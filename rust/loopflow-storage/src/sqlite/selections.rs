@@ -108,7 +108,7 @@ fn work_in(
         conn,
         &super::children::ids_json(ids.iter().map(|id| id.as_str())),
     )?;
-    let published = super::project_adoption::published_in(conn, &ids)?;
+    let published = super::task_started::published_in(conn, &ids)?;
     let owners = super::task_ownership::owners_in(conn, &ids)?;
     let mut task_work = Vec::with_capacity(tasks.len());
     for task in tasks {

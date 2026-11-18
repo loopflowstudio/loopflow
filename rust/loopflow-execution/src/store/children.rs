@@ -279,7 +279,7 @@ impl Store {
     pub(crate) async fn apply_linear_observation(
         &self,
         task_id: &TaskId,
-        observation: loopflow_storage::linear_records::LinearIssueObservation,
+        observation: loopflow_storage::planning::TrackerObservation,
         observed_at: OffsetDateTime,
         planning_connected: bool,
     ) -> StoreResult<LinearObservationOutcome> {

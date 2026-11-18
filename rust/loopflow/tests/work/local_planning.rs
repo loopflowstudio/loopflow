@@ -17,8 +17,25 @@ fn project_with_sync(
     };
     serde_json::json!({
         "project": store.project(project).unwrap().unwrap(),
-        "sync": application.project_planning_sync(project).unwrap(),
+        "sync": application.project_tracker_sync(project).unwrap(),
     })
+}
+
+/// The owner's newest unconfirmed action of `kind`.
+fn unconfirmed(
+    store: &loopflow_storage::sqlite::SqliteStore,
+    owner: loopflow_storage::sqlite::tracker_actions::ActionOwner,
+    kind: loopflow_storage::sqlite::tracker_actions::ActionKind,
+) -> Option<String> {
+    use loopflow_storage::sqlite::tracker_actions::ActionPhase;
+    store
+        .tracker_actions_for(&owner)
+        .unwrap()
+        .into_iter()
+        .rfind(|action| {
+            action.kind == kind && matches!(action.phase, ActionPhase::Queued | ActionPhase::Sent)
+        })
+        .map(|action| action.id)
 }
 
 fn command(repo: &Path, home: &Path, args: &[&str]) -> Command {
@@ -1102,15 +1119,19 @@ fn project_creation_binding_and_activation_save_offline() {
             assert_eq!(active["summary"], "Retain summary");
             assert!(active.get("graph").is_none());
             assert_eq!(active["krs"][0]["text"], "Preserve Tasks");
+            // Activation is a status edit once the Project has a tracker object
+            // or a queued creation; otherwise its creation will carry it.
             let changes = store.pending_project_changes(&id).unwrap();
             let state = changes
                 .iter()
-                .find(|change| change.value.field() == "project_status")
-                .unwrap();
-            assert_eq!(
-                state.value,
-                WorkValue::ProjectStatus(ProjectStatus::Started)
-            );
+                .find(|change| change.value.field() == "project_status");
+            assert_eq!(state.is_some(), mapped || connected);
+            if let Some(state) = state {
+                assert_eq!(
+                    state.value,
+                    WorkValue::ProjectStatus(ProjectStatus::Started)
+                );
+            }
             lf(repo.path(), home.path(), &args);
             lf(
                 repo.path(),
@@ -1118,7 +1139,7 @@ fn project_creation_binding_and_activation_save_offline() {
                 &["wave", "bind-project", "product", id.as_str(), "--json"],
             );
             assert_eq!(store.pending_project_changes(&id).unwrap(), changes);
-            if mapped {
+            if let (true, Some(state)) = (mapped, state) {
                 let incoming = serde_json::from_value(serde_json::json!({
                     "id": provider, "slug": active["slug"], "name": "Authored name",
                     "summary": "Retain summary", "krs": active["krs"],
@@ -1132,6 +1153,7 @@ fn project_creation_binding_and_activation_save_offline() {
                     "initiative",
                     &incoming,
                     20,
+                    loopflow_storage::planning_sync::TrackerKind::Linear,
                 )
                 .unwrap();
                 // The unsent activation is sent last, so it stays pending and
@@ -1143,7 +1165,7 @@ fn project_creation_binding_and_activation_save_offline() {
                     .any(|change| change.id == state.id));
                 let conflict: Option<String> = db
                     .query_row(
-                        "SELECT conflict_json FROM project_changes WHERE id=?1",
+                        "SELECT conflict_json FROM tracker_actions WHERE id=?1",
                         [&state.id],
                         |row| row.get(0),
                     )
@@ -1396,7 +1418,7 @@ fn project_edits_save_offline_in_both_connection_modes() {
             canonical.to_string(),
         );
         loopflow_execution::work::wave::bootstrap::upsert_wave(&store, &wave).unwrap();
-        let project = loopflow_execution::linear::LinearProject {
+        let project = loopflow_storage::planning::TrackerProject {
             description: None,
             id: "provider-project".into(),
             revision: Some("2026-10-08T10:00:00Z".into()),
@@ -1418,6 +1440,7 @@ fn project_edits_save_offline_in_both_connection_modes() {
             "initiative",
             &project,
             17,
+            loopflow_storage::planning_sync::TrackerKind::Linear,
         )
         .unwrap();
         let id = store.list_projects(Some(wave.id())).unwrap()[0].id.clone();
@@ -1487,17 +1510,18 @@ fn project_edits_save_offline_in_both_connection_modes() {
         assert_eq!(saved["project"]["name"], "Saved");
         assert_eq!(saved["project"]["summary"], "");
         assert_eq!(saved["project"]["krs"][0]["text"], "Retain the proof");
-        assert_eq!(saved["sync"]["connected"], connected);
+        // An unmapped Project has no tracker object to edit; its creation will
+        // carry these values.
         assert_eq!(
-            saved["sync"]["changes"].as_array().unwrap().is_empty(),
-            !connected
+            saved["sync"]["actions"].as_array().unwrap().is_empty(),
+            !(connected && mapped)
         );
         if mapped {
             assert_eq!(project_with_sync(&store, &id), saved);
         }
         assert_eq!(store.project(&shadow.id).unwrap().unwrap(), shadow);
         let changes = store.pending_project_changes(&id).unwrap();
-        assert_eq!(changes.len(), 3);
+        assert_eq!(changes.len(), if mapped { 3 } else { 0 });
         lf(
             repo.path(),
             home.path(),
@@ -1530,6 +1554,7 @@ fn project_edits_save_offline_in_both_connection_modes() {
                 "initiative",
                 &incoming,
                 18,
+                loopflow_storage::planning_sync::TrackerKind::Linear,
             )
             .unwrap();
             let read = project_with_sync(&store, &id);
@@ -1550,10 +1575,10 @@ fn project_edits_save_offline_in_both_connection_modes() {
             assert!(pending
                 .iter()
                 .any(|change| change.value.field() == "project_name"));
-            let conflicts = read["sync"]["changes"].as_array().unwrap();
+            let conflicts = read["sync"]["actions"].as_array().unwrap();
             assert!(conflicts
                 .iter()
-                .all(|change| change["state"] != "adopted_linear"));
+                .all(|action| action["phase"] != "conflicted"));
             // A provider edit matching the save neither settles nor duplicates it.
             incoming.name = "Saved".into();
             incoming.revision = Some("2026-10-08T12:00:00Z".into());
@@ -1563,11 +1588,12 @@ fn project_edits_save_offline_in_both_connection_modes() {
                 "initiative",
                 &incoming,
                 19,
+                loopflow_storage::planning_sync::TrackerKind::Linear,
             )
             .unwrap();
             let read = project_with_sync(&store, &id);
             assert_eq!(store.pending_project_changes(&id).unwrap(), pending);
-            assert_eq!(read["sync"]["changes"], Value::Array(conflicts.clone()));
+            assert_eq!(read["sync"]["actions"], Value::Array(conflicts.clone()));
         }
         let plan_file = home.path().join("plan.json");
         let content = serde_json::json!({
@@ -1590,8 +1616,8 @@ fn project_edits_save_offline_in_both_connection_modes() {
             String::from_utf8_lossy(&output.stderr)
         );
         assert_eq!(
-            String::from_utf8_lossy(&output.stderr).contains("pending planning sync"),
-            connected
+            String::from_utf8_lossy(&output.stderr).contains(" · queued"),
+            connected && mapped
         );
         let saved = project_with_sync(&store, &id);
         assert_eq!(saved["project"]["krs"], content["krs"]);
@@ -1607,7 +1633,10 @@ fn project_edits_save_offline_in_both_connection_modes() {
         assert_eq!(saved["project"]["description"], authored.description.trim());
         assert_eq!(saved["project"]["name"], "Saved");
         assert_eq!(saved["project"]["summary"], "");
-        assert_eq!(store.pending_project_changes(&id).unwrap().len(), 4);
+        assert_eq!(
+            store.pending_project_changes(&id).unwrap().len(),
+            if mapped { 4 } else { 0 }
+        );
         lf(repo.path(), home.path(), &args);
         let repeated = project_with_sync(&store, &id);
         assert_eq!(repeated, saved);
@@ -1621,6 +1650,7 @@ fn project_edits_save_offline_in_both_connection_modes() {
                 "initiative",
                 &incoming,
                 20,
+                loopflow_storage::planning_sync::TrackerKind::Linear,
             )
             .unwrap();
             let read = project_with_sync(&store, &id);
@@ -1634,11 +1664,11 @@ fn project_edits_save_offline_in_both_connection_modes() {
                 .unwrap()
                 .iter()
                 .any(|change| change.value.field() == "krs"));
-            assert!(read["sync"]["changes"]
+            assert!(read["sync"]["actions"]
                 .as_array()
                 .unwrap()
                 .iter()
-                .all(|change| change["state"] != "adopted_linear"));
+                .all(|action| action["phase"] != "conflicted"));
         }
         assert!(store.list_tasks(None).unwrap().is_empty());
         assert!(!repo.path().join(".lf/wave").exists());
@@ -1669,7 +1699,7 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
             canonical.to_string(),
         );
         loopflow_execution::work::wave::bootstrap::upsert_wave(&store, &wave).unwrap();
-        let project = loopflow_execution::linear::LinearProject {
+        let project = loopflow_storage::planning::TrackerProject {
             description: None,
             id: "provider-project".into(),
             revision: Some("2026-10-08T10:00:00Z".into()),
@@ -1688,6 +1718,7 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
             "initiative",
             &project,
             17,
+            loopflow_storage::planning_sync::TrackerKind::Linear,
         )
         .unwrap();
         let project_id = store.list_projects(Some(wave.id())).unwrap()[0].id.clone();
@@ -1806,24 +1837,25 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
             String::from_utf8_lossy(&output.stderr)
         );
         assert_eq!(
-            String::from_utf8_lossy(&output.stderr).contains("pending planning sync"),
+            String::from_utf8_lossy(&output.stderr).contains(" · queued"),
             connected
         );
+        // Edits are queued once the Task has a tracker object or a queued
+        // creation; otherwise its creation will carry them.
         let pending = store.pending_task_changes(&second).unwrap();
-        assert_eq!(pending.len(), 3);
+        assert_eq!(pending.len(), if mapped || connected { 3 } else { 0 });
         assert!(store.pending_task_changes(&first).unwrap().is_empty());
-        assert!(store
-            .project_order_delivery(
-                store
-                    .task(&second)
-                    .unwrap()
-                    .unwrap()
-                    .project_id
-                    .as_ref()
-                    .unwrap()
+        assert_eq!(
+            unconfirmed(
+                &store,
+                loopflow_storage::sqlite::tracker_actions::ActionOwner::Project(
+                    store.task(&second).unwrap().unwrap().project_id.unwrap()
+                ),
+                loopflow_storage::sqlite::tracker_actions::ActionKind::Order,
             )
-            .unwrap()
-            .is_some());
+            .is_some(),
+            mapped
+        );
         let edited = store.task(&second).unwrap().unwrap();
         let revision = || {
             conn.query_row(
@@ -1883,9 +1915,8 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
         let sync = loopflow_execution::store::Store {
             sqlite: store.clone(),
         }
-        .task_planning_sync(&second)
+        .task_tracker_sync(&second)
         .unwrap();
-        assert_eq!(sync.connected, connected);
         assert_eq!(status["sync"], serde_json::to_value(&sync).unwrap());
         assert_eq!(
             String::from_utf8(output.stderr).unwrap(),
@@ -1894,11 +1925,13 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
                 .map(|line| format!("{line}\n"))
                 .collect::<String>()
         );
-        assert_eq!(sync.changes.is_empty(), !connected);
+        assert_eq!(sync.actions.is_empty(), !connected);
         if connected {
-            assert!(sync.changes.iter().any(|c| c.field == "task_order"));
-            assert_eq!(sync.changes.iter().any(|c| c.field == "creation"), !mapped);
-            assert!(sync.changes.iter().any(|c| c.field == "task_title"));
+            // A reorder in a Project without a tracker object yet is carried
+            // by that Project's creation.
+            assert_eq!(sync.actions.iter().any(|a| a.change == "order"), mapped);
+            assert_eq!(sync.actions.iter().any(|a| a.change == "create"), !mapped);
+            assert!(sync.actions.iter().any(|a| a.change == "title"));
         }
         let desktop = lf(
             repo.path(),
@@ -1938,10 +1971,10 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
             let sync = loopflow_execution::store::Store {
                 sqlite: store.clone(),
             }
-            .task_planning_sync(&second)
+            .task_tracker_sync(&second)
             .unwrap();
-            assert!(sync.changes.iter().all(|c| c.state
-                != loopflow_execution::store::planning_sync::PlanningSyncState::AdoptedLinear));
+            assert!(sync.actions.iter().all(|a| a.phase
+                != loopflow_execution::store::sqlite::tracker_actions::ActionPhase::Conflicted));
             let retained = store.task(&second).unwrap().unwrap();
             assert_eq!(retained.title, "Saved offline");
             assert_eq!(retained.description, "");
@@ -1954,7 +1987,7 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
             }
             let conflict: Option<String> = conn
                 .query_row(
-                    "SELECT conflict_json FROM task_changes WHERE id=?1",
+                    "SELECT conflict_json FROM tracker_actions WHERE id=?1",
                     [&pending[0].id],
                     |row| row.get(0),
                 )
@@ -2034,7 +2067,7 @@ fn moving_saves_membership_offline_and_retains_inbound_changes() {
                 project.linear_id =
                     Some(loopflow_execution::linear::LinearProjectId::new(name).unwrap());
                 store.insert_project(&project).unwrap();
-                let observed = loopflow_execution::linear::LinearProject {
+                let observed = loopflow_storage::planning::TrackerProject {
                     id: name.into(),
                     slug: project.slug.clone(),
                     name: project.name.clone(),
@@ -2053,6 +2086,7 @@ fn moving_saves_membership_offline_and_retains_inbound_changes() {
                     name,
                     &observed,
                     1,
+                    loopflow_storage::planning_sync::TrackerKind::Linear,
                 )
                 .unwrap();
                 observations.push(observed);
@@ -2101,7 +2135,7 @@ fn moving_saves_membership_offline_and_retains_inbound_changes() {
             .unwrap()
         };
         let before = revision();
-        db.execute_batch("CREATE TRIGGER fail_refile BEFORE INSERT ON task_changes BEGIN SELECT RAISE(ABORT,'injected receipt failure'); END;").unwrap();
+        db.execute_batch("CREATE TRIGGER fail_refile BEFORE INSERT ON planning_peer_changes BEGIN SELECT RAISE(ABORT,'injected receipt failure'); END;").unwrap();
         assert!(!command(repo.path(), home.path(), &args)
             .output()
             .unwrap()
@@ -2121,7 +2155,7 @@ fn moving_saves_membership_offline_and_retains_inbound_changes() {
             String::from_utf8_lossy(&output.stderr)
         );
         assert_eq!(
-            String::from_utf8_lossy(&output.stderr).contains("pending planning sync"),
+            String::from_utf8_lossy(&output.stderr).contains(" · queued"),
             connected
         );
         let moved = store.task(&task.id).unwrap().unwrap();
@@ -2129,8 +2163,13 @@ fn moving_saves_membership_offline_and_retains_inbound_changes() {
         assert_eq!(moved.wave_id, Some(projects[1].wave_id.clone()));
         assert_eq!(moved.revision, task.revision + 1);
         assert!(moved.worktree.is_none());
+        // An unmapped Task has no tracker object to edit: its creation carries
+        // the new membership.
         let changes = store.pending_task_changes(&task.id).unwrap();
-        assert_eq!(changes.len(), 1);
+        assert_eq!(changes.len(), usize::from(mapped));
+        if !mapped {
+            continue;
+        }
         assert_eq!(changes[0].value.field(), "task_project");
         assert_eq!(
             changes[0].value,
@@ -2410,23 +2449,37 @@ fn deletion_saves_offline_and_retains_execution_and_retry_identity() {
         let before = store.task(&task_id).unwrap().unwrap();
         let work = loopflow_execution::durable::WorkRef::Task(task_id.clone());
         let execution = store.work_status(&work).unwrap();
-        db.execute_batch("CREATE TRIGGER fail_removal BEFORE INSERT ON task_changes WHEN NEW.field='deleted' BEGIN SELECT RAISE(ABORT,'receipt failed'); END;").unwrap();
-        assert!(!command(repo.path(), home.path(), &["task", "delete", id])
-            .output()
-            .unwrap()
-            .status
-            .success());
-        assert_eq!(store.task(&task_id).unwrap().unwrap(), before);
-        assert!(store.pending_task_changes(&task_id).unwrap().is_empty());
-        db.execute_batch("DROP TRIGGER fail_removal;").unwrap();
+        // The removal and its action are one save: a failed action leaves the
+        // Task as it was. A Task with no tracker object queues no action.
+        if connected {
+            db.execute_batch("CREATE TRIGGER fail_removal BEFORE INSERT ON tracker_actions WHEN NEW.kind='delete' BEGIN SELECT RAISE(ABORT,'receipt failed'); END;").unwrap();
+            assert!(!command(repo.path(), home.path(), &["task", "delete", id])
+                .output()
+                .unwrap()
+                .status
+                .success());
+            assert_eq!(store.task(&task_id).unwrap().unwrap(), before);
+            db.execute_batch("DROP TRIGGER fail_removal;").unwrap();
+        }
         let output = lf(repo.path(), home.path(), &["task", "delete", id]);
         if connected {
             assert!(output.as_str().unwrap().contains("Pending Linear sync"));
         }
-        let changes = store.pending_task_deletion(&task_id).unwrap();
-        assert!(changes.is_some());
+        let changes = unconfirmed(
+            &store,
+            loopflow_storage::sqlite::tracker_actions::ActionOwner::Task(task_id.clone()),
+            loopflow_storage::sqlite::tracker_actions::ActionKind::Delete,
+        );
+        assert_eq!(changes.is_some(), connected);
         lf(repo.path(), home.path(), &["task", "delete", id]);
-        assert_eq!(store.pending_task_deletion(&task_id).unwrap(), changes);
+        assert_eq!(
+            unconfirmed(
+                &store,
+                loopflow_storage::sqlite::tracker_actions::ActionOwner::Task(task_id.clone()),
+                loopflow_storage::sqlite::tracker_actions::ActionKind::Delete,
+            ),
+            changes
+        );
         let removed = store.task(&task_id).unwrap().unwrap();
         assert_eq!(store.work_status(&work).unwrap(), execution);
         assert_eq!(removed.worktree, before.worktree);
@@ -2438,7 +2491,14 @@ fn deletion_saves_offline_and_retains_execution_and_retry_identity() {
         drop(store);
         let reopened =
             loopflow_execution::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
-        assert_eq!(reopened.pending_task_deletion(&task_id).unwrap(), changes);
+        assert_eq!(
+            unconfirmed(
+                &reopened,
+                loopflow_storage::sqlite::tracker_actions::ActionOwner::Task(task_id.clone()),
+                loopflow_storage::sqlite::tracker_actions::ActionKind::Delete,
+            ),
+            changes
+        );
     }
 }
 
@@ -2641,154 +2701,6 @@ fn wave_sync_without_an_initiative_shows_local_planning() {
             "inbox: no Linear Initiative; showing local planning (lf wave plan connect inbox)\n"
         ),
         "{text}"
-    );
-}
-
-#[test]
-fn planning_sync_tracks_creation_errors_uncertainty_conflicts_and_settlement() {
-    let repo = TestRepo::new();
-    let home = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(repo.path().join(".lf")).unwrap();
-    std::fs::write(
-        repo.path().join(".lf/config.yaml"),
-        "planning:\n  provider: linear\n  team: fixture-team\n",
-    )
-    .unwrap();
-    lf(
-        repo.path(),
-        home.path(),
-        &["wave", "add", "inbox", "--json"],
-    );
-    let created = lf(
-        repo.path(),
-        home.path(),
-        &[
-            "task",
-            "create",
-            "--wave",
-            "inbox",
-            "--title",
-            "Saved plan",
-            "--json",
-        ],
-    )["task"]
-        .clone();
-    let id = created["id"].as_str().unwrap();
-    let project = created["project_id"].as_str().unwrap();
-    lf(
-        repo.path(),
-        home.path(),
-        &["task", "edit", id, "--title", "Later title"],
-    );
-    let comments = lf(
-        repo.path(),
-        home.path(),
-        &["task", "report", id, "Local comment", "--json"],
-    );
-    assert_eq!(comments["pending_sync"].as_array().unwrap().len(), 1);
-    let conn = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
-    let status =
-        || lf(repo.path(), home.path(), &["desktop", "task", id, "--json"])["sync"].clone();
-    let initial = status();
-    for field in ["creation", "task_title", "comment"] {
-        assert!(initial["changes"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|c| c["field"] == field && c["state"] == "pending"));
-    }
-    let read_project = || {
-        let snapshot = lf(
-            repo.path(),
-            home.path(),
-            &["wave", "status", "inbox", "--json"],
-        );
-        snapshot["projects"]["items"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|p| p["id"] == project)
-            .unwrap()["sync"]
-            .clone()
-    };
-    assert!(read_project()["changes"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|c| c["field"] == "creation"));
-    let revision = || {
-        conn.query_row(
-            "SELECT revision FROM store_revisions WHERE domain='planning'",
-            [],
-            |r| r.get::<_, i64>(0),
-        )
-        .unwrap()
-    };
-    let before = revision();
-    conn.execute("UPDATE task_creation_intents SET export_attempted=1,export_error='Lost creation reply' WHERE task_id=?1", [id]).unwrap();
-    assert!(revision() > before);
-    conn.execute("UPDATE project_transitions SET export_attempted=1,export_link_attempted=1,export_error='Lost attachment reply' WHERE successor_id=?1", [project]).unwrap();
-    conn.execute(
-        "UPDATE task_changes SET attempted=1,error='Lost field reply' WHERE task_id=?1",
-        [id],
-    )
-    .unwrap();
-    conn.execute(
-        "UPDATE task_comment_deliveries SET error='Lost comment reply' WHERE comment_id=?1",
-        [comments["comments"][0]["id"].as_str().unwrap()],
-    )
-    .unwrap();
-    let uncertain = status();
-    assert!(uncertain["changes"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .all(|c| (c["state"] == "uncertain" || c["field"] == "comment") && c["error"].is_string()));
-    // Planning reads retry delivery and report the current missing mapping,
-    // while retaining the uncertain creation and attachment attempts.
-    let project_sync = read_project();
-    assert_eq!(project_sync["changes"][0]["state"], "uncertain");
-    assert_eq!(
-        project_sync["changes"][0]["error"],
-        "Wave has no Linear Initiative; export remains pending"
-    );
-    // Model provider confirmation and an observed losing field receipt; projection is read-only.
-    conn.execute(
-        "UPDATE tasks SET external_issue_id='fixture-issue' WHERE id=?1",
-        [id],
-    )
-    .unwrap();
-    conn.execute(
-        "UPDATE projects SET external_project_id='fixture-project' WHERE id=?1",
-        [project],
-    )
-    .unwrap();
-    conn.execute(r#"UPDATE task_changes SET conflict_json='{"revision":null,"value":{"field":"task_title","value":"Linear title"}}',error=NULL WHERE task_id=?1"#, [id]).unwrap();
-    conn.execute(
-        "UPDATE task_comment_deliveries SET acknowledged=1,error=NULL",
-        [],
-    )
-    .unwrap();
-    let settled = status();
-    assert_eq!(settled["changes"].as_array().unwrap().len(), 1);
-    assert_eq!(settled["changes"][0]["state"], "adopted_linear");
-    assert_eq!(settled["changes"][0]["local_value"], "Later title");
-    assert_eq!(settled["changes"][0]["linear_value"], "Linear title");
-    assert!(read_project()["changes"].as_array().unwrap().is_empty());
-    std::fs::write(repo.path().join(".lf/config.yaml"), "{}\n").unwrap();
-    conn.execute(
-        "UPDATE task_comment_deliveries SET acknowledged=0,error='Offline'",
-        [],
-    )
-    .unwrap();
-    let disconnected = status();
-    assert_eq!(disconnected["connected"], false);
-    assert_eq!(disconnected["changes"], settled["changes"]);
-    assert!(
-        lf(repo.path(), home.path(), &["task", "show", id, "--json"])["comments"]["pending_sync"]
-            .as_array()
-            .unwrap()
-            .is_empty()
     );
 }
 
@@ -3106,7 +3018,7 @@ fn canonical_status_retains_content_and_execution_across_acquisition_states() {
     project.linear_id =
         Some(loopflow_execution::linear::LinearProjectId::new("provider-project").unwrap());
     store.insert_project(&project).unwrap();
-    let observed: loopflow_execution::linear::LinearProject = serde_json::from_value(json!({
+    let observed: loopflow_storage::planning::TrackerProject = serde_json::from_value(json!({
         "id":"provider-project", "slug":project.slug, "name":project.name,
         "summary":"", "description":"Saved Project prose", "status":"started",
         "krs":[], "metric_targets":[], "initiative_ids":["initiative"], "team_ids":["team"], "revision":null
@@ -3117,6 +3029,7 @@ fn canonical_status_retains_content_and_execution_across_acquisition_states() {
         "initiative",
         &observed,
         17,
+        loopflow_storage::planning_sync::TrackerKind::Linear,
     )
     .unwrap();
     let db = rusqlite::Connection::open(&path).unwrap();
@@ -3214,7 +3127,7 @@ fn canonical_status_retains_content_and_execution_across_acquisition_states() {
         }
     }
     // A pending membership save explains the difference without replacing content.
-    db.execute("INSERT INTO task_changes(id,task_id,value_json,base_json,attempted) VALUES('pending-membership',?1,?2,NULL,0)", rusqlite::params![id.as_str(),serde_json::to_string(&WorkValue::TaskProject(saved.project_id.as_ref().map(ToString::to_string))).unwrap()]).unwrap();
+    db.execute("INSERT INTO tracker_actions(id,task_id,subject,kind,value_json,phase,tracker) VALUES('00000000-0000-4000-8000-0000000000aa',?1,'task_project','field',?2,'queued','linear')", rusqlite::params![id.as_str(),serde_json::to_string(&WorkValue::TaskProject(saved.project_id.as_ref().map(ToString::to_string))).unwrap()]).unwrap();
     assert_eq!(read()["plan_state"], "available");
     store
         .observe_pm_issue_change("provider-task", None, true)
@@ -3250,8 +3163,8 @@ fn observed_issue(
     project: &str,
     title: &str,
     description: &str,
-) -> loopflow_execution::linear::LinearIssue {
-    loopflow_execution::linear::LinearIssue {
+) -> loopflow_storage::planning::TrackerItem {
+    loopflow_storage::planning::TrackerItem {
         id: id.into(),
         identifier: "FIX-1".into(),
         name: title.into(),

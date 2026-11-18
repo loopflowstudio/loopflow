@@ -178,7 +178,7 @@ struct WorkModelTests {
         historical["projects"] = ["state": "ok", "truncated": false, "items": [[
             "id": "old-plan", "linear_id": NSNull(), "slug": "old", "name": "Previous",
             "workflow": "feature", "status": "completed", "current": false, "metric_targets": [], "krs": [],
-            "sync": ["connected": false, "changes": []]
+            "sync": ["actions": []]
         ]]]
         let reply = try JSONSerialization.data(withJSONObject: historical)
         await deferred.release(try #require(String(data: reply, encoding: .utf8)))
@@ -572,7 +572,7 @@ struct WorkModelStreamTests {
             .appendingPathComponent("tests/fixtures/dto/peer_planning_status.json")
         let statuses = String(decoding: try Data(contentsOf: url), as: UTF8.self)
         func peers(_ sequence: Int, _ answers: Int, repo: String, statuses: String) throws -> WorkFrame {
-            let body = #"{"transport":"git","destinations":\#(statuses)}"#
+            let body = #"{"tracker":"git","destinations":\#(statuses)}"#
             return try fixture.frame("peer_planning", sequence: sequence, answers: answers,
                                      scope: WorkScope(repo: repo, headless: false, task: nil, activity: nil, taskListWave: nil),
                                      body: body)

@@ -93,6 +93,7 @@ struct WavesView: View {
         .background(palette.background)
         .overlay(alignment: .bottom) { NoticeView(center: model.navigation.notices).zIndex(ZIndex.toast) }
         .modifier(CreationNotices(notices: model.navigation.notices))
+        .answeringLostLines(model)
         .task { await model.keepWorkCurrent() }
         .task { await model.keepPlanningCurrent() }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in

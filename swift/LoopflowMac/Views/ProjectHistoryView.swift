@@ -31,7 +31,7 @@ struct ProjectHistoryView: View {
             ScrollView {
                 if let project = projects.first(where: { $0.id == selected }) {
                     VStack(alignment: .leading, spacing: 12) {
-                        PlanningSyncView(sync: project.sync)
+                        TrackerSyncView(sync: project.sync, repo: repo)
                         ForEach(project.krs) { kr in
                             Label(kr.text, systemImage: kr.holds ? "checkmark.circle.fill" : "circle")
                         }

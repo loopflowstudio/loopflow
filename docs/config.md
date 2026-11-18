@@ -510,7 +510,7 @@ identity. Persisted artifacts name their participant; conversation replies use
 | Behavior | CLI Flag | Config |
 |----------|----------|--------|
 | Agent | `-a claude:opus` | `agent: claude:opus` |
-| [Planning synchronization](work.md#share-the-plan) | — | `repo.plan`: `{provider: linear, team: "<id>"}`, `{provider: asana, team: "<gid-or-url>"}`, `{provider: notion, team: "<page-url-or-id>"}` or `{provider: git, shared: team}` |
+| [Planning synchronization](work.md#share-the-plan) | — | `repo.plan`: `{provider: linear, team: "<id>"}`, `{provider: asana, team: "<gid-or-url>"}` or `{provider: git, shared: team}` |
 | Interactive terminal | direct TTY or `-i` | — |
 | Include docs | `--docs README.md,docs/` | `context: {docs: [README.md, docs/]}` |
 | Include branch files | `--diff files` | `context: {diff_files: true}` |

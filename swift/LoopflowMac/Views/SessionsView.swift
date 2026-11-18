@@ -1441,6 +1441,7 @@ struct SessionsView: View {
             }
             if let home = workspaces.localMachineId, workspaces.machineError == nil { model.confirmMachine(home) }
         }
+        .answeringLostLines(model)
     }
 }
 

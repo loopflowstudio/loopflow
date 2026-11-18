@@ -53,7 +53,7 @@ fn default_git_plan_is_the_shared_main_ref() {
     initialize(home.path());
     let status: Value =
         serde_json::from_str(&run(repo.path(), home.path(), &["status", "--json"])).unwrap();
-    assert_eq!(status["transport"], "git");
+    assert_eq!(status["tracker"], "git");
     assert_eq!(
         status["destinations"][0]["reference"],
         "refs/loopflow/planning/shared/main"
@@ -77,7 +77,7 @@ fn personal_git_is_explicit_and_key_recovery_selects_the_same_ref() {
     initialize(right.path());
     let status: Value =
         serde_json::from_str(&run(repo.path(), left.path(), &["status", "--json"])).unwrap();
-    assert_eq!(status["transport"], "git");
+    assert_eq!(status["tracker"], "git");
     let key = run(repo.path(), left.path(), &["key"]);
     assert!(uuid::Uuid::parse_str(&key).is_ok());
     run(repo.path(), right.path(), &["key", "--recover", &key]);
@@ -121,7 +121,7 @@ fn repository_selects_shared_git_or_linear_without_manual_enrollment() {
     .unwrap();
     let status: Value =
         serde_json::from_str(&run(repo.path(), home.path(), &["status", "--json"])).unwrap();
-    assert_eq!(status["transport"], "linear");
+    assert_eq!(status["tracker"], "linear");
     assert_eq!(status["destinations"], serde_json::json!([]));
     let refs = Command::new("git")
         .current_dir(repo.path())

@@ -4,7 +4,7 @@ use crate::process::attachment;
 use crate::session::WorkSource;
 use loopflow_model::durable::{ProjectId, TaskId};
 use loopflow_model::id::WaveId;
-use loopflow_storage::linear_records::{LinearIssueId, LinearProjectId};
+use loopflow_storage::planning::{LinearIssueId, LinearProjectId};
 use loopflow_storage::sqlite::SqliteStore;
 use loopflow_storage::test_fixture::{unpublished_conversation, unregistered_task};
 use std::sync::{Arc, Barrier};

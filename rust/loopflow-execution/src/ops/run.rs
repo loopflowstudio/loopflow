@@ -348,7 +348,6 @@ mod tests {
     use time::OffsetDateTime;
 
     use super::{resolve_work_binding, resolve_work_selection, WorkSelection};
-    use crate::linear::LinearProject;
     use crate::linear::{LinearIssueId, LinearProjectId};
     use crate::store::SharedStore;
     use crate::store::StorageConfig;
@@ -356,6 +355,7 @@ mod tests {
     use crate::work::wave::Wave;
     use loopflow_model::durable::{ProjectId, TaskId, WorkRef};
     use loopflow_model::id::WaveId;
+    use loopflow_storage::planning::TrackerProject;
     use loopflow_storage::work::project::Project;
     use loopflow_storage::work::project::ProjectKR;
     use loopflow_storage::work::task::{LinearWritebackState, Observation, Task, TaskPr, TaskPrId};
@@ -1327,7 +1327,7 @@ mod tests {
             .await
             .unwrap();
         let snapshot = Inventory {
-            projects: vec![LinearProject {
+            projects: vec![TrackerProject {
                 description: None,
                 revision: None,
                 id: "project-api".to_string(),

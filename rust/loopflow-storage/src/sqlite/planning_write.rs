@@ -1,15 +1,21 @@
-//! The planning write boundary shared by local operations and imports.
-//! Callers own their transaction and local delivery evidence; this writer changes
-//! only planning columns and captures local mutations in that same transaction.
+//! The planning write boundary shared by local operations, tracker
+//! observations and Git imports. Callers own their transaction; this writer
+//! changes planning columns, journals local and tracker writes for Git peers,
+//! and queues a tracker action for each value a local write changed.
 use crate::planning_exchange::PlanningMutation;
 use crate::work::edit::{CommentContent, Disposition, WorkEdit, WorkValue};
 use crate::{StoreError, StoreResult};
 use rusqlite::{params, Connection, OptionalExtension};
 use std::collections::{BTreeMap, BTreeSet};
 
-#[derive(Debug, Clone, Copy)]
+/// Who a planning write comes from, which decides what else it records.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WriteOrigin {
+    /// A person or agent here: journaled, and queued for the tracker.
     Local,
+    /// A fact the tracker reported: journaled, never echoed back to it.
+    Tracker,
+    /// A Git peer's change: already in the journal it came from.
     Import,
 }
 
@@ -217,15 +223,19 @@ fn read_record(
     decode(rows.next()?.ok_or(StoreError::NotFound)?)
 }
 
+/// `queue`: whether a `Local` write's changes are actions. A record created in
+/// this write is not edited by it: its tracker learns it through `create`.
 fn write_record(
     conn: &Connection,
     table: &str,
     id: &str,
     edits: &[WorkEdit],
     origin: WriteOrigin,
+    queue: bool,
 ) -> StoreResult<bool> {
     let before = read(conn, table, id)?;
     let mut columns = BTreeMap::new();
+    let mut changes = Vec::new();
     for edit in edits {
         let edit = &edit.change;
         if matches!(
@@ -250,6 +260,7 @@ fn write_record(
         if before.contains(edit) {
             continue;
         }
+        changes.push(edit);
         let value = edit.value()?;
         match edit {
             WorkValue::Disposition(_) | WorkValue::CommentContent(_) => {
@@ -289,7 +300,12 @@ fn write_record(
             previous_identifier.as_deref(),
         )?;
     }
-    if matches!(origin, WriteOrigin::Local) {
+    if origin == WriteOrigin::Local && queue {
+        for change in changes {
+            super::tracker_actions::enqueue_local(conn, table, id, change)?;
+        }
+    }
+    if matches!(origin, WriteOrigin::Local | WriteOrigin::Tracker) {
         // Initial rows and every subsequent write use this same typed snapshot.
         capture(conn, table, id)?;
     }
@@ -326,20 +342,41 @@ pub(crate) fn capture(conn: &Connection, table: &str, target: &str) -> StoreResu
                 .collect::<Result<BTreeSet<String>, _>>()?;
             parents
         };
-        let clock = conn.query_row(
-            "SELECT max(CAST(unixepoch('subsec')*1000 AS INTEGER),COALESCE(max(clock)+1,0)) FROM planning_peer_changes",
-            [], |row| row.get(0),
-        )?;
-        let mutation = PlanningMutation {
-            edit,
-            clock,
-            parents,
-        };
-        let id = uuid::Uuid::new_v4().to_string();
-        retain(conn, &id, &mutation)?;
-        observe(conn, &mutation.edit, std::iter::once(id.as_str()))?;
+        record(conn, edit, parents)?;
     }
     Ok(())
+}
+
+/// Record `edit` with every journal head of its field as a parent, so Git's
+/// competing values resolve to it. Nothing when the field has one head.
+pub(crate) fn settle(conn: &Connection, edit: &WorkEdit) -> StoreResult<()> {
+    let mut query = conn.prepare(
+        "SELECT c.id FROM planning_peer_changes c WHERE c.object_id=?1 AND c.field=?2 AND NOT EXISTS(
+             SELECT 1 FROM planning_peer_changes child,json_each(child.mutation,'$.parents') parent
+             WHERE child.object_id=c.object_id AND child.field=c.field AND parent.value=c.id)",
+    )?;
+    let heads = query
+        .query_map(params![edit.target, edit.change.field()], |row| row.get(0))?
+        .collect::<Result<BTreeSet<String>, _>>()?;
+    if heads.len() < 2 {
+        return Ok(());
+    }
+    record(conn, edit.clone(), heads)
+}
+
+fn record(conn: &Connection, edit: WorkEdit, parents: BTreeSet<String>) -> StoreResult<()> {
+    let clock = conn.query_row(
+        "SELECT max(CAST(unixepoch('subsec')*1000 AS INTEGER),COALESCE(max(clock)+1,0)) FROM planning_peer_changes",
+        [], |row| row.get(0),
+    )?;
+    let mutation = PlanningMutation {
+        edit,
+        clock,
+        parents,
+    };
+    let id = uuid::Uuid::new_v4().to_string();
+    retain(conn, &id, &mutation)?;
+    observe(conn, &mutation.edit, std::iter::once(id.as_str()))
 }
 
 pub(crate) fn retain(conn: &Connection, id: &str, change: &PlanningMutation) -> StoreResult<()> {
@@ -527,18 +564,29 @@ pub(crate) fn write(
         .collect::<StoreResult<Vec<_>>>()?;
     let mut changed = false;
     for ((table, id), values) in grouped(&edits) {
-        changed |= write_record(conn, table, id, &values, origin)?;
+        changed |= write_record(conn, table, id, &values, origin, true)?;
     }
     Ok(changed)
 }
 
-/// Save local Work in the caller's transaction, including its causal identity.
+/// Save local Work in the caller's transaction, including its causal identity
+/// and the tracker actions it asks for.
 pub(crate) fn local(conn: &Connection, edits: &[WorkEdit]) -> StoreResult<bool> {
     write(conn, edits, WriteOrigin::Local)
 }
 
+/// Save what the tracker holds, which it needs no action to learn.
+pub(crate) fn tracker(conn: &Connection, edits: &[WorkEdit]) -> StoreResult<bool> {
+    write(conn, edits, WriteOrigin::Tracker)
+}
+
 /// Create shared records before attaching any machine-local execution data.
-pub(crate) fn create(conn: &Connection, repo: &str, edits: &[WorkEdit]) -> StoreResult<()> {
+pub(crate) fn create(
+    conn: &Connection,
+    repo: &str,
+    edits: &[WorkEdit],
+    origin: WriteOrigin,
+) -> StoreResult<()> {
     let edits = edits
         .iter()
         .map(WorkEdit::canonicalized)
@@ -546,14 +594,31 @@ pub(crate) fn create(conn: &Connection, repo: &str, edits: &[WorkEdit]) -> Store
     let records = grouped(&edits);
     // Foreign-key parents exist before children even when the caller's edits
     // arrive in a different order. Capturing fields still uses the common writer.
+    let mut created = BTreeSet::new();
     for table in WORK_TABLES {
         for (&(record_table, id), values) in &records {
-            if record_table == table {
-                ensure_record(conn, repo, table, id, values)?;
+            if record_table == table && ensure_record(conn, repo, table, id, values)? {
+                created.insert((table, id));
+                // A new comment is a change to its Task, though the insert
+                // already holds it. A new Task or Project is a `create`.
+                if origin == WriteOrigin::Local && table == "task_comments" {
+                    for value in values {
+                        super::tracker_actions::enqueue_local(conn, table, id, &value.change)?;
+                    }
+                }
             }
         }
     }
-    write(conn, &edits, WriteOrigin::Local)?;
+    for (&(table, id), values) in &records {
+        write_record(
+            conn,
+            table,
+            id,
+            values,
+            origin,
+            !created.contains(&(table, id)),
+        )?;
+    }
     Ok(())
 }
 
@@ -589,6 +654,7 @@ mod tests {
                         Edit::ProjectName(Some("Plan".into())),
                     ],
                 ),
+                super::WriteOrigin::Local,
             )
             .unwrap();
             local(
@@ -981,7 +1047,7 @@ mod tests {
                 "session_events",
                 "session_activity",
                 "task_graphs",
-                "task_state_deliveries",
+                "tracker_actions",
             ]
             .into_iter()
             .map(|table| {
@@ -1027,7 +1093,7 @@ mod tests {
         {
             let mut conn = a.conn.lock().unwrap();
             let tx = conn.transaction().unwrap();
-            super::super::task_state_delivery::queue_in(&tx, &task, "completed").unwrap();
+            super::super::task_state::decide_in(&tx, &task, "completed").unwrap();
             tx.commit().unwrap();
         }
         let snapshot = a.export_peer_planning("/repo", &route.id()).unwrap();
@@ -1079,11 +1145,13 @@ mod tests {
                 }
             )
         );
+        // A Git peer's decision reaches this store through the journal, never
+        // as a tracker action of its own.
         assert_eq!(
-            conn.query_row("SELECT count(*) FROM task_state_deliveries", [], |r| r
+            conn.query_row("SELECT count(*) FROM tracker_actions", [], |r| r
                 .get::<_, i64>(0))
                 .unwrap(),
-            1
+            0
         );
         drop(conn);
         let before = a.export_peer_planning("/repo", &route.id()).unwrap();

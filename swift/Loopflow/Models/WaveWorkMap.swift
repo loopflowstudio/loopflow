@@ -18,7 +18,7 @@ public enum ProjectStatus: String, Decodable, Sendable, Hashable {
 }
 
 public struct ProjectPlanningSnapshot: Decodable, Sendable, Identifiable, Hashable {
-    public let sync: PlanningSyncStatus
+    public let sync: TrackerSync
     public let current: Bool
     public let id: String
     public let linearId: String?
@@ -65,7 +65,7 @@ public struct TaskAcquisition: Decodable, Sendable, Hashable {
 
 public struct TaskPlanningSnapshot: Decodable, Sendable, Identifiable, Hashable {
     public let acquisition: TaskAcquisition
-    public let sync: PlanningSyncStatus
+    public let sync: TrackerSync
     public let id: String
     public let repositoryId: String
     public let repo: String

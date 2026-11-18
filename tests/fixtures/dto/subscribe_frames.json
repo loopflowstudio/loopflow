@@ -318,8 +318,9 @@
       "answers": 7,
       "unavailable": null,
       "body": {
-        "transport": "git",
-        "destinations": []
+        "tracker": "git",
+        "destinations": [],
+        "actions": []
       },
       "work": null,
       "read_at": {

@@ -24,8 +24,8 @@ pub use loopflow_storage::execution;
 pub use loopflow_storage::graph;
 pub use loopflow_storage::graph_process;
 pub use loopflow_storage::instrumentation;
-pub use loopflow_storage::linear_records;
 pub use loopflow_storage::machine_records;
+pub use loopflow_storage::planning;
 pub mod machines;
 pub use loopflow_storage::metric;
 mod metrics;
@@ -57,7 +57,7 @@ mod planning_reads;
 pub use loopflow_storage::planning_sync;
 mod pr_landings;
 mod processes;
-mod project_adoption;
+mod task_started;
 pub use loopflow_storage::recording_gap;
 pub use loopflow_storage::records;
 pub mod rentals;
@@ -658,7 +658,7 @@ mod tests {
     use loopflow_model::durable::{Author, WorkRef};
     use loopflow_model::id::WaveId;
     use loopflow_storage::child::ChildRef;
-    use loopflow_storage::linear_records::{LinearIssueId, LinearProjectId};
+    use loopflow_storage::planning::{LinearIssueId, LinearProjectId};
     use loopflow_storage::work::project::{Project, ProjectId};
     use loopflow_storage::work::task::{
         CiIncident, GithubPr, LinearWritebackState, PrPhase, PrPresentation, PrPublication, Task,
@@ -1093,7 +1093,15 @@ mod tests {
                 )
                 .await
                 .unwrap();
-            assert!(store.sqlite.pending_task_state(&task.id).unwrap().is_none());
+            assert!(store
+                .sqlite
+                .tracker_actions_for(
+                    &loopflow_storage::sqlite::tracker_actions::ActionOwner::Task(task.id.clone())
+                )
+                .unwrap()
+                .iter()
+                .all(|action| action.kind
+                    != loopflow_storage::sqlite::tracker_actions::ActionKind::State));
             store
                 .sqlite
                 .reopen_task(&task.id, Some("New scope"))
@@ -1366,6 +1374,40 @@ mod tests {
         assert!(crate::store::task_work::task_graph(&store.sqlite, &task.id)
             .unwrap()
             .is_none());
+    }
+
+    // An observed removal stamps the Task itself, so placement refuses it even
+    // without the acquisition's change log. That log stays: it guards
+    // re-acceptance, tracks revisions and carries removals released stores
+    // recorded without stamping the Task.
+    #[tokio::test]
+    async fn a_tracker_removal_withdraws_new_launches() {
+        let (directory, store, wave) = planning_store().await;
+        let project = make_project(&wave);
+        store.create_project(&project).await.unwrap();
+        select_project(&store, &project);
+        let mut task = make_task(&store, &wave, &project);
+        task.worktree = Some(directory.path().join("checkout"));
+        store.sqlite.seed_unplaced_task(&task);
+        store
+            .observe_pm_issue_change(task.linear_id.as_ref().unwrap().as_str(), None, true)
+            .await
+            .unwrap();
+        rusqlite::Connection::open(directory.path().join("registry.db"))
+            .unwrap()
+            .execute("DELETE FROM pm_issue_changes", [])
+            .unwrap();
+        let result = store
+            .place_task(
+                &task.id,
+                task.worktree.as_ref().unwrap(),
+                &task.workspace_slug,
+                &make_task_pr(&task),
+                None,
+            )
+            .await;
+        assert!(result.unwrap_err().to_string().contains("was deleted"));
+        assert!(store.task_prs(&task.id).await.unwrap().is_empty());
     }
 
     #[tokio::test]
@@ -1683,9 +1725,8 @@ mod tests {
         );
         store.create_wave(&other).await.unwrap();
         let mut foreign = make_project(&other);
-        foreign.linear_id = Some(
-            loopflow_storage::linear_records::LinearProjectId::new("foreign-project").unwrap(),
-        );
+        foreign.linear_id =
+            Some(loopflow_storage::planning::LinearProjectId::new("foreign-project").unwrap());
         store.create_project(&foreign).await.unwrap();
         let mut response = snapshot.clone();
         response.synced_at = 2;
@@ -1906,7 +1947,8 @@ mod tests {
                 wave.id(),
                 &snapshot.initiative,
                 &old,
-                20
+                20,
+                loopflow_storage::planning_sync::TrackerKind::Linear
             )
             .is_err()
         );
@@ -1956,6 +1998,7 @@ mod tests {
             &snapshot.initiative,
             &confirmed,
             10,
+            loopflow_storage::planning_sync::TrackerKind::Linear,
         )
         .unwrap();
         let accepted = store
@@ -1987,7 +2030,8 @@ mod tests {
                 other.id(),
                 &snapshot.initiative,
                 &confirmed,
-                20
+                20,
+                loopflow_storage::planning_sync::TrackerKind::Linear
             )
             .is_err()
         );
@@ -2021,9 +2065,8 @@ mod tests {
         store.create_project(&predecessor).await.unwrap();
         select_project(&store, &predecessor);
         let mut successor = make_project(&wave);
-        successor.linear_id = Some(
-            loopflow_storage::linear_records::LinearProjectId::new("successor-project").unwrap(),
-        );
+        successor.linear_id =
+            Some(loopflow_storage::planning::LinearProjectId::new("successor-project").unwrap());
         let task = make_task(&store, &wave, &predecessor);
         let pr = make_task_pr(&task);
         store.seed_task(&task, &pr).await.unwrap();
@@ -2568,6 +2611,7 @@ mod tests {
             &snapshot.initiative,
             &observed,
             10,
+            loopflow_storage::planning_sync::TrackerKind::Linear,
         )
         .unwrap();
 

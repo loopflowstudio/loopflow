@@ -71,6 +71,50 @@
       ],
       "type": "object"
     },
+    "ActionKind": {
+      "enum": [
+        "create",
+        "field",
+        "order",
+        "state",
+        "comment",
+        "delete",
+        "link"
+      ],
+      "type": "string"
+    },
+    "ActionOwnerKind": {
+      "description": "What a tracker action addresses.",
+      "enum": [
+        "task",
+        "project",
+        "wave"
+      ],
+      "type": "string"
+    },
+    "ActionPhase": {
+      "description": "Where an action stands. A person sees `queued`, `sent` and `conflicted`;\n`confirmed` and `retired` actions have left the queue.",
+      "oneOf": [
+        {
+          "enum": [
+            "queued",
+            "confirmed",
+            "retired"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "sent",
+          "description": "Sent with no answer yet; looked for before anything else on its owner.",
+          "type": "string"
+        },
+        {
+          "const": "conflicted",
+          "description": "The tracker's value won; `conflict` holds it and `value` the local loser.",
+          "type": "string"
+        }
+      ]
+    },
     "ActivityNode": {
       "properties": {
         "id": {
@@ -2057,7 +2101,7 @@
         "sync": {
           "anyOf": [
             {
-              "$ref": "#/$defs/PlanningSyncStatus"
+              "$ref": "#/$defs/TrackerSync"
             },
             {
               "type": "null"
@@ -3992,6 +4036,21 @@
       ],
       "type": "string"
     },
+    "LostAnswer": {
+      "description": "How a person answers a value the tracker won: `lf task sync --keep-theirs`\nor `--use-mine`, and Desktop's two buttons on the line.",
+      "oneOf": [
+        {
+          "const": "keep_theirs",
+          "description": "The tracker's value stands; the line closes.",
+          "type": "string"
+        },
+        {
+          "const": "use_mine",
+          "description": "Save the losing value again, which sends it.",
+          "type": "string"
+        }
+      ]
+    },
     "Machine": {
       "properties": {
         "created_at": {
@@ -5451,22 +5510,30 @@
       "type": "object"
     },
     "PlanStatus": {
-      "description": "What `repo.plan` answers: the transport, and for Git the\ndestinations with their import and publication evidence.",
+      "description": "What `repo.plan` answers: the tracker, for Git its destinations with\ntheir import and publication evidence, and every open and lost tracker\naction.",
       "properties": {
+        "actions": {
+          "description": "What the tracker has yet to confirm (open: `queued`, `sent`), in send\norder, and each value it kept over a local one (lost: `conflicted`)\nuntil it is answered. On Git, only lost values: Git keeps no queue.",
+          "items": {
+            "$ref": "#/$defs/TrackerActionStatus"
+          },
+          "type": "array"
+        },
         "destinations": {
           "items": {
             "$ref": "#/$defs/PeerPlanningStatus"
           },
           "type": "array"
         },
-        "transport": {
-          "description": "`git`, or the tracker's lowercased name.",
+        "tracker": {
+          "description": "`git`, `linear` or `asana`.",
           "type": "string"
         }
       },
       "required": [
-        "transport",
-        "destinations"
+        "tracker",
+        "destinations",
+        "actions"
       ],
       "type": "object"
     },
@@ -5480,63 +5547,6 @@
         "unavailable"
       ],
       "type": "string"
-    },
-    "PlanningSyncChange": {
-      "properties": {
-        "error": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "field": {
-          "type": "string"
-        },
-        "id": {
-          "type": "string"
-        },
-        "linear_value": true,
-        "local_value": true,
-        "state": {
-          "$ref": "#/$defs/PlanningSyncState"
-        }
-      },
-      "required": [
-        "id",
-        "field",
-        "state",
-        "local_value",
-        "linear_value",
-        "error"
-      ],
-      "type": "object"
-    },
-    "PlanningSyncState": {
-      "enum": [
-        "pending",
-        "uncertain",
-        "adopted_linear"
-      ],
-      "type": "string"
-    },
-    "PlanningSyncStatus": {
-      "description": "Read-only delivery evidence. These rows never confer execution authority.",
-      "properties": {
-        "changes": {
-          "items": {
-            "$ref": "#/$defs/PlanningSyncChange"
-          },
-          "type": "array"
-        },
-        "connected": {
-          "type": "boolean"
-        }
-      },
-      "required": [
-        "connected",
-        "changes"
-      ],
-      "type": "object"
     },
     "Portability": {
       "enum": [
@@ -6394,7 +6404,7 @@
           "$ref": "#/$defs/ProjectStatus"
         },
         "sync": {
-          "$ref": "#/$defs/PlanningSyncStatus"
+          "$ref": "#/$defs/TrackerSync"
         }
       },
       "required": [
@@ -6418,7 +6428,6 @@
         "opencodezen",
         "linear",
         "asana",
-        "notion",
         "doppler"
       ],
       "type": "string"
@@ -12311,7 +12320,7 @@
           "type": "string"
         },
         "sync": {
-          "$ref": "#/$defs/PlanningSyncStatus"
+          "$ref": "#/$defs/TrackerSync"
         }
       },
       "required": [
@@ -14199,7 +14208,7 @@
           ]
         },
         "sync": {
-          "$ref": "#/$defs/PlanningSyncStatus"
+          "$ref": "#/$defs/TrackerSync"
         },
         "wave_id": {
           "type": [
@@ -14375,6 +14384,101 @@
     },
     "TraceId": {
       "type": "string"
+    },
+    "TrackerActionStatus": {
+      "description": "One tracker action as a person reads it.",
+      "properties": {
+        "change": {
+          "description": "What changes, as a person names it: `title`, `complete`, `comment`.",
+          "type": "string"
+        },
+        "error": {
+          "description": "Why the last request did not confirm it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/ActionKind"
+        },
+        "local_value": {
+          "description": "The value saved here; when conflicted, the one that lost."
+        },
+        "owner_id": {
+          "type": "string"
+        },
+        "owner_kind": {
+          "$ref": "#/$defs/ActionOwnerKind"
+        },
+        "phase": {
+          "$ref": "#/$defs/ActionPhase",
+          "description": "`queued`, `sent` (reply unknown) or `conflicted` (the tracker's value won)."
+        },
+        "seq": {
+          "description": "Send order across the repository; none for Git, which keeps no queue.",
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "subject": {
+          "description": "The field or comment the change addresses.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tracker": {
+          "$ref": "#/$defs/TrackerKind"
+        },
+        "tracker_value": {
+          "description": "The tracker's winning value, when conflicted."
+        }
+      },
+      "required": [
+        "id",
+        "seq",
+        "owner_kind",
+        "owner_id",
+        "kind",
+        "change",
+        "subject",
+        "phase",
+        "tracker",
+        "error",
+        "local_value",
+        "tracker_value"
+      ],
+      "type": "object"
+    },
+    "TrackerKind": {
+      "description": "Where a planning change goes: Git's journal, or a queued tracker.",
+      "enum": [
+        "git",
+        "linear",
+        "asana"
+      ],
+      "type": "string"
+    },
+    "TrackerSync": {
+      "description": "A Task's or Project's slice of `lf repo plan`'s actions: what its tracker\nhas yet to confirm (open), and each value the tracker won (lost) until it\nis answered.\nRead-only; these rows never confer execution authority.",
+      "properties": {
+        "actions": {
+          "items": {
+            "$ref": "#/$defs/TrackerActionStatus"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "actions"
+      ],
+      "type": "object"
     },
     "TransitionKind": {
       "enum": [
@@ -15918,6 +16022,71 @@
           "x-result-example": {
             "issue": "LOO-1",
             "stopped": true
+          }
+        },
+        {
+          "additionalProperties": false,
+          "description": "`lf task sync <issue> [--keep-theirs | --use-mine]`: exchange the\nTask with its tracker now, first answering every value it lost.\nAnswers what the command prints.",
+          "properties": {
+            "answer": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/LostAnswer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "directory": {
+              "type": "string"
+            },
+            "issue": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "task.sync",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "directory",
+            "issue",
+            "answer"
+          ],
+          "type": "object",
+          "x-result": {
+            "type": "string"
+          }
+        },
+        {
+          "additionalProperties": false,
+          "description": "`lf repo plan answer <action> --keep-theirs | --use-mine`: answer one\nlost line of the directory's repository, whoever owns it. Answers the\nline as it stood.",
+          "properties": {
+            "action": {
+              "type": "string"
+            },
+            "answer": {
+              "$ref": "#/$defs/LostAnswer"
+            },
+            "directory": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "plan.answer",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "directory",
+            "action",
+            "answer"
+          ],
+          "type": "object",
+          "x-result": {
+            "$ref": "#/$defs/TrackerActionStatus"
           }
         },
         {

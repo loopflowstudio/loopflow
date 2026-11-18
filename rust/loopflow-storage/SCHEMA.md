@@ -35,6 +35,7 @@ to one. `uv run python scripts/due_removals.py` prints when each may drop.
 - `relocated_task_processes`: task_id, process_id
 - `task_changes`: seq, id, task_id, field, value_json, base_json, conflict_json, attempted, error, acknowledged_revision, acknowledged
 - `task_checkouts`: task_id, worktree, branch, base_commit, parent_pr_id
+- `task_comment_deliveries`: comment_id, comment_json, acknowledged, error, conflicting_comment_json
 - `task_creation_intents`: task_id, repository_id, project_id, title, description, export_json, export_attempted, export_error, due_date, export_observed_at
 - `task_events`: id, task_id, kind_json, created_at
 - `task_linear_ingested_comments`: task_id, comment_id, ingested_at
@@ -47,6 +48,7 @@ to one. `uv run python scripts/due_removals.py` prints when each may drop.
 - `task_state_deliveries`: seq, id, task_id, target, base_revision, base_state, attempted, settled, error, conflict_json
 - `task_summaries`: task_id, ended, ended_at, graph, loop_passes, ship_events, wall_seconds, reflect
 - `tasks`: id, repository_id, project_id, external_issue_id, issue_identifier, created_at, issue_title, issue_description, pm_snapshot_synced_at, ~~worktree~~ (leaving → LOO-954, unused_store_members), workspace_slug, abandon_reason, updated_at, abandoned_at, ~~primary_session_id~~ (leaving → LOO-954, unused_store_members), planning_revision, planning_rank, planning_assignee, planning_state, planning_completed_at, planning_provider_revision, planning_url, planning_branch_name, planning_team_id, planning_completed, planning_deleted_at, ~~branch~~ (leaving → LOO-954, unused_store_members), ~~base_commit~~ (leaving → LOO-954, unused_store_members), ~~parent_pr_id~~ (leaving → LOO-954, unused_store_members), completion_request, completion_error, planning_due_date, ~~checkout_machine_id~~ (leaving → LOO-954, unused_store_members), paused, shipped_at, ~~ship_lf_process_id~~ (leaving → LOO-954, unused_store_members), ~~ship_restarts~~ (leaving → LOO-954, unused_store_members), ~~ship_approved_lf_process_id~~ (leaving → LOO-954, unused_store_members), ~~ship_stopped_at~~ (leaving → LOO-954, unused_store_members), ~~ship_stopped_lf_process_id~~ (leaving → LOO-954, unused_store_members), ~~regressed_in~~ (leaving → LOO-730, unused_store_members), ~~ship_stopped_person~~ (leaving → LOO-954, unused_store_members)
+- `tracker_actions`: seq, id, wave_id, project_id, task_id, subject, kind, value_json, base_json, conflict_json, phase, tracker, remote_id, confirmed_revision, error, sent_at, looked_at
 
 ## PR landing
 
@@ -82,13 +84,16 @@ to one. `uv run python scripts/due_removals.py` prints when each may drop.
 - `steer_adapters`: agent_process_id, capability, created_at, activated_at
 - `steer_delivered`: session_id, steer_id, claimed_at, delivered_at
 - `steers`: seq, id, repo, wave_id, task_id, project_id, session_id, source, revision, author, text, created_at
-- `task_comment_deliveries`: comment_id, comment_json, acknowledged, error, conflicting_comment_json
 - `task_comments`: id, task_id, body, author, created_at, provider_revision
 - `task_update_readings`: task_id, observation
 
 ## Creation
 
 - `creation_receipts`: request_id, kind, fingerprint, run, task_id, session_id, artifact_key, milestone, result, launch, created_at, updated_at
+
+## Command answer
+
+- `command_answers`: request_id, fingerprint, result, error, revisions, answered_at
 
 ## LfSession
 
@@ -125,6 +130,19 @@ to one. `uv run python scripts/due_removals.py` prints when each may drop.
 - `provider_session_accounts` — **leaving → LOO-928, unused_store_members**: provider, provider_session_id, account_id, created_at, isolated
 - `provider_tokens`: provider, access_token, refresh_token, oauth_client_id, expires_at, login, updated_at, credential_type, encrypted
 
+## Leaving the store
+
+- `ondemands` — **leaving → LOO-954, unused_store_members**: name, created_at
+- `pools` — **leaving → LOO-954, unused_store_members**: name, created_at
+- `session_steers` — **leaving → LOO-954, unused_store_members**: session_id, steer_id, attempt, applicable
+- `steer_batches` — **leaving → LOO-954, unused_store_members**: id, session_id, agent_process_id, provider_thread, attachment_token, boundary, payload_hash, evidence, created_at
+- `steer_deliveries` — **leaving → LOO-954, unused_store_members**: session_id, steer_id, attempt, batch_id, excerpted
+- `task_deletions` — **leaving → LOO-954, unused_store_members**: wave_id, issue_id, identifier, confirmed_at
+- `task_issue_identities` — **leaving → LOO-954, unused_store_members**: wave_id, issue_id, identifier
+- `task_pr_repair_incidents` — **leaving → LOO-954, unused_store_members**: task_pr_id, kind, occurred_at
+- `tool_responses` — **leaving → LOO-954, unused_store_members**: id, work_kind, work_id, request_id, choice, responded_at
+- `work_pane_layouts` — **leaving → LOO-954, unused_store_members**: repository_id, kind, work_id, layout_json
+
 ## Code-size measurement
 
 - `blob_tokens`: sha, lines, bytes, tokens
@@ -151,16 +169,3 @@ to one. `uv run python scripts/due_removals.py` prints when each may drop.
 ## Desktop shell
 
 - `desktop_shells`: id, task_id, checkout, owner, created_at, jobs_settled, ~~close_requested~~ (leaving → LOO-954, unused_store_members), terminal_id, launcher_lf_process_id
-
-## Not in the ownership map
-
-- `ondemands` — **leaving → LOO-954, unused_store_members**: name, created_at
-- `pools` — **leaving → LOO-954, unused_store_members**: name, created_at
-- `session_steers` — **leaving → LOO-954, unused_store_members**: session_id, steer_id, attempt, applicable
-- `steer_batches` — **leaving → LOO-954, unused_store_members**: id, session_id, agent_process_id, provider_thread, attachment_token, boundary, payload_hash, evidence, created_at
-- `steer_deliveries` — **leaving → LOO-954, unused_store_members**: session_id, steer_id, attempt, batch_id, excerpted
-- `task_deletions` — **leaving → LOO-954, unused_store_members**: wave_id, issue_id, identifier, confirmed_at
-- `task_issue_identities` — **leaving → LOO-954, unused_store_members**: wave_id, issue_id, identifier
-- `task_pr_repair_incidents` — **leaving → LOO-954, unused_store_members**: task_pr_id, kind, occurred_at
-- `tool_responses` — **leaving → LOO-954, unused_store_members**: id, work_kind, work_id, request_id, choice, responded_at
-- `work_pane_layouts` — **leaving → LOO-954, unused_store_members**: repository_id, kind, work_id, layout_json

@@ -167,7 +167,6 @@
       "ship_control": {
         "unavailable": "Task is complete"
       },
-      "shipping": null,
       "task": {
         "tracker_state": {
           "synced_at": 1793156337,
@@ -451,8 +450,7 @@
         "workspace_slug": "delivery",
         "worktree": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
         "started_by": null,
-        "ship_approval": null,
-        "ship_stop": null
+        "auto_ship": null
       },
       "graph_processes": [
         {
@@ -768,7 +766,6 @@
         "ship_control": {
           "unavailable": "Task is complete"
         },
-        "shipping": null,
         "task": {
           "tracker_state": {
             "synced_at": 1793156337,
@@ -1131,7 +1128,6 @@
       "ship_control": {
         "unavailable": "Task is complete"
       },
-      "shipping": null,
       "task": {
         "tracker_state": {
           "synced_at": 1793156337,
@@ -1418,8 +1414,7 @@
         "workspace_slug": "delivery",
         "worktree": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
         "started_by": null,
-        "ship_approval": null,
-        "ship_stop": null
+        "auto_ship": null
       },
       "graph_processes": [
         {
@@ -1706,7 +1701,6 @@
         "ship_control": {
           "unavailable": "Task is complete"
         },
-        "shipping": null,
         "task": {
           "tracker_state": {
             "synced_at": 1793156337,
@@ -2318,8 +2312,7 @@
         "workspace_slug": "delivery",
         "worktree": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
         "started_by": null,
-        "ship_approval": null,
-        "ship_stop": null
+        "auto_ship": null
       },
       "graph_processes": [
         {

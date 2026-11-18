@@ -67,12 +67,12 @@ first reading after start is the restart and reboot case. Each reading:
    back at once; its terminal holds later passes off. The pass's start runs
    with `LF_RECOVERING_SESSION=<session>`; any other `lf session resume` of it
    is a person's, and sets the count to zero and clears `start_failure`.
-3. **Carries Task runs.** A shipping or moving Task whose recorded carrier is
-   dead gets `lf --task <ID> ship` or `lf task run <ID>` again, from its
-   checkpoint. A carrier that exits on its own writes an outcome on its
-   process row; a dead carrier with none died. One count serves both
+3. **Carries Task runs.** A Task whose `lf task run` carrier is dead gets
+   `lf task run <ID>` again, from its checkpoint; with Auto-Ship on it stands
+   in at interactive steps by itself. A carrier that exits on its own clears
+   its OS process; a dead carrier left it behind. The pass counts those starts
    (`task_graphs.restarts`, `restarted_at`), reset when the run finishes a
-   step.
+   step, and waits for a person after five.
 4. **Retains**, at most every hour: closes Process rows whose OS process is
    gone, forgets finished ones nothing references, merges per-receipt usage,
    reclaims pages, then removes receipts of Processes proven dead
@@ -154,8 +154,8 @@ rather than the connection. The root accepts any message either side sends;
 `x-min-revision` are this build's range. Each operation's kind is a `const` as
 on the wire, and `x-result` beside it names what `response.result` carries.
 For a write, that schema derives from the Rust type the operation returns.
-For example, `task.ship` returns `TaskShip`: its `state` is `shipping`,
-`already_shipping` or `at_end`, with the fields described by that variant.
+For example, `task.ship` returns `TaskRun`: its `state` is `running`,
+`waiting` or `ended`, with the fields described by that variant.
 `lf --task <issue> ship --json` prints the same result. Use the operation's
 `x-result` to decode it; `response.result` adds no extra result-type tag.
 
@@ -464,14 +464,14 @@ the phone's `view.select` Task list and its creation destinations all read it.
   command (`lf [-b] [-a <agent>] task run …`, `lf --task <issue> ship`)
   as a detached process and answers what that process reports once it
   knows: `{state: running, ships, graph_process, log}` when the
-  Graph registers, `waiting {step}` or `ended` when nothing ran, `shipping
-  {process, log}`, or the refusal it printed. The connection never waits on
-  the run. `approve` is `-b`: every step headless to `end`, approving
-  Auto-Ship; without it the run stops before the next interactive step, and
-  one with none ahead reaches `end` as bare `lf task run` does. A null `agent`
-  uses each step's configured harness. `lf task run <issue> --json` and `lf
-  ship --json` print the same value. `task.hold` withdraws the approval
-  (`{issue, stopped}`), `task.steer` and `task.report {message}` save to the
+  Graph registers, `waiting {step}` or `ended` when nothing ran, or the
+  refusal it printed; `task.ship` answers the same after turning Auto-Ship
+  on. The connection never waits on the run. `approve` is `-b`: every step
+  headless to `end`, turning Auto-Ship on unless it is stopped; without it
+  the run stands in at interactive steps only while Auto-Ship is on, and
+  otherwise stops before the next one. A null `agent` uses each step's
+  configured harness. `lf task run <issue> --json` and `lf ship --json`
+  print the same value. `task.hold` stops Auto-Ship (`{issue, stopped}`), `task.steer` and `task.report {message}` save to the
   thread and return it, and `task.interrupt` returns its receipt.
 - A write uses the shared `Write` shape. `Write::run` calls the shared Rust
   function its CLI handler calls and returns the typed value; the CLI prints

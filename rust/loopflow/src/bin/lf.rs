@@ -741,20 +741,19 @@ fn print_task_snapshot(
                 })
                 .unwrap_or_else(|| at.to_string())
         };
-        if let Some(approval) = &snapshot.ship_approval {
-            println!(
-                "  Auto-Ship approved by {} {}",
-                approval.by,
-                when(approval.at)
-            );
-        }
-        if let Some(stop) = &snapshot.ship_stop {
-            println!(
-                "  Not shipping: {} stopped it {} · `lf ship {}` approves it again",
-                stop.by,
-                when(stop.at),
-                snapshot.issue_identifier
-            );
+        if let Some(mark) = &snapshot.auto_ship {
+            use loopflow_storage::sqlite::AutoShipState;
+            match mark.state {
+                AutoShipState::On => {
+                    println!("  Auto-Ship: on, by {} {}", mark.by, when(mark.at))
+                }
+                AutoShipState::Stopped => println!(
+                    "  Auto-Ship: stopped by {} {} · `lf ship {}` turns it on",
+                    mark.by,
+                    when(mark.at),
+                    snapshot.issue_identifier
+                ),
+            }
         }
         if let Some(conflict) = &snapshot.completion_pending {
             println!("  error: {conflict}");

@@ -311,7 +311,9 @@ struct ServerProtocolTests {
         guard case .response(_, _, .object(let shipping)) = try answer("task_shipping") else {
             Issue.record("Missing task.ship result"); return
         }
-        #expect(shipping["state"] == .string("shipping"))
+        // `task.ship` returns the run, as `task.run` does.
+        #expect(shipping["state"] == .string("running"))
+        #expect(shipping["ships"] == .bool(true))
         guard case .response(_, _, .object(let held)) = try answer("task_held") else {
             Issue.record("Missing task.hold result"); return
         }

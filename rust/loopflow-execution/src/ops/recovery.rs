@@ -1,7 +1,7 @@
 //! Recovery of this Machine's work, run by the Machine server's recovery pass.
 //! [`settle`] closes AgentProcesses whose lf died, releases AgentProcess
 //! ancestry that was never recorded, carries a Task's run again
-//! when its ship process exited or its `lf task run` died, starts a run that ended waiting on
+//! when its `lf task run` died, starts a run that ended waiting on
 //! a usage limit, and gives back rented Machines whose work drained or whose
 //! soft deadline came. [`retain`] keeps the store to what is still needed.
 //! [`due_task_conversations`] names the Task conversations to start, and

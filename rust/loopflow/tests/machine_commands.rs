@@ -3150,7 +3150,7 @@ fn mini_starts_nothing_for_a_task_that_moved_back() {
     let laptop = gethostname::gethostname().to_string_lossy().into_owned();
     move_to(laptop.split('.').next().unwrap());
 
-    // Each process read on mini runs its recovery, which restarts ship processes.
+    // Each process read on mini runs its recovery, which carries dead runs again.
     for _ in 0..5 {
         let read = fixture
             .command(&["process", "list", "--json"])

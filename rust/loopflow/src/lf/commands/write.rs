@@ -209,15 +209,16 @@ writes! {
         )?,
     },
 
-    /// `lf --task <issue> ship --json`, started detached: approves Auto-Ship.
+    /// `lf --task <issue> ship --json`, started detached: turns Auto-Ship on
+    /// and returns the run, as `task.run` does.
     #[serde(rename = "task.ship")]
-    TaskShip { directory: PathBuf, issue: String } => task::TaskShip;
+    TaskShip { directory: PathBuf, issue: String } => task::TaskRun;
     { issue, .. } => match remote {
         Some(remote) => remote.call()?,
         None => task::ship(directory, issue, environment)?,
     },
 
-    /// `lf task hold <issue> --json`: withdraws the Task's Auto-Ship approval.
+    /// `lf task hold <issue> --json`: stops the Task's Auto-Ship.
     #[serde(rename = "task.hold")]
     TaskHold {
         directory: PathBuf,
@@ -1429,19 +1430,19 @@ mod tests {
     #[test]
     fn typed_answers_keep_the_wire_shape() {
         use super::WriteResult;
-        use loopflow_execution::engine::task::TaskShip;
+        use loopflow_execution::engine::task::TaskRun;
         use serde_json::json;
 
         let shipping: serde_json::Value = serde_json::from_str(include_str!(
             "../../../../loopflow-execution/tests/fixtures/dto/server/task_shipping.json"
         ))
         .unwrap();
+        // `task.ship` answers as `task.run` does.
         for expected in [
             shipping["result"].clone(),
-            json!({"state": "already_shipping", "issue": "LOO-1", "lf_process_id": shipping["result"]["lf_process_id"]}),
-            json!({"state": "at_end", "issue": "LOO-1"}),
+            json!({"state": "ended", "issue": "LOO-1"}),
         ] {
-            let result: TaskShip = serde_json::from_value(expected.clone()).unwrap();
+            let result: TaskRun = serde_json::from_value(expected.clone()).unwrap();
             let actual = serde_json::to_value(WriteResult::TaskShip(Box::new(result))).unwrap();
             assert_eq!(actual, expected);
             assert_result_schema("task.ship", &actual);

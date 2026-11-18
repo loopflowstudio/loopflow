@@ -440,7 +440,6 @@
         "ship_control": {
           "unavailable": null
         },
-        "shipping": null,
         "pr": {
           "id": "pr_33333333333333333333333333333333",
           "sequence": 1,
@@ -627,7 +626,6 @@
         "ship_control": {
           "unavailable": null
         },
-        "shipping": null,
         "pr": null,
         "graph_source": null,
         "section": "backlog",

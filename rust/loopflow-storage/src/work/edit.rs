@@ -97,7 +97,9 @@ work_values! {
     (TaskAssignee, "task_assignee", Option<String>),
     // Released peers recorded a Task hold here; nothing reads it.
     (HistoricalTaskPaused, "task_paused", bool),
-    (TaskShippedAt, "task_shipped_at", Option<i64>),
+    // Released peers recorded an Auto-Ship handoff here; Auto-Ship is a
+    // `task_graphs` mark now and nothing reads it (LOO-971 drops the column).
+    (HistoricalTaskShippedAt, "task_shipped_at", Option<i64>),
     (TaskDueDate, "task_due_date", Option<String>),
     (TaskDeletedAt, "task_deleted_at", Option<i64>),
     (TaskUrl, "task_url", Option<String>),

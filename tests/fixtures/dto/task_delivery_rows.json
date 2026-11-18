@@ -253,7 +253,6 @@
     "ship_control": {
       "unavailable": null
     },
-    "shipping": null,
     "pr": {
       "id": "pr_commits",
       "sequence": 1,
@@ -544,7 +543,6 @@
     "ship_control": {
       "unavailable": null
     },
-    "shipping": null,
     "pr": {
       "id": "pr_commits",
       "sequence": 1,
@@ -833,7 +831,6 @@
     "ship_control": {
       "unavailable": null
     },
-    "shipping": null,
     "pr": {
       "id": "pr_commits",
       "sequence": 1,
@@ -935,7 +932,6 @@
     "ship_control": {
       "unavailable": null
     },
-    "shipping": null,
     "pr": null,
     "graph_source": null,
     "lifecycle": "unstarted",
@@ -1011,7 +1007,6 @@
     "ship_control": {
       "unavailable": null
     },
-    "shipping": null,
     "pr": null,
     "graph_source": null,
     "lifecycle": "unstarted",
@@ -1274,7 +1269,6 @@
     "ship_control": {
       "unavailable": null
     },
-    "shipping": null,
     "pr": {
       "id": "pr_commits",
       "sequence": 1,
@@ -1565,7 +1559,6 @@
     "ship_control": {
       "unavailable": null
     },
-    "shipping": null,
     "pr": {
       "id": "pr_commits",
       "sequence": 1,

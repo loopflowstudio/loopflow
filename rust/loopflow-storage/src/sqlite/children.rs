@@ -569,8 +569,12 @@ impl SqliteStore {
                 [id.as_str()],
             )?;
             super::task_state::decide_in(&tx, id, "unstarted")?;
-            // Reopening withdraws Auto-Ship: the approval ended with the Task.
-            super::task_work::unship_in(&tx, id)?;
+            // Reopening clears Auto-Ship: it ended with the Task.
+            tx.execute(
+                "UPDATE task_graphs SET auto_ship=NULL,auto_ship_at=NULL,auto_ship_by=NULL
+                 WHERE task_id=?1 AND auto_ship IS NOT NULL",
+                [id.as_str()],
+            )?;
             insert_task_event_in(
                 &tx,
                 id,

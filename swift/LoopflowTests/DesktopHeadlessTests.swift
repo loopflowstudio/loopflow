@@ -207,9 +207,9 @@ struct DesktopHeadlessTests {
 
         // `lf task status`: its work, Graph processes, comments and recorded execution.
         feed.send(try frame("task", sequence: 2, answers: 2, task: task.task.identifier,
-                            body: ["overview": work, "graph_processes": [run], "execution": ["work": work, "ship_approval": ["at": 1793266000, "by": ["kind": "person", "name": "Maya"]],
+                            body: ["overview": work, "graph_processes": [run], "execution": ["work": work,
                                                  "started_by": ["kind": "session", "id": "session_1", "name": "LOO-1 task", "requester": "Maya"],
-                                                 "ship_stop": ["at": 1793266380, "by": ["kind": "person", "name": "Maya"]]],
+                                                 "auto_ship": ["state": "on", "at": 1793266000, "by": ["kind": "person", "name": "Maya"]]],
                                    "comments": ["identifier": task.task.identifier, "comments": [], "pending_sync": [], "conflicts": [String: String](), "refresh_error": NSNull()]]))
         try await eventually { model.taskWork[task.id].value != nil }
         let shown = try #require(model.taskWork[task.id].value)
@@ -219,15 +219,17 @@ struct DesktopHeadlessTests {
         for id in diagnostics.sessions.map(\.id) {
             _ = try view.inspect().find(viewWithAccessibilityIdentifier: "task-work-\(id)")
         }
-        // The shipping line names who approved it.
+        // The Workflow line names who turned Auto-Ship on, and Stop Auto-Ship replaces Auto-Ship.
         let bar = TaskWorkflowBar(model: model, task: task, work: model.taskWork[task.id])
-        #expect(bar.live == "\(try #require(task.shipping).reason) · approved by Maya")
-        // A person's stop says why the Task isn't shipping and how to approve it again.
-        let stop = try #require(model.taskExecution[task.id].value?.shipStop)
-        #expect(stop.by == .person(name: "Maya"))
-        let line = TaskWorkflowBar.notShipping(stop, issue: task.task.identifier)
-        #expect(line.hasPrefix("Not shipping: Maya stopped it "))
-        #expect(line.hasSuffix(" · lf ship \(task.task.identifier) approves it again"))
+        #expect(bar.live.hasSuffix(" · Auto-Ship on, by Maya"))
+        let control = TaskShipControl(model: model, task: task)
+        _ = try control.inspect().find(viewWithAccessibilityIdentifier: "task-ship-stop")
+        #expect(throws: (any Error).self) { try control.inspect().find(viewWithAccessibilityIdentifier: "task-ship") }
+        // A person's stop says who stopped it and how to turn it on again.
+        let line = TaskWorkflowBar.autoShipLine(
+            AutoShip(state: .stopped, at: 1793266380, by: .person(name: "Maya")), issue: task.task.identifier)
+        #expect(line.hasPrefix("Auto-Ship stopped by Maya "))
+        #expect(line.hasSuffix(" · lf ship \(task.task.identifier) turns it on"))
 
         // Any Graph process is one line that opens to its id, its launched graph,
         // where it stands and every step it started.
@@ -353,7 +355,7 @@ struct DesktopHeadlessTests {
         let planning = try Data(contentsOf: fixtures.appendingPathComponent("roadmap_snapshot.json"))
         let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self, from: planning)
         let wave = try #require(roadmap.waves.first)
-        let task = try #require(wave.tasks.items.first { $0.runControl.unavailable == nil && $0.shipping == nil })
+        let task = try #require(wave.tasks.items.first { $0.runControl.unavailable == nil && $0.runtime?.status != .shipping })
         var wire = try #require(JSONSerialization.jsonObject(
             with: Data(contentsOf: fixtures.appendingPathComponent("task_work.json"))) as? [String: Any])
         let started = Recorder()
@@ -438,16 +440,6 @@ struct DesktopHeadlessTests {
         for _ in 0..<200 where await started.calls.last?.contains("complete") != true { try await Task.sleep(for: .milliseconds(5)) }
         #expect(await started.calls.last == ["task", "complete", task.task.identifier, "--json"])
 
-        // A shipping Task offers Stop Auto-Ship in place of Auto-Ship.
-        let shipping = try #require(wave.tasks.items.first { $0.shipping != nil })
-        let shipped = TaskShipControl(model: model, task: shipping)
-        #expect(throws: (any Error).self) {
-            try shipped.inspect().find(viewWithAccessibilityIdentifier: "task-ship")
-        }
-        try shipped.inspect().find(viewWithAccessibilityIdentifier: "task-ship-stop").button().tap()
-        for _ in 0..<200 where await started.calls.last?.contains("hold") != true { try await Task.sleep(for: .milliseconds(5)) }
-        #expect(await started.calls.last == ["task", "hold", shipping.task.identifier, "--json"])
-
         // Auto-Ship says it was requested, never that it shipped; its Undo stops Auto-Ship.
         model.shipTask(task)
         let notice = try #require(model.navigation.notices.current)
@@ -495,14 +487,12 @@ struct DesktopHeadlessTests {
         }
     }
 
-    @Test("A shipping Task says what shipping is doing and cannot be shipped again")
+    @Test("A shipping Task cannot be shipped again")
     func shippingRow() throws {
         let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self,
             from: Data(contentsOf: fixtures.appendingPathComponent("roadmap_snapshot.json")))
-        let shipped = try #require(snapshot.waves.first?.tasks.items.first { $0.shipping != nil })
-        #expect(shipped.runtime?.status == .shipping)
-        #expect(shipped.shipping?.label == "Landing")
-        #expect(shipped.shipControl.unavailable == "Task is already shipping")
+        let shipped = try #require(snapshot.waves.first?.tasks.items.first { $0.runtime?.status == .shipping })
+        #expect(shipped.shipControl.unavailable == "Auto-Ship is already on")
     }
 
     @Test("A workflow is drawn as a graph: circles, described interactive steps, a loop arc and an arrow per run")
@@ -510,7 +500,7 @@ struct DesktopHeadlessTests {
         let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self,
             from: Data(contentsOf: fixtures.appendingPathComponent("roadmap_snapshot.json")))
         let wave = try #require(roadmap.waves.first)
-        let task = try #require(wave.tasks.items.first { $0.runControl.unavailable == nil && $0.shipping == nil })
+        let task = try #require(wave.tasks.items.first { $0.runControl.unavailable == nil && $0.runtime?.status != .shipping })
         let started = Recorder()
         let model = WorkModel(query: RegistryQuery(run: { args, _ in
             if args.prefix(2) == ["task", "run"] { await started.add(args) }

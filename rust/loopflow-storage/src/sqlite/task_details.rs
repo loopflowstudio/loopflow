@@ -31,7 +31,7 @@ pub struct TaskDetailFacts {
     pub graph_names: HashMap<TaskId, String>,
     /// The step each Task stands at on its graph; absent while a run carries it.
     pub steps: HashMap<TaskId, String>,
-    /// Tasks handed off to Auto-Ship.
+    /// Tasks with Auto-Ship on.
     pub shipped: HashSet<TaskId>,
     pub tracker_actions: HashMap<TaskId, TrackerActions>,
     pub repository_paths: HashMap<RepositoryId, String>,
@@ -114,8 +114,8 @@ impl SqliteStore {
             )?,
             shipped: task_set(
                 &snapshot,
-                "SELECT id FROM tasks
-                 WHERE id IN (SELECT value FROM json_each(?1)) AND shipped_at IS NOT NULL",
+                "SELECT task_id FROM task_graphs
+                 WHERE task_id IN (SELECT value FROM json_each(?1)) AND auto_ship='on'",
                 &json,
             )?,
             tracker_actions: super::planning_sync::task_tracker_actions_in(&snapshot, &ids)?,

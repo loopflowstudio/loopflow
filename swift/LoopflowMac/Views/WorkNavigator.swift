@@ -314,9 +314,7 @@ struct WorkNavigator: View {
                            waitingForDetails: Bool, slotHint: String?, task: RoadmapTask?,
                            status: SessionProgramStatus, selected: Bool, hover: HoverFlag) -> some View {
         let detail: (text: String, help: String)?
-        if let shipping = task?.shipping {
-            detail = ("\(shipping.label) · \(shipping.reason)", preview.help)
-        } else if task?.task.description.isEmpty == false || preview.age != nil {
+        if task?.task.description.isEmpty == false || preview.age != nil {
             detail = (preview.text, preview.help)
         } else if waitingForDetails {
             detail = ("Loading planning…", "Waiting for Task details")

@@ -215,8 +215,8 @@ struct TaskWorkflowHeader: View {
 }
 
 /// Auto-Ship at the right end of the Workflow bar, always visible; while
-/// shipping the same spot holds Stop Auto-Ship. Rust decides whether shipping
-/// can start. Sidebar rows and menus carry no ship control.
+/// Auto-Ship is on the same spot holds Stop Auto-Ship. Rust decides whether
+/// shipping can start. Sidebar rows and menus carry no ship control.
 struct TaskShipControl: View {
     let model: WorkModel
     let task: RoadmapTask
@@ -232,11 +232,11 @@ struct TaskShipControl: View {
 
     var body: some View {
         Group {
-            if task.shipping != nil {
+            if model.taskExecution[task.id].value?.autoShip?.state == .on {
                 Button("Stop Auto-Ship") { model.stopShipping(task) }
                     .buttonStyle(WorkOutlineButtonStyle())
                     .disabled(readingUnavailable != nil)
-                    .help("lf --task \(task.task.identifier) ship --stop: withdraw it and disarm auto-merge")
+                    .help("lf task hold \(task.task.identifier): the run waits at its next step for you, and auto-merge is disarmed")
                     .accessibilityIdentifier("task-ship-stop")
             } else if !task.isCompleted {
                 let refusal = readingUnavailable ?? task.shipControl.unavailable
@@ -312,7 +312,7 @@ struct TaskWorkflowBar: View {
                 }
                 Text(live)
                     .lineLimit(1).truncationMode(.tail)
-                    .foregroundStyle(task.shipping?.state == .restarting ? palette.warning : palette.textSecondary)
+                    .foregroundStyle(palette.textSecondary)
                     .help(live)
                     .accessibilityIdentifier("task-workflow-bar-live")
                 Spacer(minLength: 0)
@@ -376,30 +376,31 @@ struct TaskWorkflowBar: View {
         switch place {
         case .passed: palette.textTertiary
         case .here: palette.text
-        case .going: task.shipping != nil ? palette.success : palette.working
+        case .going: autoShip?.state == .on ? palette.success : palette.working
         case .ahead: .clear
         }
     }
 
     private var stages: [Stage] {
-        work.value?.graph.map { Self.stages($0, shipping: task.shipping != nil) } ?? []
+        work.value?.graph.map { Self.stages($0, shipping: autoShip?.state == .on) } ?? []
     }
 
-    /// What is happening now, in one line: shipping and who approved it, or
-    /// the stop that keeps it from shipping.
+    private var autoShip: AutoShip? { model.taskExecution[task.id].value?.autoShip }
+
+    /// What is happening now, in one line: where the Task stands, and its
+    /// Auto-Ship mark when someone set one.
     var live: String {
-        let execution = model.taskExecution[task.id].value
-        if let shipping = task.shipping {
-            guard let approval = execution?.shipApproval else { return shipping.reason }
-            return "\(shipping.reason) · approved by \(approval.by.label)"
-        }
-        guard let stop = execution?.shipStop else { return position }
-        return "\(Self.notShipping(stop, issue: task.task.identifier)) · \(position)"
+        guard let autoShip else { return position }
+        return "\(position) · \(Self.autoShipLine(autoShip, issue: task.task.identifier))"
     }
 
-    static func notShipping(_ stop: ShipMark, issue: String) -> String {
-        let when = Date(timeIntervalSince1970: TimeInterval(stop.at)).formatted(date: .abbreviated, time: .shortened)
-        return "Not shipping: \(stop.by.label) stopped it \(when) · lf ship \(issue) approves it again"
+    static func autoShipLine(_ mark: AutoShip, issue: String) -> String {
+        switch mark.state {
+        case .on: return "Auto-Ship on, by \(mark.by.label)"
+        case .stopped:
+            let when = Date(timeIntervalSince1970: TimeInterval(mark.at)).formatted(date: .abbreviated, time: .shortened)
+            return "Auto-Ship stopped by \(mark.by.label) \(when) · lf ship \(issue) turns it on"
+        }
     }
 
     private var position: String {

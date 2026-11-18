@@ -665,7 +665,6 @@ impl World {
                 &run.id,
                 &loopflow_storage::graph_process::ExecutionStart::reserved(run.started_at),
             ),
-            stops_at == END,
         )? {
             bail!("Task {issue} moved while starting {requested}");
         }

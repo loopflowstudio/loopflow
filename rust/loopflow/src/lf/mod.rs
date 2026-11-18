@@ -483,12 +483,13 @@ pub enum Commands {
         #[arg(long = "json", id = "steer_json")]
         json: bool,
     },
-    /// Ship the Task: run every remaining step to merge and completion, standing in at each interactive step
+    /// Ship the Task: turn Auto-Ship on and run it as `lf task run` does, standing in at each interactive step
     ///
-    /// Returns once the Task is shipping and runs on to its end (`-b` waits for
-    /// it); `lf task status` follows it. A second `lf ship` while one runs exits 0.
-    /// With no ISSUE, ships the checkout's Task, or a new one for its branch.
-    /// `lf task hold` withdraws the approval and takes back its merge request.
+    /// Prints what `lf task run` prints and returns once the run registers
+    /// (`-b` waits for it); `lf task status` follows it. A Task waiting at an
+    /// interactive step is stood in for there. With no ISSUE, ships the
+    /// checkout's Task, or a new one for its branch. `lf task hold` stops
+    /// Auto-Ship: the run waits at its next interactive or merging step.
     Ship {
         issue: Option<String>,
         /// Take up this graph in place of the Task's remaining steps
@@ -2461,10 +2462,11 @@ using lf open's ordinary host selection. Preview and --quote open nothing."
         #[arg(long)]
         json: bool,
     },
-    /// Stop Auto-Ship until the next `lf ship`: end the ship process and disarm auto-merge it armed
+    /// Stop Auto-Ship until the next `lf ship` and disarm auto-merge it armed
     ///
-    /// The stop stands, so no run ships the Task again until `lf ship`. With
-    /// no ISSUE, holds the checkout's Task.
+    /// Nothing is killed: the run waits at its next interactive step, or before
+    /// a step that merges. The stop stands until `lf ship`. With no ISSUE,
+    /// holds the checkout's Task.
     Hold {
         issue: Option<String>,
         /// Why, kept in the Task's history

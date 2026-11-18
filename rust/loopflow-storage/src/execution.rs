@@ -50,7 +50,7 @@ impl TaskLocation {
 }
 
 /// A Task's state, derived from its checkout, Graph position, whether a
-/// Graph runs for it and the Auto-Ship approval. Completion and abandonment
+/// Graph runs for it and its Auto-Ship mark. Completion and abandonment
 /// are durable; the open states follow what the Task is doing now. Whether
 /// anyone owns it is ownership, not state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -59,14 +59,14 @@ pub enum TaskState {
     /// No checkout yet.
     Unstarted,
     /// A checkout, no Graph running and not at an interactive step: before its first run,
-    /// after a stopped one, or shipping whose ship process exited.
+    /// after a stopped one, or with Auto-Ship on and nothing running.
     Idle,
     /// Between Graphs at an interactive step, in a conversation in its Task Session.
     Active,
     /// A Graph runs for it with an interactive step still ahead that will stop for a person.
     Moving,
-    /// A Graph runs for it and no interactive step ahead will stop it: none remain, or
-    /// Auto-Ship approved stand-ins at the rest. It finishes on its own to merge.
+    /// A Graph runs for it with Auto-Ship on: it stands in at each interactive
+    /// step and finishes on its own to merge.
     Shipping,
     /// Completed independently of Graph position.
     Done,

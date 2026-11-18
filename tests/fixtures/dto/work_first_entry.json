@@ -220,7 +220,6 @@
           "ship_control": {
             "unavailable": "Agent execution unavailable: agent \"opencode:opencode/test-model\" uses harness \"opencode\", which does not support a managed execution boundary; select codex or claude"
           },
-          "shipping": null,
           "runtime": {
             "completion_pending": null,
             "provider": "opencode",

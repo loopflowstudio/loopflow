@@ -520,7 +520,7 @@ mod tests {
     }
 
     #[test]
-    fn auto_ship_log_reads_and_writes_plan_by_index() {
+    fn auto_ship_reads_and_writes_plan_by_index() {
         let (_home, store, _task, _viewer) = fixture();
         let task = TaskId::new();
         store
@@ -533,31 +533,18 @@ mod tests {
                 due_date: None,
             })
             .unwrap();
+        store
+            .take_up_task_graph(&task, r#"{"name":"code","steps":[]}"#)
+            .unwrap();
+        let mark = crate::sqlite::AutoShip {
+            state: crate::sqlite::AutoShipState::On,
+            at: 1,
+            by: crate::process::Starter::Person { name: None },
+        };
         let traced = statements(&store, || {
-            store
-                .ship_task(
-                    &task,
-                    (
-                        &loopflow_model::id::LfProcessId::new(),
-                        &crate::graph_process::ExecutionStart::reserved(1),
-                    ),
-                    "ship",
-                )
-                .unwrap();
-            let seen = store.task_run_restarts(&task).unwrap();
-            store.count_task_run_restart(&task, None, &seen).unwrap();
-            store
-                .ship_task(
-                    &task,
-                    (
-                        &loopflow_model::id::LfProcessId::new(),
-                        &crate::graph_process::ExecutionStart::reserved(1),
-                    ),
-                    "ship",
-                )
-                .unwrap();
-            store.task_shipping(&task).unwrap();
-            store.reset_task_run_restarts(&task).unwrap();
+            store.set_task_auto_ship(&task, &mark, true, None).unwrap();
+            store.task_auto_ship(&task).unwrap();
+            store.task_state(&task).unwrap();
         });
         let scans = growing_scans(&store, &traced);
         assert!(scans.is_empty(), "{}", scans.join("\n"));

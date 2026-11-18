@@ -11,3 +11,12 @@
 - Named the fact Auto-Ship (existing product word), not "auto mode" from the quote. Reverse by renaming; nothing has shipped.
 - One mark `auto_ship` on|stopped instead of on/off pairs. Reverse if someone needs who approved before a stop.
 - Dropped the route approval: a no-interactive-ahead run merges but shows `moving`, not `shipping`/Autonomous. Reverse by restoring the write in the run's start path.
+
+## Implement (2026-11-18, headless)
+
+- Migration is `task_graph_auto_ship`, not `auto_ship`: unmerged migrations apply in name order after merged ones, and it must follow LOO-959's `process_rows_on_owners` (it reads `task_ship_events.caller_session_id`). Rename freely once #1972 merges.
+- `lf task hold` on a Task with no Graph saves nothing and answers "was not shipping": the mark lives on `task_graphs`. Passed over: taking up the default graph just to hold it, which would make an unstarted Task idle.
+- Reopening a Task clears its Auto-Ship mark (NULL), as reopening withdrew the approval before.
+- The Runner's interactive decision moved into the executor: `GraphRunner::stopping_at_interactive` is gone, `RunningGraph::stands_in` reads Auto-Ship at each interactive step, and `SkillOutcome::Unapproved` became `StopsAt` (the landing stop and the interactive stop are one outcome).
+- `TaskGraphRecord.auto_ship` carries `#[serde(default)]` for Moves from released senders; LOO-971 removes it with the `approval` key.
+- Hand-merged PRs on graphs with no land step: the run still finishes its steps into `end` and completion settles; no merge check between steps was added.

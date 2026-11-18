@@ -1516,9 +1516,8 @@ fn server_operations_match_their_lf_commands() {
         assert_eq!(written["owner"].is_null(), !claimed, "{written}");
     }
     // Stopping a Task that is not shipping saves the stop, which keeps a run
-    // from approving it until `lf ship`, retaining who requested the stop. The
-    // ship process it kills and the merge request it takes back are the ship
-    // tests'.
+    // from merging until `lf ship`, retaining who requested the stop. The
+    // merge request it takes back is the ship tests'.
     // No run is live, so an interrupt reaches nothing, in the app as through `lf`.
     let interrupt = Write::TaskInterrupt {
         directory: directory.clone(),
@@ -1588,7 +1587,7 @@ fn server_operations_match_their_lf_commands() {
             issue: "INF-123".into(),
         }
         .read()
-        .unwrap()["execution"]["ship_stop"]["by"]
+        .unwrap()["execution"]["auto_ship"]["by"]
             .clone()
     };
     compare(stop.clone(), &|| stop.clone(), &stopped);

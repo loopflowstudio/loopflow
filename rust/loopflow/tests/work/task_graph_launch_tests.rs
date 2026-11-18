@@ -1283,8 +1283,7 @@ os.execv({binary}, [{binary}, *sys.argv[1:]])
 
     /// Wait for the run a returned `lf task run` printed, if it printed one:
     /// until the Task's records show nothing running and its carrier has
-    /// exited. Its code is the shipping it carried, else its last Graph
-    /// run's: a carrier's result is its Graph's.
+    /// exited. Its code is its last Graph run's: a carrier's result is its Graph's.
     fn ran(&self, output: std::process::Output) -> Ran {
         let mut text = format!(
             "{}{}",
@@ -1316,20 +1315,18 @@ os.execv({binary}, [{binary}, *sys.argv[1:]])
         let mut carrier: Option<u32> = None;
         let deadline = Instant::now() + Duration::from_secs(120);
         loop {
-            let (pid, ship, graphs): (Option<u32>, Option<u32>, bool) = db
+            let (pid, graphs): (Option<u32>, bool) = db
                 .query_row(
                     "SELECT (SELECT run_pid FROM task_graphs WHERE task_id=?1),
-                        (SELECT pid FROM task_ship_events WHERE task_id=?1 AND ended_at IS NULL
-                            AND kind IN ('approved','carried') ORDER BY at DESC LIMIT 1),
                         EXISTS(SELECT 1 FROM graph_processes WHERE task_id=?1 AND ended_at IS NULL)",
                     [&task],
-                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                    |row| Ok((row.get(0)?, row.get(1)?)),
                 )
                 .unwrap();
-            carrier = carrier.or(pid).or(ship);
+            carrier = carrier.or(pid);
             // SAFETY: signal 0 only asks whether the pid exists.
             let carrier_runs = carrier.is_some_and(|pid| unsafe { libc::kill(pid as i32, 0) } == 0);
-            if pid.is_none() && ship.is_none() && !graphs && !carrier_runs {
+            if pid.is_none() && !graphs && !carrier_runs {
                 break;
             }
             assert!(
@@ -1341,14 +1338,9 @@ os.execv({binary}, [{binary}, *sys.argv[1:]])
         }
         let code: Option<i32> = db
             .query_row(
-                "SELECT COALESCE(
-                     (SELECT exit_code FROM task_ship_events WHERE task_id=?1
-                         AND kind IN ('approved','carried') AND ended_at IS NOT NULL
-                         AND at>=(SELECT started_at FROM graph_processes WHERE lf_process_id=?2)
-                         ORDER BY ended_at DESC LIMIT 1),
-                     (SELECT exit_code FROM graph_processes WHERE task_id=?1
-                         ORDER BY started_at DESC,rowid DESC LIMIT 1))",
-                [&task, &graph],
+                "SELECT exit_code FROM graph_processes WHERE task_id=?1
+                 ORDER BY started_at DESC,rowid DESC LIMIT 1",
+                [&task],
                 |row| row.get(0),
             )
             .unwrap();
@@ -1782,7 +1774,7 @@ fn restart_recorder(bin: &Path) -> (PathBuf, PathBuf) {
     fs::write(
         &lf,
         format!(
-            "#!/bin/sh\ncase \"$*\" in *'task run INF-123'|*'--task INF-123 ship')\n  echo \"$*|$LF_AGENT_OVERRIDE|$LF_SETTINGS\" >> '{}'; exit 0;;\nesac\nexec '{}' \"$@\"\n",
+            "#!/bin/sh\ncase \"$*\" in *'task run INF-123')\n  echo \"$*|$LF_AGENT_OVERRIDE|$LF_SETTINGS\" >> '{}'; exit 0;;\nesac\nexec '{}' \"$@\"\n",
             restarts.display(),
             loopflow_test_support::lf_binary()
         ),
@@ -1813,17 +1805,6 @@ fn restart_of_a_finished_wait(graph: &str, recorded: Option<&str>) -> String {
         "INSERT INTO agent_limit_recoveries(lf_process_id,provider,reason,retry_at,agent,updated_at)
          VALUES(?1,'claude','rejected: five_hour',1,?2,1)",
         rusqlite::params![waiting, recorded],
-    )
-    .unwrap();
-    // Convert the ordinary failure into a capacity wait. A real wait retains
-    // the end-to-end Graph's approval; the repeated failure above withdrew it.
-    if graph == "held" {
-        db.execute("UPDATE tasks SET shipped_at=1", []).unwrap();
-    }
-    // A failed ship waits before restarting; that wait has passed too.
-    db.execute(
-        "UPDATE task_ship_events SET ended_at=1 WHERE ended_at IS NOT NULL AND exit_code IS NOT 0",
-        [],
     )
     .unwrap();
 
@@ -1864,12 +1845,13 @@ fn a_restarted_wait_with_no_explicit_agent_ignores_the_readers() {
     );
 }
 
-/// With no stop for a person the run ships, so ship's own restart resumes it.
+/// With no stop for a person ahead the run may merge; it is carried again
+/// as `lf task run` all the same.
 #[test]
 fn a_shipping_tasks_restarted_wait_keeps_its_explicit_agent() {
     assert_eq!(
         restart_of_a_finished_wait("held", Some("claude:opus")),
-        "--agent claude:opus --task INF-123 ship||{}"
+        "--agent claude:opus task run INF-123||{}"
     );
 }
 
@@ -1928,23 +1910,12 @@ sys.exit(code)
         ran.text
     );
     assert!(!ran.text.contains("starting it again"), "{}", ran.text);
-    let db = rusqlite::Connection::open(task.home.path().join("loopflow.db")).unwrap();
     assert_eq!(support::recorded_graphs(task.home.path()).len(), 1);
-    // `-b` approved Auto-Ship; a ship restart would only meet the same refusal.
-    let shipped_at: Option<i64> = db
-        .query_row("SELECT shipped_at FROM tasks", [], |row| row.get(0))
-        .unwrap();
-    assert!(shipped_at.is_none());
-    // Cross ship's retry deadline so reads would restart an approval left behind.
-    db.execute(
-        "UPDATE task_ship_events SET ended_at=1 WHERE ended_at IS NOT NULL AND exit_code IS NOT 0",
-        [],
-    )
-    .unwrap();
+    // `-b` turned Auto-Ship on, and the refusal leaves it on; nothing starts
+    // the stopped run again.
     for _ in 0..2 {
         let status = task.text_status();
-        assert!(!status.contains("Ship failed"), "{status}");
-        assert!(!status.contains("Auto-Ship approved"), "{status}");
+        assert!(status.contains("Auto-Ship: on"), "{status}");
         assert!(
             status.contains("stopped after a provider refusal"),
             "{status}"
@@ -2274,7 +2245,7 @@ fn end_is_retained_while_the_tasks_pr_blocks_completion() {
     assert_eq!(task.graph()["position"], at("end"));
     // Nothing runs while completion waits on the PR, so the Task reads idle.
     assert_eq!(task.state(), "idle");
-    // A plain run into end hands the Task to Auto-Ship, which may land it.
+    // A stop stands at `end` too.
     let stop = task.run(&["--task", "INF-123", "ship", "--stop"]);
     let stop = String::from_utf8_lossy(&stop.stdout);
     assert!(stop.contains("INF-123 stopped shipping"), "{stop}");
@@ -2641,7 +2612,7 @@ fn stand_ins(task: &GraphTask) -> Vec<String> {
         .collect()
 }
 
-/// The Task history lines that record a handoff to shipping.
+/// The Task history lines that record Auto-Ship turning on.
 fn handoffs(task: &GraphTask) -> Vec<String> {
     tokio::runtime::Runtime::new()
         .unwrap()
@@ -2654,7 +2625,7 @@ fn handoffs(task: &GraphTask) -> Vec<String> {
         .into_iter()
         .filter_map(|event| match event.kind {
             loopflow_execution::work::task::TaskEventKind::Progress { summary }
-                if summary.starts_with("Shipping: ") =>
+                if summary.starts_with("Auto-Ship on: ") =>
             {
                 Some(summary)
             }
@@ -2698,7 +2669,6 @@ fn task_ship_runs_every_remaining_step_standing_in_at_each_interactive_step() {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    assert!(String::from_utf8_lossy(&output.stdout).contains("INF-123 reached its end"));
     assert_eq!(task.graph()["position"], at("end"));
     let handoff = handoffs(&task);
     assert_eq!(handoff.len(), 1);
@@ -2734,9 +2704,9 @@ fn task_ship_stands_in_at_the_step_the_task_waits_at() {
 }
 
 #[test]
-fn task_ship_defers_to_a_live_ship() {
+fn a_second_ship_refuses_while_a_run_carries_the_task() {
     let task = shipping_task();
-    // The first ship holds at its stand-in; a second one finds it live.
+    // The first ship holds at its stand-in; a second one finds its run live.
     fs::write(task.home.path().join("hold"), "").unwrap();
     let mut first = command(
         task.repo.path(),
@@ -2748,18 +2718,9 @@ fn task_ship_defers_to_a_live_ship() {
     .spawn()
     .unwrap();
     wait_for("the stand-in", || !stand_ins(&task).is_empty());
-    let second = task.run(&["-b", "--task", "INF-123", "ship"]);
-    assert!(second.status.success());
-    assert!(
-        String::from_utf8_lossy(&second.stdout).contains("INF-123 is already shipping"),
-        "{}",
-        String::from_utf8_lossy(&second.stdout)
-    );
-    // The spelling `task.ship` runs, here and over SSH: its typed result.
-    let answered = task.run(&["--task", "INF-123", "ship", "--json"]);
-    assert!(answered.status.success(), "{answered:?}");
-    let answer: serde_json::Value = serde_json::from_slice(&answered.stdout).unwrap();
-    assert_eq!(answer["state"], "already_shipping");
+    assert_eq!(task.state(), "shipping");
+    let error = refusal(task.run(&["-b", "--task", "INF-123", "ship"]));
+    assert!(error.contains("Task INF-123 is running graph"), "{error}");
     fs::remove_file(task.home.path().join("hold")).unwrap();
     assert!(first.wait().unwrap().success());
     assert_eq!(task.graph()["position"], at("end"));
@@ -2767,7 +2728,28 @@ fn task_ship_defers_to_a_live_ship() {
 }
 
 #[test]
-fn task_ship_stop_withdraws_the_approval_and_ends_its_ship() {
+fn a_bare_ship_prints_what_task_run_prints_and_stands_in_by_auto_ship() {
+    let task = shipping_task();
+    task.task_run_ok(&["task", "run", "INF-123"]);
+    assert_eq!(task.graph()["position"], at("review"));
+    // Bare, not `-b`: the run stands in at review because Auto-Ship is on.
+    let shipped = task.task_run(&["--task", "INF-123", "ship"]);
+    assert!(shipped.success(), "{}", shipped.text);
+    assert!(
+        shipped.text.contains("INF-123 · ") && shipped.text.contains("running as Graph process"),
+        "{}",
+        shipped.text
+    );
+    assert!(shipped.text.contains("ships:  this run may merge the PR"), "{}", shipped.text);
+    assert_eq!(task.graph()["position"], at("end"));
+    assert_eq!(stand_ins(&task).len(), 1);
+    let status = task.status();
+    assert_eq!(status["execution"]["auto_ship"]["state"], "on", "{status}");
+    assert_eq!(status["execution"]["auto_ship"]["by"]["kind"], "person");
+}
+
+#[test]
+fn a_stopped_ship_kills_nothing_and_its_run_carries_on() {
     let task = shipping_task();
     fs::write(task.home.path().join("hold"), "").unwrap();
     let mut first = command(
@@ -2785,13 +2767,18 @@ fn task_ship_stop_withdraws_the_approval_and_ends_its_ship() {
     let stopped = task.run(&["--task", "INF-123", "ship", "--stop"]);
     let stopped = String::from_utf8_lossy(&stopped.stdout);
     assert!(stopped.contains("INF-123 stopped shipping"), "{stopped}");
-    assert!(!first.wait().unwrap().success());
+    // Auto-Ship is stopped; the step already standing in finishes.
+    assert_eq!(task.state(), "moving");
     fs::remove_file(task.home.path().join("hold")).unwrap();
-    // Approval withdrawn, its run stopped where it stood.
-    assert_ne!(task.state(), "shipping");
+    assert!(first.wait().unwrap().success());
     let again = task.run(&["--task", "INF-123", "ship", "--stop"]);
     let again = String::from_utf8_lossy(&again.stdout);
-    assert!(again.contains("INF-123 is not shipping"), "{again}");
+    assert!(again.contains("INF-123 was not shipping"), "{again}");
+    assert!(
+        task.text_status().contains("Auto-Ship: stopped by "),
+        "{}",
+        task.text_status()
+    );
 }
 
 #[test]
@@ -2802,10 +2789,11 @@ fn task_ship_stop_sticks_through_a_headless_relaunch() {
         "- graph: proof\n- cmd: pr land\n",
     );
     // A person stops shipping; the stop stands though nothing was shipping.
+    task.task_run_ok(&["task", "run", "INF-123"]);
     let stopped = task.run(&["--task", "INF-123", "ship", "--stop"]);
     assert!(stopped.status.success());
-    // A run with nothing interactive ahead would approve Auto-Ship and merge;
-    // under the stop it waits at the landing step instead.
+    // A run with nothing interactive ahead would merge; under the stop it
+    // waits at the landing step instead.
     let ran = task.task_run(&["task", "run", "INF-123", "landing"]);
     assert!(ran.success(), "{}", ran.text);
     assert!(
@@ -2816,7 +2804,7 @@ fn task_ship_stop_sticks_through_a_headless_relaunch() {
     );
     assert_eq!(task.graph()["position"], at("pr land"));
     assert_ne!(task.state(), "shipping");
-    // Relaunched headless from its first step, it still never ships.
+    // Relaunched headless from its first step, `-b` keeps the stop.
     let again = task.run(&["-b", "task", "run", "INF-123", "--from", "proof"]);
     assert!(
         again.status.success(),
@@ -2827,22 +2815,21 @@ fn task_ship_stop_sticks_through_a_headless_relaunch() {
     assert_ne!(task.state(), "shipping");
     assert!(handoffs(&task).is_empty());
     let status = task.status();
-    assert!(status["ship_approval"].is_null());
-    assert_eq!(status["ship_stop"]["by"]["kind"], "person");
-    assert_eq!(status["started_by"]["kind"], "person");
+    assert_eq!(status["execution"]["auto_ship"]["state"], "stopped", "{status}");
+    assert_eq!(status["execution"]["auto_ship"]["by"]["kind"], "person");
     // Standing at the landing step, a plain relaunch waits there again.
     let waiting = task.task_run(&["task", "run", "INF-123"]);
     assert!(waiting.success(), "{}", waiting.text);
     assert_eq!(task.graph()["position"], at("pr land"));
     assert!(
-        task.text_status().contains("Not shipping: "),
+        task.text_status().contains("Auto-Ship: stopped by "),
         "{}",
         task.text_status()
     );
 }
 
 #[test]
-fn task_ship_stops_shipping_when_its_run_fails_the_same_way_every_attempt() {
+fn a_ship_whose_run_fails_the_same_way_stops_and_keeps_auto_ship_on() {
     let task = shipping_task();
     // `gate` refuses identically until the repository defines `late`.
     let output = task.run(&["-b", "--task", "INF-123", "ship", "--graph", "gate"]);
@@ -2852,11 +2839,16 @@ fn task_ship_stops_shipping_when_its_run_fails_the_same_way_every_attempt() {
         stderr.contains("failed 3 times with the same error"),
         "{stderr}"
     );
-    // The approval is withdrawn, so no restart repeats the refusal.
-    assert_ne!(task.state(), "shipping");
-    let again = task.run(&["--task", "INF-123", "ship", "--stop"]);
-    let again = String::from_utf8_lossy(&again.stdout);
-    assert!(again.contains("INF-123 is not shipping"), "{again}");
+    // The run stopped on its own, so nothing carries it again; Auto-Ship is
+    // still on for the next `lf task run`.
+    for _ in 0..3 {
+        task.ok(&["task", "list"]);
+    }
+    assert_eq!(task.state(), "idle");
+    assert_eq!(task.status()["execution"]["auto_ship"]["state"], "on");
+    let stopped = task.run(&["--task", "INF-123", "ship", "--stop"]);
+    let stopped = String::from_utf8_lossy(&stopped.stdout);
+    assert!(stopped.contains("INF-123 stopped shipping"), "{stopped}");
 }
 
 #[test]
@@ -2879,42 +2871,37 @@ fn task_ship_completes_when_its_pr_merges_mid_ship() {
     fs::remove_file(task.home.path().join("hold")).unwrap();
     let output = first.wait_with_output().unwrap();
     assert!(output.status.success());
-    // Review is this graph's last step, so it checks merged work: the merge
-    // completes nothing until the stand-in there finishes into `end`.
+    // The merge interrupts nothing: the stand-in at review finishes into `end`.
     assert_eq!(task.state(), "done");
     assert_eq!(task.graph()["position"], at("end"));
     assert_eq!(stand_ins(&task).len(), 1);
 }
 
 #[test]
-fn task_ship_takes_a_merged_pr_on_to_its_check_step_instead_of_building() {
+fn a_ship_meets_a_hand_merged_pr_at_its_landing_step() {
     let task = shipping_task();
     task.task_run_ok(&["task", "run", "INF-123", "verified"]);
     assert_eq!(task.graph()["position"], at("review"));
     // Someone merged the PR by hand while the Task waited at review.
     task.publish(true);
     let output = task.run(&["-b", "--task", "INF-123", "ship"]);
-    let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
         output.status.success(),
-        "{stdout}{}",
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
-    assert!(
-        stdout.contains("INF-123: its PR merged; on to check"),
-        "{stdout}"
-    );
+    // The run stood in at review, its landing step met the merge, and a
+    // stand-in checked the merged work at `check`.
     assert_eq!(task.state(), "done");
     assert_eq!(task.graph()["position"], at("end"));
-    // The landing steps never ran; a stand-in checked the merged work at
-    // `check`, then finished.
     let turns = stand_ins(&task);
-    assert_eq!(turns.len(), 1, "{turns:?}");
-    assert!(turns[0].contains("at check"), "{}", turns[0]);
+    assert_eq!(turns.len(), 2, "{turns:?}");
+    assert!(turns[1].contains("at check"), "{}", turns[1]);
 }
 
 #[test]
-fn task_ship_restarts_after_its_process_dies() {
+fn a_ship_whose_carrier_dies_still_reaches_its_end() {
     let task = shipping_task();
     fs::write(task.home.path().join("hold"), "").unwrap();
     let mut first = command(
@@ -2931,11 +2918,9 @@ fn task_ship_restarts_after_its_process_dies() {
     first.kill().unwrap();
     first.wait().unwrap();
     fs::remove_file(task.home.path().join("hold")).unwrap();
-    // The server's recovery pass finds the dead ship and starts it again.
-    wait_for("the restarted ship to reach end", || {
-        task.graph()["position"] == at("end")
-    });
-    // The restart carries the same handoff; it is not shipped a second time.
+    // The Graph outlives its carrier and arrives at `end` itself.
+    wait_for("the run to reach end", || task.graph()["position"] == at("end"));
+    // Auto-Ship was turned on once.
     assert_eq!(handoffs(&task).len(), 1);
 }
 
@@ -2946,7 +2931,7 @@ fn debug_run(task: &GraphTask) -> String {
         "SELECT json_array(step,run_start,lf_process_id,restarts,restarted_at) FROM task_graphs",
         "SELECT json_array(p.id,p.pid,p.completed_at,p.outcome,p.exit_code,p.command) FROM processes p WHERE p.id IN (SELECT lf_process_id FROM task_graphs)",
         "SELECT json_array(lf_process_id,graph,started_at,ended_at,pid,exit_code) FROM graph_processes",
-        "SELECT json_array(id,shipped_at) FROM tasks",
+        "SELECT json_array(task_id,auto_ship) FROM task_graphs",
     ] {
         let mut query = db.prepare(sql).unwrap();
         for row in query.query_map([], |row| row.get::<_, String>(0)).unwrap() {
@@ -3100,69 +3085,12 @@ fn task_ship_unassigned_mid_ship_waits_and_lets_its_running_step_finish() {
     task.ok(&["task", "unassign", "INF-123"]);
     first.kill().unwrap();
     first.wait().unwrap();
-    // Nobody owns it, so the server does not start its ship again.
-    let shown = task.run(&["wave", "show", "--json"]);
-    let shown = String::from_utf8_lossy(&shown.stdout);
-    assert!(
-        shown.contains("Unassigned; `lf task claim` and `lf ship` keep it shipping"),
-        "{shown}"
-    );
-    // Unassigning stops the ship, not the step already running.
+    // Unassigning stops nothing already running.
     fs::remove_file(task.home.path().join("hold")).unwrap();
     wait_for("the running step to finish", || {
         task.graph()["position"] == at("end")
     });
     assert_eq!(stand_ins(&task).len(), 1);
-}
-
-/// A Claude stand-in that records its first turn and fails at once, the way an
-/// expired login does.
-const FAILING_CLAUDE: &str = r#"#!/usr/bin/python3
-import json, os, sys
-if '--version' in sys.argv:
-    print('fixture')
-    sys.exit(0)
-home = os.environ['LF_HOME']
-message = json.loads(sys.stdin.readline())
-with open(os.path.join(home, 'stand-ins.jsonl'), 'a') as turns:
-    turns.write(json.dumps(message['message']['content'][0]['text']) + '\n')
-sys.exit(3)
-"#;
-
-#[test]
-fn task_ship_restarts_after_a_failure_wait_instead_of_at_once() {
-    let task = GraphTask::with_tools(&[("claude", FAILING_CLAUDE)]);
-
-    loopflow_execution::config::files::update(&task.home.path().join("config.yaml"), |value| {
-        value["agent"] = "claude".into();
-        Ok(())
-    })
-    .unwrap();
-    let output = task.run(&["-b", "--task", "INF-123", "ship"]);
-    assert!(!output.status.success());
-    // The ship's Task run started its failing Graph three times, then gave up.
-    let attempts = stand_ins(&task).len();
-    assert_eq!(attempts, 3);
-    // Approved with its ship process exited, it is idle until the restart.
-    assert_eq!(task.state(), "idle");
-    // The server's passes right after the failure leave the restart waiting
-    // its minute; reads change nothing.
-    for _ in 0..3 {
-        task.ok(&["task", "list"]);
-    }
-    std::thread::sleep(Duration::from_secs(2));
-    assert_eq!(stand_ins(&task).len(), attempts);
-    assert_eq!(task.state(), "idle");
-    // The shipping reason names the stand-in's failure and the wait.
-    let shown = task.run(&["wave", "show", "--json"]);
-    let shown = String::from_utf8_lossy(&shown.stdout);
-    let reason = shown
-        .split("\"reason\":\"Ship failed: ")
-        .nth(1)
-        .and_then(|rest| rest.split('"').next())
-        .unwrap_or_else(|| panic!("no failed shipping reason in {shown}"));
-    assert!(reason.starts_with("agent exited with code 1"), "{reason}");
-    assert!(reason.ends_with("; retrying within a minute"), "{reason}");
 }
 
 #[test]

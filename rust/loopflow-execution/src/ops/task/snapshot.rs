@@ -11,7 +11,7 @@ use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 
-use crate::ops::error::{OpsError, OpsResult};
+use crate::ops::error::OpsResult;
 use crate::ops::task_actions::{derive_task_actions, TaskActionEvidence, TaskActionModel};
 use crate::store::SharedStore;
 use loopflow_storage::child::ChildRef;
@@ -129,28 +129,10 @@ pub(super) async fn read_task_snapshot(store: &SharedStore, task: Task) -> OpsRe
         .get(&task.id)
         .map(|graph| starter(graph.caller_session.as_ref()))
         .transpose()?;
-    let ship_approval = store
+    let auto_ship = store
         .sqlite
-        .task_shipping(&task.id)
-        .map_err(task_error)?
-        .map(|shipping| {
-            Ok::<_, OpsError>(super::ShipMark {
-                at: shipping.shipped_at,
-                by: starter(shipping.approving_session.as_ref())?,
-            })
-        })
-        .transpose()?;
-    let ship_stop = store
-        .sqlite
-        .task_ship_stop(&task.id)
-        .map_err(task_error)?
-        .map(|stop| {
-            Ok::<_, OpsError>(super::ShipMark {
-                at: stop.at,
-                by: super::ship::stopper(&store.sqlite, &stop).map_err(task_error)?,
-            })
-        })
-        .transpose()?;
+        .task_auto_ship(&task.id)
+        .map_err(task_error)?;
     Ok(TaskSnapshot {
         machine_id,
         issue_id: task.tracker_id.as_ref().map(|id| id.as_str().to_string()),
@@ -182,8 +164,7 @@ pub(super) async fn read_task_snapshot(store: &SharedStore, task: Task) -> OpsRe
         observation: task.observation,
         actions,
         started_by,
-        ship_approval,
-        ship_stop,
+        auto_ship,
     })
 }
 

@@ -403,11 +403,11 @@ If it did, its answer lost, the Task runs on mini and the claim is written
 there. If it did not, or mini is gone, the laptop takes the Task back and the
 move ends.
 
-Auto-Ship approval travels with the move, as the Graph position does. Each
-Machine keeps approvals and stops as a log (who, when, which process). The continued run is a plain
-`lf task run`; when it stops at an interactive step, mini's ship process carries
-the Task on, as it would have on the laptop. `lf task hold MTG-321` withdraws the
-approval on either Machine. A Machine ships only Tasks it owns: once a Task has
+Auto-Ship travels with the move, as the Graph position does: it is one mark
+on the Task's Graph (on or stopped, who, when). The continued run is a plain
+`lf task run`; with Auto-Ship on it stands in at interactive steps on mini, as
+it would have on the laptop. `lf task hold MTG-321` stops Auto-Ship on either
+Machine. A Machine ships only Tasks it owns: once a Task has
 left, its old checkout starts nothing.
 
 ## Own and rent Machines
@@ -513,7 +513,7 @@ lf machine doctor
 ```
 
 Each owner record (a Session's agent and attachment, a Graph run or step, a
-Task or ship carrier) carries the pid and OS start time of the process it runs
+Task's carrier) carries the pid and OS start time of the process it runs
 as; liveness is one OS lookup against them. The Machine server's liveness pass
 records the end of an owner whose process died without writing it.
 

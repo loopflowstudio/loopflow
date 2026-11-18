@@ -167,10 +167,7 @@ impl TaskNames {
             identifier: summary.identifier,
             title: summary.name,
             state,
-            // An approved Task waits on its ship, whatever its next move says.
-            reason: task
-                .shipping
-                .map_or(task.next_move.reason, |shipping| shipping.reason),
+            reason: task.next_move.reason,
             graph: task.graph_name.map(|name| TaskRowGraph {
                 name,
                 step: task.step,

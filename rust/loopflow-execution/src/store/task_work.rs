@@ -154,6 +154,7 @@ mod tests {
             },
             step: "review".into(),
             run_start: Some(Default::default()),
+            auto_ship: None,
         };
         let json = serde_json::to_value(&record).unwrap();
         assert_eq!(
@@ -199,13 +200,17 @@ pub struct TaskGraphRow {
 }
 
 /// A Task's Graph as another Machine takes it up: the graph it took up, the
-/// step it stands at, and the cursor its run sets out from again, if it is on
-/// one. The run's Process stays behind.
+/// step it stands at, the cursor its run sets out from again, if it is on
+/// one, and its Auto-Ship mark. The run's Process stays behind.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct TaskGraphRecord {
     pub graph: CapturedGraph,
     pub step: String,
     pub run_start: Option<ExecutionCursor>,
+    /// Released senders omit it: their Task arrives with no mark. The default
+    /// goes with the released shape (LOO-971).
+    #[serde(default)]
+    pub auto_ship: Option<loopflow_storage::sqlite::AutoShip>,
 }
 
 fn decode_row(row: super::sqlite::task_work::SavedTaskGraphRow) -> StoreResult<TaskGraphRow> {
@@ -237,6 +242,7 @@ pub(crate) fn task_graph_record(
                     .as_deref()
                     .map(serde_json::from_str)
                     .transpose()?,
+                auto_ship: row.auto_ship,
             })
         })
         .transpose()
@@ -257,6 +263,7 @@ pub(crate) fn place_moved_task_graph(
                 .as_ref()
                 .map(serde_json::to_string)
                 .transpose()?,
+            auto_ship: record.auto_ship.clone(),
         },
         by,
     )
@@ -274,7 +281,6 @@ pub fn start_task_graph_run(
     row: &TaskGraphRow,
     cursor: &ExecutionCursor,
     carrier: (&LfProcessId, &ExecutionStart),
-    ships: bool,
 ) -> StoreResult<bool> {
     store.start_task_graph_run(
         task,
@@ -282,7 +288,6 @@ pub fn start_task_graph_run(
         row.run.as_ref().map(|(_, carrier)| &carrier.id),
         &serde_json::to_string(cursor)?,
         carrier,
-        ships,
     )
 }
 pub fn advance_task_graph_run(

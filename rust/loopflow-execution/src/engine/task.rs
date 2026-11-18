@@ -30,8 +30,8 @@ pub enum TaskRun {
         issue: String,
         /// The graph and where the run set out: `code from implement`.
         run: String,
-        /// No interactive step is left ahead: Auto-Ship is approved and the
-        /// run may merge the PR.
+        /// The run may merge the PR: Auto-Ship is on, or no interactive step
+        /// is left ahead, and nobody stopped Auto-Ship.
         ships: bool,
         graph_process: LfProcessId,
         /// Where the run's output goes once its launcher lets go; null while a
@@ -57,7 +57,7 @@ impl TaskRun {
             } => Some(format!(
                 "{issue} · {run} running as Graph process {graph_process}{}\n  follow: lf task status {issue}\n  log:    {}",
                 if *ships {
-                    format!("\n  ships:  no interactive step is left, so this run may merge the PR; `lf task hold {issue}` withdraws")
+                    format!("\n  ships:  this run may merge the PR; `lf task hold {issue}` stops it")
                 } else {
                     String::new()
                 },
@@ -70,55 +70,12 @@ impl TaskRun {
     }
 }
 
-/// What `task.ship` set going.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(tag = "state", rename_all = "snake_case", deny_unknown_fields)]
-pub enum TaskShip {
-    /// Auto-Ship is approved and `process` ships the Task to `end`.
-    Shipping {
-        issue: String,
-        #[serde(rename = "lf_process_id")]
-        process: LfProcessId,
-        /// The ship's output once its launcher lets go; null under `-b`.
-        log: Option<PathBuf>,
-    },
-    /// Another live process already ships it.
-    AlreadyShipping {
-        issue: String,
-        #[serde(rename = "lf_process_id")]
-        process: LfProcessId,
-    },
-    /// The Task already stands at `end`.
-    AtEnd { issue: String },
-}
-
-impl TaskShip {
-    /// What `lf ship` prints; a ship its terminal keeps prints nothing here.
-    pub fn render(&self) -> Option<String> {
-        match self {
-            Self::Shipping {
-                issue,
-                log: Some(log),
-                ..
-            } => Some(format!(
-                "{issue} shipping\n  follow: lf task status {issue}\n  log:    {}",
-                log.display()
-            )),
-            Self::Shipping { log: None, .. } => None,
-            Self::AlreadyShipping { issue, process } => {
-                Some(format!("{issue} is already shipping (process {process})"))
-            }
-            Self::AtEnd { issue } => Some(format!("{issue} is already at its end")),
-        }
-    }
-}
-
-/// What `task.hold` withdrew.
+/// What `task.hold` stopped.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Hold {
     pub issue: String,
-    /// A run was shipping the Task; otherwise only the stop was saved.
+    /// Auto-Ship was on; otherwise only the stop was saved.
     pub stopped: bool,
 }
 
@@ -128,7 +85,7 @@ impl Hold {
         if self.stopped {
             format!("{issue} stopped shipping")
         } else {
-            format!("{issue} is not shipping; no run ships it until `lf ship {issue}`")
+            format!("{issue} was not shipping; no run merges it until `lf ship {issue}`")
         }
     }
 }
@@ -162,15 +119,16 @@ pub fn run(
     )
 }
 
-/// `task.ship`: approve Auto-Ship and start shipping detached, as `lf --task
-/// <issue> ship` does: every remaining step headless, an interactive step
-/// standing in for the person, until the PR lands.
-pub fn ship(directory: &Path, issue: &str, environment: &[(String, String)]) -> Result<TaskShip> {
+/// `task.ship`: turn Auto-Ship on and start the Task's run detached, as
+/// `lf --task <issue> ship` does: it returns what `task.run` returns, and the
+/// run stands in at each interactive step until the PR lands.
+pub fn ship(directory: &Path, issue: &str, environment: &[(String, String)]) -> Result<TaskRun> {
     launch::start_with(directory, &spell_ship(issue), environment)
 }
 
-/// `task.hold`: withdraw the Task's Auto-Ship approval, as `lf --task <issue>
-/// ship --stop` does, until the next `task.ship`.
+/// `task.hold`: stop Auto-Ship, as `lf task hold <issue>` does, until the
+/// next `task.ship`. Nothing is killed; the run waits at its next interactive
+/// or merging step.
 pub fn hold(issue: &str, reason: Option<&str>) -> Result<Hold> {
     let stopped = crate::ops::task::ship::ship_stop(issue, reason).map_err(written)?;
     Ok(Hold {
@@ -322,7 +280,7 @@ pub fn spell_ship(issue: &str) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Hold, TaskRun, TaskShip};
+    use super::{Hold, TaskRun};
     use serde::{de::DeserializeOwned, Serialize};
 
     /// A response fixture's `result` decodes as `T` and encodes back unchanged.
@@ -361,18 +319,13 @@ mod tests {
         assert!(ships
             .render()
             .unwrap()
-            .contains("this run may merge the PR; `lf task hold LOO-1` withdraws"));
-        let shipping: TaskShip = result(include_str!(
-            "../../tests/fixtures/dto/server/task_shipping.json"
-        ));
-        assert!(shipping.render().unwrap().starts_with("LOO-1 shipping"));
+            .contains("this run may merge the PR; `lf task hold LOO-1` stops it"));
         let held: Hold = result(include_str!(
             "../../tests/fixtures/dto/server/task_held.json"
         ));
         assert_eq!(held.render(), "LOO-1 stopped shipping");
         // A missing field is an error, never a default.
         assert!(serde_json::from_str::<TaskRun>(r#"{"state":"running","issue":"LOO-1"}"#).is_err());
-        assert!(serde_json::from_str::<TaskShip>(r#"{"state":"at_end"}"#).is_err());
         let waiting = TaskRun::Waiting {
             issue: "LOO-1".into(),
             step: "demo".into(),

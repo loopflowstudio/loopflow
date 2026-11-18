@@ -396,12 +396,7 @@
           "unavailable": null
         },
         "ship_control": {
-          "unavailable": "Task is already shipping"
-        },
-        "shipping": {
-          "shipped_at": 1792600000,
-          "state": "landing",
-          "reason": "CI running on #1650"
+          "unavailable": "Auto-Ship is already on"
         },
         "pr": null,
         "graph_source": null,
@@ -667,7 +662,6 @@
         "ship_control": {
           "unavailable": null
         },
-        "shipping": null,
         "pr": {
           "id": "pr-review",
           "sequence": 1,
@@ -771,7 +765,6 @@
         "ship_control": {
           "unavailable": null
         },
-        "shipping": null,
         "pr": null,
         "graph_source": null,
         "lifecycle": "unstarted",
@@ -871,7 +864,6 @@
         "ship_control": {
           "unavailable": null
         },
-        "shipping": null,
         "pr": null,
         "graph_source": null,
         "lifecycle": "done",

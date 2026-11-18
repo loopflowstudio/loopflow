@@ -264,7 +264,6 @@ public struct RoadmapTask: Decodable, Sendable, Identifiable, Hashable {
     public let execution: TaskExecutionSnapshot?
     public let runControl: TaskRunControl
     public let shipControl: TaskRunControl
-    public let shipping: ShippingSnapshot?
     public let pr: PrSnapshot?
     public internal(set) var section: TaskSection
 
@@ -276,7 +275,6 @@ public struct RoadmapTask: Decodable, Sendable, Identifiable, Hashable {
         case latestGraphProcess = "latest_graph_process"
         case runControl = "run_control"
         case shipControl = "ship_control"
-        case shipping
         case nextMove = "next_move"
     }
 
@@ -311,32 +309,6 @@ public struct RoadmapTask: Decodable, Sendable, Identifiable, Hashable {
     /// opening claims nothing. Unstarted and finished Tasks open one only when a
     /// person asks, or when Desktop already shows its Session.
     public var opensConversationAutomatically: Bool { lifecycle.isWorking }
-}
-
-/// What a shipped Task is doing, derived in Rust; nothing here waits on a person.
-public struct ShippingSnapshot: Decodable, Sendable, Hashable {
-    public let shippedAt: Int64
-    public let state: State
-    public let reason: String
-
-    public enum State: String, Decodable, Sendable, Hashable {
-        case building, landing, repairing, restarting, unassigned
-    }
-
-    public var label: String {
-        switch state {
-        case .building: "Building"
-        case .landing: "Landing"
-        case .repairing: "Repairing"
-        case .restarting: "Restarting"
-        case .unassigned: "Unassigned"
-        }
-    }
-
-    enum CodingKeys: String, CodingKey {
-        case state, reason
-        case shippedAt = "shipped_at"
-    }
 }
 
 public enum WorkNextMoveOwner: String, Decodable, Sendable, Hashable {

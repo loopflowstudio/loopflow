@@ -1398,7 +1398,7 @@ struct TaskPlanningReadabilityTests {
         #expect(model.selectionPlans.failure == nil)
     }
 
-    @Test("Loaded empty descriptions omit the preview; shipping remains visible while updating", arguments: [false, true])
+    @Test("Loaded empty descriptions omit the preview, also while updating", arguments: [false, true])
     func emptyDescription(shipping: Bool) throws {
         let fixture = try WorkTestFixture.load()
         var root = try #require(JSONSerialization.jsonObject(with: Data(fixture.roadmapJSON.utf8)) as? [String: Any])
@@ -1408,7 +1408,6 @@ struct TaskPlanningReadabilityTests {
         task["description"] = ""
         items[0]["task"] = task
         items[0]["section"] = "working"
-        items[0]["shipping"] = shipping ? ["shipped_at": 1, "state": "landing", "reason": "Checks passed"] : NSNull()
         tasks["items"] = items
         root["tasks"] = tasks
         let wire = try JSONSerialization.data(withJSONObject: root)
@@ -1433,7 +1432,6 @@ struct TaskPlanningReadabilityTests {
         #expect(throws: (any Error).self) { try navigator.inspect().find(text: "Loading planning…") }
         if shipping {
             #expect(try navigator.inspect().find(text: "Updating…").string() == "Updating…")
-            #expect(try navigator.inspect().find(text: "Landing · Checks passed").string() == "Landing · Checks passed")
         }
     }
 

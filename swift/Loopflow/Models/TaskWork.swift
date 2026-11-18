@@ -14,25 +14,24 @@ public struct TaskWork: Codable, Sendable, Equatable {
 }
 
 /// `lf task status`'s recorded execution: the Task's work, who started its
-/// latest Graph, and who approved or stopped Auto-Ship.
+/// latest Graph, and its Auto-Ship mark.
 public struct TaskExecution: Decodable, Sendable, Equatable {
     public let work: TaskWork
     public let startedBy: Starter?
-    public let shipApproval: ShipMark?
-    /// Keeps a run from approving Auto-Ship and waits it at its landing step, until `lf ship`.
-    public let shipStop: ShipMark?
+    /// On: the run stands in at interactive steps. Stopped: it waits at its
+    /// landing step until `lf ship`. `nil` when nobody set it.
+    public let autoShip: AutoShip?
 
     enum CodingKeys: String, CodingKey {
         case work
-        case startedBy = "started_by", shipApproval = "ship_approval", shipStop = "ship_stop"
+        case startedBy = "started_by", autoShip = "auto_ship"
     }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         work = try container.decode(TaskWork.self, forKey: .work)
         startedBy = try container.decode(Starter?.self, forKey: .startedBy)
-        shipApproval = try container.decode(ShipMark?.self, forKey: .shipApproval)
-        shipStop = try container.decode(ShipMark?.self, forKey: .shipStop)
+        autoShip = try container.decode(AutoShip?.self, forKey: .autoShip)
     }
 }
 
@@ -72,8 +71,11 @@ public enum Starter: Decodable, Sendable, Hashable {
     }
 }
 
-/// When someone approved or stopped Auto-Ship, and who.
-public struct ShipMark: Decodable, Sendable, Hashable {
+/// Auto-Ship on the Task's Graph: on or stopped, when, and who set it.
+public struct AutoShip: Decodable, Sendable, Hashable {
+    public enum State: String, Decodable, Sendable, Hashable { case on, stopped }
+
+    public let state: State
     public let at: Int64
     public let by: Starter
 }

@@ -203,19 +203,10 @@ pub struct TaskSnapshot {
     pub actions: TaskActionModel,
     /// Who started the Task's latest Graph.
     pub started_by: Option<crate::process::Starter>,
-    /// Who approved Auto-Ship and when, while the Task is approved.
-    pub ship_approval: Option<ShipMark>,
-    /// The stop that keeps a run from approving Auto-Ship, until `lf ship`.
-    pub ship_stop: Option<ShipMark>,
-}
-
-/// When someone approved or stopped Auto-Ship, and who.
-#[derive(
-    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
-)]
-pub struct ShipMark {
-    pub at: i64,
-    pub by: crate::process::Starter,
+    /// Auto-Ship on the Task's Graph: on, stopped, and who set it when;
+    /// `null` when nobody has.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub auto_ship: Option<loopflow_storage::sqlite::AutoShip>,
 }
 
 #[derive(
@@ -557,8 +548,8 @@ pub(crate) async fn task_work_status(store: &Store, task: &Task) -> OpsResult<Wo
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TaskRunStart {
     /// A run of the Task's Graph from this step; the caller starts it as
-    /// `lf --task ISSUE graph run`. With `ships`, Auto-Ship is approved: no
-    /// interactive step is left ahead, and the run may merge the PR.
+    /// `lf --task ISSUE graph run`. With `ships`, the run may merge the PR:
+    /// Auto-Ship is on, or no interactive step is left ahead, and nobody stopped it.
     Run { step: String, ships: bool },
     /// The Task now waits at this interactive step; nothing runs.
     Waiting(String),
@@ -821,9 +812,8 @@ async fn start_task_run(
     mode: TaskRunMode,
     merges: fn(&[String]) -> bool,
 ) -> OpsResult<TaskRunStart> {
-    let through = mode.runs_through();
     let selection = select_task_run(store, task, task.worktree()?, requested, from, merges)?;
-    let ships = selection.reaches_end(mode);
+    let reaches_end = selection.reaches_end(mode);
     let TaskRunSelection {
         graph,
         take_up,
@@ -833,21 +823,33 @@ async fn start_task_run(
     let (process, carrier) = crate::journal::current_lf_process_id()
         .zip(crate::journal::current_execution_start())
         .ok_or_else(|| task_error("a Task run requires a registered Process"))?;
-    // This lf carries the run, and the Task's shipping when the run hands it
-    // off at `end`; each ends with this lf.
+    // This lf carries the run; it ends with this lf.
     crate::journal::mark_run_owner(loopflow_storage::graph_process::RunOwner::TaskCarrier);
-    crate::journal::mark_run_owner(loopflow_storage::graph_process::RunOwner::ShipCarrier);
     if take_up {
         crate::store::task_work::take_up_task_graph(&store.sqlite, &task.id, &graph)
             .map_err(task_error)?;
     }
+    if mode == TaskRunMode::Headless {
+        ship::batch_on(store, task).await?;
+    }
+    // Auto-Ship on runs through the interactive steps, standing in at each;
+    // stopped, no run merges.
+    let auto_ship = store
+        .sqlite
+        .task_auto_ship(&task.id)
+        .map_err(task_error)?
+        .map(|mark| mark.state);
+    let on = auto_ship == Some(loopflow_storage::sqlite::AutoShipState::On);
+    let through = mode.runs_through() || on;
+    let ships = auto_ship != Some(loopflow_storage::sqlite::AutoShipState::Stopped)
+        && (on || reaches_end);
     let row = crate::store::task_work::task_graph_row(&store.sqlite, &task.id)
         .map_err(task_error)?
         .ok_or_else(|| task_error(format!("Task {issue} lost its graph while starting")))?;
     let Some(start) = start else {
         if store
             .sqlite
-            .end_task_graph(&task.id, (&process, &carrier))
+            .end_task_graph(&task.id)
             .map_err(task_error)?
         {
             settle_pending_completion(store, task).await?;
@@ -873,7 +875,6 @@ async fn start_task_run(
         &row,
         &start.cursor,
         (&process, &carrier),
-        ships,
     )
     .map_err(task_error)?
     {

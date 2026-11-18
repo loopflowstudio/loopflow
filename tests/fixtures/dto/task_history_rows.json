@@ -61,7 +61,6 @@
     "ship_control": {
       "unavailable": "Linear Task is canceled"
     },
-    "shipping": null,
     "pr": null,
     "graph_source": null,
     "lifecycle": "abandoned",
@@ -131,7 +130,6 @@
     "ship_control": {
       "unavailable": "Linear Task is canceled"
     },
-    "shipping": null,
     "pr": null,
     "graph_source": null,
     "lifecycle": "abandoned",
@@ -201,7 +199,6 @@
     "ship_control": {
       "unavailable": "Linear Task is canceled"
     },
-    "shipping": null,
     "pr": null,
     "graph_source": null,
     "lifecycle": "abandoned",
@@ -271,7 +268,6 @@
     "ship_control": {
       "unavailable": "Linear Task is canceled"
     },
-    "shipping": null,
     "pr": null,
     "graph_source": null,
     "lifecycle": "abandoned",
@@ -341,7 +337,6 @@
     "ship_control": {
       "unavailable": "Linear Task is canceled"
     },
-    "shipping": null,
     "pr": null,
     "graph_source": null,
     "lifecycle": "abandoned",
@@ -411,7 +406,6 @@
     "ship_control": {
       "unavailable": "Linear Task is canceled"
     },
-    "shipping": null,
     "pr": null,
     "graph_source": null,
     "lifecycle": "abandoned",
@@ -481,7 +475,6 @@
     "ship_control": {
       "unavailable": "Linear Task is canceled"
     },
-    "shipping": null,
     "pr": null,
     "graph_source": null,
     "lifecycle": "abandoned",
@@ -551,7 +544,6 @@
     "ship_control": {
       "unavailable": null
     },
-    "shipping": null,
     "pr": null,
     "graph_source": null,
     "lifecycle": "unstarted",
@@ -622,7 +614,6 @@
     "ship_control": {
       "unavailable": null
     },
-    "shipping": null,
     "pr": null,
     "graph_source": null,
     "lifecycle": "unstarted",
@@ -693,7 +684,6 @@
     "ship_control": {
       "unavailable": null
     },
-    "shipping": null,
     "pr": null,
     "graph_source": null,
     "lifecycle": "unstarted",
@@ -764,7 +754,6 @@
     "ship_control": {
       "unavailable": null
     },
-    "shipping": null,
     "pr": null,
     "graph_source": null,
     "lifecycle": "unstarted",
@@ -835,7 +824,6 @@
     "ship_control": {
       "unavailable": "Linear Task is complete"
     },
-    "shipping": null,
     "pr": null,
     "graph_source": null,
     "lifecycle": "done",
@@ -905,7 +893,6 @@
     "ship_control": {
       "unavailable": "Linear Task is complete"
     },
-    "shipping": null,
     "pr": null,
     "graph_source": null,
     "lifecycle": "done",
@@ -975,7 +962,6 @@
     "ship_control": {
       "unavailable": "Linear Task is complete"
     },
-    "shipping": null,
     "pr": null,
     "graph_source": null,
     "lifecycle": "done",
@@ -1045,7 +1031,6 @@
     "ship_control": {
       "unavailable": null
     },
-    "shipping": null,
     "pr": null,
     "graph_source": null,
     "lifecycle": "unstarted",
@@ -1116,7 +1101,6 @@
     "ship_control": {
       "unavailable": "Linear Task is canceled"
     },
-    "shipping": null,
     "pr": null,
     "graph_source": null,
     "lifecycle": "abandoned",

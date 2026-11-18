@@ -47,8 +47,8 @@
     "name": "LOO-291 task",
     "requester": "Maya"
   },
-  "ship_approval": null,
-  "ship_stop": {
+  "auto_ship": {
+    "state": "stopped",
     "at": 1793266380,
     "by": {
       "kind": "person",

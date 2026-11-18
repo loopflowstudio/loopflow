@@ -30,8 +30,6 @@ pub enum RunOwner {
     /// `task_graphs`: the lf carrying a Task's run. It records no result of
     /// its own; its Graph run's is the Task's.
     TaskCarrier,
-    /// `task_ship_events`: the lf that approved or carries a Task's shipping.
-    ShipCarrier,
 }
 
 /// How a run ended, derived from its end, exit code and error.

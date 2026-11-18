@@ -12,7 +12,7 @@ to one. `uv run python scripts/due_removals.py` prints when each may drop.
 
 ## Task graph
 
-- `task_graphs`: task_id, graph, step, run_start, lf_process_id, updated_at, run_pid, run_os_started_at
+- `task_graphs`: task_id, graph, step, run_start, lf_process_id, updated_at, run_pid, run_os_started_at, restarts, restarted_at, auto_ship, auto_ship_at, auto_ship_by
 
 ## Wave
 
@@ -44,10 +44,10 @@ to one. `uv run python scripts/due_removals.py` prints when each may drop.
 - `task_primary_sessions`: task_id, session_id
 - `task_prs`: id, task_id, sequence, slug, branch, base_commit, publication_requested_at, after_merge, next_slug, github_number, github_url, merge_commit, abandoned_at, created_at, updated_at, github_head_sha, ci_observation, parent_pr_id, github_observation, linear_attachment_id, linear_comment_id, linear_link_error, merge_mode, merge_requested_at, merge_head_sha, merged_at, merge_tracking_complete, ~~repair_tracking_complete~~ (leaving → LOO-954, unused_store_members), pr_title, pr_body, pr_copy_head_sha, historical
 - `task_retirements`: task_id, completion, checkout, branch, due_at, phase, reason, retry_at, failures
-- `task_ship_events`: id, task_id, kind, at, lf_process_id, person, pid, os_started_at, ended_at, exit_code, error, caller_session_id
+- `task_ship_events` — **leaving → LOO-971, task_graph_auto_ship**: id, task_id, kind, at, lf_process_id, person, pid, os_started_at, ended_at, exit_code, error, caller_session_id
 - `task_state_deliveries`: seq, id, task_id, target, base_revision, base_state, attempted, settled, error, conflict_json
-- `task_summaries`: task_id, ended, ended_at, graph, loop_passes, ship_events, wall_seconds, reflect
-- `tasks`: id, repository_id, project_id, external_issue_id, issue_identifier, created_at, issue_title, issue_description, pm_snapshot_synced_at, ~~worktree~~ (leaving → LOO-954, unused_store_members), workspace_slug, abandon_reason, updated_at, abandoned_at, ~~primary_session_id~~ (leaving → LOO-954, unused_store_members), planning_revision, planning_rank, planning_assignee, planning_state, planning_completed_at, planning_provider_revision, planning_url, planning_branch_name, planning_team_id, planning_completed, planning_deleted_at, ~~branch~~ (leaving → LOO-954, unused_store_members), ~~base_commit~~ (leaving → LOO-954, unused_store_members), ~~parent_pr_id~~ (leaving → LOO-954, unused_store_members), completion_request, completion_error, planning_due_date, ~~checkout_machine_id~~ (leaving → LOO-954, unused_store_members), paused, shipped_at, ~~ship_lf_process_id~~ (leaving → LOO-954, unused_store_members), ~~ship_restarts~~ (leaving → LOO-954, unused_store_members), ~~ship_approved_lf_process_id~~ (leaving → LOO-954, unused_store_members), ~~ship_stopped_at~~ (leaving → LOO-954, unused_store_members), ~~ship_stopped_lf_process_id~~ (leaving → LOO-954, unused_store_members), ~~regressed_in~~ (leaving → LOO-730, unused_store_members), ~~ship_stopped_person~~ (leaving → LOO-954, unused_store_members)
+- `task_summaries`: task_id, ended, ended_at, graph, loop_passes, ~~ship_events~~ (leaving → LOO-971, task_graph_auto_ship), wall_seconds, reflect, auto_ship
+- `tasks`: id, repository_id, project_id, external_issue_id, issue_identifier, created_at, issue_title, issue_description, pm_snapshot_synced_at, ~~worktree~~ (leaving → LOO-954, unused_store_members), workspace_slug, abandon_reason, updated_at, abandoned_at, ~~primary_session_id~~ (leaving → LOO-954, unused_store_members), planning_revision, planning_rank, planning_assignee, planning_state, planning_completed_at, planning_provider_revision, planning_url, planning_branch_name, planning_team_id, planning_completed, planning_deleted_at, ~~branch~~ (leaving → LOO-954, unused_store_members), ~~base_commit~~ (leaving → LOO-954, unused_store_members), ~~parent_pr_id~~ (leaving → LOO-954, unused_store_members), completion_request, completion_error, planning_due_date, ~~checkout_machine_id~~ (leaving → LOO-954, unused_store_members), paused, ~~shipped_at~~ (leaving → LOO-971, task_graph_auto_ship), ~~ship_lf_process_id~~ (leaving → LOO-954, unused_store_members), ~~ship_restarts~~ (leaving → LOO-954, unused_store_members), ~~ship_approved_lf_process_id~~ (leaving → LOO-954, unused_store_members), ~~ship_stopped_at~~ (leaving → LOO-954, unused_store_members), ~~ship_stopped_lf_process_id~~ (leaving → LOO-954, unused_store_members), ~~regressed_in~~ (leaving → LOO-730, unused_store_members), ~~ship_stopped_person~~ (leaving → LOO-954, unused_store_members)
 - `tracker_actions`: seq, id, wave_id, project_id, task_id, subject, kind, value_json, base_json, conflict_json, phase, tracker, remote_id, confirmed_revision, error, sent_at, looked_at
 
 ## PR landing
@@ -108,7 +108,7 @@ to one. `uv run python scripts/due_removals.py` prints when each may drop.
 
 ## LfSession
 
-- `agent_sessions`: id, current_capture, title, title_source, completed_at, created_at, request, interactive, repo, provider_thread, task_id, wave_id, ~~work_source~~ (leaving → LOO-836, unused_store_members), bound_at, input_published, cwd, skill, provider, model, primary_scope, agent_process_id, ~~transport_lf_process_id~~ (leaving → LOO-965, process_rows_on_owners), fence_locator, moved_to_machine_id, held_terminal_id, skill_version, opened_at, transition, departed_attachment, departure, agent_started_at, agent_pid, agent_os_started_at, agent_ended_at, agent_exit_code, agent_launcher_lf_process_id, agent_spawn_state, agent_command, agent_interactive, agent_endpoint, agent_inbox, attachment_token, attached_lf_process_id, attached_pid, attached_os_started_at, attached_terminal_id
+- `agent_sessions`: id, current_capture, title, title_source, completed_at, created_at, request, interactive, repo, provider_thread, task_id, wave_id, ~~work_source~~ (leaving → LOO-836, unused_store_members), bound_at, input_published, cwd, skill, provider, model, primary_scope, agent_process_id, ~~transport_lf_process_id~~ (leaving → LOO-965, process_rows_on_owners), fence_locator, moved_to_machine_id, held_terminal_id, skill_version, opened_at, transition, departed_attachment, departure, agent_started_at, agent_pid, agent_os_started_at, agent_ended_at, agent_exit_code, agent_launcher_lf_process_id, agent_spawn_state, agent_command, agent_interactive, agent_endpoint, agent_inbox, attachment_token, attached_lf_process_id, attached_pid, attached_os_started_at, attached_terminal_id, starts_since_turn, last_started_at, start_failure
 - `session_activity`: session_id, observed_at, open_tools, pending_input, yielded, program_status, status_stream, status_sequence, attachment_token, agent_process_id, preview, cpu_sampled_at, cpu_quiet_since
 - `session_events`: seq, session_id, provider_thread, provider_turn, kind, receipt_key, provider_generation, lf_process_id, task_id, wave_id, observed_at, payload, captured_event, agent_process_id, provider_account, independent, provider_lineage, turn_thread, turn_id, turn_ended_at, turn_status, turn_error
 - `session_moves`: session_id, agent, requested_at
@@ -131,6 +131,9 @@ to one. `uv run python scripts/due_removals.py` prints when each may drop.
 
 - `agent_limit_recoveries`: lf_process_id, provider, reason, retry_at, agent, updated_at
 - `processes` — **leaving → LOO-965, process_rows_on_owners**: id, trace_id, parent_lf_process_id, via_agent, caller_session_id, caller_provider_generation, command, repo, cwd, started_at, completed_at, outcome, exit_code, error, signal, pid, kind, agent_session_id, os_started_at, endpoint, agent_provider, agent_interactive, caller_agent_process_id, attached_lf_process_id, attachment_token, attachment_exit_seq, spawn_state, terminal_id, receipt_locator, journal_trace_locator, ~~viewed~~ (leaving → LOO-954, unused_store_members), ~~native_input~~ (leaving → LOO-954, unused_store_members), ~~viewer_hold~~ (leaving → LOO-954, unused_store_members), ~~viewer_hold_at~~ (leaving → LOO-954, unused_store_members), inbox, held_terminal_id
+
+## AgentProcess
+
 
 ## Provider authentication
 

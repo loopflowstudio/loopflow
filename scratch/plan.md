@@ -218,11 +218,15 @@ and `< /dev/null`.
   `sync_tests::publish_keeps_the_prs_base_and_names_a_disagreement`, unit rows in
   `ops::pr::tests::` and `lf` bin `task_pr_line_names_the_stack_parent_by_task`.
 
+- Slice 3, Desktop half built: `TaskStackParent` decoded on `TaskExecution`
+  (required nullable); `TaskStackParentLabel` ("Stacked on LOO-12", help names
+  branch and PR) beside the PR link in `WorkSurfaceView`. `task_lifecycle.json`
+  gained `stack_parent: null` per phase; Rust's `dto_fixtures::composed_lifecycle_…`
+  needs it. Checks: `scripts/test_desktop.sh --filter 'DTOFixtureTests|taskWorkFollowsTheStream'`
+  passed (57 tests); `dto_fixtures::composed_lifecycle_preserves_completion_before_graph_arrival` passed.
+
 Remaining:
-- Desktop: decode `stack_parent` beside `TaskExecution` (`swift/Loopflow/Models/TaskWork.swift`),
-  Swift fixture test in `DTOFixtureTests` (`task_checkout.json` now carries it),
-  "Stacked on LOO-12" beside the PR line.
-- `lf sync <Task> --plan` does not resolve the Task; it plans the literal ref.
+- `lf sync <Task> --plan` does not resolve the Task; it plans the literal ref (open question).
 
 ## Larger than this work (on the page, not planned)
 

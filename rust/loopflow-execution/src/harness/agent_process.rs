@@ -109,6 +109,24 @@ pub(crate) fn spawn_native(
     Ok(child)
 }
 
+/// A launch whose provider CLI is not installed is recorded as any spawn that
+/// failed, without the attempt.
+pub(crate) fn record_missing_provider(
+    command: &std::process::Command,
+    owner: &Recording,
+) -> Result<()> {
+    let Recording {
+        store,
+        session,
+        attachment,
+    } = owner;
+    store.with_session_attachment(session, attachment, || {
+        store.record_agent_process_launch(session, attachment, command, true)?;
+        store.record_agent_process_exit(session, attachment, false)
+    })?;
+    Ok(())
+}
+
 /// A managed launch reports turns to the Machine server, so its agent starts
 /// once the server welcomes a connection. The selected installation starts
 /// a stopped server, as it does when opening a work session.

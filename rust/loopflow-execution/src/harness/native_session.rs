@@ -596,6 +596,9 @@ fn run_client(
     // answers `--resume` of a conversation it never wrote with "No
     // conversation found", and the Session could not be opened again.
     if crate::os_process::which_command(process).is_none() {
+        if let Some(owner) = owned {
+            crate::harness::agent_process::record_missing_provider(process, owner)?;
+        }
         bail!(missing_agent_message(launch.harness.kind()));
     }
     // The receipt names this opening; the provider's own `lf` commands are

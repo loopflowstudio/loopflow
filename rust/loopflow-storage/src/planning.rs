@@ -90,7 +90,7 @@ pub enum StateHistory {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct LinearIssue {
+pub struct TrackerItem {
     /// Provider revision; absent only in historical planning.
     pub revision: Option<String>,
     #[serde(deserialize_with = "loopflow_model::id::deserialize_uuid")]
@@ -119,7 +119,7 @@ pub struct LinearIssue {
     pub assignee: Option<String>,
 }
 
-/// Asana and Notion have no short identifiers; their Tasks keep the local
+/// Asana has no short identifiers; their Tasks keep the local
 /// `lf-` identifier Loopflow assigned.
 pub fn local_identifier(id: &str) -> String {
     uuid::Uuid::parse_str(id)
@@ -127,7 +127,7 @@ pub fn local_identifier(id: &str) -> String {
         .unwrap_or_else(|_| id.to_string())
 }
 
-impl LinearIssue {
+impl TrackerItem {
     /// Linear calls the item complete, not canceled or duplicate.
     pub fn is_complete(&self) -> bool {
         match self.state.as_deref() {
@@ -143,18 +143,18 @@ impl LinearIssue {
 /// compared — not trusted as identity — so out-of-order responses never move
 /// the cursor backward.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LinearIssueObservation {
+pub struct TrackerObservation {
     pub revision: String,
     pub title: String,
     pub description: String,
-    pub comments: Vec<LinearComment>,
+    pub comments: Vec<TrackerComment>,
 }
 
 /// Linear's comment and attribution metadata, retained unchanged in conflict receipts.
 /// A provider user or an explicit requester steer supplies person attribution;
 /// an integration's display name alone does not.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct LinearComment {
+pub struct TrackerComment {
     #[serde(deserialize_with = "loopflow_model::id::deserialize_uuid")]
     pub id: String,
     /// Provider creation time; display order. `revision` orders direction.
@@ -166,8 +166,8 @@ pub struct LinearComment {
     pub author_name: Option<String>,
 }
 
-impl From<&LinearComment> for TaskComment {
-    fn from(comment: &LinearComment) -> Self {
+impl From<&TrackerComment> for TaskComment {
+    fn from(comment: &TrackerComment) -> Self {
         let author =
             if comment.author_id.is_some() || loopflow_model::comment::is_steer(&comment.body) {
                 TaskCommentAuthor::Person {
@@ -191,7 +191,7 @@ impl From<&LinearComment> for TaskComment {
 
 /// Retained Linear facts, including foreign and not-yet-associated Projects.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct LinearProject {
+pub struct TrackerProject {
     #[serde(deserialize_with = "loopflow_model::id::deserialize_uuid")]
     pub id: String,
     pub revision: Option<String>,
@@ -251,6 +251,7 @@ pub fn render_krs(krs: &[ProjectKR]) -> String {
 }
 
 pub mod project_document;
+pub mod rules;
 
 #[derive(Debug, thiserror::Error)]
 #[error("{0}")]

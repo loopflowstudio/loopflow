@@ -4,7 +4,6 @@
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 
-use super::children::{insert_task_event_in, task_events_after_in};
 use super::SqliteStore;
 use crate::work::task::{TaskEventKind, TaskId};
 use crate::{StoreError, StoreResult};
@@ -24,14 +23,6 @@ pub struct RetainedFiling {
     pub notes: String,
     pub due: Option<String>,
     pub existing: bool,
-}
-
-#[derive(Debug)]
-pub struct RetainedRelation {
-    pub task_id: TaskId,
-    pub relation_id: String,
-    pub source_issue_id: String,
-    pub target_issue_id: String,
 }
 
 impl SqliteStore {
@@ -83,6 +74,12 @@ impl SqliteStore {
                         let mut conn = self.conn.lock().expect("store mutex poisoned");
                         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
                         let target = recover_filing_in(&tx, &intent)?;
+                        super::tracker_actions::retain_relation_in(
+                            &tx,
+                            &TaskId::from_raw(source.clone()),
+                            &intent.relation_id,
+                            &intent.issue_id,
+                        )?;
                         tx.commit()?;
                         target
                     };
@@ -141,62 +138,17 @@ impl SqliteStore {
         }
         Ok(())
     }
-
-    pub fn pending_retained_relations(&self, repo: &str) -> StoreResult<Vec<RetainedRelation>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut query = conn.prepare(
-            "SELECT DISTINCT source.id, json_extract(e.kind_json, '$.intent.relation_id'),
-                source.external_issue_id, target.external_issue_id
-             FROM task_events e JOIN tasks source ON source.id=e.task_id
-             JOIN repository_plans w ON w.id=source.repository_id
-             JOIN tasks target ON target.id=json_extract(e.kind_json, '$.intent.issue_id')
-                OR target.external_issue_id=json_extract(e.kind_json, '$.intent.issue_id')
-                OR target.id=(SELECT task_id FROM task_creation_intents WHERE json_extract(export_json,'$.id')=json_extract(e.kind_json,'$.intent.issue_id'))
-             WHERE w.repo=?1 AND json_extract(e.kind_json, '$.kind')='follow_through_intent'
-                AND source.external_issue_id IS NOT NULL AND target.external_issue_id IS NOT NULL
-                AND source.planning_deleted_at IS NULL AND target.planning_deleted_at IS NULL
-                AND NOT EXISTS(SELECT 1 FROM task_events confirmed WHERE confirmed.task_id=source.id
-                    AND json_extract(confirmed.kind_json, '$.kind')='follow_through_relation_confirmed'
-                    AND json_extract(confirmed.kind_json, '$.relation_id')=json_extract(e.kind_json, '$.intent.relation_id')
-                    AND json_extract(confirmed.kind_json, '$.source_issue_id')=source.external_issue_id
-                    AND json_extract(confirmed.kind_json, '$.target_issue_id')=target.external_issue_id)",
-        )?;
-        let rows = query.query_map([repo], |row| {
-            Ok(RetainedRelation {
-                task_id: TaskId::from_raw(row.get::<_, String>(0)?),
-                relation_id: row.get(1)?,
-                source_issue_id: row.get(2)?,
-                target_issue_id: row.get(3)?,
-            })
-        })?;
-        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
-    }
-
-    pub fn confirm_retained_relation(&self, relation: &RetainedRelation) -> StoreResult<()> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let kind = TaskEventKind::FollowThroughRelationConfirmed {
-            relation_id: relation.relation_id.clone(),
-            source_issue_id: relation.source_issue_id.clone(),
-            target_issue_id: relation.target_issue_id.clone(),
-        };
-        if !task_events_after_in(&tx, &relation.task_id, 0)?
-            .iter()
-            .any(|event| event.kind == kind)
-        {
-            insert_task_event_in(&tx, &relation.task_id, &kind)?;
-        }
-        tx.commit()?;
-        Ok(())
-    }
 }
 
 fn recover_filing_in(conn: &Connection, intent: &RetainedFiling) -> StoreResult<String> {
-    let existing: Option<String> = conn.query_row(
-        "SELECT id FROM tasks WHERE id=?1 OR external_issue_id=?1
-         OR id=(SELECT task_id FROM task_creation_intents WHERE json_extract(export_json,'$.id')=?1)",
-        [&intent.issue_id], |row| row.get(0),
-    ).optional()?;
+    let existing: Option<String> = conn
+        .query_row(
+            "SELECT id FROM tasks WHERE id=?1 OR external_issue_id=?1
+         OR id='task_'||replace(lower(?1),'-','')",
+            [&intent.issue_id],
+            |row| row.get(0),
+        )
+        .optional()?;
     if let Some(id) = existing {
         return super::children::short_task_id(conn, &TaskId::from_raw(id))?
             .ok_or(StoreError::NotFound);
@@ -238,7 +190,25 @@ fn recover_filing_in(conn: &Connection, intent: &RetainedFiling) -> StoreResult<
         },
     )?;
     if !local {
-        super::planning_export::retain_filing_export_in(conn, &task.id, intent)?;
+        let project = conn
+            .query_row(
+                "SELECT id FROM projects WHERE id=?1 OR external_project_id=?1",
+                [&intent.project_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+        super::tracker_actions::retain_filing_create_in(
+            conn,
+            &task.id,
+            &[
+                crate::work::edit::WorkValue::TaskTitle(Some(intent.title.clone())),
+                crate::work::edit::WorkValue::TaskDescription(Some(intent.notes.clone())),
+                crate::work::edit::WorkValue::TaskDueDate(intent.due.clone()),
+                crate::work::edit::WorkValue::TaskProject(Some(
+                    project.unwrap_or_else(|| intent.project_id.clone()),
+                )),
+            ],
+        )?;
     }
     Ok(task.identifier)
 }
@@ -246,7 +216,6 @@ fn recover_filing_in(conn: &Connection, intent: &RetainedFiling) -> StoreResult<
 #[cfg(test)]
 mod tests {
     use super::{RetainedFiling, SqliteStore};
-    use crate::sqlite::planning_changes::PlanningChanges;
     use crate::work::task::TaskEventKind;
     use crate::work::wave::Wave;
     use loopflow_model::durable::{ProjectId, TaskId};
@@ -336,7 +305,7 @@ mod tests {
     }
 
     #[test]
-    fn provider_filing_preserves_unknown_creation_and_original_relation_without_link_event() {
+    fn provider_filing_preserves_unknown_creation_and_queues_its_relation_once() {
         let (_home, store, source, mut intent) = fixture();
         intent.issue_id = uuid::Uuid::new_v4().to_string();
         intent.project_id = "original-project".into();
@@ -350,62 +319,44 @@ mod tests {
             .into_iter()
             .find(|task| task.id != source)
             .unwrap();
-        let export = store
-            .prepare_planning_export(
-                PlanningChanges::Task(&child.id),
-                "changed-team",
-                Some("changed-initiative"),
-            )
+        // The creation may have reached Linear: it waits for a look, with the
+        // intent's values, never today's Task.
+        let actions = store
+            .tracker_actions_for(&crate::sqlite::tracker_actions::ActionOwner::Task(
+                child.id.clone(),
+            ))
             .unwrap();
-        assert_eq!(export.id, intent.issue_id);
+        assert_eq!(actions.len(), 1);
         assert_eq!(
-            export.input,
-            json!({"id":intent.issue_id,"teamId":"original-team","projectId":"original-project",
-            "stateId":"original-state","title":intent.title,"description":intent.notes,"dueDate":intent.due})
+            actions[0].kind,
+            crate::sqlite::tracker_actions::ActionKind::Create
         );
-        assert!(
-            store
-                .planning_export_attempts(PlanningChanges::Task(&child.id))
-                .unwrap()
-                .creation
+        assert_eq!(
+            actions[0].phase,
+            crate::sqlite::tracker_actions::ActionPhase::Sent
         );
-        let error: String = store
-            .conn
-            .lock()
+        assert_eq!(actions[0].value[0]["value"], json!(intent.title));
+        assert!(actions[0].error.as_deref().unwrap().contains("unknown"));
+        // The relation goes out on its source Task once, under the relation's
+        // own id, aimed at the Task the filing made.
+        let links = store
+            .tracker_actions_for(&crate::sqlite::tracker_actions::ActionOwner::Task(
+                source.clone(),
+            ))
             .unwrap()
-            .query_row(
-                "SELECT export_error FROM task_creation_intents WHERE task_id=?1",
-                [child.id.as_str()],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert!(error.contains("unknown"));
-        assert!(store
-            .pending_retained_relations("/repo")
-            .unwrap()
-            .is_empty());
-        store
-            .conn
-            .lock()
-            .unwrap()
-            .execute(
-                "UPDATE tasks SET external_issue_id=?2 WHERE id=?1",
-                params![child.id.as_str(), intent.issue_id],
-            )
-            .unwrap();
-        let pending = store.pending_retained_relations("/repo").unwrap();
-        assert_eq!(pending.len(), 1);
-        assert_eq!(pending[0].relation_id, intent.relation_id);
-        assert_eq!(pending[0].target_issue_id, intent.issue_id);
-        assert_eq!(pending[0].source_issue_id, "source-linear");
-        for _ in 0..2 {
-            store.confirm_retained_relation(&pending[0]).unwrap();
-        }
-        assert!(store
-            .pending_retained_relations("/repo")
-            .unwrap()
-            .is_empty());
-        assert_eq!(store.task_events_after(&source, 0).unwrap().len(), 2);
+            .into_iter()
+            .filter(|action| action.kind == crate::sqlite::tracker_actions::ActionKind::Link)
+            .collect::<Vec<_>>();
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].id, intent.relation_id);
+        assert_eq!(
+            links[0].task_link(),
+            Some(crate::sqlite::tracker_actions::TaskLink::Relation {
+                id: intent.relation_id.clone(),
+                target: child.id.clone(),
+            })
+        );
+        assert_eq!(store.task_events_after(&source, 0).unwrap().len(), 1);
     }
 
     #[test]

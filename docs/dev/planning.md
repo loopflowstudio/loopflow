@@ -17,6 +17,21 @@ selects another existing Linear Project.
 [Cutover status](reference-cutover.md#cutover-status) records
 other implementation and proof gaps.
 
+## Words
+
+| Word | Means | Not |
+|---|---|---|
+| plan | the shared Waves, Projects and Tasks; a Wave's plan is its Project | |
+| Project | the Wave's current plan | Chapter |
+| tracker | where the plan is mirrored: Git, Linear or Asana | bridge; provider means the agent's provider |
+| action | one outgoing change for Linear or Asana in `tracker_actions`: queued or sent (open), then confirmed, conflicted (lost, until answered) or retired; Git exchanges the journal instead. Prose near Desktop says "tracker action": Desktop's actions are buttons | effect |
+| event | one incoming change from a tracker | |
+| sync | moving the plan in either direction | |
+| Work | the model's name, in dev docs only | |
+
+Older code still says observation, acceptance and acquisition for events,
+provider for the tracker, and Chapter for the Project.
+
 ## Planning authority and identity
 
 ```bash
@@ -85,7 +100,10 @@ live state; its stored values and historical judgment events remain readable evi
 The typed field writer—not either complete domain struct—defines portable content;
 flattening records does not make checkout or execution fields synchronizable.
 
-`linear/` owns provider responses and acceptance; there is no generic planning facade.
+`ops/tracker.rs` selects the repository's tracker, `Tracker { Linear, Asana }`,
+from `.lf/config.yaml`; `linear/` and `asana/` own provider requests, responses and
+acceptance. The store never builds provider input, and no `Linear*` type leaves
+`linear/`: trackers fail with `tracker::TrackerError`.
 `ops/planning_sync.rs` owns foreground exchange, store access and Wave locks for
 both transports. Ordinary Task lookup and comments belong to `ops/task.rs`.
 A Git lookup miss stays a Git lookup miss; it cannot fall through to Linear.
@@ -201,26 +219,76 @@ exchange evidence and grant no Task ownership. Ownership entries travel as marke
 Task comments in both modes; with Git planning, each local append sorts after every
 entry its Machine has seen.
 
-Task and Project Linear field receipts share `sqlite/planning_changes.rs`, with
-separate foreign keys. They retain stable mutation identity, provider baseline and
-conflicting values. An unchanged baseline preserves pending local edits; an observed
-conflict adopts Linear and retains the losing intention. `planning_order.rs` saves
-one Project order receipt and neighboring Task ranks in the same transaction.
-Complete-list evidence owns ordering; detail reads never reorder Tasks. Uncertain
-writes remain attempted and require provider readback before another effect.
+### One outbound queue
 
-Creation captures a stable provider UUID and exact input before network I/O.
-Task creation reads canonical Work and retains only shared creation-field baselines,
-not a provider-shaped Task copy or local execution data. Existing receipts keep their
-original input and baseline bytes through retries.
-Acquisition attaches the provider mapping to the original local row. Unknown creation
-or attachment outcomes retain their receipts; a matching title proves nothing.
+Every change Linear or Asana carries is one `tracker_actions` row, written in the
+transaction that saves it: `create`, `field`, `order`, `state`, `comment`,
+`delete` or `link` (a Project's Initiative, a follow-up relation
+`relation:<id>`, a pull request `pr:<url>`). Each row addresses one owner, a
+Wave, Project or Task, on the tracker named by `provider`, set when it is queued
+from the owner's binding or queued creation. `value_json` is a `WorkValue` in
+store words; `linear/actions.rs` and `asana/actions.rs` turn it into a request
+and nothing else does. `WriteOrigin::Local` writes queue; tracker facts
+(acceptance, attach, conflict adoption, removal) and imports queue nothing, so
+acceptance never echoes. A newer queued value for the same owner and subject
+retires the older one; a sent one stays for its look. An owner with no
+binding and no queued `create` queues nothing.
+
+One bounded pass (`ops/tracker/drain.rs`) sends at most 20 requests or runs 5 s,
+four owners at a time, each request under its own 5 s deadline. Owners go in
+order of their oldest action, except that the owner a command just saved goes
+first. Within an owner, everything waits behind an unconfirmed `create`; otherwise
+only actions on the same subject wait behind each other. A Task naming a Project
+still being created, and a relation to a Task with no tracker object, hold
+without a request. So does an action its tracker blocks (a Linear Project
+whose Wave has no Initiative): the block is decided before the send, saves its
+error once and keeps the action queued at no cost to the pass. A pass
+with nothing unconfirmed asks the provider nothing.
+`lf task sync <id>` drains one owner now, looking for every sent action at
+once; on Git it exchanges the planning ref.
+
+`planning::rules::decide` confirms each kind against what the tracker holds,
+for the drain and for inbound events alike, or marks it conflicted: a field
+adopts a newer tracker value and keeps the losing one in `conflict_json`; state uses Linear's history
+when it has one; order moves only on complete-list evidence; deletion is confirmed by
+trash or a delete acknowledgement and retires when the object is active at a
+newer revision; a comment matches its id, or on Asana its visible text.
+
+The lost-reply rule is the same for every kind: a `sent` action is looked
+for before anything else on its subject is sent, at most once per
+max(600 s, the delta freshness window). A send that carries our id or reads
+before it adds (Linear comments, every link) is repeated instead. A tracker with
+no form for an action answers `Unsupported` and the action retires with that
+reason: Asana has no Project edits after creation, no order, no Initiatives and
+no follow-up relations. A queued action for a tracker the repository no longer
+uses retires naming both.
+
+A `create` carries the owner's UUID, which both trackers send as the provider
+identity, and its creation baseline: shared creation fields, never a
+provider-shaped copy or local execution data. The tracker builds the request when
+it sends. The event that finds it attaches the provider mapping to the original local row
+and confirms the `create`. An unknown creation outcome stays sent until a
+look finds it; a matching title proves nothing.
 Comments retain identity and authorship. Incoming planning completion changes only
 the planning disposition: it neither moves a local Task nor authorizes cleanup.
 Session/Process records and checkout paths never enter the Git document.
 
-`PlanningSyncStatus` presents local Linear delivery evidence; `lf repo plan`
-presents Git acquisition/publication receipts and held projections. The retained
+One view answers "where does my change stand" on every tracker:
+`TrackerActionStatus` (`planning_sync.rs`). An action is open while `queued`
+or `sent`, and lost while `conflicted`, with the losing `local_value` and the
+winning `tracker_value`. `lf repo plan` lists the repository's open and lost
+actions ("3 open · 1 lost"), and a Task's or Project's `sync` is its slice. A
+lost action retires when it is answered: a later save of its subject
+("answered by a later save"), an event that changes that field again at a
+newer revision ("changed again in Linear"), or `answer_lost` over action ids
+of any owner (`lf repo plan answer <id> --keep-theirs | --use-mine`, served
+as `plan.answer` for Desktop's Keep / Use mine on every line; `lf task sync
+--keep-theirs | --use-mine` answers a Task's whole slice). Git
+has no queue: a field's competing journal heads are its lost values, the
+winner's value as `tracker_value`, until a save names them all as parents;
+an answer records the chosen value with every head as a parent. `lf repo plan`
+on Git lists its destinations, its acquisition/publication receipts and held
+projections, then its lost values. The retained
 mutation journal grows with every edit, so `lf repo plan journal` reads it on
 request: every change, losing values included, and the ranked candidate IDs, which
 are not applied or published evidence; rejected projections retain their failure reasons.
@@ -266,9 +334,9 @@ access. After reset, the next boundary retries pending identities. Successful
 mutation payloads supply confirmation without a follow-up read. Lost responses
 retain uncertainty; positive rate-limit rejection makes that receipt retryable.
 Independent Homes do not share this pause.
-Ingestion adopts observed Linear conflicts and retains the losing
-local intentions in field, state and comment receipts. Retired intentions never
-reenter delivery after a late acknowledgement or matching observation.
+Ingestion adopts observed Linear conflicts and keeps the losing local value on
+its action. Retired actions never reenter delivery after a late acknowledgement
+or matching observation.
 The documented unconditional-update race remains a protocol limit.
 
 ## Plan creation and selection
@@ -533,8 +601,8 @@ uses the same state delivery path as completion and reopening. Resolve the issue
 team and target state before marking a receipt attempted, so failed reads remain
 retryable. A lost mutation reply retains uncertainty until provider observation.
 Delivery at save, check and watcher boundaries selects unmapped local Projects and Tasks,
-using their saved UUIDs. Project transitions and Task creation receipts retain the
-captured payload, attempted effects and errors; no second creation owner exists.
+using their saved UUIDs. Each `create` action retains its baseline, attempt and
+error; no second creation owner exists.
 Exact observations attach mappings in the common ingestion transaction before
 inventory can allocate another local identity. The creation snapshot establishes
 field baselines without acknowledging later edits. Observed Linear conflicts still

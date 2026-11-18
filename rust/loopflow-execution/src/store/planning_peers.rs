@@ -86,7 +86,7 @@ pub fn import_peer_planning(
             .into_iter()
             .map(|(name, declaration)| (declaration.id, name))
             .collect();
-        let connected = crate::ops::planning_client::connected(repo);
+        let connected = crate::ops::tracker::connected(repo);
         let import = super::sqlite::PeerImport {
             repo,
             destination,

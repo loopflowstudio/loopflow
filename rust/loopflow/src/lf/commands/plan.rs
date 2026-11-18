@@ -5,11 +5,25 @@ use std::path::Path;
 use anyhow::{anyhow, Result};
 
 use crate::lf::RepoPlanCommand as PlanCommand;
+use loopflow_execution::store::planning_sync::{
+    ActionOwnerKind, LostAnswer, TrackerActionStatus, TrackerKind,
+};
+use loopflow_execution::store::sqlite::tracker_actions::ActionPhase;
 use loopflow_execution::store::Store;
 
 /// `lf repo plan [key|journal]`; bare, the planning status.
 pub fn run(cmd: Option<&PlanCommand>, json: bool, subscribe: bool) -> Result<()> {
-    let repo = status_repository(&std::env::current_dir()?)?;
+    let directory = std::env::current_dir()?;
+    if let Some(PlanCommand::Answer {
+        id,
+        keep_theirs,
+        json,
+        ..
+    }) = cmd
+    {
+        return answer(&directory, id, *keep_theirs, *json);
+    }
+    let repo = status_repository(&directory)?;
     if cmd.is_none() && subscribe {
         return subscribe_status(&repo, loopflow_execution::read_stream::Transport::Stdio)
             .map(drop);
@@ -103,11 +117,30 @@ async fn run_async(repo: &Path, cmd: Option<&PlanCommand>, status_json: bool) ->
         }
         None => print_status(&store, &repo_key, status_json).await?,
         Some(PlanCommand::Journal { json }) => print_journal(&store, &repo_key, *json).await?,
+        Some(PlanCommand::Answer { .. }) => unreachable!("answering runs before the status read"),
     }
     Ok(())
 }
 
-/// `lf planning status --subscribe`: `lf planning status --json` now and each time
+/// `lf repo plan answer <id> --keep-theirs | --use-mine`.
+fn answer(directory: &Path, id: &str, keep_theirs: bool, json: bool) -> Result<()> {
+    let answer = if keep_theirs {
+        LostAnswer::KeepTheirs
+    } else {
+        LostAnswer::UseMine
+    };
+    let line = loopflow_execution::ops::planning_sync::answer_lost(directory, id, answer)?;
+    if json {
+        println!("{}", serde_json::to_string(&line)?);
+    } else if answer == LostAnswer::KeepTheirs {
+        println!("Kept {}'s {}.", line.tracker.display_name(), line.change);
+    } else {
+        println!("Saved your {} again.", line.change);
+    }
+    Ok(())
+}
+
+/// `lf repo plan --subscribe`: `lf repo plan --json` now and each time
 /// it changes. The subscription reads stored status; `lf wave status --sync` and
 /// foreground providers exchange planning.
 pub(crate) fn subscribe_status(
@@ -125,42 +158,74 @@ pub(crate) fn subscribe_status(
     )
 }
 
-/// What `repo.plan` answers: the transport, and for Git the
-/// destinations with their import and publication evidence.
+/// What `repo.plan` answers: the tracker, for Git its destinations with
+/// their import and publication evidence, and every open and lost tracker
+/// action.
 #[derive(Debug, serde::Serialize, schemars::JsonSchema)]
 pub(crate) struct PlanStatus {
-    /// `git`, or the tracker's lowercased name.
-    transport: String,
+    /// `git`, `linear` or `asana`.
+    tracker: String,
     destinations: Vec<loopflow_execution::store::PeerPlanningStatus>,
+    /// What the tracker has yet to confirm (open: `queued`, `sent`), in send
+    /// order, and each value it kept over a local one (lost: `conflicted`)
+    /// until it is answered. On Git, only lost values: Git keeps no queue.
+    actions: Vec<TrackerActionStatus>,
 }
 
 /// Where a repository's planning is exchanged.
 enum Status {
-    /// The tracker its config names; local saves wait while it is unavailable.
-    Remote(&'static str),
-    Git(Vec<loopflow_execution::store::PeerPlanningStatus>),
+    /// The tracker its config names, and its open and lost actions.
+    Remote(TrackerKind, Vec<TrackerActionStatus>),
+    /// Git's destinations, and each value its journal lost.
+    Git(
+        Vec<loopflow_execution::store::PeerPlanningStatus>,
+        Vec<TrackerActionStatus>,
+    ),
 }
 
 impl Status {
-    /// What `lf planning status --json` prints.
+    /// What `lf repo plan --json` prints.
     fn report(self) -> PlanStatus {
         match self {
-            Self::Remote(provider) => PlanStatus {
-                transport: provider.to_ascii_lowercase(),
+            Self::Remote(tracker, actions) => PlanStatus {
+                tracker: tracker.as_str().to_owned(),
                 destinations: Vec::new(),
+                actions,
             },
-            Self::Git(destinations) => PlanStatus {
-                transport: "git".to_owned(),
+            Self::Git(destinations, actions) => PlanStatus {
+                tracker: TrackerKind::Git.as_str().to_owned(),
                 destinations,
+                actions,
             },
         }
     }
 }
 
-fn remote_transport(repo: &str) -> Result<Option<&'static str>> {
+/// The name a person reads for an action's owner: a Task's identifier, a
+/// Project's name.
+fn owner_name(store: &Store, action: &TrackerActionStatus) -> Result<String> {
+    let id = &action.owner_id;
+    Ok(match action.owner_kind {
+        ActionOwnerKind::Task => store
+            .sqlite
+            .task(&loopflow_model::durable::TaskId::from_raw(id))?
+            .map_or_else(|| id.clone(), |task| task.identifier),
+        ActionOwnerKind::Project => store
+            .sqlite
+            .project(&loopflow_model::durable::ProjectId::from_raw(id))?
+            .map_or_else(|| id.clone(), |project| project.name),
+        _ => id.clone(),
+    })
+}
+
+fn remote_transport(repo: &str) -> Result<Option<TrackerKind>> {
     let config =
         loopflow_execution::config::load_config(Some(Path::new(repo)))?.unwrap_or_default();
-    Ok(config.planning_transport().remote_name())
+    Ok(config
+        .planning_transport()
+        .remote_name()
+        .map(|name| TrackerKind::parse(&name.to_ascii_lowercase()))
+        .transpose()?)
 }
 
 /// What `lf --cwd <directory> config planning status --json` prints.
@@ -176,13 +241,23 @@ pub(crate) fn read_status(directory: &Path) -> Result<PlanStatus> {
 
 /// Stored status only: an exchange binds the configured destination.
 async fn status(store: Option<&Store>, repo: &str) -> Result<Status> {
-    if let Some(provider) = remote_transport(repo)? {
-        return Ok(Status::Remote(provider));
-    }
-    Ok(Status::Git(match store {
-        Some(store) => loopflow_execution::ops::planning_sync::peer_status(store, repo).await?,
+    let tracker = remote_transport(repo)?;
+    let actions = match store {
+        Some(store) => store
+            .sqlite
+            .repository_tracker_actions(repo, tracker.unwrap_or(TrackerKind::Git))?,
         None => Vec::new(),
-    }))
+    };
+    if let Some(tracker) = tracker {
+        return Ok(Status::Remote(tracker, actions));
+    }
+    Ok(Status::Git(
+        match store {
+            Some(store) => loopflow_execution::ops::planning_sync::peer_status(store, repo).await?,
+            None => Vec::new(),
+        },
+        actions,
+    ))
 }
 
 /// The command binds the configured destination first, so a changed
@@ -199,15 +274,28 @@ async fn print_status(store: &Store, repo: &str, json: bool) -> Result<()> {
         );
         return Ok(());
     }
-    let destinations = match status {
-        Status::Remote(provider) => {
-            println!("Planning: {provider}. Unavailable transport leaves local saves pending.");
+    let (destinations, lost) = match status {
+        Status::Remote(tracker, actions) => {
+            let open = actions
+                .iter()
+                .filter(|action| action.phase != ActionPhase::Conflicted)
+                .count();
+            let lost = actions.len() - open;
+            if actions.is_empty() {
+                println!("Tracker: {}. Nothing open.", tracker.as_str());
+                return Ok(());
+            }
+            println!("Tracker: {}. {open} open · {lost} lost.", tracker.as_str());
+            // Open lines in send order, then lost ones.
+            let mut actions = actions;
+            actions.sort_by_key(|action| action.phase == ActionPhase::Conflicted);
+            print_actions(store, &actions)?;
             return Ok(());
         }
-        Status::Git(destinations) => destinations,
+        Status::Git(destinations, lost) => (destinations, lost),
     };
     if !destinations.iter().any(|d| d.active) {
-        println!("Planning: Git (configured remote; local saves wait when unavailable)");
+        println!("Tracker: git (configured remote; local saves wait when unavailable)");
     }
     for destination in destinations {
         println!(
@@ -256,7 +344,39 @@ async fn print_status(store: &Store, repo: &str, json: bool) -> Result<()> {
         }
     }
     println!("Import retention is not publication; `lf planning journal` lists retained values.");
+    if !lost.is_empty() {
+        println!("Tracker: git. {} lost.", lost.len());
+        print_actions(store, &lost)?;
+    }
     Ok(())
+}
+
+/// One line per action under its owner's name, and how to answer a lost one.
+fn print_actions(store: &Store, actions: &[TrackerActionStatus]) -> Result<()> {
+    let owners = actions
+        .iter()
+        .map(|action| owner_name(store, action))
+        .collect::<Result<Vec<_>>>()?;
+    let width = owners.iter().map(String::len).max().unwrap_or(0);
+    for (owner, action) in owners.iter().zip(actions) {
+        let id = match action.phase {
+            ActionPhase::Conflicted => short_id(&action.id),
+            _ => "",
+        };
+        println!("  {owner:width$}  {id:8}  {}", action.line());
+    }
+    if actions
+        .iter()
+        .any(|action| action.phase == ActionPhase::Conflicted)
+    {
+        println!("Answer a lost line: lf repo plan answer <id> --keep-theirs, or --use-mine.");
+    }
+    Ok(())
+}
+
+/// The prefix `lf repo plan answer` accepts for a line.
+fn short_id(id: &str) -> &str {
+    id.get(..8).unwrap_or(id)
 }
 
 async fn print_journal(store: &Store, repo: &str, json: bool) -> Result<()> {

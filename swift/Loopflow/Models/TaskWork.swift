@@ -53,12 +53,6 @@ public struct TaskStackParent: Decodable, Sendable, Hashable {
         case prNumber = "pr_number"
     }
 
-    public init(identifier: String, branch: String, prNumber: UInt64?) {
-        self.identifier = identifier
-        self.branch = branch
-        self.prNumber = prNumber
-    }
-
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         identifier = try container.decode(String.self, forKey: .identifier)

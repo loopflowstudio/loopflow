@@ -225,8 +225,8 @@ and `< /dev/null`.
   needs it. Checks: `scripts/test_desktop.sh --filter 'DTOFixtureTests|taskWorkFollowsTheStream'`
   passed (57 tests); `dto_fixtures::composed_lifecycle_preserves_completion_before_graph_arrival` passed.
 
-Remaining:
-- `lf sync <Task> --plan` does not resolve the Task; it plans the literal ref (open question).
+Remaining: nothing in scope. All four slices are built; gate runs the suites.
+`lf sync <Task> --plan` still plans the literal ref (open question, not this Task).
 
 ## Larger than this work (on the page, not planned)
 
@@ -243,17 +243,3 @@ In LOO-959's worktree: `lf task status LOO-959` prints `stacked on LOO-953
 branch (`gh pr view 1972 --json baseRefName`); `lf sync` prints "Merging
 origin/jack/loo-953-…". In the fixture, `lf sync INF-123` in an unstacked
 child stacks it and moves its PR in one command.
-
-## Docs written ahead (write-docs, 2026-11-18)
-
-- `docs/ops.md` Checkouts: `lf sync LOO-12` example, its output, what sync
-  records, never `git merge`/`gh pr edit --base`, publish keeps the base and
-  prints the disagreement line.
-- `docs/work.md`: one sentence on stacking an existing Task with `lf sync`.
-- `docs/agent-api.md`: `lf sync INF-123` in Delegate and a paragraph after `--stack-on`.
-- `rust/loopflow-definitions/src/builtins/LOOPFLOW.md`: the Teaching line.
-- `rust/loopflow/src/lf/mod.rs`: `onto` help.
-
-The docs promise this output for `lf sync <Task>`, which slice 2 should print:
-`Stacked LOO-13 on LOO-12; PR #1972 now targets <branch>` before the usual
-"Merging origin/<branch> into <branch>". With no PR, the clause after `;` drops.

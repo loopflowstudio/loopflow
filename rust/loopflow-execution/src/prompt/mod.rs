@@ -4,6 +4,7 @@
 //! and assembling them into a formatted prompt.
 
 pub mod attribution;
+pub mod change;
 pub mod context_budget;
 pub mod process;
 pub mod structured_reply;
@@ -17,6 +18,7 @@ use std::time::Instant;
 
 use crate::error::CoreError;
 use crate::graph::{load_skill, Skill};
+use crate::prompt::change::{Change, ChangeRange};
 use crate::repository::RepoId;
 use once_cell::sync::Lazy;
 use regex::Regex;
@@ -55,9 +57,9 @@ pub struct Document {
 /// How diff context is represented after tiering.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum DiffTier {
-    /// Full unified diff (< 15k tokens)
+    /// Every changed file and the whole patch (under 15,000 tokens)
     UnifiedDiff,
-    /// Stat-only summary (fallback for large diffs)
+    /// Every changed file and the command that reads one file's patch
     StatOnly,
     /// No diff context
     #[default]
@@ -1164,18 +1166,11 @@ fn gather_all_text_files(repo_root: &Path) -> Result<Vec<Document>, CoreError> {
     Ok(docs)
 }
 
-/// Token threshold for tiered diff: below this, include full unified diff.
-const DIFF_TIER_THRESHOLD: usize = 15_000;
-/// Heuristic limits for attempting full diff.
-const DIFF_MAX_FILES_FOR_FULL: usize = 20;
-const DIFF_MAX_LINES_FOR_FULL: usize = 800;
-
-/// Gather diff context with automatic tier selection.
+/// The branch's change as one prompt section: what it committed since the
+/// default branch, or its uncommitted work when it has committed nothing.
+/// Nothing on the default branch or a detached HEAD. A failed read is no diff.
 ///
-/// - If unified diff is under 15k tokens, include full diff.
-/// - Otherwise, fall back to diff stat (file list + lines changed).
-///
-/// Returns (diff_string, tier, file_count).
+/// Returns (section, tier, file_count).
 fn gather_diff_tiered(repo_root: &Path) -> Result<(Option<String>, DiffTier, usize), CoreError> {
     let branch_output = Command::new("git")
         .args(["branch", "--show-current"])
@@ -1190,103 +1185,22 @@ fn gather_diff_tiered(repo_root: &Path) -> Result<(Option<String>, DiffTier, usi
     }
 
     let base_branch = crate::git::get_default_branch(repo_root).unwrap_or("main".to_string());
-    let diff_ref = format!("origin/{}...HEAD", base_branch);
-
-    // Count committed changes vs base branch. If none, fall back to
-    // working tree diff (handles branches with only staged changes).
-    let name_output = Command::new("git")
-        .args(["diff", "--name-only", &diff_ref])
-        .current_dir(repo_root)
-        .output()?;
-
-    let committed_count = if name_output.status.success() {
-        String::from_utf8_lossy(&name_output.stdout)
-            .lines()
-            .filter(|l| !l.trim().is_empty())
-            .count()
-    } else {
-        0
+    let read = |range| {
+        Change::read(repo_root, range)
+            .ok()
+            .filter(|change| !change.files.is_empty())
     };
-
-    let (diff_ref, file_count) = if committed_count > 0 {
-        (diff_ref, committed_count)
-    } else {
-        // No committed changes (or no remote) — try working tree diff against HEAD.
-        let head_output = Command::new("git")
-            .args(["diff", "--name-only", "HEAD"])
-            .current_dir(repo_root)
-            .output()?;
-        let head_count = if head_output.status.success() {
-            String::from_utf8_lossy(&head_output.stdout)
-                .lines()
-                .filter(|l| !l.trim().is_empty())
-                .count()
-        } else {
-            0
-        };
-        ("HEAD".to_string(), head_count)
-    };
-
-    if file_count == 0 {
+    let Some(change) = read(ChangeRange::Since(format!("origin/{base_branch}")))
+        .or_else(|| read(ChangeRange::Uncommitted))
+    else {
         return Ok((None, DiffTier::None, 0));
-    }
-
-    let shortstat_output = Command::new("git")
-        .args(["diff", "--shortstat", &diff_ref])
-        .current_dir(repo_root)
-        .output()?;
-    let shortstat = if shortstat_output.status.success() {
-        String::from_utf8_lossy(&shortstat_output.stdout).to_string()
-    } else {
-        String::new()
     };
-
-    let total_lines = parse_shortstat_total_lines(&shortstat).unwrap_or(0);
-
-    let stat_output = Command::new("git")
-        .args(["diff", "--stat", &diff_ref])
-        .current_dir(repo_root)
-        .output()?;
-
-    let stat = if stat_output.status.success() {
-        String::from_utf8_lossy(&stat_output.stdout).to_string()
+    let tier = if change.patch.is_some() {
+        DiffTier::UnifiedDiff
     } else {
-        String::new()
+        DiffTier::StatOnly
     };
-
-    let allow_full_diff =
-        file_count <= DIFF_MAX_FILES_FOR_FULL && total_lines <= DIFF_MAX_LINES_FOR_FULL;
-
-    if allow_full_diff {
-        let diff_output = Command::new("git")
-            .args(["diff", &diff_ref])
-            .current_dir(repo_root)
-            .output()?;
-
-        if diff_output.status.success() {
-            let diff = String::from_utf8_lossy(&diff_output.stdout).to_string();
-            if !diff.trim().is_empty() && count_tokens(&diff) < DIFF_TIER_THRESHOLD {
-                return Ok((Some(diff), DiffTier::UnifiedDiff, file_count));
-            }
-        }
-    }
-
-    if !stat.trim().is_empty() {
-        return Ok((Some(stat), DiffTier::StatOnly, file_count));
-    }
-
-    Ok((None, DiffTier::None, file_count))
-}
-
-fn parse_shortstat_total_lines(output: &str) -> Option<usize> {
-    let numbers: Vec<usize> = output
-        .split_whitespace()
-        .filter_map(|token| token.parse::<usize>().ok())
-        .collect();
-    if numbers.len() <= 1 {
-        return Some(0);
-    }
-    Some(numbers[1..].iter().sum())
+    Ok((Some(change.prompt_section()), tier, change.files.len()))
 }
 
 fn build_gitignore(repo_root: &Path) -> ignore::gitignore::Gitignore {
@@ -2859,6 +2773,29 @@ mod tests {
         assert_eq!(tier, DiffTier::UnifiedDiff);
         assert_eq!(count, 1);
         assert!(diff.unwrap().contains("fn committed()"));
+    }
+
+    #[test]
+    fn gather_diff_tiered_large_branch_lists_files_and_the_read_command() {
+        let repo = loopflow_test_support::TestRepo::new();
+        repo.create_branch("feature");
+        let generated: String = (0..20_000).map(|n| format!("row {n} of data\n")).collect();
+        repo.create_file("aaa_generated.txt", &generated);
+        repo.create_file("src/zzz_retry.rs", "fn retry() {}\n");
+        repo.stage_all();
+        repo.commit("add a retry and regenerate");
+
+        let (diff, tier, count) = gather_diff_tiered(repo.path()).unwrap();
+        let diff = diff.expect("a large branch still has a change section");
+        assert_eq!(tier, DiffTier::StatOnly);
+        assert_eq!(count, 2);
+        assert!(
+            diff.contains("git diff origin/main...HEAD -- '<path>'"),
+            "{diff}"
+        );
+        assert!(diff.contains("aaa_generated.txt\n"));
+        assert!(diff.contains("src/zzz_retry.rs\n"));
+        assert!(!diff.contains("row 1 of data"));
     }
 
     // ── Cross-repo context loading ──────────────────────────────────────

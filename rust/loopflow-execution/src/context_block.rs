@@ -71,10 +71,18 @@ impl ContextDelivery {
                 .iter()
                 .map(|doc| doc.path.as_str())
                 .collect::<Vec<_>>();
-            references.push(write_prompt_log(&repo, &format!(
-                "Inspect current changes with `git diff` and `git diff main...HEAD`.\nChanged paths: {}\n",
+            let paths = format!(
+                "Changed paths: {}\n",
                 serde_json::to_string(&paths).expect("paths serialize")
-            ), "changes", None)?);
+            );
+            let changes = match &components.diff {
+                Some(change) if components.diff_files.is_empty() => change.clone(),
+                Some(change) => format!("{change}\n{paths}"),
+                None => format!(
+                    "Inspect current changes with `git diff` and `git diff main...HEAD`.\n{paths}"
+                ),
+            };
+            references.push(write_prompt_log(&repo, &changes, "changes", None)?);
         }
         let skill_file = components
             .skill
@@ -627,6 +635,23 @@ mod tests {
                 .file_name()
                 .to_string_lossy()
                 .contains("clipboard")));
+    }
+
+    #[test]
+    fn the_branch_change_is_delivered_as_a_reference_the_agent_reads() {
+        let repo = tempdir().unwrap();
+        let section = "Changed since origin/main, 1 file. Read one file's patch with:\n";
+        let delivery = ContextDelivery::prepare(&crate::prompt::PromptComponents {
+            repo_root: repo.path().display().to_string(),
+            diff: Some(section.into()),
+            ..Default::default()
+        })
+        .unwrap();
+        let [reference] = delivery.references.as_slice() else {
+            panic!("one changes reference: {:?}", delivery.references);
+        };
+        let reference = fs::canonicalize(repo.path()).unwrap().join(reference);
+        assert_eq!(fs::read_to_string(reference).unwrap(), section);
     }
 
     #[test]

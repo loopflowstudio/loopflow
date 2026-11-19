@@ -117,6 +117,13 @@ pub struct TrackerItem {
     pub team_id: Option<String>,
     /// Provider user ID of the assignee, if any.
     pub assignee: Option<String>,
+    /// The item this one is a sub-item of, by the id its own `id` would be.
+    pub parent_id: Option<String>,
+    /// Whether this read says what the parent is. Asana names a parent by an
+    /// id Loopflow does not keep, so its reads leave the Task's parent alone.
+    /// Inventories captured before parents were read say nothing either.
+    #[serde(default)]
+    pub parent_observed: bool,
 }
 
 /// Asana has no short identifiers; their Tasks keep the local

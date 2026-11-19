@@ -161,7 +161,7 @@ mod tests {
     async fn team_delta_keeps_comments_across_pages_and_completion() {
         let issue = json!({"id":"issue-1","identifier":"FIX-1","title":"Completed with direction",
             "description":"Body","branchName":null,"completedAt":null,"dueDate":null,
-            "updatedAt":"2026-10-11T12:00:00Z","url":null,"prioritySortOrder":0.0,"sortOrder":1.0,
+            "updatedAt":"2026-10-11T12:00:00Z","url":null,"parent":null,"prioritySortOrder":0.0,"sortOrder":1.0,
             "assignee":null,"state":{"type":"completed"},"team":{"id":"team-1"},"project":null});
         let comment = |id, revision| {
             let mut issue = issue.clone();

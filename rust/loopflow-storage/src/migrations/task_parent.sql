@@ -69,3 +69,33 @@ END;
 -- leaving: task_prs.next_slug LOO-996
 -- leaving: pr_landings.after_merge LOO-996
 -- leaving: pr_landings.next_slug LOO-996
+
+-- A tracker's own parent of an item: a Linear sub-issue's, an Asana subtask's.
+-- Rows read before this column existed have not observed it.
+ALTER TABLE tracker_items ADD COLUMN parent_id TEXT;
+ALTER TABLE tracker_items ADD COLUMN parent_id_observed INTEGER NOT NULL DEFAULT 0;
+
+DROP TRIGGER store_revision_tracker_items_update;
+CREATE TRIGGER store_revision_tracker_items_update AFTER UPDATE ON tracker_items
+WHEN NEW.repo IS NOT OLD.repo OR NEW.tracker IS NOT OLD.tracker OR
+    NEW.id IS NOT OLD.id OR NEW.identifier IS NOT OLD.identifier COLLATE BINARY OR
+    NEW.project_id IS NOT OLD.project_id OR
+    NEW.needs_refresh IS NOT OLD.needs_refresh OR
+    NEW.revision IS NOT OLD.revision OR NEW.branch_name IS NOT OLD.branch_name OR
+    NEW.url IS NOT OLD.url OR NEW.name IS NOT OLD.name OR
+    NEW.description IS NOT OLD.description OR NEW.rank IS NOT OLD.rank OR
+    NEW.completed IS NOT OLD.completed OR
+    NEW.completed_at IS NOT OLD.completed_at OR NEW.due_date IS NOT OLD.due_date OR
+    NEW.state IS NOT OLD.state OR NEW.team_id IS NOT OLD.team_id OR
+    NEW.assignee IS NOT OLD.assignee OR
+    NEW.completed_at_observed IS NOT OLD.completed_at_observed OR
+    NEW.due_date_observed IS NOT OLD.due_date_observed OR
+    NEW.assignee_observed IS NOT OLD.assignee_observed OR
+    NEW.claimed_project_id IS NOT OLD.claimed_project_id OR
+    NEW.project_id_observed IS NOT OLD.project_id_observed OR
+    NEW.parent_id IS NOT OLD.parent_id OR
+    NEW.parent_id_observed IS NOT OLD.parent_id_observed OR
+    (NEW.observed_at IS NULL) IS NOT (OLD.observed_at IS NULL)
+BEGIN
+    UPDATE store_revisions SET revision=revision+1 WHERE domain='planning';
+END;

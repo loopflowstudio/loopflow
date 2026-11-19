@@ -257,7 +257,7 @@ async fn respond(
         json!({"issue": {"id":"source-issue", "identifier":"FIX-1", "url":"https://linear.app/fixture/issue/FIX-1",
             "title":"Deliver the command", "description":"", "dueDate":null,
             "updatedAt":"2026-10-07T00:00:00Z", "completedAt":null, "branchName":null,
-            "prioritySortOrder":1.0, "sortOrder":1.0, "assignee":null, "state":{"type":"unstarted"},
+            "parent":null,"prioritySortOrder":1.0, "sortOrder":1.0, "assignee":null, "state":{"type":"unstarted"},
             "team":{"id":"team-1"}, "project":{"id":"project-1", "name":"Provider destination",
                 "description":"", "content":"workflow: feature", "status":{"type":"started"},
                 "updatedAt":"2026-10-07T00:00:00Z", "archivedAt":null,

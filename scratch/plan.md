@@ -428,15 +428,66 @@ existing update a conversation gets about its own Task; Waves and
      says why in its doc comment.
    - `durable::abandon_task_in` is the one abandon write; `lf task
      abandon` and `complete_children` both call it.
-5. **The link travels.** `TaskParent` through the plan exchange and to Linear
-   and Asana, on LOO-938. Until then a child reaches the tracker as an
-   ordinary issue: `task_creation_intents` carries no parent.
+5. **The link travels.** Built, on LOO-938 (`lf sync LOO-938`, merge
+   50ee8cb3c8). `WorkValue::TaskParent` (`task_parent`) is a plan field:
+   creation writes it through `planning_write::create` (the raw `UPDATE` in
+   `insert_task_row` is gone), a carrier's page holds a parent before its
+   child (`plan_carriers::needs`, same repository only), and the queue's
+   `create` carries it. Linear: `parentId` on `issueCreate` and
+   `issueUpdate`, `parent { id }` in `issue_fields!` and
+   `LIST_ITEMS_QUERY`. Asana: `parent` on `POST /tasks`, the parent's gid
+   read with one `GET /tasks/external:<id>`. A child's creation waits in the
+   drain while its parent's is unsent (`parents_named`, one set for Projects
+   and Tasks). `tracker_items.parent_id` and `parent_id_observed`
+   (`task_parent.sql`) hold what the tracker says; `observe_parents` applies
+   it after a batch is admitted, so a sub-issue read before its parent still
+   links. The cycle refusal is `planning_write::parent_refusal`: a local
+   save errors, a tracker's or another Machine's value is skipped and the
+   Task keeps its parent.
+   Shown by `plan_carriers::tests::a_follow_up_reaches_another_machine_under_its_parent`,
+   `linear_events::tests::a_trackers_parent_becomes_the_tasks_and_never_makes_a_task_its_own_ancestor`,
+   `task_planning_tests::a_follow_up_is_created_in_linear_under_its_parents_issue`
+   and `asana_planning_tests::asana_follow_up_is_created_as_a_subtask_of_its_parent`.
+   Run 2026-11-18: those four; all 373 `loopflow-storage` library tests;
+   execution's `ops::linear::`, `linear::`, `ops::tracker`, `asana::` and
+   `ops::plan_` (148 of 151); both parent `session_cli_tests`; clippy.
+   What it taught: a tracker with no parent must not clear a link it could
+   never hold (a parent in another repository, or one never sent), so
+   "no parent" clears only when the held parent has a tracker item; and a
+   parent in another repository cannot ride a repository's page, or the
+   other Machine files it in the wrong repository.
+   Not built:
+   - Asana reads no parent. Its API names a parent by gid and Loopflow
+     keeps only its own `external` id, so `TrackerItem.parent_observed` is
+     false for Asana and a subtask made in Asana does not become a child.
+     `docs/work.md` says it does ("makes it a sub-issue or subtask of
+     another"); the Linear half is true.
+   - Asana's edit of a parent retires as unsupported. Nothing local changes
+     a parent after filing, so no `task_parent` field action is queued by
+     either tracker today; Linear's `issueUpdate` arm has no caller yet.
+   - A child whose parent's `create` was rejected for good is sent with no
+     parent once the parent has no queued creation, and nothing sends the
+     link later.
+   - A link skipped on import still takes the arriving stamp, so the two
+     Machines keep different parents until one is edited again.
+   - `test(local_planning::)`, `binary(two_people)` and the Swift suites
+     were not run here: gate.
+   Failing on this merge and not from this slice:
+   `planning_lookup_tests::missing_git_task_never_falls_through_to_linear`
+   (expects "not found in the Git tracker", a message LOO-938 removed) and
+   `ops::linear::tests::connect_adds_an_unregistered_wave_on_main_before_linking_it`
+   ("missing field `teams`"). `plan_git::tests::a_task_made_on_one_clone_…`
+   failed twice from this checkout and passed from an empty directory with
+   a temp `HOME`.
 
-Next: slice 5, on `lf sync LOO-938`, and with it the cycle refusal.
+Next: nothing in the plan's slices. Left for gate: the `MachineServer`
+acceptance check, the hook timing with ten open children, and the suites
+named above. Swift still does not decode the receipt's `parent` or the
+pane's two keys.
 
-One PR. #1983 (LOO-938) was open and unmerged at 2026-11-18, with nothing
-new on origin/main since this branch's base, so slice 5 is built on
-`lf sync LOO-938` and the PR waits behind #1983.
+One PR. #1983 (LOO-938) was open and unmerged at 2026-11-18; this branch is
+stacked on it and its PR waits behind #1983. The two LOO-938 test failures
+above come with it.
 
 ## Acceptance check at gate
 

@@ -10,7 +10,8 @@ use serde_json::{json, Value};
 use super::{LinearClient, OrderedIssue, PlanningResponse};
 use crate::ops::tracker::{
     creation_id, ingest_task, message, now, observed_project, observed_task, opening_state,
-    remote_project, remote_task, repository_scope, target_state, value, values, Sent,
+    remote_parent, remote_project, remote_task, repository_scope, target_state, value, values,
+    Sent,
 };
 use crate::ops::OpsResult;
 use crate::store::Store;
@@ -133,6 +134,11 @@ impl LinearClient {
                 WorkValue::TaskProject(project) => {
                     input["projectId"] = json!(project_id(store, project.as_deref()).await?)
                 }
+                WorkValue::TaskParent(parent) => {
+                    if let Some(parent) = remote_parent(store, parent.as_deref()).await? {
+                        input["parentId"] = json!(parent);
+                    }
+                }
                 _ => {}
             }
         }
@@ -232,6 +238,9 @@ impl LinearClient {
             WorkValue::TaskAssignee(assignee) => json!({"assigneeId": assignee}),
             WorkValue::TaskProject(project) => {
                 json!({"projectId": project_id(store, project.as_deref()).await?})
+            }
+            WorkValue::TaskParent(parent) => {
+                json!({"parentId": remote_parent(store, parent.as_deref()).await?})
             }
             other => {
                 return Err(message(format!(
@@ -774,10 +783,10 @@ fn move_input(issues: &[&OrderedIssue], position: usize) -> Option<Value> {
     let primary = match (left, right) {
         (Some(l), Some(r)) if l.priority_sort_order != r.priority_sort_order => {
             return between(Some(l.priority_sort_order), Some(r.priority_sort_order))
-                .map(|p| json!({"prioritySortOrder":p}))
+                .map(|p| json!({"parent":null,"prioritySortOrder":p}))
                 .or_else(|| {
                     between(Some(l.sort_order), None)
-                        .map(|s| json!({"prioritySortOrder":l.priority_sort_order,"sortOrder":s}))
+                        .map(|s| json!({"parent":null,"prioritySortOrder":l.priority_sort_order,"sortOrder":s}))
                 });
         }
         (Some(l), _) => l.priority_sort_order,
@@ -785,7 +794,7 @@ fn move_input(issues: &[&OrderedIssue], position: usize) -> Option<Value> {
         _ => return None,
     };
     between(left.map(|i| i.sort_order), right.map(|i| i.sort_order))
-        .map(|s| json!({"prioritySortOrder":primary,"sortOrder":s}))
+        .map(|s| json!({"parent":null,"prioritySortOrder":primary,"sortOrder":s}))
 }
 
 /// The next single move toward `desired`: the issue, its sort-key input and

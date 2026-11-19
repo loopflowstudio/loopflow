@@ -576,6 +576,46 @@ fn task_create_in_linear_repository_returns_published_task_without_execution() {
 }
 
 #[test]
+fn a_follow_up_is_created_in_linear_under_its_parents_issue() {
+    with_export_plan(|runtime, fixture, repo, task, state| {
+        let wave = runtime
+            .block_on(fixture.store.get_wave(task.wave_id.as_ref().unwrap()))
+            .unwrap()
+            .unwrap();
+        let file = |title: &str, parent: Option<&Task>| {
+            crate::ops::task::task_create(
+                repo,
+                Some(wave.slug()),
+                Some(title.into()),
+                Some("Retain this work".into()),
+                crate::ops::task::TaskAdoptionOptions::default(),
+                crate::ops::task::TaskParentChoice {
+                    named: parent.map(|parent| parent.identifier.clone()),
+                    caller: None,
+                },
+                None,
+            )
+            .unwrap()
+        };
+        let parent = file("Parent", None);
+        let child = file("Follow-up", Some(&parent));
+        let issue = runtime
+            .block_on(state.lock())
+            .issues
+            .iter()
+            .find(|issue| issue["id"] == child.tracker_id.as_ref().unwrap().as_str())
+            .cloned()
+            .expect("the follow-up reached Linear");
+        assert_eq!(
+            issue["parent"]["id"],
+            parent.tracker_id.as_ref().unwrap().as_str()
+        );
+        // What Linear answered names the same parent, so the link stands.
+        assert_eq!(child.parent_task_id, Some(parent.id));
+    });
+}
+
+#[test]
 fn task_sync_still_adopts_a_newer_linear_state() {
     with_planning_task(|runtime, fixture, repo, task, state| {
         runtime.block_on(state.lock()).fail_completion = true;

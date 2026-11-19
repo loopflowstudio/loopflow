@@ -1653,6 +1653,7 @@ fn insert_task_row(conn: &Connection, task: &Task) -> StoreResult<()> {
             task.id.as_str(),
             &[
                 Edit::TaskProject(task.project_id.as_ref().map(ToString::to_string)),
+                Edit::TaskParent(task.parent_task_id.as_ref().map(ToString::to_string)),
                 Edit::TaskLinearId(task.tracker_id.as_ref().map(|id| id.as_str().to_owned())),
                 Edit::TaskIdentifier(task.identifier.clone()),
                 Edit::TaskTitle(Some(task.title.clone())),
@@ -1669,10 +1670,9 @@ fn insert_task_row(conn: &Connection, task: &Task) -> StoreResult<()> {
         ),
         crate::sqlite::planning_write::WriteOrigin::Local,
     )?;
-    conn.execute("UPDATE tasks SET pm_snapshot_synced_at=?2,workspace_slug=?3,created_at=?4,updated_at=?5,parent_task_id=?6 WHERE id=?1",params![
+    conn.execute("UPDATE tasks SET pm_snapshot_synced_at=?2,workspace_slug=?3,created_at=?4,updated_at=?5 WHERE id=?1",params![
         task.id.as_str(),task.tracker_synced_at,task.workspace_slug,
-        task.created_at.unix_timestamp(),task.updated_at.unix_timestamp(),
-        task.parent_task_id.as_ref().map(TaskId::as_str)])?;
+        task.created_at.unix_timestamp(),task.updated_at.unix_timestamp()])?;
     write_task_checkout_in(conn, task)
 }
 

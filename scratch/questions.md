@@ -94,6 +94,31 @@ rest is not chosen.
 - `tests/fixtures/dto/task_status.json` is now read as `DesktopTaskPane`,
   what `lf task show --json` prints, with `row: null`.
 
+## Made while building slice 5, for review
+
+- A tracker's or another Machine's parent that would make a Task its own
+  ancestor, or that names a Task this Machine does not have, is skipped
+  without an error: the Task keeps its parent. Only a local save errors,
+  and no command makes one yet. Skip quietly / record a Task event / show
+  it as a conflicted tracker action?
+- A swap made in the tracker (A under B becomes B under A) read child
+  first is skipped as a cycle, and is not retried until that issue is read
+  again.
+- A tracker item with no parent clears the Task's parent only when the held
+  parent has a tracker item. A parent in another repository or one never
+  sent stays.
+- A parent in another repository does not travel with a repository's plan
+  page; the other Machine has the child without the link.
+- An existing Linear sub-issue becomes a child here at its next read.
+  Wanted for every sub-issue already in Linear / only for Tasks filed from
+  Loopflow?
+- Asana: a follow-up is created as a subtask (one extra `GET` for the
+  parent's gid); a subtask made or moved in Asana is not read back. Store
+  Asana gids so it can be / leave?
+- `TrackerItem.parent_observed` takes `#[serde(default)]` so captured
+  inventories in test fixtures still decode. The type is not an `lf --json`
+  DTO.
+
 ## Raised by reading slice 4 (not run)
 
 - `lf task complete <parent>` closes or abandons children, and each of

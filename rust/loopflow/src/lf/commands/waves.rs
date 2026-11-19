@@ -4010,6 +4010,8 @@ mod tests {
             project_id: Some("current".into()),
             team_id: Some("team".into()),
             assignee: None,
+            parent_id: None,
+            parent_observed: true,
         };
         let mut items = vec![item.clone()];
         item.id = "started".into();
@@ -4223,6 +4225,8 @@ mod tests {
             project_id: Some(predecessor.into()),
             team_id: Some("team".into()),
             assignee: None,
+            parent_id: None,
+            parent_observed: true,
             branch_name: None,
             revision: None,
             url: None,

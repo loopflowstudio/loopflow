@@ -9,6 +9,7 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::Json;
+use loopflow_storage::work::task::Task;
 use serde_json::{json, Value};
 use tokio::sync::Mutex;
 
@@ -87,7 +88,7 @@ async fn create(State(state): State<Shared>, Json(body): Json<Value>) -> Respons
         "name": input["name"], "html_notes": input["html_notes"],
         "completed": input["completed"].as_bool().unwrap_or(false), "completed_at": null,
         "modified_at": modified, "permalink_url": format!("https://app.asana.com/0/{PROJECT}/{id}"),
-        "due_on": input["due_on"], "assignee": null,
+        "due_on": input["due_on"], "assignee": null, "parent": input["parent"],
         "memberships": input["projects"].as_array().unwrap().iter()
             .map(|project| json!({"project": {"gid": project}})).collect::<Vec<_>>(),
     });
@@ -314,6 +315,34 @@ fn asana_task_create_mirrors_task_under_its_loopflow_identity() {
             "<body>Mirror <strong>Tasks</strong> into Asana</body>"
         );
         assert_eq!(task["completed"], false);
+    });
+}
+
+#[test]
+fn asana_follow_up_is_created_as_a_subtask_of_its_parent() {
+    with_asana(|runtime, _fixture, repo, state| {
+        let file = |title: &str, parent: Option<&Task>| {
+            crate::ops::task::task_create(
+                repo,
+                None,
+                Some(title.into()),
+                Some("Brief".into()),
+                crate::ops::task::TaskAdoptionOptions::default(),
+                crate::ops::task::TaskParentChoice {
+                    named: parent.map(|parent| parent.identifier.clone()),
+                    caller: None,
+                },
+                None,
+            )
+            .unwrap()
+        };
+        let parent = file("Parent", None);
+        let child = file("Follow-up", Some(&parent));
+        let asana =
+            |task: &Task| mirrored(runtime, &state, task.tracker_id.as_ref().unwrap().as_str());
+        assert_eq!(asana(&child)["parent"], asana(&parent)["gid"]);
+        // Asana's answer does not say what the parent is; the link stands.
+        assert_eq!(child.parent_task_id, Some(parent.id));
     });
 }
 

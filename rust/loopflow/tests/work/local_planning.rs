@@ -3179,6 +3179,8 @@ fn observed_issue(
         completed_at: None,
         state: Some("unstarted".into()),
         assignee: None,
+        parent_id: None,
+        parent_observed: true,
         due_date: None,
     }
 }

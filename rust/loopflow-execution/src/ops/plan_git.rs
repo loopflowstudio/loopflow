@@ -49,7 +49,7 @@ pub fn exchange_all(store: &SqliteStore) -> Result<()> {
         if !path.is_dir() || crate::ops::tracker::connected(&repo) {
             continue;
         }
-        if let Err(error) = exchange(store, &repo) {
+        if let Err(error) = exchange(store, &repo, None) {
             tracing::debug!(%repo, error = %format!("{error:#}"), "Git plan exchange failed");
         }
     }
@@ -59,25 +59,26 @@ pub fn exchange_all(store: &SqliteStore) -> Result<()> {
 /// [`exchange`] for a clone this Machine has saved nothing in and never read
 /// a plan for, which registers it for [`exchange_all`]. `false` when the
 /// Machine already knows the clone, or it has no remote.
-pub fn first_exchange(store: &SqliteStore, repo: &str) -> Result<bool> {
+pub fn first_exchange(store: &SqliteStore, repo: &str, until: Instant) -> Result<bool> {
     if store.repository_id(repo)?.is_some() || remote(Path::new(repo)).is_none() {
         return Ok(false);
     }
-    exchange(store, repo).map(|()| true)
+    exchange(store, repo, Some(until)).map(|()| true)
 }
 
 /// Fetch every Machine's plan ref, take in what changed in the others', then
 /// commit the records changed here onto this Machine's ref and push it. The
 /// outcome is recorded for `lf repo tracker`. A repository with no remote
-/// does nothing.
-pub fn exchange(store: &SqliteStore, repo: &str) -> Result<()> {
+/// does nothing. With `until`, Git is stopped then and the next exchange
+/// carries what this one did not.
+pub fn exchange(store: &SqliteStore, repo: &str, until: Option<Instant>) -> Result<()> {
     let Some(remote) = remote(Path::new(repo)) else {
         return Ok(());
     };
     // A clone that has saved nothing still reads the plan its remote carries.
     let repository = crate::repository::location::ensure_repository(store, repo)?;
-    turn(store, repo, &remote, &repository, None, |sent_seq| {
-        exchange_with(store, repo, &remote, &repository, sent_seq)
+    turn(store, repo, &remote, &repository, until, |sent_seq| {
+        exchange_with(store, repo, &remote, &repository, sent_seq, until)
     })
 }
 
@@ -131,9 +132,10 @@ fn exchange_with(
     remote: &str,
     repository: &RepositoryId,
     sent_seq: i64,
+    until: Option<Instant>,
 ) -> Result<()> {
     let path = Path::new(repo);
-    git(
+    git_until(
         path,
         &[
             "fetch",
@@ -146,6 +148,7 @@ fn exchange_with(
             &format!("+{OWN}*:{SEEN}*"),
         ],
         None,
+        until,
     )?;
     let me = crate::store::machines::local_machine(store)?.id;
     let seen = seen_refs(path)?;
@@ -183,7 +186,15 @@ fn exchange_with(
             }
         }
     }
-    publish(store, path, remote, me.as_str(), repository, sent_seq, None)?;
+    publish(
+        store,
+        path,
+        remote,
+        me.as_str(),
+        repository,
+        sent_seq,
+        until,
+    )?;
     failed.map_or(Ok(()), Err)
 }
 
@@ -646,7 +657,7 @@ mod tests {
         }
 
         fn exchange(&self) {
-            exchange(&self.store, &self.repo).unwrap();
+            exchange(&self.store, &self.repo, None).unwrap();
         }
 
         /// What follows a save: a push, no fetch.
@@ -703,8 +714,9 @@ mod tests {
 
         // mini was never told about the laptop: the remote is what they share,
         // and the first read of a fresh clone fetches it, once.
-        assert!(first_exchange(&mini.store, &mini.repo).unwrap());
-        assert!(!first_exchange(&mini.store, &mini.repo).unwrap());
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        assert!(first_exchange(&mini.store, &mini.repo, until).unwrap());
+        assert!(!first_exchange(&mini.store, &mini.repo, until).unwrap());
         assert_eq!(mini.title(&task).as_deref(), Some("x"));
         assert_eq!(mini.listed(), ["x"]);
         // Each clone keeps its own repository id and answers to the other's,
@@ -741,6 +753,21 @@ mod tests {
         laptop.exchange();
         assert_eq!(refs(), settled);
         assert_eq!((laptop.unsent(), mini.unsent()), (0, 0));
+    }
+
+    #[test]
+    fn an_exchange_with_an_end_is_stopped_at_it() {
+        let (_root, _origin, laptop, mini) = machines();
+        let task = laptop.task("before a claim");
+        let unsent = laptop.unsent();
+        let now = Some(std::time::Instant::now());
+        let error = exchange(&laptop.store, &laptop.repo, now).unwrap_err();
+        assert_eq!(format!("{error:#}"), "git fetch did not answer in time");
+        assert_eq!(laptop.unsent(), unsent);
+        // The next exchange carries what that one did not.
+        laptop.exchange();
+        mini.exchange();
+        assert_eq!(mini.title(&task).as_deref(), Some("before a claim"));
     }
 
     #[test]
@@ -801,7 +828,7 @@ mod tests {
         let away = origin.bare_path().with_extension("away");
         std::fs::rename(origin.bare_path(), &away).unwrap();
         let task = laptop.task("made offline");
-        let error = exchange(&laptop.store, &laptop.repo).unwrap_err();
+        let error = exchange(&laptop.store, &laptop.repo, None).unwrap_err();
         assert!(format!("{error:#}").starts_with("fatal:"), "{error:#}");
         let held = laptop
             .store

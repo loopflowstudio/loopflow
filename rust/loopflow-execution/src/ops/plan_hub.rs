@@ -52,37 +52,65 @@ pub fn set_hub(
 
 // ---- Another Machine's side ----
 
-/// [`exchange`] for `repo`, when it has no Linear or Asana.
+/// [`exchange`] for `repo`, when it has no Linear or Asana, for as long as
+/// the hub takes: a move waits for its plan to be there.
 pub async fn sync(store: &crate::store::Store, repo: &str) -> Result<()> {
+    exchanged(store, repo, Why::Asked).await
+}
+
+/// [`exchange`] for `repo`, when it has no Linear or Asana, as a read nobody
+/// asked for: the command it rides on waits [`super::plan_carriers::WAIT`] at
+/// most.
+pub async fn read(store: &crate::store::Store, repo: &str) -> Result<()> {
+    let until = Instant::now() + super::plan_carriers::WAIT;
+    exchanged(store, repo, Why::Read(until)).await
+}
+
+async fn exchanged(store: &crate::store::Store, repo: &str, why: Why) -> Result<()> {
     if crate::ops::tracker::connected(repo) {
         return Ok(());
     }
     let (sqlite, repo) = (store.sqlite.clone(), repo.to_owned());
-    crate::journal::request::spawn_blocking(move || exchange(&sqlite, &repo, None)).await?
+    crate::journal::request::spawn_blocking(move || exchange(&sqlite, &repo, why)).await?
+}
+
+/// Why an exchange runs, which is how long it may take.
+#[derive(Debug, Clone, Copy)]
+pub(super) enum Why {
+    /// Someone asked for the plan: as long as the hub takes.
+    Asked,
+    /// A read nobody asked for, over by then.
+    Read(Instant),
+    /// After a save, over by then. A repository with nothing unsent that has
+    /// read the hub before asks it nothing.
+    Save(Instant),
 }
 
 /// Send this Machine's hub, when it has one, the records of `repo` it has not
 /// taken, then take in what changed there. Either order gives the same plan.
-/// With `send_until`, after a save, a repository with nothing unsent that has
-/// read the hub before asks it nothing, and an exchange already running is
-/// waited for only until then. The outcome is recorded for `lf repo tracker`.
-pub(super) fn exchange(store: &SqliteStore, repo: &str, send_until: Option<Instant>) -> Result<()> {
+/// One with an end waits for an exchange already running and for the hub's
+/// answers only until then. The outcome is recorded for `lf repo tracker`.
+pub(super) fn exchange(store: &SqliteStore, repo: &str, why: Why) -> Result<()> {
     let Some(hub) = hub(store)? else {
         return Ok(());
     };
     let Some(repository) = store.repository_id(repo)? else {
         return Ok(());
     };
-    let _turn = super::plan_carriers::lock(store, "plan-hub", &repository, send_until)?;
+    let until = match why {
+        Why::Asked => None,
+        Why::Read(until) | Why::Save(until) => Some(until),
+    };
+    let _turn = super::plan_carriers::lock(store, "plan-hub", &repository, until)?;
     let held = store.select_carrier(repo, Carrier::Hub, hub.id.as_str())?;
-    if send_until.is_some()
+    if matches!(why, Why::Save(_))
         && held.seen_seq.is_some()
         && store.plan_unsent(repo, Carrier::Hub, 0)?.count == 0
     {
         return Ok(());
     }
     let result = (|| {
-        let mut connection = open(store, repo, &hub, &repository)?;
+        let mut connection = open(store, repo, &hub, &repository, until)?;
         send(store, &mut connection, repo, &repository, held.sent_seq)?;
         let mut since = held.seen_seq;
         let mut records = Vec::new();
@@ -118,6 +146,7 @@ fn open(
     repo: &str,
     hub: &Machine,
     repository: &RepositoryId,
+    until: Option<Instant>,
 ) -> Result<Connection> {
     let local = crate::store::machines::local_machine(store)?;
     let sender = Sender {
@@ -131,7 +160,7 @@ fn open(
         },
         secrets: Secrets::default(),
     };
-    let connection = Connection::open_on(hub, sender)?;
+    let connection = Connection::open_on(hub, sender, until)?;
     if connection.welcome().server_revision < crate::machine::wire::PLAN_REVISION {
         return Err(Error::new(ErrorCode::Incompatible, crate::machine::ssh::outdated(hub)).into());
     }

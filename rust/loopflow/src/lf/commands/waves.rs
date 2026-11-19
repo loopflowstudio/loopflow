@@ -967,7 +967,8 @@ fn task_machine(repo: &Path, issue: &str) -> Result<Option<TaskMachine>> {
         selection: Selection::capture(repo, None)?,
         secrets: Secrets::default(),
     };
-    let connection = loopflow_execution::machine::client::Connection::open_on(&machine, sender)?;
+    let connection =
+        loopflow_execution::machine::client::Connection::open_on(&machine, sender, None)?;
     let read = super::read::Read::TaskStatus {
         directory: repo.to_owned(),
         issue: route.task_id.to_string(),

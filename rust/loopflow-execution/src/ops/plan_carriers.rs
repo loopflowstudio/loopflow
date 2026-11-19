@@ -13,22 +13,30 @@ use anyhow::{anyhow, bail, Result};
 use loopflow_model::durable::{RepositoryId, TaskId};
 use loopflow_storage::sqlite::SqliteStore;
 
+use super::plan_hub::Why;
+
 /// One exchange for `repo` by each carrier it has: the hub first, since it
 /// answers in less time than a fetch and what it gives goes out by Git in the
 /// same turn. Git runs whether or not the hub answered; the first failure is
-/// returned.
-fn exchange(store: &SqliteStore, repo: &str) -> Result<()> {
-    let by_hub = super::plan_hub::exchange(store, repo, None);
-    super::plan_git::exchange(store, repo).and(by_hub)
+/// returned. With `until`, both are over by then.
+fn exchange(store: &SqliteStore, repo: &str, until: Option<Instant>) -> Result<()> {
+    let why = until.map_or(Why::Asked, Why::Read);
+    let by_hub = super::plan_hub::exchange(store, repo, why);
+    super::plan_git::exchange(store, repo, until).and(by_hub)
 }
 
-/// [`exchange`] for `repo`, when it has no Linear or Asana.
+/// [`exchange`] for `repo`, when it has no Linear or Asana, for as long as
+/// the carriers take.
 pub async fn sync(store: &crate::store::Store, repo: &str) -> Result<()> {
+    sync_until(store, repo, None).await
+}
+
+async fn sync_until(store: &crate::store::Store, repo: &str, until: Option<Instant>) -> Result<()> {
     if crate::ops::tracker::connected(repo) {
         return Ok(());
     }
     let (sqlite, repo) = (store.sqlite.clone(), repo.to_owned());
-    crate::journal::request::spawn_blocking(move || exchange(&sqlite, &repo)).await?
+    crate::journal::request::spawn_blocking(move || exchange(&sqlite, &repo, until)).await?
 }
 
 /// After a save in `repo`, which has no Linear or Asana: each carrier takes
@@ -40,7 +48,7 @@ pub(crate) async fn send(store: &crate::store::Store, repo: &str) -> Result<()> 
     let hub = {
         let (sqlite, repo) = (store.sqlite.clone(), repo.to_owned());
         crate::journal::request::spawn_blocking(move || {
-            super::plan_hub::exchange(&sqlite, &repo, Some(until))
+            super::plan_hub::exchange(&sqlite, &repo, Why::Save(until))
         })
     };
     let git = {
@@ -55,19 +63,23 @@ pub(crate) async fn send(store: &crate::store::Store, repo: &str) -> Result<()> 
     git?.and(hub?)
 }
 
-/// How long a save, a claim or a first read waits on the carriers.
-const WAIT: Duration = Duration::from_secs(5);
+/// How long a save, a claim, a first read or a read nobody asked for waits on
+/// the carriers.
+pub(super) const WAIT: Duration = Duration::from_secs(5);
 
 /// Before this Machine claims `task`, which nobody owns as far as it has
 /// seen: one exchange by each carrier, so a claim already made elsewhere is
-/// read first. A carrier that fails or outlasts [`WAIT`] leaves the
+/// read first. A carrier that fails or is stopped at [`WAIT`] leaves the
 /// claim to go ahead; whichever claim was first holds once they meet.
 pub(crate) async fn before_claim(store: &crate::store::Store, repo: &Path, task: &TaskId) {
     if !matches!(store.sqlite.task_owned(task), Ok(false)) {
         return;
     }
     let repo = repo.to_string_lossy();
-    briefly(&repo, sync(store, &repo)).await;
+    went_on(
+        &repo,
+        sync_until(store, &repo, Some(Instant::now() + WAIT)).await,
+    );
 }
 
 /// A clone this Machine has not met reads its remote's plan when first
@@ -77,13 +89,17 @@ pub async fn before_first_read(directory: &Path) {
     let Ok(Some((store, repo))) = carried(directory) else {
         return;
     };
+    let until = Instant::now() + WAIT;
     let exchanged = {
         let repo = repo.clone();
         crate::journal::request::spawn_blocking(move || {
-            super::plan_git::first_exchange(&store, &repo).map(drop)
+            super::plan_git::first_exchange(&store, &repo, until).map(drop)
         })
     };
-    briefly(&repo, async { exchanged.await? }).await;
+    went_on(
+        &repo,
+        exchanged.await.unwrap_or_else(|error| Err(error.into())),
+    );
 }
 
 /// The store and repository of `directory`, when this Machine has a store
@@ -97,14 +113,10 @@ fn carried(directory: &Path) -> Result<Option<(SqliteStore, String)>> {
     Ok(Some((crate::store::open_sqlite(&path)?, repo)))
 }
 
-/// Wait [`WAIT`] for an exchange, which runs on past it.
-async fn briefly(repo: &str, exchange: impl std::future::Future<Output = Result<()>>) {
-    match tokio::time::timeout(WAIT, exchange).await {
-        Ok(Ok(())) => {}
-        Ok(Err(error)) => {
-            tracing::debug!(%repo, error = %format!("{error:#}"), "going on without the plan exchange");
-        }
-        Err(_) => tracing::debug!(%repo, "going on before the plan exchange finished"),
+/// A command that read the plan first goes on without it.
+fn went_on(repo: &str, exchanged: Result<()>) {
+    if let Err(error) = exchanged {
+        tracing::debug!(%repo, error = %format!("{error:#}"), "going on without the plan exchange");
     }
 }
 
@@ -147,7 +159,7 @@ fn exchange_after_command(directory: &Path) -> Result<()> {
         turn.running = true;
     }
     loop {
-        let result = exchange(&store, &repo);
+        let result = exchange(&store, &repo, None);
         let mut turns = TURNS.lock().expect("plan turns are never poisoned");
         let turn = turns.entry(repo.clone()).or_default();
         if std::mem::take(&mut turn.again) && result.is_ok() {

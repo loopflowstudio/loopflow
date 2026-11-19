@@ -136,3 +136,12 @@ Still open from before:
     once and is right on the next read. Left as is.
   - The hub's send has no deadline of its own; only the wait for it is five
     seconds.
+
+- QA after slice 4 (2026-11-18), each reversible before release:
+  - Waits a command did not ask for are bounded per wait, not per command:
+    a create or a claim with a carrier hanging takes 10 to 15 s (two
+    five-second waits in a row). One deadline per command would need it
+    passed from the command down; not done.
+  - `lf task sync` and a move's hub exchange stay unbounded (120 s per hub
+    answer, SSH's own limits for Git), since someone asked for them. They
+    print nothing while they wait.

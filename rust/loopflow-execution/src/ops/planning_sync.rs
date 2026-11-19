@@ -177,7 +177,7 @@ fn sync_directory(directory: &Path, refresh: bool) -> OpsResult<()> {
             let store = planning_store().await?;
             if !super::tracker::connected(&repo) {
                 // Nobody asked for this read, so it fetches nothing.
-                return super::plan_hub::sync(&store, &repo).await.map_err(message);
+                return super::plan_hub::read(&store, &repo).await.map_err(message);
             }
             if refresh {
                 super::tracker_events::refresh_repository(&store, &repo).await;

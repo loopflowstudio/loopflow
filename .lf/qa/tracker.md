@@ -42,15 +42,22 @@ case: a home `T` beside a script `t` is the same path. A second clone under
 the *same* `LF_HOME` is a different repository to lf and shows an empty plan;
 its saves go out on the Machine's one ref.
 
-With no server a save waits for `lf task sync <id>`. With `lf server run` for
-each home, a CLI save is pushed on the server's minute and fetched on the
-other's (97 s measured); a `task.create` over the socket is pushed in about
-2 s. To time it, poll `git -C <bare> for-each-ref refs/loopflow/plan`.
+Every save pushes its own ref at once, CLI or socket (about a second
+against a local bare remote). Another Machine reads it on `lf task sync <id>`,
+or on its server's minute (53 s measured). With a hub, the save is on the hub
+when the command returns. To time it, poll `git -C <bare> for-each-ref refs/loopflow/plan`.
 
 To make the remote fail, `git remote set-url origin /nonexistent.git`, save
 and `lf task sync <id>`: `lf repo tracker` reads `unreachable since …` with
 Git's reason, and `--json` fills `plan.git.error` and `failing_since`.
-Restore the URL afterwards. For a first-wins claim race, point one home's
+Restore the URL afterwards. A missing path fails at once; to see whether a
+command keeps to its five seconds, make the remote hang instead: an
+executable that runs `sleep 60`, set as `git config core.sshCommand <it>`,
+with `remote set-url origin git@slow.example:x/y.git`. Time each command
+(`python3 -I -c 'import time;print(time.time())'` before and after); with a
+hanging remote or hub a save, a claim or a first read returns in 5 to 15 s
+(a create reads the hub, then sends: two waits), `lf task sync` waits as
+long as the carriers take. Unset `core.sshCommand` afterwards. For a first-wins claim race, point one home's
 remote at the missing path while both run `lf task claim <id>`, restore it,
 then `lf task sync <id>` on each; the losing home's steer is a row in
 `steers` with `source` `ownership:<entry>`.
@@ -59,7 +66,10 @@ A hub needs no real host: put an `ssh` first on the laptop home's `PATH` that
 runs its last argument with `bash -c` under the hub home's `HOME` and
 `LF_HOME`, with the branch `lf` at that home's `~/.local/bin/lf`; then
 `lf machine add mini` and `lf machine hub mini`. A flag file the stand-in
-checks (exit 255) takes the hub down. The hub must have fetched the laptop's
+checks (exit 255) takes the hub down. For a sleeping mini, have a second
+flag sleep 10 s before exiting 255 (SSH's `ConnectTimeout`); for a hub that
+accepts and never answers, a third flag sleeps 120 s. `pkill -f` the
+stand-in's own path afterwards, never a broader pattern. The hub must have fetched the laptop's
 ref once before it knows the laptop's repository id.
 
 For the returning-user case, build a home with the installed binary

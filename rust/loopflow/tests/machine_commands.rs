@@ -1549,7 +1549,7 @@ fn the_later_change_shows_on_both_machines_through_the_hub() {
     assert!(listed.contains("git smoke"), "{listed}");
     // mini's server fetches once a minute. Each clone keeps its repository id
     // and answers to the others', which is how the hub finds its checkout.
-    loopflow_execution::ops::plan_git::exchange(&plan.remote, remote_path).unwrap();
+    loopflow_execution::ops::plan_git::exchange(&plan.remote, remote_path, None).unwrap();
     assert_eq!(title(&plan.remote).as_deref(), Some("git smoke"));
     ok(&["task", "sync", &identifier]);
     let laptop_id = plan
@@ -1682,9 +1682,16 @@ fn of_two_claims_made_apart_the_first_holds_on_both_machines() {
     ada.ok(&["task", "sync", &identifier]);
     grace.ok(&["task", "sync", &identifier]);
 
-    // Each claim looks at the remote first; neither claim is there yet.
+    // Ada's claim goes to the remote with the save. Grace claims while her
+    // remote does not answer, so she has not seen it.
     ada.ok(&["task", "claim", &identifier]);
+    let origin = repo.bare_path().to_str().unwrap();
+    git(
+        &grace.checkout(),
+        &["remote", "set-url", "origin", "/unreachable/plan.git"],
+    );
     grace.ok(&["task", "claim", &identifier]);
+    git(&grace.checkout(), &["remote", "set-url", "origin", origin]);
     let owner = |home: &Home| {
         loopflow_execution::store::ownership::task_ownership(&home.store(), &task)
             .unwrap()

@@ -449,12 +449,18 @@ etude checkout and `lf` version are unknown.
    `--subscribe`).
 
    What it taught:
-   - The five seconds had to be made true in three places, or a slow carrier
+   - The five seconds had to be made true in four places, or a slow carrier
      held the command: the push is stopped at the deadline (`git_until`), a
      send waits for an exchange already holding the turn only until then
-     (`plan_carriers::lock`), and the two carriers run at once. The hub's
-     connection has no deadline of its own beyond SSH's; a hub that accepts
-     and never answers still holds the command.
+     (`plan_carriers::lock`), the two carriers run at once, and the hub's
+     connection gives each answer what is left of the deadline
+     (`Connection::open_on(.., until)`). QA found the last missing: a hub
+     that accepted and never answered held `lf task create` 240 s.
+   - Every exchange a command waits on without asking is stopped at five
+     seconds, not just waited for: the hub read before a create
+     (`plan_hub::read`), the exchange before a claim and a clone's first read
+     (`plan_git::exchange(.., Some(until))`). QA saw a claim held 122 s by a
+     hanging remote. `lf task sync` and a move's hub exchange stay unbounded.
    - `publish` reads `plan-seen/<me>` itself, so a send builds on the ref as
      last pushed or fetched with no fetch.
    - A refused push (the remote's copy of the ref is ahead of `plan-seen/<me>`:
@@ -578,6 +584,15 @@ etude checkout and `lf` version are unknown.
   `cargo nextest run -p loopflow-execution -p loopflow --lib -E 'test(ops::plan_git::) | test(server::schema::tests::)'`
   (13 tests) and clippy on both crates. The acceptance test, the only one
   that sends to a hub after a save, was not rerun: gate.
+- QA after slice 4, 2026-11-18 (`scratch/qa.html`, homes in `/tmp/lfq3`):
+  two fixes, both bounding carrier waits (hub answers; the exchange before a
+  claim and a first read). After them `cargo nextest run -p loopflow-execution
+  --lib -E 'test(ops::plan_git::)'` (6, with
+  `an_exchange_with_an_end_is_stopped_at_it`) passed and clippy on
+  `loopflow-execution` and `loopflow` is clean. The acceptance test passed (117 s).
+  `of_two_claims_made_apart_…` failed as written since slice 4: Ada's claim is
+  pushed with the save, so Grace's claim saw it and took over. It now cuts
+  Grace's remote while she claims, and passes (11 s).
 - Nothing remains to build: all four slices are in the code and the four
   differences at the top hold in it. Etude's cutover is by hand, after
   release.

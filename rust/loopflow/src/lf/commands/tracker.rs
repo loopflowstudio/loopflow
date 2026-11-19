@@ -116,7 +116,7 @@ pub(crate) fn subscribe_status(
             async move {
                 if let Some(store) = store.as_deref() {
                     if let Err(error) =
-                        loopflow_execution::ops::plan_hub::sync(store, &repo_key).await
+                        loopflow_execution::ops::plan_hub::read(store, &repo_key).await
                     {
                         tracing::debug!(error = %format!("{error:#}"), "hub exchange pending");
                     }

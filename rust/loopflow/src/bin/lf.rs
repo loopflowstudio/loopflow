@@ -1233,10 +1233,9 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
                             loopflow_execution::ops::task_ownership::render(ownership)
                         );
                     }
-                    if let Some(line) = loopflow::lf::commands::waves::task_conversation_line(
-                        &task.id,
-                        &task.identifier,
-                    )? {
+                    if let Some(line) =
+                        loopflow::lf::commands::waves::task_conversation_line(&task.id)?
+                    {
                         println!("Conversation: {line}");
                     }
                     for session in loopflow_execution::ops::task::task_copied_sessions(&task.id)? {

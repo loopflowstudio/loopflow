@@ -30,7 +30,6 @@
       "agent_process_id": "44444444-4444-4444-8444-444444444444",
       "ended": {
         "at": "2026-11-17T12:01:00Z",
-        "by": "died",
         "exit_code": 137
       },
       "start": {
@@ -42,7 +41,8 @@
         "at": "2026-11-17T12:02:02Z",
         "reason": null,
         "command": null
-      }
+      },
+      "status_line": "died 12:01 (exit 137) · starts again 12:02"
     },
     {
       "id": "manual",
@@ -55,7 +55,8 @@
       "agent_process_id": null,
       "ended": null,
       "start": null,
-      "outlook": null
+      "outlook": null,
+      "status_line": null
     }
   ],
   "conversation": "session_5e55105e000040008000000000000002",

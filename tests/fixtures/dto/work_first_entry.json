@@ -57,7 +57,8 @@
     "raw": false,
     "ended": null,
     "start": null,
-    "outlook": null
+    "outlook": null,
+    "status_line": "unknown"
   },
   "reopened": {
     "action": {
@@ -108,7 +109,8 @@
     "raw": false,
     "ended": null,
     "start": null,
-    "outlook": null
+    "outlook": null,
+    "status_line": "unknown"
   },
   "roadmap": {
     "generated_at": "2026-10-11T22:28:09.267041Z",
@@ -328,7 +330,8 @@
       "raw": false,
       "ended": null,
       "start": null,
-      "outlook": null
+      "outlook": null,
+      "status_line": "unknown"
     },
     {
       "action": {
@@ -384,7 +387,8 @@
       "raw": false,
       "ended": null,
       "start": null,
-      "outlook": null
+      "outlook": null,
+      "status_line": "unknown"
     },
     {
       "action": {
@@ -434,7 +438,8 @@
       "raw": false,
       "ended": null,
       "start": null,
-      "outlook": null
+      "outlook": null,
+      "status_line": "closed; `lf resume session_bf12c20b53be450998e36bf24a58b56f` opens it"
     }
   ],
   "task_primary": {
@@ -491,6 +496,7 @@
     "raw": false,
     "ended": null,
     "start": null,
-    "outlook": null
+    "outlook": null,
+    "status_line": "unknown"
   }
 }

@@ -364,11 +364,13 @@ killed before saving its first turn. Then the conversation starts again on a
 fresh thread with its original request, whether the server starts it or you
 do with `lf resume`, and the old thread stays in `lf session history`.
 
-A start that cannot happen says why instead of retrying silently. A work
-session that has never run reads as that, not as a death:
+A work session that has never run reads as that, not as a death. Until its
+first agent runs it is starting, and a start that cannot happen says why
+instead of retrying silently:
 
 ```bash
 lf task status LOO-12
+# Conversation: starting
 # Conversation: could not start: claude is not installed on this Machine's PATH · tries again 12:02
 # Conversation: died 12:01 (exit 137) · starts again 12:02 · last start failed: no PTY left: 511 in use (kern.tty.ptmx_max)
 ```
@@ -377,8 +379,10 @@ lf task status LOO-12
 holder takes one, and the Machine runs out of them first.
 
 `lf session list --json` and `lf task status --json` carry the same answer as
-the Session's `outlook`: `coming_back`, `waiting_for_you`, `quit` or
-`could_not_start`, with when, why and the command. Desktop prints it too.
+the Session's `outlook`: `starting`, `coming_back`, `waiting_for_you`, `quit`
+or `could_not_start`, with when, why and the command. The sentence itself is
+the Session's `status_line`, written once by the server in the Machine's
+local time; `lf task status` and Desktop print it as given.
 
 | After a kill or reboot… | |
 |---|---|

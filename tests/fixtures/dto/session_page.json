@@ -67,7 +67,8 @@
       "raw": false,
       "ended": null,
       "start": null,
-      "outlook": null
+      "outlook": null,
+      "status_line": "running"
     }
   ],
   "next": null

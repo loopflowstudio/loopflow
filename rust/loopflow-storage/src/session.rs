@@ -358,9 +358,10 @@ pub struct SessionSummary {
     pub task_terminal: bool,
     /// Its Task names it as the Task's primary conversation.
     pub task_primary: bool,
-    /// It is its Task's conversation in the Task's checkout on this Machine:
-    /// the one the server's recovery pass starts. A Task checked out
-    /// elsewhere, or a conversation moved to another Machine, is not.
+    /// It is an open Task's conversation in the Task's checkout on this
+    /// Machine: one the server's recovery pass reads. A Task checked out
+    /// elsewhere, a completed conversation, or one moved to another Machine,
+    /// is not.
     pub in_task_checkout: bool,
     pub task_ids: Vec<TaskId>,
     pub captured: Option<i64>,
@@ -400,12 +401,10 @@ pub struct AgentEnd {
     pub exit_code: Option<i32>,
 }
 
-impl AgentEnd {
-    /// The person quit: `/exit` or Ctrl+D (0), or Ctrl+C at the prompt (130).
-    /// Every other end is a death.
-    pub fn by_person(&self) -> bool {
-        matches!(self.exit_code, Some(0 | 130))
-    }
+/// The person quit: `/exit` or Ctrl+D (0), or Ctrl+C at the prompt (130).
+/// Every other exit, and an end nobody saw, is a death.
+pub fn quit_by_person(exit_code: Option<i32>) -> bool {
+    matches!(exit_code, Some(0 | 130))
 }
 
 /// A Graph as its Graph process records it; Current says nothing about a live process.

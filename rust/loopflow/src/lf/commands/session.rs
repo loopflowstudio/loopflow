@@ -9,8 +9,8 @@ use crate::lf::SessionCommand;
 use crate::lf::SessionConnectionArgs;
 use crate::lf::SessionListArgs;
 use loopflow_execution::ops::human_session::{
-    ConversationLaunch, Opening, SessionEnd, SessionOutlook, SessionOutlookKind, SessionRecord,
-    SessionStarts, SessionState,
+    ConversationLaunch, Opening, SessionEnd, SessionOutlook, SessionRecord, SessionStarts,
+    SessionState,
 };
 use loopflow_execution::session_record::SessionTitleSource;
 use loopflow_execution::store::{open_store, storage_config_from_env, Store};
@@ -417,9 +417,13 @@ pub struct SessionFacts {
     /// The server's starts of it since it last finished a turn.
     #[serde(deserialize_with = "Option::deserialize")]
     pub start: Option<SessionStarts>,
-    /// Whether it comes back while it is down, and what brings it back.
+    /// Whether it comes up while it is not running, and what brings it.
     #[serde(deserialize_with = "Option::deserialize")]
     pub outlook: Option<SessionOutlook>,
+    /// All of the above as the server's one sentence; `lf task status`
+    /// prints the Task's conversation's as given.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub status_line: Option<String>,
 }
 
 impl SessionFacts {
@@ -436,79 +440,9 @@ impl SessionFacts {
             ended: session.ended,
             start: session.start,
             outlook: session.outlook,
+            status_line: session.status_line,
         }
     }
-
-    /// `lf task status`'s line for the Task's conversation: running, or how
-    /// it ended and its outlook as the Session gives it. Nothing here decides
-    /// whether it comes back; `now` only picks "starting" over "starts".
-    pub fn conversation_line(&self, task: &str, now: i64) -> String {
-        if matches!(self.state, SessionState::Active | SessionState::Detached) {
-            return match &self.start {
-                Some(SessionStarts {
-                    attempts,
-                    last_started_at: Some(at),
-                }) => format!("running (started again {}, attempt {attempts})", clock(at)),
-                _ => "running".to_string(),
-            };
-        }
-        let ending = match &self.ended {
-            Some(SessionEnd { at, exit_code, .. }) => format!(
-                "died {} ({})",
-                clock(at),
-                exit_code.map_or("no exit recorded".to_string(), |code| format!(
-                    "exit {code}"
-                ))
-            ),
-            None => "closed".to_string(),
-        };
-        let Some(outlook) = &self.outlook else {
-            return match self.state {
-                SessionState::Unknown => "unknown".to_string(),
-                _ => format!("{ending}; `lf resume --task {task}` opens it"),
-            };
-        };
-        let reason = outlook
-            .reason
-            .as_deref()
-            .map_or(String::new(), |reason| format!(" · {reason}"));
-        let again = |later: &str, now_doing: &str| match outlook.at.as_deref() {
-            Some(at)
-                if chrono::DateTime::parse_from_rfc3339(at)
-                    .is_ok_and(|at| at.timestamp() > now) =>
-            {
-                format!(" · {later} again {}", clock(at))
-            }
-            Some(_) => format!(" · {now_doing} again"),
-            None => String::new(),
-        };
-        let mut line = match outlook.kind {
-            SessionOutlookKind::Quit => match &self.ended {
-                Some(end) => format!("quit {}", clock(&end.at)),
-                None => "quit".to_string(),
-            },
-            SessionOutlookKind::ComingBack => {
-                format!("{ending}{}{reason}", again("starts", "starting"))
-            }
-            SessionOutlookKind::WaitingForYou => format!("{ending}{reason}"),
-            SessionOutlookKind::CouldNotStart => format!(
-                "could not start: {}{}",
-                outlook.reason.as_deref().unwrap_or("no reason recorded"),
-                again("tries", "trying")
-            ),
-        };
-        if let Some(command) = &outlook.command {
-            line.push_str(&format!("; `{command}` opens it"));
-        }
-        line
-    }
-}
-
-/// Local `HH:MM` for an RFC 3339 time.
-fn clock(rfc3339: &str) -> String {
-    chrono::DateTime::parse_from_rfc3339(rfc3339)
-        .map(|at| at.with_timezone(&chrono::Local).format("%H:%M").to_string())
-        .unwrap_or_else(|_| rfc3339.to_string())
 }
 
 /// `lf session list`.
@@ -1277,163 +1211,4 @@ pub(super) fn mutate(
             _ => unreachable!("is_mutation selects Session mutations"),
         }
     })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{
-        SessionEnd, SessionFacts, SessionOutlook, SessionOutlookKind, SessionStarts, SessionState,
-    };
-    use loopflow_execution::ops::human_session::SessionEndedBy;
-
-    fn conversation(
-        state: SessionState,
-        ended: Option<SessionEnd>,
-        outlook: Option<SessionOutlook>,
-    ) -> SessionFacts {
-        SessionFacts {
-            id: "conversation".into(),
-            title: "LOO-9 conversation".into(),
-            provider: Some("claude".into()),
-            interactive: true,
-            state,
-            available: false,
-            cwd: "/src/loopflow.loo-9".into(),
-            agent_process_id: None,
-            ended,
-            start: None,
-            outlook,
-        }
-    }
-
-    fn end(by: SessionEndedBy, exit_code: Option<i32>) -> Option<SessionEnd> {
-        Some(SessionEnd {
-            at: "2026-11-17T12:01:00Z".into(),
-            by,
-            exit_code,
-        })
-    }
-
-    const RESUME: &str = "lf resume --task LOO-9";
-    /// 2026-11-17T12:01:30Z, between the end above and a start at 12:05.
-    const NOW: i64 = 1_794_916_890;
-
-    fn outlook(
-        kind: SessionOutlookKind,
-        at: Option<&str>,
-        reason: Option<&str>,
-        command: Option<&str>,
-    ) -> Option<SessionOutlook> {
-        Some(SessionOutlook {
-            kind,
-            at: at.map(str::to_string),
-            reason: reason.map(str::to_string),
-            command: command.map(str::to_string),
-        })
-    }
-
-    fn line(ended: Option<SessionEnd>, outlook: Option<SessionOutlook>) -> String {
-        conversation(SessionState::Closed, ended, outlook).conversation_line("LOO-9", NOW)
-    }
-
-    #[test]
-    fn a_running_conversation_says_so_and_how_often_it_was_started_again() {
-        let mut running = conversation(SessionState::Active, None, None);
-        assert_eq!(running.conversation_line("LOO-9", NOW), "running");
-        running.start = Some(SessionStarts {
-            attempts: 1,
-            last_started_at: Some("2026-11-17T12:01:02Z".into()),
-        });
-        let line = running.conversation_line("LOO-9", NOW);
-        assert!(line.starts_with("running (started again "), "{line}");
-        assert!(line.ends_with(", attempt 1)"), "{line}");
-    }
-
-    /// Each outlook prints as given: whether it comes back, when, and the
-    /// command that opens it otherwise.
-    #[test]
-    fn a_conversation_that_is_down_prints_its_outlook() {
-        use SessionOutlookKind::{ComingBack, CouldNotStart, Quit, WaitingForYou};
-        let died = || end(SessionEndedBy::Died, Some(137));
-
-        let quit = line(
-            end(SessionEndedBy::Person, Some(0)),
-            outlook(Quit, None, None, Some(RESUME)),
-        );
-        assert!(quit.starts_with("quit "), "{quit}");
-        assert!(
-            quit.ends_with("; `lf resume --task LOO-9` opens it"),
-            "{quit}"
-        );
-
-        let under_way = line(
-            died(),
-            outlook(ComingBack, Some("2026-11-17T12:01:00Z"), None, None),
-        );
-        assert!(
-            under_way.ends_with("(exit 137) · starting again"),
-            "{under_way}"
-        );
-        let later = line(
-            died(),
-            outlook(
-                ComingBack,
-                Some("2026-11-17T12:05:00Z"),
-                Some("last start failed: no PTY left: 511 in use (kern.tty.ptmx_max)"),
-                None,
-            ),
-        );
-        assert!(later.contains("(exit 137) · starts again "), "{later}");
-        assert!(
-            later.ends_with(" · last start failed: no PTY left: 511 in use (kern.tty.ptmx_max)"),
-            "{later}"
-        );
-
-        let gave_up = line(
-            end(SessionEndedBy::Died, None),
-            outlook(WaitingForYou, None, Some("started 5 times"), Some(RESUME)),
-        );
-        assert!(
-            gave_up.ends_with(
-                "(no exit recorded) · started 5 times; `lf resume --task LOO-9` opens it"
-            ),
-            "{gave_up}"
-        );
-        let no_server = line(
-            died(),
-            outlook(
-                WaitingForYou,
-                None,
-                Some("no server runs here to start it"),
-                Some(RESUME),
-            ),
-        );
-        assert!(
-            no_server.ends_with(
-                "(exit 137) · no server runs here to start it; `lf resume --task LOO-9` opens it"
-            ),
-            "{no_server}"
-        );
-
-        // It never ran: no "died", no "closed".
-        let failed = line(
-            None,
-            outlook(
-                CouldNotStart,
-                Some("2026-11-17T12:01:00Z"),
-                Some("claude is not installed on this Machine's PATH"),
-                None,
-            ),
-        );
-        assert_eq!(
-            failed,
-            "could not start: claude is not installed on this Machine's PATH · trying again"
-        );
-
-        assert_eq!(
-            line(None, None),
-            "closed; `lf resume --task LOO-9` opens it",
-            "prepared and not yet started"
-        );
-    }
 }

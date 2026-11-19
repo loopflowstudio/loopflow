@@ -921,29 +921,19 @@ struct DTOFixtureTests {
         #expect(decoded == sessions)
     }
 
-    @Test("A Session says how its agent ended and prints the server's outlook; every key is required")
+    @Test("A Session carries how its agent ended, its outlook and the server's sentence; every key is required")
     func sessionEndingFixture() throws {
         let data = try loadFixtureData("session_memberships.json")
         let sessions = try JSONDecoder().decode([SessionRecord].self, from: data)
-        let before = try #require(ISO8601DateFormatter().date(from: "2026-11-17T12:01:30Z"))
-        let after = try #require(ISO8601DateFormatter().date(from: "2026-11-17T12:03:00Z"))
-        #expect(sessions.compactMap(\.outlook?.kind) == [.quit, .comingBack, .waitingForYou, .couldNotStart])
-        #expect(sessions[0].conversationLine() == nil)
-        #expect(sessions[1].ended?.by == .person)
-        #expect(sessions[1].conversationLine() == "Quit; `lf resume run_00000000000000000000000000000002` opens it")
+        #expect(sessions.compactMap(\.outlook?.kind) == [.quit, .comingBack, .waitingForYou, .couldNotStart, .starting])
+        #expect(sessions[0].statusLine == "running")
+        #expect(sessions[1].statusLine == "quit 12:01; `lf resume run_00000000000000000000000000000002` opens it")
         #expect(sessions[3].ended?.exitCode == 137)
         #expect(sessions[3].start?.attempts == 1)
-        #expect(sessions[3].conversationLine(now: after)
-            == "Died (exit 137) · starting again · last start failed: claude is not installed on this Machine's PATH")
-        let later = try #require(sessions[3].conversationLine(now: before))
-        #expect(later.hasPrefix("Died (exit 137) · starts again "))
         #expect(sessions[4].ended?.exitCode == nil)
-        #expect(sessions[4].conversationLine()
-            == "Died (no exit recorded) · started 5 times; `lf resume --task LOO-1` opens it")
-        #expect(sessions[5].conversationLine(now: after)
-            == "Could not start: no PTY left: 511 in use (kern.tty.ptmx_max) · trying again")
+        #expect(sessions[6].statusLine == "starting")
         let objects = try #require(JSONSerialization.jsonObject(with: data) as? [[String: Any]])
-        for key in ["ended", "start", "outlook"] {
+        for key in ["ended", "start", "outlook", "status_line"] {
             var value = objects[3]
             value.removeValue(forKey: key)
             #expect(throws: DecodingError.self) {

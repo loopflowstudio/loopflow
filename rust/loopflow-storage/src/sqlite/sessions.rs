@@ -465,9 +465,10 @@ fn summary_query(page: &str, by_id: bool, now: i64) -> String {
         graph.pid,graph.os_started_at,graph.exit_code,graph.error,a.agent_ended_at IS NOT NULL,
         a.agent_ended_at,a.agent_exit_code,
         a.starts_since_turn,a.last_started_at,a.start_failure,
-        a.moved_to_machine_id IS NULL AND EXISTS(SELECT 1 FROM task_primary_sessions tp
-         JOIN task_checkouts c ON c.task_id=tp.task_id
-         WHERE tp.session_id=s.id AND rtrim(c.worktree,'/')=rtrim(s.cwd,'/'))
+        EXISTS(SELECT 1 FROM task_primary_sessions tp
+         JOIN tasks pt ON pt.id=tp.task_id
+         JOIN task_checkouts pc ON pc.task_id=tp.task_id
+         WHERE tp.session_id=a.id AND {here})
         FROM page s JOIN agent_sessions a ON a.id=s.id
         LEFT JOIN session_events captured ON captured.seq=s.current_capture
         LEFT JOIN graph_process_steps gs ON gs.lf_process_id=captured.lf_process_id
@@ -475,7 +476,8 @@ fn summary_query(page: &str, by_id: bool, now: i64) -> String {
         LEFT JOIN wave_addresses w ON w.id=s.wave_id
         LEFT JOIN tasks t ON t.id=s.task_id
         ORDER BY {order}", super::task_work::session_tasks("a"),
-        task_state = super::durable::task_state_sql("t"))
+        task_state = super::durable::task_state_sql("t"),
+        here = super::session_recovery::task_conversation_here_sql("a", "pt", "pc"))
 }
 
 fn read_summary(

@@ -64,7 +64,8 @@ takes the Desktop pane's relayed route.
 
 Start the branch's `lf server run` detached (Python `os.fork()`/`os.setsid()`,
 stdin `/dev/null`); the recovery pass lives in it. `lf task checkout <task>`
-prepares the conversation and the pass starts it. `kill -9` the provider (find
+prepares the conversation and the pass starts it (`Conversation: starting`
+until its first agent is recorded). `kill -9` the provider (find
 it by `pgrep -f 'w/bin/claude --name <task>'`) and poll `lf task status <task> |
 grep Conversation` once a second: `died … · starting again`, then `running
 (started again …, attempt n)`. A second kill with no finished turn waits the

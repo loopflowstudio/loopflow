@@ -87,13 +87,18 @@ turn or step the Session and the Task run show the command that continues. A
 start that fails records its reason on the Session
 (`agent_sessions.start_failure`, for example `claude is not installed on this
 Machine's PATH`), cleared by the next start that succeeds, and retries on the
-same backoff. A Session's `ended {at, by, exit_code}` and `start {attempts,
+same backoff. A Session's `ended {at, exit_code}` and `start {attempts,
 last_started_at}` carry these facts, and its `outlook {kind, at, reason,
-command}` says once what happens next: `coming_back`, `waiting_for_you`,
-`quit` or `could_not_start`. The Session read folds it
-(`ops::human_session::session_ending`) from the backoff, the give-up, whether
-the Task is checked out and claimed here and whether a server runs;
-`lf session list`, `lf task status` and Desktop print it and derive nothing.
+command}` says once what happens next: `starting`, `coming_back`,
+`waiting_for_you`, `quit` or `could_not_start`. Whether the server starts a
+conversation is one rule, `ops::recovery::server_start`: quit, the give-up,
+whether the Task is open, checked out and claimed here, whether a server
+runs, then the backoff. The pass asks it of each open Task's conversation
+here (`task_conversations_here`) and the Session read
+(`ops::human_session::session_ending`) asks it for the outlook, so a line
+never promises a start the pass will not make. That read also writes the
+sentence, `status_line`; `lf task status` and Desktop print it and derive
+nothing.
 A holder that gets no PTY answers `no PTY left: N in use (<limit>)`, read the
 way `lf machine doctor`'s `ptys` check reads it. Only a Task's work session is
 started; a Wave's or repository's work session, a chat and a batch are

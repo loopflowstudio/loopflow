@@ -243,6 +243,8 @@ public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
     public let start: SessionStarts?
     /// Whether it comes back while it is down, and what brings it back; nil while it runs.
     public let outlook: SessionOutlook?
+    /// Whether it runs, how it ended and its outlook, as the server's one sentence; printed as given.
+    public let statusLine: String?
 
     /// One word for a row: Available for a person wins over what its client is doing.
     public var statusLabel: String {
@@ -274,39 +276,30 @@ public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
         case openArgv = "open_argv"
         case terminalIds = "terminal_ids"
         case turn, raw, ended, start, outlook
+        case statusLine = "status_line"
     }
 }
 
 /// A conversation's last agent end.
 public struct SessionEnd: Codable, Sendable, Hashable {
-    public enum By: String, Codable, Sendable, Hashable {
-        /// `/exit`, Ctrl+D or Ctrl+C at the prompt. It stays quit.
-        case person
-        /// Killed, crashed, or gone with its holder or the Machine.
-        case died
-    }
-
     /// RFC 3339.
     public let at: String
-    public let by: By
     public let exitCode: Int?
 
     enum CodingKeys: String, CodingKey {
-        case at, by
+        case at
         case exitCode = "exit_code"
     }
 
     public func encode(to encoder: Encoder) throws {
         var values = encoder.container(keyedBy: CodingKeys.self)
         try values.encode(at, forKey: .at)
-        try values.encode(by, forKey: .by)
         try values.encode(exitCode, forKey: .exitCode)
     }
 
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         at = try values.decode(String.self, forKey: .at)
-        by = try values.decode(By.self, forKey: .by)
         exitCode = try values.decode(Int?.self, forKey: .exitCode)
     }
 }
@@ -336,10 +329,11 @@ public struct SessionStarts: Codable, Sendable, Hashable {
     }
 }
 
-/// Whether a conversation that is down comes back, and what brings it back.
-/// The server works it out; this app prints it.
+/// Whether a conversation that is not running comes up, and what brings it.
+/// The server works it out, and writes `SessionRecord.statusLine` from it.
 public struct SessionOutlook: Codable, Sendable, Hashable {
     public enum Kind: String, Codable, Sendable, Hashable {
+        case starting
         case comingBack = "coming_back"
         case waitingForYou = "waiting_for_you"
         case quit
@@ -372,34 +366,6 @@ public struct SessionOutlook: Codable, Sendable, Hashable {
         at = try values.decode(String?.self, forKey: .at)
         reason = try values.decode(String?.self, forKey: .reason)
         command = try values.decode(String?.self, forKey: .command)
-    }
-}
-
-extension SessionRecord {
-    /// One line for a Task conversation that is down or was started again: "Died (exit 137) · starting again".
-    /// Nil while it runs normally and when nothing says why it is down. It prints `outlook`; `now` only
-    /// picks "starting" over "starts".
-    public func conversationLine(now: Date = Date()) -> String? {
-        if state == .active || state == .detached {
-            guard let start else { return nil }
-            return "Started again after it died (attempt \(start.attempts))"
-        }
-        guard let outlook else { return nil }
-        let died = ended.map { "Died (\($0.exitCode.map { "exit \($0)" } ?? "no exit recorded"))" } ?? "Closed"
-        let reason = outlook.reason.map { " · \($0)" } ?? ""
-        func again(_ later: String, _ nowDoing: String) -> String {
-            guard let at = outlook.at, let due = ISO8601DateFormatter().date(from: at) else { return "" }
-            return due > now ? " · \(later) again \(due.formatted(date: .omitted, time: .shortened))" : " · \(nowDoing) again"
-        }
-        var line: String
-        switch outlook.kind {
-        case .quit: line = "Quit"
-        case .comingBack: line = died + again("starts", "starting") + reason
-        case .waitingForYou: line = died + reason
-        case .couldNotStart: line = "Could not start: \(outlook.reason ?? "no reason recorded")" + again("tries", "trying")
-        }
-        if let command = outlook.command { line += "; `\(command)` opens it" }
-        return line
     }
 }
 
@@ -538,6 +504,7 @@ extension SessionRecord {
         try values.encode(ended, forKey: .ended)
         try values.encode(start, forKey: .start)
         try values.encode(outlook, forKey: .outlook)
+        try values.encode(statusLine, forKey: .statusLine)
     }
 
     public init(from decoder: Decoder) throws {
@@ -573,5 +540,6 @@ extension SessionRecord {
         ended = try values.decode(SessionEnd?.self, forKey: .ended)
         start = try values.decode(SessionStarts?.self, forKey: .start)
         outlook = try values.decode(SessionOutlook?.self, forKey: .outlook)
+        statusLine = try values.decode(String?.self, forKey: .statusLine)
     }
 }

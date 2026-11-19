@@ -1,5 +1,5 @@
-//! Task conversations that ended without the person quitting, for the
-//! server's recovery pass to start again.
+//! Task conversations in their checkouts here, for the server's recovery
+//! pass to start again, and the counters it keeps on them.
 
 use loopflow_model::durable::TaskId;
 use loopflow_model::id::{AgentProcessId, LfSessionId};
@@ -12,9 +12,8 @@ use crate::StoreResult;
 /// continues.
 pub const CONVERSATION_STARTS: u32 = 5;
 
-/// An open Task's conversation, in its checkout here, whose current agent is
-/// not recorded as quit by the person: it was never started, it ended some
-/// other way, or it is unfinished and may have died.
+/// An open Task's conversation in the Task's checkout on this Machine, with
+/// what decides whether the server starts it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConversationToStart {
     pub session: LfSessionId,
@@ -27,7 +26,8 @@ pub struct ConversationToStart {
     /// When the agent's end was recorded; `None` while its row is unfinished.
     pub ended_at: Option<i64>,
     /// The provider's exit, as its launcher saw it. `None` when nobody saw
-    /// the end: the holder died, or the Machine restarted.
+    /// the end: the holder died, or the Machine restarted. It is written
+    /// just before the end, so it is read on its own.
     pub exit_code: Option<i32>,
     /// The agent's recorded OS identity.
     pub identity: Option<(u32, i64)>,
@@ -35,13 +35,23 @@ pub struct ConversationToStart {
     pub last_started_at: Option<i64>,
 }
 
+/// SQL: Session row `s` is the conversation of open Task `t`, running in its
+/// checkout `c` on this Machine. The recovery pass lists these rows and a
+/// Session's summary asks it of one, so both read one definition.
+pub(super) fn task_conversation_here_sql(s: &str, t: &str, c: &str) -> String {
+    format!(
+        "({open} AND {s}.completed_at IS NULL AND {s}.interactive=1
+          AND {s}.moved_to_machine_id IS NULL
+          AND rtrim({s}.cwd,'/')=rtrim({c}.worktree,'/'))",
+        open = super::durable::task_open_sql(t),
+    )
+}
+
 impl SqliteStore {
     /// Every open Task's primary conversation in this Machine's checkout of
-    /// the Task whose agent did not end by the person quitting (exit 0, or 130
-    /// for Ctrl+C) and that has starts left, most recently active Task first.
-    /// One that never had an agent is included: preparing it asks for a start.
-    /// A moved or completed conversation is not one.
-    pub fn conversations_to_start(&self) -> StoreResult<Vec<ConversationToStart>> {
+    /// the Task, most recently active Task first. Whether the server starts
+    /// one is the caller's rule, not this read's.
+    pub fn task_conversations_here(&self) -> StoreResult<Vec<ConversationToStart>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut statement = conn.prepare_cached(&format!(
             "SELECT s.id,t.id,s.agent_process_id,s.agent_ended_at,s.agent_exit_code,
@@ -50,15 +60,11 @@ impl SqliteStore {
              JOIN tasks t ON t.id=tp.task_id
              JOIN task_checkouts c ON c.task_id=t.id
              JOIN agent_sessions s ON s.id=tp.session_id
-             WHERE {open} AND s.completed_at IS NULL AND s.interactive=1
-               AND s.moved_to_machine_id IS NULL
-               AND rtrim(s.cwd,'/')=rtrim(c.worktree,'/')
-               AND s.starts_since_turn<?1
-               AND (s.agent_exit_code IS NULL OR s.agent_exit_code NOT IN (0,130))
+             WHERE {here}
              ORDER BY t.updated_at DESC,t.id",
-            open = super::durable::task_open_sql("t"),
+            here = task_conversation_here_sql("s", "t", "c"),
         ))?;
-        let rows = statement.query_map([CONVERSATION_STARTS], |row| {
+        let rows = statement.query_map([], |row| {
             Ok(ConversationToStart {
                 session: row.get(0)?,
                 task: TaskId::from_raw(row.get::<_, String>(1)?),

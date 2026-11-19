@@ -57,7 +57,8 @@
     "transition": null,
     "ended": null,
     "start": null,
-    "outlook": null
+    "outlook": null,
+    "status_line": "running"
   },
   {
     "id": "run_00000000000000000000000000000002",
@@ -123,7 +124,6 @@
     "transition": null,
     "ended": {
       "at": "2026-11-17T12:01:00Z",
-      "by": "person",
       "exit_code": 0
     },
     "start": null,
@@ -132,7 +132,8 @@
       "at": null,
       "reason": null,
       "command": "lf resume run_00000000000000000000000000000002"
-    }
+    },
+    "status_line": "quit 12:01; `lf resume run_00000000000000000000000000000002` opens it"
   },
   {
     "id": "run_00000000000000000000000000000003",
@@ -184,7 +185,8 @@
     "transition": null,
     "ended": null,
     "start": null,
-    "outlook": null
+    "outlook": null,
+    "status_line": "running"
   },
   {
     "id": "run_00000000000000000000000000000004",
@@ -237,7 +239,6 @@
     "transition": null,
     "ended": {
       "at": "2026-11-17T12:01:00Z",
-      "by": "died",
       "exit_code": 137
     },
     "start": {
@@ -249,7 +250,8 @@
       "at": "2026-11-17T12:02:02Z",
       "reason": "last start failed: claude is not installed on this Machine's PATH",
       "command": null
-    }
+    },
+    "status_line": "died 12:01 (exit 137) · starts again 12:02 · last start failed: claude is not installed on this Machine's PATH"
   },
   {
     "id": "run_00000000000000000000000000000006",
@@ -312,7 +314,6 @@
     "transition": null,
     "ended": {
       "at": "2026-11-17T12:01:00Z",
-      "by": "died",
       "exit_code": null
     },
     "start": {
@@ -324,7 +325,8 @@
       "at": null,
       "reason": "started 5 times",
       "command": "lf resume --task LOO-1"
-    }
+    },
+    "status_line": "died 12:01 (no exit recorded) · started 5 times; `lf resume --task LOO-1` opens it"
   },
   {
     "id": "run_00000000000000000000000000000007",
@@ -390,7 +392,8 @@
       "at": "2026-11-17T12:02:02Z",
       "reason": "no PTY left: 511 in use (kern.tty.ptmx_max)",
       "command": null
-    }
+    },
+    "status_line": "could not start: no PTY left: 511 in use (kern.tty.ptmx_max) · tries again 12:02"
   },
   {
     "id": "task_00000000000000000000000000000001:feature:demo:0",
@@ -455,6 +458,12 @@
     "transition": null,
     "ended": null,
     "start": null,
-    "outlook": null
+    "outlook": {
+      "kind": "starting",
+      "at": null,
+      "reason": null,
+      "command": null
+    },
+    "status_line": "starting"
   }
 ]

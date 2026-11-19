@@ -1279,19 +1279,13 @@ fn task_conversation(
     )
 }
 
-/// `lf task status`'s conversation line for `task`; `None` before it has one.
-pub fn task_conversation_line(
-    task: &loopflow_model::durable::TaskId,
-    identifier: &str,
-) -> Result<Option<String>> {
+/// `lf task status`'s conversation line for `task`, as the server wrote it;
+/// `None` before it has one.
+pub fn task_conversation_line(task: &loopflow_model::durable::TaskId) -> Result<Option<String>> {
     let Some(store) = loopflow_execution::store::read_existing_registry()? else {
         return Ok(None);
     };
-    let now = time::OffsetDateTime::now_utc().unix_timestamp();
-    let Some(facts) = task_conversation(&std::sync::Arc::new(store), task)? else {
-        return Ok(None);
-    };
-    Ok(Some(facts.conversation_line(identifier, now)))
+    Ok(task_conversation(&std::sync::Arc::new(store), task)?.and_then(|facts| facts.status_line))
 }
 
 /// The open Tasks `query` selects, read from the store's filter rather than

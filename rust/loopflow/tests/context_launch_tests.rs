@@ -1447,7 +1447,6 @@ fn a_killed_task_conversation_comes_back_once_and_a_quit_one_stays_quit() {
     assert_eq!(current, (third, 1), "a quit conversation stays quit");
     let conversation = status();
     assert_eq!(conversation["state"], "closed", "{conversation}");
-    assert_eq!(conversation["ended"]["by"], "person", "{conversation}");
     assert_eq!(conversation["ended"]["exit_code"], 0, "{conversation}");
     assert_eq!(
         conversation["start"],
@@ -1455,6 +1454,12 @@ fn a_killed_task_conversation_comes_back_once_and_a_quit_one_stays_quit() {
         "{conversation}"
     );
     assert_eq!(conversation["outlook"]["kind"], "quit", "{conversation}");
+    assert!(
+        conversation["status_line"]
+            .as_str()
+            .is_some_and(|line| line.starts_with("quit ") && line.ends_with(" opens it")),
+        "{conversation}"
+    );
     assert_eq!(
         conversation["outlook"]["at"],
         serde_json::Value::Null,

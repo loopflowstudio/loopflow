@@ -33,7 +33,7 @@ lf ship LOO-12               # auto on, then the remaining steps: reflect, gate,
 ```
 
 `lf ship` turns [auto](orchestration.md#auto) on and runs the Task, so
-its run stands in for you at `human-review` and `verify`. A PR someone merges
+its run stands in for you at `ship-review` and `verify`. A PR someone merges
 by hand meanwhile is met by the landing step, which sees the merge and goes on
 to `verify`.
 

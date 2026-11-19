@@ -94,9 +94,9 @@ lf session list                  # what is running: each conversation, OS-confir
 ## 4. Pick up the conversation
 
 When the PR is published, the Task waits at its review, in the Task's own
-conversation: one page built from what the run produced. It shows what changes,
-whether the product's concepts and the code's line up, how to try it, what was
-checked, the choices made for you and the questions left open.
+conversation: one page built from what the run produced. It shows what ships,
+how to try it, the choices made for you, and everything left outside the PR,
+each with a proposal to fix it here, give it its own Task or drop it.
 
 ```bash
 lf resume --task <ID>            # from any terminal, on whatever agent it ran

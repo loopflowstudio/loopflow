@@ -12,7 +12,7 @@ failure there still shows the run got past the auto check. Start the branch's
 `lf server run` detached first (the world's `launchctl` refuses bootstrap).
 
 Graph: `.lf/graphs/qaship.yaml` with `- implement`, `- interactive:
-human-review`, `- cmd: land`, `- interactive: verify`; commit, push, then
+ship-review`, `- cmd: land`, `- interactive: verify`; commit, push, then
 `git merge origin/main` in each Task checkout (the graph is read from the
 checkout). For a run with no interactive step ahead, `- implement` then
 `- cmd: land`, on a fresh `lf task create '<words>' --json`.
@@ -34,10 +34,10 @@ carries it as `execution.auto`). Served: hello from
 takes nothing else (a never-run Task takes up the repository's graph), and
 `task.auto.off` takes `"reason":null` beside them and answers `{issue, was_on}`.
 `lf task auto on` is `lf ship`: check both spellings on a Task waiting at
-`human-review` (each stands in there) and on a never-run Task (one Graph run).
+`ship-review` (each stands in there) and on a never-run Task (one Graph run).
 With `--json` the run is the only thing on stdout; "standing in at …" goes to
 stderr. Both spellings at the same moment on a never-run Task leave one run:
-one prints it, the other exits 1 with "is running graph …".
+both print it and exit 0, and `lf task status` shows one Graph run.
 
 Selection state `auto` is a Dashboard expression (`lf desktop dashboard query
 'Auto' 'state:auto'` prints JSON), not a `lf task list` filter. Never run

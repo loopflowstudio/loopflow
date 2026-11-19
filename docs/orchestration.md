@@ -233,26 +233,27 @@ stands at.
 - loop:
     - loop:
         - graph: build      # code and a published PR
-        - interactive: human-review # you read the page; iterate goes back to build
+        - interactive: ship-review # you read the page; iterate goes back to build
     - graph: deliver        # gate, then land and stay until it merges
     - interactive: verify   # you check it on main; fix forward or finish
 ```
 
 ```bash
-lf graph feature                    # explore and human-review open here with you; the rest runs on its own
-lf -b graph feature                 # every step headless; an agent stands in at explore and human-review
+lf graph feature                    # explore and ship-review open here with you; the rest runs on its own
+lf -b graph feature                 # every step headless; an agent stands in at explore and ship-review
 lf task run LOO-12 feature          # runs up to explore and stops; the Task waits in its conversation
-lf task run LOO-12                  # after you're done there: on to human-review
+lf task run LOO-12                  # after you're done there: on to ship-review
 lf task run LOO-12 --from explore   # back to choosing what to build
 lf -b task run LOO-12               # the rest, straight through to a merged PR
 lf ship LOO-12                      # auto on: the rest runs with an agent standing in for you
 ```
 
-At `human-review` you read one page, `scratch/human-review.html`, built from
-what the run already produced: the plan, the concept review, what `qa` saw, each
-step's commit, the open questions and the PR's checks. Ask for more and the
-change goes back to `build` with your words in the plan; otherwise it goes on to
-`deliver`.
+At `ship-review` you read one page, `scratch/ship-review.html`: what ships, in
+your terms, and everything the run left outside the PR, each with a proposal to
+fix it here, give it its own Task, or drop it. It is not a code review; concept
+review and gate already answered whether the change is right. You decide what
+happens to each finding. Ask for more and the change goes back to `build` with
+your words in the plan; otherwise it goes on to `deliver`.
 
 `-i` makes every step of a launch interactive and `-b` every step headless. At an
 interactive step with a loop behind it, you, or the agent standing in, decide
@@ -281,7 +282,7 @@ merge the PR. Turning it on means nobody is waited for, so it runs the Task:
 It prints what `lf task run` prints and leaves one Graph process:
 
 ```bash
-lf ship LOO-12                      # LOO-12 · code from human-review running as Graph run …
+lf ship LOO-12                      # LOO-12 · code from ship-review running as Graph run …
 lf task status LOO-12               # LOO-12  moving · auto: on by Maya, Nov 18 09:04
 lf task auto off LOO-12             # LOO-12: auto off
 lf task auto on LOO-12              # the same command as `lf ship LOO-12`
@@ -290,7 +291,7 @@ lf task auto on LOO-12              # the same command as `lf ship LOO-12`
 A Task waiting at an interactive step is stood in for there, and one that
 never ran takes up its Graph and runs. The run reads auto at each interactive
 step, not at launch: turn it on while `build` runs and that run carries on,
-standing in at `human-review` when it gets there.
+standing in at `ship-review` when it gets there.
 `lf task auto off`, or Desktop's **Auto** toggle, kills nothing. The run carries on to its next interactive step and
 waits there, or reaches a merging step (`lf land`, `lf pr arm`, `pr-land`) and
 waits before it: "Waiting at pr land: auto is off (Maya). `lf ship` lands it."
@@ -302,7 +303,7 @@ and how to go on.
 
 Auto decides who takes the interactive steps; it is not what lets a PR
 merge. Any run that reaches a merging step lands unless auto is off:
-`lf task run` after `human-review` goes through `deliver`, and the `auto` Graph, which has
+`lf task run` after `ship-review` goes through `deliver`, and the `auto` Graph, which has
 no interactive step, lands without the setting ever being on. `lf task run` says
 so on its `merges:` line. A failing run leaves auto alone: the Task stops at
 the failed step, and the next `lf task run` stands in again. A PR merged by hand
@@ -316,7 +317,7 @@ is met by the run's own landing step, which sees the merge and goes on.
 | `moving` | a run carries it, whatever the auto setting |
 | `done` · `abandoned` | completed, dropped |
 
-Builtins are `feature` (explore, then plan, build, human-review, deliver, verify), `code`
+Builtins are `feature` (explore, then plan, build, ship-review, deliver, verify), `code`
 (the same without explore), `auto` (pursue then deliver, no interactive step: request to merged PR
 without you) and `research` (findings, no PR). To change one, copy it, commit it,
 and select it for a Wave with `graph: feature` in `.lf/wave/product/config.yaml`:

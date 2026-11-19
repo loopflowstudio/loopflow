@@ -56,9 +56,9 @@ without starting anything.
 Status and setting are separate axes. `TaskState` says what is happening; the
 auto setting says who takes the interactive steps. One word: **auto**.
 
-- **The setting** is one mark on `task_graphs`: `auto` (`on` | `stopped`, NULL
+- **The setting** is one mark on `task_graphs`: `auto` (`on` | `off`, NULL
   when never set), `auto_at`, `auto_by` (`Starter` JSON resolved at write
-  time). Rust `Option<Auto>`, `AutoState { On, Stopped }`. It moves with the
+  time). Rust `Option<Auto>`, `AutoState { On, Off }`. It moves with the
   Graph record, survives taking up another graph, and is cleared by reopening
   the Task. Migration `task_graph_auto` adds the columns and
   `task_summaries.auto`, backfills from `task_ship_events`, NULLs
@@ -70,12 +70,12 @@ auto setting says who takes the interactive steps. One word: **auto**.
   [ISSUE] [--reason] [--json]` (served as `task.auto.off`);
   `lf -b task run` (on, unless stopped). Nothing else: no route
   approval, and failures, refusals and reaching `end` leave it alone.
-- **`lf ship <task>`** is auto on, then the run (detached, `lf task run`'s
+- **`lf ship <task>`** is the run, asked for auto (detached, `lf task run`'s
   output, `task.ship` returns `TaskRun`). On a live run it reports that run. On
   a Task waiting at an interactive step it stands in at that step.
 - **What reads it:** the Graph runner, at each interactive step of a Task run
   (`RunningGraph::stands_in`), and the landing step, which waits only on
-  `stopped` ("Waiting at pr land: auto is off (Maya). `lf ship` lands it.").
+  `off` ("Waiting at pr land: auto is off (Maya). `lf ship` lands it.").
   `task_state_sql` and `TaskSection::of` never read it. `auto off` kills
   nothing: the run stops at its next interactive step or landing.
 - **No `shipping` state, no Autonomous section.** A Task with auto on reads
@@ -135,12 +135,6 @@ Session. A Task that took up a Graph and never ran it owes setup
 detached, and the person's own `lf task run` then met that live run and
 refused. So the early take-up was itself a request to run.
 
-`lf ship` still takes up the Graph a moment before its own run starts
-(`graph_for_ship`), across `prepare_task`. A conversation opening inside that
-window would start a second run and the ship would report the refusal. Seen
-in QA with two ships at once; not in a fixture. "To build: ship is a run
-that asks for auto" closes it.
-
 Checks nobody has run since main was merged in (2026-11-19):
 
 - Swift build and `scripts/test_desktop.sh --filter 'DTOFixtureTests|ServerProtocolTests|RegistryQueryTests|WorkModelTests|WorkNavigationTests|WaveStandupTests|WorkSelectionTests|TaskStatusTests|TaskConceptTests|DesktopHeadlessTests|PendingChangesTests|WorkCacheTests|TaskRowMetadataTests'`:
@@ -181,47 +175,60 @@ Shape, for gate's review:
   its own Task.
 - Open, nobody has decided: whether `lf -b task run` should write auto on.
 
-## To build: ship is a run that asks for auto
+## Built: ship is a run that asks for auto
 
-Concept review, second pass, 2026-11-19 (`scratch/concept-review.html`), a
-choice made for review. Build this first: it shows soonest whether "ship is
-shorthand" holds in the code.
+Built 2026-11-19 (concept review, second pass). `lf ship` is `carry_task_run`
+with `TaskProcessOptions.auto = AutoAsk::Person { note }`; `lf -b task run`
+sends `AutoAsk::Batch`. `start_task_run` (`ops/task.rs`) writes the ask once,
+after its own take-up (`ship::ask`).
 
-Today `ship_on` (`rust/loopflow-execution/src/ops/task/ship.rs`) decides in
-the CLI process what the run decides again in `start_task_run`
-(`ops/task.rs`): the Graph and its take-up, the claim, whether a run is live,
-where to start. Make `lf ship` an `lf task run` whose request asks for auto:
+- A person's ask on a Task waiting at an interactive step starts at that step
+  (`select_task_run`'s `stands_in`); on a live run it turns auto on and
+  answers `TaskRunStart::Live` (printed as `TaskRun::Running`, `merges: true`,
+  exit 0); at `end` it answers `Ended` and writes nothing.
+- `ship_on`, `ShipStart`, `graph_for_ship`, `task_for_auto`, `live_graph_run`
+  are deleted.
+- What it taught: with the take-up in the run, two first runs at once would
+  both take a Graph up, and the second's `INSERT OR REPLACE` wiped the first's
+  run. A Task with no Graph now takes its first up with
+  `take_up_first_task_graph` (`INSERT OR IGNORE`); the loser, and a run that
+  loses `start_task_graph_run`, reads the Task again. So "moved on graph …
+  while this run was starting" is gone: a bare run that loses gets "is running
+  graph …", a ship reports the live run.
+- A ship that meets a carrier whose Graph process has not registered waits up
+  to 30 s for it (`ship::running_graph`), then falls to the bare run's
+  sentence.
+- Changed on purpose: a ship that fails before its run starts leaves auto
+  unset. A done or abandoned Task gets the run's sentences ("is done; `lf task
+  reopen` …", "is abandoned; inspect …"), not ship's own.
+- Not in a fixture: two ships at the same moment. QA drives it.
 
-- The run request (`TaskProcessOptions`, through `task_place` to
-  `start_task_run`) carries who asks for auto: nobody; `-b` (on unless off,
-  today's `batch_on` from `TaskRunMode::Headless`); a person (on, lifts off,
-  with the `--reason` note). One type, one write, after the run's own take-up.
-- Asked by a person, on a Task waiting at an interactive step, the selection
-  (`select_task_run`) starts at that step instead of after it. A bare
-  `lf task run` there is unchanged.
-- Asked by a person, on a live run: write on and answer with that run
-  (`TaskRun::Running`, `merges: true`), exit 0, in place of "is running
-  graph …". A bare `lf task run` on a live run still gets that sentence.
-- At `end`: `TaskRun::Ended`, nothing written. Done and abandoned Tasks keep
-  their sentences ("is complete", "is abandoned; recover it before turning
-  auto on").
-- Delete `ship_on`, `ShipStart`, `graph_for_ship`, `task_for_auto`,
-  `live_graph_run`. `ship.rs` keeps `set`, `auto_off`, `starter`,
-  `ship_branch_task`. `lf/commands/ship.rs` is `carry_task_run` with the
-  request, keeping "standing in at <step>".
-- Changes on purpose: a ship that fails before its run starts (no worktree,
-  launch refused) leaves auto unset; today it leaves auto on with nothing
-  running.
-- Tests: the two `auto_on_*` fixtures and
-  `auto_off_sticks_through_a_headless_relaunch` still pass; add one for a
-  ship on a live run (reports it, auto on, one Graph run).
+Stored and wire value is `off` (`AutoState::Off`, `task_graph_auto.sql`,
+`task_checkout.json`, `server_schema.json`, Swift `Auto.State.off`,
+`docs/telemetry.md`).
 
-Passed over: keeping `ship_on` and moving only the write (keeps its copy of
-the start choice); leaving the window documented.
+Run 2026-11-19: `task_graph_launch_tests::{auto_o,a_ship,task_ship,a_stopped_ship}`
+15 passed; storage `sqlite::task_work sqlite::task_summaries` 7 passed;
+execution `task_graph:: ops::task::explain::tests:: store::task_work_lifecycle_tests`
+14 passed; `golden_prompt` passed.
 
-Also here, since the migration is unmerged: the stored and wire value
-`stopped` becomes `off` (`AutoState::Off`, `task_graph_auto.sql`, DTO
-fixtures, Swift, SCHEMA.md, docs). Every surface already says "off".
+## To build: the Task run takes the conversation's outlook type
+
+Direction 2026-11-19 (exact words in `scratch/questions.md`, "Run outlook").
+`DiedRun::reason` (`ops/task/run_recovery.rs`, written in this Task) is the
+run's own sentence maker beside the conversation's `SessionOutlook`
+(`ops/human_session.rs`). One shape for both:
+
+- The run's wire facts are `died {at_step, at}` and a `SessionOutlook`
+  (`kind`, `at`, `reason`, `command`); they replace `DiedRun::reason` where
+  `task_execution.rs` fills waiting/blocked.
+- "no server runs here" applies to the run as it does to a conversation.
+- The three run sentences use the conversation's words: clock time,
+  "starting again", no "pass".
+- DTO fixtures, Swift and `SCHEMA`-free: no stored change expected.
+
+Not started. If it proves a separate outcome once opened, file it as its own
+Task instead.
 
 ## Exclusions
 
@@ -230,53 +237,19 @@ fixtures, Swift, SCHEMA.md, docs). Every surface already says "off".
 - `.lf/graphs/autonomous.yaml` is a graph name; it stays.
 - The contract migration that drops what is leaving: LOO-971.
 
-## To build: human-review becomes ship-review
+## Built: human-review is ship-review
 
-Direction 2026-11-19 (exact words in `scratch/questions.md`, "Ship review").
-Concept review and gate own whether the change is right; ship-review makes
-what ships understood and decides what happens to every finding.
+Built 2026-11-19. Step and skill renamed everywhere (`code.yaml`,
+`feature.yaml`, `ship-review.md`, `builtins.rs`, `task_session.md`,
+`.lf/skills/task-session.md`, docs, `.lf/qa`, fixtures, tests); the page is
+`scratch/ship-review.html`. The skill's goals are understanding and a decision
+on every finding, with the filing bar; headless it fixes small things, files
+what clears the bar and goes on. `concept-review.md` says a wrong model in the
+area is this work, however large, and after build means another full pass.
+`docs/orchestration.md` and `docs/getting-started.md` describe the new page.
 
-- Rename the step and skill `human-review` → `ship-review` everywhere:
-  `task/graph/code.yaml`, `feature.yaml`, `task/skill/human-review.md` →
-  `ship-review.md`, `builtins.rs`, `task_session.md` and
-  `.lf/skills/task-session.md`, docs (`ops.md`, `orchestration.md`),
-  `.lf/qa/*.md`, `task_graph.rs` tests, `world/recipes.rs`,
-  `tests/world_recipes.rs`, `tests/work/local_planning.rs`, DTO fixtures
-  (`task_shipping.json`, `server_schema.json`). Graph position is a cursor, so
-  Tasks waiting at the step keep their place. `human-present` surface is
-  separate; leave it.
-- Rewrite the skill's goals (keep it short, builtin voice):
-  - Not a code review and not a go/no-go.
-  - Understanding: the change in the person's terms, real output, ask about
-    what is likeliest to surprise; never "does this look good?".
-  - Findings: everything left outside the PR (concept review's "outside this
-    PR", qa notes, `scratch/questions.md`), each with a proposed disposition:
-    fix here, own Task, drop. The person decides; Tasks are filed then.
-  - The filing bar: a Task only for what is clearly important and too big
-    or too scope-expanding to fix here. Small things are fixed here or not
-    filed, unless there is a real reason to separate them. Several such
-    findings go into one Task, not a fan-out.
-  - With nobody there: same page as the record; fix small things here (copy,
-    a missed rename); file every untracked finding that clears the bar;
-    never reopen the design; go on to delivery.
-- Concept review (`task/skill/concept-review.md`): be willing to take another
-  big pass to get the models right. Today "What is larger than this work goes
-  on the page … Deciding what to do about it is not this review's job" is
-  what produces "outside this PR". Change it so a model that is wrong in the
-  area this work touches is this work, however large the fix; only a
-  separate outcome goes on the page as outside it. Say the same in "After the
-  change is built": a wrong model after build means another full pass, not a
-  follow-up.
+A Task waiting at `human-review` in a stored Graph keeps that captured graph,
+so its step name stays until it takes a Graph up again.
 
-## To build: the Task run speaks the conversation's outlook
-
-Carried from LOO-959's concept review (answer 1a; #1972 merged first). Folded
-in here: this branch owns run recovery (`ops/task/run_recovery.rs`) and its
-restart rule.
-
-- The Task run gets the conversation's outlook type: `SessionOutlook`
-  (`ops/human_session.rs`) replaces `DiedRun::reason` in waiting/blocked; the
-  run's death is `died { at_step, at }`.
-- "no server runs here" applies to the run as it does to the conversation.
-- The three run sentences use the conversation's words: clock time,
-  "starting again", no "pass".
+Not run here: `world_recipes::`, `local_planning` (renamed step in
+assertions). CI.

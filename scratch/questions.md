@@ -35,11 +35,22 @@ Questions 1 and 2 got no written answer in scratch.
   kept. Reverse if someone needs it.
 - **Hand-merged PRs go through the Graph.** No PR watcher; a graph with no
   land step finishes its steps into `end`.
-- **Stored value `off`** (to build; was `stopped`). One name for what people
+- **Stored value `off`** (was `stopped`). One name for what people
   type and what `--json` says.
-- **`lf ship` is a run that asks for auto** (concept review, second pass; to
-  build). The run's take-up writes auto; `ship_on` goes. A ship that fails
+- **`lf ship` is a run that asks for auto** (concept review, second pass).
+  The run's take-up writes auto; `ship_on` is gone. A ship that fails
   before its run starts leaves auto unset. Reverse by restoring `ship_on`.
+- **A ship on a done or abandoned Task gets `lf task run`'s sentence**, not
+  "is complete" / "recover it before turning auto on".
+- **A run that loses the start to another reads the Task again**; the bare
+  run then says "is running graph …". The "moved on graph … while this run
+  was starting" sentence is gone.
+- **A ship waits up to 30 s for a just-started run to register its Graph**
+  before reporting it; past that it gets the bare run's refusal.
+- **A Task waiting at `human-review` keeps that name** in its captured Graph;
+  no stored Graph is rewritten.
+- **The run-outlook steer is in the plan as this Task's next section**, not
+  filed: `DiedRun::reason` is code this PR adds. Reverse by filing it.
 - **`lf task auto on` is the `lf ship` operation** (concept review,
   2026-11-19). It parses as `lf ship`: it runs the Task, standing in at a
   waiting interactive step. Reverse by restoring a mark-only write; to arm
@@ -81,3 +92,7 @@ Jack: "lets also rename human-review to ship-review. And we can discuss quickly 
 mostly i think we dont need like a true "code review" or go/no decisions -- concept review + gate covers that. so an automated ship review is probably mostly about filling followups for anything not covered in the concept-review, or potentially fixing some small things,"
 - Jack, on headless filing: "(a) file every untracked finding as a Task" / "Generally perfer bulk tasks for a bunch of small things rather than just explosive task fan out"
 - Jack: "also encourage the ship review to only follow things that are clearly important, but just too big and too scope-expansive to fix here. We should make sure concept-review is encouraged to be aggressive about being willing to take another big pass to get the models right. / or small stuff, generally either fix it here or just dont file it, unless theres a really good reason to separete it."
+
+## Run outlook (2026-11-19)
+
+Jack, as a comment on this Task: "From LOO-959's concept review (answer 1a, deferred to this Task because 959 merged first as #1972): give the Task run the conversation's outlook type. The run's died {at_step, at} and the SessionOutlook shape replace DiedRun::reason in waiting/blocked; 'no server runs here' applies to the run too; the three run sentences use the conversation's words (clock time, 'starting again', no 'pass'). Fold it into this Task if it fits after ship's restart rule; otherwise file it as its own Task."

@@ -69,3 +69,10 @@ Questions 1 and 2 got no written answer in scratch.
   `lf machine prune` settles it.
 - Whether `lf ship` should set auto inside the run's own take-up
   (`start_task_run`) instead of taking the Graph up just before it.
+
+## Ship review (2026-11-19)
+
+Jack: "lets also rename human-review to ship-review. And we can discuss quickly whether we ant to /refine or change its goals so it makes sense both interactive and not. I would say that at interactive its often my goal to basically:
+(a) try to minimize comprhension debt, make sure i actually understand what is being shipped
+(b) make some calls on how aggressively to go after things found during concept review [often in particular the automated concept reivew says "outside this PR" -- i may disagree or just want to explicitly start those tasks
+mostly i think we dont need like a true "code review" or go/no decisions -- concept review + gate covers that. so an automated ship review is probably mostly about filling followups for anything not covered in the concept-review, or potentially fixing some small things,"

@@ -781,12 +781,17 @@ Every slice is built, slice 8 included; nothing is left for implement. The
 run then goes on through reflect, gate and land (Jack, 2026-11-18: "don't
 stop at human-review. This run ships"). Left for later steps:
 
-- gate: the named checks under Checks, and CI's full matrix. No test ran
-  after the conflict-free merge of main `a0548bfe28` (`df387d1d95`), which
-  changed how Session reads find running agents (#1977) under this branch's
-  `summary_query` additions; `ops::human_session::tests::` and
-  `context_launch_tests::a_killed_task_conversation` are the ones that would
-  show a break.
+- gate: the named checks under Checks, and CI's full matrix. Slice 8's tests
+  ran on the tree with main `a0548bfe28` (#1977) merged. Nothing has been
+  built or run since the later merge of main `3496a8761d` (`55b60b4edd`, no
+  conflicts). It rewrote much of `rust/loopflow/tests/context_launch_tests.rs`
+  (362 lines) and touched `loopflow-storage/src/sqlite/processes.rs`,
+  `lf/commands/waves.rs`, `server/README.md` and
+  `task_graph_launch_tests.rs`, all files this branch changes. First at gate:
+  `cargo clippy --all-targets -- -D warnings`, then
+  `context_launch_tests::a_killed_task_conversation`,
+  `…a_task_conversation_whose_agent`, `…a_task_checkout_starts` and
+  `task_graph_launch_tests::a_task_run_whose_carrier_died`.
 - a person: whether real Claude exits 0 on SIGTERM (decides `holder_stopping`),
   and the real reboot with three Tasks.
 

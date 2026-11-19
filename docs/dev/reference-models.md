@@ -131,10 +131,10 @@ Graph run --< step                 graph_process_steps; result is the step's exi
 | Concept | Owns |
 | --- | --- |
 | Repository | Wave membership |
-| Wave | Enduring objective, memory, cadence, budget and metric instruments; its planning holds status, Tasks, KRs and targets (one Linear Project when connected) |
+| Wave | Enduring objective, memory, cadence and budget; its Projects (Linear Projects when connected) group its Tasks and carry name, summary and status |
 | Task | Worktree, optional PR, captured graph and position, and every associated Session and Graph run; independent Graphs do not move that position |
 | Graph | Reusable authored graph of agent/mechanical/router nodes; a running one is a Graph run and its steps |
-| LfProcess | One lf invocation's opaque id (`LfProcessId`, `LF_PROCESS_ID`); no table holds it. The record that owns the work (Session attachment, Graph run, step, Task carrier, ship event, CI repair, project activation) carries its pid, OS start and result |
+| LfProcess | One lf invocation's opaque id (`LfProcessId`, `LF_PROCESS_ID`); no table holds it. The record that owns the work (Session attachment, Graph run, step, Task carrier, ship event, CI repair) carries its pid, OS start and result |
 | AgentProcess | The provider OS process Loopflow started: durable `id` (`AgentProcessId`) with its launching lf, pid, OS start, spawn state, exit, endpoint and inbox, recorded on its Session's row; the Session also holds the attached lf, that lf's pid, OS start and terminal, and the attachment token. A Session runs one agent at a time; a replaced one has exited |
 | LfSession | Loopflow conversation identity, title, feedback, current AgentSession and provider history |
 | AgentSession | Provider-owned conversation, identified by opaque AgentSessionId for resume, turn matching and account attribution; no separate table |
@@ -513,11 +513,12 @@ not imported. Runtime readers use only the final schema and current encodings.
 
 ### Planning
 
-Linear statuses are the owner: one In Progress Linear Project per Wave. Planned
-Linear Projects express future plans; Completed ones retain history. A Task without
+A Wave holds any number of Projects and selects none; their statuses mirror
+the tracker's. A new Task joins the newest started Project, and makes one when
+the Wave has none open. A Task without
 a graph takes up an explicitly named one, its Wave default, repository `graph:`, then builtin `code`.
-There is no packet or local switch. A Wave's Project is replaced in place, preserving
-active Task identity/worktree/PR/execution and refusing unrelated competing plans.
+There is no packet or local switch. Started Tasks keep their identity, worktree,
+PR and execution whatever happens to their Project.
 A second Machine adopts the same state through ordinary synchronization.
 
 Adjacent APIs keep their own authority: Task PR operations own Git/GitHub;

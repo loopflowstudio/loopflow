@@ -414,3 +414,31 @@ on main the first command alone has already created a Linear Project.
 
 Each slice regenerates `server_schema.json` and `SCHEMA.md` if it touched
 them and deletes the tests of what it removed.
+
+## Docs written ahead of the code (2026-11-18)
+
+They describe the behavior above as intended; the implement steps read them.
+
+- `docs/work.md`: "Plan it: KRs and targets" is now "Projects" (example, which
+  Project a new Task joins, where Projects start and end); KR and metric
+  mentions gone.
+- `docs/dev/planning.md`: intro and Words row; "Plan creation and selection"
+  and "Replace a Wave's Project, keep the work" are one section, "Projects of
+  a Wave"; the KR/target field paragraphs gone.
+- `docs/glossary.md` (KR row → Project row), `docs/agent-api.md`,
+  `docs/index.md`, `docs/orchestration.md`, `docs/dev/machines.md`,
+  `docs/dev/data.md`, `docs/dev/reference-models.md`, `docs/dev/index.md` and
+  regenerated `index.html`, `AGENTS.md` Work model, `PROMPTS.md`,
+  `swift/README.md`, `.lf/qa/tracker.md`.
+
+Left for slice 4, because they follow the code: `docs/dev/reference.md` rows
+84-85, 199, 217 and `reference-code.md` 57, 70-75, 82 (the architecture check
+ties them to live tables), the builtin skills, `SCHEMA.md`.
+
+Settled while writing: Task creation prints `<title> · <id> in Project <name>`
+when the Wave has more than one open Project.
+
+Open, from writing `docs/work.md` "Projects": with `edit-project` gone and no
+tracker, no `lf` command renames, adds or ends a Project, so such a Wave keeps
+the one Project its first Task made, named for the Wave. The docs say so. Is
+that the wanted no-tracker behavior, or does a rename stay?

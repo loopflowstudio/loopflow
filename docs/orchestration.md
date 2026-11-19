@@ -332,9 +332,8 @@ change crosses storage, auth or public APIs.
 ```
 
 **Objective** is what the Wave is for and how it moves. **Process** is
-constraint: when to design first, what never to touch. KRs live in the plan
-([Waves](work.md#waves)). To keep it moving without you, run an ordinary
-command from your own cron or launchd:
+constraint: when to design first, what never to touch. To keep it moving
+without you, run an ordinary command from your own cron or launchd:
 
 ```bash
 # 0 9 * * *  cd ~/src/product && lf --wave product -b skill wave/operate

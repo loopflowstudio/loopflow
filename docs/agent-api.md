@@ -66,7 +66,7 @@ lf task wait INF-123 --until terminal                   # block until it settles
 ## The owners
 
 Tracked Work follows Wave → Task in navigation. A Wave owns its objective and
-memory; its planning holds Tasks, KRs and targets.
+memory; its Projects group its Tasks.
 A Task owns its checkout and its PR history, with one current PR. Every
 conversation and Graph attributed to it is part of its work. The Task has one
 captured graph and position, advanced by `lf task run` and `lf ship`; independent
@@ -252,8 +252,8 @@ Every read the conducting surfaces offer is `--json`:
 
 ```bash
 lf wave list --json                    # every durable Wave and its Machine/runtime evidence
-lf wave status <wave> --json           # hierarchy plus one Rust-derived metric_portfolio
-lf wave show --json                      # every Wave repeats that required portfolio envelope
+lf wave status <wave> --json           # its Projects, Tasks and execution evidence
+lf wave show --json                      # the same reading for every Wave
 lf session history --task INF-123 --json
 lf session usage --wave parser --json
 lf session usage --days 30 --json   # recorded provider usage, newest first

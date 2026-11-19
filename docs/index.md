@@ -118,7 +118,7 @@ lf task run INF-123
 
 A Skill supplies instructions; a Graph composes skills and mechanical operations.
 A Task owns one change, its checkout and PRs. A Wave keeps the objective
-and memory; its planning holds the Tasks, KRs and targets; the Wave names the graph its Tasks take up by default.
+and memory; its Projects group its Tasks; the Wave names the graph its Tasks take up by default.
 
 LfSession keeps the conversation, including headless work, and the pid of the
 agent it runs. A running Graph is one lf process and the steps it starts; the

@@ -51,8 +51,8 @@ Fix the reported host or attachment problem, then use
 `lf open --task LOO-12` to open the conversation without advancing the Graph.
 
 Every agent that works on a Task starts from the same place: the Task's notes
-and thread, its checkout and `scratch/`, and, in a Wave, the Wave's goal,
-memory and KRs.
+and thread, its checkout and `scratch/`, and, in a Wave, the Wave's goal
+and memory.
 
 Run `lf incident` in a Task checkout to investigate a failure, including after
 the Task is done. A named Graph keeps the checkout's Task context and records
@@ -356,7 +356,7 @@ Each Task is one item in the tracker, and the tracker is where coworkers work:
 | open, land or abandon its PR | a link to the PR and its state |
 
 Linear and Asana behave the same way. In Linear, a Wave is an Initiative and
-its current Project is a Linear Project; in Asana, it is a team project.
+each of its Projects is a Linear Project; in Asana, it is a team project.
 
 Every change saves on this machine first and joins one queue of actions for
 the tracker, sent in the order you made them. Each `lf` command sends a short
@@ -403,8 +403,8 @@ billing: no Linear Initiative; showing local planning (lf wave plan connect bill
 ## Waves
 
 A Wave keeps a longer objective moving across many Tasks: a goal, the memory
-agents curate as they work, and its planning: Tasks and KRs. Every Task in it
-starts with that context.
+agents curate as they work, and its Tasks, grouped in Projects. Every Task in
+it starts with that context.
 
 ### Give it a goal and memory
 
@@ -461,7 +461,7 @@ replacement by its ID for a new removal or rename.
 ```bash
 lf --wave billing wave-operate "invoices first"   # one finite pass over its Tasks
 lf resume --wave billing                          # the Wave's ongoing conversation
-lf wave status billing                            # plan, Tasks, metrics and execution evidence
+lf wave status billing                            # Projects, Tasks and execution evidence
 ```
 
 `wave-operate` gives every started Task you own a disposition: moving, acted on,
@@ -526,21 +526,38 @@ remote preference behavior. `lf wave status` explains each value's source.
 A Wave without `config.yaml` reads these keys from `GOAL.md` frontmatter, which
 released lf still reads (LOO-640 removes that).
 
-### Plan it: KRs and targets
+### Projects
 
-```bash
-lf wave plan billing --json                     # its Tasks, KRs and metric targets
-lf wave update-project --wave billing --file project.json
+```text
+$ lf wave create billing
+$ lf task create --wave billing --title "Meter usage events"
+Meter usage events · LOO-12
+$ lf wave status billing
+…
+  Project   billing (4f1c…) · started
 ```
 
-```json
-{"metric_targets":[],"krs":[{"text":"A customer's invoice matches metered usage to the cent.","holds":false}]}
+A new Wave has no Project and sends nothing to the tracker. Its first Task
+makes one, named for the Wave. A Wave can hold several Projects, each with a
+name, a summary and a status; `lf wave status` and `lf wave plan billing --json`
+list them in the Wave's order, ended ones included.
+
+Projects start and end in the tracker: rename one, start another or mark one
+completed in Linear, and `lf wave sync` shows the same here. Without a
+tracker, a Wave keeps the one Project its first Task made.
+
+A new Task joins the Wave's newest started Project, or its newest Project
+that has not ended when none is started. When every Project has ended, the
+Task makes a new one. With more than one open, the command says which it
+chose:
+
+```text
+$ lf task create --wave billing --title "Refund a mischarged invoice"
+Refund a mischarged invoice · LOO-14 in Project Invoicing
 ```
 
-The goal names who benefits; KRs prove it, observably, across a window. A
-Wave's current Project holds its Tasks, KRs and metric targets.
-`lf wave update-project` replaces its KRs and targets in place, and started Tasks keep their worktree and PR
-wherever they are.
+Move a Task to another Project in the tracker. A Task in any Project of its
+Wave runs, and a started Task keeps its worktree and PR wherever it is.
 
 ### Nested Waves
 

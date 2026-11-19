@@ -4,7 +4,7 @@ Read when the change touches `lf repo tracker`, the `tracker:` config key, Git p
 
 A fresh Git repository with no remote is the first-visit case: `lf repo
 tracker` reads `Plan: this Machine.` and `lf task create`, `lf wave
-edit-project` all run. Then `git init --bare` a sibling, `git remote add origin
+create` both run. Then `git init --bare` a sibling, `git remote add origin
 <it>`, push `main`: `lf repo tracker` reads `Plan: Git origin, N unsent.` with
 the records listed. `lf task sync <id>` (it needs an id) exchanges now, and
 `git ls-remote origin` shows `refs/loopflow/plan/<machine id>`: one JSON file

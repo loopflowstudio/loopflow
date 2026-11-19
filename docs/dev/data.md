@@ -328,11 +328,10 @@ those lines by binary.
 
 ## Planning and external transitions
 
-A Wave's selected Project holds its Tasks, KRs and targets. Project rows own saved
+A Wave's Projects group its Tasks; none is selected. Project rows own saved
 planning, with optional tracker bindings and separate tracker events. Local
 changes save before their tracker actions send; conflicts a tracker reports follow
-the planning writer's rules. Replanning preserves started Tasks and their worktree, PR and execution;
-competing current provider Projects require reconciliation.
+the planning writer's rules. Replanning preserves started Tasks and their worktree, PR and execution.
 
 No transaction spans SQLite, payload files, Git, Linear, GitHub and provider
 processes. Use the smallest boundary that can prove the operation: a SQLite

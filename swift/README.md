@@ -143,8 +143,9 @@ open only a Task's conversation and never read Desktop's layouts.
 Repository and Wave
 entry shows their conversation, opened on load or on selection.
 Waves pair that conversation with their objective, status, planning and
-full Task inventory, followed by their metrics. **Project history** and **Workflow**
-open the existing planning inspectors. The sidebar starts at 240 points wide;
+full Task inventory. **Projects** lists the Wave's Projects in order with
+name, status and tracker sync, ended ones included; **Workflow** opens the
+Wave's default Graph in the catalogue inspector. The sidebar starts at 240 points wide;
 drag its edge to resize or use the title-bar button or **⌘\** to toggle it.
 Its scroll position survives Wave and Task navigation. Working order survives
 relaunch; ordinary launch restores the selected Work.
@@ -762,7 +763,7 @@ codebase tree, and registry health.
 - `LoopflowMac/WorkModel.swift` — shared readings, stable selection, and local scope
 - `LoopflowMac/Views/WavesView.swift` — Portfolio membership and Wave inspectors
 - `LoopflowMac/Views/RoadmapView.swift` — all-Wave planning list and lifecycle controls
-- `LoopflowMac/Views/WaveDetailPane.swift` — streamed Wave plan, Tasks and metrics
+- `LoopflowMac/Views/WaveDetailPane.swift` — streamed Wave plan and Tasks
 - `LoopflowMac/PortfolioRepoState.swift` — one repository's Wave projection
 - `Loopflow/Services/RegistryQuery.swift` — typed `lf --json` reads
 - `LoopflowMac/Services/RegistryQueryLocal.swift` — shared Work through the local server; terminal launches and remote file streams through the CLI
@@ -973,14 +974,10 @@ launching a window. Display/terminal integration is opt-in with
 `LOOPFLOW_NATIVE_TESTS=1`; use it for configured-host diagnostics or demo.
 See [Testing](#testing) for the full commands and CLI prerequisite.
 
-Wave opening and Retry call `WorkModel.activateProject` from both WorkSurface and
-Portfolio. The command outlives the opened view; it never refreshes a view directly.
-Both surfaces show “Preparing Project…” while that Wave's planning command is pending,
-retaining cached planning. Retry appears after failure. An unfinished persisted
-Process without a pending local command remains an unknown outcome.
-The Work stream supplies `project_readiness`: the selected plan, dated accepted
-facts, unresolved transition and the exact activation Process's outcome. Empty default
-Graphs render no template section. Command transport errors remain scoped to the Wave.
+Opening a Wave runs no planning command: it shows the Projects and Tasks the
+Work stream supplies, and a Wave with no Project shows an empty Projects list.
+Empty default Graphs render no template section. Command transport errors remain
+scoped to the Wave.
 
 Work observation and navigation project durable Waves, their planning and Tasks with
 associated Sessions and Processes; they introduce no additional Work kinds.

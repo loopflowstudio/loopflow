@@ -168,3 +168,9 @@ Each is reversible before release.
     gets a Project row on its first Task; no command completes a Project
     without a tracker; KR text in saved Projects stops being shown;
     `lf wave edit-project` goes.
+
+## 43bf9b write-docs (2026-11-18)
+
+- Without a tracker, a Wave keeps the one Project its first Task made: no `lf`
+  command renames, adds or ends a Project once `lf wave edit-project` goes.
+  `docs/work.md` "Projects" states this. Wanted, or does a local rename stay?

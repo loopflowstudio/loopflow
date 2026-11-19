@@ -267,7 +267,7 @@ at human-review. lf task status LOO-15
 A merge is news once Loopflow has seen it: `lf land` and Auto-Ship see their
 own, and a PR merged by hand on GitHub shows at the next `lf pr reconcile`.
 
-`lf wave show` and Desktop list a child under its parent. Once the parent is
+`lf wave show` lists a child under its parent. Once the parent is
 done or abandoned, a child still open is listed on its own; its link stays.
 
 ## Finish

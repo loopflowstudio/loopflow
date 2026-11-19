@@ -254,10 +254,11 @@ reads the files that changed in each other Machine's ref since the tip in
 `plan_refs`, applies them through the one way in, then commits the records
 past `sent_seq` onto its own ref and pushes. It uses no index and no worktree,
 and runs outside any SQLite transaction. A file that does not parse, or a
-field this build does not know, is skipped and logged; the rest applies. A
-clone whose repository id differs from a fetched ref's takes the lower of the
-two, so clones converge without a command. A repository with no remote writes
-no ref. A gone Machine's ref can be deleted once any Machine has fetched it.
+field this build does not know, is skipped and logged; the rest applies. Each
+clone keeps its own repository id and records the id every fetched ref names
+as a locator of its checkout (`locate_repository`), so a hub or a move that
+names the repository by another Machine's id finds it and no saved Task
+changes repository. A repository with no remote writes no ref. A gone Machine's ref can be deleted once any Machine has fetched it.
 
 **Hub.** A Machine whose `hub:` setting names another sends the records past
 `sent_seq` in `plan.apply` and reads `plan.changes { repository, since }` page
@@ -270,9 +271,11 @@ nothing.
 **When they run.** The Machine server owns both. After each command it answers
 it exchanges with the hub and pushes to Git, one exchange per repository at a
 time and at most one every five seconds after the last. One server task fetches
-every repository that has a remote and no tracker every 60 s. `lf task sync`
-does both in the foreground. A command run with no server sends to the hub and
-leaves Git unsent until the server or `lf task sync`. A cold Task lookup,
+every repository that has a remote and no tracker every 60 s, which is also
+when a save made by the CLI is pushed; the CLI itself sends to the hub only.
+`lf task sync` does both in the foreground. The first `lf task list` or `lf repo tracker` in a clone the Machine
+has saved nothing in does one exchange before it reads, which registers the
+clone for the server's minute. A cold Task lookup,
 provider exit, `lf wave status --sync` and `lf repo tracker --subscribe` read
 the hub too.
 

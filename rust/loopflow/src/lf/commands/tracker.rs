@@ -69,6 +69,9 @@ async fn open_store() -> Result<Store> {
 }
 
 async fn run_async(repo: &Path, cmd: Option<&RepoTrackerCommand>, status_json: bool) -> Result<()> {
+    if cmd.is_none() {
+        loopflow_execution::ops::plan_carriers::before_first_read(repo).await;
+    }
     let store = open_store().await?;
     let repo_key = repo.to_string_lossy();
     match cmd {

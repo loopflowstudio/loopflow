@@ -216,8 +216,9 @@ ordinary comment delivery to Linear, the plan ref or the hub; arriving comments 
 into the log with the Machine that wrote them. An unknown Machine remains an
 entry reference, never an invented SSH route.
 Plan refs and the hub address a repository by its RepositoryId. A plan ref
-carries it: a clone that fetches a ref naming another ID takes the lower of the
-two, so every clone of one remote converges without a command. A repository
+carries it: a clone that fetches a ref naming another ID records it as a locator of
+its own checkout, so every clone of one remote answers to every Machine's ID
+without a command and keeps its own. A repository
 with no remote binds each clone by hand (`lf config repo --bind <id>`) before a
 hub can reach it. Explicit association converges
 established roots on a selected ID without rewriting Work; Desktop reassociates retained windows on opening/restoration. This associates repository roots, not divergent

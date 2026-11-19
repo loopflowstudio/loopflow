@@ -1546,15 +1546,21 @@ fn the_later_change_shows_on_both_machines_through_the_hub() {
     // The teammate never heard of the laptop: the Task is in the remote.
     teammate(&["task", "sync", &identifier]);
     assert_eq!(title(&teammate_store()).as_deref(), Some("git smoke"));
-    // mini's server fetches once a minute; every clone ends on one repository.
+    let listed = teammate(&["task", "list"]);
+    assert!(listed.contains("git smoke"), "{listed}");
+    // mini's server fetches once a minute. Each clone keeps its repository id
+    // and answers to the others', which is how the hub finds its checkout.
     loopflow_execution::ops::plan_git::exchange(&plan.remote, remote_path).unwrap();
     assert_eq!(title(&plan.remote).as_deref(), Some("git smoke"));
     ok(&["task", "sync", &identifier]);
+    let laptop_id = plan
+        .local
+        .repository_id(plan.local_path.to_str().unwrap())
+        .unwrap()
+        .unwrap();
     assert_eq!(
-        plan.local
-            .repository_id(plan.local_path.to_str().unwrap())
-            .unwrap(),
-        plan.remote.repository_id(remote_path).unwrap()
+        plan.remote.repository_path(&laptop_id).unwrap().as_deref(),
+        Some(remote_path)
     );
 
     // With a hub, a save is on mini when the command returns.

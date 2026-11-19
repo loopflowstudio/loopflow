@@ -1,0 +1,739 @@
+<!doctype html><meta charset="utf-8"><title>LOO-938 QA</title>
+<style>body{font:15px/1.5 -apple-system,sans-serif;max-width:980px;margin:2em auto;padding:0 1em;color:#1c1c1c}
+pre{background:#f5f5f3;padding:12px;overflow:auto;font:12px/1.45 ui-monospace,Menlo,monospace;border-radius:6px;max-height:520px}
+h2{margin-top:2.2em}code{background:#f0f0ee;padding:1px 4px;border-radius:3px}.saw{border-left:3px solid #888;padding-left:12px}
+table{border-collapse:collapse}td,th{border:1px solid #ddd;padding:6px 10px;text-align:left;vertical-align:top}</style>
+<h1>LOO-938: one plan at every size, used by hand</h1>
+<p>2026-11-18. The branch <code>lf</code> (debug build) driven from the shell in private homes under <code>/tmp/lfq2</code>: one <code>HOME</code>/<code>LF_HOME</code> pair per Machine, bare remotes beside them, a stand-in <code>ssh</code> for the hub, the installed <code>lf 0.16.0+7bb879aff</code> for the returning-user home. Transcripts are the commands as run; <code>[L]</code> is the laptop, <code>[M]</code> the mini, <code>[B]</code> bob's Machine.</p>
+<h2>What broke and was fixed</h2>
+<table>
+<tr><th>Seen</th><th>Cause</th><th>Fix</th></tr>
+<tr><td>On the second Machine <code>lf task show &lt;id&gt;</code> found the Task and <code>lf task list</code> was empty. Either Machine could be the one: whichever had the higher repository id lost its list after the first fetch.</td>
+<td>The Git exchange imported under the clone's own repository id, then rebound the clone to the lowest id any ref named. The list reads by the selected id, and a trigger forbids moving a Task to another repository id.</td>
+<td>Clones no longer converge. Each keeps its id and records the others' as locators of its checkout (<code>SqliteStore::locate_repository</code>), which is all the hub and a move need. <code>ops/plan_git.rs</code>, test extended to read the list on both clones.</td></tr>
+<tr><td>A teammate's fresh clone: <code>lf task list</code> empty and <code>lf repo tracker</code> reading <code>Plan: Git origin.</code>, for good, with both servers running.</td>
+<td>Reads register nothing, and the server only fetches repositories the Machine has registered.</td>
+<td>The first <code>lf task list</code> or <code>lf repo tracker</code> in a clone the Machine has not met does one exchange, five seconds at most, before it reads (<code>plan_git::first_exchange</code>).</td></tr>
+<tr><td>Three Desktop tests failed (<code>WorkPart(rawValue: "git_destinations") → nil</code>). The Swift sources had not been compiled on this branch.</td>
+<td>A test helper still named the part this branch renamed to <code>plan_home</code>.</td>
+<td>Helper sends a <code>plan_home</code> frame. <code>scripts/test_desktop.sh --filter 'DTOFixtureTests|DesktopHeadlessTests|WorkModelTests'</code>: 116 tests pass.</td></tr>
+<tr><td>Docs: &ldquo;within a minute&rdquo;, &ldquo;a few seconds after a change&rdquo;, bare <code>lf task sync</code>, &ldquo;takes the lower of the two&rdquo; ids.</td>
+<td>Measured otherwise; <code>lf task sync</code> needs a Task.</td>
+<td><code>docs/work.md</code>, <code>docs/dev/planning.md</code>, <code>docs/dev/machines.md</code>, <code>docs/dev/reference.md</code> say what happens.</td></tr>
+</table>
+<h2>Scenarios</h2>
+<h3>1. One Machine, no remote</h3><p>A new home and a new repository with no remote. Nothing travels and nothing is asked for.</p><pre>[L] $ lf repo tracker
+Plan: this Machine.
+(exit 0)
+
+[L] $ lf task list
+baf129 · — · Write the changelog
+(exit 0)
+
+[L] $ lf repo tracker
+Plan: this Machine.
+(exit 0)
+
+[L] $ lf repo tracker --json
+{&quot;actions&quot;:[],&quot;plan&quot;:{&quot;git&quot;:null,&quot;hub&quot;:null},&quot;tracker&quot;:null}
+(exit 0)</pre><p class="saw">Works. <code>Plan: this Machine.</code>, <code>plan: {git: null, hub: null}</code>.</p>
+<h3>2. Two Machines sharing a remote</h3><p>The laptop saves and syncs; a second Machine with a fresh clone runs <code>lf task list</code> as its first command; each then makes a Task. Run on the final build.</p><pre># Final build. P (laptop) is a new Machine with a repository that has a remote.
+[P] $ lf task create &#x27;Write the changelog&#x27;
+[P] $ lf repo tracker
+Plan: Git origin, 1 unsent.
+  37a1e2
+(exit 0)
+
+[P] $ lf task sync 37a1e2
+37a1e2: nothing unsent
+(exit 0)
+
+[P] $ lf repo tracker
+Plan: Git origin.
+(exit 0)
+
+# Q (mini) is a second new Machine with a fresh clone. Its first command is a read.
+[Q] $ lf task list
+37a1e2 · — · Write the changelog
+(exit 0)
+
+[Q] $ lf repo tracker
+Plan: Git origin.
+(exit 0)
+
+# Q makes a Task before P has heard of Q; each keeps its own repository id, and both lists show both Tasks.
+[Q] $ lf task create &#x27;Made on the mini&#x27;
+[Q] $ lf repo tracker
+Plan: Git origin, 1 unsent.
+  55df5d
+(exit 0)
+
+[Q] $ lf task sync 55df5d
+55df5d: nothing unsent
+(exit 0)
+
+[P] $ lf task sync 37a1e2
+37a1e2: nothing unsent
+(exit 0)
+
+[P] $ lf task list
+37a1e2 · — · Write the changelog
+55df5d · — · Made on the mini
+(exit 0)
+
+[Q] $ lf task list
+37a1e2 · — · Write the changelog
+55df5d · — · Made on the mini
+(exit 0)
+
+P repository_plans (id, selected): [(&#x27;repo_c07dbeda&#x27;, 1), (&#x27;repo_84a89b17&#x27;, 0)] task repository ids: [&#x27;repo_c07dbeda&#x27;]
+Q repository_plans (id, selected): [(&#x27;repo_84a89b17&#x27;, 1), (&#x27;repo_c07dbeda&#x27;, 0)] task repository ids: [&#x27;repo_84a89b17&#x27;]
+# R is a fresh clone whose remote does not answer: the first read still answers, and says why the plan is empty.
+[R] $ lf task list
+(exit 0)
+
+[R] $ lf repo tracker
+Plan: Git origin, unreachable since Nov 18 17:05.
+  fatal: &#x27;/tmp/lfq2/gone.git&#x27; does not appear to be a git repository
+(exit 0)</pre><p class="saw">Broke twice before it worked, both fixed (below). Now the first read in a fresh clone shows the plan, both lists show both Tasks, and each clone keeps its own repository id with the other's as a locator. A clone whose remote does not answer still answers and names Git's reason.</p>
+<h3>3. The later edit wins</h3><p>Both Machines retitle one Task before exchanging; the mini's edit is made two seconds later.</p><pre># Both Machines retitle the same Task before either exchanges; M&#x27;s edit is made second.
+[L] $ lf task update baf129 --title Changelog (laptop wording)
+task_baf129fa07ad4d9ca959ec419fe8f68a: updated
+(exit 0)
+
+[M] $ lf task update baf129 --title Changelog (mini wording, later)
+task_baf129fa07ad4d9ca959ec419fe8f68a: updated
+(exit 0)
+
+[L] $ lf task sync baf129
+baf129: nothing unsent
+(exit 0)
+
+[M] $ lf task sync baf129
+baf129: nothing unsent
+(exit 0)
+
+[L] $ lf task sync baf129
+baf129: nothing unsent
+(exit 0)
+
+[L] $ lf task list
+baf129 · — · Changelog (mini wording, later)
+266bec · — · Fix the login bug
+177842 · — · Made on the mini
+587014 · — · Timing probe
+(exit 0)
+
+[M] $ lf task list
+baf129 · — · Changelog (mini wording, later)
+266bec · — · Fix the login bug
+177842 · — · Made on the mini
+587014 · — · Timing probe
+(exit 0)
+
+[L] $ lf repo tracker
+Plan: Git origin.
+(exit 0)
+
+[M] $ lf repo tracker
+Plan: Git origin.
+(exit 0)</pre><p class="saw">Works. Both end on the later title, nothing marked lost.</p>
+<h3>4. Waves, Projects, comments</h3><p>A Wave, a Task and a comment made on the laptop; the mini renames the Wave while the laptop moves the Task into it.</p><pre># A Wave, a Task in it and a comment made on L; read on M.
+[L] $ lf wave create billing
+Added Wave billing; committed .lf/wave/billing on /private/tmp/lfq2/L/repo (b0fb6a27b2)
+(exit 0)
+
+[L] $ lf --wave billing task create &#x27;Invoice export&#x27;  -&gt; 68a0d2
+[L] $ lf comment 68a0d2 Use the CSV format finance asked for
+Saved f0728439-44a0-4ee6-abca-45b623956c12
+(exit 0)
+
+[L] $ lf repo tracker
+Plan: Git origin, 4 unsent.
+  project billing
+  wave billing
+  68a0d2
+  comment f6e43398
+(exit 0)
+
+[L] $ lf task sync 68a0d2
+68a0d2: nothing unsent
+(exit 0)
+
+[M] $ lf task sync 68a0d2
+68a0d2: nothing unsent
+(exit 0)
+
+[M] $ lf task list
+baf129 · — · Changelog (mini wording, later)
+266bec · — · Fix the login bug
+177842 · — · Made on the mini
+587014 · — · Timing probe
+68a0d2 · — · Invoice export
+(exit 0)
+
+[M] $ lf wave list
+WAVE              REPOSITORY                    STATUS    TASKS  MACHINE         
+billing           /private/tmp/lfq2/M/repo      ready         0  unplaced        
+(exit 0)
+
+comments on M: [&#x27;Use the CSV format finance asked for\n\n&lt;!-- loopflow-requester:&quot;ada&quot; --&gt;\n\n&lt;!-- loopflow-steer:f6e43398-f32d-43e0-a6cf-05539858ed6b --&gt;&#x27;]
+wave: None project: None
+[L] $ lf task move 68a0d2 --wave billing
+task_68a0d2cce3d944ecb2644eb8acab9fd4: membership saved
+(exit 0)
+
+[M] $ lf wave rename billing invoicing
+Renamed Wave billing → invoicing
+(exit 0)
+
+[L] $ lf task sync 68a0d2
+68a0d2: nothing unsent
+(exit 0)
+
+[M] $ lf task sync 68a0d2
+68a0d2: nothing unsent
+(exit 0)
+
+[L] $ lf task sync 68a0d2
+68a0d2: nothing unsent
+(exit 0)
+
+[M] $ lf wave list
+WAVE              REPOSITORY                    STATUS    TASKS  MACHINE         
+invoicing         /private/tmp/lfq2/M/repo      ready         1  unplaced        
+(exit 0)
+
+[L] $ lf wave list
+WAVE              REPOSITORY                    STATUS    TASKS  MACHINE         
+invoicing         /private/tmp/lfq2/L/repo      ready         1  unplaced        
+(exit 0)
+
+[L] $ lf repo tracker
+Plan: Git origin.
+(exit 0)
+
+[M] $ lf repo tracker
+Plan: Git origin.
+(exit 0)</pre><p class="saw">Works. Both end on <code>invoicing</code> with one Task. (<code>lf --wave billing task create</code> files to the backlog on both; not this change.)</p>
+<h3>5. Offline</h3><p>The laptop's remote stops answering, it saves twice, then the remote returns.</p><pre># L&#x27;s remote stops answering (URL pointed at a path that does not exist).
+[L] $ lf task update 266bec --title Fix the login bug on Safari
+task_266bec5a9e1749ab810d2bab8e5f364b: updated
+(exit 0)
+
+[L] $ lf task create &#x27;Made offline&#x27;
+[L] $ lf repo tracker
+Plan: Git origin, 2 unsent.
+  266bec
+  dea850
+(exit 0)
+
+[L] $ lf task sync 266bec
+Error: fatal: &#x27;/tmp/lfq2/gone.git&#x27; does not appear to be a git repository
+(exit 1)
+
+[L] $ lf repo tracker
+Plan: Git origin, unreachable since Nov 18 16:35, 2 unsent.
+  266bec
+  dea850
+  fatal: &#x27;/tmp/lfq2/gone.git&#x27; does not appear to be a git repository
+(exit 0)
+
+[L] $ lf repo tracker --json
+{&quot;actions&quot;:[],&quot;plan&quot;:{&quot;git&quot;:{&quot;error&quot;:&quot;fatal: &#x27;/tmp/lfq2/gone.git&#x27; does not appear to be a git repository&quot;,&quot;failing_since&quot;:1795048555,&quot;records&quot;:[&quot;266bec&quot;,&quot;dea850&quot;],&quot;remote&quot;:&quot;origin&quot;,&quot;unsent&quot;:2},&quot;hub&quot;:null},&quot;tracker&quot;:null}
+(exit 0)
+
+[L] $ lf task list
+baf129 · — · Changelog (mini wording, later)
+266bec · — · Fix the login bug on Safari
+177842 · — · Made on the mini
+587014 · — · Timing probe
+68a0d2 · — · Invoice export
+dea850 · — · Made offline
+(exit 0)
+
+# The remote answers again.
+[L] $ lf task sync 266bec
+266bec: nothing unsent
+(exit 0)
+
+[L] $ lf repo tracker
+Plan: Git origin.
+(exit 0)
+
+[M] $ lf task sync 266bec
+266bec: nothing unsent
+(exit 0)
+
+[M] $ lf task list
+baf129 · — · Changelog (mini wording, later)
+266bec · — · Fix the login bug on Safari
+177842 · — · Made on the mini
+587014 · — · Timing probe
+68a0d2 · — · Invoice export
+dea850 · — · Made offline
+(exit 0)</pre><p class="saw">Works. Saves land, the line reads <code>unreachable since …, 2 unsent</code> with Git's reason, and they go when the remote answers.</p>
+<h3>6. A teammate, and two claims</h3><p>bob on a third Machine clones, adds a Task, and claims the same Task as ada before either has seen the other; then takes over a Task he has seen ada claim.</p><pre># B is a teammate (bob) on a third Machine with a fresh clone. ada on L has already claimed 177842.
+[B] $ lf task list
+baf129 · — · Changelog (mini wording, later)
+266bec · — · Fix the login bug on Safari
+177842 · ada · Runs on home_69e17dc1bbe482f95ef08c0334142ade since Nov 18 16:36 · Made on the mini
+587014 · — · Timing probe
+68a0d2 · — · Invoice export
+dea850 · — · Made offline
+(exit 0)
+
+[B] $ lf task create &#x27;Bob adds rate limiting&#x27;
+[B] $ lf task sync 266bec
+266bec: nothing unsent
+(exit 0)
+
+[L] $ lf task sync 266bec
+266bec: nothing unsent
+(exit 0)
+
+[L] $ lf task list
+baf129 · — · Changelog (mini wording, later)
+266bec · — · Fix the login bug on Safari
+177842 · ada · Made on the mini
+587014 · — · Timing probe
+68a0d2 · — · Invoice export
+dea850 · — · Made offline
+1f9595 · — · Bob adds rate limiting
+(exit 0)
+
+# ada (L) and bob (B) both claim 587014 before either has seen the other&#x27;s claim (B&#x27;s remote is unreachable while it claims).
+[L] $ lf task claim 587014
+Owner: ada on Jacks-MacBook-Pro-2
+  Nov 18 16:36  claim  ada on Jacks-MacBook-Pro-2
+(exit 0)
+
+[B] $ lf task claim 587014
+Owner: bob on Jacks-MacBook-Pro-2
+  Nov 18 16:36  claim  bob on Jacks-MacBook-Pro-2
+(exit 0)
+
+[B] $ lf task sync 587014
+587014: nothing unsent
+(exit 0)
+
+[L] $ lf task sync 587014
+587014: nothing unsent
+(exit 0)
+
+[B] $ lf task sync 587014
+587014: nothing unsent
+(exit 0)
+
+[L] $ lf task status 587014
+Tracker state: available
+Timing probe · 587014
+Planning: unstarted · current
+Owner: ada on Jacks-MacBook-Pro-2
+  Nov 18 16:36  claim  ada on Jacks-MacBook-Pro-2
+  Nov 18 16:36  claim  bob on home_6b5d801e625fb873678dd8feac502600
+587014  Not checked out on Jacks-MacBook-Pro-2
+(exit 0)
+
+[B] $ lf task status 587014
+Tracker state: available
+Timing probe · 587014
+Planning: unstarted · current
+Owner: ada on home_69e17dc1bbe482f95ef08c0334142ade
+  Nov 18 16:36  claim  ada on home_69e17dc1bbe482f95ef08c0334142ade
+  Nov 18 16:36  claim  bob on Jacks-MacBook-Pro-2
+587014  Runs on home_69e17dc1bbe482f95ef08c0334142ade since Nov 18 16:36
+  Not checked out on Jacks-MacBook-Pro-2
+(exit 0)
+
+[B] $ lf task list
+baf129 · — · Changelog (mini wording, later)
+266bec · — · Fix the login bug on Safari
+177842 · ada · Runs on home_69e17dc1bbe482f95ef08c0334142ade since Nov 18 16:36 · Made on the mini
+587014 · ada · Runs on home_69e17dc1bbe482f95ef08c0334142ade since Nov 18 16:36 · Timing probe
+68a0d2 · — · Invoice export
+dea850 · — · Made offline
+1f9595 · — · Bob adds rate limiting
+(exit 0)
+
+[L] $ lf task list
+baf129 · — · Changelog (mini wording, later)
+266bec · — · Fix the login bug on Safari
+177842 · ada · Made on the mini
+587014 · ada · Timing probe
+68a0d2 · — · Invoice export
+dea850 · — · Made offline
+1f9595 · — · Bob adds rate limiting
+(exit 0)
+
+# bob has seen ada&#x27;s claim on 177842 and claims it anyway (a takeover, as on main).
+[B] $ lf task claim 177842
+Owner: bob on Jacks-MacBook-Pro-2
+  Nov 18 16:36  claim  ada on home_69e17dc1bbe482f95ef08c0334142ade
+  Nov 18 16:37  claim  bob on Jacks-MacBook-Pro-2
+(exit 0)
+
+[B] $ lf task sync 177842
+177842: nothing unsent
+(exit 0)
+
+[L] $ lf task sync 177842
+177842: nothing unsent
+(exit 0)
+
+[L] $ lf task status 177842
+Tracker state: available
+Made on the mini · 177842
+Planning: unstarted · current
+Owner: ada on Jacks-MacBook-Pro-2
+Also claimed later by bob on home_6b5d801e625fb873678dd8feac502600
+  Nov 18 16:36  claim  ada on Jacks-MacBook-Pro-2
+  Nov 18 16:37  claim  bob on home_6b5d801e625fb873678dd8feac502600
+177842  Not checked out on Jacks-MacBook-Pro-2
+(exit 0)
+
+# bob gives it back
+[B] $ lf task unassign 177842
+Unowned
+  Nov 18 16:36  claim  ada on home_69e17dc1bbe482f95ef08c0334142ade
+  Nov 18 16:37  claim  bob on Jacks-MacBook-Pro-2
+  Nov 18 16:37  unassign  bob on Jacks-MacBook-Pro-2
+(exit 0)
+
+[B] $ lf task sync 177842
+177842: nothing unsent
+(exit 0)
+
+[L] $ lf task sync 177842
+177842: nothing unsent
+(exit 0)
+
+[L] $ lf task list
+baf129 · — · Changelog (mini wording, later)
+266bec · — · Fix the login bug on Safari
+177842 · ada · Made on the mini
+587014 · ada · Timing probe</pre><p class="saw">First-wins works: both Machines read <code>Owner: ada</code>, and bob's Machine holds the steer &ldquo;ada on home_69e1… claimed this Task first, before this Machine had seen it, so the claim made here did not hold. The run here was stopped and its work stays in this checkout&rdquo;. The takeover reads differently on each Machine (bob's: <code>Owner: bob</code>; ada's: <code>Owner: ada</code>, <code>Also claimed later by bob</code>), and after bob unassigns ada's list still shows ada. That is main's reading of a takeover, not new here.</p>
+<h3>7. A hub</h3><p>The laptop names the mini its hub through a stand-in <code>ssh</code>; a save is on the mini when the command returns; the hub goes down and Git carries the change to bob; the hub returns.</p><pre># L names M (mini) its hub. ssh is a stand-in that runs the command under M&#x27;s home.
+[L] $ lf machine add mini
+mini  mini  home_6e551e2827583cab01d3f8cd4f9da3df
+(exit 0)
+
+[L] $ lf machine hub mini
+This Machine exchanges its plan with mini.
+(exit 0)
+
+[L] $ lf repo tracker
+Plan: Git origin.
+Hub mini, 15 unsent.
+  177842
+  587014
+  baf129
+  project billing
+  comment f6e43398
+  68a0d2
+  wave invoicing
+  266bec
+  dea850
+  comment b75626eb
+  1f9595
+  comment 3062bdfb
+  comment 672d8977
+  comment 1a54105a
+  comment 61154e3b
+(exit 0)
+
+[L] $ lf machine hub
+Hub mini.
+(exit 0)
+
+[L] $ lf task update dea850 --title Made offline, renamed through the hub
+task_dea8505c03a14da4827e2bc70ae4a84e: updated
+(exit 0)
+
+[L] $ lf repo tracker
+Plan: Git origin, 1 unsent.
+  dea850
+Hub mini.
+(exit 0)
+
+[M] $ lf task list
+baf129 · — · Changelog (mini wording, later)
+266bec · — · Fix the login bug on Safari
+177842 · — · Made on the mini
+587014 · ada · Runs on home_69e17dc1bbe482f95ef08c0334142ade since Nov 18 16:36 · Timing probe
+68a0d2 · — · Invoice export
+dea850 · — · Made offline, renamed through the hub
+1f9595 · — · Bob adds rate limiting
+(exit 0)
+
+M store title: [(&#x27;Made offline, renamed through the hub&#x27;,)]
+# M retitles; L reads it through the hub with one sync.
+[M] $ lf task update baf129 --title Changelog, final
+task_baf129fa07ad4d9ca959ec419fe8f68a: updated
+(exit 0)
+
+[L] $ lf task sync baf129
+baf129: nothing unsent
+(exit 0)
+
+[L] $ lf task list
+baf129 · — · Changelog, final
+266bec · — · Fix the login bug on Safari
+177842 · ada · Made on the mini
+# The hub goes down. L saves; Git still carries it to B (a Git-only teammate).
+[L] $ lf task update 266bec --title Fix the login bug on Safari and Firefox
+task_266bec5a9e1749ab810d2bab8e5f364b: updated
+Saved locally; planning synchronization pending. See `lf repo tracker`.
+(exit 0)
+
+[L] $ lf repo tracker
+Plan: Git origin, 1 unsent.
+  266bec
+Hub mini, unreachable since Nov 18 16:37, 1 unsent.
+  266bec
+  machine &quot;mini&quot;: unreachable: run `ssh -o ControlPath=none -- &#x27;mini&#x27;` to check the address, network and SSH service; ssh: connect to host mini port 22: Operation timed out
+(exit 0)
+
+[L] $ lf task sync 266bec
+Error: machine &quot;mini&quot;: unreachable: run `ssh -o ControlPath=none -- &#x27;mini&#x27;` to check the address, network and SSH service; ssh: connect to host mini port 22: Operation timed out
+(exit 1)
+
+[L] $ lf repo tracker
+Plan: Git origin.
+Hub mini, unreachable since Nov 18 16:37, 1 unsent.
+  266bec
+  machine &quot;mini&quot;: unreachable: run `ssh -o ControlPath=none -- &#x27;mini&#x27;` to check the address, network and SSH service; ssh: connect to host mini port 22: Operation timed out
+(exit 0)
+
+[B] $ lf task sync 266bec
+266bec: nothing unsent
+(exit 0)
+
+[B] $ lf task list
+baf129 · — · Changelog, final
+266bec · — · Fix the login bug on Safari and Firefox
+177842 · — · Made on the mini
+587014 · ada · Runs on home_69e17dc1bbe482f95ef08c0334142ade since Nov 18 16:36 · Timing probe
+68a0d2 · — · Invoice export
+dea850 · — · Made offline, renamed through the hub
+1f9595 · — · Bob adds rate limiting
+(exit 0)
+
+266bec · — · Fix the login bug on Safari and Firefox
+# The hub answers again.
+[L] $ lf task sync 266bec
+266bec: nothing unsent
+(exit 0)
+
+[L] $ lf repo tracker
+Plan: Git origin.
+Hub mini.
+(exit 0)
+
+[L] $ lf repo tracker --json
+{&quot;actions&quot;:[],&quot;plan&quot;:{&quot;git&quot;:{&quot;error&quot;:null,&quot;failing_since&quot;:null,&quot;records&quot;:[],&quot;remote&quot;:&quot;origin&quot;,&quot;unsent&quot;:0},&quot;hub&quot;:{&quot;error&quot;:null,&quot;failing_since&quot;:null,&quot;machine&quot;:&quot;mini&quot;,&quot;records&quot;:[],&quot;unsent&quot;:0}},&quot;tracker&quot;:null}
+(exit 0)</pre><p class="saw">Works, with repository ids that differ per Machine: the hub finds its checkout by the laptop's id.</p>
+<h3>8. Moving a Task</h3><p><code>lf task move --machine mini</code> for an unstarted Task.</p><pre># Move an unstarted Task from L to its hub Machine; ids for the repository differ per Machine.
+[L] $ lf task move dea850 --machine mini
+Checked mini: it can take dea850
+Arrived on mini
+(exit 0)
+
+[L] $ lf task status dea850
+Made offline, renamed through the hub · dea850
+Runs on mini; read from its server.
+State: unstarted · ready
+Graph: code
+Next: lf task run dea850
+(exit 0)
+
+[M] $ lf task status dea850
+Tracker state: available
+Made offline, renamed through the hub · dea850
+Planning: unstarted · current
+Owner: ada on Jacks-MacBook-Pro-2
+  Nov 18 16:38  claim  ada on Jacks-MacBook-Pro-2
+dea850  Not checked out on Jacks-MacBook-Pro-2
+(exit 0)
+
+[M] $ lf task list
+baf129 · — · Changelog, final
+266bec · — · Fix the login bug on Safari and Firefox
+177842 · — · Made on the mini
+587014 · ada · Runs on home_69e17dc1bbe482f95ef08c0334142ade since Nov 18 16:36 · Timing probe
+68a0d2 · — · Invoice export
+dea850 · ada · Made offline, renamed through the hub
+1f9595 · — · Bob adds rate limiting
+(exit 0)</pre><p class="saw">Works with per-Machine repository ids.</p>
+<h3>9. Returning user</h3><p>A home and remote built with the released <code>lf</code> (Git planning on <code>refs/loopflow/planning/shared/main</code>), opened with the branch; then a second new Machine reads.</p><pre># A home built with the released lf (lf 0.16.0+7bb879aff (build 7bb879aff on v0.16.0)), Git planning on origin, then opened with the branch build.
+[released] $ lf task create &#x27;Old task one&#x27;
+    &quot;identifier&quot;: &quot;c37c42&quot;,
+[released] $ lf task create &#x27;Old task two&#x27;
+    &quot;identifier&quot;: &quot;592c14&quot;,
+[released] $ lf wave create legacy
+Added Wave legacy; committed .lf/wave/legacy on /private/tmp/lfq2/U/repo (bd67accf8d)
+[released] $ lf repo tracker
+0e8a6c7a0d1f11040c6d4a1b20dfb75154600cc2b06dca917e1a563e72405289  refs/loopflow/planning/shared/main (configured)  4 records
+  Retained import: de53dfdc7ef06e39c86be39c1b72d5dad21ef0e5
+  Fetched: de53dfdc7ef06e39c86be39c1b72d5dad21ef0e5
+  Publication: confirmed (0ff6acefad0e9f5c121b7ce570a67278176dcb56); local changes pending
+Import retention is not publication; `lf repo tracker journal` lists retained values.
+[released] $ lf task list
+c37c42 · — · Old task one
+592c14 · — · Old task two
+0ff6acefad0e9f5c121b7ce570a67278176dcb56 commit	refs/loopflow/planning/shared/main
+# Same home, branch build.
+[U] $ lf task list
+c37c42 · — · Old task one
+592c14 · — · Old task two
+(exit 0)
+
+[U] $ lf repo tracker
+Plan: Git origin.
+(exit 0)
+
+[U] $ lf wave list
+WAVE              REPOSITORY                    STATUS    TASKS  MACHINE         
+legacy            /private/tmp/lfq2/U/repo      ready         0  unplaced        
+(exit 0)
+
+[U] $ lf task update c37c42 --title Old task one, edited after the upgrade
+task_c37c42ac6fce461084dab4e396f37e08: updated
+(exit 0)
+
+[U] $ lf task sync c37c42
+c37c42: nothing unsent
+(exit 0)
+
+[U] $ lf repo tracker
+Plan: Git origin.
+(exit 0)
+
+8946911cba49d06d1d6423bc4dcc07a1587022fb commit	refs/loopflow/plan/home_e2fd027759a9f947eefd0be6705790eb
+0ff6acefad0e9f5c121b7ce570a67278176dcb56 commit	refs/loopflow/planning/shared/main
+projects/proj_bca904a33a4f47ce9d7b0eb282033b89.json
+repository
+tasks/59/task_592c14b748a84912a360e204af87d7e0.json
+tasks/c3/task_c37c42ac6fce461084dab4e396f37e08.json
+waves/b92f56a1-7611-43c7-82cc-ff673c94ee56.json
+# A second Machine (fresh home, branch build) clones and reads.
+[U2] $ lf task list
+c37c42 · — · Old task one, edited after the upgrade
+592c14 · — · Old task two
+(exit 0)
+
+[U2] $ lf wave list
+WAVE              REPOSITORY                    STATUS    TASKS  MACHINE         
+legacy            /private/tmp/lfq2/U2/repo     ready         0  unplaced        
+(exit 0)</pre><p class="saw">Works. Tasks and the Wave stay; the first exchange publishes the whole plan to the new ref; the second Machine reads it. Right after the upgrade <code>lf repo tracker</code> reads <code>Plan: Git origin.</code> before anything is on the new ref.</p>
+<h3>10. A ref this build cannot fully read</h3><p>A hand-written ref with a file that is not JSON, a field named <code>task_mood</code>, and one good new Task.</p><pre># Another Machine&#x27;s ref carries a file that is not JSON, a Task with a field this build does not know, and one good new Task.
+[U] $ lf task sync c37c42
+c37c42: nothing unsent
+(exit 0)
+
+[U] $ lf task list
+c37c42 · — · Retitled by a newer build
+592c14 · — · Old task two
+aa11aa · — · New from the other Machine
+(exit 0)
+
+[U] $ lf repo tracker
+Plan: Git origin.
+(exit 0)
+
+2026-11-19T00:39:24.396666Z  WARN loopflow_execution::ops::plan_git: skipped a plan ref field this build does not know file=tasks/c3/task_c37c42ac6fce461084dab4e396f37e08.json error=unknown variant `task_mood`, expected one of `wave_name`, `wave_parent`, `wave_retired`, `wave_project`, `project_wave`, `project_linear_id`, `proje
+2026-11-19T00:39:24.396853Z  WARN loopflow_execution::ops::plan_git: skipped a plan ref file that does not parse file=tasks/zz/task_zz.json error=key must be a string at line 1 column 3 pid=43883 lf=0.16.0+50f12b591.dirty rev=50f12b591</pre><p class="saw">Works. The bad file and the unknown field are skipped and logged; the retitle and the new Task arrive.</p>
+<h3>11. A second clone on the same Machine</h3><p>The same remote cloned again under the same <code>LF_HOME</code>.</p><pre># A second clone of the same remote on the same Machine (L).
+[L repo2] $ lf task list
+(exit 0)
+[L repo2] $ lf repo tracker
+Plan: Git origin.
+Hub mini.
+[L repo2] $ lf task create &#x27;From the second clone&#x27;
+    &quot;identifier&quot;: &quot;d8b249&quot;,
+[L repo2] $ lf task sync
+Error: the hub has no checkout of repository repo_fdf89cfa846e44dda4145f53feed8cac; clone it there and run `lf config repo --bind repo_fdf89cfa846e44dda4145f53feed8cac` in it, or when the hub already holds this plan, run `lf config repo --bind &lt;id&gt;` here with the id `lf config repo` prints in the hub&#x27;s checkout
+Plan: Git origin.
+Hub mini, unreachable since Nov 18 16:39, 1 unsent.
+  d8b249
+  the hub has no checkout of repository repo_fdf89cfa846e44dda4145f53feed8cac; clone it there and run `lf config repo --bind repo_fdf89cfa846e44dda4145f53feed8cac` in it, or when the hub already holds this plan, run `lf config repo --bind &lt;id&gt;` here with the id `lf config repo` prints in the hub&#x27;s checkout
+[L repo2] $ lf task list
+d8b249 · — · From the second clone
+[L] $ lf task list
+baf129 · — · Changelog, final
+266bec · — · Fix the login bug on Safari and Firefox
+177842 · ada · Made on the mini
+587014 · ada · Timing probe
+68a0d2 · — · Invoice export
+dea850 · ada · Runs on mini since Nov 18 16:38 · Made offline, renamed through the hub
+1f9595 · — · Bob adds rate limiting
+(exit 0)
+
+[L] $ lf repo tracker
+Plan: Git origin.
+Hub mini, 2 unsent.
+  comment ca5e3b49
+  comment f78b2179
+(exit 0)
+
+[M] $ lf task sync baf129
+baf129: nothing unsent
+(exit 0)
+
+[M] $ lf task list
+baf129 · — · Changelog, final
+d8b249 · — · From the second clone
+266bec · — · Fix the login bug on Safari and Firefox
+177842 · — · Made on the mini
+587014 · ada · Runs on home_69e17dc1bbe482f95ef08c0334142ade since Nov 18 16:36 · Timing probe
+68a0d2 · — · Invoice export
+dea850 · ada · Made offline, renamed through the hub
+1f9595 · — · Bob adds rate limiting
+(exit 0)</pre><p class="saw">Still wrong, see the end: an empty plan and a hub error that tells the person to <code>--bind</code>.</p>
+<h3>12. A Linear repository</h3><p>Tracker set to Linear, no login.</p><pre># A repository whose tracker is Linear (no login here): unchanged from main.
+[X] $ lf config set --shared repo.tracker.linear.team ENG
+/private/tmp/lfq2/X/repo/.lf/config.yaml: repo.tracker.linear.team saved; DomainAction
+(exit 0)
+
+[X] $ lf repo tracker
+Tracker: linear. 1 open · 0 lost.
+  0267a0            create · queued · No Linear credential found. Run `doppler run -- lf account connect linear`.
+(exit 0)
+
+[X] $ lf task sync 0267a0
+Error: Task publication to Linear remains pending: No Linear credential found. Run `doppler run -- lf account connect linear`.
+(exit 1)
+
+plan refs on origin (unchanged, 3 Machines): 3</pre><p class="saw">Unchanged from main: the create queues, no plan ref is written.</p>
+<h3>13. A save through the server socket</h3><p><code>task.create</code> sent to the laptop's server as Desktop sends it; the script polls the remote for the push.</p><pre>hello -&gt; {&quot;type&quot;:&quot;welcome&quot;,&quot;client_id&quot;:&quot;76008581-76a0-4850-ad30-cf00e544a38a&quot;,&quot;revision&quot;:9,&quot;server_revision&quot;:9,&quot;min_revision&quot;:8,&quot;instance&quot;:&quot;88e6e03b-d251-4e25-a967-8455a
+answer after 0.5s: {&quot;type&quot;:&quot;response&quot;,&quot;id&quot;:&quot;c1&quot;,&quot;trace_id&quot;:&quot;20efa300-01e6-42bb-909a-879e3fd3c227&quot;,&quot;result&quot;:{&quot;graph&quot;:null,&quot;milestone&quot;:&quot;filed&quot;,&quot;row&quot;:{&quot;actions&quot;:{&quot;reason&quot;:&quot;run the next work with `lf task run`; inspect earl
+ref pushed 1.6s after the request</pre><p class="saw">Works: pushed 1.6 s after the request. A CLI save waited for the server's minute: 38 s to push, 97 s to show on the other Machine.</p>
+<h2>Checks run after the fixes</h2>
+<pre>cargo nextest run -p loopflow -p loopflow-execution --lib --test integration -E 'test(the_later_change_shows_on_both_machines_through_the_hub) | test(ops::plan_git::)'
+  5 passed; the acceptance test took 242 s of nextest's 300 (load average 45 to 90)
+cargo nextest run -p loopflow -p loopflow-storage --lib --test integration -E 'test(of_two_claims_made_apart_the_first_holds_on_both_machines) | test(repository_plans_are_explicit) | test(query_plans::) | test(store::repository_lifecycle_tests::)'
+  15 passed (run before the last narrowing of the first read)
+cargo clippy -p loopflow-storage -p loopflow-execution -p loopflow --all-targets -- -D warnings      clean
+scripts/test_desktop.sh --filter 'DTOFixtureTests|DesktopHeadlessTests|WorkModelTests'               116 passed</pre>
+<h2>What works now</h2>
+<p>One Machine with and without a remote; two and three Machines over a bare remote with no setting; a fresh clone's first read; later-edit-wins; Waves, Projects, comments; offline and back; first-wins claims with the steer on the losing Machine; a hub over <code>ssh</code>, down and back with Git carrying meanwhile; a Task move; the upgrade from the released <code>lf</code>; a ref with unreadable parts; Linear untouched; a served save pushed in under two seconds.</p>
+<h2>Not reached</h2>
+<ul>
+<li>Desktop's plan lines in a window. Headless view and DTO tests ran; no window was opened.</li>
+<li>Reordering the backlog: no <code>lf</code> command reorders it. <code>task_rank</code> is in every record and the lists agree in order on all three Machines.</li>
+<li>A losing claim stopping a live Graph. No provider was run in these homes; the steer was read from the store.</li>
+<li>etude's cutover and the real mini.</li>
+<li>A teammate who can fetch but not push (file remotes have no permissions); the acceptance test covers it.</li>
+<li>The full suites; gate and CI run them.</li>
+</ul>
+<h2>Still wrong, worst first</h2>
+<ol>
+<li>A second clone of one remote under the same <code>LF_HOME</code> shows an empty plan, because its Task ids already belong to the first clone. With a hub named, <code>lf task sync</code> fails with &ldquo;the hub has no checkout of repository …; … run <code>lf config repo --bind</code>&rdquo;. Its own saves reach other Machines on the Machine's one ref. Worktrees are unaffected.</li>
+<li>A save made by the CLI reaches another Machine in up to two minutes (97 s measured), since only the server's minute pushes it. Desktop's saves push in seconds.</li>
+<li>Desktop, or any served read, of a clone the Machine has saved nothing in still shows an empty plan until an <code>lf task list</code>, <code>lf repo tracker</code> or a save in it.</li>
+<li>After a takeover the two Machines name different owners until the taken-over Machine acts (scenario 6). Main's behavior, now visible to every team sharing a remote.</li>
+<li>Teammates' Machines read as ids: <code>177842 · ada · Runs on home_69e17dc1bbe482f95ef08c0334142ade since Nov 18 16:36 · Made on the mini</code>, and the comment &ldquo;ada claimed this on home_69e1…&rdquo;.</li>
+<li>Right after the upgrade <code>lf repo tracker</code> reads <code>Plan: Git origin.</code> before anything is on the new ref.</li>
+<li><code>lf task sync &lt;id&gt;</code> prints <code>&lt;id&gt;: nothing unsent</code> after sending, and needs a Task id to exchange a whole repository.</li>
+<li>The acceptance test ran 242 s against nextest's 300 s limit on this Machine.</li>
+</ol>

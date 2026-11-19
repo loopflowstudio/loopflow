@@ -1198,10 +1198,10 @@ private struct WorkTestFixture {
                   scope: WorkScope(repo: repo, headless: false, task: nil, activity: nil, taskListWave: nil), body: entries)
     }
 
-    /// A repository-destinations reading: a frame that confirms and changes no Work.
+    /// A reading of where the plan travels: a frame that confirms and changes no Work.
     func unrelatedFrame(sequence: Int) throws -> WorkFrame {
-        try frame("git_destinations", sequence: sequence, answers: nil,
-                  body: #"{"destinations":[]}"#)
+        try frame("plan_home", sequence: sequence, answers: nil,
+                  body: #"{"actions":[],"plan":{"git":null,"hub":null},"tracker":null}"#)
     }
 
     func sessionEntries(sourceFile: String = #filePath) throws -> (json: String, ids: [String]) {

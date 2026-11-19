@@ -88,3 +88,30 @@ Still open from before:
 - `lf session receive --planning-key` is gone, so a released `lf` moving a
   Task to a branch-built Machine fails on the unknown flag until both run the
   same release.
+
+- QA (2026-11-18), each reversible before release:
+  - Clones no longer converge on one repository id. Each keeps its own and
+    records the ids other Machines' refs name as locators of its checkout
+    (`locate_repository`). Converging rebinding left every Task saved under
+    the clone's first id out of `lf task list` (the list reads by the selected
+    id, and `task_repository_is_fixed` forbids moving a Task). The plan's
+    "made for review" item 3 said the clone takes the lower id.
+  - The first `lf task list` or `lf repo tracker` in a clone the Machine has
+    saved nothing in does one Git exchange (five seconds at most) before it
+    reads. Without it a teammate's fresh clone showed an empty plan and
+    `Plan: Git origin.` for good, since the server only fetches registered
+    repositories. Desktop's reads of such a clone do not do this.
+  - A save made by the CLI is pushed on the server's minute, not "a few
+    seconds after a change": 38 s to push and 97 s to show on the other
+    Machine, measured. A `task.create` over the socket pushed in 1.6 s.
+    `docs/work.md` now says "within a couple of minutes". Should a CLI save
+    ask the running server to push?
+  - A second clone of one remote under the same `LF_HOME` shows an empty plan
+    (its Task ids already belong to the first clone) and, with a hub, an error
+    telling the person to `--bind`. Its own saves go out on the Machine's ref.
+  - Right after an upgrade from the released `lf`, `lf repo tracker` reads
+    `Plan: Git origin.` with nothing unsent although nothing is on the new ref
+    yet; the first exchange publishes the whole plan.
+  - A teammate's Machine reads as its id (`ada claimed this on home_69e1…`),
+    in `lf task list` too. Main's rule (labels stay on their Machine), now
+    seen by everyone who shares a remote.

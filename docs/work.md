@@ -241,9 +241,10 @@ laptop$ lf repo tracker
 Plan: Git origin.
 ```
 
-On the mini, `lf task list` shows the Task within a minute. A teammate who
-clones the repository sees the same plan, and their Tasks appear in yours: no
-account and no server, only push access to the repository.
+On the mini, `lf task list` shows the Task within a couple of minutes; the
+first `lf task list` in a fresh clone reads the remote before it answers. A
+teammate who clones the repository sees the same plan, and their Tasks appear
+in yours: no account and no server, only push access to the repository.
 
 Every Task, Project, Wave, comment and order you change travels: renaming a
 Wave on the laptop renames it on the mini, and reordering the backlog reorders
@@ -253,8 +254,9 @@ processes stay on the Machine that ran them. Claims follow your Git
 
 Every command saves on this Machine first, so nothing waits on the network.
 Each Machine pushes its plan to a ref of its own on the remote
-(`refs/loopflow/plan/<machine id>`) a few seconds after a change and fetches
-the others' once a minute; `lf task sync` does both now. The refs stay out of
+(`refs/loopflow/plan/<machine id>`) within a minute of a change, a few seconds
+after one made in Desktop, and fetches the others' once a minute;
+`lf task sync <issue>` does both now. The refs stay out of
 `git branch`, `git status` and a plain clone. A repository with no remote reads
 `Plan: this Machine.` and sends nothing.
 

@@ -33,24 +33,60 @@ pub async fn sync(store: &crate::store::Store, repo: &str) -> Result<()> {
     crate::journal::request::spawn_blocking(move || exchange(&sqlite, &repo)).await?
 }
 
-/// How long a claim waits to see the claims other Machines have made.
-const BEFORE_CLAIM: Duration = Duration::from_secs(5);
+/// How long a claim or a first read waits on the carriers.
+const WAIT: Duration = Duration::from_secs(5);
 
 /// Before this Machine claims `task`, which nobody owns as far as it has
 /// seen: one exchange by each carrier, so a claim already made elsewhere is
-/// read first. A carrier that fails or outlasts [`BEFORE_CLAIM`] leaves the
+/// read first. A carrier that fails or outlasts [`WAIT`] leaves the
 /// claim to go ahead; whichever claim was first holds once they meet.
 pub(crate) async fn before_claim(store: &crate::store::Store, repo: &Path, task: &TaskId) {
     if !matches!(store.sqlite.task_owned(task), Ok(false)) {
         return;
     }
     let repo = repo.to_string_lossy();
-    match tokio::time::timeout(BEFORE_CLAIM, sync(store, &repo)).await {
-        Ok(Ok(())) => {}
-        Ok(Err(error)) => {
-            tracing::debug!(%task, error = %format!("{error:#}"), "claiming without the plan exchange");
+    briefly(&repo, async {
+        Ok::<_, std::convert::Infallible>(sync(store, &repo).await)
+    })
+    .await;
+}
+
+/// A clone this Machine has not met reads its remote's plan when first
+/// asked what the plan is (`lf task list`, `lf repo tracker`), before the
+/// command opens the store it reads. See [`super::plan_git::first_exchange`].
+pub async fn before_first_read(directory: &Path) {
+    let path = crate::store::default_db_path();
+    let Ok(repo) = crate::repository::discover(directory) else {
+        return;
+    };
+    let repo = repo.to_string();
+    if !path.exists() || crate::ops::tracker::connected(&repo) {
+        return;
+    }
+    let Ok(store) = crate::store::open_sqlite(&path) else {
+        return;
+    };
+    let exchanged = {
+        let repo = repo.clone();
+        crate::journal::request::spawn_blocking(move || {
+            super::plan_git::first_exchange(&store, &repo).map(drop)
+        })
+    };
+    briefly(&repo, exchanged).await;
+}
+
+/// Wait [`WAIT`] for an exchange, which runs on past it.
+async fn briefly<E: std::fmt::Display>(
+    repo: &str,
+    exchange: impl std::future::Future<Output = Result<Result<()>, E>>,
+) {
+    match tokio::time::timeout(WAIT, exchange).await {
+        Ok(Ok(Ok(()))) => {}
+        Ok(Ok(Err(error))) => {
+            tracing::debug!(%repo, error = %format!("{error:#}"), "going on without the plan exchange");
         }
-        Err(_) => tracing::debug!(%task, "claiming before the plan exchange finished"),
+        Ok(Err(error)) => tracing::debug!(%repo, %error, "the plan exchange did not run"),
+        Err(_) => tracing::debug!(%repo, "going on before the plan exchange finished"),
     }
 }
 

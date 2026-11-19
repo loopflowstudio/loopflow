@@ -20,7 +20,8 @@ said: `scratch/explore.md`; the review that set the three differences below:
    keeps one cursor into `plan_changes`. `hub_sends` goes; both lines say
    "unsent" and count records.
 3. **The ref names the repository**, so a fresh clone needs no
-   `lf config repo --bind` (checked in slice 2).
+   `lf config repo --bind`. Each clone keeps its own id and records the ids
+   other refs name as locators of its checkout (QA, below).
 
 "Your order of your claimed Tasks" (the design's second order) moves to the
 tracker Task; see Exclusions.
@@ -155,10 +156,12 @@ A repository with no remote writes no ref. *Passed over:* the design's "the
 ref exists locally" for one Machine; nobody could read it.
 
 **Repository id.** *Made for review.* When a fetched ref's `repository` differs
-from this clone's, the clone takes the lower of the two through
-`bind_repository`, so every clone converges without a command and the hub
-finds its checkout. Checked in slice 2: binding keeps rows saved under the
-clone's first id, so this stands.
+from this clone's, the clone records it as a locator of its checkout
+(`locate_repository`), so the hub and a move find the checkout by any
+Machine's id. The clone keeps its own id. QA found the earlier rule (take the
+lower id through `bind_repository`) hid every Task saved under the first id
+from `lf task list`: the list reads by the selected id and
+`task_repository_is_fixed` forbids moving a Task.
 
 **When they run.** The Machine server owns both. After a command it answers,
 the existing coalesced exchange (`ops/plan_carriers.rs` `after_command`, quiet 5 s) does the hub and
@@ -349,10 +352,10 @@ etude checkout and `lf` version are unknown.
    test with a bare remote and a third home.
 
    What it taught:
-   - The repository id check passes: `bind_repository` keeps the first id as
-     a local locator and rows saved under it stay with the checkout, so a
-     clone takes the lowest id any fetched ref names. The `repository` file
-     stays and the docs need no `--bind` for a repository with a remote.
+   - The repository id check failed in QA: rows saved under a clone's first
+     id stay with the checkout but leave `lf task list`. Clones keep their own
+     id and hold the others' as locators. The `repository` file stays and the
+     docs need no `--bind` for a repository with a remote.
    - A clone that has saved nothing must still read: the exchange registers
      the repository itself (`ensure_repository`). Skipping an unregistered
      clone left a second Machine with an empty plan.
@@ -361,12 +364,12 @@ etude checkout and `lf` version are unknown.
    - The exchange commits only when the tree would differ, so two Machines
      that agree stop writing commits (checked: refs unchanged after extra
      exchanges).
-   - Between convergence on a lower repository id and the hub's own fetch,
-     the hub is addressed by an id it has not seen and answers "no checkout"
-     for up to a minute. The acceptance test runs mini's fetch first.
-   - A second clone of one remote on the same Machine cannot take the shared
-     id (`bind_repository` refuses an id that locates another path); it keeps
-     its own and logs. Untested.
+   - Until the hub has fetched a Machine's ref, it is addressed by an id it
+     has not seen and answers "no checkout" for up to a minute. The acceptance
+     test runs mini's fetch first.
+   - A second clone of one remote on the same Machine cannot answer to an id
+     that locates another path; it logs, shows an empty plan, and sends its
+     saves on the Machine's one ref (QA, scenario 11).
    - The last case of "Acceptance check at gate", the one whole-plan refs
      exist for, is in the acceptance test: a home whose push is refused
      retitles through the hub; a fourth Git-only home reads that title from
@@ -476,5 +479,14 @@ etude checkout and `lf` version are unknown.
   `plan_changes`. It took 200 s of nextest's 300 on this Machine, for gate to
   watch. The server-side `after_command` path has no focused test and was only
   compiled.
+- QA, 2026-11-18, by hand in private homes (`scratch/qa.html`): three fixes
+  (per-clone repository ids with locators; the first read of an unmet clone
+  exchanges once; a stale Swift test helper) and docs made to match. After
+  them: the acceptance test and `ops::plan_git::` passed (acceptance 242 s of
+  nextest's 300, for gate to watch), clippy clean on the three crates,
+  `scripts/test_desktop.sh --filter 'DTOFixtureTests|DesktopHeadlessTests|WorkModelTests'`
+  116 passed. Not rerun after the last edit: `of_two_claims_made_apart_…`,
+  `query_plans::`, `store::repository_lifecycle_tests::` (passed one edit
+  earlier). What is still wrong is listed at the end of `scratch/qa.html`.
 - Next: nothing in this Task's slices; gate runs the list above. Open choices
   are in `scratch/questions.md`.

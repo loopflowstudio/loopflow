@@ -20,7 +20,8 @@ use loopflow_storage::StoreError;
 const OWN: &str = "refs/loopflow/plan/";
 /// The remote's refs as last fetched, this Machine's own among them.
 const SEEN: &str = "refs/loopflow/plan-seen/";
-/// The repository id every clone of the remote converges on.
+/// The id its Machine knows the repository by, which every other clone
+/// records as naming its own checkout.
 const REPOSITORY: &str = "repository";
 /// Bytes of records read from the store at a time while a commit is built.
 const PAGE: usize = 1 << 20;
@@ -53,6 +54,16 @@ pub fn exchange_all(store: &SqliteStore) -> Result<()> {
     Ok(())
 }
 
+/// [`exchange`] for a clone this Machine has saved nothing in and never read
+/// a plan for, which registers it for [`exchange_all`]. `false` when the
+/// Machine already knows the clone, or it has no remote.
+pub fn first_exchange(store: &SqliteStore, repo: &str) -> Result<bool> {
+    if store.repository_id(repo)?.is_some() || remote(Path::new(repo)).is_none() {
+        return Ok(false);
+    }
+    exchange(store, repo).map(|()| true)
+}
+
 /// Fetch every Machine's plan ref, take in what changed in the others', then
 /// commit the records changed here onto this Machine's ref and push it. The
 /// outcome is recorded for `lf repo tracker`. A repository with no remote
@@ -77,7 +88,7 @@ fn exchange_with(
     store: &SqliteStore,
     repo: &str,
     remote: &str,
-    mut repository: RepositoryId,
+    repository: RepositoryId,
     sent_seq: i64,
 ) -> Result<()> {
     let path = Path::new(repo);
@@ -103,7 +114,6 @@ fn exchange_with(
     let mut failed = None;
     let taken = store.plan_ref_tips(repo)?;
     let names = crate::store::ownership::machine_names(store)?;
-    let mut lowest = repository.clone();
     for (machine, tip) in &seen {
         if machine == me.as_str() || taken.get(machine) == Some(tip) {
             continue;
@@ -119,19 +129,16 @@ fn exchange_with(
             Ok::<_, anyhow::Error>(theirs)
         })();
         match read {
-            Ok(Some(theirs)) if theirs.as_str() < lowest.as_str() => lowest = theirs,
-            Ok(_) => {}
+            // A hub or a move that names the repository by that Machine's id
+            // finds this checkout. Tasks keep the id they were saved under.
+            Ok(Some(theirs)) => {
+                if !store.locate_repository(repo, &theirs)? {
+                    tracing::warn!(%repo, %theirs, "another checkout here already answers to that repository id")
+                }
+            }
+            Ok(None) => {}
             Err(error) => {
                 failed.get_or_insert(error.context(format!("read the plan ref of {machine}")));
-            }
-        }
-    }
-    // Clones of one remote converge on the lowest id any of them was given.
-    if lowest != repository {
-        match crate::repository::location::bind_repository(store, repo, &lowest) {
-            Ok(()) => repository = lowest,
-            Err(error) => {
-                tracing::warn!(%repo, %error, "this clone keeps its own repository id")
             }
         }
     }
@@ -456,7 +463,8 @@ fn git(repo: &Path, args: &[&str], input: Option<&[u8]>) -> Result<Vec<u8>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{exchange, remote};
+    use super::{exchange, first_exchange, remote};
+    use loopflow_model::durable::RepositoryId;
     use loopflow_storage::sqlite::plan_carriers::Carrier;
     use loopflow_storage::sqlite::SqliteStore;
     use loopflow_storage::work::task::{NewTask, TaskUpdate};
@@ -559,12 +567,23 @@ mod tests {
                 .count
         }
 
-        fn repository(&self) -> String {
+        fn repository(&self) -> RepositoryId {
+            self.store.repository_id(&self.repo).unwrap().unwrap()
+        }
+
+        /// The titles `lf task list` shows in this clone.
+        fn listed(&self) -> Vec<String> {
             self.store
-                .repository_id(&self.repo)
+                .open_tasks_matching(&self.repository(), "", None, None)
                 .unwrap()
-                .unwrap()
-                .to_string()
+                .into_iter()
+                .map(|task| task.title)
+                .collect()
+        }
+
+        /// The checkout this Machine finds for a repository id.
+        fn checkout_of(&self, repository: &RepositoryId) -> Option<String> {
+            self.store.repository_path(repository).unwrap()
         }
     }
 
@@ -587,12 +606,27 @@ mod tests {
         assert!(!git(origin.bare_path(), &["branch", "-a"]).contains("loopflow"));
         assert!(!git(Path::new(&laptop.repo), &["branch", "-a"]).contains("loopflow"));
 
-        // mini was never told about the laptop: the remote is what they share.
-        mini.exchange();
+        // mini was never told about the laptop: the remote is what they share,
+        // and the first read of a fresh clone fetches it, once.
+        assert!(first_exchange(&mini.store, &mini.repo).unwrap());
+        assert!(!first_exchange(&mini.store, &mini.repo).unwrap());
         assert_eq!(mini.title(&task).as_deref(), Some("x"));
-        // Every clone of the remote ends on one repository id.
+        assert_eq!(mini.listed(), ["x"]);
+        // Each clone keeps its own repository id and answers to the other's,
+        // so a hub or a move finds the checkout and no saved Task changes hands.
+        mini.task("made on mini");
+        mini.exchange();
         laptop.exchange();
-        assert_eq!(laptop.repository(), mini.repository());
+        assert_eq!(laptop.listed().len(), 2);
+        assert_eq!(mini.listed().len(), 2);
+        assert_eq!(
+            laptop.checkout_of(&mini.repository()).as_deref(),
+            Some(laptop.repo.as_str())
+        );
+        assert_eq!(
+            mini.checkout_of(&laptop.repository()).as_deref(),
+            Some(mini.repo.as_str())
+        );
         assert_eq!(laptop.title(&task).as_deref(), Some("x"));
 
         mini.retitle(&task, "one");

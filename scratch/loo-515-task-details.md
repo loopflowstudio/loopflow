@@ -238,4 +238,4 @@ files:
   page and Task switches.
 - No GitHub patch renderer remains.
 
-Check (implement, November 19, after the merge of main `932702681e`): `scripts/test_desktop.sh --filter 'TaskFilesTests|ReviewDiffTests|TaskBriefTests|PullRequestTests'` → 52 passed; `cargo test -p loopflow-execution --lib config::` → 104 passed. Gate/CI: clippy, `documented_commands::`, golden, the full swift suite, `global_commands`. Demo: the pane on screen.
+Check (implement, November 19, after the merge of main `932702681e`): `scripts/test_desktop.sh --filter 'TaskFilesTests|ReviewDiffTests|TaskBriefTests|PullRequestTests'` → 52 passed; `cargo test -p loopflow-execution --lib config::` → 104 passed (again after compress). Gate/CI: clippy, `documented_commands::`, golden, the full swift suite, `global_commands`. Demo: the pane on screen.

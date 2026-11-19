@@ -40,7 +40,7 @@ pub fn private_path(repo: &Path) -> Result<PathBuf> {
 }
 
 /// The checkout a private settings file belongs to.
-fn private_root(path: &Path) -> Result<&Path> {
+pub(crate) fn private_root(path: &Path) -> Result<&Path> {
     path.parent()
         .and_then(Path::parent)
         .context("private settings sit in a checkout's .lf directory")
@@ -946,7 +946,6 @@ mod tests {
         std::fs::create_dir(&repo).unwrap();
         super::import(&repo, None, false, &recovery, "/repo/old", false).unwrap();
         let path = private_path(&repo).unwrap();
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         assert_eq!(
             crate::config::files::read(&path).unwrap()["agents"][0],
             "codex"
@@ -1159,9 +1158,7 @@ mod tests {
         let id = loopflow_model::id::WaveId::new();
         let key = format!("waves.{id}.agent");
         let source_path = private_path(source.path()).unwrap();
-        std::fs::create_dir_all(source_path.parent().unwrap()).unwrap();
         let target_path = private_path(target.path()).unwrap();
-        std::fs::create_dir_all(target_path.parent().unwrap()).unwrap();
         let parts: Vec<_> = key.split('.').collect();
         super::edit(
             &source_path,

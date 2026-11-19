@@ -403,9 +403,12 @@ The docs commit the implementation to three things the plan had left open:
      after a build); with the question and interrupt tests under nextest, 104s
      and 106s each. Nextest's limit is 300s.
 
-Next: demo on the real CLIs. Open from this Task: Pi usage attribution
-(`scratch/questions.md` 25), and Claude and Codex in the question and
-interrupt tests (18, 22).
+No implement slice remains. Next: demo on the real CLIs (a Task pinned to
+OpenCode Gemini 4 Carbon and one pinned to a Pi model, each through
+`implement`, with a mid-step steer). Open from this Task, each needing a
+decision first: Pi usage attribution (`scratch/questions.md` 25), Claude and
+Codex in the question and interrupt tests (18, 22), deleting the uncalled
+`Driver::send_current` (26), and the usage-less `task-session` row (27).
 
 ## Seen on the real CLI (OpenCode 2.2.1, 2026-11-18)
 

@@ -1,549 +1,340 @@
-# LOO-938 — One plan at every size
+# 43bf9b — Remove chapters, KRs and metrics
 
-The design is `scratch/plan-design.md` (guide: `scratch/plan-design.html`).
-This file is how the branch gets there, and where the two differ this file
-holds. History of the question: `scratch/plan-ownership-history.md`; what was
-said: `scratch/explore.md`; the review of the branch as built, which set
-difference 4 and slice 4: `scratch/concept-review.html`.
+Stacked on LOO-938 (PR #1971); that Task's plan is on its own branch
+(`git show jack/loo-938-send-every-planning-change-through-one-queue:scratch/plan.md`).
+The other files in `scratch/` are LOO-938's and are background here.
 
-*Made for review, differing from the design:*
+## Direction
 
-1. **A Machine's ref holds its whole plan**, every field with the stamp it
-   carries, whoever wrote it. The design says a ref holds only the fields whose
-   newest stamp is that Machine's and prunes the rest. That breaks when a
-   teammate reaches a hub but cannot push: everyone prunes on seeing their
-   stamp and Git never carries the value. Whole-plan refs need no pruning, no
-   merging of fragments across refs, no held-back tip, and a retired Machine's
-   ref can simply be deleted. Cost: each change is re-published by every
-   Machine as one small commit (identical records are one blob on the remote).
-2. **One shape for both carriers.** A carrier sends whole stamped records and
-   keeps one cursor into `plan_changes`. `hub_sends` goes; both lines say
-   "unsent" and count records.
-3. **The ref names the repository**, so a fresh clone needs no
-   `lf config repo --bind`. Each clone keeps its own id and records the ids
-   other refs name as locators of its checkout (QA, below).
-4. **A save goes out by every carrier, whichever door it came through.** One
-   function sends after a save; nothing outside `ops/plan_carriers.rs` names a
-   carrier to send by. As built through slice 3, a CLI save told the hub at
-   once and left Git to the server's minute (38 s to push, 97 s to show on the
-   other Machine, measured in QA) while the same save through the server
-   pushed in 1.6 s. Slice 4. *Passed over:* the CLI asking the running server
-   to exchange (a new wire operation, and nothing with no server); a shorter
-   minute; documenting two minutes.
+The brief: "Remove chapters, KRs and metrics." "The chapter machinery is
+unused and is why a small group of Tasks costs a Project. This is a pure
+deletion; it adds no replacement."
 
-"Your order of your claimed Tasks" (the design's second order) moves to the
-tracker Task; see Exclusions.
+Scope correction, steer f1ada74d, 2026-11-18, by a Session for Jack Heart:
+"keep Projects as real records. A Wave may hold many Projects, Tasks keep
+their Project membership, and a Task still reaches its Wave through its
+Project. Remove only the chapter machinery: the single current Project and its
+activation, transitions, KRs, metric targets, instruments, observations, live
+metrics, and the three commands. Do not collapse Project into a link on the
+Wave; the title overstates that. The direction now under discussion makes
+Projects the finishing groups that map to tracker Projects, with Waves as
+grouping above them."
 
-Jack Heart, 2026-11-18, on whether the design replaces "the hub owns the
-plan": "Why woudd it not? it seems like it does". On order: "your order of
-your claimed tasks is NOT the proejct order, ut your order of hte backlog IS".
+So `projects`, `tasks.project_id → projects.wave_id`, Project name, summary,
+description, status, rank, and the tracker sync of all of them stay as they
+are. What goes is everything that makes one Project of a Wave special, and
+everything that hangs KRs and metrics on a Project or a Wave.
 
 ## What people see
 
-- One Machine: nothing changes. `lf repo tracker` reads `Plan: this Machine.`
-- Two Machines sharing a remote: a Task made on the laptop is on the remote
-  in seconds and on the mini within a minute, with no setting. Offline,
-  `lf repo tracker` on the laptop reads `Plan: Git origin, unreachable since
-  …, 1 unsent.` and later `Plan: Git origin.`
-- With `lf machine hub mini`: the same change arrives in seconds, and a second
-  line reads `Hub mini.` or `Hub mini, unreachable since …, 2 unsent.` Stop the
-  mini's server and Git still carries it.
-- A teammate who clones the repository sees the plan and their Tasks appear
-  on yours. No account, no hub.
-- Two edits to one field: the one made later wins on every Machine. Nothing
-  is ever `lost` or `conflicted` between Loopflow Machines.
-- Reordering the backlog on one Machine reorders it on all of them
-  (`task_rank` is a stamped field like any other).
-- Linear and Asana repositories behave as they do on main.
+- `lf wave create billing` registers the Wave and commits `.lf/wave/billing/`.
+  No Project row, nothing sent to Linear or Asana.
+- `lf task create --wave billing 'x'` works on a Wave with no Project: the
+  Task's Project is made then (see "Which Project a new Task joins").
+- A Task in any Project of its Wave runs. Nothing says "configured Project is
+  not In Progress", "No Project selected yet" or "Preparing Project…".
+- `lf help wave` lists no `update-project`, `edit-project`; `lf wave plan`
+  has `connect` and `reteam` only.
+- `lf wave status`, `lf wave show`, `lf wave plan --json`: Projects with name,
+  summary, status and tracker sync. No `current`, `krs`, `metric_targets`,
+  `metric_portfolio`, `project_readiness`.
+- Desktop Wave detail: no Metrics section, no KR checklist, no activation
+  spinner or retry. The "Project history" sheet stays as the Wave's Projects
+  list (name, status, tracker sync). The standup board header names the Wave;
+  it has no "current Project" line, metric headline or KR marks.
+- Agent context for a Task or a Wave has no `## KRs`, `## Metric targets` or
+  `<lf:metric-portfolio>` block.
+- `lf history usage --weekly` prints its report and writes nothing to a Wave.
+- A Linear Project's `content` (where KRs and targets were rendered) is never
+  written again and never parsed. What is there stays.
 
 ## Source of truth
 
-Each Machine's store, plus one stamp per field. The plan a Machine shows is,
-for each field, the value with the newest stamp it has received. Three
-carriers move stamped values and none of them decides anything.
+`projects` rows and `tasks.project_id`, as on main. A Wave's Projects are the
+rows with its `wave_id`; none of them is selected.
 
-### The stamp
+### Which Project a new Task joins — made for review
 
-`(at, machine id)`, compared in that order. `at` is
-`max(wall clock in ms, highest at this Machine has written or seen + 1)`.
+`lf task create --wave`, a Task moved into a Wave, and the two planning
+explanations (`planning_explain.rs:208,385`) all ask "the Wave's Project"
+through `ops::project::current_project` → `selected_project` →
+`waves.current_project_id` today. With no selection they ask one storage
+function instead, in `sqlite/children.rs` beside `list_projects`:
 
-*Made for review.* The design says "one more than the highest this Machine has
-written or seen". With that alone, a laptop offline since counter 4000
-retitles a Task on Tuesday at 4001 and loses to the mini's Monday retitle at
-4500, because the mini did more writes. Folding the wall clock in keeps the
-design's guarantee (an edit made after seeing yours beats yours, whatever
-either clock says) and makes unseen edits resolve by when they were made. A
-Machine with a clock an hour fast wins unseen races for that hour and no
-longer: everyone who sees its stamp moves past it.
+> the Wave's newest `started` Project; else its newest `backlog`, `planned` or
+> `paused` one; else none. Newest by `created_at`, then `id`.
 
-A field with no stamp row reads as `(0, this Machine)`. So nothing is seeded:
-a store that predates stamps offers its whole plan at 0, and any save beats
-it. *Passed over:* stamping existing values from the Git journal's clocks (the
-design's "Moving what exists"). It reads tables this branch marks leaving, and
-after the cutover below the Machines agree on every value anyway.
+When it answers none, creating or moving a Task makes a Project named for the
+Wave (`started`), in the same transaction, and queues its tracker `create`.
+On stores written by main the answer equals `current_project_id` whenever that
+Project is In Progress, which the old rule required.
 
-### Tables (all in this Task's one migration, `plan_hub.sql`, still unmerged)
+*Passed over:* `--project` on `lf task create` (an addition; it belongs to the
+Projects-as-finishing-groups direction still under discussion); refusing when
+a Wave has several open Projects (adds a precondition); `tasks.wave_id` so a
+Wave's Tasks need no Project (ruled out by the steer).
 
-- `plan_stamps(owner_id, field, at, machine_id)`, primary key
-  `(owner_id, field)`, index on `at` for the clock. New.
-- `plan_changes` stays: the local order in which records changed. A local save
-  bumps its record; so does an arriving value that wins. An arrival that
-  changes nothing bumps nothing, which is what ends an exchange.
-- `plan_carriers(repo, carrier, peer, sent_seq, seen_seq, error,
-  failing_since)`, primary key `(repo, carrier)`, `carrier` is `git` or `hub`.
-  `sent_seq`: how far into this Machine's `plan_changes` the carrier has
-  taken. `seen_seq`: the hub's `plan_changes` watermark (NULL for Git).
-  `peer`: the remote name or the hub's machine id. It replaces `hub_plans`,
-  `hub_sends` and their triggers; it keeps the `store_revision_*` triggers so
-  views see the lines change.
-- `plan_refs(repo, machine_id, tip)`: the last commit of each other Machine's
-  ref taken in. Per store, not per clone, so two clones of one repository on a
-  Machine agree.
+## Findings that shape the work
 
-"Unsent" for a carrier is the count of records in `plan_changes` past its
-`sent_seq`. No per-field queue and no `queued` / `sent` phase: sending a
-record twice changes nothing.
-
-### One record shape
-
-A stamped record is a record's id, its table and every field it has, each with
-`{value, at, machine}`. `plan.apply`, `plan.changes` and a file in a Git ref
-all carry exactly this, from one serializer (`planning_write::read` plus the
-stamps). One function lists the stamped records past a cursor; both carriers
-call it.
-
-### One way in
-
-`planning_write` gains the only function that takes values from elsewhere:
-stamped records in, each field written (as `WriteOrigin::Import`) only when
-its stamp is newer than the one held, stamps recorded, clock moved past the
-highest seen. The hub's import, `plan.apply` on the hub and the Git import all
-call it. A local save stamps every field it changes with the next stamp; a
-tracker observation is stamped the same way.
-
-It replaces `import_hub_plan`'s skip of fields with an open send, first
-contact's "queue every owner the hub lacked", and `apply_hub_edits` writing
-arrivals as local saves. `comments_arrived` (ownership markers, direction
-steers, re-claim) stays and runs for every carrier.
-
-## Carriers
-
-**Hub.** `ops/plan_hub.rs`, protocol revision 9, never released, so changed in
-place. One exchange: send the stamped records past `sent_seq` with
-`plan.apply` (paged by the existing byte budget) and move `sent_seq`; read
-`plan.changes` since `seen_seq` and apply. Order does not matter. The first
-exchange sends the whole plan once. `lf machine hub --clear` deletes the hub
-rows and loses nothing.
-
-**Git.** `refs/loopflow/plan/<machine id>` on the repository's remote: this
-Machine's whole plan, one stamped record per file (`tasks/<2 hex>/<id>.json`,
-`waves/<id>.json`, `projects/<id>.json`, `comments/<2 hex>/<id>.json`),
-canonical JSON so equal records are equal blobs, plus `repository` at the root
-holding the repository id. One exchange, in any checkout of the repository:
-
-1. `git fetch <remote> '+refs/loopflow/plan/*:refs/loopflow/plan-seen/*'`.
-2. For each other Machine's ref whose tip moved: `git diff-tree` from the tip
-   in `plan_refs` (the first time, or when that commit is not in this clone,
-   from this Machine's own last tree, else the empty tree), read the changed
-   files, apply through the one way in, record the tip.
-3. Build this Machine's commit with `git fast-import` on top of
-   `plan-seen/<me>`: rewrite the file of every record in `plan_changes` past
-   `sent_seq`. Push; on success move `sent_seq`. Offline, nothing is committed
-   and the line reads `N unsent`.
-
-Only the owning Machine pushes its ref, so a push is a fast-forward. A ref of
-a Machine that is gone can be deleted by anyone once any Machine has fetched
-it; this Task adds no command for it.
-
-Probe (git 2.50.1, `/tmp`): a first ref of 10,000 records built in about 1 s
-including generating the input; one changed record and one deletion on top
-took 0.12 s with no index and no worktree; the pushed ref does not appear in
-`git status`, `git branch -a` or a plain clone; a wildcard fetch into
-`plan-seen/*` and `diff-tree` between tips listed exactly the two paths.
-
-A repository with no remote writes no ref. *Passed over:* the design's "the
-ref exists locally" for one Machine; nobody could read it.
-
-**Repository id.** *Made for review.* When a fetched ref's `repository` differs
-from this clone's, the clone records it as a locator of its checkout
-(`locate_repository`), so the hub and a move find the checkout by any
-Machine's id. The clone keeps its own id. QA found the earlier rule (take the
-lower id through `bind_repository`) hid every Task saved under the first id
-from `lf task list`: the list reads by the selected id and
-`task_repository_is_fixed` forbids moving a Task.
-
-**When they run.** `ops/plan_carriers.rs` has two verbs and owns both
-carriers' timing.
-
-- `send(repo)`, after a save (slice 4): each carrier takes the records past
-  its cursor and reads nothing. The hub's is today's `send_only` exchange.
-  Git's is `publish` on the own ref as last fetched (`plan-seen/<me>`), with
-  no fetch; a push the remote refuses as not a fast-forward is left for the
-  next `sync`. Five seconds at most (`WAIT`); the cursor moves only on
-  success, so the minute sends what a slow push did not.
-- `sync(repo)`, when asked (`lf task sync`, `lf wave status --sync`), before a
-  claim, on a Task lookup that misses, and after a command the server answers
-  (`after_command`, quiet 5 s): read and send by each carrier.
-
-One server task runs the Git exchange for every repository without Linear or
-Asana that has a remote, every 60 s; that is how another Machine's change
-arrives with no hub. Reads nobody asked for (before a create, a provider
-exit, `lf repo tracker --subscribe`) read the hub only: a hub read is one
-request and a fetch is not. With no server, saves still go out by both
-carriers and other Machines' changes wait for `lf task sync`. *Made for
-review:* 60 s, one `git fetch` per repository per minute, no setting.
-
-**Linear / Asana.** Unchanged in this Task: `tracker_actions`, per Machine.
-
-## Surfaces that change
-
-- `lf repo tracker` text and `--json`: `plan: {git: {remote, unsent,
-  error, failing_since} | null, hub: {machine, unsent, error,
-  failing_since} | null}`, with the unsent records listed under each line by
-  identifier. The per-field `queued` lines go. DTO fixture
-  `tests/fixtures/dto/tracker_sync.json`, Rust and Swift fixture tests.
-- Desktop `RepositoryPlanView` / `RepositoryPlan.swift`: the same two lines.
-- `machine/wire.rs` `PlanApply` / `PlanChanges`, `server_schema.json`,
-  Swift `ServerProtocol`.
-- `lf task sync`: prints what is unsent by each carrier.
-- Docs, written ahead of the build (write-docs, 2026-11-18) and describing
-  the behavior above: `docs/work.md` ("Share the plan", the Sync reference),
-  `docs/ops.md`, `docs/config.md`, `docs/glossary.md`, `docs/dev/planning.md`
-  (Words; "Without a tracker: stamps and carriers"), `docs/dev/machines.md`,
-  `docs/dev/reference.md` ("Shared plan" row), `docs/dev/data.md`,
-  `rust/loopflow/src/server/README.md`. Implement reads them as the spec for
-  wording: `Plan: Git origin, 1 unsent.`, `Hub mini.`, records listed by
-  identifier, Git's own reason on the error line. Code links in the reference
-  row (`HubPlan`) follow the types.
-
-  Both things the docs assumed held: `lf task claim` / `lf task run` exchange
-  first and the losing claim's run stops, keeping its work; a clone with a
-  remote needs no `lf config repo --bind`.
-
-  Questions writing exposed:
-  - A teammate who can fetch but not push sees the plan and every save of
-    theirs stays unsent, with a push error on the line for good. Should a
-    clone that has never pushed successfully read differently (say
-    `Plan: Git origin, read only.`) instead of an error?
-  - `docs/work.md` now says "anyone who can push to it can change any Task".
-    Does `docs/security.md` need the same sentence?
-
-## Absent and error states
-
-- No remote, no hub: `Plan: this Machine.` Nothing runs.
-- Fetch or push fails: `Plan: Git origin, unreachable since …, N unsent.` with
-  Git's reason; the hub line is independent. Saves never wait on either.
-- Push rejected because the remote's own-Machine ref moved (a second store
-  using this Machine's id): shown as the error; never forced.
-- A file that does not parse, or a field this build does not know: that field
-  is skipped and logged; the rest of the ref applies.
-- A hub older than this build: the existing skew error naming the fix.
-- A released `lf` on another Machine keeps reading the old
-  `refs/loopflow/planning/*` and sees no new changes. `TrackerConfig::ReleasedGit`
-  stays until LOO-973.
-
-## Operational boundary
-
-10,000 Tasks, about 15 fields each: `plan_stamps` near 150,000 rows, read by
-primary key; the clock is `max(at)` on its index. Check both and the
-`plan_changes` range read with `EXPLAIN QUERY PLAN` in `query_plans.rs`.
-A change costs one small commit per Machine on the remote and one no-op diff
-read per Machine; sized for about ten Machines, not a hundred.
-Stamping happens inside the save's own transaction: no second write lock. Git
-runs outside any SQLite transaction. One exchange per carrier and repository
-at a time (`locks/plan-hub/<id>.lock`, `locks/plan-git/<id>.lock`); a hub and
-a Git exchange may overlap, and each import is one transaction.
-
-## Acceptance check at gate
-
-Extend `machine_commands::the_later_change_shows_on_both_machines_through_the_hub`
-(stand-in `ssh`, real carrier) to three homes and a bare remote:
-
-```bash
-L: lf task create 'x'            # remote unreachable → repo tracker: "Git origin, 1 unsent"
-L: lf task sync ; M: lf task sync ; M: lf task show <id>     # title "x", no hub named
-L: lf machine hub mini ; M: lf task edit <id> --title one
-L: lf task sync ; L: lf task show <id>                       # "one"
-stop M's server ; L: lf task edit <id> --title two           # Hub mini, unreachable, 1 unsent
-T (third home, another identity): lf task sync ; lf task show <id>   # "two", by Git
-start M's server ; M: lf task show <id>                      # "two"
-```
-
-and the case the hub-owns design needed "pull before push" for: L holds a
-stale title and has never met the hub; after first contact both show M's
-newer one. And the case whole-plan refs exist for: T's push is refused, T
-retitles through the hub, a fourth Git-only home sees T's title from L's ref.
-
-## Cutover for etude
-
-By hand, not code. With the released `lf`: `lf task sync` on the laptop and
-the mini until `lf repo tracker` shows both refs confirmed (the laptop's
-personal ref showed "local changes pending" and "Git acquisition failed" on
-2026-11-18; the 22 records there exist only on the laptop and will arrive on
-the mini as new records either way). Install on both. Each server writes its
-ref within a minute. Neither Git nor the hub needs `lf config repo --bind` on the mini, once the
-mini has fetched. Unverified: the mini was unreachable during both kickoffs, so its
-etude checkout and `lf` version are unknown.
-
-## Exclusions
-
-- A person's slice of a team's Linear Project, Wave membership from the link,
-  Linear manual order for the backlog, a person's order of their claimed Tasks
-  (a rank keyed by person and Task, shown only to them), and a person's own
-  Machines exchanging through Git on a tracker repository. This needs its own
-  Task, LOO-980: it needs "which refs are mine" and a decision on which
-  rule owns a field both a tracker and a stamp carry. The two orders are
-  designed together there. Two things said for it on 2026-11-18 are in
-  `scratch/explore.md` and the design's tracker section: backlog reorders
-  are written in each tracker's own terms, and a Team or Initiative matters
-  only as the default for a new Wave.
-- A command that deletes a gone Machine's ref, and squashing a ref's history.
-- One identity for a repository that every clone computes alone. Today an id
-  per clone, locators learned from plan refs, and `--bind` for a hub with no
-  remote; a hub asked by an id it has not fetched answers "no checkout", with
-  an error that still says `--bind`. Changing it re-keys
-  `tasks.repository_id` in every store. Not filed.
-- Who may use someone's hub beyond SSH reach.
-- The phone, presence, the hub's persistent connection: LOO-861.
-- Task identifiers for repositories without a tracker.
+1. **`project_transitions` also gates tracker export.** `uncreated`
+   (`loopflow-storage/src/sqlite/tracker_actions.rs:980-992`) exports a local
+   Project only when a `project_transitions` row with `local_plan_json` names
+   it; `ensure_project` (`sqlite/project_selection.rs:123-229`) writes that
+   row. Without the table a Project made here would never reach Linear. The
+   Project half of `uncreated` goes; creating a Project queues its `create`
+   action in the creating transaction. That also keeps a Project that arrived
+   from another Machine by Git or hub from being created twice. A Project made
+   offline by the released `lf` and still unexported at upgrade has only its
+   transition row: the migration cannot build the action's baseline
+   (`creation_baseline` is Rust), so the first open after upgrade is where it
+   is queued, or it is left and said so. Slice 1 settles which by running it.
+2. **Plan records carry three of the removed fields.**
+   `planning_write::read` (`sqlite/planning_write.rs:101-136`) emits
+   `wave_project`, `krs`, `metric_targets`; `plan_carriers.rs:125-143` orders
+   a Wave after its `current_project_id` Project. The Git carrier skips a
+   field it cannot decode (`ops/plan_git.rs:260-292`); the hub decodes
+   `Vec<StampedRecord>` strictly (`machine/wire.rs:272,291`), so one Machine
+   on LOO-938's build sending `krs` fails the whole page on this build. The
+   per-field skip moves onto `StampedRecord`'s own decoding so both carriers
+   have it, and `parse_record` loses its copy. `plan_stamps` rows for the
+   three fields stay as rows nobody reads.
+3. **Upgrades from old releases decode the removed variants.**
+   `convert_released_data` and `convert_project_content`
+   (`migration_runner.rs:780-835`) run after released migration
+   `0.13.12.002` and parse stored JSON as `WorkValue`, including `Krs` and
+   `MetricTargets`, and write `projects.krs`. Released migrations are
+   immutable and their conversion has to keep working from a store older than
+   that batch. The conversion keeps its own private reading of those values
+   (raw JSON, validated as JSON) and no longer names `WorkValue::Krs`,
+   `ProjectKR` or `MetricTarget`. `project_document.rs` parsing survives only
+   as far as that conversion needs it, inside `migration_runner`.
+4. **The migration is marks only, in its own file.** `new_migration.py`
+   prints `plan_hub.sql` on this branch because LOO-938's migration is
+   unmerged (`_unmerged`, `scripts/new_migration.py:57-75`). Unmerged slugs
+   are ordered by name after merged ones (`migration_build.rs:19`), so a
+   second file works: create `remove_chapters.sql` by hand; `r` sorts after
+   `plan_hub`. Marks need no DDL and no trigger rebuild
+   (`unused_store_members.sql` marked `tasks.worktree` and left its trigger
+   and index). The idle triggers (`selected_project_wave_update`,
+   `selected_project_owner_update`, `project_activation_start_from_process`,
+   the `graph_run_end_from_process_*` writes) stay until the contract, which
+   also rebuilds `waves` (FK column) and the `wave_addresses` view
+   (`SELECT w.*`).
+5. **Nothing in production deletes a `projects` row** (only a test, with
+   foreign keys off), so a stale `waves.current_project_id` cannot block a
+   delete during the window.
+6. `ensure_wave_project` (`work/wave/bootstrap.rs:32`) has no production
+   caller; about twenty tests use it to get "a Wave with a Project". The real
+   path is `wave_lifecycle::ensure_first_project` (`ops/wave_lifecycle.rs:130-154`).
+7. `tests/e2e/linear_oauth.py:229-319` inserts into `wave_chapters`, a table
+   that no longer exists: an earlier attempt, dead.
 
 ## What goes
 
-- `import_hub_plan`'s first-contact branch and open-send skip;
-  `apply_hub_edits`; `hub_sends`, `HubSend`, `open_by_owner`,
-  `mark_hub_sent`, `confirm_hub_sends`, the `queued` / `sent` phase;
-  `hub_plans` (into `plan_carriers`); `forget_hub_plans` reporting values
-  "the hub never took".
-- "The change sent last wins" for the hub: gone from code and docs. The
-  phrase stays where it describes Linear/Asana (`planning/rules.rs`,
-  `docs/dev/reference.md` "Linear events", `docs/dev/delivery.md`), which
-  this Task leaves alone.
-- Already deleted on this branch and staying deleted: the journal, field
-  causality, destinations, `PlanningSync`, `lf repo tracker key` / `journal`,
-  the `two-people` World. The Git carrier is new code in a new module; nothing
-  comes back from `planning_git.rs`.
-- Must survive: `lf machine hub`, the hub line, `comments_arrived`, the cold
-  move sending the plan to its target first (`session_move::ready`), every
-  Linear/Asana path.
+Behavior that must survive: Projects and their tracker sync both ways (name,
+summary, description, status, rank, Initiatives, Teams, Task order), Task
+identity and history, a Task reaching its Wave, `lf wave plan connect` and
+`reteam`, `.lf/wave/**` directories, upgrade from any released store.
+
+**Commands and served writes**
+- `WaveCommand::EditProject`, `UpdateProject`, `WavePlanCommand::Bind`,
+  `WaveProjectTarget` (`loopflow/src/lf/mod.rs:1531-1549,1922-1933,2016-2034`),
+  their handlers (`bin/lf.rs:905-920,971-984,1044-1060`), entries in
+  `changes_work` (`lf/mod.rs:1211-1217`), help text saying "first Project" and
+  "current Project".
+- `wave.plan.bind` (`lf/commands/write.rs:498-508`), `engine::wave::planning_bind`,
+  `tests/fixtures/dto/server/wave_plan_bind.json`, its lines in
+  `server/wire.rs`, `server/schema.rs`, `server/README.md`.
+
+**Selection and activation**
+- `loopflow-storage/src/sqlite/project_selection.rs`, whole file:
+  `read_project_binding`, `write_project_binding`, `bind_project`,
+  `ensure_project`, `record_project_activation`, `selected_project`,
+  `project_readiness`, `ProjectReadiness*`, `ProjectActivation`.
+- `require_selected_project`, `require_current_task_project`
+  (`sqlite/durable.rs:412-449`) and their calls in `place_task_in`,
+  `promote_task_prepared`, `create_task`, task move, `require_task_launch`.
+- `WorkValue::WaveProject` and its arms (`work/edit.rs:103,147`,
+  `planning_write.rs:33,69,103-116,204-215`); the `current_project_id` need in
+  `plan_carriers.rs:129`.
+- `RunOwner::ProjectActivation` and its arms (`graph_inventory.rs:756-761`,
+  `retention.rs:250-252`, `processes.rs:613-616`,
+  `loopflow-test-support/src/lib.rs:69`), `query_plans.rs:164`.
+- `ops/project.rs`: `current_project`, `bind_project`, `update_project`,
+  `resolve_project*`, `ProjectTarget`, `edit`, `readiness`. What is left of the
+  file is the one call to the new storage function, so the file goes too.
+- `ops/wave_lifecycle.rs` `ensure_first_project`; `WaveAdded.project`.
+- `work/wave/bootstrap.rs` `ensure_wave_project`; test callers build their
+  Project with `insert_project` or create a Task in the Wave.
+- The `~/.lf/chapter-locks` directory name in `ops/planning_sync.rs:227-254`
+  becomes `wave-locks` (the lock stays).
+
+**KRs and metric targets**
+- `ProjectKR`, `Project.krs`, `Project.metric_targets`,
+  `validate_metric_targets` (`work/project.rs`), `WorkValue::Krs`,
+  `MetricTargets` (`work/edit.rs:128-129,177-179`), `update_project_content`
+  (`sqlite/project_content.rs`), the columns in `insert_project`,
+  `PROJECT_COLUMNS`, `map_project_row` (`sqlite/children.rs`), in
+  `ActionKind::of`, `field_baseline`, `creation_baseline`
+  (`sqlite/tracker_actions.rs`), in `put_project` and
+  `project_accepted_planning` (`sqlite/linear_events.rs`).
+- `TrackerProject.krs`, `.metric_targets`, `render_project_content`,
+  `render_metric_targets`, `render_krs` (`planning.rs:194-256`),
+  `planning/project_document.rs` (see finding 3),
+  `linear/project_document.rs`, the `content` write in
+  `linear/actions.rs:160,173-181`, `project_field_input` and
+  `patch_project_field` arms (`linear/mod.rs:1414-1434,2306-2331`), the parse
+  in `ProjectNode::into_tracker_project` with its "older rotation archived its
+  predecessor" branch (`linear/mod.rs:2334-2362`), `asana/actions.rs:387-403`,
+  `ops/tracker.rs:411-425`.
+- Queued `tracker_actions` whose subject is `krs` or `metric_targets`: the
+  drain retires them unsent.
+
+**Metrics**
+- `loopflow-storage/src/metric.rs` (1059 lines), `sqlite/metrics.rs` (663),
+  `loopflow-execution/src/ops/metrics.rs` (729), `work/wave/metrics.rs` (760),
+  `store/metrics.rs` (65).
+- `context_cost.rs` `observations` and `publish` (334-415); the report stays.
+- `print_metric_portfolio` and helpers (`lf/commands/waves.rs:2805-2980`).
+- `render_project_context` and `render_wave_context` metric and KR text
+  (`ops/run.rs:71-100`).
+- `World::plan`, `World::metric` and their recipe uses (`world/mod.rs:355-436`,
+  `world/recipes.rs`).
+
+**Wire types** (`tests/fixtures/dto/`, Rust and Swift fixture tests)
+- `WaveDetailSnapshot` and `WaveRoadmap`: `project_readiness`,
+  `metric_portfolio`. `ProjectSummary`: `current`, `krs`, `metric_targets`.
+  `Project`: `krs`, `metric_targets`. `WaveAdded`: `project`.
+- `metric_portfolio.json` whole; fields out of `roadmap_snapshot`,
+  `wave_detail`, `work_first_entry`, `task_status`, `wave_added`,
+  `task_lifecycle`, `task_history_planning`; `server_schema.json`
+  regenerated (`lf server describe --json`).
+
+**Desktop** (`swift/`)
+- Whole files: `Models/MetricPortfolio.swift`,
+  `LoopflowMac/Views/ProjectReadinessView.swift`,
+  `LoopflowTests/ProjectActivationTests.swift`; `KeyResultProof` and
+  `WaveKeyResult` in `Models/WavePlan.swift` (unused today).
+- `WaveMetricPortfolioView` and helpers (`WaveDetailPane.swift:283-675`), KR
+  rows in `WaveProjectView`, activation props and `activateProject`
+  (`WorkModel.swift:2017-2060`, `WavesView.swift:103-107,368-370`),
+  `currentProject` on `WaveWorkMap`, `WavePlan`, `WaveRoadmap`,
+  `WaveDetailSnapshot`, `ProjectReadiness` in `RegistryQuery.swift`,
+  `PlanningKeyResult`, board heading and header lines
+  (`WaveStandupBoard.swift:97-105,219-245`).
+- `waveForProject` matches any of a Wave's Projects, not the current one.
+  `ProjectHistoryView` loses its KR list and its default to the current
+  Project. Tests in `DTOFixtureTests`, `WaveDetailReadingTests`,
+  `RegistryQueryTests`, `WorkModelTests`, `WaveStandupTests` follow.
+  `MockWaveFixture.swift` loses the same fields. `swift/README.md` sections.
+
+**Docs and skills**
+- `docs/work.md` "Plan it: KRs and targets" (529-543) and the KR and metric
+  mentions at 55, 358-359, 403-407, 464; `docs/dev/planning.md` intro, "Plan
+  creation and selection" (400-453), "Replace a Wave's Project, keep the
+  work" (455-468); `docs/dev/reference.md` Wave Project and Live metric rows
+  (the architecture check requires every live table to have a row, so the
+  leaving tables stay listed as leaving); `reference-models.md`,
+  `reference-code.md`, `dev/index.md` (and regenerated `index.html`),
+  `data.md:331`, `machines.md:69`, `agent-api.md:69,255-256`,
+  `docs/index.md:121`, `glossary.md` KR row, `orchestration.md:335`,
+  `AGENTS.md` Work model paragraph, `PROMPTS.md:163`.
+- Builtins: `split-wave.md` metric and `update-project` lines,
+  `kickoff.md:79`, `prompt.md:30,84-85`, `wave_operate.md:10`; the test at
+  `skills/mod.rs:1206-1222`. `.lf/qa/tracker.md:1,6-7`.
+- `tests/e2e/linear_oauth.py:104,229-319`; the `.lf/chapters` ignores in
+  `scripts/check_architecture.py:75` and `python/tests/test_architecture.py:219`.
+
+**Schema** — `remove_chapters.sql`, marks only (`-- leaving: … <Task ID>`; the
+checker wants a tracker-style ID, `[A-Z]+-\d+`, and this Task's is `43bf9b`:
+see questions):
+`waves.current_project_id`, the seven `waves.project_activation_*`,
+`project_transitions`, `projects.krs`, `projects.metric_targets`,
+`projects.legacy_current`, `projects.iteration`, `tracker_projects.krs`,
+`tracker_projects.metric_targets`, `pm_projects.krs`,
+`pm_projects.metric_targets`, `metric_instruments`, `metric_observations`,
+and `project_changes` (read only by a test since `tracker_actions.sql`
+acknowledged every row). `SCHEMA.md` regenerated by `scripts/schema_page.py`.
+
+**Tests that go with their feature:** the lists in the three inventories,
+chiefly `project_selection.rs` tests, `sqlite/metrics.rs` tests,
+`ops/metrics.rs` and `work/wave/metrics.rs` tests, `store/mod.rs`
+`selected_project_*`, `local_planning.rs` 1024, 1399, 2706,
+`global_commands.rs:2088`, `status_tests.rs:620`, `dto_fixtures.rs:129,208`,
+`waves.rs` 4053, 4216, 4283. Migration tests and fixtures under
+`rust/loopflow-storage/tests/fixtures/migrations/` stay: they seed released
+schemas.
+
+## Absent and error states
+
+- Wave with no Project: every reader shows an empty Projects list; Task
+  creation makes one.
+- Wave whose Projects are all completed or canceled: a new Task makes a new
+  Project named for the Wave.
+- A record from a Machine on an older build carrying `wave_project`, `krs` or
+  `metric_targets`: the field is skipped and logged, the rest applies.
+- A Linear Project whose `content` holds KR markdown: read as nothing.
+- `.lf/wave/<name>/metrics/*.md`: files nobody reads.
+- An old `lf` on a store this build has written: Waves made here have no
+  current Project, so it reports none selected. Not supported; the marks only
+  delay the drop.
+
+## Exclusions
+
+- Dropping the marked columns and tables, rebuilding `waves`, the idle
+  triggers and `wave_addresses`: the contract, after the window.
+- `.lf/wave/**` content in this repository (`product/GOAL.md` "Chapter
+  planning", `intelligence/metrics/*.md`, MEMORY notes) and `.lf/chapters/**`
+  anywhere: Wave memory and other repositories' records.
+- `release/v*/NOTES.md`, released migrations and their fixtures.
+- Naming a Task's Project at creation, a Project per finishing group, Wave
+  membership from a tracker link: the direction under discussion and LOO-980.
+
+## Acceptance check at gate
+
+Headless, in a fixture repository with the stand-in Linear:
+
+```
+lf wave create billing            # store: 0 projects rows for the Wave; no projectCreate sent
+lf task create --wave billing x   # 1 projects row, status started; one projectCreate, one issueCreate
+lf wave plan billing --json       # projects[0] has no current/krs/metric_targets; no metric_portfolio, project_readiness
+lf help wave                      # no update-project, edit-project
+lf wave plan bind billing x       # Clap: unrecognized subcommand
+```
+
+and, from the repository root,
+`grep -ri 'key result\|metric_target' rust/ swift/ docs/` matches only
+released migrations (`src/migrations/*.sql`, `tests/fixtures/migrations/`),
+`migration_runner.rs`'s conversion of released data, and `SCHEMA.md`'s
+leaving entries.
+
+Demo: the first two commands on a fresh repository, then `lf wave status
+billing` showing one Project and one Task with nothing about KRs or metrics;
+on main the first command alone has already created a Linear Project.
 
 ## Slices
 
-1. **Stamps and one record shape, over the hub.** *Built.* `plan_stamps`,
-   the stamp on every local and tracker save, `StampedRecord`, the one way in
-   (`planning_write::apply`), `plan_carriers` with the hub's cursor,
-   `plan.apply` / `plan.changes` carrying records, `hub_sends`, `hub_plans`
-   and first contact deleted, `lf repo tracker`'s hub line in records, Swift
-   model and view. The storage module is `sqlite/plan_carriers.rs`.
+1. **A Wave with no selected Project, end to end.** `lf wave create` makes no
+   Project; the storage function above answers Task creation and moves;
+   `require_selected_project` and `project_selection.rs` go;
+   Project creation queues its tracker `create`; `uncreated` loses its Project
+   half; `wave_project` leaves the plan record and the hub decodes per field;
+   `remove_chapters.sql` exists with the selection marks. This is the slice
+   that can prove the plan wrong: it shows whether anything still needs "the"
+   Project (launch, Session membership, tracker export, the plan carriers'
+   ordering), and what happens to a Project left unexported by the released
+   `lf` (finding 1). Shown by the first two acceptance commands against the
+   stand-in Linear and by `cargo test -p loopflow --lib task_graph_launch_tests::`
+   on a Task whose Project is not the Wave's newest.
+2. **Commands and activation.** The three commands, `wave.plan.bind`,
+   `RunOwner::ProjectActivation`, `project_readiness` off the wire, Desktop's
+   activation and readiness views, `ensure_wave_project` and its test callers.
+3. **KRs and metric targets.** The `WorkValue` variants, Project fields,
+   Linear `content`, tracker action subjects, agent context text, wire fields,
+   Desktop KR rows, finding 3's private conversion.
+4. **Metrics.** The five metric modules, `context_cost` publishing, the
+   portfolio on the wire and in Desktop, the demo world, then docs, builtins
+   and the remaining marks in one pass, with the grep.
 
-   What it taught:
-   - The model holds: later edit wins in either arrival order, a save after
-     seeing a fast clock beats it, a stale laptop takes the hub's newer value
-     at first contact, and a re-sent record changes no row (storage tests with
-     the clock set, `sqlite::plan_carriers::`).
-   - `plan_changes` is bumped when a *stamp* is adopted, not only a value.
-     Two Machines that wrote the same value keep different stamps otherwise,
-     and a third edit between them splits the plan.
-   - What a peer just gave is not owed back: an import from a carrier moves
-     that carrier's `sent_seq` to the end when nothing was unsent before it.
-     Without this `lf repo tracker` reads `N unsent` after every read. That
-     holds for the hub only. The Git import passes no carrier
-     (`apply_plan_records(.., None, ..)`): a whole-plan ref owes every arrival
-     back in this Machine's own ref, and the same exchange publishes it. A Git
-     arrival also counts as unsent for the hub, which is how one carrier feeds
-     the other.
-   - A page of records carries what each record needs ahead of it (a
-     comment's Task, a Task's Project, a Project's Wave, a Wave's parent and
-     selected Project), so any page applies alone. The old send split parents
-     from children at a page boundary and would have stalled. A plan ref's
-     files are read through the same import, in one call per fetched ref, so
-     Git gets this from `create`'s parents-first order.
-   - Unstamped fields converge on the higher machine id at first contact, and
-     the lower one adopts every stamp once (its whole plan counts as changed,
-     then is marked sent to that carrier).
-   - `plan_changes` had no `store_revision_*` triggers and
-     `store_revisions_cover_every_table` was failing on the branch; it has
-     them now, since the unsent count is read from it.
-   - `--json` is `plan: {hub: {machine, unsent, records, error,
-     failing_since} | null}`: `unsent` is a count and `records` names the
-     first twenty. `git` joins it in slice 2.
-   - Without Git, the first line is `Plan: this Machine.` and the hub line
-     follows it. `lf machine hub` alone prints `Hub mini.` or `No hub.`
-   - Not built: skipping a field this build does not know. A hub older or
-     newer is caught by the protocol revision; a plan ref file needs it
-     (slice 2), which means parsing fields one at a time, not a typed
-     `Vec<StampedValue>`.
-2. **Git refs.** *Built* (`ops/plan_git.rs`, `plan_refs`), except etude's
-   move, which is by hand. The same records written as files, fetch, import,
-   the server's timer (`server/maintenance.rs`), the repository id check, the
-   Git line in `lf repo tracker`, `lf task sync` and Desktop, the acceptance
-   test with a bare remote and a third home.
-
-   What it taught:
-   - The repository id check failed in QA: rows saved under a clone's first
-     id stay with the checkout but leave `lf task list`. Clones keep their own
-     id and hold the others' as locators. The `repository` file stays and the
-     docs need no `--bind` for a repository with a remote.
-   - A clone that has saved nothing must still read: the exchange registers
-     the repository itself (`ensure_repository`). Skipping an unregistered
-     clone left a second Machine with an empty plan.
-   - A Machine whose ref is missing from the remote publishes its whole plan
-     whatever its cursor says, so a deleted ref or a new remote heals.
-   - The exchange commits only when the tree would differ, so two Machines
-     that agree stop writing commits (checked: refs unchanged after extra
-     exchanges).
-   - Until the hub has fetched a Machine's ref, it is addressed by an id it
-     has not seen and answers "no checkout" for up to a minute. The acceptance
-     test runs mini's fetch first.
-   - A second clone of one remote on the same Machine cannot answer to an id
-     that locates another path; it logs, shows an empty plan, and sends its
-     saves on the Machine's one ref (QA, scenario 11).
-   - The last case of "Acceptance check at gate", the one whole-plan refs
-     exist for, is in the acceptance test: a home whose push is refused
-     retitles through the hub; a fourth Git-only home reads that title from
-     the laptop's ref.
-   - A record skipped because it could not be written (questions, slice 2)
-     is not retried: the ref's tip is recorded once read, and later diffs
-     start from it. It arrives again only when its file next changes.
-   - Reads that are not asked for do not fetch: `lf repo tracker --subscribe`
-     and a provider exit exchange with the hub only; `lf task sync`,
-     `lf wave status --sync`, a Task lookup that misses, a served command and
-     the server's minute do Git too.
-3. **Claims are first-wins.** *Built*, without Linear or Asana
-   (`sqlite/task_ownership.rs`, `ops/plan_carriers.rs` `before_claim`). An entry
-   carries `order` and `seen`; every Machine sorts the log by `order`, then
-   the writing Machine's id; a claim whose `seen` is not the entry in effect
-   just before it loses to the claim holding the Task and names no owner
-   anywhere. The Machine whose claim lost writes a steer naming who was first
-   and a Task interrupt. `lf task claim` and placing an unowned Task exchange
-   by each carrier first, five seconds at most.
-
-   What it taught:
-   - The order cannot be read off the comment's stamp. A move hands its claim
-     to the target before the comment arrives, and with no carrier in reach
-     the comment may never arrive, so the entry carries its own `order`: the
-     plan clock, and past every entry its writer held for the Task.
-     `journal_order_in` is gone; a marker that arrives with a move keeps the
-     order its writer gave it.
-   - `seen` names the last entry *in effect*, not the last in the log. Naming
-     a claim that lost would make the next entry look stale on a Machine that
-     has not received the loser yet.
-   - Only a claim loses, and only to a holder. An unassign that crossed a
-     takeover still unassigns, and the taken-over Machine claims again, as on
-     main.
-   - Seeing first does not stop a second run by a teammate: after the
-     exchange `lf task run` takes the Task over as on main, and the earlier
-     owner's Sessions are told. On your own Machines it does: the claim is
-     refused with "ownership is written on Machine mini".
-   - Routing (`work_route::resolve`) reads known Work only, so the exchange
-     sits at the claim, after the command has chosen this Machine.
-   - Not built: showing a lost claim as lost in `lf task status`; `lf ship`
-     and checkout adoption exchanging first.
-
-4. **One door for a save.** *Next.* Add `plan_carriers::send` as described
-   under "When they run" and call it where a save sends to the hub alone
-   today: `ops/planning_sync.rs` `sync_saved` and `machine/task.rs`
-   (`plan_hub::sync(.., true)`). `plan_git` gains the push without a fetch;
-   `publish` already takes the own ref's tip as an argument. After it, no
-   caller outside `ops/plan_*` passes `send_only`.
-
-   Shows it worked: two homes and a bare remote, a server running in neither;
-   `lf task create 'x'` on L, then `git ls-remote <remote>
-   'refs/loopflow/plan/*'` lists L's ref at once and `lf repo tracker` reads
-   `Plan: Git origin.`; with the remote moved away it reads `unreachable
-   since …, 1 unsent` and the command still returns within `WAIT`. Then
-   `docs/work.md` "Share the plan" says seconds to the remote and a minute to
-   the other Machine again, and `rust/loopflow/src/server/README.md` and
-   `docs/dev/planning.md` name the two verbs.
-
-   Check before it lands: every save in a fixture with a remote now pushes a
-   plan ref there. Fixtures with a local bare remote gain a hidden ref; grep
-   `rust/loopflow/tests/` for assertions on a remote's ref list
-   (`ls-remote`, `for-each-ref`, `show-ref`) and for an `origin` that is a
-   real URL, which would reach for the network on each save. If one exists,
-   the fixture's remote changes, not the product.
-
-   Also in this slice, since it is the same sentence in the docs: confirm
-   QA's "a served read of a clone the Machine has saved nothing in shows an
-   empty plan". `after_command` runs for served reads that name a directory
-   and `plan_git::exchange` registers the clone, so it may already heal
-   within the quiet period; read it from a server socket and record which.
-
-## Checks
-
-- Slice 1, run by implement, passed 2026-11-18:
-  `cargo nextest run -p loopflow-storage --lib -E 'test(sqlite::plan_carriers::) | test(sqlite::planning_write::) | test(query_plans::) | test(migration_runner::) | test(revisions::)'`;
-  `cargo nextest run -p loopflow -p loopflow-execution --lib --test integration -E 'test(the_later_change_shows_on_both_machines_through_the_hub) | test(store::children_tests::) | test(store::ownership_lifecycle_tests::) | test(planning_setup_tests::) | test(dto_fixtures::subscribe_frames) | test(server::schema::tests::)'`;
-  `cargo clippy -p loopflow-storage -p loopflow-execution -p loopflow --all-targets -- -D warnings`.
-- Those ran before main (#1974, the `processes` table goes) was merged in at
-  `be214dee63`. After the merge only
-  `cargo check -p loopflow-storage -p loopflow-execution -p loopflow --all-targets`
-  ran, clean, 2026-11-18. Slice 2 reruns the hub acceptance test as it
-  extends it; the storage tests rerun at gate.
-- Slice 2, run by implement, passed 2026-11-18:
-  `cargo test -p loopflow-execution --lib ops::plan_git::`.
-  `cargo nextest run -p loopflow --test integration -E 'test(the_later_change_shows_on_both_machines_through_the_hub) | test(dto_fixtures::subscribe_frames)'`
-  (the acceptance test: 137 s);
-  `cargo nextest run -p loopflow -p loopflow-storage --lib -E 'test(server::schema::tests::) | test(revisions::) | test(migration_runner::)'`
-  (one migration test finished at 299 s of nextest's 300 on a loaded
-  Machine). `server_schema.json` regenerated.
-- Slice 2's tests ran before main (#1977, Session reads) was merged in at
-  `5796dd348b`; the merge touched no plan file. After it,
-  `cargo check -p loopflow-storage -p loopflow-execution -p loopflow --all-targets`
-  ran clean, 2026-11-18. The acceptance test reruns as slice 3 extends it.
-- Slice 3, run by implement, passed 2026-11-18:
-  `cargo nextest run -p loopflow -p loopflow-execution -p loopflow-storage --lib --test integration -E 'test(server::schema::tests::) | test(task_ownership::tests::) | test(store::ownership_lifecycle_tests::) | test(store::ownership::tests::) | test(task_ownership_follows_claim_handoff_and_unassign_through_the_writer) | test(of_two_claims_made_apart_the_first_holds_on_both_machines) | test(dto_fixtures::) | test(sqlite::plan_carriers::) | test(revisions::)'`
-  (101 tests; `store::ownership_lifecycle_tests::a_double_claim_…` failed as
-  the old rule's test and is rewritten as `of_two_claims_made_apart_…`, which
-  passes); the acceptance test
-  `test(the_later_change_shows_on_both_machines_through_the_hub)` with the
-  refused-push case, 62 s; clippy on the four crates. `server_schema.json`
-  and `SCHEMA.md` regenerated.
-- Seen once, cause unknown, for gate to watch: before those passes,
-  `machine_commands::of_two_claims_made_apart_the_first_holds_on_both_machines`
-  and the acceptance test timed out at nextest's 300 s twice (load average
-  about 90, together and then the claims test alone), and the claims test
-  then passed in 28 s and 19 s with nothing changed. The same commands by
-  hand took 1 to 7 s each. `ps` showed stopped (`T`) `lf` processes of other
-  sessions on the Machine at the time. No hang was found in the claim path.
-- Slice 3's run by hand, 2026-11-18 (two homes, a bare remote in `/tmp`):
-  both `lf task claim`, three `lf task sync`; `lf task status` on both showed
-  `Owner: ada`, both claims in the log, and the losing home held the steer
-  "ada on home_… claimed this Task first, before this Machine had seen it…".
-- For gate, not run here: the rest of `machine_commands::`, `transport::`,
-  `binary(transport_tests)`, `documented_commands::` (docs changed),
-  `performance_tests::`, `local_planning::` and the Task launch fixtures
-  (placing an unowned Task now exchanges first, which pushes a plan ref to a
-  fixture's remote), `migration_runner::` (the ownership trigger is recreated
-  with `seen`), and Swift
-  `scripts/test_desktop.sh --filter 'DTOFixtureTests|DesktopHeadlessTests|WorkModelTests'`
-  (`RepositoryPlan.swift`, `RepositoryPlanView.swift` and three test files
-  changed with the `--json` shape, `GitCarrier` and `CarrierStanding`, and
-  were never compiled on this branch).
-- Slice 3's tests ran before main (#1980, Codex usage limit) was merged in at
-  `3f4fde8d14`; the merge touched no plan or ownership file. After it,
-  `cargo check -p loopflow-storage -p loopflow-execution -p loopflow --all-targets`
-  ran clean, 2026-11-18. No test was rerun.
-- Left on the Machine, not started by this pass as far as it can tell: five
-  `target/debug/lf server run` processes of this checkout, one to five hours
-  old.
-- Compress, passed 2026-11-18 after moving the both-carrier code to
-  `ops/plan_carriers.rs`:
-  `cargo nextest run -p loopflow-storage -p loopflow-execution -p loopflow --lib -E 'test(sqlite::plan_carriers::) | test(sqlite::planning_write::) | test(ops::plan_git::) | test(moving_saves_membership_offline_and_retains_inbound_changes) | test(store::children_tests::)'`
-  (17 tests) and clippy on the three crates.
-  `local_planning::moving_saves_membership_offline_…` injected its failure on
-  `git_tracker_changes`, which nothing writes any more; it now injects on
-  `plan_changes`. It took 200 s of nextest's 300 on this Machine, for gate to
-  watch. The server-side `after_command` path has no focused test and was only
-  compiled.
-- QA, 2026-11-18, by hand in private homes (`scratch/qa.html`): three fixes
-  (per-clone repository ids with locators; the first read of an unmet clone
-  exchanges once; a stale Swift test helper) and docs made to match. After
-  them: the acceptance test and `ops::plan_git::` passed (acceptance 242 s of
-  nextest's 300, for gate to watch), clippy clean on the three crates,
-  `scripts/test_desktop.sh --filter 'DTOFixtureTests|DesktopHeadlessTests|WorkModelTests'`
-  116 passed. Not rerun after the last edit: `of_two_claims_made_apart_…`,
-  `query_plans::`, `store::repository_lifecycle_tests::` (passed one edit
-  earlier). What is still wrong is listed at the end of `scratch/qa.html`.
-- Next: slice 4. Then gate runs the list above. Open choices are in
-  `scratch/questions.md`; the review's five questions are at the end of
-  `scratch/concept-review.html`.
+Each slice regenerates `server_schema.json` and `SCHEMA.md` if it touched
+them and deletes the tests of what it removed.

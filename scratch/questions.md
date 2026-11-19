@@ -124,3 +124,34 @@ Still open from before:
   - Left as built and asked on the page: `lf task run` taking over a Task a
     teammate holds; `lf task sync` needing a Task id without a tracker; a
     teammate's Machine reading as its id; an id per clone.
+
+# Open choices (43bf9b, kickoff, 2026-11-18, headless)
+
+`scratch/plan.md` is now this Task's plan; everything above is LOO-938's.
+Each is reversible before release.
+
+- A new or moved Task joins its Wave's newest `started` Project, else its
+  newest open one, else a Project made then and named for the Wave. No
+  `--project` flag. Should several open Projects in a Wave ask which?
+- `lf wave edit-project` goes with the other two, as the brief lists it. A
+  Project's name, summary and description are then edited only in the
+  tracker; without a tracker nothing edits them.
+- Desktop keeps the "Project history" sheet as a plain list of the Wave's
+  Projects; the standup board header loses its Project line.
+- Hub records decode per field, like Git's, so a Machine on LOO-938's build
+  sending `krs` does not fail the page.
+- `-- leaving:` marks want an ID like `LOO-123` (`check_migrations.py`
+  `LEAVING_MARK`); this Task is `43bf9b`. Widen the pattern, or does the Task
+  get a tracker ID first?
+- `remove_chapters.sql` is a second unmerged migration on a stacked branch,
+  made by hand because `new_migration.py` answers with the parent's
+  `plan_hub.sql`. Not yet run through `check_migrations.py`.
+- A Project made offline by the released `lf` and unexported at upgrade is
+  known only by its `project_transitions` row. Queue its create on first
+  open, or leave it? Slice 1 decides by running it.
+- `project_changes` is marked leaving here though the brief does not name it
+  (only a test reads it).
+- Left alone: this repository's `.lf/wave/product/GOAL.md` "Chapter planning"
+  section and `.lf/wave/intelligence/metrics/*.md`, which nothing will read.
+- `~/.lf/chapter-locks` is renamed `wave-locks`; a lock held by a running old
+  `lf` during the swap is not seen by the new one.

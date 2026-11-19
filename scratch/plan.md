@@ -66,6 +66,16 @@ and no `lf` gets linked over a running one. Lib unit tests have no
 `CARGO_BIN_EXE_lf`; they keep the nested build. Their own processes all run that
 one build, so nothing swaps under them.
 
+What the ctor does not cover: the fixture CLI is a path, `target/debug/lf`,
+and two builds of `lf` link to it. The ctor removes the writer inside an
+integration binary. Lib test binaries (`cargo test -p loopflow --lib`, which
+holds `tests/work/`, and loopflow-execution's tests) have no
+`CARGO_BIN_EXE_lf` and still run the nested build, so a bare `cargo nextest run`
+without `LOOPFLOW_TEST_LF` can still relink the path under an integration binary
+running beside them. `scripts/test.py` and CI set the variable, and plain
+`cargo test` runs the lib binary before the integration binaries. Listed under
+Exclusions; the structural answer is on the concept-review page.
+
 Rejected options:
 - Building the same variant in `lf_binary`: it would have to replicate Cargo's
   unified feature set and profile, which is fragile.
@@ -75,9 +85,12 @@ Rejected options:
 
 The holder side does get a named failure. The ready line the holder prints
 (`terminal_holder.rs:108`) gains its build: `<pid> <build>`. `spawn` returns it,
-and `Client::ensure` fails at once when it differs from `place`, naming both
-builds and the executable path, instead of polling 20s at a socket nobody will
-bind. The ready line is read only by `spawn`, so it stays one line. A line with
+and `Client::ensure` fails at once when it differs from `place`, instead of
+polling 20s at a socket nobody will bind. The error says what happened, not just
+what differs: the executable at `<path>` is now build `<b>`, this server is
+build `<a>` and has been replaced since it started. Production can reach this
+too: `lf install` commits the entry gate with `fs::rename`
+(`installation.rs:753`), and a server still running spawns `current_exe()`. The ready line is read only by `spawn`, so it stays one line. A line with
 no build (an older holder) is treated as a match.
 
 ### 2. Swift "New Task closes the sheet in the click…": cause found by reading
@@ -157,5 +170,17 @@ shasum -a 256 target/debug/lf    # still A; 27/27 pass
 - `codex_startup_failures_preserve_input_and_allow_reconnect` speed.
 - Concurrent cargo commands in one worktree clobbering `target/debug/lf`
   (AGENTS.md: one cargo command at a time).
+- Lib test binaries' nested builds relinking `target/debug/lf` beside a running
+  integration binary under bare `cargo nextest run` (see 1b).
+- Spawning the holder from a build-owned executable instead of `current_exe()`
+  (concept-review page, question 1).
 - Waiting on the holder lock instead of the `STARTUP` deadline when a
   same-build holder is claimed but refusing.
+
+## Concept review (2026-11-19)
+
+`scratch/concept-review.html`. The four fixes stand. Added: what slice 1 leaves
+uncovered, and slice 2's error names the replaced server. Chosen for review:
+slice 2 stays a named failure; making the holder executable belong to its build
+(`Place` carries the executable the server spawns) is passed over here as
+larger than a flaky-test Task.

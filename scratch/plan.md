@@ -436,6 +436,15 @@ Next: demo. Recheck Pi usage on a real Task and keep the existing OpenCode
 and Pi QA results. Claude and Codex question handling, the uncalled
 `Driver::send_current`, and idle wake for OpenCode and Pi stay out of scope.
 
+QA round 2 (2026-11-18, `scratch/qa.html` scenarios 8-14): real Pi usage
+is one turn row with usage; a real OpenCode question stops after one attempt
+and steer-then-run answers it; real Claude and Codex workers record an
+interrupted turn, and Claude's rerun settles (Codex's hit the account's usage
+limit). Fixed in QA: the exit line no longer glues "." onto a reason ending in
+"?"; `harness::asked_question` reads the question for both the stop and
+`lf task status`, which now gives the steer-then-run advice instead of "launch
+fresh work"; the limit-waiting line trims the provider's period.
+
 ## Seen on the real CLI (OpenCode 2.2.1, 2026-11-18)
 
 - `opencode run --standalone --format json --auto -m opencode/gemini-4-carbon`

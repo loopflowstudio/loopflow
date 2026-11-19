@@ -289,17 +289,15 @@ pub fn run_task_graph_for(
                 return stop.stop(task, status);
             }
             // A question nobody answered would only be asked again.
-            if let Some((_, question)) = cause.as_deref().and_then(|cause| {
-                cause.split_once(&format!(
-                    "{}: ",
-                    loopflow_execution::harness::UNANSWERED_QUESTION
-                ))
-            }) {
+            if let Some(question) = cause
+                .as_deref()
+                .and_then(loopflow_execution::harness::asked_question)
+            {
                 let stop = TaskRunStopped::Question {
                     issue: task.identifier.clone(),
                     run: run.to_string(),
                     step: stopped_step(store, task)?.unwrap_or_else(|| "its step".into()),
-                    cause: question.trim().trim_end_matches('.').to_string(),
+                    cause: question.to_string(),
                 };
                 return stop.stop(task, status);
             }

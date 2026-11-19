@@ -128,14 +128,90 @@ every step. <span class="fix">Fixed</span>; the routing test now checks <code>gr
 <li><code>cargo clippy -p loopflow-execution -p loopflow --all-targets -- -D warnings</code>: clean</li>
 </ul>
 
+<h2>Round 2: slice 7 on real CLIs (2026-11-18, after compress)</h2>
+<p>Same private home, rebuilt branch <code>lf</code> at <code>6ddd177629</code> plus the fixes below. Pi 1.3.0 and OpenCode 2.2.1 on
+<code>opencode/gemini-4-carbon</code>; Claude and Codex on their defaults.</p>
+<table>
+<tr><th>Scenario</th><th>Result</th></tr>
+<tr><td>8. Pi worker usage (question 25)</td><td><span class="ok">one turn row, usage joined</span></td></tr>
+<tr><td>9. OpenCode worker asked to wait for an answer</td><td>model declined to ask and finished with no commit</td></tr>
+<tr><td>10. OpenCode worker made to call <code>question</code></td><td><span class="ok">one attempt, stop prints the question and both commands</span>; <span class="bad">"?." and status said "launch fresh work"</span> → <span class="fix">fixed</span></td></tr>
+<tr><td>11. Steer the answer, run again</td><td><span class="ok">fresh conversation used the answer, at human-review</span></td></tr>
+<tr><td>12. Interrupt a real Claude worker, run again</td><td><span class="ok">turn <code>interrupted</code>, rerun settled in a new Session</span></td></tr>
+<tr><td>13. Interrupt a real Codex worker, run again</td><td><span class="ok">turn <code>interrupted</code></span>; rerun hit the account's real usage limit; <span class="bad">"PM.. It goes on"</span> → <span class="fix">fixed</span></td></tr>
+<tr><td>14. <code>lf -b</code> batch in a Task checkout (compressed <code>is_task_checkout</code>)</td><td><span class="ok">wrote <code>note.txt</code> unprompted</span></td></tr>
+</table>
+
+<h2>8. Pi usage</h2>
+<pre>$ lf task run 507a14 -a pi:opencode/gemini-4-carbon; sleep 20
+$ lf steer 507a14 'Also give halve a one-line docstring that says "Return half of a."'
+def halve(a):
+    """Return half of a."""
+    return a / 2
+$ lf history usage --task 507a14
+implement      38,999   1,757   168,544   $0.11   1/1
+task-session   29,512   2,119    40,885   $0.08   1/1
+sqlite&gt; select provider, status, input_tokens, output_tokens, step from turns where session_id='session_f3ce…';
+pi|completed|38999|1757|implement          &lt;- one row</pre>
+
+<h2>9-11. A real question</h2>
+<p>Asked to "use your question tool to ask me…; do not guess", Gemini read the headless instructions and wrote
+"Stopping before writing any files: this step is running headless, so nobody is in the conversation to answer a
+`question` tool prompt" instead. The step settled with nothing committed and the Graph went on to <code>human-review</code>:
+a step that refused its work reads as done. Told "Your first and only action must be a call to the <code>question</code> tool", it asked:</p>
+<pre>Error: agent exited with code 1: unanswered_question: OpenCode asked a question with nobody there to answer it: Should clamp take (x, lo, hi) or (lo, hi, x)?. Check /private/tmp/lfq974/home/runs/e4/… for details.
+the run of qa from start stopped at implement: OpenCode asked … (lo, hi, x)?. Check /private/tmp/… for details; answer with `lf steer b8bb40 "…"`, then `lf task run b8bb40`
+$ lf task status b8bb40
+  latest Graph: implement: agent exited with code 1: unanswered_question: OpenCode asked … ?. Check … for details. Inspect its history and effects, then launch fresh work</pre>
+<p>One attempt. Two things read wrong: "?." where <code>run.rs</code> glued ". Check" onto the reason, and status advising
+"launch fresh work" against the stop's own advice. <span class="fix">Fixed:</span> the exit line puts "Check … for details." on its
+own line, as the provider-failure line already did; <code>harness::asked_question</code> reads the question from a step's error for
+both <code>lf task run</code>'s stop and status; status reads the stop's sentence. After the fix, on the real CLI:</p>
+<pre>the run of qa from start stopped at implement: OpenCode asked a question with nobody there to answer it: Should wrap take (x, n) or (n, x)?; answer with `lf steer c5cf2c "…"`, then `lf task run c5cf2c`
+  latest Graph: implement stopped: OpenCode asked a question with nobody there to answer it: Should wrap take (x, n) or (n, x)?; answer with `lf steer c5cf2c "…"`, then `lf task run c5cf2c`</pre>
+<p><code>a_question_with_nobody_there_ends_the_step</code> now also asserts the status advice and no "?.". The answer path:</p>
+<pre>$ lf steer b8bb40 "Use (x, lo, hi). Now write clamp in calc.py; do not ask again."
+$ lf task run b8bb40 -a opencode:opencode/gemini-4-carbon   →  at human-review
+def clamp(x, lo, hi): …    c0b2f1e Add clamp(x, lo, hi) to calc.py</pre>
+
+<h2>12-13. Interrupt on Claude and Codex</h2>
+<pre>$ lf task interrupt b675a9        (claude, 15 s into the turn)
+  latest Graph: implement: process exited with status 130. …
+turns: claude|interrupted|2|163
+$ lf task run b675a9 -a claude    →  at human-review, a second implement Session
+$ lf task interrupt 1818cb        (codex)
+turns: codex|interrupted||
+$ lf task run 1818cb -a codex
+  latest Graph: implement is waiting for codex capacity until Nov 18 20:40: provider_rate_limited: You’ve hit your usage limit. … try again at 8:38 PM.. It goes on by itself.</pre>
+<p>No provider left under the QA home after either interrupt. Codex's rerun is blocked by the account, not by lf; stopped it with
+<code>lf task interrupt</code>. <span class="fix">Fixed</span> the doubled period: the waiting line trims the provider's own period, as the
+stopped line already did.</p>
+
+<h2>14. Batch in a Task checkout</h2>
+<pre>$ cd repo.507a14-add-a-halve
+$ lf -b -a opencode:opencode/gemini-4-carbon : "Create a file named note.txt containing the word hi…"
+done
+$ cat note.txt
+hi</pre>
+
+<h2>Round 2 checks</h2>
+<ul>
+<li><code>cargo test -p loopflow --lib task_graph_launch_tests::a_question_with_nobody_there_ends_the_step</code>: passed (84s)</li>
+<li><code>cargo test -p loopflow-execution --lib ops::task_execution::</code>: 2 passed</li>
+<li><code>cargo clippy -p loopflow-execution -p loopflow --all-targets -- -D warnings</code>: clean</li>
+</ul>
+
 <h2>What works, what wasn't reached, what's still wrong</h2>
 <p><b>Works now:</b> <code>lf task run</code> on real OpenCode and Pi settles <code>implement</code>, commits in the Task checkout,
-takes a mid-step steer, stops on interrupt and runs again, refuses a missing pinned CLI after one attempt, and moves past a missing first choice.</p>
-<p><b>Not reached:</b> a question with nobody there on a real CLI (Gemini never asked); Claude and Codex workers on real CLIs (not this change's surface); typing into an OpenCode Task conversation.</p>
+takes a mid-step steer and records usage (Pi included); a real OpenCode question stops the run after one attempt with the question
+and the two commands, and steer-then-run answers it; real Claude and Codex workers stop on interrupt with the turn
+<code>interrupted</code>, and Claude's rerun settles; a missing pinned CLI is refused after one attempt; a missing first choice is passed over.</p>
+<p><b>Not reached:</b> a real Pi dialog (question 20: Pi's question text is still read from memory of its RPC shape); Codex's rerun after
+interrupt (the account hit its usage limit until 20:40); typing into an OpenCode Task conversation.</p>
 <p><b>Still wrong, worst first:</b></p>
 <ol>
-<li>Pi worker usage is missing from <code>lf history usage --task</code> (question 25), now seen on the real CLI.</li>
+<li>A worker that refuses its work and says why settles the step: the Graph moved to <code>human-review</code> with nothing committed (scenario 9, question 31).</li>
 <li>A missing first choice's move vanishes from status once the step settles (29), and no Task conversation opens on the next agent (30).</li>
-<li>The first worker-test run after a build takes 280s against a 300s limit (24).</li>
+<li>Worker tests take 250-280s on the first run after a build against a 300s limit (24).</li>
 </ol>
 </body></html>

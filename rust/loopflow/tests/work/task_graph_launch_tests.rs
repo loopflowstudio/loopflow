@@ -2129,8 +2129,17 @@ fn a_question_with_nobody_there_ends_the_step() {
         );
         assert_eq!(support::recorded_graphs(home).len(), 1, "{provider}");
         assert_eq!(task.graph()["position"]["running"], false, "{provider}");
+        assert!(!asked.text.contains("?."), "{provider}: {}", asked.text);
         let status = task.text_status();
         assert!(status.contains(reason), "{provider}: {status}");
+        assert!(
+            status.contains("answer with `lf steer INF-123 \"…\"`, then `lf task run INF-123`"),
+            "{provider}: {status}"
+        );
+        assert!(
+            !status.contains("launch fresh work"),
+            "{provider}: {status}"
+        );
         assert!(
             !status.contains("Fixture completed."),
             "{provider}: {status}"

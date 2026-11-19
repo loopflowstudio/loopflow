@@ -41,6 +41,13 @@ use loopflow_model::chat::types::ConversationEvent;
 /// `lf task run` stops on it: another attempt would only ask again.
 pub const UNANSWERED_QUESTION: &str = "unanswered_question";
 
+/// What an agent asked with nobody there, read from its step's error, whose
+/// line carrying the code ends with the question.
+pub fn asked_question(error: &str) -> Option<&str> {
+    let (_, asked) = error.split_once(&format!("{UNANSWERED_QUESTION}: "))?;
+    Some(asked.lines().next().unwrap_or_default().trim())
+}
+
 pub(crate) fn configure_vendor_std_env(command: &mut std::process::Command) -> Result<()> {
     let context = crate::os_process::execution_context()?;
     set_vendor_std_env(command, &context.lf_bin, &context.lf_home)

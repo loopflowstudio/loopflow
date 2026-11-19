@@ -106,11 +106,9 @@ unread and the README says so.
     (120-175s against 39s; 254-268s for all four together after slice 7).
     Not looked into; nextest's limit is 300s, so this is close.
 
-25. **Real Pi usage after the join.** QA saw Pi omit usage from
-    `lf history usage --task`. Slice 7 joins by time span and tests it with
-    the RPC stand-in; nobody has rerun a real Pi Task since. Demo rechecks.
-    The pre-fix real RPC session files are under
-    `~/.pi/agent/sessions/--private-tmp-loo974-*--/`.
+25. **Real Pi usage after the join.** Seen in QA round 2 (2026-11-18): a real
+    Pi worker's turn is one row in `history.turns` with its usage, and
+    `lf history usage --task` shows it.
 
 26. **`Driver::send_current` has no production caller.** Claude, Codex and Pi
     implement it and test it; steers reach a running turn only through the
@@ -133,3 +131,9 @@ unread and the README says so.
     started**, and status reads `body: provider pi`. Chats do not move, so the
     conversation is not opened on OpenCode. Should it be?
 
+31. **A worker that declines its work settles the step.** Asked to "use your
+    question tool to ask me…; do not guess", Gemini on OpenCode read the
+    headless instructions, wrote why it would not proceed, committed nothing,
+    and the Graph moved to `human-review`. Only a `question` tool call stops
+    the run. Should a step that ends with no change and a stated missing input
+    stop like a question does?

@@ -824,7 +824,7 @@ fn run_headless_prompt(
     } else {
         let reason = loopflow_execution::os_process::exit_reason(&result.stderr);
         Err(anyhow!(
-            "agent exited with code {}{reason}. Check {} for details.",
+            "agent exited with code {}{reason}\nCheck {} for details.",
             result.exit_code,
             runtime.artifact_dir().display()
         ))

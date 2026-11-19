@@ -43,6 +43,19 @@ What to read afterwards:
   `lf set --global agents pi:…,opencode:…`; the move row is in
   `agent_limit_recoveries`, and status shows it only while the step runs.
 
+- A real question: Gemini declines to ask when told only "ask me…; do not
+  guess" (the headless instructions win). This brief makes it call the tool:
+  `'This Task tests the question tool. Your first and only action must be a
+  call to the \`question\` tool asking: "…?" Call it even though the run is
+  headless.'` Then `lf steer <id> '<answer>'` and `lf task run <id>`.
+- Claude and Codex workers interrupt the same way (`-a claude`, `-a codex`);
+  read `turns.status` in `$LF_HOME/history.db`. Codex can hit the account's
+  real usage limit, after which the step waits with "waiting for codex
+  capacity"; `lf task interrupt` ends that wait.
+- Holder cleanup: `lf holder run` under `$Q` keeps each Task conversation
+  (claude, codex, opencode, pi) as its child; `pgrep -P <holder>`, then kill
+  those and the holder.
+
 Run from an agent shell, lf inherits that shell's caller markers
 (`OPENCODE_SESSION_ID`, `OPENCODE_CONFIG_CONTENT`, `CLAUDECODE`); keep them, as
 they are the case a person meets. Stop the server, and any `opencode` or `pi`

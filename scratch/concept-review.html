@@ -21,7 +21,7 @@
 </style>
 
 <h1>Do the steering concepts line up?</h1>
-<p class="lede">Area: how a person's steer reaches a managed conversation on each of the four providers, and how a work session is launched to match its worker. The idle-wake diff (<code>git diff 2a3b6d11d8 HEAD</code>) sits in the middle of it; the review covers the area with that diff in it.</p>
+<p class="lede">Area: how a person's steer reaches a managed conversation on each of the four providers, and how a work session is launched to match its worker. The idle-wake diff (<code>git diff 2a3b6d11d8 HEAD</code>) sits in the middle of it; the review covers the area with that diff in it. Second pass, at <code>a886db6eaa</code>: the model fix and the <code>boundary::After</code> split are built and through QA.</p>
 
 <h2>One interaction, walked</h2>
 <div class="existing">
@@ -44,23 +44,28 @@
   <tr><td>Where an idle conversation can be reached (never seen)</td><td><code>IdleReach</code> built from <code>agent_endpoint</code>, <code>agent_inbox</code> and <code>provider</code></td><td class="part">partly</td><td>One column, <code>agent_inbox</code>, holds two different things: Claude's key file and an OpenCode or Pi socket. <code>provider</code> picks which one it is, and any other provider falls through to Claude. The enum puts them back together when read, so nobody sees the split.</td></tr>
   <tr><td>"I reopened it, so it's waiting for me"</td><td>The activity reset inside <code>record_agent_inbox</code></td><td class="part">partly</td><td>The rule "a new provider process is idle until its first turn" lives in a function named for saving an address. It applies only to providers that name an inbox; Codex's reopen goes through its app-server and was not checked against it.</td></tr>
   <tr><td>Reopen with steers waiting</td><td>Claude: start hook folds them into context, no turn. OpenCode/Pi: the wake starts a turn.</td><td class="no">no</td><td>One action, two outcomes, depending on provider. Larger than this Task (Claude's start path predates it).</td></tr>
-  <tr><td><b>The model in <code>agent:</code></b></td><td>Worker: <code>opencode run --model</code>. Work session: <code>Harness::open</code> passes nothing.</td><td class="no">no</td><td><b>Biggest mismatch.</b> <code>opencode:opencode/gemini-4-carbon</code> ran Gemini 4 Neon in the work session, the account's default, with no warning. The person configured one model and got another. Pi and Claude honor it in both.</td></tr>
+  <tr><td>The model in <code>agent:</code>, new conversation</td><td><code>opencode::environment</code> sets <code>"model"</code> in <code>OPENCODE_CONFIG_CONTENT</code> for workers and work sessions</td><td class="yes">yes</td><td>Was the biggest mismatch on the first pass; built. QA: a new work session and a worker both answered on <code>gemini-4-carbon</code> while the account default is neon.</td></tr>
+  <tr><td>The model in <code>agent:</code>, reopened conversation</td><td>OpenCode keeps the model of the session's last turn; the config only picks a new session's</td><td class="part">partly</td><td>Change <code>agent:</code> and reopen the same OpenCode work session: it stays on the old model, silently (<code>probes.md</code>, questions.md 7). New conversations are right. Reversible, left for review.</td></tr>
+  <tr><td>"After a turn" vs "now reachable"</td><td><code>boundary::After::{TurnEnd, Reachable}</code></td><td class="yes">yes</td><td>The compress replaced a <code>turn_ended: bool</code> with two variants, one per thing that happened. The reopen wake held through QA after it.</td></tr>
   <tr><td>(nothing)</td><td><code>/tmp/lf-wake-*</code> directory, removed on exit</td><td class="part">partly</td><td>A SIGKILL leaves an empty directory. It is harmless and clears on reboot. Accepted.</td></tr>
 </table>
 
-<h2>The biggest mismatch: one model setting, two outcomes</h2>
+<h2>First pass's biggest mismatch: one model setting, two outcomes (now built)</h2>
 <div class="cols">
 <div class="existing">
 <p><b>Before</b></p>
 <p>The OpenCode TUI (2.2.1) has no <code>--model</code> flag: <code>opencode --help</code> lists <code>--standalone --server --auto --continue --session --prompt</code>. The worker passes <code>--model</code> to <code>run</code>; the work session drops the setting. Steering, context and resume are the same in both, but the model is not.</p>
 </div>
 <div class="proposed">
-<p class="tag">PROPOSED</p>
+<p class="tag">BUILT (7688d7f24f)</p>
 <p><b>After</b></p>
 <p><code>opencode::environment</code> writes <code>"model"</code> into <code>OPENCODE_CONFIG_CONTENT</code>, which both launches already build. <code>run --model</code> is deleted, so the model goes through one place for workers and work sessions alike. A test on <code>environment</code> checks the key; a real TUI run checks that the configured model answers.</p>
 </div>
 </div>
 <p>Choice made for review: config over a CLI flag. The other option is to wait for OpenCode to add <code>--model</code> to its TUI, which leaves work sessions on the wrong model until it does. Config is the one path the TUI reads today, and it is reversible.</p>
+
+<h2>Biggest mismatch left: reopen with steers waiting</h2>
+<p>With the model fixed, the widest gap is one action with two outcomes. Reopen a work session that has steers waiting: OpenCode and Pi start a turn on them; Claude folds them into the next typed turn's context. Fixing it belongs to Claude's start hook, which every Claude work session runs, so it is listed below rather than built here. Nothing in this Task's diff makes it worse.</p>
 
 <h2>Larger than this work</h2>
 <ul>
@@ -70,9 +75,10 @@
 
 <h2>Questions</h2>
 <ol>
-  <li>OpenCode work-session model: (a) through <code>OPENCODE_CONFIG_CONTENT</code> for both launches, as planned; (b) keep <code>run --model</code> for workers and add config only for the TUI; (c) leave it until OpenCode's TUI takes <code>--model</code>.</li>
+  <li>OpenCode work-session model (built as a): (a) through <code>OPENCODE_CONFIG_CONTENT</code> for both launches; (b) keep <code>run --model</code> for workers and add config only for the TUI; (c) leave it until OpenCode's TUI takes <code>--model</code>.</li>
   <li>Reopen with steers waiting: (a) a turn starts, on every provider; (b) the steers become context for the next typed turn, on every provider; (c) leave the providers different.</li>
   <li>The "new process is idle" rule: (a) leave it in <code>record_agent_inbox</code>; (b) move it to a process's first boundary for every provider, as its own Task.</li>
+  <li>A reopened OpenCode work session after <code>agent:</code> changed: (a) stays on its last model, as now; (b) the plugin sets the model each turn; (c) lf starts a new conversation when the model changed.</li>
   <li><code>agent_inbox</code> holding two shapes: (a) fine, since <code>provider</code> tells them apart; (b) split into a key-file column and a socket column.</li>
 </ol>
 </html>

@@ -23,3 +23,8 @@ Meaning against the numbered options on `scratch/human-review.html`:
   - `48edb9`: Fail headless Claude and Codex worker turns when they ask a question with nobody there
 - **3b:** Do one more `build` pass on this branch (Slice 8 in `scratch/plan.md`) to delete uncalled `Driver::send_current`, read `unanswered_question` from the recorded turn in `history.turns` instead of splitting `"unanswered_question: "` out of step error prose (`asked_question`), and name the filed follow-up Tasks in `harness/README.md`'s parity table.
 
+2026-11-19, Jack Heart at `human-review` (pass 2, `scratch/human-review.html`):
+
+- "land it"
+
+

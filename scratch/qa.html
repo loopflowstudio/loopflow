@@ -1,197 +1,267 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8">
-<title>LOO-996 QA: work with children, used by hand</title>
+<html lang="en">
+<meta charset="utf-8">
+<title>LOO-996 QA: work with children, second pass</title>
 <style>
-body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:920px;margin:2rem auto;padding:0 1rem;color:#1c1c1e}
-h1{font-size:1.5rem}h2{font-size:1.15rem;margin-top:2.2rem;border-bottom:1px solid #ddd;padding-bottom:.2rem}h3{font-size:1rem;margin-top:1.6rem}
-pre{background:#f5f5f7;padding:.7rem .9rem;border-radius:6px;overflow-x:auto;font:12.5px/1.45 ui-monospace,Menlo,monospace}
-code{font:12.5px ui-monospace,Menlo,monospace;background:#f5f5f7;padding:0 .2rem;border-radius:3px}
-table{border-collapse:collapse;width:100%}td,th{border:1px solid #ddd;padding:.35rem .55rem;text-align:left;vertical-align:top}
-.ok{color:#1a7f37}.bad{color:#b42318}.fix{color:#9a6700}
-</style></head><body>
-<h1>LOO-996: work with children, used by hand</h1>
-<p>2026-11-18, branch <code>jack-heart/subwaves2</code> at a5b10f0457 plus the fixes below. Four private Machines
-under <code>/tmp/lf-qa-kids*</code>: the branch <code>lf</code>, its own <code>lf server run</code>, a local bare origin behind a
-GitHub-shaped remote, <code>.lf/qa/gh-standin.py</code> as GitHub, and a stand-in <code>claude</code> that runs lf's hooks
-as installed and runs <code>!cmd</code> lines as the agent's tool calls. One Machine used the real Claude login
-(haiku) to see the wake. How to rebuild all of it: <code>.lf/qa/task-children.md</code>.</p>
+  body { font: 15px/1.5 -apple-system, system-ui, sans-serif; max-width: 920px; margin: 2.5rem auto; padding: 0 1.25rem; color: #1b1b1b; }
+  h1 { font-size: 1.6rem; margin-bottom: .2rem; }
+  h2 { font-size: 1.2rem; margin-top: 2.4rem; border-bottom: 1px solid #ddd; padding-bottom: .25rem; }
+  h3 { font-size: 1rem; margin-top: 1.8rem; }
+  pre { background: #f5f5f2; padding: .8rem 1rem; overflow-x: auto; font: 12.5px/1.45 ui-monospace, Menlo, monospace; border-radius: 4px; }
+  code { font: 12.5px ui-monospace, Menlo, monospace; background: #f5f5f2; padding: 0 .2em; }
+  table { border-collapse: collapse; width: 100%; }
+  td, th { border: 1px solid #ddd; padding: .45rem .6rem; vertical-align: top; text-align: left; }
+  .ok { color: #17692d; } .bad { color: #a12020; }
+  p.sub { color: #555; margin-top: 0; }
+</style>
 
-<h2>What broke and was fixed</h2>
-<table>
-<tr><th>Seen</th><th>Now</th></tr>
-<tr><td>A follow-up filed from a Task's conversation printed <code>Retry budget per host · c2b6ef</code>: nothing said it had become a child, and the link is never typed.</td>
-<td class="fix">The receipt has a second line, <code>&nbsp;&nbsp;parent: 86e0ba</code>. The real Claude conductor repeated it back: "filed as a child of ab44bb". (<code>task_create.rs</code>, asserted in <code>a_task_filed_from_a_tasks_conversation_shows_under_it</code>)</td></tr>
-<tr><td>A child whose Graph failed and was relaunched produced "…conducts, failed at task show nosuchtask and failed at task show nosuchtask."</td>
-<td class="fix">One reading says it once. (<code>TaskObservation::news</code>; new test <code>a_run_and_its_relaunch_failing_alike_are_one_piece_of_news</code>)</td></tr>
-<tr><td><code>lf task complete</code> printed <code>aa6ccc stays open</code> with no reason beside <code>f7c78a stays open: #101 open, at demo</code>.</td>
-<td class="fix"><code>f60533 stays open: started, no PR</code>.</td></tr>
-<tr><td>The parent's status showed a merged child as <code>active at demo</code>; the one fact a conductor wants was missing.</td>
-<td class="fix"><code>child: ad1967  Retry budget per host  active at demo · #100 merged</code>. <code>docs/work.md</code> shows the new line and the receipt.</td></tr>
-</table>
+<h1>LOO-996: work with children, used by hand again</h1>
+<p class="sub">2026-11-18, branch <code>jack-heart/subwaves2</code> at 26683764f9 (after slice 6, the compress pass and the
+one-reading commit). Three private Machines under <code>/tmp/lf-qa-kids5..7</code>: the branch <code>lf</code>, its own
+<code>lf server run</code>, a bare origin behind a GitHub-shaped remote, <code>.lf/qa/gh-standin.py</code> as GitHub and
+<code>.lf/qa/claude-standin.py</code> as Claude; one used the real Claude login on haiku. How to rebuild it:
+<code>.lf/qa/task-children.md</code>.</p>
+
+<p><b>No code changed in this pass.</b> Everything the first pass fixed still holds (the receipt's
+<code>parent:</code> line, a child line's PR, one "failed at" per reading, <code>stays open: started, no PR</code>), and all
+three things it listed as wrong and slice 6 took on now behave as slice 6 says. What this pass found is at the end.</p>
 
 <h2>Scenarios</h2>
 
-<h3>1. Fresh Machine: file follow-ups from the Task's conversation</h3>
-<p><code>lf task create 'Retry failed uploads'</code>, <code>lf task checkout</code>, then typed into its conversation through a PTY (second pass, final build):</p>
-<pre>!lf task create "Log each retry"
-Log each retry · f60533
-  parent: e7ff6b
-[exit 0]
+<h3>1. A fresh Machine: file follow-ups from the Task's conversation</h3>
+<p><code>lf task create 'Retry failed uploads'</code>, <code>lf task checkout f5a0f9</code>, then typed into its conversation
+through a PTY (<code>!</code> lines run as the agent's Bash tool call):</p>
+<pre>!lf task create "Retry budget per host"
+Retry budget per host · 4f0cb4
+  parent: f5a0f9
+!lf task create "Log each retry" --json      → "parent": {"identifier": "f5a0f9", "state": "idle", "parent_id": null, …}
+                                               "task": {"parent_task_id": "task_f5a0f9…"}, "row": {"task": {"parent_id": "task_f5a0f9…"}}
+!lf task create --title "Document the budget"
+Document the budget · c10428
+  parent: f5a0f9
 
-$ lf task status e7ff6b
-  child: ad1967  Retry budget per host  unstarted
-  child: f60533  Log each retry         unstarted
-  child: cf55b8  Document the budget    unstarted</pre>
-<p class="ok">Works. <code>--json</code> carries <code>parent</code> (the parent's row) and <code>task.parent_task_id</code>.</p>
-<pre>$ lf task create 'Unrelated cleanup' --parent none     → top-level
-$ lf task create 'Document the budget' --parent 86e0ba → child, from outside any conversation
-$ lf task create 'Jitter' --parent nope99
-Error: --parent names an unknown Task: nope99
-$ lf task create 'x' --parent ''
-Error: --parent names an unknown Task:
-# typed in a plain terminal inside the Task's checkout: top-level (no caller)
-# from the child c2b6ef's conversation:
-!lf task create "Cap retries at five"                   → sibling under 86e0ba
-!lf task create "Nested under the child" --parent c2b6ef
+$ lf task status f5a0f9
+  child: 4f0cb4  Retry budget per host  unstarted
+  child: 7e85ee  Log each retry         unstarted
+  child: c10428  Document the budget    unstarted
+$ lf task status f5a0f9 --json   → keys children, comments, graph_processes, parent, sessions, stack_parent, summary, task
+                                   parent null; each child's parent_id is f5a0f9's id</pre>
+<p>From the child 4f0cb4's own conversation, while f5a0f9 is open:</p>
+<pre>!lf task create "Cap retries at five"                      → parent: f5a0f9   (a sibling)
+!lf task create "Nested under the child" --parent 4f0cb4   → parent: 4f0cb4
 
 $ lf task list
-86e0ba · QA Person · Retry failed uploads
-  c2b6ef · QA Person · Retry budget per host
-    bd062e · — · Nested under the child
-  f7c78a · — · Log each retry
-  aa6ccc · — · Document the budget
-  6d20d4 · — · Cap retries at five
-b32f9c · — · Typed in the checkout terminal
-01c5cd · — · Unrelated cleanup</pre>
+f5a0f9 · QA Person · Retry failed uploads
+  4f0cb4 · QA Person · Retry budget per host
+    0c41ee · — · Nested under the child
+  7e85ee · — · Log each retry
+  c10428 · — · Document the budget
+  94067e · — · Cap retries at five</pre>
+<p class="ok">Works as the docs say.</p>
 
-<h3>2. The conductor hears a child stop, and a steer stays with the child</h3>
-<pre>$ lf task run c2b6ef            # qa Graph: a cmd step, then interactive demo
-$ lf session steers &lt;parent's conversation&gt; --json
-  "source": "notice:task_c2b6ef…",
-  "text": "c2b6ef \"Retry budget per host\", which this conversation conducts, stopped at demo. lf task status c2b6ef"
-$ lf steer c2b6ef 'Use a per-host token bucket'
-$ lf session steers &lt;parent's conversation&gt;     → still 1 pending: the notice only
-# next prompt in the parent's conversation, as the hook injects it:
+<h3>2. The conductor hears a stop; a steer stays with the child</h3>
+<pre>$ lf task run 4f0cb4                          # qa Graph: a cmd step, then interactive demo
+$ lf steer 4f0cb4 'Use a per-host token bucket'
+# next prompt in f5a0f9's conversation, as the hook injects it:
 &lt;lf:steers&gt;
-Task notice 908ebac5-…. News about work this conversation conducts; following it up is yours. Read the Task's current status before acting. …
-c2b6ef "Retry budget per host", which this conversation conducts, stopped at demo. lf task status c2b6ef
-0 pending. Inspect: lf session steers e83e51dc… --json
+Task notice 17e32d7d-…. News about work this conversation conducts; following it up is yours. Read the Task's current status before acting. …
+4f0cb4 "Retry budget per host", which this conversation conducts, stopped at demo. lf task status 4f0cb4
+0 pending. Inspect: lf session steers 4fb55498… --json
 &lt;/lf:steers&gt;</pre>
-<p class="ok">One notice for the stop, none for the step that passed. The steer was delivered to the child's own conversation only.</p>
+<p class="ok">One notice for the stop, nothing for the step that passed, and the steer is not in the parent's block.</p>
+<p>With the stand-in, <code>lf session steers</code> read <code>pending: 0</code> until that prompt: the server writes a notice only
+for a conversation it can wake, and the stand-in has no inbox. The QA note said otherwise and is corrected.</p>
 
-<h3>3. A real Claude conversation is woken without being asked</h3>
-<p>Real <code>HOME</code>, private <code>LF_HOME</code>, <code>default_agent: claude:haiku</code>. The idle conversation of ab44bb was steered to
-run <code>lf task create "Retry budget per host"</code>; then, from a shell, <code>lf task run 69ea04</code> at 20:37:50. From Claude's transcript:</p>
-<pre>04:37:52 user  &lt;cross-session-message from="loopflow" from-name="Loopflow"&gt;
-  Task notice 32ff43c5-…. News about work this conversation conducts; following it up is yours. …
-  69ea04 "Retry budget per host", which this conversation conducts, stopped at demo. lf task status 69ea04
-04:37:53 assistant  Bash: lf task status 69ea04 --json
-04:37:56 assistant  Child Task 69ea04 "Retry budget per host" is waiting at its demo step. Its last `qa`
-  run completed, so nothing is running now. I read its status and didn't change anything. …
-  I won't advance it past the demo without your go-ahead. Do you want to look at the demo first, or
-  should I continue it with `lf task run 69ea04`?</pre>
-<p class="ok">Woken two seconds after the child stopped; it read the child and brought it up.</p>
-<p>First launch in a repository Claude has not seen sat at Claude's own "Adding a new directory … Yes, add it" prompt (for
-<code>--add-dir &lt;main checkout&gt;</code>) and listed as <code>detached</code> with no turn until a viewer answered it. Not from this change.</p>
+<h3>3. The same failure is said once (slice 6)</h3>
+<p>Child 7e85ee run on a Graph whose first step fails; <code>lf task run</code> relaunches it twice, so each launch is three
+failed runs. A prompt in the parent's conversation after each stage:</p>
+<pre>$ lf task run 7e85ee qa-fail        # 3 runs stopped at `task show nosuchtask`
+  → 7e85ee "Log each retry", which this conversation conducts, failed at task show nosuchtask. lf task status 7e85ee
+$ lf task run 7e85ee qa-fail        # 3 more, same step
+  → (no steers block at all)
+$ lf task run 7e85ee qa             # moves it to demo
+  → 7e85ee "Log each retry", which this conversation conducts, stopped at demo. lf task status 7e85ee
+$ lf task run 7e85ee qa-fail        # fails at the old step again
+  → 7e85ee "Log each retry", which this conversation conducts, failed at task show nosuchtask. lf task status 7e85ee</pre>
+<p class="ok">Silent while nothing moved; news again once the child had stood somewhere else. The last line is the case
+slice 6's test does not cover.</p>
 
-<h3>4. A failing child, a merge, and a merged parent that stays open</h3>
-<pre># child Graph step `cmd: task show nosuchtask` fails; lf relaunches it twice
-"f60533 \"Log each retry\", which this conversation conducts, failed at task show nosuchtask. lf task status f60533"   (twice, from two readings)
+<h3>4. Real Claude: six failures, one wake</h3>
+<p>Real <code>HOME</code>, private <code>LF_HOME</code>, <code>default_agent: claude:haiku</code>. The idle conversation of c783d7 was
+steered to file "Log each retry" (4025c8). From Claude's transcript (UTC):</p>
+<pre>05:34:05 assistant  Bash: lf task create "Log each retry"   →  Log each retry · 4025c8 ⏎   parent: c783d7
+05:34:06 assistant  Created "Log each retry" (4025c8) as a child of c783d7.
 
-# the child's PR is merged on the fake GitHub; lf pr reconcile
-"c2b6ef \"Retry budget per host\", which this conversation conducts, merged. lf task status c2b6ef"
+# shell, 05:34:13: lf task run 4025c8 qa-fail        (3 failed runs)
+05:34:14 user  &lt;cross-session-message from="loopflow"&gt; Task notice c43e4477-…
+               4025c8 "Log each retry", which this conversation conducts, failed at task show nosuchtask. lf task status 4025c8
+05:34:16 assistant  Bash: lf task status 4025c8 --json; lf task show 4025c8
+05:34:22 assistant  The child Task 4025c8 "Log each retry" stopped, and nothing is running now. I have not relaunched it.
+                    … That same step failed in three separate graph processes, all stopped. …
 
-# the parent's own PR merges
-$ lf task status 86e0ba
-  Pull request: merged  GitHub #102  qa-person/86e0ba-retry-failed-uploads
+# shell: lf task run 4025c8 qa-fail again            (7 Graph rows now; 30 s watched)
+(no new message; lf session steers: pending 0)
+
+# shell, 05:35:19: lf task run 4025c8 qa
+05:35:22 assistant  Bash: lf task status 4025c8 --json | …
+05:35:27 assistant  The child Task 4025c8 "Log each retry" is waiting at its **demo** step for a person. This is not a failure.
+                    … someone has to open it with `lf session resume f29f7742…`. …</pre>
+<p class="ok">Woken one second after the first failure and about two after the stop; the five failures in between cost no
+turn. Before slice 6 each later reading was another identical notice.</p>
+
+<h3>5. Merges, and a merged parent that stays open</h3>
+<pre># PRs #100 (4f0cb4), #101 (94067e), #102 (f5a0f9) opened with lf pr open; #100 and #102 merged on the fake GitHub; lf pr reconcile
+# next prompt in f5a0f9's conversation:
+Task f5a0f9: No Task workflow selected. PR merged.
+4f0cb4 "Retry budget per host", which this conversation conducts, merged. lf task status 4f0cb4
+
+$ lf task status f5a0f9
+  Pull request: merged  GitHub #102  qa-person/f5a0f9-retry-failed-uploads
   action: no_action  (Merged · 4 children open)
-$ lf task status 86e0ba --json | jq .task
-  {"state": "idle", "next": null, "reason": "Merged · 4 children open", "pr": {"number": 102, "phase": "merged", …}}</pre>
-<p class="ok">Merged and not done; nothing asks to complete it. The parent's own conversation also got "Task 86e0ba: … PR merged."</p>
+  child: 4f0cb4  Retry budget per host  active at demo · #100 merged
+  child: 7e85ee  Log each retry         idle
+  child: c10428  Document the budget    unstarted
+  child: 94067e  Cap retries at five    idle · #101 open
+$ lf task status f5a0f9 --json | jq .task  → state "idle", next null, reason "Merged · 4 children open", pr.phase "merged"</pre>
+<p class="ok">Merged, open, and nothing asks to complete it.</p>
 
-<h3>5. Closing the parent</h3>
-<pre>$ lf task complete e7ff6b          (second pass)
-e7ff6b done
-  ad1967 done: #100 merged
-  cf55b8 abandoned: never started
-  f60533 stays open: started, no PR
-$ lf task complete 86e0ba          (first pass; again → "86e0ba done", rc 0)
-  f7c78a stays open: #101 open, at demo
-$ lf task list     # open children of a done parent list on their own
-f7c78a · QA Person · Log each retry
-aa6ccc · QA Person · Document the budget
-bd062e · — · Nested under the child</pre>
-<p class="ok">As the docs say. The abandoned child reads <code>Planning: canceled</code>, and its link is kept (<code>parent: 86e0ba</code>).</p>
+<h3>6. Closing the parent settles each level (slice 6)</h3>
+<p>4f0cb4 (merged) had two children of its own: 0c41ee never started, 2c414b with a checkout. Typed in f5a0f9's conversation:</p>
+<pre>!lf task complete f5a0f9
+f5a0f9 done
+  4f0cb4 done: #100 merged
+    0c41ee abandoned: never started
+    2c414b stays open: started, no PR
+  c10428 abandoned: never started
+  7e85ee stays open: started, no PR
+  94067e stays open: #101 open
 
-<h3>6. After close and retirement, the conversation reopens in the main checkout</h3>
-<pre>$ lf task retire 86e0ba            # 15 minutes after the first retire pass; checkout directory gone
+$ lf task list
+7e85ee · QA Person · Log each retry
+94067e · QA Person · Cap retries at five
+2c414b · QA Person · Started grandchild</pre>
+<p class="ok">The first pass saw 4f0cb4's never-started child left open here; it is abandoned now, indented under its parent.</p>
+<p><code>--json</code> and the served request, on two more families:</p>
+<pre>$ lf task complete 4f170a --json            → {…the Task's fields…, "state": "completed",
+                                               "children": [{"outcome": "abandoned", "task": {"identifier": "f5a21c", "state": "abandoned", …}, "children": []}]}
+served {"kind":"task.complete","directory":…,"issue":"220927"}
+                                            → same top-level keys; children[0] outcome "abandoned", task a1e338</pre>
+<pre>$ lf task complete f5a0f9      # again
+f5a0f9 done                     (rc 0)</pre>
+
+<h3>7. A follow-up filed after the parent closed (slice 6)</h3>
+<pre># from the still-open child 94067e's conversation, f5a0f9 now done:
+!lf task create "Filed after the parent closed"
+Filed after the parent closed · 655eb3
+  parent: 94067e
+$ lf task abandon 655eb3
+# next prompt in 94067e's conversation:
+655eb3 "Filed after the parent closed", which this conversation conducts, was abandoned. lf task status 655eb3</pre>
+<p class="ok">Under the caller, whose conversation is open, and that conversation hears about it.</p>
+
+<h3>8. After close and retirement, the conversation reopens in the main checkout</h3>
+<pre>$ lf task retire f5a0f9          # 21:29:50 nothing; again at 21:45:01: /tmp/lf-qa-kids5/repo.f5a0f9-retry-failed-uploads is gone
 $ lf session list
-e83e51dc…  closed  86e0ba  86e0ba Retry failed uploads
-$ lf resume e83e51dc…              (in a PTY)
-resumed adeee1d2-44cd-4b4c-a1ee-238c616ec80a in /private/tmp/lf-qa-kids/repo
+4fb55498…  closed  f5a0f9  f5a0f9 Retry failed uploads
+$ lf resume f5a0f9               (by Task, in a PTY)
+!lf task create "Filed from the reopened conversation"
+Filed from the reopened conversation · 156b29
+  parent: f5a0f9
+# #101 (94067e) merged on the fake GitHub; lf pr reconcile; then in the same conversation:
 !pwd
-/private/tmp/lf-qa-kids/repo
-# a child's PR merges afterwards; the reopened conversation's next prompt:
-f7c78a "Log each retry", which this conversation conducts, merged</pre>
-<p class="ok">Same provider thread, main checkout, the Session row's <code>cwd</code> rewritten. <code>lf resume c2b6ef</code> (by Task) did the same for the closed child.</p>
+94067e "Cap retries at five", which this conversation conducts, merged. lf task status 94067e
+/private/tmp/lf-qa-kids5/repo</pre>
+<p class="ok">Same conversation, main checkout, still hearing about its open child. A follow-up filed from it goes under the
+done parent, as the first pass saw; that question is still open in <code>scratch/questions.md</code>.</p>
 
-<h3>7. A Wave</h3>
-<pre>!lf task create "Wave child one"                 → parent: 640624, in Wave uploads
-!lf task create "Wave child elsewhere" --no-wave → parent: 640624, still in Wave uploads
-$ lf wave show uploads
-  WORKING
-    640624  …  Wave parent
-      fcd2b6  …  Wave child one · BACKLOG
-      f56e8e  …  Wave child elsewhere · BACKLOG</pre>
+<h3>9. Over the server socket</h3>
+<pre>task.create {"request":"Served child", "parent":"220927", …}   → result.parent.identifier "220927", task.parent_task_id set, row.task.parent_id set
+task.create {…, "parent":"nope99"}                              → error outcome_unknown: "--parent names an unknown Task: nope99; inspect the affected work before retrying"
+task.create with no "parent" key                                → filed top-level, parent null</pre>
 
-<h3>8. A returning Machine</h3>
-<p>Home built with the installed <code>lf</code> 0.16.0 (two Tasks, one run to <code>demo</code>, a held conversation, a saved reading, a PR),
-then its server stopped and the branch binary put in place.</p>
-<pre>$ lf task list                      # migrated, same Tasks
+<h3>10. A second Machine</h3>
+<p>A second <code>HOME</code>/<code>LF_HOME</code> on a fresh clone of the same origin; <code>lf repo tracker</code> on the first
+reads <code>Plan: Git origin.</code></p>
+<pre>$ lf task list                 (second Machine, first command)
+94067e · QA Person · Runs on home_9c06cb33… since Nov 18 21:29 · Cap retries at five
+  655eb3 · — · Filed after the parent closed
+…
+$ lf task status 655eb3        →   parent: 94067e
+$ lf task status 2c414b --json →   parent: 4f0cb4, state done</pre>
+<p class="ok">The link arrives and nests.</p>
+<p class="bad">The same list shows c10428, 0c41ee, a1e338, f5a21c and 1528a5 as open backlog: all abandoned on the first
+Machine. See "Still wrong".</p>
+
+<h3>11. A Graph that reaches end</h3>
+<pre>$ lf task run 379777 qa-end      # childless: one cmd step
+379777  done                      action: no_action  (Task is terminal)
+$ lf task run a32d33 qa-end      # has one unstarted child
+a32d33  idle                      Planning: unstarted
+  action: run  (run the next work with `lf task run`; inspect earlier Graphs and independent Sessions first)
+  child: e80c18  Open kid  unstarted</pre>
+<p class="ok">The parent stays open.</p> <p>Nothing on it says that the open child is why.</p>
+
+<h3>12. A Wave, another repository, two at once, bad input</h3>
+<pre>!lf task create "Wave child one"                  → parent: 58c1e6; listed under it in `lf wave show uploads` (· BACKLOG)
+!lf task create "Wave child top" --parent none    → top-level, not in the Wave
+$ lf task complete 58c1e6                          → 58c1e6 done ⏎   1ee1d7 abandoned: never started;  lf wave show: (no plan rows)
+
+$ cd ../other &amp;&amp; lf task create 'In another repository' --parent 94067e   → parent: 94067e; a child line on 94067e's status
+$ lf task create 'Racer one' --parent 94067e &amp; lf task create 'Racer two' --parent 94067e &amp;   → both filed, both listed
+$ lf task create 'Under a done parent' --parent f5a0f9          → filed under it, listed top-level
+$ lf task create 'Under an abandoned parent' --parent c10428    → same</pre>
+
+<h3>13. A returning Machine</h3>
+<p>Home built with the installed <code>lf 0.16.0+7bb879aff</code>: a Task run to <code>demo</code> with a held conversation that
+had taken a prompt. Server stopped, branch binary put in place, branch server started.</p>
+<pre>$ lf task list                                    → 983994 · QA Person · Old parent work
 # in the conversation the 0.16 holder still runs:
-!lf task create "Follow-up after upgrade"
-Follow-up after upgrade · c47019
-  parent: da90af
-# child run to demo, parent PR merged:
-"c47019 \"Follow-up after upgrade\", which this conversation conducts, stopped at demo. …"
-"Task da90af: At demo · available for review. PR merged."
-$ lf task status da90af → action: no_action  (Merged · 1 child open)</pre>
-<p class="ok">No warnings or errors in <code>logs/lf.log</code> on any of the Machines.</p>
-
-<h3>9. Ten children</h3>
-<p>A parent with ten children all at <code>demo</code>: the prompt hook (<code>lf __context-block --moment tool</code>, debug build) took
-726, 575, 632, 601 ms; a childless Task's took 512, 500, 511 ms. The first call delivered eight notices and the second the other two.</p>
-
-<h2>Checks after the fixes</h2>
-<pre>cargo test -p loopflow-execution --lib harness::task_updates::     12 passed
-cargo test -p loopflow --test integration -- a_task_filed_from_a_tasks_conversation_shows_under_it \
-  a_merged_parent_stays_open_until_it_is_completed_with_its_children a_closed_tasks_conversation_resumes   3 passed
-cargo fmt; cargo clippy --all-targets -- -D warnings                clean</pre>
+!lf task create "Follow-up after upgrade"         → a2c65b ⏎   parent: 983994
+$ lf task run a2c65b
+  → a2c65b "Follow-up after upgrade", which this conversation conducts, stopped at demo. lf task status a2c65b
+$ lf task complete 983994
+983994 done
+  a2c65b stays open: started, no PR, at demo</pre>
+<p class="ok">No warnings in that home's <code>logs/lf.log</code>.</p>
 
 <h2>What works now</h2>
-<p>Every line of the plan's acceptance check, by hand: a follow-up filed with no flag shows under its Task; its
-conversation is told when a child stops, fails, merges or closes, and a real one is woken for it; a merged parent stays
-open with no nudge; completing it settles the children and names the ones left; the conversation reopens in the main
-checkout after its own is gone, and still hears about an open child.</p>
+<p>Every line of the plan's acceptance check, by hand, on the branch as it stands: a follow-up filed with no flag shows
+under its Task; the conversation is told when a child stops, fails, merges, is completed or abandoned, and a real one
+is woken for it, once per piece of news; a merged parent stays open with no nudge; completing it settles its children
+and theirs and names the ones left; the conversation reopens in the main checkout after its own is gone and still
+hears about an open child. Also: the link over the socket, on a second Machine, across two repositories and on a home
+that 0.16 built.</p>
 
 <h2>Not reached</h2>
 <ul>
-<li>Linear and Asana: the follow-up as a sub-issue, and a tracker's parent read back. No tracker was connected; that needs a real workspace.</li>
-<li>A second Machine receiving the link through the plan carriers.</li>
-<li>Codex as the conductor (wake through its app-server) and a Codex resume after retirement.</li>
+<li>Linear and Asana: the follow-up as a sub-issue and a tracker's parent read back. That needs a real workspace.</li>
+<li>Codex as the conductor (the wake through its app-server) and a Codex resume after retirement.</li>
 <li>Desktop and iOS: nothing draws children there yet.</li>
-<li>Auto-Ship reaching <code>end</code> on a parent with open children, and <code>lf ship</code>'s "conducting" answer: the fake GitHub has no auto-merge.</li>
-<li>The served <code>task.create {parent}</code> over the socket.</li>
+<li>Auto-Ship merging a parent's PR with children open, and <code>lf ship</code>'s "conducting" answer: the fake GitHub
+has no auto-merge. The no-PR half of the same rule is scenario 11.</li>
+<li>The hook's cost with ten children, measured in the first pass (about 600 ms against 510 ms, debug build), was not
+measured again.</li>
 </ul>
 
 <h2>Still wrong, worst first</h2>
 <ol>
-<li>A follow-up filed after the parent closed (from a still-open child's conversation, or from the parent's reopened one)
-goes under the closed parent: it lists top-level and its news goes to a conversation nobody may open again. A choice about the flat rule, in <code>scratch/questions.md</code>.</li>
-<li><code>lf task complete &lt;parent&gt;</code> completes a merged child but leaves that child's own never-started child open, where completing the child directly would abandon it.</li>
-<li>Each relaunch of a failing child Graph that fails in a later reading is another identical notice, and with a real conductor another paid turn.</li>
-<li><code>lf task status</code> of a retired Task still prints its <code>worktree:</code> path, which no longer exists. Older than this change.</li>
-<li>A child's own conversation receives the ownership claim as an update with its raw <code>&lt;!-- loopflow-ownership:{…} --&gt;</code> marker. Older than this change.</li>
-<li><code>lf task retire &lt;task&gt;</code> before its time prints nothing and exits 0; nothing says when it will act.</li>
+<li><b>A second Machine lists abandoned Tasks as open.</b> An arriving <code>canceled</code> disposition is stored
+(<code>Planning: canceled</code> on <code>lf task status</code>) and sets no <code>abandoned_at</code>, which is what
+<code>lf task list</code> reads. <code>main</code> has the same code; this change makes it show, because completing a parent
+abandons children.</li>
+<li><b>A parent with no PR whose Graph ends with a child open reads "run the next work with <code>lf task run</code>".</b>
+Only a merged parent says "N children open".</li>
+<li><b>A never-started child of a never-started child survives its grandparent's completion.</b>
+<code>lf task complete 220927</code> abandoned a1e338 and left e1dd86 open, top-level. <code>lf task abandon</code> typed
+directly leaves children alone the same way, so the rule is consistent; whether it is wanted is in
+<code>scratch/questions.md</code>.</li>
+<li>A child whose last run failed prints <code>idle</code> on its parent's status.</li>
+<li>Served <code>task.create</code> with an unknown parent answers <code>outcome_unknown</code> and "--parent names…",
+though nothing was written; with no <code>parent</code> key it files top-level where the plan says the key is required
+(its sibling keys are accepted absent too).</li>
+<li>Older than this change, seen again: <code>lf task status … | head</code> panics on the closed pipe ("failed printing
+to stdout: Broken pipe"); a Task that never ran a Graph is told "No Task workflow selected. PR merged."; a fresh home's
+server logs "store retention failed … no such table: agent_sessions" once at start; an unknown <code>--wave</code> name
+creates that Wave; <code>lf task retire</code> before its time prints nothing.</li>
 </ol>
-</body></html>
+</html>

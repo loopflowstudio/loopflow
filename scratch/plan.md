@@ -542,8 +542,16 @@ existing update a conversation gets about its own Task; Waves and
    person never sees, kept for the reason in its doc comment.
 
 Next: gate. QA walked the acceptance check by hand
-on a private Machine, 2026-11-18 (`scratch/qa.html`), before slice 6: every line of it held,
+on a private Machine, 2026-11-18, before slice 6: every line of it held,
 and a real Claude conversation was woken two seconds after its child stopped.
+A second pass on 26683764f9 (`scratch/qa.html`) walked it again with slice 6
+and changed no code: the flat rule after a parent closes, the nested
+settlement, `children` on `lf task complete --json` and served
+`task.complete`, served `task.create {parent}`, the link on a second Machine
+through the Git origin, a Graph reaching `end` on a parent with a child open,
+and six failures of one step waking real Claude once, with the same failure
+news again after the child had stood at `demo` (the case slice 6's test does
+not cover). What it left open is in `scratch/questions.md`.
 A prompt hook for a parent with ten children at a review step took about
 600 ms against 510 ms for a childless Task, both on a debug build. Left for
 gate: the `MachineServer` fixture test of the same check and the suites named

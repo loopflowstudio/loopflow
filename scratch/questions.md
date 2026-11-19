@@ -172,6 +172,31 @@ files under the closed parent. Under it / top-level?
   behaviour, or should `task-session` say more about deciding a child's
   review?
 
+## Raised by the second QA pass, after slice 6 (2026-11-18, `scratch/qa.html`)
+
+Nothing in the code changed in this pass. Seen and left as built:
+
+- `lf task complete <parent>` abandons a never-started child and leaves that
+  child's own never-started child open, top-level in the backlog (`e1dd86`
+  under `a1e338`). `lf task abandon <ID>` typed directly leaves children
+  alone the same way. Abandon them too / leave?
+- A parent with no PR whose Graph reaches `end` with a child open stays open
+  and reads `action: run (run the next work with lf task run …)`. Only the
+  merged case says "N children open". Say it here too / leave?
+- A child whose last run failed prints `child: 7e85ee  Log each retry  idle`
+  on its parent's status; the failure is in the child's own `reason` only.
+- A second Machine lists Tasks abandoned on the first as open backlog, the
+  children a parent's completion abandoned among them. An arriving
+  `canceled` disposition sets no `abandoned_at`; `main` reads the same way.
+- Served `task.create` files top-level when the `parent` key is absent, as
+  `title`, `wave`, `graph` and `session` are accepted absent. Its unknown
+  parent answers `outcome_unknown` with the CLI's words, "--parent names an
+  unknown Task: nope99; inspect the affected work before retrying", though
+  nothing was written.
+- The earlier pass's question stands and now has an answer to check: told a
+  child failed, real Claude read the child, said it had not relaunched it and
+  stopped; told a child stopped at `demo`, it named the conversation to open.
+
 ## Raised by reading slice 4 (not run)
 
 - `lf task complete <parent>` closes or abandons children, and each of

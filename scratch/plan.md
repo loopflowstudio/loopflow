@@ -138,8 +138,8 @@ refused. So the early take-up was itself a request to run.
 `lf ship` still takes up the Graph a moment before its own run starts
 (`graph_for_ship`), across `prepare_task`. A conversation opening inside that
 window would start a second run and the ship would report the refusal. Seen
-in QA with two ships at once; not in a fixture. Closing it means setting auto inside `start_task_run`,
-after its take-up.
+in QA with two ships at once; not in a fixture. "To build: ship is a run
+that asks for auto" closes it.
 
 Checks nobody has run since main was merged in (2026-11-19):
 
@@ -172,9 +172,6 @@ the `loopflow` filters (240 of 245, the five above), `documented_commands::`,
 
 Shape, for gate's review:
 
-- The stored value is `stopped` while every surface says "off"
-  (`auto.state: "stopped"`, `lf task auto off`). The migration is unmerged, so
-  renaming the value to `off` is one edit.
 - `auto off` on a Task with no Graph saves nothing and answers "auto was not
   on". The mark has no home before a Graph row exists.
 - Off means two things: the person takes the interactive steps, and nothing
@@ -183,6 +180,48 @@ Shape, for gate's review:
 - The builtin `auto` Graph shares its name with the setting. Renaming it is
   its own Task.
 - Open, nobody has decided: whether `lf -b task run` should write auto on.
+
+## To build: ship is a run that asks for auto
+
+Concept review, second pass, 2026-11-19 (`scratch/concept-review.html`), a
+choice made for review. Build this first: it shows soonest whether "ship is
+shorthand" holds in the code.
+
+Today `ship_on` (`rust/loopflow-execution/src/ops/task/ship.rs`) decides in
+the CLI process what the run decides again in `start_task_run`
+(`ops/task.rs`): the Graph and its take-up, the claim, whether a run is live,
+where to start. Make `lf ship` an `lf task run` whose request asks for auto:
+
+- The run request (`TaskProcessOptions`, through `task_place` to
+  `start_task_run`) carries who asks for auto: nobody; `-b` (on unless off,
+  today's `batch_on` from `TaskRunMode::Headless`); a person (on, lifts off,
+  with the `--reason` note). One type, one write, after the run's own take-up.
+- Asked by a person, on a Task waiting at an interactive step, the selection
+  (`select_task_run`) starts at that step instead of after it. A bare
+  `lf task run` there is unchanged.
+- Asked by a person, on a live run: write on and answer with that run
+  (`TaskRun::Running`, `merges: true`), exit 0, in place of "is running
+  graph …". A bare `lf task run` on a live run still gets that sentence.
+- At `end`: `TaskRun::Ended`, nothing written. Done and abandoned Tasks keep
+  their sentences ("is complete", "is abandoned; recover it before turning
+  auto on").
+- Delete `ship_on`, `ShipStart`, `graph_for_ship`, `task_for_auto`,
+  `live_graph_run`. `ship.rs` keeps `set`, `auto_off`, `starter`,
+  `ship_branch_task`. `lf/commands/ship.rs` is `carry_task_run` with the
+  request, keeping "standing in at <step>".
+- Changes on purpose: a ship that fails before its run starts (no worktree,
+  launch refused) leaves auto unset; today it leaves auto on with nothing
+  running.
+- Tests: the two `auto_on_*` fixtures and
+  `auto_off_sticks_through_a_headless_relaunch` still pass; add one for a
+  ship on a live run (reports it, auto on, one Graph run).
+
+Passed over: keeping `ship_on` and moving only the write (keeps its copy of
+the start choice); leaving the window documented.
+
+Also here, since the migration is unmerged: the stored and wire value
+`stopped` becomes `off` (`AutoState::Off`, `task_graph_auto.sql`, DTO
+fixtures, Swift, SCHEMA.md, docs). Every surface already says "off".
 
 ## Exclusions
 

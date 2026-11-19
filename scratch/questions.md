@@ -35,8 +35,11 @@ Questions 1 and 2 got no written answer in scratch.
   kept. Reverse if someone needs it.
 - **Hand-merged PRs go through the Graph.** No PR watcher; a graph with no
   land step finishes its steps into `end`.
-- **Stored value `stopped`, shown as "off".** Reverse by renaming the value in
-  the unmerged migration.
+- **Stored value `off`** (to build; was `stopped`). One name for what people
+  type and what `--json` says.
+- **`lf ship` is a run that asks for auto** (concept review, second pass; to
+  build). The run's take-up writes auto; `ship_on` goes. A ship that fails
+  before its run starts leaves auto unset. Reverse by restoring `ship_on`.
 - **`lf task auto on` is the `lf ship` operation** (concept review,
   2026-11-19). It parses as `lf ship`: it runs the Task, standing in at a
   waiting interactive step. Reverse by restoring a mark-only write; to arm
@@ -67,8 +70,8 @@ Questions 1 and 2 got no written answer in scratch.
 - A Graph process killed with its carrier stays open until the hourly prune,
   so the Task reads `moving` with nothing running. Base behavior;
   `lf machine prune` settles it.
-- Whether `lf ship` should set auto inside the run's own take-up
-  (`start_task_run`) instead of taking the Graph up just before it.
+- `lf task auto off` before a first run saves nothing, so a later
+  `lf -b task run` turns auto on. Storing auto on the Task would close it.
 
 ## Ship review (2026-11-19)
 

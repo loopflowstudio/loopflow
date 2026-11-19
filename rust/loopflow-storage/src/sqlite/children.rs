@@ -506,7 +506,7 @@ impl SqliteStore {
         Ok(request)
     }
 
-    /// Explicit completion settles the Task and its direct children together.
+    /// Explicit completion settles the Task and its children together.
     pub fn request_family_completion(
         &self,
         task: &TaskId,

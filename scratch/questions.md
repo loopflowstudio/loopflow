@@ -62,10 +62,6 @@ rest is not chosen.
 
 ## Made while building slice 4, for review
 
-- `TaskRow.parent` and `TaskSummary.parent_id` are the parent's stable ID,
-  the key a list nests by; `lf task status --json`'s top-level `parent`
-  stays the identifier. Two keys named `parent` with different values in
-  one document: rename one?
 - A parent with open children whose run reaches `end` is not approved to
   ship and requests no completion. If its PR is still open there, it waits
   for `lf land`.
@@ -75,8 +71,6 @@ rest is not chosen.
   checkout event. A child with a checkout and no commits stays open.
 - A child abandoned by its parent's completion records the reason "parent
   Task completed".
-- `lf task complete --json` and served `task.complete` still return the
-  parent Task alone.
 - In `lf wave show`, a child prints under its parent in the parent's
   section, with its own section named at the end of the line when it
   differs.
@@ -84,11 +78,9 @@ rest is not chosen.
 ## Made while finishing slice 2, for review
 
 - The creation receipt's `parent` is the parent's whole `TaskRow`, the row
-  lists print, so `.parent.identifier` holds and no new shape exists. That
-  makes three spellings in one receipt: `task.parent_task_id` (ID),
-  `row.task.parent_id` (ID), `parent` (row). `lf task status` and
-  `lf task show` keep `parent` as the identifier string. One spelling
-  everywhere / leave?
+  lists print, so `.parent.identifier` holds and no new shape exists.
+  `task.parent_task_id` (the stored Task) and `row.task.parent_id` both
+  hold the ID.
 - Served `task.create` has no caller, so `parent: null` files top-level;
   a client names the parent or gets none.
 - `tests/fixtures/dto/task_status.json` is now read as `DesktopTaskPane`,
@@ -137,9 +129,8 @@ rest is not chosen.
   the conductor until the Task's step or PR moves.
 - `parent_id` is the ID and `parent` is the parent's `TaskRow` everywhere;
   `lf task status --json`'s `parent` changes from an identifier string to a
-  row. Answers the two "rename one?" items below.
+  row.
 - `lf task complete --json` and served `task.complete` gain `children`.
-  Answers the slice 4 item below.
 - Left as built: one notice per child settled by a parent's completion, sent
   to the conversation that completed it; a terminal in the Task's checkout
   files top-level.
@@ -165,19 +156,14 @@ its PR (`active at demo · #100 merged`); `lf task complete` says `stays open:
 started, no PR` where it gave no reason; a run and its relaunches failing at
 one step in one reading are one "failed at …" in the notice.
 
-- Filed from a child's conversation after the parent closed, a follow-up goes
-  under the closed parent (flat rule), lists top-level, and its news goes to a
-  conversation nobody has open. The same when the closed parent's reopened
-  conversation files one. Under the closed parent as now / under the calling
-  Task when its parent is closed / top-level?
-- `lf task complete <parent>` completes a merged child and leaves that child's
-  own never-started child open (`bd062e` under `c2b6ef`), though
-  `lf task complete c2b6ef` typed directly would abandon it. Settle
-  grandchildren too / leave?
-- `lf task run` relaunches a failed Graph twice, and each relaunch that fails
-  in a later reading is another notice: one broken child woke its conductor
-  twice with the same sentence. One notice per failing step until it changes /
-  as now?
+Seen there and changed by slice 6 (choices in the section above): a
+follow-up filed from a child's conversation after the parent closed went
+under the closed parent; `lf task complete <parent>` left a merged child's
+never-started child open (`bd062e` under `c2b6ef`); `lf task run`'s two
+relaunches of one broken child woke its conductor twice with the same
+sentence. Still as QA saw it: the closed parent's own reopened conversation
+files under the closed parent. Under it / top-level?
+
 - A person typing `lf task create` in a terminal inside the Task's checkout
   files top-level work: only the conversation carries the caller. Should the
   checkout count?

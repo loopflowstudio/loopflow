@@ -347,8 +347,9 @@ existing update a conversation gets about its own Task; Waves and
    the human output. Shown by
    `session_cli_tests::a_task_filed_from_a_tasks_conversation_shows_under_it`
    and `adoption::tests::a_task_filed_from_a_tasks_conversation_is_its_child`.
-   Built with slice 4: `parent` on `TaskRow` and `parent_id` on
-   `TaskSummary` (both the parent's stable ID, so a list nests by `id`),
+   Built with slice 4: `parent_id` on `TaskRow` and `TaskSummary` (the
+   parent's stable ID, so a list nests by `id`; `TaskRow`'s key was `parent`
+   until slice 6),
    the Swift mirror `TaskPlanningSnapshot.parentId` and every fixture,
    `lf wave show` and `lf task list` indenting a child under an open
    parent in the list.
@@ -414,11 +415,9 @@ existing update a conversation gets about its own Task; Waves and
    `lf land`; and "never started" needed its own definition (no PR, no
    Graph process, no checkout event, not begun), stricter than
    `unstarted`.
-   Not built: `lf task complete --json` prints the parent only; the served
-   `task.complete` returns the parent only, so an agent completing a parent
-   cannot read which children stayed open. Desktop does not nest yet
-   (`parentId` is decoded and unused). A done parent run through
-   `lf task complete` again does not revisit children left open.
+   Not built: Desktop does not nest yet (`parentId` is decoded and
+   unused). A done parent run through `lf task complete` again does not
+   revisit children left open.
    The three review items, settled:
    - "Merged with children open" is `task_actions::conducting_reason`,
      read by `merged_action` and the list's next move; `RoadmapTask`
@@ -524,6 +523,13 @@ existing update a conversation gets about its own Task; Waves and
    Both CLI cases are in
    `session_cli_tests::a_merged_parent_stays_open_until_it_is_completed_with_its_children`
    and `a_task_filed_from_a_tasks_conversation_shows_under_it`.
+   Run on 8100b36272, 2026-11-18: all 13 `harness::task_updates::tests::`,
+   the `adoption` test, both `session_cli_tests` and all 48
+   `dto_fixtures::` passed.
+   Read at realign: `TaskObservation::step` is the step the Task stands at
+   or its run left (`TaskGraphPosition::Run.step`, not `at`), so a relaunch
+   read mid-run does not reset the silence; only the Task arriving at
+   another step or its PR phase moving does.
    Left for gate: `binary(served_reads)` (it compares served `task.complete`
    with the CLI's `--json`; both go through `task_completed`),
    `test(documented_commands::)`, and Swift, which decodes `task.complete`

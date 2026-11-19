@@ -136,8 +136,7 @@ Each is reversible before release.
 - `lf wave edit-project` goes with the other two, as the brief lists it. A
   Project's name, summary and description are then edited only in the
   tracker; without a tracker nothing edits them.
-- Desktop keeps the "Project history" sheet as a plain list of the Wave's
-  Projects; the standup board header loses its Project line.
+- The standup board header loses its Project line.
 - Hub records decode per field, like Git's, so a Machine on LOO-938's build
   sending `krs` does not fail the page.
 - `-- leaving:` marks want an ID like `LOO-123` (`check_migrations.py`
@@ -146,12 +145,26 @@ Each is reversible before release.
 - `remove_chapters.sql` is a second unmerged migration on a stacked branch,
   made by hand because `new_migration.py` answers with the parent's
   `plan_hub.sql`. Not yet run through `check_migrations.py`.
-- A Project made offline by the released `lf` and unexported at upgrade is
-  known only by its `project_transitions` row. Queue its create on first
-  open, or leave it? Slice 1 decides by running it.
 - `project_changes` is marked leaving here though the brief does not name it
   (only a test reads it).
 - Left alone: this repository's `.lf/wave/product/GOAL.md` "Chapter planning"
   section and `.lf/wave/intelligence/metrics/*.md`, which nothing will read.
 - `~/.lf/chapter-locks` is renamed `wave-locks`; a lock held by a running old
   `lf` during the swap is not seen by the new one.
+
+- Concept review (43bf9b, 2026-11-18, headless, `scratch/concept-review.html`,
+  questions 1-5), each reversible before release:
+  - The "newest started" rule stays, and creation and move name the Project
+    joined when the Wave has several open. On one store it answers the old
+    current Project in 17 of 17 Waves; "oldest started" in 15.
+  - `uncreated` keeps its Project half and tests the Project's `plan_stamps`
+    row instead of `project_transitions`; an unstamped Project counts as made
+    here, so the released `lf`'s unexported Project is queued by the first
+    drain. Passed over: queuing the create in the creating transaction, which
+    misses Projects made before a tracker is connected.
+  - Desktop's "Project history" becomes "Projects"; the CLI line drops
+    "current" and "historical".
+  - Left as planned and asked on the page: a Wave without a tracker still
+    gets a Project row on its first Task; no command completes a Project
+    without a tracker; KR text in saved Projects stops being shown;
+    `lf wave edit-project` goes.

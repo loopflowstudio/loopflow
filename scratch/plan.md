@@ -20,10 +20,36 @@ Wave; the title overstates that. The direction now under discussion makes
 Projects the finishing groups that map to tracker Projects, with Waves as
 grouping above them."
 
+Second steer, a1df4aca, 2026-11-18, by the same Session for Jack Heart:
+"Projects that end are wanted. Keep a Project able to start, end and show its
+status: `projects.work_state`, `work_terminal_at`, the status mirrored from the
+tracker, and a Wave holding several Projects in order
+(`tracker_wave_projects.position`). What goes is the ceremony around ending
+one: the single current slot on a Wave, activation, the successor rollover in
+`project_transitions`, KRs, metric targets, instruments, observations and live
+metrics. If removing something would stop a Project from ending or from being
+listed with its status, leave it and say so."
+
 So `projects`, `tasks.project_id → projects.wave_id`, Project name, summary,
-description, status, rank, and the tracker sync of all of them stay as they
+description, status, rank, `work_state`, `work_terminal_at`,
+`tracker_wave_projects` and the tracker sync of all of them stay as they
 are. What goes is everything that makes one Project of a Wave special, and
 everything that hangs KRs and metrics on a Project or a Wave.
+
+### What starts and ends a Project (checked 2026-11-18)
+
+Nothing on the list below ends a Project, so nothing is held back for the
+second steer. A Project's status changes in two places and both stay: the
+tracker's status mirrored both ways (`Edit::ProjectStatus` in
+`linear_events.rs`, the `status` arm of `patch_project_field`), and
+`SqliteStore::abandon(WorkRef::Project)` (`sqlite/durable.rs:102`), which
+writes `work_state` and `work_terminal_at`. The successor rollover is already
+dead: nothing writes `project_transitions.predecessor_id` or `reset_name`;
+`ensure_project` only reads them. No `lf` command completes a Project without
+a tracker, on main or after; that is an addition and is on the review page as
+a question, not in this plan. A Wave's Projects list in
+`planning_rank, created_at, id` order (`list_projects`,
+`sqlite/children.rs:1295`), unchanged.
 
 ## What people see
 
@@ -36,11 +62,18 @@ everything that hangs KRs and metrics on a Project or a Wave.
 - `lf help wave` lists no `update-project`, `edit-project`; `lf wave plan`
   has `connect` and `reteam` only.
 - `lf wave status`, `lf wave show`, `lf wave plan --json`: Projects with name,
-  summary, status and tracker sync. No `current`, `krs`, `metric_targets`,
-  `metric_portfolio`, `project_readiness`.
+  summary, status and tracker sync, in the Wave's order. No `current`, `krs`,
+  `metric_targets`, `metric_portfolio`, `project_readiness`. The text line is
+  `Project   <name> (<id>) · <status>`; the words "current" and "historical"
+  go (`print_projects`, `lf/commands/waves.rs:440-452`).
+- `lf task create --wave billing 'x'` and a move into a Wave name the Project
+  the Task joined when the Wave has more than one open Project
+  (`… in Project <name>`); `--json` carries the Task's `project_id` as today.
 - Desktop Wave detail: no Metrics section, no KR checklist, no activation
-  spinner or retry. The "Project history" sheet stays as the Wave's Projects
-  list (name, status, tracker sync). The standup board header names the Wave;
+  spinner or retry. The "Project history" button and sheet become "Projects":
+  the Wave's Projects in order with name, status and tracker sync, ended ones
+  included (`ProjectHistoryView` → `WaveProjectsView`). "History" named the
+  succession of chapters; a Wave now holds several Projects at once. The standup board header names the Wave;
   it has no "current Project" line, metric headline or KR marks.
 - Agent context for a Task or a Wave has no `## KRs`, `## Metric targets` or
   `<lf:metric-portfolio>` block.
@@ -59,35 +92,63 @@ rows with its `wave_id`; none of them is selected.
 explanations (`planning_explain.rs:208,385`) all ask "the Wave's Project"
 through `ops::project::current_project` → `selected_project` →
 `waves.current_project_id` today. With no selection they ask one storage
-function instead, in `sqlite/children.rs` beside `list_projects`:
+function instead, `new_task_project(wave)` in `sqlite/children.rs` beside
+`list_projects`:
 
 > the Wave's newest `started` Project; else its newest `backlog`, `planned` or
 > `paused` one; else none. Newest by `created_at`, then `id`.
 
 When it answers none, creating or moving a Task makes a Project named for the
-Wave (`started`), in the same transaction, and queues its tracker `create`.
-On stores written by main the answer equals `current_project_id` whenever that
-Project is In Progress, which the old rule required.
+Wave (`started`) in the same transaction. Its tracker `create` is queued by
+the drain as today (finding 1).
 
-*Passed over:* `--project` on `lf task create` (an addition; it belongs to the
-Projects-as-finishing-groups direction still under discussion); refusing when
-a Wave has several open Projects (adds a precondition); `tasks.wave_id` so a
-Wave's Tasks need no Project (ruled out by the steer).
+This is the one place a Wave still singles out a Project, and it is computed,
+not stored: nobody sets it and nothing gates on it. Because nobody sets it,
+the commands say it: creation and move name the Project joined whenever the
+Wave has more than one open Project (see "What people see"). A Task that
+landed in the wrong Project is moved in the tracker, whose membership is
+mirrored back.
+
+Measured on one store written by main (62 live Waves, 64 Projects,
+2026-11-18): of the 17 Waves with a `current_project_id`, the rule answers
+that Project in 17; "oldest started" answers it in 15. 22 Waves have one open
+Project, 5 have two, 1 has three; 2 have two `started`. The other 45 live
+Waves have no current Project and get one on their first Task.
+
+Not guaranteed: a Project started in Linear under the Wave's Initiative after
+the current one becomes the answer. That is the case the creation output
+names.
+
+*Passed over:* keeping a pointer on the Wave as a plain default (the single
+current slot both steers remove); the Project whose name is the Wave's (a
+rename in Linear would make a duplicate on the next Task); the first started
+Project in the Wave's order (matches less of the saved data, and rank is the
+tracker's, not a statement about new Tasks); `--project` on `lf task create`
+(an addition; it belongs to the Projects-as-finishing-groups direction);
+refusing when a Wave has several open Projects (adds a precondition);
+`tasks.wave_id` so a Wave's Tasks need no Project (ruled out by the first
+steer; on the review page as the larger question).
 
 ## Findings that shape the work
 
-1. **`project_transitions` also gates tracker export.** `uncreated`
-   (`loopflow-storage/src/sqlite/tracker_actions.rs:980-992`) exports a local
-   Project only when a `project_transitions` row with `local_plan_json` names
-   it; `ensure_project` (`sqlite/project_selection.rs:123-229`) writes that
-   row. Without the table a Project made here would never reach Linear. The
-   Project half of `uncreated` goes; creating a Project queues its `create`
-   action in the creating transaction. That also keeps a Project that arrived
-   from another Machine by Git or hub from being created twice. A Project made
-   offline by the released `lf` and still unexported at upgrade has only its
-   transition row: the migration cannot build the action's baseline
-   (`creation_baseline` is Rust), so the first open after upgrade is where it
-   is queued, or it is left and said so. Slice 1 settles which by running it.
+1. **`project_transitions` also marks "this Machine made this Project".**
+   `uncreated` (`loopflow-storage/src/sqlite/tracker_actions.rs:980-992`) is
+   what the drain asks on every pass (`enqueue_tracker_creations`,
+   `ops/tracker/drain.rs:122`): it gives a `create` to each unbound Project
+   and Task, "including those made before the tracker was connected". Its
+   Project half requires a `project_transitions` row with `local_plan_json`,
+   which `ensure_project` writes; the Task half uses `task_creation_intents`.
+   The test exists so a Project that arrived unbound from another Machine is
+   not created twice. `uncreated` stays, both halves: queuing the `create` in
+   the creating transaction would miss every Project made before a tracker is
+   connected. Its Project test becomes LOO-938's stamp: the Project's
+   `wave_id` row in `plan_stamps` names this Machine
+   (`planning_write::local_machine`), and a Project with no stamp counts as
+   made here, as LOO-938 reads unstamped fields. That also settles the
+   Project the released `lf` made offline and never exported: it has no
+   stamp, so the first drain pass after upgrade queues it. Slice 1 checks
+   both, and that a Task's `issueCreate` waits for its Project's tracker id
+   when the two are queued in the same pass.
 2. **Plan records carry three of the removed fields.**
    `planning_write::read` (`sqlite/planning_write.rs:101-136`) emits
    `wave_project`, `krs`, `metric_targets`; `plan_carriers.rs:125-143` orders
@@ -161,8 +222,9 @@ identity and history, a Task reaching its Wave, `lf wave plan connect` and
   `retention.rs:250-252`, `processes.rs:613-616`,
   `loopflow-test-support/src/lib.rs:69`), `query_plans.rs:164`.
 - `ops/project.rs`: `current_project`, `bind_project`, `update_project`,
-  `resolve_project*`, `ProjectTarget`, `edit`, `readiness`. What is left of the
-  file is the one call to the new storage function, so the file goes too.
+  `resolve_project*`, `ProjectTarget`, `edit`, `readiness`. `WaveGraph`,
+  `GraphDefault` and `wave_graph` also live in that file and stay: they move
+  beside `scope_graph_default` in `ops/task.rs`, and the file goes.
 - `ops/wave_lifecycle.rs` `ensure_first_project`; `WaveAdded.project`.
 - `work/wave/bootstrap.rs` `ensure_wave_project`; test callers build their
   Project with `insert_project` or create a Task in the Wave.
@@ -223,8 +285,10 @@ identity and history, a Task reaching its Wave, `lf wave plan connect` and
   `PlanningKeyResult`, board heading and header lines
   (`WaveStandupBoard.swift:97-105,219-245`).
 - `waveForProject` matches any of a Wave's Projects, not the current one.
-  `ProjectHistoryView` loses its KR list and its default to the current
-  Project. Tests in `DTOFixtureTests`, `WaveDetailReadingTests`,
+  `ProjectHistoryView` becomes `WaveProjectsView`, loses its KR list and its
+  default to the current Project (it opens on the list), and its two
+  "Project history" buttons (`WaveDetailPane.swift:42`,
+  `WaveStandupBoard.swift:201`) read "Projects". Tests in `DTOFixtureTests`, `WaveDetailReadingTests`,
   `RegistryQueryTests`, `WorkModelTests`, `WaveStandupTests` follow.
   `MockWaveFixture.swift` loses the same fields. `swift/README.md` sections.
 
@@ -282,7 +346,12 @@ schemas.
 ## Exclusions
 
 - Dropping the marked columns and tables, rebuilding `waves`, the idle
-  triggers and `wave_addresses`: the contract, after the window.
+  triggers and `wave_addresses`: the contract, after the window. Its export
+  includes `projects.krs`: on the store measured above 47 of 64 Projects hold
+  KR text, plus 4 instruments and 38 observations. Until then the text is in
+  the leaving column and in the Linear Project's `content`, shown by no `lf`
+  surface.
+- A command that completes a Project without a tracker.
 - `.lf/wave/**` content in this repository (`product/GOAL.md` "Chapter
   planning", `intelligence/metrics/*.md`, MEMORY notes) and `.lf/chapters/**`
   anywhere: Wave memory and other repositories' records.
@@ -296,11 +365,16 @@ Headless, in a fixture repository with the stand-in Linear:
 
 ```
 lf wave create billing            # store: 0 projects rows for the Wave; no projectCreate sent
-lf task create --wave billing x   # 1 projects row, status started; one projectCreate, one issueCreate
+lf task create --wave billing x   # 1 projects row, status started; one projectCreate, then one issueCreate naming that Project
 lf wave plan billing --json       # projects[0] has no current/krs/metric_targets; no metric_portfolio, project_readiness
 lf help wave                      # no update-project, edit-project
 lf wave plan bind billing x       # Clap: unrecognized subcommand
 ```
+
+With a second `started` Project in the Wave (inserted as the stand-in Linear's
+observation), `lf task create --wave billing y` prints the Project it joined,
+and marking that Project completed in the stand-in sends the next Task to the
+other one: a Project still ends, and is still listed with its status.
 
 and, from the repository root,
 `grep -ri 'key result\|metric_target' rust/ swift/ docs/` matches only
@@ -315,15 +389,17 @@ on main the first command alone has already created a Linear Project.
 ## Slices
 
 1. **A Wave with no selected Project, end to end.** `lf wave create` makes no
-   Project; the storage function above answers Task creation and moves;
-   `require_selected_project` and `project_selection.rs` go;
-   Project creation queues its tracker `create`; `uncreated` loses its Project
-   half; `wave_project` leaves the plan record and the hub decodes per field;
+   Project; `new_task_project` answers Task creation and moves, and their
+   output names the Project when the Wave has several open;
+   `require_selected_project` and `project_selection.rs` go; `uncreated`
+   tests the Project's stamp instead of `project_transitions`;
+   `wave_project` leaves the plan record and the hub decodes per field;
    `remove_chapters.sql` exists with the selection marks. This is the slice
    that can prove the plan wrong: it shows whether anything still needs "the"
    Project (launch, Session membership, tracker export, the plan carriers'
-   ordering), and what happens to a Project left unexported by the released
-   `lf` (finding 1). Shown by the first two acceptance commands against the
+   ordering), and whether the stamp test exports a Project made before a
+   tracker was connected and one left unexported by the released `lf`
+   (finding 1). Shown by the first two acceptance commands against the
    stand-in Linear and by `cargo test -p loopflow --lib task_graph_launch_tests::`
    on a Task whose Project is not the Wave's newest.
 2. **Commands and activation.** The three commands, `wave.plan.bind`,

@@ -121,8 +121,9 @@ retry stays covered by its own assertions.
 2. Landing and publication return the shared sentence on `Closed` and follow a
    live successor. Focused: `task_pr_authority_tests`, the stacking tests in
    `sync_tests.rs`.
-3. `docs/work.md` stacking paragraph: one line that `lf sync` follows a parent
-   Task to its next PR when the stacked one closes.
+3. Docs (written ahead, write-docs 2026-11-19): `docs/ops.md` Checkouts gains
+   the follow paragraph, example and the closed-parent error; `docs/work.md`
+   stacking paragraph gains one clause. Match them to the built messages.
 
 ## Demo
 

@@ -314,6 +314,26 @@ PR. In an unstacked Task, any other branch, or a Task whose PR has merged,
 merges without recording a stack; a stacked Task syncs onto its parent, another
 open Task, or the default branch, which detaches it.
 
+A stack names a Task, not one of its PRs. When LOO-12's PR closes without
+merging and LOO-12 opens another, the next `lf sync` in LOO-13 follows it:
+
+```
+$ lf sync
+Merging origin/jack/loo-12-retry-budget...
+Synced onto origin/jack/loo-12-retry-budget.
+```
+
+Sync records the new PR, so `lf task status LOO-13` reads `stacked on LOO-12
+(#1983, jack/loo-12-retry-budget)`; before that sync it still names the closed
+#1971. Landing and `lf pr publish` follow the same way, and a new PR that has
+already merged carries the child onto the default branch. When LOO-12 has no
+PR left to follow, sync stops and names both ways forward:
+
+```
+$ lf sync
+stack parent LOO-12's PR #1971 closed without merging; `lf sync LOO-12` restacks this Task on its branch, `lf sync main` detaches it
+```
+
 Record a stack with these commands, not with `git merge` of the parent's branch
 or `gh pr edit --base`: lf reads neither, so the next `lf sync` merges main
 and the PR's base disagrees with the Task.

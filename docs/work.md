@@ -18,7 +18,8 @@ lf capture-tasks                             # talk it through; the Session file
 A Task adopts existing work or gets its own worktree beside your repository, its own branch and at
 most one pull request. A stacked Task forks from its parent's branch on origin,
 pushing it when absent or when an unpublished parent is ahead; `lf sync`
-carries the child through the parent's updates and squash merge. To stack a
+carries the child through the parent's updates and squash merge, and on to
+the parent's next PR when the stacked one closes unmerged. To stack a
 Task that already exists, run `lf sync LOO-12` in its worktree; `lf sync main`
 takes it back off.
 

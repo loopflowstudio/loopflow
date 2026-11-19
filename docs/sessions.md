@@ -40,6 +40,7 @@ overview tabs all open conversations the same way.
 | missing for this scope | starts one and says so |
 | running in an lf terminal, shown or not | opens one more view here; other views stay open and all of them type |
 | ended or crashed | continues the same provider thread from its history |
+| recorded in a directory that is gone, such as a done Task's retired checkout | continues it in the repository's main checkout |
 | running in a client lf can't share (`lf <skill>` in another terminal, say) | takes it over and says so: that client ends and the conversation continues here; unsent text there is lost |
 
 If attachment fails, resume reports the failure and leaves that work intact.
@@ -464,6 +465,11 @@ even if the server restarted since its last turn. Claude takes the news as a
 message from `loopflow`, Codex as a turn of its own. A comment with direction
 arrives as a steer; other comments arrive as Task updates. A
 conversation in the middle of a turn hears updates at its next boundary.
+
+A Task's conversation also hears about the
+[follow-ups filed from it](work.md#file-follow-ups-from-a-task), less often:
+when one stops at an interactive step, fails, merges or closes, not at each
+step. A steer for a child stays with the child.
 Pi and OpenCode hear updates at their next boundary too. Idle update delivery
 needs no watcher or timer per conversation.
 

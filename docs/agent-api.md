@@ -94,7 +94,7 @@ lf checkout INF-123                    # ensure Work and worktree only
 lf task run INF-123                    # place an existing Task, start its Graph, return once it runs
 lf task create --wave <wave> --title "add passkeys"  # file the issue; run it with `lf task run`
 pbpaste | lf task create --wave <wave>               # report from stdin; first line is the title
-lf task run INF-124 --stack-on INF-123 # dependent work before the parent lands
+lf task run INF-124 --stack-on INF-123 # dependent work before INF-123 lands
 lf sync INF-123                        # stack the Task you are in on INF-123
 ```
 
@@ -183,8 +183,18 @@ means lf printed it into the conversation, not that the model followed it; to
 say it again, steer again.
 
 Task updates arrive the same way. When a Task's position, a run or a comment
-that is not direction changes, lf saves a steer for the Task's interactive
-conversations, marked as an observation and not a request.
+that is not direction changes, or its PR merges or the Task closes, lf saves a
+steer for the Task's interactive conversations, marked as an observation and
+not a request.
+
+A Task created from a Task's Session is that Task's child
+(`lf task create --parent none` files it top-level). The parent's interactive
+conversations conduct it: they get a notice when the child stops at an
+interactive step, a run of it fails or stops, its PR merges, or it is
+completed or abandoned. The notice names the child, its step and
+`lf task status <ID>`, and is news about work the conversation is responsible
+for, so acting on it is in scope. Steers saved for a child are not delivered
+to its parent.
 
 Keep routine agent progress in working notes and the Session response. `lf task report`
 from an agent Session marks its entry as progress, excluded from steers. Use

@@ -135,7 +135,10 @@ keep the same Task; conflicting Task ownership fails without moving either
 person's work.
 
 Plain `lf task create` files new work, including from an owned checkout or
-Session. `--run` starts the created Task; it does not opt into adoption.
+Session: it never adopts the caller's checkout or conversation. Run from a
+Task's conversation, the new Task is that Task's
+[follow-up](#file-follow-ups-from-a-task). `--run` starts the created Task; it
+does not opt into adoption.
 Explicit sources work with or without `--run`. Creation alone starts no Graph
 and approves no Auto-Ship. Binding also requires an explicit Session ID.
 
@@ -208,6 +211,56 @@ A Graph that stopped or crashed stays as history; nothing resumes it. Read
 `lf task status`, then launch what remains with `lf task run`. The Task keeps
 its worktree, branch and PR throughout.
 
+## File follow-ups from a Task
+
+In LOO-12's conversation, say "file the follow-ups", or run it yourself there:
+
+```bash
+lf task create --title "Retry budget per host"      # a child of LOO-12: no flag
+lf task create --title "Unrelated cleanup" --parent none    # top-level instead
+lf task create --title "Jitter the backoff" --parent LOO-30 # under another Task
+lf task status LOO-12                               # LOO-12 and its children
+```
+
+```text
+$ lf task status LOO-12
+LOO-12  idle
+  …
+  PR: #1972 merged
+  Merged · 3 children open
+  child: LOO-14  Retry budget per host    running at implement
+  child: LOO-15  Log each retry           at human-review
+  child: LOO-16  Document the budget      unstarted
+```
+
+A Task filed from a Task's conversation is its child, whether you typed the
+command, the agent did, or a step of its Graph did. Each child is an ordinary
+Task with its own worktree, branch and pull request; it joins its parent's
+Wave unless you pass `--wave`. A parent says where a Task came from, a stack
+says which branch it starts from, and neither sets the other: add
+`--stack-on LOO-12` when the follow-up needs LOO-12's unmerged code.
+
+Follow-ups stay flat. Filed from LOO-14's conversation, a new Task is a
+sibling under LOO-12; `--parent LOO-14` nests it. Outside a Task's
+conversation, `lf task create` files top-level work as before.
+
+LOO-12's conversation conducts its children. It is told, and woken if idle,
+when a child stops at an interactive step, a child's run fails or stops, a
+child's PR merges, or a child is completed or abandoned. Steps passing inside
+a child's run tell it nothing. A steer goes only to the Task it names:
+`lf steer LOO-14 "…"` reaches LOO-14's agents, not LOO-12's conversation.
+
+```text
+loopflow: LOO-15 "Log each retry", which this conversation conducts, stopped
+at human-review. lf task status LOO-15
+```
+
+A merge is news once Loopflow has seen it: `lf land` and Auto-Ship see their
+own, and a PR merged by hand on GitHub shows at the next `lf pr reconcile`.
+
+`lf wave show` and Desktop list a child under its parent. Once the parent is
+done or abandoned, a child still open is listed on its own; its link stays.
+
 ## Finish
 
 ```bash
@@ -219,6 +272,28 @@ A Task whose graph reaches `end` requests completion itself; with a PR,
 completion waits for the merge. Landing outside its graph leaves the Task open
 until you complete it. Publishing, landing and CI repair are covered in
 [Pull requests](ops.md#pull-requests).
+
+A Task with open children stays open after its PR merges. It reads
+`Merged · 3 children open`, nothing asks you to complete it, and Auto-Ship
+leaves it open, so its conversation is still there to conduct them. Complete it
+when the follow-ups are settled:
+
+```text
+$ lf task complete LOO-12
+LOO-12 done
+  LOO-14 done: #1980 merged
+  LOO-16 abandoned: never started
+  LOO-15 stays open: #1981 open, at human-review
+```
+
+Completing a parent finishes each child whose PR merged and abandons each
+child that never started. A child with anything unmerged (an open PR, a
+running Graph, a checkout with commits) stays open and is named;
+finish it or `lf task abandon` it yourself. The command never stops to ask.
+
+A done Task's conversation is still yours. `lf resume LOO-12` reopens it
+after the checkout is gone, in the repository's main checkout, and it goes on
+hearing about any child that is still open.
 
 ## Share the plan
 
@@ -273,10 +348,12 @@ Each Task is one item in the tracker, and the tracker is where coworkers work:
 | edits the title or description | updates the Task and tells a running agent |
 | comments | delivers it to the Task's agents as direction |
 | completes, cancels or reopens it | moves the Task to match |
+| makes it a sub-issue or subtask of another | lists it as that Task's child |
 
 | You, in Loopflow… | Coworkers see… |
 |---|---|
 | create, edit, steer, complete, reorder or delete | the same change |
+| file a follow-up from a Task | a sub-issue of that Task's issue (Linear) or a subtask (Asana) |
 | start work on the Task | it moves to in progress |
 | open, land or abandon its PR | a link to the PR and its state |
 
@@ -506,6 +583,12 @@ it missed.
 ID prefixes of four or more hex digits (`abcd`, `lf-abcd`, `task_abcd`). An
 ambiguous prefix lists its matches.
 
+**Parent.** `--parent <ID>` on `lf task create` names the parent;
+`--parent none` files top-level; an unknown ID is an error naming it, and so
+is a parent that would be its own descendant. In `--json`, `parent` is the
+parent's identifier or `null`, and `lf task status --json` carries `children`,
+the same rows `lf task list --json` prints, `[]` when there are none.
+
 **Graph selection.** A Task keeps the graph it took up. Before its first run:
 the one named on `lf task run LOO-12 GRAPH`, then its Wave's default, then
 `graph:` in `.lf/config.yaml`, then builtin `code`. `lf task run LOO-12 --from
@@ -513,11 +596,13 @@ demo` starts at any step; starting from an interactive step only puts the Task
 there. See [Orchestration](orchestration.md#where-a-person-takes-part).
 
 **Membership.** `lf task create` makes a standalone Task unless you pass
-`--wave`. `lf task move LOO-12 --wave billing` (or `--no-wave`) changes it later
+`--wave`; a [follow-up](#file-follow-ups-from-a-task) is filed in its parent's
+Wave and Project, and stays there if the parent later moves. `lf task move LOO-12 --wave billing` (or `--no-wave`) changes it later
 and keeps the Session, checkout, PR and graph.
 
 **Completion.** `lf task complete` changes status only, independent of graph
-position; retry it alone if it fails. `lf task reopen` keeps the same PR.
+position; retry it alone if it fails. On a parent it also finishes merged
+children and abandons never-started ones. `lf task reopen` keeps the same PR.
 `lf task abandon` cancels it, closes its PRs and deletes its branches.
 
 **Sync.** `lf task sync LOO-12` exchanges that Task with its tracker now. On

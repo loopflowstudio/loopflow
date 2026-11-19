@@ -215,6 +215,28 @@ added. What changes for a Task with open children:
 "Plain creation files new work, regardless of the current checkout or
 invoking Session" (`lf/mod.rs:2244`) and the adoption comment go.
 
+## Docs, written first
+
+The user docs for this change, describing intended behaviour; implement reads
+them as the spec for wording and output:
+
+- `docs/work.md`: "File follow-ups from a Task" (new), "Finish" (merged parent
+  with open children, `lf task complete` over children, resume after close),
+  the tracker tables, and Reference (Parent, Membership, Completion).
+- `docs/sessions.md`: the `lf resume` table row for a directory that is gone;
+  hearing about follow-ups.
+- `docs/agent-api.md`: Task updates and the notice to a conductor.
+- `docs/glossary.md`: Parent, child.
+
+The examples use `--parent`, which Clap does not have until slice 2, so the
+`documented_commands` check fails on this branch until then.
+
+Settled while writing, for review: the human `lf task status` prints one
+`child:` line per child (identifier, title, standing) and the reason line;
+`lf task complete <parent>` prints one line per child with what happened to
+it; the notice reads "LOO-15 "…", which this conversation conducts, stopped
+at human-review. lf task status LOO-15".
+
 ## Source of truth
 
 `tasks.parent_task_id`. Children are the Tasks that name a parent, ordered by

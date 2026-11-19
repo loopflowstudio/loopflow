@@ -14,6 +14,7 @@ first, then the engineering words it borrows.
 | **Loopflow** | A graph that can go back and try again. Exactly: a graph with at least one backward edge. |
 | **Deciding step** | The step that chooses between moving on and going back. |
 | **Task** | One piece of work with a finish line. |
+| **Parent**, **child** | A Task filed from another Task's conversation is its child. The parent's conversation is told when a child stops, fails or lands. Not the same as a stack, which says whose branch a Task starts from. |
 | **Wave** | A goal Loopflow keeps working on. It has a written objective, a memory, and a schedule. |
 | **Plan** | The shared Waves, Projects and Tasks. `lf wave plan` shows one Wave’s part, and `lf plan list` shows the repository’s plan. |
 | **KR** | Key result. A result you can check, stated before the work starts. |

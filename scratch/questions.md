@@ -24,6 +24,20 @@ rest is not chosen.
   It is live behaviour (v0.13.16, `docs/ops.md:38`).
 - Wave and repository conversations do not hear about Tasks in this change.
 
+## Raised by writing the docs (2026-11-18)
+
+- "Parent" already means the stack parent across `docs/work.md`,
+  `docs/agent-api.md` and `docs/ops.md` ("forks from its parent's branch").
+  The docs now say "a parent says where a Task came from, a stack says which
+  branch it starts from". Is the filing link called parent / follow-up of /
+  something else, and does the stack keep the word?
+- A follow-up that needs its parent's unmerged code must also pass
+  `--stack-on`. Filed from a Task whose PR has not merged, should a child
+  stack on it by default? The docs say no (plan: neither implies the other).
+- A child whose parent closed is listed top-level. Does anything on that
+  child still show where it came from in the human output, or only in
+  `--json`?
+
 ## One type of work
 
 1. (planned: see above and plan decision 7)

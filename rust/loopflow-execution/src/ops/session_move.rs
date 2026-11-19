@@ -79,7 +79,7 @@ pub type ContinueRun =
     fn(&std::path::Path, &str, Option<&str>) -> Result<crate::engine::task::TaskRun>;
 
 /// `lf task move X --machine M`. A Graph the move stopped continues where the
-/// Task arrives, through `run`. `conversation` is the Session it carries;
+/// Task arrives, through Auto-Ship or `run`. `conversation` is the Session it carries;
 /// `None` carries the Task's own conversation.
 pub fn move_task(
     issue: &str,
@@ -288,14 +288,21 @@ async fn relay_task(
         ""
     };
     eprintln!("Arrived on {place}{at}{carried}");
-    let stopped = moved_task.stopped.is_some().then(|| StoppedRun {
-        identifier: name.clone(),
-        from,
-        task: task.id.clone(),
-        place: place.clone(),
-        repository: crate::ops::task::repository_for_task(store, &task)
-            .map_err(|error| error.to_string()),
-    });
+    let stopped = if moved_task.approval.is_some() {
+        // Restoring the approval lets the destination's ship recovery take
+        // over the saved cursor. Starting a separate Task run here races it.
+        eprintln!("Auto-Ship approval moved to {place}; follow: lf task status {name}");
+        None
+    } else {
+        moved_task.stopped.is_some().then(|| StoppedRun {
+            identifier: name.clone(),
+            from,
+            task: task.id.clone(),
+            place: place.clone(),
+            repository: crate::ops::task::repository_for_task(store, &task)
+                .map_err(|error| error.to_string()),
+        })
+    };
     Ok((
         crate::store::ownership::task_ownership(&store.sqlite, &task.id)?,
         stopped,

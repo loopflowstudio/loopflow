@@ -55,8 +55,8 @@ fn watch(terminals: &Registry) {
 
 /// The watcher's store, what it read last and when, when it last settled,
 /// and when the pass must read again though nothing moved: a
-/// due conversation's terminal was still ending, or a conversation's or a
-/// run's backoff comes due.
+/// due conversation's terminal was still ending, a backoff comes due, or
+/// settlement was throttled when run records changed.
 #[derive(Default)]
 struct Watcher {
     store: Option<SqliteStore>,
@@ -83,8 +83,7 @@ impl Watcher {
     }
 
     /// Whether this reading settles: [`SETTLE_EVERY`] passed, or a run's
-    /// backoff came due. Settling answers when the next run comes due, always
-    /// later, so a due run never settles twice.
+    /// backoff came due. Settling answers when the next run comes due.
     fn settles(&self, now: SystemTime) -> bool {
         due(self.settled, now, SETTLE_EVERY) || self.runs_due.is_some_and(|at| at <= now)
     }
@@ -118,11 +117,21 @@ impl Watcher {
         if unchanged && self.wake().is_none_or(|at| now < at) {
             return;
         }
-        self.seen = Some((revisions, now));
         if self.settles(now) {
             self.settled = Some(now);
             self.runs_due = loopflow_execution::ops::recovery::settle().map(time_at);
+        } else if self.seen.is_some_and(|(seen, _)| {
+            (seen.planning, seen.processes) != (revisions.planning, revisions.processes)
+        }) {
+            // A move can restore Auto-Ship while settlement is throttled.
+            // Revisit that change even if nothing else writes to the store.
+            self.runs_due = self
+                .runs_due
+                .into_iter()
+                .chain(self.settled.map(|at| at + SETTLE_EVERY))
+                .min();
         }
+        self.seen = Some((revisions, now));
         let held = |session: &LfSessionId| {
             terminals.session_terminal(session).is_some()
                 || terminals.pending_terminal(session, None).is_some()

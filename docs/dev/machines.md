@@ -393,22 +393,21 @@ label; then the refusal prints the same check and retry. Addressed to mini from 
 runs on the laptop, which holds the move. A leaving move carries on: it
 commits, pushes and takes the conversation, which are safe to repeat. A sent
 move is delivered as it was sent, conversation included, without committing or
-pushing again. Either way the Graph continues on mini at the step it was on. If
-the Graph does not start on mini, the move still stands and the last line prints
-`lf task run MTG-321 --from 'implement'`, which starts it at that step on the
-Task's owner.
+pushing again. For a Task outside Auto-Ship, the move continues a Graph it
+stopped, starting it on mini at the saved step. If the Graph does not start,
+the move still stands and prints `lf task run MTG-321 --from 'implement'` to
+start it on the Task's owner.
 
 `lf task claim MTG-321` on the laptop first asks mini whether the move arrived.
 If it did, its answer lost, the Task runs on mini and the claim is written
 there. If it did not, or mini is gone, the laptop takes the Task back and the
 move ends.
 
-Auto-Ship approval travels with the move, as the Graph position does. Each
-Machine keeps approvals and stops as a log (who, when, which process). The continued run is a plain
-`lf task run`; when it stops at an interactive step, mini's ship process carries
-the Task on, as it would have on the laptop. `lf task hold MTG-321` withdraws the
-approval on either Machine. A Machine ships only Tasks it owns: once a Task has
-left, its old checkout starts nothing.
+Auto-Ship approval travels with the move, as the Graph position does. Mini's
+server starts the ship process from the saved Graph position. Each Machine
+keeps approvals and stops as a log (who, when, which process).
+`lf task hold MTG-321` withdraws the approval on either Machine. A Machine
+ships only Tasks it owns. Once a Task has left, its old checkout starts nothing.
 
 ## Own and rent Machines
 

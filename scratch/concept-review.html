@@ -70,293 +70,138 @@
   .swatch.ex { border: 1px solid var(--line); background: var(--card); }
   .swatch.pr { border: 2px dashed var(--new); }
 </style>
+<style>
+  .grid4 { display:grid; grid-template-columns: 1.3fr repeat(4,1fr); gap:0; }
+</style>
 </head>
 <body>
 <main>
+<h1>A Task step on any harness, with slice 7 in</h1>
+<p class="lede">LOO-974 read whole against its base (3496a876), after slice 7, compress and QA round 2.
+The area is the one the earlier passes took: how a Task step gets its agent, what it may do, what
+happens when it cannot start or cannot finish, and how anyone tells the four harnesses apart.</p>
 
-<h1>A Task step on any harness, as built</h1>
-<p class="lede">LOO-974 after six slices and QA on real OpenCode 2.2.1 and Pi 1.3.0, read
-against its base (<code>e55f40bd</code>) as someone meeting it for the first time. The area
-is the same one the first review took: how a Task step gets its agent, what that agent may
-do, what happens when it cannot start or cannot finish, and how anyone can tell the four
-harnesses behave alike.</p>
-
-<div class="verdict">
-  <strong>Outcome: the plan changed.</strong> The design held where it was built: the
-  permission rule has one name and one owner, OpenCode is launched the way Claude is, and a
-  missing harness is passed over or named once. What does not line up yet is the thing the
-  Task exists to deliver. "Parity" is written down as a table whose own rule is "a test or a
-  named gap in every cell", and five cells are neither. One of them, Pi usage, is a
-  deliverable the brief names. The plan gains one slice, 7, with three parts.
-</div>
+<div class="verdict"><strong>Outcome: nothing to change in the plan.</strong> The three slice-7 mismatches
+the last page called out are closed as built: a question stops after one attempt with its answer path,
+a Pi turn is one row with its usage, and interrupt is shown on all four harnesses. Every cell of the
+parity table is a test or a named gap. What remains is smaller than this Task or already a named
+question; the largest is that a stop on a question is read back out of the error's prose
+while the turn already stores its code. Next step: demo, on real Tasks.</div>
 
 <div class="key">
   <span><span class="swatch ex"></span>built on this branch</span>
-  <span><span class="swatch pr"></span>proposed, slice 7</span>
-  <span><span class="pill yes">yes</span> product and code line up</span>
-  <span><span class="pill no">no</span> they do not</span>
-  <span><span class="pill unk">not read</span> nobody has looked</span>
+  <span><span class="swatch pr"></span>proposed, not in this Task</span>
+  <span class="pill yes">yes</span> product and code line up
+  <span class="pill no">no</span> they do not
+  <span class="pill unk">not read</span> nobody has looked
 </div>
 
 <h2>One interaction, walked</h2>
-<p>A Task's <code>implement</code> step runs on OpenCode with Gemini 4 Carbon. Normal path,
-seen in QA: the step settles with a commit, a steer sent mid-step changes what it writes,
-usage is in <code>lf history usage --task</code>, and the Graph stands at its next step. The
-failure worth walking is the one the docs now promise a recovery for: the agent asks a
-question and nobody is there.</p>
-
+<p>A Task's <code>implement</code> runs on OpenCode with Gemini 4 Carbon and the model asks which
+database to target. Seen in QA round 2 on the real CLI (<code>scratch/qa.html</code>, scenarios 8-14).</p>
 <div class="two">
-  <div class="panel">
-    <h3>Built</h3>
-<pre><code>$ lf task run LOO-12 -a opencode:opencode/gemini-4-carbon
-<span class="err">OpenCode asked a question with nobody there to answer it:
-Which database should the migration target?</span>
-The run of code failed (attempt 1 of 3); starting it again at implement.
-<span class="err">OpenCode asked a question with nobody there to answer it: …</span>
-The run of code failed (attempt 2 of 3); starting it again at implement.
-<span class="err">OpenCode asked a question with nobody there to answer it: …</span>
-The run of code failed 3 times; this Task run stops here.</code></pre>
-    <p class="note">Assembled from the message strings in <code>harness/common.rs</code> and
-    <code>commands/graph.rs</code>; the three attempts are what
-    <code>a_question_with_nobody_there_ends_the_step</code> runs (72s for that reason).</p>
-    <p>Each attempt is a new conversation and a full model turn up to the question.
-    <code>docs/orchestration.md</code> says "answer with <code>lf steer LOO-12 "…"</code>
-    and run again"; the person gets to do that only after the model has asked three times,
-    possibly in three wordings.</p>
-  </div>
-  <div class="panel proposed">
-    <h3>Proposed</h3>
-<pre><code>$ lf task run LOO-12 -a opencode:opencode/gemini-4-carbon
-<span class="err">the run of code stopped at implement on a question:
-Which database should the migration target?</span>
-Answer with `lf steer LOO-12 "…"`, then `lf task run LOO-12`.
-
+  <div class="panel"><h3>Built</h3>
+<pre>$ lf task run LOO-12 -a opencode:opencode/gemini-4-carbon
+the run of code stopped at implement: Which database
+should the migration target?; answer with
+`lf steer LOO-12 "…"`, then `lf task run LOO-12`
+$ lf task status LOO-12
+implement stopped: Which database …; answer with …
 $ lf steer LOO-12 "the staging replica"
 $ lf task run LOO-12
-<span class="ok">implement settles; the Graph moves to its next step</span></code></pre>
-    <p>One ask. The answer is a steer, which the next run's conversation reads at its
-    start, the way slice 6 already reads one back on every stand-in.</p>
+<span class="ok">implement settles; the Graph stands at review</span></pre>
+  <p class="note">One attempt. The stop and the status read the same sentence through
+  <code>harness::asked_question</code>. The next run is a new conversation that hears the steer.</p>
+  </div>
+  <div class="panel"><h3>Failure and recovery around it</h3>
+  <p><strong>Pinned harness missing:</strong> one attempt, the install hint as the reason.
+  With <code>agents: [pi, opencode]</code> and Pi missing, the step runs on OpenCode and the move is recorded.</p>
+  <p><strong>Interrupt:</strong> <code>lf task interrupt</code> exits 130 with the turn
+  <code>interrupted</code>; the next <code>lf task run</code> starts the step in a new conversation (question 21).</p>
+  <p><strong>Same question on Claude or Codex:</strong> <span class="pill unk">not read</span>
+  no decoder fails the turn; the README says so.</p>
   </div>
 </div>
 
 <h2>Do the product's concepts and the code's line up?</h2>
 <table>
-  <tr><th style="width:21%">What a person knows</th><th style="width:27%">What the code has</th><th style="width:8%"></th><th>What is right or wrong</th></tr>
-  <tr>
-    <td><strong>What a headless Task step may do.</strong> Everything the OS account allows.</td>
-    <td><code>skip_permissions</code>; <code>agent::headless_task_checkout</code>, called by <code>run.rs</code> and batch resume</td>
-    <td><span class="pill yes">yes</span></td>
-    <td>Was one idea under five names. <code>AgentWriteScope</code>, <code>AgentExecutionBoundary</code>, <code>supports_execution_boundary</code>, <code>checkout_execution_boundary</code> and <code>confine_checkout_agent</code> are gone, with the branches only fixtures reached.</td>
-  </tr>
-  <tr>
-    <td><strong>Execution boundary.</strong> The account, container or VM you choose.</td>
-    <td>Nothing; <code>docs/security.md</code> only</td>
-    <td><span class="pill yes">yes</span></td>
-    <td>One name, one meaning. A concept that became nothing at all.</td>
-  </tr>
-  <tr>
-    <td><strong>Harness.</strong> Any of four runs a step; OpenCode is launched like Claude.</td>
-    <td><code>Harness</code>, <code>Capabilities</code>; OpenCode: <code>opencode --standalone</code> in a terminal, <code>opencode run</code> per headless turn</td>
-    <td><span class="pill yes">yes</span></td>
-    <td>The private server, its HTTP client, SSE reader, companion thread and permission auto-reply are deleted. lf names the conversation (<code>ses_&lt;uuid&gt;</code>) on every launch kind.</td>
-  </tr>
-  <tr>
-    <td><strong>The four behave alike.</strong> "Full parity".</td>
-    <td>The table in <code>harness/README.md</code>; <code>a_task_step_runs_as_a_worker_on_every_harness</code></td>
-    <td><span class="pill no">no</span></td>
-    <td>The biggest mismatch; see below. Four cells read "not shown", on the two harnesses that are the reference, and one reads "no" for something the brief names.</td>
-  </tr>
-  <tr>
-    <td><strong>A turn and what it cost.</strong></td>
-    <td><code>history.turns</code>: lf's row (Task, Graph, step) and the transcript's row (usage)</td>
-    <td><span class="pill no">no</span></td>
-    <td>On Pi, one turn is two rows. lf names it by its request id; Pi's session file names it by the user entry's id. Usage sits on the row with no Task, so <code>lf history usage --task</code> shows a Pi step as free. Seen on the stand-in and on real Pi.</td>
-  </tr>
-  <tr>
-    <td><strong>The agent order.</strong> A Graph step moves down it when its agent cannot go on.</td>
-    <td><code>_fallthrough_rungs</code>, read before the conversation opens (<code>start_on_installed_agent</code>) and during the turn (<code>_run_with_retries</code>); <code>_record_agent_move</code></td>
-    <td><span class="pill yes">yes</span></td>
-    <td>"Not installed" joined the reasons to move, through the same ladder and the same record. Two smaller wrinkles: the record lives in <code>agent_limit_recoveries</code>, a table named for one reason; and the move shows in <code>lf task status</code> only while the step runs.</td>
-  </tr>
-  <tr>
-    <td><strong>"This harness is not installed."</strong></td>
-    <td><code>check_cli_available</code>: one site for headless launches; still <code>replay.rs</code>, <code>primary.rs</code>, <code>native_session.rs</code>, <code>config.rs</code></td>
-    <td><span class="pill yes">yes</span></td>
-    <td>For a Task step, asked once. The Task's own conversation does not move: with <code>agents: [pi, opencode]</code> and Pi missing, the step runs on OpenCode and the conversation does not open.</td>
-  </tr>
-  <tr>
-    <td><strong>A step failed; lf tries again</strong> when trying again could go differently.</td>
-    <td><code>TASK_RUN_ATTEMPTS = 3</code>; <code>TaskRunStopped::{Repeated, Unlaunched, Limit}</code>; <code>graph_failed_before_its_agent</code></td>
-    <td><span class="pill no">no</span></td>
-    <td>A launch lf refused now stops after one attempt, derived from the store with no stored refusal. A question does not: it is the one failure whose fix is known to be a person, and it is retried twice.</td>
-  </tr>
-  <tr>
-    <td><strong>A question with nobody there.</strong></td>
-    <td><code>common::unanswered_question</code>, raised by <code>opencode_decode</code> and <code>pi.rs</code></td>
-    <td><span class="pill no">no</span></td>
-    <td>OpenCode and Pi: one sentence, one outcome. Claude and Codex: not read. <code>codex_decode.rs</code> marks the Session as waiting, which may be the hang this Task removed from OpenCode. The orchestration doc states the outcome for every harness.</td>
-  </tr>
-  <tr>
-    <td><strong>Interrupt a step; run it again.</strong></td>
-    <td><code>agent::interrupted()</code>; both readers settle the open turn <code>Interrupted</code>; a worker is a Run and <code>run_refusal</code> refuses to continue one</td>
-    <td><span class="pill no">no</span></td>
-    <td>The behavior is right and the name is not: <code>a_worker_stops_on_interrupt_and_its_session_resumes</code> asserts that the Session does <em>not</em> resume. Before slice 4, OpenCode and Pi recorded the turn <code>failed</code>; whether Claude and Codex do the same under the Graph's SIGTERM has not been read.</td>
-  </tr>
-  <tr>
-    <td><strong>A steer reaches a running step.</strong></td>
-    <td>The hook after each tool (<code>lf __context-block</code>); and <code>Driver::send_current</code></td>
-    <td><span class="pill no">no</span></td>
-    <td><code>send_current</code> has implementations and tests on Claude, Codex and Pi and no production caller: a concept the code has and no person meets. It predates this branch.</td>
-  </tr>
-  <tr>
-    <td><strong>Worker, work session, chat, batch.</strong></td>
-    <td><code>LaunchKind</code>, the launch matrix</td>
-    <td><span class="pill yes">yes</span></td>
-    <td>The matrix's worker cell now asserts <code>yolo</code> in a Task checkout on all four.</td>
-  </tr>
+<tr><th>What a person knows</th><th>What the code has</th><th></th><th>What is right or wrong</th></tr>
+<tr><td>A headless Task step may do what the OS account allows.</td>
+<td><code>skip_permissions</code>; <code>agent::is_task_checkout</code>, called by <code>run.rs</code> and batch resume</td>
+<td><span class="pill yes">yes</span></td><td>One rule, one owner, the word the config already uses (<code>yolo</code>). The five boundary names are gone.</td></tr>
+<tr><td>Execution boundary: the account, container or VM you choose.</td><td>Nothing; <code>docs/security.md</code></td>
+<td><span class="pill yes">yes</span></td><td>A concept that became nothing.</td></tr>
+<tr><td>Harness. OpenCode is launched like Claude.</td>
+<td><code>opencode --standalone</code> in a terminal; one <code>opencode run --standalone --format json --auto</code> per headless turn</td>
+<td><span class="pill yes">yes</span></td><td>No private server, SSE reader or companion thread left.</td></tr>
+<tr><td>The four behave alike.</td><td>The table in <code>harness/README.md</code>; five <code>task_graph_launch_tests</code></td>
+<td><span class="pill yes">yes</span></td><td>Every cell is a test or a named gap. The gaps: questions on Claude and Codex, limit moves and idle steer wake on OpenCode and Pi.</td></tr>
+<tr><td>A turn and what it cost.</td><td>One <code>history.turns</code> row; Pi entries joined by timestamp span</td>
+<td><span class="pill yes">yes</span></td><td>Seen on real Pi: one row with usage in <code>lf history usage --task</code>. An exact entry id wins over the span.</td></tr>
+<tr><td>The agent order; a step moves down it when its agent cannot go on.</td>
+<td><code>start_on_installed_agent</code>, <code>_fallthrough_rungs</code>, <code>_record_agent_move</code> into <code>agent_limit_recoveries</code></td>
+<td><span class="pill no">no</span></td><td>Small: the record lives in a table named for one reason, and shows in <code>lf task status</code> only while the step runs (questions 16, 17, 29).</td></tr>
+<tr><td>lf tries a failed run again only when another try could go differently.</td>
+<td><code>TaskRunStopped::{Repeated, Unlaunched, Limit, Question}</code>; three detectors</td>
+<td><span class="pill yes">yes</span></td><td>Each stop prints the command that resumes it. The detectors read three sources: the store (<code>graph_failed_before_its_agent</code>), the limit table, and the error text.</td></tr>
+<tr><td>A question with nobody there.</td>
+<td>Turn: <code>TurnEnd::Error{code: "unanswered_question"}</code>. Step: the flattened line <code>unanswered_question: …</code>, parsed by <code>asked_question</code></td>
+<td><span class="pill no">no</span></td><td>One fact, two representations; see below.</td></tr>
+<tr><td>A steer reaches a running step.</td><td>The hook after each tool; <code>Driver::send_current</code> on three drivers, no production caller</td>
+<td><span class="pill no">no</span></td><td>The product has one path; the code keeps a second that nothing calls (question 26).</td></tr>
+<tr><td>Stopped, then run again.</td><td>A worker's Session is a Run; <code>run_refusal</code> refuses to continue Runs</td>
+<td><span class="pill unk">open</span></td><td>"Starts the step again" is what is built and documented. Continuing the native thread is question 21.</td></tr>
 </table>
 
-<h2>The biggest mismatch: parity is a table that does not meet its own rule</h2>
-<p>The plan's done-line is "the README table has a test or a named gap in every cell". This
-is the table as committed, with the cells that are neither.</p>
-<table>
-  <tr><th>A Task step</th><th>Claude</th><th>Codex</th><th>OpenCode</th><th>Pi</th></tr>
-  <tr><td>Starts as a worker, settles, records answer and thread; the Graph advances</td><td><span class="pill yes">yes</span></td><td><span class="pill yes">yes</span></td><td><span class="pill yes">yes</span></td><td><span class="pill yes">yes</span></td></tr>
-  <tr><td>Records its usage in the Task's history</td><td><span class="pill yes">yes</span></td><td><span class="pill yes">yes</span></td><td><span class="pill yes">yes</span></td><td><span class="pill no">no</span> second turn row</td></tr>
-  <tr><td>Receives the step's context</td><td><span class="pill yes">yes</span></td><td><span class="pill yes">yes</span></td><td><span class="pill yes">yes</span></td><td><span class="pill yes">yes</span></td></tr>
-  <tr><td>Hears a steer sent while it runs</td><td><span class="pill yes">yes</span></td><td><span class="pill yes">yes</span></td><td><span class="pill yes">yes</span></td><td><span class="pill yes">yes</span></td></tr>
-  <tr><td>Runs as <code>yolo</code> in its Task's checkout</td><td><span class="pill yes">yes</span></td><td><span class="pill yes">yes</span></td><td><span class="pill yes">yes</span></td><td><span class="pill yes">yes</span></td></tr>
-  <tr><td>Passed over when not installed, or named once</td><td><span class="pill yes">yes</span></td><td><span class="pill yes">yes</span></td><td><span class="pill yes">yes</span></td><td><span class="pill yes">yes</span></td></tr>
-  <tr><td>A question with nobody there fails the turn</td><td><span class="pill unk">not read</span></td><td><span class="pill unk">not read</span></td><td><span class="pill yes">yes</span></td><td><span class="pill yes">yes</span></td></tr>
-  <tr><td>Interrupt records the turn interrupted; the next run starts the step again</td><td><span class="pill unk">not read</span></td><td><span class="pill unk">not read</span></td><td><span class="pill yes">yes</span></td><td><span class="pill yes">yes</span></td></tr>
-  <tr><td>Moves to the next agent on a usage limit</td><td><span class="pill yes">yes</span></td><td><span class="pill yes">yes</span></td><td><span class="pill no">no</span> LOO-518</td><td><span class="pill no">no</span> no Task</td></tr>
-  <tr><td>As an idle work session, hears a steer</td><td><span class="pill yes">yes</span></td><td><span class="pill yes">yes</span></td><td><span class="pill no">no</span> no Task</td><td><span class="pill no">no</span> no Task</td></tr>
-</table>
-<p>The brief asks for "the same expectations the other supported harnesses carry". On two
-rows the expectation was written from what OpenCode and Pi were made to do and never read
-on Claude or Codex, so those rows measure the newcomers against themselves. On the usage
-row the gap is not a missing feature: the usage is recorded, on the wrong row.</p>
-
+<h2>The biggest mismatch left: a question is read from prose</h2>
 <div class="two">
-  <div class="panel">
-    <h3>Before (as committed)</h3>
-<pre><code>history.turns, one Pi worker turn:
-  turn = &lt;lf request id&gt;   task, graph, step     usage: none
-  turn = 897c915b          (no task)             usage: 23,839 in
-
-README: "no: kept under Pi's turn id"
-test:   skips the usage assertion for Pi
-
-interrupt test: OpenCode, Pi
-  …_and_its_session_resumes   // asserts a new conversation</code></pre>
-    <p class="note">The plan held the Pi fix back because "no real Pi session file from an
-    RPC run has been read". QA has since written them: under
-    <code>~/.pi/agent/sessions/</code>, entries are
-    <code>message</code> rows with an 8-hex <code>id</code>, a <code>parentId</code>, a
-    <code>timestamp</code> and <code>usage</code> on each assistant row.</p>
+  <div class="panel"><h3>Built</h3>
+<pre>decoder   ConversationEvent::Error { code: "unanswered_question", message }
+session   TurnEnd::Error { code, message }        <span class="ok">structured</span>
+step      error = "unanswered_question: OpenCode asked …: Which database …"
+graph.rs  asked_question(cause)  // split_once("unanswered_question: ")
+status    asked_question(step.error)</pre>
+  <p class="note">Works, is tested on both harnesses and on the real CLI. The code is stored once as
+  a field and once as a string prefix; two readers depend on the prefix surviving every layer that
+  formats a step's error.</p>
   </div>
-  <div class="panel proposed">
-    <h3>After (slice 7)</h3>
-<pre><code>history.turns, one Pi worker turn:
-  turn = &lt;lf request id&gt;   task, graph, step     usage: 23,839 in
-  <span class="gone">turn = 897c915b</span>
-
-README: yes, same test, no skip
-
-interrupt test: Claude, Codex, OpenCode, Pi
-  a_worker_stops_on_interrupt_and_the_next_run_starts_its_step_again
-
-a question: one attempt, then the stop names the answer</code></pre>
-    <p>The transcript read attaches a turn's usage to the recorded turn that covers it in
-    time, as <code>transcript/facts.rs</code> <code>covers</code> already does for
-    completions. No harness has to learn the provider's id for its own turn.</p>
+  <div class="panel proposed"><h3>Proposed, its own small change</h3>
+<pre>graph.rs  last turn of the failed step → TurnEnd::Error.code
+status    same read
+asked_question  deleted</pre>
+  <p class="note">The question would come from the recorded turn, where the code already is. Not
+  planned here: it changes no behavior a person sees, and demo is next. Larger than a nit only if a
+  third reader appears.</p>
   </div>
 </div>
 
-<h3>The proposal against three paths</h3>
-<table>
-  <tr><th style="width:24%">Path</th><th>What happens</th><th style="width:28%">What must survive</th></tr>
-  <tr><td>Normal: a Pi step settles</td><td>One turn row carries the Task, the step and the usage. <code>lf history usage --task</code> counts it.</td><td>Claude, Codex and OpenCode rows unchanged: their transcript already names the recorded turn, so the id match wins before <code>covers</code> is asked.</td></tr>
-  <tr><td>Counterexample: two Pi turns in one session file</td><td>Each transcript turn is covered by exactly one recorded turn's start and end. A turn nothing covers (a person typed into Pi directly) keeps its own row, as now.</td><td>Usage for turns lf never recorded.</td></tr>
-  <tr><td>Counterexample: a recorded turn with no end (crash)</td><td>Nothing covers; the transcript row stands alone, as now. No usage is lost, it is only unattributed.</td><td>—</td></tr>
-  <tr><td>Failure: a question</td><td>One attempt; the stop carries the question and the two commands.</td><td>Three attempts for every other failed turn. Auto-Ship approval ends at the stop, as at the others.</td></tr>
-  <tr><td>Counterexample: the decoder's sentence changes</td><td>The stop must not be read from the sentence. The failed turn carries a code (<code>unanswered_question</code>), as <code>provider_rate_limited</code> and <code>pi_disconnected</code> are codes.</td><td>—</td></tr>
-  <tr><td>Recovery from a question</td><td><code>lf steer</code>, then <code>lf task run</code>: a new conversation, which reads the steer at its start.</td><td>The steer stays unread until a conversation of that Task claims it.</td></tr>
-  <tr><td>Interrupt on Claude or Codex</td><td>The test reads what is recorded. If the turn reads <code>failed</code>, the reader settles it <code>Interrupted</code> under <code>agent::interrupted()</code>, as OpenCode's and Pi's do.</td><td>Exit 130, one attempt, no answer.</td></tr>
-</table>
-
-<h2>Choices made for review</h2>
-<table>
-  <tr><th style="width:26%">Chosen</th><th>Passed over, and why</th></tr>
-  <tr><td>Pi usage joins the recorded turn in the transcript read.</td><td>Naming the Pi turn after the session file's user entry, as OpenCode's driver reads its store row. It makes the driver read the provider's file mid-turn, once per harness that has this shape; the join is one place.</td></tr>
-  <tr><td>A question stops the run after one attempt.</td><td>Leaving three attempts (the committed behavior): each costs a model turn and none can end differently. Making the Task wait for a person as a new kind of Graph stop: larger, below.</td></tr>
-  <tr><td>The interrupt test runs all four and takes the name of what it shows.</td><td>Leaving "not shown": the row would keep stating an expectation nobody read on the reference harnesses.</td></tr>
-  <tr><td>The question row stays unread for Claude and Codex, written as "no: not read".</td><td>Recording real headless traces of Claude's <code>AskUserQuestion</code> and Codex's <code>requestUserInput</code> here. It is a probe of two CLIs this Task does not change, and what it finds may be a hang that needs its own fix.</td></tr>
-</table>
-
 <h2>Larger than this work</h2>
-<table>
-  <tr><th style="width:32%">What</th><th>What it would take</th></tr>
-  <tr><td>What a headless Claude or Codex worker does with a question is unknown; Codex may wait.</td><td>One recorded trace per CLI, then the same code and sentence in <code>claude</code>'s and <code>codex</code>'s decoders, and both in the question test.</td></tr>
-  <tr><td><code>Driver::send_current</code> has no production caller.</td><td>Deleting the trait method, three implementations and about twenty tests across <code>claude.rs</code>, <code>codex.rs</code>, <code>pi.rs</code> and <code>pi_tests.rs</code>; or deciding same-turn input is coming back. Open PR #1974 touches the same files.</td></tr>
-  <tr><td>A Task's conversation does not move down the agent order when its first choice is not installed; its steps do.</td><td>Deciding whether chats move at all. Today only a Graph step does, for limits too.</td></tr>
-  <tr><td>A move is recorded in <code>agent_limit_recoveries</code> and shown only while the step runs.</td><td>A table rename (a staged migration) and a line in status for a settled step.</td></tr>
-  <tr><td>OpenCode and Pi failures are never classified; idle OpenCode and Pi work sessions hear a steer only at their next turn. Three of the four "no" cells name no Task.</td><td>Filing them. LOO-518 covers OpenCode's failure payloads only.</td></tr>
-  <tr><td>A worker's question is a failure, not a place the Task waits.</td><td>A Graph stop that holds the step's conversation open for an answer; a worker would no longer always be a Run nobody continues.</td></tr>
-  <tr><td>Writes outside the checkout are denied on no harness, though the brief assumed they were.</td><td>An OS sandbox around all four; it reverses <code>docs/security.md</code>.</td></tr>
-  <tr><td><code>tests/fixtures/dto/work_first_entry.json</code> still quotes the deleted refusal as an OpenCode Task's reason.</td><td>Regenerating the fixture, which also rewrites drift from before this Task and reaches the Swift fixture tests.</td></tr>
-</table>
+<ul>
+<li>Claude and Codex questions: a decoder for <code>AskUserQuestion</code> and <code>requestUserInput</code>, after a trace is recorded (question 18).</li>
+<li>Limit and transient classification for OpenCode and Pi: needs real failure payloads (LOO-518).</li>
+<li>Idle steer wake for OpenCode and Pi work sessions: server work (question 5).</li>
+<li>A real write denial: an OS sandbox around all four harnesses (question 1).</li>
+</ul>
 
 <h2>Questions</h2>
-<p>The marked option is what the plan now does. A number and a letter is a complete answer.</p>
 <ol class="q">
-  <li>A Pi worker's usage sits on a second turn row.
-    <ol>
-      <li class="pick">Join it to the recorded turn that covers it, in the transcript read. (chosen)</li>
-      <li>Name the Pi turn after the session file's user entry.</li>
-      <li>Leave the cell "no" and file it.</li>
-    </ol>
-  </li>
-  <li>A worker asks a question with nobody there.
-    <ol>
-      <li class="pick">Stop the run after one attempt; the stop prints the question and <code>lf steer</code> / <code>lf task run</code>. (chosen)</li>
-      <li>Keep three attempts.</li>
-      <li>Hold the step open and wait for a person (a new Graph stop; not this Task).</li>
-    </ol>
-  </li>
-  <li>The interrupt row on Claude and Codex.
-    <ol>
-      <li class="pick">Run the test on all four, fix what it finds, rename it. (chosen)</li>
-      <li>Leave "not shown" and rename only.</li>
-    </ol>
-  </li>
-  <li>The question row on Claude and Codex.
-    <ol>
-      <li class="pick">"no: not read"; the orchestration doc's sentence names OpenCode and Pi. (chosen)</li>
-      <li>Record both CLIs here and build what they need.</li>
-    </ol>
-  </li>
-  <li><code>Driver::send_current</code>.
-    <ol>
-      <li class="pick">Left alone here. (chosen)</li>
-      <li>Delete it in this Task.</li>
-      <li>Keep it: same-turn input is coming back.</li>
-    </ol>
-  </li>
-  <li>The Task's conversation when its first agent is not installed.
-    <ol>
-      <li class="pick">Does not move; fails with the install hint. (chosen, unchanged)</li>
-      <li>Moves down the order like a step.</li>
-    </ol>
-  </li>
-  <li>The "no" cells with no Task (Pi limits, idle wake on OpenCode and Pi).
-    <ol>
-      <li class="pick">The cell states the cause; nothing is filed by this Task. (chosen)</li>
-      <li>File one Task each and name it in the cell.</li>
-    </ol>
-  </li>
+<li>The question stop reads prose.
+  <ol><li class="pick">Leave it; revisit if a third reader appears. (chosen)</li>
+  <li>Read the code from the step's last recorded turn and delete <code>asked_question</code>, in this Task.</li>
+  <li>File it as its own Task.</li></ol></li>
+<li><code>Driver::send_current</code> has no production caller.
+  <ol><li>Delete it on all three drivers, here.</li>
+  <li class="pick">File it; same-turn input may come back. (chosen: left as question 26)</li></ol></li>
+<li>The agent-move record.
+  <ol><li class="pick">Keep it in <code>agent_limit_recoveries</code> as built. (chosen)</li>
+  <li>Rename the table for any move, in its own Task with a migration.</li></ol></li>
+<li>An interrupted step.
+  <ol><li class="pick">Starts again in a new conversation, as built and documented. (chosen)</li>
+  <li>Continues its native thread; needs Runs to be resumable.</li></ol></li>
+<li>The parity gaps with no Task (question 11).
+  <ol><li>File a Task per gap now.</li>
+  <li class="pick">Leave the cause in the cell until someone hits it. (chosen)</li></ol></li>
 </ol>
-
 </main>
 </body>
 </html>

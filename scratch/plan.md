@@ -433,7 +433,10 @@ Compress (2026-11-18): `tests/e2e/capture_history.py` read the deleted
 Clippy clean; `harness::pi` and `agent::session` tests pass.
 
 Next: demo. Recheck Pi usage on a real Task and keep the existing OpenCode
-and Pi QA results. Claude and Codex question handling, the uncalled
+and Pi QA results. Concept review after slice 7 (2026-11-18,
+`scratch/concept-review.html`) changed nothing in the plan; the step's
+question is read from its error's `unanswered_question: ` prefix while the
+turn stores the code as a field, left as is. Claude and Codex question handling, the uncalled
 `Driver::send_current`, and idle wake for OpenCode and Pi stay out of scope.
 
 QA round 2 (2026-11-18, `scratch/qa.html` scenarios 8-14): real Pi usage

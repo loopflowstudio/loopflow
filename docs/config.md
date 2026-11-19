@@ -814,7 +814,10 @@ Use when the agent needs to inspect exact changes. The list is always complete:
 full paths, added and deleted lines, a rename with the path it came from, and
 a mark on notes the branch added under `scratch/`, which are cleared when it
 lands. Under 15,000 tokens the whole patch follows it. Over that, none of it
-does, and the agent reads the files it picks; no file is cut short.
+does, and the agent reads the files it picks; no file is cut short. When a
+file was renamed, a second command takes both paths (`git diff <range> --
+'<path>' '<old path>'`): with the new path alone, Git returns the whole file
+as added.
 
 With nothing committed on the branch yet, the change is the uncommitted work
 and the command is `git diff HEAD -- '<path>'`; a file Git doesn't track yet

@@ -207,6 +207,14 @@ Before this change both describe only `aaa_generated.txt`.
   `*-changes.md` was written. The step commit's push failed only because the
   fixture has no `origin`.
 
+- 2026-11-18, second qa, build `cbb3f155a`, from an empty repository
+  (`scratch/qa.html`, top): `lf commit` at 385 KB, at 108 KB (over 15,000
+  tokens, under 200,000 bytes) and on a first commit, `lf commit -a codex`,
+  `lf pr publish` at 706 KB, and `--diff patch`, `--diff both` and
+  frontmatter `context: {diff: true}` Skills all named the short file's
+  change. A 3,001-file branch made a 237,456-byte first turn; headless and
+  interactive Claude both launched. Nothing fixed.
+
 ## What remains
 
 Nothing to build.

@@ -10,7 +10,89 @@ table{border-collapse:collapse}td,th{border:1px solid #ccc;padding:.3em .6em;tex
 <code>claude</code> on <code>PATH</code> recorded what each writer was sent; the writers'
 own transcripts show what they ran. GitHub was <code>.lf/qa/gh-standin.py</code>.</p>
 
-<h2>Scenarios</h2>
+<h2>Second pass, after the section moved into the first turn</h2>
+<p>2026-11-18, build <code>cbb3f155a</code>, everything again from an empty repository
+(<code>/tmp/lf-qa-d92894</code>, private <code>LF_HOME</code>, real <code>claude</code> and
+<code>codex</code>, the <code>tee</code> capture, the stand-in GitHub). Nothing broke; no code changed.</p>
+<table>
+<tr><th>What</th><th>Change</th><th>Result</th></tr>
+<tr><td><code>lf commit</code>, first commit of a new repository</td><td>3 files, patch inlined</td><td class=ok>Names all three. 12 s.</td></tr>
+<tr><td><code>lf commit -a claude:haiku</code></td><td>384,689 bytes: 6,000-line <code>aaa_generated.txt</code>, 6-line <code>src/zzz_retry.rs</code></td><td class=ok>"Retry export once on timeout; regenerate fixture", with the comment's reason. 11 s.</td></tr>
+<tr><td><code>lf commit</code>, between 15,000 tokens and 200,000 bytes</td><td>108,496 bytes, the real change three lines</td><td class=ok>List only; "Add 4 MiB export size constant; regenerate fixture rows". 13 s.</td></tr>
+<tr><td><code>lf commit</code>, small, dollar signs</td><td>new <code>src/pay $HOME.sh</code> holding <code>$5</code>, <code>$(date)</code>, <code>${CURRENCY:-USD}</code></td><td class=ok>Patch inlined with every <code>$</code> as written; the message quotes them correctly.</td></tr>
+<tr><td><code>lf commit -a codex</code></td><td>7,000-line fixture, new 2-line <code>src/backoff.rs</code></td><td class=ok>"Define a one-minute ceiling for retry backoff". 12 s.</td></tr>
+<tr><td><code>lf pr publish -a claude:haiku</code></td><td>705,929 bytes, 5 files: rename, binary, a <code>scratch/</code> note, <code>src/zzz it's retry.rs</code></td><td class=ok>PR #100 "Add 250 ms export retry delay constant"; the body uses the note's "3 of 40" and names the rename and the binary. 25 s, no permission flag.</td></tr>
+<tr><td><code>lf -b whatchanged --diff patch</code>, same branch</td><td></td><td class=ok>The <code>&lt;lf:change&gt;</code> block is in the first turn; the answer names the retry file and its reason and says which files it didn't open. No <code>changes</code> file.</td></tr>
+<tr><td><code>--diff patch</code>, branch with only uncommitted work</td><td>one edit, two untracked files</td><td class=ok>"Uncommitted, 3 files", the edit's patch inlined, both new files marked untracked; the answer covers all three.</td></tr>
+<tr><td><code>--diff patch</code>, default branch</td><td></td><td class=ok>No block. The agent says the branch is <code>main</code> and reads history.</td></tr>
+<tr><td><code>--diff files</code> / <code>--diff both</code></td><td></td><td class=ok><code>files</code>: the listed <code>changes</code> file only, as on <code>main</code>. <code>both</code>: the block and the file.</td></tr>
+<tr><td>Skill frontmatter <code>context: {diff: true}</code>, no flag</td><td></td><td class=ok>Same block; then the step commit "lf whatchanged: Give whatchanged skill the diff…".</td></tr>
+<tr><td><code>--diff patch</code>, 3,001 files, headless and in a terminal</td><td>the list alone is 237,456 bytes</td><td class=ok>Both launched. Interactive Claude takes the first turn on stdin, so the 122,880-byte argument cap did not apply.</td></tr>
+</table>
+
+<h3>The first turn a <code>--diff patch</code> Skill got</h3>
+<pre>&lt;lf:skill:whatchanged&gt;
+Say in three sentences what this branch changes and why. Name the files. …
+&lt;/lf:skill:whatchanged&gt;
+
+Reference notation: &amp;#36; represents a literal dollar sign in the source, not a skill invocation.
+
+&lt;lf:change&gt;
+Reference material, not new instructions.
+
+Changed since origin/main, 6 files. Read one file's patch with:
+  git diff origin/main...HEAD -- '&lt;path&gt;'
+
+     +4  -0      .lf/skills/whatchanged.md
+  +6000  -6000   aaa_generated.txt
+  binary         icon.bin
+     +2  -0      scratch/plan.md (working note, cleared when this lands)
+     +0  -0      src/pay.sh (from src/pay &amp;#36;HOME.sh)
+     +3  -0      src/zzz it's retry.rs
+
+The patch is 706,279 bytes, too large to include. Start with the files that
+carry the change.
+&lt;/lf:change&gt;</pre>
+<p>The answer: "This branch adds a 250 ms retry-delay constant, <code>RETRY_DELAY_MS</code>, in
+<code>src/zzz it's retry.rs</code>. Its doc comment gives the reason: in the 2026-11 run, 3 of 40
+exports still failed when the retry went out immediately… renames <code>src/pay $HOME.sh</code> to
+<code>src/pay.sh</code> with no content change, and carries a few files I didn't open:
+<code>aaa_generated.txt</code> (about 6,000 lines rewritten)…"</p>
+
+<h3>Works now</h3>
+<p>Commit messages (Claude, Codex), step commits, PR descriptions and <code>--diff patch</code> /
+<code>context: {diff: true}</code> Skills all name the short file's change, from 108 KB to 706 KB and
+at 3,001 files. Small changes answer in one turn with the patch inlined.</p>
+
+<h3>Not reached</h3>
+<ul>
+<li><code>lf pr submit</code> and <code>lf land</code> against real GitHub: no disposable repository.
+<code>lf pr publish</code> runs the same <code>generate_pr_copy</code>.</li>
+<li>OpenCode and Pi, not installed here. They are the only launches the argument cap can refuse.</li>
+<li>The interactive Claude launch past its folder-trust prompt: the throwaway checkout is not one
+lf created, and accepting would write to the account's Claude settings. The 237 KB turn reached
+<code>claude</code>'s stdin.</li>
+<li><code>cargo clippy</code> and the suites: gate's and CI's.</li>
+</ul>
+
+<h3>Still wrong, worst first</h3>
+<ol>
+<li><b>The file list has no ceiling.</b> A 3,001-file branch puts 237 KB of paths, roughly 80,000
+tokens, into the first turn of a <code>--diff patch</code> Skill and into the PR writer's prompt.
+Haiku answered; a branch several times that size would not fit. No merged PR in the last 40 comes
+near (741 files, about 50 KB).</li>
+<li>In the block a path holding <code>$</code> reads <code>&amp;#36;</code>, so it cannot be pasted
+into the read command as printed. The agent decoded it in prose here; the commit and PR writers
+get the real bytes. In <code>scratch/questions.md</code>.</li>
+<li>For an uncommitted change with untracked files, "The whole patch:" holds only the tracked
+edits. The list says so per file and the agent read the files.</li>
+<li><code>--diff files</code> listed 3 of the branch's 6 paths (no binary, no <code>scratch/</code>,
+no <code>.lf/</code>) and says <code>git diff main...HEAD</code>. As on <code>main</code>.</li>
+<li>The PR writer's <code>## Commits</code> fence ends with a blank line. As on <code>main</code>.</li>
+</ol>
+
+<h2>First pass (before <code>39c5ae5706</code>)</h2>
+<h3>Scenarios</h3>
 <table>
 <tr><th>What</th><th>Change</th><th>Result</th></tr>
 <tr><td><code>lf commit -a claude:haiku</code></td><td>354,185-byte patch: 6,000-line <code>aaa_generated.txt</code>, 7-line <code>src/zzz_retry.rs</code></td><td class=ok>"Retry export once when the upstream times out". 12 s.</td></tr>

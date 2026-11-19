@@ -36,3 +36,13 @@ instead, so test both sizes.
   transcript). No `*-changes.md` is written (that is `--diff files`). On the
   default branch there is no block; on a branch with no commits the range is
   the uncommitted work, untracked files included.
+- **`context: {diff: true}`** in a repository skill's frontmatter gives the
+  same block with no flag. A skill told to "run no git commands" shows
+  whether the agent used the block or guessed.
+- **Interactive launch:** run `lf <skill> --diff patch` under a Python
+  `pty.fork()` for ten seconds and kill it. Claude stops at its folder-trust
+  prompt in a checkout lf did not create; the capture script's `.stdin` file
+  already holds the whole first turn, since interactive Claude takes it on
+  stdin, not as an argument. Only Pi and OpenCode check the 122,880-byte cap.
+- **Many files:** 3,000 two-line CSVs under `fixtures/tables/generated/region_NN/`
+  make a list of about 237 KB with a patch that is not inlined.

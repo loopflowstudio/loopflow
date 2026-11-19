@@ -31,9 +31,13 @@ Made headless at kickoff and concept review; each is reversible. Detail in
 - An uncommitted change now lists untracked files, marked "no patch: read the
   file". Their contents are not inlined. Inline small ones?
 - The change block counts toward the 122,880-byte terminal argument cap
-  (`agent::validate_terminal_turn`), as the clipboard does. A list of several
-  thousand files, or a patch near 15,000 tokens beside a large clipboard,
-  could refuse an interactive launch. Not bounded here.
+  (`agent::validate_terminal_turn`), which only Pi and OpenCode terminal
+  launches check. qa, 2026-11-18: on a 3,001-file branch the list alone was
+  237,456 bytes; headless Claude answered and interactive Claude launched
+  (its first turn goes over stdin). The list has no ceiling anywhere: about
+  80,000 tokens at that size, in a `--diff patch` Skill and in the PR
+  writer's prompt. Bound it (say, collapse a directory of several hundred
+  files to one line with a count)?
 - In the `<lf:change>` block every `$` in the patch reads `&#36;`, under the
   one-line notation key (`prompt::render_reference`), as in the clipboard and
   explicit docs. The commit and PR writers get the patch unescaped. A Skill

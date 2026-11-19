@@ -132,8 +132,25 @@ clippy clean.
 
 ## Remaining
 
-Gate. Nothing is left to build. The checks under "Checks nobody has run"
-below are gate's and CI's.
+Concept review, fourth pass, 2026-11-19 at `439dffb91c`
+(`scratch/concept-review.html`, "Fourth pass"). The third pass's proposals are
+built and QA drove them; one sentence is still written twice:
+
+- **A landing wait tells the Task conversation the wrong command.** With auto
+  off, a Graph standing `At { land }` reads, in `lf task status`, "Waiting at
+  land: auto is off (Demo). `lf ship X` lands it." (`auto::waiting_to_land`).
+  The same Task's conversation context (`TaskGraph::guidance`, appended in
+  `ops/run.rs`) falls to "`lf task run X` starts it.", and that run waits
+  again at once. Build: `guidance` takes the Task's `Option<&Auto>` and, when
+  `auto::waiting_to_land` answers, prints that sentence in place of the
+  `lf task run` line; `ops/run.rs` passes the auto it reads with the graph
+  (`task_work::task_auto` or wherever `lf task status` reads it). Test: in
+  `guidance_names_the_waiting_step_and_how_to_go_on`, a graph `At { land }`
+  with an off mark contains "`lf ship INF-1` lands it" and no
+  "`lf task run INF-1` starts it". Removes the Open item "A Task conversation
+  at a landing wait still gets `guidance`'s …" from `scratch/questions.md`.
+
+Then gate. The checks under "Checks nobody has run" below are gate's and CI's.
 
 ## Built: the last ship words on the wire
 

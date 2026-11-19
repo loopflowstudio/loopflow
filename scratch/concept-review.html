@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8">
-<title>LOO-968 concept review: auto as built, third pass</title>
+<title>LOO-968 concept review: auto as built, fourth pass</title>
 <style>
 :root{--bg:#fff;--fg:#1d1d1f;--mute:#6e6e73;--line:#d2d2d7;--yes:#1a7f37;--no:#b42318;--part:#9a6700;--prop:#f3efe2;--propline:#c9a227;--card:#f6f6f8}
 @media (prefers-color-scheme:dark){:root{--bg:#161618;--fg:#e8e8ea;--mute:#9a9aa0;--line:#3a3a3f;--yes:#4ac26b;--no:#ff7b72;--part:#d4a72c;--prop:#2c2818;--propline:#c9a227;--card:#1f1f22}}
@@ -106,6 +106,21 @@ A Task at `end` that is not yet done:
 <li><b><code>task.shipped</code></b>, the subscription event, means "the PR merged". With ship now meaning "run with auto", that is one word for two ideas on the wire. Released Desktop reads it.</li>
 <li><b>The <code>auto</code> Graph's name.</b></li>
 </ul>
+
+<h2>Fourth pass (2026-11-19, at <code>439dffb91c</code>)</h2>
+<p>Reviewed again with compress and QA in it. Built since the third pass: <code>ship_control</code> deleted (1a), <code>--reason</code> as the run's direction and an off's Task comment (2a), the reference doc, the landing wait in <code>lf task status</code>, <code>auto off</code> on an unknown Task answering <code>not_found</code>. Every pairing above that read <span class="no">no</span> for this work now reads <span class="yes">yes</span>, except one sentence written twice:</p>
+<table>
+<tr><th>Product concept</th><th>Code concept</th><th>Lines up?</th><th>What is wrong</th></tr>
+<tr><td>"This Task waits at land because auto is off; <code>lf ship</code> lands it"</td><td><code>auto::waiting_to_land</code> for <code>lf task status</code>; <code>TaskGraph::guidance</code> for the Task conversation</td><td class="no">no</td><td>One state, two sentences. Status says <code>lf ship X</code>; the conversation's context says "<code>lf task run X</code> starts it", and that run waits again at once. <code>guidance</code> never sees the auto mark.</td></tr>
+</table>
+<div class="cols">
+<div class="card"><b>Existing</b> <span class="mute">(conversation context, auto off, At land)</span>
+<pre>Graph feature: at land. `lf task run LOO-12` starts it.</pre></div>
+<div class="card prop"><b>Proposed</b>
+<pre>Graph feature: at land. Waiting at land: auto is off (Maya).
+`lf ship LOO-12` lands it.</pre></div>
+</div>
+<p>Written into <code>scratch/plan.md</code> under "Remaining" as the next build, then gate. <code>outlook</code> unread and the 30 s wait in <code>auto::running_graph</code> stay as shaped (third pass).</p>
 
 <h2>Questions</h2>
 <ol>

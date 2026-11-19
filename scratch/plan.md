@@ -854,6 +854,26 @@ behavior choice, asked on the page as questions 1–6:
 5. Wording: "the server's next pass" in the run's line; "started again …
    attempt 3" on a conversation that never ran before its failed starts.
 
+## Concept review after slice 8 (2026-11-18, HEAD `5d98228881`)
+
+`scratch/concept-review.html`, the whole branch read against `origin/main`.
+Nothing for implement. The six answers are in the code as slice 8 says: one
+rule (`server_start`), one sentence (`status_line`), `starting` as a value,
+`ended` without `by`. Left, each a question on the page and none needed to
+ship:
+
+1. "Down" is still read twice. The pass counts an unfinished agent whose
+   process is gone; the fold needs a recorded end. They differ only for an
+   agent killed while no server ran, which reads `closed; \`lf resume --task
+   X\` opens it` with no outlook until a server's retention records the end.
+2. The outlook's kind mixes what happened (`quit`, `could_not_start`) with
+   who brings it up (`coming_back`, `waiting_for_you`). No client reads the
+   kind; both print `status_line`.
+3. `docs/sessions.md` says "work session" in prose and prints
+   "Conversation:" under it.
+
+The run's line stays prose with its own words until LOO-968 (1a).
+
 ## Checks
 
 - `cargo test -p loopflow --lib server::recovery::tests::`: 7 pass (implement).

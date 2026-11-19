@@ -19,6 +19,7 @@ export default {
     // plugin's log (OpenCode's stderr, kept beside the capture), then quiet
     // until the next block lf renders closes it.
     let gap;
+    const log = (line) => console.error(line);
     const recordingGap = (error) => {
       const message = error.message.split("\n")[0];
       if (gap === message) return;
@@ -36,9 +37,9 @@ export default {
     const wake = spec.wake ? wakeSocket(async (thread, text) => {
       if (thread !== owner) throw new Error(`this OpenCode runs ${owner}, not ${thread}`);
       await session.synthetic({ sessionID: owner, text });
-    }, (line) => console.error(line)) : null;
+    }, log) : null;
     // A launch that reports no turns opens no connection and reports no turn end.
-    const server = spec.turns ? machineServer(delivery, (line) => console.error(line), wake) : undefined;
+    const server = spec.turns ? machineServer(delivery, log, wake) : undefined;
     // A work session's turn is recorded from its first request to its end, so
     // the server knows when it is idle.
     let turn = false;
@@ -73,7 +74,7 @@ export default {
           recordingGap(error);
         }
       }
-      heard += ownNews(callback, (line) => console.error(line), ["--delivery", delivery], lf);
+      heard += ownNews(callback, log, ["--delivery", delivery], lf);
       const text = `${heard}${block ?? ""}`;
       if (text) input.system.push({ type: "text", text });
     });

@@ -136,7 +136,9 @@ files under a disposable `HOME`. After the first turn ends nothing is typed:
 prompt afterwards must still run a turn. `requests.json`, `screen.txt` and the
 Machine's logs land in `--output`. It needs the provider CLI installed and no
 account. Run it with inherited `LF_*` unset. It passed on OpenCode 2.2.1 and
-Pi 1.3.0.
+Pi 1.3.0. On OpenCode 2.0.32 the scripted model's config is refused ("Reconnect
+OpenCode Console to continue") and the first turn never reaches the model, so
+the wake is not exercised there.
 
 ## Released capture-history preservation
 

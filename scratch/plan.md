@@ -66,8 +66,11 @@ Checks, each run once on this tree:
 - Not tested: a wake racing a typed prompt, and a wake while a permission or
   question dialog is open. Both providers say they queue the message as a
   steer; only the Node stand-ins and the idle case were run.
-- OpenCode 2.0.32 was not run end to end here (the probe covered its
-  `session.synthetic`).
+- OpenCode 2.0.32 has no end-to-end run of the wake (the probe covered its
+  `session.synthetic`): `idle_wake.py` on it stops at the first turn with
+  "Reconnect OpenCode Console to continue", the fixture's `opencode` provider
+  config never reaching the scripted model. `command -v opencode` is 2.0.32 on
+  this Machine; 2.2.1 is `/opt/homebrew/bin/opencode`.
 - PR #1985 merged on 2026-11-19 at 18:46 UTC, before the idle-wake commits.
   It was a squash, and the branch has no open PR: gate publishes the
   idle-wake diff (`git diff 2a3b6d11d8 HEAD`) as a new one.

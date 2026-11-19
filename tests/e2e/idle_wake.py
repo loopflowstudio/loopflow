@@ -12,7 +12,6 @@ import signal
 import subprocess
 import tempfile
 import threading
-import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -59,15 +58,6 @@ class _Model(BaseHTTPRequestHandler):
 
 def _heard(marker: str, since: int = 0) -> bool:
     return any(marker in json.dumps(body) for body in _Model.requests[since:])
-
-
-def _wait(tui: _Tui, predicate, description: str, seconds: float = 45) -> None:
-    deadline = time.monotonic() + seconds
-    while time.monotonic() < deadline:
-        tui.drain(0.1)
-        if predicate():
-            return
-    raise AssertionError(description + "\n" + "\n".join(tui.screen.display))
 
 
 def _owned(root: Path) -> list[int]:
@@ -201,19 +191,18 @@ def _probe(lf: Path, harness: str, native: Path, output: Path) -> None:
         task = json.loads(created)["task"]["id"]
         run("checkout", task)
         tui = _Tui([str(lf), "resume", "--task", task], work, env)
-        if not _quietly(tui, lambda: len(_Model.requests) >= 1, 30):
-            tui.enter("Say hello")
-        _wait(tui, lambda: len(_Model.requests) >= 1, "the first turn never reached the model")
+        # The work session opens on its skill; nothing is typed to start it.
+        tui.wait(lambda: len(_Model.requests) >= 1, "the first turn never reached the model", 45)
         # Let the turn end and its Stop reach the server.
         tui.drain(6.0)
         before = len(_Model.requests)
         run("steer", task, STEER)
-        _wait(tui, lambda: _heard("WAKE_MARKER", before), "the idle work session was not woken")
+        tui.wait(lambda: _heard("WAKE_MARKER", before), "the idle work session was not woken", 45)
         tui.drain(2.0)
         (output / "screen.txt").write_text("\n".join(tui.screen.display))
         typed = len(_Model.requests)
         tui.enter("typed after wake")
-        _wait(tui, lambda: _heard("typed after wake", typed), "typing after a wake ran no turn")
+        tui.wait(lambda: _heard("typed after wake", typed), "typing after a wake ran no turn", 45)
     finally:
         (output / "requests.json").write_text(json.dumps(_Model.requests, indent=2))
         if tui is not None:
@@ -232,14 +221,6 @@ def _probe(lf: Path, harness: str, native: Path, output: Path) -> None:
             shutil.copyfile(log, output / log.name)
         model.shutdown()
         shutil.rmtree(root, ignore_errors=True)
-
-
-def _quietly(tui: _Tui, predicate, seconds: float) -> bool:
-    try:
-        _wait(tui, predicate, "", seconds)
-        return True
-    except AssertionError:
-        return False
 
 
 def main() -> None:

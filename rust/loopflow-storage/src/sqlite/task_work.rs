@@ -290,21 +290,21 @@ pub enum AutoState {
     /// `lf task auto on`, `lf ship` or `lf -b task run` turned it on.
     On,
     /// `lf task auto off` turned it off; `-b` leaves it off.
-    Stopped,
+    Off,
 }
 
 impl AutoState {
     pub(super) fn as_str(self) -> &'static str {
         match self {
             Self::On => "on",
-            Self::Stopped => "stopped",
+            Self::Off => "off",
         }
     }
 
     pub(super) fn parse(value: &str) -> StoreResult<Self> {
         match value {
             "on" => Ok(Self::On),
-            "stopped" => Ok(Self::Stopped),
+            "off" => Ok(Self::Off),
             other => Err(crate::StoreError::InvalidData(format!(
                 "unknown auto state {other:?}"
             ))),
@@ -844,22 +844,22 @@ impl SqliteStore {
     }
 
     /// Set the Task's auto mark, noting it in the Task's history. With
-    /// `keeps_stop`, a standing stop stays and nothing is written. Returns the
+    /// `keeps_off`, a standing off stays and nothing is written. Returns the
     /// mark it had; a Task with no Graph has none and keeps none.
     pub fn set_task_auto(
         &self,
         task: &TaskId,
         mark: &Auto,
-        keeps_stop: bool,
+        keeps_off: bool,
         note: Option<&str>,
     ) -> StoreResult<Option<Auto>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction()?;
         let before = auto_in(&tx, task)?;
-        if keeps_stop
+        if keeps_off
             && before
                 .as_ref()
-                .is_some_and(|before| before.state == AutoState::Stopped)
+                .is_some_and(|before| before.state == AutoState::Off)
         {
             return Ok(before);
         }
@@ -878,7 +878,7 @@ impl SqliteStore {
         if before.as_ref().map(|before| before.state) != Some(mark.state) {
             let what = match mark.state {
                 AutoState::On => "auto on",
-                AutoState::Stopped => "auto off",
+                AutoState::Off => "auto off",
             };
             let summary = match note {
                 Some(note) => format!("{what}: {}: {note}", mark.by),
@@ -1071,7 +1071,7 @@ mod tests {
             },
         };
         let on = mark(super::AutoState::On, 10);
-        let stopped = mark(super::AutoState::Stopped, 20);
+        let stopped = mark(super::AutoState::Off, 20);
         // No Graph, nothing to carry the mark.
         store.set_task_auto(&task.id, &on, false, None).unwrap();
         assert_eq!(store.task_auto(&task.id).unwrap(), None);
@@ -1350,12 +1350,12 @@ mod tests {
         assert_eq!(
             mark(&stopped),
             Some(super::Auto {
-                state: super::AutoState::Stopped,
+                state: super::AutoState::Off,
                 at: 20,
                 by: person(Some("Casey")),
             })
         );
-        assert_eq!(mark(&withdrawn).unwrap().state, super::AutoState::Stopped);
+        assert_eq!(mark(&withdrawn).unwrap().state, super::AutoState::Off);
         assert_eq!(mark(&never), None);
         // A released lf reads no Task as shipping.
         let shipped: i64 = conn

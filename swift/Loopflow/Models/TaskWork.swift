@@ -95,9 +95,9 @@ public enum Starter: Decodable, Sendable, Hashable {
     }
 }
 
-/// The Task's auto setting: on or stopped, when, and who set it.
+/// The Task's auto setting: on or off, when, and who set it.
 public struct Auto: Decodable, Sendable, Hashable {
-    public enum State: String, Decodable, Sendable, Hashable { case on, stopped }
+    public enum State: String, Decodable, Sendable, Hashable { case on, off }
 
     public let state: State
     public let at: Int64

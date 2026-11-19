@@ -48,7 +48,7 @@
     "requester": "Maya"
   },
   "auto": {
-    "state": "stopped",
+    "state": "off",
     "at": 1793266380,
     "by": {
       "kind": "person",

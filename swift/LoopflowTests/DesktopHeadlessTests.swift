@@ -226,7 +226,7 @@ struct DesktopHeadlessTests {
         let control = TaskAutoControl(model: model, task: task)
         #expect(try control.inspect().find(viewWithAccessibilityIdentifier: "task-auto").toggle().isOn())
         // Turning it off says who did and when.
-        let line = TaskWorkflowBar.autoLine(Auto(state: .stopped, at: 1793266380, by: .person(name: "Maya")))
+        let line = TaskWorkflowBar.autoLine(Auto(state: .off, at: 1793266380, by: .person(name: "Maya")))
         #expect(line.hasPrefix("auto off by Maya "))
         // A stacked Task names its parent by Task beside its PR line.
         let parent = try #require(model.taskExecution[task.id].value?.stackParent)

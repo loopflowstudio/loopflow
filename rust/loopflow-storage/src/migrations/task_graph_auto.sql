@@ -1,18 +1,18 @@
 -- A Task's auto setting is one mark on its Graph: 'on' (`lf task auto on`,
--- `lf ship`, `lf -b task run`) or 'stopped' (`lf task auto off`), with when
+-- `lf ship`, `lf -b task run`) or 'off' (`lf task auto off`), with when
 -- and who (`Starter` JSON, resolved when it was set). NULL when nobody has set
 -- it. `lf ship` is `lf task auto on`, then `lf task run`; no ship process
 -- carries a Task, so its log and the shared handoff stamp leave.
-ALTER TABLE task_graphs ADD COLUMN auto TEXT CHECK (auto IN ('on','stopped'));
+ALTER TABLE task_graphs ADD COLUMN auto TEXT CHECK (auto IN ('on','off'));
 ALTER TABLE task_graphs ADD COLUMN auto_at INTEGER;
 ALTER TABLE task_graphs ADD COLUMN auto_by TEXT CHECK (auto_by IS NULL OR json_valid(auto_by));
 -- A finished Task's last auto mark, in place of counting its log.
-ALTER TABLE task_summaries ADD COLUMN auto TEXT CHECK (auto IN ('on','stopped'));
+ALTER TABLE task_summaries ADD COLUMN auto TEXT CHECK (auto IN ('on','off'));
 
 -- Each Task's latest approval or stop becomes its mark. A withdrawal (a
--- failure that ended shipping) reads as stopped.
+-- failure that ended shipping) reads as off.
 UPDATE task_graphs SET (auto,auto_at,auto_by)=(
-    SELECT CASE e.kind WHEN 'approved' THEN 'on' ELSE 'stopped' END,
+    SELECT CASE e.kind WHEN 'approved' THEN 'on' ELSE 'off' END,
         e.at,
         CASE WHEN e.caller_session_id IS NOT NULL THEN json_object(
                 'kind','session','id',e.caller_session_id,

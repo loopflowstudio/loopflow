@@ -206,7 +206,7 @@ pub struct TaskSnapshot {
     pub actions: TaskActionModel,
     /// Who started the Task's latest Graph.
     pub started_by: Option<crate::process::Starter>,
-    /// Auto on the Task's Graph: on, stopped, and who set it when;
+    /// Auto on the Task's Graph: on, off, and who set it when;
     /// `null` when nobody has.
     #[serde(deserialize_with = "Option::deserialize")]
     pub auto: Option<loopflow_storage::sqlite::Auto>,
@@ -608,7 +608,7 @@ pub(crate) async fn task_work_status(store: &Store, task: &Task) -> OpsResult<Wo
 pub enum TaskRunStart {
     /// A run of the Task's Graph from this step; the caller starts it as
     /// `lf --task ISSUE graph run`. With `merges`, the run may merge the PR:
-    /// Auto is on, or no interactive step is left ahead, and nobody stopped it.
+    /// Auto is on, or no interactive step is left ahead, and nobody turned auto off.
     /// With `stands_in`, a person asked for auto and the run sets out at that
     /// interactive step.
     Run {
@@ -992,7 +992,7 @@ async fn try_start_task_run(
         .map(|mark| mark.state)
     {
         Some(loopflow_storage::sqlite::AutoState::On) => (true, true),
-        Some(loopflow_storage::sqlite::AutoState::Stopped) => (false, false),
+        Some(loopflow_storage::sqlite::AutoState::Off) => (false, false),
         None => (false, reaches_end),
     };
     let through = mode.runs_through() || on;

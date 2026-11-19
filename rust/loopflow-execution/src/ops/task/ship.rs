@@ -44,12 +44,12 @@ pub fn starter(
 }
 
 /// Save `state` as this caller's mark, naming who is asking as it is written;
-/// with `keeps_stop`, a standing stop stays. Returns whether auto was on before.
+/// with `keeps_off`, a standing off stays. Returns whether auto was on before.
 fn set(
     store: &SharedStore,
     task: &Task,
     state: AutoState,
-    keeps_stop: bool,
+    keeps_off: bool,
     note: Option<&str>,
 ) -> OpsResult<bool> {
     let repo = super::repository_for_task(store, task)?;
@@ -65,7 +65,7 @@ fn set(
     };
     let before = store
         .sqlite
-        .set_task_auto(&task.id, &mark, keeps_stop, note)
+        .set_task_auto(&task.id, &mark, keeps_off, note)
         .map_err(task_error)?;
     Ok(before.is_some_and(|before| before.state == AutoState::On))
 }
@@ -129,7 +129,7 @@ pub fn auto_off(issue: &str, note: Option<&str>) -> OpsResult<bool> {
     let (task, was_on) = block_on_task(async {
         let store = task_store().await?;
         let task = task_by_issue(&store, issue).await?;
-        let was_on = set(&store, &task, AutoState::Stopped, false, note)?;
+        let was_on = set(&store, &task, AutoState::Off, false, note)?;
         Ok((task, was_on))
     })?;
     if was_on {

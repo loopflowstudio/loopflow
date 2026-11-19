@@ -593,7 +593,7 @@ struct DTOFixtureTests {
         let data = try loadFixtureData("task_checkout.json")
         let execution = try JSONDecoder().decode(TaskExecution.self, from: data)
         #expect(execution.startedBy?.label == "Session \"LOO-291 task\" for Maya")
-        #expect(execution.auto == Auto(state: .stopped, at: 1793266380, by: .person(name: "Maya")))
+        #expect(execution.auto == Auto(state: .off, at: 1793266380, by: .person(name: "Maya")))
         #expect(execution.stackParent?.identifier == "LOO-290")
         #expect(execution.stackParent?.branch == "maya/loo-290-parent")
         #expect(execution.stackParent != nil && execution.stackParent?.prNumber == nil)

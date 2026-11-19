@@ -3392,7 +3392,7 @@ fn unconfigured_repository_runs_tasks_on_the_builtin_code_graph() {
     assert_eq!(listed[0]["graph_name"], "code");
     let shown = run_until_waiting(repo.path(), home.path(), &["task", "run", id], id);
     assert_eq!(shown["name"], "code");
-    assert_eq!(shown["position"]["step"], "human-review");
+    assert_eq!(shown["position"]["step"], "ship-review");
 }
 
 #[test]

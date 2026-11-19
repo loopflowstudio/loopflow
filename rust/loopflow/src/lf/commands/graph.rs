@@ -870,7 +870,7 @@ impl RunningGraph<'_> {
             .store
             .sqlite
             .task_auto(task)?
-            .filter(|mark| mark.state == AutoState::Stopped)
+            .filter(|mark| mark.state == AutoState::Off)
         else {
             return Ok(None);
         };

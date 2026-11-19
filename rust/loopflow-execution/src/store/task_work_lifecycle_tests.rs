@@ -133,7 +133,7 @@ fn defer_holds_the_lifecycle_and_a_run_is_moving_whatever_its_auto_setting() {
     // State says what is happening, whoever takes the interactive steps:
     // the running Task is moving with auto off and with it on.
     for setting in [
-        loopflow_storage::sqlite::AutoState::Stopped,
+        loopflow_storage::sqlite::AutoState::Off,
         loopflow_storage::sqlite::AutoState::On,
     ] {
         store

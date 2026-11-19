@@ -89,7 +89,7 @@ pub fn auto_phrase(auto: &loopflow_storage::sqlite::Auto) -> String {
     };
     let state = match auto.state {
         AutoState::On => "on",
-        AutoState::Stopped => "off",
+        AutoState::Off => "off",
     };
     let at = loopflow_execution::output::format_time(auto.at);
     format!(" · auto: {state}{by}, {at}")

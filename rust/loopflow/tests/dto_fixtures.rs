@@ -469,7 +469,7 @@ fn prepared_checkout_retains_owning_home_without_starting_execution() {
         "Session \"LOO-291 task\" for Maya"
     );
     let auto = snapshot.auto.as_ref().unwrap();
-    assert_eq!(auto.state, loopflow_storage::sqlite::AutoState::Stopped);
+    assert_eq!(auto.state, loopflow_storage::sqlite::AutoState::Off);
     assert_eq!(auto.by.to_string(), "Maya");
     assert_eq!(
         serde_json::to_value(&snapshot).unwrap(),

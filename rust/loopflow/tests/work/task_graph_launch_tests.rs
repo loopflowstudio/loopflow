@@ -2859,7 +2859,7 @@ fn a_stopped_ship_kills_nothing_and_its_run_carries_on() {
     );
     let json = task.run(&["task", "status", "INF-123", "--json"]);
     let json: serde_json::Value = serde_json::from_slice(&json.stdout).unwrap();
-    assert_eq!(json["auto"]["state"], "stopped", "{json}");
+    assert_eq!(json["auto"]["state"], "off", "{json}");
 }
 
 #[test]
@@ -2893,7 +2893,7 @@ fn auto_off_sticks_through_a_headless_relaunch() {
     assert_eq!(task.graph()["position"], at("pr land"));
     assert!(handoffs(&task).is_empty());
     let status = task.status();
-    assert_eq!(status["auto"]["state"], "stopped", "{status}");
+    assert_eq!(status["auto"]["state"], "off", "{status}");
     assert_eq!(status["auto"]["by"]["kind"], "person");
     // Standing at the landing step, a plain relaunch waits there again.
     let waiting = task.task_run(&["task", "run", "INF-123"]);

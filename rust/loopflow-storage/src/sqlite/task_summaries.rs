@@ -198,7 +198,7 @@ mod tests {
             .take_up_task_graph(&task, r#"{"name":"polish","steps":[]}"#)
             .unwrap();
         let stopped = super::super::Auto {
-            state: super::super::AutoState::Stopped,
+            state: super::super::AutoState::Off,
             at: 4,
             by: crate::process::Starter::Person { name: None },
         };
@@ -227,7 +227,7 @@ mod tests {
         assert_eq!(ended, TaskEnd::Abandoned);
         assert_eq!(graph.as_deref(), Some("polish"));
         assert_eq!(loop_passes, [("review".to_owned(), 2)].into());
-        assert_eq!(auto, Some(super::super::AutoState::Stopped));
+        assert_eq!(auto, Some(super::super::AutoState::Off));
         assert!(wall_seconds >= 0);
         assert_eq!(reflect, None);
     }

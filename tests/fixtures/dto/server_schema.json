@@ -360,7 +360,7 @@
           "type": "string"
         },
         {
-          "const": "stopped",
+          "const": "off",
           "description": "`lf task auto off` turned it off; `-b` leaves it off.",
           "type": "string"
         }
@@ -13660,7 +13660,7 @@
               "type": "null"
             }
           ],
-          "description": "Auto on the Task's Graph: on, stopped, and who set it when;\n`null` when nobody has."
+          "description": "Auto on the Task's Graph: on, off, and who set it when;\n`null` when nobody has."
         },
         "base_commit": {
           "type": [
@@ -15793,7 +15793,7 @@
             "issue": "LOO-1",
             "log": "/Users/maya/.lf/logs/graph-85c31c1e-850c-4821-878d-55527b6dba46.log",
             "merges": true,
-            "run": "code from human-review",
+            "run": "code from ship-review",
             "state": "running"
           }
         },

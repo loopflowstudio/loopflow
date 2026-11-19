@@ -890,7 +890,7 @@ async fn start_task_run(
             .map_err(task_error)?;
     }
     if mode == TaskRunMode::Headless {
-        ship::batch_on(store, task).await?;
+        ship::batch_on(store, task)?;
     }
     // Auto on runs through the interactive steps, standing in at each;
     // stopped, no run merges.

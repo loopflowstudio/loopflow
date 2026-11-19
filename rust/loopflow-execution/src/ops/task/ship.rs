@@ -20,10 +20,7 @@ use super::{block_on_task, task_error, task_store, SharedStore, TaskRunSelection
 pub enum ShipStart {
     /// Auto is on; run the Task, standing in from `from` when it waits
     /// at that interactive step.
-    Run {
-        task: Box<Task>,
-        from: Option<String>,
-    },
+    Run { issue: String, from: Option<String> },
     /// Nothing new runs: the Task stands at `end`, or its live run carries
     /// on and stands in from its next interactive step.
     Reported(TaskRun),
@@ -46,21 +43,6 @@ pub fn starter(
 ) -> crate::store::StoreResult<crate::process::Starter> {
     let person = crate::config::participant_name_in(repo).ok().flatten();
     sqlite.starter(session, person.as_deref())
-}
-
-/// The mark this caller sets now: who is asking, resolved as it is written.
-async fn mark(store: &SharedStore, task: &Task, state: AutoState) -> OpsResult<Auto> {
-    let repo = super::repository_for_task(store, task)?;
-    Ok(Auto {
-        state,
-        at: loopflow_storage::rows::now_unix(),
-        by: starter(
-            &store.sqlite,
-            &repo,
-            crate::journal::caller_session_id().as_ref(),
-        )
-        .map_err(task_error)?,
-    })
 }
 
 /// The Task auto is turned on for: open, and launchable here.
@@ -112,16 +94,26 @@ async fn graph_for_ship(
         .ok_or_else(|| task_error(format!("Task {} has no graph", task.identifier)))
 }
 
-/// Save `state` as this caller's mark; with `keeps_stop`, a standing stop
-/// stays. Returns whether auto was on before.
-async fn set(
+/// Save `state` as this caller's mark, naming who is asking as it is written;
+/// with `keeps_stop`, a standing stop stays. Returns whether auto was on before.
+fn set(
     store: &SharedStore,
     task: &Task,
     state: AutoState,
     keeps_stop: bool,
     note: Option<&str>,
 ) -> OpsResult<bool> {
-    let mark = mark(store, task, state).await?;
+    let repo = super::repository_for_task(store, task)?;
+    let mark = Auto {
+        state,
+        at: loopflow_storage::rows::now_unix(),
+        by: starter(
+            &store.sqlite,
+            &repo,
+            crate::journal::caller_session_id().as_ref(),
+        )
+        .map_err(task_error)?,
+    };
     let before = store
         .sqlite
         .set_task_auto(&task.id, &mark, keeps_stop, note)
@@ -143,7 +135,7 @@ pub fn ship_on(issue: &str, graph: Option<&str>, note: Option<&str>) -> OpsResul
         if !store.sqlite.task_owned(&task.id).map_err(task_error)? {
             crate::store::ownership::claim_task(&store.sqlite, &task.id).map_err(task_error)?;
         }
-        set(&store, &task, AutoState::On, false, note).await?;
+        set(&store, &task, AutoState::On, false, note)?;
         let from = match &graph.position {
             TaskGraphPosition::At { .. } => graph.waiting_step().map(|step| step.name.clone()),
             TaskGraphPosition::Run { at, .. } => {
@@ -161,10 +153,7 @@ pub fn ship_on(issue: &str, graph: Option<&str>, note: Option<&str>) -> OpsResul
                 None
             }
         };
-        Ok(ShipStart::Run {
-            task: Box::new(task),
-            from,
-        })
+        Ok(ShipStart::Run { issue, from })
     })
 }
 
@@ -187,8 +176,8 @@ async fn live_graph_run(store: &SharedStore, task: &Task) -> OpsResult<Option<St
 }
 
 /// `lf -b task run`: auto on unless someone turned it off.
-pub(super) async fn batch_on(store: &SharedStore, task: &Task) -> OpsResult<()> {
-    set(store, task, AutoState::On, true, None).await.map(drop)
+pub(super) fn batch_on(store: &SharedStore, task: &Task) -> OpsResult<()> {
+    set(store, task, AutoState::On, true, None).map(drop)
 }
 
 /// `lf task auto off`: turn auto off and take back any merge request
@@ -199,7 +188,7 @@ pub fn auto_off(issue: &str, note: Option<&str>) -> OpsResult<bool> {
     let (task, was_on) = block_on_task(async {
         let store = task_store().await?;
         let task = task_by_issue(&store, issue).await?;
-        let was_on = set(&store, &task, AutoState::Stopped, false, note).await?;
+        let was_on = set(&store, &task, AutoState::Stopped, false, note)?;
         Ok((task, was_on))
     })?;
     if was_on {

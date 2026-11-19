@@ -20,17 +20,17 @@ pub fn run(
     reason: Option<&str>,
     json: bool,
 ) -> Result<()> {
-    let (task, from) = match ship_on(issue, graph, reason)? {
-        ShipStart::Run { task, from } => (task, from),
+    let (issue, from) = match ship_on(issue, graph, reason)? {
+        ShipStart::Run { issue, from } => (issue, from),
         ShipStart::Reported(run) => return super::graph::announce_run(&run, json),
     };
     if let Some(step) = &from {
-        eprintln!("{}: standing in at {step}", task.identifier);
+        eprintln!("{issue}: standing in at {step}");
     }
     super::graph::carry_task_run(
         cli,
         repo,
-        &task.identifier,
+        &issue,
         TaskProcessOptions {
             wave: cli.wave.clone(),
             from,

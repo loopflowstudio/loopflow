@@ -511,9 +511,13 @@ fn build_prompt_at(
     loopflow_execution::agent_input_timing::record("prompt_begin", subject);
     let task_input = prepare_task_input(cli)?;
     let task_checkout = match &task_input {
-        Some((_, seed)) => {
-            std::fs::canonicalize(seed.task.worktree()?)? == std::fs::canonicalize(&repo_root)?
-        }
+        // A closed Task's conversation continues outside its retired checkout.
+        Some((_, seed)) => seed
+            .task
+            .worktree
+            .as_ref()
+            .and_then(|checkout| std::fs::canonicalize(checkout).ok())
+            .is_some_and(|checkout| std::fs::canonicalize(&repo_root).ok() == Some(checkout)),
         None => false,
     };
     let confine = confine_checkout_agent(task_checkout, is_interactive);

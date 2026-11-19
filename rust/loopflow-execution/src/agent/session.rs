@@ -123,7 +123,12 @@ pub fn resolve_session_config(
             .transpose()?
             .flatten()
         {
-            if task.worktree()?.canonicalize()? == session.cwd.canonicalize()? {
+            // A closed Task's conversation continues outside its retired checkout.
+            let checkout = task
+                .worktree
+                .as_ref()
+                .and_then(|path| path.canonicalize().ok());
+            if checkout.is_some() && checkout == session.cwd.canonicalize().ok() {
                 config.write_scope = super::AgentWriteScope::Worktree;
                 needs_execution_boundary = true;
             }

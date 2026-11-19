@@ -601,6 +601,19 @@ pub fn repository_for_task(store: &Store, task: &Task) -> OpsResult<PathBuf> {
         .ok_or_else(|| task_error(format!("Task {} repository is unavailable", task.id)))
 }
 
+/// Where a Task's conversations work: its checkout, or the repository's main
+/// checkout once the Task is closed and that checkout is retired.
+pub(crate) async fn task_directory(store: &Store, task: &Task) -> OpsResult<PathBuf> {
+    if task.worktree.as_ref().is_some_and(|path| path.is_dir())
+        || task_work_status(store, task).await? == WorkStatus::Ready
+    {
+        return Ok(task.worktree()?.clone());
+    }
+    Ok(crate::git::worktrees::main_repo_root(
+        &repository_for_task(store, task)?,
+    )?)
+}
+
 pub(crate) async fn task_work_status(store: &Store, task: &Task) -> OpsResult<WorkStatus> {
     let work = store
         .work_for_child(&ChildRef::Task(task.id.clone()))

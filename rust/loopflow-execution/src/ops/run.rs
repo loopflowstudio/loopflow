@@ -238,7 +238,7 @@ async fn bind_selected_work(
         if let Ok(Some(graph)) = crate::store::task_work::task_graph(&store.sqlite, &task.id) {
             context.push_str(&format!("\n\n{}", graph.guidance(&task.identifier)));
         }
-        let cwd = task.worktree()?.clone();
+        let cwd = crate::ops::task::task_directory(store, &task).await?;
         return Ok(WorkBinding {
             source: selected.source,
             subjects: wave

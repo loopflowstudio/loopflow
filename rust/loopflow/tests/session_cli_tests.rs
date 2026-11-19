@@ -572,20 +572,13 @@ fn headless_resume_preserves_a_held_owners_capture_on_both_harnesses() {
     }
 }
 
+/// A stand-in `claude` in `bin` that answers one resumed turn and writes its
+/// cwd, arguments, caller, hook context and input beside `LF_TEST_RESUME_PROOF`.
 #[cfg(unix)]
-#[test]
-fn headless_resume_reads_the_saved_workspace_and_names_its_caller() {
+fn claude_resume_probe(bin: &std::path::Path) {
     use std::os::unix::fs::PermissionsExt;
 
-    let home = tempfile::tempdir().unwrap();
-    let saved = home.path().join("saved");
-    let caller = home.path().join("caller");
-    let bin = home.path().join("bin");
-    for (path, marker) in [(&saved, "SAVED_CONTEXT"), (&caller, "CALLER_CONTEXT")] {
-        std::fs::create_dir_all(path.join("scratch")).unwrap();
-        std::fs::write(path.join("scratch/context.md"), marker).unwrap();
-    }
-    std::fs::create_dir(&bin).unwrap();
+    std::fs::create_dir(bin).unwrap();
     let provider = bin.join("claude");
     std::fs::write(
         &provider,
@@ -619,6 +612,93 @@ for line in sys.stdin:
     )
     .unwrap();
     std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn a_closed_tasks_conversation_resumes_in_the_main_checkout() {
+    let home = tempfile::tempdir().unwrap();
+    let repo = loopflow_test_support::TestRepo::new();
+    let bin = home.path().join("bin");
+    claude_resume_probe(&bin);
+    // The Task is done and its checkout was retired with the conversation's directory.
+    let retired = home.path().join("retired-checkout");
+    let (id, _, _) = prepare_conversation(home.path(), &retired, "claude", "Original input");
+    let store = loopflow_execution::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
+    let repository = loopflow_execution::repository::location::ensure_repository(
+        &store,
+        repo.path().to_str().unwrap(),
+    )
+    .unwrap();
+    let database = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    database
+        .execute(
+            "INSERT INTO tasks(id,repository_id,issue_identifier,issue_title,issue_description,created_at,updated_at,workspace_slug,planning_completed,planning_completed_at)
+             VALUES('task_00000000000000000000000000000001',?1,'INF-1','Closed work','',1,1,'closed-work',1,'2026-11-03T00:00:00Z')",
+            [repository.as_str()],
+        )
+        .unwrap();
+    database
+        .execute_batch(&format!(
+            "UPDATE agent_sessions SET provider_thread='fixture-native',task_id='task_00000000000000000000000000000001' WHERE id='{id}';
+             INSERT INTO task_primary_sessions(task_id,session_id) VALUES('task_00000000000000000000000000000001','{id}');"
+        ))
+        .unwrap();
+    let path = std::env::join_paths(std::iter::once(bin).chain(std::env::split_paths(
+        &std::env::var_os("PATH").unwrap_or_default(),
+    )))
+    .unwrap();
+    let output = command(
+        home.path(),
+        &[
+            "-b",
+            "session",
+            "resume",
+            &id,
+            "--message",
+            "Where are you?",
+        ],
+    )
+    .current_dir(home.path())
+    .env("PATH", path)
+    .env("HOME", home.path())
+    .env("LF_TEST_RESUME_PROOF", home.path().join("proof"))
+    .output()
+    .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let main = repo.path().canonicalize().unwrap();
+    assert_eq!(
+        std::fs::read_to_string(home.path().join("proof.cwd"))
+            .unwrap()
+            .trim(),
+        main.to_str().unwrap()
+    );
+    let args = std::fs::read_to_string(home.path().join("proof.args")).unwrap();
+    assert!(args.contains("--resume\nfixture-native\n"), "{args}");
+    let after = store.session(&id).unwrap().unwrap();
+    assert_eq!(after.cwd.canonicalize().unwrap(), main);
+    assert_eq!(
+        after.task_id.as_ref().map(ToString::to_string).as_deref(),
+        Some("task_00000000000000000000000000000001")
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn headless_resume_reads_the_saved_workspace_and_names_its_caller() {
+    let home = tempfile::tempdir().unwrap();
+    let saved = home.path().join("saved");
+    let caller = home.path().join("caller");
+    let bin = home.path().join("bin");
+    for (path, marker) in [(&saved, "SAVED_CONTEXT"), (&caller, "CALLER_CONTEXT")] {
+        std::fs::create_dir_all(path.join("scratch")).unwrap();
+        std::fs::write(path.join("scratch/context.md"), marker).unwrap();
+    }
+    claude_resume_probe(&bin);
     let (id, input, dir) = prepare_conversation(home.path(), &saved, "claude", "Original input");
     let database = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     database

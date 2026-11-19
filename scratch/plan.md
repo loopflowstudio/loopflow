@@ -160,6 +160,8 @@ shasum -a 256 target/debug/lf    # still A; 27/27 pass
    fails at once on a mismatch, naming the executable path, both builds and
    `lf server restart`. The test's holder executable is a `#[cfg(test)]`
    thread-local override; the test spawns a script that prints another build.
+   The test asserts the error's text, not how long it took: the 20s wait ends
+   in "is not answering", so the text already tells the two paths apart.
 3. **Built.** The probe confirmed the cause: the log held
    `session resume --wave wave-1 --prepare` and
    `--repo … session resume --prepare` with two openings live. Both New Task
@@ -169,7 +171,7 @@ shasum -a 256 target/debug/lf    # still A; 27/27 pass
    since gating on `test-support` would hide it from the `lf` bin under
    `cargo test`'s unified features.)
 
-Left for gate: the acceptance check below, `binary(session_launch_contract)`,
+Left for gate: the acceptance check above, `binary(session_launch_contract)`,
 `test(terminal_holder::)`, `test(transport::registry_tests::)`, Swift
 `WorkDestinationTests`, clippy over the workspace (execution clippy passed here).
 

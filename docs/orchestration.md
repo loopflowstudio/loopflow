@@ -238,6 +238,33 @@ your `lf set wave.graph` for its Wave and then its repository, then its Wave's
 `graph:`, then the repository's in `.lf/config.yaml`, then builtin `code`. It keeps
 that Graph as it was; later edits apply to Tasks that take it up afterwards.
 
+### Describe a Graph
+
+```yaml
+# .lf/graphs/ship-api.yaml
+description: Build the endpoint, audit it, then deliver.
+steps:
+- implement
+- audit
+- interactive: demo
+- graph: deliver
+```
+
+```console
+$ lf graph list
+auto       Request to merged PR without a person: build and publish, then deliver.
+code       Build, deliver and verify. You try the change, then check it on main.
+feature    Explore, build, deliver and verify. You choose what to build, try the change…
+ship-api   Build the endpoint, audit it, then deliver.
+my-graph
+```
+
+`description:` is one line saying what running the Graph gets you. Desktop's
+Start menu shows it beside the Graph's name, with a stop count taken from its
+`interactive:` steps. Every builtin has one. A Graph without it, written as a
+bare list of steps, still runs and still lists; Start offers it under
+**More ›**.
+
 ## Run Tasks on other machines
 
 ```bash

@@ -95,12 +95,11 @@ The Mac app shows the same records the commands print; it keeps no copy of its o
 - **Task workspace**: three panes, the `session` conversation, a `shell` at the
   Task's checkout and a `browser` for Files, the Graph log and local pages.
 - **Dashboards**: Tasks side by side, chosen by a query.
-- **Wave view**: the Wave conversation beside a standup board, with the Tasks
-  being worked on three to a page below. The board shows one section at a time:
-  Backlog, Working (with each Session Available or Busy), Autonomous (shipping)
-  and Done. The repository page is the same view over every repository Task.
-  Every pane and view part zooms and hides from buttons on hover, its dividers
-  drag, and the header's `Show…` menu brings hidden parts back.
+- **Wave view**: the Wave conversation on the left, its [backlog](#the-backlog)
+  on the right, and the Tasks being worked on three to a page below. The
+  repository page is the same view over every repository Task. Every pane and
+  view part zooms and hides from buttons on hover, its dividers drag, and the
+  header's `Show…` menu brings hidden parts back.
 - **⌘K**: search Waves, Tasks, Sessions and Graphs.
 
 ```bash
@@ -111,6 +110,89 @@ lf desktop dashboard query attention 'state:available or state:blocked'   # save
 Queries take `wave:`, `task:`, `kind:task|wave` and
 `state:open|available|running|blocked|paused|idle|backlog|done`; whitespace
 means AND, and `or` and parentheses compose.
+
+### The backlog
+
+Open a Wave and its unstarted Tasks are one ranked list, the next work first.
+Click a row and its brief opens under it; nothing starts until you press Start.
+
+```text
+Product · demo-20260924 · Objective ›                                    New
+All 46 · Mine 1 · Available 43                                    Search…
+[Start · feature ▾]  Claim  Edit  Move ▾   6 of 46  ↑ ↓          Abandon…
+  LOO-452  Customize terminal chords                                     ●
+           Let people rebind chords per repository and drive them from…
+           Show all 412 words
+  LOO-456  Keep briefs readable on narrow windows                        ◌
+  LOO-753  Retry provider launches · Infrastructure                      ○
+```
+
+The mark at a row's right edge is its owner: filled for you, muted for someone
+else, a dashed ring for nobody. A row shows its Wave when it isn't the one
+you're looking at.
+
+- **Find.** Search matches titles and briefs. **Mine** is what you've claimed;
+  **Available** is everything not claimed by someone else.
+- **Select.** Click, ↑↓, ⌘-click, ⇧-click and ⇧↑↓ select. One selected Task
+  shows its brief, cut at nine lines past 900 characters; several selected show
+  none. ⌘A selects all and Esc clears.
+- **Act.** The toolbar acts on the selection, with a count when there are
+  several. `···` on a row and right-click open the same actions: Start, Claim,
+  Edit brief, Move to another Wave or to the top, Move up/down, Copy ID and
+  Abandon…. The narrowest window drops the position and ↑↓ first.
+- **Order.** Drag rows, press ⌘↑↓, or use Move ▾ › To top. The order is the
+  Task's rank in its Wave, the same one `lf task list --wave product` prints and
+  Linear shows. Over a whole repository, order belongs to each Wave, so
+  reordering is off there.
+- **Claim without starting.** Claim makes a Task yours so nobody else takes it;
+  it runs nothing.
+- **Undo.** ⌘Z undoes a reorder, a claim or a brief edit. If someone changed
+  the brief since your edit, undo leaves it and says so. Start and Abandon
+  aren't undone; an abandoned Task keeps its ID and history.
+
+| Key | Does |
+|---|---|
+| ⌘↩ | Start |
+| C | Claim |
+| E | Edit the brief |
+| ⌘⌫ | Abandon… |
+| ⌘↑ ⌘↓ | Move the selection up or down |
+
+#### Start picks a flow
+
+Start runs a Task's Graph, which Desktop calls its flow. The button names the
+one it will run: `Start · feature`, the Wave's default. ▾ lists the others,
+each with its description and how many times it stops for you:
+
+```text
+✓ Each Wave's flow        feature 2 · code 1
+  feature                 Explore, build, deliver and verify      3 stops
+  code                    Build, deliver and verify               2 stops
+  research                Investigate and report, with no PR      1 stop
+  More ›
+  Run without stopping
+  auto                    Request to merged PR without a person   merges without asking
+  incident                Restore first, then fix the cause       never stops
+```
+
+Several Tasks from Waves with different defaults show the split,
+`Start 3 · feature 2 · code 1`; clicking it starts each on its own Wave's flow.
+Pick a flow below "Each Wave's flow" to run all of them on that one. Flows under
+"Run without stopping" never wait for you, and Auto-Ship may merge their PRs.
+Graphs with no `description:` sit under **More ›**
+([describe a Graph](orchestration.md#describe-a-graph)).
+
+Starting several runs them one after another. If one fails, the notice says
+which, `Started 2 of 3 · LOO-456: …`, and the ones that started stay started.
+Started Tasks leave the backlog and appear in the sidebar.
+
+#### When the list is empty
+
+Every empty list says why and offers one step: **Mine** with nothing claimed
+offers **Show available**, a search with no match offers **Clear search**, and
+an empty Wave offers **New**. While the backlog loads or the server is
+unreachable, the last rows you saw stay with a notice and **Retry**. A list
+too large to load at once says `Partial: searching the 200 loaded`.
 
 ### Connection recovery
 
@@ -137,9 +219,8 @@ lf --task LOO-12 desktop send -p session 'also cover the timeout path'   # into 
 lf desktop browse http://localhost:5173
 lf desktop move -p browser --destination session --axis vertical
 lf desktop goto 2                                 # what ⌘2 does
-lf desktop do section -p board section=working    # the Wave board: backlog, working, autonomous or done
-lf desktop do filter -p board days=14             # Done covers 14 days; kept on this Mac
-lf desktop zoom --on -p board                     # the board fills the view; --off returns
+lf desktop capture -p board                       # the Wave's backlog as text: counts, then rows in order with owners
+lf desktop zoom --on -p board                     # the backlog fills the view; --off returns
 ```
 
 Without `-p`, a command acts on the terminal it runs in, so an agent's own tool

@@ -182,7 +182,11 @@ CI runs the full suites.
    - Per-item failure notices.
 
    Focused test: `BacklogBoardTests` actions against a stub `RegistryQuery`.
-4. **Desktop capture text and docs.** `swift/LoopflowMac` README and `docs/` mentions of the board's sections.
+4. **Desktop capture text and docs.** The user docs are written ahead of the code; implementation makes them true or edits them:
+   - `docs/surfaces.md` "The backlog" (list, keys, Start's flow menu, empty states) and the `lf desktop capture -p board` example; the `section`/`filter` examples are gone.
+   - `docs/orchestration.md` "Describe a Graph" (`description:` + `steps:`, `lf graph list` output).
+   - `docs/workspaces.md`: "Desktop shows its backlog".
+   - Details the docs settled that the plan left open: a loading or unreachable backlog keeps its last rows with **Retry**; an empty Wave offers **New**; `incident` is listed under "Run without stopping" as "never stops".
 
 Exploration history follows. Explore round 6, November 14, 2026, combined the composed reading workspace, compact rows and a separate full-width repository conversation. Review page: [explore.html](explore.html).
 

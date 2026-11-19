@@ -77,7 +77,7 @@ lf diff ENG-123                     # only its changes
 
 `lf workspace` opens arrangements and overviews. In a repository or Wave, it
 shows started, unfinished Tasks; backlog Tasks appear only when selected.
-Desktop shows its board, while Rex, Herdr and cmux arrange native Task tabs.
+Desktop shows its backlog, while Rex, Herdr and cmux arrange native Task tabs.
 Use `lf open --task <task>` to enter a conversation from an overview. Overviews
 and automatic arrivals start no agents and leave existing conversation input
 where it is. A Task's configured workspace can hide Conversation; ordinary

@@ -72,7 +72,7 @@ fn known_fields<'de, D: serde::Deserializer<'de>>(
 }
 
 /// A saved list of values, such as a queued tracker `create`, without the
-/// fields this build no longer has (`krs`, `metric_targets`).
+/// fields this build no longer has, such as KRs and metric targets.
 pub fn known_values(values: Value) -> StoreResult<Vec<WorkValue>> {
     Ok(skip_unknown(serde_json::from_value::<Vec<Value>>(values)?))
 }

@@ -2490,8 +2490,8 @@ mod tests {
             let parsed = super::parse_project_document(after).unwrap();
             assert_eq!(parsed.description().trim(), description.trim());
             assert!(after.contains("workflow: code\n"));
-            assert_eq!(parsed.krs, before.krs);
-            assert_eq!(parsed.metric_targets, before.metric_targets);
+            assert_eq!(parsed.released_krs, before.released_krs);
+            assert_eq!(parsed.released_targets, before.released_targets);
             assert!(!after.contains("Old introduction"));
             assert!(!after.contains("Target rationale"));
             assert!(!after.contains("Old closing"));

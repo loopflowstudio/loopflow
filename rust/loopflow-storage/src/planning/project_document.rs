@@ -26,8 +26,8 @@ pub struct ReleasedKr {
 #[derive(Debug)]
 pub struct ProjectDocument<'a> {
     /// The `## Metric targets` JSON array, unread except by released conversion.
-    pub metric_targets: serde_json::Value,
-    pub krs: Vec<ReleasedKr>,
+    pub released_targets: serde_json::Value,
+    pub released_krs: Vec<ReleasedKr>,
     source: &'a str,
     fields: Vec<(std::ops::Range<usize>, ProjectField)>,
 }
@@ -73,8 +73,8 @@ impl ProjectDocument<'_> {
             result.push_str(&self.source[range.clone()]);
         }
         let parsed = parse_project_document(&result)?;
-        if parsed.krs != self.krs
-            || parsed.metric_targets != self.metric_targets
+        if parsed.released_krs != self.released_krs
+            || parsed.released_targets != self.released_targets
             || parsed.description().trim() != description.trim()
         {
             return Err(ProjectDocumentError(
@@ -205,7 +205,7 @@ pub fn parse_project_document(source: &str) -> ProjectDocumentResult<ProjectDocu
         }
     }
 
-    let metric_targets = if targets.iter().all(|line| line.trim().is_empty()) {
+    let released_targets = if targets.iter().all(|line| line.trim().is_empty()) {
         serde_json::Value::Array(Vec::new())
     } else {
         serde_json::from_str::<Vec<serde_json::Value>>(&targets.concat())
@@ -216,8 +216,8 @@ pub fn parse_project_document(source: &str) -> ProjectDocumentResult<ProjectDocu
     };
     fields.sort_unstable_by_key(|(range, _)| range.start);
     Ok(ProjectDocument {
-        metric_targets,
-        krs,
+        released_targets,
+        released_krs: krs,
         source,
         fields,
     })
@@ -233,7 +233,7 @@ mod tests {
         let document = parse_project_document(source).unwrap();
         assert_eq!(document.observed_description(), "A measured bet.");
         assert_eq!(
-            document.krs,
+            document.released_krs,
             vec![
                 ReleasedKr {
                     text: "One proof holds".into(),
@@ -245,7 +245,7 @@ mod tests {
                 },
             ]
         );
-        assert_eq!(document.metric_targets[0]["metric_id"], "rate");
+        assert_eq!(document.released_targets[0]["metric_id"], "rate");
         let edited = document.replace_description("New prose").unwrap();
         assert!(edited.starts_with("New prose\n\n"));
         for kept in [

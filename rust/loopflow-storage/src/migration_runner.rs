@@ -828,8 +828,8 @@ fn convert_project_content(conn: &rusqlite::Connection) -> StoreResult<()> {
             rusqlite::params![
                 id,
                 document.description(),
-                serde_json::to_string(&document.krs)?,
-                serde_json::to_string(&document.metric_targets)?
+                serde_json::to_string(&document.released_krs)?,
+                serde_json::to_string(&document.released_targets)?
             ],
         )?;
     }
@@ -6073,7 +6073,9 @@ mod tests {
         )))
         .unwrap();
         let mut project = snapshot["projects"][0].take();
+        // The released Project body carried KRs and targets; current DTOs do not.
         project["krs"] = serde_json::json!([{"text":"Saved planning survives","holds":true}]);
+        project["metric_targets"] = serde_json::json!([]);
         let item = &mut snapshot["items"][0];
         item["state"] = serde_json::Value::Null;
         item["completed"] = serde_json::json!(true);
@@ -6154,9 +6156,12 @@ mod tests {
             )
             .unwrap();
         let content = crate::planning::project_document::parse_project_document(&text).unwrap();
-        assert_eq!(serde_json::to_value(content.krs).unwrap(), project["krs"]);
         assert_eq!(
-            serde_json::to_value(content.metric_targets).unwrap(),
+            serde_json::to_value(content.released_krs).unwrap(),
+            project["krs"]
+        );
+        assert_eq!(
+            serde_json::to_value(content.released_targets).unwrap(),
             project["metric_targets"]
         );
         conn.execute("INSERT INTO task_changes(id,task_id,field,value_json) VALUES('membership','task_fields','project_id','\"project_fields\"')", []).unwrap();

@@ -148,22 +148,30 @@ env -u LOOPFLOW_TEST_LF cargo test -p loopflow --test session_launch_contract
 shasum -a 256 target/debug/lf    # still A; 27/27 pass
 ```
 
-## Slices
+## Slices (all built, 2026-11-19)
 
-1. **No nested build under loopflow integration tests.** The ctor sets
-   `LOOPFLOW_TEST_LF` from `CARGO_BIN_EXE_lf`. Run the acceptance check above.
-   This one can prove the plan wrong: if a nested cargo still runs (watch
-   `pgrep -f 'cargo build --offline -p loopflow'`), some binary misses the ctor.
-   Check every standalone `[[test]]` in `rust/loopflow/Cargo.toml` that calls
-   `lf_binary()` (e.g. `build_cleanup.rs`) includes `support`, or points it at
-   `CARGO_BIN_EXE_lf`. Update the `LOOPFLOW_TEST_LF` paragraph in
-   `rust/loopflow/tests/README.md:304`.
-2. **Holder ready line names its build.** `run()` prints `<pid> <build>`;
-   `spawn` returns it; `ensure` fails at once on a mismatch. Unit test in
-   `terminal_holder/tests.rs`: a ready line naming another build makes `ensure`
-   return the named error with no 20s wait.
-3. **Swift:** confirm the warm-primary request, then `canPrepare = { false }`.
-4. **`with_process` is `#[cfg(not(test))]`.**
+1. **Built.** The support ctor sets `LOOPFLOW_TEST_LF` from
+   `option_env!("CARGO_BIN_EXE_lf")` (option: `src/lib.rs` also includes
+   `tests/support/mod.rs`). Every standalone `[[test]]` that reaches
+   `lf_binary()` includes `support`; `codex_live_smoke` doesn't call it. Ran the
+   acceptance check: 27/27 on the first run after `touch lf.rs`, `target/debug/lf`
+   sha 3e727fd7… before and after.
+2. **Built.** Ready line is `<pid> <build>`; `Client::ensure(place, build)`
+   fails at once on a mismatch, naming the executable path, both builds and
+   `lf server restart`. The test's holder executable is a `#[cfg(test)]`
+   thread-local override; the test spawns a script that prints another build.
+3. **Built.** The probe confirmed the cause: the log held
+   `session resume --wave wave-1 --prepare` and
+   `--repo … session resume --prepare` with two openings live. Both New Task
+   destination tests set `canPrepare = { false }`; 3/3 runs pass.
+4. **Built.** `with_process` is `#[cfg(not(test))]`; `human_session` 51/51.
+   (Only execution's unit tests; loopflow's lib tests can still reach it,
+   since gating on `test-support` would hide it from the `lf` bin under
+   `cargo test`'s unified features.)
+
+Left for gate: the acceptance check below, `binary(session_launch_contract)`,
+`test(terminal_holder::)`, `test(transport::registry_tests::)`, Swift
+`WorkDestinationTests`, clippy over the workspace (execution clippy passed here).
 
 ## Exclusions
 

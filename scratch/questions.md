@@ -21,3 +21,15 @@
   carry `PATH` only when the caller is a person (`agent_caller()` none), or run
   the pane command through the person's login shell. See
   `scratch/concept-review.html` question 1.
+
+## Implement (headless)
+
+- `remote_path()` now **appends** the tool directories (was: prepended, with
+  `~/.cargo/bin` first). A remote with both a dev `lf` in `~/.cargo/bin` and a
+  release one in `~/.local/bin` now gets the remote shell's own order, then
+  `~/.local/bin`. Reversible in one line.
+- `end_open` answers only failures. A viewer that exits 0 before attaching
+  still gets the wrapper's "(status 0)" line rather than its tail.
+- The bare-PATH fixture hides `claude` only because no tool directory holds
+  one; on a Machine with `claude` in `/opt/homebrew/bin` it would find it.
+  Not changed here.

@@ -171,14 +171,26 @@ override yields argv without `--agent`; with an override, `--agent <it>`. The
 
 ## Slices
 
-1. **PATH in main** (teaches the most: if appending in `main` breaks a fixture
-   that relies on a bare `PATH` hiding a tool, the mechanism is wrong). `TOOL_DIRS`
-   + `tool_path`, the `main` call, delete the server, pane and world copies, run
-   `server`/`open::conversation` unit tests and the `env -i` command.
-2. **Receipt reason**: `fail_open`, viewer tail, `main` error path, `settle`
-   text; the fixture probe first.
-3. **No recorded `--agent`**: `resolve` + `resume_argv` + test.
-4. Plists, systemd unit, `REMOTE_PATH`, Swift comment.
+All four built (commits 54c70a2345 and the one after).
+
+1. **PATH in main** — done. `os_process::{TOOL_DIRS, tool_dirs, tool_path,
+   repair_path}`; `main` calls `repair_path()` first. Server, pane and World
+   copies deleted. The bare-PATH fixture still passes: its `HOME` is temp and
+   this Machine has no provider in `/opt/homebrew/bin` or `/usr/local/bin`.
+2. **Receipt reason** — done. Probe answered yes: the launcher holds
+   `LF_OPEN_RECEIPT` and writes first; the fixture asserts the receipt starts
+   with "'claude' is not installed" and holds no exit line. `transport::end_open`
+   runs in `main` for every failed command holding the variable; a clean exit
+   (code 0) writes nothing and leaves the wrapper's line, so a launcher that ran
+   its conversation to the end can't answer for its viewer. The CSI regex in
+   `provider_auth` widened to ECMA-48 (`\x1b[?25h` leaked through before).
+3. **No recorded `--agent`** — done. `Resolved.agent` deleted; `resume_argv`
+   reads `agent_override()`.
+4. **Plists, systemd, SSH, Swift** — done. `REMOTE_PATH` is `remote_path()`.
+
+Not run here: the `env -i … lf session resume <throwaway>` acceptance (needs a
+PTY, a server and a real provider; a branch build against the real store) and
+Rex `lf open --json` with `claude` off `PATH`. Both go to qa.
 
 ## Exclusions
 

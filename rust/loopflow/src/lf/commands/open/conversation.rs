@@ -343,7 +343,11 @@ exit "$result""#.into(),
                     "lf open: the conversation did not attach"
                 );
                 receipt.status = OpenStatus::Failed;
-                receipt.reason = Some(format!("{error:#}; retry the same command"));
+                let reason = format!("{error:#}");
+                receipt.reason = Some(format!(
+                    "{}; retry the same command",
+                    reason.trim_end().trim_end_matches('.')
+                ));
             }
         }
     }
@@ -467,7 +471,7 @@ mod tests {
         assert_eq!(receipt.status, super::OpenStatus::Failed);
         assert_eq!(
             receipt.reason.as_deref(),
-            Some("'claude' is not installed.; retry the same command")
+            Some("'claude' is not installed; retry the same command")
         );
     }
 

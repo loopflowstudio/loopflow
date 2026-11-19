@@ -131,7 +131,7 @@ splits again.
 
 ```bash
 lf open --task ENG-123 --tab --host rex --json
-# {"status": "failed", "reason": "'claude' is not installed; retry the same command", ...}
+# {"status": "failed", "reason": "'claude' is not installed. Install it with `npm install -g @anthropic-ai/claude-code`, then open `claude` to sign in; retry the same command", ...}
 ```
 
 A successful conversation open means the Session attached, not just that the

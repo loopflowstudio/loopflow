@@ -241,3 +241,21 @@ files:
 - No GitHub patch renderer remains.
 
 Check (implement, November 19, after the merge of main `932702681e`): `scripts/test_desktop.sh --filter 'TaskFilesTests|ReviewDiffTests|TaskBriefTests|PullRequestTests'` → 52 passed; `cargo test -p loopflow-execution --lib config::` → 104 passed (again after compress). Gate/CI: clippy, `documented_commands::`, golden, the full swift suite, `global_commands`. Demo: the pane on screen.
+
+Jack, on the tour after publish: "Tour doesnt need to survive submitting the tour, but are there any good alternatives to how to implement it?" Then, on Devin Review's "hasn't analyzed the latest changes" banner with Analyze latest / Analyze automatically: "Maybe a button would make sense here too". Not yet built; proposal below.
+
+Proposed (not decided): the tour records the commit it was written at (`at: <sha>` in `scratch/diff-order.yaml`). When the head has moved past it, or no tour exists, the Diff's order control offers **Write tour** / **Update tour**, which runs a headless agent in the Task's checkout that rewrites the file; the order switches to Tour when it lands. Files changed since `at` show where they fall today (after the named ones). On demand only; no automatic rewrite.
+
+Jack: "i wonder if there is some way we can also to smarter changes over itme. we could allow repo level settings to prioritize certain folders or file extensions ro something". Not decided. Today By kind is a fixed rule in `ReviewKind` (`ReviewOrder.swift`): generated and lock files, tests, docs, source by path patterns.
+
+## Next for implement — the tour skill and its button (November 19)
+
+Jack, quoting the proposal ("a small skill whose whole job is to read the diff and write the YAML … the worker and the button write the same thing the same way"): "We need this, plus we need to put this into other skills and/or the overall loopflow guide."
+
+1. **A builtin skill that writes the tour.** Its whole job: read the Task's comparison (`lf task diff`), write `scratch/diff-order.yaml` with `at:` (the head commit it read), `first:` and `hide:`, each entry `- path:` with an optional one-line `why:`. It rewrites the file whole, never appends. It decides only the order and what to hide; it edits nothing else. Name it for what it makes (*assumed:* `tour`). Keep it short and plain like the other builtins.
+2. **Every skill that hands a change to a reader points at it** instead of restating the format: `implement` (replace its sentence), and any other builtin that changes the diff before someone reads it or builds the reading page (check `compress`, `human-review`, `demo`, `pr-publish`). `LOOPFLOW.md` is paid on every run: add one line there only if a run outside those skills (a plain chat that makes the change) would otherwise never write it; say which you chose and why.
+3. **Desktop reads `at:`.** When the head has moved past it, the order control says how many commits old the tour is; files changed since fall after the named ones as today.
+4. **The button.** In the order control: **Write tour** when there is none, **Update tour** when it is stale. It runs the skill headless in the Task's checkout, the way Desktop already starts Graph runs as children, shows that it is running, and switches to Tour when the new file lands. A failure says why in the pane. No automatic rewrite on push.
+5. Tests a person would notice: a tour written at an older commit reads as stale; the skill's golden; the button's command line.
+
+Not in this slice: the repository `diff_order` setting, `.gitattributes`, "Always hide?" (proposed in the section above, not decided).

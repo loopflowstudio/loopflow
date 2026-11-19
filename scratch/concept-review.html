@@ -1,68 +1,106 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8">
-<title>LOO-968 concept review: Auto-Ship as built</title>
+<title>LOO-968 concept review: auto as built</title>
 <style>
-:root{--bg:#fff;--fg:#1d1d1f;--mute:#6e6e73;--line:#d2d2d7;--yes:#1a7f37;--no:#b42318;--prop:#f3efe2;--card:#f6f6f8}
-@media (prefers-color-scheme:dark){:root{--bg:#161618;--fg:#e8e8ea;--mute:#9a9aa0;--line:#3a3a3f;--yes:#4ac26b;--no:#ff7b72;--prop:#2c2818;--card:#1f1f22}}
-body{background:var(--bg);color:var(--fg);font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:60rem;margin:2rem auto;padding:0 1rem}
+:root{--bg:#fff;--fg:#1d1d1f;--mute:#6e6e73;--line:#d2d2d7;--yes:#1a7f37;--no:#b42318;--part:#9a6700;--prop:#f3efe2;--propline:#c9a227;--card:#f6f6f8}
+@media (prefers-color-scheme:dark){:root{--bg:#161618;--fg:#e8e8ea;--mute:#9a9aa0;--line:#3a3a3f;--yes:#4ac26b;--no:#ff7b72;--part:#d4a72c;--prop:#2c2818;--propline:#c9a227;--card:#1f1f22}}
+body{background:var(--bg);color:var(--fg);font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:62rem;margin:2rem auto;padding:0 1rem}
 code{font:13px ui-monospace,Menlo,monospace}
 table{border-collapse:collapse;width:100%;margin:1rem 0}
 td,th{border-bottom:1px solid var(--line);padding:.45rem .5rem;text-align:left;vertical-align:top}
-.yes{color:var(--yes);font-weight:600}.no{color:var(--no);font-weight:600}
+.yes{color:var(--yes);font-weight:600}.no{color:var(--no);font-weight:600}.part{color:var(--part);font-weight:600}
 .mute{color:var(--mute)}
-.prop{background:var(--prop);border-left:3px solid #c9a227;padding:.6rem .9rem;margin:1rem 0}
+.prop{background:var(--prop);border-left:3px solid var(--propline)}
 .cols{display:grid;grid-template-columns:1fr 1fr;gap:1rem}
 .card{background:var(--card);padding:.7rem 1rem;border-radius:6px}
-pre{background:var(--card);padding:.7rem 1rem;border-radius:6px;overflow:auto}
+pre{background:var(--card);padding:.7rem 1rem;border-radius:6px;overflow:auto;margin:.4rem 0}
+.card pre{background:transparent;padding:0}
+@media (max-width:46rem){.cols{grid-template-columns:1fr}}
 </style></head><body>
-<h1>Do the concepts line up? Auto-Ship as built</h1>
-<p><b>Area:</b> how a Task gets taken the rest of the way without a person: <code>lf ship</code>, <code>lf -b task run</code>, <code>lf task hold</code>, the run reading Auto-Ship at each step, recovery, and the state labels every surface shows. Reviewed at HEAD <code>4c0481cb6e</code> against the LOO-959 base <code>89943efba2</code> (89 files, +1,141 / −2,478).</p>
+<h1>Do the concepts line up? Auto, as built</h1>
+<p><b>Area:</b> how a Task goes on without a person: the auto setting, the three things that turn it on (<code>lf ship</code>, <code>lf task auto on</code>, <code>lf -b task run</code>), turning it off, what a run does with it at interactive and merging steps, and what the CLI, the wire and Desktop call each of these. Taken this wide because the Task's claim is about the whole: "ship is shorthand for auto on the Task's Graph". Reviewed at <code>3aaba763d0</code> against base <code>f5ff6a6c79</code> (152 files, +2,347 / −3,051).</p>
+<p class="mute">Tan panels are proposed and not built. Everything else exists.</p>
 
 <h2>One interaction, with its failure and recovery</h2>
-<pre>lf ship LOO-12          # LOO-12 · code from human-review running as Graph process …  ships: yes
-lf task status LOO-12   # shipping · Auto-Ship: on by Maya, 09:04
-  (the run is killed)   # recovery starts `lf task run LOO-12`, under RUN_RESTARTS; it stands in at human-review
-lf task hold LOO-12     # LOO-12 stopped shipping   (nothing killed)
-  (run reaches pr land) # Waiting at pr land: not approved to merge (Maya stopped shipping). `lf ship` lands it.
-lf ship LOO-12          # on again; same run path; lands</pre>
-<p>One carrier, one recovery loop, one restart rule. The run decides at each step by reading the mark, so a turn-on or a stop mid-run counts without restarting anything. The code matches: <code>RunningGraph::stands_in</code> and <code>stopped_landing</code> are the only two readers that change behavior, <code>task_state_sql</code> the only one that changes a label.</p>
+<pre>lf task run LOO-12      # runs build, stops: the Task waits at human-review
+lf task auto on LOO-12  # LOO-12: auto on            ← nothing starts. status: active · auto: on by Maya
+lf task run LOO-12      # goes on to deliver          ← human-review is skipped, not stood in for
+                        #   (a bare run at a waiting step means "I finished this step")
+lf ship LOO-12          # what was wanted: LOO-12: standing in at human-review … running
+
+lf task create 'x'      # INF-9, never run
+lf task auto on INF-9   # error: Task INF-9 has not taken up a Graph, and auto is set on one;
+                        #        `lf ship INF-9` turns auto on and runs it</pre>
+<p>The rest of the walk holds. A killed run is carried again as <code>lf task run</code> and stands in because auto is on. <code>lf task auto off</code> kills nothing; the run waits at its next interactive or merging step. One carrier, one recovery loop, one restart rule, and the run reads the setting when it gets to a step, not at launch.</p>
 
 <h2>Pairings</h2>
 <table>
 <tr><th>What a person knows</th><th>In the code</th><th></th><th>Note</th></tr>
-<tr><td>Auto-Ship (on / stopped)</td><td><code>task_graphs.auto_ship{,_at,_by}</code>, <code>AutoShip</code>, <code>AutoShipState</code>, <code>TaskSnapshot.auto_ship</code>, Swift <code>autoShip</code></td><td class="yes">yes</td><td>One name from column to button.</td></tr>
-<tr><td><code>lf ship</code></td><td><code>ship_on</code> + <code>carry_task_run</code>; <code>task.ship</code> returns <code>TaskRun</code></td><td class="yes">yes</td><td>Same output, same Graph process as <code>lf task run</code>.</td></tr>
-<tr><td>"the run stands in for me"</td><td><code>stands_in</code> per interactive step; <code>start_task_run</code> runs through while on</td><td class="yes">yes</td><td>Read when reached, not at launch.</td></tr>
-<tr><td>Stopping it</td><td><code>lf task hold</code> · Desktop <b>Stop Auto-Ship</b> · prints "stopped shipping" · <code>ship_stop</code> · engine <code>Hold</code> · alias <code>ship --stop</code></td><td class="no">no</td><td>One action, five names. Every one does the same thing (set <code>stopped</code>, clear armed auto-merge); the words disagree. Tests still call the <code>ship --stop</code> alias.</td></tr>
-<tr><td><code>shipping</code> state, Autonomous section</td><td><code>TaskState::Shipping</code>, <code>TaskSection::Autonomous</code>, derived from Auto-Ship on + a live run</td><td class="no">no</td><td>One idea under three words (Auto-Ship, shipping, Autonomous). Derived, not stored, so it is only naming. Excluded by the plan.</td></tr>
-<tr><td>"stopped" vs "never set"</td><td><code>stopped</code> blocks merging; NULL lets a run that reaches a merging step land</td><td class="yes">yes</td><td>The three-way mark earns its third state: <code>auto</code> and <code>deliver</code> land with nobody turning Auto-Ship on. <code>docs/orchestration.md</code> says so.</td></tr>
-<tr><td><code>lf -b task run</code></td><td><code>batch_on</code> writes <code>on</code> unless stopped; the launcher flag also stands in</td><td class="no">partly</td><td>A launch flag writes a lasting Task fact, so a single headless pass turns the Task Autonomous for later bare runs and recovery. That's intended (recovery relaunches bare <code>lf task run</code>), but a person reading <code>-b</code> as "this run, headless" won't expect it.</td></tr>
-<tr><td>A run that gave up</td><td><code>TaskRunStopped</code> leaves the mark; position stays <code>run</code>; state <code>idle</code></td><td class="yes">yes</td><td>Same label as a non-shipping run that gave up (<code>completion_is_independent_of_graph_position</code>). The next <code>lf task run</code> stands in again.</td></tr>
-<tr><td>Ship process, ship log, shipping snapshot</td><td>gone (<code>task_ship_events</code> leaving for LOO-971)</td><td class="yes">yes</td><td>No concept left that a person never sees.</td></tr>
+<tr><td>Auto, a setting on the Task</td><td><code>task_graphs.auto{,_at,_by}</code>, <code>Option&lt;Auto&gt;</code>, <code>TaskDetail.auto</code>, selection state <code>auto</code>, Swift <code>AutoBadge</code></td><td class="yes">yes</td><td>One word from column to badge. No state or board section restates it.</td></tr>
+<tr><td>Status and auto are separate</td><td><code>task_state_sql</code> and <code>TaskSection::of</code> never read auto</td><td class="yes">yes</td><td></td></tr>
+<tr><td>Turning auto on</td><td><code>auto_on</code> (mark only; error with no Graph) · <code>ship_on</code> (mark, take up a Graph, claim, run, stand in at the waiting step) · Desktop toggle sends <code>task.ship</code></td><td class="no">no</td><td>One action, two behaviors. The toggle and the command with the same name do different things. Biggest mismatch, below.</td></tr>
+<tr><td>"<code>lf ship</code> is auto on, then exactly <code>lf task run</code>"<br><span class="mute">(docs/orchestration.md, <code>lf help ship</code>)</span></td><td><code>ShipStart::Run { from }</code> passes <code>--from &lt;waiting step&gt;</code>; a bare run starts after it</td><td class="no">no</td><td>False where it matters most: a Task waiting at <code>human-review</code>. Ship is not the sum of the two commands a person can type.</td></tr>
+<tr><td>Auto on, on a Task that hasn't run</td><td>the mark's home is the <code>task_graphs</code> row, which doesn't exist yet → refusal</td><td class="no">no</td><td>A storage accident shown to the person as a rule. The refusal's own text names the command that works.</td></tr>
+<tr><td>Turning auto off</td><td><code>auto_off</code>, <code>task.auto</code>, toggle off; disarms auto-merge; kills nothing</td><td class="yes">yes</td><td>One action, one name, one path.</td></tr>
+<tr><td>Off, on, never set</td><td><code>stopped</code> blocks a merging step; NULL lets a run that reaches one land; <code>on</code> also stands in</td><td class="part">partly</td><td>Three states behind a two-position toggle. "Never set" earns its place (<code>lf task run</code> after your own review lands; the <code>auto</code> Graph lands). But after <code>auto off</code>, your own <code>lf task run</code> past review waits at <code>pr land</code> and tells you to <code>lf ship</code>. So off means two things: "I take the interactive steps" and "nothing merges". Docs say so. Stored <code>stopped</code>, shown "off".</td></tr>
+<tr><td>"this run may merge"</td><td><code>TaskRun::Running.ships</code>, <code>TaskRunStart::Run.ships</code>, printed <code>ships:</code></td><td class="no">no</td><td>One word, two ideas. <code>ship</code> is auto on + run; <code>ships</code> is "may merge", true with auto never set when no interactive step is ahead. It is also a launch-time guess at something the run reads live.</td></tr>
+<tr><td><code>lf -b task run</code></td><td><code>batch_on</code>: writes <code>on</code> unless stopped</td><td class="part">partly</td><td>A launch flag writes a lasting Task fact. It is what lets recovery relaunch a bare <code>lf task run</code> and still stand in. So <code>-b task run</code> is <code>lf ship</code> in the foreground that respects a stop. Left as is.</td></tr>
+<tr><td>The <code>auto</code> Graph</td><td><code>builtins/task/graph/auto.yaml</code> (pursue, deliver; no interactive step)</td><td class="no">no</td><td>One name, two ideas: <code>lf ship LOO-1 --graph auto</code> beside <code>auto: on</code>. The docs already have to write "the <code>auto</code> Graph … lands without the setting ever being on". Larger than this work: a builtin rename (and <code>graph: auto</code> in people's configs).</td></tr>
+<tr><td>A run that died comes back</td><td><code>restart_runs</code>, <code>DiedRun</code>, <code>RUN_RESTARTS</code> — in <code>ops/task/ship.rs</code></td><td class="part">partly</td><td>Right concept, wrong address: more than half of <code>ship.rs</code> is recovery for every Task run, shipped or not.</td></tr>
+<tr><td>Ship process, ship log, shipping state, Autonomous section, hold</td><td>gone; columns leaving for LOO-971</td><td class="yes">yes</td><td>One stale line: <code>docs/dev/machines.md</code> "a Task outside Auto-Ship".</td></tr>
 </table>
 
-<h2>Biggest mismatch: the stop has five names</h2>
+<h2>Biggest mismatch: "auto on" is two actions</h2>
+<p>The Task set out to make ship a shorthand. As built, ship is the only complete way to turn auto on, and <code>lf task auto on</code> is a narrower thing with the better name: it refuses a Task that hasn't run, and on a waiting Task it sets a mark that nothing reads until a run starts, where the obvious run then skips the step it was meant to cover. The state it creates ("auto on, waiting at an interactive step, nothing running") is the one the plan had to explain twice.</p>
 <div class="cols">
-<div class="card"><b>Existing</b><br>
-<code>lf task hold LOO-12</code> → "LOO-12 stopped shipping"<br>
-Desktop: <b>Stop Auto-Ship</b><br>
-Run: "not approved to merge (Maya stopped shipping)"<br>
-Status: "Auto-Ship: stopped by Maya"</div>
-<div class="card prop"><b>Proposed (not built)</b><br>
-Output says what changed: "LOO-12: Auto-Ship stopped" / "Auto-Ship was not on"; the run says "Waiting at pr land: Auto-Ship stopped by Maya. `lf ship` lands it." Tests call <code>task hold</code>, not the alias. Whether the command stays <code>hold</code> is question 1.</div>
+<div class="card"><b>Existing</b>
+<pre>lf task auto on X   mark only
+                    no Graph → error
+                    waiting  → nothing happens
+lf ship X           mark + take up + claim + run,
+                    stands in at the waiting step
+Desktop Auto on     task.ship
+lf task auto off X  mark off</pre></div>
+<div class="card prop"><b>Proposed</b>
+<pre>lf task auto on X   the Task goes on without you:
+lf ship X             same operation, shorter to type
+Desktop Auto on       same operation
+                    live run → reported, stands in from
+                               its next interactive step
+                    waiting  → stands in at that step
+                    never run → takes up its Graph, runs
+lf task auto off X  unchanged</pre></div>
 </div>
-<p>This is copy, not model. The model under it is right: one mark, one writer per action, two readers. Nothing here needs another implement pass; gate can take the test alias swap.</p>
-
-<h2>What would break it</h2>
+<p>Auto on means nobody is waited for. A Task waiting for someone with auto on is a contradiction the setting can resolve by itself, so turning it on runs the Task. Then "ship is shorthand for auto on" is literally true, the toggle and the command agree, and three things go away: the <code>auto_on</code> operation, the no-Graph refusal and its docs paragraph, and the <code>auto on</code>-then-bare-run trap.</p>
+<p><b>Tested against:</b></p>
 <ul>
-<li>A released <code>lf ship</code> dying across the upgrade is not carried again (its pid lived on <code>task_ship_events</code>). Recorded in <code>questions.md</code>; <code>lf task run</code> recovers it.</li>
-<li>A graph with no land step and a hand-merged PR now finishes its steps before completing. Recorded as a decision.</li>
+<li><i>Normal.</i> Live run: both commands already only set the mark and report. Unchanged.</li>
+<li><i>Failure.</i> A run that failed the same way and stopped keeps auto on; <code>lf task auto on</code> again starts it again, where today it answers "auto on" and nothing moves.</li>
+<li><i>Recovery.</i> Unchanged: recovery relaunches <code>lf task run</code>, which reads the mark.</li>
+<li><i>Counterexample kept.</i> Someone who wants auto armed on a waiting Task without starting anything can't. Nothing reads such a mark until a run, and they can ship when ready. If arming ahead matters (a Wave marking backlog Tasks), the mark moves to the Task row; that is question 1c.</li>
+<li><i>Must survive.</i> Off still stands against <code>-b</code>; only a person's <code>auto on</code> / <code>ship</code> lifts it; the setting still moves with the Task.</li>
+</ul>
+<p><b>Passed over:</b> keeping <code>auto on</code> a pure setting and fixing its holes instead (store it on the Task so it can precede a Graph; make a bare run stand in at the waiting step when auto is on). That keeps two actions and changes what a bare <code>lf task run</code> means at an interactive step, which people rely on to say "I'm done here".</p>
+
+<h2>Smaller, same pass</h2>
+<ul>
+<li class="prop" style="padding:.3rem .6rem;list-style-position:inside"><code>ships</code> → <code>merges</code> on <code>TaskRun::Running</code> and <code>TaskRunStart::Run</code>, printed <code>merges: this run may merge the PR; `lf task auto off X` stops it</code>.</li>
+<li class="prop" style="padding:.3rem .6rem;list-style-position:inside">Run recovery moves out of <code>ops/task/ship.rs</code> to <code>ops/task/run_recovery.rs</code>; <code>ship.rs</code> keeps the setting and <code>lf ship</code>.</li>
+<li class="prop" style="padding:.3rem .6rem;list-style-position:inside"><code>docs/dev/machines.md</code>: "outside Auto-Ship" → "with auto not on".</li>
+</ul>
+
+<h2>Larger than this work</h2>
+<ul>
+<li>The <code>auto</code> Graph shares its name with the setting. Renaming a builtin Graph touches <code>graph: auto</code> in configs, docs and the catalog.</li>
+<li>Off as "nothing merges" as well as "I take the interactive steps". Splitting them needs a run to know whether it stood in for someone before it reached the merge, across restarts. The three-state mark is the cheaper truth; the page records that the toggle hides one of the three.</li>
 </ul>
 
 <h2>Questions</h2>
 <ol>
-<li>The stop command: (a) keep <code>lf task hold</code>, change only the printed words to "Auto-Ship stopped"; (b) rename to <code>lf task auto-ship off</code>-style pair with <code>lf ship</code>; (c) leave as is.</li>
-<li><code>lf -b task run</code> writing Auto-Ship on: (a) keep (recovery and later bare runs stand in); (b) <code>-b</code> stands in for its own run only and writes nothing, so only <code>lf ship</code> turns it on.</li>
-<li>The board's words: (a) keep <code>shipping</code>/Autonomous; (b) rename the state and section to Auto-Ship so one word runs through (separate Task, wire change).</li>
+<li><code>lf task auto on</code>: (a) the same operation as <code>lf ship</code>, as proposed and written into the plan; (b) stays a mark that starts nothing, as built; (c) a mark that starts nothing and lives on the Task, so it can be set before the first run.</li>
+<li><code>ships</code> on the run receipt: (a) rename to <code>merges</code>; (b) keep; (c) drop the line and the field, since the run decides at the merging step.</li>
+<li>The <code>auto</code> Graph's name: (a) leave; (b) file a Task to rename it (to what?).</li>
+<li>After <code>auto off</code>, your own <code>lf task run</code> past review: (a) waits at <code>pr land</code> until <code>lf ship</code>, as built; (b) lands, because you ran it.</li>
+<li><code>lf -b task run</code> writes auto on: (a) keep; (b) stands in for its own run only.</li>
 </ol>
 </body></html>

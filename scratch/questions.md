@@ -37,7 +37,13 @@ Questions 1 and 2 got no written answer in scratch.
   land step finishes its steps into `end`.
 - **Stored value `stopped`, shown as "off".** Reverse by renaming the value in
   the unmerged migration.
-- **`auto on` on a Task with no Graph is an error naming `lf ship`** (was:
+- **`lf task auto on` is the `lf ship` operation** (concept review,
+  2026-11-19; to build). It runs the Task, standing in at a waiting
+  interactive step; the mark-only `auto on` and its no-Graph error go.
+  Reverse by restoring `ops::task::ship::auto_on`; to arm ahead of a first run
+  instead, store auto on the Task.
+- **`ships` becomes `merges`** on the run receipt.
+- Superseded by the two above: **`auto on` on a Task with no Graph is an error naming `lf ship`** (was:
   take up the default graph, which made the Task read "Starting" and its
   conversation start a run). `auto off` there saves nothing and answers "auto
   was not on". Reverse by storing auto on the Task instead of `task_graphs`,

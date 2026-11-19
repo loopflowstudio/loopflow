@@ -34,6 +34,14 @@ address and its lock remain stable so already-running relays can recover across
 the rename. There is one listener, with no alias or alternate protocol path.
 Work and credentials stay in place.
 
+For a repository without Linear or Asana the service also reads the shared
+plan. A save, here or in the CLI, sends its own records at once
+(`plan_carriers::send`: the hub, and a Git push with no fetch, five seconds at
+most). The service reads and sends (`plan_carriers::sync`) after each command
+it answers that names a directory, and fetches every such repository's plan
+refs every 60 s, which is when another Machine's change arrives with no hub.
+[Without a tracker](../../../../docs/dev/planning.md) has the carriers.
+
 ## Local protocol, revision 9
 
 One connection per client over the same-user Unix socket. Every message is one

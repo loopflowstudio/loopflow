@@ -268,16 +268,23 @@ through its own clone. The carrier is `ssh <hub> lf server connect`
 (`ops/plan_hub.rs`). Clearing the hub deletes its carrier rows and loses
 nothing.
 
-**When they run.** The Machine server owns both. After each command it answers
-it exchanges with the hub and pushes to Git, one exchange per repository at a
-time and at most one every five seconds after the last. One server task fetches
-every repository that has a remote and no tracker every 60 s, which is also
-when a save made by the CLI is pushed; the CLI itself sends to the hub only.
-`lf task sync` does both in the foreground. The first `lf task list` or `lf repo tracker` in a clone the Machine
+**When they run.** `ops/plan_carriers.rs` has two verbs. `send` follows every
+save, from the CLI or the server: the hub takes the records past its cursor and
+Git pushes this Machine's ref as last fetched, with no fetch, both within five
+seconds. A push that fails, runs out of time or is refused (the remote's copy
+of the ref is ahead of the one fetched) leaves its records unsent. `sync` reads
+and sends by each carrier: `lf task sync`, `lf wave status --sync`, before a
+claim, on a Task lookup that misses, and after each command the server
+answers, one exchange per repository at a time and at most one every five
+seconds after the last. One server task runs the Git exchange for
+every repository that has a remote and no tracker every 60 s, which is how
+another Machine's change arrives with no hub; with no server it waits for
+`lf task sync`. The first `lf task list` or `lf repo tracker` in a clone the Machine
 has saved nothing in does one exchange before it reads, which registers the
-clone for the server's minute. A cold Task lookup,
-provider exit, `lf wave status --sync` and `lf repo tracker --subscribe` read
-the hub too.
+clone for the server's minute. A served read of such a clone answers with an
+empty plan once and exchanges after its reply. A cold Task lookup,
+provider exit and `lf repo tracker --subscribe` read
+the hub only.
 
 A change costs one small commit per Machine on the remote; sized for about ten
 Machines per repository. Tracker repositories use none of this:

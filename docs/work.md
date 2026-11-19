@@ -235,13 +235,11 @@ second Machine and the plan is there, with nothing to set up:
 laptop$ lf task create 'plan smoke'
 plan smoke · 3e1c9a
 laptop$ lf repo tracker
-Plan: Git origin, 1 unsent.
-  3e1c9a
-laptop$ lf repo tracker
 Plan: Git origin.
 ```
 
-On the mini, `lf task list` shows the Task within a couple of minutes; the
+The Task is on the remote in seconds and `lf task list` on the mini shows it
+within a minute; the
 first `lf task list` in a fresh clone reads the remote before it answers. A
 teammate who clones the repository sees the same plan, and their Tasks appear
 in yours: no account and no server, only push access to the repository.
@@ -254,8 +252,8 @@ processes stay on the Machine that ran them. Claims follow your Git
 
 Every command saves on this Machine first, so nothing waits on the network.
 Each Machine pushes its plan to a ref of its own on the remote
-(`refs/loopflow/plan/<machine id>`) within a minute of a change, a few seconds
-after one made in Desktop, and fetches the others' once a minute;
+(`refs/loopflow/plan/<machine id>`) as part of the save, for five seconds at
+most, and its server fetches the others' once a minute;
 `lf task sync <issue>` does both now. The refs stay out of
 `git branch`, `git status` and a plain clone. A repository with no remote reads
 `Plan: this Machine.` and sends nothing.

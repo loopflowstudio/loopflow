@@ -1533,11 +1533,10 @@ fn the_later_change_shows_on_both_machines_through_the_hub() {
     let title = |store: &loopflow_execution::store::sqlite::SqliteStore| {
         store.task(&task).unwrap().map(|task| task.title)
     };
-    let waiting = ok(&["repo", "tracker"]);
-    assert!(waiting.starts_with("Plan: Git origin, "), "{waiting}");
-    assert!(waiting.contains(" unsent.\n"), "{waiting}");
-    assert!(waiting.contains(&format!("  {identifier}\n")), "{waiting}");
-    assert!(!waiting.contains("Hub "), "{waiting}");
+    // The save itself pushed it, with no server and nothing asked.
+    let pushed = git(bare, &["for-each-ref", "refs/loopflow/plan"]);
+    assert_eq!(pushed.lines().count(), 1, "{pushed}");
+    assert_eq!(ok(&["repo", "tracker"]).trim(), "Plan: Git origin.");
     assert_eq!(
         ok(&["task", "sync", &identifier]).trim(),
         format!("{identifier}: nothing unsent")
@@ -1651,6 +1650,8 @@ fn the_later_change_shows_on_both_machines_through_the_hub() {
         refused.starts_with("Plan: Git origin, unreachable since "),
         "{refused}"
     );
+    assert!(refused.contains(" unsent.\n"), "{refused}");
+    assert!(refused.contains(&format!("  {identifier}\n")), "{refused}");
     ok(&["task", "sync", &identifier]);
     // A fourth home has no hub and never met the teammate.
     let fourth = Home::cloned(&fixture, "fourth", "fourth@test.com", "Grace", bare);

@@ -291,6 +291,55 @@ pub fn execution_context() -> Result<loopflow_storage::child::ChildExecutionCont
     })
 }
 
+/// Where the tools lf starts live (providers, `gh`, `git`, `node`). launchd,
+/// systemd and an SSH command give lf a `PATH` holding none of them; a
+/// terminal's usually holds all of them.
+pub const TOOL_DIRS: [&str; 6] = [
+    "~/.local/bin",
+    "/opt/homebrew/bin",
+    "/opt/homebrew/sbin",
+    "/usr/local/bin",
+    "/usr/local/sbin",
+    "~/.cargo/bin",
+];
+
+/// `TOOL_DIRS` with `~/` under `home`.
+pub fn tool_dirs(home: &Path) -> [String; 6] {
+    TOOL_DIRS.map(|entry| match entry.strip_prefix("~/") {
+        Some(rest) => home.join(rest).to_string_lossy().into_owned(),
+        None => entry.to_owned(),
+    })
+}
+
+/// `path` with each tool directory it lacks appended. Appending only resolves
+/// what `path` could not, so a terminal's own order still wins.
+pub fn tool_path(path: &str, home: &Path) -> String {
+    let mut entries: Vec<String> = path
+        .split(':')
+        .filter(|entry| !entry.is_empty())
+        .map(str::to_owned)
+        .collect();
+    for entry in tool_dirs(home) {
+        if !entries.contains(&entry) {
+            entries.push(entry);
+        }
+    }
+    entries.join(":")
+}
+
+/// Give this process, and everything it starts, the tool directories. Call
+/// first in `main`, while the process has one thread.
+pub fn repair_path() {
+    let Some(home) = dirs::home_dir() else {
+        return;
+    };
+    let path = std::env::var("PATH").unwrap_or_default();
+    let repaired = tool_path(&path, &home);
+    if repaired != path {
+        std::env::set_var("PATH", repaired);
+    }
+}
+
 pub fn which_on_path(name: &Path) -> Option<PathBuf> {
     which_in(name, &std::env::var_os("PATH")?)
 }
@@ -352,6 +401,24 @@ mod tests {
     use std::time::Duration;
 
     use super::terminate_process_group;
+
+    #[test]
+    fn a_bare_path_gains_the_tool_directories_after_its_own() {
+        let home = std::path::Path::new("/Users/maya");
+        let path = super::tool_path("/usr/bin:/bin:/opt/homebrew/bin", home);
+        let entries: Vec<_> = path.split(':').collect();
+        assert_eq!(entries[..3], ["/usr/bin", "/bin", "/opt/homebrew/bin"]);
+        assert_eq!(entries[3], "/Users/maya/.local/bin");
+        assert!(entries.contains(&"/Users/maya/.cargo/bin"));
+        assert_eq!(
+            entries
+                .iter()
+                .filter(|e| **e == "/opt/homebrew/bin")
+                .count(),
+            1
+        );
+        assert_eq!(super::tool_path(&path, home), path);
+    }
 
     #[test]
     fn private_home_keeps_explicit_binary_selection() {

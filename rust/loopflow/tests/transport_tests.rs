@@ -3405,6 +3405,10 @@ fn a_launch_that_found_no_provider_leaves_nothing_to_resume() {
     assert!(shown.contains("'claude' is not installed"), "{missing:?}");
     let log = std::fs::read_to_string(fixture.home.path().join("logs/lf.log")).unwrap();
     assert!(log.contains("'claude' is not installed"), "{log}");
+    // The launcher answered the opening with its own error, not the relayed screen.
+    let reason = std::fs::read_to_string(fixture.home.path().join("receipt")).unwrap();
+    assert!(reason.starts_with("'claude' is not installed"), "{reason}");
+    assert!(!reason.contains("status"), "{reason}");
 
     let mut launch = fixture.command(&["-a", "claude", "resume"]);
     launch.env("PATH", &path);

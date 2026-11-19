@@ -1492,6 +1492,8 @@ fn print_thread(result: &loopflow_model::comment::TaskComments, json: bool) -> a
 }
 
 fn main() -> std::process::ExitCode {
+    // Before any thread exists: everything lf starts inherits this `PATH`.
+    loopflow_execution::os_process::repair_path();
     loopflow::build_info::initialize();
     loopflow_execution::transport::initialize();
     // The holder outlives servers and installs. It writes no journal trace
@@ -1511,20 +1513,24 @@ fn main() -> std::process::ExitCode {
         if let Err(error) = &result {
             loopflow_execution::engine::launch::report::<()>(Err(error));
         }
-        loopflow_execution::transport::report_exit(journal::command_exit_code(&result));
+        let code = journal::command_exit_code(&result);
+        // Still set: `lf open` put this command in a pane and it ended before
+        // its conversation attached. The pane waits; the receipt says why.
+        if std::env::var_os(loopflow_execution::transport::OPEN_RECEIPT_ENV).is_some() {
+            if let Err(error) = &result {
+                tracing::warn!(
+                    command = std::env::args().skip(1).collect::<Vec<_>>().join(" "),
+                    error = format!("{error:#}"),
+                    "conversation opened by lf open failed before attaching"
+                );
+            }
+            loopflow_execution::transport::end_open(&result, code);
+        }
+        loopflow_execution::transport::report_exit(code);
         result
     });
     let code = journal::command_exit_code(&result);
     if let Err(error) = result {
-        // Still set: `lf open` put this command in a pane and it failed before
-        // its conversation attached. The pane closes; the log keeps why.
-        if std::env::var_os(loopflow_execution::transport::OPEN_RECEIPT_ENV).is_some() {
-            tracing::warn!(
-                command = std::env::args().skip(1).collect::<Vec<_>>().join(" "),
-                error = format!("{error:#}"),
-                "conversation opened by lf open failed before attaching"
-            );
-        }
         if error
             .downcast_ref::<loopflow_execution::process::CommandExit>()
             .is_none()

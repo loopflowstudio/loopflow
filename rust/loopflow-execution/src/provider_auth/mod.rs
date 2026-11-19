@@ -79,7 +79,7 @@ static GH_LOGIN_RE: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"(?i)logged in to\s+\S+\s+as\s+([a-z0-9-]+)").expect("github login regex")
 });
 static ANSI_ESCAPE_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"\x1B\[[0-9;]*[A-Za-z]").expect("ansi escape regex"));
+    Lazy::new(|| Regex::new(r"\x1B\[[0-?]*[ -/]*[@-~]").expect("ansi escape regex"));
 
 pub use loopflow_storage::provider::{ParseProviderError, Provider};
 
@@ -1614,7 +1614,7 @@ fn extract_url(line: &str) -> Option<String> {
     })
 }
 
-fn strip_ansi_escape_codes(line: &str) -> String {
+pub(crate) fn strip_ansi_escape_codes(line: &str) -> String {
     static OSC_RE: Lazy<Regex> =
         Lazy::new(|| Regex::new(r"\x1b\]([^\x07\x1b]*)(?:\x07|\x1b\\)").expect("OSC regex"));
     let decoded = OSC_RE.replace_all(line, |captures: &regex::Captures<'_>| {

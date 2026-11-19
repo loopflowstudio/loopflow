@@ -1979,6 +1979,9 @@ fn view(
                 for piece in pieces {
                     let event = match piece {
                         wire::Piece::Bytes(bytes) => {
+                            if matches!(tag, Tag::Out | Tag::Err) {
+                                keep_open_tail(&bytes);
+                            }
                             write_output(&mut terminal, stream, &bytes)?;
                             continue;
                         }
@@ -2273,14 +2276,77 @@ pub const OPEN_RECEIPT_ENV: &str = "LF_OPEN_RECEIPT";
 /// A tab launch succeeds only when this view is attached and its Session's
 /// native client is ready. Startup errors before Return leave no success receipt.
 fn acknowledge_open() {
+    answer_open("attached");
+}
+
+/// Why this opening failed, for `lf open` to report. The first answer stands:
+/// the launcher's own error beats the output its viewer relayed afterwards.
+pub fn fail_open(reason: &str) {
+    answer_open(reason);
+}
+
+fn answer_open(answer: &str) {
     let Some(path) = std::env::var_os(OPEN_RECEIPT_ENV) else {
         return;
     };
     std::env::remove_var(OPEN_RECEIPT_ENV);
     let path = Path::new(&path);
-    let temporary = path.with_extension("ready");
-    if std::fs::write(&temporary, "attached").is_ok() {
-        let _ = std::fs::rename(temporary, path);
+    let temporary = path.with_extension(std::process::id().to_string());
+    if std::fs::write(&temporary, answer).is_ok() {
+        // Fails when another process answered first.
+        let _ = std::fs::hard_link(&temporary, path);
+        let _ = std::fs::remove_file(&temporary);
+    }
+}
+
+/// Output relayed before this opening attached: a provider's last words when
+/// it exits before it is ready.
+static OPEN_TAIL: Mutex<Vec<u8>> = Mutex::new(Vec::new());
+const OPEN_TAIL_LIMIT: usize = 4096;
+
+fn keep_open_tail(bytes: &[u8]) {
+    if std::env::var_os(OPEN_RECEIPT_ENV).is_none() {
+        return;
+    }
+    let mut tail = OPEN_TAIL
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    tail.extend_from_slice(bytes);
+    let excess = tail.len().saturating_sub(OPEN_TAIL_LIMIT);
+    tail.drain(..excess);
+}
+
+/// Answer an opening this process failed without attaching: its own error,
+/// else what the provider said before exiting. A launcher that ran its
+/// conversation to a clean end leaves the answer to its viewer.
+pub fn end_open(result: &Result<()>, code: u8) {
+    let Err(error) = result else {
+        return;
+    };
+    if error
+        .downcast_ref::<crate::process::CommandExit>()
+        .is_none()
+    {
+        return fail_open(&format!("{error:#}"));
+    }
+    let tail = OPEN_TAIL
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    fail_open(&open_failure(&String::from_utf8_lossy(&tail), code));
+}
+
+fn open_failure(tail: &str, code: u8) -> String {
+    let exit = format!("Conversation exited before attachment (status {code})");
+    let shown = crate::provider_auth::strip_ansi_escape_codes(tail);
+    let lines: Vec<&str> = shown
+        .split(['\r', '\n'])
+        .map(str::trim_end)
+        .filter(|line| !line.trim().is_empty())
+        .collect();
+    if lines.is_empty() {
+        exit
+    } else {
+        format!("{}\n{exit}", lines.join("\n"))
     }
 }
 
@@ -2583,6 +2649,45 @@ pub fn report_exit(code: u8) {
         false,
         None,
     );
+}
+
+#[cfg(test)]
+mod open_receipt_tests {
+    use super::{acknowledge_open, fail_open, open_failure, OPEN_RECEIPT_ENV};
+
+    #[test]
+    fn the_first_answer_to_an_opening_stands() {
+        let _lock = loopflow_test_support::env_lock().lock().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let receipt = dir.path().join("receipt");
+        std::env::set_var(OPEN_RECEIPT_ENV, &receipt);
+        fail_open("'claude' is not installed");
+        assert!(std::env::var_os(OPEN_RECEIPT_ENV).is_none());
+        std::env::set_var(OPEN_RECEIPT_ENV, &receipt);
+        fail_open("relayed tail");
+        std::env::set_var(OPEN_RECEIPT_ENV, &receipt);
+        acknowledge_open();
+        assert_eq!(
+            std::fs::read_to_string(&receipt).unwrap(),
+            "'claude' is not installed"
+        );
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn a_provider_that_exits_unready_is_reported_in_its_own_words() {
+        assert_eq!(
+            open_failure(
+                "\x1b[2J\x1b[H\x1b[31mNo conversation found\x1b[0m\r\n\r\n",
+                1
+            ),
+            "No conversation found\nConversation exited before attachment (status 1)"
+        );
+        assert_eq!(
+            open_failure("\x1b[?25h\r\n", 7),
+            "Conversation exited before attachment (status 7)"
+        );
+    }
 }
 
 #[cfg(test)]

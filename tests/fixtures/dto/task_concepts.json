@@ -54,7 +54,11 @@
           "task_id": "task_22222222222222222222222222222222",
           "unavailable": "Task checkout is unavailable",
           "worktree": "/repo/fix-2"
-        }
+        },
+        "ended": null,
+        "start": null,
+        "outlook": null,
+        "status_line": "unknown"
       },
       {
         "account": null,
@@ -108,7 +112,11 @@
           "task_id": "task_22222222222222222222222222222222",
           "unavailable": "Task checkout is unavailable",
           "worktree": "/repo/fix-2"
-        }
+        },
+        "ended": null,
+        "start": null,
+        "outlook": null,
+        "status_line": "unknown"
       },
       {
         "account": null,
@@ -160,7 +168,11 @@
           "task_id": null,
           "unavailable": "Persistent checkout is unavailable",
           "worktree": "/repo/fix-2"
-        }
+        },
+        "ended": null,
+        "start": null,
+        "outlook": null,
+        "status_line": "unknown"
       },
       {
         "account": null,
@@ -214,7 +226,11 @@
           "task_id": "task_22222222222222222222222222222222",
           "unavailable": "Task checkout is unavailable",
           "worktree": "/repo/fix-2"
-        }
+        },
+        "ended": null,
+        "start": null,
+        "outlook": null,
+        "status_line": "unknown"
       },
       {
         "account": null,
@@ -266,7 +282,11 @@
           "task_id": null,
           "unavailable": "Persistent checkout is unavailable",
           "worktree": "/repo/fix-2"
-        }
+        },
+        "ended": null,
+        "start": null,
+        "outlook": null,
+        "status_line": "unknown"
       }
     ],
     "tasks": [
@@ -728,7 +748,11 @@
           "task_id": "task_22222222222222222222222222222222",
           "unavailable": "Task checkout is unavailable",
           "worktree": "/repo/fix-2"
-        }
+        },
+        "ended": null,
+        "start": null,
+        "outlook": null,
+        "status_line": "running"
       },
       {
         "account": null,
@@ -782,7 +806,11 @@
           "task_id": "task_22222222222222222222222222222222",
           "unavailable": "Task checkout is unavailable",
           "worktree": "/repo/fix-2"
-        }
+        },
+        "ended": null,
+        "start": null,
+        "outlook": null,
+        "status_line": "unknown"
       },
       {
         "account": null,
@@ -834,7 +862,11 @@
           "task_id": null,
           "unavailable": "Persistent checkout is unavailable",
           "worktree": "/repo/fix-2"
-        }
+        },
+        "ended": null,
+        "start": null,
+        "outlook": null,
+        "status_line": "unknown"
       },
       {
         "account": null,
@@ -888,7 +920,11 @@
           "task_id": "task_22222222222222222222222222222222",
           "unavailable": "Task checkout is unavailable",
           "worktree": "/repo/fix-2"
-        }
+        },
+        "ended": null,
+        "start": null,
+        "outlook": null,
+        "status_line": "unknown"
       },
       {
         "account": null,
@@ -940,7 +976,11 @@
           "task_id": null,
           "unavailable": "Persistent checkout is unavailable",
           "worktree": "/repo/fix-2"
-        }
+        },
+        "ended": null,
+        "start": null,
+        "outlook": null,
+        "status_line": "unknown"
       }
     ],
     "tasks": [
@@ -1411,7 +1451,11 @@
           "task_id": "task_22222222222222222222222222222222",
           "unavailable": "Task checkout is unavailable",
           "worktree": "/repo/fix-2"
-        }
+        },
+        "ended": null,
+        "start": null,
+        "outlook": null,
+        "status_line": "running"
       },
       {
         "account": null,
@@ -1465,7 +1509,11 @@
           "task_id": "task_22222222222222222222222222222222",
           "unavailable": "Task checkout is unavailable",
           "worktree": "/repo/fix-2"
-        }
+        },
+        "ended": null,
+        "start": null,
+        "outlook": null,
+        "status_line": "unknown"
       },
       {
         "account": null,
@@ -1517,7 +1565,11 @@
           "task_id": null,
           "unavailable": "Persistent checkout is unavailable",
           "worktree": "/repo/fix-2"
-        }
+        },
+        "ended": null,
+        "start": null,
+        "outlook": null,
+        "status_line": "unknown"
       },
       {
         "account": null,
@@ -1571,7 +1623,11 @@
           "task_id": "task_22222222222222222222222222222222",
           "unavailable": "Task checkout is unavailable",
           "worktree": "/repo/fix-2"
-        }
+        },
+        "ended": null,
+        "start": null,
+        "outlook": null,
+        "status_line": "unknown"
       },
       {
         "account": null,
@@ -1623,7 +1679,11 @@
           "task_id": null,
           "unavailable": "Persistent checkout is unavailable",
           "worktree": "/repo/fix-2"
-        }
+        },
+        "ended": null,
+        "start": null,
+        "outlook": null,
+        "status_line": "unknown"
       }
     ],
     "tasks": [
@@ -2085,7 +2145,11 @@
           "task_id": "task_22222222222222222222222222222222",
           "unavailable": "Task checkout is unavailable",
           "worktree": "/repo/fix-2"
-        }
+        },
+        "ended": null,
+        "start": null,
+        "outlook": null,
+        "status_line": "running"
       },
       {
         "account": null,
@@ -2139,7 +2203,11 @@
           "task_id": "task_22222222222222222222222222222222",
           "unavailable": "Task checkout is unavailable",
           "worktree": "/repo/fix-2"
-        }
+        },
+        "ended": null,
+        "start": null,
+        "outlook": null,
+        "status_line": "unknown"
       },
       {
         "account": null,
@@ -2191,7 +2259,11 @@
           "task_id": null,
           "unavailable": "Persistent checkout is unavailable",
           "worktree": "/repo/fix-2"
-        }
+        },
+        "ended": null,
+        "start": null,
+        "outlook": null,
+        "status_line": "unknown"
       },
       {
         "account": null,
@@ -2245,7 +2317,11 @@
           "task_id": "task_22222222222222222222222222222222",
           "unavailable": "Task checkout is unavailable",
           "worktree": "/repo/fix-2"
-        }
+        },
+        "ended": null,
+        "start": null,
+        "outlook": null,
+        "status_line": "unknown"
       },
       {
         "account": null,
@@ -2297,7 +2373,11 @@
           "task_id": null,
           "unavailable": "Persistent checkout is unavailable",
           "worktree": "/repo/fix-2"
-        }
+        },
+        "ended": null,
+        "start": null,
+        "outlook": null,
+        "status_line": "unknown"
       }
     ],
     "tasks": [
@@ -2770,7 +2850,11 @@
           "task_id": "task_22222222222222222222222222222222",
           "unavailable": "Task checkout is unavailable",
           "worktree": "/repo/fix-2"
-        }
+        },
+        "ended": null,
+        "start": null,
+        "outlook": null,
+        "status_line": "running"
       },
       {
         "account": null,
@@ -2824,7 +2908,11 @@
           "task_id": "task_22222222222222222222222222222222",
           "unavailable": "Task checkout is unavailable",
           "worktree": "/repo/fix-2"
-        }
+        },
+        "ended": null,
+        "start": null,
+        "outlook": null,
+        "status_line": "unknown"
       },
       {
         "account": null,
@@ -2876,7 +2964,11 @@
           "task_id": null,
           "unavailable": "Persistent checkout is unavailable",
           "worktree": "/repo/fix-2"
-        }
+        },
+        "ended": null,
+        "start": null,
+        "outlook": null,
+        "status_line": "unknown"
       },
       {
         "account": null,
@@ -2930,7 +3022,11 @@
           "task_id": "task_22222222222222222222222222222222",
           "unavailable": "Task checkout is unavailable",
           "worktree": "/repo/fix-2"
-        }
+        },
+        "ended": null,
+        "start": null,
+        "outlook": null,
+        "status_line": "unknown"
       },
       {
         "account": null,
@@ -2982,7 +3078,11 @@
           "task_id": null,
           "unavailable": "Persistent checkout is unavailable",
           "worktree": "/repo/fix-2"
-        }
+        },
+        "ended": null,
+        "start": null,
+        "outlook": null,
+        "status_line": "unknown"
       }
     ],
     "tasks": [

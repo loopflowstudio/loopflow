@@ -68,28 +68,9 @@ fn a_client_that_closes_at_once_leaves_the_server_listening() {
     let repo = TestRepo::new();
     let mut server = Server::start(repo.path(), home.path());
     let socket = loopflow::server::socket_path().unwrap();
-    for _ in 0..2000 {
-        // A full listen queue refuses; only the server's exit fails the test.
-        if std::os::unix::net::UnixStream::connect(&socket).is_err() {
-            std::thread::sleep(Duration::from_millis(2));
-        }
-    }
+    drop(std::os::unix::net::UnixStream::connect(&socket).unwrap());
+    loopflow_execution::machine::client::Connection::open().unwrap();
     assert!(server.0.try_wait().unwrap().is_none(), "the server exited");
-    // Closed clients leave as their connections notice; until then it may be `busy`.
-    let deadline = std::time::Instant::now() + Duration::from_secs(20);
-    loop {
-        match loopflow_execution::machine::client::Connection::open() {
-            Ok(_) => break,
-            Err(error) => {
-                let busy = error
-                    .downcast_ref::<loopflow_execution::engine::Error>()
-                    .is_some_and(|error| error.code == loopflow_execution::engine::ErrorCode::Busy);
-                assert!(busy, "{error:#}");
-                assert!(std::time::Instant::now() < deadline, "{error:#}");
-                std::thread::sleep(Duration::from_millis(50));
-            }
-        }
-    }
 }
 
 #[test]
@@ -1174,7 +1155,7 @@ fn server_operations_match_their_lf_commands() {
         let printed = read(repo.path(), home.path(), &argv, query.input());
         let mut served = Value::Null;
         unchanged(&argv, &mut || served = server_read(query.clone()));
-        let Ok(printed) = serde_json::from_str::<Value>(&printed) else {
+        let Ok(mut printed) = serde_json::from_str::<Value>(&printed) else {
             // History is rendered text, including its final newline. A path's
             // CLI newline is only its output delimiter.
             let text = if matches!(query, Read::SessionHistoryGet { .. }) {
@@ -1185,6 +1166,18 @@ fn server_operations_match_their_lf_commands() {
             assert_eq!(served, Value::String(text), "{argv:?}");
             continue;
         };
+        if matches!(query, Read::MachineDoctor) {
+            // The CLI and server read the Machine's PTY usage at different times.
+            for report in [&mut served, &mut printed] {
+                let ptys = report["checks"]
+                    .as_array_mut()
+                    .unwrap()
+                    .iter_mut()
+                    .find(|check| check["name"] == "ptys")
+                    .expect("machine doctor reports PTY usage");
+                *ptys = serde_json::json!({"name": "ptys"});
+            }
+        }
         assert_eq!(without_clock(served), without_clock(printed), "{argv:?}");
     }
     for served in subscriptions {

@@ -670,6 +670,7 @@ mod tests {
         let id = TaskId::new();
         store
             .create_task(&NewTask {
+                parent_task_id: None,
                 repository_id: crate::test_fixture::repository(store, "/repo"),
                 id: id.clone(),
                 project_id: Some(project),

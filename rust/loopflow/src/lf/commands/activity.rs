@@ -497,6 +497,7 @@ mod tests {
         .unwrap();
         let task = store
             .create_task(&loopflow_execution::work::task::NewTask {
+                parent_task_id: None,
                 repository_id: repository,
                 id: loopflow_model::durable::TaskId::new(),
                 project_id: None,

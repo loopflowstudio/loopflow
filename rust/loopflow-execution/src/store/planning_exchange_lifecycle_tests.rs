@@ -17,6 +17,7 @@ fn standalone_task_exchange_preserves_membership_comments_and_ownership() {
     b.bind_git_destination(path, &route).unwrap();
     let task = a
         .create_task(&NewTask {
+            parent_task_id: None,
             id: TaskId::new(),
             repository_id: crate::repository::location::ensure_repository(&a, path).unwrap(),
             project_id: None,

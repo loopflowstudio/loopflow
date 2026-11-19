@@ -1690,6 +1690,7 @@ mod tests {
     async fn seed_task(store: &SharedStore, worktree: &Path) -> TaskId {
         let now = OffsetDateTime::now_utc();
         let task = Task {
+            parent_task_id: None,
             repository_id: crate::repository::location::ensure_repository(
                 &store.sqlite,
                 &worktree.display().to_string(),

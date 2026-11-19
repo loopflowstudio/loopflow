@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::lf::commands::session::SessionFacts;
 use crate::lf::commands::session_history::format_tokens;
-use crate::lf::commands::task_row::{TaskDetail, TaskGraphRow, TaskNames, TaskThread};
+use crate::lf::commands::task_row::{TaskDetail, TaskGraphRow, TaskNames, TaskRow, TaskThread};
 use loopflow_execution::durable::{TaskSection, TaskState};
 use loopflow_execution::ops::task_execution::{TaskExecutionSnapshot, TaskExecutionState};
 use loopflow_execution::output::Colors;
@@ -1182,6 +1182,55 @@ pub(crate) async fn task_row(store: &SharedStore, task: &Task) -> Result<Roadmap
         .expect("one Task reads one row"))
 }
 
+/// The Task `task` was filed from, by identifier, and the Tasks filed from it.
+async fn task_family(store: &SharedStore, task: &Task) -> Result<(Option<String>, Vec<TaskRow>)> {
+    let parent = match &task.parent_task_id {
+        Some(parent) => store.get_task(parent).await?.map(|task| task.identifier),
+        None => None,
+    };
+    let children = store.sqlite.task_children(&task.id)?;
+    if children.is_empty() {
+        return Ok((parent, Vec::new()));
+    }
+    let shared = SharedTaskReads::read(store).await?;
+    let names = TaskNames::read(Some(store)).await?;
+    let rows = snapshot_task_details(store, children.iter().collect(), false, &shared)?
+        .into_iter()
+        .map(|row| names.row(row))
+        .collect();
+    Ok((parent, rows))
+}
+
+/// `lf task status`: the Task it was filed from and one line per child.
+pub fn print_task_family(task: &Task) -> Result<()> {
+    tokio::runtime::Runtime::new()?.block_on(async {
+        let store = loopflow_execution::store::read_existing_registry()?
+            .map(std::sync::Arc::new)
+            .ok_or_else(|| anyhow!("no Loopflow store exists on this Machine"))?;
+        let (parent, children) = task_family(&store, task).await?;
+        if let Some(parent) = parent {
+            println!("  parent: {parent}");
+        }
+        let width = |text: fn(&TaskRow) -> &str| {
+            children
+                .iter()
+                .map(|row| text(row).chars().count())
+                .max()
+                .unwrap_or(0)
+        };
+        let (identifier, title) = (width(|row| &row.identifier), width(|row| &row.title));
+        for child in &children {
+            println!(
+                "  child: {:identifier$}  {:title$}  {}",
+                child.identifier,
+                child.title,
+                child.standing()
+            );
+        }
+        Ok(())
+    })
+}
+
 /// `lf task status --json`.
 pub fn print_task_detail(status: loopflow_execution::ops::task::TaskStatus) -> Result<()> {
     let rt = tokio::runtime::Runtime::new()?;
@@ -1234,8 +1283,11 @@ pub(crate) async fn task_detail(
         }
     }
     let summary = store.sqlite.task_summary(&task.id)?;
+    let (parent, children) = task_family(store, &task).await?;
     Ok(TaskDetail {
         summary,
+        parent,
+        children,
         stack_parent: status
             .execution
             .and_then(|execution| execution.stack_parent),

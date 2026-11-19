@@ -289,6 +289,7 @@ fn asana_task_create_mirrors_task_under_its_loopflow_identity() {
             Some("Ship the Asana provider".into()),
             Some("Mirror **Tasks** into Asana".into()),
             crate::ops::task::TaskAdoptionOptions::default(),
+            Default::default(),
             None,
         )
         .unwrap();
@@ -325,6 +326,7 @@ fn asana_status_title_and_comments_write_back_to_the_mirrored_task() {
             Some("Write back".into()),
             None,
             crate::ops::task::TaskAdoptionOptions::default(),
+            Default::default(),
             None,
         )
         .unwrap();
@@ -394,6 +396,7 @@ fn asana_outage_keeps_the_local_save_and_publishes_once_on_retry() {
             Some("Saved offline".into()),
             None,
             crate::ops::task::TaskAdoptionOptions::default(),
+            Default::default(),
             None,
         )
         .unwrap();
@@ -422,6 +425,7 @@ fn asana_comments_and_edits_by_people_become_task_direction() {
             Some("Take direction".into()),
             None,
             crate::ops::task::TaskAdoptionOptions::default(),
+            Default::default(),
             None,
         )
         .unwrap();
@@ -521,6 +525,7 @@ fn asana_tasks_coworkers_delete_leave_the_plan() {
             Some("Deleted in Asana".into()),
             None,
             crate::ops::task::TaskAdoptionOptions::default(),
+            Default::default(),
             None,
         )
         .unwrap();
@@ -553,6 +558,7 @@ fn asana_wave_projects_become_team_projects_holding_their_tasks() {
             Some("Planned work".into()),
             None,
             crate::ops::task::TaskAdoptionOptions::default(),
+            Default::default(),
             None,
         )
         .unwrap();

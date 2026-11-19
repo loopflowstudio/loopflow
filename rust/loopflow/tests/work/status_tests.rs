@@ -248,6 +248,7 @@ fn seed_stale_project_work(
     store.insert_project(&stale).expect("seed stale Project");
     select_project(home, &wave, stale.tracker_id.as_ref().unwrap().as_str());
     let stale_task = Task {
+        parent_task_id: None,
         repository_id: loopflow_execution::repository::location::ensure_repository(
             &store,
             wave.repo(),

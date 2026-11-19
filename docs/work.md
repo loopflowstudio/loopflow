@@ -228,9 +228,9 @@ LOO-12  idle
   …
   PR: #1972 merged
   Merged · 3 children open
-  child: LOO-14  Retry budget per host    running at implement
-  child: LOO-15  Log each retry           at human-review
-  child: LOO-16  Document the budget      unstarted
+  child: LOO-14  Retry budget per host  moving
+  child: LOO-15  Log each retry         idle at human-review
+  child: LOO-16  Document the budget    unstarted
 ```
 
 A Task filed from a Task's conversation is its child, whether you typed the
@@ -585,9 +585,11 @@ ambiguous prefix lists its matches.
 
 **Parent.** `--parent <ID>` on `lf task create` names the parent;
 `--parent none` files top-level; an unknown ID is an error naming it, and so
-is a parent that would be its own descendant. In `--json`, `parent` is the
-parent's identifier or `null`, and `lf task status --json` carries `children`,
-the same rows `lf task list --json` prints, `[]` when there are none.
+is a parent that would be its own descendant. `lf task create --json` carries
+the parent's ID as `task.parent_task_id`. `lf task status --json` carries
+`parent`, the parent's identifier or `null`, and `children`, the same rows
+`lf task list --json` prints, `[]` when there are none. A child's own
+`lf task status` prints `parent: LOO-12`.
 
 **Graph selection.** A Task keeps the graph it took up. Before its first run:
 the one named on `lf task run LOO-12 GRAPH`, then its Wave's default, then

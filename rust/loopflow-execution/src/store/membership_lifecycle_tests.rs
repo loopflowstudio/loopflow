@@ -22,6 +22,7 @@ fn membership_moves_preserve_work_and_capture_owners() {
     .unwrap();
     let task = store
         .create_task(&NewTask {
+            parent_task_id: None,
             id: TaskId::new(),
             repository_id: repository,
             project_id: None,

@@ -1349,6 +1349,7 @@ mod tests {
         let store = crate::test_fixture::open(&path).unwrap();
         let task = store
             .create_task(&crate::work::task::NewTask {
+                parent_task_id: None,
                 id: TaskId::new(),
                 repository_id: crate::test_fixture::repository(&store, "/request-stop"),
                 project_id: None,
@@ -1538,6 +1539,7 @@ mod tests {
             let store = crate::test_fixture::open(&dir.path().join("db")).unwrap();
             store
                 .create_task(&crate::work::task::NewTask {
+                    parent_task_id: None,
                     id: id.clone(),
                     repository_id: crate::test_fixture::repository(&store, "/moving"),
                     project_id: None,
@@ -1585,6 +1587,7 @@ mod tests {
         let id = TaskId::new();
         store
             .create_task(&crate::work::task::NewTask {
+                parent_task_id: None,
                 id: id.clone(),
                 repository_id: crate::test_fixture::repository(&store, "/shipping"),
                 project_id: None,

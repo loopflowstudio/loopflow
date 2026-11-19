@@ -587,6 +587,7 @@ mod tests {
             self.store
                 .sqlite
                 .create_task(&loopflow_storage::work::task::NewTask {
+                    parent_task_id: None,
                     repository_id: loopflow_storage::test_fixture::repository(
                         &self.store.sqlite,
                         "/repo",

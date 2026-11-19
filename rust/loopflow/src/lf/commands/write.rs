@@ -108,6 +108,8 @@ writes! {
             title: title.clone(),
             request: request.clone(),
             wave: wave.clone(),
+            parent: None,
+            caller: None,
             graph: graph.clone(),
             session: session.clone(),
             worktree: None,

@@ -614,6 +614,101 @@ for line in sys.stdin:
     std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
 }
 
+#[test]
+fn a_task_filed_from_a_tasks_conversation_shows_under_it() {
+    let home = tempfile::tempdir().unwrap();
+    let repo = loopflow_test_support::TestRepo::new();
+    let lf = |args: &[&str], caller: Option<&str>| {
+        let mut command = command(home.path(), args);
+        command.current_dir(repo.path()).env("HOME", home.path());
+        if let Some(caller) = caller {
+            command.env("LF_AGENT_CALLER", caller);
+        }
+        let output = command.output().unwrap();
+        assert!(
+            output.status.success(),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout).unwrap()
+    };
+    let json = |text: String| serde_json::from_str::<serde_json::Value>(&text).unwrap();
+    let parent = json(lf(
+        &["task", "create", "--title", "Retry requests", "--json"],
+        None,
+    ));
+    let parent_id = parent["task"]["id"].as_str().unwrap().to_owned();
+    let parent_name = parent["task"]["identifier"].as_str().unwrap().to_owned();
+    assert!(parent["task"]["parent_task_id"].is_null());
+
+    // An agent in the Task's conversation runs the command.
+    let (session, _, _) = prepare_conversation(home.path(), repo.path(), "claude", "Parent");
+    let database = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    let launcher = loopflow_model::id::LfProcessId::new();
+    database
+        .execute(
+            "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
+            [&launcher],
+        )
+        .unwrap();
+    database
+        .execute(
+            "UPDATE agent_sessions SET task_id=?2 WHERE id=?1",
+            [&session, &parent_id],
+        )
+        .unwrap();
+    let store = loopflow_execution::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
+    let attachment =
+        attachment::claim_session_attachment(&store, &session, None, &launcher).unwrap();
+    let caller = serde_json::to_string(&attachment.caller(session.clone().into(), None)).unwrap();
+
+    let child = json(lf(
+        &[
+            "task",
+            "create",
+            "--title",
+            "Retry budget per host",
+            "--json",
+        ],
+        Some(&caller),
+    ));
+    assert_eq!(child["task"]["parent_task_id"], parent_id);
+    let child_name = child["task"]["identifier"].as_str().unwrap();
+    let apart = json(lf(
+        &[
+            "task",
+            "create",
+            "--title",
+            "Unrelated",
+            "--parent",
+            "none",
+            "--json",
+        ],
+        Some(&caller),
+    ));
+    assert!(apart["task"]["parent_task_id"].is_null());
+
+    let status = json(lf(&["task", "status", &parent_name, "--json"], None));
+    assert!(status["parent"].is_null());
+    let children = status["children"].as_array().unwrap();
+    assert_eq!(children.len(), 1, "{children:?}");
+    assert_eq!(children[0]["identifier"], child_name);
+    assert_eq!(children[0]["state"], "unstarted");
+    let status = json(lf(&["task", "status", child_name, "--json"], None));
+    assert_eq!(status["parent"], parent_name);
+    assert_eq!(status["children"], serde_json::json!([]));
+
+    let shown = lf(&["task", "status", &parent_name], None);
+    assert!(
+        shown.contains(&format!(
+            "child: {child_name}  Retry budget per host  unstarted"
+        )),
+        "{shown}"
+    );
+    let shown = lf(&["task", "status", child_name], None);
+    assert!(shown.contains(&format!("parent: {parent_name}")), "{shown}");
+}
+
 #[cfg(unix)]
 #[test]
 fn a_closed_tasks_conversation_resumes_in_the_main_checkout() {

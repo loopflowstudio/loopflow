@@ -964,6 +964,7 @@
           "state": "pending"
         },
         "project_id": "proj_e7b7e8a944a340d0ad66d4701134ce98",
+        "parent_task_id": null,
         "rank": 0,
         "repo_id": "repo_e5aa50b1a744490b8ebb7f1b02455c36",
         "revision": 6,
@@ -1903,6 +1904,7 @@
           "state": "pending"
         },
         "project_id": "proj_e7b7e8a944a340d0ad66d4701134ce98",
+        "parent_task_id": null,
         "rank": 0,
         "repo_id": "repo_e5aa50b1a744490b8ebb7f1b02455c36",
         "revision": 6,
@@ -2736,6 +2738,7 @@
           "state": "current"
         },
         "project_id": "proj_e7b7e8a944a340d0ad66d4701134ce98",
+        "parent_task_id": null,
         "rank": 0,
         "repo_id": "repo_e5aa50b1a744490b8ebb7f1b02455c36",
         "revision": 5,

@@ -11405,6 +11405,13 @@
             "null"
           ]
         },
+        "parent_task_id": {
+          "description": "The Task this one was filed from; its children are the Tasks naming it.\nNot the stack: `parent_pr_id` says which branch it starts from.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "project_id": {
           "type": [
             "string",
@@ -11496,6 +11503,7 @@
         "wave_id",
         "repo_id",
         "project_id",
+        "parent_task_id",
         "worktree",
         "workspace_slug",
         "branch",

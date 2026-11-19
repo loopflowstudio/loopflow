@@ -217,6 +217,7 @@ impl Pair {
         let task = mini
             .store
             .create_task(&NewTask {
+                parent_task_id: None,
                 repository_id: crate::repository::location::ensure_repository(
                     &mini.store,
                     &mini.path,

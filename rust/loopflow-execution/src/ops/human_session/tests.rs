@@ -1534,6 +1534,7 @@ async fn a_held_task_conversation_without_a_view_offers_attach() {
         .store
         .sqlite
         .create_task(&loopflow_storage::work::task::NewTask {
+            parent_task_id: None,
             repository_id: crate::repository::location::ensure_repository(
                 &logins.store.sqlite,
                 "/fixture",

@@ -21,6 +21,10 @@ pub struct TaskCreation {
     pub title: Option<String>,
     pub request: Option<String>,
     pub wave: Option<String>,
+    /// `--parent`: a Task, or `none`.
+    pub parent: Option<String>,
+    /// The conversation that ran the command; its Task is the default parent.
+    pub caller: Option<loopflow_model::id::LfSessionId>,
     pub graph: Option<String>,
     pub session: Option<String>,
     pub worktree: Option<PathBuf>,
@@ -176,6 +180,10 @@ pub fn create(id: &str, mut input: TaskCreation) -> Result<Created> {
                 session: input.session.clone(),
                 worktree: input.worktree.clone(),
             };
+            let parent = crate::ops::task::TaskParentChoice {
+                named: input.parent.clone(),
+                caller: input.caller.clone(),
+            };
             step("file_task", || {
                 if admits {
                     crate::ops::task::admit_task(
@@ -184,6 +192,7 @@ pub fn create(id: &str, mut input: TaskCreation) -> Result<Created> {
                         input.title.clone(),
                         input.request.clone(),
                         adoption,
+                        parent,
                         input.graph.as_deref(),
                         identity,
                     )
@@ -194,6 +203,7 @@ pub fn create(id: &str, mut input: TaskCreation) -> Result<Created> {
                         input.title.clone(),
                         input.request.clone(),
                         adoption,
+                        parent,
                         Some(identity),
                     )
                 }

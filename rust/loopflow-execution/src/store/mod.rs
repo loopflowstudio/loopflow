@@ -790,6 +790,7 @@ mod tests {
             .expect("current unix time");
         let id = TaskId::new();
         Task {
+            parent_task_id: None,
             repository_id: crate::repository::location::ensure_repository(
                 &store.sqlite,
                 wave.repo(),
@@ -1441,6 +1442,7 @@ mod tests {
                 store
                     .sqlite
                     .create_task(&loopflow_storage::work::task::NewTask {
+                        parent_task_id: None,
                         repository_id: crate::repository::location::ensure_repository(
                             &store.sqlite,
                             directory.path().canonicalize().unwrap().to_str().unwrap(),

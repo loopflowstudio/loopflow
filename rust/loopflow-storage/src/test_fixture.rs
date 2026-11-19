@@ -248,6 +248,7 @@ pub fn task() -> (tempfile::TempDir, SqliteStore, Task, TaskPr) {
     )
     .unwrap();
     let task = Task {
+        parent_task_id: None,
         repository_id: crate::test_fixture::repository(&store, "/repo"),
         id: task_id.clone(),
 
@@ -367,6 +368,7 @@ pub fn unowned_task() -> (tempfile::TempDir, SqliteStore, TaskId) {
     let repo = dir.path().canonicalize().unwrap();
     let task = store
         .create_task(&crate::work::task::NewTask {
+            parent_task_id: None,
             id: TaskId::new(),
             repository_id: crate::test_fixture::repository(&store, repo.to_str().unwrap()),
             project_id: None,

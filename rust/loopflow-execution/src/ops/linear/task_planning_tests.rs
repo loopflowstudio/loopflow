@@ -222,6 +222,7 @@ esac
                 .find(|project| project.tracker_id.as_ref().unwrap().as_str() == "project-1")
                 .unwrap();
             let task = Task {
+                parent_task_id: None,
                 repository_id: crate::repository::location::ensure_repository(
                     &fixture.store.sqlite,
                     repo.to_str().unwrap(),
@@ -526,6 +527,7 @@ fn with_export_plan(
         .store
         .sqlite
         .create_task(&loopflow_storage::work::task::NewTask {
+            parent_task_id: None,
             repository_id: crate::repository::location::ensure_repository(
                 &fixture.store.sqlite,
                 repo.to_str().unwrap(),
@@ -563,6 +565,7 @@ fn task_create_in_linear_repository_returns_published_task_without_execution() {
             Some("New Linear Task".into()),
             Some("Retain this work".into()),
             crate::ops::task::TaskAdoptionOptions::default(),
+            Default::default(),
             None,
         )
         .unwrap();

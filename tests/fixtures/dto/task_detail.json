@@ -60,5 +60,7 @@
     "identifier": "LOO-1",
     "branch": "jack/loo-1-parse-mail",
     "pr_number": 1718
-  }
+  },
+  "parent": null,
+  "children": []
 }

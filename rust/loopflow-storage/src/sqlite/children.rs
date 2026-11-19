@@ -65,6 +65,7 @@ fn task_creation_in(conn: &Connection, task: &TaskId) -> StoreResult<Option<NewT
         [task.as_str()],
         |row| {
             Ok(NewTask {
+                parent_task_id: None,
                 due_date: row.get(3)?,
                 id: task.clone(),
                 project_id: row.get::<_, Option<String>>(0)?.map(ProjectId::from_raw),
@@ -120,6 +121,7 @@ pub(super) fn create_task_in(conn: &Connection, input: &NewTask) -> StoreResult<
         wave_id,
         repository_id: input.repository_id.clone(),
         project_id: input.project_id.clone(),
+        parent_task_id: input.parent_task_id.clone(),
         worktree: None,
         workspace_slug: String::new(),
         branch: String::new(),
@@ -699,6 +701,22 @@ impl SqliteStore {
             wave_id.map(|id| ("p.wave_id", id.as_str())),
             &super::durable::task_open_sql("t"),
         )
+    }
+
+    /// The Tasks filed from `parent`, in filing order, open or closed.
+    pub fn task_children(&self, parent: &TaskId) -> StoreResult<Vec<Task>> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let conn = conn.savepoint()?;
+        let query = format!(
+            "{TASK_COLUMNS} WHERE t.parent_task_id=?1 AND {TASK_VISIBLE}
+             ORDER BY t.created_at, t.id"
+        );
+        let mut statement = conn.prepare(&query)?;
+        // A few rows: each reads its own identifier, not every Task's.
+        let tasks = statement
+            .query_map([parent.as_str()], |row| map_task_row(&conn, row))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(tasks)
     }
 
     /// Closed Tasks of one repository (and Wave), newest first, `limit` at a
@@ -1620,9 +1638,10 @@ fn insert_task_row(conn: &Connection, task: &Task) -> StoreResult<()> {
         ),
         crate::sqlite::planning_write::WriteOrigin::Local,
     )?;
-    conn.execute("UPDATE tasks SET pm_snapshot_synced_at=?2,workspace_slug=?3,created_at=?4,updated_at=?5 WHERE id=?1",params![
+    conn.execute("UPDATE tasks SET pm_snapshot_synced_at=?2,workspace_slug=?3,created_at=?4,updated_at=?5,parent_task_id=?6 WHERE id=?1",params![
         task.id.as_str(),task.tracker_synced_at,task.workspace_slug,
-        task.created_at.unix_timestamp(),task.updated_at.unix_timestamp()])?;
+        task.created_at.unix_timestamp(),task.updated_at.unix_timestamp(),
+        task.parent_task_id.as_ref().map(TaskId::as_str)])?;
     write_task_checkout_in(conn, task)
 }
 
@@ -1807,7 +1826,7 @@ const TASK_COLUMNS: &str = "SELECT t.id,t.external_issue_id,
         ORDER BY e.seq DESC LIMIT 1),
         json_object('state','current')),
     t.project_id, t.planning_revision, COALESCE(c.branch,''), COALESCE(c.base_commit,''), c.parent_pr_id,
-    t.planning_rank,t.planning_assignee,t.planning_due_date,COALESCE(t.planning_state,CASE WHEN t.planning_completed=1 THEN 'completed' END),t.planning_completed_at,t.repository_id
+    t.planning_rank,t.planning_assignee,t.planning_due_date,COALESCE(t.planning_state,CASE WHEN t.planning_completed=1 THEN 'completed' END),t.planning_completed_at,t.repository_id,t.parent_task_id
     FROM tasks t LEFT JOIN projects p ON p.id=t.project_id
     LEFT JOIN task_checkouts c ON c.task_id=t.id";
 pub(super) const TASK_PR_COLUMNS: &str = "SELECT
@@ -2267,6 +2286,7 @@ fn map_task_columns(
             .map_err(|error| invalid_column(10, error))?,
         wave_id: row.get(4)?,
         project_id: row.get::<_, Option<String>>(11)?.map(ProjectId::from_raw),
+        parent_task_id: row.get::<_, Option<String>>(22)?.map(TaskId::from_raw),
         repository_id: loopflow_model::durable::RepositoryId::parse(&row.get::<_, String>(21)?)
             .map_err(|error| invalid_column(21, error))?,
         worktree: row.get::<_, Option<String>>(5)?.map(PathBuf::from),

@@ -50,6 +50,7 @@ fn defer_holds_the_lifecycle_and_a_run_with_nothing_interactive_ahead_ships() {
         .unwrap();
     store
         .create_task(&loopflow_storage::work::task::NewTask {
+            parent_task_id: None,
             repository_id: loopflow_storage::test_fixture::repository(&store, "/repo"),
             id: task.clone(),
             project_id: Some(project),
@@ -214,6 +215,7 @@ fn reaching_end_without_remaining_steps_approves_shipping() {
     let by = LfProcessId::new();
     store
         .create_task(&loopflow_storage::work::task::NewTask {
+            parent_task_id: None,
             repository_id: loopflow_storage::test_fixture::repository(&store, "/repo"),
             id: task.clone(),
             project_id: None,

@@ -501,6 +501,7 @@ impl World {
             Some(title.to_string()),
             Some(report.to_string()),
             loopflow_execution::ops::task::TaskAdoptionOptions::default(),
+            Default::default(),
             None,
         )?)
     }

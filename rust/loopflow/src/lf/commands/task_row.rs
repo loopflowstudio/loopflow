@@ -68,6 +68,27 @@ pub struct TaskDetail {
     /// The Task this one is stacked on; `null` when it builds on the default branch.
     #[serde(deserialize_with = "Option::deserialize")]
     pub stack_parent: Option<loopflow_execution::ops::task::TaskStackParent>,
+    /// The Task this one was filed from, by identifier; `null` for top-level work.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub parent: Option<String>,
+    /// The Tasks filed from this one, in filing order.
+    pub children: Vec<TaskRow>,
+}
+
+impl TaskRow {
+    /// Where the Task stands, in a few words: "idle at human-review".
+    pub fn standing(&self) -> String {
+        let state = serde_json::to_value(self.state)
+            .ok()
+            .and_then(|state| state.as_str().map(str::to_owned))
+            .unwrap_or_default();
+        match self.graph.as_ref().and_then(|graph| graph.step.as_deref()) {
+            Some(step) if !matches!(self.state, TaskState::Done | TaskState::Abandoned) => {
+                format!("{state} at {step}")
+            }
+            _ => state,
+        }
+    }
 }
 
 /// One of the Task's Graph runs; `lf graph show <id>` draws it.

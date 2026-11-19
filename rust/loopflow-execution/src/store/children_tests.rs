@@ -76,6 +76,7 @@ fn task_identifier_repairs_all_generated_titles_from_a_replaced_editor_with_fore
     let store = crate::store::opening::open_ephemeral(&path).unwrap();
     let task = store
         .create_task(&NewTask {
+            parent_task_id: None,
             repository_id: local_repository(&store),
             id: TaskId::new(),
             project_id: Some(local_project(&store)),
@@ -164,6 +165,7 @@ fn task_labels_and_generated_names_follow_local_identity_and_linear_mapping() {
     let store = crate::store::opening::open_ephemeral(&home.path().join("db")).unwrap();
     let task = store
         .create_task(&NewTask {
+            parent_task_id: None,
             repository_id: local_repository(&store),
             id: TaskId::from_raw("task_abcdef10000000000000000000000001"),
             project_id: Some(local_project(&store)),
@@ -324,6 +326,7 @@ fn local_labels_extend_only_for_collisions_including_completed_tasks() {
     for id in [&first, &second] {
         store
             .create_task(&NewTask {
+                parent_task_id: None,
                 repository_id: local_repository(&store),
                 id: id.clone(),
                 project_id: Some(project.clone()),
@@ -355,6 +358,7 @@ fn task_checkout_reads_this_machines_checkout() {
     let store = crate::store::opening::open_ephemeral(&directory.path().join("db")).unwrap();
     let task = store
         .create_task(&NewTask {
+            parent_task_id: None,
             repository_id: local_repository(&store),
             due_date: None,
             id: TaskId::new(),
@@ -394,6 +398,7 @@ fn canonical_task_fields_survive_restart_and_peer_import() {
     let store = crate::store::opening::open_ephemeral(&path).unwrap();
     let task = store
         .create_task(&NewTask {
+            parent_task_id: None,
             repository_id: local_repository(&store),
             id: TaskId::new(),
             project_id: Some(local_project(&store)),
@@ -522,6 +527,7 @@ fn local_planning_creation_retry_keeps_identity_after_edit_and_restart() {
     let path = directory.path().join("loopflow.db");
     let store = crate::store::opening::open_ephemeral(&path).unwrap();
     let input = NewTask {
+        parent_task_id: None,
         repository_id: local_repository(&store),
         due_date: None,
         id: TaskId::new(),
@@ -606,6 +612,7 @@ fn local_planning_provider_mapping_preserves_identity_and_creation_receipt() {
     let store =
         crate::store::opening::open_ephemeral(&directory.path().join("loopflow.db")).unwrap();
     let input = NewTask {
+        parent_task_id: None,
         repository_id: local_repository(&store),
         due_date: None,
         id: TaskId::new(),
@@ -672,6 +679,7 @@ fn local_planning_prefix_collision_is_explicit() {
     let store =
         crate::store::opening::open_ephemeral(&directory.path().join("loopflow.db")).unwrap();
     let input = NewTask {
+        parent_task_id: None,
         repository_id: local_repository(&store),
         due_date: None,
         id: TaskId::parse("task_0123456789ab40008000000000000001").unwrap(),
@@ -918,6 +926,7 @@ fn an_admitted_creation_commits_task_graph_claim_and_conversation_together() {
     let repository_id = local_repository(&store);
     let admit = |request: &str, graph: &str| {
         let creation = NewTask {
+            parent_task_id: None,
             repository_id: repository_id.clone(),
             due_date: None,
             id: TaskId::new(),

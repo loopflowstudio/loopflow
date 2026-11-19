@@ -173,6 +173,7 @@ fn recover_filing_in(conn: &Connection, intent: &RetainedFiling) -> StoreResult<
     let task = super::children::create_task_in(
         conn,
         &crate::work::task::NewTask {
+            parent_task_id: None,
             id,
             repository_id: super::repositories::repository_id_in(
                 conn,

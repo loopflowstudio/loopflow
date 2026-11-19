@@ -2241,7 +2241,7 @@ using lf open's ordinary host selection. Preview and --quote open nothing."
     },
     /// Create a Task; with --run, also start its Graph
     #[command(
-        after_help = "Plain creation files new work, regardless of the current checkout or invoking Session. --run starts the created Task; it does not select work to adopt. Pass --session SESSION or --worktree PATH to adopt existing work, with or without --run. Find Loopflow Session IDs with `lf session list --json`; an agent keeping its chat passes its own ID explicitly. Explicit-source retries return the same Task. Main and Wave checkouts stay shared. Adoption preserves files, branch, history and live attachment; creation alone starts no Graph and approves no Auto-Ship. Remote calls use sources on the selected Machine."
+        after_help = "Plain creation files new work and never adopts the current checkout or invoking Session. Run from a Task's conversation, the new Task is that Task's follow-up: its child, in its Wave. Filed from a child's conversation it is a sibling; --parent ID names another parent and --parent none files top-level work. --run starts the created Task; it does not select work to adopt. Pass --session SESSION or --worktree PATH to adopt existing work, with or without --run. Find Loopflow Session IDs with `lf session list --json`; an agent keeping its chat passes its own ID explicitly. Explicit-source retries return the same Task. Main and Wave checkouts stay shared. Adoption preserves files, branch, history and live attachment; creation alone starts no Graph and approves no Auto-Ship. Remote calls use sources on the selected Machine."
     )]
     Create {
         /// Retry a submitted creation with the same identity and content
@@ -2263,6 +2263,10 @@ using lf open's ordinary host selection. Preview and --quote open nothing."
         /// Explicit Wave membership; omitted creates a standalone Task
         #[arg(long)]
         wave: Option<String>,
+        /// The Task this one is filed from, or `none`; defaults to the Task
+        /// whose conversation runs the command
+        #[arg(long, value_name = "ID")]
+        parent: Option<String>,
         /// Task title; omitted when stdin supplies the report and first line
         #[arg(long)]
         title: Option<String>,

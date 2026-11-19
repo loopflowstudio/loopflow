@@ -1948,6 +1948,7 @@ pub fn task_create(
     title: Option<String>,
     report: Option<String>,
     adoption: TaskAdoptionOptions,
+    parent: TaskParentChoice,
     receipt: Option<loopflow_storage::sqlite::creation::CreationIdentity>,
 ) -> OpsResult<Task> {
     let main = crate::git::worktrees::main_repo_root(repo).map_err(task_error)?;
@@ -1962,8 +1963,10 @@ pub fn task_create(
             identity,
             admit: None,
         });
-        let task =
-            file_task_in(&store, repo, &main, wave, title, report, adoption, receipt).await?;
+        let task = file_task_in(
+            &store, repo, &main, wave, title, report, adoption, parent, receipt,
+        )
+        .await?;
         super::planning_sync::sync_after_save(
             &store,
             &main.to_string_lossy(),
@@ -1981,12 +1984,14 @@ pub fn task_create(
 /// File the Task with its Graph and primary conversation in one transaction,
 /// from retained planning and with no network. Planning exchange follows the
 /// answer (`sync_admitted`); the conversation makes the checkout.
+#[allow(clippy::too_many_arguments)]
 pub fn admit_task(
     repo: &Path,
     wave: Option<&str>,
     title: Option<String>,
     request: Option<String>,
     adoption: TaskAdoptionOptions,
+    parent: TaskParentChoice,
     graph: Option<&str>,
     receipt: loopflow_storage::sqlite::creation::CreationIdentity,
 ) -> OpsResult<Task> {
@@ -2009,6 +2014,7 @@ pub fn admit_task(
             title,
             request,
             adoption,
+            parent,
             Some(receipt),
         )
         .await
@@ -2150,6 +2156,7 @@ async fn file_task_in(
     title: Option<String>,
     report: Option<String>,
     adoption: TaskAdoptionOptions,
+    parent: TaskParentChoice,
     receipt: Option<Receipt<'_>>,
 ) -> OpsResult<Task> {
     let input = resolve_task_create_input(title.as_deref(), report.as_deref())?;
@@ -2194,24 +2201,41 @@ async fn file_task_in(
             super::wave_lifecycle::add(repo, name, None).await?;
         }
     }
+    let repository_id =
+        crate::repository::location::ensure_repository(&store.sqlite, &main.to_string_lossy())
+            .map_err(task_error)?;
+    let parent = parent.resolve(store).await?;
     let selected = select_task_creation_wave(store, main, wave).await?;
+    // With no Wave named, a follow-up is filed in its parent's Wave and Project.
+    let inherited = parent
+        .as_ref()
+        .filter(|parent| wave.is_none() && parent.repository_id == repository_id)
+        .and_then(|parent| parent.project_id.clone().zip(parent.wave_id.clone()));
+    let (selected, inherited) = match (selected, inherited) {
+        (None, Some((project, wave))) => (
+            store.get_wave(&wave).await.map_err(task_error)?,
+            Some(project),
+        ),
+        (selected, _) => (selected, None),
+    };
     let wave_slug = selected.as_ref().map(|wave| wave.slug().to_string());
     let (creation_project, acquisition) = match selected {
         Some(wave) => {
             let acquisition = super::planning_sync::lock_wave_planning(&wave).await?;
-            let project = super::project::current_project(store, &wave)?.id;
+            let project = match inherited {
+                Some(project) => project,
+                None => super::project::current_project(store, &wave)?.id,
+            };
             (Some(project), Some(acquisition))
         }
         None => (None, None),
     };
-    let repository_id =
-        crate::repository::location::ensure_repository(&store.sqlite, &main.to_string_lossy())
-            .map_err(task_error)?;
     let creation = loopflow_storage::work::task::NewTask {
         due_date: None,
         id: loopflow_model::durable::TaskId::new(),
         repository_id,
         project_id: creation_project,
+        parent_task_id: parent.map(|parent| parent.id),
         title: input.title,
         description: input.report,
     };
@@ -2243,6 +2267,44 @@ async fn file_task_in(
         .await
         .map_err(task_error)?
         .ok_or_else(|| task_error("Created Task is missing"))
+}
+
+/// Which Task a new one is filed under.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TaskParentChoice {
+    /// `--parent`: a Task, or `none` for top-level work.
+    pub named: Option<String>,
+    /// The conversation that ran the command. Its Task is the parent when
+    /// none is named.
+    pub caller: Option<loopflow_model::id::LfSessionId>,
+}
+
+impl TaskParentChoice {
+    /// Follow-ups stay flat: filed from a child's conversation, the new Task
+    /// is that child's sibling.
+    async fn resolve(&self, store: &SharedStore) -> OpsResult<Option<Task>> {
+        let unknown = |id: &str| task_error(format!("--parent names an unknown Task: {id}"));
+        let id = match (self.named.as_deref(), &self.caller) {
+            (Some("none"), _) | (None, None) => return Ok(None),
+            (Some(named), _) => crate::store::children::resolve_task_id(&store.sqlite, named, None)
+                .map_err(task_error)?
+                .ok_or_else(|| unknown(named))?,
+            (None, Some(caller)) => {
+                let Some(task) = crate::ops::human_session::moves::conversation_task(
+                    &store.sqlite,
+                    caller.as_str(),
+                )
+                .map_err(task_error)?
+                else {
+                    return Ok(None);
+                };
+                let own = store.get_task(&task).await.map_err(task_error)?;
+                own.and_then(|own| own.parent_task_id).unwrap_or(task)
+            }
+        };
+        let parent = store.get_task(&id).await.map_err(task_error)?;
+        Ok(Some(parent.ok_or_else(|| unknown(id.as_str()))?))
+    }
 }
 
 pub fn resolve_task_create_input(

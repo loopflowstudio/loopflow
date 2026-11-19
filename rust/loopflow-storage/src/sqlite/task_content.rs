@@ -230,6 +230,7 @@ mod tests {
                 .map(|index| {
                     store
                         .create_task(&NewTask {
+                            parent_task_id: None,
                             id: TaskId::new(),
                             repository_id: repository_id.clone(),
                             project_id: project_id.clone(),

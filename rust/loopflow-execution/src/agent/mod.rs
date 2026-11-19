@@ -2434,6 +2434,7 @@ trust_level = "trusted"
         );
         let now = time::OffsetDateTime::now_utc();
         let task = crate::work::task::Task {
+            parent_task_id: None,
             id: crate::durable::TaskId::new(),
             revision: 0,
             identifier: "LOO-1".into(),

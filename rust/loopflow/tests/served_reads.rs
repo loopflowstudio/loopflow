@@ -593,6 +593,7 @@ fn screen_reads_are_compact_passive_and_match_cli() {
     let store = loopflow_execution::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
     store
         .create_task(&loopflow_execution::work::task::NewTask {
+            parent_task_id: None,
             id: loopflow_execution::durable::TaskId::new(),
             repository_id: registered.task.repository_id.clone(),
             project_id: None,
@@ -3015,6 +3016,8 @@ fn served_task_create_survives_a_dropped_connection_and_server_restart() {
         title: Some("One Task".into()),
         request: None,
         wave: None,
+        parent: None,
+        caller: None,
         graph: None,
         session: None,
         worktree: None,

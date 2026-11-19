@@ -1301,6 +1301,9 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
                     },
                     None => {}
                 }
+                if let Some(task) = &status.task {
+                    loopflow::lf::commands::waves::print_task_family(task)?;
+                }
             }
             Ok(())
         }

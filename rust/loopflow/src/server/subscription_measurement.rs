@@ -77,6 +77,7 @@ fn seed(home: &Path, pid: u32) {
     for i in 0..64 {
         store
             .create_task(&loopflow_storage::work::task::NewTask {
+                parent_task_id: None,
                 repository_id: repository_id.clone(),
                 id: TaskId::new(),
                 project_id: None,

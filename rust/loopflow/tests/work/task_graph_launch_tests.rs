@@ -1969,8 +1969,360 @@ sys.exit(code)
     assert_eq!(task.graph()["position"], at("review"));
 }
 
+/// `worker`: one `implement` step, then a person's review.
+fn define_worker_graph(task: &GraphTask) {
+    task.repo.create_file(
+        ".lf/graphs/worker.yaml",
+        "- implement\n- interactive: {name: demo, id: review}\n",
+    );
+    task.repo.stage_all();
+    task.repo.commit("Define a worker followed by a review");
+}
+
+fn opencode_stand_in() -> String {
+    include_str!("../../../loopflow-execution/tests/support/opencode_cli.py")
+        .replace("__WAIT__", "False")
+        .replace(
+            "Path(__file__).resolve().parent.parent",
+            "Path(os.environ['LF_HOME'])",
+        )
+}
+
+fn pi_stand_in() -> String {
+    format!(
+        "#!/usr/bin/python3 -I\n{}",
+        include_str!("../../../loopflow-execution/src/harness/testdata/pi_rpc.py").replace(
+            "Path.cwd() / \"pi-conversation.jsonl\"",
+            "Path(os.environ['LF_HOME']) / (os.environ['LF_CAPTURE_KEY'] + '.jsonl')"
+        )
+    )
+}
+
+/// One `implement` step on each stand-in: it settles and the Graph moves on,
+/// with its answer, native thread and usage recorded. While its one tool
+/// runs, `lf steer` saves a steer; the hooks lf gave the harness return the
+/// step's context before the tool and the steer after it.
 #[test]
-fn a_failed_run_starts_again_at_the_step_that_failed() {
+fn a_task_step_runs_as_a_worker_on_every_harness() {
+    let opencode = opencode_stand_in();
+    let pi = pi_stand_in();
+    for (provider, agent, script, answer) in [
+        (
+            "opencode",
+            "opencode:opencode/fixture",
+            opencode,
+            "Fixture completed.",
+        ),
+        ("pi", "pi:fixture/model", pi, "answer 1:"),
+        ("claude", "claude", holding_claude(), "Held."),
+        (
+            "codex",
+            "codex",
+            support::codex_app_server_script("Worker finished.", ""),
+            "Worker finished.",
+        ),
+    ] {
+        let task = GraphTask::with_tools(&[(provider, &script)]);
+        define_worker_graph(&task);
+        let home = task.home.path();
+        fs::write(home.join("release"), "").unwrap();
+        // Each stand-in runs the hooks lf gave its harness around one tool.
+        fs::write(
+            home.join("tool_turn.py"),
+            include_str!("../../../loopflow-execution/tests/support/tool_turn.py"),
+        )
+        .unwrap();
+
+        let started = task.run(&["task", "run", "INF-123", "worker", "-a", agent]);
+        wait_for("the worker's tool", || home.join("holding").exists());
+        task.ok(&["steer", "INF-123", "WORKER_DIRECTION"]);
+        fs::write(home.join("tool-done"), "").unwrap();
+        let ran = task.ran(started);
+        assert!(ran.success(), "{provider}: {}", ran.text);
+        assert_eq!(task.graph()["position"], at("review"), "{provider}");
+        let graphs = support::recorded_graphs(task.home.path());
+        assert_eq!(graphs.len(), 1, "{provider}");
+        assert_eq!(graphs[0].1.len(), 1, "{provider}");
+
+        let db = rusqlite::Connection::open(task.home.path().join("loopflow.db")).unwrap();
+        let (session, thread): (String, String) = db
+            .query_row(
+                "SELECT id, provider_thread FROM agent_sessions
+                 WHERE task_id=?1 AND provider=?2 AND skill='implement'
+                   AND interactive=0 AND completed_at IS NOT NULL",
+                rusqlite::params![task.registered.task.id.as_str(), provider],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert!(!thread.is_empty(), "{provider}");
+        let history = task.run(&["history", "show", &session, "--final"]);
+        assert!(
+            history.status.success(),
+            "{provider}: {}",
+            String::from_utf8_lossy(&history.stderr)
+        );
+        assert!(
+            String::from_utf8_lossy(&history.stdout).contains(answer),
+            "{provider}: {history:?}"
+        );
+
+        // The start hook named this worker's Session and Task, and the hook
+        // after the tool brought the steer saved while the tool ran.
+        let context = fs::read_to_string(home.join("hook-context")).unwrap();
+        assert!(
+            context.contains(&format!("This Session: {session}\n")),
+            "{provider}: {context}"
+        );
+        assert!(
+            context.contains("This Session's Task: INF-123"),
+            "{provider}: {context}"
+        );
+        let steer = fs::read_to_string(home.join("hook-steer")).unwrap();
+        assert!(steer.contains("WORKER_DIRECTION"), "{provider}: {steer}");
+
+        let runs = task.run(&[
+            "history", "usage", "--days", "0", "--task", "INF-123", "--json",
+        ]);
+        let runs: serde_json::Value = serde_json::from_slice(&runs.stdout).unwrap();
+        let usage = runs
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|run| run["session_id"] == session.as_str())
+            .map(|run| &run["usage"])
+            .unwrap();
+        // Pi's stand-in counts its one model call its own way.
+        let (input, output) = if provider == "pi" { (10, 3) } else { (20, 5) };
+        assert_eq!(usage["input_tokens"], input, "{provider}: {usage}");
+        assert_eq!(usage["output_tokens"], output, "{provider}: {usage}");
+    }
+}
+
+/// OpenCode cancels a headless question and lets the model assume an answer;
+/// Pi waits on its dialog. Either way the worker's turn fails with what was
+/// asked and the run stops there: a second attempt would only ask again. The
+/// answer is a steer, which the next run's conversation hears.
+#[test]
+fn a_question_with_nobody_there_ends_the_step() {
+    for (provider, agent, script) in [
+        ("opencode", "opencode:opencode/fixture", opencode_stand_in()),
+        ("pi", "pi:fixture/model", pi_stand_in()),
+    ] {
+        let task = GraphTask::with_tools(&[(provider, &script)]);
+        define_worker_graph(&task);
+        let home = task.home.path();
+        fs::write(home.join("ask-question"), "").unwrap();
+
+        let asked = task.task_run(&["task", "run", "INF-123", "worker", "-a", agent]);
+        assert!(!asked.success(), "{provider}: {}", asked.text);
+        let reason = "asked a question with nobody there to answer it: Use the fixture?";
+        assert!(asked.text.contains(reason), "{provider}: {}", asked.text);
+        assert!(
+            asked
+                .text
+                .contains("answer with `lf steer INF-123 \"…\"`, then `lf task run INF-123`"),
+            "{provider}: {}",
+            asked.text
+        );
+        assert!(
+            !asked.text.contains("starting it again"),
+            "{provider}: {}",
+            asked.text
+        );
+        assert_eq!(support::recorded_graphs(home).len(), 1, "{provider}");
+        assert_eq!(task.graph()["position"]["running"], false, "{provider}");
+        assert!(!asked.text.contains("?."), "{provider}: {}", asked.text);
+        let status = task.text_status();
+        assert!(status.contains(reason), "{provider}: {status}");
+        assert!(
+            status.contains("answer with `lf steer INF-123 \"…\"`, then `lf task run INF-123`"),
+            "{provider}: {status}"
+        );
+        assert!(
+            !status.contains("launch fresh work"),
+            "{provider}: {status}"
+        );
+        assert!(
+            !status.contains("Fixture completed."),
+            "{provider}: {status}"
+        );
+
+        // The answer reaches the conversation the next run starts.
+        task.ok(&["steer", "INF-123", "USE_THE_FIXTURE"]);
+        fs::remove_file(home.join("ask-question")).unwrap();
+        fs::write(
+            home.join("tool_turn.py"),
+            include_str!("../../../loopflow-execution/tests/support/tool_turn.py"),
+        )
+        .unwrap();
+        fs::write(home.join("tool-done"), "").unwrap();
+        task.task_run_ok(&["task", "run", "INF-123", "-a", agent]);
+        assert_eq!(task.graph()["position"], at("review"), "{provider}");
+        let heard = ["hook-context", "hook-steer"]
+            .map(|hook| fs::read_to_string(home.join(hook)).unwrap())
+            .join("\n");
+        assert!(heard.contains("USE_THE_FIXTURE"), "{provider}: {heard}");
+    }
+}
+
+/// `lf task interrupt` ends a worker's turn while it runs: the turn is recorded
+/// interrupted, nothing starts the run again, and the next `lf task run` takes
+/// the step up and moves the Graph on.
+#[test]
+fn a_worker_stops_on_interrupt_and_the_next_run_starts_its_step_again_on_claude_and_codex() {
+    interrupt_a_worker("claude", "claude", &holding_claude(), "Held.");
+    interrupt_a_worker(
+        "codex",
+        "codex",
+        &support::codex_app_server_script("Worker finished.", ""),
+        "Worker finished.",
+    );
+}
+
+#[test]
+fn a_worker_stops_on_interrupt_and_the_next_run_starts_its_step_again_on_opencode_and_pi() {
+    interrupt_a_worker(
+        "opencode",
+        "opencode:opencode/fixture",
+        &opencode_stand_in(),
+        "Fixture completed.",
+    );
+    interrupt_a_worker("pi", "pi:fixture/model", &pi_stand_in(), "answer 1:");
+}
+
+fn interrupt_a_worker(provider: &str, agent: &str, script: &str, answer: &str) {
+    {
+        let task = GraphTask::with_tools(&[(provider, script)]);
+        define_worker_graph(&task);
+        let home = task.home.path();
+        fs::write(home.join("hold-turn"), "").unwrap();
+        fs::write(home.join("release"), "").unwrap();
+
+        let mark = last_graph(home);
+        let started = task.run(&["task", "run", "INF-123", "worker", "-a", agent]);
+        // The stand-in says when the worker's own turn is under way.
+        wait_for("the worker's turn", || home.join("holding").exists());
+        task.ok(&["task", "interrupt", "INF-123"]);
+        let stopped = task.ran(started);
+        assert_eq!(stopped.code, Some(130), "{provider}: {}", stopped.text);
+        assert_eq!(attempts(home, mark), ["interrupted"], "{provider}");
+        assert_eq!(task.graph()["position"]["running"], false, "{provider}");
+
+        let db = rusqlite::Connection::open(home.join("loopflow.db")).unwrap();
+        let worker = |ended: &str| -> (String, Option<String>, Option<String>) {
+            db.query_row(
+                &format!(
+                    "SELECT s.id, s.provider_thread,
+                        (SELECT turn_status FROM session_events
+                          WHERE session_id=s.id AND kind='captured'
+                          ORDER BY rowid DESC LIMIT 1)
+                     FROM agent_sessions s
+                     WHERE s.task_id=?1 AND s.provider=?2 AND s.skill='implement'
+                       AND s.interactive=0 {ended}
+                     ORDER BY s.rowid DESC LIMIT 1"
+                ),
+                rusqlite::params![task.registered.task.id.as_str(), provider],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap_or_else(|error| panic!("{provider}: no worker Session: {error}"))
+        };
+        let (interrupted, thread, turn) = worker("");
+        assert_eq!(turn.as_deref(), Some("interrupted"), "{provider}");
+        assert!(
+            thread.is_some_and(|thread| !thread.is_empty()),
+            "{provider}"
+        );
+        // The stand-in is gone with its turn: nothing answers after the stop.
+        let history = task.run(&["history", "show", &interrupted, "--final"]);
+        assert!(
+            !String::from_utf8_lossy(&history.stdout).contains(answer),
+            "{provider}: {history:?}"
+        );
+
+        // Nobody continues a Run: the step starts again in a conversation of its own.
+        fs::remove_file(home.join("hold-turn")).unwrap();
+        task.task_run_ok(&["task", "run", "INF-123", "-a", agent]);
+        assert_eq!(task.graph()["position"], at("review"), "{provider}");
+        let (resumed, _, turn) = worker("AND s.completed_at IS NOT NULL");
+        assert_ne!(resumed, interrupted, "{provider}");
+        assert_eq!(turn.as_deref(), Some("completed"), "{provider}");
+        let history = task.run(&["history", "show", &resumed, "--final"]);
+        assert!(
+            String::from_utf8_lossy(&history.stdout).contains(answer),
+            "{provider}: {history:?}"
+        );
+    }
+}
+
+/// A harness that is not installed fails the same way on every attempt, so the
+/// run is not started again; with another agent in the order the step runs there.
+#[test]
+fn a_step_that_cannot_launch_is_not_started_again() {
+    let codex = support::codex_app_server_script("Worker finished.", "");
+    let task = GraphTask::with_tools(&[("codex", &codex)]);
+    define_worker_graph(&task);
+
+    let pinned = task.task_run(&[
+        "task",
+        "run",
+        "INF-123",
+        "worker",
+        "-a",
+        "opencode:opencode/fixture",
+    ]);
+    assert!(!pinned.success(), "{}", pinned.text);
+    let hint = "'opencode' is not installed. Install OpenCode 2 or later";
+    assert!(pinned.text.contains(hint), "{}", pinned.text);
+    assert!(
+        pinned.text.contains("stopped before any agent started"),
+        "{}",
+        pinned.text
+    );
+    assert!(
+        !pinned.text.contains("starting it again"),
+        "{}",
+        pinned.text
+    );
+    assert_eq!(support::recorded_graphs(task.home.path()).len(), 1);
+    let status = task.text_status();
+    assert!(status.contains("'opencode' is not installed"), "{status}");
+
+    task.ok(&[
+        "set",
+        "--global",
+        "agents",
+        "opencode:opencode/fixture,codex",
+    ]);
+    let moved = task.task_run(&["task", "run", "INF-123"]);
+    assert!(moved.success(), "{}", moved.text);
+    assert_eq!(task.graph()["position"], at("review"));
+    assert_eq!(support::recorded_graphs(task.home.path()).len(), 2);
+    let db = rusqlite::Connection::open(task.home.path().join("loopflow.db")).unwrap();
+    let ran_on_codex: bool = db
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM agent_sessions WHERE task_id=?1 AND provider='codex'
+                 AND skill='implement' AND interactive=0 AND completed_at IS NOT NULL)",
+            [task.registered.task.id.as_str()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(ran_on_codex, "{}", moved.text);
+    let recorded: String = db
+        .query_row("SELECT reason FROM agent_limit_recoveries", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert!(
+        recorded.starts_with(&format!(
+            "'opencode' is not installed{}codex",
+            loopflow_execution::ops::task_execution::MOVED_TO
+        )),
+        "{recorded}"
+    );
+}
+
+#[test]
+fn a_failed_command_step_is_started_again() {
     let task = GraphTask::new();
     let failed = task.task_run(&["task", "run", "INF-123", "held-review"]);
     assert!(!failed.success(), "{}", failed.text);

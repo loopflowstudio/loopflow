@@ -1372,7 +1372,7 @@ mod tests {
         let _ambient = crate::test_ambient::EnvGuard::new();
         for (provider, argv) in [
             ("codex", &["codex", "app-server", "--listen", "fixture"][..]),
-            ("opencode", &["opencode", "serve"]),
+            ("opencode", &["opencode", "run"]),
             ("claude", &["claude"]),
         ] {
             reap_detached(provider, argv);

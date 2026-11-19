@@ -530,8 +530,8 @@ for (const compact of [false, false, true]) {{
   texts.push(request.system.map((part) => part.text));
 }}
 // The first request finds the launch has never checked for steers; the
-// second finds nothing newer.
-assert.deepEqual(texts.slice(0, 2).map((text) => text[1]), ['STEER BLOCK', 'BLOCK']);
+// second finds nothing newer and still carries the steer it heard.
+assert.deepEqual(texts.map((text) => text[1]), ['STEER BLOCK', 'STEER BLOCK', 'STEER BLOCK']);
 end();
 await new Promise((resolve) => setTimeout(resolve, 200));
 await close();

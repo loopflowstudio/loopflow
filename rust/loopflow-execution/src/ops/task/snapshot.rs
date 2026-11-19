@@ -92,7 +92,7 @@ pub(super) async fn read_task_snapshot(store: &SharedStore, task: Task) -> OpsRe
         let launch_refusal = if worktree_blocker.is_some() {
             None
         } else {
-            task_configuration_refusal(&task, &repo, wave.as_ref().map(|w| w.slug()), None)
+            task_configuration_refusal(&task, &repo, wave.as_ref().map(|w| w.slug()))
                 .or_else(|| task_event_process_refusal(latest_event.as_ref()).map(str::to_string))
         };
         let action_evidence = TaskActionEvidence {

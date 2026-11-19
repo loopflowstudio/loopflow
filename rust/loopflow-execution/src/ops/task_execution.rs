@@ -104,6 +104,15 @@ pub async fn execution_of_latest_graph(
         }),
     );
     snapshot.captured = input.map(|(_, _, captured)| *captured);
+    if snapshot.state == TaskExecutionState::Blocked {
+        if let Some(question) = step.and_then(|step| facts.unanswered_questions.get(&step.id)) {
+            let label = snapshot.step.as_deref().unwrap_or("Step");
+            snapshot.reason = format!(
+                "{label} stopped: {question}; {}",
+                question_advice(&task.identifier)
+            );
+        }
+    }
     if let Some(recovery) = step.and_then(|step| facts.limit_recoveries.get(&step.id)) {
         apply_limit_recovery(&mut snapshot, recovery, &task.identifier, || {
             crate::ops::task::limit_recovery::restarts_by_itself(sqlite, &task.id).unwrap_or_else(
@@ -240,6 +249,11 @@ pub const MOVED_TO: &str = "; continuing on ";
 /// agent it may use was left; what would let it move follows.
 pub const STOPPED: &str = "; stopped: ";
 
+/// How a person answers the question that stopped Task `issue`'s step.
+pub fn question_advice(issue: &str) -> String {
+    format!("answer with `lf steer {issue} \"…\"`, then `lf task run {issue}`")
+}
+
 /// The limit that stopped a step and what would let it move, as one sentence.
 /// The current `lf task run` does not retry such a run automatically.
 pub fn limit_stop(recovery: &AgentLimitRecovery) -> Option<String> {
@@ -265,8 +279,9 @@ fn apply_limit_recovery(
         (TaskExecutionState::Running, Some(retry_at)) => {
             snapshot.state = TaskExecutionState::Waiting;
             snapshot.reason = format!(
-                "{label} is waiting for {provider} capacity until {}: {reason}. It goes on by itself.",
-                crate::output::format_time(retry_at)
+                "{label} is waiting for {provider} capacity until {}: {}. It goes on by itself.",
+                crate::output::format_time(retry_at),
+                reason.trim_end_matches('.')
             );
         }
         (TaskExecutionState::Running, None) => {
@@ -338,7 +353,7 @@ fn project_execution(
                 )
             } else {
                 let ended = match (&process.error, process.exit_code) {
-                    (Some(error), _) => error.clone(),
+                    (Some(error), _) => error.trim_end_matches('.').to_string(),
                     (None, Some(code)) => format!("process exited with status {code}"),
                     (None, None) => "process left no exit record".to_string(),
                 };

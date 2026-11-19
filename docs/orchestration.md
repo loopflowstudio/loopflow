@@ -259,8 +259,13 @@ your words in the plan; otherwise it goes on to `deliver`.
 interactive step with a loop behind it, you, or the agent standing in, decide
 advance or iterate; blocked there, the Task waits at that step. A step that
 fails is tried again, up to three attempts, starting at that step; the steps
-before it stay done. A run that stops leaves the Task at the step it stopped
-on, `lf task status` names it, and the next `lf task run` starts there:
+before it stay done. A skill step that failed before any agent started (its
+harness is not installed, say) is not tried again, since the next attempt would
+fail the same way: fix the cause and `lf task run`. When a headless OpenCode
+or Pi agent asks a question, the run stops after one attempt and prints the
+question. Answer with `lf steer LOO-12 "…"`, then `lf task run LOO-12`. A run
+that stops leaves the Task at that step. `lf task status` names the step, and
+the next `lf task run` starts there:
 
 ```bash
 lf task status LOO-12               # Graph code: stopped at land --wait-and-fix

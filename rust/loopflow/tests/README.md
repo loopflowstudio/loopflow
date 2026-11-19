@@ -99,10 +99,10 @@ resume per harness:
 
 | Test | Wiring it proves |
 |---|---|
-| `terminal_launch_and_resume_use_current_policy_and_preserve_native_identity` | Claude terminal, Codex native and OpenCode server: settings reach each provider's argv, thread parameters or config through the owner and PTY; `session resume` continues the same native conversation with current settings |
+| `terminal_launch_and_resume_use_current_policy_and_preserve_native_identity` | Claude terminal, Codex native and OpenCode: settings reach each provider's argv, thread parameters or config through the owner and PTY; `session resume` continues the same native conversation with current settings |
 | `headless_launch_and_graph_keep_current_options` | Claude stream: a headless skill arrives on stream-json stdin; `--yolo --chrome on` reach a Graph step's launch |
 | `codex_headless_start_receives_current_policy_on_the_wire` | Codex headless: model and sandbox reach `thread/start` |
-| `opencode_headless_start_selects_the_model_and_permissions` | OpenCode headless: model, permissions and the context plugin reach the server |
+| `opencode_headless_start_selects_the_model_and_permissions` | OpenCode headless: model, permissions and the context plugin reach `opencode run` |
 | `pi_public_headless_skill_delivers_context`, `pi_native_callbacks_retain_identity_final_output_and_usage` | Pi launch and its native callbacks |
 | `previews_do_not_start_a_provider_and_terminal_schema_is_explicitly_unsupported` | `--context` and the handlers' schema refusals start no provider; a refused resume keeps its Session |
 | `task_conversation_preparation_is_passive_and_connect_uses_shared_launch_settings` | `resume --prepare` starts nothing; a Task conversation's first `lf resume` launches with shared settings and the next continues it |
@@ -979,6 +979,14 @@ under the environment lock and restore the pin afterward.
 Attachment-rejection fixtures must also supply provider version probes and restrict
 PATH to their stand-ins: Claude checks `--version` before launching on first input.
 A locally installed provider must not make an otherwise incomplete fixture pass.
+
+A provider stand-in shows lf's hooks only if it runs them. A fixture that
+copies `loopflow-execution/tests/support/tool_turn.py` into `LF_HOME` gets a
+turn with one tool from the Claude, Codex, OpenCode and Pi stand-ins: the start
+hook's block in `hook-context`, `holding` while the tool runs, and after the
+fixture writes `tool-done`, the tool hook's steers in `hook-steer`. lf reads
+usage and final answers from the provider's transcript and skips a turn with
+no timestamp, so a stand-in dates the rows it writes.
 
 Changes to terminal provider probes or spawning must run both `session_cli_tests`
 and `agent_startup_tests`. An executable that exits with an error still started

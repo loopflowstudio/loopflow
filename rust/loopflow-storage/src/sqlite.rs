@@ -79,7 +79,7 @@ pub use children::ClosedTaskPage;
 pub use graph_inventory::{entry_of, AgentLimitRecovery, GraphExecutionFacts, UnrunGraph};
 pub use project_selection::{ProjectActivation, ProjectReadiness, ProjectReadinessState};
 pub use revisions::{Revisions, StoreRevisions};
-pub use session_events::{AnsweredTurn, CurrentConversation};
+pub use session_events::{AnsweredTurn, CurrentConversation, TurnSpan};
 pub use task_details::TaskDetailFacts;
 pub use task_work::{Auto, AutoState, OpenWork};
 

@@ -207,8 +207,18 @@ what ships understood and decides what happens to every finding.
   - Findings: everything left outside the PR (concept review's "outside this
     PR", qa notes, `scratch/questions.md`), each with a proposed disposition:
     fix here, own Task, drop. The person decides; Tasks are filed then.
-  - Bundle small findings into one Task; a finding gets its own Task only
-    when it is its own outcome. No fan-out.
-  - With nobody there: same page as the record; file every untracked
-    finding (bundled as above); fix small things here (copy, a missed
-    rename); never reopen the design; go on to delivery.
+  - The filing bar: a Task only for what is clearly important and too big
+    or too scope-expanding to fix here. Small things are fixed here or not
+    filed, unless there is a real reason to separate them. Several such
+    findings go into one Task, not a fan-out.
+  - With nobody there: same page as the record; fix small things here (copy,
+    a missed rename); file every untracked finding that clears the bar;
+    never reopen the design; go on to delivery.
+- Concept review (`task/skill/concept-review.md`): be willing to take another
+  big pass to get the models right. Today "What is larger than this work goes
+  on the page … Deciding what to do about it is not this review's job" is
+  what produces "outside this PR". Change it so a model that is wrong in the
+  area this work touches is this work, however large the fix; only a
+  separate outcome goes on the page as outside it. Say the same in "After the
+  change is built": a wrong model after build means another full pass, not a
+  follow-up.

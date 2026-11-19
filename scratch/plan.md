@@ -11,6 +11,33 @@ A Task can have children, and the conversation that filed them keeps
 conducting them: it hears when one stops, fails or lands, and it stays open
 until it is closed.
 
+## The model
+
+What a person knows, and the one record behind each. The page
+`scratch/concept-review.html` draws it.
+
+- **A Task** is one outcome with at most one PR. It may have a **parent**,
+  another Task: the work it was filed from. That is the whole hierarchy.
+- **A conversation belongs to one Task.** It works in that Task's checkout and
+  direction for the Task is for it. This is `session_tasks()` and it stays
+  exactly as it is: ten call sites rely on a Session belonging to at most one
+  Task.
+- **A conversation conducts the children of its Task.** A second relation,
+  derived from the parent link and nothing else. It decides one thing: which
+  conversations are told when a child's standing moves.
+- **Merged** is a fact about the PR; **closed** is someone saying the Task is
+  finished. Closing never takes the conversation away and never moves a child.
+- **Stack** says which branch a Task starts from. It is not the parent and
+  neither implies the other.
+
+What a parent is for, in the words that sized it: "all could be projects, and
+only the store really maps to subissues. the rest are too big to be
+subissues" (Jack Heart, `scratch/said.md`). A parent with children is the
+store-sized group: follow-ups of one Task, conducted from its conversation.
+A group the size of the perf or Standard work is a Project, and its
+conversation is a Wave's; that conversation conducting its Project's Tasks is
+the same relation with a second source, and is not built here.
+
 ## The problem, as the code has it
 
 Managing follow-ups from a Task's conversation is the pattern in use. Reading
@@ -43,9 +70,9 @@ In LOO-937's conversation: "file the follow-ups." `lf task status LOO-937`
 lists three children with each one's step. LOO-937's PR merges: its row reads
 merged, three children open, and nothing tells anyone to complete it. A child
 lands and the conversation says so without being asked; another stops at its
-review and the conversation brings it up. `lf task complete LOO-937` closes
-the children with nothing unmerged and names the one that still has an open
-PR. After LOO-937 closes and its checkout is gone, `lf resume` reopens the
+review and the conversation brings it up. Steps passing in between wake
+nobody. `lf task complete LOO-937` closes the children with nothing unmerged
+and names the one that still has an open PR, which stays open. After LOO-937 closes and its checkout is gone, `lf resume` reopens the
 same conversation in the repository's main checkout.
 
 ## Decisions
@@ -80,7 +107,11 @@ from a Task's conversation files a child. The caller's Task comes from
 with the Session taken from `LF_AGENT_CALLER`. Flat by default: when the
 calling Task itself has a parent, the new Task takes that same parent and is
 its sibling. `--parent <ID>` says otherwise; `--parent none` files top-level.
-Outside a Task conversation nothing changes. A cycle is refused the way
+The caller is any Session that belongs to the Task, a step of its Graph
+included, so Tasks filed by `launch-plan` or `ship-decomposed` are children
+too. Outside a Task nothing changes. The link is written at filing and
+nothing in this change rewrites it; a tracker edit to an issue's parent
+arrives through the plan exchange (decision 5). A cycle is refused the way
 stacking's is (`sqlite/children.rs:880`). Parent and stack stay two facts:
 `--stack-on` and `lf sync <ID>` are untouched.
 
@@ -92,32 +123,61 @@ linear/linear `schema.graphql`, read 2026-11-18). Passed over: finding the
 Project by climbing at read time, which rewrites `task_wave_in`,
 `TASK_COLUMNS` and seven more `p.id=t.project_id` joins while LOO-938 is
 rewriting the same records, and leaves `agent_sessions.wave_id` stale when a
-parent moves. Climbing belongs with the later Wave and Task fusion.
+parent moves. This sets aside the brief's "belongs by climbing". The later direction
+supports it: with no Project nesting in Linear, "we might invert the design
+somewhat and basically allow hierarchy to be grouping ontop of projecst"
+(`scratch/said.md`), which keeps the Project as the fact a Task carries. A
+parent later moved to another Project leaves its children where they were
+filed.
 
 **5. The parent travels as a plan field and as the tracker's own parent.**
 `WorkValue::TaskParent` beside `TaskProject`. Linear: `parentId` on
 `issueCreate` and `issueUpdate`, `parent { id }` in `issue_fields!`
 (confirmed in Linear's published schema). Asana: `parent` on `POST /tasks`
 and `opt_fields` (from memory of the API; not called). No Loopflow-only field
-lands on a tracker item. This is the part that overlaps LOO-938 (PR #1971,
-open, Graph mid-implement): `planning_write.rs`, `work/edit.rs`,
+lands on a tracker item. This is the part that overlaps LOO-938 (PR #1983,
+open; #1971 was closed): `planning_write.rs`, `work/edit.rs`,
 `tracker_actions.rs`, and its new `plan_carriers.rs:125` `needs()`, which
 must carry a parent before its child. It is built last, on LOO-938 via
 `lf sync LOO-938` if that has not merged. LOO-938's plan says "Not built:
 skipping a field this build does not know", so a peer on an older build may
 fail on `task_parent`; with one person on current builds that is accepted.
 
-**6. A parent's conversation hears about its children through the updates
-that exist.** No new channel. `session_tasks()` gains the open children of
-the Session's Task, and `TaskObservation` (`task_updates.rs:56`) gains the
-PR phase and whether the Task closed, so "landed" is news. The update names
-the child and reads as news about work this conversation conducts; today's
-line says "not a request or permission to launch work", which is wrong for a
-parent. Delivery is unchanged: an idle Claude or Codex conversation is woken
-by the server, a busy one hears at its next tool or prompt hook, a closed one
-at its next resume. A missed wake is already logged and the news waits
-(`wake.rs:153`).
+**6. A parent's conversation is told when a child's standing moves.** No new
+channel and no new writer: the same reading that writes a Task's updates
+(`task_updates::write_task`) writes a second, coarser notice for whoever
+conducts it.
 
+- `session_tasks()` does not change. Widening it, as the kickoff draft had
+  it, would deliver direction steered at a child to its parent's conversation
+  (`steers.rs:411`, `p.task_id IN member_tasks`), make `conversation_task`
+  return nothing for a parent (`moves.rs:165` matches exactly one Task), drop
+  the Task from the context block and the steer marker
+  (`context_block.rs:143`, `agent_process.rs:176`), and count a parent's
+  terminal as hosting its children at retirement (`task_retirement.rs:182`).
+- Conducted Tasks are the Tasks whose `parent_task_id` is one of the
+  Session's Tasks. `task_updates::write` reads those after its own, and the
+  steer audience (`scopes()`) admits a notice to a Session when the notice's
+  Task has a parent among `member_tasks`. Both read one definition in
+  `task_work.rs`.
+- The notice is its own steer source beside `update:` and is written only
+  when the child's standing moved: it stopped at an interactive step, a run
+  ended failed or stopped, its PR merged, it was closed or abandoned. Steps
+  passing inside a run are not news to a conductor. Each notice wakes an idle
+  conversation into a paid turn, and today's `update:` steer fires at every
+  step start; five children on an eight-step Graph would be forty turns.
+- `TaskObservation` (`task_updates.rs:56`) gains the PR phase and whether the
+  Task closed or was abandoned, so "landed" is news for the Task's own
+  conversation too.
+- The notice names the child, its step and `lf task status <ID>`, and reads
+  as news about work this conversation conducts; today's line says "not a
+  request or permission to launch work", which is wrong for a parent.
+- Hearing follows the link and nothing else: a closed parent's conversation,
+  once reopened, still hears about a child that is open.
+- Delivery is unchanged: an idle Claude or Codex conversation is woken by the
+  server, a busy one hears at its next tool or prompt hook, a closed one at
+  its next resume. A missed wake is already logged and the news waits
+  (`wake.rs:153`).
 - New triggers advance `store_revisions.task_updates` when a `task_prs` row
   merges and when a Task closes, is abandoned or changes parent; today the
   `tasks` trigger covers three other columns.
@@ -133,14 +193,23 @@ added. What changes for a Task with open children:
 
 - Its reason reads "Merged · 3 children open" and `next` is null.
 - Auto-Ship's merge does not request completion (`ship.rs:496`).
-- `lf task complete <parent>` names the open children, then closes with it
-  every child that has nothing unmerged (no PR, or a merged one, and no run).
-  A child with an open PR, a live run or unpublished commits stops the
-  command, which lists them and takes `--keep <ID>` (the child moves up to
-  the next parent, or top-level) or `--abandon <ID>` (made for review).
-  Jack Heart: "3: i think probably close by default". Passed over: abandoning
-  unmerged children without being told, since abandonment force-removes the
-  worktree and deletes the remote branch with no grace period.
+- `lf task complete <parent>` never stops and takes no new flag **(made for
+  review)**. It closes the parent, and with it: each child whose PR merged
+  becomes done; each child never started (no checkout, no PR, no run) is
+  abandoned, which destroys nothing. A child with anything unmerged (an open
+  PR, a live run, a checkout with commits) stays open with its link, and the
+  command names each one with its step. Jack Heart: "3: i think probably
+  close by default"; and on Asana, "There's some combination of completed and
+  discarded".
+- A child whose parent is done, abandoned or unknown to this Machine is
+  listed top-level; its link is kept. One display rule covers all three.
+- Passed over: `--keep <ID>` / `--abandon <ID>` and stopping the command
+  (the kickoff draft), which add a refusal, two flags and a write that moves
+  a child to another parent, all for a case `lf task abandon <ID>` already
+  answers. Also passed over: abandoning unmerged children without being
+  told, since abandonment force-removes the worktree and deletes the remote
+  branch with no grace period; and marking never-started children done,
+  which puts work nobody did in Done here and in the tracker.
 
 **8. `--parent` reads the caller; `lf task create` help says so.** The line
 "Plain creation files new work, regardless of the current checkout or
@@ -157,27 +226,34 @@ filing time; no stored child list. Open, merged and closed derive as today
 | Surface | Change |
 |---|---|
 | `lf task create` | `--parent <ID\|none>`; default from the calling conversation; receipt carries `parent` |
-| `lf task status --json` (`task_row::TaskDetail`) | `parent`, `children: [{identifier, title, state, step, pr}]` |
+| `lf task status --json` (`task_row::TaskDetail`) | `parent` (identifier, required and nullable) beside `stack_parent`; `children: [TaskRow]`, the row type every list already uses, not a second shape |
 | `lf task show` (`TaskStatus`, `DesktopTaskPane`) | same two keys; human output lists children |
-| `RoadmapTask` (lists, server, Swift mirror) | `parent`, required and nullable, so slice 4 has something to draw |
+| `TaskRow`, `RoadmapTask` (lists, server, Swift mirror) | `parent`, required and nullable, so a list can nest and the sidebar has something to draw |
 | `lf wave show` | a child prints indented under its parent |
-| `lf task complete` | closes children; `--keep`, `--abandon` |
+| `lf task complete` | closes merged and never-started children; names the ones left open |
 | served `task.create` | `parent` |
-| Task updates | children's position, runs, merge and close |
+| Task updates | merge and close for a Task's own conversation; a notice to its parent's when its standing moves |
 | Fixtures | `task_detail.json`, `task_status.json`, `roadmap_snapshot.json`, `task_create_receipt.json`, `local_task.json`, `server_schema.json`, Swift `DTOFixtureTests` |
 
 Absent and error states: no parent is `null` and no children is `[]`, never a
-missing key. A parent that was deleted or is unknown to this Machine leaves
+missing key. A parent that is done, abandoned or unknown to this Machine leaves
 the child top-level with its link kept. `--parent` naming an unknown Task is
 an error naming it. A conversation with no Task files top-level, as today.
 
 ## Operational limits
 
-- `session_tasks()` runs on every hook boundary of every agent. The children
-  lookup is one indexed read on `tasks(parent_task_id)`; check
-  `EXPLAIN QUERY PLAN` against a 10,000-Task store.
-- Updates for children are written inside the reading Session's hook, as
-  today; no new writer, no new lock holder.
+- The conducted-Tasks lookup runs on every hook boundary of every
+  interactive conversation. It is one indexed read on
+  `tasks(parent_task_id)`; check `EXPLAIN QUERY PLAN` against a 10,000-Task
+  store.
+- A hook starts without the quiet cache (`QUIET_AT` is per process), so it
+  rebuilds each Task's history, "tens of milliseconds" each
+  (`task_updates.rs:24`), inside a ten-second hook. The loop over children
+  skips a child whose last reading already reported it closed or abandoned.
+  Measure a boundary with ten open children; if it is slow, the reading row
+  keeps the revision it was taken at so an unmoved child costs one compare.
+- Notices for children are written inside the reading Session's hook or the
+  server's watcher, as today; no new writer, no new lock holder.
 
 ## Exclusions
 
@@ -224,20 +300,26 @@ existing update a conversation gets about its own Task; Waves and
    is the one that could prove the plan wrong; the provider half is already
    answered by the probes, so what it tests is lf's launch path (config and
    skills loaded from `session.cwd`, `journal::with_runtime(cwd)`,
-   `current_dir`). Nothing here touches LOO-938's files.
+   `current_dir`). Nothing here touches LOO-938's files. A Session that
+   belonged to the Task only by sitting in its checkout, never bound, is a
+   repository chat once it reopens in the main checkout; the Task's primary
+   and bound Sessions keep the Task through `task_id`.
 2. **The link, local.** Migration (`parent_task_id`, its index, the leaving
    marks, the new triggers), `lf task create` default and `--parent`, Project
    copied, `parent` and `children` on status, show and `RoadmapTask`.
-3. **Hearing about children.** Membership and the two new observation facts;
-   the child wording; `task_session.md`. Test: a fixture child Graph stops at
-   an interactive step and the parent's idle conversation receives the update.
+3. **Hearing about children.** The conducted relation, the two new
+   observation facts, the notice and its audience; `task_session.md`. Tests:
+   a fixture child Graph stops at an interactive step and the parent's idle
+   conversation receives one notice, and none for the steps before it;
+   `lf steer <child> '…'` does not reach the parent's conversation.
 4. **Merged and open; closing.** Reason and `next` for a parent with open
-   children, Auto-Ship's skipped completion, `lf task complete` over children.
+   children, Auto-Ship's skipped completion, `lf task complete` over children,
+   a child of a done parent listed top-level.
 5. **The link travels.** `TaskParent` through the plan exchange and to Linear
    and Asana, on LOO-938.
 
 One PR. If LOO-938 is still unmerged when slices 1–4 are done, slice 5 is
-built on `lf sync LOO-938` and the PR waits behind #1971.
+built on `lf sync LOO-938` and the PR waits behind #1983.
 
 ## Acceptance check at gate
 
@@ -250,7 +332,8 @@ lf task status LOO-A --json                   # .children[0].identifier is the f
 lf task status LOO-A --json                   # .task.pr.phase "merged", .task.state not "done", .task.next null
 # the follow-up's Graph stops at an interactive step
 lf session steers <LOO-A's conversation>      # an update naming the follow-up and its step
-lf task complete LOO-A                        # closes LOO-A and the follow-up
+lf steer <follow-up> 'x'; lf session steers <LOO-A's conversation>   # 'x' is not there
+lf task complete LOO-A                        # closes LOO-A; the merged follow-up is done, an unstarted one abandoned, one with an open PR named and left open
 lf task retire && lf -b resume <LOO-A's conversation> --message 'pwd'   # answers from the main checkout
 ```
 
@@ -259,7 +342,8 @@ lf task retire && lf -b resume <LOO-A's conversation> --message 'pwd'   # answer
 From a Task's conversation, a follow-up is filed with no flag and shows under
 that Task; the conversation is told when the follow-up stops, fails or lands;
 the Task's PR can merge and the Task stay open without being told to
-complete; closing it closes its children or says which ones it will not; and
+complete; closing it closes the children that have nothing unmerged and
+names the ones it leaves open; and
 its conversation reopens after its checkout is gone.
 
 ## The other designs, intent only

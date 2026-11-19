@@ -686,3 +686,51 @@ Code readings that moved the plan (a0548bfe28):
   `tests/task_pr_range_tests.rs:1038`); `after_merge` and `next_slug` are dead.
 - No Task-to-Task parent exists anywhere; `waves.parent_wave_id` /
   `WorkValue::WaveParent` is the working pattern.
+
+> if so, then it seems like we might invert the design somewhat and basically allow hierarchy to be grouping ontop of projecst
+
+> what do they use sub issues for
+
+Linear's sub-issues page (summarising fetch, 2026-11-18): "Use sub-issues to break down larger "parent" issues into smaller pieces of work"; create them "when a set of work is too large to be a single issue but too small to be a project"; "also ideal for splitting up work shared across teammates"; "Sometimes an issue grows so large it's more appropriate to turn it into a project instead." Converting a parent adds the original issue and its sub-issues to the project as standalone issues and removes the sub-issue links.
+
+Jack Heart:
+
+> so lets take a look at some of the examples from today:
+>
+> - store rework
+> - perf work
+> - standard card file
+>
+> which of these map well to issue -> subissues? which to new projects?
+
+Jack Heart, on which examples map to sub-issues and which to Projects:
+
+> i would say all could be projects, and only the store really maps to subissues. the rest are too big to be subissues
+
+> can you look more into how people actually use teams, initiatives, projects in practice? i ave a hard time believign all projects end in reality
+
+## Concept review readings (2026-11-18, headless, nobody present)
+
+- `session_tasks()` (`sqlite/task_work.rs:66`) is "the Tasks a Session belongs
+  to" for steer audience (`steers.rs:411`), `conversation_task`
+  (`moves.rs:165`), the context block, the steer marker, session completion,
+  the orphan filter and retirement. Several match exactly one Task.
+- A Task update is written at every step start: `RunObservation.step` is part
+  of the compared reading (`task_updates.rs:157`).
+- Retirement waits while the Task's terminal is viewed (`ViewerHold::Viewed`,
+  `task_retirement.rs:226`).
+- `gh pr view`: #1971 is closed; LOO-938's open PR is #1983 on the same branch.
+- `lf task reopen` exists (`lf/mod.rs:2233`); `TaskDetail` already carries
+  `stack_parent`; `TaskRow` is the row lists use.
+- This file gained lines from the Task's live conversation while the review
+  ran (sub-issues versus Projects for the store, perf and Standard work).
+
+How Linear projects are used in practice (web search and summarising fetches, 2026-11-18; thin evidence, few named companies):
+- Linear changelog 2024-03-19: a Maintenance project status "to capture evergreen projects as well as projects that have shipped but are still actively being worked on". Linear's projects FAQ: "Technically yes, you can create a project without a completion date".
+- Linear, large-company guide: "a small number of top-level teams"; a team when there is "A durable group of people who regularly work together"; projects "typically run for weeks to months"; a project, initiative, label or view for "A temporary body of work".
+- Linear on itself: a project is shared work taking "over two weeks"; engineers lead, specs 1–2 pages, weekly updates; only mobile and infrastructure are specialised teams (CEO, via Lenny's Newsletter, as summarised).
+- Langfuse handbook: "Projects need project management, so only open one for real work"; "Nothing rolls forward silently"; initiatives "Rare"; product-area labels for filters.
+- r/Linear (two threads, replies only): a core feature "with no definitive end date"; "We utilize labels to identify long-term projects."
+- hilton.org.uk: "Like Jira projects, Linear teams have members and no end date."
+
+> i agree with linear that best practices are to have proejcts end; this is basically the chapters idea

@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Concept review: work with children</title>
+<style>
+  :root {
+    --bg: #fbfaf7; --fg: #1d1c1a; --soft: #5d5a55; --line: #dcd8d0; --card: #ffffff;
+    --yes: #1f7a4a; --no: #b3401f; --new: #2456b8; --newbg: #eaf0fb; --nobg: #fbece6; --yesbg: #e8f4ec;
+    --code: #f1eee8;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #17171a; --fg: #ebe9e4; --soft: #a5a199; --line: #34343a; --card: #1f1f24;
+      --yes: #6fcf97; --no: #f08a66; --new: #8fb2f5; --newbg: #1f2a44; --nobg: #3a221b; --yesbg: #1c3226;
+      --code: #26262c;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+    font: 16px/1.55 -apple-system, "Segoe UI", system-ui, sans-serif; }
+  main { max-width: 1020px; margin: 0 auto; padding: 40px 24px 80px; }
+  h1 { font-size: 30px; line-height: 1.2; margin: 0 0 10px; }
+  h2 { font-size: 21px; margin: 46px 0 12px; }
+  h3 { font-size: 16px; margin: 0 0 8px; }
+  p { margin: 0 0 12px; }
+  .lede { color: var(--soft); max-width: 760px; }
+  code { background: var(--code); padding: 1px 5px; border-radius: 4px;
+    font: 13px/1.4 ui-monospace, "SF Mono", Menlo, monospace; }
+  pre { background: var(--code); padding: 12px 14px; border-radius: 8px; overflow-x: auto;
+    font: 13px/1.5 ui-monospace, "SF Mono", Menlo, monospace; margin: 0 0 12px; }
+  table { width: 100%; border-collapse: collapse; background: var(--card);
+    border: 1px solid var(--line); border-radius: 10px; overflow: hidden; font-size: 14.5px; }
+  th, td { text-align: left; vertical-align: top; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+  th { font-weight: 600; background: var(--code); }
+  tr:last-child td { border-bottom: 0; }
+  .yes, .no, .new { display: inline-block; padding: 1px 9px; border-radius: 99px; font-weight: 600; font-size: 13px; white-space: nowrap; }
+  .yes { color: var(--yes); background: var(--yesbg); }
+  .no { color: var(--no); background: var(--nobg); }
+  .new { color: var(--new); background: var(--newbg); }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 760px) { .grid { grid-template-columns: 1fr; } }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; }
+  .card.before { border-left: 4px solid var(--no); }
+  .card.after { border-left: 4px solid var(--new); }
+  .big { background: var(--card); border: 2px solid var(--no); border-radius: 12px; padding: 20px 22px; }
+  svg { width: 100%; height: auto; display: block; }
+  svg text { font: 13px -apple-system, "Segoe UI", system-ui, sans-serif; fill: var(--fg); }
+  svg .s { fill: var(--soft); font-size: 12px; }
+  svg .box { fill: var(--card); stroke: var(--line); stroke-width: 1.5; }
+  svg .nbox { fill: var(--newbg); stroke: var(--new); stroke-width: 1.5; }
+  svg .bad { stroke: var(--no); stroke-width: 2; fill: none; }
+  svg .good { stroke: var(--new); stroke-width: 2; fill: none; stroke-dasharray: 5 4; }
+  svg .plain { stroke: var(--soft); stroke-width: 1.5; fill: none; }
+  ol.q > li { margin-bottom: 16px; }
+  ol.q ol { list-style: lower-alpha; margin-top: 4px; }
+  .legend span { margin-right: 14px; }
+  .timeline { list-style: none; padding: 0; margin: 0; }
+  .timeline li { padding: 8px 0 8px 18px; border-left: 2px solid var(--line); position: relative; }
+  .timeline li::before { content: ""; position: absolute; left: -6px; top: 15px; width: 10px; height: 10px; border-radius: 50%; background: var(--soft); }
+  .timeline li.n::before { background: var(--new); }
+  .timeline li.x::before { background: var(--no); }
+</style>
+</head>
+<body>
+<main>
+
+<h1>Work with children: do the product's concepts and the code's line up?</h1>
+<p class="lede">The area taken is everything a follow-up touches: how one piece of work relates to
+another (parent, stack, Project, Wave), which conversation is told about which work, and what
+merging and closing do to the conversation. The plan under review is <code>scratch/plan.md</code>
+for Task c6a874; nothing is built yet. Reviewed 2026-11-18 at <code>a0548bfe28</code>, with nobody present.</p>
+<p class="legend"><span><span class="yes">yes</span> lines up</span>
+<span><span class="no">no</span> does not</span>
+<span><span class="new">proposed</span> not in the code today</span></p>
+
+<h2>One interaction, walked</h2>
+<p>LOO-937's conversation files three follow-ups. This is what happens under the plan as kickoff
+wrote it, and where it breaks.</p>
+<ul class="timeline">
+  <li class="n"><code>lf task create 'Drop the members marked leaving'</code>, no flag. The caller's Task
+    becomes the parent. <span class="new">proposed</span> Holds.</li>
+  <li class="x">The plan widens <code>session_tasks()</code> so the conversation "hears about its
+    children". From that moment the conversation <em>belongs to four Tasks</em>. The next
+    <code>lf task create</code> finds no single Task for the caller and files top-level.
+    The context block stops naming LOO-937.</li>
+  <li class="x">You run <code>lf steer LOO-954 'use the new index'</code>. The direction is printed
+    in LOO-937's conversation too, as direction.</li>
+  <li class="x">Three children run an eight-step Graph. The idle conversation is woken at each step
+    start: about two dozen turns before anything needs it.</li>
+  <li class="n">LOO-937 merges. Its row reads "Merged · 3 children open" and nothing asks you to
+    complete it. <span class="new">proposed</span> Holds.</li>
+  <li class="x">One child fails. Recovery: you run <code>lf task complete LOO-937</code> to wrap up;
+    the command stops and asks for <code>--keep</code> or <code>--abandon</code> per child. The
+    command to abandon a child already exists.</li>
+  <li class="n">The checkout is retired; <code>lf resume</code> reopens the same conversation in the
+    main checkout. <span class="new">proposed</span> Holds; both providers were probed.</li>
+</ul>
+
+<h2>The pairings</h2>
+<table>
+  <tr><th style="width:23%">What a person knows</th><th style="width:30%">What the code has</th><th style="width:9%">Lines up</th><th>What is wrong, or what changes</th></tr>
+  <tr><td>A Task: one outcome, one PR</td><td><code>tasks</code>, <code>task_checkouts</code>, <code>task_prs</code></td>
+    <td><span class="no">no</span></td><td>A Task can carry several PRs in a row (<code>task_prs.sequence</code>, live since v0.13.16) while its own seed text says "zero or one". Larger than this work; see below.</td></tr>
+  <tr><td>A follow-up of a Task</td><td>nothing; <code>lf task create</code> ignores its caller on purpose</td>
+    <td><span class="no">no</span></td><td><span class="new">proposed</span> <code>tasks.parent_task_id</code>, set from the calling Session's Task. One link, flat by default.</td></tr>
+  <tr><td>"This is the Task's conversation"</td><td><code>session_tasks()</code>: bound by <code>task_id</code> or sitting in its checkout</td>
+    <td><span class="yes">yes</span></td><td>Ten call sites rely on it meaning at most one Task. It must stay that.</td></tr>
+  <tr><td>"This conversation runs those follow-ups"</td><td>nothing</td>
+    <td><span class="no">no</span></td><td>The kickoff plan put this idea under the name above. <strong>The biggest mismatch.</strong></td></tr>
+  <tr><td>Being told something happened</td><td>Task updates: one steer per changed reading, at every step start</td>
+    <td><span class="no">no</span></td><td>Right for the conversation watching its own Task. For a conductor the unit is a change of standing: stopped for a person, failed, merged, closed.</td></tr>
+  <tr><td>Merged</td><td><code>pr.phase == "merged"</code></td><td><span class="yes">yes</span></td><td>No new field.</td></tr>
+  <tr><td>Closed</td><td><code>planning_completed</code>, state <code>done</code></td><td><span class="yes">yes</span></td>
+    <td>The mismatch is the nudge, not the record: "Merged; complete the Task" pushes a parent closed. It goes for a Task with open children.</td></tr>
+  <tr><td>Closed, but I'm still talking to it</td><td>Session <code>cwd</code> points at a removed checkout; resume refuses "Task … is done"</td>
+    <td><span class="no">no</span></td><td><span class="new">proposed</span> A missing directory resolves to the repository's main checkout. Closing stops being the end of a conversation.</td></tr>
+  <tr><td>Discarded</td><td><code>abandoned_at</code></td><td><span class="yes">yes</span></td>
+    <td>Used below for a never-started child closed with its parent, so Done lists only work that was done.</td></tr>
+  <tr><td>Stacked on another Task</td><td><code>task_checkouts.parent_pr_id</code>, <code>stack_parent</code>, <code>--stack-on</code></td>
+    <td><span class="no">no</span></td><td>One word, two ideas: the code says "parent" and "child" for stacking already. Tolerable while every stack name is qualified (<code>stack_parent</code>) and the new one is bare <code>parent</code>. Skills that say "child" for a stacked Task (<code>ship-decomposed</code>) get reworded when they are next touched.</td></tr>
+  <tr><td>The group a Task is in</td><td><code>tasks.project_id</code> → <code>projects.wave_id</code></td><td><span class="yes">yes</span></td>
+    <td>A child copies its parent's Project at filing, as Linear's sub-issues do. Climbing at read time is passed over.</td></tr>
+  <tr><td>A child's row under its parent</td><td><code>TaskRow</code> is the row every list uses</td><td><span class="yes">yes</span></td>
+    <td>The kickoff plan drew a second five-field shape for children. <code>children: [TaskRow]</code> instead.</td></tr>
+</table>
+
+<h2>The biggest mismatch: belonging and conducting are two relations</h2>
+<div class="big">
+<p>A conversation <strong>belongs to</strong> a Task: it works in the Task's checkout, files work in
+its name, and direction for the Task is direction for it. A conversation <strong>conducts</strong> a
+Task: it is told when that Task needs someone. The person never confuses these. The kickoff plan
+gave them one definition by adding children to <code>session_tasks()</code>.</p>
+
+<div class="grid">
+<div class="card before">
+<h3>Before: one relation, widened</h3>
+<svg viewBox="0 0 440 210" role="img" aria-label="One membership relation covering parent and children">
+  <rect class="box" x="10" y="80" width="130" height="46" rx="8"/><text x="24" y="100">conversation</text><text class="s" x="24" y="116">of LOO-937</text>
+  <rect class="box" x="290" y="12" width="140" height="36" rx="8"/><text x="304" y="35">LOO-937</text>
+  <rect class="box" x="290" y="62" width="140" height="36" rx="8"/><text x="304" y="85">LOO-954 child</text>
+  <rect class="box" x="290" y="112" width="140" height="36" rx="8"/><text x="304" y="135">LOO-955 child</text>
+  <rect class="box" x="290" y="162" width="140" height="36" rx="8"/><text x="304" y="185">LOO-956 child</text>
+  <path class="bad" d="M140 96 L290 30"/><path class="bad" d="M140 100 L290 80"/><path class="bad" d="M140 106 L290 130"/><path class="bad" d="M140 112 L290 180"/>
+  <text class="s" x="150" y="150">session_tasks(): 4 Tasks</text>
+</svg>
+<p>Everything keyed on membership moves with it: steer audience (<code>steers.rs:411</code>),
+<code>conversation_task</code> (<code>moves.rs:165</code>, exactly one Task or none), the context block,
+the steer marker, session completion, retirement's "hosted" Tasks.</p>
+</div>
+<div class="card after">
+<h3>After: two relations, the second derived <span class="new">proposed</span></h3>
+<svg viewBox="0 0 440 210" role="img" aria-label="Belongs to one Task, conducts its children">
+  <rect class="box" x="10" y="80" width="130" height="46" rx="8"/><text x="24" y="100">conversation</text><text class="s" x="24" y="116">of LOO-937</text>
+  <rect class="box" x="290" y="12" width="140" height="36" rx="8"/><text x="304" y="35">LOO-937</text>
+  <rect class="nbox" x="290" y="62" width="140" height="36" rx="8"/><text x="304" y="85">LOO-954 child</text>
+  <rect class="nbox" x="290" y="112" width="140" height="36" rx="8"/><text x="304" y="135">LOO-955 child</text>
+  <rect class="nbox" x="290" y="162" width="140" height="36" rx="8"/><text x="304" y="185">LOO-956 child</text>
+  <path class="plain" d="M140 96 L290 30"/><text class="s" x="170" y="50">belongs to</text>
+  <path class="good" d="M360 48 L360 62"/><path class="good" d="M140 104 L290 80"/><path class="good" d="M140 108 L290 130"/><path class="good" d="M140 112 L290 180"/>
+  <text class="s" x="150" y="170">conducts: parent_task_id</text>
+</svg>
+<p><code>session_tasks()</code> is untouched. Conducted Tasks are the Tasks whose parent is one of the
+Session's Tasks. It is read in two places only: the update writer, and the audience of one new
+steer source.</p>
+</div>
+</div>
+
+<h3 style="margin-top:18px">What follows from it</h3>
+<table>
+  <tr><th style="width:26%"></th><th>Kickoff plan</th><th>After the review</th></tr>
+  <tr><td>What the conductor is told</td><td>Every update the child's own conversation gets</td><td>One notice when the child's standing moves: stopped at an interactive step, a run failed or stopped, merged, closed or abandoned</td></tr>
+  <tr><td><code>lf steer &lt;child&gt;</code></td><td>Also printed in the parent's conversation</td><td>Reaches the child only</td></tr>
+  <tr><td>Filing a second follow-up</td><td>Caller has four Tasks; no parent found</td><td>Caller belongs to one Task; that is the parent</td></tr>
+  <tr><td>Who writes the notice</td><td colspan="2">Unchanged in both: whoever reads first, a hook or the server's watcher. No new writer.</td></tr>
+  <tr><td>A closed parent</td><td>Children must be moved or abandoned first</td><td>Hearing follows the link. A reopened conversation still hears about an open child.</td></tr>
+</table>
+<p style="margin-top:12px">The same relation later takes a second source without changing shape: a
+Wave's conversation conducting its Project's Tasks. That is the group size the perf and Standard
+work were ("the rest are too big to be subissues"). Not in this work.</p>
+</div>
+
+<h2>Closing a parent</h2>
+<div class="grid">
+<div class="card before">
+<h3>Kickoff plan</h3>
+<pre>$ lf task complete LOO-937
+LOO-956 has an open PR.
+Pass --keep LOO-956 or --abandon LOO-956.</pre>
+<p>A stop, two flags, and a write that moves a kept child to another parent.</p>
+</div>
+<div class="card after">
+<h3>After <span class="new">proposed</span></h3>
+<pre>$ lf task complete LOO-937
+LOO-937 done.
+  LOO-954 done (merged #1990)
+  LOO-955 abandoned (never started)
+  LOO-956 left open · at human-review · PR #1992</pre>
+<p>No stop, no flag, no child ever moves. A child shows under its parent while the parent is open and
+top-level otherwise; the same rule already covered a parent unknown to this Machine.</p>
+</div>
+</div>
+<p style="margin-top:12px">Counterexamples kept. <em>Auto-Ship completes a parent at merge:</em> it would
+abandon the follow-ups not yet started, so Auto-Ship's merge does not complete a Task with open
+children. <em>A never-started child you still wanted:</em> it is abandoned with the parent; abandoning
+an unstarted Task removes no checkout or branch. <em>A child with unpublished commits:</em> counts as
+unmerged and stays open.</p>
+
+<h2>What the review left as the plan had it</h2>
+<table>
+  <tr><th style="width:34%">Decision</th><th>Why it stands</th></tr>
+  <tr><td>The link is Task → Task, not Task → conversation</td><td>It survives the conversation, travels as the tracker's own parent field, and any Session of the Task (a Graph step included) files children.</td></tr>
+  <tr><td>Parent and stack stay two facts</td><td>A follow-up of merged work starts from main; one of unmerged work may stack. The dependency Task (3de47e) owns whether stack becomes a setting on one link.</td></tr>
+  <tr><td>A child copies its parent's Project</td><td>Linear does the same, and the Project stays the fact a Task carries: "allow hierarchy to be grouping ontop of projecst". Sets aside the brief's "belongs by climbing".</td></tr>
+  <tr><td>The checkout goes at close, not at merge</td><td>Nothing is pulled from under a live provider process. Cost: a merged parent open for weeks keeps a checkout of a branch that no longer moves.</td></tr>
+  <tr><td>Slice order: resume first</td><td>Small, touches none of LOO-938's files. The untested part of the idea is slice 3: whether notices at a change of standing are the right amount of news.</td></tr>
+  <tr><td>The link travels last, on LOO-938</td><td>The brief says so. LOO-938's open PR is now #1983; #1971 was closed.</td></tr>
+</table>
+
+<h2>Larger than this work</h2>
+<table>
+  <tr><th style="width:34%">What</th><th>What it would take</th></tr>
+  <tr><td>A Wave's conversation is told nothing about its Tasks</td><td>A second source for the conducted relation (a Wave Session → open, started Tasks in its Project) and a volume rule for a Wave with hundreds of Tasks.</td></tr>
+  <tr><td>Three ways to relate two Tasks: parent, stack, and "start when that lands"</td><td>One design for the last two (Task 3de47e), so filing a follow-up of unmerged work does not need a second flag to get its parent's code.</td></tr>
+  <tr><td>Several PRs in a row on one Task</td><td>Removing <code>task_prs.sequence</code> and <code>request_task_pr_publication</code>; <code>lf land</code> after new commits files a child that takes the branch. Eight tests change.</td></tr>
+  <tr><td>A merge made by hand on GitHub is not news until lf reconciles the PR</td><td>A server-side reader of PR state, or a webhook into a self-hosted server.</td></tr>
+  <tr><td>Task and Wave as one stored type</td><td>Not needed for any behaviour above. The two relations here (belongs, conducts) are what a single type would have to keep apart too.</td></tr>
+</table>
+
+<h2>Choices made for review</h2>
+<ol class="q">
+  <li>What a conductor hears about a child.
+    <ol><li><strong>Chosen:</strong> only a change of standing (stopped for a person, failed, merged, closed).</li>
+    <li>Everything the child's own conversation hears, step by step.</li>
+    <li>Standing changes, plus a digest of steps when the conductor is next woken for another reason.</li></ol></li>
+  <li><code>lf task complete</code> on a parent with a child that has unmerged work.
+    <ol><li><strong>Chosen:</strong> close the parent, leave that child open with its link, name it.</li>
+    <li>Stop and ask (<code>--keep</code> / <code>--abandon</code>).</li>
+    <li>Leave the parent open until every child is closed.</li></ol></li>
+  <li>A never-started child when its parent closes.
+    <ol><li><strong>Chosen:</strong> abandoned.</li>
+    <li>Done, as Linear's "mark remaining sub-issues done" setting does.</li>
+    <li>Left in the backlog, top-level.</li></ol></li>
+  <li>A closed parent's conversation and a child that is still open.
+    <ol><li><strong>Chosen:</strong> it still hears, whenever it is open.</li>
+    <li>Hearing ends when the parent closes.</li></ol></li>
+  <li>A child's Project.
+    <ol><li><strong>Chosen:</strong> copied from the parent at filing; it does not follow the parent later.</li>
+    <li>Found by climbing to the parent each time it is read.</li></ol></li>
+  <li>A Task filed by a Graph step of LOO-937 (<code>launch-plan</code>, <code>ship-decomposed</code>), not by its conversation.
+    <ol><li><strong>Chosen:</strong> a child of LOO-937, like any other.</li>
+    <li>Top-level unless <code>--parent</code> is passed.</li></ol></li>
+</ol>
+
+</main>
+</body>
+</html>

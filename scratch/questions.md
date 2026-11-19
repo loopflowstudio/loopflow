@@ -10,8 +10,15 @@ rest is not chosen.
   conversation stays in its checkout; after close it reopens in the
   repository's main checkout.
 - A child copies its parent's Project when filed; nothing climbs at read time.
-- `lf task complete <parent>` closes children with nothing unmerged and stops
-  on the others, taking `--keep <ID>` or `--abandon <ID>`.
+- `lf task complete <parent>` never stops and takes no new flag: merged
+  children become done, never-started ones are abandoned, and a child with
+  anything unmerged stays open with its link and is named (concept review;
+  replaces the kickoff's `--keep` / `--abandon`).
+- A conversation belongs to one Task and conducts that Task's children: two
+  relations. `session_tasks()` is not widened (concept review).
+- A conductor is told when a child stops at an interactive step, fails,
+  merges or closes, not at each step.
+- A closed parent's conversation still hears about a child that is open.
 - No `merged` / `closed` booleans: `pr.phase` and `state` already say it.
 - Removing several PRs in a row on one Task is a follow-up Task, not this PR.
   It is live behaviour (v0.13.16, `docs/ops.md:38`).

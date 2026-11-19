@@ -228,16 +228,11 @@ fn task(repo: &Path, command: &TaskCommand, io: &mut CommandIo<'_>) -> Result<()
             let completion =
                 loopflow_execution::ops::task::task_complete(repo, issue, reason.as_deref())?;
             if *json {
-                writeln!(
-                    io.output,
-                    "{}",
-                    serde_json::to_string_pretty(&completion.task)?
-                )?;
+                let completed = super::waves::task_completed(completion)?;
+                writeln!(io.output, "{}", serde_json::to_string_pretty(&completed)?)?;
             } else {
                 writeln!(io.output, "{} done", completion.task.identifier)?;
-                for child in &completion.children {
-                    writeln!(io.output, "  {}", child_completion_line(child))?;
-                }
+                write_child_completions(io.output, &completion.children, 1)?;
             }
             Ok(())
         }
@@ -397,20 +392,38 @@ pub fn read_task_draft(input: &mut dyn Read) -> Result<String> {
     Ok(String::from_utf8(bytes)?)
 }
 
+/// One line per child, each child's own children indented under it.
+fn write_child_completions(
+    output: &mut dyn std::io::Write,
+    children: &[loopflow_storage::sqlite::children::ChildCompletion],
+    depth: usize,
+) -> Result<()> {
+    for child in children {
+        writeln!(
+            output,
+            "{}{}",
+            "  ".repeat(depth),
+            child_completion_line(child)
+        )?;
+        write_child_completions(output, &child.children, depth + 1)?;
+    }
+    Ok(())
+}
+
 fn child_completion_line(child: &loopflow_storage::sqlite::children::ChildCompletion) -> String {
-    use loopflow_storage::sqlite::children::ChildDisposition;
+    use loopflow_storage::sqlite::children::ChildOutcome;
 
     let id = &child.task.identifier;
     let pr = child.pr.as_ref().and_then(|pr| {
         pr.github()
             .map(|github| format!("#{} {}", github.number, pr.phase().as_str()))
     });
-    match child.disposition {
-        ChildDisposition::Completed => {
+    match child.outcome {
+        ChildOutcome::Done => {
             format!("{id} done: {}", pr.as_deref().unwrap_or("PR merged"))
         }
-        ChildDisposition::Abandoned => format!("{id} abandoned: never started"),
-        ChildDisposition::Open => {
+        ChildOutcome::Abandoned => format!("{id} abandoned: never started"),
+        ChildOutcome::Open => {
             let pr = pr.unwrap_or_else(|| "started, no PR".into());
             let step = child.step.as_ref().map(|step| format!("at {step}"));
             let reasons = std::iter::once(pr).chain(step).collect::<Vec<_>>();

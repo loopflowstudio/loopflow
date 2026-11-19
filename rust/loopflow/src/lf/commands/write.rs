@@ -127,10 +127,10 @@ writes! {
 
     /// `lf task complete <issue>`.
     #[serde(rename = "task.complete")]
-    TaskComplete { directory: PathBuf, issue: String } => loopflow_storage::work::task::Task;
-    { issue, .. } => {
-        loopflow_execution::ops::task::task_complete(&task_repo(issue)?, issue, None)?.task
-    },
+    TaskComplete { directory: PathBuf, issue: String } => super::waves::TaskCompleted;
+    { issue, .. } => super::waves::task_completed(
+        loopflow_execution::ops::task::task_complete(&task_repo(issue)?, issue, None)?,
+    )?,
 
     /// `lf task reopen <issue>`.
     #[serde(rename = "task.reopen")]

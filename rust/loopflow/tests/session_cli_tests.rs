@@ -707,7 +707,7 @@ fn a_task_filed_from_a_tasks_conversation_shows_under_it() {
     assert!(shown["parent"].is_null());
     assert_eq!(shown["children"][0]["identifier"], child_name);
     let shown = json(lf(&["task", "show", child_name, "--json"], None));
-    assert_eq!(shown["parent"], parent_name);
+    assert_eq!(shown["parent"]["identifier"], parent_name);
     assert_eq!(shown["children"], serde_json::json!([]));
 
     let status = json(lf(&["task", "status", &parent_name, "--json"], None));
@@ -717,7 +717,10 @@ fn a_task_filed_from_a_tasks_conversation_shows_under_it() {
     assert_eq!(children[0]["identifier"], child_name);
     assert_eq!(children[0]["state"], "unstarted");
     let status = json(lf(&["task", "status", child_name, "--json"], None));
-    assert_eq!(status["parent"], parent_name);
+    // The same row the creation receipt carried, wherever a parent is read.
+    assert_eq!(status["parent"]["identifier"], parent_name);
+    assert_eq!(status["parent"]["id"], parent_id);
+    assert_eq!(status["task"]["parent_id"], parent_id);
     assert_eq!(status["children"], serde_json::json!([]));
 
     let shown = lf(&["task", "status", &parent_name], None);
@@ -760,6 +763,9 @@ fn a_merged_parent_stays_open_until_it_is_completed_with_its_children() {
     let (landed_id, landed) = file("Retry budget per host", Some(&parent));
     let (reviewing_id, reviewing) = file("Log each retry", Some(&parent));
     let (_, unstarted) = file("Document the budget", Some(&parent));
+    // The landed child has follow-ups of its own.
+    let (_, grandchild) = file("Tune the budget", Some(&landed));
+    let (kept_id, kept) = file("Budget dashboards", Some(&landed));
 
     let database = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     let publish = |task: &str, number: u32, merged: bool| {
@@ -794,6 +800,7 @@ fn a_merged_parent_stays_open_until_it_is_completed_with_its_children() {
     publish(&parent_id, 1979, true);
     publish(&landed_id, 1980, true);
     publish(&reviewing_id, 1981, false);
+    publish(&kept_id, 1982, false);
 
     // Merged with children open: it says so, and nothing asks to complete it.
     let status = json(lf(&["task", "status", &parent, "--json"]));
@@ -801,26 +808,59 @@ fn a_merged_parent_stays_open_until_it_is_completed_with_its_children() {
     assert_eq!(status["task"]["reason"], "Merged · 3 children open");
     assert!(status["task"]["next"].is_null(), "{}", status["task"]);
     assert_ne!(status["task"]["state"], "done");
-    assert_eq!(status["children"][0]["parent"], parent_id);
+    assert_eq!(status["children"][0]["parent_id"], parent_id);
     let listed = lf(&["task", "list"]);
     let line = |listed: &str, start: String| listed.lines().any(|line| line.starts_with(&start));
     assert!(line(&listed, format!("  {reviewing} ·")), "{listed}");
 
-    let completed = lf(&["task", "complete", &parent]);
+    // A child that becomes done settles its own children by the same rule.
+    let completed = json(lf(&["task", "complete", &parent, "--json"]));
+    assert_eq!(completed["identifier"], parent);
+    let outcomes = |children: &serde_json::Value| {
+        children
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|child| {
+                (
+                    child["task"]["identifier"].as_str().unwrap().to_owned(),
+                    child["outcome"].as_str().unwrap().to_owned(),
+                    child["task"]["state"].as_str().unwrap().to_owned(),
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+    let children = outcomes(&completed["children"]);
     assert_eq!(
-        completed,
-        format!(
-            "{parent} done\n  {landed} done: #1980 merged\n  {unstarted} abandoned: never started\n  {reviewing} stays open: #1981 open\n"
-        )
+        children[..2],
+        [
+            (landed.clone(), "done".into(), "done".into()),
+            (unstarted.clone(), "abandoned".into(), "abandoned".into()),
+        ]
     );
+    assert_eq!(
+        (&children[2].0, children[2].1.as_str()),
+        (&reviewing, "open")
+    );
+    let grandchildren = outcomes(&completed["children"][0]["children"]);
+    assert_eq!(
+        grandchildren[0],
+        (grandchild.clone(), "abandoned".into(), "abandoned".into())
+    );
+    assert_eq!(
+        (&grandchildren[1].0, grandchildren[1].1.as_str()),
+        (&kept, "open")
+    );
+    assert_eq!(completed["children"][1]["children"], serde_json::json!([]));
     let state = |task: &str| json(lf(&["task", "status", task, "--json"]))["task"]["state"].clone();
     assert_eq!(state(&parent), "done");
     assert_eq!(state(&landed), "done");
     assert_eq!(state(&unstarted), "abandoned");
+    assert_eq!(state(&grandchild), "abandoned");
 
     // The child left open keeps its link and is listed on its own.
     let left = json(lf(&["task", "status", &reviewing, "--json"]));
-    assert_eq!(left["parent"], parent);
+    assert_eq!(left["parent"]["identifier"], parent);
     assert!(
         !matches!(left["task"]["state"].as_str(), Some("done" | "abandoned")),
         "{}",
@@ -828,6 +868,19 @@ fn a_merged_parent_stays_open_until_it_is_completed_with_its_children() {
     );
     let listed = lf(&["task", "list"]);
     assert!(line(&listed, format!("{reviewing} ·")), "{listed}");
+
+    // In text, each child's own children are indented under it.
+    let (second_id, second) = file("Cache responses", None);
+    let (merged_id, merged) = file("Cache per host", Some(&second));
+    let (_, idle) = file("Document the cache", Some(&merged));
+    publish(&second_id, 1990, true);
+    publish(&merged_id, 1991, true);
+    assert_eq!(
+        lf(&["task", "complete", &second]),
+        format!(
+            "{second} done\n  {merged} done: #1991 merged\n    {idle} abandoned: never started\n"
+        )
+    );
 }
 
 #[cfg(unix)]

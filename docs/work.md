@@ -249,8 +249,10 @@ says which branch it starts from, and neither sets the other: add
 `--stack-on LOO-12` when the follow-up needs LOO-12's unmerged code.
 
 Follow-ups stay flat. Filed from LOO-14's conversation, a new Task is a
-sibling under LOO-12; `--parent LOO-14` nests it. Outside a Task's
-conversation, `lf task create` files top-level work as before.
+sibling under LOO-12; `--parent LOO-14` nests it. Once LOO-12 is done or
+abandoned, a Task filed from LOO-14's conversation is LOO-14's child.
+Outside a Task's conversation, `lf task create` files top-level work as
+before.
 
 LOO-12's conversation conducts its children. It is told, and woken if idle,
 when a child stops at an interactive step, a child's run fails or stops, a
@@ -290,6 +292,7 @@ when the follow-ups are settled:
 $ lf task complete LOO-12
 LOO-12 done
   LOO-14 done: #1980 merged
+    LOO-17 abandoned: never started
   LOO-16 abandoned: never started
   LOO-15 stays open: #1981 open, at human-review
 ```
@@ -297,7 +300,9 @@ LOO-12 done
 Completing a parent finishes each child whose PR merged and abandons each
 child that never started. A child with anything unmerged (an open PR, a
 running Graph, a checkout with commits) stays open and is named;
-finish it or `lf task abandon` it yourself. The command never stops to ask.
+finish it or `lf task abandon` it yourself. A child finished this way settles
+its own children by the same rule, printed under it. The command never stops
+to ask.
 
 A done Task's conversation is still yours. `lf resume LOO-12` reopens it
 after the checkout is gone, in the repository's main checkout, and it goes on
@@ -662,13 +667,13 @@ ambiguous prefix lists its matches.
 
 **Parent.** `--parent <ID>` on `lf task create` names the parent;
 `--parent none` files top-level; an unknown ID is an error naming it, and so
-is a parent that would be its own descendant. `lf task create --json` carries
-`parent`, the parent's row as `lf task list --json` prints it, or `null`.
-`lf task status --json` and `lf task show --json` carry
-`parent`, the parent's identifier or `null`, and `children`, the same rows
-`lf task list --json` prints, `[]` when there are none. Each of those rows
-carries its own `parent`, the parent's `id` or `null`, so a list can nest. A
-child's own `lf task status` prints `parent: LOO-12`.
+is a parent that would be its own descendant. `lf task create --json`,
+`lf task status --json` and `lf task show --json` carry `parent`, the
+parent's row as `lf task list --json` prints it, or `null`, so
+`.parent.identifier` reads the same from all three. The last two also carry
+`children`, the same rows, `[]` when there are none. Each row carries
+`parent_id`, the parent's `id` or `null`, so a list can nest. A child's own
+`lf task status` prints `parent: LOO-12`.
 
 **Graph selection.** A Task keeps the graph it took up. Before its first run:
 the one named on `lf task run LOO-12 GRAPH`, then its Wave's default, then
@@ -683,7 +688,10 @@ and keeps the Session, checkout, PR and graph.
 
 **Completion.** `lf task complete` changes status only, independent of graph
 position; retry it alone if it fails. On a parent it also finishes merged
-children and abandons never-started ones. `lf task reopen` keeps the same PR.
+children and abandons never-started ones. `lf task complete --json` carries
+`children`: each child's row, its `outcome` (`done`, `abandoned` or `open`)
+and its own `children`; `[]` when there were none. `lf task reopen` keeps the
+same PR.
 `lf task abandon` cancels it, closes its PRs and deletes its branches.
 
 **Sync.** `lf task sync LOO-12` exchanges that Task with its tracker now. On

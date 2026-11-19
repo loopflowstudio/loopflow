@@ -5,7 +5,7 @@
     "title": "Route incoming mail",
     "wave": "infrastructure",
     "project": "Gmail",
-    "parent": null,
+    "parent_id": null,
     "state": "active",
     "reason": "Review the demo in the Task's conversation",
     "graph": {

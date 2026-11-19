@@ -2280,29 +2280,42 @@ pub struct TaskParentChoice {
 
 impl TaskParentChoice {
     /// Follow-ups stay flat: filed from a child's conversation, the new Task
-    /// is that child's sibling.
+    /// is that child's sibling while their parent is open on this Machine.
+    /// Under a parent that closed or is not here, it would be filed under
+    /// work whose conversation nobody has open, so it is the caller's child.
     async fn resolve(&self, store: &SharedStore) -> OpsResult<Option<Task>> {
-        let unknown = |id: &str| task_error(format!("--parent names an unknown Task: {id}"));
-        let id = match (self.named.as_deref(), &self.caller) {
+        let caller = match (self.named.as_deref(), &self.caller) {
             (Some("none"), _) | (None, None) => return Ok(None),
-            (Some(named), _) => crate::store::children::resolve_task_id(&store.sqlite, named, None)
-                .map_err(task_error)?
-                .ok_or_else(|| unknown(named))?,
-            (None, Some(caller)) => {
-                let Some(task) = crate::ops::human_session::moves::conversation_task(
-                    &store.sqlite,
-                    caller.as_str(),
-                )
-                .map_err(task_error)?
-                else {
-                    return Ok(None);
-                };
-                let own = store.get_task(&task).await.map_err(task_error)?;
-                own.and_then(|own| own.parent_task_id).unwrap_or(task)
+            (Some(named), _) => {
+                let unknown = || task_error(format!("--parent names an unknown Task: {named}"));
+                let id = crate::store::children::resolve_task_id(&store.sqlite, named, None)
+                    .map_err(task_error)?
+                    .ok_or_else(unknown)?;
+                let parent = store.get_task(&id).await.map_err(task_error)?;
+                return Ok(Some(parent.ok_or_else(unknown)?));
             }
+            (None, Some(caller)) => caller,
         };
-        let parent = store.get_task(&id).await.map_err(task_error)?;
-        Ok(Some(parent.ok_or_else(|| unknown(id.as_str()))?))
+        let Some(own) =
+            crate::ops::human_session::moves::conversation_task(&store.sqlite, caller.as_str())
+                .map_err(task_error)?
+        else {
+            return Ok(None);
+        };
+        let Some(own) = store.get_task(&own).await.map_err(task_error)? else {
+            return Ok(None);
+        };
+        let Some(parent) = &own.parent_task_id else {
+            return Ok(Some(own));
+        };
+        let parent = match store.get_task(parent).await.map_err(task_error)? {
+            Some(parent) => {
+                let state = store.sqlite.task_state(&parent.id).map_err(task_error)?;
+                (!matches!(state, TaskState::Done | TaskState::Abandoned)).then_some(parent)
+            }
+            None => None,
+        };
+        Ok(Some(parent.unwrap_or(own)))
     }
 }
 
@@ -2677,7 +2690,7 @@ pub struct TaskCompletion {
     pub children: Vec<loopflow_storage::sqlite::children::ChildCompletion>,
 }
 
-/// Complete the Task and settle its direct children without moving their Graphs.
+/// Complete the Task and settle its children without moving their Graphs.
 pub fn task_complete(repo: &Path, issue: &str, note: Option<&str>) -> OpsResult<TaskCompletion> {
     block_on_task(async {
         let (store, mut task) = resolve_saved_task(repo, None, issue).await?;
@@ -2872,7 +2885,7 @@ async fn settle_completion(
     task: &mut Task,
     request: i64,
 ) -> OpsResult<Vec<loopflow_storage::sqlite::children::ChildCompletion>> {
-    use loopflow_storage::sqlite::children::{ChildDisposition, CompletionSettlement};
+    use loopflow_storage::sqlite::children::{ChildOutcome, CompletionSettlement};
 
     let result = async {
         if task_work_status(store, task).await? == WorkStatus::Abandoned {
@@ -2900,14 +2913,16 @@ async fn settle_completion(
             .await
             .map_err(task_error)?
             .ok_or_else(|| task_error("completed Task is missing"))?;
-        for child in &children {
-            let result = match child.disposition {
-                ChildDisposition::Completed => finish_completion(store, &child.task).await,
-                ChildDisposition::Abandoned => {
+        let mut settled = children.iter().collect::<Vec<_>>();
+        while let Some(child) = settled.pop() {
+            settled.extend(&child.children);
+            let result = match child.outcome {
+                ChildOutcome::Done => finish_completion(store, &child.task).await,
+                ChildOutcome::Abandoned => {
                     let result = retirement::close_conversations(&store.sqlite, &child.task.id);
                     sync_completion(store, &child.task).await.and(result)
                 }
-                ChildDisposition::Open => continue,
+                ChildOutcome::Open => continue,
             };
             if let Err(error) = result {
                 crate::journal::request::diagnostic(format_args!(

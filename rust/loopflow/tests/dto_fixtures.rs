@@ -371,7 +371,11 @@ fn task_status_preserves_canonical_work_and_tracker_state() {
     }
     let pane: DesktopTaskPane = serde_json::from_value(wire).unwrap();
     // A follow-up names the Task it was filed from and lists its own.
-    assert_eq!(pane.parent.as_deref(), Some("LOO-1"));
+    assert_eq!(pane.parent.as_ref().unwrap().identifier, "LOO-1");
+    assert_eq!(
+        pane.children[0].parent_id.as_deref(),
+        Some("task_11111111111111111111111111111111")
+    );
     assert_eq!(pane.children[0].identifier, "LOO-3");
     let status = &pane.status;
     let task = status.task.as_ref().unwrap();

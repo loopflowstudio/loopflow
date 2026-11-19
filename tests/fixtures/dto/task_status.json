@@ -129,7 +129,26 @@
     "synced_at": 1790683200
   },
   "row": null,
-  "parent": "LOO-1",
+  "parent": {
+    "id": "task_44444444444444444444444444444444",
+    "identifier": "LOO-1",
+    "title": "Parse incoming mail",
+    "wave": null,
+    "project": "Mail",
+    "parent_id": null,
+    "state": "idle",
+    "reason": "Merged · 2 children open",
+    "graph": {
+      "name": "code",
+      "step": "end"
+    },
+    "pr": {
+      "number": 1718,
+      "url": "https://github.com/loopflowstudio/loopflow/pull/1718",
+      "phase": "merged"
+    },
+    "next": null
+  },
   "children": [
     {
       "id": "task_33333333333333333333333333333333",
@@ -137,7 +156,7 @@
       "title": "Retry the bounced mail",
       "wave": null,
       "project": "Mail",
-      "parent": "task_11111111111111111111111111111111",
+      "parent_id": "task_11111111111111111111111111111111",
       "state": "idle",
       "reason": "Waiting at human-review",
       "graph": {

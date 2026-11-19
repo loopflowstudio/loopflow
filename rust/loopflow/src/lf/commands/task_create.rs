@@ -22,8 +22,7 @@ pub struct TaskCreated {
     #[serde(deserialize_with = "Option::deserialize")]
     pub session: Option<loopflow_execution::ops::human_session::SessionRecord>,
     pub row: super::waves::RoadmapTask,
-    /// The Task this one was filed from, as lists show it; `null` for
-    /// top-level work.
+    /// The Task this one was filed from; `null` for top-level work.
     #[serde(deserialize_with = "Option::deserialize")]
     pub parent: Option<super::task_row::TaskRow>,
 }

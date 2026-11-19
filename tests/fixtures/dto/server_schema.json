@@ -520,6 +520,26 @@
       ],
       "type": "object"
     },
+    "ChildOutcome": {
+      "description": "What completing a parent did with one child, in the order they are reported.",
+      "oneOf": [
+        {
+          "const": "done",
+          "description": "Its PR had merged.",
+          "type": "string"
+        },
+        {
+          "const": "abandoned",
+          "description": "It was never started.",
+          "type": "string"
+        },
+        {
+          "const": "open",
+          "description": "It holds something unmerged and keeps its link.",
+          "type": "string"
+        }
+      ]
+    },
     "CiCheck": {
       "description": "One required check that is not passing, named so the `ci-fix` skill can\nresolve the exact failure from its logs.",
       "properties": {
@@ -1423,6 +1443,31 @@
       ],
       "type": "object"
     },
+    "CompletedChild": {
+      "description": "One child of a completed Task. Wire type; no defaults.",
+      "properties": {
+        "children": {
+          "description": "What becoming done did with its own children.",
+          "items": {
+            "$ref": "#/$defs/CompletedChild"
+          },
+          "type": "array"
+        },
+        "outcome": {
+          "$ref": "#/$defs/ChildOutcome"
+        },
+        "task": {
+          "$ref": "#/$defs/TaskRow",
+          "description": "The child as it stands now."
+        }
+      },
+      "required": [
+        "task",
+        "outcome",
+        "children"
+      ],
+      "type": "object"
+    },
     "ConfigSource": {
       "description": "Authority is independent of the declaration's scope and target.",
       "enum": [
@@ -1886,11 +1931,15 @@
           ]
         },
         "parent": {
-          "description": "The Task this one was filed from, by identifier; `null` for top-level work.",
-          "type": [
-            "string",
-            "null"
-          ]
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TaskRow"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The Task this one was filed from; `null` for top-level work."
         },
         "plan_error": {
           "type": [
@@ -11913,6 +11962,168 @@
       ],
       "type": "object"
     },
+    "TaskCompleted": {
+      "description": "`lf task complete --json`: the completed Task and what its completion did\nwith each child. Wire type; no defaults.",
+      "properties": {
+        "assignee": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "base_commit": {
+          "type": "string"
+        },
+        "branch": {
+          "type": "string"
+        },
+        "children": {
+          "description": "One entry per Task filed from it that was open, in the order the\ncommand prints them.",
+          "items": {
+            "$ref": "#/$defs/CompletedChild"
+          },
+          "type": "array"
+        },
+        "completed_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "created_at": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "due_date": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "identifier": {
+          "type": "string"
+        },
+        "parent_pr_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "parent_task_id": {
+          "description": "The Task this one was filed from; its children are the Tasks naming it.\nNot the stack: `parent_pr_id` says which branch it starts from.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "project_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rank": {
+          "description": "Shared planning fields; independent of local execution and Workflow position.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "repo_id": {
+          "description": "Stable repository identity, independent of planning membership.",
+          "type": "string"
+        },
+        "revision": {
+          "description": "Local optimistic-write revision; independent of Linear observation age.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "state": {
+          "description": "Linear's state type, `completed` once done; the lifecycle is `TaskState`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "title": {
+          "type": "string"
+        },
+        "tracker_id": {
+          "description": "The record’s ID in the repository's tracker.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tracker_synced_at": {
+          "description": "Time of the last successful tracker refresh.",
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "tracker_writeback": {
+          "$ref": "#/$defs/LinearWritebackState"
+        },
+        "updated_at": {
+          "type": "string"
+        },
+        "wave_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WaveId"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Read projection from the Project join, validated against the Project on save."
+        },
+        "workspace_slug": {
+          "type": "string"
+        },
+        "worktree": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "revision",
+        "identifier",
+        "title",
+        "description",
+        "rank",
+        "assignee",
+        "due_date",
+        "state",
+        "completed_at",
+        "tracker_id",
+        "tracker_synced_at",
+        "tracker_writeback",
+        "wave_id",
+        "repo_id",
+        "project_id",
+        "parent_task_id",
+        "worktree",
+        "workspace_slug",
+        "branch",
+        "base_commit",
+        "parent_pr_id",
+        "created_at",
+        "updated_at",
+        "children"
+      ],
+      "type": "object"
+    },
     "TaskConditionSnapshot": {
       "description": "A Task's shared condition and the evidence that proves it.",
       "properties": {
@@ -12006,7 +12217,7 @@
               "type": "null"
             }
           ],
-          "description": "The Task this one was filed from, as lists show it; `null` for\ntop-level work."
+          "description": "The Task this one was filed from; `null` for top-level work."
         },
         "row": {
           "$ref": "#/$defs/RoadmapTask"
@@ -13523,8 +13734,8 @@
             "null"
           ]
         },
-        "parent": {
-          "description": "The stable ID of the Task this one was filed from.",
+        "parent_id": {
+          "description": "The `id` of the Task this one was filed from; `null` for top-level work.",
           "type": [
             "string",
             "null"
@@ -13572,7 +13783,7 @@
         "title",
         "wave",
         "project",
-        "parent",
+        "parent_id",
         "state",
         "reason",
         "graph",
@@ -15861,7 +16072,7 @@
           ],
           "type": "object",
           "x-result": {
-            "$ref": "#/$defs/Task"
+            "$ref": "#/$defs/TaskCompleted"
           }
         },
         {

@@ -144,6 +144,19 @@ rest is not chosen.
   to the conversation that completed it; a terminal in the Task's checkout
   files top-level.
 
+Made while building slice 6:
+
+- The repeated failure stays silent only while the Task's step and PR phase
+  match the earlier reading; either moving makes the same sentence news
+  again. Keep that reset / silence it for the life of the Task?
+- `lf task complete --json` keeps the Task's own fields at the top level
+  (the stored Task, as before) and adds `children`, whose entries hold a
+  `TaskRow` under `task`. The parent and its children are two shapes in one
+  answer. Leave / make the top level a `TaskRow` too (breaks Desktop's
+  decode of `task.complete`)?
+- A child left open has `children: []` in the answer even when it has
+  children: the list says what the completion did, not what exists.
+
 ## Raised by QA on a private Machine (2026-11-18, `scratch/qa.html`)
 
 Changed there, for review: the human `lf task create` receipt prints a second

@@ -80,26 +80,48 @@ impl TaskObservation {
         })
     }
 
+    /// The step the Task stands at or last left.
+    fn step(&self) -> Option<&str> {
+        self.position.as_ref().map(|position| match position {
+            TaskGraphPosition::At { step } | TaskGraphPosition::Run { step, .. } => step.as_str(),
+        })
+    }
+
+    /// How each run that ended without succeeding ended, by run.
+    fn failures(&self) -> impl Iterator<Item = (&LfProcessId, String)> {
+        self.runs
+            .iter()
+            .filter(|(_, run)| run.completed && run.outcome.as_deref() != Some("succeeded"))
+            .map(|(id, run)| {
+                let outcome = run.outcome.as_deref().unwrap_or("stopped");
+                let failure = match &run.step {
+                    Some(step) => format!("{outcome} at {}", step.position()),
+                    None => outcome.to_owned(),
+                };
+                (id, failure)
+            })
+    }
+
     /// How the Task's standing moved since `old`, as a conductor hears it:
     /// it stopped at an interactive step, a run ended without succeeding, its
     /// PR merged, it closed. Steps passing inside a run are not news.
     fn news(&self, old: &Self) -> Vec<String> {
-        let mut news = Vec::new();
-        for (id, run) in &self.runs {
-            if run.completed
-                && run.outcome.as_deref() != Some("succeeded")
-                && !old.runs.get(id).is_some_and(|run| run.completed)
-            {
-                let outcome = run.outcome.as_deref().unwrap_or("stopped");
-                news.push(match &run.step {
-                    Some(step) => format!("{outcome} at {}", step.position()),
-                    None => outcome.to_owned(),
-                });
-            }
-        }
-        news.sort();
+        // A relaunch that fails where a run in `old` did says nothing new
+        // while the Task's step and PR are where they were.
+        let said = if old.step() == self.step() && old.pr == self.pr {
+            old.failures().map(|(_, failure)| failure).collect()
+        } else {
+            BTreeSet::new()
+        };
         // A run and its relaunches that end the same way are one piece of news.
-        news.dedup();
+        let failures = self
+            .failures()
+            .filter(|(id, failure)| {
+                !old.runs.get(id).is_some_and(|run| run.completed) && !said.contains(failure)
+            })
+            .map(|(_, failure)| failure)
+            .collect::<BTreeSet<_>>();
+        let mut news = failures.into_iter().collect::<Vec<_>>();
         if let Some(TaskGraphPosition::At { step }) = &self.position {
             if old.position != self.position && step != "start" && step != "end" {
                 news.push(format!("stopped at {step}"));
@@ -647,6 +669,34 @@ mod tests {
         assert_eq!(notices.len(), 1, "{notices:?}");
         assert!(
             notices[0].contains("conducts, failed at gate. lf task status"),
+            "{notices:?}"
+        );
+    }
+
+    #[test]
+    fn a_relaunch_failing_where_the_last_run_did_is_not_told_twice() {
+        let (_home, store, parent) = task_session();
+        task(&store, "Retry", "/task-updates-child", Some(&parent));
+        let fail = |step: &str| {
+            store.test_graph(
+                "feature",
+                "/task-updates-child",
+                &[(step, Some("failed"))],
+                Some("failed"),
+            );
+        };
+        fail("gate");
+        assert_eq!(unread(&store, "reader").0.len(), 1);
+        // The relaunch is read later and fails at the same step.
+        fail("gate");
+        let (notices, _) = unread(&store, "reader");
+        assert_eq!(notices.len(), 1, "{notices:?}");
+        // A failure somewhere else is news.
+        fail("lint");
+        let (notices, _) = unread(&store, "reader");
+        assert_eq!(notices.len(), 2, "{notices:?}");
+        assert!(
+            notices[1].contains("conducts, failed at lint."),
             "{notices:?}"
         );
     }

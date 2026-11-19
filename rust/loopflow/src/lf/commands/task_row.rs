@@ -28,9 +28,9 @@ pub struct TaskRow {
     pub wave: Option<String>,
     /// Its Project's name; `null` outside any Project.
     pub project: Option<String>,
-    /// The stable ID of the Task this one was filed from.
+    /// The `id` of the Task this one was filed from; `null` for top-level work.
     #[serde(deserialize_with = "Option::deserialize")]
-    pub parent: Option<String>,
+    pub parent_id: Option<String>,
     pub state: TaskState,
     /// Why it is in that state, or what it waits on.
     pub reason: String,
@@ -71,9 +71,9 @@ pub struct TaskDetail {
     /// The Task this one is stacked on; `null` when it builds on the default branch.
     #[serde(deserialize_with = "Option::deserialize")]
     pub stack_parent: Option<loopflow_execution::ops::task::TaskStackParent>,
-    /// The Task this one was filed from, by identifier; `null` for top-level work.
+    /// The Task this one was filed from; `null` for top-level work.
     #[serde(deserialize_with = "Option::deserialize")]
-    pub parent: Option<String>,
+    pub parent: Option<TaskRow>,
     /// The Tasks filed from this one, in filing order.
     pub children: Vec<TaskRow>,
 }
@@ -189,7 +189,7 @@ impl TaskNames {
             id: summary.id,
             identifier: summary.identifier,
             title: summary.name,
-            parent: summary.parent_id,
+            parent_id: summary.parent_id,
             state,
             // An approved Task waits on its ship, whatever its next move says.
             reason: task.conducting.unwrap_or_else(|| {

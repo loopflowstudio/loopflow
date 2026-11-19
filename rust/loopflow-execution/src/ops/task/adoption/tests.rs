@@ -295,6 +295,20 @@ fn a_task_filed_from_a_tasks_conversation_is_its_child() {
         children.iter().map(|task| &task.id).collect::<Vec<_>>(),
         [&child.id, &sibling.id]
     );
+
+    // Once the parent closes, nobody conducts under it: a follow-up filed
+    // from the child's conversation is that child's child.
+    table
+        .db()
+        .execute(
+            "UPDATE tasks SET planning_completed=1,planning_state='completed' WHERE id=?1",
+            [parent.id.as_str()],
+        )
+        .unwrap();
+    let after = table
+        .file("Cap the budget", None, None, Some(&from_child))
+        .unwrap();
+    assert_eq!(after.parent_task_id.as_ref(), Some(&child.id));
 }
 
 #[test]

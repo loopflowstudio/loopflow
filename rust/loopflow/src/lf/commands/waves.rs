@@ -1174,9 +1174,9 @@ pub struct DesktopTaskPane {
     #[serde(flatten)]
     pub status: loopflow_execution::ops::task::TaskStatus,
     pub row: Option<RoadmapTask>,
-    /// The Task this one was filed from, by identifier; `null` for top-level work.
+    /// The Task this one was filed from; `null` for top-level work.
     #[serde(deserialize_with = "Option::deserialize")]
-    pub parent: Option<String>,
+    pub parent: Option<TaskRow>,
     /// The Tasks filed from this one, in filing order.
     pub children: Vec<TaskRow>,
 }
@@ -1213,44 +1213,118 @@ pub(crate) async fn created_rows(
     store: &SharedStore,
     task: &Task,
 ) -> Result<(RoadmapTask, Option<TaskRow>)> {
+    let row = task_row(store, task).await?;
+    Ok((row, parent_row(store, task).await?))
+}
+
+/// The rows of `tasks`, as `lf task list --json` prints them.
+async fn task_rows(store: &SharedStore, tasks: Vec<&Task>) -> Result<Vec<TaskRow>> {
+    if tasks.is_empty() {
+        return Ok(Vec::new());
+    }
+    let shared = SharedTaskReads::read(store).await?;
+    let names = TaskNames::read(Some(store)).await?;
+    Ok(snapshot_task_details(store, tasks, false, &shared)?
+        .into_iter()
+        .map(|row| names.row(row))
+        .collect())
+}
+
+/// The row of the Task `task` was filed from; `None` for top-level work and
+/// for a parent this Machine does not hold.
+async fn parent_row(store: &SharedStore, task: &Task) -> Result<Option<TaskRow>> {
     let parent = match &task.parent_task_id {
         Some(parent) => store.get_task(parent).await?,
         None => None,
     };
-    let shared = SharedTaskReads::read(store).await?;
-    let mut rows = snapshot_task_details(
-        store,
-        std::iter::once(task).chain(&parent).collect(),
-        false,
-        &shared,
-    )?;
-    let parent = match rows.len() {
-        2 => {
-            let names = TaskNames::read(Some(store)).await?;
-            rows.pop().map(|row| names.row(row))
-        }
-        _ => None,
-    };
-    Ok((rows.pop().expect("one Task reads one row"), parent))
+    Ok(task_rows(store, parent.iter().collect()).await?.pop())
 }
 
-/// The Task `task` was filed from, by identifier, and the Tasks filed from it.
-async fn task_family(store: &SharedStore, task: &Task) -> Result<(Option<String>, Vec<TaskRow>)> {
-    let parent = match &task.parent_task_id {
-        Some(parent) => store.get_task(parent).await?.map(|task| task.identifier),
-        None => None,
-    };
+/// The Task `task` was filed from and the Tasks filed from it.
+async fn task_family(store: &SharedStore, task: &Task) -> Result<(Option<TaskRow>, Vec<TaskRow>)> {
     let children = store.sqlite.task_children(&task.id)?;
-    if children.is_empty() {
-        return Ok((parent, Vec::new()));
+    Ok((
+        parent_row(store, task).await?,
+        task_rows(store, children.iter().collect()).await?,
+    ))
+}
+
+/// `lf task complete --json`: the completed Task and what its completion did
+/// with each child. Wire type; no defaults.
+#[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct TaskCompleted {
+    #[serde(flatten)]
+    pub task: Task,
+    /// One entry per Task filed from it that was open, in the order the
+    /// command prints them.
+    pub children: Vec<CompletedChild>,
+}
+
+/// One child of a completed Task. Wire type; no defaults.
+#[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct CompletedChild {
+    /// The child as it stands now.
+    pub task: TaskRow,
+    pub outcome: loopflow_storage::sqlite::children::ChildOutcome,
+    /// What becoming done did with its own children.
+    pub children: Vec<CompletedChild>,
+}
+
+/// Join a completion to the rows its children have now.
+pub(crate) fn task_completed(
+    completion: loopflow_execution::ops::task::TaskCompletion,
+) -> Result<TaskCompleted> {
+    use loopflow_storage::sqlite::children::ChildCompletion;
+
+    fn ids<'a>(
+        children: &'a [ChildCompletion],
+        into: &mut Vec<&'a loopflow_storage::work::task::TaskId>,
+    ) {
+        for child in children {
+            into.push(&child.task.id);
+            ids(&child.children, into);
+        }
     }
-    let shared = SharedTaskReads::read(store).await?;
-    let names = TaskNames::read(Some(store)).await?;
-    let rows = snapshot_task_details(store, children.iter().collect(), false, &shared)?
-        .into_iter()
-        .map(|row| names.row(row))
-        .collect();
-    Ok((parent, rows))
+    fn join(
+        children: &[ChildCompletion],
+        rows: &mut HashMap<String, TaskRow>,
+    ) -> Result<Vec<CompletedChild>> {
+        children
+            .iter()
+            .map(|child| {
+                Ok(CompletedChild {
+                    task: rows
+                        .remove(child.task.id.as_str())
+                        .ok_or_else(|| anyhow!("{} has no row", child.task.identifier))?,
+                    outcome: child.outcome,
+                    children: join(&child.children, rows)?,
+                })
+            })
+            .collect()
+    }
+    let mut settled = Vec::new();
+    ids(&completion.children, &mut settled);
+    let mut rows = HashMap::new();
+    if !settled.is_empty() {
+        tokio::runtime::Runtime::new()?.block_on(async {
+            let store = loopflow_execution::store::read_existing_registry()?
+                .map(std::sync::Arc::new)
+                .ok_or_else(|| anyhow!("no Loopflow store exists on this Machine"))?;
+            // Read after the settlement, so each row shows where its Task stands now.
+            let mut tasks = Vec::with_capacity(settled.len());
+            for id in settled {
+                tasks.extend(store.get_task(id).await?);
+            }
+            for row in task_rows(&store, tasks.iter().collect()).await? {
+                rows.insert(row.id.clone(), row);
+            }
+            anyhow::Ok(())
+        })?;
+    }
+    Ok(TaskCompleted {
+        children: join(&completion.children, &mut rows)?,
+        task: completion.task,
+    })
 }
 
 /// `lf task status`: the Task it was filed from and one line per child.
@@ -1261,7 +1335,7 @@ pub fn print_task_family(task: &Task) -> Result<()> {
             .ok_or_else(|| anyhow!("no Loopflow store exists on this Machine"))?;
         let (parent, children) = task_family(&store, task).await?;
         if let Some(parent) = parent {
-            println!("  parent: {parent}");
+            println!("  parent: {}", parent.identifier);
         }
         let width = |text: fn(&TaskRow) -> &str| {
             children

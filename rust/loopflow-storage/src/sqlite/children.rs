@@ -33,19 +33,37 @@ use loopflow_model::id::WaveId;
 use super::{SqliteStore, TaskCheckout};
 
 /// What completing a parent did with one child, in the order they are reported.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum ChildDisposition {
-    Completed,
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum ChildOutcome {
+    /// Its PR had merged.
+    Done,
+    /// It was never started.
     Abandoned,
+    /// It holds something unmerged and keeps its link.
     Open,
 }
 
 #[derive(Debug)]
 pub struct ChildCompletion {
     pub task: Task,
-    pub disposition: ChildDisposition,
+    pub outcome: ChildOutcome,
     pub pr: Option<TaskPr>,
     pub step: Option<String>,
+    /// What completing this child did with its own children; empty unless
+    /// it became done.
+    pub children: Vec<ChildCompletion>,
 }
 
 #[derive(Debug)]
@@ -2671,19 +2689,23 @@ fn children_where(conn: &Connection, parent: &TaskId, filter: &str) -> StoreResu
     Ok(children)
 }
 
+/// Completing a Task means one thing by any path: a child that becomes done
+/// here settles its own children by the same rule.
 fn complete_children(conn: &Connection, parent: &TaskId) -> StoreResult<Vec<ChildCompletion>> {
     let children = children_where(conn, parent, &open_task_children_where())?;
     let mut completions = Vec::with_capacity(children.len());
     for task in children {
         let pr = active_task_pr_on(conn, &task.id)?;
-        let disposition = if pr.as_ref().is_some_and(|pr| pr.phase() == PrPhase::Merged) {
+        let mut children = Vec::new();
+        let outcome = if pr.as_ref().is_some_and(|pr| pr.phase() == PrPhase::Merged) {
             record_task_completion(conn, &task.id)?;
-            ChildDisposition::Completed
+            children = complete_children(conn, &task.id)?;
+            ChildOutcome::Done
         } else if pr.is_none() && never_started(conn, &task.id)? {
             super::durable::abandon_task_in(conn, &task.id, "parent Task completed", now_unix())?;
-            ChildDisposition::Abandoned
+            ChildOutcome::Abandoned
         } else {
-            ChildDisposition::Open
+            ChildOutcome::Open
         };
         let step = conn
             .query_row(
@@ -2694,12 +2716,13 @@ fn complete_children(conn: &Connection, parent: &TaskId) -> StoreResult<Vec<Chil
             .optional()?;
         completions.push(ChildCompletion {
             task,
-            disposition,
+            outcome,
             pr,
             step,
+            children,
         });
     }
-    completions.sort_by_key(|child| child.disposition);
+    completions.sort_by_key(|child| child.outcome);
     Ok(completions)
 }
 

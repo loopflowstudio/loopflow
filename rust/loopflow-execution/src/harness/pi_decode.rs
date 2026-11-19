@@ -94,10 +94,6 @@ impl Turn {
         facts
     }
 
-    pub fn id(&self) -> &str {
-        &self.id
-    }
-
     fn display(&mut self, event: &Value, facts: &mut Vec<Decoded>) -> Vec<ConversationEvent> {
         let mut out = Vec::new();
         match event["type"].as_str() {

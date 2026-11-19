@@ -8,7 +8,7 @@ use tokio::sync::mpsc;
 use super::fact::{Decoded, ProviderTurn};
 use super::pi::Driver as PiDriver;
 use super::pi_decode::Turn;
-use super::{Driver, SendCurrentOutcome};
+use super::Driver;
 use crate::agent::AgentConfig;
 use loopflow_model::chat::types::{ConversationEvent, ConversationItem, Lifecycle};
 
@@ -478,91 +478,6 @@ fn pi_empty_final_answers_fail_but_tool_steps_and_internal_retries_can_recover()
             ..
         })
     ));
-}
-
-#[tokio::test]
-async fn pi_steering_receipts_preserve_one_turn_and_distinguish_uncertainty() {
-    let mut config = crate::agent::AgentConfig::default();
-    let (_ledger, _env, recording) = fixture(&mut config);
-    let (tx, mut rx) = mpsc::unbounded_channel();
-
-    let mut pi = PiDriver::new(
-        &crate::harness::launch_for_test(crate::harness::HarnessKind::Pi, &config, &recording),
-        tx,
-    );
-    pi.start().await.unwrap();
-    assert_eq!(
-        pi.send_current("idle").await,
-        SendCurrentOutcome::NotSteerable
-    );
-    pi.send_input("wait").await.unwrap();
-    let ConversationEvent::TurnStarted { turn_id } = rx.recv().await.unwrap() else {
-        panic!("turn starts");
-    };
-    let crate::harness::Recording {
-        store,
-        session,
-        attachment: _,
-    } = recording.clone();
-    let thread = pi.agent_session().unwrap();
-    let origin = store.session_turns(&session).unwrap();
-    assert!(matches!(
-        pi.send_current("reject").await,
-        SendCurrentOutcome::Failed { .. }
-    ));
-    assert!(matches!(
-        pi.send_current("handled").await,
-        SendCurrentOutcome::Unknown { .. }
-    ));
-    assert!(matches!(
-        pi.send_current("malformed").await,
-        SendCurrentOutcome::Unknown { .. }
-    ));
-    assert_eq!(
-        pi.send_current("direction 雪").await,
-        SendCurrentOutcome::Sent {
-            provider_turn_id: turn_id.clone()
-        }
-    );
-    assert_eq!(
-        pi.send_current("finish").await,
-        SendCurrentOutcome::Sent {
-            provider_turn_id: turn_id.clone()
-        }
-    );
-    let events = completed(&mut rx).await;
-    assert!(!events
-        .iter()
-        .any(|e| matches!(e, ConversationEvent::TurnStarted { .. })));
-    assert!(
-        matches!(events.last(), Some(ConversationEvent::TurnCompleted {turn_id: id, status: Lifecycle::Completed}) if id == &turn_id)
-    );
-    assert_eq!(pi.agent_session().unwrap(), thread);
-    let start = origin
-        .iter()
-        .find(|turn| turn.started_at.is_some())
-        .unwrap();
-    let turns = store.session_turns(&session).unwrap();
-    let done = turns.iter().find(|turn| turn.ended_at.is_some()).unwrap();
-    // The end completes the turn the start began, keeping its origin.
-    assert_eq!(done.id, start.id);
-    assert_eq!(done.lf_process_id, start.lf_process_id);
-    assert_eq!(done.agent_process_id, start.agent_process_id);
-    assert_eq!(done.task_id, start.task_id);
-    assert_eq!(turns.len(), origin.len());
-    pi.send_input("wait").await.unwrap();
-    assert!(matches!(
-        pi.send_current("late").await,
-        SendCurrentOutcome::Unknown { .. }
-    ));
-    completed(&mut rx).await;
-    pi.send_input("wait").await.unwrap();
-    assert!(matches!(
-        pi.send_current("disconnect").await,
-        SendCurrentOutcome::Unknown { .. }
-    ));
-    completed(&mut rx).await;
-    pi.stop().await.unwrap();
 }
 
 #[test]

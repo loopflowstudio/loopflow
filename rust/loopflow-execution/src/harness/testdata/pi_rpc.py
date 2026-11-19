@@ -187,19 +187,6 @@ for line in sys.stdin:
     response = {"type": "response", "command": command, "id": request.get("id"), "success": True}
     if command == "get_state":
         response["data"] = {"sessionFile": str(file), "sessionId": "fixture"}
-    elif command == "steer":
-        text = request["message"]
-        if text == "reject":
-            response.update(success=False, error="Steer rejected")
-        elif text == "malformed":
-            del response["success"]
-            response["data"] = {"disposition": "queued"}
-        elif text == "disconnect":
-            sys.exit(9)
-        else:
-            if text == "late":
-                _emit({"type": "agent_settled", "aborted": True})
-            response["data"] = {"disposition": "handled" if text == "handled" else "queued"}
     elif command == "prompt":
         text = request["message"]
         _record(text)
@@ -208,9 +195,6 @@ for line in sys.stdin:
         else:
             response["data"] = {"disposition": "started"}
     _emit(response)
-    if command == "steer" and text == "finish":
-        _emit(_message("steering incorporated"))
-        _emit({"type": "agent_settled", "aborted": False})
     if command == "abort":
         _emit({"type": "agent_settled", "aborted": True})
     if command != "prompt" or not response["success"]:

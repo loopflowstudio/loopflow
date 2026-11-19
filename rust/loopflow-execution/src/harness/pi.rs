@@ -19,25 +19,18 @@ use super::fact::{Decoded, ProviderFact, ProviderTurn};
 use super::fact_writer::FactWriter;
 use super::pi_decode::Turn;
 use super::Recording;
-use super::{Driver as StreamDriver, HarnessError, SendCurrentOutcome};
+use super::{Driver as StreamDriver, HarnessError};
 use crate::agent::AgentConfig;
 use crate::steer::NativeBoundary;
 use loopflow_model::chat::types::{ConversationEvent, Lifecycle};
 use loopflow_model::id::AgentSessionId;
-
-#[derive(Debug)]
-struct Response {
-    value: Value,
-    // Snapshot in stream order: a later settlement cannot change the receipt.
-    turn: Option<String>,
-}
 
 #[derive(Debug, Default)]
 struct State {
     turn: Option<Turn>,
     /// Writes what this process's turns establish; present once started.
     writer: Option<FactWriter>,
-    responses: HashMap<String, oneshot::Sender<Response>>,
+    responses: HashMap<String, oneshot::Sender<Value>>,
     dead: bool,
 }
 
@@ -193,7 +186,8 @@ impl Driver {
         Ok(())
     }
 
-    async fn request_observed(&mut self, mut value: Value) -> Result<Response> {
+    async fn request(&mut self, mut value: Value) -> Result<Value> {
+        let command = value["type"].as_str().unwrap_or("command").to_owned();
         let id = uuid::Uuid::new_v4().to_string();
         value["id"] = json!(id);
         let (tx, rx) = oneshot::channel();
@@ -215,12 +209,7 @@ impl Driver {
             .expect("Pi state lock poisoned")
             .responses
             .remove(&id);
-        result
-    }
-
-    async fn request(&mut self, value: Value) -> Result<Value> {
-        let command = value["type"].as_str().unwrap_or("command").to_owned();
-        let response = self.request_observed(value).await?.value;
+        let response = result?;
         anyhow::ensure!(
             response["success"] == true,
             "Pi {}: {}",
@@ -311,10 +300,7 @@ impl Driver {
                             .as_str()
                             .and_then(|id| state.responses.remove(id))
                         {
-                            let _ = tx.send(Response {
-                                value,
-                                turn: state.turn.as_ref().map(|turn| turn.id().to_owned()),
-                            });
+                            let _ = tx.send(value);
                         }
                         continue;
                     }
@@ -474,57 +460,6 @@ impl StreamDriver for Driver {
             return Err(error);
         }
         Ok(())
-    }
-
-    async fn send_current(&mut self, content: &str) -> SendCurrentOutcome {
-        if content.trim().is_empty() {
-            return SendCurrentOutcome::Failed {
-                error: "steer input is empty".into(),
-            };
-        }
-        let turn = self
-            .state
-            .lock()
-            .expect("Pi state lock poisoned")
-            .turn
-            .as_ref()
-            .map(|turn| turn.id().to_owned());
-        let Some(turn) = turn else {
-            return SendCurrentOutcome::NotSteerable;
-        };
-        // Pi owns the queue. An acknowledgment proves acceptance, not incorporation.
-        // Missing responses and a settlement racing the acknowledgment are uncertain.
-        match self
-            .request_observed(json!({"type":"steer", "message":content}))
-            .await
-        {
-            Ok(response) if response.value["success"] == false => SendCurrentOutcome::Failed {
-                error: response.value["error"]
-                    .as_str()
-                    .unwrap_or("Pi rejected steering")
-                    .into(),
-            },
-            Ok(response)
-                if response.value["success"] == true
-                    && response.value["data"]["disposition"] == "queued"
-                    && response.turn.as_deref() == Some(&turn) =>
-            {
-                SendCurrentOutcome::Sent {
-                    provider_turn_id: turn,
-                }
-            }
-            Ok(response) => SendCurrentOutcome::Unknown {
-                provider_turn_id: Some(turn),
-                error: format!(
-                    "Pi steer did not confirm queuing during the active turn (disposition: {})",
-                    response.value["data"]["disposition"]
-                ),
-            },
-            Err(error) => SendCurrentOutcome::Unknown {
-                provider_turn_id: Some(turn),
-                error: error.to_string(),
-            },
-        }
     }
 
     async fn interrupt(&mut self) -> Result<()> {

@@ -225,29 +225,6 @@ pub fn is_turn_in_progress(err: &anyhow::Error) -> bool {
     )
 }
 
-/// What happened when the controller tried to deliver input to the exact
-/// provider Turn active at the time of the call.
-///
-/// This is deliberately an outcome rather than a provider capability. Codex,
-/// for example, accepts steering only for some Turn kinds, and a Turn can end
-/// between observation and delivery. This receipt never proves incorporation;
-/// authored input still belongs in a later boundary's durable seed.
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum SendCurrentOutcome {
-    Sent {
-        provider_turn_id: String,
-    },
-    NotSteerable,
-    Failed {
-        error: String,
-    },
-    Unknown {
-        provider_turn_id: Option<String>,
-        error: String,
-    },
-}
-
 /// How a harness answers vendor approval/permission requests.
 ///
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -266,14 +243,6 @@ pub trait Driver: Send + Sync {
     async fn start(&mut self) -> Result<()>;
     /// Start the next provider Turn from durable seed input.
     async fn send_input(&mut self, content: &str) -> Result<()>;
-    /// Try to deliver input to the exact Turn currently active.
-    ///
-    /// Harnesses without same-Turn input keep the default. A rejection or race
-    /// is not an error in the Work protocol; the controller seeds a later
-    /// boundary instead.
-    async fn send_current(&mut self, _content: &str) -> SendCurrentOutcome {
-        SendCurrentOutcome::NotSteerable
-    }
     /// Cancel the in-flight turn but keep the session alive for the next
     /// turn. The interrupted turn surfaces as a
     /// `TurnCompleted { status: Interrupted }` terminal event. No-op when no
@@ -724,10 +693,7 @@ pub fn admit_for_test(home: &std::path::Path) -> Recording {
 
 #[cfg(test)]
 mod tests {
-    use tokio::sync::mpsc;
-
-    use super::{admit_for_test, launch_for_test, ApprovalPolicy, HarnessKind, SendCurrentOutcome};
-    use crate::agent::AgentConfig;
+    use super::HarnessKind;
 
     #[test]
     fn parsing_normalizes_case_and_whitespace() {
@@ -747,33 +713,6 @@ mod tests {
             HarnessKind::parse("lfharness").map(HarnessKind::as_str),
             None
         );
-    }
-
-    #[tokio::test]
-    async fn current_send_is_decided_from_the_active_turn() {
-        let (tx, _rx) = mpsc::unbounded_channel();
-        for kind in HarnessKind::ALL {
-            let name = kind.as_str();
-            let config = AgentConfig {
-                agent: crate::config::Agent {
-                    harness: kind,
-                    model: None,
-                },
-                ..AgentConfig::default()
-            };
-            let home = tempfile::tempdir().unwrap();
-            let recording = admit_for_test(home.path());
-            let launch = launch_for_test(kind, &config, &recording);
-            let mut harness =
-                launch
-                    .harness
-                    .driver(&launch, tx.clone(), ApprovalPolicy::AutoApprove);
-            assert_eq!(
-                harness.send_current("direction").await,
-                SendCurrentOutcome::NotSteerable,
-                "an inactive {name} harness has no exact Turn to steer"
-            );
-        }
     }
 }
 

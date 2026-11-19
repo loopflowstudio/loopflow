@@ -768,5 +768,15 @@ etude checkout and `lf` version are unknown.
   (100). `server_schema.json` and `SCHEMA.md` regenerated. Not rerun: the
   acceptance test (gate). A store that ran this branch's earlier
   `plan_hub.sql` holds a TEXT `not_taken` and no reason column.
+- QA after slice 6 and its compress, 2026-11-18 (`scratch/qa.html`, homes in
+  `/tmp/lfq6`): two fixes and a test. While Git holds something not taken a
+  save reads as well (`plan_git::send`), so the rename clears the line in the
+  same command; `lf machine hub --clear` prints `No hub.`;
+  `ops::plan_git::…the_later_title_wins_on_both` failed 2 runs of 7 on two
+  stamps in one millisecond and now waits past the mini's stamps (9 of 9).
+  The hub pair was run by hand: `Hub mini, 3 unsent, 3 not taken.`, cleared
+  by the rename with Git away. Passed after: clippy on `loopflow-execution`
+  and `loopflow`; `cargo test -p loopflow-execution --lib ops::plan_git::`
+  (7). Not rerun: the acceptance test and gate's lists above.
   Open choices are in `scratch/questions.md`; the review's four
   questions are at the end of `scratch/concept-review.html`.

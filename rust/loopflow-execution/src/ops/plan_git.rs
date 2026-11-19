@@ -85,7 +85,9 @@ pub fn exchange(store: &SqliteStore, repo: &str, until: Option<Instant>) -> Resu
 /// Push the records changed here onto this Machine's ref as last fetched,
 /// fetching nothing, and give up at `until`. A push the remote refuses (its
 /// copy of the ref is ahead of the one fetched) is the error, and the next
-/// [`exchange`] sends what this did not.
+/// [`exchange`] sends what this did not. While something is not taken the
+/// save may be what lets it arrive (a Wave renamed), so this reads as well;
+/// what is still not taken stays on the line and is no error of the save.
 pub fn send(store: &SqliteStore, repo: &str, until: Instant) -> Result<()> {
     let path = Path::new(repo);
     let Some(remote) = remote(path) else {
@@ -95,6 +97,13 @@ pub fn send(store: &SqliteStore, repo: &str, until: Instant) -> Result<()> {
         return Ok(());
     };
     turn(store, repo, &remote, &repository, Some(until), |sent_seq| {
+        let waiting = store
+            .plan_carrier(repo, Carrier::Git)?
+            .is_some_and(|held| held.not_taken.is_some());
+        if waiting {
+            return exchange_with(store, repo, &remote, &repository, sent_seq, Some(until))
+                .or_else(|error| error.downcast::<NotTaken>().map(drop));
+        }
         let me = crate::store::machines::local_machine(store)?.id;
         publish(
             store,
@@ -650,6 +659,23 @@ mod tests {
             send(&self.store, &self.repo, until)
         }
 
+        /// Returns once the wall clock is past every stamp this Machine holds.
+        fn wait_past_stamps(&self) {
+            let held = self
+                .store
+                .plan_records_since(&self.repo, 0, usize::MAX)
+                .unwrap()
+                .records
+                .iter()
+                .flat_map(|record| record.fields.iter().map(|field| field.at))
+                .max()
+                .unwrap();
+            let now = || time::OffsetDateTime::now_utc().unix_timestamp_nanos() / 1_000_000;
+            while now() <= i128::from(held) {
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+        }
+
         fn unsent(&self) -> usize {
             self.store
                 .plan_unsent(&self.repo, Carrier::Git, 0)
@@ -721,6 +747,8 @@ mod tests {
         assert_eq!(laptop.title(&task).as_deref(), Some("x"));
 
         mini.retitle(&task, "one");
+        // Later means a later millisecond: within one, the Machine id decides.
+        mini.wait_past_stamps();
         laptop.retitle(&task, "two");
         mini.exchange();
         laptop.exchange();
@@ -951,7 +979,8 @@ mod tests {
             ),
         )
         .unwrap();
-        laptop.exchange();
+        // The save that renamed it reads too, so the line is right at once.
+        laptop.send().unwrap();
         assert_eq!(laptop.title(&theirs).as_deref(), Some("on mini"));
         assert_eq!(not_taken(&laptop), None);
         mini.exchange();

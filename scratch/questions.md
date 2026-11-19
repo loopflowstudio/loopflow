@@ -191,3 +191,16 @@ Still open from before:
   - `lf wave create` holds the Wave lifecycle lock through the look, up to
     five seconds with a carrier hanging.
   - The line names the other Machine by id unless it is an added Machine.
+
+- QA after slice 6 (2026-11-18), headless, each reversible before release:
+  - While Git holds something not taken, every save fetches and reads as
+    well (five seconds at most), so the rename the line asks for clears it
+    in the same command. Cost: one fetch per save for as long as a Wave is
+    split. What is still not taken is not an error of the save.
+  - `lf machine hub --clear` prints `No hub.`; the old line said the plan
+    stays here, which is false with a remote.
+  - Left as is: with a hub and no server, what the hub brings on a save
+    shows as `Git origin, N unsent` until the next save or sync. Should the
+    Git push of a save follow the hub's read instead of running beside it
+    (slower save, nothing left over)?
+  - Left as is: one WARN per skipped Wave per exchange while a Wave is split.

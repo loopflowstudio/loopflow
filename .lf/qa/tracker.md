@@ -111,9 +111,10 @@ Wave. Each keeps its own `design` and its Tasks; everything else still
 crosses. `lf task sync` exits 1 and `lf repo tracker` reads
 `Plan: Git origin, 3 not taken.` with the rename under it (the other Machine
 by id unless it was added with `lf machine add`). `lf wave rename design
-<new>` on one home, then `lf task sync <id>` on both (the renamed home twice
-if it went first): both lists hold all the Tasks and both lines read
-`Plan: Git origin.` The skipped records are also
+<new>` on one home clears that home's line at once (a save reads too while
+something is not taken); the other home clears on its next save, `lf task
+sync <id>` or server minute. Both lists then hold all the Tasks and both
+lines read `Plan: Git origin.` The skipped records are also
 `WARN loopflow_storage::sqlite::plan_carriers` lines in each home's
 `logs/lf.log`.
 
@@ -123,3 +124,15 @@ through the stand-in `ssh` registers a launchd job for that home
 it with `launchctl print gui/$(id -u)/<label> | grep path` and stop it with
 `launchctl bootout gui/$(id -u)/<label>` when done. Replace the home's binary
 (`rm`, then copy) before restarting it.
+
+The hub carries the same case: take the hub down (the stand-in's flag) and
+both remotes away, make the Wave on both, bring only the hub back and
+`lf task sync <id>` on the laptop. Its line reads
+`Hub mini, 3 unsent, 3 not taken.` with the reason; the rename on the laptop
+clears it and the mini's list holds both. `lf task sync` still exits 1 on
+Git's error while the remotes are away.
+
+For the minute, run the laptop's `lf server run` in the background (record
+its PID), type nothing on the laptop and poll `lf task list` there after a
+save on the mini: 40 to 60 s. The minute's exchange is silent; a split Wave
+is one `skipped a plan record` WARN per exchange in `logs/lf.log`.

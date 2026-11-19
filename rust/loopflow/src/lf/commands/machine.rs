@@ -230,7 +230,7 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
             )?;
             match selected {
                 Some(hub) => println!("This Machine exchanges its plan with {}.", hub.name()),
-                None => println!("This Machine has no hub. Its plan stays here."),
+                None => println!("No hub."),
             }
         }
         MachineCommand::List { label, json } => {

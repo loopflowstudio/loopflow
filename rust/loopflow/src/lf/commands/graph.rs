@@ -908,9 +908,15 @@ impl RunningGraph<'_> {
         else {
             return Ok(None);
         };
+        let issue = self
+            .store
+            .sqlite
+            .task(task)?
+            .map(|task| task.identifier)
+            .ok_or_else(|| anyhow::anyhow!("Task {task} is not recorded"))?;
         eprintln!(
             "{}",
-            loopflow_execution::ops::task::auto::landing_wait(&step, &stop, None)
+            loopflow_execution::ops::task::auto::landing_wait(&step, &stop, &issue)
         );
         Ok(Some(step))
     }

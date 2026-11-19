@@ -388,8 +388,7 @@ impl TaskGraph {
         };
         let ends = step == START || step == END;
         let interactive = self.interactive_steps.iter().any(|s| &s.name == step);
-        (!ends && !interactive)
-            .then(|| crate::ops::task::auto::landing_wait(step, off, Some(issue)))
+        (!ends && !interactive).then(|| crate::ops::task::auto::landing_wait(step, off, issue))
     }
 
     /// One line for text status.

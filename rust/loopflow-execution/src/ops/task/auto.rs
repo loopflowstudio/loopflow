@@ -26,13 +26,9 @@ pub fn starter(
 
 /// Why a Task run waits at its merging `step` while auto is off, and what
 /// lands it. The run prints it as it stops; `lf task status` reads it after.
-pub fn landing_wait(step: &str, off: &Auto, issue: Option<&str>) -> String {
-    let ship = match issue {
-        Some(issue) => format!("lf ship {issue}"),
-        None => "lf ship".to_owned(),
-    };
+pub fn landing_wait(step: &str, off: &Auto, issue: &str) -> String {
     format!(
-        "Waiting at {step}: auto is off ({}). `{ship}` lands it.",
+        "Waiting at {step}: auto is off ({}). `lf ship {issue}` lands it.",
         off.by
     )
 }

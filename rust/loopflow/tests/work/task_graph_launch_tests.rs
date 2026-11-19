@@ -3251,7 +3251,8 @@ fn auto_off_sticks_through_a_headless_relaunch() {
     let ran = task.task_run(&["task", "run", "INF-123", "landing"]);
     assert!(ran.success(), "{}", ran.text);
     assert!(
-        ran.text.contains("Waiting at pr land: auto is off ("),
+        ran.text.contains("Waiting at pr land: auto is off (")
+            && ran.text.contains("`lf ship INF-123` lands it."),
         "{}",
         ran.text
     );

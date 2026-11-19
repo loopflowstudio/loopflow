@@ -299,7 +299,7 @@ step, not at launch: turn it on while `build` runs and that run carries on,
 standing in at `ship-review` when it gets there.
 `lf task auto off`, or Desktop's **Auto** toggle, kills nothing. The run carries on to its next interactive step and
 waits there, or reaches a merging step (`lf land`, `lf pr arm`, `pr-land`) and
-waits before it: "Waiting at pr land: auto is off (Maya). `lf ship` lands it."
+waits before it: "Waiting at pr land: auto is off (Maya). `lf ship INF-1` lands it."
 Auto-merge that Loopflow armed is disarmed. Off stands:
 `lf -b task run` turns auto on unless someone turned it off, and only
 `lf ship` turns it back on. Other Graphs in the Task's worktree never move it. There is no

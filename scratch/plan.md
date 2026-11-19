@@ -122,8 +122,14 @@ Slices 1 and 2 in one pass: `StackParentPr`, `current_parent_pr`, the
 land in one write. `select_stack_parent` is unchanged: its fall-through to
 the parent's active row already is the rule, so a call to
 `current_parent_pr` there would add nothing. Docs (slice 3) already match the
-built sentence. Remaining: run the acceptance test at gate along with
-`task_pr_authority_tests` and `store::` placement tests.
+built sentence.
+
+Checks: `cargo test -p loopflow --test integration
+sync_tests::stacking_retry_replaces_an_abandoned_parent_and_syncs` passed
+2026-11-19 (realign; all five cases incl. Detach). `task_pr_authority_tests`,
+`store::` placement tests and clippy: gate/CI.
+
+Remaining: none in implement; gate next.
 
 ## Slices
 

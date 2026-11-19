@@ -484,10 +484,14 @@ existing update a conversation gets about its own Task; Waves and
    failed twice from this checkout and passed from an empty directory with
    a temp `HOME`.
 
-Next: nothing in the plan's slices. Left for gate: the `MachineServer`
-acceptance check, the hook timing with ten open children, and the suites
-named above. Swift still does not decode the receipt's `parent` or the
-pane's two keys.
+Next: nothing in the plan's slices. QA walked the acceptance check by hand
+on a private Machine, 2026-11-18 (`scratch/qa.html`): every line of it held,
+and a real Claude conversation was woken two seconds after its child stopped.
+A prompt hook for a parent with ten children at a review step took about
+600 ms against 510 ms for a childless Task, both on a debug build. Left for
+gate: the `MachineServer` fixture test of the same check and the suites named
+above. Swift still does not decode the receipt's `parent` or the pane's two
+keys.
 
 One PR. #1983 (LOO-938) was open and unmerged at 2026-11-18; this branch is
 stacked on it and its PR waits behind #1983. The two LOO-938 test failures

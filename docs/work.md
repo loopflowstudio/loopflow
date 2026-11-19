@@ -229,8 +229,16 @@ LOO-12  idle
   PR: #1972 merged
   Merged · 3 children open
   child: LOO-14  Retry budget per host  moving
-  child: LOO-15  Log each retry         idle at human-review
+  child: LOO-15  Log each retry         idle at human-review · #1981 open
   child: LOO-16  Document the budget    unstarted
+```
+
+The receipt of a follow-up names the Task it went under:
+
+```text
+$ lf task create --title "Retry budget per host"
+Retry budget per host · LOO-14
+  parent: LOO-12
 ```
 
 A Task filed from a Task's conversation is its child, whether you typed the

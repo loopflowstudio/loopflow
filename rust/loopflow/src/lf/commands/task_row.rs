@@ -79,15 +79,18 @@ pub struct TaskDetail {
 }
 
 impl TaskRow {
-    /// Where the Task stands, in a few words: "idle at human-review".
+    /// Where the Task stands, in a few words: "idle at human-review · #12 open".
     pub fn standing(&self) -> String {
         let state = self.state.label();
-        match self.graph.as_ref().and_then(|graph| graph.step.as_deref()) {
-            Some(step) if !matches!(self.state, TaskState::Done | TaskState::Abandoned) => {
-                format!("{state} at {step}")
-            }
+        let open = !matches!(self.state, TaskState::Done | TaskState::Abandoned);
+        let mut standing = match self.graph.as_ref().and_then(|graph| graph.step.as_deref()) {
+            Some(step) if open => format!("{state} at {step}"),
             _ => state.to_owned(),
+        };
+        if let Some(pr) = self.pr.as_ref().filter(|_| open) {
+            standing.push_str(&format!(" · #{} {}", pr.number, pr.phase.as_str()));
         }
+        standing
     }
 }
 

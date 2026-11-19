@@ -125,6 +125,35 @@ rest is not chosen.
   inventories in test fixtures still decode. The type is not an `lf --json`
   DTO.
 
+## Raised by QA on a private Machine (2026-11-18, `scratch/qa.html`)
+
+Changed there, for review: the human `lf task create` receipt prints a second
+line `  parent: <ID>` for a child; a child line in `lf task status` ends with
+its PR (`active at demo · #100 merged`); `lf task complete` says `stays open:
+started, no PR` where it gave no reason; a run and its relaunches failing at
+one step in one reading are one "failed at …" in the notice.
+
+- Filed from a child's conversation after the parent closed, a follow-up goes
+  under the closed parent (flat rule), lists top-level, and its news goes to a
+  conversation nobody has open. The same when the closed parent's reopened
+  conversation files one. Under the closed parent as now / under the calling
+  Task when its parent is closed / top-level?
+- `lf task complete <parent>` completes a merged child and leaves that child's
+  own never-started child open (`bd062e` under `c2b6ef`), though
+  `lf task complete c2b6ef` typed directly would abandon it. Settle
+  grandchildren too / leave?
+- `lf task run` relaunches a failed Graph twice, and each relaunch that fails
+  in a later reading is another notice: one broken child woke its conductor
+  twice with the same sentence. One notice per failing step until it changes /
+  as now?
+- A person typing `lf task create` in a terminal inside the Task's checkout
+  files top-level work: only the conversation carries the caller. Should the
+  checkout count?
+- A real Claude conductor, told a child stopped at review, read its status and
+  asked "should I continue it with `lf task run`?" Is that the wanted
+  behaviour, or should `task-session` say more about deciding a child's
+  review?
+
 ## Raised by reading slice 4 (not run)
 
 - `lf task complete <parent>` closes or abandons children, and each of
@@ -132,6 +161,8 @@ rest is not chosen.
   conversation that just completed the parent then gets one notice per
   child it settled. Send them as now / skip notices for children settled by
   their parent's completion?
+  Seen in QA: the completing conversation's next prompt carried its own
+  "Task completed" update and one notice per settled child.
 
 ## Raised by writing the docs (2026-11-18)
 

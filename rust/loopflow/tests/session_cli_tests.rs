@@ -692,6 +692,15 @@ fn a_task_filed_from_a_tasks_conversation_shows_under_it() {
     ));
     assert!(apart["task"]["parent_task_id"].is_null());
     assert!(apart["parent"].is_null());
+    // Without `--json` the receipt says where the follow-up went.
+    let receipt = lf(
+        &["task", "create", "--title", "Log each retry"],
+        Some(&caller),
+    );
+    assert!(
+        receipt.ends_with(&format!("\n  parent: {parent_name}\n")),
+        "{receipt}"
+    );
 
     // `lf task show` carries the same two keys as `lf task status`.
     let shown = json(lf(&["task", "show", &parent_name, "--json"], None));
@@ -704,7 +713,7 @@ fn a_task_filed_from_a_tasks_conversation_shows_under_it() {
     let status = json(lf(&["task", "status", &parent_name, "--json"], None));
     assert!(status["parent"].is_null());
     let children = status["children"].as_array().unwrap();
-    assert_eq!(children.len(), 1, "{children:?}");
+    assert_eq!(children.len(), 2, "{children:?}");
     assert_eq!(children[0]["identifier"], child_name);
     assert_eq!(children[0]["state"], "unstarted");
     let status = json(lf(&["task", "status", child_name, "--json"], None));

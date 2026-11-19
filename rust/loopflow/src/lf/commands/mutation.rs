@@ -411,13 +411,10 @@ fn child_completion_line(child: &loopflow_storage::sqlite::children::ChildComple
         }
         ChildDisposition::Abandoned => format!("{id} abandoned: never started"),
         ChildDisposition::Open => {
+            let pr = pr.unwrap_or_else(|| "started, no PR".into());
             let step = child.step.as_ref().map(|step| format!("at {step}"));
-            let reasons = pr.into_iter().chain(step).collect::<Vec<_>>();
-            if reasons.is_empty() {
-                format!("{id} stays open")
-            } else {
-                format!("{id} stays open: {}", reasons.join(", "))
-            }
+            let reasons = std::iter::once(pr).chain(step).collect::<Vec<_>>();
+            format!("{id} stays open: {}", reasons.join(", "))
         }
     }
 }

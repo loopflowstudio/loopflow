@@ -98,6 +98,8 @@ impl TaskObservation {
             }
         }
         news.sort();
+        // A run and its relaunches that end the same way are one piece of news.
+        news.dedup();
         if let Some(TaskGraphPosition::At { step }) = &self.position {
             if old.position != self.position && step != "start" && step != "end" {
                 news.push(format!("stopped at {step}"));
@@ -627,6 +629,26 @@ mod tests {
         assert!(unread(&store, "child-reader")
             .1
             .contains(&"use the staging bucket".to_string()));
+    }
+
+    #[test]
+    fn a_run_and_its_relaunch_failing_alike_are_one_piece_of_news() {
+        let (_home, store, parent) = task_session();
+        task(&store, "Retry", "/task-updates-child", Some(&parent));
+        for _ in 0..2 {
+            store.test_graph(
+                "feature",
+                "/task-updates-child",
+                &[("gate", Some("failed"))],
+                Some("failed"),
+            );
+        }
+        let (notices, _) = unread(&store, "reader");
+        assert_eq!(notices.len(), 1, "{notices:?}");
+        assert!(
+            notices[0].contains("conducts, failed at gate. lf task status"),
+            "{notices:?}"
+        );
     }
 
     #[test]

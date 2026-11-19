@@ -5,56 +5,105 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>LOO-515 · concept review</title>
 <style>
-  :root { --bg:#fdfcf9; --fg:#1d1d1b; --muted:#6b6a65; --rule:#e4e1d8; --add:#e3f3e1; --del:#fbe4e1; --prop:#2f6fb3; --code:#f3f1ea; }
+  :root { --bg:#fdfcf9; --fg:#1d1d1b; --muted:#6b6a65; --rule:#e4e1d8; --prop:#2f6fb3; --code:#f3f1ea; }
   @media (prefers-color-scheme: dark) {
-    :root { --bg:#1a1a18; --fg:#ecebe6; --muted:#9a988f; --rule:#34332f; --add:#1f3a22; --del:#43221f; --prop:#7fb2ee; --code:#25241f; }
+    :root { --bg:#1a1a18; --fg:#ecebe6; --muted:#9a988f; --rule:#34332f; --prop:#7fb2ee; --code:#25241f; }
   }
   body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.6 -apple-system, "Lato", system-ui, sans-serif; }
   main { max-width:44rem; margin:0 auto; padding:3rem 1.25rem 5rem; }
   header p { color:var(--muted); margin:.2rem 0; font-size:.9rem; }
   h1 { font-size:1.6rem; margin:0 0 .5rem; }
   h2 { font-size:1.15rem; margin:2.6rem 0 .6rem; }
-  code, pre { font:13px/1.5 ui-monospace, Menlo, monospace; }
-  code { background:var(--code); padding:0 .25em; border-radius:3px; }
-  pre { background:var(--code); padding:.8rem 1rem; border-radius:6px; overflow-x:auto; }
+  code { font:13px/1.5 ui-monospace, Menlo, monospace; background:var(--code); padding:0 .25em; border-radius:3px; }
   .lede { font-size:1.08rem; border-left:3px solid var(--prop); padding-left:1rem; margin:2rem 0; }
   .proposed { color:var(--prop); }
   .row { display:grid; grid-template-columns:1fr 1fr; gap:1rem; }
   @media (max-width:560px) { .row { grid-template-columns:1fr; } }
   .panel { border:1px solid var(--rule); border-radius:6px; padding:.8rem 1rem; }
   .panel h3 { margin:0 0 .4rem; font-size:.95rem; }
-  .panel.after { border-color:var(--prop); }
-  .del { background:var(--del); } .add { background:var(--add); }
-  ol li { margin:.6rem 0; }
-  table { border-collapse:collapse; width:100%; font-size:.92rem; }
-  td, th { text-align:left; padding:.4rem .5rem; border-bottom:1px solid var(--rule); vertical-align:top; }
+  .panel p { margin:.3rem 0; font-size:.93rem; }
+  table { border-collapse:collapse; width:100%; font-size:.93rem; }
+  th, td { text-align:left; vertical-align:top; padding:.45rem .6rem .45rem 0; border-bottom:1px solid var(--rule); }
+  th { color:var(--muted); font-weight:600; }
+  ol li { margin:.7rem 0; }
+  .muted { color:var(--muted); }
 </style>
 </head>
-<body><main>
+<body>
+<main>
 <header>
-<h1>Task details: one reader, nothing left to merge</h1>
-<p>LOO-515 · concept-review step, third pass · 2026-11-14</p>
-<p>Built from scratch/loo-515-task-details.md, swift/LoopflowMac/TaskFileDocument.swift, Views/ReviewStreamView.swift, Views/TaskChangesView.swift, Views/TaskFilesView.swift</p>
+  <h1>The Diff holds together. The pane it lives in has four names.</h1>
+  <p>LOO-515 · concept-review step, fourth pass · 2026-11-19</p>
+  <p>Built from <code>scratch/loo-515-task-details.md</code>, <code>swift/LoopflowMac/ReviewOrder.swift</code>, <code>TaskFileDocument.swift</code>, <code>Views/TaskChangesView.swift</code>, <code>Views/WorkspacePanesView.swift</code>, <code>DesktopActions.swift</code>, <code>swift/README.md</code>, <code>config/catalog.rs</code>, <code>config/files.rs</code>, builtin <code>implement.md</code> and <code>graph/code.yaml</code></p>
 </header>
-<p class="lede">Nothing to change and no product choice open. The second pass's direction is built: both diff readers step with <code>]</code>/<code>[</code> through one <code>ReviewStepper</code> and keep their place in one <code>places[ReviewReader]</code> store.</p>
+
+<p class="lede">Nothing to rebuild before the demo. Three choices are yours when you see it on screen; the first is what to call the pane.</p>
+
 <h2>Actions → concepts → APIs</h2>
 <table>
 <tr><th>You do</th><th>Concept</th><th>API</th></tr>
-<tr><td>⌥⌘2, <code>]</code>/<code>[</code>, select → Ask</td><td>Changes: the PR-equivalent comparison, disk only</td><td><code>lf task diff</code></td></tr>
-<tr><td>Diff one file while editing</td><td>Files' Diff: one file, draft as typed</td><td><code>lf task diff &lt;path&gt;</code> + draft</td></tr>
-<tr><td>Step, switch away, come back</td><td><code>ReviewReader</code> → <code>ReviewPlace</code> (anchor, current stop)</td><td>none new</td></tr>
+<tr><td>⌥⌘1 / 2 / 3</td><td>Brief, Diff, Files: the first tabs of the Task's pane</td><td><code>details page=…</code></td></tr>
+<tr><td>Read the change</td><td>One comparison, what <code>lf pr open</code> would show, as one stream</td><td><code>lf task changes</code>, <code>lf task diff</code></td></tr>
+<tr><td>Read it in a useful order</td><td>The worker's order: <code>first:</code> and <code>hide:</code>, each with a why</td><td><code>scratch/diff-order.yaml</code> via <code>lf task file</code></td></tr>
+<tr><td>Never see <code>scratch/</code> or <code>tests/</code></td><td>Always hidden: yours, per repository</td><td><code>diff_hidden</code> in <code>.lf/config.local.yaml</code></td></tr>
+<tr><td>Comment on lines, Send</td><td>Comments, sent together into the unsent input</td><td>terminal text insert</td></tr>
+<tr><td>Browse the checkout</td><td>Files: the tree on the Task's Machine</td><td><code>task.files</code></td></tr>
 </table>
-<h2>What stays different, on purpose</h2>
+
+<h2>The mismatch: one pane, four names</h2>
 <div class="row">
-<div class="panel"><h3>Changes</h3>What <code>lf pr open</code> would show. A dirty file gets <code>•</code>; its draft is not in the stream.</div>
-<div class="panel"><h3>Files' Diff</h3>The file as typed, 180 ms debounce, header says <code>· unsaved draft</code>.</div>
+  <div class="panel">
+    <h3>What it is called today</h3>
+    <p><b>Toggle Browser</b> · View menu and ⇧⌘E (on main)</p>
+    <p><b>Show Task Details</b> · the action this branch adds</p>
+    <p><b>Files</b> · the README: "show / hide Files", "Toggle Files" (no such menu item, on main either)</p>
+    <p><b>LOO-515</b> · the pane's own menu label</p>
+  </div>
+  <div class="panel">
+    <h3>Why it matters now</h3>
+    <p>Its first three tabs are Brief, Diff and Files. "Files" names the pane and one tab of it, the remainder of "why does files show up three times".</p>
+    <p>The brief asks that nobody wonders "which Task they are viewing". The pane's name and the Task's name are the same slot.</p>
+  </div>
 </div>
-<h2>Watch in the demo</h2>
-<p>Changes' <strong>Focus file</strong> and Files' Diff on a changed file now behave alike: one file, <code>]</code> crossing into the next changed file. Both were chosen separately (Focus from prototype A; Diff mode from LOO-497). Whether Focus still earns its button is something the demo will show, not a question this step settles.</p>
-<h2>For compress</h2>
-<p>The doc comment <code>/// Unified or side by side; side by side needs a wide pane.</code> slid above <code>ReviewStepper</code> in <code>ReviewStreamView.swift</code>; it belongs on <code>ReviewLayoutPicker</code>.</p>
+<p class="muted">Not decided here: no recorded decision picks a name, and the menu title is shared with tabs LOO-497 owns.</p>
+
+<h2>Two hide lists, different on purpose</h2>
+<div class="row">
+  <div class="panel">
+    <h3>Hidden by the worker for this change</h3>
+    <p><code>hide:</code> in the order file. A path or a folder. Carries a reason. <b>Show</b> per entry. Ends with the change.</p>
+  </div>
+  <div class="panel">
+    <h3>Always hidden</h3>
+    <p><code>diff_hidden</code>. Text matched anywhere in a path, ignoring case. One toggle shows them all. Yours, per repository.</p>
+  </div>
+</div>
+<p>Neither writes into the other. Both stay in the count: "7 changes in 4 of 9 files".</p>
+
+<h2>When the worker's order exists</h2>
+<p><code>lf pr submit</code> and <code>lf pr land</code> clear added <code>scratch/</code> files in every repository, not only this one. The <code>code</code> Graph runs <code>human-review</code> before <code>deliver</code>, so the order is there the first time you read the Diff and gone once the PR is published: at <code>verify</code>, and whenever you reopen the Task later.</p>
+
+<h2>Wording repairs, next implement or compress pass</h2>
+<p class="proposed">Proposed, no behaviour changes.</p>
+<ul>
+  <li>Focus's strip reads "Only X · 8 other files hidden", a third meaning of "hidden". <span class="proposed">"Only X · 8 more files".</span></li>
+  <li><code>["scratch/"]</code> is written twice: the setting's default in the catalog and the Diff's starting value in Swift.</li>
+</ul>
+
 <h2>Still noted, not this Task</h2>
-<p>A <code>.changes(comparison:)</code> browser tab and the Changes page are two representations of one view; merging them changes the persisted <code>WorkBrowserTab</code> shape, which LOO-497/416 own.</p>
+<p>A <code>.changes(comparison:)</code> browser tab and the Diff page are two representations of one view; merging them changes the persisted <code>WorkBrowserTab</code> shape, which LOO-497/416 own. The move from <code>lf.config.local.yaml</code> names no Task that removes it.</p>
+
 <h2>Questions</h2>
-<ol><li>None blocking.</li></ol>
-</main></body></html>
+<ol>
+  <li>What is the pane called?
+    <br>a. Keep "Browser" on the menu; the README follows it.
+    <br>b. "Task Details" everywhere a person reads it (menu, README), since Brief, Diff and Files are its fixed tabs.
+    <br>c. The Task itself: the menu toggles "LOO-515", and the pane says the Task's name.</li>
+  <li>Focus, beside a sidebar click, the filter and Files' Diff:
+    <br>a. keeps its button. b. goes.</li>
+  <li>The worker's order after publish:
+    <br>a. ends at publish, as built. b. should still be there when you reopen the Task.</li>
+</ol>
+</main>
+</body>
+</html>

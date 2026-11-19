@@ -122,8 +122,46 @@ bar outside the scroll view as "headers lock"; several comments as one line.
   A repeated short line (`}`) can re-anchor to the wrong identical line.
 - Moves are found only between a pure removal and a pure addition in one file.
 - The file menu and sidebar carry no per-file +/−; file headers do.
-- This repository's gate clears `scratch/`, so `scratch/diff-order.yaml` does
-  not outlive gate here.
+- `lf pr submit` and `lf pr land` clear added `scratch/` files in every
+  repository, so `scratch/diff-order.yaml` ends at publish. In the `code` Graph
+  `human-review` comes before `deliver`, so the tour exists when a person first
+  reads the Diff and is gone for `verify` and for anyone reopening the Task
+  after its PR is published.
+
+## Concept review, November 19 (fourth pass)
+
+Page: `scratch/concept-review.html`. Reviewed: the combined Diff pane, the
+order file, `diff_hidden`, the private settings move. No concept merges or
+splits; the model holds as one comparison read three ways (order, hidden,
+filter). Nothing here needs a build before the demo.
+
+Stays different on purpose:
+
+- Two hide lists. The worker's `hide:` is per change, matches a path or folder
+  prefix, carries a reason and is revealed entry by entry. Yours
+  (`diff_hidden`) is per repository, matches text anywhere ignoring case
+  ("always filter tests/") and is revealed by one toggle. Neither writes into
+  the other; both stay in the count ("4 of 9 files").
+
+Wording repairs for the next implement or compress pass (no behaviour):
+
+- Focus's strip says "· 8 other files hidden", a third meaning of "hidden"
+  beside the two lists. Say what Focus does: "Only X · 8 more files".
+- `["scratch/"]` is written twice, as `diff_hidden`'s catalog default and as
+  `TaskFilesStore.hiddenPaths`' starting value. The Swift copy is what the Diff
+  hides before the setting is read and when the read fails.
+
+Open, for the person at the demo (not answered by any recorded decision):
+
+1. What is the pane called? It has four names: **Toggle Browser** (View menu
+   and ⇧⌘E, on main), **Show Task Details** (this branch's action), "Files"
+   (`swift/README.md`: "show / hide Files", "Toggle Files", which is not a menu
+   item on main either) and the Task identifier on its own menu. Its first
+   three tabs are now Brief, Diff and Files, so "Files" names both the pane and
+   one tab. This is the same question as Task identity below.
+2. Focus: with a sidebar click bringing a file to the top, the filter narrowing
+   the stream and Files' Diff showing one file, does Focus keep its button?
+3. Should the worker's order outlive publish (see Limits found)?
 
 ## Remaining
 
@@ -135,8 +173,7 @@ bar outside the scroll view as "headers lock"; several comments as one line.
   viewing"; the pane now shows only the identifier on the strip's menu, after
   "why does files show up three times" removed the header row. Whether that is
   enough is for the demo.
-- Open choices: whether Focus still earns its button beside the sidebar and
-  Files' Diff; whether a tour should survive gate; the parts shown on the page
+- Open choices: the three under Concept review; the parts shown on the page
   and not named (read marks, syntax colors, pause, depth slider, folded
   renames, hunk grouping) stay out.
 - The released `lf` reads private settings at `lf.config.local.yaml`; once a

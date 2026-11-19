@@ -18,8 +18,6 @@ pub struct Turn {
     usage: TurnUsage,
     messages: usize,
     failed: bool,
-    /// Why lf ended the turn, kept on its completion.
-    error: Option<Value>,
     answered: bool,
     final_text: String,
     streamed_text: bool,
@@ -70,7 +68,6 @@ impl Turn {
             usage: TurnUsage::default(),
             messages: 0,
             failed: false,
-            error: None,
             answered: false,
             final_text: String::new(),
             streamed_text: false,
@@ -91,9 +88,8 @@ impl Turn {
 
     /// End the turn, as Pi settled it or as its stream died with `error`.
     pub fn finish(&mut self, status: Lifecycle, error: Option<Value>) -> Vec<Decoded> {
-        self.error = error;
         let mut facts = Vec::new();
-        let display = self.settle(status, &mut facts);
+        let display = self.settle(status, error, &mut facts);
         facts.extend(display.into_iter().map(Decoded::from));
         facts
     }
@@ -242,7 +238,7 @@ impl Turn {
                 } else {
                     Lifecycle::Completed
                 };
-                out.extend(self.settle(status, facts));
+                out.extend(self.settle(status, None, facts));
             }
             _ => {}
         }
@@ -268,7 +264,13 @@ impl Turn {
         self.usage.model = usage.model;
     }
 
-    fn settle(&mut self, status: Lifecycle, facts: &mut Vec<Decoded>) -> Vec<ConversationEvent> {
+    /// `error` is why lf, not Pi, ended the turn; it is kept on the completion.
+    fn settle(
+        &mut self,
+        status: Lifecycle,
+        error: Option<Value>,
+        facts: &mut Vec<Decoded>,
+    ) -> Vec<ConversationEvent> {
         let mut out = Vec::new();
         facts.push(ProviderFact::Activity(Signal::Yielded(status == Lifecycle::Completed)).into());
         if !self.final_text.is_empty() {
@@ -305,7 +307,7 @@ impl Turn {
             ProviderFact::TurnCompleted {
                 turn: Some(self.turn.clone()),
                 status,
-                detail: json!({"status": status.name(), "error": self.error}),
+                detail: json!({"status": status.name(), "error": error}),
             }
             .into(),
         );

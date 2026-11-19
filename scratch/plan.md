@@ -466,6 +466,10 @@ fresh work"; the limit-waiting line trims the provider's period.
      (104s), harness, storage turns/session_events/graph_inventory unit
      rows, `documented_commands::`, clippy.
 
+Compress (2026-11-19): Pi's decoder passes the failed turn's error to
+`settle` instead of holding it on `Turn`; `harness::is_turn_in_progress`
+(no caller on main either) is gone. `harness::pi` tests and clippy pass.
+
 Next: gate.
 
 ## Seen on the real CLI (OpenCode 2.2.1, 2026-11-18)

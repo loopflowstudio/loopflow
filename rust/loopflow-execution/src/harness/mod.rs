@@ -207,13 +207,6 @@ pub enum HarnessError {
     TurnAlreadyInProgress,
 }
 
-pub fn is_turn_in_progress(err: &anyhow::Error) -> bool {
-    matches!(
-        err.downcast_ref::<HarnessError>(),
-        Some(HarnessError::TurnAlreadyInProgress)
-    )
-}
-
 /// How a harness answers vendor approval/permission requests.
 ///
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

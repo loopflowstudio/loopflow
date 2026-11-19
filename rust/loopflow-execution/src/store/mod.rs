@@ -2267,7 +2267,6 @@ mod tests {
     }
 
     /// Counts the interrupts it receives.
-    #[derive(Default)]
     struct InterruptCountingHarness {
         interrupts: std::sync::Arc<std::sync::atomic::AtomicUsize>,
     }

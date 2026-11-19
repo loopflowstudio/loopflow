@@ -184,3 +184,31 @@ Shape, for gate's review:
 - An `auto:` key in graph YAML: auto is a Task fact, not a graph property.
 - `.lf/graphs/autonomous.yaml` is a graph name; it stays.
 - The contract migration that drops what is leaving: LOO-971.
+
+## To build: human-review becomes ship-review
+
+Direction 2026-11-19 (exact words in `scratch/questions.md`, "Ship review").
+Concept review and gate own whether the change is right; ship-review makes
+what ships understood and decides what happens to every finding.
+
+- Rename the step and skill `human-review` → `ship-review` everywhere:
+  `task/graph/code.yaml`, `feature.yaml`, `task/skill/human-review.md` →
+  `ship-review.md`, `builtins.rs`, `task_session.md` and
+  `.lf/skills/task-session.md`, docs (`ops.md`, `orchestration.md`),
+  `.lf/qa/*.md`, `task_graph.rs` tests, `world/recipes.rs`,
+  `tests/world_recipes.rs`, `tests/work/local_planning.rs`, DTO fixtures
+  (`task_shipping.json`, `server_schema.json`). Graph position is a cursor, so
+  Tasks waiting at the step keep their place. `human-present` surface is
+  separate; leave it.
+- Rewrite the skill's goals (keep it short, builtin voice):
+  - Not a code review and not a go/no-go.
+  - Understanding: the change in the person's terms, real output, ask about
+    what is likeliest to surprise; never "does this look good?".
+  - Findings: everything left outside the PR (concept review's "outside this
+    PR", qa notes, `scratch/questions.md`), each with a proposed disposition:
+    fix here, own Task, drop. The person decides; Tasks are filed then.
+  - Bundle small findings into one Task; a finding gets its own Task only
+    when it is its own outcome. No fan-out.
+  - With nobody there: same page as the record; file every untracked
+    finding (bundled as above); fix small things here (copy, a missed
+    rename); never reopen the design; go on to delivery.

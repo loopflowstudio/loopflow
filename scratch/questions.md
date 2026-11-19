@@ -61,3 +61,9 @@ Open: the word (auto vs Auto-Ship), whether `lf ship` stays as shorthand, what r
 - `lf task status` carries the setting on its first line (`LOO-1  moving · auto: on by Maya, Nov 18 09:04`); the "`lf ship` turns it on" hint went with the separate line.
 - Still open from the plan: whether `lf -b task run` writes auto on.
 - `lf task auto on` then a bare `lf task run` skips a waiting interactive step instead of standing in at it; only `lf ship` (or `--from <step>`) stands in there. Left as is: a bare run has always meant "the person finished this step".
+
+## Sync onto main after #1972/#1974 landed (2026-11-19, headless)
+
+- Main's #1972 made a moved Auto-Ship approval hand the run to the destination's ship recovery (`session_move.rs` printed "Auto-Ship approval moved to …" and started no run). With no ship recovery here, the move continues the run as `lf task run` again; `mini_starts_nothing_for_a_task_that_moved_back` now counts mini's Graph runs (1) instead of `task_ship_events` carried rows.
+- Main's `restart_ship` test (`a_ship_that_records_failure_after_the_sweep_reads_it_waits_to_restart`) went with `restart_ship`.
+- Swift was not built after the merge (`TaskWork.swift`, `DTOFixtureTests`, `DesktopHeadlessTests` combine `auto` with main's `stack_parent`); gate builds it.

@@ -4060,7 +4060,7 @@ tee -a '{record}/input' | env -i HOME='{remote}' PATH=/usr/bin:/bin bash -c "$re
     let held = fixture.json(&["task", "auto", "off", task.as_str(), "--json"]);
     assert_eq!(
         held,
-        serde_json::json!({"issue": task.as_str(), "on": false, "was_on": false})
+        serde_json::json!({"issue": task.as_str(), "was_on": false})
     );
 
     let commands = fs::read_to_string(record.join("commands")).unwrap();
@@ -4074,7 +4074,7 @@ tee -a '{record}/input' | env -i HOME='{remote}' PATH=/usr/bin:/bin bash -c "$re
     let (hello, request) = entry_input(&record);
     assert_eq!(hello["client"]["kind"], "machine");
     assert_eq!(request["sender"]["repository"], plan.repository.as_str());
-    assert_eq!(request["operation"]["kind"], "task.auto");
+    assert_eq!(request["operation"]["kind"], "task.auto.off");
     assert_eq!(request["operation"]["issue"], task.as_str());
 }
 

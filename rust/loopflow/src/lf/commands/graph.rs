@@ -336,8 +336,8 @@ pub fn carry_task_run(
     }
     let issue = task.identifier.clone();
     let announce = |run: &TaskRun| announce_run(run, json);
-    let (step, ships) = match start {
-        TaskRunStart::Run { step, ships } => (step, ships),
+    let (step, merges) = match start {
+        TaskRunStart::Run { step, merges } => (step, merges),
         TaskRunStart::Waiting(step) => return announce(&TaskRun::Waiting { issue, step }),
         TaskRunStart::Ended => return announce(&TaskRun::Ended { issue }),
     };
@@ -347,7 +347,7 @@ pub fn carry_task_run(
         announce(&TaskRun::Running {
             issue: issue.clone(),
             run: step.clone(),
-            ships,
+            merges,
             graph_process: graph.clone(),
             log: log.map(Path::to_path_buf),
         })

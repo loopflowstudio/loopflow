@@ -2750,54 +2750,39 @@ fn a_bare_ship_stands_in_because_auto_is_on() {
 }
 
 #[test]
-fn auto_on_starts_nothing_and_the_next_bare_run_stands_in() {
+fn auto_on_at_a_waiting_step_stands_in_there_with_one_graph_run() {
     let task = shipping_task();
     task.task_run_ok(&["task", "run", "INF-123"]);
     assert_eq!(task.graph()["position"], at("review"));
     let graphs = support::recorded_graphs(task.home.path()).len();
-    let on = task.run(&["task", "auto", "on", "INF-123"]);
-    assert_eq!(
-        String::from_utf8_lossy(&on.stdout).trim(),
-        "INF-123: auto on",
-        "{}",
-        String::from_utf8_lossy(&on.stderr)
-    );
-    // The setting changed and nothing else: the Task still waits at review.
-    assert_eq!(support::recorded_graphs(task.home.path()).len(), graphs);
-    assert_eq!(task.graph()["position"], at("review"));
-    assert!(stand_ins(&task).is_empty());
+    // Turning auto on is `lf ship`: nobody is waited for, so the Task runs.
+    let on = task.task_run(&["task", "auto", "on", "INF-123", "--reason", "good to go"]);
+    assert!(on.success(), "{}", on.text);
     assert!(
-        task.text_status().contains("active · auto: on by "),
+        on.text.contains("INF-123: standing in at review"),
         "{}",
-        task.text_status()
+        on.text
     );
-    // Bare, not `-b`: a run reaching review stands in there because auto is on.
-    let ran = task.task_run(&["task", "run", "INF-123", "--from", "review"]);
-    assert!(ran.success(), "{}", ran.text);
     assert_eq!(task.graph()["position"], at("end"));
+    assert_eq!(support::recorded_graphs(task.home.path()).len(), graphs + 1);
     assert_eq!(stand_ins(&task).len(), 1);
-    assert_eq!(handoffs(&task).len(), 1);
+    let handoff = handoffs(&task);
+    assert_eq!(handoff.len(), 1);
+    assert!(handoff[0].ends_with(": good to go"), "{}", handoff[0]);
+    assert_eq!(task.status()["auto"]["state"], "on");
 }
 
 #[test]
-fn auto_on_a_task_that_never_ran_takes_up_no_graph_and_the_next_run_is_the_only_one() {
+fn auto_on_a_task_that_never_ran_leaves_exactly_one_run() {
     let task = shipping_task();
-    let error = refusal(task.run(&["task", "auto", "on", "INF-123"]));
-    assert!(
-        error.contains("INF-123 has not taken up a Graph") && error.contains("`lf ship INF-123`"),
-        "{error}"
-    );
-    // Nothing was taken up, so nothing reads as starting and no
-    // conversation starts a run of its own.
-    let status = task.text_status();
-    assert!(!status.contains("Starting"), "{status}");
-    assert!(task.status()["auto"].is_null());
-    // The person's run is the one run, and says what `lf task run` says.
-    let ran = task.task_run(&["task", "run", "INF-123"]);
-    assert!(ran.success(), "{}", ran.text);
-    assert_eq!(task.graph()["position"], at("review"));
+    let on = task.task_run(&["task", "auto", "on", "INF-123"]);
+    assert!(on.success(), "{}", on.text);
+    assert!(on.text.contains("running as Graph run"), "{}", on.text);
+    // The one run took every step, standing in at review.
+    assert_eq!(task.graph()["position"], at("end"));
     assert_eq!(support::recorded_graphs(task.home.path()).len(), 1);
-    assert!(stand_ins(&task).is_empty());
+    assert_eq!(stand_ins(&task).len(), 1);
+    assert_eq!(task.status()["auto"]["state"], "on");
 }
 
 #[test]
@@ -2823,7 +2808,7 @@ fn a_ship_on_a_running_task_reports_its_run_and_starts_nothing() {
         String::from_utf8_lossy(&shipped.stderr)
     );
     assert!(text.contains("at review running as Graph run"), "{text}");
-    assert!(text.contains("ships:"), "{text}");
+    assert!(text.contains("merges:"), "{text}");
     fs::remove_file(task.home.path().join("hold")).unwrap();
     assert!(first.wait().unwrap().success());
     assert_eq!(task.graph()["position"], at("end"));

@@ -393,7 +393,7 @@ label; then the refusal prints the same check and retry. Addressed to mini from 
 runs on the laptop, which holds the move. A leaving move carries on: it
 commits, pushes and takes the conversation, which are safe to repeat. A sent
 move is delivered as it was sent, conversation included, without committing or
-pushing again. For a Task outside Auto-Ship, the move continues a Graph it
+pushing again. For a Task with auto not on, the move continues a Graph it
 stopped, starting it on mini at the saved step. If the Graph does not start,
 the move still stands and prints `lf task run MTG-321 --from 'implement'` to
 start it on the Task's owner.

@@ -441,7 +441,8 @@ retain service authentication through `lf account`. See
 | `lf pr publish` / `lf pr open` | Ready PR, printed / draft PR, opened |
 | `lf pr abandon [BRANCH]` | Close the PR, remove the worktree, delete the branch |
 | `lf pr reconcile` | Check recorded landings once; recover a Task's missing PR |
-| `lf ship [ISSUE]` / `lf task auto on\|off [ISSUE]` | Turn auto on and run the Task / set auto: off makes the run wait at its next interactive or merging step |
+| `lf ship [ISSUE]` / `lf task auto on [ISSUE]` | Turn auto on and run the Task |
+| `lf task auto off [ISSUE]` | Turn auto off: the run waits at its next interactive or merging step |
 | `lf repo ci [--since 7d]` | Report CI incidents and their repairs |
 | `lf repo release run\|check\|status\|notes\|bump\|tag\|publish` | Release stages, together or one at a time |
 | `lf commit`, `lf sync`, `lf wt create\|switch\|list\|prune\|delete` | Git, with Task and stack awareness |

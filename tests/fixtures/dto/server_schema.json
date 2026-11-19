@@ -333,16 +333,12 @@
       ],
       "type": "object"
     },
-    "AutoSet": {
+    "AutoOff": {
       "additionalProperties": false,
-      "description": "What `task.auto` set.",
+      "description": "What `task.auto.off` turned off.",
       "properties": {
         "issue": {
           "type": "string"
-        },
-        "on": {
-          "description": "The Task's auto setting now.",
-          "type": "boolean"
         },
         "was_on": {
           "description": "Auto was on before this.",
@@ -351,7 +347,6 @@
       },
       "required": [
         "issue",
-        "on",
         "was_on"
       ],
       "type": "object"
@@ -13463,13 +13458,13 @@
                 "null"
               ]
             },
+            "merges": {
+              "description": "The run may merge the PR: auto is on, or no interactive step is\nleft ahead, and nobody turned auto off.",
+              "type": "boolean"
+            },
             "run": {
               "description": "The graph and where the run set out: `code from implement`.",
               "type": "string"
-            },
-            "ships": {
-              "description": "The run may merge the PR: auto is on, or no interactive step is\nleft ahead, and nobody turned auto off.",
-              "type": "boolean"
             },
             "state": {
               "const": "running",
@@ -13480,7 +13475,7 @@
             "state",
             "issue",
             "run",
-            "ships",
+            "merges",
             "graph_process",
             "log"
           ],
@@ -15757,14 +15752,14 @@
             "graph_process": "85c31c1e-850c-4821-878d-55527b6dba46",
             "issue": "LOO-1",
             "log": "/Users/maya/.lf/logs/graph-85c31c1e-850c-4821-878d-55527b6dba46.log",
+            "merges": false,
             "run": "code from implement",
-            "ships": false,
             "state": "running"
           }
         },
         {
           "additionalProperties": false,
-          "description": "`lf --task <issue> ship --json`, started detached: turns auto on\nand returns the run, as `task.run` does.",
+          "description": "`lf --task <issue> ship --json`, spelled `lf task auto on <issue>\n--json` too, started detached: turns auto on and returns the run, as\n`task.run` does. Nothing else turns auto on.",
           "examples": [
             {
               "directory": "/repo",
@@ -15797,27 +15792,25 @@
             "graph_process": "85c31c1e-850c-4821-878d-55527b6dba46",
             "issue": "LOO-1",
             "log": "/Users/maya/.lf/logs/graph-85c31c1e-850c-4821-878d-55527b6dba46.log",
+            "merges": true,
             "run": "code from human-review",
-            "ships": true,
             "state": "running"
           }
         },
         {
           "additionalProperties": false,
-          "description": "`lf task auto on|off <issue> --json`: sets the Task's auto setting.",
+          "description": "`lf task auto off <issue> --json`: turns the Task's auto setting off.",
           "examples": [
             {
               "directory": "/repo",
               "issue": "LOO-1",
-              "kind": "task.auto",
-              "on": false,
+              "kind": "task.auto.off",
               "reason": null
             },
             {
               "directory": "/laptop/repo",
               "issue": "LOO-1",
-              "kind": "task.auto",
-              "on": false,
+              "kind": "task.auto.off",
               "reason": null
             }
           ],
@@ -15829,11 +15822,8 @@
               "type": "string"
             },
             "kind": {
-              "const": "task.auto",
+              "const": "task.auto.off",
               "type": "string"
-            },
-            "on": {
-              "type": "boolean"
             },
             "reason": {
               "description": "Why, as `--reason` records it.",
@@ -15847,16 +15837,14 @@
             "kind",
             "directory",
             "issue",
-            "on",
             "reason"
           ],
           "type": "object",
           "x-result": {
-            "$ref": "#/$defs/AutoSet"
+            "$ref": "#/$defs/AutoOff"
           },
           "x-result-example": {
             "issue": "LOO-1",
-            "on": false,
             "was_on": true
           }
         },

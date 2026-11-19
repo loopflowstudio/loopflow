@@ -38,25 +38,21 @@ Questions 1 and 2 got no written answer in scratch.
 - **Stored value `stopped`, shown as "off".** Reverse by renaming the value in
   the unmerged migration.
 - **`lf task auto on` is the `lf ship` operation** (concept review,
-  2026-11-19; to build). It runs the Task, standing in at a waiting
-  interactive step; the mark-only `auto on` and its no-Graph error go.
-  Reverse by restoring `ops::task::ship::auto_on`; to arm ahead of a first run
-  instead, store auto on the Task.
-- **`ships` becomes `merges`** on the run receipt.
-- Superseded by the two above: **`auto on` on a Task with no Graph is an error naming `lf ship`** (was:
-  take up the default graph, which made the Task read "Starting" and its
-  conversation start a run). `auto off` there saves nothing and answers "auto
-  was not on". Reverse by storing auto on the Task instead of `task_graphs`,
-  so it can be set before the first run.
+  2026-11-19). It parses as `lf ship`: it runs the Task, standing in at a
+  waiting interactive step. Reverse by restoring a mark-only write; to arm
+  ahead of a first run instead, store auto on the Task.
+- **`lf task auto on` with no ISSUE on a branch with no Task makes one**, as
+  `lf ship` does, since the two are one parse. Reverse by keeping the
+  `TaskCommand::Auto` variant through dispatch and matching both where
+  `Commands::Ship` is matched.
+- **The served off is `task.auto.off`**, answering `{issue, was_on}`.
+- **`ships` became `merges`** on the run receipt.
 - **Reopening a Task clears auto.**
 - **State never reads the setting**, so auto on, waiting at an interactive
   step with nothing running, reads `active` (was `idle`).
 - **Rows learn auto through the selection state `auto`**, not a field on each
   row DTO. A done or abandoned Task never carries it.
-- **Desktop's toggle on sends `task.ship`** (auto on, then the run). Reverse to
-  `task.auto on` if the toggle should start nothing.
-- **`lf task auto on` then bare `lf task run` continues after a waiting
-  interactive step**; only `lf ship` or `--from <step>` stands in there.
+- **Desktop's toggle on sends `task.ship`** (auto on, then the run).
 - **A moved Task continues as `lf task run`** on the destination;
   `mini_starts_nothing_for_a_task_that_moved_back` counts mini's Graph runs.
 - **A released `lf ship` that dies across the upgrade is not carried again.**

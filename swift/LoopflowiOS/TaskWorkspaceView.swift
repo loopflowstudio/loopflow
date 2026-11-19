@@ -30,7 +30,7 @@ struct TaskWorkspaceView: View {
         if let row {
             if row.states.contains(.auto) {
                 Button("Auto off", systemImage: "pause.circle") {
-                    feed.request("Auto off", row) { .taskAuto(directory: $0, issue: $1, on: false) }
+                    feed.request("Auto off", row) { .taskAutoOff(directory: $0, issue: $1) }
                 }
             } else if row.states.contains(.unstarted) {
                 Button("Start", systemImage: "play.fill") {

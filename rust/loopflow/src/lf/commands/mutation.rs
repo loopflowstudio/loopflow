@@ -120,21 +120,23 @@ fn local(
                 .as_deref()
                 .or(cli.task.as_deref())
                 .context("No Task selected")?;
+            if matches!(state, crate::lf::AutoSetting::On) {
+                unreachable!("`lf task auto on` parses as `lf ship`")
+            }
             // A Task another Machine runs is set there.
-            let super::write::WriteResult::TaskAuto(set) = super::write::Write::TaskAuto {
+            let super::write::WriteResult::TaskAutoOff(off) = super::write::Write::TaskAutoOff {
                 directory: directory.to_path_buf(),
                 issue: issue.to_owned(),
-                on: matches!(state, crate::lf::AutoSetting::On),
                 reason: reason.clone(),
             }
             .run()?
             else {
-                unreachable!("task.auto answers with the setting")
+                unreachable!("task.auto.off answers with what it turned off")
             };
             if *json {
-                writeln!(io.output, "{}", serde_json::to_string(&set)?)?;
+                writeln!(io.output, "{}", serde_json::to_string(&off)?)?;
             } else {
-                writeln!(io.output, "{}", set.render())?;
+                writeln!(io.output, "{}", off.render())?;
             }
             Ok(())
         }

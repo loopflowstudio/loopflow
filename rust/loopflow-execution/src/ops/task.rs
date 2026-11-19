@@ -44,6 +44,7 @@ use snapshot::{
 };
 pub use snapshot::{task_changes, task_diff, task_file, task_snapshot, MAX_FILE_BYTES};
 mod file_save;
+pub mod run_recovery;
 pub mod ship;
 pub use directory::{task_files, TaskDirectory, TaskFileEntry, TaskFileKind};
 pub use file_save::{task_save, TaskFileRecovery, TaskFileSave};
@@ -604,9 +605,9 @@ pub(crate) async fn task_work_status(store: &Store, task: &Task) -> OpsResult<Wo
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TaskRunStart {
     /// A run of the Task's Graph from this step; the caller starts it as
-    /// `lf --task ISSUE graph run`. With `ships`, the run may merge the PR:
+    /// `lf --task ISSUE graph run`. With `merges`, the run may merge the PR:
     /// Auto is on, or no interactive step is left ahead, and nobody stopped it.
-    Run { step: String, ships: bool },
+    Run { step: String, merges: bool },
     /// The Task now waits at this interactive step; nothing runs.
     Waiting(String),
     /// Nothing remained: the Task reached `end`.
@@ -893,7 +894,7 @@ async fn start_task_run(
     }
     // Auto on runs through the interactive steps, standing in at each;
     // stopped, no run merges.
-    let (on, ships) = match store
+    let (on, merges) = match store
         .sqlite
         .task_auto(&task.id)
         .map_err(task_error)?
@@ -940,7 +941,10 @@ async fn start_task_run(
             graph.name
         )));
     }
-    Ok(TaskRunStart::Run { step: label, ships })
+    Ok(TaskRunStart::Run {
+        step: label,
+        merges,
+    })
 }
 
 /// The run this process carried ended; settle a completion its arrival at

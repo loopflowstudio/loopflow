@@ -32,7 +32,7 @@ pub enum TaskRun {
         run: String,
         /// The run may merge the PR: auto is on, or no interactive step is
         /// left ahead, and nobody turned auto off.
-        ships: bool,
+        merges: bool,
         graph_process: LfProcessId,
         /// Where the run's output goes once its launcher lets go; null while a
         /// terminal (`-b`, `-i`) keeps it.
@@ -51,13 +51,13 @@ impl TaskRun {
             Self::Running {
                 issue,
                 run,
-                ships,
+                merges,
                 graph_process,
                 log: Some(log),
             } => Some(format!(
                 "{issue} · {run} running as Graph run {graph_process}{}\n  follow: lf task status {issue}\n  log:    {}",
-                if *ships {
-                    format!("\n  ships:  this run may merge the PR; `lf task auto off {issue}` stops it")
+                if *merges {
+                    format!("\n  merges: this run may merge the PR; `lf task auto off {issue}` stops it")
                 } else {
                     String::new()
                 },
@@ -70,24 +70,22 @@ impl TaskRun {
     }
 }
 
-/// What `task.auto` set.
+/// What `task.auto.off` turned off.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct AutoSet {
+pub struct AutoOff {
     pub issue: String,
-    /// The Task's auto setting now.
-    pub on: bool,
     /// Auto was on before this.
     pub was_on: bool,
 }
 
-impl AutoSet {
+impl AutoOff {
     pub fn render(&self) -> String {
         let issue = &self.issue;
-        match (self.on, self.was_on) {
-            (true, _) => format!("{issue}: auto on"),
-            (false, true) => format!("{issue}: auto off"),
-            (false, false) => format!("{issue}: auto was not on"),
+        if self.was_on {
+            format!("{issue}: auto off")
+        } else {
+            format!("{issue}: auto was not on")
         }
     }
 }
@@ -122,27 +120,20 @@ pub fn run(
 }
 
 /// `task.ship`: turn auto on and start the Task's run detached, as
-/// `lf --task <issue> ship` does: it returns what `task.run` returns, and the
-/// run stands in at each interactive step until the PR lands.
+/// `lf --task <issue> ship` and `lf task auto on <issue>` do: it returns what
+/// `task.run` returns, and the run stands in at each interactive step until
+/// the PR lands. It is the one way to turn auto on.
 pub fn ship(directory: &Path, issue: &str, environment: &[(String, String)]) -> Result<TaskRun> {
     launch::start_with(directory, &spell_ship(issue), environment)
 }
 
-/// `task.auto`: set the Task's auto setting, as `lf task auto on|off <issue>`
-/// does. On, its run stands in at each interactive step and may merge. Off,
-/// nothing is killed: the run waits at its next interactive or merging step
-/// until auto is on again.
-pub fn auto(issue: &str, on: bool, reason: Option<&str>) -> Result<AutoSet> {
-    use crate::ops::task::ship;
-    let was_on = if on {
-        ship::auto_on(issue, reason)
-    } else {
-        ship::auto_off(issue, reason)
-    }
-    .map_err(written)?;
-    Ok(AutoSet {
+/// `task.auto.off`: turn the Task's auto setting off, as `lf task auto off
+/// <issue>` does. Nothing is killed: the run waits at its next interactive or
+/// merging step until `task.ship` turns auto on again.
+pub fn auto_off(issue: &str, reason: Option<&str>) -> Result<AutoOff> {
+    let was_on = crate::ops::task::ship::auto_off(issue, reason).map_err(written)?;
+    Ok(AutoOff {
         issue: issue.to_owned(),
-        on,
         was_on,
     })
 }
@@ -290,7 +281,7 @@ pub fn spell_ship(issue: &str) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{AutoSet, TaskRun};
+    use super::{AutoOff, TaskRun};
     use serde::{de::DeserializeOwned, Serialize};
 
     /// A response fixture's `result` decodes as `T` and encodes back unchanged.
@@ -319,28 +310,26 @@ mod tests {
         else {
             panic!("the fixture is a running Task")
         };
-        let ships = TaskRun::Running {
+        let merging = TaskRun::Running {
             issue,
             run,
-            ships: true,
+            merges: true,
             graph_process,
             log,
         };
-        assert!(ships
+        assert!(merging
             .render()
             .unwrap()
             .contains("this run may merge the PR; `lf task auto off LOO-1` stops it"));
-        let set: AutoSet = result(include_str!(
-            "../../tests/fixtures/dto/server/task_auto_set.json"
+        let off: AutoOff = result(include_str!(
+            "../../tests/fixtures/dto/server/task_auto_off_answer.json"
         ));
-        assert_eq!(set.render(), "LOO-1: auto off");
-        let was_off = AutoSet {
+        assert_eq!(off.render(), "LOO-1: auto off");
+        let was_off = AutoOff {
             was_on: false,
-            ..set.clone()
+            ..off
         };
         assert_eq!(was_off.render(), "LOO-1: auto was not on");
-        let on = AutoSet { on: true, ..set };
-        assert_eq!(on.render(), "LOO-1: auto on");
         // A missing field is an error, never a default.
         assert!(serde_json::from_str::<TaskRun>(r#"{"state":"running","issue":"LOO-1"}"#).is_err());
         let waiting = TaskRun::Waiting {

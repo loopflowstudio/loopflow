@@ -1,7 +1,7 @@
-//! `lf ship`: turn auto on for the Task's Graph, then do what
-//! `lf task run` does. The run stands in at each interactive step because
-//! Auto is on, not because of how it was launched; a Task waiting at one
-//! is stood in for there.
+//! `lf ship`, spelled `lf task auto on` too: turn auto on for the Task's
+//! Graph and run it. The run stands in at each interactive step because auto
+//! is on, not because of how it was launched; a Task waiting at one is stood
+//! in for there.
 
 use std::path::Path;
 

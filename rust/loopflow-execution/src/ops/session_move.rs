@@ -126,14 +126,14 @@ impl StoppedRun {
         match started {
             Ok(crate::engine::task::TaskRun::Running {
                 graph_process,
-                ships,
+                merges,
                 ..
             }) => {
                 eprintln!("Running on {} as Graph run {graph_process}", self.place);
                 eprintln!("  follow: lf task status {name}");
-                if ships {
+                if merges {
                     eprintln!(
-                        "  ships:  this run may merge the PR; `lf task auto off {name}` stops it"
+                        "  merges: this run may merge the PR; `lf task auto off {name}` stops it"
                     );
                 }
             }

@@ -1247,7 +1247,7 @@ fn server_operations_match_their_lf_commands() {
         | Write::TaskUpdate { .. }
         | Write::TaskClaim { .. }
         | Write::TaskUnassign { .. }
-        | Write::TaskAuto { .. }
+        | Write::TaskAutoOff { .. }
         | Write::TaskMove { .. }
         // Starting a run or a ship starts Processes; task_run_waits_at_an_interactive_step
         // compares the run, and comments differ by their saved IDs.
@@ -1568,10 +1568,9 @@ fn server_operations_match_their_lf_commands() {
         assert_eq!(last(&written), last(&printed), "{args:?}");
         assert_eq!(last(&written).0, format!("served {steer}"));
     }
-    let stop = Write::TaskAuto {
+    let stop = Write::TaskAutoOff {
         directory: directory.clone(),
         issue: "INF-123".into(),
-        on: false,
         reason: None,
     };
     let stopped = || {
@@ -2042,14 +2041,12 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             path(directory),
             words(&["task", "unassign", issue, "--json"]),
         ),
-        Write::TaskAuto {
+        Write::TaskAutoOff {
             directory,
             issue,
-            on,
             reason,
         } => {
-            let state = if *on { "on" } else { "off" };
-            let mut spelled = words(&["task", "auto", state, issue, "--json"]);
+            let mut spelled = words(&["task", "auto", "off", issue, "--json"]);
             if let Some(reason) = reason {
                 spelled.extend(words(&["--reason", reason]));
             }

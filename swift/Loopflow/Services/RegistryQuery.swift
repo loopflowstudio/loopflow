@@ -290,8 +290,8 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
     /// `end`, turning auto on, as `-b` does.
     case taskRun(directory: String, issue: String, graph: String?, from: String?, agent: String?, approve: Bool)
     case taskShip(directory: String, issue: String)
-    /// `lf task auto on|off <issue>`: sets the Task's auto setting.
-    case taskAuto(directory: String, issue: String, on: Bool)
+    /// `lf task auto off <issue>`: turns the Task's auto setting off. `taskShip` turns it on.
+    case taskAutoOff(directory: String, issue: String)
     /// Answer one lost line of the directory's repository, whoever owns it.
     case repoTrackerAnswer(directory: String, action: String, answer: LostAnswer)
     case taskSteer(directory: String, issue: String, message: String)
@@ -395,7 +395,7 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
             return (approve ? ["--batch"] : []) + argument("--agent", agent) + ["task", "run", issue]
                 + [graph].compactMap { $0 } + argument("--from", from) + ["--json"]
         case .taskShip(_, let issue): return ["--task", issue, "ship", "--json"]
-        case .taskAuto(_, let issue, let on): return ["task", "auto", on ? "on" : "off", issue, "--json"]
+        case .taskAutoOff(_, let issue): return ["task", "auto", "off", issue, "--json"]
         case .repoTrackerAnswer(_, let action, let answer):
             return ["repo", "tracker", "answer", action, answer == .keepTheirs ? "--keep-theirs" : "--use-mine", "--json"]
         case .taskSteer(_, let issue, let message): return ["steer", issue, message, "--json"]
@@ -580,8 +580,8 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
             TaggedFields("task.ship", ["directory": directory, "issue": issue])
         case .repoTrackerAnswer(let directory, let action, let answer):
             TaggedFields("repo.tracker.answer", ["directory": directory, "action": action, "answer": answer])
-        case .taskAuto(let directory, let issue, let on):
-            TaggedFields("task.auto", ["directory": directory, "issue": issue, "on": on, "reason": String?.none])
+        case .taskAutoOff(let directory, let issue):
+            TaggedFields("task.auto.off", ["directory": directory, "issue": issue, "reason": String?.none])
         case .taskSteer(let directory, let issue, let message):
             TaggedFields("task.steer", ["directory": directory, "issue": issue, "message": message])
         case .taskReport(let directory, let issue, let message):

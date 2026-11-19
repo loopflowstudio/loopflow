@@ -520,7 +520,7 @@ mod tests {
             include_str!("../../tests/fixtures/dto/server/admitted.json"),
             include_str!("../../tests/fixtures/dto/server/task_running.json"),
             include_str!("../../tests/fixtures/dto/server/task_shipping.json"),
-            include_str!("../../tests/fixtures/dto/server/task_auto_set.json"),
+            include_str!("../../tests/fixtures/dto/server/task_auto_off_answer.json"),
             include_str!("../../tests/fixtures/dto/server/session_steered.json"),
             include_str!("../../tests/fixtures/dto/server/session_boundary_answer.json"),
             include_str!("../../tests/fixtures/dto/server/wave_plan_connected.json"),

@@ -313,6 +313,24 @@ impl Cli {
                 })?;
             }
         }
+        // `lf task auto on` is `lf ship`: one command, two spellings.
+        if let Some(Commands::Task {
+            cmd:
+                TaskCommand::Auto {
+                    state: AutoSetting::On,
+                    issue,
+                    reason,
+                    json,
+                },
+        }) = &mut self.command
+        {
+            self.command = Some(Commands::Ship {
+                issue: issue.take(),
+                graph: None,
+                reason: reason.take(),
+                json: *json,
+            });
+        }
         // `lf ship ISSUE` selects its Task as `--task` does.
         if let Some(Commands::Ship { issue, .. }) = &mut self.command {
             if let Some(issue) = issue.take() {
@@ -483,13 +501,15 @@ pub enum Commands {
         #[arg(long = "json", id = "steer_json")]
         json: bool,
     },
-    /// Ship the Task: `lf task auto on`, then `lf task run`, standing in at each interactive step
+    /// Ship the Task: turn auto on and run it, standing in at each interactive step
     ///
-    /// Prints what `lf task run` prints and returns once the run registers
-    /// (`-b` waits for it); `lf task status` follows it. A Task waiting at an
-    /// interactive step is stood in for there. With no ISSUE, ships the
-    /// checkout's Task, or a new one for its branch. `lf task auto off` turns
-    /// auto off: the run waits at its next interactive or merging step.
+    /// `lf task auto on` is this command. Prints what `lf task run` prints and
+    /// returns once the run registers (`-b` waits for it); `lf task status`
+    /// follows it. A Task waiting at an interactive step is stood in for
+    /// there; a Task already running carries on and stands in from its next
+    /// one. With no ISSUE, ships the checkout's Task, or a new one for its
+    /// branch. `lf task auto off` turns auto off: the run waits at its next
+    /// interactive or merging step.
     Ship {
         issue: Option<String>,
         /// Take up this graph in place of the Task's remaining steps
@@ -2193,7 +2213,7 @@ conversation; the next `lf task run` continues after it. A run that fails starts
 step that failed; the steps before it stay done, and --from reruns them. `-i` runs every step \
 with you in this terminal instead. A run that reaches `end`, as `-b` does, turns auto on like `lf ship`, \
 which may merge the PR, unless someone turned auto off; then it waits at the landing step \
-until `lf ship` or `lf task auto on`. Add --open to open its primary conversation locally when the launch returns, \
+until `lf ship`. Add --open to open its primary conversation locally when the launch returns, \
 using lf open's ordinary host selection. Preview and --quote open nothing."
     )]
     Run {
@@ -2472,19 +2492,18 @@ using lf open's ordinary host selection. Preview and --quote open nothing."
     },
     /// Turn the Task's auto setting on or off: who takes its interactive steps
     ///
-    /// On, the Task's runs stand in for you at each interactive step and may
-    /// merge the PR; nothing starts, and a live run stands in from its next
-    /// interactive step. Off, nothing is killed: the run waits at its next
-    /// interactive step, or before a step that merges, and auto-merge Loopflow
-    /// armed is disarmed. `lf ship` is `auto on`, then `lf task run`. With no
-    /// ISSUE, sets the checkout's Task.
+    /// On is `lf ship`: nobody is waited for, so the Task runs, standing in
+    /// for you at each interactive step, and may merge the PR. Off, nothing is
+    /// killed: the run waits at its next interactive step, or before a step
+    /// that merges, and auto-merge Loopflow armed is disarmed. With no ISSUE,
+    /// sets the checkout's Task.
     Auto {
         state: AutoSetting,
         issue: Option<String>,
         /// Why, kept in the Task's history
         #[arg(long)]
         reason: Option<String>,
-        /// Print the Task, its setting and whether auto was on before
+        /// Print the run `on` started, as `lf ship --json` does, or the Task and whether `off` found auto on
         #[arg(long)]
         json: bool,
     },
@@ -4193,6 +4212,16 @@ mod tests {
                 .may_launch_agent()
         );
         assert!(!checked(&["lf", "--task", "LOO-1", "task", "auto", "off"]).may_launch_agent());
+        // `lf task auto on` is `lf ship`, selection and flags included.
+        let on = checked(&[
+            "lf", "task", "auto", "on", "LOO-1", "--reason", "go", "--json",
+        ]);
+        assert_eq!(on.task.as_deref(), Some("LOO-1"));
+        assert!(matches!(
+            &on.command,
+            Some(Commands::Ship { issue: None, graph: None, reason: Some(reason), json: true })
+                if reason == "go"
+        ));
         // A Session id beside its Work selects the Session; Task and Wave
         // together stay one selection too many.
         for argv in [

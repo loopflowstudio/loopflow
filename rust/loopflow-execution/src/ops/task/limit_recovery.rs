@@ -92,7 +92,7 @@ pub(crate) fn restart_waiting_runs() -> OpsResult<()> {
             let Some(worktree) = task.worktree.as_ref().filter(|path| path.is_dir()) else {
                 continue;
             };
-            super::ship::restart_lf_in(
+            super::run_recovery::restart_lf_in(
                 worktree,
                 wait.agent.as_deref(),
                 &["task", "run", &task.identifier],

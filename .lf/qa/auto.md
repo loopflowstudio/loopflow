@@ -30,7 +30,9 @@ carries it as `execution.auto`). Served: hello from
 `{"type":"request","id":…,"operation":{"kind":"task.ship","directory":…,
 "issue":…},"select":null,"sender":null,"request_id":"<uuid>"}`; `task.ship`
 takes nothing else (a never-run Task takes up the repository's graph), and
-`task.auto` adds `"on":false,"reason":null`.
+`task.auto.off` takes `"reason":null` beside them and answers `{issue, was_on}`.
+`lf task auto on` is `lf ship`: check both spellings on a Task waiting at
+`human-review` (each stands in there) and on a never-run Task (one Graph run).
 
 Selection state `auto` is a Dashboard expression (`lf desktop dashboard query
 'Auto' 'state:auto'` prints JSON), not a `lf task list` filter. Never run

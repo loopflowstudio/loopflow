@@ -27,7 +27,7 @@ pub fn settle() -> Option<i64> {
         }
         Err(error) => tracing::warn!("AgentProcess settlement: {error}"),
     }
-    let runs_due = crate::ops::task::ship::restart_runs()
+    let runs_due = crate::ops::task::run_recovery::restart_runs()
         .inspect_err(|error| tracing::warn!("run restart: {error}"))
         .ok()
         .flatten();

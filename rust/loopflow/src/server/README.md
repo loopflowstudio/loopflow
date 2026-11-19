@@ -144,7 +144,7 @@ Machine's null `sender` is `invalid`, and a client on this Machine sends null:
 ```text
 → {"type":"hello","revision":8,"min_revision":8,"client":{"kind":"machine",…}}
 ← {"type":"welcome",…}
-→ {"type":"request","id":"…","operation":{"kind":"task.auto","directory":"/laptop/repo",…},"select":null,"sender":{"repository":"repo_…","selection":{"profile":{…},"participant":"…","agent":null,"settings":null,"source":null},"secrets":{}}}
+→ {"type":"request","id":"…","operation":{"kind":"task.auto.off","directory":"/laptop/repo",…},"select":null,"sender":{"repository":"repo_…","selection":{"profile":{…},"participant":"…","agent":null,"settings":null,"source":null},"secrets":{}}}
 ← {"type":"response","id":"…","result":{…}}
 ```
 
@@ -206,7 +206,7 @@ by a test and every server fixture must decode.
 ← {"type":"reading","id":"b","checkpoint":"opaque-reading-token","frame":{"answers":3,…}}
 → {"type":"cancel","id":"b"}
 → {"type":"request","id":"c","operation":{"kind":"task.run","directory":"/repo","issue":"LOO-1","graph":null,"from":null,"agent":null,"approve":false},"select":null,"request_id":null}
-← {"type":"response","id":"c","trace_id":"…","result":{"state":"running","issue":"LOO-1","run":"code from start","ships":false,"graph_process":"…","log":"…"}}
+← {"type":"response","id":"c","trace_id":"…","result":{"state":"running","issue":"LOO-1","run":"code from start","merges":false,"graph_process":"…","log":"…"}}
 → {"type":"subscribe","id":"d","operation":{"kind":"task.wait","issue":"LOO-1","until":"submitted"},"select":null,"resume":null}
 ← {"type":"reading","id":"d","checkpoint":"another-token","frame":{"answers":null,"unavailable":null,"body":{"reached":true,"task":{…}}}}
 ← {"type":"ended","id":"d"}
@@ -380,8 +380,8 @@ case names one operation, including distinct claim/unassign and pin/unpin writes
 | `task.create` | `lf task create [--session <id>] [--run] --request-id <id>` | write |
 | `creation.get` | `lf server receipt <request-id> --json` | read; no creation or launch |
 | `task.run` | `lf task run <issue>` | `engine::task` |
-| `task.ship` | `lf ship` | `engine::task` |
-| `task.auto` | `lf task auto on\|off <issue>` | `engine::task` |
+| `task.ship` | `lf ship`, `lf task auto on <issue>` | `engine::task` |
+| `task.auto.off` | `lf task auto off <issue>` | `engine::task` |
 | `task.steer` | `lf steer <issue> <message>` | `engine::task`; the thread entry the store saves as the Task's steer |
 | `task.report` | `lf task report <issue> <message>` | `engine::task` |
 | `task.interrupt` | `lf task interrupt <issue>` | `engine::task` |
@@ -509,7 +509,7 @@ the phone's `view.select` Task list and its creation destinations all read it.
   {directory, issue}` outlive the request, so the server starts their
   command (`lf [-b] [-a <agent>] task run …`, `lf --task <issue> ship`)
   as a detached process and answers what that process reports once it
-  knows: `{state: running, ships, graph_process, log}` when the
+  knows: `{state: running, merges, graph_process, log}` when the
   Graph registers, `waiting {step}` or `ended` when nothing ran, or the
   refusal it printed; `task.ship` answers the same after turning auto
   on. The connection never waits on the run. `approve` is `-b`: every step
@@ -517,7 +517,7 @@ the phone's `view.select` Task list and its creation destinations all read it.
   the run stands in at interactive steps only while auto is on, and
   otherwise stops before the next one. A null `agent` uses each step's
   configured harness. `lf task run <issue> --json` and `lf ship --json`
-  print the same value. `task.auto {directory, issue, on, reason}` sets auto (`{issue, on, was_on}`), `task.steer` and `task.report {message}` save to the
+  print the same value. `task.auto.off {directory, issue, reason}` turns auto off (`{issue, was_on}`); only `task.ship` turns it on, `task.steer` and `task.report {message}` save to the
   thread and return it, and `task.interrupt` returns its receipt.
 - A write uses the shared `Write` shape. `Write::run` calls the shared Rust
   function its CLI handler calls and returns the typed value; the CLI prints
@@ -527,7 +527,7 @@ the phone's `view.select` Task list and its creation destinations all read it.
   which makes the checkout and starts the Graph after the answer.
   A null `wave` selects the repository. Both paths return the same creation
   receipt, described below. A write whose Work
-  lives on another Machine (`task.run`, `task.ship`, `task.auto`,
+  lives on another Machine (`task.run`, `task.ship`, `task.auto.off`,
   `task.claim`, `task.unassign`, `session.resume`) goes to that Machine's
   server over SSH and returns its answer; it never falls back to
   local execution. Requests create no Process rows; diagnostics the shared

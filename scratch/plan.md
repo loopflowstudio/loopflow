@@ -13,65 +13,37 @@ a setting and no state); "i think lf task auto on lf task auto off maybe?";
 PR #1976, base `main`. Main (with #1972 and #1974) is merged in at
 `39b87d6262`.
 
-## To build next: auto on is one action
+## Auto on is one action
 
 Concept review, 2026-11-19 (`scratch/concept-review.html`), a choice made for
-review. As built, "turn auto on" is two actions: `lf task auto on` sets the
-mark only (and refuses a Task with no Graph), while `lf ship` and Desktop's
-toggle set it and run. On a Task waiting at `human-review`, `lf task auto on`
-then `lf task run` skips the step; only `lf ship` stands in. So ship is not
-shorthand for anything a person can type, and the docs' "exactly `lf task
-run`" is false there.
+review: auto on means nobody is waited for, so turning it on runs the Task.
+`lf task auto on X`, `lf ship X` and Desktop's toggle are one operation.
 
-The model: auto on means nobody is waited for, so turning it on runs the Task.
-`lf task auto on X`, `lf ship X` and the Desktop toggle are one operation;
-`lf ship` is the short spelling (and, with no ISSUE, the one that makes a Task
-for the branch).
+Built 2026-11-19:
 
-1. `lf task auto on [ISSUE] [--reason] [--json]` runs `commands::ship::run`
-   (`rust/loopflow/src/lf/mod.rs`, `lf/commands/ship.rs`, `mutation.rs`): same
-   output and `--json` as `lf ship`. Live run: reported, nothing starts.
-   Waiting at an interactive step: stands in there. Never run: takes up its
-   Graph and runs. At `end`: reports ended.
-2. Delete `ops::task::ship::auto_on` and its no-Graph refusal. On the wire one
-   served operation turns auto on, `task.ship`; `task.auto` loses `on: true`
-   (`lf/commands/write.rs`, `server/schema.rs`, fixtures `task_auto.json`,
-   `task_auto_set.json`, Swift `DesktopActions`). Name what is left for what it
-   does (off), following the wire's existing naming.
-3. Tests in `rust/loopflow/tests/work/task_graph_launch_tests.rs`:
-   `auto_on_starts_nothing_and_the_next_bare_run_stands_in` and
-   `auto_on_a_task_that_never_ran_takes_up_no_graph_and_the_next_run_is_the_only_one`
-   become one test that `lf task auto on` on a Task waiting at `review` stands
-   in there and leaves one Graph run, and one that on a never-run Task it
-   leaves exactly one run. Keep `a_ship_on_a_running_task_reports_its_run_and_starts_nothing`.
-4. `ships` → `merges` on `TaskRun::Running` and `TaskRunStart::Run`
-   (`engine/task.rs`, `ops/task.rs`, `lf/commands/graph.rs`, fixtures
-   `task_shipping.json`, `task_running.json`, `server/README.md`,
-   `ServerProtocolTests.swift`), printed `merges:`. "Ship" is auto on plus the
-   run; this field says the run may merge, which is true with auto never set.
-5. Move run recovery (`restart_lf_in`, `RUN_RESTARTS`, `DiedRun`, `died_run`,
-   `restart_runs`, `continuable`, the test) from `ops/task/ship.rs` to
-   `ops/task/run_recovery.rs`. It serves every Task run.
-6. Docs and help: `docs/orchestration.md` Auto section (drop "starts
-   nothing", the "takes `lf ship`" paragraph, "exactly `lf task run`"; `ships:`
-   → `merges:`), `lf help ship` / `lf help task auto`, the operate skills'
-   lines naming `lf task auto on`, `.lf/qa/auto.md`, and
-   `docs/dev/machines.md` "a Task outside Auto-Ship" → "with auto not on".
+- `lf task auto on [ISSUE] [--reason] [--json]` parses as `lf ship`
+  (`Cli::checked` in `rust/loopflow/src/lf/mod.rs`), so every dispatch, detach
+  and remote route that names `Commands::Ship` serves both spellings. With no
+  ISSUE on a branch with no Task it makes one, as `lf ship` does.
+- `ops::task::ship::auto_on` and its no-Graph refusal are gone. On the wire
+  `task.ship` is the one way to turn auto on; `task.auto` became
+  `task.auto.off {directory, issue, reason}` answering `{issue, was_on}`
+  (`AutoOff`). Fixtures `task_auto_off.json`, `task_auto_off_answer.json`.
+- `ships` is `merges` on `TaskRun::Running` and `TaskRunStart::Run`, printed
+  `merges:`.
+- Run recovery lives in `ops/task/run_recovery.rs`.
+- Tests: `auto_on_at_a_waiting_step_stands_in_there_with_one_graph_run`,
+  `auto_on_a_task_that_never_ran_leaves_exactly_one_run`, and the parse row in
+  `lf::tests`.
 
-Passed over: keeping `auto on` a pure setting and storing it on the Task so it
-can precede a Graph, with a bare run standing in at the waiting step. That
-keeps two actions and changes what a bare `lf task run` means at an
-interactive step ("I finished this step"). Lost on purpose: arming auto on a
-waiting Task without starting anything.
-
-Checks: `cargo test -p loopflow --lib task_graph_launch_tests::` filtered to
-the auto and ship tests, `documented_commands::`, the `write.rs` wire tests,
-clippy. Swift stays with gate.
+Passed over: keeping `auto on` a pure setting stored on the Task so it can
+precede a Graph, with a bare run standing in at the waiting step. That keeps
+two actions and changes what a bare `lf task run` means at an interactive step
+("I finished this step"). Lost on purpose: arming auto on a waiting Task
+without starting anything.
 
 ## What exists
 
-Describes the branch at `3aaba763d0`; the section above changes who turns
-auto on.
 
 Status and setting are separate axes. `TaskState` says what is happening; the
 auto setting says who takes the interactive steps. One word: **auto**.
@@ -85,12 +57,12 @@ auto setting says who takes the interactive steps. One word: **auto**.
   `tasks.shipped_at` (so a released lf during upgrade skew stops relaunching
   `lf ship`), and marks `task_ship_events`, `tasks.shipped_at` and
   `task_summaries.ship_events` leaving for LOO-971.
-- **Who sets it (as built):** `lf task auto on|off [ISSUE] [--reason]
-  [--json]` (served as `task.auto`; `on` sets the mark and starts nothing);
-  `lf ship` (on, always, the only other thing that lifts a stop);
+- **Who sets it:** `lf ship`, spelled `lf task auto on` too (on, always, the
+  only thing that lifts a stop; served as `task.ship`); `lf task auto off
+  [ISSUE] [--reason] [--json]` (served as `task.auto.off`);
   `lf -b task run` (on, unless stopped). Nothing else: no route
   approval, and failures, refusals and reaching `end` leave it alone.
-- **`lf ship <task>`** is auto on, then exactly `lf task run` (detached, same
+- **`lf ship <task>`** is auto on, then the run (detached, `lf task run`'s
   output, `task.ship` returns `TaskRun`). On a live run it reports that run. On
   a Task waiting at an interactive step it stands in at that step.
 - **What reads it:** the Graph runner, at each interactive step of a Task run
@@ -109,7 +81,7 @@ auto setting says who takes the interactive steps. One word: **auto**.
   `ship --stop` alias are deleted.
 - **Surfaces:** `lf task status` first line `LOO-1  moving · auto: on by Maya,
   Nov 18 09:04`; snapshot field `auto`; Desktop `TaskAutoControl` toggle (on
-  sends `task.ship`, off `task.auto`) and `AutoBadge` on cards and rows; docs,
+  sends `task.ship`, off `task.auto.off`) and `AutoBadge` on cards and rows; docs,
   builtin operate skills, `.lf/qa/auto.md` and AGENTS.md say auto.
 
 `refs/wip/loo-968-auto-ship-rename` holds a dropped rename-only diff; delete it
@@ -134,17 +106,15 @@ when the PR merges.
 
 ## Remaining
 
-"To build next", then gate.
+Gate.
 
 QA 2026-11-19 (`scratch/qa.html`): the CLI, socket, recovery and 0.16 upgrade
 paths work on a private Machine. `lf task status --json` now carries `auto`
 (`TaskDetail.auto`), and a Task read from another Machine prints it; the
 remote line was compiled, not driven.
 
-Built 2026-11-19, replaced by "To build next": `lf task auto on` on a Task
-with no Graph exits 1 pointing at `lf ship`.
-
-What the reproduction that led there showed: after the early take-up the Task read
+What an earlier build showed, when `lf task auto on` took up a Graph without
+running it: the Task read
 "Conversation: starting", "latest Graph: Starting feature", with an open
 Session. A Task that took up a Graph and never ran it owes setup
 (`ops/human_session/setup.rs`): its conversation starts `lf task run`

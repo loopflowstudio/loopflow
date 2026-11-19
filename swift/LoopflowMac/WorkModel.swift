@@ -2692,7 +2692,7 @@ final class WorkModel {
     }
 
     func turnAutoOff(_ task: RoadmapTask) {
-        request(task, "Auto off", .taskAuto(directory: directory(task), issue: task.task.identifier, on: false))
+        request(task, "Auto off", .taskAutoOff(directory: directory(task), issue: task.task.identifier))
     }
 
     /// The Work the Machine control describes: the current started Task, else the

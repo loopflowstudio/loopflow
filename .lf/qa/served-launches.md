@@ -18,9 +18,9 @@ then `lf task create --title "Launch QA" --json` creates local planning data.
 Create with stdin closed; `--graph` on creation requires `--run`.
 Before `task.ship`, place the Task with `lf checkout <id> --json`; creating or
 binding a prepared Session alone does not place its checkout. `task.ship` returns
-what `task.run` returns (`state: running`, `graph_process`, `ships: true`); on a
-Task whose run is live it turns auto on and returns that run. `task.auto`
-takes `on` and `reason: null` and answers `{issue, on, was_on}`.
+what `task.run` returns (`state: running`, `graph_process`, `merges: true`); on a
+Task whose run is live it turns auto on and returns that run. `task.auto.off`
+takes `reason: null` and answers `{issue, was_on}`; nothing but `task.ship` turns auto on.
 
 For a checkout without launching a Graph, run `lf wt create qa --json`, take
 its `path`, then pass it to `lf task create --worktree <path> --title ... --json`.

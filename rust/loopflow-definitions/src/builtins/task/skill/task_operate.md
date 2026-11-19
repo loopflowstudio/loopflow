@@ -47,8 +47,8 @@ liveness is not permission. A run listed in status is not a live process: its
    `lf -b task run` and `lf ship` turn auto on: the run stands in at the
    interactive steps and may merge the PR. A run with no interactive step left
    ahead may merge it too. Use them only when asked to ship or land. After
-   someone turns auto off (`lf task auto off`), only a requested `lf ship` or
-   `lf task auto on` turns it on again.
+   someone turns auto off (`lf task auto off`), only a requested `lf ship` turns
+   it on again.
 
 4. **Stay with it.** A launch is progress, not the stopping point. Reread
    status after each action, wait for real changes without tight polling,

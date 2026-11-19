@@ -1,4 +1,4 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>LOO-938 concept review, third pass</title><style>
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>LOO-938 concept review, fourth pass</title><style>
 :root{--bg:#fbfaf7;--fg:#1d1c1a;--mute:#6b675f;--line:#dedad2;--card:#fff;--yes:#2f7d4f;--no:#b3402a;--prop:#2b5fb3;--propbg:#eaf1fc;--code:#f1eee8}
 @media (prefers-color-scheme:dark){:root{--bg:#161614;--fg:#ecebe6;--mute:#9b978d;--line:#34322e;--card:#1f1e1b;--yes:#6cc38f;--no:#ef8a72;--prop:#8db4ff;--propbg:#1c2638;--code:#26241f}}
 *{box-sizing:border-box}
@@ -14,8 +14,7 @@ table{width:100%;border-collapse:collapse;font-size:14.5px;margin:12px 0}
 th,td{text-align:left;vertical-align:top;padding:9px 10px;border-bottom:1px solid var(--line)}
 th{font-weight:600}
 .y{color:var(--yes);font-weight:700}.n{color:var(--no);font-weight:700}
-.prop{border-left:4px solid var(--prop);background:var(--propbg);padding:12px 16px;border-radius:0 8px 8px 0;margin:14px 0}
-.prop b.tag,.tagp{color:var(--prop);font-weight:700}
+.tagp{color:var(--prop);font-weight:700}
 .cols{display:grid;grid-template-columns:1fr 1fr;gap:16px}
 @media (max-width:760px){.cols{grid-template-columns:1fr}}
 .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 18px}
@@ -24,95 +23,95 @@ th{font-weight:600}
 .mute{color:var(--mute)}
 ol.q>li{margin:12px 0}
 ol.q ol{list-style:lower-alpha;margin-top:4px}
-.key{font-size:14px;color:var(--mute)}
 </style></head><body><main>
 <h1>Do the plan's concepts and the code's concepts line up?</h1>
-<p class="lede">LOO-938, third review of the built branch, 2026-11-18 at <code>e9d247895a</code> against base <code>3496a8761d</code>, with slice 5, its compress and its QA (<code>scratch/qa.html</code>) in.</p>
-<p><b>Area taken:</b> how a repository's plan is shared without Linear or Asana: the save, the stamp, the two carriers, what arrives and what <code>lf repo tracker</code> says about it, claims, clones, and this time the Wave, because the last QA pass found two Machines holding one Wave name. <span class="tagp">Blue</span> marks what this review proposes; everything else exists.</p>
+<p class="lede">LOO-938, fourth review of the built branch, 2026-11-18 at <code>8080a934af</code> against base <code>3496a8761d</code>, with slice 6, its compress and its QA (<code>scratch/qa.html</code>) in. The three earlier passes are in this file's Git history.</p>
+<p><b>Area taken:</b> how a repository's plan is shared without Linear or Asana, as someone meeting it for the first time: the save, the stamp, the two carriers, the three things a carrier's line can say (unsent, not taken, unreachable), Waves made apart, claims, clones. <span class="tagp">Blue</span> marks what is not built; everything else exists.</p>
 
 <h2>Answer</h2>
-<p>One no that matters. The second review's slice 5 is built and does what it said: a create against a hanging hub takes 5.3 s, not 10 to 15. But the counterexample that review kept was wrong, and QA walked into what it hid. A person knows a Wave by its name. The code gives it a random id on the Machine that made it. Two Machines that each make <code>design</code> hold two Waves that can never meet, and the last QA fix turned that from an error on every exchange into silence: the import skips the other Machine's Wave with its Projects and Tasks, logs it, and never tries again, while <code>lf repo tracker</code> reads <code>Plan: Git origin.</code> The Task's own promise is one plan. Here there are two and the line says one.</p>
+<p>They line up where it decides what a person's plan holds. Nothing here sends the branch back to be built. The third pass's two no's are yes now: what a carrier brought and could not write is on the line with the command that fixes it and is read again, and making a Wave looks first. What is left is two places where a word on the line is the code's idea and not the person's, both seen only when a carrier is slow or the Machine runs no server, and the four larger things the earlier passes already named.</p>
 
-<h2>One interaction, walked</h2>
-<p>Mini makes Wave <code>design</code>. Seconds later, on the laptop: <code>lf task create 'x' --wave design</code>. Both online.</p>
+<h2>One interaction, walked as built</h2>
 <div class="cols">
-<div class="card"><h3>As built</h3><pre>M$ lf wave create design
+<div class="card"><h3>Normal, failure, recovery</h3><pre>M$ lf wave create design
 L$ lf task create 'x' --wave design
-   no Wave design here → makes one (new id)
-   save, send
-L$ lf task sync
-   mini's design: name held here → skipped,
-   with its Project and Tasks. Logged.
-   Never read again.
-L$ lf repo tracker
-   Plan: Git origin.
-M$ lf task list        # no 'x'
-L$ lf task list        # none of mini's design Tasks</pre>
-<p class="mute">Recovery: none. Renaming one Wave afterwards does not bring the skipped Projects and Tasks: the ref's tip and the hub's watermark already moved past them.</p></div>
-<div class="card p"><h3 class="tagp">Proposed (slice 6)</h3><pre>M$ lf wave create design
-L$ lf task create 'x' --wave design
-   no Wave design here → look first (one
-   exchange, 5 s at most) → mini's design
-   arrives → 'x' joins it
+   looks first → mini's design → 'x' joins it
 L$ lf repo tracker
    Plan: Git origin.
 
-# both offline when they made it:
+# both made design offline
+L$ lf task sync 3e1c9a          # exit 1
 L$ lf repo tracker
    Plan: Git origin, 3 not taken.
-     Wave design from mini: a Wave named
-     design is here. Rename one:
-     lf wave rename design &lt;name&gt;
+     wave design from mini has the name of a
+     Wave here; `lf wave rename design &lt;new
+     name&gt;` on either Machine lets both arrive
 L$ lf wave rename design design-laptop
-L$ lf task sync ; lf repo tracker
+L$ lf repo tracker
    Plan: Git origin.</pre>
-<p class="mute">Recovery: rename either one; the next exchange takes what waited, on both Machines.</p></div>
+<p class="mute">Run by hand in QA, by Git and by the hub. The rename clears the line in the same command.</p></div>
+<div class="card"><h3>Where it still reads oddly</h3><pre># hub named, no server on the laptop;
+# mini made 0e417e, the hub brought it
+L$ lf repo tracker
+   Plan: Git origin, 3 unsent.
+     project final
+     0e417e
+     wave final
+   Hub mini.
+
+# remote accepts and never answers
+L$ lf task create 'y' --wave new
+   Saved locally; planning synchronization pending.
+   Saved locally; planning synchronization pending.
+   (exit 0, 16.2s)</pre>
+<p class="mute">Both true to the code. Neither loses anything; the next save, sync or server minute settles the first.</p></div>
 </div>
-<p>Tested against three cases. <b>Normal:</b> the Wave made elsewhere has arrived or arrives in the look; one Wave (QA scenario 5 already shows this when it arrives first: "review already exists"). <b>Failure:</b> both made offline; everything else still crosses, and the line names what did not. <b>Recovery:</b> a rename, then the held read takes the Wave, its Projects and its Tasks. <b>Counterexample kept:</b> while a split stands, each exchange reads again everything that carrier brought since; that grows until someone renames. It is the cost of not adding a queue of records to retry.</p>
 
 <h2>Concepts, paired</h2>
 <table>
 <tr><th>What a person knows</th><th>What the code has</th><th>Lines up?</th></tr>
-<tr><td>The plan</td><td><code>planning_write</code>, <code>StampedRecord</code></td><td class="y">yes</td></tr>
-<tr><td>"The later edit wins"</td><td><code>plan_stamps</code>, <code>planning_write::apply</code></td><td class="y">yes</td></tr>
-<tr><td>"It has / hasn't reached origin, mini"</td><td><code>plan_carriers.sent_seq</code>, <code>CarrierStanding.unsent</code></td><td class="y">yes</td></tr>
-<tr><td>"I have / haven't got what origin, mini hold"</td><td><code>plan_refs.tip</code>, <code>plan_carriers.seen_seq</code>; a record that cannot be written is skipped, the cursor moves past it, <code>logs/lf.log</code> has a line</td><td class="n">no: a state the code has and the person never sees, with no way back. <span class="tagp">Hold the cursor, say it on the line (slice 6).</span></td></tr>
-<tr><td>A Wave: <code>design</code>, one directory <code>.lf/wave/design</code></td><td><code>waves.id</code>, random per Machine; <code>idx_waves_active_locator</code> allows one active Wave per name; <code>config.yaml</code> commits the id</td><td class="n">no: one name, two ideas. The biggest mismatch, below.</td></tr>
-<tr><td>"I saved; it goes out"</td><td><code>plan_carriers::send</code></td><td class="y">yes</td></tr>
-<tr><td>"Saving waits five seconds at most"</td><td>a create: one save, one send (slice 5)</td><td class="y">yes for a create; a claim still waits twice</td></tr>
-<tr><td>"The first claim holds"</td><td>ownership entries with <code>order</code>, <code>seen</code>; <code>before_claim</code> looks first</td><td class="y">yes</td></tr>
-<tr><td>"The first Wave of a name holds"</td><td>nothing: making a Wave does not look first</td><td class="n">no. <span class="tagp">The same look a claim makes (slice 6).</span></td></tr>
-<tr><td>"Unreachable since"</td><td><code>failing_since</code>: also a push the remote refused, which was reached</td><td class="n">no, a word: question 3</td></tr>
-<tr><td>"This repository"</td><td>id per clone, locators, <code>--bind</code></td><td class="n">no: larger than this work, as both earlier reviews said</td></tr>
-<tr><td>"Runs on mini" for a teammate</td><td>Machine id shown</td><td class="n">no: still open</td></tr>
-<tr><td><code>lf task sync LOO-12</code> without a tracker</td><td>exchanges the whole repository; the id is unused</td><td class="n">no: still open</td></tr>
+<tr><td>The plan</td><td><code>planning_write</code>, <code>StampedRecord</code>: one shape for the hub, a ref file and the import</td><td class="y">yes</td></tr>
+<tr><td>"The later edit wins"</td><td><code>plan_stamps</code>, <code>planning_write::apply</code>. Every Task and Project field travels when cleared; a Wave's retirement and selected Project travel only when set, and nothing clears them</td><td class="y">yes</td></tr>
+<tr><td>"I saved; it goes out"</td><td><code>plan_carriers::send</code>, the only send after a save</td><td class="y">yes</td></tr>
+<tr><td>"I haven't got everything origin, mini hold"</td><td><code>plan_carriers.not_taken</code>, <code>not_taken_reason</code>; the read cursor held; <code>plan.apply</code> answers a count</td><td class="y">yes (was no)</td></tr>
+<tr><td>"The first Wave of a name holds"</td><td><code>plan_carriers::look_first</code>, shared with a claim</td><td class="y">yes (was no)</td></tr>
+<tr><td>"The first claim holds"</td><td>ownership entries with <code>order</code>, <code>seen</code></td><td class="y">yes</td></tr>
+<tr><td>"N unsent": my changes origin lacks</td><td>records past <code>sent_seq</code>: everything this Machine's ref lacks, including what another Machine wrote and the hub brought, which origin already has in that Machine's ref</td><td class="n">no: whole-plan refs, which the person never sees, show through one word. Question 1.</td></tr>
+<tr><td>"Saving waits five seconds at most"</td><td><code>WAIT</code> per wait: the look, the Wave's send, the Task's send</td><td class="n">no when a carrier hangs: 11 to 16 s. Passed over in three passes. Question 2.</td></tr>
+<tr><td>"Unreachable since"</td><td><code>failing_since</code>: also a push the remote refused</td><td class="n">no, a word. Question 3.</td></tr>
+<tr><td>"Sync the plan now"</td><td><code>lf task sync &lt;issue&gt;</code>: the Task named is unused without a tracker</td><td class="n">no: open since the first pass</td></tr>
+<tr><td>A Wave is its name</td><td><code>waves.id</code> per Machine; two of one name wait for a rename</td><td class="n">no, shown and recoverable; joining them is larger than this work. Question 4.</td></tr>
+<tr><td>"This repository"</td><td>id per clone, locators, <code>--bind</code> for a hub with no remote</td><td class="n">no: larger than this work</td></tr>
+<tr><td>"Runs on mini" for a teammate</td><td>Machine id shown until the Machine is added</td><td class="n">no: main's rule, now seen by everyone on a remote</td></tr>
 </table>
 
-<h2>The biggest mismatch: a Wave is its name to a person and an id to the code</h2>
+<h2>The biggest mismatch left: "unsent" counts the mirror, not your changes</h2>
 <div class="cols">
-<div class="card"><h3>Before</h3>
-<p>The repository itself says one Wave: after a pull both Machines have one <code>.lf/wave/design/</code>. Each store says its own: the laptop's <code>design</code> and mini's <code>design</code> have different ids, and the index allows one. Slice 5 widened the window: it deleted the hub read before a create, and <code>--wave design</code> for a Wave this Machine has not seen makes one (as on main; the second review's page said it would fail until <code>lf task sync</code>, which was wrong).</p>
-<p>The last QA pass kept the rest of the plan crossing by skipping what cannot be written. That was right for everything else and wrong for what it skips: no line, no retry.</p></div>
-<div class="card p"><h3 class="tagp">After (slice 6, in the plan)</h3>
-<p><b>Making a Wave looks first.</b> Where a command is about to make a Wave row (<code>lf wave create</code>, <code>--wave</code> on a create), one exchange by each carrier, five seconds at most, the look a claim already makes. Online, the second Machine finds the first one's Wave and uses it.</p>
-<p><b>What was not taken is on the line and is read again.</b> The import returns what it skipped. A carrier that skipped something keeps its read cursor (the ref's tip, the hub's watermark) where it was and records why in <code>plan_carriers</code>; <code>lf repo tracker</code> and Desktop show <code>N not taken</code> with the reason and the command that fixes it; <code>lf task sync</code> exits 1 with it. The next exchange after the rename takes everything.</p></div>
+<div class="card"><h3>As built</h3>
+<p>A Machine's ref holds its whole plan, so every record that arrives from the hub is owed to this Machine's own ref. A save sends by both carriers at once; what the hub's read brings in that same moment misses the push beside it. With a server the next minute sends it. With none the line reads <code>Plan: Git origin, 3 unsent.</code> naming a Task the mini made, until the next save or <code>lf task sync</code>. Offline from Git with a hub in reach, the count grows with everyone's work.</p></div>
+<div class="card p"><h3 class="tagp">Not built: three ways, none chosen</h3>
+<p><b>a.</b> Leave it: the count is true of the ref and settles itself.</p>
+<p><b>b.</b> A save sends to the hub, then pushes, under the one deadline. Nothing is left over; a hanging hub then leaves Git no time, so a save that Git could have carried stays unsent.</p>
+<p><b>c.</b> The line counts only records whose newest stamp is this Machine's and says nothing of the rest. Matches the word; hides the one case whole-plan refs exist for (a teammate who cannot push, carried by your ref).</p></div>
 </div>
-<p class="mute">Passed over for this work, and larger than it: <b>joining the two Waves.</b> One name is one Wave, so the import would make it so: the Wave with the higher id is retired and its Projects and child Waves move to the other, all through fields that are already stamped (<code>WaveRetired</code>, <code>ProjectWave</code>, <code>WaveParent</code>), so every Machine computes the same join; <code>register_authored_waves</code> already rewrites a <code>config.yaml</code> whose id is retired to the live Wave of that name. It would delete "not taken" for Waves outright. What it would take: deciding what a Wave with two first Projects looks like (nobody made the second on purpose), what happens to the retired Wave's Sessions on its Machine, and children of the same name under both (the join recurses). That is a product decision about Waves and Projects, not about carriers. Question 1.</p>
+<p class="mute">Left as built for this work. It changes a count in a state that mends itself, and each fix trades it for something else a person would meet.</p>
 
 <h2>Checked and left alone</h2>
 <table>
 <tr><th>Looked like a mismatch</th><th>Why it stays</th></tr>
-<tr><td>Skipping one record instead of failing the exchange</td><td>Right: one bad record should not stop the plan. Only its silence and its one chance were wrong.</td></tr>
-<tr><td><code>lf repo tracker --subscribe</code> no longer reads the hub</td><td>The read never worked (read-only store). The stream shows the store; saves and the server's minute change it.</td></tr>
-<tr><td>A claim waits twice (look, then send)</td><td>The claim needs the look. One deadline per command is plumbing for every caller; passed over twice.</td></tr>
-<tr><td><code>of_two_claims_made_apart_…</code> times out under load, then passes</td><td>Not a concept. Gate finds the cause or rewrites it; the plan says so.</td></tr>
+<tr><td>A Wave's cleared retirement or selected Project is not sent</td><td>No command clears either; a clone registers a Wave before its plan arrives, and sending the empty value would clear a peer's. Stays until something un-retires a Wave.</td></tr>
+<tr><td>While something is not taken, every exchange reads again all that carrier brought since, and every save fetches</td><td>The accepted cost of having no queue of records to retry. It ends at the rename.</td></tr>
+<tr><td>A record only the hub cannot write shows on the sender as unsent with no reason</td><td>Visible, and the hub's own line carries the reason. Carrying it back is a wire change for a case nobody has met.</td></tr>
+<tr><td>One WARN per skipped Wave per exchange</td><td>A log line a minute while a split stands; the line on screen is what a person reads.</td></tr>
+<tr><td><code>of_two_claims_made_apart_…</code> times out under load, then passes</td><td>Not a concept. Gate finds the cause or rewrites it.</td></tr>
 </table>
 
 <h2>Questions</h2>
 <ol class="q">
-<li>Two Machines made a Wave of one name apart.<ol><li>Show it and let a rename fix it, as proposed (slice 6).</li><li>Join them: the later one's Projects and Tasks move into the earlier, in its own Task after this one.</li><li>Both: 1a now, 1b later, and "not taken" stays for whatever else cannot be written.</li></ol></li>
-<li>Making a Wave looks first, five seconds at most when a carrier hangs.<ol><li>Yes, as proposed.</li><li>No: Waves are made rarely enough that the line in 1a covers it.</li></ol></li>
-<li>The line says <code>unreachable since</code> for any carrier failure, including a push the remote refused.<ol><li>Leave it.</li><li><code>failing since</code>, matching the <code>--json</code> field.</li></ol></li>
-<li>The earlier reviews' open questions (<code>lf task run</code> on a teammate's Task, <code>lf task sync</code> without a tracker, teammates' Machine names, repository identity) still stand as built.</li>
+<li><code>N unsent</code> counts records another Machine wrote that this Machine's ref has not repeated yet.<ol><li>Leave it.</li><li>A save sends to the hub, then pushes.</li><li>Count only this Machine's own changes on the line.</li></ol></li>
+<li>With a carrier hanging, <code>lf task create --wave &lt;new&gt;</code> takes 16 s, <code>lf wave create</code> 11 s, a claim 10 s, and the pending line prints twice.<ol><li>Leave it: only a hang costs this; offline fails at once.</li><li>One deadline per command, in its own Task.</li></ol></li>
+<li>The line says <code>unreachable since</code> for a push the remote refused.<ol><li>Leave it.</li><li><code>failing since</code>, matching the <code>--json</code> field.</li></ol></li>
+<li>Two Machines made a Wave of one name apart: shown, and a rename fixes it.<ol><li>That is enough.</li><li>Join them at import, in its own Task.</li></ol></li>
+<li>From the earlier passes, as built: <code>lf task run</code> takes over a Task a teammate holds; <code>lf task sync</code> needs a Task id without a tracker; a teammate's Machine reads as its id; a repository has an id per clone.<ol><li>Leave all four.</li><li>Name the ones to file.</li></ol></li>
 </ol>
 </main></body></html>

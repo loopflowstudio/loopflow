@@ -4,9 +4,9 @@ The design is `scratch/plan-design.md` (guide: `scratch/plan-design.html`).
 This file is how the branch gets there, and where the two differ this file
 holds. History of the question: `scratch/plan-ownership-history.md`; what was
 said: `scratch/explore.md`; the review of the branch as built:
-`scratch/concept-review.html` (its third pass set difference 5 and slice 6;
-the earlier passes, which set difference 4 and slices 4 and 5, are in its Git
-history).
+`scratch/concept-review.html` (its fourth pass, with slice 6 in, found
+nothing to build; the earlier passes, which set differences 4 and 5 and
+slices 4 to 6, are in its Git history).
 
 *Made for review, differing from the design:*
 
@@ -780,3 +780,9 @@ etude checkout and `lf` version are unknown.
   (7). Not rerun: the acceptance test and gate's lists above.
   Open choices are in `scratch/questions.md`; the review's four
   questions are at the end of `scratch/concept-review.html`.
+- Fourth concept review, 2026-11-18, at `8080a934af`: nothing to build.
+  Left as built and asked on the page: `N unsent` counts records another
+  Machine wrote that this Machine's ref has not repeated yet (question 1);
+  up to three five-second waits in one command when a carrier hangs
+  (question 2). Checked: a Wave's retirement and selected Project travel only
+  when set, and no command clears either. No code read or test run changed.

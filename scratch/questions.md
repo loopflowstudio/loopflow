@@ -204,3 +204,8 @@ Still open from before:
     Git push of a save follow the hub's read instead of running beside it
     (slower save, nothing left over)?
   - Left as is: one WARN per skipped Wave per exchange while a Wave is split.
+
+- Fourth concept review (2026-11-18, `scratch/concept-review.html`): nothing
+  changed. Left as built: `N unsent` includes records the hub brought that
+  this Machine's ref has not repeated (passed over: hub then Git in a save;
+  counting only this Machine's own changes).

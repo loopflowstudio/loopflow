@@ -90,8 +90,10 @@ pub fn create(
             title: title.clone(),
             request: report,
             wave: if *no_wave { None } else { wave.clone() },
-            parent: parent.clone(),
-            caller: loopflow_execution::journal::caller_session_id(),
+            parent: loopflow_execution::ops::task::TaskParentChoice {
+                named: parent.clone(),
+                caller: loopflow_execution::journal::caller_session_id(),
+            },
             graph: graph.clone(),
             session: session.clone(),
             worktree: worktree.clone(),

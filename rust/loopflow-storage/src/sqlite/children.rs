@@ -738,16 +738,7 @@ impl SqliteStore {
     pub fn task_children(&self, parent: &TaskId) -> StoreResult<Vec<Task>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let conn = conn.savepoint()?;
-        let query = format!(
-            "{TASK_COLUMNS} WHERE t.parent_task_id=?1 AND {TASK_VISIBLE}
-             ORDER BY t.created_at, t.rowid"
-        );
-        let mut statement = conn.prepare(&query)?;
-        // A few rows: each reads its own identifier, not every Task's.
-        let tasks = statement
-            .query_map([parent.as_str()], |row| map_task_row(&conn, row))?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        Ok(tasks)
+        children_where(&conn, parent, TASK_VISIBLE)
     }
 
     /// Closed Tasks of one repository (and Wave), newest first, `limit` at a
@@ -2668,14 +2659,20 @@ fn record_task_completion(conn: &Connection, task: &TaskId) -> StoreResult<()> {
     super::task_summaries::write_in(conn, task, super::task_summaries::TaskEnd::Done)
 }
 
-fn complete_children(conn: &Connection, parent: &TaskId) -> StoreResult<Vec<ChildCompletion>> {
+/// The Tasks filed from `parent` that `filter` admits, in filing order.
+fn children_where(conn: &Connection, parent: &TaskId, filter: &str) -> StoreResult<Vec<Task>> {
     let mut statement = conn.prepare(&format!(
-        "{TASK_COLUMNS} WHERE t.parent_task_id=?1 AND {} ORDER BY t.created_at,t.rowid",
-        open_task_children_where()
+        "{TASK_COLUMNS} WHERE t.parent_task_id=?1 AND {filter} ORDER BY t.created_at,t.rowid"
     ))?;
+    // A few rows: each reads its own identifier, not every Task's.
     let children = statement
         .query_map([parent.as_str()], |row| map_task_row(conn, row))?
         .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(children)
+}
+
+fn complete_children(conn: &Connection, parent: &TaskId) -> StoreResult<Vec<ChildCompletion>> {
+    let children = children_where(conn, parent, &open_task_children_where())?;
     let mut completions = Vec::with_capacity(children.len());
     for task in children {
         let pr = active_task_pr_on(conn, &task.id)?;

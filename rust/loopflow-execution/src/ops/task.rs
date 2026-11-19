@@ -2269,7 +2269,7 @@ async fn file_task_in(
 }
 
 /// Which Task a new one is filed under.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct TaskParentChoice {
     /// `--parent`: a Task, or `none` for top-level work.
     pub named: Option<String>,

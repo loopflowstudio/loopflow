@@ -114,7 +114,7 @@ fn phase_action(evidence: &TaskActionEvidence) -> TaskActionModel {
     }
 }
 
-pub fn merged_children_reason(count: u32) -> String {
+pub(crate) fn merged_children_reason(count: u32) -> String {
     let children = if count == 1 { "child" } else { "children" };
     format!("Merged · {count} {children} open")
 }

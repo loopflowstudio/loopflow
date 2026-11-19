@@ -2967,7 +2967,7 @@ fn served_task_create_survives_a_dropped_connection_and_server_restart() {
     // A repeat returns the same receipt; the reads beside it are taken again.
     let receipt = |mut answer: serde_json::Value| {
         let fields = answer.as_object_mut().unwrap();
-        for read in ["session", "row"] {
+        for read in ["session", "row", "parent"] {
             fields.remove(read).unwrap();
         }
         answer
@@ -3021,8 +3021,7 @@ fn served_task_create_survives_a_dropped_connection_and_server_restart() {
         title: Some("One Task".into()),
         request: None,
         wave: None,
-        parent: None,
-        caller: None,
+        parent: Default::default(),
         graph: None,
         session: None,
         worktree: None,

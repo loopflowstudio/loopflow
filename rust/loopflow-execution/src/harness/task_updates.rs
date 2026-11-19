@@ -71,16 +71,24 @@ impl TaskObservation {
         self.pr.as_deref() == Some(PrPhase::Merged.as_str())
     }
 
+    /// How the Task closed or reopened since `old`, in a word.
+    fn closing(&self, old: &Self) -> Option<&str> {
+        (old.closed != self.closed).then_some(match self.closed.as_deref() {
+            Some("done") => "completed",
+            Some(closed) => closed,
+            None => "reopened",
+        })
+    }
+
     /// How the Task's standing moved since `old`, as a conductor hears it:
     /// it stopped at an interactive step, a run ended without succeeding, its
     /// PR merged, it closed. Steps passing inside a run are not news.
     fn news(&self, old: &Self) -> Vec<String> {
         let mut news = Vec::new();
         for (id, run) in &self.runs {
-            let ended = |run: &RunObservation| run.completed;
-            if ended(run)
+            if run.completed
                 && run.outcome.as_deref() != Some("succeeded")
-                && !old.runs.get(id).is_some_and(ended)
+                && !old.runs.get(id).is_some_and(|run| run.completed)
             {
                 let outcome = run.outcome.as_deref().unwrap_or("stopped");
                 news.push(match &run.step {
@@ -98,12 +106,8 @@ impl TaskObservation {
         if self.merged() && !old.merged() {
             news.push("merged".into());
         }
-        if old.closed != self.closed {
-            match self.closed.as_deref() {
-                Some("done") => news.push("was completed".into()),
-                Some(closed) => news.push(format!("was {closed}")),
-                None => news.push("was reopened".into()),
-            }
+        if let Some(closing) = self.closing(old) {
+            news.push(format!("was {closing}"));
         }
         news
     }
@@ -271,12 +275,8 @@ fn write_task(store: &SqliteStore, task: &TaskId) -> StoreResult<()> {
         if observation.merged() && !old.merged() {
             changes.push("PR merged.".into());
         }
-        if old.closed != observation.closed {
-            changes.push(match observation.closed.as_deref() {
-                Some("done") => "Task completed.".into(),
-                Some(closed) => format!("Task {closed}."),
-                None => "Task reopened.".into(),
-            });
+        if let Some(closing) = observation.closing(old) {
+            changes.push(format!("Task {closing}."));
         }
         if old.position != observation.position || !changes.is_empty() {
             let mut text = format!(

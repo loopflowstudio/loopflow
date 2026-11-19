@@ -98,10 +98,7 @@ fn merged(issue: &str) -> ShipMerge {
             match &merge {
                 ShipMerge::Done => println!("{issue}: its PR merged; completed"),
                 ShipMerge::Verifying(step) => println!("{issue}: its PR merged; on to {step}"),
-                ShipMerge::Conducting(count) => println!(
-                    "{issue}: {}",
-                    loopflow_execution::ops::task_actions::merged_children_reason(*count)
-                ),
+                ShipMerge::Conducting(reason) => println!("{issue}: {reason}"),
                 ShipMerge::Open => {}
             }
             merge

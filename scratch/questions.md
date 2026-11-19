@@ -39,3 +39,13 @@
 ## Human review (2026-11-19)
 
 Jack, on the concept review's "one idea, three words" (shipping state, Autonomous section, Auto-Ship mark): "I tink this should be in scope"
+
+## Explore round 1 (2026-11-19, `scratch/explore.html`)
+
+Jack, quoting vision C ("A mark, not a state: delete TaskState::Shipping and TaskSection::Autonomous. The Task reads moving with an Auto-Ship badge…"): "this is cloest"
+- "1. a mark/badge is a state isnt it?"
+- "2) do orchestrator or humanlayer have terms they used here"
+- "3) i think lf task auto on lf task auto off maybe?"
+- "4) b"
+
+Open: the word (auto vs Auto-Ship), whether `lf ship` stays as shorthand, what replaces `lf task hold`.

@@ -432,7 +432,9 @@
           "state": "idle",
           "reason": "Waiting for your review at demo",
           "step": null,
-          "captured": null
+          "captured": null,
+          "died": null,
+          "outlook": null
         },
         "run_control": {
           "unavailable": null
@@ -618,7 +620,9 @@
           "state": "idle",
           "reason": "No active execution",
           "step": null,
-          "captured": null
+          "captured": null,
+          "died": null,
+          "outlook": null
         },
         "run_control": {
           "unavailable": null

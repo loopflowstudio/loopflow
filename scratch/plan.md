@@ -114,12 +114,13 @@ when the PR merges.
 
 ## Remaining
 
-1. The run outlook ("To build" below), the one section not started.
-2. QA again: everything below was driven before ship became a run asking for
+1. QA again: everything below was driven before ship became a run asking for
    auto. Two ships at the same moment on a never-run Task is the case no
    fixture holds; expected now: one run, both exit 0, the second prints the
-   live run.
-3. Gate.
+   live run. Also a died run with no server: `lf task status` should read
+   "Run died … · no server runs here to start it; `lf task run X` starts it
+   again".
+2. Gate.
 
 QA 2026-11-19 at `08e047dfe8` (`scratch/qa.html`), before `ship_on` was
 deleted: `lf task auto on`, `lf ship` and `task.ship` are one operation on a
@@ -231,23 +232,38 @@ lf::commands::write::tests::` with the two auto-off fixtures, 51 passed;
 `dto_fixtures::` 50 passed; `documented_commands::` 4 passed; clippy clean.
 Swift not built since `Auto.State.off`. Gate/CI.
 
-## To build: the Task run takes the conversation's outlook type
+## Built: the Task run takes the conversation's outlook type
 
 Direction 2026-11-19 (exact words in `scratch/questions.md`, "Run outlook").
-`DiedRun::reason` (`ops/task/run_recovery.rs`, written in this Task) is the
-run's own sentence maker beside the conversation's `SessionOutlook`
-(`ops/human_session.rs`). One shape for both:
+Built 2026-11-19:
 
-- The run's wire facts are `died {at_step, at}` and a `SessionOutlook`
-  (`kind`, `at`, `reason`, `command`); they replace `DiedRun::reason` where
-  `task_execution.rs` fills waiting/blocked.
-- "no server runs here" applies to the run as it does to a conversation.
-- The three run sentences use the conversation's words: clock time,
-  "starting again", no "pass".
-- DTO fixtures and Swift follow; no stored change is expected.
+- `TaskExecutionSnapshot` carries `died {at_step, at}` and `outlook`
+  (`SessionOutlook`), both required and nullable. `reason` is the one
+  sentence, written in Rust: "Run died 12:01 at implement · starting again",
+  "… · starts again 12:05", "… · started 5 times; `lf task run X` starts it
+  again". `DiedRun::reason`, `next_at` and `RUN_RESTARTS` are gone.
+- One rule: `DiedRun::server_start` asks `recovery::server_start` with the
+  run's restarts, so a run and a conversation share the 5 starts, the
+  backoff and the reasons it is left (`human_session::left_reason`). No
+  server, not claimed here and not checked out here read `blocked` with the
+  command; before, they read `waiting` and promised a start.
+- `died.at` is null until retention records the death: a carrier found dead
+  by its pid has no time, and the sentence drops the clock ("Run died at
+  demo · …"). That is the usual case right after a kill.
+- Fixture `task_execution_died.json` (Rust and Swift); every execution
+  fixture gained the two keys; `server_schema.json` regenerated.
+- Desktop prints `reason`; nothing there reads `outlook` yet.
+- Also fixed: `TaskWorkView.autoLine` still named `Auto.State.stopped`, so
+  the Swift package did not build since the stored word became `off`.
 
-Not started. If it proves a separate outcome once opened, file it as its own
-Task instead.
+Run 2026-11-19: `ops::task::run_recovery::` (2), `ops::human_session::tests::`
+(33), `dto_fixtures::` (51), `server::schema::tests::` (8),
+`task_graph_launch_tests::a_task_run_whose_carrier_died…`,
+`documented_commands::` (4), `scripts/test_desktop.sh --filter
+'TaskGraphProofTests|DTOFixtureTests'` (64), clippy: all pass.
+
+Not driven: a died run with no server, as a person would see it in
+`lf task status` (QA). The unit rows cover the sentence.
 
 ## Exclusions
 

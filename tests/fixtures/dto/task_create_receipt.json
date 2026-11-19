@@ -164,7 +164,9 @@
         "state": "starting",
         "reason": "Starting code",
         "step": null,
-        "captured": null
+        "captured": null,
+        "died": null,
+        "outlook": null
       },
       "run_control": {
         "unavailable": null
@@ -289,7 +291,9 @@
         "state": "running",
         "reason": "Worker is running implement",
         "step": null,
-        "captured": null
+        "captured": null,
+        "died": null,
+        "outlook": null
       },
       "run_control": {
         "unavailable": null

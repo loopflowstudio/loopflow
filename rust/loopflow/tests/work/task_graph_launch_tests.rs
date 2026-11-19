@@ -3130,21 +3130,23 @@ fn a_task_run_whose_carrier_died_is_carried_again_and_gives_up_after_five() {
     let deadline = Instant::now() + Duration::from_secs(30);
     let execution = loop {
         let execution = task.status()["execution"].clone();
-        if execution["reason"]
-            .as_str()
-            .is_some_and(|reason| reason.starts_with("Run died 5 times at"))
-            || Instant::now() > deadline
-        {
+        if execution["outlook"]["kind"] == "waiting_for_you" || Instant::now() > deadline {
             break execution;
         }
         std::thread::sleep(Duration::from_millis(200));
     };
-    assert_eq!(
-        execution["reason"],
-        "Run died 5 times at demo; `lf task run INF-123` starts it again",
+    // The conversation's words: what it left it for, then the command.
+    let reason = execution["reason"].as_str().unwrap_or_default();
+    assert!(
+        reason.starts_with("Run died ")
+            && reason.ends_with("at demo · started 5 times; `lf task run INF-123` starts it again"),
         "{execution} {}",
         debug_run(&task)
     );
+    assert_eq!(execution["state"], "blocked");
+    assert_eq!(execution["died"]["at_step"], "demo");
+    assert_eq!(execution["outlook"]["reason"], "started 5 times");
+    assert_eq!(execution["outlook"]["command"], "lf task run INF-123");
     std::thread::sleep(Duration::from_secs(2));
     assert_eq!(
         support::recorded_graphs(task.home.path()).len(),

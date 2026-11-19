@@ -38,6 +38,8 @@
     },
     "execution": {
       "captured": null,
+      "died": null,
+      "outlook": null,
       "reason": "No Task Graph has run; independent Sessions may still be active",
       "state": "idle",
       "step": null

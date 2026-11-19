@@ -4371,6 +4371,8 @@ mod tests {
             reason: "Release target is unavailable".into(),
             step: None,
             captured: None,
+            died: None,
+            outlook: None,
         });
         let none = None;
         let missing = LocalProgressEvidenceState::Missing;
@@ -4402,6 +4404,8 @@ mod tests {
                 reason: "Process evidence remains unresolved".into(),
                 step: None,
                 captured: None,
+                died: None,
+                outlook: None,
             };
             assert!(unresolved(
                 TaskState::Done,
@@ -4493,6 +4497,8 @@ mod tests {
                 reason: "worker evidence".into(),
                 step: None,
                 captured: None,
+                died: None,
+                outlook: None,
             };
             let actions = TaskActionEvidence {
                 status: WorkStatus::Ready,
@@ -4586,6 +4592,8 @@ mod tests {
             reason: "gate: process exited with status 1".into(),
             step: None,
             captured: None,
+            died: None,
+            outlook: None,
         };
         for (status, reason) in [
             (TaskState::Done, "Task is complete"),

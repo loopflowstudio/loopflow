@@ -674,16 +674,7 @@ fn session_ending(
             format!("could not start: {failure}{}", again("tries", "trying", at)),
         ),
         (ServerStart::Left(left), None) => {
-            let left = match left {
-                Left::OutOfStarts => Some(format!("started {attempts} times")),
-                Left::Elsewhere if conversation => {
-                    Some("its Task is not checked out here".to_string())
-                }
-                // Not a Task's conversation: nothing here ever starts it.
-                Left::Elsewhere | Left::Quit => None,
-                Left::NotClaimedHere => Some("its Task is not claimed on this Machine".to_string()),
-                Left::NoServer => Some("no server runs here to start it".to_string()),
-            };
+            let left = left_reason(left, attempts, conversation);
             let reason = match (left, failure) {
                 (Some(left), Some(failure)) => {
                     Some(format!("{left}; last start failed: {failure}"))
@@ -737,8 +728,27 @@ fn ending_here(
     session_ending(session, now, claimed, crate::ops::recovery::server_runs)
 }
 
+/// Why the server leaves something that is down to a person, ready to
+/// print; `None` when nothing here ever starts it. A Task's conversation and
+/// a Task's run say it in the same words.
+pub(crate) fn left_reason(
+    left: crate::ops::recovery::Left,
+    starts: u32,
+    of_task: bool,
+) -> Option<String> {
+    use crate::ops::recovery::Left;
+    match left {
+        Left::OutOfStarts => Some(format!("started {starts} times")),
+        Left::Elsewhere if of_task => Some("its Task is not checked out here".to_string()),
+        // Not a Task's: nothing here ever starts it.
+        Left::Elsewhere | Left::Quit => None,
+        Left::NotClaimedHere => Some("its Task is not claimed on this Machine".to_string()),
+        Left::NoServer => Some("no server runs here to start it".to_string()),
+    }
+}
+
 /// This Machine's local `HH:MM` for a Unix time.
-fn clock(at: i64) -> String {
+pub(crate) fn clock(at: i64) -> String {
     chrono::DateTime::from_timestamp(at, 0).map_or_else(
         || at.to_string(),
         |at| at.with_timezone(&chrono::Local).format("%H:%M").to_string(),

@@ -8341,6 +8341,27 @@
       ],
       "type": "object"
     },
+    "RunDied": {
+      "description": "A Task run's carrier died while the run was at a step.",
+      "properties": {
+        "at": {
+          "description": "RFC 3339; `null` when nobody recorded the death.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "at_step": {
+          "description": "The step the run reached, where it starts again.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "at_step",
+        "at"
+      ],
+      "type": "object"
+    },
     "Schema": {
       "type": [
         "object",
@@ -12710,6 +12731,28 @@
             "null"
           ]
         },
+        "died": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RunDied"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Where the run's carrier (`lf task run`) died before the run stopped;\n`null` for a run that runs, stopped on its own, or never started."
+        },
+        "outlook": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SessionOutlook"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "What happens next to a run that died, as this Machine reads it: the\nserver here starts it again at `at`, or leaves it to `command` for\n`reason`. `null` unless `died` says it did."
+        },
         "reason": {
           "type": "string"
         },
@@ -12728,7 +12771,9 @@
         "state",
         "reason",
         "step",
-        "captured"
+        "captured",
+        "died",
+        "outlook"
       ],
       "type": "object"
     },

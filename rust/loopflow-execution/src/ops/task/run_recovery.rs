@@ -2,6 +2,8 @@
 //! Task run is recovered here, whatever its auto setting.
 
 use crate::ops::error::OpsResult;
+use crate::ops::human_session::{clock, left_reason, SessionOutlook, SessionOutlookKind};
+use crate::ops::recovery::{server_start, DownConversation, ServerStart};
 use loopflow_model::id::LfProcessId;
 use loopflow_storage::work::task::Task;
 
@@ -29,16 +31,14 @@ pub(super) fn restart_lf_in(
     Ok(())
 }
 
-/// How many times in a row a run whose carrier died is carried again before
-/// it waits for a person's `lf task run`.
-pub const RUN_RESTARTS: u32 = 5;
-
 /// A Task run whose carrier (`lf task run`) died before the run stopped: it
 /// was killed, or ended with no exit record, rather than exiting on its own.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DiedRun {
     /// The step the run reached.
-    pub at: String,
+    pub at_step: String,
+    /// When the carrier died; `None` until retention records a death nobody saw.
+    pub at: Option<i64>,
     /// The carrier that died, which the next carrier takes the run over from.
     pub carrier: LfProcessId,
     /// Starts since the run last finished a step, and when the last one was.
@@ -46,30 +46,63 @@ pub struct DiedRun {
 }
 
 impl DiedRun {
-    /// When the next start is due (0: at once), or `None` once
-    /// [`RUN_RESTARTS`] ran out.
-    pub fn next_at(&self) -> Option<i64> {
-        (self.restarts.count < RUN_RESTARTS).then(|| {
-            crate::ops::recovery::next_start_at(self.restarts.count, self.restarts.at).unwrap_or(0)
-        })
+    /// Whether the server carries the run again, by the rule and schedule
+    /// that start a Task's conversation ([`server_start`]). `here`: the Task
+    /// is checked out on this Machine.
+    pub fn server_start(
+        &self,
+        here: bool,
+        claimed_here: impl FnOnce() -> bool,
+        server_runs: impl FnOnce() -> bool,
+    ) -> ServerStart {
+        let facts = DownConversation {
+            here,
+            exit_code: None,
+            starts_since_turn: self.restarts.count,
+            last_started_at: self.restarts.at,
+        };
+        server_start(&facts, claimed_here, server_runs)
     }
 
-    /// One line for the Task's run.
-    pub fn reason(&self, issue: &str, now: i64) -> String {
-        let at = &self.at;
-        match self.next_at() {
-            None => format!(
-                "Run died {} times at {at}; `lf task run {issue}` starts it again",
-                self.restarts.count
-            ),
-            Some(due) if due <= now => {
-                format!("Run died at {at}; the server's next pass carries it again")
+    /// What happens next to the run, and the sentence that says it in this
+    /// Machine's local time: "Run died 12:01 at implement · starting again".
+    pub fn outlook(&self, issue: &str, now: i64, start: ServerStart) -> (SessionOutlook, String) {
+        let died = match self.at {
+            Some(at) => format!("Run died {} at {}", clock(at), self.at_step),
+            None => format!("Run died at {}", self.at_step),
+        };
+        match start {
+            ServerStart::At(next) => {
+                // Nothing started it since it last finished a step: it was
+                // due when it died.
+                let at = next.or(self.at);
+                let again = match at {
+                    Some(at) if at > now => format!("starts again {}", clock(at)),
+                    _ => "starting again".to_string(),
+                };
+                let outlook = SessionOutlook {
+                    kind: SessionOutlookKind::ComingBack,
+                    at: at.and_then(crate::transcript::rfc3339),
+                    reason: None,
+                    command: None,
+                };
+                (outlook, format!("{died} · {again}"))
             }
-            Some(due) => format!(
-                "Run died at {at}; it is carried again in {} min (restart {} of {RUN_RESTARTS})",
-                (due - now + 59) / 60,
-                self.restarts.count + 1
-            ),
+            ServerStart::Left(left) => {
+                let reason = left_reason(left, self.restarts.count, true);
+                let command = format!("lf task run {issue}");
+                let why = reason
+                    .as_deref()
+                    .map_or(String::new(), |reason| format!(" · {reason}"));
+                let line = format!("{died}{why}; `{command}` starts it again");
+                let outlook = SessionOutlook {
+                    kind: SessionOutlookKind::WaitingForYou,
+                    at: None,
+                    reason,
+                    command: Some(command),
+                };
+                (outlook, line)
+            }
         }
     }
 }
@@ -94,7 +127,8 @@ pub fn died_run(
         return Ok(None);
     }
     Ok(Some(DiedRun {
-        at: row.graph.step_name_of(&cursor).unwrap_or(row.step),
+        at_step: row.graph.step_name_of(&cursor).unwrap_or(row.step),
+        at: carrier.died_at,
         carrier: carrier.id,
         restarts: sqlite.task_run_restarts(task)?,
     }))
@@ -113,9 +147,12 @@ pub(crate) fn restart_runs() -> OpsResult<Option<i64>> {
             let Some(died) = died_run(&store.sqlite, &id).map_err(task_error)? else {
                 continue;
             };
-            let Some(due) = died.next_at() else {
+            // This is the server asking: one runs. `continuable` reads the
+            // claim and the checkout once the run is due.
+            let ServerStart::At(due) = died.server_start(true, || true, || true) else {
                 continue;
             };
+            let due = due.unwrap_or(0);
             if due > now {
                 soonest = Some(soonest.map_or(due, |at: i64| at.min(due)));
                 continue;
@@ -134,7 +171,7 @@ pub(crate) fn restart_runs() -> OpsResult<Option<i64>> {
             tracing::info!(
                 "carried {}'s run again at {} after its carrier died",
                 task.identifier,
-                died.at
+                died.at_step
             );
         }
         Ok(soonest)
@@ -172,30 +209,87 @@ async fn continuable(
 
 #[cfg(test)]
 mod tests {
+    use crate::ops::human_session::{clock, SessionOutlookKind};
+    use crate::ops::recovery::ServerStart;
     use loopflow_model::id::LfProcessId;
+    use loopflow_storage::sqlite::task_work::TaskRunRestarts;
+
+    fn died(count: u32, restarted: Option<i64>, at: Option<i64>) -> super::DiedRun {
+        super::DiedRun {
+            at_step: "implement".into(),
+            at,
+            carrier: LfProcessId::new(),
+            restarts: TaskRunRestarts {
+                count,
+                at: restarted,
+            },
+        }
+    }
+
+    fn read(run: &super::DiedRun, now: i64, server: bool) -> (SessionOutlookKind, String) {
+        let start = run.server_start(true, || true, || server);
+        let (outlook, line) = run.outlook("LOO-1", now, start);
+        (outlook.kind, line)
+    }
 
     #[test]
-    fn a_died_run_is_carried_again_at_once_then_later_then_waits_for_a_person() {
-        use loopflow_storage::sqlite::task_work::TaskRunRestarts;
-        let died = |count, at| super::DiedRun {
-            at: "implement".into(),
-            carrier: LfProcessId::new(),
-            restarts: TaskRunRestarts { count, at },
-        };
-        assert_eq!(died(0, None).next_at(), Some(0));
+    fn a_died_run_starts_again_at_once_then_later_then_waits_for_a_person() {
+        use SessionOutlookKind::{ComingBack, WaitingForYou};
+        let first = died(0, None, Some(100));
         assert_eq!(
-            died(0, None).reason("LOO-1", 100),
-            "Run died at implement; the server's next pass carries it again"
+            first.server_start(true, || true, || true),
+            ServerStart::At(None)
         );
-        assert_eq!(died(3, Some(100)).next_at(), Some(100 + 2 * 60));
         assert_eq!(
-            died(3, Some(100)).reason("LOO-1", 100),
-            "Run died at implement; it is carried again in 2 min (restart 4 of 5)"
+            read(&first, 100, true),
+            (
+                ComingBack,
+                format!("Run died {} at implement · starting again", clock(100))
+            )
         );
-        assert_eq!(died(5, Some(100)).next_at(), None);
+        let later = died(3, Some(100), None);
         assert_eq!(
-            died(5, Some(100)).reason("LOO-1", 100),
-            "Run died 5 times at implement; `lf task run LOO-1` starts it again"
+            later.server_start(true, || true, || true),
+            ServerStart::At(Some(100 + 2 * 60))
+        );
+        assert_eq!(
+            read(&later, 100, true),
+            (
+                ComingBack,
+                format!("Run died at implement · starts again {}", clock(220))
+            )
+        );
+        assert_eq!(
+            read(&died(5, Some(100), None), 100, true),
+            (
+                WaitingForYou,
+                "Run died at implement · started 5 times; `lf task run LOO-1` starts it again"
+                    .to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn a_died_run_promises_no_start_this_machine_will_not_make() {
+        use SessionOutlookKind::WaitingForYou;
+        let run = died(0, None, None);
+        assert_eq!(
+            read(&run, 100, false),
+            (
+                WaitingForYou,
+                "Run died at implement · no server runs here to start it; `lf task run LOO-1` starts it again"
+                    .to_string()
+            )
+        );
+        let unclaimed = run.server_start(true, || false, || true);
+        assert_eq!(
+            run.outlook("LOO-1", 100, unclaimed).0.reason.as_deref(),
+            Some("its Task is not claimed on this Machine")
+        );
+        let elsewhere = run.server_start(false, || true, || true);
+        assert_eq!(
+            run.outlook("LOO-1", 100, elsewhere).0.reason.as_deref(),
+            Some("its Task is not checked out here")
         );
     }
 }

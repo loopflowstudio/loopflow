@@ -17,7 +17,9 @@
     "state": "idle",
     "reason": "Checkout prepared",
     "step": null,
-    "captured": null
+    "captured": null,
+    "died": null,
+    "outlook": null
   },
   "worktree": "/src/loopflow.workspace",
   "workspace_slug": "workspace",

@@ -346,7 +346,7 @@ those 5 starts count from zero.
 ```bash
 lf task status LOO-12
 # Conversation: died 09:14 (exit 1) · started 5 times; `lf resume --task LOO-12` opens it
-# Run died 5 times at implement; `lf task run LOO-12` starts it again
+# Run died 09:14 at implement · started 5 times; `lf task run LOO-12` starts it again
 ```
 
 The line promises a start only when this Machine will make one. With no
@@ -356,6 +356,7 @@ it says so and gives the command instead:
 ```bash
 lf task status LOO-12
 # Conversation: died 12:01 (exit 137) · no server runs here to start it; `lf resume --task LOO-12` opens it
+# Run died 12:01 at implement · no server runs here to start it; `lf task run LOO-12` starts it again
 ```
 
 A crash can take the provider's transcript with it, as when the provider was

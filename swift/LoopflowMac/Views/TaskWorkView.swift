@@ -409,7 +409,7 @@ struct TaskWorkflowBar: View {
     static func autoLine(_ mark: Auto) -> String {
         switch mark.state {
         case .on: return "auto on, by \(mark.by.label)"
-        case .stopped:
+        case .off:
             let when = Date(timeIntervalSince1970: TimeInterval(mark.at)).formatted(date: .abbreviated, time: .shortened)
             return "auto off by \(mark.by.label) \(when)"
         }

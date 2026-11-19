@@ -75,6 +75,14 @@ Questions 1 and 2 got no written answer in scratch.
 - `TaskGraphRecord.auto` carries `#[serde(default)]` and the Move JSON keeps
   its `approval` key for released peers; LOO-971 removes both.
 
+- **A died run the server will not start reads `blocked`** (no server, not
+  claimed or checked out here), with the command; it read `waiting` before.
+- **A run's death has a clock time only once retention records it**; until
+  then the sentence is "Run died at <step> · …". Reverse by stamping
+  `run_died_at` when a reader first finds the pid gone.
+- **Runs and conversations share one start limit** (`CONVERSATION_STARTS`);
+  `RUN_RESTARTS` is gone.
+
 ## Open
 
 - Whether `lf -b task run` should write auto on.

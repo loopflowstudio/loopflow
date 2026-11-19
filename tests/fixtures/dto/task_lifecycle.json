@@ -22,6 +22,8 @@
       },
       "execution": {
         "captured": null,
+        "died": null,
+        "outlook": null,
         "reason": "Graph delivery finished; nothing further is launched",
         "state": "idle",
         "step": null
@@ -307,6 +309,8 @@
         "created_at": "2026-10-28T02:58:55Z",
         "execution": {
           "captured": null,
+          "died": null,
+          "outlook": null,
           "reason": "Graph delivery finished; nothing further is launched",
           "state": "idle",
           "step": null
@@ -622,6 +626,8 @@
         },
         "execution": {
           "captured": null,
+          "died": null,
+          "outlook": null,
           "reason": "Graph delivery finished; nothing further is launched",
           "state": "idle",
           "step": null
@@ -1000,6 +1006,8 @@
       },
       "execution": {
         "captured": null,
+        "died": null,
+        "outlook": null,
         "reason": "Step Process ad653185-cde7-4ed4-9c19-d91aa2e1192e is running session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py",
         "state": "running",
         "step": "session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py"
@@ -1269,6 +1277,8 @@
         "created_at": "2026-10-28T02:58:55Z",
         "execution": {
           "captured": null,
+          "died": null,
+          "outlook": null,
           "reason": "Step Process ad653185-cde7-4ed4-9c19-d91aa2e1192e is running session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py",
           "state": "running",
           "step": "session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py"
@@ -1574,6 +1584,8 @@
         },
         "execution": {
           "captured": null,
+          "died": null,
+          "outlook": null,
           "reason": "Step Process ad653185-cde7-4ed4-9c19-d91aa2e1192e is running session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py",
           "state": "running",
           "step": "session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py"
@@ -1936,6 +1948,8 @@
       },
       "execution": {
         "captured": null,
+        "died": null,
+        "outlook": null,
         "reason": "Step Process ad653185-cde7-4ed4-9c19-d91aa2e1192e is running session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py",
         "state": "running",
         "step": "session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py"
@@ -2161,6 +2175,8 @@
         "created_at": "2026-10-28T02:58:55Z",
         "execution": {
           "captured": null,
+          "died": null,
+          "outlook": null,
           "reason": "Step Process ad653185-cde7-4ed4-9c19-d91aa2e1192e is running session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py",
           "state": "running",
           "step": "session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py"
@@ -2468,6 +2484,8 @@
         },
         "execution": {
           "captured": null,
+          "died": null,
+          "outlook": null,
           "reason": "Step Process ad653185-cde7-4ed4-9c19-d91aa2e1192e is running session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py",
           "state": "running",
           "step": "session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py"

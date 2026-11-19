@@ -875,7 +875,7 @@ struct TaskFilesTests {
         #expect(!store.reviewTruncated)
         #expect(store.shownReview?.files.map(\.path) == ["a.swift", "z.swift"])
         #expect(store.position(.changes) == "4 changes")
-        store.hiddenPaths = []
+        store.hidden = []
         store.reviewFilter = "NOTES"
         #expect(store.shownReview?.files.map(\.path) == ["scratch/notes.md"])
     }
@@ -913,7 +913,7 @@ struct TaskFilesTests {
         #expect(store.shownGroups.first?.title == "Start here")
         #expect(store.step(1, in: .changes)?.path == "z.swift")
         #expect(store.workerHides("docs/guide.md")?.why == "Rename only")
-        #expect(store.hiddenPaths == ["scratch/"])
+        #expect(store.hidden == [.init(pattern: "scratch/", source: "Default")])
         store.shownWorkerHides = ["docs/"]
         #expect(store.shownReview?.files.map(\.path) == ["z.swift", "a.swift", "docs/guide.md"])
         // By path reads folder by folder, top-level files first.
@@ -1001,6 +1001,30 @@ struct TaskFilesTests {
         let store = try twoFileStore()
         await store.loadReview()
         #expect(store.tourAction == "Write tour")
+    }
+
+    /// `diff_hidden` as `lf` resolved it: every layer's patterns, each named by
+    /// the layer that added it; only yours can be removed, and removing yours
+    /// leaves the others.
+    @Test func hiddenPatternsKeepWhereTheyCameFromAndOnlyYoursChange() throws {
+        let explained = try JSONDecoder().decode(ConfigurationValue.self, from: Data("""
+        {"value": ["scratch/", "vendor/", "tests/"], "candidates": [
+          {"key": "diff_hidden", "source": "builtin", "reason": "", "locator": "builtin", "scope": "global",
+           "target": "general", "value": ["scratch/"]},
+          {"key": "diff_hidden", "source": "repository", "reason": "", "locator": ".lf/config.yaml",
+           "scope": "repository", "target": "general", "value": ["vendor/"]},
+          {"key": "diff_hidden", "source": "personal", "reason": "", "locator": ".lf/config.local.yaml",
+           "scope": "repository", "target": "general", "value": ["tests/"]}]}
+        """.utf8))
+        let store = try twoFileStore()
+        store.hidden = try #require(TaskFilesStore.hidden(from: explained))
+        #expect(store.hidden.map(\.source) == ["Default", "Repository", nil])
+        #expect(store.yourHidden == ["tests/"])
+        store.hide(" *.lock ")
+        store.unhide("vendor/")
+        store.unhide("tests/")
+        #expect(store.hidden.map(\.pattern) == ["scratch/", "vendor/", "*.lock"])
+        #expect(store.hides("Cargo.lock") && store.hides("rust/vendor/x.rs") && !store.hides("rust/lockfile.rs"))
     }
 
     @Test func diffSteppingPastAFilesLastChangeOpensTheNextFilesDiff() async throws {

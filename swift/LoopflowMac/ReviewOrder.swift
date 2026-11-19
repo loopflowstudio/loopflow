@@ -1,5 +1,6 @@
 #if os(macOS)
 import Foundation
+import Loopflow
 
 /// What a worker says about reading its change: which files come first and
 /// which are not worth opening, each with an optional reason. Read from
@@ -81,44 +82,49 @@ struct DiffOrder: Equatable, Sendable {
 
 /// How the Diff orders its files.
 enum ReviewOrdering: String, CaseIterable, Sendable {
-    /// The worker's files first, in its order; the rest by kind.
+    /// The worker's files first, in its order; the rest by group.
     case tour = "Tour"
-    /// Source, tests, docs, then generated and lock files; largest change first.
-    case kind = "By kind"
+    /// Under the `diff_groups` headings; largest change first within each.
+    case groups = "By group"
     case path = "By path"
 }
 
-/// What a changed file is, from its path alone.
-enum ReviewKind: Int, CaseIterable, Sendable {
-    case source, tests, docs, generated
-
-    var title: String {
-        switch self {
-        case .source: "Source"
-        case .tests: "Tests"
-        case .docs: "Docs"
-        case .generated: "Generated and lock files"
-        }
+/// A path pattern from `diff_groups` or `diff_hidden`, matched against `/`
+/// and the file's path, ignoring case: contained anywhere (`/tests/`,
+/// `scratch/`), or at the end when it starts with `*` (`*.sql`).
+enum DiffPattern {
+    static func matches(_ pattern: String, _ path: String) -> Bool {
+        let path = "/" + path.lowercased(), pattern = pattern.lowercased()
+        if pattern.hasPrefix("*") { return path.hasSuffix(pattern.dropFirst()) }
+        return path.contains(pattern)
     }
+}
 
-    init(_ file: ReviewFile) {
-        let path = file.path.lowercased()
-        let name = (path as NSString).lastPathComponent
-        let folders = path.split(separator: "/").dropLast()
-        let type = (name as NSString).pathExtension
-        if file.status == .binary || type == "lock" || type == "snap" || type == "pbxproj"
-            || name.hasSuffix("-lock.json") || name.hasSuffix(".lock.json") || name.contains(".min.")
-            || folders.contains(where: { ["generated", "__generated__", "__snapshots__", "vendor"].contains($0) }) {
-            self = .generated
-        } else if folders.contains(where: { ["test", "tests", "__tests__", "spec", "fixtures"].contains($0) || $0.hasSuffix("tests") })
-                    || name.hasPrefix("test_") || name.contains("_test.") || name.contains(".test.")
-                    || name.contains(".spec.") || name.contains("tests.") {
-            self = .tests
-        } else if ["md", "mdx", "rst", "txt", "adoc"].contains(type) || folders.first == "docs" {
-            self = .docs
-        } else {
-            self = .source
+/// One heading of the `diff_groups` setting: the files a pattern matches, or,
+/// with no patterns, every file no group matches (`- rest: Everything else`).
+struct DiffGroupSetting: Equatable, Sendable {
+    var title: String
+    /// nil for the rest.
+    var paths: [String]?
+
+    static let restTitle = "Everything else"
+    /// Until the setting is read, and when that read fails, the files stay
+    /// under one heading.
+    static let unread = [DiffGroupSetting(title: "Changed files", paths: nil)]
+
+    /// The setting's final value as `lf` resolved it; nil when it is not a list of groups.
+    static func parse(_ value: JSONValue) -> [DiffGroupSetting]? {
+        guard case .array(let entries) = value else { return nil }
+        let groups = entries.compactMap { entry -> DiffGroupSetting? in
+            guard case .object(let fields) = entry else { return nil }
+            if let rest = fields["rest"] {
+                if case .string(let title) = rest { return DiffGroupSetting(title: title, paths: nil) }
+                return DiffGroupSetting(title: restTitle, paths: nil)
+            }
+            guard case .string(let title)? = fields["title"], case .array(let paths)? = fields["paths"] else { return nil }
+            return DiffGroupSetting(title: title, paths: paths.compactMap { if case .string(let path) = $0 { path } else { nil } })
         }
+        return groups.count == entries.count ? groups : nil
     }
 }
 
@@ -131,9 +137,10 @@ struct ReviewGroup: Equatable, Sendable, Identifiable {
     let files: [ReviewFile]
 
     /// Files in reading order, grouped. A tour names files; a file it does not
-    /// name, or one added after it was written, follows by kind, so the order
+    /// name, or one added after it was written, follows by group, so the order
     /// can never lose a file.
-    static func arrange(_ files: [ReviewFile], ordering: ReviewOrdering, order: DiffOrder?) -> [ReviewGroup] {
+    static func arrange(_ files: [ReviewFile], ordering: ReviewOrdering, order: DiffOrder?,
+                        groups: [DiffGroupSetting]) -> [ReviewGroup] {
         switch ordering {
         case .path:
             let folders = Dictionary(grouping: files) { file in
@@ -143,31 +150,36 @@ struct ReviewGroup: Equatable, Sendable, Identifiable {
                 ReviewGroup(id: "path:\($0.key)", title: $0.key.isEmpty ? "Top level" : $0.key, isTour: false,
                             files: $0.value.sorted { $0.path < $1.path })
             }
-        case .kind:
-            return byKind(files)
+        case .groups:
+            return byGroup(files, groups)
         case .tour:
             var rest = files
-            var groups: [ReviewGroup] = []
+            var tour: [ReviewGroup] = []
             for (index, entry) in (order?.first ?? []).enumerated() {
-                let named = byKind(rest.filter { entry.matches($0.path) }).flatMap(\.files)
+                let named = byGroup(rest.filter { entry.matches($0.path) }, groups).flatMap(\.files)
                 guard !named.isEmpty else { continue }
                 rest.removeAll { entry.matches($0.path) }
                 // An entry without a reason reads on under the one above it.
-                if entry.why.isEmpty, let last = groups.last {
-                    groups[groups.count - 1] = ReviewGroup(id: last.id, title: last.title, isTour: true, files: last.files + named)
+                if entry.why.isEmpty, let last = tour.last {
+                    tour[tour.count - 1] = ReviewGroup(id: last.id, title: last.title, isTour: true, files: last.files + named)
                 } else {
-                    groups.append(ReviewGroup(id: "tour:\(index)", title: entry.why, isTour: true, files: named))
+                    tour.append(ReviewGroup(id: "tour:\(index)", title: entry.why, isTour: true, files: named))
                 }
             }
-            return groups + byKind(rest)
+            return tour + byGroup(rest, groups)
         }
     }
 
-    private static func byKind(_ files: [ReviewFile]) -> [ReviewGroup] {
-        let kinds = Dictionary(grouping: files) { ReviewKind($0) }
-        return ReviewKind.allCases.compactMap { kind in
-            guard let files = kinds[kind] else { return nil }
-            return ReviewGroup(id: "kind:\(kind.rawValue)", title: kind.title, isTour: false, files: files.sorted {
+    /// Each file under the first group a pattern matches, else under the rest;
+    /// a list with no rest puts those files last, under "Everything else".
+    private static func byGroup(_ files: [ReviewFile], _ groups: [DiffGroupSetting]) -> [ReviewGroup] {
+        let rest = groups.firstIndex { $0.paths == nil } ?? groups.count
+        let placed = Dictionary(grouping: files) { file in
+            groups.firstIndex { $0.paths?.contains { DiffPattern.matches($0, file.path) } == true } ?? rest
+        }
+        return placed.sorted { $0.key < $1.key }.map { index, files in
+            ReviewGroup(id: "group:\(index)", title: groups.indices.contains(index) ? groups[index].title : DiffGroupSetting.restTitle,
+                        isTour: false, files: files.sorted {
                 ($1.additions + $1.deletions, $0.path) < ($0.additions + $0.deletions, $1.path)
             })
         }

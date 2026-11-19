@@ -200,7 +200,7 @@ struct ReviewDiffTests {
         #expect(ReviewComment.message([moved], revision: "abc") == "`a.swift:L11-12` (after): why Spanish? say so (abc) ")
     }
 
-    @Test func aWorkersOrderPutsItsFilesFirstAndTheRestByKind() {
+    @Test func aWorkersOrderPutsItsFilesFirstAndTheRestByGroup() throws {
         let order = DiffOrder.parse("""
         # written when the change is handed over
         at: 81d3fa5973e63a4394a25357502e635a3baf5d5b
@@ -230,21 +230,32 @@ struct ReviewDiffTests {
         let files = [file("Cargo.lock", lines: 90), file("README.md", lines: 5), file("rust/a.rs", lines: 2),
                      file("rust/b.rs", lines: 40), file("rust/tests/a.rs", lines: 60), file("swift/Store.swift", lines: 1),
                      file("swift/StoreTests.swift", lines: 3)]
-        let kinds = ReviewGroup.arrange(files, ordering: .kind, order: order)
-        #expect(kinds.map(\.title) == ["Source", "Tests", "Docs", "Generated and lock files"])
-        // Largest change first within a kind.
-        #expect(kinds.flatMap(\.files).map(\.path) == ["rust/b.rs", "rust/a.rs", "swift/Store.swift", "rust/tests/a.rs",
-                                                        "swift/StoreTests.swift", "README.md", "Cargo.lock"])
-        let tour = ReviewGroup.arrange(files, ordering: .tour, order: order)
-        // An entry without a reason reads on under the one above; unnamed files follow by kind.
-        #expect(tour.map(\.title) == ["A change over 1 MB no longer loses its last files", "Source", "Tests", "Docs",
-                                       "Generated and lock files"])
+        let groups = try #require(DiffGroupSetting.parse(.array([
+            .object(["title": .string("Docs"), "paths": .array([.string("*.md")])]),
+            .object(["rest": .null]),
+            .object(["title": .string("Tests"), "paths": .array([.string("/tests/"), .string("tests.")])]),
+            .object(["title": .string("Generated"), "paths": .array([.string("*.lock")])]),
+        ])))
+        #expect(groups[1] == DiffGroupSetting(title: "Everything else", paths: nil))
+        #expect(DiffGroupSetting.parse(.array([.object(["title": .string("No paths")])])) == nil)
+        let byGroup = ReviewGroup.arrange(files, ordering: .groups, order: order, groups: groups)
+        #expect(byGroup.map(\.title) == ["Docs", "Everything else", "Tests", "Generated"])
+        // Largest change first within a group.
+        #expect(byGroup.flatMap(\.files).map(\.path) == ["README.md", "rust/b.rs", "rust/a.rs", "swift/Store.swift",
+                                                          "rust/tests/a.rs", "swift/StoreTests.swift", "Cargo.lock"])
+        // A list without a rest puts unmatched files last.
+        #expect(ReviewGroup.arrange(files, ordering: .groups, order: nil, groups: [groups[3]]).map(\.title)
+                == ["Generated", "Everything else"])
+        let tour = ReviewGroup.arrange(files, ordering: .tour, order: order, groups: groups)
+        // An entry without a reason reads on under the one above; unnamed files follow by group.
+        #expect(tour.map(\.title) == ["A change over 1 MB no longer loses its last files", "Docs", "Everything else",
+                                       "Tests", "Generated"])
         #expect(tour[0].isTour && tour[0].files.map(\.path) == ["swift/Store.swift", "swift/StoreTests.swift"])
         #expect(Set(tour.flatMap(\.files).map(\.path)) == Set(files.map(\.path)))
-        let paths = ReviewGroup.arrange(files, ordering: .path, order: order)
+        let paths = ReviewGroup.arrange(files, ordering: .path, order: order, groups: groups)
         #expect(paths.map(\.title) == ["Top level", "rust/", "swift/"])
-        // No tour: the tour order is the kind order.
-        #expect(ReviewGroup.arrange(files, ordering: .tour, order: nil) == kinds)
+        // No tour: the tour order is the group order.
+        #expect(ReviewGroup.arrange(files, ordering: .tour, order: nil, groups: groups) == byGroup)
     }
 }
 #endif

@@ -283,3 +283,14 @@ Jack: "a little complicated on what do on how to combine groups from multiple co
 - `diff.hidden`: AppendReset, the existing list combination: every layer adds; `[]` clears below.
 - The tour is not groups: `first:` pins files above whatever groups resolve to, `hide:` adds to hidden for this change. Nothing to merge.
 This supersedes the steer about same-title groups merging and last-match-wins.
+
+### Built (November 19): `diff_hidden` and `diff_groups`
+
+- Two flat settings, not a `diff:` section: top-level `diff` is already the released shorthand for `context.diff` (include the branch diff in a prompt). The released `lf` 0.16.0 read `diff: {groups: …}` in `.lf/config.yaml` as `context.diff` and warned "skipping context.diff: invalid value".
+- `diff_hidden`: `Repository` applicability (every layer but Wave scope), `AppendReset`, default `[scratch/]`. `diff_groups`: `Repository`, `Replace`, default Docs, Data model, `rest: Everything else`, Tests, Generated and lock files (`catalog.rs`). A group is `{title, paths}` or `{rest: <title or null>}` (`DiffGroup`, untagged; a bare `{}` is refused).
+- One pattern rule for both: matched against `/` + the path, ignoring case; contained anywhere, or at the end when it starts with `*`.
+- Desktop reads both through `config.explain` at the repository's personal file and applies only the tour on top (`ReviewGroup.arrange`). `ReviewKind` is deleted; the order menu reads Tour / By group / By path. Until the read answers, and for a remote Task, the files sit under one "Changed files" heading (no Swift copy of the default groups); hidden keeps its `scratch/` copy.
+- Always hidden lists every pattern with the layer that last added it (Default, Repository, Personal, Override); only yours have ✕, and removing your last one unsets your key instead of writing `[]`, which would clear the layers below.
+- This repository's `.lf/config.yaml` writes the full `diff_groups` list, with `rust/loopflow-model/`, `rust/loopflow-storage/` and `tests/fixtures/dto/` in Data model and `tests/goldens/` in Generated.
+- Check: `cargo test -p loopflow-execution --lib config::` → 105 passed; `scripts/test_desktop.sh --filter 'TaskFilesTests|ReviewDiffTests'` → 50 passed; branch `lf config explain diff_groups` here selects the repository's list.
+

@@ -904,11 +904,54 @@ final class TaskFilesStore {
 
     // MARK: Hidden paths and order
 
-    /// Paths the Diff leaves out: a changed file is hidden when its path contains
-    /// one of these, ignoring case. The `diff_hidden` setting once the Diff has read
-    /// it; until then and when that read fails, this copy of its catalog default
-    /// (`diff_hidden` in `rust/loopflow-execution/src/config/catalog.rs`).
-    var hiddenPaths = ["scratch/"] { didSet { arrange() } }
+    /// A pattern the Diff leaves out, and whose it is.
+    struct HiddenPattern: Equatable, Sendable {
+        let pattern: String
+        /// Where a pattern you cannot edit here comes from ("Repository");
+        /// nil for your own, saved in the repository's `.lf/config.local.yaml`.
+        let source: String?
+    }
+
+    /// The `diff_hidden` setting as `lf` resolved it, every layer added. Until
+    /// the Diff has read it and when that read fails, this copy of its catalog
+    /// default (`diff_hidden` in `rust/loopflow-execution/src/config/catalog.rs`).
+    var hidden = [HiddenPattern(pattern: "scratch/", source: "Default")] { didSet { arrange() } }
+    /// The `diff_groups` setting as `lf` resolved it.
+    var diffGroups = DiffGroupSetting.unread { didSet { arrange() } }
+
+    /// Your own hidden patterns, the only ones the Diff edits.
+    var yourHidden: [String] { hidden.filter { $0.source == nil }.map(\.pattern) }
+
+    func hide(_ pattern: String) {
+        let pattern = pattern.trimmingCharacters(in: .whitespaces)
+        guard !pattern.isEmpty, !yourHidden.contains(pattern) else { return }
+        hidden.append(HiddenPattern(pattern: pattern, source: nil))
+    }
+
+    func unhide(_ pattern: String) {
+        hidden.removeAll { $0.pattern == pattern && $0.source == nil }
+    }
+
+    /// The final value and, for each pattern, the last layer that added it.
+    static func hidden(from setting: ConfigurationValue) -> [HiddenPattern]? {
+        guard case .array(let values) = setting.value else { return nil }
+        let patterns = values.compactMap { if case .string(let pattern) = $0 { pattern } else { nil } }
+        var seen = Set<String>()
+        return patterns.filter { seen.insert($0).inserted }.map { pattern in
+            let candidate = setting.candidates.last { candidate in
+                guard case .array(let values) = candidate.value else { return false }
+                return values.contains(.string(pattern))
+            }
+            let source: String? = switch (candidate?.source, candidate?.scope) {
+            case ("personal", "repository"): nil
+            case ("builtin", _): "Default"
+            case ("repository", _): "Repository"
+            case ("personal", _): "Personal"
+            default: "Override"
+            }
+            return HiddenPattern(pattern: pattern, source: source)
+        }
+    }
     /// Read the hidden files too, without forgetting what is hidden.
     var showsHidden = false { didSet { arrange() } }
     /// Narrows the stream to paths containing this text.
@@ -926,11 +969,11 @@ final class TaskFilesStore {
 
     var ordering: ReviewOrdering {
         let choice = orderingChoice ?? .tour
-        return choice == .tour && !hasTour ? .kind : choice
+        return choice == .tour && !hasTour ? .groups : choice
     }
 
     func hides(_ path: String) -> Bool {
-        hiddenPaths.contains { path.range(of: $0, options: .caseInsensitive) != nil }
+        hidden.contains { DiffPattern.matches($0.pattern, path) }
     }
 
     /// The worker's reason to leave a path out, until you ask to see it.
@@ -954,7 +997,7 @@ final class TaskFilesStore {
             (showsHidden || !hides(file.path)) && workerHides(file.path) == nil
                 && (filter.isEmpty || file.path.range(of: filter, options: .caseInsensitive) != nil)
         }
-        shownGroups = ReviewGroup.arrange(files, ordering: ordering, order: diffOrder)
+        shownGroups = ReviewGroup.arrange(files, ordering: ordering, order: diffOrder, groups: diffGroups)
         shownReview = ReviewDiff(files: shownGroups.flatMap(\.files))
     }
 

@@ -477,8 +477,8 @@ Then the list is the whole order, and `--explain` marks `default_agent` unused.
 | Personal `agents: [claude, codex]`; repository `agents: [codex]` | Claude, then Codex |
 
 Lists and compound settings follow their declared merge rules. `context.docs`,
-`context.exclude`, `summaries` and `supported_harnesses` add in precedence order; `[]`
-clears earlier contributions. Keyed maps merge by key. `agents` preserves order and replaces as a unit. `tracker` replaces its complete tagged
+`context.exclude`, `summaries`, `supported_harnesses` and `diff_hidden` add in precedence order; `[]`
+clears earlier contributions. `diff_groups`, the headings of a Task's Diff in Desktop, replaces as a unit. Keyed maps merge by key. `agents` preserves order and replaces as a unit. `tracker` replaces its complete tagged
 configuration. `false` is a value; omission and `unset` reveal lower declarations.
 
 ## Source, scope and target

@@ -20,7 +20,7 @@ struct TaskChangesView: View {
     @State private var paneWidth: CGFloat = 0
     @State private var width: CGFloat = 0
     @State private var showsDelivery = false
-    /// The hidden paths as `diff_hidden` last read or saved them; nil until read.
+    /// Your hidden patterns as `diff_hidden` last read or saved them; nil until read.
     @State private var savedHidden: [String]?
     @State private var hiddenNotice: String?
 
@@ -69,10 +69,10 @@ struct TaskChangesView: View {
         .background(palette.background)
         .onGeometryChange(for: CGFloat.self, of: \.size.width) { paneWidth = $0 }
         .accessibilityIdentifier("browser-changes")
-        .task(id: store.cwd) { await readHidden() }
-        .onChange(of: store.hiddenPaths) { _, paths in
-            guard savedHidden != nil, paths != savedHidden else { return }
-            Task { await saveHidden(paths) }
+        .task(id: store.cwd) { await readSettings() }
+        .onChange(of: store.yourHidden) { _, patterns in
+            guard savedHidden != nil, patterns != savedHidden else { return }
+            Task { await saveHidden(patterns) }
         }
         .task(id: "\(store.comparison)|\(task?.reference.workspace?.baseCommit ?? "")") {
             store.observeFiles()
@@ -116,35 +116,50 @@ struct TaskChangesView: View {
         .padding(.horizontal, 12).padding(.vertical, 8)
     }
 
-    // MARK: Hidden paths
+    // MARK: Hidden paths and groups
 
-    /// Your own setting for this repository: `diff_hidden` in its `.lf/config.local.yaml`.
-    private var hiddenFile: JSONValue {
+    /// Your own settings for this repository, in its `.lf/config.local.yaml`.
+    /// Reading through it resolves every layer: built-in, the repository's
+    /// `.lf/config.yaml`, your global preferences, then yours here.
+    private var personalFile: JSONValue {
         ConfigurationDestination.personalRepository.address(repository: store.cwd, wave: "")
     }
 
-    private func readHidden() async {
-        // A checkout on another Machine keeps the list for this window only.
+    private func explain(_ key: String) async throws -> ConfigurationValue? {
+        let data = try await ServerClient.configuration(.configExplain(destination: personalFile, key: key))
+        return try JSONDecoder().decode(ConfigurationExplanation.self, from: data).inspections.first?.settings[key]
+    }
+
+    private func readSettings() async {
+        // A checkout on another Machine keeps the defaults for this window only.
         guard store.query.remoteMachine == nil else { return }
         do {
-            let data = try await ServerClient.configuration(.configExplain(destination: hiddenFile, key: "diff_hidden"))
-            let explained = try JSONDecoder().decode(ConfigurationExplanation.self, from: data)
-            guard case .array(let values)? = explained.inspections.first?.settings["diff_hidden"]?.value else { return }
-            let paths = values.compactMap { if case .string(let path) = $0 { path } else { nil } }
-            savedHidden = paths
-            store.hiddenPaths = paths
+            if let groups = try await explain("diff_groups").flatMap({ DiffGroupSetting.parse($0.value) }) {
+                store.diffGroups = groups
+            }
+            if let hidden = try await explain("diff_hidden").flatMap(TaskFilesStore.hidden(from:)) {
+                savedHidden = hidden.filter { $0.source == nil }.map(\.pattern)
+                store.hidden = hidden
+            }
             hiddenNotice = nil
         } catch {
-            hiddenNotice = "Hidden paths are not saved: \(error.localizedDescription)"
+            hiddenNotice = "Diff settings unavailable: \(error.localizedDescription)"
         }
     }
 
-    private func saveHidden(_ paths: [String]) async {
+    /// Yours replace your own list; none left removes it, so the layers below
+    /// still apply (an empty list would clear them).
+    private func saveHidden(_ patterns: [String]) async {
         do {
-            let yaml = String(decoding: try JSONEncoder().encode(paths), as: UTF8.self)
-            _ = try await ServerClient.configuration(.configSet(destination: hiddenFile, key: "diff_hidden", value: yaml))
-            savedHidden = paths
+            if patterns.isEmpty {
+                _ = try await ServerClient.configuration(.configUnset(destination: personalFile, key: "diff_hidden"))
+            } else {
+                let yaml = String(decoding: try JSONEncoder().encode(patterns), as: UTF8.self)
+                _ = try await ServerClient.configuration(.configSet(destination: personalFile, key: "diff_hidden", value: yaml))
+            }
+            savedHidden = patterns
             hiddenNotice = nil
+            await readSettings()
         } catch {
             hiddenNotice = "Hidden paths are not saved: \(error.localizedDescription)"
         }
@@ -247,7 +262,7 @@ struct TaskChangesView: View {
         .background(palette.surfaceMuted.opacity(0.5))
     }
 
-    /// Tour, By kind or By path. Tour is offered when the worker left one.
+    /// Tour, By group or By path. Tour is offered when the worker left one.
     private var orderMenu: some View {
         Menu {
             ForEach(ReviewOrdering.allCases.filter { $0 != .tour || store.hasTour }, id: \.self) { ordering in
@@ -465,7 +480,7 @@ private struct ChangedFilesSidebar: View {
                     .lineLimit(group.isTour ? 3 : 1).fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 4)
                 if group.id.hasPrefix("path:"), group.title.hasSuffix("/") {
-                    Button("Hide") { hide(group.title) }.buttonStyle(WorkPlainButtonStyle())
+                    Button("Hide") { store.hide("/" + group.title) }.buttonStyle(WorkPlainButtonStyle())
                         .help("Always leave \(group.title) out of the Diff")
                 }
             }
@@ -534,30 +549,36 @@ private struct ChangedFilesSidebar: View {
         }
     }
 
-    /// What you always leave out, each removable, and a field to add another.
+    /// What is always left out: yours, each removable, and the repository's
+    /// and the defaults, each named by where it comes from. A field adds yours.
     @ViewBuilder private var alwaysHidden: some View {
         let files = store.review?.files ?? []
         let hidden = files.count { store.hides($0.path) }
         heading("Always hidden")
-        ForEach(store.hiddenPaths, id: \.self) { path in
+        ForEach(store.hidden, id: \.pattern) { entry in
             HStack(spacing: 6) {
-                Text(path).font(Typography.code(11)).lineLimit(1).truncationMode(.head)
-                Text(fileCount(files.count { $0.path.range(of: path, options: .caseInsensitive) != nil }))
+                Text(entry.pattern).font(Typography.code(11)).lineLimit(1).truncationMode(.head)
+                Text(fileCount(files.count { DiffPattern.matches(entry.pattern, $0.path) }))
                     .foregroundStyle(palette.textSecondary)
                 Spacer(minLength: 4)
-                Button { store.hiddenPaths.removeAll { $0 == path } } label: {
-                    Image(systemName: "xmark").font(.system(size: 8, weight: .bold)).frame(width: 16, height: 16)
-                        .contentShape(Rectangle())
+                if let source = entry.source {
+                    Text(source).foregroundStyle(palette.textSecondary)
+                        .help("From \(source == "Default" ? "Loopflow's default" : "the \(source.lowercased()) settings"); diff_hidden there changes it")
+                } else {
+                    Button { store.unhide(entry.pattern) } label: {
+                        Image(systemName: "xmark").font(.system(size: 8, weight: .bold)).frame(width: 16, height: 16)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain).help("Stop hiding paths matching \(entry.pattern)")
+                    .accessibilityLabel("Stop hiding \(entry.pattern)")
                 }
-                .buttonStyle(.plain).help("Stop hiding paths containing \(path)")
-                .accessibilityLabel("Stop hiding \(path)")
             }
             .padding(.horizontal, 8).padding(.vertical, 2)
         }
-        TextField("tests/, .lock…", text: $hiding)
+        TextField("tests/, *.lock…", text: $hiding)
             .textFieldStyle(.roundedBorder).font(Typography.code(11))
-            .onSubmit { hide(hiding); hiding = "" }
-            .help("Hide every changed file whose path contains this text")
+            .onSubmit { store.hide(hiding); hiding = "" }
+            .help("Hide every changed file whose path contains this text, or ends with it after *")
             .padding(.horizontal, 8).padding(.vertical, 4)
             .accessibilityIdentifier("changes-hide")
         if hidden > 0 {
@@ -569,12 +590,6 @@ private struct ChangedFilesSidebar: View {
             Text(notice).foregroundStyle(palette.warning).textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true).padding(8)
         }
-    }
-
-    private func hide(_ text: String) {
-        let path = text.trimmingCharacters(in: .whitespaces)
-        guard !path.isEmpty, !store.hiddenPaths.contains(path) else { return }
-        store.hiddenPaths.append(path)
     }
 }
 

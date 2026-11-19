@@ -354,12 +354,35 @@ hide:
 ```
 
 `first` puts those files at the top in that order, each `why` heading its files
-in the stream and the sidebar. Every file it does not name follows **By kind**:
-source, tests, docs, then generated and lock files, largest change first.
-Without the file the Diff reads By kind. The order menu switches between
-**Tour**, **By kind** and **By path**. `hide` leaves those paths out from the
-start; the sidebar lists each with its reason and **Show**, and they never join
-your own hidden paths.
+in the stream and the sidebar. Every file it does not name follows **By group**,
+largest change first within each group. Without the file the Diff reads By
+group. The order menu switches between **Tour**, **By group** and **By path**.
+`hide` leaves those paths out for this change only; the sidebar lists each with
+its reason and **Show**, and they never join the hidden paths below.
+
+The groups are the `diff_groups` setting, an ordered list read as `lf`
+resolves it (`lf config explain diff_groups`). The nearest layer that sets it
+wins whole: yours for the repository, then your global one, then the
+repository's `.lf/config.yaml`, then the default. A file goes under the first
+group with a matching pattern; files no group matches go where the list says
+`rest`, or last when it has none:
+
+```yaml
+diff_groups:
+- title: Docs
+  paths: ['*.md', /docs/]
+- title: Data model
+  paths: [/migrations/, '*.sql', schema, /models/, '*.proto', dto]
+- rest: Everything else
+- title: Tests
+  paths: [/test/, tests/, _test., .test., .spec., tests.]
+- title: Generated and lock files
+  paths: ['*.lock', '*.snap', /generated/, /vendor/]
+```
+
+A pattern matches `/` followed by the file's path, ignoring case: anywhere in
+it, or at its end when the pattern starts with `*`. That is the default, a
+little shortened; `lf config catalog` prints it whole.
 
 `at` is the commit the tour was written at. Once a later commit changes a file
 outside `scratch/`, the stream says so ("The tour was written at 81d3fa5 · 3
@@ -370,11 +393,13 @@ still follow the named ones. Nothing rewrites the tour on its own, and a Task
 on another Machine offers neither button.
 
 The sidebar lists the files in that order: type to narrow the stream, click a
-file to bring it to the top. Under them, **Always hidden** is your own
-`diff_hidden` setting for the repository, saved in its `.lf/config.local.yaml`
-(`scratch/` by default): path text matched anywhere in a path. Hidden files stay
-in the count: "7 changes in 4 of 9 files". Below 620 pt the sidebar opens over
-the stream from its button and closes when you choose a file.
+file to bring it to the top. Under them, **Always hidden** is the `diff_hidden`
+setting, patterns matched the same way. Every layer adds to it (`scratch/` by
+default; `[]` clears the layers below), and each pattern is named by the layer
+that added it. Only yours can be removed or added there; they are saved in the
+repository's `.lf/config.local.yaml`. Hidden files stay in the count: "7
+changes in 4 of 9 files". Below 620 pt the sidebar opens over the stream from
+its button and closes when you choose a file.
 
 The stream follows the comparison live without moving what you are reading. A
 bar above it names the file you are in, with its counts and **Open**. Press `]`

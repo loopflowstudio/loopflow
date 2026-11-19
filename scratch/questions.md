@@ -24,6 +24,25 @@ rest is not chosen.
   It is live behaviour (v0.13.16, `docs/ops.md:38`).
 - Wave and repository conversations do not hear about Tasks in this change.
 
+## Made while building slices 1 and 2, for review
+
+- Only a done or abandoned Task's conversation falls back to the main
+  checkout. An open Task with no checkout still refuses with "has no
+  checkout; place it with `lf checkout`".
+- `lf resume <Task>` still chooses among the Task's unfinished conversations
+  only; a completed one reopens by Session ID.
+- A child's `lf task status` prints `parent: LOO-12` (answers the third
+  question below for the detail view; lists are not built).
+- A child line's standing is the Task's state plus the step it stands at:
+  `moving`, `idle at human-review`, `unstarted`. The docs example changed
+  from "running at implement" to match; a running child's current step is
+  not on `TaskRow`.
+- `--no-wave` and an omitted `--wave` are the same value, so a follow-up
+  filed with `--no-wave` still joins its parent's Wave. `--parent none` is
+  how to file outside it.
+- A follow-up filed in another repository than its parent keeps the link and
+  takes no Project.
+
 ## Raised by writing the docs (2026-11-18)
 
 - "Parent" already means the stack parent across `docs/work.md`,

@@ -315,30 +315,65 @@ existing update a conversation gets about its own Task; Waves and
 
 ## Slices
 
-1. **A closed Task's conversation resumes.** Launch resolves a missing `cwd`
-   to the repository's main checkout for both the bound and the primary
-   Session, Claude and Codex. Shown by: complete a Task, run `lf task retire`,
-   `lf -b resume <session> --message …` answers from the main checkout. This
-   is the one that could prove the plan wrong; the provider half is already
-   answered by the probes, so what it tests is lf's launch path (config and
-   skills loaded from `session.cwd`, `journal::with_runtime(cwd)`,
-   `current_dir`). Nothing here touches LOO-938's files. A Session that
-   belonged to the Task only by sitting in its checkout, never bound, is a
-   repository chat once it reopens in the main checkout; the Task's primary
-   and bound Sessions keep the Task through `task_id`.
-2. **The link, local.** Migration (`parent_task_id`, its index, the leaving
-   marks, the new triggers), `lf task create` default and `--parent`, Project
-   copied, `parent` and `children` on status, show and `RoadmapTask`.
-3. **Hearing about children.** The conducted relation, the two new
-   observation facts, the notice and its audience; `task_session.md`. Tests:
-   a fixture child Graph stops at an interactive step and the parent's idle
-   conversation receives one notice, and none for the steps before it;
-   `lf steer <child> '…'` does not reach the parent's conversation.
+1. **A closed Task's conversation resumes.** Built (17d81aa538).
+   `admit_workspace` is the one place: a Session whose `cwd` is not a
+   directory takes its repository's main checkout (from its Task, else its
+   `repo`, else its Wave) and the row keeps the new `cwd`. Shown by
+   `session_cli_tests::a_closed_tasks_conversation_resumes_in_the_main_checkout`
+   (`lf -b session resume <id> --message …`, Claude stand-in, `pwd` is the
+   main checkout) and `retirement::tests::a_closed_tasks_conversations_reopen_in_the_main_checkout`
+   (real retirement, primary and bound Sessions, `lf resume <Task>`).
+   What it taught: the plan held, and the launch path had three more places
+   that demanded the checkout, none of them in the plan: binding a Task as
+   Work (`ops/run.rs` `bind_selected_work`, now `task_directory`), the launch
+   prompt's workspace context (`task_workspace_context`), and two
+   `canonicalize` comparisons that failed on a missing path
+   (`agent/session.rs`, `commands/run.rs`). An open Task with no checkout
+   still refuses as before; only a done or abandoned one falls back.
+   Not covered: a Codex resume (the launch path is shared; only the Claude
+   stand-in ran) and the interactive viewer path, which reaches the same
+   `admit_workspace` through `open_waiting`.
+2. **The link, local.** Partly built (62e08279d5).
+   Built: migration `task_parent` (`parent_task_id`, `tasks_parent` index,
+   the planning trigger's `WHEN`), `Task.parent_task_id`,
+   `lf task create --parent <ID|none>` and the default from
+   `journal::caller_session_id()`, flat by default, Project and Wave copied
+   when the parent is in the same repository, `task_children`, `parent` and
+   `children` on `lf task status --json`, `parent:` and `child:` lines in
+   the human output. Shown by
+   `session_cli_tests::a_task_filed_from_a_tasks_conversation_shows_under_it`
+   and `adoption::tests::a_task_filed_from_a_tasks_conversation_is_its_child`.
+   Remaining:
+   - `parent` on `TaskRow` and `RoadmapTask` (`TaskSummary.parent_id`), the
+     Swift mirror and its fixtures, `lf wave show` indenting a child, a
+     child of a closed parent listed top-level. Nothing lists nest yet.
+   - `lf task show` (`TaskStatus`, `DesktopTaskPane`): the same two keys.
+   - served `task.create`: `parent`. Today it files top-level
+     (`write.rs` passes `parent: None, caller: None`).
+   - `lf task create --json` carries `task.parent_task_id` (an ID), not the
+     `.parent.identifier` the acceptance check names; `row.parent` arrives
+     with `RoadmapTask`.
+   - The leaving marks for `task_prs.after_merge` / `next_slug` and the
+     `pr_landings` pair. `map_task_pr_row` reads columns by position, so
+     taking them out of `TASK_PR_COLUMNS` renumbers every read after 7.
+   - The cycle refusal: nothing can make one at filing (a new Task has no
+     children). It belongs with the first write that changes a parent
+     (slice 5's tracker edit). `docs/work.md` Reference still names it.
+3. **Hearing about children.** Next. The conducted relation, the two new
+   observation facts, the notice and its audience; `task_session.md`; the
+   `task_updates` revision triggers for a merged `task_prs` row and a Task
+   closing, being abandoned or changing parent, added to `task_parent.sql`.
+   Tests: a fixture child Graph stops at an interactive step and the
+   parent's idle conversation receives one notice, and none for the steps
+   before it; `lf steer <child> '…'` does not reach the parent's
+   conversation. For the lookup, read a few Task rows with `map_task_row`:
+   `TaskIdentifiers::read` scans every Task (`query_plans` catches it).
 4. **Merged and open; closing.** Reason and `next` for a parent with open
    children, Auto-Ship's skipped completion, `lf task complete` over children,
    a child of a done parent listed top-level.
 5. **The link travels.** `TaskParent` through the plan exchange and to Linear
-   and Asana, on LOO-938.
+   and Asana, on LOO-938. Until then a child reaches the tracker as an
+   ordinary issue: `task_creation_intents` carries no parent.
 
 One PR. If LOO-938 is still unmerged when slices 1–4 are done, slice 5 is
 built on `lf sync LOO-938` and the PR waits behind #1983.

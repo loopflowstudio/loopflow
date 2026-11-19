@@ -197,7 +197,7 @@ pub fn create_or_update_pr(
             parent: stack.as_ref().map(|stack| RecordedParent {
                 identifier: &stack.parent_identifier,
                 branch: &stack.parent_branch,
-                merged: stack.parent_merged,
+                merged: stack.parent == crate::ops::task::StackParentPr::Merged,
             }),
             base: &base_branch,
             default_branch: &default_branch,
@@ -2042,6 +2042,9 @@ fn publication_base(
 ) -> OpsResult<(Option<StackedSync>, String)> {
     let stack = crate::ops::task::task_stack(repo)?;
     let base = match stack.as_ref() {
+        Some(stack) if matches!(stack.parent, crate::ops::task::StackParentPr::Closed { .. }) => {
+            return Err(stack.closed_parent_error(default_branch))
+        }
         Some(stack) => stack
             .live_parent_branch()
             .unwrap_or(default_branch)

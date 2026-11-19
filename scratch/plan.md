@@ -113,6 +113,18 @@ retry stays covered by its own assertions.
 - `lf task status` before a sync still shows the recorded #1971.
 - A parent branch deleted on close: GitHub closes the child PR with it.
 
+## Built (implement, 2026-11-19)
+
+Slices 1 and 2 in one pass: `StackParentPr`, `current_parent_pr`, the
+`Closed` sentence in `run_sync_in`, `stack_for_landing` and
+`publication_base`. `sync_task_placement` now takes the parent to record
+(`Option<&TaskPrId>`) instead of a clear flag, so the followed row and base
+land in one write. `select_stack_parent` is unchanged: its fall-through to
+the parent's active row already is the rule, so a call to
+`current_parent_pr` there would add nothing. Docs (slice 3) already match the
+built sentence. Remaining: run the acceptance test at gate along with
+`task_pr_authority_tests` and `store::` placement tests.
+
 ## Slices
 
 1. **The fixture first.** Rewrite the test above and watch it fail; add

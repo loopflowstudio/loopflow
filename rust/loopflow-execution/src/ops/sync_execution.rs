@@ -87,6 +87,14 @@ pub(crate) fn run_sync_in(
     };
     let detach =
         stacked.is_some() && onto.is_some_and(|target| target == default || target == upstream);
+    if let Some(stacked) = stacked.as_ref().filter(|_| !detach) {
+        if matches!(
+            stacked.parent,
+            crate::ops::task::StackParentPr::Closed { .. }
+        ) {
+            return Err(stacked.closed_parent_error(&default).into());
+        }
+    }
     if stacked.is_some() && onto.is_some() && !detach {
         return Err(anyhow!(
             "{} names no other open Task; name one to restack this Task on it, the default branch to detach it, or omit the target to sync its parent",

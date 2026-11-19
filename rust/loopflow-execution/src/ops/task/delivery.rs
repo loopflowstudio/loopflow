@@ -283,7 +283,7 @@ pub fn refresh_task_pr_for_publication(repo: &Path) -> OpsResult<()> {
                 .sync_task_placement(
                     &task.id,
                     &task.base_commit,
-                    true,
+                    None,
                     time::OffsetDateTime::now_utc(),
                 )
                 .await
@@ -800,12 +800,7 @@ async fn resolve_task_pr_base(
         && merge_base != task.base_commit
     {
         store
-            .sync_task_placement(
-                &task.id,
-                &merge_base,
-                false,
-                time::OffsetDateTime::now_utc(),
-            )
+            .sync_task_placement(&task.id, &merge_base, None, time::OffsetDateTime::now_utc())
             .await
             .map_err(|error| task_error(format!("failed to record Task PR base: {error}")))?;
     }

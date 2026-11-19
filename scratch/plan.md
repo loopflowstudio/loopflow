@@ -47,10 +47,15 @@ Source of truth: Claude's transcript file, read through
 home). lf's `write_provider_session` record stays as written, before start.
 It names the thread lf chose; it no longer means "resumable".
 
-1. **One decider.** `resume_native_session` (`ops/human_session.rs`) is the
-   only place that turns a recorded thread into `Start::Resume`. It treats a
-   lost thread as no thread:
-   `input_provider_session(key)?.filter(|t| !thread_lost(..))`. A Claude input
+1. **One decider.** A *saved thread* is one function in
+   `ops/human_session.rs`:
+   `fn saved_thread(store, artifact_key, provider) -> Result<Option<ProviderSessionRef>>`,
+   `input_provider_session(key)?` filtered by `!thread_lost(..)`. Its two
+   callers are the two places that ask "does this conversation have provider
+   history?" at open time: `resume_native_session` (the only place that
+   turns a recorded thread into `Start::Resume`) and `new_thread`'s
+   `threaded` (continuation log vs original request), which today inlines
+   the same `input_provider_session` + `thread_lost` pair. A Claude input
    with no usable thread returns `false`, and `open_waiting_locked` takes its
    existing "consumed launch without native history" branch: `append_input`
    gives the same Session a new input carrying the original request, and
@@ -104,8 +109,13 @@ this case is rare.
   Claude itself reports. Not touched.
 - Dead input rows from past failed launches (57 of 122 on one Machine) stay.
   Each one resumes correctly on its next open.
-- `has_provider_history` / resume-explanation text for a lost thread may
-  still say it resumes. Noted, not changed.
+- `has_provider_history` (the Session projection, `sessions.rs`) still
+  means "a thread is recorded", so `resume_intent`, Desktop's action label
+  and `resume_explanation` call a lost thread "Resume" while opening starts
+  it fresh. Fixing it means the projection reading Claude's files for every
+  listed Session, which the 10,000-Task load rule rules out; the honest fix
+  is recording the thread only once the provider saved it (a later Task).
+  Noted on `scratch/concept-review.html`, not changed here.
 
 ## Slices
 
@@ -113,7 +123,8 @@ this case is rare.
    the plan wrong: it shows `lost_thread` (still in place) recovers a provider
    that started and died, not only one that never started. Run the three
    transport tests.
-2. **Move the predicate into `resume_native_session`; delete `lost_thread`.**
+2. **Add `saved_thread`; use it in `resume_native_session` and
+   `new_thread`; delete `lost_thread`.**
    Rerun slice 1's tests and the session_launch_contract and session_cli tests
    named above.
 3. **Real Claude quit-before-typing check** through `lf`, using a PTY like the

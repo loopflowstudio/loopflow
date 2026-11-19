@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<title>LOO-984 concept review: does a recorded thread mean a conversation?</title>
+<style>
+:root{color-scheme:light dark;--bg:#fbfaf7;--fg:#1d1d1b;--mute:#6b6a66;--line:#dedbd3;--yes:#2f7d4a;--no:#b2402f;--prop:#2b5fb3;--card:#fff}
+@media (prefers-color-scheme:dark){:root{--bg:#161615;--fg:#ecebe6;--mute:#9a988f;--line:#34332f;--yes:#6cc08a;--no:#ee7a66;--prop:#7aa7f0;--card:#1f1f1d}}
+body{background:var(--bg);color:var(--fg);font:16px/1.55 -apple-system,system-ui,sans-serif;max-width:920px;margin:2rem auto;padding:0 1.2rem}
+h1{font-size:1.5rem;margin-bottom:.2rem}h2{margin-top:2.2rem;font-size:1.15rem}
+code{font:13.5px ui-monospace,Menlo,monospace}
+table{border-collapse:collapse;width:100%;margin:.6rem 0}td,th{border-bottom:1px solid var(--line);padding:.45rem .5rem;text-align:left;vertical-align:top}
+th{font-weight:600}
+.yes{color:var(--yes);font-weight:700}.no{color:var(--no);font-weight:700}
+.prop{border-left:4px solid var(--prop);padding:.2rem .9rem;background:color-mix(in srgb,var(--prop) 7%,transparent)}
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:1rem}
+.card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:.8rem 1rem}
+.card h3{margin:.1rem 0 .5rem;font-size:1rem}
+pre{background:var(--card);border:1px solid var(--line);border-radius:6px;padding:.7rem;overflow:auto;font-size:13px}
+.mute{color:var(--mute)}
+ol.q li{margin:.5rem 0}
+</style></head><body>
+
+<h1>A launch that ends before Claude's first turn</h1>
+<p class="mute">LOO-984 · concept review of <code>scratch/plan.md</code> before it is built · 2026-11-19</p>
+
+<p><b>Area taken:</b> how a conversation decides to <i>resume</i> or <i>start again</i> when you open it, across
+<code>lf resume</code>, <code>lf session resume</code>, pane opens and the recovery watcher. That covers the record lf writes before Claude starts,
+<code>lost_thread</code> (#1972), <code>resume_native_session</code>, <code>new_thread</code> and the guards in <code>run_client</code>.
+Not just the guards the brief names.</p>
+
+<h2>The interaction</h2>
+<div class="cols">
+<div class="card"><h3>Today</h3>
+<pre>$ lf -a claude resume       # Ctrl-C twice before typing
+$ lf resume
+No conversation found with session ID: 3f…</pre>
+<p>The pane opens Claude with <code>--resume</code>. You're stuck until <code>lf session new</code>.
+(#1972 catches this on the <code>open</code> path, but openers that go straight to <code>open_waiting_locked</code> don't get that check.)</p></div>
+<div class="card prop"><h3>Proposed</h3>
+<pre>$ lf resume
+Claude has no saved copy of this conversation;
+starting it again from its first request.
+╭─ Claude ─…</pre>
+<p>The same Session gets a new input with the same first request, and Claude starts with <code>--session-id &lt;new&gt;</code>.
+A conversation Claude did save still resumes.</p></div>
+</div>
+
+<h2>Do the concepts line up?</h2>
+<table>
+<tr><th>What a person knows</th><th>What the code has</th><th></th><th>What's wrong</th></tr>
+<tr><td>A conversation <b>has history</b> and resumes</td>
+<td><code>input_provider_session</code> (lf's record, written before start), <code>has_provider_history</code> (projection of that record)</td>
+<td class="no">no</td><td>One name for two ideas. "The thread lf named" and "the thread Claude saved" are both called <i>provider session</i>. They come apart in every launch that dies before the first turn (on 2026-11-18, 57 of 122 Sessions on one Machine).</td></tr>
+<tr><td>Opening <b>decides</b> resume vs start</td>
+<td><code>lost_thread</code> in <code>open</code>, plus <code>resume_native_session</code> in <code>open_waiting_locked</code>, plus <code>threaded</code> in <code>new_thread</code></td>
+<td class="no">no</td><td>One action with three owners. Two of them call <code>thread_lost</code> and one doesn't, so the result depends on which door you came in by.</td></tr>
+<tr><td>Starting again <b>uses the first request</b></td>
+<td><code>append_input</code> (keeps <code>request</code>/<code>skill</code>), <code>new_thread</code> with <code>threaded=false</code></td>
+<td class="yes">yes</td><td>Both carry <code>session.request</code>, so the plan's switch from one to the other changes nothing you'd notice.</td></tr>
+<tr><td>Claude <b>isn't installed</b> / lf server is down</td>
+<td><code>which_command</code> pre-check, <code>record_missing_provider</code>, second <code>require_server()</code></td>
+<td class="no">no</td><td>Guards that exist only so the record isn't written too early. Once a lost thread counts as no thread, nobody needs them: <code>context_environment</code> already requires the server, and exec maps NotFound to <code>missing_agent_message</code>.</td></tr>
+<tr><td>The action label says <b>Resume</b></td>
+<td><code>resume_intent</code> ← <code>has_provider_history</code>; <code>resume_explanation</code></td>
+<td class="no">no</td><td>For a lost thread the label still says "Resume" while opening starts fresh. <b>Larger than this work</b> (see below).</td></tr>
+<tr><td>A <b>saved conversation</b> that Claude refuses to resume stays as it was</td>
+<td><code>provider_rejected_resume_keeps_the_selected_conversation</code></td>
+<td class="yes">yes</td><td>The transcript exists, so <code>thread_lost</code> is false and nothing changes.</td></tr>
+</table>
+
+<h2>Biggest mismatch: a recorded thread is treated as a saved one</h2>
+<p>lf has to pick the thread id before Claude starts (<code>--session-id</code>), so the record can't wait for Claude without a hook. And the hook fires before Claude saves anything, so it doesn't cover quit-before-typing.
+The plan accepts that and moves the meaning: the record says <i>which</i> thread, and Claude's transcript file says <i>whether</i> it exists. That's right. Before this review, the plan still left the predicate written out in two places.</p>
+<div class="cols">
+<div class="card"><h3>Plan as written</h3>
+<pre>resume_native_session:
+  input_provider_session(k)
+    .filter(|t| !thread_lost(..))
+new_thread:
+  let threaded = match input_provider_session(k) {
+    Some(t) =&gt; !thread_lost(..), None =&gt; false };</pre></div>
+<div class="card prop"><h3>Plan now (changed by this review)</h3>
+<pre>fn saved_thread(store, key, provider)
+    -&gt; Result&lt;Option&lt;ProviderSessionRef&gt;&gt;
+
+resume_native_session: saved_thread(..)
+new_thread:            saved_thread(..).is_some()</pre>
+<p>One rule under one name, and the code says what a person means by "has history".</p></div>
+</div>
+
+<h2>Tested against</h2>
+<table>
+<tr><th>Path</th><th>Result</th></tr>
+<tr><td>Normal: saved conversation, <code>lf resume</code></td><td>Transcript found → <code>Start::Resume</code>. Unchanged.</td></tr>
+<tr><td>Failure: CLI missing, exit 1, quit before typing</td><td>No transcript → <code>resume_native_session</code> returns false → <code>append_input</code> + <code>fresh_launch</code> with the first request.</td></tr>
+<tr><td>Failure: Claude is running in a pane, nothing typed yet, <code>lf resume</code> elsewhere</td><td>TakeOver stops the client first, then sees no transcript and starts fresh. Nothing was lost, because nothing was saved.</td></tr>
+<tr><td>Held terminal open in another view</td><td>Intent is View, which attaches and returns before the predicate runs. Same as <code>lost_thread</code>'s <code>held_elsewhere</code>.</td></tr>
+<tr><td>Recovery: crash during the new-input write</td><td><code>lost_thread</code> used a <code>fresh-thread:</code> receipt for idempotence. <code>append_input</code> runs under the launch lock, like the existing "consumed launch without native history" branch. Open in <code>questions.md</code>.</td></tr>
+<tr><td>Counterexample: transcript deleted after real turns</td><td>Starts again from the first request, same as #1972 today. Claude's own history is gone, so lf has nothing better to seed from.</td></tr>
+</table>
+
+<h2>Larger than this work</h2>
+<p><b>The label still lies.</b> <code>has_provider_history</code> comes from the store projection. Making it true would mean reading
+<code>~/.claude/projects</code> for every listed Session, which the 10,000-Task load rule rules out. The fix that keeps the concepts true is to stop calling a thread recorded until the provider confirms it saved it.
+For Claude, that means watching for the first transcript write (or the first <code>UserPromptSubmit</code> hook) and recording the thread then.
+That change would delete <code>thread_lost</code> as an open-time check. It needs its own Task and touches hook delivery.</p>
+
+<h2>Outcome</h2>
+<p>The plan changed: one <code>saved_thread</code> helper serves <code>resume_native_session</code> and <code>new_thread</code>, slice 2 is renamed to match, and the label mismatch is written up as an exclusion with what fixing it would take. The rest of the design stands.</p>
+
+<h2>Questions</h2>
+<ol class="q">
+<li>Restarting from a lost thread: <b>a</b>) a new input via <code>append_input</code> (planned) · <b>b</b>) the same input restarted on the same <code>--session-id</code>, which real Claude accepts.</li>
+<li>The "Resume" label on a lost thread: <b>a</b>) leave it (planned) · <b>b</b>) file a Task to record the thread only after Claude saves it · <b>c</b>) check the transcript in <code>resume_explanation</code> only, not the listing.</li>
+<li>The diagnostic text: <b>a</b>) "Claude has no saved copy of this conversation; starting it again from its first request." (planned) · <b>b</b>) say nothing, since the first request shows up anyway.</li>
+</ol>
+</body></html>

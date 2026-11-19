@@ -942,6 +942,32 @@ impl Driver {
             }
         });
 
+        // The owned headless server loses its driver on exit. Settle its open
+        // turn before the process records its own end.
+        if child.is_some() && self.approval != ApprovalPolicy::NativeClient {
+            let open_stream = Arc::downgrade(&stream);
+            let Recording { store, session, .. } = owner.clone();
+            crate::agent::register_interrupt_cleanup(move || {
+                let Some(stream) = open_stream.upgrade() else {
+                    return;
+                };
+                let thread = match store.session_thread(&session) {
+                    Ok(Some(thread)) => thread,
+                    Ok(None) => return,
+                    Err(error) => {
+                        tracing::warn!(%error, "could not read the interrupted Codex thread");
+                        return;
+                    }
+                };
+                let mut stream = stream.blocking_lock();
+                if let Some(ended) = stream.decoder.interrupt_pending(thread) {
+                    if let Err(error) = stream.writer.record(&[ended]) {
+                        tracing::warn!(%error, "could not record Codex's interrupted turn");
+                    }
+                }
+            });
+        }
+
         let (initialized_tx, initialized_rx) = oneshot::channel::<()>();
         let (thread_id_tx, thread_id_rx) = oneshot::channel::<AgentSessionId>();
         let turn_in_progress = self.turn_in_progress.clone();

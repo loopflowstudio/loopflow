@@ -1,6 +1,7 @@
 //! Held provider fixtures shared by Graph and Task lifecycle checks.
 /// A Claude stand-in that announces `ready` in LF_HOME, then waits there for
-/// `release` before it answers.
+/// `release` before it answers. While `hold-turn` is there it writes `holding`
+/// and keeps its turn open.
 pub fn holding_claude() -> String {
     super::claude_stand_in(HOLDING_CLAUDE)
 }
@@ -23,6 +24,15 @@ turn = os.path.join(home, 'tool_turn.py')
 if streamed and os.path.exists(turn):
     hooks = json.load(open(sys.argv[sys.argv.index('--settings') + 1]))['hooks']
     subprocess.run([sys.executable, turn, 'stand-in', json.dumps(hooks)], check=True)
+# A fixture that left `hold-turn` holds a headless turn open until it is removed.
+if streamed and os.path.exists(os.path.join(home, 'hold-turn')):
+    # Claude echoes the request and names its conversation before it works.
+    print(json.dumps(message | {'session_id': 'stand-in'}), flush=True)
+    print(json.dumps({'type': 'system', 'subtype': 'init', 'session_id': 'stand-in'}), flush=True)
+    with open(os.path.join(home, 'holding'), 'w') as holding:
+        holding.write('stand-in')
+    while os.path.exists(os.path.join(home, 'hold-turn')):
+        time.sleep(0.02)
 while not os.path.exists(os.path.join(home, 'release')):
     time.sleep(0.02)
 if not streamed:

@@ -37,6 +37,10 @@ use tokio::sync::mpsc;
 use crate::agent::AgentConfig;
 use loopflow_model::chat::types::ConversationEvent;
 
+/// The code of a turn that failed on a question nobody was there to answer.
+/// `lf task run` stops on it: another attempt would only ask again.
+pub const UNANSWERED_QUESTION: &str = "unanswered_question";
+
 pub(crate) fn configure_vendor_std_env(command: &mut std::process::Command) -> Result<()> {
     let context = crate::os_process::execution_context()?;
     set_vendor_std_env(command, &context.lf_bin, &context.lf_home)

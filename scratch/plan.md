@@ -17,10 +17,10 @@ checked, and how the next gap is seen.
 | a worker starts, settles, records answer, native thread and usage; the Graph advances | `a_task_step_runs_as_a_worker_on_every_harness` |
 | the step's context reaches the provider | `a_task_step_runs_as_a_worker_on_every_harness` |
 | a steer sent while the step runs reaches it | same test |
-| the step's usage is recorded | same test, all four. Pi: slice 7 |
+| the step's usage is recorded | same test, all four |
 | a harness that is not installed is passed over, or named once | `a_step_that_cannot_launch_is_not_started_again` |
-| a question with nobody there ends the turn and stops the run after one attempt | OpenCode, Pi: `a_question_with_nobody_there_ends_the_step` (one attempt: slice 7). Claude, Codex: no, not read |
-| interrupt stops a worker with its turn recorded interrupted; the next run starts the step again | `a_worker_stops_on_interrupt_and_the_next_run_starts_its_step_again`, all four (Claude, Codex and the name: slice 7) |
+| a question with nobody there ends the turn and stops the run after one attempt | OpenCode, Pi: `a_question_with_nobody_there_ends_the_step`. Claude, Codex: no, not read |
+| interrupt stops a worker with its turn recorded interrupted; the next run starts the step again | `a_worker_stops_on_interrupt_and_the_next_run_starts_its_step_again`, all four, using this test filter |
 | a usage limit moves to the next agent | Claude, Codex: yes. OpenCode, Pi: no (excluded) |
 | an idle work session hears a steer | Claude, Codex: yes. OpenCode, Pi: no (excluded) |
 
@@ -224,8 +224,8 @@ The docs commit the implementation to three things the plan had left open:
   `missing_agent_message`'s first sentence);
 - test names for slices 3 and 4:
   `a_question_with_nobody_there_ends_the_step`,
-  `a_worker_stops_on_interrupt_and_the_next_run_starts_its_step_again`
-  (slice 7 renames it from `…_and_its_session_resumes`);
+  `a_worker_stops_on_interrupt_and_the_next_run_starts_its_step_again_on_*`
+  (two tests, two harnesses each);
 - a `harness::launch_matrix` cell asserting a worker in a Task checkout is `yolo`.
 
 `documented_commands::` runs at gate (new examples: `lf task run LOO-12 -a …`,
@@ -323,7 +323,7 @@ The docs commit the implementation to three things the plan had left open:
      trace recorded; the table says "not shown"), and stopping the two retries
      that ask the same question again. `scratch/questions.md` 18 and 19.
 4. **Interrupt, then run again. Built for OpenCode and Pi.**
-   - `a_worker_stops_on_interrupt_and_its_session_resumes` (slice 7 renames it) holds `implement`
+   - The interrupt test (renamed and widened in slice 7) holds `implement`
      mid-turn on each stand-in (`hold-turn` in the home; the stand-in writes
      `holding` once its turn is under way), runs `lf task interrupt`, and
      reads: exit 130, one attempt, the worker's turn `interrupted`, no answer.
@@ -404,62 +404,31 @@ The docs commit the implementation to three things the plan had left open:
      after a build); with the question and interrupt tests under nextest, 104s
      and 106s each. Nextest's limit is 300s.
 
-7. **The parity table meets its own rule. Next.** After QA, five cells of the
-   README table are neither a test nor a named gap: Pi usage ("no" for
-   something the brief names) and four "not shown" on Claude and Codex.
-   `scratch/concept-review.html` shows them. Three parts, smallest first; each
-   stands alone.
-   - **Rename and widen the interrupt test.**
-     `a_worker_stops_on_interrupt_and_its_session_resumes` becomes
-     `a_worker_stops_on_interrupt_and_the_next_run_starts_its_step_again`
-     (the Session does not resume; a worker is a Run) and gains the Claude and
-     Codex stand-ins. They need the `hold-turn` / `holding` files the OpenCode
-     and Pi stand-ins honor (`tests/support/opencode_cli.py:186`,
-     `harness/testdata/pi_rpc.py`). Expect on each: exit 130, one attempt, the
-     worker's turn `interrupted`, no answer, and the next `lf task run` at
-     `review`. If Claude or Codex records `failed`, its reader settles the open
-     turn `Interrupted` when `agent::interrupted()` holds, as slice 4 did for
-     the other two. Update the README row and its paragraph, and
-     `rust/loopflow/tests/README.md` if it names the test.
-   - **A Pi worker's usage lands on the Task's turn.** One turn is two
-     `history.turns` rows today: lf's, under its request id, with the Task,
-     Graph and step; and the transcript's, under the session file's user entry
-     id (8 hex, e.g. `897c915b`), with the usage. Chosen: where the transcript
-     read writes a turn's usage, a transcript turn whose id matches no recorded
-     turn goes to the recorded turn that covers it in time
-     (`transcript/facts.rs` `covers`, already used for completions); an id
-     match still wins first, so Claude, Codex and OpenCode do not change. A
-     transcript turn nothing covers keeps its own row. Passed over: naming the
-     Pi turn after the session file's entry, which has the driver read Pi's
-     file mid-turn. Real session files from QA's RPC runs are under
-     `~/.pi/agent/sessions/--private-tmp-loo974-*--/`: `message` entries with
-     `id`, `parentId`, `timestamp`, and `usage` on each assistant entry. Shown
-     by dropping the Pi skip in
-     `a_task_step_runs_as_a_worker_on_every_harness`; the README cell and its
-     paragraph become "yes". If the join cannot be made without changing
-     another harness's rows, fall back to the passed-over option and say so.
-   - **A question stops the run after one attempt.** Today the failed turn is
-     a failed step, so `lf task run` asks the same question in three new
-     conversations before the person can answer. Chosen: the OpenCode decoder
-     and Pi's dialog failure give the failed turn a code, `unanswered_question`
-     (beside `provider_rate_limited`, `pi_disconnected`); `run_task_graph_for`
-     reads it from the failed step and stops with
-     `the run of <graph> stopped at <step> on a question: <question>` and
-     ``Answer with `lf steer <ID> "…"`, then `lf task run <ID>`.``, ending an
-     Auto-Ship approval like the other stops. Never matched on the sentence.
-     `a_question_with_nobody_there_ends_the_step` then expects one attempt,
-     and after `lf steer` and `lf task run` reads the steer back in the new
-     conversation (slice 6's `tool_turn.py`) and the Graph at `review`.
-     `docs/orchestration.md:260` names OpenCode and Pi and the one attempt.
-     Passed over: three attempts as built; holding the step open for a person
-     (a new Graph stop, larger than this Task).
-   - The README's question cells for Claude and Codex change from "not shown"
-     to "no: not read". Nothing is built for them here.
+7. **The parity table meets its own rule. Built.**
+   - `a_worker_stops_on_interrupt_and_the_next_run_starts_its_step_again`
+     filters two tests covering all four harnesses. Each checks exit 130, one
+     attempt, an interrupted turn without an answer, and a new conversation
+     that reaches `review` on the next run. Claude settles its pending turn
+     on signal-driven EOF. Codex records its owned headless app-server's
+     pending turn in the interrupt cleanup before lf exits.
+   - The Pi transcript reader attaches usage and the final answer to the
+     recorded turn when its timestamps cover the transcript entry. An exact
+     entry id takes precedence. The worker test reads Pi's usage from
+     `lf history usage --task`; the transcript test checks that it creates no
+     second turn. The history query uses the session/thread prefix of the
+     unique index (checked with 100,000 synthetic turns).
+   - OpenCode and Pi emit `unanswered_question`. The Task run stops after
+     one attempt and prints the question, `lf steer`, and `lf task run`.
+     The question test reads the answer back in the fresh conversation
+     and checks that the Graph reaches review. Claude and Codex question
+     handling remains a named gap in the parity table.
+   - Passed here 2026-11-18 under nextest, the four worker tests together on
+     the first run after a build: 254s, 254s, 257s, 268s. Nextest kills a test
+     at 300s; question 24. Clippy and `documented_commands::` clean.
 
-Not in slice 7, on the page as larger than this work: Claude and Codex
-questions (`scratch/questions.md` 18), the uncalled `Driver::send_current`
-(26), the usage-less `task-session` row (27), a Task conversation that does not
-move down the order (30), Tasks for the "no" cells (11). After slice 7: demo.
+Next: demo. Recheck Pi usage on a real Task and keep the existing OpenCode
+and Pi QA results. Claude and Codex question handling, the uncalled
+`Driver::send_current`, and idle wake for OpenCode and Pi stay out of scope.
 
 ## Seen on the real CLI (OpenCode 2.2.1, 2026-11-18)
 

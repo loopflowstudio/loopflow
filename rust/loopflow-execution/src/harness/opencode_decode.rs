@@ -114,10 +114,10 @@ impl Turn {
                         .filter_map(|question| question["question"].as_str())
                         .collect();
                     self.asked = true;
-                    out.extend(self.fail(&super::common::unanswered_question(
-                        "OpenCode",
-                        &asked.join(" "),
-                    )));
+                    out.extend(self.fail_as(
+                        super::UNANSWERED_QUESTION,
+                        &super::common::unanswered_question("OpenCode", &asked.join(" ")),
+                    ));
                 }
             }
             Some("error") => {
@@ -139,11 +139,15 @@ impl Turn {
 
     /// Fail the turn for `reason`; its first failure is the one reported.
     pub fn fail(&mut self, reason: &str) -> Vec<Decoded> {
+        self.fail_as("opencode_error", reason)
+    }
+
+    fn fail_as(&mut self, code: &str, reason: &str) -> Vec<Decoded> {
         if std::mem::replace(&mut self.failed, true) {
             return Vec::new();
         }
         vec![ConversationEvent::Error {
-            code: "opencode_error".into(),
+            code: code.into(),
             message: sanitize_error_message(reason),
             evidence: None,
         }
@@ -370,16 +374,21 @@ mod tests {
         assert!(turn.asked());
         decoded.extend(turn.finish(true, false));
 
-        let errors: Vec<&str> = display(&decoded)
+        let errors: Vec<(&str, &str)> = display(&decoded)
             .into_iter()
             .filter_map(|event| match event {
-                ConversationEvent::Error { message, .. } => Some(message.as_str()),
+                ConversationEvent::Error { code, message, .. } => {
+                    Some((code.as_str(), message.as_str()))
+                }
                 _ => None,
             })
             .collect();
         assert_eq!(
             errors,
-            ["OpenCode asked a question with nobody there to answer it: Do you prefer red or blue?"]
+            [(
+                "unanswered_question",
+                "OpenCode asked a question with nobody there to answer it: Do you prefer red or blue?"
+            )]
         );
         assert_eq!(
             fact_lines(&decoded).last().unwrap(),

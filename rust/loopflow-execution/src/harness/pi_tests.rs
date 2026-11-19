@@ -317,12 +317,17 @@ async fn pi_rejected_prompt_and_malformed_stream_remain_failures() {
 
 #[tokio::test]
 async fn pi_headless_dialogs_and_extension_failures_do_not_hang_or_succeed() {
-    for (input, reason) in [
+    for (input, failed, reason) in [
         (
             "dialog",
+            "unanswered_question",
             "Pi asked a question with nobody there to answer it: Use the fixture?",
         ),
-        ("extension error", "context delivery failed"),
+        (
+            "extension error",
+            "pi_disconnected",
+            "context delivery failed",
+        ),
     ] {
         let mut config = crate::agent::AgentConfig::default();
         let (_ledger, _env, recording) = fixture(&mut config);
@@ -342,7 +347,7 @@ async fn pi_headless_dialogs_and_extension_failures_do_not_hang_or_succeed() {
             })
         ));
         assert!(
-            matches!(rx.recv().await.unwrap(), ConversationEvent::Error { message, .. } if message.contains(reason))
+            matches!(rx.recv().await.unwrap(), ConversationEvent::Error { code, message, .. } if code == failed && message.contains(reason))
         );
         pi.stop().await.unwrap();
     }

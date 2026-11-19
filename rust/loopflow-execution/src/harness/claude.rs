@@ -345,7 +345,19 @@ impl Driver {
                 })
                 .await;
 
-                let status = if interrupted.load(Ordering::SeqCst) {
+                // A signal ending lf takes Claude with it, and nothing reads
+                // this reader's events any more: it records the end itself.
+                let signalled = crate::agent::interrupted();
+                if signalled {
+                    let ended = decoder
+                        .lock()
+                        .expect("claude decoder lock poisoned")
+                        .interrupt_pending();
+                    if let Err(error) = writer.write(&ended) {
+                        tracing::warn!(%error, "could not record Claude's interrupted turn");
+                    }
+                }
+                let status = if signalled || interrupted.load(Ordering::SeqCst) {
                     Lifecycle::Interrupted
                 } else {
                     tracing::warn!("claude stream ended without a final result");

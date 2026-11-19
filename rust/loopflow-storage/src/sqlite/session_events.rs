@@ -33,6 +33,13 @@ pub struct CurrentConversation {
     pub thread: AgentSessionId,
 }
 
+#[derive(Debug)]
+pub struct TurnSpan {
+    pub turn: String,
+    pub started_at: Option<i64>,
+    pub ended_at: Option<i64>,
+}
+
 impl SqliteStore {
     /// The provider conversation that resumes `input`, as its captured row
     /// keeps it.
@@ -515,21 +522,25 @@ impl SqliteStore {
             .is_some())
     }
 
-    /// Each completion `history.turns` keeps in `thread`: its turn and when it
-    /// was observed. The transcript pass reads it to fill the turns history
-    /// missed.
-    pub fn session_completions(
+    /// Each turn `history.turns` keeps in `thread`: its name, when it started
+    /// and when it ended. The transcript pass reads it to find the turn a
+    /// transcript turn was recorded as, and to fill the ends history missed.
+    pub fn session_turn_spans(
         &self,
         session: &str,
         thread: &AgentSessionId,
-    ) -> StoreResult<Vec<(String, i64)>> {
+    ) -> StoreResult<Vec<TurnSpan>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare_cached(
-            "SELECT provider_turn,ended_at FROM history.turns
-             WHERE session_id=?1 AND provider_thread=?2 AND ended_at IS NOT NULL",
+            "SELECT provider_turn,started_at,ended_at FROM history.turns
+             WHERE session_id=?1 AND provider_thread=?2",
         )?;
         let rows = query.query_map(params![session, thread], |row| {
-            Ok((row.get(0)?, row.get(1)?))
+            Ok(TurnSpan {
+                turn: row.get(0)?,
+                started_at: row.get(1)?,
+                ended_at: row.get(2)?,
+            })
         })?;
         rows.map(|row| row.map_err(StoreError::from)).collect()
     }

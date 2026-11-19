@@ -300,6 +300,7 @@ impl Driver {
         let events = self.events.clone();
         tokio::spawn(async move {
             let mut lines = BufReader::new(stdout).lines();
+            let mut code = "pi_disconnected";
             let outcome: Result<()> = async {
                 while let Some(line) = lines.next_line().await? {
                     let value: Value =
@@ -334,6 +335,7 @@ impl Driver {
                                 .filter_map(|text| text.as_str())
                                 .collect::<Vec<_>>()
                                 .join(" ");
+                            code = super::UNANSWERED_QUESTION;
                             bail!(super::common::unanswered_question("Pi", &question));
                         }
                     }
@@ -377,7 +379,7 @@ impl Driver {
                 return;
             }
             let _ = events.send(ConversationEvent::Error {
-                code: "pi_disconnected".into(),
+                code: code.into(),
                 message: outcome
                     .expect_err("Pi reader returns only after an error or EOF")
                     .to_string(),

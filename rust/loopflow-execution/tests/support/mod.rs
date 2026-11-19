@@ -266,6 +266,11 @@ if [ -f "$LF_HOME/tool_turn.py" ]; then
     hooks=$(printf '%s' "$thread_start" | python3 -c 'import json, sys; print(json.dumps(json.load(sys.stdin)["params"]["config"]["hooks"]))')
     python3 "$LF_HOME/tool_turn.py" "$thread" "$hooks" || exit 1
 fi
+# A fixture that left `hold-turn` holds the turn open until it is removed.
+if [ -f "$LF_HOME/hold-turn" ]; then
+    printf '%s' "$thread" > "$LF_HOME/holding"
+    while [ -f "$LF_HOME/hold-turn" ]; do sleep 0.05; done
+fi
 printf '%s\n' '{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"threadId":"'"$thread"'","turnId":"'"$turn"'","itemId":"message-test","delta":__OUTPUT__}}'
 printf '%s\n' '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"'"$thread"'","turnId":"'"$turn"'","item":{"type":"agentMessage","id":"message-test","text":__OUTPUT__,"phase":"final_answer"}}}'
 python3 '__ROLLOUT__' "$thread" "$turn" '__OUTPUT__' || exit 1

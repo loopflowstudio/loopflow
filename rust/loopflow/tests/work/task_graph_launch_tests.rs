@@ -2089,17 +2089,17 @@ fn a_task_step_runs_as_a_worker_on_every_harness() {
             .find(|run| run["session_id"] == session.as_str())
             .map(|run| &run["usage"])
             .unwrap();
-        // Pi's session file names a turn by its entry id and lf by its own
-        // request id, so the usage lf reads there is not the Run's.
-        if provider != "pi" {
-            assert_eq!(usage["input_tokens"], 20, "{provider}: {usage}");
-            assert_eq!(usage["output_tokens"], 5, "{provider}: {usage}");
-        }
+        // Pi's stand-in counts its one model call its own way.
+        let (input, output) = if provider == "pi" { (10, 3) } else { (20, 5) };
+        assert_eq!(usage["input_tokens"], input, "{provider}: {usage}");
+        assert_eq!(usage["output_tokens"], output, "{provider}: {usage}");
     }
 }
 
 /// OpenCode cancels a headless question and lets the model assume an answer;
-/// Pi waits on its dialog. Either way the worker's turn fails with what was asked.
+/// Pi waits on its dialog. Either way the worker's turn fails with what was
+/// asked and the run stops there: a second attempt would only ask again. The
+/// answer is a steer, which the next run's conversation hears.
 #[test]
 fn a_question_with_nobody_there_ends_the_step() {
     for (provider, agent, script) in [
@@ -2108,12 +2108,26 @@ fn a_question_with_nobody_there_ends_the_step() {
     ] {
         let task = GraphTask::with_tools(&[(provider, &script)]);
         define_worker_graph(&task);
-        fs::write(task.home.path().join("ask-question"), "").unwrap();
+        let home = task.home.path();
+        fs::write(home.join("ask-question"), "").unwrap();
 
         let asked = task.task_run(&["task", "run", "INF-123", "worker", "-a", agent]);
         assert!(!asked.success(), "{provider}: {}", asked.text);
         let reason = "asked a question with nobody there to answer it: Use the fixture?";
         assert!(asked.text.contains(reason), "{provider}: {}", asked.text);
+        assert!(
+            asked
+                .text
+                .contains("answer with `lf steer INF-123 \"…\"`, then `lf task run INF-123`"),
+            "{provider}: {}",
+            asked.text
+        );
+        assert!(
+            !asked.text.contains("starting it again"),
+            "{provider}: {}",
+            asked.text
+        );
+        assert_eq!(support::recorded_graphs(home).len(), 1, "{provider}");
         assert_eq!(task.graph()["position"]["running"], false, "{provider}");
         let status = task.text_status();
         assert!(status.contains(reason), "{provider}: {status}");
@@ -2121,6 +2135,22 @@ fn a_question_with_nobody_there_ends_the_step() {
             !status.contains("Fixture completed."),
             "{provider}: {status}"
         );
+
+        // The answer reaches the conversation the next run starts.
+        task.ok(&["steer", "INF-123", "USE_THE_FIXTURE"]);
+        fs::remove_file(home.join("ask-question")).unwrap();
+        fs::write(
+            home.join("tool_turn.py"),
+            include_str!("../../../loopflow-execution/tests/support/tool_turn.py"),
+        )
+        .unwrap();
+        fs::write(home.join("tool-done"), "").unwrap();
+        task.task_run_ok(&["task", "run", "INF-123", "-a", agent]);
+        assert_eq!(task.graph()["position"], at("review"), "{provider}");
+        let heard = ["hook-context", "hook-steer"]
+            .map(|hook| fs::read_to_string(home.join(hook)).unwrap())
+            .join("\n");
+        assert!(heard.contains("USE_THE_FIXTURE"), "{provider}: {heard}");
     }
 }
 
@@ -2128,20 +2158,34 @@ fn a_question_with_nobody_there_ends_the_step() {
 /// interrupted, nothing starts the run again, and the next `lf task run` takes
 /// the step up and moves the Graph on.
 #[test]
-fn a_worker_stops_on_interrupt_and_its_session_resumes() {
-    for (provider, agent, script, answer) in [
-        (
-            "opencode",
-            "opencode:opencode/fixture",
-            opencode_stand_in(),
-            "Fixture completed.",
-        ),
-        ("pi", "pi:fixture/model", pi_stand_in(), "answer 1:"),
-    ] {
-        let task = GraphTask::with_tools(&[(provider, &script)]);
+fn a_worker_stops_on_interrupt_and_the_next_run_starts_its_step_again_on_claude_and_codex() {
+    interrupt_a_worker("claude", "claude", &holding_claude(), "Held.");
+    interrupt_a_worker(
+        "codex",
+        "codex",
+        &support::codex_app_server_script("Worker finished.", ""),
+        "Worker finished.",
+    );
+}
+
+#[test]
+fn a_worker_stops_on_interrupt_and_the_next_run_starts_its_step_again_on_opencode_and_pi() {
+    interrupt_a_worker(
+        "opencode",
+        "opencode:opencode/fixture",
+        &opencode_stand_in(),
+        "Fixture completed.",
+    );
+    interrupt_a_worker("pi", "pi:fixture/model", &pi_stand_in(), "answer 1:");
+}
+
+fn interrupt_a_worker(provider: &str, agent: &str, script: &str, answer: &str) {
+    {
+        let task = GraphTask::with_tools(&[(provider, script)]);
         define_worker_graph(&task);
         let home = task.home.path();
         fs::write(home.join("hold-turn"), "").unwrap();
+        fs::write(home.join("release"), "").unwrap();
 
         let mark = last_graph(home);
         let started = task.run(&["task", "run", "INF-123", "worker", "-a", agent]);
@@ -2169,7 +2213,7 @@ fn a_worker_stops_on_interrupt_and_its_session_resumes() {
                 rusqlite::params![task.registered.task.id.as_str(), provider],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
-            .unwrap()
+            .unwrap_or_else(|error| panic!("{provider}: no worker Session: {error}"))
         };
         let (interrupted, thread, turn) = worker("");
         assert_eq!(turn.as_deref(), Some("interrupted"), "{provider}");

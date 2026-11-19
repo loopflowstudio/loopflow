@@ -80,13 +80,13 @@ row names the test that shows it; "no" is a gap with its owner.
 | a Task step | Claude | Codex | OpenCode | Pi | test |
 |---|---|---|---|---|---|
 | starts as a worker, settles, records its answer and native thread; the Graph advances | yes | yes | yes | yes | `task_graph_launch_tests::a_task_step_runs_as_a_worker_on_every_harness` |
-| records its usage in the Task's history | yes | yes | yes | no: kept under Pi's turn id | same test |
+| records its usage in the Task's history | yes | yes | yes | yes | same test; `transcript::facts::tests::a_pi_turn_loopflow_recorded_takes_the_session_files_usage` |
 | receives the step's context | yes | yes | yes | yes | same test; `harness::context::tests::` |
 | hears a steer sent while it runs, after its next tool | yes | yes | yes | yes | same test; `harness::context::tests::` |
 | runs as `yolo` in its Task's checkout | yes | yes | yes | yes | `harness::launch_matrix` |
 | is passed over when its CLI is not installed, or named once when it was the only choice | yes | yes | yes | yes | `task_graph_launch_tests::a_step_that_cannot_launch_is_not_started_again` |
-| fails the turn, with the question as its reason, when it asks one and nobody is there | not shown | not shown | yes | yes | `task_graph_launch_tests::a_question_with_nobody_there_ends_the_step` |
-| stops on `lf task interrupt` with its turn recorded interrupted; the next `lf task run` starts the step again | not shown | not shown | yes | yes | `task_graph_launch_tests::a_worker_stops_on_interrupt_and_its_session_resumes` |
+| fails the turn, with the question as its reason, when it asks one and nobody is there; the run stops after that one attempt | no: not read | no: not read | yes | yes | `task_graph_launch_tests::a_question_with_nobody_there_ends_the_step` |
+| stops on `lf task interrupt` with its turn recorded interrupted; the next `lf task run` starts the step again | yes | yes | yes | yes | `a_worker_stops_on_interrupt_and_the_next_run_starts_its_step_again_on_claude_and_codex`, `a_worker_stops_on_interrupt_and_the_next_run_starts_its_step_again_on_opencode_and_pi` |
 | moves to the next agent on a usage limit | yes | yes | no: failures unclassified (LOO-518) | no: failures unclassified | `agent::tests::` fallthrough tests |
 | as an idle work session, hears a steer | yes | yes | no: next turn only | no: next turn only | `server::wake::tests::` |
 
@@ -101,20 +101,21 @@ On real OpenCode 2.2.1 and Pi 1.3.0 workers, a steer sent mid-step changed
 the code each wrote. OpenCode keeps no system text between requests, so its
 plugin sends every steer it has heard with each later request.
 
-lf reads usage from each provider's own transcript. Pi's session file names a
-turn by its entry id and lf's record of the same turn uses its request id, so
-a Pi worker's usage lands on a second turn row that `lf history usage --task`
-does not count.
+lf reads usage from each provider's transcript. Pi's session file uses its own
+entry ids, so lf joins an unmatched Pi entry to the recorded turn whose
+timestamps cover it. The usage then appears in `lf history usage --task`.
 
 `opencode run --auto` cancels a question itself and tells the model to go on
 with assumptions; lf fails the turn at that tool call and stops the run. Pi
-opens an extension dialog, and lf fails the turn there. What a headless Claude
-or Codex does with a question has not been recorded.
+opens an extension dialog, and lf fails the turn there. Both give the turn's
+error the code `unanswered_question`, and `lf task run` stops on it after one
+attempt with the question and the `lf steer` that answers it; the next run's
+conversation hears that steer. lf does not read a headless Claude's or Codex's
+question: no decoder fails a turn on one, and none has been recorded.
 
-An interrupted worker is a Run, and nobody continues a Run: the next
-`lf task run` starts its step in a new conversation. The Graph stops any
-harness's step the same way (`an_interrupt_ends_the_running_agent_step_and_starts_nothing_further`);
-what a Claude or Codex worker records for the turn it was in has not been read.
+On all four harnesses, `lf task interrupt` ends the worker with exit 130,
+records its turn as interrupted, and leaves the Graph at that step. The next
+`lf task run` starts the step in a new conversation.
 
 A "no" for OpenCode or Pi means the step stops with the provider's error (limits)
 or the steer waits for the next turn (idle wake); neither loses work.

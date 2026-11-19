@@ -80,20 +80,10 @@ as the change stands after QA. Slice 7 of `scratch/plan.md` takes up 19, 21,
     step's stop advice reads "Nothing is left in its order after codex"**; it
     does not name the entry that was passed over.
 
-18. **What does a headless Claude or Codex do with a question?** The parity
-    table's question row now reads "not shown" for both. No decoder fails a
-    turn on Claude's `AskUserQuestion` or Codex's `requestUserInput`
-    (`codex_decode.rs` only marks the Session as waiting), and no trace of
-    either was recorded. The orchestration doc's sentence ("a headless step
-    whose agent asks a question fails with the question as its reason") is
-    shown for OpenCode and Pi only.
-
-19. **A question is asked three times.** The failed turn is a failed step, so
-    `lf task run` starts it again twice and the model asks again each time
-    (`a_question_with_nobody_there_ends_the_step` takes 72s for that reason).
-    Stopping after the first question needs the retry loop to tell a question
-    from another failure. Chosen for review: slice 7 stops after one, by a
-    code on the failed turn.
+18. **What does a headless Claude or Codex do with a question?** No decoder
+    fails the turn on Claude's `AskUserQuestion` or Codex's
+    `requestUserInput` (Codex marks the Session as waiting). No trace of
+    either was recorded.
 
 20. **Pi's question text is read from `title` and `message`** of its
     `extension_ui_request`, taken from memory of Pi's RPC shape and the
@@ -107,29 +97,19 @@ as the change stands after QA. Slice 7 of `scratch/plan.md` takes up 19, 21,
     it; slice 7 renames it to what it shows. Should an interrupted step
     continue its own conversation instead?
 
-22. **What does an interrupted Claude or Codex worker record for its turn?**
-    Not read. The test runs OpenCode and Pi; the README says "not shown" for
-    the other two. On OpenCode and Pi the turn was recorded `failed` until
-    this slice. Slice 7 adds both to the test.
-
 23. **Ctrl-C in a terminal reaches the provider and lf together.** If the
     provider dies before lf's handler runs, `agent::interrupted()` is still
     false when the reader settles and the turn can read `failed`. The Graph's
     stop signals lf alone, so a Task step does not race.
 
 24. **The worker tests are slow only on the first run after a build**
-    (120-175s against 39s). Not looked into; nextest's limit is 300s.
+    (120-175s against 39s; 254-268s for all four together after slice 7).
+    Not looked into; nextest's limit is 300s, so this is close.
 
-25. **A Pi worker's usage is missing from `lf history usage --task`.** The
-    session file's turn id (`rpc-user-1`) and lf's request id name the same
-    turn in two `history.turns` rows; usage sits on the one with no Task.
-    Seen on the stand-in only. Fix candidates: name the Pi turn after the
-    session file's user entry, as OpenCode's driver does with its store row,
-    or have the transcript read attach usage to the recorded turn that
-    `covers` it, as it already does for completions. Chosen for review: the
-    second, in slice 7. QA's real RPC runs left session files under
-    `~/.pi/agent/sessions/--private-tmp-loo974-*--/`, and real Pi showed the
-    same missing usage.
+25. **Real Pi usage after the join.** QA saw Pi omit usage from
+    `lf history usage --task`. Slice 7 tests the join with the RPC stand-in.
+    The pre-fix real RPC session files are under
+    `~/.pi/agent/sessions/--private-tmp-loo974-*--/`.
 
 26. **`Driver::send_current` has no production caller.** Claude, Codex and Pi
     implement it and test it; steers reach a running turn only through the

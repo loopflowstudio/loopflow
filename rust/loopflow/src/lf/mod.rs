@@ -2491,12 +2491,12 @@ using lf open's ordinary host selection. Preview and --quote open nothing."
         json: bool,
     },
     /// Turn the Task's auto setting on or off: who takes its interactive steps
-    ///
-    /// On is `lf ship`: nobody is waited for, so the Task runs, standing in
-    /// for you at each interactive step, and may merge the PR. Off, nothing is
-    /// killed: the run waits at its next interactive step, or before a step
-    /// that merges, and auto-merge Loopflow armed is disarmed. With no ISSUE,
-    /// sets the checkout's Task.
+    #[command(
+        after_help = "On is `lf ship`: nobody is waited for, so the Task runs, standing in for you at \
+each interactive step, and may merge the PR. Off, nothing is killed: the run waits at its next \
+interactive step, or before a step that merges, and auto-merge Loopflow armed is disarmed. With \
+no ISSUE, sets the checkout's Task."
+    )]
     Auto {
         state: AutoSetting,
         issue: Option<String>,

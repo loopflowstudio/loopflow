@@ -128,12 +128,14 @@ bar outside the scroll view as "headers lock"; several comments as one line.
   reads the Diff and is gone for `verify` and for anyone reopening the Task
   after its PR is published.
 
-## Concept review, November 19 (fourth pass)
+## Concept review, November 19 (fifth pass)
 
-Page: `scratch/concept-review.html`. Reviewed: the combined Diff pane, the
-order file, `diff_hidden`, the private settings move. No concept merges or
-splits; the model holds as one comparison read three ways (order, hidden,
-filter). Nothing here needs a build before the demo.
+Page: `scratch/concept-review.html`. Reviewed: the two commits since the fourth
+pass (`7a7e367634`, `7b3484d303`). Both wording repairs that pass named are in:
+Focus's strip reads "Only X · N more files", and the Swift `["scratch/"]` says
+it is a copy of the catalog default. No concept merges or splits; the model
+holds as one comparison read three ways (order, hidden, filter). Nothing here
+needs a build before the demo.
 
 Stays different on purpose:
 

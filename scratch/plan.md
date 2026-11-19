@@ -217,7 +217,34 @@ Before this change both describe only `aaa_generated.txt`.
 
 ## What remains
 
-Nothing to build.
+One thing to build, from the concept review at `64d09064af`:
+
+- **The read command for a renamed file.** `git diff <range> -- '<path>'`
+  with only the new path returns the whole file as added: Git pairs a rename
+  only when both paths are in the pathspec. Run 2026-11-18 in a throwaway
+  repository: a 300-line file renamed and given one more line lists as
+  `+1 -0`, the one-path command returns `new file mode` and 301 added lines,
+  and `git diff --cached --stat -- new_name.txt old_name.txt` returns
+  `1 insertion(+)`. No qa fixture held a rename.
+
+  In `Change::prompt_section` (`rust/loopflow-execution/src/prompt/change.rs`),
+  when any file has `renamed_from`, follow the read command with:
+
+  ```
+  A renamed file needs both paths:
+    git diff <range> -- '<path>' '<old path>'
+  ```
+
+  Nothing else in the section changes, and a change with no rename renders
+  byte for byte as it does now. One test in `prompt::change::tests`: a large
+  staged change holding a renamed file with one edit; the section holds both
+  command lines and the `(from old)` line, and a change with no rename holds
+  only the first. Add the sentence to "Raw Diff" in `docs/config.md`.
+  Check with a real writer: `lf commit -a claude:haiku` on that fixture should
+  describe the edit, not an added file.
+
+  Passed over: `--no-renames` in the list and the command, which makes one
+  path always work and shows a moved 3,000-line file as +3000 and -3000.
 
 Left for later steps:
 
@@ -227,7 +254,9 @@ Left for later steps:
   CI's; not run here.
 - The open choices in `questions.md`; none blocks shipping.
 
-Larger than this Task, on `concept-review.html`: the Task workspace block as a
-fourth `ChangeRange` (a worker with `diff: true` is shown a change twice until
-then), and `gather_branch_change` treating only a branch named `main` as the
-default branch.
+Larger than this Task, on `concept-review.html`: `--diff files` as a weaker
+copy of the same list (it loads every changed file's contents and delivers
+their paths in a listed file; `--diff both` now gives the paths twice); the
+Task workspace block as a fourth `ChangeRange` (a worker with `diff: true` is
+shown a change twice until then); and `gather_branch_change` treating only a
+branch named `main` as the default branch.

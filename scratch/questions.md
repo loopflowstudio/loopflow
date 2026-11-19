@@ -51,3 +51,9 @@ Made headless at kickoff and concept review; each is reversible. Detail in
   has no admitted invocation" (`harness/native_session.rs:356`,
   `journal::current_lf_process_id()` was `None`) where the test expects "was
   deleted". Not diagnosed here; it wants its own Task.
+- For a renamed file the read command gets a second spelling with both paths
+  (plan, "What remains"). With one path Git returns the whole file as added.
+  Or list and read with `--no-renames`, so a move shows as a delete and an add?
+- `--diff files` loads every changed file's contents and delivers only their
+  paths, in a listed file; the `<lf:change>` list already holds them. Remove
+  it in its own Task, leaving `--diff` on or off? Not filed.

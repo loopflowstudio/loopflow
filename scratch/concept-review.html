@@ -20,65 +20,76 @@
   }
   body { background: var(--bg); color: var(--fg); font: 16px/1.55 -apple-system, "Segoe UI", sans-serif;
          max-width: 980px; margin: 0 auto; padding: 40px 24px 80px; }
-  h1 { font-size: 28px; line-height: 1.2; margin: 0 0 8px; }
-  h2 { font-size: 21px; margin: 44px 0 10px; }
-  h3 { font-size: 17px; margin: 24px 0 6px; }
-  p, li { max-width: 74ch; }
-  .lede { color: var(--muted); margin-top: 0; }
-  code, pre { font: 13.5px/1.5 ui-monospace, "SF Mono", Menlo, monospace; background: var(--code); border-radius: 4px; }
+  h1 { font-size: 30px; margin: 0 0 8px; }
+  h2 { font-size: 21px; margin: 44px 0 12px; }
+  h3 { font-size: 16px; margin: 0 0 8px; }
+  .lede { color: var(--muted); }
+  code, pre { font: 13px/1.5 ui-monospace, Menlo, monospace; background: var(--code); border-radius: 4px; }
   code { padding: 1px 5px; }
-  pre { padding: 14px 16px; overflow-x: auto; margin: 10px 0; }
-  table { border-collapse: collapse; width: 100%; margin: 12px 0; background: var(--card); }
-  th, td { text-align: left; vertical-align: top; padding: 9px 12px; border: 1px solid var(--line); }
-  th { font-weight: 600; }
+  pre { padding: 12px 14px; overflow-x: auto; margin: 8px 0; }
+  table { border-collapse: collapse; width: 100%; font-size: 14.5px; }
+  th, td { text-align: left; vertical-align: top; padding: 9px 10px; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 600; }
   .yes { color: var(--yes); font-weight: 700; }
   .no { color: var(--no); font-weight: 700; }
-  tr.proposed td:first-child { border-left: 4px solid var(--new); }
-  .tag { color: var(--new); font-weight: 600; }
   .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-  @media (max-width: 760px) { .cols { grid-template-columns: 1fr; } }
-  .card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 14px 18px; }
-  .card.proposed { border-left: 4px solid var(--new); background: var(--newbg); }
-  .card h3 { margin-top: 0; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 16px 18px; }
+  .proposed { border: 2px solid var(--new); background: var(--newbg); }
+  .tag { color: var(--new); font-weight: 600; }
   ol.q > li { margin-bottom: 14px; }
   ol.q ol { list-style: lower-alpha; margin-top: 4px; }
+  @media (max-width: 760px) { .cols { grid-template-columns: 1fr; } }
 </style>
 </head>
 <body>
 
 <h1>Showing an agent a change</h1>
-<p class="lede">Concept review for Task d92894 after the change was built and run, 2026-11-18, against
-base <code>3496a8761d</code> at <code>9f5f1fd770</code>. Anything on a <span class="tag">gold edge</span>
-is proposed; everything else is in the branch. It replaces the page written before any code.</p>
+<p class="lede">Concept review for Task d92894 with the whole change built and run twice, 2026-11-18,
+against base <code>3496a8761d</code> at <code>64d09064af</code>. Anything on a
+<span class="tag">gold edge</span> is proposed; everything else is in the branch. It replaces the page
+written at <code>9f5f1fd770</code>, whose proposal (the section in the first turn) is now built.</p>
 
 <p><strong>The area taken.</strong> Every place lf puts a change in front of an agent: the commit writer,
-the PR writer, <code>--diff patch</code> / <code>context: {diff: true}</code>, and the Task workspace block.
-The Task names the two writers; the branch moved the third onto the same type, so the review covers what
-that type is and how it reaches each agent.</p>
+the PR writer, <code>--diff patch</code> / <code>context: {diff: true}</code>,
+<code>--diff files</code>, and the Task workspace block. The Task names the two writers; the branch moved
+the third onto the same type, so the review covers what that type promises and whether each promise
+holds.</p>
 
-<h2>Two interactions, walked</h2>
+<h2>One interaction, walked</h2>
 
 <div class="cols">
   <div class="card">
-    <h3><code>lf commit</code> on 354 KB</h3>
-    <p>The writer is sent every file with its line counts and
-    <code>git diff --cached -- '&lt;path&gt;'</code>. It reads <code>src/zzz_retry.rs</code> and titles the
-    commit "Retry export once when the upstream times out". Codex, a step commit, 801 files and the PR
-    writer did the same (<code>scratch/qa.html</code>).</p>
-    <p><strong>Failure:</strong> the writer reads nothing. It still has the whole list.</p>
-    <p><strong>Recovery:</strong> none needed; nothing is stored.</p>
-    <p>This is right. No change.</p>
+    <h3><code>lf pr submit</code> on a branch that moves a module</h3>
+    <p>The branch renames <code>old_name.txt</code> (300 lines) to <code>new_name.txt</code>, edits one
+    line of it, and regenerates a 400&nbsp;KB fixture. The patch is over 15,000 tokens, so the writer gets
+    the list and the command:</p>
+<pre>Changed since origin/main, 2 files. Read one file's patch with:
+  git diff origin/main...HEAD -- '&lt;path&gt;'
+
+  +6000  -0   aaa_generated.txt
+     +1  -0   new_name.txt (from old_name.txt)</pre>
+    <p>The list is right: one line changed.</p>
   </div>
   <div class="card">
-    <h3><code>lf -b sayit --diff patch</code></h3>
-    <p>lf builds the same section, writes it to <code>.lf/prompts/…-changes.md</code>, and lists that path
-    in the context block among the other references.</p>
-    <p><strong>Failure, observed three runs of three:</strong> the agent never opened the file. On a branch
-    with one edited and one new file, both uncommitted, it ran its own <code>git diff main...HEAD</code> and
-    answered "The small2 branch adds nothing beyond main". The unread file listed the changed files.</p>
-    <p><strong>Recovery:</strong> the person notices and pastes the diff in.</p>
+    <h3>What the command returns</h3>
+<pre>$ git diff --cached -- 'new_name.txt'
+diff --git a/new_name.txt b/new_name.txt
+new file mode 100644
+--- /dev/null
++++ b/new_name.txt
+@@ -0,0 +1,301 @@</pre>
+    <p><strong>Failure, run here in a throwaway repository:</strong> Git pairs a rename only when both
+    paths are in the pathspec. With one, the writer is handed 301 added lines for a file the list says
+    changed by one. It reads the whole file to find nothing, or describes an addition.</p>
+    <p><strong>Recovery:</strong> the writer has to know to add the old path.
+    <code>git diff --cached --stat -- new_name.txt old_name.txt</code> gives
+    <code>1 insertion(+)</code>.</p>
   </div>
 </div>
+
+<p>Renames are what large branches are made of, and large branches are the only ones that take the
+reading path. The smaller cases (354&nbsp;KB, 801 files, 3,001 files, Codex, step commits, a path with a
+space and an apostrophe) all read the right file in qa; none of them held a rename.</p>
 
 <h2>Do the product's concepts and the code's concepts line up?</h2>
 
@@ -88,31 +99,37 @@ that type is and how it reaches each agent.</p>
     <td>The message is about the change: what is staged, or the branch against its base</td>
     <td><code>Change::read(Staged | Since)</code>, <code>prompt_section()</code> in the writer's prompt</td>
     <td class="yes">yes</td>
-    <td>Was a 20,000-character prefix. Fixed, and shown on real writers.</td>
+    <td>Was a 20,000-character prefix. Shown on real writers from 108&nbsp;KB to 706&nbsp;KB.</td>
   </tr>
   <tr>
     <td>One idea of "the change as the agent sees it": every file, how to read one, the patch when small</td>
-    <td><code>prompt/change.rs</code>, one type, one size rule (<code>PATCH_INLINE_TOKENS</code>)</td>
+    <td><code>prompt/change.rs</code>: one type, one size rule (<code>PATCH_INLINE_TOKENS</code>)</td>
     <td class="yes">yes</td>
-    <td>Three implementations and four limits became one. <code>DiffTier</code> and both <code>truncate_chars</code> are gone.</td>
+    <td>Three implementations and four limits became one.</td>
   </tr>
   <tr>
     <td><code>--diff patch</code>: "give the agent the diff"</td>
-    <td>A <code>changes</code> file, listed by path; the agent opens it if it thinks to</td>
-    <td class="no">no</td>
-    <td>One concept, two deliveries. The writers are shown the section; a Skill is shown a filename. Measured: the filename is not followed. The docs now say "it is not put in front of the agent", which describes a flag that does less than its name.</td>
-  </tr>
-  <tr>
-    <td>"What did this run's context hold?" (attribution)</td>
-    <td><code>attributed_context</code> pushes the section as <code>Kind::Diff</code> only if the task text contains it, and records a <code>StatOnly</code> decision regardless</td>
-    <td class="no">no</td>
-    <td>The section is never in the task text, so the diff is absent from attribution while the decision about it is recorded. Follows from the row above and is fixed with it.</td>
-  </tr>
-  <tr>
-    <td>Things you ask for by flag arrive with the request: <code>--docs</code>, <code>-c</code></td>
-    <td><code>format_task_prompt</code> appends clipboard and explicit docs to the first turn</td>
+    <td><code>format_task_prompt</code> appends an <code>&lt;lf:change&gt;</code> block after the clipboard</td>
     <td class="yes">yes</td>
-    <td><code>--diff</code> is the one explicit flag that does not go this way.</td>
+    <td>Was a listed file nobody opened. Built in <code>39c5ae5706</code>; a run with no <code>git diff</code> call named both files.</td>
+  </tr>
+  <tr>
+    <td>"What did this run's context hold?"</td>
+    <td><code>attributed_context</code> records the block as a <code>Diff</code> asset on the Task channel</td>
+    <td class="yes">yes</td>
+    <td>Fixed by the row above with no edit to the matching.</td>
+  </tr>
+  <tr>
+    <td>"The command reads any file's patch"</td>
+    <td>One spelling per range, one path: <code>git diff &lt;range&gt; -- '&lt;path&gt;'</code></td>
+    <td class="no">no</td>
+    <td>False for a renamed file: it returns the whole file as added. The list knows the old path and prints it; the command does not use it. The biggest mismatch left, below.</td>
+  </tr>
+  <tr>
+    <td><code>--diff files</code>: "the changed files"</td>
+    <td>Loads every changed file's contents (<code>DocumentSource::Diff</code>), then writes only their paths to a <code>changes</code> file with a fixed <code>git diff main...HEAD</code></td>
+    <td class="no">no</td>
+    <td>One name for two ideas (the catalog says "Include full requested file contents"; the agent gets paths), and one idea twice: the <code>&lt;lf:change&gt;</code> list already holds those paths. Larger than this work; below.</td>
   </tr>
   <tr>
     <td>An agent working a Task is told what the checkout changed</td>
@@ -124,95 +141,104 @@ that type is and how it reaches each agent.</p>
     <td>Notes under <code>scratch/</code> leave when the change lands</td>
     <td><code>ChangedFile.working_note</code> from <code>git::scratch::added</code></td>
     <td class="yes">yes</td>
-    <td>The PR writer used the marked note's "3 of 40" in its body.</td>
+    <td>The PR writer used a marked note's figure in its body.</td>
+  </tr>
+  <tr>
+    <td>"Every changed file, whatever the size"</td>
+    <td>One line per file, no ceiling</td>
+    <td class="yes">yes</td>
+    <td>As asked. At 3,001 files the list is 237&nbsp;KB, about 80,000 tokens. Question 2.</td>
   </tr>
   <tr>
     <td>Both writers do the same job</td>
     <td>The commit writer always skips permission prompts; the PR writer follows <code>yolo</code></td>
     <td class="no">no</td>
-    <td>Unchanged. The PR writer ran <code>git diff</code> without the flag, so nothing broke. Question 3.</td>
+    <td>Unchanged. The PR writer ran <code>git diff</code> without the flag in both qa passes. Question 3.</td>
   </tr>
 </table>
 
 <h2>The biggest mismatch</h2>
 
-<p>The branch made one type for showing an agent a change, then delivered it two ways. Where it is put in
-the prompt, a cheap model read the right file every time. Where it is put in a file, the model never
-opened it. Same section, same model; the only variable is whether lf showed it.</p>
+<p>The design rests on one sentence: the writer is given every file and a way to read any one. For a
+rename the way is wrong, and it is wrong in the direction that costs most, a whole file where the list
+promised a line.</p>
 
 <div class="cols">
   <div class="card">
     <h3>Before (in the branch)</h3>
-<pre>lf commit            prompt: "## Change" + section
-lf pr submit         prompt: "## Change" + section
---diff patch         .lf/prompts/…-changes.md
-                     context block: its path
-attribution          Diff asset: absent
-                     StatOnly decision: recorded</pre>
+<pre>Changed since origin/main, 2 files. Read one
+file's patch with:
+  git diff origin/main...HEAD -- '&lt;path&gt;'
+
+  +6000  -0   aaa_generated.txt
+     +1  -0   new_name.txt (from old_name.txt)</pre>
   </div>
   <div class="card proposed">
     <h3>After <span class="tag">(proposed)</span></h3>
-<pre>lf commit            prompt: "## Change" + section
-lf pr submit         prompt: "## Change" + section
---diff patch         first turn: section, after the
-                     request, beside -c and --docs
-attribution          Diff asset: Task channel
---diff files         changes file as on main: paths</pre>
+<pre>Changed since origin/main, 2 files. Read one
+file's patch with:
+  git diff origin/main...HEAD -- '&lt;path&gt;'
+A renamed file needs both paths:
+  git diff origin/main...HEAD -- '&lt;path&gt;' '&lt;old path&gt;'
+
+  +6000  -0   aaa_generated.txt
+     +1  -0   new_name.txt (from old_name.txt)</pre>
   </div>
 </div>
 
-<h3>Why this and not the alternatives</h3>
 <ul>
-  <li><strong>The size is already bounded.</strong> The section is the file list plus at most 15,000 tokens of
-  patch. <code>--docs</code> bodies go in the first turn with no bound at all.</li>
-  <li><strong>It is asked for.</strong> <code>--diff patch</code> and <code>context: {diff: true}</code> are off
-  by default and no builtin Skill sets them. Someone who turns one on wants the agent to have it.</li>
-  <li><strong>It is no more frozen than today.</strong> The file is written once at launch; so is a first
-  turn. The read command in the section is how the agent gets the current state either way.</li>
-  <li><strong>The code gets smaller.</strong> <code>ContextDelivery::prepare</code> loses its three-way match
-  and goes back to what it does on <code>main</code> for <code>diff_files</code>; attribution starts telling
-  the truth with no edit; the docs lose the caveat.</li>
+  <li>The two extra lines appear only when the change holds a rename, so every section qa read stays
+  byte for byte what it was.</li>
+  <li>Nothing in <code>Change</code> changes shape: <code>renamed_from</code> is already there.</li>
+  <li>The inlined patch is unaffected; Git pairs renames across the whole range.</li>
+  <li>Passed over: dropping rename detection (<code>--no-renames</code>) so list and command agree. The
+  list would then show a moved 3,000-line file as +3000 and -3000, which hides the one-line edit the
+  writer should describe.</li>
 </ul>
 
 <h3>Tested against three paths</h3>
 <table>
   <tr><th style="width:20%">Path</th><th>What happens</th></tr>
-  <tr><td>Normal</td><td><code>lf review --diff patch</code> on a small branch: the patch is in the first turn; the agent answers without a tool call. On a large one: the list and the command are in the first turn; it reads what it picks.</td></tr>
-  <tr><td>Failure</td><td>Compaction drops the first turn. The agent has lost the list, as it loses <code>--docs</code> bodies; <code>git diff</code> still works. The listed file would have survived, unread.</td></tr>
-  <tr><td>Recovery</td><td>Resume replays the transcript, which holds the section. Nothing new is stored.</td></tr>
-  <tr><td>Counterexample kept</td><td>A Task worker running a Skill with <code>diff: true</code> now sees a change twice: the workspace block (base, index, worktree) and this section (branch against <code>origin/&lt;base&gt;</code>). Two readings of one idea, each up to 15,000 tokens of patch. That is the workspace-block item below, and it exists today in weaker form.</td></tr>
-  <tr><td>Counterexample kept</td><td>A native-skill launch (<code>format_task_prompt</code> with arguments) appends docs after the message; the section goes the same way.</td></tr>
+  <tr><td>Normal</td><td>A branch that moves a directory and edits two files in it: the writer reads each with both paths and gets the edit.</td></tr>
+  <tr><td>Failure</td><td>The writer ignores the second line and passes one path. It gets the whole file, as today; the list still says <code>+1 -0 … (from …)</code>.</td></tr>
+  <tr><td>Recovery</td><td>None stored; the next read with both paths is right.</td></tr>
+  <tr><td>Counterexample kept</td><td>A pure rename with no edit (<code>+0 -0</code>): both paths return a header and no hunks, which is the truth.</td></tr>
+  <tr><td>Counterexample kept</td><td>A copy (<code>-C</code>) is not detected by default, so no line carries a source that is not a rename.</td></tr>
 </table>
 
 <h2>Larger than this work</h2>
 <ul>
+  <li><strong><code>--diff files</code> is a weaker copy of the same list.</strong> It reads every changed
+  file's contents and delivers their paths in a listed file, which qa showed agents do not open.
+  <code>--diff both</code> now gives the paths twice. Removing it means dropping the
+  <code>diff_files</code> setting, <code>DocumentSource::Diff</code>, the gather pass and the
+  <code>changes</code> branch in <code>ContextDelivery::prepare</code>; <code>.lf/config.yaml</code> is
+  read by the released <code>lf</code> too, so the key stays readable for a release.</li>
   <li><strong>The Task workspace block is a second "change as shown to an agent".</strong> It would take a
-  fourth <code>ChangeRange</code> (base against worktree, untracked included, which <code>Uncommitted</code>
-  now half does) and a per-file state. Then a worker with <code>diff: true</code> would get one section.</li>
+  fourth <code>ChangeRange</code> (base against worktree, untracked included) and a per-file state. Until
+  then a worker with <code>diff: true</code> is shown a change twice, each up to 15,000 tokens of
+  patch.</li>
   <li><strong><code>gather_branch_change</code> treats only a branch named <code>main</code> as the default
-  branch</strong> while asking Git for the default branch two lines later. On a repository whose default is
-  <code>trunk</code>, <code>--diff patch</code> there reads <code>origin/trunk...HEAD</code> and finds nothing,
-  so no harm, but <code>main</code> on such a repository is skipped as a feature branch. Unchanged by this
-  branch.</li>
+  branch</strong>, two lines before asking Git which branch is. Unchanged by this branch.</li>
   <li><strong><code>--diff patch</code> on a branch with commits shows committed work only.</strong>
-  Uncommitted edits on top are absent. Documented. The fourth range above would close it.</li>
-  <li><strong><code>lf task diff</code>'s 1&nbsp;MB whole-comparison cap</strong>
-  (<code>ops/task/snapshot.rs</code>): a person-facing read; its fix is a per-file read in the served API.</li>
+  Documented. The fourth range would close it.</li>
+  <li><strong><code>lf task diff</code>'s 1&nbsp;MB whole-comparison cap</strong>: a person-facing read; its
+  fix is a per-file read in the served API.</li>
 </ul>
 
 <h2>Questions</h2>
 <ol class="q">
-  <li>Where <code>--diff patch</code> puts the section.
+  <li>The read command for a renamed file.
     <ol>
-      <li>In the first turn, after the request, as <code>--docs</code> and <code>-c</code> are. <span class="tag">Chosen for review.</span></li>
-      <li>A listed file, as built. The flag stays cheap and does little.</li>
-      <li>Take <code>context: {diff: true}</code> back off <code>Change</code> and leave the old stat; ship only the writers.</li>
+      <li>A second command line with both paths, shown only when the change holds a rename. <span class="tag">Chosen for review.</span></li>
+      <li>Leave it; the list's <code>(from old)</code> is enough for a writer to work it out.</li>
+      <li>List and read without rename detection, so one path always works and a move shows as a delete and an add.</li>
     </ol>
   </li>
-  <li><code>docs/config.md</code> used to say "Point to Git inspection commands rather than inlining a frozen patch". Did that sentence mean:
+  <li>The list has no ceiling: 237&nbsp;KB at 3,001 files.
     <ol>
-      <li>never put patch text in a prompt, in which case 1a is wrong and the section should carry only the list and the command for Skills;</li>
-      <li>don't rely on it staying current, which the read command covers.</li>
+      <li>Leave it complete, as asked. <span class="tag">Chosen.</span></li>
+      <li>Collapse a directory of several hundred files to one line with a count.</li>
     </ol>
   </li>
   <li>The PR writer follows <code>yolo</code>; the commit writer always skips permission prompts.
@@ -221,10 +247,16 @@ attribution          Diff asset: Task channel
       <li>Give the PR writer the same floor.</li>
     </ol>
   </li>
-  <li>The size rule: 15,000 tokens for every caller. <span class="tag">Chosen</span> before code; the runs gave no reason to move it.
+  <li><code>docs/config.md</code> used to say "Point to Git inspection commands rather than inlining a frozen patch". Did that sentence mean:
     <ol>
-      <li>Keep.</li>
-      <li>100,000 bytes for the writers only.</li>
+      <li>never put patch text in a Skill's prompt, in which case the block should carry only the list and the command;</li>
+      <li>don't rely on it staying current, which the read command covers. <span class="tag">Assumed.</span></li>
+    </ol>
+  </li>
+  <li><code>--diff files</code>.
+    <ol>
+      <li>Its own Task: remove it, <code>--diff</code> becomes on or off. <span class="tag">Recommended, not filed.</span></li>
+      <li>Keep it as the cheap path-only option.</li>
     </ol>
   </li>
   <li>Untracked files in an uncommitted change are listed with "no patch: read the file".

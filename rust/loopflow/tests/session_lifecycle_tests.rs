@@ -26,6 +26,16 @@ struct Fixture {
 impl Fixture {
     /// `waits` keeps the stand-in attached until its stdin receives a line.
     fn new(waits: bool) -> Self {
+        Self::with_server_provider(waits, true)
+    }
+
+    /// Manual resumes pass their own PATH to the holder. Keep the stand-in
+    /// off the server's PATH so the recovery watcher cannot launch it first.
+    fn manual_conversations() -> Self {
+        Self::with_server_provider(false, false)
+    }
+
+    fn with_server_provider(waits: bool, server_has_provider: bool) -> Self {
         let home = tempfile::tempdir().unwrap();
         support::seed_store(home.path());
         let bin = home.path().join("bin");
@@ -40,11 +50,16 @@ impl Fixture {
         )
         .unwrap();
         std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let server_path = if server_has_provider {
+            format!("{}:/usr/bin:/bin", bin.display())
+        } else {
+            "/usr/bin:/bin".to_owned()
+        };
         Self {
             _server: MachineServer::start_with_path(
                 env!("CARGO_BIN_EXE_lf"),
                 home.path(),
-                &format!("{}:/usr/bin:/bin", bin.display()),
+                &server_path,
             ),
             home,
             repo: TestRepo::new(),
@@ -302,9 +317,9 @@ const PATIENCE: Duration = Duration::from_secs(180);
 const LAUNCH: [&str; 5] = ["-i", "--agent", "opencode", ":", "Review the parser"];
 
 #[test]
-fn task_conversation_starts_at_launch_not_creation() {
+fn task_checkout_prepares_the_conversation_and_manual_launch_reuses_it() {
     for headless in [false, true] {
-        let fixture = Fixture::new(false);
+        let fixture = Fixture::manual_conversations();
         std::fs::create_dir_all(fixture.repo.path().join(".lf")).unwrap();
         std::fs::write(
             fixture.repo.path().join(".lf/config.yaml"),
@@ -440,7 +455,7 @@ fn task_conversation_starts_at_launch_not_creation() {
 
 #[test]
 fn primary_readiness_is_metadata_only_for_repository_wave_and_task() {
-    let fixture = Fixture::new(false);
+    let fixture = Fixture::manual_conversations();
     support::register_task_with_pr(
         fixture.home.path(),
         fixture.repo.path(),
@@ -1170,7 +1185,7 @@ fn preparation_rejects_messages_without_admitting_or_launching_a_conversation() 
 
 #[test]
 fn ensured_task_conversation_opens_and_recovers_unrecorded_native_exits() {
-    let fixture = Fixture::new(false);
+    let fixture = Fixture::manual_conversations();
     support::register_task_with_pr(
         fixture.home.path(),
         fixture.repo.path(),
@@ -1247,7 +1262,7 @@ fn ensured_task_conversation_opens_and_recovers_unrecorded_native_exits() {
 #[test]
 fn ensured_conversation_recovers_native_exit_before_history_is_published() {
     {
-        let fixture = Fixture::new(false);
+        let fixture = Fixture::manual_conversations();
         support::register_task_with_pr(
             fixture.home.path(),
             fixture.repo.path(),

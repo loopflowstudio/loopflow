@@ -85,10 +85,10 @@ row names the test that shows it; "no" is a gap with its owner.
 | hears a steer sent while it runs, after its next tool | yes | yes | yes | yes | same test; `harness::context::tests::` |
 | runs as `yolo` in its Task's checkout | yes | yes | yes | yes | `harness::launch_matrix` |
 | is passed over when its CLI is not installed, or named once when it was the only choice | yes | yes | yes | yes | `task_graph_launch_tests::a_step_that_cannot_launch_is_not_started_again` |
-| fails the turn, with the question as its reason, when it asks one and nobody is there; the run stops after that one attempt | no: not read | no: not read | yes | yes | `task_graph_launch_tests::a_question_with_nobody_there_ends_the_step` |
+| fails the turn, with the question as its reason, when it asks one and nobody is there; the run stops after that one attempt | no: not read (Task 48edb9) | no: not read (Task 48edb9) | yes | yes | `task_graph_launch_tests::a_question_with_nobody_there_ends_the_step` |
 | stops on `lf task interrupt` with its turn recorded interrupted; the next `lf task run` starts the step again | yes | yes | yes | yes | `a_worker_stops_on_interrupt_and_the_next_run_starts_its_step_again_on_claude_and_codex`, `a_worker_stops_on_interrupt_and_the_next_run_starts_its_step_again_on_opencode_and_pi` |
-| moves to the next agent on a usage limit | yes | yes | no: failures unclassified (LOO-518) | no: failures unclassified | `agent::tests::` fallthrough tests |
-| as an idle work session, hears a steer | yes | yes | no: next turn only | no: next turn only | `server::wake::tests::` |
+| moves to the next agent on a usage limit | yes | yes | no: failures unclassified (LOO-518) | no: failures unclassified (Task 98edc6) | `agent::tests::` fallthrough tests |
+| as an idle work session, hears a steer | yes | yes | no: next turn only (Task 540073) | no: next turn only (Task 540073) | `server::wake::tests::` |
 
 Context and steers reach every harness the same way: it runs
 `lf __context-block` when the conversation starts and after each tool. Claude
@@ -107,10 +107,10 @@ timestamps cover it. The usage then appears in `lf history usage --task`.
 
 `opencode run --auto` cancels a question itself and tells the model to go on
 with assumptions; lf fails the turn at that tool call and stops the run. Pi
-opens an extension dialog, and lf fails the turn there. Both give the turn's
-error the code `unanswered_question`, and `lf task run` stops on it after one
-attempt with the question and the `lf steer` that answers it; the next run's
-conversation hears that steer. lf does not read a headless Claude's or Codex's
+opens an extension dialog, and lf fails the turn there. Both record the turn
+with the error code `unanswered_question` and the question. `lf task run` stops
+on it after one attempt, and it and `lf task status` print the question and the
+`lf steer` that answers it; the next run's conversation hears that steer. lf does not read a headless Claude's or Codex's
 question: no decoder fails a turn on one, and none has been recorded.
 
 On all four harnesses, `lf task interrupt` ends the worker with exit 130,

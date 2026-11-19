@@ -17,7 +17,8 @@ pub struct Turn {
     id: String,
     usage: TurnUsage,
     messages: usize,
-    failed: bool,
+    /// Why the turn failed so far; a later message Pi answers clears it.
+    error: Option<Value>,
     answered: bool,
     final_text: String,
     streamed_text: bool,
@@ -67,7 +68,7 @@ impl Turn {
             turn,
             usage: TurnUsage::default(),
             messages: 0,
-            failed: false,
+            error: None,
             answered: false,
             final_text: String::new(),
             streamed_text: false,
@@ -87,9 +88,13 @@ impl Turn {
     }
 
     /// End the turn, as Pi settled it or as its stream died with `error`.
+    /// A failure Pi already reported stays the turn's error.
     pub fn finish(&mut self, status: Lifecycle, error: Option<Value>) -> Vec<Decoded> {
+        if self.error.is_none() {
+            self.error = error;
+        }
         let mut facts = Vec::new();
-        let display = self.settle(status, error, &mut facts);
+        let display = self.settle(status, &mut facts);
         facts.extend(display.into_iter().map(Decoded::from));
         facts
     }
@@ -128,16 +133,12 @@ impl Turn {
                     });
                 }
                 self.streamed_text = false;
-                self.failed = message["stopReason"] == "error";
-                if self.failed {
-                    out.push(ConversationEvent::Error {
-                        code: "pi_model_error".into(),
-                        message: message["errorMessage"]
-                            .as_str()
-                            .unwrap_or("Pi model request failed")
-                            .into(),
-                        evidence: None,
-                    });
+                self.error = None;
+                if message["stopReason"] == "error" {
+                    let reason = message["errorMessage"]
+                        .as_str()
+                        .unwrap_or("Pi model request failed");
+                    out.push(self.fail("pi_model_error", reason));
                 }
                 let usage = message_usage(message);
                 if let Some(input_tokens) = usage.total_input_tokens {
@@ -224,21 +225,20 @@ impl Turn {
                 }
             }
             Some("agent_settled") => {
-                if !self.answered && !self.failed && event["aborted"] != true {
-                    out.push(ConversationEvent::Error {
-                        code: "pi_empty_turn".into(),
-                        message: "Pi settled without a nonempty final answer".into(),
-                        evidence: None,
-                    });
+                if !self.answered && self.error.is_none() && event["aborted"] != true {
+                    out.push(self.fail(
+                        "pi_empty_turn",
+                        "Pi settled without a nonempty final answer",
+                    ));
                 }
                 let status = if event["aborted"] == true {
                     Lifecycle::Interrupted
-                } else if self.failed || !self.answered {
+                } else if self.error.is_some() || !self.answered {
                     Lifecycle::Failed
                 } else {
                     Lifecycle::Completed
                 };
-                out.extend(self.settle(status, None, facts));
+                out.extend(self.settle(status, facts));
             }
             _ => {}
         }
@@ -264,13 +264,17 @@ impl Turn {
         self.usage.model = usage.model;
     }
 
-    /// `error` is why lf, not Pi, ended the turn; it is kept on the completion.
-    fn settle(
-        &mut self,
-        status: Lifecycle,
-        error: Option<Value>,
-        facts: &mut Vec<Decoded>,
-    ) -> Vec<ConversationEvent> {
+    /// Record why the turn failed and say it.
+    fn fail(&mut self, code: &str, message: &str) -> ConversationEvent {
+        self.error = Some(loopflow_storage::session::turn_error(code, message));
+        ConversationEvent::Error {
+            code: code.into(),
+            message: message.into(),
+            evidence: None,
+        }
+    }
+
+    fn settle(&mut self, status: Lifecycle, facts: &mut Vec<Decoded>) -> Vec<ConversationEvent> {
         let mut out = Vec::new();
         facts.push(ProviderFact::Activity(Signal::Yielded(status == Lifecycle::Completed)).into());
         if !self.final_text.is_empty() {
@@ -307,7 +311,7 @@ impl Turn {
             ProviderFact::TurnCompleted {
                 turn: Some(self.turn.clone()),
                 status,
-                detail: json!({"status": status.name(), "error": error}),
+                detail: json!({"status": status.name(), "error": self.error}),
             }
             .into(),
         );

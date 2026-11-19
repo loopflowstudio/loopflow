@@ -137,3 +137,5 @@ unread and the README says so.
     and the Graph moved to `human-review`. Only a `question` tool call stops
     the run. Should a step that ends with no change and a stated missing input
     stop like a question does?
+
+- QA after slice 8: a worker's question shows without the options the agent offered (OpenCode `questions[].options`, Pi `select` `options`). Left as is; adding them is a small change in `common::unanswered_question`'s callers.

@@ -1,217 +1,78 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><title>LOO-974 QA: real OpenCode and Pi workers</title>
+<html><head><meta charset="utf-8"><title>LOO-974 QA after slice 8</title>
 <style>
-body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:60rem;margin:2rem auto;padding:0 1rem;color:#1d1d1f}
-h1{font-size:1.5rem}h2{font-size:1.15rem;margin-top:2rem;border-bottom:1px solid #ddd;padding-bottom:.2rem}
-pre{background:#f5f5f7;padding:.7rem;overflow-x:auto;font-size:12.5px;border-radius:6px}
-code{font-size:13px}.ok{color:#1a7f37;font-weight:600}.bad{color:#cf222e;font-weight:600}.fix{color:#8250df;font-weight:600}
-table{border-collapse:collapse;width:100%}td,th{border:1px solid #ddd;padding:.35rem .5rem;text-align:left;vertical-align:top;font-size:14px}
+body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:60rem;margin:2rem auto;padding:0 1rem;color:#222}
+pre{background:#f5f5f2;padding:.7rem;overflow-x:auto;font-size:13px;white-space:pre-wrap}
+table{border-collapse:collapse;width:100%}td,th{border:1px solid #ddd;padding:.4rem .6rem;vertical-align:top;text-align:left}
+.ok{color:#1a7f37}.bad{color:#b42318}.fix{color:#7a4cc2}
 </style></head><body>
-<h1>LOO-974 QA: Task steps on real OpenCode and Pi</h1>
-<p>2026-11-18. Branch <code>lf</code> copied to <code>/tmp/lfq974/bin</code>, private <code>LF_HOME</code> with its own
-<code>lf server run</code>, the account's real <code>HOME</code> for provider logins. OpenCode 2.2.1 and Pi 1.3.0, both on
-<code>opencode/gemini-4-carbon</code>. A throwaway repo (<code>calc.py</code>) with Graph <code>qa</code>:
-<code>step: implement</code> then <code>interactive: human-review</code>. Commands ran from an agent shell that itself
-carried OpenCode caller env (<code>OPENCODE_SESSION_ID</code>, <code>OPENCODE_CONFIG_CONTENT</code>).</p>
+<h1>LOO-974 QA after slice 8</h1>
+<p>Branch <code>lf</code> at 74fe81132 (then with the fix below), private Machine at <code>/tmp/lfq8</code>, real
+<code>opencode</code> 2.2.1 and <code>pi</code> 1.3.0, model <code>opencode/gemini-4-carbon</code>. Graph
+<code>implement → interactive: human-review</code>. The earlier QA run (slices 1–7) is in this file's git history at 85272f531c.
+Slice 8 changed where a step's question is read from (the recorded turn, not error prose) and what a failed Pi turn keeps.</p>
 
 <table>
 <tr><th>Scenario</th><th>Result</th></tr>
-<tr><td>1. OpenCode worker, first run</td><td><span class="ok">settled</span>, but <span class="bad">session rooted in the main checkout</span> and the parent's plugin leaked in → <span class="fix">fixed</span></td></tr>
-<tr><td>2. OpenCode worker with a mid-step steer</td><td>step settled; <span class="bad">steer claimed, never acted on</span> → <span class="fix">fixed</span></td></tr>
-<tr><td>3. OpenCode again after the fixes</td><td><span class="ok">checkout directory, steer applied</span></td></tr>
-<tr><td>4. Pi worker with a mid-step steer</td><td><span class="ok">settled, steer applied</span>; usage missing (known, question 25)</td></tr>
-<tr><td>5. Interrupt an OpenCode worker, run again</td><td><span class="ok">turn <code>interrupted</code>, rerun settled</span></td></tr>
-<tr><td>6. Pinned Pi, Pi not on <code>PATH</code></td><td><span class="ok">one attempt, install hint</span>; <span class="bad">doubled punctuation</span> → <span class="fix">fixed</span></td></tr>
-<tr><td>7. <code>agents: [pi, opencode]</code>, Pi missing</td><td><span class="ok">ran on OpenCode, move recorded</span>; status hides it once settled</td></tr>
-<tr><td>Every <code>-a</code> Graph log</td><td><span class="bad">opened with "--agent has no effect"</span> → <span class="fix">fixed</span></td></tr>
+<tr><td>1. OpenCode worker calls <code>question</code></td><td><span class="ok">one attempt; stop line and status say the same sentence; <code>turns.error</code> carries <code>unanswered_question</code></span></td></tr>
+<tr><td>2. Answer by steer, rerun</td><td><span class="ok">divide raises ZeroDivisionError, Graph at human-review</span></td></tr>
+<tr><td>3. Pi worker raises a real dialog (<code>ctx.ui.select</code>)</td><td><span class="ok">first time reached: same stop, same status, same turn error</span></td></tr>
+<tr><td>4. Answer by steer, rerun (Pi)</td><td><span class="ok">code written, at human-review</span></td></tr>
+<tr><td>5. Pi killed mid-turn</td><td><span class="ok"><code>pi_disconnected</code> on the turn; lf retried; finished</span></td></tr>
+<tr><td>6. Pi hits a real Gemini 429 mid-run</td><td><span class="bad">turn failed with no error recorded</span> → <span class="fix">fixed</span></td></tr>
+<tr><td>7. Pi against a 429 stand-in endpoint, after the fix</td><td><span class="ok">three turns, each <code>pi_model_error</code> with the provider message</span>; three attempts (follow-up 98edc6)</td></tr>
+<tr><td>8. OpenCode worker with a mid-step steer</td><td><span class="ok">docstring applied, usage recorded ($0.15)</span></td></tr>
 </table>
 
-<h2>1. OpenCode worker, first run</h2>
-<pre>$ lf task run f42a49 -a opencode:opencode/gemini-4-carbon
-f42a49 · qa from start running as Graph run c87b6a4b-…
-# worker process:
-opencode run --standalone --format json --auto --model opencode/gemini-4-carbon --session ses_94048b83…
-$ lf task status f42a49
-  Graph qa: at human-review
-  Session: session_d2193e76…  f42a49 Add subtract  completed</pre>
-<p>The commit landed on the Task branch. The model's own answer flagged two things, and both checked out:</p>
-<pre>1. Worktree working directory resolved to the main repo: `opencode serve` had OS cwd
-   /private/tmp/lfq974/repo.f42a49-add-a-subtract, while the OpenCode session's working
-   directory and workspace root resolved to /private/tmp/lfq974/repo (main).
-2. Inherited OPENCODE_CONFIG_CONTENT merged the parent OpenCode plugin …</pre>
-<pre>sqlite&gt; select id, directory from session_v2 where …
-ses_94048b83…|/private/tmp/lfq974/repo                         &lt;- worker
-ses_41e74bd7…|/private/tmp/lfq974/repo.f42a49-add-a-subtract   &lt;- Task conversation</pre>
-<p>Reproduced by hand: the same <code>opencode run</code> from the checkout, with <code>PWD</code> set to the main repo,
-records the main repo; with a matching <code>PWD</code>, the checkout. OpenCode takes its directory from <code>$PWD</code>.
-lf set the child's cwd and left the caller's <code>PWD</code>.</p>
-<p><span class="fix">Fix:</span> <code>configure_agent_env</code> sets cwd and <code>PWD</code> together for every headless harness
-(four duplicated <code>current_dir</code> calls deleted); <code>NativeClient</code> sets <code>PWD</code> for terminal launches.
-Test: <code>harness::environment_tests::provider_child_starts_in_its_checkout_with_a_matching_pwd</code>.</p>
-<p><span class="fix">Fix:</span> lf read <code>OPENCODE_CONFIG_CONTENT</code> from its own environment and merged it, so inside an
-OpenCode conversation the parent's plugin and context came first. OpenCode's markers (<code>OPENCODE</code>,
-<code>OPENCODE_SESSION_ID</code>, <code>OPENCODE_TERMINAL</code>, <code>OPENCODE_CONFIG_CONTENT</code>) joined
-<code>CALLER_SESSION_ENV</code>; the launch matrix already sets every marker in the caller and asserts none reaches a provider.</p>
+<h2>1–2. OpenCode question</h2>
+<pre>$ tail graph-a97fac6a….log
+the run of qa from start stopped at implement: OpenCode asked a question with nobody there to answer it: Should divide raise or return None on b == 0?; answer with `lf steer ce8f3e "…"`, then `lf task run ce8f3e`
+$ lf task status ce8f3e
+  latest Graph: implement stopped: OpenCode asked a question with nobody there to answer it: Should divide raise or return None on b == 0?; answer with `lf steer ce8f3e "…"`, then `lf task run ce8f3e` · started by QA
+$ sqlite3 history.db "select provider,step,status,error from turns …"
+opencode|implement|failed|{"code":"unanswered_question","message":"OpenCode asked a question … b == 0?"}</pre>
+<p>After <code>lf steer ce8f3e 'Raise ZeroDivisionError…'</code> and <code>lf task run</code>: <code>Graph qa: at human-review</code>, commit
+"Add divide(a, b) raising ZeroDivisionError on zero divisor".</p>
 
-<h2>2. A mid-step steer on OpenCode</h2>
-<pre>$ lf steer ad5c57 'Also give multiply a one-line docstring that says "Return a times b."'
-steer_delivered: session_14abf5f6… 1795050200   (17:03:20; the worker committed at 17:03:52)
-$ cat calc.py
-def multiply(a, b):
-    return a * b                                 &lt;- no docstring</pre>
-<p>The plugin claimed the steer and put it in that request's system text. OpenCode stores no system text and the plugin
-sent it once, so every later model request in the turn had lost it. Claude and Codex keep a steer in the transcript.</p>
-<p><span class="fix">Fix:</span> <code>context_opencode.js</code> keeps what it has heard and sends it with every later request.
-<code>harness::context::tests::a_managed_opencode_turn_…</code> now asserts the steer on all three requests (it asserted the drop before).</p>
+<h2>3–4. Pi question</h2>
+<p>Pi has no question tool. A project <code>.pi/extensions/ask.ts</code> did not load: the model reported "In non-interactive Pi runs
+without <code>--approve</code> … Pi skips protected <code>.pi/</code> project extensions", and the step settled at human-review with nothing done
+(the known "a refusal reads as done", question 31). The same extension as a personal one in a private <code>PI_CODING_AGENT_DIR</code> loaded:</p>
+<pre>  latest Graph: implement stopped: Pi asked a question with nobody there to answer it: Should divide raise or return None on b == 0?; answer with `lf steer 2e0f06 "…"`, then `lf task run 2e0f06`
+pi|implement|failed|{"code":"unanswered_question","message":"Pi asked a question …"}|18723 input tokens</pre>
+<p>Steer and rerun: completed, divide written. The question reads without its options (<code>["raise","None"]</code>); OpenCode drops them the same way.</p>
 
-<h2>3. OpenCode after the fixes</h2>
-<pre>$ lf task run 90e8ba -a opencode:opencode/gemini-4-carbon; sleep 12
-$ lf steer 90e8ba 'Also give divide a one-line docstring that says "Return a over b."'
-  Graph qa: at human-review
-def divide(a, b):
-    """Return a over b."""
-    return a / b
-worker PWD=/private/tmp/lfq974/repo.ad5c57-add-a-multiply; no OPENCODE_SESSION_ID in its env
-session_v2.directory = the Task checkout
-$ lf history usage --task 90e8ba
-  implement   74,305 in   1,305 out   264,340 cache   $0.20   1/1</pre>
-
-<h2>4. Pi worker with a steer</h2>
-<pre>$ lf task run 00ab89 -a pi:opencode/gemini-4-carbon; sleep 15
-$ lf steer 00ab89 'Also give negate a one-line docstring that says "Return minus a."'
-  Graph qa: at human-review
-def negate(a):
-    """Return minus a."""
-    return -a
-57e2285 Add negate(a) to calc.py with docstring and tests
-$ lf history usage --task 00ab89
-  implement   -   -   -   -   0/0                 &lt;- question 25, as the plan predicted</pre>
-
-<h2>5. Interrupt, then run again (OpenCode)</h2>
-<pre>$ lf task interrupt 87c17c
-87c17c: stopped Graph qa at implement
-  latest Graph: implement: process exited with status 130 …
-$ lf session history session_0393f42a…
-turn ses_0c06d11d… interrupted input=0 output=0
-(no opencode run left)
-$ lf task run 87c17c -a opencode:…  →  at human-review, square(a) written</pre>
-
-<h2>6. Pinned harness not installed</h2>
-<pre>$ PATH=…without pi… lf task run 781b41 -a pi:opencode/gemini-4-carbon
-[1/2] implement
-Error: 'pi' is not installed. Install Pi 1.3 or later with `npm install -g --ignore-scripts @earendil-works/pi-coding-agent`. Configure its model and credentials in Pi.
-the run of qa from start stopped before any agent started: … credentials in Pi.; `lf task run 781b41` starts the run again there
-  latest Graph: implement: … credentials in Pi.. Inspect its history and effects, then launch fresh work</pre>
-<p>One attempt, the hint as the reason. <span class="fix">Fixed</span> the punctuation: the stop now reads
-"…stopped before any agent started, and `lf task run 781b41` starts it again there: &lt;cause&gt;", and status trims a
-trailing period before ". Inspect".</p>
-
-<h2>7. Missing first choice, OpenCode behind it</h2>
-<pre>$ lf set --global agents pi:opencode/gemini-4-carbon,opencode:opencode/gemini-4-carbon
-$ lf task run 34a3b2        →  at human-review, is_even written
-agent_limit_recoveries: pi | 'pi' is not installed; continuing on opencode:opencode/gemini-4-carbon</pre>
-<p>The step moved. Once it settled, <code>lf task status</code> no longer shows "implement went on under opencode",
-as with a limit move (question 29). No Task conversation started, since chats don't move; status reads
-<code>body: provider pi</code> (question 30).</p>
-
-<h2>Graph log header</h2>
-<p>Every <code>lf task run -a …</code> Graph log began with "This command does not start an agent; --agent has no effect":
-the internal <code>lf --agent … graph run</code> was missing from <code>Cli::may_launch_agent</code>, though it carries the agent to
-every step. <span class="fix">Fixed</span>; the routing test now checks <code>graph run</code> beside <code>ship</code>.</p>
+<h2>5–7. Pi failures</h2>
+<p>A Task long enough to kill hit Gemini's real per-minute quota on the first attempt. The turn read <code>failed</code> with an empty
+<code>error</code>, while the Graph log had the whole 429. Slice 8 kept lf-ended errors (disconnect, question) on Pi's completion but not the
+ones Pi itself reports (<code>pi_model_error</code>, <code>pi_empty_turn</code>); Codex, Claude and OpenCode all keep theirs.</p>
+<p class="fix">Fix: <code>pi_decode::Turn</code> holds <code>error: Option&lt;Value&gt;</code> in place of <code>failed: bool</code>; a model error or an empty settle sets it,
+a later answered message clears it (Pi's internal retries still recover), and a stream death keeps an earlier reported cause.
+Test <code>a_failed_pi_turn_keeps_why_on_its_completion</code>.</p>
+<pre>12|failed|{"code":"pi_model_error","message":"429: {\"message\":\"You exceeded your current quota (QA stand-in)\",…}"}
+13|failed|{"code":"pi_model_error",…}
+14|failed|{"code":"pi_model_error",…}
+The run of qa from start failed 3 times; this Task run stops here.</pre>
+<p>Killing the <code>pi</code> worker mid-turn: <code>{"code":"pi_disconnected","message":"Pi RPC stream closed"}</code>, then a retry that finished.</p>
 
 <h2>Checks</h2>
 <ul>
-<li><code>cargo test -p loopflow-execution --lib -- harness::launch_matrix harness::opencode provider_child</code>: 15 passed (246s)</li>
-<li><code>cargo test -p loopflow-execution --lib -- opencode_turn opencode_run</code>: 4 passed</li>
-<li><code>cargo test -p loopflow --lib -- lf::tests::</code>: 38 passed</li>
-<li><code>cargo test -p loopflow --lib -- task_graph_launch_tests::a_task_step_runs_as_a_worker_on_every_harness task_graph_launch_tests::a_step_that_cannot_launch_is_not_started_again</code>: 2 passed (280s, first run after a build; nextest's limit is 300s)</li>
-<li><code>cargo clippy -p loopflow-execution -p loopflow --all-targets -- -D warnings</code>: clean</li>
+<li><code>cargo test -p loopflow-execution --lib harness::pi_tests::</code>: 13 passed</li>
+<li><code>cargo clippy -p loopflow-execution --all-targets -- -D warnings</code>: clean</li>
+<li>Full suites: CI at gate</li>
 </ul>
 
-<h2>Round 2: slice 7 on real CLIs (2026-11-18, after compress)</h2>
-<p>Same private home, rebuilt branch <code>lf</code> at <code>6ddd177629</code> plus the fixes below. Pi 1.3.0 and OpenCode 2.2.1 on
-<code>opencode/gemini-4-carbon</code>; Claude and Codex on their defaults.</p>
-<table>
-<tr><th>Scenario</th><th>Result</th></tr>
-<tr><td>8. Pi worker usage (question 25)</td><td><span class="ok">one turn row, usage joined</span></td></tr>
-<tr><td>9. OpenCode worker asked to wait for an answer</td><td>model declined to ask and finished with no commit</td></tr>
-<tr><td>10. OpenCode worker made to call <code>question</code></td><td><span class="ok">one attempt, stop prints the question and both commands</span>; <span class="bad">"?." and status said "launch fresh work"</span> → <span class="fix">fixed</span></td></tr>
-<tr><td>11. Steer the answer, run again</td><td><span class="ok">fresh conversation used the answer, at human-review</span></td></tr>
-<tr><td>12. Interrupt a real Claude worker, run again</td><td><span class="ok">turn <code>interrupted</code>, rerun settled in a new Session</span></td></tr>
-<tr><td>13. Interrupt a real Codex worker, run again</td><td><span class="ok">turn <code>interrupted</code></span>; rerun hit the account's real usage limit; <span class="bad">"PM.. It goes on"</span> → <span class="fix">fixed</span></td></tr>
-<tr><td>14. <code>lf -b</code> batch in a Task checkout (compressed <code>is_task_checkout</code>)</td><td><span class="ok">wrote <code>note.txt</code> unprompted</span></td></tr>
-</table>
-
-<h2>8. Pi usage</h2>
-<pre>$ lf task run 507a14 -a pi:opencode/gemini-4-carbon; sleep 20
-$ lf steer 507a14 'Also give halve a one-line docstring that says "Return half of a."'
-def halve(a):
-    """Return half of a."""
-    return a / 2
-$ lf history usage --task 507a14
-implement      38,999   1,757   168,544   $0.11   1/1
-task-session   29,512   2,119    40,885   $0.08   1/1
-sqlite&gt; select provider, status, input_tokens, output_tokens, step from turns where session_id='session_f3ce…';
-pi|completed|38999|1757|implement          &lt;- one row</pre>
-
-<h2>9-11. A real question</h2>
-<p>Asked to "use your question tool to ask me…; do not guess", Gemini read the headless instructions and wrote
-"Stopping before writing any files: this step is running headless, so nobody is in the conversation to answer a
-`question` tool prompt" instead. The step settled with nothing committed and the Graph went on to <code>human-review</code>:
-a step that refused its work reads as done. Told "Your first and only action must be a call to the <code>question</code> tool", it asked:</p>
-<pre>Error: agent exited with code 1: unanswered_question: OpenCode asked a question with nobody there to answer it: Should clamp take (x, lo, hi) or (lo, hi, x)?. Check /private/tmp/lfq974/home/runs/e4/… for details.
-the run of qa from start stopped at implement: OpenCode asked … (lo, hi, x)?. Check /private/tmp/… for details; answer with `lf steer b8bb40 "…"`, then `lf task run b8bb40`
-$ lf task status b8bb40
-  latest Graph: implement: agent exited with code 1: unanswered_question: OpenCode asked … ?. Check … for details. Inspect its history and effects, then launch fresh work</pre>
-<p>One attempt. Two things read wrong: "?." where <code>run.rs</code> glued ". Check" onto the reason, and status advising
-"launch fresh work" against the stop's own advice. <span class="fix">Fixed:</span> the exit line puts "Check … for details." on its
-own line, as the provider-failure line already did; <code>harness::asked_question</code> reads the question from a step's error for
-both <code>lf task run</code>'s stop and status; status reads the stop's sentence. After the fix, on the real CLI:</p>
-<pre>the run of qa from start stopped at implement: OpenCode asked a question with nobody there to answer it: Should wrap take (x, n) or (n, x)?; answer with `lf steer c5cf2c "…"`, then `lf task run c5cf2c`
-  latest Graph: implement stopped: OpenCode asked a question with nobody there to answer it: Should wrap take (x, n) or (n, x)?; answer with `lf steer c5cf2c "…"`, then `lf task run c5cf2c`</pre>
-<p><code>a_question_with_nobody_there_ends_the_step</code> now also asserts the status advice and no "?.". The answer path:</p>
-<pre>$ lf steer b8bb40 "Use (x, lo, hi). Now write clamp in calc.py; do not ask again."
-$ lf task run b8bb40 -a opencode:opencode/gemini-4-carbon   →  at human-review
-def clamp(x, lo, hi): …    c0b2f1e Add clamp(x, lo, hi) to calc.py</pre>
-
-<h2>12-13. Interrupt on Claude and Codex</h2>
-<pre>$ lf task interrupt b675a9        (claude, 15 s into the turn)
-  latest Graph: implement: process exited with status 130. …
-turns: claude|interrupted|2|163
-$ lf task run b675a9 -a claude    →  at human-review, a second implement Session
-$ lf task interrupt 1818cb        (codex)
-turns: codex|interrupted||
-$ lf task run 1818cb -a codex
-  latest Graph: implement is waiting for codex capacity until Nov 18 20:40: provider_rate_limited: You’ve hit your usage limit. … try again at 8:38 PM.. It goes on by itself.</pre>
-<p>No provider left under the QA home after either interrupt. Codex's rerun is blocked by the account, not by lf; stopped it with
-<code>lf task interrupt</code>. <span class="fix">Fixed</span> the doubled period: the waiting line trims the provider's own period, as the
-stopped line already did.</p>
-
-<h2>14. Batch in a Task checkout</h2>
-<pre>$ cd repo.507a14-add-a-halve
-$ lf -b -a opencode:opencode/gemini-4-carbon : "Create a file named note.txt containing the word hi…"
-done
-$ cat note.txt
-hi</pre>
-
-<h2>Round 2 checks</h2>
-<ul>
-<li><code>cargo test -p loopflow --lib task_graph_launch_tests::a_question_with_nobody_there_ends_the_step</code>: passed (84s)</li>
-<li><code>cargo test -p loopflow-execution --lib ops::task_execution::</code>: 2 passed</li>
-<li><code>cargo clippy -p loopflow-execution -p loopflow --all-targets -- -D warnings</code>: clean</li>
-</ul>
-
-<h2>What works, what wasn't reached, what's still wrong</h2>
-<p><b>Works now:</b> <code>lf task run</code> on real OpenCode and Pi settles <code>implement</code>, commits in the Task checkout,
-takes a mid-step steer and records usage (Pi included); a real OpenCode question stops the run after one attempt with the question
-and the two commands, and steer-then-run answers it; real Claude and Codex workers stop on interrupt with the turn
-<code>interrupted</code>, and Claude's rerun settles; a missing pinned CLI is refused after one attempt; a missing first choice is passed over.</p>
-<p><b>Not reached:</b> a real Pi dialog (question 20: Pi's question text is still read from memory of its RPC shape); Codex's rerun after
-interrupt (the account hit its usage limit until 20:40); typing into an OpenCode Task conversation.</p>
+<h2>Where it stands</h2>
+<p><b>Works:</b> questions from real OpenCode and Pi workers stop the run once, read the same in the stop and in status, come from
+<code>history.turns</code>, and resume after a steer. Failed Pi turns now record why. Steers and usage still land after the main merge.</p>
+<p><b>Not reached:</b> Claude and Codex this run (slice 8 touched their code only by deleting <code>send_current</code>; their mid-turn steers go
+through the hook, covered by the earlier run).</p>
 <p><b>Still wrong, worst first:</b></p>
 <ol>
-<li>A worker that refuses its work and says why settles the step: the Graph moved to <code>human-review</code> with nothing committed (scenario 9, question 31).</li>
-<li>A missing first choice's move vanishes from status once the step settles (29), and no Task conversation opens on the next agent (30).</li>
-<li>Worker tests take 250-280s on the first run after a build against a 300s limit (24).</li>
+<li>A Pi quota 429 burns three Graph attempts (filed: 98edc6).</li>
+<li>A project Pi extension silently doesn't load in a headless worker; the worker refuses and the step settles as done (question 31).</li>
+<li>A question shows without the options the agent offered.</li>
+<li>The worker Session that failed on a question lists as <code>completed</code> in <code>lf task status</code>.</li>
+<li>With no <code>.gitignore</code>, the after-step commit took <code>__pycache__</code> ("lf implement: Add compiled Python 3.13 bytecode").</li>
 </ol>
 </body></html>

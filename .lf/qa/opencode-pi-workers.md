@@ -48,6 +48,21 @@ What to read afterwards:
   `'This Task tests the question tool. Your first and only action must be a
   call to the \`question\` tool asking: "…?" Call it even though the run is
   headless.'` Then `lf steer <id> '<answer>'` and `lf task run <id>`.
+- A real Pi question: Pi has no question tool, and headless Pi skips
+  untrusted project `.pi/extensions/`. Copy `~/.pi/agent/{auth,settings}.json`
+  into `$Q/piagent/` (mode 700, delete after), add
+  `$Q/piagent/extensions/ask.ts` registering a tool whose `execute` calls
+  `ctx.ui.select(question, options)`, and export `PI_CODING_AGENT_DIR=$Q/piagent`
+  for both `lf server run` and `lf task run`. Brief: "Your first and only
+  action must be a call to the `ask` tool …".
+- A Pi model failure on demand: in the same agent dir, a `models.json`
+  provider (`"api": "openai-completions"`, dummy `apiKey`) whose `baseUrl`
+  is a local server answering 429; run `-a pi:<provider>/<model>`. The step
+  fails three times (lf's Graph retry) and each `turns.error` reads
+  `pi_model_error`.
+- Kill a Pi worker mid-turn: its process title is `pi`, a child of the
+  `lf --batch … skill implement` process; `kill -9` it. The turn reads
+  `pi_disconnected`, then lf retries the Graph.
 - Claude and Codex workers interrupt the same way (`-a claude`, `-a codex`);
   read `turns.status` in `$LF_HOME/history.db`. Codex can hit the account's
   real usage limit, after which the step waits with "waiting for codex

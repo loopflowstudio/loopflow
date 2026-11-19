@@ -5,7 +5,7 @@ use std::time::Duration;
 use serde_json::json;
 use tokio::sync::mpsc;
 
-use super::fact::{Decoded, ProviderTurn};
+use super::fact::{Decoded, ProviderFact, ProviderTurn};
 use super::pi::Driver as PiDriver;
 use super::pi_decode::Turn;
 use super::Driver;
@@ -478,6 +478,47 @@ fn pi_empty_final_answers_fail_but_tool_steps_and_internal_retries_can_recover()
             ..
         })
     ));
+}
+
+/// What a failed turn's completion records as its error.
+fn completed_error(decoded: Vec<Decoded>) -> serde_json::Value {
+    decoded
+        .into_iter()
+        .find_map(|decoded| match decoded {
+            Decoded::Fact(ProviderFact::TurnCompleted { detail, .. }) => {
+                Some(detail["error"].clone())
+            }
+            _ => None,
+        })
+        .expect("turn completion")
+}
+
+#[test]
+fn a_failed_pi_turn_keeps_why_on_its_completion() {
+    let provider_turn = || ProviderTurn {
+        thread: "/tmp/pi-session.jsonl".into(),
+        turn: "turn".into(),
+    };
+    let mut turn = Turn::new(provider_turn());
+    turn.event(&json!({"type":"message_end","message":{"role":"assistant","content":[],"stopReason":"error","errorMessage":"429 quota exceeded"}}));
+    let settled = turn.event(&json!({"type":"agent_settled","aborted":false}));
+    assert_eq!(
+        completed_error(settled),
+        json!({"code":"pi_model_error","message":"429 quota exceeded"})
+    );
+
+    let mut turn = Turn::new(provider_turn());
+    let settled = turn.event(&json!({"type":"agent_settled","aborted":false}));
+    assert_eq!(completed_error(settled)["code"], "pi_empty_turn");
+
+    // A model error Pi reported stays the cause when its stream then closes.
+    let mut turn = Turn::new(provider_turn());
+    turn.event(&json!({"type":"message_end","message":{"role":"assistant","content":[],"stopReason":"error","errorMessage":"overloaded"}}));
+    let died = turn.finish(
+        Lifecycle::Failed,
+        Some(json!({"code":"pi_disconnected","message":"Pi RPC stream closed"})),
+    );
+    assert_eq!(completed_error(died)["code"], "pi_model_error");
 }
 
 #[test]

@@ -201,9 +201,9 @@ pub struct AgentConfig {
     pub output_schema: Option<serde_json::Value>,
     /// Resolved harness and provider model.
     pub agent: Agent,
-    /// Agents a Graph step moves to when a usage limit or unavailable model
-    /// refuses `agent`: the rest of the configured order (`default_agent`,
-    /// then `agents`). Empty when the agent was an explicit choice.
+    /// Agents a headless launch moves to when a usage limit, an unavailable
+    /// model or a revoked login refuses `agent`, as `Config::resolve_agents`
+    /// gives them. Empty when the agent was an explicit `harness:model`.
     pub fallback_agents: Vec<Agent>,
     /// Max turn budget when supported by the harness.
     pub max_turns: Option<u32>,
@@ -448,9 +448,9 @@ pub struct ProcessConfig {
     pub timeout: Option<Duration>,
     /// Live resources for this lf invocation, retained across provider retries.
     pub runtime: Option<LfProcessRuntime>,
-    /// A Graph step goes on after a limit: it moves through its agents and
-    /// waits for capacity. Everything else headless (commit messages, PR text)
-    /// has someone waiting on it and fails now.
+    /// A Graph step waits for capacity once a usage limit has refused every
+    /// agent in its order. Everything else headless (commit messages, PR
+    /// text) has someone waiting on it and fails then.
     pub wait_for_capacity: bool,
 }
 
@@ -807,6 +807,20 @@ pub enum AgentFailure {
     CredentialInvalidated,
 }
 
+impl AgentFailure {
+    /// The failure a harness decoder's error code states. `None` for a code
+    /// that names no cause (`codex_error`); the provider's words decide then.
+    pub(crate) fn from_code(code: &str) -> Option<Self> {
+        match code {
+            "provider_rate_limited" => Some(Self::UsageLimit),
+            "provider_model_unavailable" => Some(Self::ModelUnavailable),
+            "provider_credential_invalidated" => Some(Self::CredentialInvalidated),
+            "provider_capacity" => Some(Self::Capacity),
+            _ => None,
+        }
+    }
+}
+
 /// Build `thread/start` params for Codex app-server sessions. `headless` runs
 /// get Loopflow's permission floor; attended Sessions keep Codex's own.
 pub fn build_codex_thread_start_params(
@@ -1050,7 +1064,14 @@ fn _run_with_retries(
     mut run: impl FnMut(&AgentConfig, bool) -> Result<AgentProcessResult, CoreError>,
     mut wait: impl FnMut(Duration),
 ) -> Result<AgentProcessResult, CoreError> {
-    let rungs = _fallthrough_rungs(launch, process)?;
+    // The order to move through when a provider refuses: the launch's agent,
+    // then its fallbacks.
+    let mut rungs: Vec<Agent> = Vec::new();
+    for agent in std::iter::once(&launch.agent).chain(&launch.fallback_agents) {
+        if !rungs.contains(agent) {
+            rungs.push(agent.clone());
+        }
+    }
     let mut rung = 0;
     let mut attempt = launch.clone();
     let mut launched = false;
@@ -1164,47 +1185,8 @@ fn _with_original_task(prompt: &str, launch: &AgentConfig) -> String {
     format!("{prompt}\n\nOriginal task:\n\n{}", launch.task_prompt)
 }
 
-/// The agents a Graph step tries after a usage limit or unavailable model.
-/// With an order to move through (`default_agent`, then `agents`) it is that order
-/// as written, a bare harness on its configured model. With none, a bare
-/// harness tries its other models and an explicit `harness:model` stays put.
-/// Only a Graph step moves automatically.
-fn _fallthrough_rungs(
-    launch: &AgentConfig,
-    process: &ProcessConfig,
-) -> Result<Vec<Agent>, CoreError> {
-    let first = launch.agent.to_owned();
-    if !process.wait_for_capacity {
-        return Ok(vec![first]);
-    }
-    let mut order: Vec<Agent> = std::iter::once(first.clone())
-        .chain(launch.fallback_agents.iter().cloned())
-        .collect();
-    if launch.fallback_agents.is_empty() && first.model.is_none() {
-        order.extend(
-            first
-                .harness
-                .harness()
-                .model_rungs()
-                .iter()
-                .map(|model| Agent {
-                    harness: first.harness,
-                    model: Some((*model).to_owned()),
-                }),
-        );
-    }
-    let mut rungs: Vec<Agent> = Vec::new();
-    for rung in order {
-        if !rungs.contains(&rung) {
-            rungs.push(rung);
-        }
-    }
-    Ok(rungs)
-}
-
 /// Put the current attempt on `agent`. The thread moves within its provider;
-/// another provider reads the
-/// conversation so far and begins its own.
+/// another provider reads the conversation so far and begins its own.
 fn _climb(
     origin: &AgentConfig,
     agent: &Agent,
@@ -1213,35 +1195,41 @@ fn _climb(
 ) -> AgentConfig {
     let mut next = origin.clone();
     next.agent = agent.clone();
-    let same_provider = origin.agent.harness == agent.harness;
-    if !same_provider {
-        next.resume_token = None;
-        next.skill_invocation = None;
-        next.task_prompt = _history_import(process)
-            .unwrap_or_else(|| _with_original_task(AGENT_FAILOVER_PROMPT, launch));
+    if origin.agent.harness == agent.harness {
+        return next;
     }
+    next.resume_token = None;
+    (next.skill_invocation, next.task_prompt) = match _history_import(process) {
+        Ok(Some(turn)) => (None, turn),
+        // The provider refused before the agent said anything: the launch's
+        // own first turn, whole.
+        Ok(None) => (launch.skill_invocation.clone(), launch.task_prompt.clone()),
+        Err(error) => {
+            tracing::warn!(%error, "conversation could not move providers; the task starts over");
+            (
+                launch.skill_invocation.clone(),
+                _with_original_task(AGENT_FAILOVER_PROMPT, launch),
+            )
+        }
+    };
     next
 }
 
-/// The conversation so far as the next provider's first turn, through the same
-/// import `lf session new -a` uses. None when the step has no Session or its
-/// transcript cannot be read yet; the task then starts over on the checkout.
-fn _history_import(process: &ProcessConfig) -> Option<String> {
-    let (session_id, _) = process.runtime.as_ref()?.session_attachment()?;
-    let imported = (|| -> anyhow::Result<String> {
-        let store = crate::store::open_sqlite(&crate::store::database_path_from_env()?)?;
-        let session = store
-            .session(&session_id)?
-            .ok_or_else(|| anyhow::anyhow!("Session {session_id} is not recorded"))?;
-        crate::ops::human_session::conversation_log::continuation(&store, &session)
-    })();
-    match imported {
-        Ok(turn) => Some(turn),
-        Err(error) => {
-            tracing::warn!(%error, "conversation could not move providers; the task starts over");
-            None
-        }
-    }
+/// The conversation so far as the next provider's first turn, through the
+/// import `lf session new -a` uses. None when the agent has not replied or
+/// used a tool; an error when the run has no Session or its transcript cannot
+/// be read yet.
+fn _history_import(process: &ProcessConfig) -> anyhow::Result<Option<String>> {
+    let (session_id, _) = process
+        .runtime
+        .as_ref()
+        .and_then(|runtime| runtime.session_attachment())
+        .ok_or_else(|| anyhow::anyhow!("the run has no Session"))?;
+    let store = crate::store::open_sqlite(&crate::store::database_path_from_env()?)?;
+    let session = store
+        .session(&session_id)?
+        .ok_or_else(|| anyhow::anyhow!("Session {session_id} is not recorded"))?;
+    crate::ops::human_session::conversation_log::continuation_of_work(&store, &session)
 }
 
 /// The provider's own words for a failure, when it gave any.
@@ -1270,8 +1258,15 @@ fn _classify_agent_failure(result: &AgentProcessResult) -> Option<AgentFailure> 
     _find_provider_error(result, classify_retryable_agent_failure)
 }
 
+/// A provider's line as the phrase lists read it: lowercase, with typographic
+/// apostrophes (Codex writes "You\u{2019}ve") as ASCII.
+fn _provider_words(line: &str) -> String {
+    line.to_ascii_lowercase()
+        .replace(['\u{2018}', '\u{2019}'], "'")
+}
+
 fn _model_unavailable(text: &str) -> Option<()> {
-    let text = text.to_ascii_lowercase();
+    let text = _provider_words(text);
     let names_model = text.contains("model")
         || crate::config::CLAUDE_MODEL_FAMILIES
             .iter()
@@ -1282,6 +1277,7 @@ fn _model_unavailable(text: &str) -> Option<()> {
                 "is unavailable",
                 "is currently unavailable",
                 "is not available",
+                "is not supported",
             ]
             .iter()
             .any(|phrase| text.contains(phrase))))
@@ -1289,9 +1285,8 @@ fn _model_unavailable(text: &str) -> Option<()> {
 }
 
 pub(crate) fn credential_invalidated_failure(text: &str) -> Option<()> {
-    let text = text.to_ascii_lowercase();
+    let text = _provider_words(text);
     (text.contains("token_invalidated")
-        || text.contains("refresh_token_invalidated")
         || text.contains("refresh token was revoked")
         || text.contains("access token could not be refreshed")
         || text.contains("your session has ended. please log in again"))
@@ -1308,7 +1303,7 @@ fn _find_provider_error<T>(
 }
 
 pub(crate) fn classify_retryable_agent_failure(text: &str) -> Option<AgentFailure> {
-    let text = text.to_ascii_lowercase();
+    let text = _provider_words(text);
     if text.contains("at capacity")
         || text.contains("capacity temporarily unavailable")
         || text.contains("capacity issue")
@@ -1345,12 +1340,11 @@ pub(crate) fn classify_retryable_agent_failure(text: &str) -> Option<AgentFailur
     }
 }
 
-/// A provider's line saying the account's quota is spent, from a step's stderr
-/// or the line a native Claude displayed. Claude's openers are its own list of
-/// usage-limit messages; its capacity, per-model and seat-type lines name no
-/// spent window.
-fn subscription_limit_text(line: &str) -> Option<()> {
-    let text = line.to_ascii_lowercase();
+/// A provider's line saying the account's quota is spent, for a failure the
+/// provider gave no type. Claude's openers are its own list of usage-limit
+/// messages; its capacity, per-model and seat-type lines name no spent window.
+pub(crate) fn subscription_limit_text(line: &str) -> Option<()> {
+    let text = _provider_words(line);
     (text.contains("you've hit your")
         || text.contains("you've reached your")
         || text.contains("you're out of usage credits")
@@ -1835,29 +1829,6 @@ trust_level = "trusted"
         assert_eq!(attempts, ["claude:fable", "codex"]);
     }
 
-    #[test]
-    fn bare_interactive_returns_a_quota_refusal_without_retry() {
-        let launch = AgentConfig {
-            agent: crate::config::Agent::parse("claude:fable").unwrap(),
-            fallback_agents: vec![crate::config::Agent::parse("codex").unwrap()],
-            ..crate::agent::AgentConfig::default()
-        };
-        let mut attempts = 0;
-        let result = _run_with_retries(
-            &launch,
-            &ProcessConfig::default(),
-            &[],
-            |_, _| {
-                attempts += 1;
-                Ok(failed_result("claude_result: You've hit your Fable limit"))
-            },
-            |_| panic!("interactive refusal cannot retry"),
-        )
-        .unwrap();
-        assert_eq!(result.exit_code, 1);
-        assert_eq!(attempts, 1);
-    }
-
     fn failed_result(message: &str) -> AgentProcessResult {
         AgentProcessResult {
             exit_code: 1,
@@ -1908,6 +1879,7 @@ trust_level = "trusted"
             "claude_result: Fable 5 is currently unavailable. Switch to another model.",
             "claude_result: Selected model is not available.",
             "codex_error: model_not_found",
+            "codex_error: The 'gpt-6.2-sol' model is not supported when using Codex with a ChatGPT account.",
         ] {
             assert_eq!(
                 _classify_agent_failure(&failed_result(message)),
@@ -2086,6 +2058,16 @@ trust_level = "trusted"
         }
     }
 
+    /// LOO-974's `implement` step, 2026-11-18, as the step's stderr held it.
+    #[test]
+    fn codex_usage_limit_with_a_typographic_apostrophe_is_a_usage_limit() {
+        let line = "codex_error: You\u{2019}ve hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/settings/usage to purchase more credits or try again at 3:36 PM.";
+        assert_eq!(
+            _classify_agent_failure(&failed_result(line)),
+            Some(AgentFailure::UsageLimit)
+        );
+    }
+
     #[test]
     fn claude_lines_naming_no_spent_window_are_not_subscription_limits() {
         for line in [
@@ -2229,7 +2211,7 @@ trust_level = "trusted"
             task_prompt: "compress the diff".into(),
             ..crate::agent::AgentConfig::default()
         };
-        let refused = || failed_result("codex_error: You've hit your usage limit");
+        let refused = || failed_result("codex_error: You’ve hit your usage limit");
         let mut scripted = vec![refused(), limited_result(), done()].into_iter();
         let mut attempts = Vec::new();
         let result = _run_with_retries(
@@ -2268,7 +2250,7 @@ trust_level = "trusted"
             &[],
             |_, _| {
                 attempts += 1;
-                Ok(failed_result("codex_error: You've hit your usage limit"))
+                Ok(failed_result("codex_error: You’ve hit your usage limit"))
             },
             |delay| waits.push(delay),
         )
@@ -2278,7 +2260,7 @@ trust_level = "trusted"
         assert_eq!(result.failure, Some(AgentFailure::UsageLimit));
         assert!(result
             .stderr
-            .starts_with("codex_error: You've hit your usage limit\nNo fallback remains."));
+            .starts_with("codex_error: You’ve hit your usage limit\nNo fallback remains."));
         // What it records names the way out; with an order, what was tried.
         let advice = _limit_stop_advice("codex", &launch, &[Agent::parse("codex").unwrap()]);
         assert_eq!(
@@ -2336,30 +2318,54 @@ trust_level = "trusted"
     }
 
     #[test]
-    fn headless_work_outside_a_graph_stops_at_a_usage_limit_without_moving_or_waiting() {
+    fn headless_work_outside_a_graph_moves_through_its_order_and_never_waits() {
         // `lf commit` and `lf pr submit` message generation: someone is waiting.
         let launch = AgentConfig {
-            agent: crate::config::Agent::parse("claude").unwrap(),
-            fallback_agents: vec![crate::config::Agent::parse("codex").unwrap()],
+            agent: crate::config::Agent::parse("codex").unwrap(),
+            fallback_agents: vec![crate::config::Agent::parse("claude").unwrap()],
+            task_prompt: "describe the diff".into(),
+            skill_invocation: Some(crate::skills::invocation::SkillInvocation {
+                skill: crate::graph::Skill::named("describe"),
+                arguments: "this diff".into(),
+            }),
             ..crate::agent::AgentConfig::default()
         };
-        let process = ProcessConfig::default();
-        let mut attempts = 0;
-        let mut waits = Vec::new();
-        let result = _run_with_retries(
-            &launch,
-            &process,
-            &[],
-            |_, _| {
-                attempts += 1;
-                Ok(limited_result())
-            },
-            |delay| waits.push(delay),
-        )
-        .unwrap();
-        assert_eq!(attempts, 1);
-        assert!(waits.is_empty());
-        assert_eq!(result.failure, Some(AgentFailure::UsageLimit));
+        let refused = || failed_result("codex_error: You’ve hit your usage limit");
+        for (scripted, agents, failure) in [
+            (vec![refused(), done()], vec!["codex", "claude"], None),
+            (
+                vec![refused(), limited_result()],
+                vec!["codex", "claude"],
+                Some(AgentFailure::UsageLimit),
+            ),
+        ] {
+            let mut scripted = scripted.into_iter();
+            let mut attempts = Vec::new();
+            let result = _run_with_retries(
+                &launch,
+                &ProcessConfig::default(),
+                &[],
+                |config, _| {
+                    assert_eq!(config.skill_invocation, launch.skill_invocation);
+                    assert!(config.task_prompt.contains(&launch.task_prompt));
+                    attempts.push(config.agent.to_string());
+                    Ok(scripted.next().expect("scripted attempt"))
+                },
+                |delay| assert_eq!(delay, Duration::ZERO, "a command never waits"),
+            )
+            .unwrap();
+            assert_eq!(attempts, agents);
+            assert_eq!(result.failure, failure);
+            if failure.is_some() {
+                assert!(
+                    result.stderr.ends_with(
+                        "Nothing is left in its order after codex, claude; add another agent to `agents`"
+                    ),
+                    "{}",
+                    result.stderr
+                );
+            }
+        }
     }
 
     #[test]
@@ -2477,7 +2483,7 @@ trust_level = "trusted"
                     ..crate::agent::AgentConfig::default()
                 };
                 // Headless here is a Graph step; other headless work
-                // stops at once (its own test).
+                // moves the same way and never waits (its own test).
                 let process = ProcessConfig {
                     wait_for_capacity: true,
                     task_input: task_bound.then(|| {

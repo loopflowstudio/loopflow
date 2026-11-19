@@ -17,9 +17,10 @@ pub mod wire;
 pub use loopflow_execution::machine::socket_path;
 
 /// `PATH` with the directories a GUI-started process lacks: an OS supervisor
-/// gives this service the same minimal `PATH` it gives the app, and everything
-/// the server starts (`gh`, a provider) must resolve as it does in a terminal.
-fn supervised_path(path: &str, home: &std::path::Path) -> String {
+/// gives this service, and a terminal host's server, the same minimal `PATH`
+/// it gives the app, and everything they start (`gh`, a provider) must resolve
+/// as it does in a terminal.
+pub(crate) fn supervised_path(path: &str, home: &std::path::Path) -> String {
     let mut entries: Vec<String> = path
         .split(':')
         .filter(|entry| !entry.is_empty())

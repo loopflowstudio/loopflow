@@ -1497,6 +1497,15 @@ fn main() -> std::process::ExitCode {
     });
     let code = journal::command_exit_code(&result);
     if let Err(error) = result {
+        // Still set: `lf open` put this command in a pane and it failed before
+        // its conversation attached. The pane closes; the log keeps why.
+        if std::env::var_os(loopflow_execution::transport::OPEN_RECEIPT_ENV).is_some() {
+            tracing::warn!(
+                command = std::env::args().skip(1).collect::<Vec<_>>().join(" "),
+                error = format!("{error:#}"),
+                "conversation opened by lf open failed before attaching"
+            );
+        }
         if error
             .downcast_ref::<loopflow_execution::process::CommandExit>()
             .is_none()

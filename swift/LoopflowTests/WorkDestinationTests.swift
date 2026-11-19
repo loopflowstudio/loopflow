@@ -203,7 +203,8 @@ struct WorkDestinationTests {
         while model.navigation.startingTask != nil, ContinuousClock.now < deadline { await Task.yield() }
         #expect(model.navigation.startingTask == nil)
         let log = requests.withLock { $0 }
-        #expect(log.allSatisfy { $0.starts(with: ["task", "create"]) || $0.starts(with: ["machine", "self"]) })
+        let unexpected = log.filter { !$0.starts(with: ["task", "create"]) && !$0.starts(with: ["machine", "self"]) }
+        #expect(unexpected.isEmpty, "\(unexpected)")
         let submitted = try #require(log.first { $0.starts(with: ["task", "create"]) })
         #expect(UUID(uuidString: submitted[3]) != nil)
         #expect(Array(submitted.dropFirst(4)) == ["--run", "--json", "--", "fix the flaky retry test"])

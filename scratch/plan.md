@@ -143,7 +143,8 @@ records the block as a `Diff` asset on the Task channel.
 
 - Moving the Task workspace block onto `Change`. It compares base, index,
   worktree and untracked files and reports a state per file; that needs a
-  fourth range, and untracked files have no numstat.
+  fourth range (the recorded base against the worktree) and a decision on
+  the per-file state. `Change` already lists untracked files.
 - `lf task diff`'s 1 MB whole-comparison cap (`ops/task/snapshot.rs:584`) and
   Desktop's workaround in LOO-515.
 - Release-notes context limits in `ops/release.rs`: a list of PRs and
@@ -253,9 +254,13 @@ Left for later steps:
   CI's; not run here.
 - The open choices in `questions.md`; none blocks shipping.
 
-Larger than this Task, on `concept-review.html`: `--diff files` as a weaker
-copy of the same list (it loads every changed file's contents and delivers
-their paths in a listed file; `--diff both` now gives the paths twice); the
-Task workspace block as a fourth `ChangeRange` (a worker with `diff: true` is
-shown a change twice until then); and `gather_branch_change` treating only a
-branch named `main` as the default branch.
+Third concept review, 2026-11-18, at `8152374d4a`: nothing to change in
+this Task.
+
+Larger than this Task, on `concept-review.html`: the Task workspace block as
+a fourth `ChangeRange`, the biggest mismatch left (a worker is listed paths
+and states with no line counts and no read command, and with `diff: true` is
+shown a change twice); `--diff files` as a weaker copy of the same list (it
+loads every changed file's contents and delivers their paths in a listed
+file; `--diff both` gives the paths twice); and `gather_branch_change`
+treating only a branch named `main` as the default branch. None is filed.

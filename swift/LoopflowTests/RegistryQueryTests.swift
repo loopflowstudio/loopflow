@@ -336,10 +336,6 @@ struct RegistryQueryTests {
       }
     ]
   },
-  "metric_portfolio": {
-    "metrics": [],
-    "contract_issues": []
-  },
   "projects": {
     "state": "ok",
     "items": [
@@ -514,10 +510,6 @@ struct RegistryQueryTests {
           "history": {
             "state": "unavailable",
             "reason": "Session history unavailable: disk is gone"
-          },
-          "metric_portfolio": {
-            "metrics": [],
-            "contract_issues": []
           },
           "projects": {
             "state": "unavailable",

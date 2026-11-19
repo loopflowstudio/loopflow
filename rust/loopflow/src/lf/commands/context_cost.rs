@@ -11,7 +11,6 @@ use serde::Serialize;
 use time::OffsetDateTime;
 
 use crate::lf::commands::WorkFilter;
-use loopflow_execution::ops::metrics::MetricProducerObservation;
 use loopflow_execution::output::{format_int, truncate, Colors};
 use loopflow_execution::session_record::{SessionHistory, SILENCE_SECONDS};
 
@@ -24,9 +23,6 @@ const BANDS: [(&str, i64); 4] = [
     ("150-200k", 150_000),
     ("200k+", 200_000),
 ];
-const SLOW_BAND: &str = "200k+";
-const WAVE: &str = "intelligence";
-const INSTRUMENT: &str = "context-cost";
 const TASK_ROWS: usize = 10;
 
 #[derive(Debug, Serialize)]
@@ -145,11 +141,6 @@ pub(crate) fn run(json: bool, filter: WorkFilter) -> Result<()> {
         println!("{}", serde_json::to_string(&report)?);
     } else {
         print!("{}", report_text(&report));
-    }
-    if filter.wave.is_none() && filter.project.is_none() && filter.task.is_none() {
-        for line in publish(&report, now) {
-            eprintln!("metric observation · {line}");
-        }
     }
     Ok(())
 }
@@ -327,91 +318,6 @@ fn turn_bands(steps: &[&Step]) -> Vec<TurnBand> {
 fn percentile(sorted: &[i64], quantile: f64) -> f64 {
     let rank = (quantile * sorted.len() as f64).ceil() as usize;
     sorted[rank.clamp(1, sorted.len()) - 1] as f64
-}
-
-// Metric observations
-
-/// The latest complete week, pushed to the Intelligence Wave's metrics.
-fn observations(report: &ContextCostReport) -> Vec<MetricProducerObservation> {
-    let Some(week) = report.weeks.iter().rev().find(|week| week.complete) else {
-        return Vec::new();
-    };
-    // Harness rows keep their own percentiles; the Wave metric reads the worst.
-    let slow = week
-        .turn_time
-        .iter()
-        .filter(|band| band.band == SLOW_BAND)
-        .map(|band| band.p90_minutes)
-        .reduce(f64::max);
-    let readings = [
-        (
-            "context-input-output-ratio",
-            week.total.input_output_ratio,
-            "no step reported output tokens this week",
-        ),
-        (
-            "context-input-per-step",
-            week.total.input_per_step,
-            "no step reported token usage this week",
-        ),
-        (
-            "context-slow-turn-minutes",
-            slow,
-            "no completed turn peaked at 200k input tokens this week",
-        ),
-        (
-            "context-silent-hours",
-            (week.total.steps > 0).then_some(week.total.silent_hours),
-            "no steps were recorded this week",
-        ),
-    ];
-    readings
-        .into_iter()
-        .map(|(metric_id, value, reason)| match value {
-            Some(value) => MetricProducerObservation::Observed {
-                wave: WAVE.to_string(),
-                metric_id: metric_id.to_string(),
-                instrument: INSTRUMENT.to_string(),
-                value,
-                source_window_start: week.start,
-                source_window_end: week.end,
-                complete: true,
-            },
-            None => MetricProducerObservation::Unavailable {
-                wave: WAVE.to_string(),
-                metric_id: metric_id.to_string(),
-                instrument: INSTRUMENT.to_string(),
-                source_as_of: week.end,
-                reason: reason.to_string(),
-            },
-        })
-        .collect()
-}
-
-/// A report still prints when its Wave metrics cannot be written.
-fn publish(report: &ContextCostReport, now: OffsetDateTime) -> Vec<String> {
-    let observations = observations(report);
-    if observations.is_empty() {
-        return Vec::new();
-    }
-    let published = (|| -> Result<Vec<String>> {
-        let Some(repo) = loopflow_execution::repository::current()? else {
-            return Ok(vec!["not in a repository; not persisted".to_string()]);
-        };
-        tokio::runtime::Runtime::new()?.block_on(async {
-            let Some(store) = loopflow_execution::store::open_existing_store().await? else {
-                return Ok(vec!["no local Loopflow registry; not persisted".to_string()]);
-            };
-            loopflow_execution::ops::metrics::publish_metric_observations(
-                &store,
-                repo.as_path(),
-                observations,
-                now,
-            )
-            .await
-        })
-    })();
-    published.unwrap_or_else(|error| vec![format!("not persisted: {error:#}")])
 }
 
 // Text
@@ -607,32 +513,5 @@ mod tests {
             }],
         );
         assert_eq!(gaps, [700]);
-    }
-
-    #[test]
-    fn only_a_complete_week_becomes_a_wave_reading() {
-        let mut step = step_at(FIRST_WEEK_START, "codex", "implement", Some((840, 2)));
-        step.silences = vec![7_200];
-        let open = build_report(std::slice::from_ref(&step), FIRST_WEEK_START + DAY);
-        assert!(observations(&open).is_empty());
-
-        let closed = build_report(&[step], FIRST_WEEK_START + 8 * DAY);
-        let readings = observations(&closed);
-        assert_eq!(readings.len(), 4);
-        assert!(matches!(
-            &readings[0],
-            MetricProducerObservation::Observed { metric_id, value, .. }
-                if metric_id == "context-input-output-ratio" && *value == 420.0
-        ));
-        // No turn reached 200k, so the slow-turn reading is absent, not zero.
-        assert!(matches!(
-            &readings[2],
-            MetricProducerObservation::Unavailable { metric_id, .. }
-                if metric_id == "context-slow-turn-minutes"
-        ));
-        assert!(matches!(
-            &readings[3],
-            MetricProducerObservation::Observed { value, .. } if *value == 2.0
-        ));
     }
 }

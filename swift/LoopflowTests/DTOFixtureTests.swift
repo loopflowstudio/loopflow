@@ -717,12 +717,6 @@ struct DTOFixtureTests {
         #expect(detail.tasks.items[0].condition.state == .waiting)
         #expect(detail.tasks.items[0].condition.reason == "merge pull request head 333333333333 on GitHub")
         #expect(detail.tasks.items[0].actions.recommended == .openPr)
-        #expect(detail.metricPortfolio.metrics[0].identity.metricId == "task-loop-trust")
-        #expect(detail.metricPortfolio.metrics[0].evidence == .met(
-            value: 1,
-            sourceWindowStart: "2026-08-13T18:00:00Z",
-            sourceWindowEnd: "2026-08-20T18:00:00Z"
-        ))
     }
 
     @Test("roadmap fixture preserves sections and durable Task references")
@@ -734,8 +728,6 @@ struct DTOFixtureTests {
         #expect(roadmap.waves.count == 2)
         let product = try #require(roadmap.waves.first)
         #expect(product.wave.name == "product")
-
-        #expect(product.metricPortfolio.metrics[0].identity.metricId == "task-loop-trust")
 
         #expect(product.unavailableTasks[0].taskIdentifier == "W2-127")
         #expect(product.unavailableTasks[0].status == .unstarted)
@@ -765,51 +757,6 @@ struct DTOFixtureTests {
         #expect(task.task.isSuccessful)
         #expect(task.task.completedAt == "2026-07-14T18:30:00Z")
         #expect(page.next == task.id)
-    }
-
-    @Test("metric portfolio fixture preserves every closed evidence payload")
-    func metricPortfolioFixturePreservesEvidence() throws {
-        let data = try loadFixtureData("metric_portfolio.json")
-        let portfolio = try JSONDecoder().decode(MetricPortfolio.self, from: data)
-
-        #expect(portfolio.metrics.count == 11)
-        #expect(portfolio.metrics.contains {
-            if case .unknown(.targetUnavailable(value: 1.0, sourceWindowStart: _, sourceWindowEnd: _)) = $0.evidence { true } else { false }
-        })
-        #expect(portfolio.contractIssues.count == 5)
-        #expect(portfolio.contractIssues.contains(.projectUnavailable(waveId: "wave-other", reason: "PM snapshot unavailable")))
-        #expect(
-            portfolio.metrics[0].description
-                == "Fraction of qualifying events that settled successfully."
-        )
-        #expect(portfolio.metrics.map(\.stage).contains(.graduated))
-        #expect(portfolio.metrics.map(\.stage).contains(.installed))
-        #expect(portfolio.metrics.contains { if case .atMost = $0.target { true } else { false } })
-        #expect(portfolio.metrics.contains { if case .never = $0.freshness { true } else { false } })
-        #expect(portfolio.metrics.contains { if case .stale = $0.freshness { true } else { false } })
-        #expect(portfolio.metrics.contains { if case .unavailable = $0.evidence { true } else { false } })
-        #expect(portfolio.metrics.contains {
-            if case .unknown(.revisionMismatch) = $0.evidence { true } else { false }
-        })
-        #expect(portfolio.metrics.contains {
-            if case .unknown(.staleUnavailable) = $0.evidence { true } else { false }
-        })
-
-        var missing = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
-        var metrics = try #require(missing["metrics"] as? [[String: Any]])
-        metrics[0].removeValue(forKey: "description")
-        missing["metrics"] = metrics
-        let missingData = try JSONSerialization.data(withJSONObject: missing)
-        #expect(throws: DecodingError.self) {
-            try JSONDecoder().decode(MetricPortfolio.self, from: missingData)
-        }
-
-        var future = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
-        var futureMetrics = try #require(future["metrics"] as? [[String: Any]])
-        futureMetrics[0]["future_field"] = true
-        future["metrics"] = futureMetrics
-        let futureData = try JSONSerialization.data(withJSONObject: future)
-        _ = try JSONDecoder().decode(MetricPortfolio.self, from: futureData)
     }
 
     @Test("Metadata does not manufacture a live state or current occurrence")

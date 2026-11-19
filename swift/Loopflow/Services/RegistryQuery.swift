@@ -1481,7 +1481,6 @@ public struct WaveRoadmap: Sendable, Hashable {
     /// The graph the Wave's Tasks take up by default.
     public let graph: String?
     public let wave: WaveSnapshot
-    public let metricPortfolio: MetricPortfolio
     public let projects: WorkEvidence<ProjectPlanningSnapshot>
     /// This Wave's share of the roadmap's Tasks, which the wire sends once.
     public let tasks: WorkEvidence<RoadmapTask>
@@ -1493,7 +1492,6 @@ public struct WaveRoadmap: Sendable, Hashable {
 
     enum CodingKeys: String, CodingKey {
         case wave, projects, graph
-        case metricPortfolio = "metric_portfolio"
         case unavailableTasks = "unavailable_tasks"
     }
 
@@ -1502,7 +1500,6 @@ public struct WaveRoadmap: Sendable, Hashable {
         graph = try container.decode(String?.self, forKey: .graph)
         let wave = try container.decode(WaveSnapshot.self, forKey: .wave)
         self.wave = wave
-        metricPortfolio = try container.decode(MetricPortfolio.self, forKey: .metricPortfolio)
         projects = try container.decode(WorkEvidence<ProjectPlanningSnapshot>.self, forKey: .projects)
         tasks = roadmapTasks.filter { $0.task.waveId == wave.id }
         unavailableTasks = try container.decode([UnavailableTaskEvidence].self, forKey: .unavailableTasks)
@@ -1536,7 +1533,6 @@ public struct WaveDetailSnapshot: Decodable, Sendable {
     public let wave: WaveSnapshot
     public let projects: WorkEvidence<ProjectPlanningSnapshot>
     public let tasks: WorkEvidence<RoadmapTask>
-    public let metricPortfolio: MetricPortfolio
     public let unavailableTasks: [UnavailableTaskEvidence]
     public let history: WorkEvidence<SessionHistory>
 
@@ -1546,7 +1542,6 @@ public struct WaveDetailSnapshot: Decodable, Sendable {
 
     enum CodingKeys: String, CodingKey {
         case wave, projects, tasks, history
-        case metricPortfolio = "metric_portfolio"
         case unavailableTasks = "unavailable_tasks"
     }
 }

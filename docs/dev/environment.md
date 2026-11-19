@@ -92,7 +92,7 @@ Session shells scrub transient credentials.
 | `LF_PROVIDER_TOKEN_KEY_PATH` | `store::token_crypto` | Location of the token encryption key. |
 | `LF_PERF_OUTPUT` | `performance` | Existing directory for opt-in CLI process/SQLite volume receipts; no SQL or data values. |
 | `LF_TRACE` | `ops::trace` | Emit operation traces instead of executing. |
-| `LOOPFLOW_DEV_WAVE_REPO` | Metrics, Desktop portfolio discovery | Repository a development app opens. |
+| `LOOPFLOW_DEV_WAVE_REPO` | `scripts/loopflow-dev.py` | Repository a development app opens. |
 | `LOOPFLOW_BUILD_*`, `LOOPFLOW_RELEASE_TAG` | `build.rs`, release scripts | Build provenance, compiled in. |
 | `LF_RELEASE_*` | Release scripts | Inputs from `lf repo release` to its scripts. |
 

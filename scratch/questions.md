@@ -207,3 +207,11 @@ Each is reversible before release.
   fails on this branch and identically on the stack base 0f00665f (LOO-938):
   the refresh hits its 5s deadline before sending the OAuth request
   (`requests.len()` 0, expected 1). Not caused here.
+
+## 43bf9b implement, slice 4 (2026-11-18)
+
+- `scripts/check_architecture.py` reports drift on this branch: LOO-938's
+  `git_tracker_*`, `planning_peer_*` and `planning_user*` tables are missing
+  from `docs/dev/reference.md`, and the `plan_git` / `plan_hub` link labels
+  name symbols those files lack. None of it involves this change's tables;
+  the stack base has the same gaps.

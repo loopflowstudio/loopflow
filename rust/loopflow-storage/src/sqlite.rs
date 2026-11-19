@@ -32,7 +32,6 @@ mod task_started;
 
 mod linear_team_checks;
 mod machine_records;
-mod metrics;
 pub mod plan_carriers;
 pub mod planning_order;
 mod planning_sync;

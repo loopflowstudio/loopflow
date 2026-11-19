@@ -216,7 +216,7 @@ def test_generated_website_docs_do_not_duplicate_the_authoritative_scan(repo: Pa
 
 
 @pytest.mark.parametrize(
-    "directory", [".lf/chapters/baseline", ".lf/tmp/archive", ".lf/log", ".lf/prompts"]
+    "directory", [".lf/tmp/archive", ".lf/log", ".lf/prompts"]
 )
 def test_historical_evidence_does_not_define_current_architecture(
     repo: Path, directory: str

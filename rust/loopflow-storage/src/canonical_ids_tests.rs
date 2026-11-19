@@ -7,7 +7,6 @@ use rusqlite::{params, Connection};
 
 use super::{_migration_transaction, apply_pending_migrations};
 use crate::canonical_ids::{preflight, session_fence_file};
-use crate::metric::MetricObservation;
 use crate::sqlite::SqliteStore;
 use crate::ProcessIdentityEvidence;
 
@@ -236,28 +235,6 @@ fn canonical_ids_failed_commit_retains_guards_through_rollback() {
         .prepare("SELECT fence_locator FROM agent_sessions")
         .is_err());
     fence.try_lock_exclusive().unwrap();
-}
-
-#[test]
-fn canonical_ids_metric_payload_case_changes_its_content_identity() {
-    let mut payload = serde_json::json!({
-        "kind": "unavailable",
-        "identity": {"wave_id": TRACE, "metric_id": "Case-Sensitive-Metric"},
-        "contract_revision": "retained-revision",
-        "instrument": "retained-producer",
-        "observation_id": "",
-        "source_as_of": "2026-10-17T00:00:00Z",
-        "reason": "retained evidence"
-    });
-    let original: MetricObservation = serde_json::from_value(payload.clone()).unwrap();
-    let original_id = original.expected_observation_id().unwrap();
-    payload["observation_id"] = original_id.clone().into();
-    let original_bytes = serde_json::to_vec(&payload).unwrap();
-    payload["identity"]["wave_id"] = TRACE.to_ascii_lowercase().into();
-    let canonical: MetricObservation = serde_json::from_value(payload).unwrap();
-    assert_ne!(canonical.expected_observation_id().unwrap(), original_id);
-    let retained: MetricObservation = serde_json::from_slice(&original_bytes).unwrap();
-    assert_eq!(retained.expected_observation_id().unwrap(), original_id);
 }
 
 #[test]

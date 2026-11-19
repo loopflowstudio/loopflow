@@ -66,7 +66,7 @@ pub fn render_task_context(
     context
 }
 
-fn render_wave_context(repo: &Path, wave: &str, metric_context: &str) -> String {
+fn render_wave_context(repo: &Path, wave: &str) -> String {
     // Authored goals and memory enter once through the prompt document gatherer.
     let graphs = match crate::graph::available_graph_names(repo) {
         Ok(names) => names
@@ -77,7 +77,7 @@ fn render_wave_context(repo: &Path, wave: &str, metric_context: &str) -> String 
         Err(error) => format!("Graph catalog unavailable: {error}"),
     };
     format!(
-        "Drive the '{wave}' Wave's goal forward using its checkout-local files.\n\n<lf:goal-context>\nAvailable graphs:\n{graphs}\n</lf:goal-context>\n\n{metric_context}\n\n<lf:wave-executive-loop>\n1. What is most important?\n2. What signals are arriving?\n3. What works?\n4. What does not?\n5. What is the current strategy?\n6. How should strategy adjust?\n\nTreat metrics as evidence, never as automatic KR completion or a composite Wave score.\n</lf:wave-executive-loop>"
+        "Drive the '{wave}' Wave's goal forward using its checkout-local files.\n\n<lf:goal-context>\nAvailable graphs:\n{graphs}\n</lf:goal-context>\n\n<lf:wave-executive-loop>\n1. What is most important?\n2. What signals are arriving?\n3. What works?\n4. What does not?\n5. What is the current strategy?\n6. How should strategy adjust?\n</lf:wave-executive-loop>"
     )
 }
 
@@ -239,15 +239,6 @@ async fn bind_selected_work(
     }
 
     let wave = wave.expect("a selection without a Task has a Wave");
-    let metric_context = crate::ops::metrics::metric_prompt_section(
-        "metric-portfolio",
-        crate::ops::metrics::stored_wave_metric_portfolio(
-            store,
-            &wave,
-            time::OffsetDateTime::now_utc(),
-        )
-        .await,
-    );
     let cwd = if crate::repository::discover(Path::new(wave.repo())).is_ok_and(|canonical| {
         crate::repository::discover(repo).is_ok_and(|other| other == canonical)
     }) {
@@ -255,7 +246,7 @@ async fn bind_selected_work(
     } else {
         PathBuf::from(wave.repo())
     };
-    let context = render_wave_context(&cwd, wave.slug(), &metric_context);
+    let context = render_wave_context(&cwd, wave.slug());
     Ok(WorkBinding {
         source: selected.source,
         subjects: vec![format!("wave:{}", wave.slug())],
@@ -642,7 +633,7 @@ mod tests {
         std::fs::create_dir_all(tmp.path().join(".lf/wave/release")).unwrap();
         let goal = "---\ncrons: []\n---\n## Objective\nShip a reliable release.\n\n## Bounds\nKeep rollback available.\n";
         std::fs::write(tmp.path().join(".lf/wave/release/GOAL.md"), goal).unwrap();
-        let seed = super::render_wave_context(tmp.path(), "release", "");
+        let seed = super::render_wave_context(tmp.path(), "release");
         for (message, explicit) in [
             (None, false),
             (Some(seed.clone()), false),
@@ -1260,7 +1251,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn direct_wave_binding_carries_graphs_and_shared_metric_context() {
+    async fn direct_wave_binding_carries_graphs() {
         let (directory, store) = test_store().await;
         let repo = directory.path().join("repo");
         std::fs::create_dir_all(repo.join(".lf/wave/runtime")).unwrap();
@@ -1312,7 +1303,7 @@ mod tests {
             .contains("Drive the 'runtime' Wave's goal forward"));
         assert!(binding.context.contains("- local-delivery\n"));
         assert!(binding.context.contains("- pursue\n"));
-        assert!(binding.context.contains("metric-portfolio"));
+        assert!(!binding.context.contains("metric"));
         assert!(resolve_work_binding(&store, &repo, "project:loopflow-api")
             .await
             .is_err());

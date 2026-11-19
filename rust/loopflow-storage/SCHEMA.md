@@ -23,12 +23,7 @@ to one. `uv run python scripts/due_removals.py` prints when each may drop.
 
 - `project_changes`: order_effects_json, seq, id, project_id, field, value_json, base_json, conflict_json, attempted, error, acknowledged_revision, acknowledged
 - `project_events`: id, project_id, kind_json, created_at
-- `projects`: id, wave_id, external_project_id, created_at, project_slug, project_name, project_summary, planning_rank, planning_provider_revision, planning_initiatives, planning_teams, description, pm_snapshot_synced_at, updated_at, work_state, work_terminal_at, iteration, status, legacy_current, krs, metric_targets
-
-## Live metric
-
-- `metric_instruments`: wave_id, metric_id, instrument, registered_at
-- `metric_observations`: observation_id, wave_id, metric_id, contract_revision, instrument, source_time_seconds, source_time_nanoseconds, received_at, graduation_qualifying, payload
+- `projects`: id, wave_id, external_project_id, created_at, project_slug, project_name, project_summary, planning_rank, planning_provider_revision, planning_initiatives, planning_teams, description, pm_snapshot_synced_at, updated_at, work_state, work_terminal_at, ~~iteration~~ (leaving → LOO-995, remove_chapters), status, ~~legacy_current~~ (leaving → LOO-995, remove_chapters), ~~krs~~ (leaving → LOO-995, remove_chapters), ~~metric_targets~~ (leaving → LOO-995, remove_chapters)
 
 ## Task
 
@@ -61,7 +56,7 @@ to one. `uv run python scripts/due_removals.py` prints when each may drop.
 - `pm_issue_changes`: issue_id, revision_ns, removed
 - `pm_items`: repo, provider, id, identifier, project_id, observed_at, needs_refresh, revision, branch_name, url, name, description, rank, completed, completed_at, due_date, state, team_id, assignee, completed_at_observed, due_date_observed, assignee_observed, claimed_project_id, project_id_observed
 - `pm_project_name_cutover` — **leaving → LOO-954, unused_store_members**: repo, provider, id, body, observed_at, archived, membership_unresolved, converted_at
-- `pm_projects`: repo, provider, id, observed_at, archived, membership_unresolved, task_order_json, revision, slug, name, summary, status, krs, metric_targets, initiative_ids, team_ids, description, description_revision, description_observed_at
+- `pm_projects`: repo, provider, id, observed_at, archived, membership_unresolved, task_order_json, revision, slug, name, summary, status, ~~krs~~ (leaving → LOO-995, remove_chapters), ~~metric_targets~~ (leaving → LOO-995, remove_chapters), initiative_ids, team_ids, description, description_revision, description_observed_at
 - `pm_wave_projects`: wave_id, project_id, position
 - `pm_wave_sync`: wave_id, provider, initiative, synced_at
 - `project_binding_imports` — **leaving → LOO-954, unused_store_members**: wave_id, original_yaml, imported_at
@@ -69,7 +64,7 @@ to one. `uv run python scripts/due_removals.py` prints when each may drop.
 - `project_transitions` — **leaving → LOO-995, remove_chapters**: wave_id, successor_id, predecessor_id, reset_name, create_successor, created_at, settled_at, local_plan_json, export_json, export_attempted, export_link_attempted, export_error, export_observed_at
 - `tracker_events`: issue_id, revision_ns, removed
 - `tracker_items`: repo, tracker, id, identifier, project_id, observed_at, needs_refresh, revision, branch_name, url, name, description, rank, completed, completed_at, due_date, state, team_id, assignee, completed_at_observed, due_date_observed, assignee_observed, claimed_project_id, project_id_observed
-- `tracker_projects`: repo, tracker, id, observed_at, archived, membership_unresolved, task_order_json, revision, slug, name, summary, status, krs, metric_targets, initiative_ids, team_ids, description, description_revision, description_observed_at
+- `tracker_projects`: repo, tracker, id, observed_at, archived, membership_unresolved, task_order_json, revision, slug, name, summary, status, ~~krs~~ (leaving → LOO-995, remove_chapters), ~~metric_targets~~ (leaving → LOO-995, remove_chapters), initiative_ids, team_ids, description, description_revision, description_observed_at
 - `tracker_wave_projects`: wave_id, project_id, position
 - `tracker_wave_sync`: wave_id, tracker, initiative, synced_at
 
@@ -134,6 +129,8 @@ to one. `uv run python scripts/due_removals.py` prints when each may drop.
 
 ## Leaving the store
 
+- `metric_instruments` — **leaving → LOO-995, remove_chapters**: wave_id, metric_id, instrument, registered_at
+- `metric_observations` — **leaving → LOO-995, remove_chapters**: observation_id, wave_id, metric_id, contract_revision, instrument, source_time_seconds, source_time_nanoseconds, received_at, graduation_qualifying, payload
 - `ondemands` — **leaving → LOO-954, unused_store_members**: name, created_at
 - `pools` — **leaving → LOO-954, unused_store_members**: name, created_at
 - `session_steers` — **leaving → LOO-954, unused_store_members**: session_id, steer_id, attempt, applicable

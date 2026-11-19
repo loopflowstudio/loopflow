@@ -415,6 +415,27 @@ on main the first command alone has already created a Linear Project.
 Each slice regenerates `server_schema.json` and `SCHEMA.md` if it touched
 them and deletes the tests of what it removed.
 
+### Status (2026-11-18)
+
+Slices 1–4 are built. What they settled:
+
+- Slice 2: the Project a new Task joins, and the Project made for a Wave
+  with none, are written in the Task's own save or move transaction
+  (`join_project_in`), so a failed save leaves no Project.
+- Slice 3: a Linear Project's `content` is still read, only to keep the
+  released `## KRs` / `## Metric targets` sections out of the description
+  and in place when it is edited; the reader's KRs and raw target JSON serve
+  released-store conversion only. Saved values carrying removed fields decode
+  without them (`work::edit::known_values`); queued KR/target actions are
+  retired by `remove_chapters.sql`.
+- Slice 4: `project_changes` is not marked here; it leaves with
+  `task_changes` under the tracker-queue contract.
+  `tests/e2e/linear_oauth.py` lost its chapter seed, but it still seeds
+  `pm_snapshots` and runs `lf status`, so it was stale before this change.
+
+Left for gate: the acceptance commands above against the stand-in Linear,
+and the Desktop suites named in scripts/testing.md.
+
 ## Docs written ahead of the code (2026-11-18)
 
 They describe the behavior above as intended; the implement steps read them.

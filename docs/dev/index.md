@@ -107,7 +107,7 @@ The source tree makes the planning boundary literal:
 ```text
 work/
 wave/{mod,config,context,
-      memory,metrics,relocate}
+      memory,relocate}
 project
 task
 

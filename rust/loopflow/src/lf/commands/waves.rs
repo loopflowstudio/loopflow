@@ -28,10 +28,6 @@ use loopflow_execution::ops::task_execution::{TaskExecutionSnapshot, TaskExecuti
 use loopflow_execution::output::Colors;
 use loopflow_execution::session_record::SessionHistory;
 use loopflow_execution::store::{open_existing_store, SharedStore};
-use loopflow_execution::work::wave::metrics::{
-    MetricContractIssueDto, MetricEvidenceDto, MetricFreshnessDto, MetricPortfolioDto,
-    MetricReadingDto, MetricStage, MetricUnknownCauseDto, Threshold,
-};
 use loopflow_execution::work::wave::Wave;
 use loopflow_model::durable::{Machine, WorkRef, WorkStatus};
 use loopflow_storage::sqlite::selections::{task_selection_states, TaskSelectionReading};
@@ -73,8 +69,6 @@ pub struct WaveDetailSnapshot {
     pub wave: WaveSnapshot,
     pub projects: Evidence<ProjectSummary>,
     pub tasks: Evidence<RoadmapTask>,
-    /// Wave-owned live evidence derived once by Rust for every consumer.
-    pub metric_portfolio: MetricPortfolioDto,
     /// Durable Project Work that cannot join the current PM plan, including
     /// non-terminal Tasks stranded under a terminal historical Project.
     pub unavailable_tasks: Vec<UnavailableTaskEvidence>,
@@ -362,7 +356,6 @@ pub struct WaveRoadmap {
     pub graph: Option<String>,
     pub wave: WaveSnapshot,
     pub projects: Evidence<ProjectSummary>,
-    pub metric_portfolio: MetricPortfolioDto,
     pub unavailable_tasks: Vec<UnavailableTaskEvidence>,
 }
 
@@ -628,8 +621,6 @@ pub(crate) async fn wave_detail(store: &SharedStore, wave: &Wave) -> Result<Wave
     let snapshot = snapshot_wave(store, wave, &checkout).await?;
     let shared = SharedTaskReads::read(store).await?;
     let task_snapshots = wave_tasks(store, wave, true, None, &shared).await?;
-    let metric_portfolio =
-        loopflow_execution::ops::metrics::wave_metric_portfolio(store, wave, now()).await?;
     Ok(WaveDetailSnapshot {
         history: Evidence::from_result(
             crate::lf::commands::session_history::collect_recent_history(
@@ -644,7 +635,6 @@ pub(crate) async fn wave_detail(store: &SharedStore, wave: &Wave) -> Result<Wave
         wave: snapshot,
         projects: project_planning(store, wave).await,
         tasks: task_snapshots.tasks,
-        metric_portfolio,
         unavailable_tasks: task_snapshots.unavailable_tasks,
         setup: loopflow_execution::work::wave::setup::read_wave_setup(store, wave, &checkout)
             .await?,
@@ -1467,12 +1457,6 @@ async fn roadmap_snapshot(
             wave: snapshot,
             projects: project_planning(store, wave).await,
             unavailable_tasks: Vec::new(),
-            metric_portfolio: loopflow_execution::ops::metrics::wave_metric_portfolio(
-                store,
-                wave,
-                evaluation_time,
-            )
-            .await?,
         });
     }
     roadmaps.sort_by(|a, b| a.wave.name.cmp(&b.wave.name));
@@ -2701,7 +2685,6 @@ fn print_status(status: &WaveDetailSnapshot) {
     }
     print_setup(&status.setup);
     print_projects(&status.projects);
-    print_metric_portfolio(&status.metric_portfolio);
     match &status.tasks {
         Evidence::Unavailable { reason } => println!("  tasks unavailable: {reason}"),
         Evidence::Ok { items, .. } => {
@@ -2756,226 +2739,6 @@ fn print_unavailable_tasks(tasks: &[UnavailableTaskEvidence]) {
             "  {}  unavailable: {} · {}",
             task.task_identifier, task.reason, task.recovery
         );
-    }
-}
-
-fn print_metric_portfolio(portfolio: &MetricPortfolioDto) {
-    print!("{}", metric_portfolio_text(portfolio));
-}
-
-pub fn metric_portfolio_text(portfolio: &MetricPortfolioDto) -> String {
-    if portfolio.metrics.is_empty() && portfolio.contract_issues.is_empty() {
-        return String::new();
-    }
-    let mut lines = vec!["  metrics".to_string()];
-    let official = portfolio
-        .metrics
-        .iter()
-        .filter(|metric| metric.stage == MetricStage::Graduated)
-        .collect::<Vec<_>>();
-    let mut official = official;
-    official.sort_by(|left, right| {
-        metric_priority(&left.evidence)
-            .cmp(&metric_priority(&right.evidence))
-            .then(left.name.cmp(&right.name))
-    });
-    for metric in official {
-        append_metric_lines(&mut lines, metric, portfolio, "    ");
-    }
-
-    let mut candidates = portfolio
-        .metrics
-        .iter()
-        .filter(|metric| metric.stage == MetricStage::Installed)
-        .collect::<Vec<_>>();
-    candidates.sort_by(|left, right| left.name.cmp(&right.name));
-    if !candidates.is_empty() {
-        lines.push("    Instrumenting".to_string());
-        for metric in candidates {
-            append_metric_lines(&mut lines, metric, portfolio, "      ");
-        }
-    }
-    if !portfolio.contract_issues.is_empty() {
-        lines.push("    Contract issues".to_string());
-        for issue in &portfolio.contract_issues {
-            lines.push(format!("      {}", metric_contract_issue(issue)));
-        }
-    }
-    format!("{}\n", lines.join("\n"))
-}
-
-fn append_metric_lines(
-    lines: &mut Vec<String>,
-    metric: &MetricReadingDto,
-    portfolio: &MetricPortfolioDto,
-    indent: &str,
-) {
-    lines.push(format!(
-        "{indent}{}  [{}]",
-        metric.name,
-        metric_evidence_label(&metric.evidence),
-    ));
-    lines.push(format!(
-        "{indent}  Owner Wave · Value {value} · Target {target} over {window} · {freshness}",
-        value = metric_value(metric),
-        target = metric_target(metric, portfolio),
-        window = metric.window,
-        freshness = metric_freshness(&metric.freshness),
-    ));
-    if let Some(reason) = metric_reason(&metric.evidence) {
-        lines.push(format!("{indent}  {reason}"));
-    }
-}
-
-fn metric_priority(evidence: &MetricEvidenceDto) -> u8 {
-    match evidence {
-        MetricEvidenceDto::Missed { .. } | MetricEvidenceDto::Unavailable { .. } => 0,
-        MetricEvidenceDto::Unknown { .. } | MetricEvidenceDto::Untargeted { .. } => 1,
-        MetricEvidenceDto::Met { .. } => 2,
-    }
-}
-
-fn metric_evidence_label(evidence: &MetricEvidenceDto) -> &'static str {
-    match evidence {
-        MetricEvidenceDto::Met { .. } => "met",
-        MetricEvidenceDto::Untargeted { .. } => "no target",
-        MetricEvidenceDto::Missed { .. } => "missed",
-        MetricEvidenceDto::Unknown { .. } => "unknown",
-        MetricEvidenceDto::Unavailable { .. } => "unavailable",
-    }
-}
-
-fn metric_value(metric: &MetricReadingDto) -> String {
-    let value = match &metric.evidence {
-        MetricEvidenceDto::Untargeted { value, .. }
-        | MetricEvidenceDto::Met { value, .. }
-        | MetricEvidenceDto::Missed { value, .. } => Some(*value),
-        MetricEvidenceDto::Unknown { cause } => match cause {
-            MetricUnknownCauseDto::TargetUnavailable { value, .. }
-            | MetricUnknownCauseDto::Incomplete { value, .. }
-            | MetricUnknownCauseDto::WindowMismatch { value, .. }
-            | MetricUnknownCauseDto::StaleObservation { value, .. } => Some(*value),
-            MetricUnknownCauseDto::Never
-            | MetricUnknownCauseDto::RevisionMismatch { .. }
-            | MetricUnknownCauseDto::StaleUnavailable { .. } => None,
-        },
-        MetricEvidenceDto::Unavailable { .. } => None,
-    };
-    value
-        .map(|value| format_metric_number(value, &metric.unit))
-        .unwrap_or_else(|| "-".to_string())
-}
-
-fn metric_target(metric: &MetricReadingDto, portfolio: &MetricPortfolioDto) -> String {
-    if portfolio.contract_issues.iter().any(|issue| {
-        matches!(issue,
-            MetricContractIssueDto::ProjectUnavailable { wave_id, .. }
-            if wave_id == metric.identity.wave_id()
-        )
-    }) {
-        return "unavailable for this Project".into();
-    }
-    match metric.target {
-        None => "unset for this Project".into(),
-        Some(Threshold::AtLeast { value }) => {
-            format!(">= {}", format_metric_number(value, &metric.unit))
-        }
-        Some(Threshold::AtMost { value }) => {
-            format!("<= {}", format_metric_number(value, &metric.unit))
-        }
-    }
-}
-
-fn format_metric_number(value: f64, unit: &str) -> String {
-    if unit == "ratio" {
-        format!("{:.2}%", value * 100.0)
-    } else {
-        format!("{value:.3} {unit}")
-    }
-}
-
-fn metric_freshness(freshness: &MetricFreshnessDto) -> String {
-    match freshness {
-        MetricFreshnessDto::Never => "never observed".to_string(),
-        MetricFreshnessDto::Fresh { expires_at, .. } => format!(
-            "fresh until {}",
-            format_time(*expires_at).unwrap_or_else(|| "unknown".to_string())
-        ),
-        MetricFreshnessDto::Stale { expires_at, .. } => format!(
-            "stale since {}",
-            format_time(*expires_at).unwrap_or_else(|| "unknown".to_string())
-        ),
-    }
-}
-
-fn metric_reason(evidence: &MetricEvidenceDto) -> Option<String> {
-    match evidence {
-        MetricEvidenceDto::Untargeted { .. }
-        | MetricEvidenceDto::Met { .. }
-        | MetricEvidenceDto::Missed { .. } => None,
-        MetricEvidenceDto::Unavailable {
-            reason,
-            source_as_of,
-        } => Some(format!(
-            "{reason} · as of {}",
-            format_time(*source_as_of).unwrap_or_else(|| "unknown".to_string())
-        )),
-        MetricEvidenceDto::Unknown { cause } => Some(match cause {
-            MetricUnknownCauseDto::Never => "no observation has arrived".to_string(),
-            MetricUnknownCauseDto::TargetUnavailable { .. } => {
-                "Project target planning is unavailable".to_string()
-            }
-            MetricUnknownCauseDto::RevisionMismatch {
-                expected_contract_revision,
-                observed_contract_revision,
-                source_time,
-            } => format!(
-                "evidence at {} measured revision {}, not {}",
-                format_time(*source_time).unwrap_or_else(|| "unknown".to_string()),
-                observed_contract_revision,
-                expected_contract_revision
-            ),
-            MetricUnknownCauseDto::Incomplete { .. } => {
-                "latest source window is incomplete".to_string()
-            }
-            MetricUnknownCauseDto::WindowMismatch { .. } => {
-                "latest source window does not match the contract".to_string()
-            }
-            MetricUnknownCauseDto::StaleObservation { .. } => {
-                "latest observation is stale".to_string()
-            }
-            MetricUnknownCauseDto::StaleUnavailable {
-                reason,
-                source_as_of,
-            } => format!(
-                "last source failure is stale: {reason} · as of {}",
-                format_time(*source_as_of).unwrap_or_else(|| "unknown".to_string())
-            ),
-        }),
-    }
-}
-
-fn metric_contract_issue(issue: &MetricContractIssueDto) -> String {
-    match issue {
-        MetricContractIssueDto::ProjectUnavailable { wave_id, reason } => format!("{wave_id}: Project targets unavailable: {reason}"),
-        MetricContractIssueDto::UnresolvedTarget { wave_id, metric_id } => format!("{wave_id}/{metric_id}: Project target has no readable instrument contract"),
-        MetricContractIssueDto::MalformedContract { path, message } => {
-            format!("{path}: {message}")
-        }
-        MetricContractIssueDto::InstrumentMismatch {
-            wave_id,
-            metric_id,
-            contract_instrument,
-            registered_instrument,
-        } => format!(
-            "{wave_id}/{metric_id} declares {contract_instrument}, but {registered_instrument} is registered"
-        ),
-        MetricContractIssueDto::InvalidGraduation {
-            wave_id,
-            metric_id,
-            reason,
-            ..
-        } => format!("{wave_id}/{metric_id} cannot graduate: {reason}"),
     }
 }
 
@@ -3110,7 +2873,6 @@ fn print_roadmap(roadmap: &RoadmapSnapshot) {
     for wave in &roadmap.waves {
         print_wave_heading(&wave.wave);
         print_projects(&wave.projects);
-        print_metric_portfolio(&wave.metric_portfolio);
         print_unavailable_tasks(&wave.unavailable_tasks);
         let tasks = match roadmap.wave_tasks(wave) {
             Evidence::Unavailable { reason } => {
@@ -3259,17 +3021,13 @@ mod tests {
     use time::OffsetDateTime;
 
     use super::{
-        derive_task_condition, metric_portfolio_text, next_move_for_task, truncate_start,
-        LocalProgressEvidence, LocalProgressEvidenceState, NextMove, NextMoveOwner,
-        TaskConditionState, TaskRuntimeSnapshot,
+        derive_task_condition, next_move_for_task, truncate_start, LocalProgressEvidence,
+        LocalProgressEvidenceState, NextMove, NextMoveOwner, TaskConditionState,
+        TaskRuntimeSnapshot,
     };
     use loopflow_execution::durable::{TaskSection, TaskState};
     use loopflow_execution::ops::task_actions::TaskActionEvidence;
     use loopflow_execution::ops::task_execution::{TaskExecutionSnapshot, TaskExecutionState};
-    use loopflow_execution::work::wave::metrics::{
-        MetricEvidenceDto, MetricFreshnessDto, MetricIdentity, MetricPortfolioDto,
-        MetricReadingDto, MetricStage, MetricUnknownCauseDto, Threshold,
-    };
     use loopflow_execution::work::wave::Wave;
     use loopflow_model::durable::WorkStatus;
     use loopflow_storage::work::task::{
@@ -3977,133 +3735,6 @@ mod tests {
             "\u{2026}fix/alpha"
         );
         assert_eq!(truncate_start("beta", 10), "beta");
-    }
-
-    #[test]
-    fn text_metrics_preserve_values_when_project_targets_are_unavailable() {
-        let fixture: MetricPortfolioDto = serde_json::from_str(include_str!(
-            "../../../../../tests/fixtures/dto/metric_portfolio.json"
-        ))
-        .unwrap();
-        let observed = fixture
-            .metrics
-            .iter()
-            .find(|metric| {
-                matches!(
-                    metric.evidence,
-                    MetricEvidenceDto::Unknown {
-                        cause: MetricUnknownCauseDto::TargetUnavailable { .. }
-                    }
-                )
-            })
-            .unwrap();
-        for cause in [
-            MetricUnknownCauseDto::TargetUnavailable {
-                value: 1.0,
-                source_window_start: OffsetDateTime::UNIX_EPOCH,
-                source_window_end: OffsetDateTime::UNIX_EPOCH,
-            },
-            MetricUnknownCauseDto::StaleObservation {
-                value: 1.0,
-                source_window_start: OffsetDateTime::UNIX_EPOCH,
-                source_window_end: OffsetDateTime::UNIX_EPOCH,
-            },
-            MetricUnknownCauseDto::Never,
-        ] {
-            let never = matches!(cause, MetricUnknownCauseDto::Never);
-            let mut metric = observed.clone();
-            metric.evidence = MetricEvidenceDto::Unknown { cause };
-            let portfolio = MetricPortfolioDto {
-                contract_issues: vec![
-                    loopflow_execution::work::wave::metrics::MetricContractIssueDto::ProjectUnavailable {
-                        wave_id: metric.identity.wave_id().to_string(),
-                        reason: "current Project is ambiguous".into(),
-                    },
-                ],
-                metrics: vec![metric],
-            };
-            let text = metric_portfolio_text(&portfolio);
-            assert!(text.contains("Target unavailable for this Project"));
-            assert!(text.contains(if never { "Value -" } else { "Value 100.00%" }));
-            assert!(!text.contains("unset for this Project"));
-        }
-        let mut known_empty = observed.clone();
-        known_empty.evidence = MetricEvidenceDto::Untargeted {
-            value: 1.0,
-            source_window_start: OffsetDateTime::UNIX_EPOCH,
-            source_window_end: OffsetDateTime::UNIX_EPOCH,
-        };
-        let text = metric_portfolio_text(&MetricPortfolioDto {
-            metrics: vec![known_empty],
-            contract_issues: vec![
-                loopflow_execution::work::wave::metrics::MetricContractIssueDto::ProjectUnavailable {
-                    wave_id: "another-wave".into(),
-                    reason: "no saved plan".into(),
-                },
-            ],
-        });
-        assert!(text.contains("[no target]"));
-        assert!(text.contains("Target unset for this Project"));
-    }
-
-    #[test]
-    fn text_metrics_group_official_signals_and_separate_candidates() {
-        let metric =
-            |name: &str, stage: MetricStage, evidence: MetricEvidenceDto| MetricReadingDto {
-                identity: MetricIdentity::new("product", name.to_lowercase().replace(' ', "-")),
-                contract_revision: "0".repeat(64),
-                name: name.to_string(),
-                description: "Reviewed metric meaning.".to_string(),
-                stage,
-                instrumented: true,
-                instrument: "scorecard".to_string(),
-                unit: "ratio".to_string(),
-                target: Some(Threshold::AtLeast { value: 1.0 }),
-                window: "7d".to_string(),
-                freshness_policy: "6h".to_string(),
-                freshness: MetricFreshnessDto::Never,
-                evidence,
-            };
-        let portfolio = MetricPortfolioDto {
-            metrics: vec![
-                metric(
-                    "Candidate",
-                    MetricStage::Installed,
-                    MetricEvidenceDto::Unknown {
-                        cause: MetricUnknownCauseDto::Never,
-                    },
-                ),
-                metric(
-                    "Healthy",
-                    MetricStage::Graduated,
-                    MetricEvidenceDto::Met {
-                        value: 1.0,
-                        source_window_start: OffsetDateTime::UNIX_EPOCH,
-                        source_window_end: OffsetDateTime::UNIX_EPOCH,
-                    },
-                ),
-                metric(
-                    "Broken",
-                    MetricStage::Graduated,
-                    MetricEvidenceDto::Missed {
-                        value: 0.5,
-                        source_window_start: OffsetDateTime::UNIX_EPOCH,
-                        source_window_end: OffsetDateTime::UNIX_EPOCH,
-                    },
-                ),
-            ],
-            contract_issues: Vec::new(),
-        };
-        let text = metric_portfolio_text(&portfolio);
-
-        assert!(text.contains("Owner Wave"));
-        let broken = text.find("Broken  [missed]").unwrap();
-        let healthy = text.find("Healthy  [met]").unwrap();
-        let instrumenting = text.find("    Instrumenting\n").unwrap();
-        let candidate = text.find("Candidate  [unknown]").unwrap();
-        assert!(broken < healthy);
-        assert!(healthy < instrumenting && instrumenting < candidate);
-        assert!(!text.contains("· instrumenting"));
     }
 
     #[test]

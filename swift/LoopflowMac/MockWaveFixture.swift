@@ -114,7 +114,6 @@ enum MockWaveFixture {
               "observed_at": "2026-07-17T00:00:00Z"
             }
           },
-          "metric_portfolio": {"metrics": [], "contract_issues": []},
           "history": {
             "state": "ok",
             "truncated": false,

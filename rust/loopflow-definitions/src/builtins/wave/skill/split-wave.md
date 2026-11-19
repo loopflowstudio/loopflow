@@ -11,8 +11,6 @@ Each child gets a fresh goal, not a slice of the parent's prose:
 
 - **Intent**: written new for each child and coherent on its own, with clear
   scope lines between siblings and a concrete, domain-specific name.
-- **Metrics**: each metric moves to exactly one child. Another Wave that needs
-  it reads it from there; never duplicate a metric or its readings.
 - **Memory**: carry forward only what a child still needs: direction, exact
   quotes, past observations, outside facts.
 
@@ -44,6 +42,5 @@ Each child gets a fresh goal, not a slice of the parent's prose:
    its worker. Keep the parent and its Projects while its active work
    finishes.
 
-6. **Check.** Each child has a goal, memory and a connected Initiative. Every
-   metric belongs to exactly one child. Nothing from the parent is
-   unaccounted for.
+6. **Check.** Each child has a goal, memory and a connected Initiative.
+   Nothing from the parent is unaccounted for.

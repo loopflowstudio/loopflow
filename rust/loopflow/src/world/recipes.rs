@@ -113,31 +113,6 @@ fn portfolio(world: &World) -> Result<()> {
     for wave in ["desktop", "systems", "quality"] {
         world.wave(wave)?;
     }
-    world.metric(
-        "desktop",
-        "tasks-opened-fast",
-        "Tasks open in under 200 ms",
-        "graduated",
-        Some(42.0),
-        1.0,
-    )?;
-    world.metric(
-        "desktop",
-        "row-states-distinct",
-        "Task states with a distinct row",
-        "installed",
-        Some(3.0),
-        2.0,
-    )?;
-    world.metric(
-        "desktop",
-        "demo-worlds-used",
-        "Demos run on a built world",
-        "installed",
-        None,
-        0.0,
-    )?;
-
     let shipped = world.task(
         Some("desktop"),
         "Show Task rows by state",

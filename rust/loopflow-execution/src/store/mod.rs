@@ -27,8 +27,6 @@ pub use loopflow_storage::instrumentation;
 pub use loopflow_storage::machine_records;
 pub use loopflow_storage::planning;
 pub mod machines;
-pub use loopflow_storage::metric;
-mod metrics;
 pub use loopflow_storage::migration_catalog;
 pub use loopflow_storage::migration_runner;
 pub use loopflow_storage::migration_schema;

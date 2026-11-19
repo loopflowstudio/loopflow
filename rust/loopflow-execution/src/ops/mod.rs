@@ -11,7 +11,6 @@ pub mod graph_process;
 pub mod human_session;
 pub mod land;
 pub mod linear;
-pub mod metrics;
 pub mod people;
 pub mod plan_carriers;
 pub mod plan_git;

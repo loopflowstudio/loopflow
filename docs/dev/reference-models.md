@@ -109,8 +109,7 @@ capture locators, names, slugs, paths and arbitrary payload content. A Task
 selector resolves each domain separately (`TaskSelector`), so an opaque
 external ID is never treated as a ticket; a Session selector tries the
 canonical LfSession first and gives native lookup the original text.
-Metric evidence keeps its originally hashed Wave spelling while its Work
-association is canonical. Files named from an identity keep their retained
+Files named from an identity keep their retained
 locators (below). The `canonical_structured_ids` migration converts released
 rows and declared JSON paths in one transaction and aborts on any collision.
 

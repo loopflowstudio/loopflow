@@ -9576,6 +9576,28 @@
       ],
       "type": "object"
     },
+    "SessionEnd": {
+      "description": "A conversation's last agent end.",
+      "properties": {
+        "at": {
+          "description": "RFC 3339.",
+          "type": "string"
+        },
+        "exit_code": {
+          "description": "The provider's exit; `null` when nobody saw it (the holder died, or\nthe Machine restarted).",
+          "format": "int32",
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "at",
+        "exit_code"
+      ],
+      "type": "object"
+    },
     "SessionGraphMembership": {
       "description": "Whether a Session's conversation is an occurrence of a Graph. Membership\ncomes only from its recorded Graph invocation, never from matching Task, checkout,\nprovider, or skill.",
       "oneOf": [
@@ -9868,6 +9890,71 @@
       ],
       "type": "string"
     },
+    "SessionOutlook": {
+      "description": "Whether a conversation that is not running comes up, and what brings it.\nThe server works this out; no client does it again from `ended` and\n`start`.",
+      "properties": {
+        "at": {
+          "description": "RFC 3339: when the server starts it next; a time already past is a\nstart under way. `null` when the server will not start it, and for\none that is starting.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "command": {
+          "description": "The command that opens it; `null` while the server brings it up.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kind": {
+          "$ref": "#/$defs/SessionOutlookKind"
+        },
+        "reason": {
+          "description": "Ready to print. Why it could not start; for one coming back, that its\nlast start failed and why; for one waiting, why the server leaves it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "at",
+        "reason",
+        "command"
+      ],
+      "type": "object"
+    },
+    "SessionOutlookKind": {
+      "oneOf": [
+        {
+          "const": "starting",
+          "description": "No agent runs yet and one is on its way: a Task's conversation the\nserver here is starting, or a start whose agent has no pid recorded.",
+          "type": "string"
+        },
+        {
+          "const": "coming_back",
+          "description": "It died and the server here starts it again, at `at`.",
+          "type": "string"
+        },
+        {
+          "const": "waiting_for_you",
+          "description": "It is down and only its command brings it up: it is not a Task's\nconversation, or the server here does not or no longer starts it.",
+          "type": "string"
+        },
+        {
+          "const": "quit",
+          "description": "The person quit it. It stays quit.",
+          "type": "string"
+        },
+        {
+          "const": "could_not_start",
+          "description": "No agent has run yet: its start failed, for `reason`. The server\ntries again at `at`, or left it to `command`.",
+          "type": "string"
+        }
+      ]
+    },
     "SessionPage": {
       "properties": {
         "entries": {
@@ -9966,6 +10053,17 @@
         "detail": {
           "type": "string"
         },
+        "ended": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SessionEnd"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "How its last agent ended, while none runs; `null` for a headless\nSession, before a first start, or when nobody recorded the end."
+        },
         "graph_membership": {
           "$ref": "#/$defs/SessionGraphMembership"
         },
@@ -9987,6 +10085,17 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "outlook": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SessionOutlook"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "What happens next to a conversation that is not running, as this\nMachine reads it; `null` while it runs, and when nothing says why it\nis down."
         },
         "preview": {
           "anyOf": [
@@ -10025,8 +10134,26 @@
           "description": "A conversation open here that Loopflow never launched; `id` is the\nprovider's conversation ID and no Session records it.",
           "type": "boolean"
         },
+        "start": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SessionStarts"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The server's starts of a Task's conversation since it last finished a\nturn; `null` when it made none, and once the person quit."
+        },
         "state": {
           "$ref": "#/$defs/SessionState"
+        },
+        "status_line": {
+          "description": "Whether it runs, how it ended and its outlook, as one sentence in this\nMachine's local time: \"died 12:01 (exit 137) · starting again\". Every\nclient prints it as given; `null` for a headless Session.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "task_ids": {
           "items": {
@@ -10136,7 +10263,11 @@
         "open_argv",
         "terminal_ids",
         "turn",
-        "raw"
+        "raw",
+        "ended",
+        "start",
+        "outlook",
+        "status_line"
       ],
       "type": "object"
     },
@@ -10150,6 +10281,29 @@
       },
       "required": [
         "terminal_id"
+      ],
+      "type": "object"
+    },
+    "SessionStarts": {
+      "description": "What the server's recovery pass did for a Task conversation.",
+      "properties": {
+        "attempts": {
+          "description": "Starts since it last finished a turn.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "last_started_at": {
+          "description": "RFC 3339: the pass's last start.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "attempts",
+        "last_started_at"
       ],
       "type": "object"
     },
@@ -12615,7 +12769,7 @@
         },
         {
           "const": "waiting",
-          "description": "Its step is waiting out a usage limit until an account frees up.",
+          "description": "Its step is waiting out a usage limit until an account frees up, or\nits run waits to be carried again after its carrier died.",
           "type": "string"
         }
       ]
@@ -16163,6 +16317,7 @@
             "availability": "available",
             "cwd": "/src/loopflow.task",
             "detail": "review-design",
+            "ended": null,
             "graph_membership": {
               "graph": "task-design",
               "graph_lf_process_id": "00000000-0000-0000-0000-00000000f10w",
@@ -16183,12 +16338,15 @@
               "resume",
               "task_00000000000000000000000000000001:task-design:review_kickoff:0"
             ],
+            "outlook": null,
             "preview": null,
             "primary_scope": null,
             "program_status": null,
             "provider": "codex",
             "raw": false,
+            "start": null,
             "state": "unknown",
+            "status_line": "running",
             "task_ids": [
               "task_00000000000000000000000000000001"
             ],

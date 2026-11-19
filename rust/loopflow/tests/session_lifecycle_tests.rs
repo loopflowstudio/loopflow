@@ -26,6 +26,16 @@ struct Fixture {
 impl Fixture {
     /// `waits` keeps the stand-in attached until its stdin receives a line.
     fn new(waits: bool) -> Self {
+        Self::with_server_provider(waits, true)
+    }
+
+    /// Manual resumes pass their own PATH to the holder. Keep the stand-in
+    /// off the server's PATH so the recovery watcher cannot launch it first.
+    fn manual_conversations() -> Self {
+        Self::with_server_provider(false, false)
+    }
+
+    fn with_server_provider(waits: bool, server_has_provider: bool) -> Self {
         let home = tempfile::tempdir().unwrap();
         support::seed_store(home.path());
         let bin = home.path().join("bin");
@@ -40,8 +50,17 @@ impl Fixture {
         )
         .unwrap();
         std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let server_path = if server_has_provider {
+            format!("{}:/usr/bin:/bin", bin.display())
+        } else {
+            "/usr/bin:/bin".to_owned()
+        };
         Self {
-            _server: MachineServer::start(env!("CARGO_BIN_EXE_lf"), home.path()),
+            _server: MachineServer::start_with_path(
+                env!("CARGO_BIN_EXE_lf"),
+                home.path(),
+                &server_path,
+            ),
             home,
             repo: TestRepo::new(),
             launched,
@@ -298,9 +317,9 @@ const PATIENCE: Duration = Duration::from_secs(180);
 const LAUNCH: [&str; 5] = ["-i", "--agent", "opencode", ":", "Review the parser"];
 
 #[test]
-fn task_conversation_starts_at_launch_not_creation() {
+fn task_checkout_prepares_the_conversation_and_manual_launch_reuses_it() {
     for headless in [false, true] {
-        let fixture = Fixture::new(false);
+        let fixture = Fixture::manual_conversations();
         std::fs::create_dir_all(fixture.repo.path().join(".lf")).unwrap();
         std::fs::write(
             fixture.repo.path().join(".lf/config.yaml"),
@@ -436,7 +455,7 @@ fn task_conversation_starts_at_launch_not_creation() {
 
 #[test]
 fn primary_readiness_is_metadata_only_for_repository_wave_and_task() {
-    let fixture = Fixture::new(false);
+    let fixture = Fixture::manual_conversations();
     support::register_task_with_pr(
         fixture.home.path(),
         fixture.repo.path(),
@@ -729,7 +748,9 @@ fn personal_task_launch_resume_and_skill_graph_keep_native_identity() {
         .unwrap();
     assert!(!refused.status.success());
     assert!(
-        String::from_utf8_lossy(&refused.stderr).contains("deleted"),
+        [&refused.stdout, &refused.stderr]
+            .iter()
+            .any(|output| String::from_utf8_lossy(output).contains("deleted")),
         "{refused:?}"
     );
     assert_eq!(fixture.count("agent_sessions"), 2);
@@ -1164,7 +1185,7 @@ fn preparation_rejects_messages_without_admitting_or_launching_a_conversation() 
 
 #[test]
 fn ensured_task_conversation_opens_and_recovers_unrecorded_native_exits() {
-    let fixture = Fixture::new(false);
+    let fixture = Fixture::manual_conversations();
     support::register_task_with_pr(
         fixture.home.path(),
         fixture.repo.path(),
@@ -1241,7 +1262,7 @@ fn ensured_task_conversation_opens_and_recovers_unrecorded_native_exits() {
 #[test]
 fn ensured_conversation_recovers_native_exit_before_history_is_published() {
     {
-        let fixture = Fixture::new(false);
+        let fixture = Fixture::manual_conversations();
         support::register_task_with_pr(
             fixture.home.path(),
             fixture.repo.path(),
@@ -1312,7 +1333,7 @@ fn ensured_conversation_recovers_native_exit_before_history_is_published() {
 
 #[test]
 fn a_task_primary_is_one_of_its_own_conversations() {
-    let fixture = Fixture::new(false);
+    let fixture = Fixture::manual_conversations();
     let sole_path = fixture.repo.create_named_worktree("task-sole");
     let task = support::register_task_with_pr(
         fixture.home.path(),
@@ -1324,7 +1345,7 @@ fn a_task_primary_is_one_of_its_own_conversations() {
     support::register_sibling_task(&task, "INF-124", "task-several", &several_path);
     let empty_path = fixture.repo.create_named_worktree("task-empty");
     support::register_sibling_task(&task, "INF-125", "task-empty", &empty_path);
-    let converse = |checkout: &Path| -> String {
+    let converse = |checkout: &Path, opened_at: i64| -> String {
         let before = fixture.launches().len();
         let output = fixture
             .command(&LAUNCH)
@@ -1332,7 +1353,23 @@ fn a_task_primary_is_one_of_its_own_conversations() {
             .output()
             .unwrap();
         assert!(output.status.success(), "{output:?}");
-        fixture.session_row(&fixture.launches()[before]).0
+        let launches = fixture.launches();
+        let [launch] = &launches[before..] else {
+            panic!(
+                "expected one launch for {}, got {:?}",
+                checkout.display(),
+                &launches[before..]
+            );
+        };
+        let session = fixture.session_row(launch).0;
+        fixture
+            .db()
+            .execute(
+                "UPDATE agent_sessions SET opened_at=?2 WHERE id=?1",
+                rusqlite::params![session, opened_at],
+            )
+            .unwrap();
+        session
     };
     let primary = |args: &[&str]| -> Value {
         fixture.json(
@@ -1362,7 +1399,7 @@ fn a_task_primary_is_one_of_its_own_conversations() {
     assert!(members("INF-125").is_empty());
 
     // The Task's only unfinished interactive conversation is its primary.
-    let sole = converse(&sole_path);
+    let sole = converse(&sole_path, 1_000);
     let chosen = primary(&["inf-123"]);
     assert_eq!(chosen["id"], sole.as_str());
     // It stays an ordinary member of its Task.
@@ -1377,15 +1414,8 @@ fn a_task_primary_is_one_of_its_own_conversations() {
     }
 
     // Among several, the most recently used one; the others stay open.
-    let earlier = converse(&several_path);
-    let later = converse(&several_path);
-    fixture
-        .db()
-        .execute(
-            "UPDATE agent_sessions SET created_at=created_at-60 WHERE id=?1",
-            [&earlier],
-        )
-        .unwrap();
+    let earlier = converse(&several_path, 1_000);
+    let later = converse(&several_path, 2_000);
     assert_eq!(primary(&["INF-124"])["id"], later.as_str());
     assert_eq!(members("INF-124").len(), 2);
 
@@ -1396,7 +1426,7 @@ fn a_task_primary_is_one_of_its_own_conversations() {
     );
     let explained = fixture.json(&["resume", "--task", "inf-124", "--explain", "--json"]);
     assert_eq!(explained["resolution"]["session"]["value"], later.as_str());
-    let newest = converse(&several_path);
+    let newest = converse(&several_path, 3_000);
     assert_eq!(primary(&["INF-124"])["id"], later.as_str());
     assert_eq!(members("INF-124").len(), 3);
     // The listing marks it, so a reader finds it without choosing one.

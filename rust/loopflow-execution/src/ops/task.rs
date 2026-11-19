@@ -2641,16 +2641,20 @@ pub fn task_reopen(issue: &str, note: Option<&str>) -> OpsResult<Task> {
     })
 }
 
-/// Start the Task's conversation beside work that does not open it here:
-/// `lf task run`, `lf ship` and `lf task checkout`. Best-effort.
-pub fn start_conversation_beside(task: &Task) {
-    let started = block_on_task(async {
+/// Prepare the Task's conversation beside work that does not open it here:
+/// `lf task run`, `lf ship` and `lf task checkout`. The Machine server's
+/// recovery pass starts a prepared conversation that never ran. Best-effort.
+pub fn prepare_conversation_beside(task: &Task) {
+    let prepared = block_on_task(async {
         let store = task_store().await?;
-        crate::ops::human_session::primary::start_task_conversation(&store, task).await;
+        let worktree = task.worktree().map_err(task_error)?.clone();
+        crate::ops::human_session::primary::ensure_task(&store, &worktree, task.id.as_str(), None)
+            .await
+            .map_err(task_error)?;
         Ok(())
     });
-    if let Err(error) = started {
-        tracing::warn!(task = %task.identifier, %error, "background Task conversation did not start");
+    if let Err(error) = prepared {
+        tracing::warn!(task = %task.identifier, %error, "Task conversation was not prepared");
     }
 }
 

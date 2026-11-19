@@ -207,6 +207,10 @@ fn record(
         terminal_ids: Vec::new(),
         turn,
         raw: true,
+        ended: None,
+        start: None,
+        outlook: None,
+        status_line: None,
     }
 }
 

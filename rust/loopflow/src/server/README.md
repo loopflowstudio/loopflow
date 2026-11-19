@@ -24,7 +24,8 @@ stop the service. Work sessions and Desktop shells run in a holder the service s
 stopping or replacing the service leaves holders and their agents running.
 This service holds no PTY itself and hosts no Graphs: those run as
 [plain detached processes](../../../loopflow-execution/src/transport/README.md#headless-work). Logout/reboot do not
-preserve live processes. Disabled Background Items remain disabled. Upgrade
+preserve live processes; the [recovery pass](#recovery-pass) starts them again.
+Disabled Background Items remain disabled. Upgrade
 retires the previous
 `com.loopflow.machine` registration before starting `com.loopflow.server`.
 The old bundled plist remains only for SMAppService approval inspection/removal.
@@ -33,6 +34,78 @@ existing disabled/masked units require explicit enablement. The `machine.sock`
 address and its lock remain stable so already-running relays can recover across
 the rename. There is one listener, with no alias or alternate protocol path.
 Work and credentials stay in place.
+
+## Recovery pass
+
+```sh
+kill -9 <pid of a Task conversation's claude>
+lf task status LOO-12   # Conversation: running (started again 12:01, attempt 1)
+```
+
+A watcher thread (`recovery.rs`) reads the store when its planning, Session or
+process revisions move, when a conversation's or a run's backoff comes due,
+and at least once a minute. The server writes nothing on the way down; every fact
+the pass needs is written before it is needed (`meta.json`, the holder's
+`exit.json`, Session and Graph-run rows with pid and OS start time). Its
+first reading after start is the restart and reboot case. Each reading:
+
+1. **Settles**, at most every 10 seconds or when a run's backoff came due: reaps orphan agents, releases
+   AgentProcess ancestry whose parent was never recorded, carries Task runs
+   (step 3), continues limit waits and checks rentals
+   (`ops::recovery::settle`). Reads never do this.
+2. **Starts Task conversations.** A Task's primary Session starts again when
+   the Task is open, claimed and checked out here, no agent or pending holder
+   serves it, and it never had an agent or its last agent did not end by the
+   person (exit 0 or 130).
+   An unfinished agent whose recorded process is gone died too. The store
+   counts the start (`agent_sessions.starts_since_turn`, `last_started_at`)
+   before it goes through `session.continue`'s path with request
+   `recover:<session>:<ended agent, or new>:<attempt>`, so one death starts one
+   provider across server restarts. `lf task run`, `lf ship` and
+   `lf task checkout` only prepare the Session; this pass starts it. That
+   first start counts only if it fails, so the first death after it comes
+   back at once; its terminal holds later passes off. The pass's
+   `lf session resume` carries that request as `--request-id`; a resume with
+   any other request, or none, is a person's, and sets the count to zero and
+   clears `start_failure`.
+3. **Carries Task runs.** A shipping or moving Task whose recorded carrier is
+   dead gets `lf --task <ID> ship` or `lf task run <ID>` again, from its
+   checkpoint. A carrier that exits on its own clears its OS process; one
+   found dead died, and retention, which clears it too, records when
+   (`task_graphs.run_died_at`). One count serves both (`task_graphs.restarts`,
+   `restarted_at`), reset when the run finishes a step.
+
+Store retention runs beside the pass, on the maintenance thread
+(`maintenance.rs`): at start and every hour it ends owners whose OS process
+is gone.
+
+One start is in flight at a time: the next begins when the last one's
+agent attaches, or after 3 seconds, most recently updated Task first. Sessions
+and carriers share one backoff: the first start after a death is immediate,
+later ones wait 1 minute doubling to 30, and after 5 starts without a finished
+turn or step the Session and the Task run show the command that continues. A
+start that fails records its reason on the Session
+(`agent_sessions.start_failure`, for example `claude is not installed on this
+Machine's PATH`), cleared by the next start that succeeds, and retries on the
+same backoff. A first start that succeeds after failed ones clears their
+count too: nothing started again. A start under way (the agent is attached to
+its open held terminal and has no pid yet, `SessionSummary.launching`) reads
+`starting`, not `unknown`. A Session's `ended {at, exit_code}` and `start {attempts,
+last_started_at}` carry these facts, and its `outlook {kind, at, reason,
+command}` says once what happens next: `starting`, `coming_back`,
+`waiting_for_you`, `quit` or `could_not_start`. Whether the server starts a
+conversation is one rule, `ops::recovery::server_start`: quit, the give-up,
+whether the Task is open, checked out and claimed here, whether a server
+runs, then the backoff. The pass asks it of each open Task's conversation
+here (`task_conversations_here`) and the Session read
+(`ops::human_session::session_ending`) asks it for the outlook, so a line
+never promises a start the pass will not make. That read also writes the
+sentence, `status_line`; `lf task status` and Desktop print it and derive
+nothing.
+A holder that gets no PTY answers `no PTY left: N in use (<limit>)`, read the
+way `lf machine doctor`'s `ptys` check reads it. Only a Task's work session is
+started; a Wave's or repository's work session, a chat and a batch are
+reported, never started.
 
 ## Local protocol, revision 8
 

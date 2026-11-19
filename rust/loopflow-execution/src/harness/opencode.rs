@@ -128,6 +128,7 @@ impl Driver {
         let mut headers = reqwest::header::HeaderMap::new();
         headers.insert(reqwest::header::AUTHORIZATION, self.authorization.clone());
         self.client = reqwest::Client::builder()
+            .no_proxy() // The private server listens on loopback.
             .default_headers(headers)
             .connect_timeout(Duration::from_secs(10))
             .build()?;

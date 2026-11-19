@@ -202,6 +202,25 @@ pub(crate) fn adopt_native(provider: Provider, id: &AgentSessionId) -> Result<()
     Ok(())
 }
 
+/// Whether `provider` can no longer resume conversation `id`: neither its
+/// native home nor the home it ran in holds the transcript, as after a crash
+/// that took the provider down before it wrote one. Only Claude and Codex
+/// keep transcripts lf finds; another provider's thread is never lost.
+pub fn thread_lost(store: &SqliteStore, provider: &str, id: &AgentSessionId) -> Result<bool> {
+    let provider = match provider {
+        "claude" => Provider::Claude,
+        "codex" => Provider::Codex,
+        _ => return Ok(false),
+    };
+    let harness = HarnessKind::parse(provider.as_str()).expect("native provider has a harness");
+    if transcript(harness, &native_home(provider), id.as_str()).is_some() {
+        return Ok(false);
+    }
+    Ok(conversation_home(store, provider, id)?
+        .and_then(|home| transcript(harness, &home, id.as_str()))
+        .is_none())
+}
+
 /// Why a recorded conversation has no readable transcript here.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Gap {
@@ -551,7 +570,7 @@ fn unix_seconds(timestamp: &Value) -> Option<i64> {
     Some(at.unix_timestamp())
 }
 
-fn rfc3339(at: i64) -> Option<String> {
+pub(crate) fn rfc3339(at: i64) -> Option<String> {
     time::OffsetDateTime::from_unix_timestamp(at)
         .ok()?
         .format(&time::format_description::well_known::Rfc3339)
@@ -828,6 +847,8 @@ mod tests {
             } else {
                 format!("sessions/2026/11/15/rollout-2026-11-15T10-00-00-{ID}.jsonl")
             };
+            let lost = |id: &str| thread_lost(&store, provider.as_str(), &id.into()).unwrap();
+            assert!(lost(ID), "no home holds it yet");
             let source = old.join(&relative);
             fs::create_dir_all(source.parent().unwrap()).unwrap();
             fs::write(
@@ -835,7 +856,9 @@ mod tests {
                 format!(r#"{{"type":"session_meta","payload":{{"id":"{ID}"}}}}"#),
             )
             .unwrap();
+            assert!(!lost(ID), "the home it ran in holds it");
             adopt_native(provider, &ID.into()).unwrap();
+            assert!(!lost(ID), "the native home holds it");
             assert_eq!(
                 fs::read(native.join(&relative)).unwrap(),
                 fs::read(&source).unwrap()
@@ -865,6 +888,8 @@ mod tests {
             assert_eq!(fs::read(native.join(&relative)).unwrap(), retained);
             let missing = "0199a213-81c0-7800-8aa1-bbab2a035a54";
             store.record_account_home_conversation(provider, missing, "old");
+            assert!(lost(missing));
+            assert!(!thread_lost(&store, "pi", &missing.into()).unwrap());
             assert!(adopt_native(provider, &missing.into())
                 .unwrap_err()
                 .to_string()

@@ -56,9 +56,11 @@ impl Pair {
         };
         pair._servers = [Person::Maya, Person::Lee]
             .map(|person| {
-                loopflow_test_support::MachineServer::start(
+                let env = pair.env(person);
+                loopflow_test_support::MachineServer::start_with_path(
                     env!("CARGO_BIN_EXE_lf"),
-                    pair.env(person)["LF_HOME"].as_str().unwrap().as_ref(),
+                    env["LF_HOME"].as_str().unwrap().as_ref(),
+                    env["PATH"].as_str().unwrap(),
                 )
             })
             .into();
@@ -337,13 +339,22 @@ fn two_people_share_one_repository() {
                      WHERE t.ended_at IS NULL AND s.attached_pid IS NOT NULL",
                 )
                 .unwrap();
-            let owners = query
-                .query_map([], |row| row.get(0))
-                .unwrap()
-                .collect::<Result<Vec<u32>, _>>()
-                .unwrap();
-            assert!(!owners.is_empty(), "checkout started no conversation");
-            owners
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+            loop {
+                let owners = query
+                    .query_map([], |row| row.get(0))
+                    .unwrap()
+                    .collect::<Result<Vec<u32>, _>>()
+                    .unwrap();
+                if !owners.is_empty() {
+                    break owners;
+                }
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "checkout started no conversation"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
         })
         .collect();
     drop(pair);

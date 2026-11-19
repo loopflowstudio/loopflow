@@ -28,7 +28,8 @@ pub enum TaskExecutionState {
     Starting,
     Running,
     Stalled,
-    /// Its step is waiting out a usage limit until an account frees up.
+    /// Its step is waiting out a usage limit until an account frees up, or
+    /// its run waits to be carried again after its carrier died.
     Waiting,
     Blocked,
     Unknown,
@@ -115,6 +116,20 @@ pub async fn execution_of_latest_graph(
     ) {
         if let Some(open) = open_graph_execution_from_facts(&task.id, facts) {
             snapshot = open;
+        }
+    }
+    if matches!(
+        snapshot.state,
+        TaskExecutionState::Idle | TaskExecutionState::Blocked
+    ) && facts.tasks_with_carrier_records.contains(&task.id)
+    {
+        if let Some(died) = crate::ops::task::ship::died_run(sqlite, &task.id)? {
+            let now = loopflow_storage::rows::now_unix();
+            snapshot.state = match died.next_at() {
+                Some(_) => TaskExecutionState::Waiting,
+                None => TaskExecutionState::Blocked,
+            };
+            snapshot.reason = died.reason(&task.identifier, now);
         }
     }
     Ok((snapshot, Some(graph.detail(entry))))

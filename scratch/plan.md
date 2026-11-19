@@ -423,9 +423,10 @@ existing update a conversation gets about its own Task; Waves and
    unused). A done parent run through `lf task complete` again does not
    revisit children left open.
    The three review items, settled:
-   - "Merged with children open" is `task_actions::conducting_reason`,
-     read by `merged_action` and the list's next move; `RoadmapTask`
-     carries its answer (`conducting`) for `TaskRow` and `lf wave show`.
+   - "Merged with children open" is one function (since slice 7,
+     `task_actions::Finished`), read by the Task's action and the list's
+     next move; `RoadmapTask` carries its answer (`conducting`) for
+     `TaskRow` and `lf wave show`.
    - `TaskEventKind::FamilyCompletionRequested` stays. The other form, a
      Graph's request withdrawn when a child appears, needs every write
      that can put an open child under a waiting Task (filing, reopening,
@@ -546,56 +547,37 @@ existing update a conversation gets about its own Task; Waves and
    person never sees, kept for the reason in its doc comment.
 
 7. **A finished parent says why it is open; a completion reaches every
-   child it closes.** Built: `task_actions::Finished` is the one definition
-   (`of` and `reason`), read by `derive_task_actions`, `waves.rs` `next_move`
-   and `conducting`, `task_row::next_command` and Auto-Ship's merge;
-   `conducting_reason` and `merged_children_reason` are gone.
-   `complete_children` recurses under every child it closes. Shown by
-   `task_actions::tests::a_task_with_no_pr_at_the_end_of_its_graph_is_finished`
-   and the CLI case
-   `session_cli_tests::a_merged_parent_stays_open_until_it_is_completed_with_its_children`
-   (both pass, clippy clean on the three crates). What it taught is in
-   `scratch/questions.md` under "Slice 7". The third concept review
-   (`scratch/concept-review.html`, 2026-11-18, e3f0806302) compared slice 6's
-   five intentions with QA's second pass: all five held. Two places are left
-   where one idea has two behaviours. Choices are **made for review**.
-   - **One definition of "its own work is over".** Its PR merged, or it has
-     no PR and stands at `end`. Today `task_actions::conducting_reason`
-     knows the first only, so a no-PR parent kept open at `end` by slice 4
-     reads "run the next work with `lf task run`" (QA scenario 11, a32d33),
-     and still reads that after its last child closes. `conducting_reason`
-     takes whether the Task stands at `end`
-     (`TaskDetailFacts.steps`; `snapshot_task_detail` reads the same
-     position) and answers "Finished · N children open" for the no-PR case,
-     "Merged · N children open" as now. With no open children the same
-     Task reads "Finished; complete the Task", `TaskAction::NoAction`, and
-     `task_row::next_command` gives `lf task complete <ID>`. A Task at
-     `end` with an open or publishing PR is not finished and keeps its
-     `lf land` line. `waves.rs` `next_move` and `RoadmapTask.conducting`
-     follow from the one function; no new field.
-     Show it: extend
-     `task_actions::tests::a_merged_task_with_open_children_is_not_asked_to_complete`
-     with the no-PR case, and
-     `task_work_lifecycle_tests::reaching_end_leaves_a_task_with_open_children_open`
-     or the CLI case in
-     `session_cli_tests::a_merged_parent_stays_open_until_it_is_completed_with_its_children`
-     with the reason and `next` before and after the child closes.
-     Passed over: completing the parent at `end` and settling its children
-     there, which abandons never-started follow-ups the moment a planning
-     Graph finishes.
-   - **Settlement reaches under an abandoned child too.**
-     `complete_children` (`sqlite/children.rs:2694`) recurses after
-     `ChildOutcome::Done` only; recurse after `Abandoned` as well, so a
-     never-started child's never-started child is abandoned with it
-     (QA: e1dd86 under a1e338). The doc comment and `ChildCompletion.children`
-     already carry it. Show it in the storage test that covers the nested
-     settlement. Passed over: `lf task abandon <parent>` settling children,
-     which needs a result on `task.abandon` and its DTO.
-   - Docs: `docs/work.md` "Finish" (the no-PR parent's two lines; "A child
-     finished this way" becomes "closed this way") and the Completion
-     reference line.
+   child it closes.** Built (5305f76a1e), from the third concept review
+   (`scratch/concept-review.html`, e3f0806302), which found slice 6's five
+   intentions all held in QA's second pass and two places where one idea had
+   two behaviours. Choices are **made for review**.
+   - `task_actions::Finished` (`Merged`, or `AtEnd`: no PR record and the
+     Graph at `end`) is the one definition of "its own work is over".
+     `derive_task_actions`, `waves.rs` `next_move` and `conducting`,
+     `task_row::next_command` and Auto-Ship's merge read it. A no-PR parent
+     at `end` reads "Finished · N children open" with `next` null, then
+     "Finished; complete the Task" with `lf task complete <ID>`. At `end`
+     with an open or publishing PR it keeps its `lf land` line.
+   - `complete_children` recurses under every child it closes, done or
+     abandoned.
+   - `docs/work.md` "Finish" and the Completion reference line say both.
+   Shown by `task_actions::tests::a_task_with_no_pr_at_the_end_of_its_graph_is_finished`
+   and `session_cli_tests::a_merged_parent_stays_open_until_it_is_completed_with_its_children`
+   (reason and `next` before and after the child closes; a never-started
+   child's never-started child abandoned). Implement reported both passing
+   and clippy clean on the three crates; not rerun since. QA has not walked
+   scenario 11 by hand on this build.
+   Passed over: completing the parent at `end` and settling its children
+   there, which abandons never-started follow-ups the moment a planning
+   Graph finishes; `lf task abandon <parent>` settling children, which needs
+   a result on `task.abandon` and its DTO.
+   What it left open is in `scratch/questions.md` under "Slice 7".
+   For compress: `Finished::of` is worked out twice for one row, in
+   `snapshot_task_detail` and again in `task_row::next_command` from
+   `lifecycle`, `pr` and `step`; `RoadmapTask` carrying the `Finished`
+   beside `conducting` would leave one.
 
-Next: gate. QA walked the acceptance check by hand
+Next: gate; no slice remains. QA walked the acceptance check by hand
 on a private Machine, 2026-11-18, before slice 6: every line of it held,
 and a real Claude conversation was woken two seconds after its child stopped.
 A second pass on 26683764f9 (`scratch/qa.html`) walked it again with slice 6

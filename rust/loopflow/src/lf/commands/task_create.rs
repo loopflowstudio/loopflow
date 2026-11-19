@@ -40,7 +40,7 @@ pub(crate) fn answer(
             let store = loopflow_execution::store::read_existing_registry()?
                 .map(std::sync::Arc::new)
                 .context("no Loopflow store exists on this Machine")?;
-            let (row, parent) = super::waves::created_rows(&store, &receipt.task).await?;
+            let (row, parent, _) = super::waves::task_with_family(&store, &receipt.task).await?;
             Ok(TaskCreated {
                 receipt,
                 session,
@@ -49,15 +49,6 @@ pub(crate) fn answer(
             })
         })
     })
-}
-
-fn parent_identifier(task: &loopflow_storage::work::task::Task) -> Result<Option<String>> {
-    let Some(parent) = &task.parent_task_id else {
-        return Ok(None);
-    };
-    let store = loopflow_execution::store::read_existing_registry()?
-        .context("no Loopflow store exists on this Machine")?;
-    Ok(store.sqlite.task(parent)?.map(|task| task.identifier))
 }
 
 pub fn create(
@@ -147,8 +138,12 @@ pub fn create(
             receipt.task.title, receipt.task.identifier
         )?;
         // Filed from a Task's conversation, the link was never typed: say it.
-        if let Some(parent) = parent_identifier(&receipt.task)? {
-            writeln!(io.output, "  parent: {parent}")?;
+        if receipt.task.parent_task_id.is_some() {
+            let store = loopflow_execution::store::read_existing_registry()?
+                .context("no Loopflow store exists on this Machine")?;
+            if let Some(parent) = super::waves::parent_identifier(&store.sqlite, &receipt.task)? {
+                writeln!(io.output, "  parent: {parent}")?;
+            }
         }
     }
     if *run && approve {

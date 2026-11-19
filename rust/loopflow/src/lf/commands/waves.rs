@@ -1185,12 +1185,12 @@ pub(crate) async fn task_pane(
     store: &SharedStore,
     status: loopflow_execution::ops::task::TaskStatus,
 ) -> Result<DesktopTaskPane> {
-    let (row, (parent, children)) = match &status.task {
-        Some(task) => (
-            Some(task_row(store, task).await?),
-            task_family(store, task).await?,
-        ),
-        None => (None, (None, Vec::new())),
+    let (row, parent, children) = match &status.task {
+        Some(task) => {
+            let (row, parent, children) = task_with_family(store, task).await?;
+            (Some(row), parent, children)
+        }
+        None => (None, None, Vec::new()),
     };
     Ok(DesktopTaskPane {
         status,
@@ -1200,53 +1200,56 @@ pub(crate) async fn task_pane(
     })
 }
 
-/// One Task's row in the Work projection's shape, as the plan reads it.
-pub(crate) async fn task_row(store: &SharedStore, task: &Task) -> Result<RoadmapTask> {
-    let shared = SharedTaskReads::read(store).await?;
-    Ok(snapshot_task_details(store, vec![task], false, &shared)?
-        .pop()
-        .expect("one Task reads one row"))
-}
-
-/// A created Task's row, and the row of the Task it was filed from.
-pub(crate) async fn created_rows(
-    store: &SharedStore,
-    task: &Task,
-) -> Result<(RoadmapTask, Option<TaskRow>)> {
-    let row = task_row(store, task).await?;
-    Ok((row, parent_row(store, task).await?))
-}
-
-/// The rows of `tasks`, as `lf task list --json` prints them.
-async fn task_rows(store: &SharedStore, tasks: Vec<&Task>) -> Result<Vec<TaskRow>> {
+/// The rows of `tasks` in the Work projection's shape, as the plan reads
+/// them, in one reading.
+async fn roadmap_rows(store: &SharedStore, tasks: Vec<&Task>) -> Result<Vec<RoadmapTask>> {
     if tasks.is_empty() {
         return Ok(Vec::new());
     }
     let shared = SharedTaskReads::read(store).await?;
-    let names = TaskNames::read(Some(store)).await?;
-    Ok(snapshot_task_details(store, tasks, false, &shared)?
-        .into_iter()
-        .map(|row| names.row(row))
-        .collect())
+    snapshot_task_details(store, tasks, false, &shared)
 }
 
-/// The row of the Task `task` was filed from; `None` for top-level work and
-/// for a parent this Machine does not hold.
-async fn parent_row(store: &SharedStore, task: &Task) -> Result<Option<TaskRow>> {
+/// The rows of `tasks`, as `lf task list --json` prints them.
+async fn task_rows(store: &SharedStore, tasks: Vec<&Task>) -> Result<Vec<TaskRow>> {
+    let rows = roadmap_rows(store, tasks).await?;
+    if rows.is_empty() {
+        return Ok(Vec::new());
+    }
+    let names = TaskNames::read(Some(store)).await?;
+    Ok(rows.into_iter().map(|row| names.row(row)).collect())
+}
+
+/// `task`'s own row, the row of the Task it was filed from and the rows of
+/// the Tasks filed from it, in one reading. The parent is `None` for
+/// top-level work and for a parent this Machine does not hold.
+pub(crate) async fn task_with_family(
+    store: &SharedStore,
+    task: &Task,
+) -> Result<(RoadmapTask, Option<TaskRow>, Vec<TaskRow>)> {
     let parent = match &task.parent_task_id {
         Some(parent) => store.get_task(parent).await?,
         None => None,
     };
-    Ok(task_rows(store, parent.iter().collect()).await?.pop())
+    let children = store.sqlite.task_children(&task.id)?;
+    let tasks = std::iter::once(task).chain(&parent).chain(&children);
+    let mut rows = roadmap_rows(store, tasks.collect()).await?.into_iter();
+    let row = rows.next().expect("one Task reads one row");
+    let names = TaskNames::read(Some(store)).await?;
+    let mut family = rows.map(|row| names.row(row));
+    let parent = parent.and_then(|_| family.next());
+    Ok((row, parent, family.collect()))
 }
 
-/// The Task `task` was filed from and the Tasks filed from it.
-async fn task_family(store: &SharedStore, task: &Task) -> Result<(Option<TaskRow>, Vec<TaskRow>)> {
-    let children = store.sqlite.task_children(&task.id)?;
-    Ok((
-        parent_row(store, task).await?,
-        task_rows(store, children.iter().collect()).await?,
-    ))
+/// The identifier of the Task `task` was filed from, when this Machine holds it.
+pub(crate) fn parent_identifier(
+    store: &loopflow_storage::sqlite::SqliteStore,
+    task: &Task,
+) -> Result<Option<String>> {
+    Ok(match &task.parent_task_id {
+        Some(parent) => store.task(parent)?.map(|parent| parent.identifier),
+        None => None,
+    })
 }
 
 /// `lf task complete --json`: the completed Task and what its completion did
@@ -1333,10 +1336,11 @@ pub fn print_task_family(task: &Task) -> Result<()> {
         let store = loopflow_execution::store::read_existing_registry()?
             .map(std::sync::Arc::new)
             .ok_or_else(|| anyhow!("no Loopflow store exists on this Machine"))?;
-        let (parent, children) = task_family(&store, task).await?;
-        if let Some(parent) = parent {
-            println!("  parent: {}", parent.identifier);
+        if let Some(parent) = parent_identifier(&store.sqlite, task)? {
+            println!("  parent: {parent}");
         }
+        let children = store.sqlite.task_children(&task.id)?;
+        let children = task_rows(&store, children.iter().collect()).await?;
         let width = |text: fn(&TaskRow) -> &str| {
             children
                 .iter()
@@ -1395,7 +1399,7 @@ pub(crate) async fn task_detail(
     let task = status
         .task
         .ok_or_else(|| anyhow!("this Task is not registered in Loopflow"))?;
-    let row = task_row(store, &task).await?;
+    let (row, parent, children) = task_with_family(store, &task).await?;
     let mut sessions = Vec::new();
     for session in status
         .overview
@@ -1409,7 +1413,6 @@ pub(crate) async fn task_detail(
         }
     }
     let summary = store.sqlite.task_summary(&task.id)?;
-    let (parent, children) = task_family(store, &task).await?;
     Ok(TaskDetail {
         summary,
         parent,

@@ -748,6 +748,14 @@ etude checkout and `lf` version are unknown.
   Flaky by the repository's rule; gate finds the cause or rewrites it.
 - Slices 1 to 5 are in the code and differences 1 to 4 at the top hold in
   it. Etude's cutover is by hand, after release.
+- Slice 6 checks, 2026-11-18, run by implement:
+  `cargo nextest run -p loopflow -p loopflow-storage -p loopflow-execution -E 'test(server::schema::tests::) | test(planning_update_triggers_compare_every_column) | test(subscribe_frames_carry_each_reads_json_result) | test(documented_commands::) | test(the_later_change_shows_on_both_machines_through_the_hub) | test(ops::wave_lifecycle::) | test(store::query_plans::tests::)'`
+  15 passed (the acceptance test 250 s at load 108);
+  clippy on the three crates clean;
+  `scripts/test_desktop.sh --filter 'DTOFixtureTests|WorkModelTests'` 100 passed.
+  Gate runs the rest: `binary(transport_tests)`, `test(transport::)`,
+  `test(performance_tests::)`, `binary(session_lifecycle_tests)`,
+  `of_two_claims_made_apart_…`.
 - Slice 6 is built; nothing in the plan is unbuilt. Gate runs the
   lists above. Open choices are in `scratch/questions.md`; the review's four
   questions are at the end of `scratch/concept-review.html`.

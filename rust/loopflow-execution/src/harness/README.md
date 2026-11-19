@@ -97,7 +97,9 @@ it themselves. In the worker test each stand-in makes those two calls around
 one tool (`tests/support/tool_turn.py`) while `lf steer` runs in between, and
 reads back the block naming its Session and Task, then the steer. The plugin
 and the extension themselves run under Node in `harness::context::tests::`.
-Neither path has been seen on a real OpenCode or Pi worker.
+On real OpenCode 2.2.1 and Pi 1.3.0 workers, a steer sent mid-step changed
+the code each wrote. OpenCode keeps no system text between requests, so its
+plugin sends every steer it has heard with each later request.
 
 lf reads usage from each provider's own transcript. Pi's session file names a
 turn by its entry id and lf's record of the same turn uses its request id, so

@@ -149,9 +149,6 @@ impl Driver {
             command.args(["--model", model]);
         }
         command.args(["--session", thread.as_str()]);
-        if let Some(cwd) = &config.cwd {
-            command.current_dir(cwd);
-        }
         super::configure_agent_env(&mut command, config);
         command.envs(environment(config, None, self.kind)?);
         super::configure_vendor_std_env(command.as_std_mut())?;
@@ -636,11 +633,10 @@ fn environment(
     kind: LaunchKind,
 ) -> Result<std::collections::BTreeMap<String, String>> {
     let mut environment = config.env.clone();
+    // An inherited value is the calling OpenCode conversation's, with its plugin.
     let mut settings: serde_json::Value = environment
         .get("OPENCODE_CONFIG_CONTENT")
-        .cloned()
-        .or_else(|| std::env::var("OPENCODE_CONFIG_CONTENT").ok())
-        .map(|value| serde_json::from_str(&value))
+        .map(|value| serde_json::from_str(value))
         .transpose()?
         .unwrap_or_else(|| serde_json::json!({}));
     if !settings.is_object() {

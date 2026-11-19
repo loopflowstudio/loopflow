@@ -294,8 +294,8 @@ The docs commit the implementation to three things the plan had left open:
    - "No AgentProcess under its Process" is read as "no captured input"
      (`process_inputs`, already indexed by Process). A launch that captured and
      then failed to spawn still gets three attempts.
-   - The stop reads `the run of <graph> stopped before any agent started:
-     <cause>; lf task run <ID> starts the run again there`, and ends an
+   - The stop reads `the run of <graph> stopped before any agent started,
+     and lf task run <ID> starts it again there: <cause>`, and ends an
      Auto-Ship approval like the other stops.
    - A missing agent later in the order is dropped without a record: one
      recovery row per step holds the move that happened, not ones that might.
@@ -403,9 +403,8 @@ The docs commit the implementation to three things the plan had left open:
      after a build); with the question and interrupt tests under nextest, 104s
      and 106s each. Nextest's limit is 300s.
 
-No implement slice remains. Next: demo on the real CLIs (a Task pinned to
-OpenCode Gemini 4 Carbon and one pinned to a Pi model, each through
-`implement`, with a mid-step steer). Open from this Task, each needing a
+No implement slice remains. QA ran both real CLIs through `lf task run`
+(below). Next: demo. Open from this Task, each needing a
 decision first: Pi usage attribution (`scratch/questions.md` 25), Claude and
 Codex in the question and interrupt tests (18, 22), deleting the uncalled
 `Driver::send_current` (26), and the usage-less `task-session` row (27).
@@ -429,8 +428,42 @@ Codex in the question and interrupt tests (18, 22), deleting the uncalled
   recorded thread `ses_<capture>` and read usage from OpenCode's store
   (23,839 input tokens, $0.048). Asked which tool its instructions say launched
   it, the model answered "lf": the context plugin loads under `opencode run`.
-- Not seen: a steer landing mid-run, turn reports from a worker to the Machine
-  server, the terminal client with `--prompt`, any Pi run.
+- Not seen: the terminal client with `--prompt` on its own (Task
+  conversations open it; nobody typed into one).
+
+## Seen through `lf task run` on real CLIs (QA, 2026-11-18)
+
+OpenCode 2.2.1 and Pi 1.3.0, both on `opencode/gemini-4-carbon`, branch `lf`,
+private `LF_HOME` with its server, real `HOME`. `scratch/qa.html` has each run.
+
+- `lf task run <ID> -a opencode:…` and `-a pi:…` each settled `implement`
+  with a commit and stood at `human-review`; a mid-step `lf steer` changed the
+  code on both. OpenCode usage is in `lf history usage --task`; Pi's is not
+  (question 25, as predicted).
+- `lf task interrupt` on OpenCode: exit 130, turn `interrupted`, no
+  `opencode run` left; the next `lf task run` settled the step.
+- `PATH` without `pi`: pinned, one attempt and the install hint; with
+  `agents: [pi:…, opencode:…]`, the step ran on OpenCode and the move was
+  recorded.
+- Fixed in QA:
+  - OpenCode roots a session in `$PWD`, not the process cwd. lf set only the
+    cwd, so every worker's OpenCode session sat in the main checkout
+    (`session_v2.directory`); its tools defaulted there. `configure_agent_env`
+    now sets cwd and `PWD` for every headless harness; `NativeClient` sets
+    `PWD` for terminals.
+  - lf run from inside an OpenCode conversation merged that conversation's
+    `OPENCODE_CONFIG_CONTENT` (its plugin, permissions) into the worker's, so
+    the parent's context reached the worker first. OpenCode's markers and
+    `OPENCODE_CONFIG_CONTENT` joined `CALLER_SESSION_ENV`; only `config.env`
+    seeds OpenCode settings.
+  - A steer the plugin claimed went into one request's system text; OpenCode
+    keeps none, so later requests lost it and Gemini never acted on it. The
+    plugin now resends every steer it has heard.
+  - Every `lf task run -a` Graph log opened with "This command does not start
+    an agent; --agent has no effect" (`graph run` was missing from
+    `may_launch_agent`).
+  - Doubled punctuation in the not-installed reason ("in Pi.. Inspect",
+    "in Pi.; `lf task run`").
 
 ## What the rewrite changed for people
 

@@ -768,9 +768,6 @@ impl Driver {
             // there with /new or /fork has no binding of its own and reads this.
             context.configure_hooks(command.as_std_mut())?;
         }
-        if let Some(cwd) = &launch.cwd {
-            command.current_dir(cwd);
-        }
         super::configure_vendor_std_env(command.as_std_mut())?;
         // Codex's shell policy need not inherit arbitrary app-server environment.
         // Pass only explicit launch and freshly resolved lf executable/Machine

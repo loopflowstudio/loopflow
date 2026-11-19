@@ -251,9 +251,6 @@ impl Driver {
             context.configure_hooks(command.as_std_mut())?;
         }
         super::configure_vendor_std_env(command.as_std_mut())?;
-        if let Some(cwd) = &config.cwd {
-            command.current_dir(cwd);
-        }
         command
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())

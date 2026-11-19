@@ -38,7 +38,8 @@ impl NativeClient {
         let mut process = Command::new(program);
         crate::agent::remove_caller_session_env(&mut process);
         process
-            .current_dir(cwd)
+            .current_dir(&cwd)
+            .env("PWD", &cwd)
             .env_remove("LOOPFLOW_DIRECTIVE_FILE")
             .envs(&launch.config.env);
         crate::provider_auth::apply_provider_env_to_command(

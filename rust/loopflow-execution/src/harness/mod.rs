@@ -51,6 +51,11 @@ pub(crate) fn configure_agent_env(command: &mut tokio::process::Command, config:
     if let Some(path) = &config.directive_relay {
         command.env("LOOPFLOW_DIRECTIVE_FILE", path);
     }
+    if let Some(cwd) = &config.cwd {
+        // OpenCode roots its session in `PWD`, not the process directory, so an
+        // inherited `PWD` would put a Task's worker in the main checkout.
+        command.current_dir(cwd).env("PWD", cwd);
+    }
     crate::provider_auth::apply_provider_env_to_command(config.agent.harness, command.as_std_mut());
 }
 
@@ -135,6 +140,24 @@ mod environment_tests {
             .status()
             .unwrap()
             .success());
+    }
+
+    #[tokio::test]
+    async fn provider_child_starts_in_its_checkout_with_a_matching_pwd() {
+        let checkout = tempfile::tempdir().unwrap();
+        let mut command = tokio::process::Command::new("/usr/bin/printenv");
+        command.arg("PWD").env("PWD", "/main/checkout");
+        let config = crate::agent::AgentConfig {
+            cwd: Some(checkout.path().to_path_buf()),
+            ..Default::default()
+        };
+        configure_agent_env(&mut command, &config);
+        let output = command.output().await.unwrap();
+        assert_eq!(
+            String::from_utf8(output.stdout).unwrap().trim(),
+            checkout.path().to_str().unwrap()
+        );
+        assert_eq!(command.as_std().get_current_dir(), Some(checkout.path()));
     }
 
     #[tokio::test]

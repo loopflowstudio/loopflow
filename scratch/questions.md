@@ -65,8 +65,9 @@ Choices made for review; `scratch/concept-review.html` shows each one.
     also rewrites key order, new fields and checkout paths that drifted before
     this Task, and reaches the Swift fixture tests. Left as committed.
 
-15. **Steers to a running headless OpenCode turn** now rely on the plugin's
-    between-tool check alone. Not seen working on the real CLI yet.
+15. **Steers to a running headless OpenCode turn** rely on the plugin's
+    between-tool check alone. Seen working on OpenCode 2.2.1 in QA
+    (2026-11-18) once the plugin resent each steer on every later request.
 
 16. **A missing agent in the middle of the order is skipped without a record.**
     Only a missing first choice shows as a move in `lf task status`; a later
@@ -130,3 +131,18 @@ Choices made for review; `scratch/concept-review.html` shows each one.
 
 27. **`lf history usage --task` lists the Task's interactive `task-session`
     beside the worker**, with no usage. Not looked into.
+
+28. **A person's own `OPENCODE_CONFIG_CONTENT` is no longer merged.** lf read
+    it from its own environment, where inside an OpenCode conversation it is
+    that conversation's, plugin included. It is now a caller marker; OpenCode's
+    config files still apply. Passed over: telling a person's value from a
+    caller's.
+
+29. **A missing agent's move shows in `lf task status` only while the step
+    runs**, as a limit move does. After the step settles, the row stays in
+    `agent_limit_recoveries` and nothing shows it.
+
+30. **With `agents: [pi:…, opencode:…]` and Pi missing, no Task conversation
+    started**, and status reads `body: provider pi`. Chats do not move, so the
+    conversation is not opened on OpenCode. Should it be?
+

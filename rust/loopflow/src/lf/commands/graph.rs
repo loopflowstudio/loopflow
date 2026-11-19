@@ -151,7 +151,7 @@ enum TaskRunStopped {
     #[error("the run of {run} failed {TASK_RUN_ATTEMPTS} times with the same error; this Task run stops here: {cause}")]
     Repeated { run: String, cause: String },
     #[error(
-        "the run of {run} stopped before any agent started: {cause}; `lf task run {issue}` starts the run again there"
+        "the run of {run} stopped before any agent started, and `lf task run {issue}` starts it again there: {cause}"
     )]
     Unlaunched {
         issue: String,

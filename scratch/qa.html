@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>LOO-974 QA: real OpenCode and Pi workers</title>
+<style>
+body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:60rem;margin:2rem auto;padding:0 1rem;color:#1d1d1f}
+h1{font-size:1.5rem}h2{font-size:1.15rem;margin-top:2rem;border-bottom:1px solid #ddd;padding-bottom:.2rem}
+pre{background:#f5f5f7;padding:.7rem;overflow-x:auto;font-size:12.5px;border-radius:6px}
+code{font-size:13px}.ok{color:#1a7f37;font-weight:600}.bad{color:#cf222e;font-weight:600}.fix{color:#8250df;font-weight:600}
+table{border-collapse:collapse;width:100%}td,th{border:1px solid #ddd;padding:.35rem .5rem;text-align:left;vertical-align:top;font-size:14px}
+</style></head><body>
+<h1>LOO-974 QA: Task steps on real OpenCode and Pi</h1>
+<p>2026-11-18. Branch <code>lf</code> copied to <code>/tmp/lfq974/bin</code>, private <code>LF_HOME</code> with its own
+<code>lf server run</code>, the account's real <code>HOME</code> for provider logins. OpenCode 2.2.1 and Pi 1.3.0, both on
+<code>opencode/gemini-4-carbon</code>. A throwaway repo (<code>calc.py</code>) with Graph <code>qa</code>:
+<code>step: implement</code> then <code>interactive: human-review</code>. Commands ran from an agent shell that itself
+carried OpenCode caller env (<code>OPENCODE_SESSION_ID</code>, <code>OPENCODE_CONFIG_CONTENT</code>).</p>
+
+<table>
+<tr><th>Scenario</th><th>Result</th></tr>
+<tr><td>1. OpenCode worker, first run</td><td><span class="ok">settled</span>, but <span class="bad">session rooted in the main checkout</span> and the parent's plugin leaked in → <span class="fix">fixed</span></td></tr>
+<tr><td>2. OpenCode worker with a mid-step steer</td><td>step settled; <span class="bad">steer claimed, never acted on</span> → <span class="fix">fixed</span></td></tr>
+<tr><td>3. OpenCode again after the fixes</td><td><span class="ok">checkout directory, steer applied</span></td></tr>
+<tr><td>4. Pi worker with a mid-step steer</td><td><span class="ok">settled, steer applied</span>; usage missing (known, question 25)</td></tr>
+<tr><td>5. Interrupt an OpenCode worker, run again</td><td><span class="ok">turn <code>interrupted</code>, rerun settled</span></td></tr>
+<tr><td>6. Pinned Pi, Pi not on <code>PATH</code></td><td><span class="ok">one attempt, install hint</span>; <span class="bad">doubled punctuation</span> → <span class="fix">fixed</span></td></tr>
+<tr><td>7. <code>agents: [pi, opencode]</code>, Pi missing</td><td><span class="ok">ran on OpenCode, move recorded</span>; status hides it once settled</td></tr>
+<tr><td>Every <code>-a</code> Graph log</td><td><span class="bad">opened with "--agent has no effect"</span> → <span class="fix">fixed</span></td></tr>
+</table>
+
+<h2>1. OpenCode worker, first run</h2>
+<pre>$ lf task run f42a49 -a opencode:opencode/gemini-4-carbon
+f42a49 · qa from start running as Graph run c87b6a4b-…
+# worker process:
+opencode run --standalone --format json --auto --model opencode/gemini-4-carbon --session ses_94048b83…
+$ lf task status f42a49
+  Graph qa: at human-review
+  Session: session_d2193e76…  f42a49 Add subtract  completed</pre>
+<p>The commit landed on the Task branch. The model's own answer flagged two things, and both checked out:</p>
+<pre>1. Worktree working directory resolved to the main repo: `opencode serve` had OS cwd
+   /private/tmp/lfq974/repo.f42a49-add-a-subtract, while the OpenCode session's working
+   directory and workspace root resolved to /private/tmp/lfq974/repo (main).
+2. Inherited OPENCODE_CONFIG_CONTENT merged the parent OpenCode plugin …</pre>
+<pre>sqlite&gt; select id, directory from session_v2 where …
+ses_94048b83…|/private/tmp/lfq974/repo                         &lt;- worker
+ses_41e74bd7…|/private/tmp/lfq974/repo.f42a49-add-a-subtract   &lt;- Task conversation</pre>
+<p>Reproduced by hand: the same <code>opencode run</code> from the checkout, with <code>PWD</code> set to the main repo,
+records the main repo; with a matching <code>PWD</code>, the checkout. OpenCode takes its directory from <code>$PWD</code>.
+lf set the child's cwd and left the caller's <code>PWD</code>.</p>
+<p><span class="fix">Fix:</span> <code>configure_agent_env</code> sets cwd and <code>PWD</code> together for every headless harness
+(four duplicated <code>current_dir</code> calls deleted); <code>NativeClient</code> sets <code>PWD</code> for terminal launches.
+Test: <code>harness::environment_tests::provider_child_starts_in_its_checkout_with_a_matching_pwd</code>.</p>
+<p><span class="fix">Fix:</span> lf read <code>OPENCODE_CONFIG_CONTENT</code> from its own environment and merged it, so inside an
+OpenCode conversation the parent's plugin and context came first. OpenCode's markers (<code>OPENCODE</code>,
+<code>OPENCODE_SESSION_ID</code>, <code>OPENCODE_TERMINAL</code>, <code>OPENCODE_CONFIG_CONTENT</code>) joined
+<code>CALLER_SESSION_ENV</code>; the launch matrix already sets every marker in the caller and asserts none reaches a provider.</p>
+
+<h2>2. A mid-step steer on OpenCode</h2>
+<pre>$ lf steer ad5c57 'Also give multiply a one-line docstring that says "Return a times b."'
+steer_delivered: session_14abf5f6… 1795050200   (17:03:20; the worker committed at 17:03:52)
+$ cat calc.py
+def multiply(a, b):
+    return a * b                                 &lt;- no docstring</pre>
+<p>The plugin claimed the steer and put it in that request's system text. OpenCode stores no system text and the plugin
+sent it once, so every later model request in the turn had lost it. Claude and Codex keep a steer in the transcript.</p>
+<p><span class="fix">Fix:</span> <code>context_opencode.js</code> keeps what it has heard and sends it with every later request.
+<code>harness::context::tests::a_managed_opencode_turn_…</code> now asserts the steer on all three requests (it asserted the drop before).</p>
+
+<h2>3. OpenCode after the fixes</h2>
+<pre>$ lf task run 90e8ba -a opencode:opencode/gemini-4-carbon; sleep 12
+$ lf steer 90e8ba 'Also give divide a one-line docstring that says "Return a over b."'
+  Graph qa: at human-review
+def divide(a, b):
+    """Return a over b."""
+    return a / b
+worker PWD=/private/tmp/lfq974/repo.ad5c57-add-a-multiply; no OPENCODE_SESSION_ID in its env
+session_v2.directory = the Task checkout
+$ lf history usage --task 90e8ba
+  implement   74,305 in   1,305 out   264,340 cache   $0.20   1/1</pre>
+
+<h2>4. Pi worker with a steer</h2>
+<pre>$ lf task run 00ab89 -a pi:opencode/gemini-4-carbon; sleep 15
+$ lf steer 00ab89 'Also give negate a one-line docstring that says "Return minus a."'
+  Graph qa: at human-review
+def negate(a):
+    """Return minus a."""
+    return -a
+57e2285 Add negate(a) to calc.py with docstring and tests
+$ lf history usage --task 00ab89
+  implement   -   -   -   -   0/0                 &lt;- question 25, as the plan predicted</pre>
+
+<h2>5. Interrupt, then run again (OpenCode)</h2>
+<pre>$ lf task interrupt 87c17c
+87c17c: stopped Graph qa at implement
+  latest Graph: implement: process exited with status 130 …
+$ lf session history session_0393f42a…
+turn ses_0c06d11d… interrupted input=0 output=0
+(no opencode run left)
+$ lf task run 87c17c -a opencode:…  →  at human-review, square(a) written</pre>
+
+<h2>6. Pinned harness not installed</h2>
+<pre>$ PATH=…without pi… lf task run 781b41 -a pi:opencode/gemini-4-carbon
+[1/2] implement
+Error: 'pi' is not installed. Install Pi 1.3 or later with `npm install -g --ignore-scripts @earendil-works/pi-coding-agent`. Configure its model and credentials in Pi.
+the run of qa from start stopped before any agent started: … credentials in Pi.; `lf task run 781b41` starts the run again there
+  latest Graph: implement: … credentials in Pi.. Inspect its history and effects, then launch fresh work</pre>
+<p>One attempt, the hint as the reason. <span class="fix">Fixed</span> the punctuation: the stop now reads
+"…stopped before any agent started, and `lf task run 781b41` starts it again there: &lt;cause&gt;", and status trims a
+trailing period before ". Inspect".</p>
+
+<h2>7. Missing first choice, OpenCode behind it</h2>
+<pre>$ lf set --global agents pi:opencode/gemini-4-carbon,opencode:opencode/gemini-4-carbon
+$ lf task run 34a3b2        →  at human-review, is_even written
+agent_limit_recoveries: pi | 'pi' is not installed; continuing on opencode:opencode/gemini-4-carbon</pre>
+<p>The step moved. Once it settled, <code>lf task status</code> no longer shows "implement went on under opencode",
+as with a limit move (question 29). No Task conversation started, since chats don't move; status reads
+<code>body: provider pi</code> (question 30).</p>
+
+<h2>Graph log header</h2>
+<p>Every <code>lf task run -a …</code> Graph log began with "This command does not start an agent; --agent has no effect":
+the internal <code>lf --agent … graph run</code> was missing from <code>Cli::may_launch_agent</code>, though it carries the agent to
+every step. <span class="fix">Fixed</span>; the routing test now checks <code>graph run</code> beside <code>ship</code>.</p>
+
+<h2>Checks</h2>
+<ul>
+<li><code>cargo test -p loopflow-execution --lib -- harness::launch_matrix harness::opencode provider_child</code>: 15 passed (246s)</li>
+<li><code>cargo test -p loopflow-execution --lib -- opencode_turn opencode_run</code>: 4 passed</li>
+<li><code>cargo test -p loopflow --lib -- lf::tests::</code>: 38 passed</li>
+<li><code>cargo test -p loopflow --lib -- task_graph_launch_tests::a_task_step_runs_as_a_worker_on_every_harness task_graph_launch_tests::a_step_that_cannot_launch_is_not_started_again</code>: 2 passed (280s, first run after a build; nextest's limit is 300s)</li>
+<li><code>cargo clippy -p loopflow-execution -p loopflow --all-targets -- -D warnings</code>: clean</li>
+</ul>
+
+<h2>What works, what wasn't reached, what's still wrong</h2>
+<p><b>Works now:</b> <code>lf task run</code> on real OpenCode and Pi settles <code>implement</code>, commits in the Task checkout,
+takes a mid-step steer, stops on interrupt and runs again, refuses a missing pinned CLI after one attempt, and moves past a missing first choice.</p>
+<p><b>Not reached:</b> a question with nobody there on a real CLI (Gemini never asked); Claude and Codex workers on real CLIs (not this change's surface); typing into an OpenCode Task conversation.</p>
+<p><b>Still wrong, worst first:</b></p>
+<ol>
+<li>Pi worker usage is missing from <code>lf history usage --task</code> (question 25), now seen on the real CLI.</li>
+<li>A missing first choice's move vanishes from status once the step settles (29), and no Task conversation opens on the next agent (30).</li>
+<li>The first worker-test run after a build takes 280s against a 300s limit (24).</li>
+</ol>
+</body></html>

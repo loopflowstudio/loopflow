@@ -285,7 +285,7 @@ fn project_execution(
                 )
             } else {
                 let ended = match (&process.error, process.exit_code) {
-                    (Some(error), _) => error.clone(),
+                    (Some(error), _) => error.trim_end_matches('.').to_string(),
                     (None, Some(code)) => format!("process exited with status {code}"),
                     (None, None) => "process left no exit record".to_string(),
                 };

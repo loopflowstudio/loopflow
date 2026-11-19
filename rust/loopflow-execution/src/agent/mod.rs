@@ -148,6 +148,11 @@ pub(crate) const CALLER_SESSION_ENV: &[&str] = &[
     "CODEX_TOOL_CALL_ID",
     "CODEX_VERSION",
     "CODEX_APPLY_PATCH_PRESERVE_LINE_ENDINGS",
+    // OpenCode
+    "OPENCODE",
+    "OPENCODE_SESSION_ID",
+    "OPENCODE_TERMINAL",
+    "OPENCODE_CONFIG_CONTENT",
 ];
 
 /// Start `command` as a new conversation rather than the caller's child. Run

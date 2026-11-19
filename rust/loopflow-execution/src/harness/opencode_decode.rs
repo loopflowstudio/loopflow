@@ -13,7 +13,8 @@ use loopflow_model::chat::types::{ConversationEvent, ConversationItem, FileEdit,
 pub(super) struct Turn {
     turn: ProviderTurn,
     final_text: String,
-    failed: bool,
+    /// The turn's first failure, kept on its completion.
+    error: Option<Value>,
     /// The model asked a question; its run is stopped, not left to assume an answer.
     asked: bool,
     parts: usize,
@@ -24,7 +25,7 @@ impl Turn {
         Self {
             turn,
             final_text: String::new(),
-            failed: false,
+            error: None,
             asked: false,
             parts: 0,
         }
@@ -115,7 +116,7 @@ impl Turn {
                         .collect();
                     self.asked = true;
                     out.extend(self.fail_as(
-                        super::UNANSWERED_QUESTION,
+                        loopflow_storage::session::UNANSWERED_QUESTION,
                         &super::common::unanswered_question("OpenCode", &asked.join(" ")),
                     ));
                 }
@@ -143,12 +144,14 @@ impl Turn {
     }
 
     fn fail_as(&mut self, code: &str, reason: &str) -> Vec<Decoded> {
-        if std::mem::replace(&mut self.failed, true) {
+        if self.error.is_some() {
             return Vec::new();
         }
+        let message = sanitize_error_message(reason);
+        self.error = Some(loopflow_storage::session::turn_error(code, &message));
         vec![ConversationEvent::Error {
             code: code.into(),
-            message: sanitize_error_message(reason),
+            message,
             evidence: None,
         }
         .into()]
@@ -162,7 +165,7 @@ impl Turn {
         let answered = !self.final_text.trim().is_empty();
         let status = if interrupted {
             Lifecycle::Interrupted
-        } else if self.failed || !exited || !answered {
+        } else if self.error.is_some() || !exited || !answered {
             Lifecycle::Failed
         } else {
             Lifecycle::Completed
@@ -192,7 +195,7 @@ impl Turn {
             ProviderFact::TurnCompleted {
                 turn: Some(self.turn.clone()),
                 status,
-                detail: json!({"status": status.name()}),
+                detail: json!({"status": status.name(), "error": self.error}),
             }
             .into(),
         );

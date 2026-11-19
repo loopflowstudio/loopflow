@@ -18,6 +18,8 @@ pub struct Turn {
     usage: TurnUsage,
     messages: usize,
     failed: bool,
+    /// Why lf ended the turn, kept on its completion.
+    error: Option<Value>,
     answered: bool,
     final_text: String,
     streamed_text: bool,
@@ -68,6 +70,7 @@ impl Turn {
             usage: TurnUsage::default(),
             messages: 0,
             failed: false,
+            error: None,
             answered: false,
             final_text: String::new(),
             streamed_text: false,
@@ -86,8 +89,9 @@ impl Turn {
         facts
     }
 
-    /// End the turn, as Pi settled it or as its stream died.
-    pub fn finish(&mut self, status: Lifecycle) -> Vec<Decoded> {
+    /// End the turn, as Pi settled it or as its stream died with `error`.
+    pub fn finish(&mut self, status: Lifecycle, error: Option<Value>) -> Vec<Decoded> {
+        self.error = error;
         let mut facts = Vec::new();
         let display = self.settle(status, &mut facts);
         facts.extend(display.into_iter().map(Decoded::from));
@@ -301,7 +305,7 @@ impl Turn {
             ProviderFact::TurnCompleted {
                 turn: Some(self.turn.clone()),
                 status,
-                detail: json!({"status": status.name()}),
+                detail: json!({"status": status.name(), "error": self.error}),
             }
             .into(),
         );

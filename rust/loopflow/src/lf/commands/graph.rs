@@ -168,7 +168,8 @@ enum TaskRunStopped {
         cause: String,
     },
     #[error(
-        "the run of {run} stopped at {step}: {cause}; answer with `lf steer {issue} \"…\"`, then `lf task run {issue}`"
+        "the run of {run} stopped at {step}: {cause}; {}",
+        loopflow_execution::ops::task_execution::question_advice(.issue)
     )]
     Question {
         issue: String,
@@ -292,15 +293,12 @@ pub fn run_task_graph_for(
                 return stop.stop(task, status);
             }
             // A question nobody answered would only be asked again.
-            if let Some(question) = cause
-                .as_deref()
-                .and_then(loopflow_execution::harness::asked_question)
-            {
+            if let Some(question) = store.graph_unanswered_question(&graph_run)? {
                 let stop = TaskRunStopped::Question {
                     issue: task.identifier.clone(),
                     run: run.to_string(),
                     step: stopped_step(store, task)?.unwrap_or_else(|| "its step".into()),
-                    cause: question.to_string(),
+                    cause: question,
                 };
                 return stop.stop(task, status);
             }

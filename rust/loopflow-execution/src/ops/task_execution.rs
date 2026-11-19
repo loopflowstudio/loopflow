@@ -86,15 +86,14 @@ pub async fn execution_of_latest_graph(
     );
     snapshot.captured = input.map(|(_, _, captured)| *captured);
     if snapshot.state == TaskExecutionState::Blocked {
-        if let Some(question) = step
-            .and_then(|step| step.error.as_deref())
-            .and_then(crate::harness::asked_question)
-        {
-            let label = snapshot.step.as_deref().unwrap_or("Step");
-            let issue = &task.identifier;
-            snapshot.reason = format!(
-                "{label} stopped: {question}; answer with `lf steer {issue} \"…\"`, then `lf task run {issue}`"
-            );
+        if let Some(step) = step {
+            if let Some(question) = sqlite.unanswered_question(step.id.as_str())? {
+                let label = snapshot.step.as_deref().unwrap_or("Step");
+                snapshot.reason = format!(
+                    "{label} stopped: {question}; {}",
+                    question_advice(&task.identifier)
+                );
+            }
         }
     }
     if let Some(recovery) = step.and_then(|step| facts.limit_recoveries.get(&step.id)) {
@@ -215,6 +214,11 @@ pub const MOVED_TO: &str = "; continuing on ";
 /// Ends a recorded limit reason when a provider refused the step and no
 /// agent it may use was left; what would let it move follows.
 pub const STOPPED: &str = "; stopped: ";
+
+/// How a person answers the question that stopped Task `issue`'s step.
+pub fn question_advice(issue: &str) -> String {
+    format!("answer with `lf steer {issue} \"…\"`, then `lf task run {issue}`")
+}
 
 /// The limit that stopped a step and what would let it move, as one sentence.
 /// The current `lf task run` does not retry such a run automatically.

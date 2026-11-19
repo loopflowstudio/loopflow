@@ -411,6 +411,13 @@ impl SqliteStore {
             .flatten())
     }
 
+    /// What the agent of process `step` asked with nobody there to answer:
+    /// the message of its latest turn that failed on one.
+    pub fn unanswered_question(&self, step: &str) -> StoreResult<Option<String>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        unanswered_question_in(&conn, step)
+    }
+
     /// Every turn of `session`, in the order they were first recorded.
     pub fn session_turns(&self, session: &str) -> StoreResult<Vec<Turn>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
@@ -421,6 +428,22 @@ impl SqliteStore {
         let rows = query.query_map([session], read_turn)?;
         rows.map(|row| row?).collect()
     }
+}
+
+pub(crate) fn unanswered_question_in(
+    conn: &rusqlite::Connection,
+    step: &str,
+) -> StoreResult<Option<String>> {
+    Ok(conn
+        .query_row(
+            "SELECT json_extract(error,'$.message') FROM history.turns
+             WHERE lf_process_id=?1 AND json_extract(error,'$.code')=?2
+             ORDER BY ended_at DESC, id DESC LIMIT 1",
+            params![step, crate::session::UNANSWERED_QUESTION],
+            |row| row.get(0),
+        )
+        .optional()?
+        .flatten())
 }
 
 /// Threads converted per pass of [`convert_turn_rows`].

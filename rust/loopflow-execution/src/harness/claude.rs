@@ -1229,7 +1229,6 @@ done
 
         harness.stop().await.expect("stop");
     }
-
 }
 
 fn claude_input_time(path: &Path, id: &str) -> Option<i64> {

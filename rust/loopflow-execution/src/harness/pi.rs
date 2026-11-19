@@ -321,7 +321,7 @@ impl Driver {
                                 .filter_map(|text| text.as_str())
                                 .collect::<Vec<_>>()
                                 .join(" ");
-                            code = super::UNANSWERED_QUESTION;
+                            code = loopflow_storage::session::UNANSWERED_QUESTION;
                             bail!(super::common::unanswered_question("Pi", &question));
                         }
                     }
@@ -347,12 +347,16 @@ impl Driver {
             state.responses.clear();
             // A signal ending lf takes Pi with it: that turn was interrupted.
             let interrupted = crate::agent::interrupted();
+            let message = outcome
+                .expect_err("Pi reader returns only after an error or EOF")
+                .to_string();
             if let Some(mut turn) = state.turn.take() {
-                let decoded = turn.finish(if interrupted {
-                    Lifecycle::Interrupted
+                let decoded = if interrupted {
+                    turn.finish(Lifecycle::Interrupted, None)
                 } else {
-                    Lifecycle::Failed
-                });
+                    let error = loopflow_storage::session::turn_error(code, &message);
+                    turn.finish(Lifecycle::Failed, Some(error))
+                };
                 let mapped = display(&decoded);
                 if let Err(error) = state.record(decoded) {
                     tracing::warn!(%error, "could not retain Pi failure");
@@ -366,9 +370,7 @@ impl Driver {
             }
             let _ = events.send(ConversationEvent::Error {
                 code: code.into(),
-                message: outcome
-                    .expect_err("Pi reader returns only after an error or EOF")
-                    .to_string(),
+                message,
                 evidence: None,
             });
         })
@@ -450,7 +452,7 @@ impl StreamDriver for Driver {
             let mapped = {
                 let mut state = self.state.lock().expect("Pi state lock poisoned");
                 match state.turn.take() {
-                    Some(mut turn) => state.record(turn.finish(Lifecycle::Failed))?,
+                    Some(mut turn) => state.record(turn.finish(Lifecycle::Failed, None))?,
                     None => Vec::new(),
                 }
             };

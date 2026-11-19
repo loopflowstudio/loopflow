@@ -1282,7 +1282,6 @@ mod tests {
         assert_eq!(method, "thread/start");
         assert!(!params.contains_key("threadId"));
     }
-
 }
 
 fn codex_input_times(path: &Path, wanted: &BTreeSet<&str>) -> BTreeMap<String, i64> {

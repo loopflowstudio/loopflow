@@ -581,6 +581,24 @@ impl SqliteStore {
         )))
     }
 
+    /// What the agent of the Graph run `id`'s last failed step asked with
+    /// nobody there to answer, if it failed on that.
+    pub fn graph_unanswered_question(&self, id: &LfProcessId) -> StoreResult<Option<String>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let Some(run) = graphs_in(&conn, "g.lf_process_id=?1", &[id])?.pop() else {
+            return Ok(None);
+        };
+        let Some(step) = run
+            .steps
+            .iter()
+            .rev()
+            .find(|step| step.run.result() == ExecutionResult::Failed)
+        else {
+            return Ok(None);
+        };
+        super::turns::unanswered_question_in(&conn, step.run.id.as_str())
+    }
+
     /// Whether the Graph run `id` failed at a skill step that opened no
     /// conversation: lf refused the launch before any agent started, and
     /// would refuse the same launch again.

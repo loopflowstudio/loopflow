@@ -198,9 +198,17 @@ impl SqliteStore {
         at: i64,
         detail: &Value,
     ) -> StoreResult<()> {
-        let error = super::turns::turn_error(detail).map(|error| match error.as_str() {
-            Some(text) => text.to_owned(),
-            None => error.to_string(),
+        let error = super::turns::turn_error(detail).map(|error| {
+            match (
+                error.as_str(),
+                error["code"].as_str(),
+                error["message"].as_str(),
+            ) {
+                (Some(text), _, _) => text.to_owned(),
+                // Read as lf's stream error for the same turn reads.
+                (None, Some(code), Some(message)) => format!("{code}: {message}"),
+                _ => error.to_string(),
+            }
         });
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(

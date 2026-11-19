@@ -853,12 +853,6 @@ impl SqliteStore {
         {
             return Ok(before);
         }
-        let state = super::durable::task_state_in(&tx, task)?;
-        if mark.state == AutoState::On && state.is_terminal() {
-            return Err(crate::StoreError::InvalidAuthority(format!(
-                "Task is {state}; it cannot ship"
-            )));
-        }
         let set = tx.execute(
             "UPDATE task_graphs SET auto=?2,auto_at=?3,auto_by=?4 WHERE task_id=?1",
             rusqlite::params![

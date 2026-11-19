@@ -280,7 +280,7 @@ merge the PR. `lf ship` turns it on and runs the Task, so it prints what
 `lf task run` prints and leaves one Graph process:
 
 ```bash
-lf ship LOO-12                      # LOO-12 · code from human-review running as Graph process …
+lf ship LOO-12                      # LOO-12 · code from human-review running as Graph run …
 lf task status LOO-12               # LOO-12  moving · auto: on by Maya, Nov 18 09:04
 lf task auto off LOO-12             # LOO-12: auto off
 lf task auto on LOO-12              # LOO-12: auto on; starts nothing

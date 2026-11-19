@@ -112,17 +112,19 @@ async fn graph_for_ship(
         .ok_or_else(|| task_error(format!("Task {} has no graph", task.identifier)))
 }
 
-/// Save `state` as this caller's mark. Returns whether auto was on before.
+/// Save `state` as this caller's mark; with `keeps_stop`, a standing stop
+/// stays. Returns whether auto was on before.
 async fn set(
     store: &SharedStore,
     task: &Task,
     state: AutoState,
+    keeps_stop: bool,
     note: Option<&str>,
 ) -> OpsResult<bool> {
     let mark = mark(store, task, state).await?;
     let before = store
         .sqlite
-        .set_task_auto(&task.id, &mark, false, note)
+        .set_task_auto(&task.id, &mark, keeps_stop, note)
         .map_err(task_error)?;
     Ok(before.is_some_and(|before| before.state == AutoState::On))
 }
@@ -144,7 +146,7 @@ pub fn auto_on(issue: &str, note: Option<&str>) -> OpsResult<bool> {
                 "Task {issue} has not taken up a Graph, and auto is set on one; `lf ship {issue}` turns auto on and runs it"
             )));
         }
-        set(&store, &task, AutoState::On, note).await
+        set(&store, &task, AutoState::On, false, note).await
     })
 }
 
@@ -156,30 +158,30 @@ pub fn ship_on(issue: &str, graph: Option<&str>, note: Option<&str>) -> OpsResul
         let task = task_for_auto(&store, issue).await?;
         let graph = graph_for_ship(&store, &task, graph).await?;
         let issue = task.identifier.clone();
-        let (from, live) = match &graph.position {
-            TaskGraphPosition::At { step } if step == END => {
-                return Ok(ShipStart::Reported(TaskRun::Ended { issue }));
-            }
-            TaskGraphPosition::At { .. } => {
-                (graph.waiting_step().map(|step| step.name.clone()), None)
-            }
-            TaskGraphPosition::Run { .. } => (None, live_graph_run(&store, &task).await?),
-        };
+        if matches!(&graph.position, TaskGraphPosition::At { step } if step == END) {
+            return Ok(ShipStart::Reported(TaskRun::Ended { issue }));
+        }
         if !store.sqlite.task_owned(&task.id).map_err(task_error)? {
             crate::store::ownership::claim_task(&store.sqlite, &task.id).map_err(task_error)?;
         }
-        set(&store, &task, AutoState::On, note).await?;
-        if let (Some(graph_process), TaskGraphPosition::Run { at, .. }) = (live, &graph.position) {
-            // The run reads auto at each interactive step, so it stands in
-            // from here without being started again.
-            return Ok(ShipStart::Reported(TaskRun::Running {
-                log: Some(crate::process::launch_log::graph_log_path(&graph_process)),
-                issue,
-                run: format!("{} at {at}", graph.name),
-                ships: true,
-                graph_process: LfProcessId::parse(&graph_process).map_err(task_error)?,
-            }));
-        }
+        set(&store, &task, AutoState::On, false, note).await?;
+        let from = match &graph.position {
+            TaskGraphPosition::At { .. } => graph.waiting_step().map(|step| step.name.clone()),
+            TaskGraphPosition::Run { at, .. } => {
+                // A live run reads auto at each interactive step, so it stands
+                // in from here without being started again.
+                if let Some(graph_process) = live_graph_run(&store, &task).await? {
+                    return Ok(ShipStart::Reported(TaskRun::Running {
+                        log: Some(crate::process::launch_log::graph_log_path(&graph_process)),
+                        issue,
+                        run: format!("{} at {at}", graph.name),
+                        ships: true,
+                        graph_process: LfProcessId::parse(&graph_process).map_err(task_error)?,
+                    }));
+                }
+                None
+            }
+        };
         Ok(ShipStart::Run {
             task: Box::new(task),
             from,
@@ -207,12 +209,7 @@ async fn live_graph_run(store: &SharedStore, task: &Task) -> OpsResult<Option<St
 
 /// `lf -b task run`: auto on unless someone turned it off.
 pub(super) async fn batch_on(store: &SharedStore, task: &Task) -> OpsResult<()> {
-    let on = mark(store, task, AutoState::On).await?;
-    store
-        .sqlite
-        .set_task_auto(&task.id, &on, true, None)
-        .map_err(task_error)?;
-    Ok(())
+    set(store, task, AutoState::On, true, None).await.map(drop)
 }
 
 /// `lf task auto off`: turn auto off and take back any merge request
@@ -223,7 +220,7 @@ pub fn auto_off(issue: &str, note: Option<&str>) -> OpsResult<bool> {
     let (task, was_on) = block_on_task(async {
         let store = task_store().await?;
         let task = task_by_issue(&store, issue).await?;
-        let was_on = set(&store, &task, AutoState::Stopped, note).await?;
+        let was_on = set(&store, &task, AutoState::Stopped, false, note).await?;
         Ok((task, was_on))
     })?;
     if was_on {

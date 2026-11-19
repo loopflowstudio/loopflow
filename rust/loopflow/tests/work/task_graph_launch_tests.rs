@@ -2823,7 +2823,7 @@ fn a_ship_on_a_running_task_reports_its_run_and_starts_nothing() {
         String::from_utf8_lossy(&shipped.stderr)
     );
     assert!(
-        text.contains("at review running as Graph process"),
+        text.contains("at review running as Graph run"),
         "{text}"
     );
     assert!(text.contains("ships:"), "{text}");

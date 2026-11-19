@@ -49,22 +49,25 @@ lf set --global agents claude,codex
 lf -b implement
 ```
 
-A classified usage-limit or model-unavailable refusal lets a Graph step try
-its configured next model or harness. Switching harnesses seeds the new
-conversation with earlier history and retains earlier outcomes. See
+A classified usage-limit or model-unavailable refusal moves headless work to
+its configured next model or harness, printing
+`codex: provider usage limit; continuing on claude`. Switching harnesses seeds
+the new conversation with earlier history and retains earlier outcomes; a turn
+refused before any reply starts again from its original prompt. See
 [agent order](config.md#keep-going-when-a-provider-runs-out) for defaults,
 model fallthrough and explicit pins.
 
 | Launch | After a classified refusal |
 | --- | --- |
 | Graph step, with or without a Task | Follow configured model/harness fallbacks |
-| Other headless work (`lf -b`, commit and PR text) | Stop with the provider error; someone is waiting on it |
+| Other headless work (`lf -b <skill>`, commit and PR text, sync conflicts) | Follow the same fallbacks and stop when the order runs out of usage |
+| Pi or OpenCode | Stop with the provider error; neither reports why it refused |
 | Interactive, with or without a Task | Keep the provider, thread and refusal visible; wait for an explicit retry or move |
 | Explicit agent | Keep the harness; bare Claude retains model fallthrough |
-| Explicit model pin | Wait on that choice, then stop |
+| Explicit model pin | Keep the model; only a Graph step waits on a usage limit |
 | Graph step's order exhausted on a usage limit | Wait 5, 15, 30, then 60 minutes, trying the order again after each; then stop with the provider error and a next step |
 | Revoked login | Skip that provider's other models; with no other provider left, stop and say how to sign in again |
-| Order exhausted otherwise | Stop with the provider error and a next step |
+| Order exhausted otherwise, or by a command | Stop with the provider error and a next step |
 | Graph step's agent is not installed | Pass over it to the next entry and record the move; with none left, fail once with the install command |
 | OpenCode or Pi fails | Stop with the provider error; their failures are not read for limits |
 

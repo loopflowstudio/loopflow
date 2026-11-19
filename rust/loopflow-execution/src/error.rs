@@ -2,7 +2,7 @@ use thiserror::Error;
 
 use serde::Serialize;
 
-#[derive(Debug, Error)]
+#[derive(Debug, Clone, Error)]
 pub enum LoadError {
     #[error("No agent selected. Use `-a <harness>` for this command or `lf set --global default_agent <harness>` to save a preference (claude, codex, opencode, pi). Without a preference, exactly one supported harness must be installed.")]
     AgentSelection,

@@ -739,14 +739,17 @@ pub(crate) fn scope_graph_default(
     repo: &Path,
     wave: Option<&str>,
 ) -> OpsResult<(String, ConfigSource)> {
-    let layers = crate::config::config_layers(Some(repo), wave).map_err(task_error)?;
-    let resolved = crate::config::settings::resolve_layers(&layers, None).map_err(task_error)?;
+    let resolved = crate::config::resolved(Some(repo), wave).map_err(task_error)?;
     let source = resolved.settings["graph"]
         .selected()
         .expect("graph has a builtin default")
         .source;
     Ok((
-        resolved.config.graph.expect("graph has a builtin default"),
+        resolved
+            .config
+            .graph
+            .clone()
+            .expect("graph has a builtin default"),
         source,
     ))
 }
@@ -2270,26 +2273,30 @@ fn truncate_task_title(value: &str, max_chars: usize) -> String {
 }
 
 /// Current launch preferences at the Task checkout, with no saved Task agent.
+/// Your own settings are found from `repository`, so they hold for a Task
+/// whose checkout is gone.
 pub fn resolve_task_agent(
     worktree: &Path,
+    repository: &Path,
     wave: Option<&str>,
-    personal: &crate::config::PersonalSettings,
     skill: Option<&crate::graph::Skill>,
 ) -> OpsResult<crate::config::Agent> {
-    let config =
-        crate::config::load_wave_config_with(Some(worktree), wave, personal)?.unwrap_or_default();
-    let resolved = crate::config::settings::resolve(&config, skill)?;
+    let shared = crate::config::resolved_for_task(worktree, repository, wave)?;
+    let Some(skill) = skill else {
+        return Ok(crate::config::Agent::parse(shared.config.agent()?)?);
+    };
+    let resolved = crate::config::settings::resolve(&shared.config, Some(skill))?;
     Ok(crate::config::Agent::parse(resolved.config.agent()?)?)
 }
 
 fn task_configuration_refusal(
     task: &Task,
+    repository: &Path,
     wave: Option<&str>,
-    personal: &crate::config::PersonalSettings,
 ) -> Option<String> {
     let worktree = task.worktree.as_deref()?;
     // Each Graph step can select its own agent.
-    match resolve_task_agent(worktree, wave, personal, None) {
+    match resolve_task_agent(worktree, repository, wave, None) {
         Ok(_) | Err(OpsError::Load(crate::error::LoadError::AgentSelection)) => None,
         Err(error) => Some(error.to_string()),
     }
@@ -2299,11 +2306,11 @@ fn task_configuration_refusal(
 /// non-resumable failure as its latest event.
 pub fn task_process_refusal_after(
     task: &Task,
+    repository: &Path,
     wave: Option<&str>,
-    personal: &crate::config::PersonalSettings,
     latest: Option<&loopflow_storage::work::task::TaskEvent>,
 ) -> Option<String> {
-    task_configuration_refusal(task, wave, personal)
+    task_configuration_refusal(task, repository, wave)
         .or_else(|| task_event_process_refusal(latest).map(str::to_string))
 }
 

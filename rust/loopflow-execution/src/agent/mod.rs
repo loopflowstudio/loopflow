@@ -183,9 +183,9 @@ pub struct AgentConfig {
     pub output_schema: Option<serde_json::Value>,
     /// Resolved harness and provider model.
     pub agent: Agent,
-    /// Agents a Graph step moves to when a usage limit or unavailable model
-    /// refuses `agent`: the rest of the configured order (`default_agent`,
-    /// then `agents`). Empty when the agent was an explicit choice.
+    /// Agents a headless launch moves to when a usage limit, an unavailable
+    /// model or a revoked login refuses `agent`, as `Config::resolve_agents`
+    /// gives them. Empty when the agent was an explicit `harness:model`.
     pub fallback_agents: Vec<Agent>,
     /// Max turn budget when supported by the harness.
     pub max_turns: Option<u32>,
@@ -422,9 +422,9 @@ pub struct ProcessConfig {
     pub timeout: Option<Duration>,
     /// Live resources for this lf invocation, retained across provider retries.
     pub runtime: Option<LfProcessRuntime>,
-    /// A Graph step goes on after a limit: it moves through its agents and
-    /// waits for capacity. Everything else headless (commit messages, PR text)
-    /// has someone waiting on it and fails now.
+    /// A Graph step waits for capacity once a usage limit has refused every
+    /// agent in its order. Everything else headless (commit messages, PR
+    /// text) has someone waiting on it and fails then.
     pub wait_for_capacity: bool,
 }
 
@@ -1009,7 +1009,7 @@ fn _run_with_retries(
     mut run: impl FnMut(&AgentConfig, bool) -> Result<AgentProcessResult, CoreError>,
     mut wait: impl FnMut(Duration),
 ) -> Result<AgentProcessResult, CoreError> {
-    let rungs = _fallthrough_rungs(launch, process);
+    let rungs = _agent_order(launch);
     let mut rung = 0;
     let mut attempt = launch.clone();
     let mut launched = false;
@@ -1123,44 +1123,20 @@ fn _with_original_task(prompt: &str, launch: &AgentConfig) -> String {
     format!("{prompt}\n\nOriginal task:\n\n{}", launch.task_prompt)
 }
 
-/// The agents a Graph step tries after a usage limit or unavailable model.
-/// With an order to move through (`default_agent`, then `agents`) it is that order
-/// as written, a bare harness on its configured model. With none, a bare
-/// harness tries its other models and an explicit `harness:model` stays put.
-/// Only a Graph step moves automatically.
-fn _fallthrough_rungs(launch: &AgentConfig, process: &ProcessConfig) -> Vec<Agent> {
-    let first = launch.agent.to_owned();
-    if !process.wait_for_capacity {
-        return vec![first];
-    }
-    let mut order: Vec<Agent> = std::iter::once(first.clone())
-        .chain(launch.fallback_agents.iter().cloned())
-        .collect();
-    if launch.fallback_agents.is_empty() && first.model.is_none() {
-        order.extend(
-            first
-                .harness
-                .harness()
-                .model_rungs()
-                .iter()
-                .map(|model| Agent {
-                    harness: first.harness,
-                    model: Some((*model).to_owned()),
-                }),
-        );
-    }
-    let mut rungs: Vec<Agent> = Vec::new();
-    for rung in order {
-        if !rungs.contains(&rung) {
-            rungs.push(rung);
+/// The order to move through when a provider refuses: the launch's agent,
+/// then its fallbacks.
+fn _agent_order(launch: &AgentConfig) -> Vec<Agent> {
+    let mut order: Vec<Agent> = Vec::new();
+    for agent in std::iter::once(&launch.agent).chain(&launch.fallback_agents) {
+        if !order.contains(agent) {
+            order.push(agent.clone());
         }
     }
-    rungs
+    order
 }
 
 /// Put the current attempt on `agent`. The thread moves within its provider;
-/// another provider reads the
-/// conversation so far and begins its own.
+/// another provider reads the conversation so far and begins its own.
 fn _climb(
     origin: &AgentConfig,
     agent: &Agent,
@@ -1169,35 +1145,41 @@ fn _climb(
 ) -> AgentConfig {
     let mut next = origin.clone();
     next.agent = agent.clone();
-    let same_provider = origin.agent.harness == agent.harness;
-    if !same_provider {
-        next.resume_token = None;
-        next.skill_invocation = None;
-        next.task_prompt = _history_import(process)
-            .unwrap_or_else(|| _with_original_task(AGENT_FAILOVER_PROMPT, launch));
+    if origin.agent.harness == agent.harness {
+        return next;
     }
+    next.resume_token = None;
+    (next.skill_invocation, next.task_prompt) = match _history_import(process) {
+        Ok(Some(turn)) => (None, turn),
+        // The provider refused before the agent said anything: the launch's
+        // own first turn, whole.
+        Ok(None) => (launch.skill_invocation.clone(), launch.task_prompt.clone()),
+        Err(error) => {
+            tracing::warn!(%error, "conversation could not move providers; the task starts over");
+            (
+                launch.skill_invocation.clone(),
+                _with_original_task(AGENT_FAILOVER_PROMPT, launch),
+            )
+        }
+    };
     next
 }
 
-/// The conversation so far as the next provider's first turn, through the same
-/// import `lf session new -a` uses. None when the step has no Session or its
-/// transcript cannot be read yet; the task then starts over on the checkout.
-fn _history_import(process: &ProcessConfig) -> Option<String> {
-    let (session_id, _) = process.runtime.as_ref()?.session_attachment()?;
-    let imported = (|| -> anyhow::Result<String> {
-        let store = crate::store::open_sqlite(&crate::store::database_path_from_env()?)?;
-        let session = store
-            .session(&session_id)?
-            .ok_or_else(|| anyhow::anyhow!("Session {session_id} is not recorded"))?;
-        crate::ops::human_session::conversation_log::continuation(&store, &session)
-    })();
-    match imported {
-        Ok(turn) => Some(turn),
-        Err(error) => {
-            tracing::warn!(%error, "conversation could not move providers; the task starts over");
-            None
-        }
-    }
+/// The conversation so far as the next provider's first turn, through the
+/// import `lf session new -a` uses. None when the agent has not replied or
+/// used a tool; an error when the run has no Session or its transcript cannot
+/// be read yet.
+fn _history_import(process: &ProcessConfig) -> anyhow::Result<Option<String>> {
+    let (session_id, _) = process
+        .runtime
+        .as_ref()
+        .and_then(|runtime| runtime.session_attachment())
+        .ok_or_else(|| anyhow::anyhow!("the run has no Session"))?;
+    let store = crate::store::open_sqlite(&crate::store::database_path_from_env()?)?;
+    let session = store
+        .session(&session_id)?
+        .ok_or_else(|| anyhow::anyhow!("Session {session_id} is not recorded"))?;
+    crate::ops::human_session::conversation_log::continuation_of_work(&store, &session)
 }
 
 /// The provider's own words for a failure, when it gave any.
@@ -1245,6 +1227,7 @@ fn _model_unavailable(text: &str) -> Option<()> {
                 "is unavailable",
                 "is currently unavailable",
                 "is not available",
+                "is not supported",
             ]
             .iter()
             .any(|phrase| text.contains(phrase))))
@@ -1456,7 +1439,12 @@ fn _pass_over_missing_agents(
     is_installed: impl Fn(crate::harness::HarnessKind) -> bool,
 ) -> Result<Agent, crate::harness::HarnessKind> {
     let first = launch.agent.clone();
-    let start = _fallthrough_rungs(launch, process)
+    let order = if process.wait_for_capacity {
+        _agent_order(launch)
+    } else {
+        vec![first.clone()]
+    };
+    let start = order
         .into_iter()
         .find(|rung| is_installed(rung.harness))
         .ok_or(first.harness)?;
@@ -1498,7 +1486,7 @@ mod tests {
         assert_eq!(first, launch.agent);
         assert_eq!(moved.agent, agent("codex"));
         assert_eq!(
-            _fallthrough_rungs(&moved, &step),
+            _agent_order(&moved),
             [agent("codex"), agent("claude")]
         );
 
@@ -1854,29 +1842,6 @@ trust_level = "trusted"
         assert_eq!(attempts, ["claude:fable", "codex"]);
     }
 
-    #[test]
-    fn bare_interactive_returns_a_quota_refusal_without_retry() {
-        let launch = AgentConfig {
-            agent: crate::config::Agent::parse("claude:fable").unwrap(),
-            fallback_agents: vec![crate::config::Agent::parse("codex").unwrap()],
-            ..crate::agent::AgentConfig::default()
-        };
-        let mut attempts = 0;
-        let result = _run_with_retries(
-            &launch,
-            &ProcessConfig::default(),
-            &[],
-            |_, _| {
-                attempts += 1;
-                Ok(failed_result("claude_result: You've hit your Fable limit"))
-            },
-            |_| panic!("interactive refusal cannot retry"),
-        )
-        .unwrap();
-        assert_eq!(result.exit_code, 1);
-        assert_eq!(attempts, 1);
-    }
-
     fn failed_result(message: &str) -> AgentProcessResult {
         AgentProcessResult {
             exit_code: 1,
@@ -1927,6 +1892,7 @@ trust_level = "trusted"
             "claude_result: Fable 5 is currently unavailable. Switch to another model.",
             "claude_result: Selected model is not available.",
             "codex_error: model_not_found",
+            "codex_error: The 'gpt-6.2-sol' model is not supported when using Codex with a ChatGPT account.",
         ] {
             assert_eq!(
                 _classify_agent_failure(&failed_result(message)),
@@ -2258,7 +2224,7 @@ trust_level = "trusted"
             task_prompt: "compress the diff".into(),
             ..crate::agent::AgentConfig::default()
         };
-        let refused = || failed_result("codex_error: You've hit your usage limit");
+        let refused = || failed_result("codex_error: You’ve hit your usage limit");
         let mut scripted = vec![refused(), limited_result(), done()].into_iter();
         let mut attempts = Vec::new();
         let result = _run_with_retries(
@@ -2297,7 +2263,7 @@ trust_level = "trusted"
             &[],
             |_, _| {
                 attempts += 1;
-                Ok(failed_result("codex_error: You've hit your usage limit"))
+                Ok(failed_result("codex_error: You’ve hit your usage limit"))
             },
             |delay| waits.push(delay),
         )
@@ -2307,7 +2273,7 @@ trust_level = "trusted"
         assert_eq!(result.failure, Some(AgentFailure::UsageLimit));
         assert!(result
             .stderr
-            .starts_with("codex_error: You've hit your usage limit\nNo fallback remains."));
+            .starts_with("codex_error: You’ve hit your usage limit\nNo fallback remains."));
         // What it records names the way out; with an order, what was tried.
         let advice = _limit_stop_advice("codex", &launch, &[Agent::parse("codex").unwrap()]);
         assert_eq!(
@@ -2365,30 +2331,54 @@ trust_level = "trusted"
     }
 
     #[test]
-    fn headless_work_outside_a_graph_stops_at_a_usage_limit_without_moving_or_waiting() {
+    fn headless_work_outside_a_graph_moves_through_its_order_and_never_waits() {
         // `lf commit` and `lf pr submit` message generation: someone is waiting.
         let launch = AgentConfig {
-            agent: crate::config::Agent::parse("claude").unwrap(),
-            fallback_agents: vec![crate::config::Agent::parse("codex").unwrap()],
+            agent: crate::config::Agent::parse("codex").unwrap(),
+            fallback_agents: vec![crate::config::Agent::parse("claude").unwrap()],
+            task_prompt: "describe the diff".into(),
+            skill_invocation: Some(crate::skills::invocation::SkillInvocation {
+                skill: crate::graph::Skill::named("describe"),
+                arguments: "this diff".into(),
+            }),
             ..crate::agent::AgentConfig::default()
         };
-        let process = ProcessConfig::default();
-        let mut attempts = 0;
-        let mut waits = Vec::new();
-        let result = _run_with_retries(
-            &launch,
-            &process,
-            &[],
-            |_, _| {
-                attempts += 1;
-                Ok(limited_result())
-            },
-            |delay| waits.push(delay),
-        )
-        .unwrap();
-        assert_eq!(attempts, 1);
-        assert!(waits.is_empty());
-        assert_eq!(result.failure, Some(AgentFailure::UsageLimit));
+        let refused = || failed_result("codex_error: You’ve hit your usage limit");
+        for (scripted, agents, failure) in [
+            (vec![refused(), done()], vec!["codex", "claude"], None),
+            (
+                vec![refused(), limited_result()],
+                vec!["codex", "claude"],
+                Some(AgentFailure::UsageLimit),
+            ),
+        ] {
+            let mut scripted = scripted.into_iter();
+            let mut attempts = Vec::new();
+            let result = _run_with_retries(
+                &launch,
+                &ProcessConfig::default(),
+                &[],
+                |config, _| {
+                    assert_eq!(config.skill_invocation, launch.skill_invocation);
+                    assert!(config.task_prompt.contains(&launch.task_prompt));
+                    attempts.push(config.agent.to_string());
+                    Ok(scripted.next().expect("scripted attempt"))
+                },
+                |delay| assert_eq!(delay, Duration::ZERO, "a command never waits"),
+            )
+            .unwrap();
+            assert_eq!(attempts, agents);
+            assert_eq!(result.failure, failure);
+            if failure.is_some() {
+                assert!(
+                    result.stderr.ends_with(
+                        "Nothing is left in its order after codex, claude; add another agent to `agents`"
+                    ),
+                    "{}",
+                    result.stderr
+                );
+            }
+        }
     }
 
     #[test]
@@ -2505,7 +2495,7 @@ trust_level = "trusted"
                     ..crate::agent::AgentConfig::default()
                 };
                 // Headless here is a Graph step; other headless work
-                // stops at once (its own test).
+                // moves the same way and never waits (its own test).
                 let process = ProcessConfig {
                     wait_for_capacity: true,
                     task_input: task_bound.then(|| {

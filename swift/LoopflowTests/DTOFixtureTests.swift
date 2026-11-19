@@ -598,6 +598,8 @@ struct DTOFixtureTests {
         #expect(execution.stackParent?.branch == "maya/loo-290-parent")
         #expect(execution.stackParent != nil && execution.stackParent?.prNumber == nil)
         #expect(Starter.person(name: nil).label == "attribution unresolved")
+        let configured = try JSONDecoder().decode(Starter.self, from: Data(#"{"kind":"config","layer":"wave"}"#.utf8))
+        #expect(configured.label == "wave config")
         var root = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
         root.removeValue(forKey: "auto")
         #expect(throws: DecodingError.self) {

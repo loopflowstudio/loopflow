@@ -1177,13 +1177,18 @@ os.execv({binary}, [{binary}, *sys.argv[1:]])
     }
 
     fn select_wave_graph(&self, name: &str) {
+        self.set_wave_setting("graph", name);
+    }
+
+    fn set_wave_setting(&self, key: &str, value: &str) {
         let store =
             loopflow_execution::store::open_sqlite(&self.home.path().join("loopflow.db")).unwrap();
-        support::select_wave_graph(
+        support::set_wave_setting(
             self.repo.path(),
             &store,
             self.registered.task.wave_id.as_ref().unwrap(),
-            name,
+            key,
+            value,
         );
     }
 
@@ -1935,11 +1940,10 @@ sys.exit(code)
     );
     assert!(!ran.text.contains("starting it again"), "{}", ran.text);
     assert_eq!(support::recorded_graphs(task.home.path()).len(), 1);
-    // `-b` turned auto on, and the refusal leaves it on; nothing starts
-    // the stopped run again.
+    // `-b` writes no auto; nothing starts the stopped run again.
     for _ in 0..2 {
         let status = task.text_status();
-        assert!(status.contains("auto: on"), "{status}");
+        assert!(!status.contains("auto:"), "{status}");
         assert!(
             status.contains("stopped after a provider refusal"),
             "{status}"
@@ -3049,6 +3053,8 @@ fn a_batch_task_run_runs_straight_through_its_interactive_steps_to_the_end() {
     assert_eq!(turns.len(), 1);
     assert!(turns[0].contains("at review"), "{}", turns[0]);
     assert_eq!(task.state(), "done");
+    // `-b` stood in for its own run; it turned no auto on.
+    assert!(task.status()["auto"].is_null());
 }
 
 #[test]
@@ -3151,6 +3157,32 @@ fn auto_on_a_task_that_never_ran_leaves_exactly_one_run() {
 }
 
 #[test]
+fn a_waves_auto_on_takes_every_step_of_its_tasks_and_an_off_still_wins() {
+    let task = shipping_task();
+    task.set_wave_setting("auto", "on");
+    // A bare run: the Wave's setting, not the command, stands in at review.
+    task.task_run_ok(&["task", "run", "INF-123"]);
+    assert_eq!(task.graph()["position"], at("end"));
+    assert_eq!(stand_ins(&task).len(), 1);
+    assert!(
+        task.text_status().contains("auto: on by wave config"),
+        "{}",
+        task.text_status()
+    );
+    // Reopened and taken up again, a Task keeps the off someone gave it.
+    task.ok(&["task", "reopen", "INF-123"]);
+    task.ok(&["task", "auto", "off", "INF-123"]);
+    task.task_run_ok(&["task", "run", "INF-123", "findings"]);
+    assert_eq!(task.graph()["position"], at("findings"));
+    assert_eq!(stand_ins(&task).len(), 1);
+    assert!(
+        task.text_status().contains("auto: off by "),
+        "{}",
+        task.text_status()
+    );
+}
+
+#[test]
 fn a_ship_on_a_running_task_reports_its_run_and_starts_nothing() {
     let task = shipping_task();
     fs::write(task.home.path().join("hold"), "").unwrap();
@@ -3165,7 +3197,7 @@ fn a_ship_on_a_running_task_reports_its_run_and_starts_nothing() {
     .spawn()
     .unwrap();
     wait_for("the stand-in", || !stand_ins(&task).is_empty());
-    // Off first, so the mark below is the ship's and not the batch run's.
+    // Off first, so the `on` below is the ship's.
     task.run(&["--task", "INF-123", "task", "auto", "off"]);
     assert!(
         task.text_status().contains("auto: off by "),
@@ -3257,7 +3289,7 @@ fn auto_off_sticks_through_a_headless_relaunch() {
         ran.text
     );
     assert_eq!(task.graph()["position"], at("pr land"));
-    // Relaunched headless from its first step, `-b` keeps the stop.
+    // Relaunched headless from its first step, `-b` leaves the stop.
     let again = task.run(&["-b", "task", "run", "INF-123", "--from", "proof"]);
     assert!(
         again.status.success(),

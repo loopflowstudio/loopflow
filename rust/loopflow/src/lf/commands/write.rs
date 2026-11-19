@@ -179,7 +179,7 @@ writes! {
 
     /// `lf [-b] [-a <agent>] task run <issue> [--from <step>] --json`, started
     /// detached: the Graph process it started, or where the Task now waits.
-    /// `approve` is `-b`: every step headless to `end`, turning auto on.
+    /// `approve` is `-b`: every step headless to `end`; it writes no auto.
     #[serde(rename = "task.run")]
     TaskRun {
         directory: PathBuf,

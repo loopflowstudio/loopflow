@@ -65,8 +65,10 @@ public enum Starter: Decodable, Sendable, Hashable {
     /// `nil` when no participant is configured or the chain is missing rows.
     case person(name: String?)
     case session(id: String, name: String?, requester: String?)
+    /// A configured default set it (`auto: on`): "wave", "repository" or "personal".
+    case config(layer: String)
 
-    private enum CodingKeys: String, CodingKey { case kind, name, id, requester }
+    private enum CodingKeys: String, CodingKey { case kind, name, id, requester, layer }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -78,6 +80,7 @@ public enum Starter: Decodable, Sendable, Hashable {
                 name: try container.decode(String?.self, forKey: .name),
                 requester: try container.decode(String?.self, forKey: .requester)
             )
+        case "config": self = .config(layer: try container.decode(String.self, forKey: .layer))
         case let kind:
             throw DecodingError.dataCorruptedError(
                 forKey: .kind, in: container, debugDescription: "unknown starter '\(kind)'"
@@ -91,6 +94,7 @@ public enum Starter: Decodable, Sendable, Hashable {
         case .person(let name): name ?? "attribution unresolved"
         case .session(let id, let name, let requester):
             (name.map { "Session \"\($0)\"" } ?? "Session \(id)") + (requester.map { " for \($0)" } ?? "")
+        case .config(let layer): "\(layer) config"
         }
     }
 }

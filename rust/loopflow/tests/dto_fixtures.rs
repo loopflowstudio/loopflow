@@ -355,6 +355,11 @@ fn task_detail_says_each_fact_once() {
         "the server's sentence, printed as given"
     );
     assert_eq!(
+        detail.auto.as_ref().unwrap().by.to_string(),
+        "wave config",
+        "a Wave's `auto: on` turned it on"
+    );
+    assert_eq!(
         serde_json::to_value(&detail).unwrap(),
         serde_json::from_str::<serde_json::Value>(json).unwrap()
     );

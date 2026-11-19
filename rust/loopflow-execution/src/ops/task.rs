@@ -734,12 +734,18 @@ impl TaskRunSelection {
 /// The graph a Task takes up when it names none: your `lf set wave.graph`, then its
 /// Wave's and the repository's `graph:`, then the builtin `code`.
 pub fn task_graph_default(store: &Store, task: &Task) -> OpsResult<(String, ConfigSource)> {
+    let (repo, wave) = task_scope(store, task)?;
+    scope_graph_default(&repo, wave.as_deref())
+}
+
+/// The repository and Wave whose configuration the Task reads.
+fn task_scope(store: &Store, task: &Task) -> OpsResult<(PathBuf, Option<String>)> {
     let repo = repository_for_task(store, task)?;
     let wave = match &task.wave_id {
         Some(id) => store.sqlite.get_wave(id).map_err(task_error)?,
         None => None,
     };
-    scope_graph_default(&repo, wave.as_ref().map(|w| w.slug()))
+    Ok((repo, wave.map(|wave| wave.slug().to_owned())))
 }
 
 /// The graph a new Task in this Wave, or the repository when `wave` is `None`,
@@ -926,7 +932,7 @@ async fn try_start_task_run(
             if crate::store::task_work::carrier_may_run(carrier) =>
         {
             if let Some(graph_process) = auto::running_graph(store, task, &carrier.id).await? {
-                auto::ask(store, task, ship, mode)?;
+                auto::ask(store, task, ship)?;
                 let at = row.graph.step_name_of(cursor);
                 return Ok(Some(TaskRunStart::Live {
                     run: format!(
@@ -972,8 +978,9 @@ async fn try_start_task_run(
         {
             return Ok(None);
         }
+        auto::configured(store, task)?;
     }
-    auto::ask(store, task, ship, mode)?;
+    auto::ask(store, task, ship)?;
     // Auto on runs through the interactive steps, standing in at each;
     // off, no run merges.
     let (on, merges) = match store

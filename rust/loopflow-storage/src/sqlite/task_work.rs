@@ -845,22 +845,18 @@ impl SqliteStore {
     }
 
     /// Set the Task's auto mark, noting it in the Task's history. With
-    /// `keeps_off`, a standing off stays and nothing is written. Returns the
+    /// `unset_only`, a standing mark stays and nothing is written. Returns the
     /// mark it had; a Task with no Graph has none and keeps none.
     pub fn set_task_auto(
         &self,
         task: &TaskId,
         mark: &Auto,
-        keeps_off: bool,
+        unset_only: bool,
     ) -> StoreResult<Option<Auto>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction()?;
         let before = auto_in(&tx, task)?;
-        if keeps_off
-            && before
-                .as_ref()
-                .is_some_and(|before| before.state == AutoState::Off)
-        {
+        if unset_only && before.is_some() {
             return Ok(before);
         }
         let set = tx.execute(
@@ -1073,7 +1069,7 @@ mod tests {
             .unwrap();
         assert_eq!(store.set_task_auto(&task.id, &on, false).unwrap(), None);
         store.set_task_auto(&task.id, &stopped, false).unwrap();
-        // `lf -b task run` keeps a stop; taking up another graph keeps it too.
+        // A configured default keeps a stop; taking up another graph keeps it too.
         store
             .set_task_auto(&task.id, &mark(super::AutoState::On, 30), true)
             .unwrap();

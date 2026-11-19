@@ -1,5 +1,6 @@
 //! A Task's auto setting. `lf ship` is an `lf task run` whose request asks
-//! for auto. Auto is one mark on `task_graphs`; the run reads it at each
+//! for auto, and `auto: on` in configuration turns it on as a Task takes up
+//! its Graph. Auto is one mark on `task_graphs`; the run reads it at each
 //! interactive step, standing in for the person while it is on, and at each
 //! step that merges, waiting there while it is off. `lf task auto off` turns
 //! it off; `lf ship`, spelled `lf task auto on` too, turns it on again.
@@ -8,10 +9,11 @@ use crate::durable::GraphProcessFilter;
 use crate::ops::error::OpsResult;
 use crate::session::GraphProcessSummaryState;
 use loopflow_model::id::LfProcessId;
+use loopflow_storage::process::{ConfigLayer, Starter};
 use loopflow_storage::sqlite::{Auto, AutoState};
 use loopflow_storage::work::task::Task;
 
-use super::{block_on_task, task_error, task_store, SharedStore, TaskRunMode};
+use super::{block_on_task, task_error, task_store, SharedStore};
 
 /// Who started a run: the Session whose agent started it, with the person
 /// named as in `repo`.
@@ -33,38 +35,65 @@ pub fn landing_wait(step: &str, off: &Auto, issue: &str) -> String {
     )
 }
 
-/// Save `state` as this caller's mark, naming who is asking as it is written;
-/// with `keeps_off`, a standing off stays. Returns whether auto was on before.
-fn set(store: &SharedStore, task: &Task, state: AutoState, keeps_off: bool) -> OpsResult<bool> {
+/// Who is asking: the caller's Session, with the person named as in the
+/// Task's repository.
+fn caller(store: &SharedStore, task: &Task) -> OpsResult<Starter> {
     let repo = super::repository_for_task(store, task)?;
+    starter(
+        &store.sqlite,
+        &repo,
+        crate::journal::caller_session_id().as_ref(),
+    )
+    .map_err(task_error)
+}
+
+/// Save `state` as the Task's mark, set by `by`; with `unset_only`, a standing
+/// mark stays. Returns whether auto was on before.
+fn set(
+    store: &SharedStore,
+    task: &Task,
+    state: AutoState,
+    by: Starter,
+    unset_only: bool,
+) -> OpsResult<bool> {
     let mark = Auto {
         state,
         at: loopflow_storage::rows::now_unix(),
-        by: starter(
-            &store.sqlite,
-            &repo,
-            crate::journal::caller_session_id().as_ref(),
-        )
-        .map_err(task_error)?,
+        by,
     };
     let before = store
         .sqlite
-        .set_task_auto(&task.id, &mark, keeps_off)
+        .set_task_auto(&task.id, &mark, unset_only)
         .map_err(task_error)?;
     Ok(before.is_some_and(|before| before.state == AutoState::On))
 }
 
-/// Write what the run asks of auto, once the Task has its Graph: `lf ship`
-/// turns it on, lifting an off; `-b` turns it on unless someone turned it off.
-pub(super) fn ask(
-    store: &SharedStore,
-    task: &Task,
-    ship: bool,
-    mode: TaskRunMode,
-) -> OpsResult<()> {
-    if ship || mode == TaskRunMode::Headless {
-        set(store, task, AutoState::On, !ship)?;
+/// `lf ship` turns auto on once the Task has its Graph, lifting an off.
+pub(super) fn ask(store: &SharedStore, task: &Task, ship: bool) -> OpsResult<()> {
+    if ship {
+        set(store, task, AutoState::On, caller(store, task)?, false)?;
     }
+    Ok(())
+}
+
+/// A Task that just took up a Graph turns auto on when its configuration says
+/// `auto: on` and nobody has set it.
+pub(super) fn configured(store: &SharedStore, task: &Task) -> OpsResult<()> {
+    let (repo, wave) = super::task_scope(store, task)?;
+    let resolved = crate::config::resolved(Some(&repo), wave.as_deref()).map_err(task_error)?;
+    if resolved.config.auto != Some(crate::config::AutoDefault::On) {
+        return Ok(());
+    }
+    let layer = match resolved.settings["auto"].selected() {
+        Some(chosen) if chosen.scope == crate::config::settings::SettingScope::Wave => {
+            ConfigLayer::Wave
+        }
+        Some(chosen) if chosen.source == crate::config::ConfigSource::Repository => {
+            ConfigLayer::Repository
+        }
+        _ => ConfigLayer::Personal,
+    };
+    set(store, task, AutoState::On, Starter::Config { layer }, true)?;
     Ok(())
 }
 
@@ -119,7 +148,7 @@ pub fn off(issue: &str, reason: Option<&str>) -> OpsResult<Option<bool>> {
         let Some(task) = store.get_task_by_issue(issue).await.map_err(task_error)? else {
             return Ok(None);
         };
-        let was_on = set(&store, &task, AutoState::Off, false)?;
+        let was_on = set(&store, &task, AutoState::Off, caller(&store, &task)?, false)?;
         if let Some(reason) = reason.map(str::trim).filter(|reason| !reason.is_empty()) {
             super::append_task_comment_async(&store, &task, reason, false).await?;
         }

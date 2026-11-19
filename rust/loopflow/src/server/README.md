@@ -513,7 +513,7 @@ the phone's `view.select` Task list and its creation destinations all read it.
   Graph registers, `waiting {step}` or `ended` when nothing ran, or the
   refusal it printed; `task.ship` answers the same after turning auto
   on. The connection never waits on the run. `approve` is `-b`: every step
-  headless to `end`, turning auto on unless someone turned it off; without it
+  headless to `end`, writing no auto; without it
   the run stands in at interactive steps only while auto is on, and
   otherwise stops before the next one. A null `agent` uses each step's
   configured harness. `lf task run <issue> --json` and `lf ship --json`

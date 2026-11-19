@@ -90,8 +90,8 @@
     "state": "on",
     "at": 1795107435,
     "by": {
-      "kind": "person",
-      "name": "Maya"
+      "kind": "config",
+      "layer": "wave"
     }
   },
   "stack_parent": {

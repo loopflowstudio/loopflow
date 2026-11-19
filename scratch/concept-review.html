@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>LOO-986 concept review: the command in a host pane</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #fbfaf7; --fg: #1d1c1a; --muted: #6b675f; --line: #dedad2;
+    --yes: #1f7a4a; --no: #b3261e; --prop: #2f5bd3; --card: #ffffff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #161513; --fg: #ebe8e1; --muted: #9b968c; --line: #34312c;
+      --yes: #5fcf8f; --no: #ff8a80; --prop: #8fb0ff; --card: #1e1d1a; }
+  }
+  body { background: var(--bg); color: var(--fg); font: 16px/1.55 -apple-system, "Segoe UI", sans-serif;
+    max-width: 960px; margin: 2.5rem auto; padding: 0 1.25rem; }
+  h1 { font-size: 1.6rem; margin-bottom: .2rem; }
+  h2 { font-size: 1.2rem; margin-top: 2.4rem; border-bottom: 1px solid var(--line); padding-bottom: .3rem; }
+  code { font: 13.5px ui-monospace, "SF Mono", Menlo, monospace; }
+  pre { background: var(--card); border: 1px solid var(--line); border-radius: 6px; padding: .8rem 1rem; overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; margin: .8rem 0; font-size: 15px; }
+  th, td { text-align: left; vertical-align: top; padding: .5rem .6rem; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 600; }
+  .yes { color: var(--yes); font-weight: 700; }
+  .no { color: var(--no); font-weight: 700; }
+  .prop { border-left: 3px solid var(--prop); padding-left: .8rem; }
+  .tag { color: var(--prop); font-weight: 600; }
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: .4rem 1rem .8rem; }
+  .muted { color: var(--muted); }
+  @media (max-width: 720px) { .cols { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+
+<h1>The command <code>lf open</code> puts in a host pane</h1>
+<p class="muted">LOO-986 concept review, 2026-11-19, against <code>scratch/plan.md</code> at kickoff. Nothing is built yet. Text in <span class="tag">blue</span> is proposed; the rest exists.</p>
+
+<p><strong>Area taken:</strong> the whole life of one pane command, from <code>lf open</code> writing it
+(<code>open/conversation.rs</code> <code>Attachment::argv</code>, <code>open.rs</code> <code>resume_argv</code>) to the
+answer its caller gets back (<code>OpenReceipt</code>), including what the command inherits (<code>PATH</code>),
+which harness it names, and who reports its failure. All three parts of the plan touch that one command, so the
+question is what the command <em>is</em>.</p>
+
+<h2>One interaction, as it fails today</h2>
+<p>An agent runs <code>lf open --task LOO-1 --json</code>. Rex, started by launchd, opens a pane running:</p>
+<pre>/bin/sh -c '&lt;wrapper&gt;' lf-open /tmp/…/receipt env -u LF_AGENT_CALLER -u LF_AGENT_OVERRIDE \
+  LF_OPEN_RECEIPT=/tmp/…/receipt  PATH=&lt;the agent's PATH + tool dirs&gt; \
+  /…/lf session resume ses_1 <span class="no">--agent codex:gpt-5</span></pre>
+<ol>
+  <li>The pane's <code>lf</code> (the <em>viewer</em>) asks for a held terminal; inside it the <em>launcher</em> finds no <code>codex</code> and prints <code>codex CLI not found</code>.</li>
+  <li>The viewer relays that line to the pane and exits with the child's code.</li>
+  <li>The wrapper writes <code>Conversation exited before attachment (status 1)</code>.</li>
+  <li>The caller gets <code>reason: "…status 1; see the destination for diagnostics and retry the same command"</code>.</li>
+  <li>Retrying the same command, an hour after someone moved the conversation to Claude, moves it back to Codex.</li>
+</ol>
+<p>Three faults, one cause: the pane command is a <strong>snapshot of the opener's state</strong> (its <code>PATH</code>, the harness it read)
+instead of a <strong>name for a conversation</strong>. And the answer channel has one writer that knows nothing.</p>
+
+<h2>Do the concepts line up?</h2>
+<table>
+  <tr><th>What a person knows</th><th>What the code has</th><th></th><th>Where it's wrong</th></tr>
+  <tr><td>"Open this conversation over there"</td><td><code>lf open</code> → <code>Resolved</code> → <code>resume_argv</code></td>
+      <td class="no">no</td><td>The argv names the conversation <em>and</em> a harness read from the store. Opening and moving are one action in the code, two to a person.</td></tr>
+  <tr><td>A conversation's harness</td><td><code>sessions.provider/model</code>; <code>Resolved.agent</code></td>
+      <td class="no">no</td><td>One idea in two places: <code>Resolved.agent</code> copies the record and then outranks it when replayed. <span class="tag">Part 3: <code>agent</code> is only the caller's <code>-a</code>.</span></td></tr>
+  <tr><td>"lf can find claude"</td><td><code>supervised_path</code>+<code>LF_SUPERVISED</code>, <code>conversation_path</code>, <code>DESKTOP_PATH</code>, plist text, <code>REMOTE_PATH</code>, Swift <code>enrichedPath</code></td>
+      <td class="no">no</td><td>One fact with no owner: six copies, each added after its own entry point failed. <span class="tag">Part 1: <code>TOOL_DIRS</code> appended in <code>main</code>; Swift and the SSH snippet stay because they run before lf.</span></td></tr>
+  <tr><td>"Why didn't it open?"</td><td>receipt file: <code>attached</code> or any text; <code>OpenReceipt.reason</code></td>
+      <td class="no">no</td><td>The only failure writer is the shell, which knows the exit status and nothing else. <span class="tag">Part 2: lf processes write their error.</span></td></tr>
+  <tr><td>"Retry the same command"</td><td><code>settle</code>'s reason text</td>
+      <td class="no">no</td><td>Advice the command can't honour while it carries <code>--agent</code>. Part 3 makes it true.</td></tr>
+  <tr><td>The pane</td><td><code>OpenHost</code>, destination, the wrapper waiting on Enter</td>
+      <td class="yes">yes</td><td></td></tr>
+  <tr><td>The receipt as the opener's answer</td><td><code>OpenReceipt</code> (wire) fed by the receipt file (handshake)</td>
+      <td class="yes">yes</td><td>Two things share "receipt", but one feeds the other and nobody outside sees the file. Not worth a rename.</td></tr>
+</table>
+
+<h2>Biggest mismatch: the pane command carries state, so it goes stale</h2>
+<div class="cols">
+  <div class="card">
+    <h3>Before</h3>
+    <pre>lf session resume ses_1 \
+  --agent codex:gpt-5   # read from the store
+PATH=&lt;caller's PATH&gt;    # read from the caller</pre>
+    <p>Replay = move. An agent's shims and venv ride into the person's conversation.</p>
+  </div>
+  <div class="card prop">
+    <h3>After (plan)</h3>
+    <pre>lf session resume ses_1
+  [--agent X  only if the caller said -a X]
+# no PATH: lf's main appends TOOL_DIRS</pre>
+    <p>The command names a conversation. Everything else is read where it runs, at the moment it runs.</p>
+  </div>
+</div>
+<p>The plan already gets this right in parts 1 and 3. This review endorses it and adds nothing to the command.</p>
+
+<h2>What the review changed in the plan</h2>
+<h3>Part 2: one rule for the answer — the first one stands</h3>
+<p>The plan's <code>fail_open</code> replaced the receipt by rename. Walk the failure:</p>
+<ol>
+  <li>The launcher inherits <code>LF_OPEN_RECEIPT</code> from the viewer (<code>native_session.rs:571</code> strips it only from the provider), so its <code>main</code> writes <code>'claude' is not installed. Install it with …</code></li>
+  <li>The held terminal ends; the viewer's relay ends unacknowledged, so it writes its 4 KiB tail — the same line wrapped in relayed bytes — <span class="no">over</span> the exact one.</li>
+</ol>
+<p class="prop">Every writer creates the receipt only if it's absent (<code>hard_link</code> from the temporary). Who answers, in order:
+the launcher's error → the viewer's own error → the relayed tail (a provider's own pre-ready exit, e.g. "No conversation found") → the wrapper's status line.
+One rule covers all four, and the wrapper already follows it (<code>[ ! -f "$receipt" ]</code>).</p>
+<p class="prop">The tail keeps live <code>Tag::Out</code> only, not <code>Tag::Snapshot</code>. Counterexample: an existing conversation's replayed screen arrives first; its provider then exits before ready; the reason would quote last week's screen.</p>
+<p>The probe the plan opened with is half answered: <code>a_launch_that_found_no_provider_leaves_nothing_to_resume</code> already asserts the viewer's stdout holds "'claude' is not installed". The remaining probe asserts the receipt file is the launcher's exact error.</p>
+
+<h3>Part 1: a known cost, written down</h3>
+<p>Since #1981 (yesterday), a person's own <code>lf open</code> from a terminal carries their whole <code>PATH</code> into a Rex pane. The brief asks to delete that.
+After the change a launchd-started Rex pane sees launchd's <code>PATH</code> + <code>TOOL_DIRS</code>: a tool reachable only through shell rc (nvm, mise, asdf) is gone from the conversation.
+On this Machine: <code>claude</code>, <code>codex</code> → <code>~/.local/bin</code>; <code>gh</code> → <code>/opt/homebrew/bin</code>; <code>node</code> → <code>~/.nvm/…</code>, also present in <code>/opt/homebrew/bin</code>. So nothing here breaks; a Machine with nvm-only node would lose <code>npx</code> MCP servers.</p>
+
+<h3>Unchanged</h3>
+<p>Append rather than prepend; <code>main</code> rather than the provider's <code>Command</code>; part 3 as written; slice order (PATH first, because a fixture that relied on a bare <code>PATH</code> hiding a tool shows soonest whether appending in <code>main</code> holds).</p>
+
+<h2>Questions</h2>
+<ol>
+  <li>Tools that live only behind shell rc (nvm, mise):
+    <br>a) accept the loss, as the brief says — add directories to <code>TOOL_DIRS</code> when one is missed (in the plan);
+    <br>b) carry the caller's <code>PATH</code> when the caller is a person (<code>agent_caller()</code> none), drop it for agents;
+    <br>c) run the pane command through the person's login shell, as a terminal's own tab does.</li>
+  <li>The receipt when two lf processes fail:
+    <br>a) first answer stands, launcher's exact error wins (in the plan);
+    <br>b) last answer stands, the tail wins.</li>
+  <li>A provider that exits before ready:
+    <br>a) its last 4 KiB of live output is the reason (in the plan);
+    <br>b) no tail — only lf's own errors and the wrapper's status line; the provider's text stays in the pane.</li>
+</ol>
+</body>
+</html>

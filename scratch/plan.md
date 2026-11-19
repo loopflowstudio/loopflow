@@ -92,11 +92,23 @@ found"), but they can come from either of two processes: the pane's lf itself
 whose text reaches the viewer only as relayed output followed by an exit code
 (`transport.rs` ~1890 returns `CommandExit(child_code)`).
 
-**Mechanism.** One writer, `transport::fail_open(text)`, beside
-`acknowledge_open`: writes `text` to the receipt atomically (same `.ready` +
-rename) and clears the env var, so it runs at most once per process.
-- The viewer keeps the last 4 KiB of relayed output while the receipt is
-  unacknowledged (nothing once acknowledged, nothing without the env var). When
+**The rule (concept review).** The receipt is written once: the first answer
+stands. Every writer — the viewer's `acknowledge_open`, `fail_open` in any lf
+process, the shell wrapper — creates the file only if it is absent (write the
+temporary, then `std::fs::hard_link` it to the receipt, which fails when the
+receipt exists, and remove the temporary; the wrapper already checks
+`[ ! -f ]`). Without this the plan below has two lf processes holding
+`LF_OPEN_RECEIPT` — the launcher in the held terminal inherits it from the
+viewer (`native_session.rs:571` strips it only from the provider) — and the
+viewer's tail written after the launcher's precise error would replace it.
+
+**Mechanism.** One failure writer, `transport::fail_open(text)`, beside
+`acknowledge_open`, under the rule above; it clears the env var, so it runs at
+most once per process.
+- The viewer keeps the last 4 KiB of relayed live output (`Tag::Out`, not
+  `Tag::Snapshot`: replayed history of an existing conversation is not why
+  this opening failed) while the receipt is unacknowledged (nothing once
+  acknowledged, nothing without the env var). When
   the relay ends before acknowledgement, it calls `fail_open` with that tail,
   ANSI-stripped and trimmed, plus the exit line. This also carries a provider's
   own message when the provider itself exits before it is ready.
@@ -108,20 +120,29 @@ rename) and clears the env var, so it runs at most once per process.
 - `Attachment::settle` reports the receipt text as the reason, ending "; retry
   the same command"; "see the destination for diagnostics" is dropped.
 
-**First probe of this slice:** the bare-PATH fixture
-(`a_launch_that_found_no_provider_leaves_nothing_to_resume`) shows which process
-holds the text: assert the receipt file contains "'claude' is not installed".
-If the launcher is the only one with it and the relayed tail is empty (output
-went to a terminal the viewer never saw), the launcher calls `fail_open` instead
-— the holder passes `LF_OPEN_RECEIPT` through only if it already does; check
-`native_session.rs:571`, which strips it from the provider.
+Who answers, in order: the launcher's own lf error (its `main`), else the
+viewer's own error (its `main`), else the tail (a provider that exited before it
+was ready, e.g. Claude's "No conversation found"), else the wrapper's status
+line.
+
+**First probe of this slice:** the bare-PATH fixture already asserts the
+viewer's stdout holds "'claude' is not installed" (the held terminal relays the
+launcher's stderr), so the tail alone would carry it. The probe is now
+(`a_launch_that_found_no_provider_leaves_nothing_to_resume`) asserting
+the receipt file is exactly the launcher's error (`'claude' is not installed. …`,
+no relayed bytes around it): that shows the launcher holds the variable and
+wrote first. If it holds no variable, the tail answers and the order above loses
+its first rung; nothing else changes.
 
 **Absent/error states:** receipt directory gone (caller timed out and dropped
 it) → write fails silently, as `acknowledge_open` does. Empty tail → the exit
 line alone ("Conversation exited before attachment (status N)").
 
 **Test:** `Attachment` unit test running a command that prints an error and
-exits 1 through the real wrapper: `wait` returns that error text. The fixture
+exits 1 through the real wrapper: `wait` returns that error text. A
+`transport` unit test: `fail_open("first")` then `fail_open("second")` from a
+fresh env var leaves "first"; `acknowledge_open` after a failure leaves the
+failure. The fixture
 assertion above covers the lf side end to end.
 
 ## 3. The pane command never names a harness it wasn't given
@@ -141,6 +162,9 @@ config check stays: it surfaces a bad `agent:` before a pane opens.
 If `target.agent` has no other reader after this, drop the field and read
 `agent_override()` in `resume_argv`.
 
+This is also what makes part 2's "retry the same command" safe to say: today
+retrying a failed pane command can move the conversation.
+
 **Test:** an `open.rs` unit test: a `Resolved` with a recorded provider and no
 override yields argv without `--agent`; with an override, `--agent <it>`. The
 `--here` path uses the same `resume_argv`, so it is covered.
@@ -157,6 +181,15 @@ override yields argv without `--agent`; with an override, `--agent <it>`. The
 4. Plists, systemd unit, `REMOTE_PATH`, Swift comment.
 
 ## Exclusions
+
+- **Known cost of part 1.** Today (#1981) a person running `lf open` from a
+  terminal carries their whole `PATH` into a Rex pane. After this change a Rex
+  pane started under launchd sees only launchd's `PATH` plus `TOOL_DIRS`, so a
+  tool reachable only through shell rc (nvm, mise, asdf, pyenv shims) is gone
+  from the conversation. On this Machine `node` is under `~/.nvm` but also in
+  `/opt/homebrew/bin`; `claude` and `codex` are in `~/.local/bin`. The brief
+  asks for `conversation_path` deleted; kept as asked, recorded in
+  `scratch/questions.md`.
 
 - Other terminal-inherited variables (`SSH_AUTH_SOCK`, locale, `TERM`) were not
   compared between a Rex pane and a shell; Herdr and cmux servers' environments

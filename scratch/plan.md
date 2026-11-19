@@ -3,8 +3,10 @@
 The design is `scratch/plan-design.md` (guide: `scratch/plan-design.html`).
 This file is how the branch gets there, and where the two differ this file
 holds. History of the question: `scratch/plan-ownership-history.md`; what was
-said: `scratch/explore.md`; the review of the branch as built, which set
-difference 4 and slice 4: `scratch/concept-review.html`.
+said: `scratch/explore.md`; the review of the branch as built:
+`scratch/concept-review.html` (its third pass set difference 5 and slice 6;
+the earlier passes, which set difference 4 and slices 4 and 5, are in its Git
+history).
 
 *Made for review, differing from the design:*
 
@@ -31,6 +33,20 @@ difference 4 and slice 4: `scratch/concept-review.html`.
    to exchange (a new wire operation, and nothing with no server); a shorter
    minute; documenting two minutes.
 
+5. **What a carrier brought and this Machine could not write is shown and
+   read again, and making a Wave looks first.** A person knows a Wave by its
+   name; each Machine gives it an id of its own, and one active Wave may hold
+   a name. Two Machines that each make `design` hold two Waves that cannot
+   meet. As built through slice 5 the import skips the other one with its
+   Projects and Tasks, logs it, moves the read cursor past it and
+   `lf repo tracker` reads `Plan: Git origin.`: two plans, and a line saying
+   one. Slice 6. *Passed over:* joining the two Waves at import (the higher id
+   retired, its Projects and child Waves moved to the other through stamped
+   fields). It is the truer answer and it is a decision about Waves and
+   Projects, not carriers: what a Wave with two first Projects looks like,
+   what happens to the retired Wave's Sessions, children of one name under
+   both. On the review page, question 1; not filed.
+
 "Your order of your claimed Tasks" (the design's second order) moves to the
 tracker Task; see Exclusions.
 
@@ -52,6 +68,13 @@ your claimed tasks is NOT the proejct order, ut your order of hte backlog IS".
   on yours. No account, no hub.
 - Two edits to one field: the one made later wins on every Machine. Nothing
   is ever `lost` or `conflicted` between Loopflow Machines.
+- A Wave made on the mini a moment ago is the Wave `lf task create --wave`
+  and `lf wave create` find on the laptop: making a Wave looks first. Two
+  Machines that each made `design` with no carrier in reach read
+  `Plan: Git origin, 3 not taken.` with `Wave design from mini: a Wave named
+  design is here. Rename one: lf wave rename design <name>` under it;
+  everything else keeps crossing, and after the rename the next exchange
+  takes the Wave, its Projects and its Tasks on both Machines.
 - Reordering the backlog on one Machine reorders it on all of them
   (`task_rank` is a stamped field like any other).
 - Linear and Asana repositories behave as they do on main.
@@ -93,7 +116,10 @@ after the cutover below the Machines agree on every value anyway.
   failing_since)`, primary key `(repo, carrier)`, `carrier` is `git` or `hub`.
   `sent_seq`: how far into this Machine's `plan_changes` the carrier has
   taken. `seen_seq`: the hub's `plan_changes` watermark (NULL for Git).
-  `peer`: the remote name or the hub's machine id. It replaces `hub_plans`,
+  `peer`: the remote name or the hub's machine id. Slice 6 adds
+  `not_taken`: what the carrier's last read could not write here, as the
+  text the line shows, NULL when it took everything. A read sets and clears
+  it; a send leaves it alone. It replaces `hub_plans`,
   `hub_sends` and their triggers; it keeps the `store_revision_*` triggers so
   views see the lines change.
 - `plan_refs(repo, machine_id, tip)`: the last commit of each other Machine's
@@ -203,7 +229,8 @@ review:* 60 s, one `git fetch` per repository per minute, no setting.
 - `lf repo tracker` text and `--json`: `plan: {git: {remote, unsent,
   error, failing_since} | null, hub: {machine, unsent, error,
   failing_since} | null}`, with the unsent records listed under each line by
-  identifier. The per-field `queued` lines go. DTO fixture
+  identifier. Slice 6 adds `not_taken: string | null` to each carrier beside
+  `error`. The per-field `queued` lines go. DTO fixture
   `tests/fixtures/dto/tracker_sync.json`, Rust and Swift fixture tests.
 - Desktop `RepositoryPlanView` / `RepositoryPlan.swift`: the same two lines.
 - `machine/wire.rs` `PlanApply` / `PlanChanges`, `server_schema.json`,
@@ -241,7 +268,10 @@ review:* 60 s, one `git fetch` per repository per minute, no setting.
 - A file that does not parse, or a field this build does not know: that field
   is skipped and logged; the rest of the ref applies. A record either carrier
   brings that cannot be written (a Wave named like one held here): that record
-  and what hangs from it are skipped and logged; the rest applies.
+  and what hangs from it are skipped; the rest applies. After slice 6 the
+  carrier's line reads `N not taken` with the reason, `lf task sync` exits 1
+  with it, and the carrier reads the same records again at each exchange
+  until they can be written.
 - A hub older than this build: the existing skew error naming the fix.
 - A released `lf` on another Machine keeps reading the old
   `refs/loopflow/planning/*` and sees no new changes. `TrackerConfig::ReleasedGit`
@@ -409,6 +439,8 @@ etude checkout and `lf` version are unknown.
    - A record skipped because it could not be written (questions, slice 2)
      is not retried: the ref's tip is recorded once read, and later diffs
      start from it. It arrives again only when its file next changes.
+     Slice 6 replaces this: the tip is not recorded while anything from that
+     ref is not taken.
    - Reads that are not asked for do not fetch: `lf repo tracker --subscribe`
      and a provider exit exchange with the hub only; `lf task sync`,
      `lf wave status --sync`, a Task lookup that misses, a served command and
@@ -505,7 +537,7 @@ etude checkout and `lf` version are unknown.
    would also cover the claim's two waits, but it adds plumbing to every caller.
    QA after it: the counterexample above is wrong. `--wave W` for a Wave
    this Machine does not have makes one (as on main), so the plan holds two
-   Waves of one name; see the next point.
+   Waves of one name; slice 6.
 
    What it showed, 2026-11-18: `ops::task::tests::` (33) and the acceptance
    test passed (34 tests). By hand in `/tmp/lfq3`, no server, hub stand-in
@@ -513,6 +545,56 @@ etude checkout and `lf` version are unknown.
    `Hub mini, unreachable since …, 1 unsent.` with "mini did not answer
    within 5s"; with the hub back, `lf task sync` sent it and the line read
    `Hub mini.`
+
+6. **Nothing arrives short in silence.** *Not built* (third concept review,
+   `scratch/concept-review.html`). Two parts, the first alone shows whether
+   the look is enough for the common case.
+
+   a. *Making a Wave looks first.* Where a command is about to make a Wave
+      row in a repository without Linear or Asana, one exchange by each
+      carrier, five seconds at most, as `plan_carriers::before_claim` does for
+      a claim; generalize that function, do not add a second. Two places:
+      `ops/wave_lifecycle.rs` where `created` is found true before
+      `ensure_wave_row`, and the path `lf task create --wave <name>` takes
+      when the name is not a Wave here (QA scenario 2 shows it makes one). A
+      carrier that fails or runs out of time lets the command go ahead.
+      Result: QA scenario 2 by hand, both homes online: the laptop's
+      `--wave q6` Task lands in the mini's Wave, one Wave on both.
+      `register_authored_waves` (a pulled `.lf/wave/<name>` whose Wave has not
+      arrived) does not look: it runs on reads, and its `config.yaml` id is
+      the arriving Wave's id, so the two meet.
+   b. *Not taken is a state of the carrier.* `apply_each` returns what it
+      skipped (record, table, the store's reason) beside what it wrote;
+      `apply_plan_records` gives it to its caller. When a read skipped
+      anything: Git does not `record_plan_ref` for that ref, the hub passes
+      the `seen_seq` it held, not the page's, and `plan_carriers.not_taken`
+      is set for that carrier to the line's text (count, then the first
+      record by name, whose Machine it came from, and for a Wave name the
+      rename command). A read that skips nothing clears it; `plan_git::send`
+      and a hub exchange that read nothing leave it. The exchange returns an
+      error carrying the same text, so `lf task sync` exits 1 and a save
+      prints its usual "planning synchronization pending". It is not a
+      carrier failure: `error` / `failing_since` stay for the remote and the
+      hub themselves, and the line reads `Plan: Git origin, 3 not taken.`,
+      never `unreachable since`. Surfaces: `CarrierStanding.not_taken` in
+      `lf repo tracker` text and `--json`, `tests/fixtures/dto/tracker_sync.json`
+      and `subscribe_frames.json` with their Rust and Swift fixture tests,
+      `RepositoryPlan.swift` line, `server_schema.json` if the standing is in
+      it, `docs/work.md` ("Share the plan"), `docs/dev/planning.md`,
+      `.lf/qa/tracker.md`. Rewrite
+      `a_wave_named_like_one_held_here_is_skipped_and_the_rest_arrives` to
+      also assert `not_taken` is set, and add the recovery: rename the held
+      Wave, apply the same records again, the arriving Wave, its Project and
+      its Task are written and `not_taken` is NULL. By hand: QA scenario 3
+      (`design` on both, offline), then `lf wave rename` on one, `lf task
+      sync` on both, both lists hold both Waves' Tasks and both lines read
+      `Plan: Git origin.`
+      Known cost, accepted: while something is not taken, each exchange by
+      that carrier reads again everything it brought since (a hub that has
+      never been read whole reads the whole plan at every save's send, inside
+      the five seconds). *Passed over:* a table of records to fetch again
+      (the hub has no read by id); deriving it from `plan_refs` against
+      `plan-seen/*` (no reason to show, nothing for the hub).
 
 ## Checks
 
@@ -637,9 +719,8 @@ etude checkout and `lf` version are unknown.
   `of_two_claims_made_apart_…` timed out at 300 s three times (once alone,
   load 90 to 145) and then passed in 29 s unchanged: the third such run.
   Flaky by the repository's rule; gate finds the cause or rewrites it.
-- Slices 1 to 4 are in the code and the four differences at the top hold
-  in it, and slice 5 is built. Etude's cutover is by hand, after
-  release.
-- Next: gate runs the lists above. Open choices are in
-  `scratch/questions.md`; the review's five questions are at the end of
-  `scratch/concept-review.html`.
+- Slices 1 to 5 are in the code and differences 1 to 4 at the top hold in
+  it. Etude's cutover is by hand, after release.
+- Next: implement builds slice 6, part a then part b. After it gate runs the
+  lists above. Open choices are in `scratch/questions.md`; the review's four
+  questions are at the end of `scratch/concept-review.html`.

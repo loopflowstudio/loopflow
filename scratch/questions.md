@@ -166,3 +166,14 @@ Still open from before:
   - `lf repo tracker --subscribe` no longer reads the hub; its read had
     failed on the stream's read-only store every time. A hub change shows
     there after the next save, `lf task sync` or the server's exchange.
+
+- Third concept review (2026-11-18, `scratch/concept-review.html`), each
+  reversible before release:
+  - Two Waves of one name made apart are shown (`N not taken`, with the
+    rename that fixes it) and read again at each exchange; they are not
+    joined. Passed over: joining at import, the higher id retired into the
+    lower. Larger than this Task; question 1 on the page.
+  - Making a Wave (`lf wave create`, `--wave` naming a Wave not here) looks
+    first by each carrier, five seconds at most.
+  - `not_taken` is its own field beside `error`; the line still says
+    `unreachable since` for a push the remote refused (question 3).

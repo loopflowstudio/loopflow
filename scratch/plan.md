@@ -77,6 +77,11 @@ when the PR merges.
 
 Gate.
 
+QA 2026-11-19 (`scratch/qa.html`): the CLI, socket, recovery and 0.16 upgrade
+paths work on a private Machine. `lf task status --json` now carries `auto`
+(`TaskDetail.auto`), and a Task read from another Machine prints it; the
+remote line was compiled, not driven.
+
 Built 2026-11-19: `lf task auto on` no longer takes up a Graph. On a Task with
 none it exits 1 with "Task INF-123 has not taken up a Graph, and auto is set on
 one; `lf ship INF-123` turns auto on and runs it", and the next bare

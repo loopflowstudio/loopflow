@@ -729,21 +729,11 @@ fn print_task_snapshot(
             "provider {}",
             snapshot.provider.as_deref().unwrap_or("not selected")
         );
-        let auto = snapshot.auto.as_ref().map_or_else(String::new, |mark| {
-            use loopflow_storage::process::Starter;
-            use loopflow_storage::sqlite::AutoState;
-            // A mark an earlier lf wrote may name nobody.
-            let by = match &mark.by {
-                Starter::Person { name: None } => String::new(),
-                by => format!(" by {by}"),
-            };
-            let state = match mark.state {
-                AutoState::On => "on",
-                AutoState::Stopped => "off",
-            };
-            let at = loopflow_execution::output::format_time(mark.at);
-            format!(" · auto: {state}{by}, {at}")
-        });
+        let auto = snapshot
+            .auto
+            .as_ref()
+            .map(loopflow::lf::commands::task_row::auto_phrase)
+            .unwrap_or_default();
         println!(
             "{}  {}{auto}\n  task: {}\n  body: {}\n  worktree: {}\n  branch: {}\n  tracker writeback: {}",
             snapshot.issue_identifier,

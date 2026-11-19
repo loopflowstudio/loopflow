@@ -1032,10 +1032,15 @@ fn print_remote_detail(machine: &str, detail: &TaskDetail) -> Result<()> {
     println!("{} · {}", task.title, task.identifier);
     println!("Runs on {machine}; read from its server.");
     println!(
-        "State: {} · {}",
+        "State: {}{} · {}",
         serde_json::to_value(task.state)?
             .as_str()
             .expect("a Task state is a string"),
+        detail
+            .auto
+            .as_ref()
+            .map(crate::lf::commands::task_row::auto_phrase)
+            .unwrap_or_default(),
         task.reason
     );
     if let Some(graph) = &task.graph {
@@ -1243,6 +1248,10 @@ pub(crate) async fn task_detail(
     Ok(TaskDetail {
         summary,
         conversation: conversation_id,
+        auto: status
+            .execution
+            .as_ref()
+            .and_then(|execution| execution.auto.clone()),
         stack_parent: status
             .execution
             .and_then(|execution| execution.stack_parent),

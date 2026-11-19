@@ -2822,10 +2822,7 @@ fn a_ship_on_a_running_task_reports_its_run_and_starts_nothing() {
         "{text}{}",
         String::from_utf8_lossy(&shipped.stderr)
     );
-    assert!(
-        text.contains("at review running as Graph run"),
-        "{text}"
-    );
+    assert!(text.contains("at review running as Graph run"), "{text}");
     assert!(text.contains("ships:"), "{text}");
     fs::remove_file(task.home.path().join("hold")).unwrap();
     assert!(first.wait().unwrap().success());
@@ -2870,6 +2867,9 @@ fn a_stopped_ship_kills_nothing_and_its_run_carries_on() {
         "{}",
         task.text_status()
     );
+    let json = task.run(&["task", "status", "INF-123", "--json"]);
+    let json: serde_json::Value = serde_json::from_slice(&json.stdout).unwrap();
+    assert_eq!(json["auto"]["state"], "stopped", "{json}");
 }
 
 #[test]

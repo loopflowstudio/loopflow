@@ -1,119 +1,162 @@
 <!doctype html>
-<meta charset="utf-8">
-<title>LOO-968 qa: lf ship is Auto-Ship on plus lf task run</title>
+<html lang="en"><meta charset="utf-8">
+<title>LOO-968 qa: the auto setting</title>
 <style>
-body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:920px;margin:2rem auto;padding:0 1rem;color:#1d1d1f}
-h1{font-size:1.5rem}h2{font-size:1.15rem;margin-top:2rem;border-top:1px solid #ddd;padding-top:1rem}
-pre{background:#f5f5f7;padding:.75rem;overflow-x:auto;font-size:13px;border-radius:6px}
-.ok{color:#1a7f37;font-weight:600}.fix{color:#9a6700;font-weight:600}.open{color:#cf222e;font-weight:600}
+body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:860px;margin:2rem auto;padding:0 1rem;color:#1c1c1c}
+h1{font-size:1.5rem}h2{font-size:1.1rem;margin-top:2rem}
+pre{background:#f5f4f0;padding:.7rem .9rem;overflow-x:auto;font:12.5px/1.45 ui-monospace,Menlo,monospace;border-radius:6px}
+code{font:12.5px ui-monospace,Menlo,monospace;background:#f5f4f0;padding:0 .2em;border-radius:3px}
+.ok{color:#17703a}.fix{color:#9a5a00}.bad{color:#a12222}
 </style>
-<h1>LOO-968 qa: <code>lf ship</code> is Auto-Ship on plus <code>lf task run</code></h1>
-<p>Branch <code>lf</code> at 3f2a4f7e89 plus the fixes below, on a private lf-world Machine
-(<code>task-review</code> recipe, /tmp/lfq968/r) with its own <code>lf server run</code>, a headless
+<h1>LOO-968 qa: <code>lf ship</code> is auto on, then <code>lf task run</code></h1>
+<p>Branch <code>lf</code> at 679f658cbf plus the fix below, on a private lf-world Machine
+(<code>task-review</code>, <code>/tmp/lfq969/r</code>) with its own <code>lf server run</code>, a headless
 <code>claude</code> stand-in that waits on a marker file, and graph <code>qaship</code>:
-implement → interactive human-review → <code>cmd: land</code> → interactive verify. The world's
-<code>gh</code> answers reads only, so <code>land</code> succeeds only on a PR merged by hand; elsewhere it fails,
-which still shows the run got past the Auto-Ship gate. Upgrade checked against the installed
-v0.16.0 in a second home (/tmp/lfq968/u).</p>
+<code>implement → interactive human-review → cmd: land → interactive verify</code>. The world's <code>gh</code>
+answers reads only, so <code>land</code> succeeds only on a PR merged by hand; elsewhere it fails, which
+still shows the run got past the auto check. Upgrade checked from the installed 0.16.0 in a second home
+(<code>/tmp/lfq969/u</code>). 2026-11-19.</p>
 
-<h2>1. Ship a Task whose PR was merged by hand <span class="ok">works</span></h2>
-<pre>lf ship 1545df --graph qaship
-[1/4] implement · [2/4] human-review (stood in) · op: land
-Pull request already merged. Complete the accepted outcome with lf task complete 1545df.
-[4/4] verify (stood in)
-lf task status 1545df → 1545df  done · Graph qaship: at end · Auto-Ship: on by Demo, Nov 18 09:04</pre>
-<p>With <code>ship_settle_merge</code> gone, the land step handles the hand merge, as the plan expected.</p>
+<h2>1. Ship a never-run Task whose PR was merged by hand <span class="ok">works</span></h2>
+<pre>$ time lf ship acb7bd --graph qaship
+acb7bd · qaship from start running as Graph run bc2f26b6-…
+  ships:  this run may merge the PR; `lf task auto off acb7bd` stops it
+  follow: lf task status acb7bd
+  log:    …/logs/graph-bc2f26b6-….log
+0.449 total
+acb7bd  moving · auto: on by Demo, Nov 19 08:56
+  Graph qaship: running at implement
+(12 s later)
+acb7bd  done · auto: on by Demo, Nov 19 08:56
+  Graph qaship: at end
+log: [1/4] implement · [2/4] human-review · op: land
+     Pull request already merged. Complete the accepted outcome with lf task complete acb7bd.
+     [4/4] verify</pre>
 
-<h2>2. <code>lf ship</code> kept its caller until the whole Graph ended <span class="fix">fixed</span></h2>
-<p>Before: <code>lf ship 7ca83c --graph qaship</code> printed the Graph banner and step lines and only
-returned when the run ended (9.8 s on scenario 1, and indefinitely on a long step).
-<code>lf task run</code> on the same Task returned at once with its <code>running as Graph process</code>
-lines. Only <code>task run</code> was detached in <code>bin/lf.rs</code>. Now <code>lf ship</code> detaches the same way:</p>
-<pre>$ time lf ship fcc343
-fcc343 · qaship from land running as Graph process 3ee27962-…
-  ships:  this run may merge the PR; `lf task hold fcc343` stops it
-  follow: lf task status fcc343
-  log:    …/logs/graph-3ee27962-….log
-0.477 total</pre>
+<h2>2. The setting on a Task that never ran <span class="ok">works as the plan says</span></h2>
+<pre>$ lf task auto on 499ce8
+Error: Task 499ce8 has not taken up a Graph, and auto is set on one; `lf ship 499ce8` turns auto on and runs it; inspect the affected work before retrying
+exit 1
+$ lf task auto off 499ce8      → 499ce8: auto was not on   (exit 0)
+$ lf task auto maybe 499ce8    → error: invalid value 'maybe' for '&lt;STATE&gt;'   (exit 2)
+$ lf task auto on nosuch       → Error: no Task exists for "nosuch"; …</pre>
+<p>The Task stayed <code>idle</code>, "No Task Graph has run", no run started.</p>
 
-<h2>3. <code>lf ship</code> on a live run printed an error <span class="fix">fixed</span></h2>
-<p>Before: Auto-Ship turned on, but the command then ran the <code>lf task run</code> refusal:</p>
-<pre>Error: Task adf894 is running graph qaship from start; read `lf task status adf894`, or `lf task interrupt adf894` to stop it</pre>
-<p>Served <code>task.ship</code> got the same error. Now <code>ship_on</code> sees the Task's live Graph process
-and reports it as <code>lf task run</code> would, with <code>ships: true</code>:</p>
-<pre>fcc343 · qaship at implement running as Graph process 41b750aa-…
-  ships:  this run may merge the PR; `lf task hold fcc343` stops it
-served task.ship → {"state":"running","issue":"7ca83c","run":"qaship at implement","ships":true,"graph_process":"3554d929-…",…}</pre>
-<p>Before the fix, adf894 (shipped mid-implement) stood in at human-review and reached <code>land</code>, so
-the run reading the mark at each step worked from the start. Only the reply was wrong.</p>
+<h2>3. <code>lf task status --json</code> did not carry the setting <span class="fix">fixed</span></h2>
+<p>The text status printed <code>active · auto: off by Demo, Nov 19 08:57</code>; the JSON had no
+<code>auto</code> anywhere (only <code>lf task show --json</code> did, as <code>execution.auto</code>). Agents are told
+to read <code>lf task status &lt;ID&gt; --json</code>, so they could not see who takes the interactive steps.
+<code>TaskDetail</code> now has a required nullable <code>auto</code>; a Task read from another Machine prints
+it on its <code>State:</code> line through the same phrase.</p>
+<pre>$ lf task status 499ce8 --json | jq .auto
+{"at": 1795107438, "by": {"kind": "person", "name": "Demo"}, "state": "stopped"}
+$ lf task status e92f20 --json | jq .auto      → null   (never set)</pre>
+<p>Fixture <code>task_detail.json</code> carries it; <code>a_stopped_ship_kills_nothing_and_its_run_carries_on</code>
+reads it from a real status (passed).</p>
 
-<h2>4. Hold mid-run, then <code>-b</code>, then ship <span class="ok">works</span></h2>
-<pre>lf task hold fcc343 --reason '…'      → fcc343 stopped shipping
-(implement finishes)                  → fcc343  active · Graph qaship: at human-review
-lf -b task run fcc343                 → Waiting at land: not approved to merge (Demo stopped shipping). `lf ship` lands it.
-                                        Auto-Ship: stopped by Demo, … · `lf ship fcc343` turns it on
-lf ship fcc343                        → qaship from land running …; land runs (fails on the world's gh)</pre>
-<p>Nothing was killed. The headless step ran to its end. Served <code>task.hold</code> answered
-<code>{"issue":"7ca83c","stopped":true}</code>.</p>
+<h2>4. A Task waiting at its interactive step <span class="ok">works</span></h2>
+<pre>$ lf task run 499ce8 qaship                    → 499ce8  active · Graph qaship: at human-review
+$ lf task auto on 499ce8 --reason 'trust this one'
+499ce8: auto on                                  (nothing started; status: active · auto: on by Demo)
+$ lf task auto on 499ce8 --json                → {"issue":"499ce8","on":true,"was_on":true}
+$ lf task auto off 499ce8 --reason 'want to read it first'
+499ce8: auto off
+$ lf -b task run 499ce8
+Waiting at land: auto is off (Demo). `lf ship` lands it.
+Stopped at land; the Task waits there for its conversation.
+$ lf ship 499ce8 --reason 'read it, go'
+499ce8 · qaship from land running as Graph run ffe4d99a-…      (land runs; fails on the world's gh)
+499ce8  idle · auto: on by Demo, Nov 19 08:59
+  Graph qaship: stopped at land</pre>
+<p>Reasons are kept as Task events: <code>auto on: Demo: trust this one</code>,
+<code>auto off: Demo: want to read it first</code>. The run that failed three times the same way left auto on.</p>
 
-<h2>5. Kill an Auto-Ship run's carrier <span class="ok">works</span></h2>
-<pre>kill -9 -&lt;pgid of lf ship 173404&gt; and its claude
-09:11:16 Run died at implement; the server's next pass carries it again
-09:12:07 running at implement            (carrier: lf task run 173404, parent: lf server run)
-(release)  → stood in at human-review, reached land</pre>
-<p>The killed Graph process still read <code>Current</code> and the Task read <code>shipping</code> while it was
-stopped at land. That lasted until <code>lf machine prune</code> ("ended 2 runs"), which the server runs
-hourly. This comes from the base; see below.</p>
+<h2>5. Changing auto while a run is live <span class="ok">works</span></h2>
+<pre>$ lf task run e92f20 qaship                    (implement held)
+$ lf task auto on e92f20                       → e92f20: auto on
+$ lf ship e92f20
+e92f20 · qaship at implement running as Graph run bdc79e4f-…    (the same run, exit 0)
+$ lf ship e92f20 --json
+{"state":"running","issue":"e92f20","run":"qaship at implement","ships":true,"graph_process":"bdc79e4f-…",…}
+$ lf task run e92f20
+Error: Task e92f20 is running graph qaship from start; read `lf task status e92f20`, or `lf task interrupt e92f20` to stop it
+$ lf task auto off e92f20 --json               → {"issue":"e92f20","on":false,"was_on":true}
+(implement released)                             e92f20  active · auto: off · Graph qaship: at human-review
+$ lf task auto on e92f20; lf task run e92f20   → qaship from land running … (bare run continues after the step)</pre>
+<p>One run throughout; nothing was killed. From the checkout, <code>lf ship</code> with no ID picked e92f20.</p>
 
-<h2>6. A run with no interactive step ahead <span class="ok">works</span></h2>
-<pre>lf task run b3a9a1 qanoint   → ships: line printed · b3a9a1  moving · no Auto-Ship line</pre>
+<h2>6. Kill a shipped run <span class="ok">works</span></h2>
+<pre>09:03:17  kill -9 -&lt;pgid of `lf ship e69cbc --graph qaship`&gt; and its claude
+          e69cbc  moving · auto: on · Graph qaship: stopped at implement
+          latest Graph: Run died at implement; the server's next pass carries it again
+09:03:40  /tmp/lfq969/bin/lf task run e69cbc        (parent: lf server run)
+(released) [2/4] human-review stood in · op: land → Error: Task e69cbc has no active PR</pre>
 
-<h2>7. Runs that keep failing <span class="ok">works</span></h2>
-<pre>The run of qaship from start failed (attempt 2 of 3); starting it again at land.
-the run of qaship from start failed 3 times with the same error; this Task run stops here: Task 7ca83c has no active PR
-7ca83c  idle · Auto-Ship: on by Demo, …</pre>
+<h2>7. Over the socket <span class="ok">works</span></h2>
+<pre>task.auto e69cbc off   → {"issue":"e69cbc","on":false,"was_on":true}
+task.auto e69cbc off   → {"issue":"e69cbc","on":false,"was_on":false}
+task.auto e69cbc on    → {"issue":"e69cbc","on":true,"was_on":false}
+task.auto 5407ad on    → error outcome_unknown: Task 5407ad has not taken up a Graph, and auto is set on one; …
+task.hold e69cbc       → error invalid: this server has no operation `task.hold`
+task.ship 5407ad       → {"state":"running","issue":"5407ad","run":"code from start","ships":true,"graph_process":"fb9ab714-…"}
+                         5407ad  moving · auto: on by Demo · Graph code: running at kickoff
+task.auto 5407ad off   → {"on":false,"was_on":true}; the run carried on through its headless steps</pre>
 
-<h2>8. Upgrade from v0.16.0 <span class="fix">status line fixed</span></h2>
-<p>v0.16 <code>lf ship 7e7045</code>, and <code>lf task hold 25275c</code>, then the branch opened the home.
-The backfill gave 7e7045 <code>auto_ship='on'</code> and cleared <code>shipped_at</code>. Released rows store no
-person, so the mark's starter is <code>{"kind":"person","name":null}</code>. Status printed
-<code>Auto-Ship: on, by attribution unresolved 2026-11-18T17:15:46Z</code>, in UTC, while every other
-line in status uses local time. Now:</p>
-<pre>Auto-Ship: on, Nov 18 09:15            (released mark, nobody named)
-Auto-Ship: on by Demo, Nov 18 09:14
-Auto-Ship: stopped by Demo, Nov 18 09:10 · `lf ship fcc343` turns it on</pre>
-<p>The killed released ship was <em>not</em> carried by the branch's server (5 min watched): its
-carrier lived on <code>task_ship_events</code>. <code>lf task run 7e7045</code> carried it on, stood in at demo,
-and reached <code>done</code>.</p>
-<p>The released lf kept writing to the store after the branch migrated it. A <code>lf ship 25275c</code>
-still running in my shell loop shipped and completed 25275c with <code>shipped_at</code> set again. That
-is expected upgrade skew. It also registered a real launchd job for the temporary home, which I
-booted out.</p>
+<h2>8. A graph with no interactive step ahead <span class="ok">works</span></h2>
+<pre>$ lf task run 144524 qanoint
+144524 · qanoint from start running as Graph run 7e0045d4-…
+  ships:  this run may merge the PR; `lf task auto off 144524` stops it
+144524  idle                                  (no auto written; land failed on "no active PR")</pre>
+
+<h2>9. Done and reopened Tasks <span class="ok">works</span></h2>
+<pre>$ lf ship acb7bd        → Error: Task acb7bd is complete   (exit 1)
+$ lf task reopen acb7bd → acb7bd: reopened; its Graph unchanged
+                          acb7bd  idle                       (auto cleared)</pre>
+
+<h2>10. Upgrade from the installed 0.16.0 <span class="ok">works</span></h2>
+<pre>released:  lf ship 43ee6d (held mid-implement)   43ee6d  shipping · Auto-Ship approved by Demo
+           lf ship 4ff26f; lf task hold 4ff26f     4ff26f  idle
+branch server started on the same home:
+43ee6d  moving · auto: on, Nov 19 09:09            {"at":…,"by":{"kind":"person","name":null},"state":"on"}
+4ff26f  idle · auto: off by Demo, Nov 19 09:09
+task_graphs.auto = on / stopped; tasks.shipped_at NULL on both
+(released ship released)  43ee6d  done · auto: on
+$ lf ship 4ff26f (branch)  → up from start running …  →  4ff26f  done · auto: on by Demo</pre>
+<p>The released <code>lf ship</code> still in flight finished its Graph against the migrated store.</p>
 
 <h2>What it leaves behind</h2>
-<p>One Graph process per run in <code>lf task status</code>, with no ship process. <code>task_graphs.auto_ship*</code>
-holds the mark. After recovery and prune, no open Graph rows are left. Every server, holder and
-stand-in started for this run was stopped, and the launchd job the released lf registered was
-removed.</p>
+<p>One Graph run per <code>lf ship</code>; <code>task_graphs.auto*</code> holds the setting; Task events hold the
+reasons. Every server, holder and stand-in of the two private Machines was stopped.</p>
 
 <h2>What works now</h2>
-<p><code>lf ship</code> turns Auto-Ship on and returns what <code>lf task run</code> returns, from the CLI and over
-the socket, whether the Task is unstarted, waiting, stopped at land or running. Hold stops the
-run at its next interactive or merging step and kills nothing. <code>-b</code> respects a stop. Recovery
-carries Auto-Ship runs as <code>lf task run</code>. A hand-merged PR completes through the land step.</p>
+<p><code>lf ship</code> turns auto on and returns what <code>lf task run</code> returns, from the CLI and the socket,
+on a never-run, waiting, stopped or running Task. <code>lf task auto on|off</code> starts and kills nothing;
+a live run reads it at its next interactive step and at landing. Recovery carries a killed run as
+<code>lf task run</code>. The setting reads the same in text and JSON status. A 0.16 home keeps its ships and holds.</p>
 
 <h2>Not reached</h2>
-<p>A real merge: the world's <code>gh</code> refuses <code>pr merge</code>, so the only landing seen succeed is
-the already-merged one. The fixture tests cover the fake-gh merge. Desktop's Stop Auto-Ship button
-was not checked, only the served <code>task.hold</code> it sends. Real Claude was not used.</p>
+<ul>
+<li>A real merge: the world's <code>gh</code> refuses writes. The fixture tests cover the fake-gh merge.</li>
+<li>Desktop's <code>TaskAutoControl</code> toggle and <code>AutoBadge</code>: the Swift was not built here; only the
+<code>task.ship</code> and <code>task.auto</code> requests the toggle sends were checked.</li>
+<li>Real Claude at the stood-in steps.</li>
+<li>A Task on another Machine showing auto on its <code>State:</code> line: compiled, not driven.</li>
+</ul>
 
 <h2>Still wrong or open, worst first</h2>
 <ol>
-<li><span class="open">An in-flight released ship is dropped at upgrade.</span> If it dies or halts after the
-migration, nothing carries it, and the Task reads <code>idle</code> with "process left no exit record … launch
-fresh work" until someone runs it. The plan chose this. The questions note says how to reverse it.</li>
-<li><span class="open">A killed Graph process reads <code>Current</code> for up to an hour.</span> Its Task shows
-<code>shipping</code> (or <code>moving</code>) with nothing running. This comes from the base and is in questions.md.</li>
-<li><code>lf task run 7ca83c qaship --from implement</code> printed "qaship from start". The run did start at
-implement, the first step. This label logic is older than the branch and was not changed.</li>
+<li class="bad"><b>QA side effect on the real Machine.</b> <code>lf desktop view 'state:auto'</code> in the private
+world opened <code>loopflow://</code> in the installed Loopflow app, which registered
+<code>/private/tmp/lfq969/r/repo</code> under the real <code>~/.lf</code> and started two real Claude conversations
+there: Sessions <code>fbbfd70b86ff46ba9c14332c5b6af3ed</code> ("repo") and
+<code>3efbe9d1c5f04128967602b99d0fbd9b</code> ("desktop"). Both sit at Claude's "is this a directory you trust?"
+dialog and have run no turn. Killing them made the server start them again; typing "No, exit" through
+<code>lf resume</code> from a scripted terminal did not reach them. They and <code>/tmp/lfq969</code> are left in
+place. To end them: <code>lf resume &lt;id&gt;</code> and choose "No, exit".</li>
+<li>A refused <code>task.auto on</code> answers <code>outcome_unknown</code> with "; inspect the affected work before
+retrying", after a message that already names the fix. Every Task refusal is classified this way
+(<code>OpsError::Message</code>); nothing was written.</li>
+<li>A killed Graph run reads <code>Current</code>, and its Task <code>moving</code> with nothing running, until
+<code>lf machine prune</code> (hourly). Base behaviour; in questions.md.</li>
+<li>A done Task keeps printing <code>auto: on</code>, and <code>lf task auto off</code> on it writes a mark.</li>
 </ol>

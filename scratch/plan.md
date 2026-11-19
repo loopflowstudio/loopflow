@@ -199,6 +199,12 @@ override yields argv without `--agent`; with an override, `--agent <it>`. The
 - npm-prefix providers outside the tool directories under launchd: only the SSH
   snippet asks npm.
 
+## Docs (written first)
+
+- `docs/workspaces.md` "If opening fails": the `--json` failure with its reason,
+  harness kept without `-a`, where a pane finds tools and the nvm/mise cost.
+- `docs/sessions.md` "Switch agents": `lf open` keeps the switched harness.
+
 ## Gate checks
 
 - `cargo test -p loopflow --lib open::` and `server::` — implementer.

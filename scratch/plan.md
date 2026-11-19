@@ -217,34 +217,24 @@ Before this change both describe only `aaa_generated.txt`.
 
 ## What remains
 
-One thing to build, from the concept review at `64d09064af`:
+Nothing left to build. The read command for a renamed file is in
+(`Change::prompt_section`): when any file has `renamed_from`, the section
+follows the read command with "A renamed file needs both paths:" and
+`git diff <range> -- '<path>' '<old path>'`. A change with no rename renders
+as before. Passed over: `--no-renames`, which shows a moved 3,000-line file
+as +3000 and -3000.
 
-- **The read command for a renamed file.** `git diff <range> -- '<path>'`
-  with only the new path returns the whole file as added: Git pairs a rename
-  only when both paths are in the pathspec. Run 2026-11-18 in a throwaway
-  repository: a 300-line file renamed and given one more line lists as
-  `+1 -0`, the one-path command returns `new file mode` and 301 added lines,
-  and `git diff --cached --stat -- new_name.txt old_name.txt` returns
-  `1 insertion(+)`. No qa fixture held a rename.
+Checked 2026-11-18:
 
-  In `Change::prompt_section` (`rust/loopflow-execution/src/prompt/change.rs`),
-  when any file has `renamed_from`, follow the read command with:
-
-  ```
-  A renamed file needs both paths:
-    git diff <range> -- '<path>' '<old path>'
-  ```
-
-  Nothing else in the section changes, and a change with no rename renders
-  byte for byte as it does now. One test in `prompt::change::tests`: a large
-  staged change holding a renamed file with one edit; the section holds both
-  command lines and the `(from old)` line, and a change with no rename holds
-  only the first. Add the sentence to "Raw Diff" in `docs/config.md`.
-  Check with a real writer: `lf commit -a claude:haiku` on that fixture should
-  describe the edit, not an added file.
-
-  Passed over: `--no-renames` in the list and the command, which makes one
-  path always work and shows a moved 3,000-line file as +3000 and -3000.
+- `cargo test -p loopflow-execution --lib prompt::change::`: 7 passed,
+  including `a_renamed_file_gets_the_read_command_that_takes_both_paths`.
+- `cargo test -p loopflow --test integration documented_commands::`: 4 passed.
+- `lf commit -a claude:haiku` in a throwaway repository: a 300-line file
+  renamed with one appended line, staged beside a 20,000-line generated file
+  so no patch was inlined. One path gave `301 insertions(+)`, both gave
+  `1 insertion(+)`. The message: "It also renames old_name.txt to
+  new_name.txt and appends retry_limit = 5 after the existing setting
+  entries." No added file was described.
 
 Left for later steps:
 

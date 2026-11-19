@@ -279,7 +279,8 @@ an error naming it. A conversation with no Task files top-level, as today.
 
 ## Exclusions
 
-- The sidebar (slice 4): played with in the running app once children exist.
+- The sidebar (the brief's fourth slice, not slice 4 below): played with in
+  the running app once children exist.
 - Wave and repository primary conversations hearing about Tasks; they have no
   member Tasks today and gain none here.
 - Dependencies ("start this when that lands"), the doc store, plan edits
@@ -396,7 +397,8 @@ existing update a conversation gets about its own Task; Waves and
    line per child: done, abandoned, left open. A child whose parent is
    closed or not in the list prints top-level (`task_hierarchy`).
    Shown by `session_cli_tests::a_merged_parent_stays_open_until_it_is_completed_with_its_children`
-   (the CLI end to end over seeded PRs: acceptance steps 3 and 7),
+   (the CLI end to end over seeded PRs: acceptance steps 3 and 7; passed
+   alone on e40719cb37, 2026-11-18),
    `task_work_lifecycle_tests::reaching_end_leaves_a_task_with_open_children_open`
    and `task_actions::tests::a_merged_task_with_open_children_is_not_asked_to_complete`.
    What it taught: a parent that reaches `end` with children open is not
@@ -405,19 +407,35 @@ existing update a conversation gets about its own Task; Waves and
    Graph process, no checkout event, not begun), stricter than
    `unstarted`.
    Not built: `lf task complete --json` prints the parent only; the served
-   `task.complete` returns the parent only. Desktop does not nest yet
+   `task.complete` returns the parent only, so an agent completing a parent
+   cannot read which children stayed open. Desktop does not nest yet
    (`parentId` is decoded and unused). A done parent run through
    `lf task complete` again does not revisit children left open.
+   Read once as a reviewer, remaining:
+   - "Merged with children open" is derived three times: `merged_action`
+     (`task_actions.rs`), the `conducting` branch in `waves.rs` next-move,
+     and `RoadmapTask::conducts_after_merge`, which then swaps the reason
+     when the row is built. One derivation, read by all three.
+   - `TaskEventKind::FamilyCompletionRequested` is a second event kind
+     carrying one bit (a person asked, not a Graph reaching `end`), read
+     back with `json_extract` in `completion_request`
+     (`sqlite/children.rs`). It is what stops a Graph's pending request
+     from abandoning a child filed afterwards. A simpler form may be for a
+     Graph's request not to outlive the first child; not decided.
+   - `complete_children` writes `abandoned_at` itself beside
+     `durable.rs`'s abandon; both end in `record_task_abandonment`.
 5. **The link travels.** `TaskParent` through the plan exchange and to Linear
    and Asana, on LOO-938. Until then a child reaches the tracker as an
    ordinary issue: `task_creation_intents` carries no parent.
 
-Next: the rest of slice 2 (`lf task show`, served `task.create`,
-`.parent.identifier` on the creation receipt, the leaving marks), then
-slice 5.
+Next: the rest of slice 2, which makes the acceptance check's first line
+true: `.parent.identifier` on the creation receipt, `parent` on served
+`task.create`, the two keys on `lf task show`, the leaving marks. With it,
+the three review items under slice 4. Then slice 5.
 
-One PR. If LOO-938 is still unmerged when slices 1–4 are done, slice 5 is
-built on `lf sync LOO-938` and the PR waits behind #1983.
+One PR. #1983 (LOO-938) was open and unmerged at 2026-11-18, with nothing
+new on origin/main since this branch's base, so slice 5 is built on
+`lf sync LOO-938` and the PR waits behind #1983.
 
 ## Acceptance check at gate
 

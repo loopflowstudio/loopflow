@@ -81,6 +81,14 @@ rest is not chosen.
   section, with its own section named at the end of the line when it
   differs.
 
+## Raised by reading slice 4 (not run)
+
+- `lf task complete <parent>` closes or abandons children, and each of
+  those is a standing move its conductor is told about (decision 6). The
+  conversation that just completed the parent then gets one notice per
+  child it settled. Send them as now / skip notices for children settled by
+  their parent's completion?
+
 ## Raised by writing the docs (2026-11-18)
 
 - "Parent" already means the stack parent across `docs/work.md`,

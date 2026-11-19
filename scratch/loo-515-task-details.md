@@ -77,9 +77,7 @@ Page: `scratch/concept-review.html`. Both findings are built:
   `•` marks a dirty file), Files' Diff reads the draft as typed. Changes'
   Focus file and Files' Diff on a changed file now look alike (one file, `]`
   crossing files); both were accepted separately, so the demo should show
-  whether Focus file still earns its button. Compress: the `Unified or side by
-  side` doc comment in `ReviewStreamView.swift` slid above `ReviewStepper`;
-  it belongs on `ReviewLayoutPicker`.
+  whether Focus file still earns its button.
 - **Noted, not this Task:** a `.changes(comparison:)` browser tab and the Files
   tool's Changes page are two representations of one view; merging them
   changes the persisted `WorkBrowserTab` shape, which LOO-497/416 own.
@@ -316,7 +314,7 @@ Mock: `scratch/explore-diff-rivals.html`, the "Combined" panel. Comparison behin
 Demo: open a Task whose change spans many files. The Diff starts on the files `scratch/diff-order.yaml` names, not on `docs/`. Click a file in the sidebar and it comes to the top with its header in the bar. Open the skipped lines above a hunk. Comment on two lines in two files, press Send; the conversation's unsent input holds both, each naming its file and lines.
 
 1. **Sidebar** (`ChangedFilesSidebar`, left of the stream): filter, files under the order's headings, comment counts, "Hidden by the worker for this change" with reasons and Show, "Always hidden" with its add field. `ChangedFilesPanel` and the title's toggle are deleted. Below 620 pt it opens over the stream from a toolbar button and closes on choosing a file. *Assumed: 620 pt, left side as in the mock.*
-2. **File bar.** A fixed bar above the stream holds the header of the file under the stream's top edge (name, status, the tour's why, counts, Open). It sits outside the scroll view, so nothing next/previous lands on is covered. Departure: the in-stream file headers still scroll; they do not themselves stick. `LazyVStack` pinned headers were not used because `scrollPosition(id:)` lands rows under them.
+2. **File bar.** A fixed bar above the stream holds the header of the file under the stream's top edge (name, status, the tour's why, counts, Open). The bar and the in-stream header are one view, `ReviewFileTitle`. It sits outside the scroll view, so nothing next/previous lands on is covered. Departure: the in-stream file headers still scroll; they do not themselves stick. `LazyVStack` pinned headers were not used because `scrollPosition(id:)` lands rows under them.
 3. **Skipped lines.** The row between hunks is a button; its lines are read with `lf task file` (the unsaved draft in Files' Diff) and replace the hunk header (`ReviewGap`, `ReviewFile.opening`). Offered only while the comparison reads the working tree. Opened lines close when their file's diff changes.
 4. **Comments** (`ReviewComment`, `store.comments`): written in an editor under the selected lines, kept under their last line, counted in the sidebar; `ReviewCommentsControl` in both readers' bars sends them. `ReviewSelectionBar` is deleted; Copy and a bare reference are in the editor. Re-anchoring matches the commented lines' text to the nearest lines that still read the same; none is detached, shown under its file header (or at the top when the file left the comparison) and still sent. Sent comments clear only when the text reached the terminal (`addToConversation` returns Bool).
 5. **Order** (`DiffOrder`, `ReviewGroup.arrange`, `ReviewKind`): as specified. Tour is the default when `first` has entries. The builtin `implement` skill carries the sentence telling the worker to write the file.
@@ -331,4 +329,4 @@ Limits found while building:
 
 Not in this slice (shown on the page, not asked for): read marks, syntax colors, pause, a depth slider, folded renames, hunk-level grouping.
 
-Check: `scripts/test_desktop.sh --filter 'TaskFilesTests|ReviewDiffTests'` → 47 passed; `cargo test -p loopflow --test golden_prompt` → passed after regenerating `builtin_implement.md`. Gate: `documented_commands::`, the full swift suite. Demo: the pane on screen, including the narrow sidebar and Send into a live conversation.
+Check (after compress, November 19): `scripts/test_desktop.sh --filter 'TaskFilesTests|ReviewDiffTests|TaskBriefTests|PullRequestTests'` → 52 passed; `cargo test -p loopflow-execution --lib config::files::` → 13 passed. Before it: `TaskFilesTests|ReviewDiffTests` → 47 passed; `cargo test -p loopflow --test golden_prompt` → passed after regenerating `builtin_implement.md`. Gate: `documented_commands::`, the full swift suite. Demo: the pane on screen, including the narrow sidebar and Send into a live conversation.

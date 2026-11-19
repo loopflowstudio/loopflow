@@ -61,36 +61,16 @@ struct ReviewStream: View {
         }
     }
 
-    /// The file's name leads; its directory is quiet beside it.
     private func fileHeader(_ file: ReviewFile, headed: Bool) -> some View {
-        let name = (file.path as NSString).lastPathComponent
-        let directory = (file.path as NSString).deletingLastPathComponent
-        return HStack(spacing: 8) {
-            HStack(spacing: 0) {
-                if !directory.isEmpty {
-                    Text(directory + "/").font(Typography.code(11)).foregroundStyle(palette.textSecondary)
-                        .lineLimit(1).truncationMode(.head)
-                }
-                Text(name).font(Typography.code(12).weight(.semibold)).lineLimit(1).layoutPriority(1)
+        ReviewFileTitle(store: store, file: file, note: file.oldPath.map { "from \($0)" })
+            .padding(.vertical, 7)
+            .background(palette.surfaceMuted)
+            .overlay(alignment: .top) { Divider() }
+            .padding(.top, headed ? 6 : 16)
+            .contextMenu {
+                Button("Open in Files") { store.selectFile(file.path, mode: .diff) }
+                Button("Read file") { store.selectFile(file.path, mode: .read) }
             }
-            if let old = file.oldPath { Text("from \(old)").font(Typography.code(11)).foregroundStyle(palette.textSecondary).lineLimit(1) }
-            if file.status != .modified { Text(file.status.rawValue).font(Typography.caption(11)).foregroundStyle(palette.textSecondary) }
-            Spacer(minLength: 4)
-            Text("+\(file.additions)").foregroundStyle(palette.successTone.ink).font(Typography.code(11))
-            Text("−\(file.deletions)").foregroundStyle(palette.failureTone.ink).font(Typography.code(11))
-            Button("Open") { store.selectFile(file.path, mode: .read) }
-                .buttonStyle(.plain).font(Typography.caption(11)).foregroundStyle(palette.textSecondary)
-                .help("Read \(file.path) in Files").accessibilityLabel("Read \(file.path) in Files")
-        }
-        .padding(.horizontal, 12).padding(.vertical, 7)
-        .background(palette.surfaceMuted)
-        .overlay(alignment: .top) { Divider() }
-        .padding(.top, headed ? 6 : 16)
-        .help(file.path)
-        .contextMenu {
-            Button("Open in Files") { store.selectFile(file.path, mode: .diff) }
-            Button("Read file") { store.selectFile(file.path, mode: .read) }
-        }
     }
 
     @ViewBuilder
@@ -332,6 +312,45 @@ struct ReviewStream: View {
     }
 }
 
+/// A changed file's header, in the stream and in the bar above it: the name
+/// leads with its directory quiet beside it, then its status, a note (where a
+/// rename came from, or the worker's reason), its counts and the way to read it.
+struct ReviewFileTitle: View {
+    let store: TaskFilesStore
+    let file: ReviewFile
+    let note: String?
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        let name = (file.path as NSString).lastPathComponent
+        let directory = (file.path as NSString).deletingLastPathComponent
+        HStack(spacing: 8) {
+            HStack(spacing: 0) {
+                if !directory.isEmpty {
+                    Text(directory + "/").font(Typography.code(11)).foregroundStyle(palette.textSecondary)
+                        .lineLimit(1).truncationMode(.head)
+                }
+                Text(name).font(Typography.code(12).weight(.semibold)).lineLimit(1).layoutPriority(1)
+            }
+            if file.status != .modified {
+                Text(file.status.rawValue).font(Typography.caption(11)).foregroundStyle(palette.textSecondary)
+            }
+            if let note, !note.isEmpty {
+                Text(note).font(Typography.caption(11)).foregroundStyle(palette.textSecondary)
+                    .lineLimit(1).truncationMode(.tail).help(note)
+            }
+            Spacer(minLength: 4)
+            Text("+\(file.additions)").foregroundStyle(palette.successTone.ink).font(Typography.code(11))
+            Text("−\(file.deletions)").foregroundStyle(palette.failureTone.ink).font(Typography.code(11))
+            Button("Open") { store.selectFile(file.path, mode: .read) }
+                .buttonStyle(.plain).font(Typography.caption(11)).foregroundStyle(palette.textSecondary)
+                .help("Read \(file.path) in Files").accessibilityLabel("Read \(file.path) in Files")
+        }
+        .padding(.horizontal, 12)
+        .help(file.path)
+    }
+}
+
 /// A line number: it lights under the pointer, and a click selects the line.
 private struct ReviewGutter: View {
     let number: Int?
@@ -402,8 +421,7 @@ private struct ReviewCommentEditor: View {
                 }
                 .buttonStyle(.bordered)
                 Button("Reference in conversation") {
-                    let revision = store.comparisonDescription ?? store.comparison.title
-                    if addToConversation?(selection.reference(revision: revision)) == true { store.reviewSelection = nil }
+                    if addToConversation?(selection.reference(revision: store.revision)) == true { store.reviewSelection = nil }
                 }
                 .buttonStyle(.bordered)
                 .disabled(addToConversation == nil)
@@ -506,7 +524,7 @@ struct ReviewCommentsControl: View {
     /// Comments are spent once they are in the conversation; a failed send keeps them.
     private func send() {
         guard let addToConversation, !store.comments.isEmpty else { return }
-        let message = ReviewComment.message(store.comments, revision: store.comparisonDescription ?? store.comparison.title)
+        let message = ReviewComment.message(store.comments, revision: store.revision)
         if addToConversation(message) { store.comments = [] }
     }
 }

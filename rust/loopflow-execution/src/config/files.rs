@@ -323,7 +323,7 @@ pub(crate) fn protect_private_file(path: &Path) -> Result<()> {
     if !text.lines().any(|line| line == format!("/{PRIVATE_FILE}")) {
         text.push_str(&format!("/{PRIVATE_FILE}\n"));
     }
-    if text != before && !(before.is_empty() && text.is_empty()) {
+    if text != before {
         atomic_write(&exclude, &text)?;
     }
     Ok(())

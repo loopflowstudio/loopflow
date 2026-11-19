@@ -608,15 +608,18 @@ struct SessionPaneView: View {
             Divider()
         }
         if let taskId = paneTaskId {
-            if case .browser = pane.content {} else { ForEach(TaskFilesStore.Page.allCases, id: \.self) { page in
-                Button(page.rawValue, systemImage: page.symbol) {
-                    guard let browser = workspace.showBrowser(.files, from: pane) else { return }
-                    do {
-                        let files = try workspace.files(for: browser.content, task: model.task(id: taskId)?.task, query: sessions.query)
-                        files.page = page
-                    } catch { paneFailed(error) }
+            // The Task's own pane already has these as its tabs.
+            if pane.content.kind != .browser {
+                ForEach(TaskFilesStore.Page.allCases, id: \.self) { page in
+                    Button(page.rawValue, systemImage: page.symbol) {
+                        guard let browser = workspace.showBrowser(.files, from: pane) else { return }
+                        do {
+                            let files = try workspace.files(for: browser.content, task: model.task(id: taskId)?.task, query: sessions.query)
+                            files.page = page
+                        } catch { paneFailed(error) }
+                    }
                 }
-            } }
+            }
             Button("Task & workflow", systemImage: "list.bullet") {
                 workspace.showBrowser(.task, from: pane)
             }
@@ -781,8 +784,8 @@ struct SessionPaneView: View {
                 HStack(spacing: 4) {
                     if let files {
                         ForEach(task == nil ? [.changes, .files] : TaskFilesStore.Page.allCases, id: \.self) { page in
-                            let shown = files.page == .brief && task == nil ? .files : files.page
-                            browserTab(page.rawValue, selected: selected == BrowserTab.files.id && shown == page,
+                            browserTab(page.rawValue,
+                                       selected: selected == BrowserTab.files.id && files.shownPage(hasTask: task != nil) == page,
                                        id: "page-\(page.rawValue.lowercased())") {
                                 workspace.showBrowser(.files, from: pane)
                                 files.page = page

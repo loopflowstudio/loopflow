@@ -6,8 +6,6 @@ import Foundation
 struct ReviewDiff: Equatable, Sendable {
     var files: [ReviewFile]
 
-    static let empty = ReviewDiff(files: [])
-
     /// Every change and moved block in reading order, across files.
     var stops: [ReviewStop] {
         files.flatMap { file in
@@ -63,8 +61,8 @@ struct ReviewDiff: Equatable, Sendable {
             }
             if line.hasPrefix("@@") {
                 file.inHunk = true
-                let (o, n) = Self.hunkStarts(line)
-                old = o; new = n
+                let span = Self.hunkSpan(line)
+                old = span.old; new = span.new
                 file.lines.append(.hunk(line))
                 continue
             }
@@ -91,13 +89,8 @@ struct ReviewDiff: Equatable, Sendable {
         return path
     }
 
-    /// `@@ -12,7 +12,9 @@` → (12, 12).
-    private static func hunkStarts(_ header: String) -> (Int, Int) {
-        let span = hunkSpan(header)
-        return (span.old, span.new)
-    }
-
-    /// Where a hunk starts on each side and how many lines it holds there.
+    /// Where a hunk starts on each side and how many lines it holds there:
+    /// `@@ -12,7 +12,9 @@` → (12, 7, 12, 9).
     static func hunkSpan(_ header: String) -> (old: Int, oldCount: Int, new: Int, newCount: Int) {
         let parts = header.split(separator: " ")
         func side(_ prefix: Character) -> (Int, Int) {
@@ -472,8 +465,11 @@ struct ReviewSelection: Equatable, Sendable {
         ReviewSelection(path: path, side: side, first: min(first, line), last: max(last, line))
     }
 
+    /// The line's number on this side; nil when the line is not on it.
+    func number(of line: ReviewLine) -> Int? { side == .old ? line.old : line.new }
+
     func contains(_ line: ReviewLine, path: String) -> Bool {
-        guard path == self.path, let number = side == .old ? line.old : line.new else { return false }
+        guard path == self.path, let number = number(of: line) else { return false }
         return (first...last).contains(number)
     }
 
@@ -488,16 +484,15 @@ struct ReviewSelection: Equatable, Sendable {
 
     /// The selected lines as plain text, without patch markers or line numbers.
     func text(in file: ReviewFile) -> String {
-        file.lines.filter { contains($0, path: path) }
-            .sorted { (side == .old ? $0.old : $0.new) ?? 0 < (side == .old ? $1.old : $1.new) ?? 0 }
-            .map(\.text).joined(separator: "\n")
+        let lines = numbered(in: file)
+        return (first...last).compactMap { lines[$0] }.joined(separator: "\n")
     }
 
     /// This side's lines of a file by number.
     func numbered(in file: ReviewFile) -> [Int: String] {
         var lines: [Int: String] = [:]
         for line in file.lines {
-            if let number = side == .old ? line.old : line.new { lines[number] = line.text }
+            if let number = number(of: line) { lines[number] = line.text }
         }
         return lines
     }

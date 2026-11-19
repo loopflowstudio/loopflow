@@ -281,36 +281,12 @@ struct TaskChangesView: View {
     /// lines scroll under it.
     @ViewBuilder private var currentFileBar: some View {
         if let currentPath, let file = store.shownReview?.file(currentPath) {
-            let name = (file.path as NSString).lastPathComponent
-            let directory = (file.path as NSString).deletingLastPathComponent
             let group = store.shownGroups.first { group in group.isTour && group.files.contains { $0.path == file.path } }
-            HStack(spacing: 8) {
-                HStack(spacing: 0) {
-                    if !directory.isEmpty {
-                        Text(directory + "/").font(Typography.code(11)).foregroundStyle(palette.textSecondary)
-                            .lineLimit(1).truncationMode(.head)
-                    }
-                    Text(name).font(Typography.code(12).weight(.semibold)).lineLimit(1).layoutPriority(1)
-                }
-                if file.status != .modified {
-                    Text(file.status.rawValue).font(Typography.caption(11)).foregroundStyle(palette.textSecondary)
-                }
-                if let why = group?.title, !why.isEmpty {
-                    Text(why).font(Typography.caption(11)).foregroundStyle(palette.textSecondary)
-                        .lineLimit(1).truncationMode(.tail).help(why)
-                }
-                Spacer(minLength: 4)
-                Text("+\(file.additions)").foregroundStyle(palette.successTone.ink).font(Typography.code(11))
-                Text("−\(file.deletions)").foregroundStyle(palette.failureTone.ink).font(Typography.code(11))
-                Button("Open") { store.selectFile(file.path, mode: .read) }
-                    .buttonStyle(.plain).font(Typography.caption(11)).foregroundStyle(palette.textSecondary)
-                    .help("Read \(file.path) in Files")
-            }
-            .padding(.horizontal, 12).frame(height: TaskFileChrome.headerHeight)
-            .background(palette.surfaceMuted)
-            .help(file.path)
-            .accessibilityElement(children: .contain)
-            .accessibilityIdentifier("changes-current-file")
+            ReviewFileTitle(store: store, file: file, note: group?.title)
+                .frame(height: TaskFileChrome.headerHeight)
+                .background(palette.surfaceMuted)
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("changes-current-file")
             Divider()
         }
     }

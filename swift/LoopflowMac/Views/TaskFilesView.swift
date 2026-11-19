@@ -26,10 +26,7 @@ struct TaskFilesView: View {
         "\(store.selection ?? "")|\(store.changes?.baseCommit ?? "")|\(store.selectedDocument?.editVersion ?? 0)|\(store.mode)"
     }
 
-    /// Brief needs the Task's row; a pane without one reads Files instead.
-    private var page: TaskFilesStore.Page {
-        store.page == .brief && task == nil ? .files : store.page
-    }
+    private var page: TaskFilesStore.Page { store.shownPage(hasTask: task != nil) }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -55,8 +52,8 @@ struct TaskFilesView: View {
             }.disabled(!isFocused).hidden().accessibilityHidden(true).frame(width: 0, height: 0)
         }
         .tint(palette.actionInk)
-        .task(id: "\(store.page)|\(checkoutBase ?? "")") {
-            guard store.page == .files else { return }
+        .task(id: "\(page)|\(checkoutBase ?? "")") {
+            guard page == .files else { return }
             store.observeFiles()
             await store.refreshChanges()
         }
@@ -156,9 +153,9 @@ struct TaskFilesView: View {
                     .accessibilityIdentifier("files-search")
                     .onSubmit {
                         if let path = store.scratchPaths.first {
-                            selectFile(path, mode: .read)
+                            read(path)
                         } else if let entry = store.treeRows.compactMap(\.entry).first(where: { $0.kind != .directory }) {
-                            selectFile(entry.path, mode: .read)
+                            read(entry.path)
                         }
                     }
                     .onKeyPress(.downArrow) {
@@ -180,7 +177,7 @@ struct TaskFilesView: View {
                         sectionHeader("scratch", expanded: $store.showsScratch)
                         if store.showsScratch {
                             ForEach(store.scratchPaths, id: \.self) { path in
-                                row(path, label: String(path.dropFirst("scratch/".count)), mode: .read)
+                                scratchRow(path)
                             }
                             if store.changes?.scratchTruncated == true {
                                 Text("Scratch list truncated").font(.caption).foregroundStyle(palette.textSecondary)
@@ -240,7 +237,7 @@ struct TaskFilesView: View {
                     Task { await store.setDirectory(entry.path, expanded: !store.tree.isExpanded(entry.path)) }
                 } else {
                     store.tree.selection = entry.path
-                    selectFile(entry.path, mode: .read)
+                    read(entry.path)
                 }
             } label: {
                 HStack(spacing: 4) {
@@ -292,7 +289,7 @@ struct TaskFilesView: View {
             .help("Show or hide file browser (⌘P)")
             .accessibilityLabel("Show or hide file browser")
             .accessibilityIdentifier("files-toggle-navigator")
-            if store.page == .files, let document = store.selectedDocument, document.snapshot?.state == .text {
+            if let document = store.selectedDocument, document.snapshot?.state == .text {
                 Button {
                     Task {
                         await document.save(issue: store.issue, query: store.query)
@@ -308,21 +305,18 @@ struct TaskFilesView: View {
                 .keyboardShortcut("s", modifiers: .command)
                 .fixedSize()
             }
-            if store.page == .files {
-                Picker("View", selection: Binding(get: { store.mode }, set: { store.mode = $0; store.noteInteraction() })) {
-                    Text("Read").tag(TaskFilesStore.Mode.read)
-                    Text("Edit").tag(TaskFilesStore.Mode.edit)
-                    Text("Diff").tag(TaskFilesStore.Mode.diff)
-                        .disabled(store.changesError != nil)
-                }.pickerStyle(.menu).labelsHidden()
-                    .accessibilityLabel("View").frame(width: 70).fixedSize()
-            }
+            Picker("View", selection: Binding(get: { store.mode }, set: { store.mode = $0; store.noteInteraction() })) {
+                Text("Read").tag(TaskFilesStore.Mode.read)
+                Text("Edit").tag(TaskFilesStore.Mode.edit)
+                Text("Diff").tag(TaskFilesStore.Mode.diff)
+                    .disabled(store.changesError != nil)
+            }.pickerStyle(.menu).labelsHidden()
+                .accessibilityLabel("View").frame(width: 70).fixedSize()
         }
         .font(Typography.caption(11)).padding(.horizontal, 10)
         .frame(height: TaskFileChrome.headerHeight)
         .fixedSize(horizontal: true, vertical: false)
     }
-
 
     private var documentPane: some View {
         VStack(spacing: 0) {
@@ -376,27 +370,27 @@ struct TaskFilesView: View {
         .accessibilityValue(expanded.wrappedValue ? "Expanded" : "Collapsed")
     }
 
-    private func selectFile(_ path: String, mode: TaskFilesStore.Mode) {
+    /// Open a file the navigator offers; a dropdown has done its job.
+    private func read(_ path: String) {
         let wasDropdown = store.navigator == .dropdown
-        store.selectFileFromInput(path, mode: mode)
+        store.selectFileFromInput(path, mode: .read)
         if wasDropdown { dismissNavigator() }
     }
 
-    private func row(_ path: String, label: String, mode: TaskFilesStore.Mode) -> some View {
+    private func scratchRow(_ path: String) -> some View {
         Button {
-            selectFile(path, mode: mode)
+            read(path)
         } label: {
             HStack {
-                Text(label)
+                Text(path.dropFirst("scratch/".count))
                     .font(.system(size: 11, design: .monospaced)).lineLimit(1).truncationMode(.middle)
                 if store.documents[path]?.dirty == true { Text("•") }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 4).padding(.vertical, 2)
-            .workSelection(store.selection == path && (store.mode == .diff) == (mode == .diff))
+            .workSelection(store.selection == path)
             .contentShape(Rectangle())
         }.buttonStyle(.plain).help(path)
-            .id("\(mode.rawValue):\(path)")
             .accessibilityLabel(path)
     }
 
@@ -573,7 +567,7 @@ private struct TaskFileDiffView: View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
                 ReviewStepper(store: store, reader: reader, isFocused: isFocused)
-                Text((store.comparisonDescription ?? store.comparison.title) + (review.draft ? " · unsaved draft" : ""))
+                Text(store.revision + (review.draft ? " · unsaved draft" : ""))
                     .font(Typography.caption(11)).foregroundStyle(palette.textSecondary)
                     .lineLimit(1).truncationMode(.middle)
                     .accessibilityIdentifier("files-diff-comparison")

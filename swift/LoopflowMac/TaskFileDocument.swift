@@ -281,6 +281,10 @@ final class TaskFilesStore {
     var comparison = ChangeComparison.workingTree(base: "parent")
     let pullRequest = PullRequestStore()
     var page = Page.files
+
+    /// The page a pane shows: Brief needs the Task's row, and a pane without
+    /// one reads Files instead.
+    func shownPage(hasTask: Bool) -> Page { page == .brief && !hasTask ? .files : page }
     enum Navigator { case closed, dropdown, pinned }
     var navigator = Navigator.closed
     var search = ""
@@ -1077,6 +1081,9 @@ final class TaskFilesStore {
         return comparison.head == nil ? "\(compared) · includes uncommitted changes"
             : "\(compared) · \(comparison.title) at \(changes.headCommit.prefix(10))"
     }
+
+    /// The comparison's name for a line sent to the conversation, before it is read too.
+    var revision: String { comparisonDescription ?? comparison.title }
 
     // MARK: One file
 

@@ -3,9 +3,8 @@
 ## Outcome
 
 `lf commit`, step commits and PR descriptions describe the change, whatever
-its size. Today both writers get the first 20,000 characters of the diff in
-path order (`ops/commit.rs:268`, `ops/pr.rs:539`) and a `[diff truncated]`
-line.
+its size. Before this branch both writers got the first 20,000 characters of
+the diff in path order and a `[diff truncated]` line.
 
 Direction, from the Task comment of 2026-11-18 (Jack Heart), which replaces
 the brief's "lf chooses whole files within a budget":
@@ -17,31 +16,16 @@ the brief's "lf chooses whole files within a budget":
 > only if the writer cannot run commands. Whatever it did not read is still
 > knowable to it from the stat. The outcome and demo in the brief stand.
 
-## Model
+## What exists
 
-lf shows an agent a change in three places today, each with its own code and
-size rule:
+All of it is built and committed (`ff02472439`, `6863c3607a`).
 
-| Where | Patch whole when | Otherwise |
-|---|---|---|
-| Commit and PR writers (`ops/commit.rs`, `ops/pr.rs`) | never past 20,000 characters | a prefix |
-| `context: {diff: true}` (`prompt/mod.rs` `gather_diff_tiered`) | under 15,000 tokens, 20 files, 800 lines | `git diff --stat` |
-| Task workspace block (`ops/task/snapshot.rs` `task_workspace_context`) | under 15,000 tokens | "Read the named worktree paths" |
-
-This Task gives the idea one owner, and does not add a fourth rule. One type
-describes a change as shown to an agent and renders the one prompt section.
-The first two rows move onto it; the third shares its number.
-
-Home: `prompt/change.rs` (both `prompt/mod.rs` and `ops/` reach it).
-
-```rust
-pub const PATCH_INLINE_TOKENS: usize = 15_000;
-pub enum ChangeRange { Staged, Since(String), Uncommitted }
-//                     --cached | <base>...HEAD | HEAD
-pub struct ChangedFile { path, renamed_from: Option<String>, lines: Option<(u64, u64)>, working_note: bool }
-pub struct Change { range: ChangeRange, files: Vec<ChangedFile>, patch: Option<String>, patch_bytes: usize }
-impl Change { pub fn read(repo, range) -> Result<Self, _>; pub fn prompt_section(&self) -> String }
-```
+`prompt/change.rs` owns showing an agent a change: `Change::read(repo, range)`
+and `Change::prompt_section()`, over `ChangeRange::{Staged, Since(base),
+Uncommitted}`. The commit writer, the PR writer and `context: {diff: true}`
+all render it; the Task workspace block shares `PATCH_INLINE_TOKENS` and
+nothing else. Both `truncate_chars`, `[diff truncated]`, the 20-file and
+800-line limits and the three old prompt headings are gone (grep, 2026-11-18).
 
 The section always holds:
 
@@ -65,16 +49,19 @@ Then one of two things:
 
 No file is ever cut, and no prefix exists. `[diff truncated]` goes.
 
-For a `Since` range, `Change::read` marks files from `git::scratch::added` as
-working notes: cleared when the change lands (`ops/land.rs:171`), worth
-reading for why, not part of what ships. `Staged` and `Uncommitted` list
-scratch plainly.
+For a `Since` range, files from `git::scratch::added` are marked as working
+notes, cleared when the change lands (`ops/land.rs:171`). `Staged` and
+`Uncommitted` list scratch plainly.
 
-The reading instructions live in the section lf builds. The builtin Skill
-texts are not edited: "Read the diff" is true with the patch inlined, with
-only the list, and when the Skill is run by hand with no section.
-`.lf/skills/pr-message.md` and other repositories' copies keep working
-unchanged.
+The builtin Skill texts are not edited: "Read the diff" is true with the patch
+inlined, with only the list, and when the Skill is run by hand.
+
+One thing differed from the plan. The text `gather_diff_tiered` returned was
+never shown to the agent: `ContextDelivery::prepare` wrote a `changes`
+reference file holding only "Inspect current changes with `git diff` and
+`git diff main...HEAD`" and counted the gathered diff's tokens in attribution.
+That file now holds the section. With `diff_files` alone the old sentence
+stays.
 
 ## Findings
 
@@ -122,24 +109,6 @@ unchanged.
    `pr-message` Skill asks for "what people said that shaped it, what a run
    showed", and the notes are where that is.
 
-## Surfaces
-
-- `ops/commit.rs` `generate_commit_message`: used by `lf commit` and
-  `commit_step` (every Graph step, 300 s timeout).
-- `ops/pr.rs` `generate_pr_copy`: used by `lf pr submit`/publish and
-  `ops/land.rs:344`. Its `## Diff stat` and `## Unified diff` headings merge
-  into the one section.
-- `prompt/mod.rs` `gather_diff_tiered`: keeps its signature and its range
-  choice (none on the default branch or detached; `origin/<base>...HEAD`;
-  `HEAD` when nothing is committed). Its text becomes
-  `Change::prompt_section()`, `DiffTier::UnifiedDiff` when the patch is
-  inlined and `StatOnly` when it is not, so `prompt/attribution.rs` is
-  untouched.
-- `ops/task/snapshot.rs` `task_workspace_context`: its `MAX_PATCH_TOKENS`
-  becomes `PATCH_INLINE_TOKENS`. Nothing else there changes.
-- `docs/orchestration.md:58` and `docs/config.md` ("Include raw diff"): one
-  line on large changes where it reads naturally.
-
 ## Absent and error states
 
 - Nothing staged, or an empty PR range: unchanged; both callers return before
@@ -165,46 +134,6 @@ unchanged.
 - Which agent writes messages, the writers' permission stance, the 300 s
   step-commit timeout.
 
-## What goes
-
-- Both `truncate_chars` (`ops/commit.rs:359`, `ops/pr.rs:2571`) and
-  `[diff truncated]`.
-- The separate `--stat` and full-diff reads in `generate_pr_copy`, and the
-  `## Staged diff`, `## Diff stat`, `## Unified diff` prompt headings.
-- In `prompt/mod.rs`: `DIFF_TIER_THRESHOLD`, `DIFF_MAX_FILES_FOR_FULL`,
-  `DIFF_MAX_LINES_FOR_FULL`, the `--shortstat` and `--stat` reads and
-  `parse_shortstat_total_lines` if nothing else calls it.
-- `MAX_PATCH_TOKENS` in `task_workspace_context`.
-- `pr_tests.rs:1716`'s assertion on `## Unified diff` moves to the new
-  heading; its point (the next agent gets the same whole prompt, all 1,200
-  lines) stays. If that fixture's patch is over 15,000 tokens, shrink the
-  fixture, not the rule.
-
-Must survive: the JSON reply contract, `message_launch` agent selection and
-fallback agents, cached gate PR copy, base and commit-log sections of the PR
-prompt, the builtin Skill texts word for word, `gather_diff_tiered`'s range
-choice and `DiffTier` as attribution reads it.
-
-## Slices
-
-All three are built; nothing is left to implement.
-
-1. **`Change` and the commit writer.** Built. Real run, 2026-11-18,
-   `lf commit -a claude:haiku` on a staged 275,665-byte patch (6,000-line
-   `aaa_generated.txt`, eleven-line `src/zzz_retry.rs`): the title was "Retry
-   export once on timeout and regenerate schema fixture" and the body gave the
-   retry's reason from the code comment. A cheap writer handed only the list
-   read the right file.
-2. **The PR writer.** Built; `pr_tests.rs` asserts the `## Change` heading and
-   all 1,200 lines. Not yet run with a real agent: that needs a GitHub remote.
-3. **Skill context and the shared number.** Built. One thing differed from the
-   plan: the text `gather_diff_tiered` returned was never shown to the agent.
-   `ContextDelivery::prepare` wrote a `changes` reference file holding only
-   "Inspect current changes with `git diff` and `git diff main...HEAD`" and
-   counted the gathered diff's tokens in attribution. That file now holds the
-   section, so the agent gets what attribution counts and what
-   `docs/config.md` describes. With `diff_files` alone the old sentence stays.
-
 ## Demo
 
 In a repository with a staged `aaa_generated.txt` of 200 KB and a ten-line
@@ -217,20 +146,30 @@ lf pr submit         # on a branch with the same change: the description does to
 
 Before this change both describe only `aaa_generated.txt`.
 
-## Checks
+## What runs showed
 
-- `cargo test -p loopflow-execution --lib prompt::` — `Change` unit tests and the Skill context cases; implement runs it.
-- `cargo test -p loopflow --lib pr_tests::` (the `tests/work` module) — implement runs the touched test.
-- `cargo test -p loopflow-execution --lib ops::task::tests::task_workspace_context` — implement runs it after slice 3.
-- The demo with a real agent — `lf commit` ran in implement (above); `lf pr submit` is qa's or gate's, on a branch with a GitHub remote.
+- 2026-11-18, `lf commit -a claude:haiku` on a staged 275,665-byte patch
+  (6,000-line `aaa_generated.txt`, eleven-line `src/zzz_retry.rs`): the title
+  was "Retry export once on timeout and regenerate schema fixture" and the
+  body gave the retry's reason from the code comment. A cheap writer handed
+  only the list read the right file.
+- 2026-11-18, realign: `cargo test -p loopflow-execution --lib --
+  prompt::change:: gather_diff_tiered the_branch_change_is_delivered
+  task_workspace_context`, 11 passed. `cargo test -p loopflow --lib --
+  pr_copy_moves_to_the_next_agent_when_codex_is_out_of_quota`, passed.
 
-## Docs written first
+## What remains
 
-`docs/orchestration.md` (after the `commit-message` agent paragraph) and
-`docs/config.md` ("Raw Diff", and the "Branch changes" row of the delivery
-table). They describe the intended behavior; implement builds to them.
+Nothing to implement. Left for later steps:
 
-The Raw Diff example settles a rendering the model left open: a first line
-naming the range and file count, the read command with a quoted `'<path>'`,
-right-aligned `+N  -N` columns, `binary` in place of counts, and a closing
-sentence with the patch size in bytes. The exact wording is implement's.
+- **The PR half of the demo with a real agent.** `lf pr submit` on a branch
+  with a GitHub remote whose important file sorts last. qa's or gate's; not
+  run.
+- **`cargo clippy --all-targets -- -D warnings` and the suites.** gate's and
+  CI's; not run here.
+- **One shape to look at in compress or gate.** With both `diff` and
+  `diff_files`, the `changes` reference holds the section and then a JSON
+  `Changed paths:` line (`context_block.rs:74`). The section already lists
+  every file of its range; the second list may be a duplicate. Check what
+  `diff_files` holds that the section does not before removing it.
+- The open choices in `questions.md`; none blocks shipping.

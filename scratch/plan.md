@@ -132,11 +132,14 @@ clippy clean.
 
 ## Remaining
 
-Concept review, fourth pass (`scratch/concept-review.html`, "Fourth pass"):
-built. `TaskGraph::waiting_to_land(auto, issue)` is the one predicate for a
-landing wait; `lf task status` (`snapshot.rs`) and the Task conversation's
-`guidance` (`ops/run.rs` passes `task_auto`) both print its "`lf ship X` lands
-it." Tested in `guidance_names_the_waiting_step_and_how_to_go_on` (passed).
+Concept review, fourth pass: built, then cut by QA's third pass
+(`scratch/qa.html`). `TaskGraph::waiting_to_land(auto, issue)` is the one
+predicate for a landing wait and `lf task status` prints it. The Task
+conversation's `TaskGraph::guidance` was never delivered (a Task launch's
+message comes from `task_input::task_seed`; `WorkBinding.context` for a Task
+reaches no provider), so it and its append in `bind_selected_work` are
+deleted. A run's landing stop no longer also prints "the Task waits there for
+its conversation".
 
 Then gate. The checks under "Checks nobody has run" below are gate's and CI's.
 

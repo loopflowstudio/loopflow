@@ -402,34 +402,6 @@ impl TaskGraph {
             ),
         }
     }
-
-    /// What the Task conversation needs: the step it works and how to go on.
-    pub fn guidance(&self, issue: &str, auto: Option<&Auto>) -> String {
-        let summary = self.summary();
-        let mut lines = vec![match (&self.position, self.waiting_step()) {
-            (TaskGraphPosition::Run { running: true, .. }, _) => {
-                return format!("{summary}. A person takes part again when that run stops.");
-            }
-            (TaskGraphPosition::Run { at, .. }, _) => format!(
-                "{summary}. `lf task run {issue}` starts that run again at {at}; read its log in `lf task status {issue}` first."
-            ),
-            (_, Some(step)) => format!(
-                "{summary}. The Task conversation works this step with the {} skill; when the person is done, `lf task run {issue}` continues after it.",
-                step.skill
-            ),
-            (TaskGraphPosition::At { step }, None) if step == END => {
-                format!("{summary}.")
-            }
-            (TaskGraphPosition::At { .. }, None) => match self.waiting_to_land(auto, issue) {
-                Some(wait) => format!("{summary}. {wait}"),
-                None => format!("{summary}. `lf task run {issue}` starts it."),
-            },
-        }];
-        lines.push(format!(
-            "`lf task run {issue} --from <step>` starts anywhere, to go back or skip ahead; `lf -b task run {issue}` and `lf ship {issue}` run headless to `end` and turn auto on, which may merge the PR, as does `lf task run {issue}` with no interactive step left ahead, so run them only when the person asks to ship or land; `lf graph <graph>` in the Task worktree runs a Graph without moving the Task."
-        ));
-        lines.join("\n")
-    }
 }
 
 /// Name the committed file a teammate's graph selection needs.
@@ -526,52 +498,34 @@ mod tests {
     }
 
     #[test]
-    fn guidance_names_the_waiting_step_and_how_to_go_on() {
+    fn only_an_off_makes_a_merging_step_a_landing_wait() {
         let repo = tempfile::tempdir().unwrap();
         let graph = CapturedGraph::load("feature", repo.path())
             .unwrap()
             .unwrap();
-        let at = |position| TaskGraph {
+        let at = |step: &str| TaskGraph {
             name: graph.name.clone(),
             interactive_steps: graph.interactive_summary(),
-            position,
+            position: TaskGraphPosition::At { step: step.into() },
         };
-        let waiting = at(TaskGraphPosition::At {
-            step: "ship-review".into(),
-        });
-        let guidance = waiting.guidance("INF-1", None);
-        assert!(
-            guidance.contains("with the ship-review skill"),
-            "{guidance}"
-        );
-        assert!(guidance.contains("`lf task run INF-1` continues after it"));
-        assert!(guidance.contains("--from <step>"));
-        let running = at(TaskGraphPosition::Run {
-            step: "explore".into(),
-            at: "implement".into(),
-            lf_process_id: "process".into(),
-            running: true,
-        });
-        assert!(!running.guidance("INF-1", None).contains("task run"));
-
-        let landing = at(TaskGraphPosition::At {
-            step: "land".into(),
-        });
-        let off = Auto {
-            state: AutoState::Off,
+        let mark = |state| Auto {
+            state,
             at: 0,
             by: crate::process::Starter::Person {
                 name: Some("Maya".into()),
             },
         };
-        let guidance = landing.guidance("INF-1", Some(&off));
-        assert!(guidance.contains("`lf ship INF-1` lands it"), "{guidance}");
-        assert!(
-            !guidance.contains("`lf task run INF-1` starts it"),
-            "{guidance}"
+        let off = mark(AutoState::Off);
+        assert_eq!(
+            at("land").waiting_to_land(Some(&off), "INF-1").as_deref(),
+            Some("Waiting at land: auto is off (Maya). `lf ship INF-1` lands it.")
         );
-        assert!(landing
-            .guidance("INF-1", None)
-            .contains("`lf task run INF-1` starts it"));
+        assert_eq!(at("land").waiting_to_land(None, "INF-1"), None);
+        assert_eq!(
+            at("land").waiting_to_land(Some(&mark(AutoState::On)), "INF-1"),
+            None
+        );
+        assert_eq!(at("ship-review").waiting_to_land(Some(&off), "INF-1"), None);
+        assert_eq!(at("end").waiting_to_land(Some(&off), "INF-1"), None);
     }
 }

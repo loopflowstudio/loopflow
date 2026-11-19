@@ -65,7 +65,12 @@ them in its start hook. They are not in the step's stdin or `.lf/prompts`.
 
 With auto off at a landing step, `lf task status` reads `latest Graph: Waiting
 at land: auto is off (Demo). \`lf ship <id>\` lands it.` and `action: no_action`;
-`execution.state` is `waiting`. An unknown ID answers `no Task exists for …`
+`execution.state` is `waiting`. The run's own log (`$LF_HOME/logs/graph-<run>.log`) ends in that sentence
+alone; an interactive stop ends in "Stopped at <step>; the Task waits there for
+its conversation." What a Task conversation is handed: `lf --task <id> --context
+<skill>` prints its input (the Task brief, no Graph position), and each held
+conversation's `--append-system-prompt-file` is in `ps` under its `lf holder run`.
+An unknown ID answers `no Task exists for …`
 (served: `not_found`) for `auto off`; `task.ship` still answers `outcome_unknown`.
 
 Selection state `auto` is a Dashboard expression (`lf desktop dashboard query

@@ -16,6 +16,57 @@ private lf-world Machine (<code>lf-world build task-review /tmp/lfq975/r</code>)
 The world's <code>gh</code> answers reads only, so <code>land</code> succeeds only on a PR merged by hand; a failure there
 still shows the run got past the auto check.</p>
 
+<h2>Third pass, 2026-11-19 at <code>8af9576b71</code></h2>
+<p>What changed since the second pass: the landing wait names the issue in the run's own line, and the Task
+conversation's Graph guidance was to print it too. Fresh <code>lf-world build task-review /tmp/q968/w</code>, graph
+<code>qaship</code> as <code>graph:</code>, the marker-file stand-in, the branch's own server.</p>
+
+<h3>A. Off mid-run, then a person's run reaches land <span class="ok">works</span></h3>
+<pre>$ lf ship 454271                       # stand-in holding implement
+454271 · qaship from start running as Graph run f2b5eca4-…
+  merges: this run may merge the PR; `lf task auto off 454271` stops it
+$ lf task auto off 454271 --reason 'I want to read the diff first'
+454271: auto off
+run log:  Stopped at ship-review; the Task waits there for its conversation.
+$ lf -b task run 454271
+Waiting at land: auto is off (Demo). `lf ship 454271` lands it.
+Stopped at land; the Task waits there for its conversation.      &lt;- contradicts the line above
+$ lf task status 454271
+454271  active · auto: off by Demo, Nov 19 13:13
+  latest Graph: Waiting at land: auto is off (Demo). `lf ship 454271` lands it.
+  action: no_action  (Waiting at land: auto is off (Demo). `lf ship 454271` lands it.)
+$ lf ship 454271      # no PR in this world: land fails three times, auto stays on
+454271  idle · auto: on by Demo, Nov 19 13:16
+  latest Graph: land: Task 454271 has no active PR. …</pre>
+
+<h3>B. Hand-merged Task: off, wait at land, bare <code>lf task auto on</code> <span class="ok">works</span></h3>
+<pre>1244df  active · auto: off by Demo
+  latest Graph: Waiting at land: auto is off (Demo). `lf ship 1244df` lands it.
+  action: no_action  (Merged; complete the Task)
+$ lf task auto on          # from the checkout
+1244df  done · auto: on by Demo, Nov 19 13:17
+  Graph qaship: at end</pre>
+
+<h3>C. The Task conversation's Graph guidance <span class="fixed">never delivered, deleted</span></h3>
+<p><code>lf --task 454271 --context default</code> at the landing wait printed the Task brief with no Graph line, and
+no <code>.lf/prompts/*context.md</code> of any conversation in the world named <code>qaship</code>. The guidance was
+appended to <code>WorkBinding.context</code> in <code>bind_selected_work</code>, but a Task launch builds its message
+from <code>task_input::task_seed</code> and both <code>bound_message</code> callers skip Task bindings, so no
+provider has read it since Task launches moved to seeds. The fourth pass's edit changed a sentence nobody sees.
+<code>TaskGraph::guidance</code> and its append are deleted; <code>task_operate.md</code> already teaches the same commands,
+and the conversation reads the wait from <code>lf task status</code>, which names <code>lf ship</code>.
+<code>waiting_to_land</code> keeps a unit test (<code>only_an_off_makes_a_merging_step_a_landing_wait</code>).
+<code>docs/dev/reference.md</code> no longer lists the guidance or says <code>lf ship</code> repeats <code>-b task run</code>.</p>
+
+<h3>D. "Stopped at land; the Task waits there for its conversation." <span class="fixed">fixed</span></h3>
+<p>Every stop printed that line from <code>report_outcome</code>, after the landing wait had said <code>lf ship</code>
+lands it. The interactive stop now prints it where it stops; the landing stop prints only its own sentence.
+Driven again after the rebuild (Task 7b9522): ship-review's log ends in the conversation line, land's in
+<code>Waiting at land: auto is off (Demo). `lf ship 7b9522` lands it.</code> alone.</p>
+
+<p>Checks: <code>task_graph::tests::</code> 4 passed; <code>task_graph_launch_tests::{auto_off_sticks…, auto_on_at_a_waiting…}</code>
+2 passed; clippy (<code>loopflow</code>, <code>loopflow-execution</code>, all targets) clean.</p>
+
 <h2>Second pass, 2026-11-19 at <code>e3104cd354</code></h2>
 <p>A fresh <code>lf-world build task-review</code> Machine, the same <code>qaship</code> graph plus <code>qaland</code>
 (<code>implement → cmd: land</code>), a stand-in that logs each headless step's whole stdin.</p>

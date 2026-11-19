@@ -685,11 +685,8 @@ async fn open_graph_store() -> Result<SharedStore> {
 
 fn report_outcome(outcome: GraphOutcome) -> Result<()> {
     match outcome {
-        GraphOutcome::Completed => Ok(()),
-        GraphOutcome::StoppedAt(step) => {
-            eprintln!("Stopped at {step}; the Task waits there for its conversation.");
-            Ok(())
-        }
+        // Each stop printed why as it stopped.
+        GraphOutcome::Completed | GraphOutcome::StoppedAt(_) => Ok(()),
         GraphOutcome::Interrupted => Err(loopflow_execution::process::CommandExit(130).into()),
         GraphOutcome::Waiting => Err(loopflow_execution::process::GraphHeld(
             "Graph stopped before its last step; inspect its history and effects".into(),
@@ -1225,6 +1222,7 @@ impl SkillExecutor for &RunningGraph<'_> {
     ) -> Result<SkillOutcome> {
         let Some(standing_in) = self.stands_in(skill)? else {
             let step = skill.interactive_step().unwrap_or(&skill.skill.name);
+            eprintln!("Stopped at {step}; the Task waits there for its conversation.");
             return Ok(SkillOutcome::StopsAt(step.to_owned()));
         };
         if let Some(step) = self.stopped_landing()? {

@@ -97,6 +97,14 @@ Questions 1 and 2 got no written answer in scratch.
   using the store-only write.
 
 ## Open
+- QA 2026-11-19 (third pass): a Task conversation's input carries no Graph
+  position at all; the deleted `TaskGraph::guidance` was its only writer and
+  reached no provider. Reverse by appending it to `task_input::task_seed`
+  (read once at a conversation's start, so it goes stale as the run moves).
+- QA 2026-11-19 (third pass): a hand-merged Task waiting at land with auto
+  off reads `latest Graph: Waiting at land … lf ship X lands it` beside
+  `action: no_action (Merged; complete the Task)`. Both are true; `lf task
+  auto on` takes it to `done`.
 - QA 2026-11-19 (second pass): `lf task auto off --reason` reaches the next
   step's agent as a steer ("I want to read the diff first" was pending for the
   ship-review Session that a later ship started). Same root as the recorded

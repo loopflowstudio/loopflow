@@ -37,23 +37,6 @@ pub fn landing_wait(step: &str, off: &Auto, issue: Option<&str>) -> String {
     )
 }
 
-/// A Task whose Graph stands at a step that is neither `start`, `end` nor
-/// interactive stopped there before merging, which only an off does.
-pub fn waiting_to_land(
-    graph: Option<&crate::task_graph::TaskGraph>,
-    auto: Option<&Auto>,
-    issue: &str,
-) -> Option<String> {
-    let off = auto.filter(|mark| mark.state == AutoState::Off)?;
-    let graph = graph?;
-    let crate::task_graph::TaskGraphPosition::At { step } = &graph.position else {
-        return None;
-    };
-    let ends = step == crate::task_graph::START || step == crate::task_graph::END;
-    let interactive = graph.interactive_steps.iter().any(|s| &s.name == step);
-    (!ends && !interactive).then(|| landing_wait(step, off, Some(issue)))
-}
-
 /// Save `state` as this caller's mark, naming who is asking as it is written;
 /// with `keeps_off`, a standing off stays. Returns whether auto was on before.
 fn set(store: &SharedStore, task: &Task, state: AutoState, keeps_off: bool) -> OpsResult<bool> {

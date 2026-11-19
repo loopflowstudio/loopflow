@@ -59,8 +59,10 @@ pub(super) async fn read_task_snapshot(store: &SharedStore, task: Task) -> OpsRe
         crate::store::task_work::task_work(&store.sqlite, &task.id).map_err(task_error)?;
     let auto = store.sqlite.task_auto(&task.id).map_err(task_error)?;
     if execution.state == crate::ops::task_execution::TaskExecutionState::Idle {
-        if let Some(wait) =
-            super::auto::waiting_to_land(work_set.graph.as_ref(), auto.as_ref(), &task.identifier)
+        if let Some(wait) = work_set
+            .graph
+            .as_ref()
+            .and_then(|graph| graph.waiting_to_land(auto.as_ref(), &task.identifier))
         {
             execution.state = crate::ops::task_execution::TaskExecutionState::Waiting;
             execution.reason = wait;

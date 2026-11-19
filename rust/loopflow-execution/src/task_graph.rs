@@ -13,6 +13,7 @@ use crate::error::LoadError;
 use crate::graph::runner::{ExecutionCursor, NestedCursor};
 use crate::graph::{compile_graph, load_authored_graph, ConcreteSkill, ConcreteStep};
 use loopflow_definitions::text::first_prose_line;
+use loopflow_storage::sqlite::{Auto, AutoState};
 
 pub use loopflow_storage::sqlite::task_work::{END, START};
 
@@ -377,6 +378,20 @@ impl TaskGraph {
         }
     }
 
+    /// Why the Task waits here and what lands it, when it stands at a step
+    /// that is neither `start`, `end` nor interactive: it stopped before
+    /// merging, which only an off does.
+    pub fn waiting_to_land(&self, auto: Option<&Auto>, issue: &str) -> Option<String> {
+        let off = auto.filter(|mark| mark.state == AutoState::Off)?;
+        let TaskGraphPosition::At { step } = &self.position else {
+            return None;
+        };
+        let ends = step == START || step == END;
+        let interactive = self.interactive_steps.iter().any(|s| &s.name == step);
+        (!ends && !interactive)
+            .then(|| crate::ops::task::auto::landing_wait(step, off, Some(issue)))
+    }
+
     /// One line for text status.
     pub fn summary(&self) -> String {
         let name = &self.name;
@@ -390,7 +405,7 @@ impl TaskGraph {
     }
 
     /// What the Task conversation needs: the step it works and how to go on.
-    pub fn guidance(&self, issue: &str) -> String {
+    pub fn guidance(&self, issue: &str, auto: Option<&Auto>) -> String {
         let summary = self.summary();
         let mut lines = vec![match (&self.position, self.waiting_step()) {
             (TaskGraphPosition::Run { running: true, .. }, _) => {
@@ -406,9 +421,10 @@ impl TaskGraph {
             (TaskGraphPosition::At { step }, None) if step == END => {
                 format!("{summary}.")
             }
-            (TaskGraphPosition::At { .. }, None) => {
-                format!("{summary}. `lf task run {issue}` starts it.")
-            }
+            (TaskGraphPosition::At { .. }, None) => match self.waiting_to_land(auto, issue) {
+                Some(wait) => format!("{summary}. {wait}"),
+                None => format!("{summary}. `lf task run {issue}` starts it."),
+            },
         }];
         lines.push(format!(
             "`lf task run {issue} --from <step>` starts anywhere, to go back or skip ahead; `lf -b task run {issue}` and `lf ship {issue}` run headless to `end` and turn auto on, which may merge the PR, as does `lf task run {issue}` with no interactive step left ahead, so run them only when the person asks to ship or land; `lf graph <graph>` in the Task worktree runs a Graph without moving the Task."
@@ -435,6 +451,7 @@ pub(crate) fn validate_graph_name(name: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::{CapturedGraph, TaskGraph, TaskGraphPosition};
+    use loopflow_storage::sqlite::{Auto, AutoState};
 
     fn write(repo: &std::path::Path, path: &str, content: &str) {
         let path = repo.join(path);
@@ -523,7 +540,7 @@ mod tests {
         let waiting = at(TaskGraphPosition::At {
             step: "ship-review".into(),
         });
-        let guidance = waiting.guidance("INF-1");
+        let guidance = waiting.guidance("INF-1", None);
         assert!(
             guidance.contains("with the ship-review skill"),
             "{guidance}"
@@ -536,6 +553,26 @@ mod tests {
             lf_process_id: "process".into(),
             running: true,
         });
-        assert!(!running.guidance("INF-1").contains("task run"));
+        assert!(!running.guidance("INF-1", None).contains("task run"));
+
+        let landing = at(TaskGraphPosition::At {
+            step: "land".into(),
+        });
+        let off = Auto {
+            state: AutoState::Off,
+            at: 0,
+            by: crate::process::Starter::Person {
+                name: Some("Maya".into()),
+            },
+        };
+        let guidance = landing.guidance("INF-1", Some(&off));
+        assert!(guidance.contains("`lf ship INF-1` lands it"), "{guidance}");
+        assert!(
+            !guidance.contains("`lf task run INF-1` starts it"),
+            "{guidance}"
+        );
+        assert!(landing
+            .guidance("INF-1", None)
+            .contains("`lf task run INF-1` starts it"));
     }
 }

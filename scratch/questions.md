@@ -105,8 +105,6 @@ Questions 1 and 2 got no written answer in scratch.
   `outcome_unknown` ("…; inspect the affected work before retrying"), as
   `task.run` does through the shared launch path. `task.auto.off` now answers
   `not_found`.
-- A Task conversation at a landing wait still gets `guidance`'s
-  "`lf task run X` starts it" (no auto in `TaskGraph`); status says `lf ship`.
 - QA 2026-11-19: a released hold on a never-run Task does not survive the
   upgrade; same root as the last item below.
 - QA 2026-11-19: Task checkout waits 10 s for the worktree lease instead of

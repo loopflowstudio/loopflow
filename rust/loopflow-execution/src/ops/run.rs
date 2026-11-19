@@ -236,7 +236,11 @@ async fn bind_selected_work(
             wave.as_ref().map(Wave::slug),
         );
         if let Ok(Some(graph)) = crate::store::task_work::task_graph(&store.sqlite, &task.id) {
-            context.push_str(&format!("\n\n{}", graph.guidance(&task.identifier)));
+            let auto = store.sqlite.task_auto(&task.id).ok().flatten();
+            context.push_str(&format!(
+                "\n\n{}",
+                graph.guidance(&task.identifier, auto.as_ref())
+            ));
         }
         let cwd = task.worktree()?.clone();
         return Ok(WorkBinding {

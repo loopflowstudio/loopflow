@@ -4,9 +4,9 @@
 
 A Task stacked on a PR that closed without merging syncs again:
 
-- bare `lf sync` (and the Graph `cmd: sync` step, which is the same
-  `run_sync_in`) follows the parent Task to its current PR, records it as the
-  new parent, retargets the child's open PR, then merges it;
+- bare `lf sync` (and the Graph `cmd: sync` step, the same `run_sync_in`)
+  follows the parent Task to its current PR, merges it, and records it as the
+  parent;
 - `lf sync <parent Task>` stacks on the parent's current PR;
 - `lf sync main` detaches it.
 
@@ -23,57 +23,66 @@ commands, so the Graph step's three retries end on something a person can act on
 - LOO-996, stacked after the close, names the #1983 row; it syncs fine.
 - `~/.lf/logs/graph-*.log` holds the error from the `implement`→`sync` retries.
 
-`select_stack_parent` (`ops/task.rs`) already skips a recorded parent row in
-`PrPhase::Abandoned` and falls through to the parent's `active_task_pr`, so at
-this base `lf sync LOO-938` should get through `stack_task`. It still dies
-after, or did on the installed build. The fixture in slice 1 settles which;
-either way the refusal in `task_stack` goes.
+## The model (concept review, 2026-11-19)
 
-## Source of truth
+A person stacks a Task on a **Task**. The record names a **PR attempt**
+(`task_checkouts.parent_pr_id` → one `task_prs` row). When the parent reopens,
+the person's parent is unchanged; the record's parent is dead. The fix is to
+make every read resolve the parent the way the person thinks of it:
 
-`task_checkouts.parent_pr_id` → a `task_prs` row. `task_stack`
-(`rust/loopflow-execution/src/ops/task.rs`) is the one resolver every consumer
-reads: sync, owned-sync recording (`sync.rs::record_control_task_state`),
-landing (`stack_for_landing`), publication (`pr.rs::publication_base`). It
-reconciles the parent's PR and must stay read-only ("without changing
-placement on a read").
+> The stack parent's PR is the recorded row, unless it closed without merging;
+> then it is the parent Task's active row. Closed only when that is closed too.
+
+`select_stack_parent` already applies this rule when stacking; `task_stack`
+does not. Both read one function. Following needs no write on the read: the
+sync that merges the followed PR records it, the way it already records the
+base it reached.
+
+Chosen for review (the earlier plan had a separate `restack_closed_parent`
+pass in `run_sync_in` that called `stack_existing_task` and re-read
+`task_stack`; passed over because it adds a second re-placement path and leaves
+landing and publication refusing a parent that is live).
 
 ## Design
 
-`StackedSync.parent_merged: bool` becomes `parent: StackParentPr`:
+`rust/loopflow-execution/src/ops/task.rs`:
 
 ```rust
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StackParentPr { Open, Merged, Closed { number: Option<u64> } }
+
+pub struct StackedSync {
+    pub fork_base: String,
+    pub child: Task,
+    pub parent_identifier: String,
+    pub parent_branch: String,
+    /// The row the parent resolves to now; differs from the child's recorded
+    /// `parent_pr_id` when the recorded PR closed and the parent reopened.
+    pub parent_pr: TaskPrId,
+    pub parent: StackParentPr,
+}
 ```
 
-- `task_stack` returns `Closed` instead of an error. Fork base resolution is
-  unchanged (recorded base, else merge-base with `origin/<branch>`).
+- `current_parent_pr(store, recorded: TaskPr, parent_task) -> TaskPr`: the
+  rule above. `task_stack` calls it after `reconcile_task_pr`;
+  `select_stack_parent` uses it in place of its own abandoned check.
+- `task_stack` never errors on a closed parent. A followed successor that
+  merged yields `Merged`, so bare sync takes the existing merged-parent path
+  onto the default branch. `fork_base` is unchanged: the recorded base is on
+  the parent's branch, which the successor row shares.
 - `live_parent_branch()` is `Some` only for `Open`.
-- One function in `ops/task.rs` writes the sentence above
-  (`StackedSync::closed_parent_message()` or similar); sync, landing and
-  publication all print it. Landing and publication keep refusing on `Closed`:
-  their base is unknown until a sync re-places the Task.
-- New `restack_closed_parent(worktree, &StackedSync) -> OpsResult<String>` in
-  `ops/task.rs`: reads the parent Task's `active_task_pr`; when it is neither
-  merged nor abandoned, runs `stack_existing_task(store, main, child,
-  parent_identifier)` (records the parent, recomputes base from shared
-  history because the row id changed, retargets the child's open PR) and
-  returns its "Stacked … on …" line; otherwise returns the error.
-- `run_sync_in` (`sync_execution.rs`): after `task_stack`, when the parent is
-  `Closed` and `onto` is `None`, print `restack_closed_parent`'s line and read
-  `task_stack` again. `lf sync main` takes the existing detach path, which
-  needs only `fork_base`. `lf sync <Task>` already goes through
-  `open_task_named` + `stack_task` before `task_stack`.
-- `record_control_task_state`: `clear_parent` reads `parent == Merged`.
+- `StackedSync::closed_parent_error()` writes the sentence above. Every
+  consumer that needs a parent and gets `Closed` returns it: `run_sync_in`
+  when not detaching, `stack_for_landing`, `pr.rs::publication_base`.
+- `record_stack_sync`: when not clearing and `parent_pr` differs from
+  `child.parent_pr_id`, record `parent_pr` with the new base in the same write.
+  `record_control_task_state`'s `clear_parent` reads `parent == Merged`.
+- `run_sync_in` (`sync_execution.rs`) changes only by the `Closed` error.
+  `lf sync main` is the existing detach; `lf sync <Task>` is the existing
+  `open_task_named` + `stack_task`.
 
-Chosen for review: following an unpublished (not yet on GitHub) successor
-row counts as "current PR", the same rule `select_stack_parent` uses. Passed
-over: following only a GitHub-open PR, which would leave a Task stuck while
-its parent republishes.
-
-Passed over: making `task_stack` itself follow the successor. It is read by
-status and publication, and re-placing there turns a read into a write.
+Followed rows count when unpublished (no GitHub PR yet), the same rule
+`select_stack_parent` already uses.
 
 ## Acceptance check at gate
 
@@ -85,41 +94,38 @@ Rewritten from the existing test of that name (`rust/loopflow/tests/sync_tests.r
 which today asserts the refusal. For each of bare `lf sync` and
 `lf sync INF-123`: close the parent's PR row, insert a successor row with
 GitHub number 43, run the sync, and assert the parent's file arrives,
-`task_stack` names the successor row, and `lf task status INF-124 --json`
-has `stack_parent.pr_number == 43`. A third case with no successor asserts
-bare sync's error names both commands, then `lf sync main` detaches
-(`task_stack` is `None`). The `lf checkout --stack-on` retry stays covered by
-its own assertions.
+the child's recorded parent is the successor row, and
+`lf task status INF-124 --json` has `stack_parent.pr_number == 43`. A third
+case with no successor asserts bare sync's error names both commands, then
+`lf sync main` detaches (`task_stack` is `None`). The `lf checkout --stack-on`
+retry stays covered by its own assertions.
 
 ## What goes
 
 - The `closed && !merged` early `Err` in `task_stack`.
 - `StackedSync.parent_merged` (replaced by `parent`).
+- The abandoned-row check inside `select_stack_parent` (now `current_parent_pr`).
 - The `unwrap_err().contains("closed without merging")` assertion in
   `sync_tests.rs`.
 
 ## Exclusions
 
-- `lf task status` saying the parent PR closed (it shows the recorded #1971
-  until a sync re-places it).
-- A parent whose successor PR already merged: bare sync gives the two-command
-  sentence; `lf sync main` handles it.
-- A parent branch deleted on close: GitHub closes the child PR with it; not
-  this Task.
+- `lf task status` before a sync still shows the recorded #1971.
+- A parent branch deleted on close: GitHub closes the child PR with it.
 
 ## Slices
 
-1. **The fixture first.** Rewrite the test above against the current code and
-   watch which sync fails where; then drop the refusal, add `StackParentPr`
-   and `restack_closed_parent`, wire `run_sync_in`. Shows the whole Done-when.
-2. Landing and publication print the shared sentence; update the
-   `record_control_task_state` read. Focused: `task_pr_authority_tests`,
-   the stacking tests in `sync_tests.rs`.
-3. `docs/work.md` stacking paragraph: one line that a closed parent PR is
-   followed to its next PR by `lf sync`.
+1. **The fixture first.** Rewrite the test above and watch it fail; add
+   `current_parent_pr`, `StackParentPr`, the record in `record_stack_sync`, the
+   `Closed` error in `run_sync_in`. Shows the whole Done-when.
+2. Landing and publication return the shared sentence on `Closed` and follow a
+   live successor. Focused: `task_pr_authority_tests`, the stacking tests in
+   `sync_tests.rs`.
+3. `docs/work.md` stacking paragraph: one line that `lf sync` follows a parent
+   Task to its next PR when the stacked one closes.
 
 ## Demo
 
-On LOO-995's checkout after install: `lf sync` prints
-`Stacked LOO-995 on LOO-938; …` and merges; `lf task status LOO-995 --json`
-shows `stack_parent.pr_number: 1983`.
+On LOO-995's checkout after install: `lf sync` prints `Synced onto
+origin/<LOO-938 branch>.`; `lf task status LOO-995 --json` shows
+`stack_parent.pr_number: 1983`.

@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>ab74ab concept review: what a stack parent is</title>
+<style>
+  :root { color-scheme: light dark; --bg:#fbfaf7; --fg:#1d1c1a; --mute:#6b6760; --line:#dedad2; --yes:#2f7d4a; --no:#b5402f; --prop:#2a5db0; --card:#f2efe8; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#161513; --fg:#ecebe7; --mute:#9a958c; --line:#34312c; --yes:#6cc28a; --no:#ee8a78; --prop:#7fa8ef; --card:#201f1c; } }
+  body { background:var(--bg); color:var(--fg); font:16px/1.55 -apple-system, "Helvetica Neue", sans-serif; max-width:920px; margin:3rem auto; padding:0 1.25rem; }
+  h1 { font-size:1.6rem; margin-bottom:.2rem } h2 { font-size:1.15rem; margin-top:2.4rem }
+  p.lede { color:var(--mute); margin-top:0 }
+  code { font:13.5px ui-monospace, Menlo, monospace; }
+  table { border-collapse:collapse; width:100%; margin:1rem 0 }
+  th, td { text-align:left; vertical-align:top; padding:.55rem .6rem; border-bottom:1px solid var(--line) }
+  th { font-weight:600 }
+  .yes { color:var(--yes); font-weight:700 } .no { color:var(--no); font-weight:700 }
+  .prop { border-left:3px solid var(--prop); padding:.2rem 0 .2rem .9rem; }
+  .tag { color:var(--prop); font-weight:600 }
+  .cols { display:grid; grid-template-columns:1fr 1fr; gap:1rem }
+  .card { background:var(--card); border-radius:8px; padding:1rem 1.1rem }
+  .card h3 { margin:.1rem 0 .6rem; font-size:1rem }
+  pre { background:var(--card); padding:.8rem 1rem; border-radius:8px; overflow-x:auto; font-size:13px }
+  ol li { margin:.5rem 0 }
+  @media (max-width:700px) { .cols { grid-template-columns:1fr } }
+</style>
+</head>
+<body>
+
+<h1>A stack parent is a Task, not a PR attempt</h1>
+<p class="lede">Area: Task stacking end to end — how a child names its parent, and the four readers of that record (sync, owned-sync recording, landing, publication). Taken because the refusal sits in the one resolver all four share, not in sync.</p>
+
+<h2>The interaction</h2>
+<div class="cols">
+  <div class="card">
+    <h3>What happened on LOO-995</h3>
+    <pre>$ lf checkout LOO-995 --stack-on LOO-938
+  # records parent = LOO-938's PR row #1971
+  ... #1971 closed unmerged; LOO-938 opens #1983
+$ lf sync
+error: stack parent … closed without merging;
+       re-place the child deliberately
+$ lf sync main      # same error
+$ lf sync LOO-938   # stacks, then the same read dies (installed build)</pre>
+    <p>The Graph <code>sync</code> step fails three times and the Task stops.</p>
+  </div>
+  <div class="card prop">
+    <h3><span class="tag">Proposed</span></h3>
+    <pre>$ lf sync
+Synced onto origin/&lt;LOO-938 branch&gt;.
+  # task_stack followed LOO-938 to #1983;
+  # the sync recorded #1983 as the parent
+$ lf task status LOO-995 --json | jq .stack_parent.pr_number
+1983</pre>
+    <p>No successor: one sentence, <code>lf sync LOO-938</code> or <code>lf sync main</code>; the latter works because the read no longer errors.</p>
+  </div>
+</div>
+
+<h2>Do the concepts line up?</h2>
+<table>
+  <tr><th>What a person knows</th><th>What the code has</th><th></th><th>Where it is wrong</th></tr>
+  <tr><td>"LOO-995 is stacked on LOO-938"</td><td><code>task_checkouts.parent_pr_id</code> → one <code>task_prs</code> row</td><td class="no">no</td><td>One name for two ideas. The person's parent is the Task; the record pins one PR attempt. A reopen is a new row, so the person's parent is alive while the record's is dead.</td></tr>
+  <tr><td>The parent's current PR</td><td><code>select_stack_parent</code>: recorded row unless abandoned, else <code>active_task_pr</code></td><td class="no">no</td><td>The rule exists once, but only for stacking. <code>task_stack</code> (every read) applies a different rule and refuses.</td></tr>
+  <tr><td>"Sync follows my parent"</td><td><code>run_sync_in</code> → <code>task_stack</code> → <code>live_parent_branch</code></td><td class="yes">yes</td><td>One owner. Breaks only through the resolver above.</td></tr>
+  <tr><td>"Stack on that Task instead"</td><td><code>lf sync &lt;Task&gt;</code> → <code>open_task_named</code> + <code>stack_task</code></td><td class="yes">yes</td><td></td></tr>
+  <tr><td>"Detach onto main"</td><td><code>lf sync main</code> → detach path, needs only <code>fork_base</code></td><td class="no">no</td><td>Blocked by a read it doesn't need: <code>task_stack</code> errors before the target is looked at.</td></tr>
+  <tr><td>Parent merged</td><td><code>StackedSync.parent_merged: bool</code></td><td class="no">no</td><td>A bool for a three-state fact (open, merged, closed). Closed hides as an error.</td></tr>
+  <tr><td>"Land the parent first"</td><td><code>stack_for_landing</code></td><td class="yes">yes</td><td>Right message once the resolver follows; today it reports the refusal instead.</td></tr>
+</table>
+
+<h2>Biggest mismatch: the parent's identity</h2>
+<div class="cols">
+  <div class="card">
+    <h3>Earlier plan (existing in <code>scratch/plan.md</code> before this review)</h3>
+    <p><code>task_stack</code> returns <code>Closed</code>; a new <code>restack_closed_parent</code> in <code>run_sync_in</code> calls <code>stack_existing_task</code>, then reads <code>task_stack</code> again. Passed over <em>following in <code>task_stack</code></em> because "re-placing there turns a read into a write".</p>
+    <p>Leaves two re-placement paths, and landing and publication still refuse a parent that is open on GitHub.</p>
+  </div>
+  <div class="card prop">
+    <h3><span class="tag">Proposed</span>: follow on read, record on sync</h3>
+    <p>Following needs no write. <code>task_stack</code> resolves the parent Task's current row with the same rule <code>select_stack_parent</code> uses (one function, <code>current_parent_pr</code>). The sync's existing write, <code>record_stack_sync</code>, records the row it merged along with the base it reached.</p>
+    <p>All four readers see the live parent. A successor that already merged becomes the ordinary merged-parent path. <code>Closed</code> means nothing left to follow, and one sentence covers it.</p>
+  </div>
+</div>
+<pre><span class="tag">proposed</span>
+pub enum StackParentPr { Open, Merged, Closed { number: Option&lt;u64&gt; } }
+StackedSync { fork_base, child, parent_identifier, parent_branch,
+              parent_pr: TaskPrId,   // resolved row, may differ from the recorded one
+              parent: StackParentPr } // replaces parent_merged</pre>
+
+<h2>Tested against</h2>
+<table>
+  <tr><th>Case</th><th>Proposed result</th></tr>
+  <tr><td>Normal: recorded row open</td><td>Unchanged; <code>parent_pr</code> equals the recorded id, no extra write.</td></tr>
+  <tr><td>Failure: closed, no successor</td><td><code>Closed</code>; bare sync, landing and publication print the two-command sentence; Graph retries end on it.</td></tr>
+  <tr><td>Recovery: <code>lf sync main</code></td><td>Detaches with the recorded fork base; parent cleared.</td></tr>
+  <tr><td>Recovery: parent reopens</td><td>Bare sync follows and records #1983; status names it.</td></tr>
+  <tr><td>Counterexample: successor already merged</td><td>Treated as merged parent: child syncs onto main. The brief said "with none, say which two commands"; this is a choice made for review (3).</td></tr>
+  <tr><td>Counterexample: parent reopened with different work</td><td>Followed, same as a force-pushed live parent. Stacking on a Task means following its work.</td></tr>
+  <tr><td>Status before any sync</td><td>Still shows #1971 (excluded; the snapshot reads the record).</td></tr>
+</table>
+
+<h2>Outcome</h2>
+<p>The plan changed: <code>restack_closed_parent</code> and the second <code>task_stack</code> read are gone; <code>current_parent_pr</code> is shared by stacking and every read; <code>record_stack_sync</code> records the followed row. Slice 1 is the same fixture.</p>
+
+<h2>Questions</h2>
+<ol>
+  <li>Should <code>task_stack</code> follow the parent Task to its successor row on every read?
+    <br>a) yes, as proposed &nbsp; b) no, only bare sync follows (the earlier plan)</li>
+  <li>Which successor rows count as "current"?
+    <br>a) open or not yet published, as <code>select_stack_parent</code> does &nbsp; b) only a GitHub-open PR</li>
+  <li>A successor that already merged:
+    <br>a) the ordinary merged-parent path onto main &nbsp; b) the two-command error</li>
+  <li>Should <code>lf task status</code> apply the same rule before any sync, so it shows #1983 immediately?
+    <br>a) yes, in this Task &nbsp; b) a separate Task &nbsp; c) no</li>
+</ol>
+</body>
+</html>

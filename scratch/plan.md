@@ -546,7 +546,7 @@ etude checkout and `lf` version are unknown.
    within 5s"; with the hub back, `lf task sync` sent it and the line read
    `Hub mini.`
 
-6. **Nothing arrives short in silence.** *Not built* (third concept review,
+6. **Nothing arrives short in silence.** *Built* (third concept review,
    `scratch/concept-review.html`). Two parts, the first alone shows whether
    the look is enough for the common case.
 
@@ -595,6 +595,33 @@ etude checkout and `lf` version are unknown.
       the five seconds). *Passed over:* a table of records to fetch again
       (the hub has no read by id); deriving it from `plan_refs` against
       `plan-seen/*` (no reason to show, nothing for the hub).
+
+   What it showed, 2026-11-18:
+   - Both parts in one place for (a): `lf task create --wave` makes its Wave
+     through `wave_lifecycle::add`, so the look sits there once
+     (`plan_carriers::look_first`; `before_claim` calls it).
+   - The plan missed the hub's own side. A hub that could not write what a
+     laptop sent answered `{}` and the laptop moved `sent_seq` past it, so a
+     rename repaired the laptop and never the hub (the storage test's
+     recovery failed on it). `plan.apply` now answers `{not_taken: N}`
+     (`PlanApplied`); from the first page with any, the sender keeps its
+     cursor and still sends the later pages. Same accepted cost as the read
+     side: everything past the cursor goes again at each exchange.
+   - The stored text is `3 not taken: <why the first was not>`; the CLI and
+     `CarrierStanding.line` in Swift put the count on the line and the reason
+     under it. `tracker_sync.json` holds no carriers, so only
+     `subscribe_frames.json` changed.
+   - Storage `sqlite::plan_carriers::` (10) and execution `ops::plan_git::`
+     (7, with `a_wave_made_on_two_machines_is_not_taken_until_one_is_renamed`)
+     passed. By hand in two homes on one bare remote: online, mini's
+     `lf wave create q6` then the laptop's `lf task create --wave q6` gave
+     one Wave id on both. Offline `design` on both: `lf task sync` exit 1,
+     `Plan: Git origin, 3 not taken.` with the rename under it on both;
+     after `lf wave rename design design-laptop` and a sync each, both list
+     all four Tasks and read `Plan: Git origin.` The other Machine is named
+     by id there, since neither home had added the other.
+   - Not run by hand: the hub pair (needs the stand-in `ssh`); the storage
+     test covers its cursor and the acceptance test its wire.
 
 ## Checks
 
@@ -721,6 +748,6 @@ etude checkout and `lf` version are unknown.
   Flaky by the repository's rule; gate finds the cause or rewrites it.
 - Slices 1 to 5 are in the code and differences 1 to 4 at the top hold in
   it. Etude's cutover is by hand, after release.
-- Next: implement builds slice 6, part a then part b. After it gate runs the
+- Slice 6 is built; nothing in the plan is unbuilt. Gate runs the
   lists above. Open choices are in `scratch/questions.md`; the review's four
   questions are at the end of `scratch/concept-review.html`.

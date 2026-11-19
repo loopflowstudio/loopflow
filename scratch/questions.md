@@ -177,3 +177,17 @@ Still open from before:
     first by each carrier, five seconds at most.
   - `not_taken` is its own field beside `error`; the line still says
     `unreachable since` for a push the remote refused (question 3).
+
+- Implement, slice 6 (2026-11-18), each reversible before release:
+  - `plan.apply` answers `{not_taken: N}` and the sender keeps those records
+    unsent (the plan had only the read side). The hub's reason is not shown
+    on the sender: its line reads `Hub mini, N unsent.` and, for a Wave name,
+    its own read shows the mirror `not taken`. A record only the hub cannot
+    write (a comment whose Task the hub lacks) shows as unsent with no reason.
+    Should `plan.apply` carry the hub's reason back?
+  - A Wave name held here is matched by repository and name, not parent; a
+    child Wave clashing under another parent would get the store's reason,
+    not the rename hint.
+  - `lf wave create` holds the Wave lifecycle lock through the look, up to
+    five seconds with a carrier hanging.
+  - The line names the other Machine by id unless it is an added Machine.

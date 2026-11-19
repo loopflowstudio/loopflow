@@ -277,6 +277,22 @@ Plan: Git origin, unreachable since Nov 18 14:02, 3 unsent.
 
 They go when the remote answers again.
 
+A Wave has one name in a repository. `lf wave create` and
+`lf task create --wave` read the plan first, so a Wave a teammate just made
+is the one you join. When two Machines each made one offline, neither
+overwrites the other, and the line says what is waiting:
+
+```text
+$ lf repo tracker
+Plan: Git origin, 3 not taken.
+  wave design from mini has the name of a Wave here; `lf wave rename design <new name>` on either Machine lets both arrive
+```
+
+```bash
+lf wave rename design design-site     # on either Machine
+lf task sync 3e1c9a                   # then on both: each takes the other's Wave, Projects and Tasks
+```
+
 The plan is as private as the repository. Anyone who can fetch it can read the
 plan, and anyone who can push to it can change any Task.
 

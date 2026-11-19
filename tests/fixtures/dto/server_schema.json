@@ -2471,6 +2471,13 @@
             "null"
           ]
         },
+        "not_taken": {
+          "description": "What the carrier's last read brought that this Machine could not\nwrite, and reads again at each exchange: `3 not taken: wave design\nfrom mini …`, the count, then why the first was not. `null` when it\ntook everything.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "records": {
           "description": "The first of them in change order: a Task's identifier, `wave <name>`,\n`project <name>` or `comment <id>`.",
           "items": {
@@ -2494,7 +2501,8 @@
         "unsent",
         "records",
         "error",
-        "failing_since"
+        "failing_since",
+        "not_taken"
       ],
       "type": "object"
     },
@@ -3303,6 +3311,13 @@
           "description": "The hub's name.",
           "type": "string"
         },
+        "not_taken": {
+          "description": "What the carrier's last read brought that this Machine could not\nwrite, and reads again at each exchange: `3 not taken: wave design\nfrom mini …`, the count, then why the first was not. `null` when it\ntook everything.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "records": {
           "description": "The first of them in change order: a Task's identifier, `wave <name>`,\n`project <name>` or `comment <id>`.",
           "items": {
@@ -3322,7 +3337,8 @@
         "unsent",
         "records",
         "error",
-        "failing_since"
+        "failing_since",
+        "not_taken"
       ],
       "type": "object"
     },
@@ -5122,6 +5138,22 @@
         "use_existing_worktree"
       ],
       "type": "string"
+    },
+    "PlanApplied": {
+      "additionalProperties": false,
+      "description": "What `plan.apply` answers.",
+      "properties": {
+        "not_taken": {
+          "description": "How many of the records could not be written here (a Wave whose name\na Wave here holds, and what hangs from it). The sender keeps them\nunsent and sends them again.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "not_taken"
+      ],
+      "type": "object"
     },
     "PlanBoard": {
       "properties": {
@@ -9512,7 +9544,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "The hub's side of a plan exchange: take in another Machine's stamped\nrecords of `repository`'s plan, in one transaction. Each field is\nwritten only when its stamp is newer than the one held here, so\nrepeating it changes nothing. Answers `{}`.",
+          "description": "The hub's side of a plan exchange: take in another Machine's stamped\nrecords of `repository`'s plan, in one transaction. Each field is\nwritten only when its stamp is newer than the one held here, so\nrepeating it changes nothing.",
           "properties": {
             "kind": {
               "const": "plan.apply",
@@ -9535,8 +9567,7 @@
           ],
           "type": "object",
           "x-result": {
-            "additionalProperties": false,
-            "type": "object"
+            "$ref": "#/$defs/PlanApplied"
           }
         },
         {

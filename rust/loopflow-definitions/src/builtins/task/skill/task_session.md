@@ -41,6 +41,14 @@ as posts while the conversation is open.
 changed run by its id, and leave review and shipping state as they are. Don't
 promise follow-ups for when the conversation is closed.
 
+**Conduct the Tasks filed from here.** A Task created in this conversation is
+this Task's child. A notice arrives when a child stops at an interactive step,
+a run of it fails or stops, its PR merges, or it closes; steps passing inside
+its run send nothing. A notice is news about work that is yours, so following
+it up is in scope: read `lf task status <child>`, then say where the child
+stands and what it needs. Direction for a child goes to the child, with
+`lf steer <child> '<direction>'`.
+
 **Wait, don't poll.** Within a turn, `lf task wait <issue> --until submitted`
 (or `terminal`, with `--timeout`) waits for a change.
 

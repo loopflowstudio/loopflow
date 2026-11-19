@@ -89,7 +89,15 @@ fn render(
         let path = path.strip_prefix(repo).unwrap_or(&path);
         // A Task update is a steer lf wrote about what it saw, not direction.
         let update = steer.source.starts_with("update:");
-        let mut item = if update {
+        // A notice is news about a Task this conversation conducts.
+        let notice = steer.source.starts_with("notice:");
+        let mut item = if notice {
+            format!(
+                "Task notice {}. News about work this conversation conducts; following it up is yours. Read the Task's current status before acting. Complete source: {}\n",
+                steer.id,
+                serde_json::to_string(path)?
+            )
+        } else if update {
             format!(
                 "Task update {}. Report this recorded progress briefly. This is observation, not a request or permission to launch work, advance review, publish or merge. Read current Task status before acting. Complete source: {}\n",
                 steer.id,
@@ -105,7 +113,7 @@ fn render(
                 serde_json::to_string(path)?
             )
         };
-        let mut body = excerpt(&steer.text, if update { 600 } else { 400 });
+        let mut body = excerpt(&steer.text, if update || notice { 600 } else { 400 });
         while !body.is_empty()
             && item.len() + crate::prompt::render_reference(body).len() + 32 > 1024
         {

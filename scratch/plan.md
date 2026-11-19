@@ -359,15 +359,28 @@ existing update a conversation gets about its own Task; Waves and
    - The cycle refusal: nothing can make one at filing (a new Task has no
      children). It belongs with the first write that changes a parent
      (slice 5's tracker edit). `docs/work.md` Reference still names it.
-3. **Hearing about children.** Next. The conducted relation, the two new
-   observation facts, the notice and its audience; `task_session.md`; the
-   `task_updates` revision triggers for a merged `task_prs` row and a Task
-   closing, being abandoned or changing parent, added to `task_parent.sql`.
-   Tests: a fixture child Graph stops at an interactive step and the
-   parent's idle conversation receives one notice, and none for the steps
-   before it; `lf steer <child> '…'` does not reach the parent's
-   conversation. For the lookup, read a few Task rows with `map_task_row`:
-   `TaskIdentifiers::read` scans every Task (`query_plans` catches it).
+3. **Hearing about children.** Built. `task_work::conducted_tasks` is the
+   one definition; `task_updates::write` reads the Session's conducted Tasks
+   after its own (`session_conducted_tasks`: id and closed, two columns, no
+   Task row), and `scopes()` admits `notice:<Task>:<key>` steers to the
+   conductor only. `TaskObservation` has `pr` and `closed`; the Task's own
+   update says "PR merged." and "Task completed.". Triggers
+   `task_update_tasks_standing` and `task_update_task_prs_merge` are in
+   `task_parent.sql`. `task_session.md` has the conducting paragraph.
+   Shown by `harness::task_updates::tests::` (a child stops at an
+   interactive step: one notice, none for its steps, none to the child's
+   own conversation, a steer for the child stays with it; failed run,
+   merge, close; a child nobody read) and
+   `a_hook_reading_its_steers_and_task_updates_plans_by_index`, which
+   traces the new lookup and the wider audience and finds no scan.
+   What it taught: a first reading as a baseline loses a child that stopped
+   before anyone looked, so a notice compares a missing reading with an
+   empty one; and `store.task()` cannot read the sparse `retirement`
+   fixture row, which now carries a title, slug and times.
+   Not built: the `MachineServer` fixture (a real child Graph, the server
+   waking the parent). Delivery is the unchanged steer path; the acceptance
+   check at gate is where it runs end to end. Not measured: a hook boundary
+   with ten open children.
 4. **Merged and open; closing.** Reason and `next` for a parent with open
    children, Auto-Ship's skipped completion, `lf task complete` over children,
    a child of a done parent listed top-level.

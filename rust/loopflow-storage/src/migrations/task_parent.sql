@@ -48,3 +48,17 @@ WHEN NEW.id IS NOT OLD.id OR NEW.repository_id IS NOT OLD.repository_id OR
 BEGIN
     UPDATE store_revisions SET revision=revision+1 WHERE domain='planning';
 END;
+
+-- A Task's standing is news to its own conversations and to its parent's:
+-- its PR merging, the Task closing or being abandoned, and its parent changing.
+CREATE TRIGGER task_update_tasks_standing AFTER UPDATE OF planning_completed,abandoned_at,parent_task_id ON tasks
+WHEN NEW.planning_completed IS NOT OLD.planning_completed OR NEW.abandoned_at IS NOT OLD.abandoned_at OR NEW.parent_task_id IS NOT OLD.parent_task_id
+BEGIN
+    UPDATE store_revisions SET revision=revision+1 WHERE domain='task_updates';
+END;
+
+CREATE TRIGGER task_update_task_prs_merge AFTER UPDATE OF merge_commit ON task_prs
+WHEN NEW.merge_commit IS NOT OLD.merge_commit
+BEGIN
+    UPDATE store_revisions SET revision=revision+1 WHERE domain='task_updates';
+END;

@@ -43,6 +43,23 @@ rest is not chosen.
 - A follow-up filed in another repository than its parent keeps the link and
   takes no Project.
 
+## Made while building slice 3, for review
+
+- A child's first reading is compared with an empty one, so a child nobody
+  read before it stopped still produces a notice. A Task's own conversation
+  keeps the baseline rule.
+- A conversation that just started marks the notices already written as read,
+  like updates: it reads its children with `lf task status`.
+- A stored reading this build cannot parse is treated as no reading (a
+  baseline) instead of an error. Readings saved before this change lack `pr`
+  and `closed`, so each Task's next reading reports nothing.
+- A closed child that reopens sends "was reopened".
+- The notice header a conversation sees: "Task notice <id>. News about work
+  this conversation conducts; following it up is yours. Read the Task's
+  current status before acting."
+- A run that ends without succeeding and leaves the Task at an interactive
+  step sends both in one notice: "failed at gate and stopped at human-review".
+
 ## Raised by writing the docs (2026-11-18)
 
 - "Parent" already means the stack parent across `docs/work.md`,

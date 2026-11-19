@@ -3012,6 +3012,19 @@ fn handoffs(task: &GraphTask) -> Vec<String> {
         .collect()
 }
 
+/// Whether the Task carries a steer saying `direction`.
+fn steered(task: &GraphTask, direction: &str) -> bool {
+    task.registered
+        .store
+        .task_comments(&task.registered.task.id)
+        .unwrap()
+        .comments
+        .iter()
+        .any(|comment| {
+            comment.body.starts_with(direction) && comment.body.contains("loopflow-steer:")
+        })
+}
+
 fn wait_for(what: &str, mut ready: impl FnMut() -> bool) {
     let deadline = Instant::now() + Duration::from_secs(90);
     while !ready() {
@@ -3048,9 +3061,9 @@ fn task_ship_runs_every_remaining_step_standing_in_at_each_interactive_step() {
         String::from_utf8_lossy(&output.stderr)
     );
     assert_eq!(task.graph()["position"], at("end"));
-    let handoff = handoffs(&task);
-    assert_eq!(handoff.len(), 1);
-    assert!(handoff[0].ends_with(": good to go"), "{}", handoff[0]);
+    assert_eq!(handoffs(&task).len(), 1);
+    // `--reason` is the run's direction: a steer on the Task.
+    assert!(steered(&task, "good to go"));
     // The review step ran headless with its skill, standing in for a person.
     let turns = stand_ins(&task);
     assert_eq!(turns.len(), 1);
@@ -3118,9 +3131,9 @@ fn auto_on_at_a_waiting_step_stands_in_there_with_one_graph_run() {
     assert_eq!(task.graph()["position"], at("end"));
     assert_eq!(support::recorded_graphs(task.home.path()).len(), graphs + 1);
     assert_eq!(stand_ins(&task).len(), 1);
-    let handoff = handoffs(&task);
-    assert_eq!(handoff.len(), 1);
-    assert!(handoff[0].ends_with(": good to go"), "{}", handoff[0]);
+    assert_eq!(handoffs(&task).len(), 1);
+    // `--reason` is the run's direction: a steer on the Task.
+    assert!(steered(&task, "good to go"));
     assert_eq!(task.status()["auto"]["state"], "on");
 }
 

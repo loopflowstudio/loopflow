@@ -69,7 +69,7 @@ pub struct TaskDetail {
     /// abandoned; `null` while it never has.
     #[serde(deserialize_with = "Option::deserialize")]
     pub summary: Option<loopflow_storage::sqlite::task_summaries::TaskSummary>,
-    /// The Task's auto setting: on or stopped, and who set it when; `null`
+    /// The Task's auto setting: on or off, and who set it when; `null`
     /// when nobody has.
     #[serde(deserialize_with = "Option::deserialize")]
     pub auto: Option<loopflow_storage::sqlite::Auto>,

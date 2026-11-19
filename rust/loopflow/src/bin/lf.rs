@@ -17,7 +17,6 @@ use loopflow_execution::definition::DefinitionKind;
 use loopflow_execution::journal::{self, with_runtime, LfEventFields, LfEventType, LfNode};
 
 use loopflow_execution::ops::project::update_project;
-use loopflow_execution::ops::task::auto::AutoAsk;
 use loopflow_execution::store::planning_sync::LostAnswer;
 
 #[derive(Clone, Default)]
@@ -2228,7 +2227,7 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
                 directive: directive.clone(),
                 branch: None,
                 from_last_fetch: false,
-                auto: Default::default(),
+                ship: false,
             },
             cli.batch || cli.interactive,
         )?;
@@ -2853,11 +2852,7 @@ fn dispatch_here(
                 directive: directive.clone(),
                 branch: None,
                 from_last_fetch: false,
-                auto: if cli.batch {
-                    AutoAsk::Batch
-                } else {
-                    AutoAsk::Nobody
-                },
+                ship: false,
             },
             *json || cli.json,
         );
@@ -2884,7 +2879,7 @@ fn dispatch_here(
                 wave: cli.wave.clone(),
                 graph: graph.clone(),
                 reason: reason.clone(),
-                auto: AutoAsk::Person,
+                ship: true,
                 ..Default::default()
             },
             *json,

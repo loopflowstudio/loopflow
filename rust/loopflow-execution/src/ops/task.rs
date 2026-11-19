@@ -104,8 +104,9 @@ pub struct TaskProcessOptions {
     /// Place a new branch from the refs the last fetch left, without the
     /// network: the caller exchanges planning and the assignee afterwards.
     pub from_last_fetch: bool,
-    /// Who asks the run for auto.
-    pub auto: auto::AutoAsk,
+    /// `lf ship`: the run turns auto on, lifting an off, and stands in at
+    /// the interactive step the Task waits at.
+    pub ship: bool,
 }
 
 impl TaskProcessOptions {
@@ -642,7 +643,7 @@ pub fn task_place(
         graph,
         from,
         reason,
-        auto,
+        ship,
         ..
     } = options.clone();
     let source = remote::source_for_task(issue)?;
@@ -663,7 +664,7 @@ pub fn task_place(
             graph.as_deref(),
             from.as_deref(),
             mode,
-            &auto,
+            ship,
             merges,
         )
         .await?;
@@ -885,20 +886,20 @@ pub fn select_task_run(
 
 /// Put the Task where `lf task run` sets out: on a run carried by this
 /// process, at the interactive step `--from` names, or at `end` when nothing
-/// remains. `ask` is written once the Task has its Graph. Two runs setting out
-/// together leave one: the other reads the Task again.
+/// remains. What the run asks of auto is written once the Task has its Graph.
+/// Two runs setting out together leave one: the other reads the Task again.
 async fn start_task_run(
     store: &SharedStore,
     task: &mut Task,
     requested: Option<&str>,
     from: Option<&str>,
     mode: TaskRunMode,
-    ask: &auto::AutoAsk,
+    ship: bool,
     merges: fn(&[String]) -> bool,
 ) -> OpsResult<TaskRunStart> {
     loop {
         if let Some(start) =
-            try_start_task_run(store, task, requested, from, mode, ask, merges).await?
+            try_start_task_run(store, task, requested, from, mode, ship, merges).await?
         {
             return Ok(start);
         }
@@ -912,13 +913,12 @@ async fn try_start_task_run(
     requested: Option<&str>,
     from: Option<&str>,
     mode: TaskRunMode,
-    ask: &auto::AutoAsk,
+    ship: bool,
     merges: fn(&[String]) -> bool,
 ) -> OpsResult<Option<TaskRunStart>> {
-    let person = matches!(ask, auto::AutoAsk::Person);
     let standing = crate::store::task_work::task_graph_row(&store.sqlite, &task.id)
         .map_err(task_error)?
-        .filter(|row| person && requested.is_none_or(|name| name == row.graph.name));
+        .filter(|row| ship && requested.is_none_or(|name| name == row.graph.name));
     match standing.as_ref().map(|row| (row, &row.run)) {
         // A live run reads auto at each interactive step, so it stands in
         // from here without being started again.
@@ -926,7 +926,7 @@ async fn try_start_task_run(
             if crate::store::task_work::carrier_may_run(carrier) =>
         {
             if let Some(graph_process) = auto::running_graph(store, task, &carrier.id).await? {
-                auto::ask(store, task, ask)?;
+                auto::ask(store, task, ship, mode)?;
                 let at = row.graph.step_name_of(cursor);
                 return Ok(Some(TaskRunStart::Live {
                     run: format!(
@@ -943,15 +943,7 @@ async fn try_start_task_run(
         }
         _ => {}
     }
-    let selection = select_task_run(
-        store,
-        task,
-        task.worktree()?,
-        requested,
-        from,
-        person,
-        merges,
-    )?;
+    let selection = select_task_run(store, task, task.worktree()?, requested, from, ship, merges)?;
     let reaches_end = selection.reaches_end(mode);
     let TaskRunSelection {
         graph,
@@ -981,7 +973,7 @@ async fn try_start_task_run(
             return Ok(None);
         }
     }
-    auto::ask(store, task, ask)?;
+    auto::ask(store, task, ship, mode)?;
     // Auto on runs through the interactive steps, standing in at each;
     // off, no run merges.
     let (on, merges) = match store
@@ -1041,7 +1033,7 @@ async fn try_start_task_run(
     Ok(Some(TaskRunStart::Run {
         step: label,
         merges,
-        stands_in: interactive.filter(|_| person).map(str::to_owned),
+        stands_in: interactive.filter(|_| ship).map(str::to_owned),
     }))
 }
 

@@ -131,7 +131,7 @@ Concept review, third pass, 2026-11-19 at `cb20b422a6`
   completion is pending shows an enabled toggle that answers `ended`.
 - `lf ship --reason` is the run's `TaskProcessOptions.reason` (the steer
   `task_place` appends, written before a live run is found, so a ship onto a
-  running Task steers it too). `AutoAsk::Person` is a unit variant.
+  running Task steers it too).
   `lf task auto off --reason` is a Task comment
   (`append_task_comment_async`, so it reaches the tracker); `set_task_auto`
   takes no note. `task.ship` has no `reason` field on the wire, so only
@@ -244,7 +244,7 @@ Shape, for gate's review:
 - The builtin `auto` Graph shares its name with the setting. Renaming it is
   its own Task.
 - Open, nobody has decided: whether `lf -b task run` should write auto on.
-- The auto setting lives in `ops/task/auto.rs` (`AutoAsk`, `ask`, `off`,
+- The auto setting lives in `ops/task/auto.rs` (`ask`, `off`,
   `running_graph`, and `ship_branch_task` for a branch with no Task).
   `commands/ship.rs` is gone: `lf ship` is a `carry_task_run` call in
   `bin/lf.rs` beside `lf task run`'s. Compress 2026-11-19: clippy clean;
@@ -262,9 +262,10 @@ Shape, for gate's review:
 ## Built: ship is a run that asks for auto
 
 Built 2026-11-19 (concept review, second pass). `lf ship` is `carry_task_run`
-with `TaskProcessOptions.auto = AutoAsk::Person`; `lf -b task run`
-sends `AutoAsk::Batch`. `start_task_run` (`ops/task.rs`) writes the ask once,
-after its own take-up (`auto::ask`).
+with `TaskProcessOptions.ship`; `-b` is the run's `TaskRunMode::Headless`,
+carried once. `start_task_run` (`ops/task.rs`) writes what either asks of auto
+once, after its own take-up (`auto::ask`). A Graph run derives "stops at
+interactive steps" from being a Task run with neither `-b` nor `-i`.
 
 - A person's ask on a Task waiting at an interactive step starts at that step
   (`select_task_run`'s `stands_in`); on a live run it turns auto on and

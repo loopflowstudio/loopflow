@@ -11,18 +11,7 @@ use loopflow_model::id::LfProcessId;
 use loopflow_storage::sqlite::{Auto, AutoState};
 use loopflow_storage::work::task::Task;
 
-use super::{block_on_task, task_error, task_store, SharedStore};
-
-/// Who asks a Task run for auto.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub enum AutoAsk {
-    #[default]
-    Nobody,
-    /// `lf -b task run`: on, unless someone turned it off.
-    Batch,
-    /// `lf ship`: on, lifting an off.
-    Person,
-}
+use super::{block_on_task, task_error, task_store, SharedStore, TaskRunMode};
 
 /// Who started a run: the Session whose agent started it, with the person
 /// named as in `repo`.
@@ -56,13 +45,18 @@ fn set(store: &SharedStore, task: &Task, state: AutoState, keeps_off: bool) -> O
     Ok(before.is_some_and(|before| before.state == AutoState::On))
 }
 
-/// Write what the run's request asks of auto, once the Task has its Graph.
-pub(super) fn ask(store: &SharedStore, task: &Task, ask: &AutoAsk) -> OpsResult<()> {
-    match ask {
-        AutoAsk::Nobody => Ok(()),
-        AutoAsk::Batch => set(store, task, AutoState::On, true).map(drop),
-        AutoAsk::Person => set(store, task, AutoState::On, false).map(drop),
+/// Write what the run asks of auto, once the Task has its Graph: `lf ship`
+/// turns it on, lifting an off; `-b` turns it on unless someone turned it off.
+pub(super) fn ask(
+    store: &SharedStore,
+    task: &Task,
+    ship: bool,
+    mode: TaskRunMode,
+) -> OpsResult<()> {
+    if ship || mode == TaskRunMode::Headless {
+        set(store, task, AutoState::On, !ship)?;
     }
+    Ok(())
 }
 
 /// How long `lf ship` waits for a run that just set out to register its Graph.

@@ -18,7 +18,7 @@ public struct TaskWork: Codable, Sendable, Equatable {
 public struct TaskExecution: Decodable, Sendable, Equatable {
     public let work: TaskWork
     public let startedBy: Starter?
-    /// On: the run stands in at interactive steps. Stopped: it waits at its
+    /// On: the run stands in at interactive steps. Off: it waits at its
     /// landing step until `lf ship`. `nil` when nobody set it.
     public let auto: Auto?
     /// The Task this one is stacked on; `nil` when it builds on the default branch.

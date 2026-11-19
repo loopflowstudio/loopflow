@@ -60,7 +60,6 @@ pub fn run(
         cli,
         repo,
         binding,
-        false,
         None,
     )
 }
@@ -86,9 +85,6 @@ pub fn run_task_graph(cli: &Cli, repo: &Path, binding: Option<&WorkBinding>) -> 
         "the Task's run is carried by another `lf task run`; read `lf task status`"
     );
     print_pipeline_header(&graph.name, &graph.steps);
-    // `-b` and `-i` run straight through: every step headless, or every step
-    // with the person in this terminal.
-    let stop_at_interactive = !cli.batch && !cli.interactive;
     execute(
         &graph.name,
         &graph.steps,
@@ -97,7 +93,6 @@ pub fn run_task_graph(cli: &Cli, repo: &Path, binding: Option<&WorkBinding>) -> 
         cli,
         repo,
         binding,
-        stop_at_interactive,
         Some(&carrier.id),
     )
 }
@@ -570,7 +565,6 @@ fn execute(
     cli: &Cli,
     repo: &Path,
     binding: Option<&WorkBinding>,
-    stop_at_interactive: bool,
     task_run: Option<&LfProcessId>,
 ) -> Result<()> {
     report_outcome(block_on(async {
@@ -595,7 +589,6 @@ fn execute(
             position: Mutex::new(start.clone()),
             task,
             task_run: task_run.cloned(),
-            stops_at_interactive: stop_at_interactive,
             interrupt,
         };
         // A project rotation moving this checkout's Task excludes new work in it.
@@ -838,9 +831,6 @@ struct RunningGraph<'a> {
     /// The `lf task run` this Graph carries its Task for: a stop keeps it from
     /// merging, and each checkpoint is where that run's next attempt sets out.
     task_run: Option<LfProcessId>,
-    /// A bare Task run: at each interactive step it stands in while auto
-    /// is on, and otherwise stops there for the person.
-    stops_at_interactive: bool,
     /// The Task's latest interrupt when its run began; a later one stops the Graph.
     interrupt: Option<i64>,
 }
@@ -928,18 +918,18 @@ impl RunningGraph<'_> {
     /// Whether this run stands in for the person at interactive `skill`, or
     /// stops before it (`None`). `-b` always stands in and `-i` runs it with
     /// the person here; a bare Task run reads auto as it gets there, so
-    /// turning it on mid-run counts.
+    /// turning it on mid-run counts. A Graph outside a Task run launches the
+    /// step as `lf skill` would.
     fn stands_in(&self, skill: &ConcreteSkill) -> Result<Option<bool>> {
         if !skill.interactive || self.launcher.interactive {
             return Ok(Some(false));
         }
-        if !self.stops_at_interactive {
-            return Ok(Some(self.launcher.batch));
+        if self.launcher.batch {
+            return Ok(Some(true));
         }
-        let task = self
-            .task
-            .as_ref()
-            .context("a run that stops at interactive steps carries a Task")?;
+        let Some(task) = self.task.as_ref().filter(|_| self.task_run.is_some()) else {
+            return Ok(Some(false));
+        };
         let on = self
             .store
             .sqlite
@@ -1491,7 +1481,6 @@ mod tests {
                 position: Mutex::new(ExecutionCursor::default()),
                 task: None,
                 task_run: None,
-                stops_at_interactive: false,
                 interrupt: None,
             };
             record_run(&running);
@@ -1575,7 +1564,6 @@ mod tests {
                 position: Mutex::new(ExecutionCursor::default()),
                 task: Some(task.id.clone()),
                 task_run: None,
-                stops_at_interactive: false,
                 interrupt: Some(
                     runtime
                         .block_on(fixture.store.latest_interrupt_id(&work))

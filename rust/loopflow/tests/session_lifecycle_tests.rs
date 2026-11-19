@@ -1333,7 +1333,7 @@ fn ensured_conversation_recovers_native_exit_before_history_is_published() {
 
 #[test]
 fn a_task_primary_is_one_of_its_own_conversations() {
-    let fixture = Fixture::new(false);
+    let fixture = Fixture::manual_conversations();
     let sole_path = fixture.repo.create_named_worktree("task-sole");
     let task = support::register_task_with_pr(
         fixture.home.path(),
@@ -1347,25 +1347,21 @@ fn a_task_primary_is_one_of_its_own_conversations() {
     support::register_sibling_task(&task, "INF-125", "task-empty", &empty_path);
     let converse = |checkout: &Path, opened_at: i64| -> String {
         let before = fixture.launches().len();
-        if opened_at == 3_000 {
-            let primary = fixture.session_row(&fixture.launches()[before - 1]).0;
-            fixture.db().execute(
-                "UPDATE agent_sessions SET agent_ended_at=1,agent_exit_code=137,last_started_at=NULL WHERE id=?1",
-                [primary],
-            ).unwrap();
-            let deadline = Instant::now() + Duration::from_secs(15);
-            while fixture.launches().len() == before {
-                assert!(Instant::now() < deadline, "watcher did not restart the primary");
-                std::thread::sleep(Duration::from_millis(20));
-            }
-        }
         let output = fixture
             .command(&LAUNCH)
             .current_dir(checkout)
             .output()
             .unwrap();
         assert!(output.status.success(), "{output:?}");
-        let session = fixture.session_row(&fixture.launches()[before]).0;
+        let launches = fixture.launches();
+        let [launch] = &launches[before..] else {
+            panic!(
+                "expected one launch for {}, got {:?}",
+                checkout.display(),
+                &launches[before..]
+            );
+        };
+        let session = fixture.session_row(launch).0;
         fixture
             .db()
             .execute(

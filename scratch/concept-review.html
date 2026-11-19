@@ -1,10 +1,4 @@
-<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<title>LOO-938 concept review — one plan at every size, as built</title>
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<style>
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>LOO-938 concept review, second pass</title><style>
 :root{--bg:#fbfaf7;--fg:#1d1c1a;--mute:#6b675f;--line:#dedad2;--card:#fff;--yes:#2f7d4f;--no:#b3402a;--prop:#2b5fb3;--propbg:#eaf1fc;--code:#f1eee8}
 @media (prefers-color-scheme:dark){:root{--bg:#161614;--fg:#ecebe6;--mute:#9b978d;--line:#34322e;--card:#1f1e1b;--yes:#6cc38f;--no:#ef8a72;--prop:#8db4ff;--propbg:#1c2638;--code:#26241f}}
 *{box-sizing:border-box}
@@ -31,131 +25,73 @@ th{font-weight:600}
 ol.q>li{margin:12px 0}
 ol.q ol{list-style:lower-alpha;margin-top:4px}
 .key{font-size:14px;color:var(--mute)}
-</style>
-</head>
-<body>
-<main>
+</style></head><body><main>
 <h1>Do the plan's concepts and the code's concepts line up?</h1>
-<p class="lede">Area taken: how a repository's plan is shared without Linear or Asana — the save, the stamp, the two carriers, when they run, what <code>lf repo tracker</code> says, claims, and what "this repository" means across clones. Taken whole because the branch replaces all of it. Reviewed 2026-11-18 at <code>3234477ab1</code> against base <code>e55f40bde0</code>, with all three slices built and QA's run (<code>scratch/qa.html</code>) as the record of what it does. The page this replaces reviewed the plan before anything was built; its three proposals were built and are marked below.</p>
-<p class="key">Blue marks what this review proposes. Everything else exists on the branch. The one proposal sent back to implement is in <code>scratch/plan.md</code> as slice 4.</p>
+<p class="lede">LOO-938, second review of the built branch, 2026-11-18 at <code>ba8cdb2646</code> against base <code>3496a8761d</code>, with slice 4, its compress and its QA (<code>scratch/qa.html</code>) in.</p>
+<p><b>Area taken:</b> how a repository's plan is shared without Linear or Asana: the save, the stamp, the two carriers, when they run, what <code>lf repo tracker</code> says, claims, clones. The same area as the first review, since the change replaces all of it. <span class="tagp">Blue</span> marks what this review proposes; everything else exists.</p>
 
 <h2>Answer</h2>
-<p><b>What the plan is lines up. When it travels does not.</b> A field, its stamp, a whole record, a cursor per carrier: each is one idea a person can say and one thing in the code. But "I saved; it goes out" has no owner. Seventeen call sites outside the carrier modules decide, each for itself, whether to tell the hub, Git, or both, and the person sees the result as rules they have to learn: a save from the CLI reaches the hub in a second and the remote in up to a minute; the same save from Desktop reaches both in two seconds.</p>
+<p>Mostly yes now. The first review's biggest mismatch, "I saved; it goes out" with no owner, is gone: two calls to <code>plan_carriers::send</code> follow every save, and nothing else sends after one. One piece of the replaced design is left. <code>lf task create</code> still <b>reads the hub before it saves</b>, the "pull before push" that the hub-owns-the-plan design needed and stamps made pointless. The save's own send then asks the hub again. People see it as QA's first "still wrong" item: with a hanging hub a create takes ten seconds, not five.</p>
 
 <h2>One interaction, walked</h2>
-<p>Laptop L and mini M share <code>origin</code>. No hub. On L: <code>lf task create 'x'</code>.</p>
+<p>Laptop L, hub mini, mini asleep (accepts, never answers). On L: <code>lf task create 'x'</code>.</p>
 <div class="cols">
-<div class="card">
-<h3>As built (QA, measured)</h3>
-<pre>L$ lf task create 'x'
-     save → stamps → plan_changes
-     sync_saved → plan_hub::sync(send_only)   no hub: nothing
+<div class="card"><h3>As built</h3><pre>L$ lf task create 'x'
+   plan_hub::read          wait 5 s, nothing
+   save → stamps → plan_changes
+   plan_carriers::send
+     hub: plan.apply + plan.changes   wait 5 s
+     git: push                        1 s
+   ≈ 10 s
 L$ lf repo tracker
-     Plan: Git origin, 1 unsent.
-     … L's server minute …            38 s
-     push refs/loopflow/plan/L
-     … M's server minute …            97 s
-M$ lf task list                       x</pre>
-<p class="mute">The same create sent to L's server socket (Desktop's path): pushed in 1.6 s, by <code>plan_carriers::after_command</code>.</p>
-</div>
-<div class="card p">
-<h3><span class="tagp">Proposed</span></h3>
-<pre>L$ lf task create 'x'
-     save → stamps → plan_changes
-     sync_saved → plan_carriers::send
-        hub:  records past its cursor, if a hub
-        Git:  records past its cursor → commit → push
+   Plan: Git origin.
+   Hub mini, unreachable since …, 1 unsent.</pre></div>
+<div class="card p"><h3 class="tagp">Proposed</h3><pre>L$ lf task create 'x'
+   save → stamps → plan_changes
+   plan_carriers::send
+     hub: plan.apply + plan.changes   wait 5 s
+     git: push                        1 s
+   ≈ 5 s
 L$ lf repo tracker
-     Plan: Git origin.
-     … M's server minute …            ≤ 60 s
-M$ lf task list                       x</pre>
-<p class="mute">A send does not fetch. Reading stays as it is: the hub when a command wants fresh, Git on the minute or when asked.</p>
+   (same two lines)</pre></div>
 </div>
-</div>
-
-<h3>Failure and recovery</h3>
-<table>
-<tr><th>Case</th><th>As built</th><th class="tagp">Proposed</th></tr>
-<tr><td>Offline save</td><td>Hub send fails, recorded on its line. Git untouched until the minute, then <code>unreachable since …</code>.</td><td>Both lines say so at once. The push is given five seconds (<code>WAIT</code>), the cursor does not move, the minute sends it later.</td></tr>
-<tr><td>The remote's own ref moved (no fetch before the push)</td><td>Cannot happen: every push follows a fetch.</td><td>The push is refused as not a fast-forward. Nothing is forced; the next full exchange fetches and publishes. Only a second store using this Machine's id does this.</td></tr>
-<tr><td>No server running</td><td>CLI saves never reach Git until <code>lf task sync</code>.</td><td>CLI saves push themselves. Other Machines' changes still wait for a server or <code>lf task sync</code>.</td></tr>
-<tr><td>A test fixture with a remote</td><td>Placing a Task pushes a plan ref to it (owed to gate already).</td><td>Every save does. A fixture whose <code>origin</code> is a real URL would reach for the network; the kept counterexample, in the plan for implement to check before it lands.</td></tr>
-</table>
+<p>The normal path loses one hub round trip per create. Recovery is the same: the record stays unsent to the hub until the next exchange. The counterexample checked: <code>lf task create --wave W</code> for a Wave made on mini a second ago. The read would have found W. Without it, the create says W is unknown and <code>lf task sync</code> (or the next read) brings it. Every other save already works this way.</p>
 
 <h2>Concepts, paired</h2>
 <table>
 <tr><th>What a person knows</th><th>What the code has</th><th>Lines up?</th></tr>
-<tr><td>The plan: Waves, Projects, Tasks, comments, backlog order</td><td><code>WorkValue</code>, <code>planning_write</code>, <code>StampedRecord</code></td><td class="y">yes</td></tr>
-<tr><td>"The later edit wins"</td><td><code>plan_stamps</code>; <code>planning_write::apply</code>, the one way in, called by the hub's import, <code>plan.apply</code> and the Git import</td><td class="y">yes</td></tr>
-<tr><td>"It has / has not reached origin, reached mini"</td><td><code>plan_changes</code> and <code>plan_carriers.sent_seq</code>; <code>CarrierStanding</code> on both lines, "unsent" for both</td><td class="y">yes — built from the first review</td></tr>
-<tr><td>"Each Machine holds the whole plan"</td><td><code>refs/loopflow/plan/&lt;machine&gt;</code>, one whole record per file; <code>plan_refs</code> for the tips read</td><td class="y">yes — built from the first review</td></tr>
-<tr><td>"I saved; it goes out"</td><td>No one function. <code>plan_hub::sync</code> is called from seven places outside the carriers, <code>plan_carriers::sync</code> from four, plus <code>after_command</code>, <code>before_claim</code>, <code>before_first_read</code>, the server's minute. Each picks its carriers.</td><td class="n">no — an action with no single owner. The biggest mismatch.</td></tr>
-<tr><td>"This repository"</td><td>A <code>RepositoryId</code> per clone; the ids other Machines use, kept as locators (<code>locate_repository</code>); a <code>repository</code> file in each ref; <code>lf config repo --bind</code> for a hub with no remote</td><td class="n">no — one thing, an id per clone and three ways to reconcile them. Larger than this work.</td></tr>
-<tr><td>A hub: "the Machine that is always on"</td><td><code>plan_carriers</code> row, <code>plan.apply</code> / <code>plan.changes</code>; decides nothing</td><td class="y">yes</td></tr>
-<tr><td>"The first claim holds"</td><td>Ownership entries inside marked comments, each with <code>order</code> and <code>seen</code>; a claim that had not seen the holder loses</td><td class="y">yes for the race.</td></tr>
-<tr><td>"…and <code>lf task run</code> on a Task a teammate holds"</td><td>Takes it over, as on main; their Sessions are told</td><td class="n">one word, two outcomes: not seeing a claim loses to it, seeing it takes it. Question 2.</td></tr>
-<tr><td><code>lf task sync LOO-12</code></td><td>With a tracker: publish that Task. Without: exchange the whole repository, then print <code>&lt;id&gt;: nothing unsent</code></td><td class="n">one name, two ideas; the id is required and unused. Question 3.</td></tr>
-<tr><td>"Runs on mini"</td><td>A teammate's Machine reads as <code>home_69e17dc1…</code>; names stay on the Machine that gave them</td><td class="n">a name the person knows that does not travel. Question 4.</td></tr>
-<tr><td><code>lf repo tracker</code> prints <code>Plan: Git origin.</code></td><td><code>TrackerStatus { tracker, plan, actions }</code></td><td class="n">the command is named for one of three answers. Larger than this work, unchanged from the first review.</td></tr>
-<tr><td>Linear / Asana: queued, sent, lost</td><td><code>tracker_actions</code>, untouched</td><td class="y">yes</td></tr>
+<tr><td>The plan</td><td><code>planning_write</code>, <code>StampedRecord</code></td><td class="y">yes</td></tr>
+<tr><td>"The later edit wins"</td><td><code>plan_stamps</code>, <code>planning_write::apply</code></td><td class="y">yes</td></tr>
+<tr><td>"It has / hasn't reached origin, mini"</td><td><code>plan_carriers.sent_seq</code>, <code>CarrierStanding</code></td><td class="y">yes</td></tr>
+<tr><td>"Each Machine holds the whole plan"</td><td><code>refs/loopflow/plan/&lt;machine&gt;</code>, <code>plan_refs</code></td><td class="y">yes</td></tr>
+<tr><td>"I saved; it goes out"</td><td><code>plan_carriers::send</code>, called from <code>planning_sync::sync_saved</code> and <code>machine/task.rs</code></td><td class="y">yes, built in slice 4</td></tr>
+<tr><td>"Saving waits five seconds at most"</td><td><code>WAIT</code> per wait; a create waits on a hub read and then on the send</td><td class="n">no: one promise with two waits behind it. The read before a create is the extra one. <span class="tagp">Delete it (slice 5).</span> A claim's exchange then its send stays two waits, since the claim needs the read.</td></tr>
+<tr><td>A read nobody asked for</td><td><code>plan_hub::read</code>: provider exit, <code>--subscribe</code>, <span class="tagp">and no longer</span> before or after a create</td><td class="y">yes once the create's go</td></tr>
+<tr><td>"The first claim holds"</td><td>ownership entries with <code>order</code>, <code>seen</code>; <code>before_claim</code></td><td class="y">yes</td></tr>
+<tr><td>The server's minute</td><td><code>plan_git::exchange_all</code> from <code>server/maintenance.rs</code></td><td class="y">yes: Git only, by design; the hub is read on demand</td></tr>
+<tr><td>"This repository"</td><td>id per clone, locators, <code>--bind</code></td><td class="n">no: larger than this work, as the first review said</td></tr>
+<tr><td>"Runs on mini" for a teammate</td><td>Machine id shown</td><td class="n">no: question 4 of the first review, still open</td></tr>
+<tr><td><code>lf task sync LOO-12</code> without a tracker</td><td>exchanges the whole repository; the id is unused</td><td class="n">no: question 3, still open</td></tr>
 </table>
 
-<h2>The biggest mismatch: who sends a save</h2>
+<h2>The biggest mismatch: a read the stamps made pointless</h2>
 <div class="cols">
-<div class="card">
-<h3>Before</h3>
-<p>The first review made both carriers one shape in storage. The scheduling kept the hub's old call sites and added Git's beside them. So the rule a person would have to learn is a table:</p>
-<pre>                     hub        Git
-CLI save             now        server's minute
-served save          5 s quiet  5 s quiet
-lf task sync         now        now
-claim / place        now        now
-provider exit        read       —
---subscribe          read       —
-no server            now        never</pre>
-<p class="mute"><code>docs/work.md</code> had to be loosened to "within a couple of minutes" after QA; the plan's own "What people see" says a minute.</p>
+<div class="card"><h3>Before</h3><p><code>task_create</code> and <code>sync_admitted</code> (<code>ops/task.rs</code>) call <code>plan_hub::read</code> around the save. On base, that slot fetched the Git journal so a save would not clobber newer values. With stamps, a newer value wins wherever it lands, and the send after the save already reads <code>plan.changes</code> (<code>plan_hub::exchange</code> always reads when something is unsent, and after a create something is).</p></div>
+<div class="card p"><h3 class="tagp">After</h3><p>Both calls go. A create is one save and one send, like every other save. The worst case drops from about ten seconds to five, and "a save waits five seconds at most" becomes true for creates. The plan's "reads nobody asked for" list loses "before a create".</p></div>
 </div>
-<div class="card p">
-<h3><span class="tagp">After</span></h3>
-<p>Two verbs in <code>ops/plan_carriers.rs</code>, and nothing outside it names a carrier to send by.</p>
-<pre>send(repo)   after a save: each carrier takes the
-             records past its cursor. No read.
-sync(repo)   when asked, before a claim, on the
-             minute: read and send, each carrier.</pre>
-<p>The table becomes one line: a save goes out by every carrier the repository has, whichever door it came through. Reads that nobody asked for still use the hub only, because a hub read is one request and a fetch is not; that distinction has a reason a person can feel.</p>
-</div>
-</div>
-<div class="prop"><b class="tag">Why this one.</b> It is the plan's second difference from the design ("one shape for both carriers") carried to the place it stopped. It removes a row of QA's "still wrong" list and lets the docs say what the plan promised. Passed over: a CLI save asking the running server to exchange (a new wire operation, and nothing happens with no server); shortening the minute (a fetch per repository per interval for everyone, to fix a push); leaving it and documenting two minutes.</div>
+<p class="mute">Passed over: one deadline for the whole command, passed down from the command. It also fixes the claim's two waits, but it is new plumbing for every caller. Deleting the read fixes creates with less code.</p>
 
 <h2>Checked and left alone</h2>
 <table>
 <tr><th>Looked like a mismatch</th><th>Why it stays</th></tr>
-<tr><td>An ownership entry has its own <code>order</code> beside the plan's stamp: two clocks.</td><td>The entry travels with a move before its comment does and has to sort the same on arrival. <code>order</code> is drawn from the plan clock, so it is one clock read in two places.</td></tr>
-<tr><td>A Git arrival is owed back to the hub and to this Machine's own ref; a hub arrival is not owed back to the hub.</td><td>Follows from whole-plan refs: what a Machine holds, it publishes. The exchange stops because an arrival that changes nothing bumps nothing.</td></tr>
-<tr><td>Clones keep their own repository id instead of converging.</td><td>QA showed converging hid every Task saved under the first id. The id is a local name for a checkout now; that is the honest reading, and the mismatch above is what remains.</td></tr>
-<tr><td><code>plan_stamps</code>, <code>plan_changes</code>, <code>plan_carriers</code>, <code>plan_refs</code>: four tables.</td><td>When a field was written, what changed here last, how far each carrier got, what was read from each ref. None derives from another.</td></tr>
+<tr><td><code>session_move</code> calls <code>plan_hub::sync</code> by name</td><td>A cold move to the hub sends the plan to the target first; it is about the hub as the target Machine, not as a carrier.</td></tr>
+<tr><td><code>lf task sync</code> is unbounded and silent</td><td>Someone asked for it. Printing progress is polish; noted in questions.</td></tr>
+<tr><td>A served read of a fresh clone answers empty once</td><td>Right on the next read; documented in <code>docs/dev/planning.md</code>.</td></tr>
 </table>
-
-<h2>Larger than this work</h2>
-<ul>
-<li><b>Repository identity.</b> A person means the remote. The code mints an id per clone, then learns the others' from plan refs, and a hub is asked by an id it may not have seen yet: "no checkout" for up to a minute, and an error that tells the person to <code>--bind</code> although the docs say a remote needs none. A second clone of one remote on one Machine shows an empty plan. An identity every clone can compute alone (the repository's root commit, say) would remove locators, the <code>repository</code> file and <code>--bind</code>. It means re-keying <code>tasks.repository_id</code> for every store, which is its own Task.</li>
-<li><b><code>lf repo tracker</code></b> reports where the plan is shared; only one of its three answers is a tracker.</li>
-<li><b>Ref history only grows</b>, and no command deletes a gone Machine's ref.</li>
-</ul>
 
 <h2>Questions</h2>
 <ol class="q">
-<li>A save made by the CLI.
-<ol><li>Pushes its own records by Git as it already sends them to the hub, as proposed (slice 4).</li><li>Asks the running server to exchange; nothing without a server.</li><li>Stays on the server's minute; the docs say two minutes.</li></ol></li>
-<li><code>lf task run</code> on a Task a teammate holds, seen.
-<ol><li>Takes it over and tells their Sessions, as on main and as built.</li><li>Refuses and names the holder; <code>lf task claim</code> is how you take it.</li></ol></li>
-<li><code>lf task sync</code> without a tracker.
-<ol><li>As built: needs a Task id, prints <code>&lt;id&gt;: nothing unsent</code>.</li><li>Takes no id and prints the <code>lf repo tracker</code> lines.</li></ol></li>
-<li>A teammate's Machine in <code>lf task list</code>.
-<ol><li>Its id, as built; names stay private to the Machine that gave them.</li><li>Each plan ref carries the name its Machine gives itself, so everyone who can fetch reads "mini".</li></ol></li>
-<li>Repository identity.
-<ol><li>Leave it: an id per clone, locators, <code>--bind</code> for a hub with no remote.</li><li>File a Task for an identity every clone computes alone.</li></ol></li>
+<li>The hub read before <code>lf task create</code>.<ol><li>Delete it, as proposed (slice 5). A <code>--wave</code> made elsewhere a second ago needs <code>lf task sync</code>.</li><li>Keep it, and give the command one five-second deadline across the read and the send.</li></ol></li>
+<li>The first review's questions 2 to 5 (<code>lf task run</code> on a teammate's Task, <code>lf task sync</code> without a tracker, teammates' Machine names, repository identity) still stand as built; see the plan's QA notes.</li>
 </ol>
-</main>
-</body>
-</html>
+</main></body></html>

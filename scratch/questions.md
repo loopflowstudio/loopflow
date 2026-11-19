@@ -145,3 +145,8 @@ Still open from before:
   - `lf task sync` and a move's hub exchange stay unbounded (120 s per hub
     answer, SSH's own limits for Git), since someone asked for them. They
     print nothing while they wait.
+
+- Second concept review (2026-11-18): the hub read before and after
+  `lf task create` goes (plan slice 5). Reversible. A `--wave` made on
+  another Machine seconds earlier then needs `lf task sync` first.
+  `lf task sync` still prints nothing while it waits; left as is.

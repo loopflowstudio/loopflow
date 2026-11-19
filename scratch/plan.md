@@ -188,8 +188,8 @@ carriers' timing.
 
 One server task runs the Git exchange for every repository without Linear or
 Asana that has a remote, every 60 s; that is how another Machine's change
-arrives with no hub. Reads nobody asked for (before a create, a provider
-exit, `lf repo tracker --subscribe`) read the hub only: a hub read is one
+arrives with no hub. Reads nobody asked for (a provider exit,
+`lf repo tracker --subscribe`) read the hub only: a hub read is one
 request and a fetch is not. With no server, saves still go out by both
 carriers and other Machines' changes wait for `lf task sync`. *Made for
 review:* 60 s, one `git fetch` per repository per minute, no setting.
@@ -484,6 +484,22 @@ etude checkout and `lf` version are unknown.
      test asserted `unsent` right after a create; it now asserts the ref is on
      the remote, and the unsent list by identifier on the refused push.
 
+5. **A create is one save and one send.** *To build* (second concept review,
+   `scratch/concept-review.html`). Delete the `plan_hub::read` calls in
+   `ops/task.rs` `task_create` (before the save) and `sync_admitted` (after
+   it). They are the hub-owns design's pull before push, and stamps don't need
+   them: the send after the save already reads `plan.changes`, since after a
+   create something is always unsent. Result: with a hub that never answers,
+   `lf task create` returns in about 5 s, not 10 (QA's first "still wrong"
+   item), and a create makes one hub round trip, not two. Kept counterexample:
+   `--wave W` for a Wave made elsewhere seconds ago fails until `lf task sync`,
+   like every other lookup of something not yet arrived. Update
+   `docs/dev/planning.md` and `.lf/qa/tracker.md` where they describe the read
+   before a create. Check: the acceptance test, `ops::task::tests::`, and
+   by hand the hanging-hub create from `.lf/qa/tracker.md` (expect about 5 s).
+   *Passed over:* one deadline per command passed down from the command; it
+   would also cover the claim's two waits, but it adds plumbing to every caller.
+
 ## Checks
 
 - Slice 1, run by implement, passed 2026-11-18:
@@ -593,8 +609,8 @@ etude checkout and `lf` version are unknown.
   `of_two_claims_made_apart_…` failed as written since slice 4: Ada's claim is
   pushed with the save, so Grace's claim saw it and took over. It now cuts
   Grace's remote while she claims, and passes (11 s).
-- Nothing remains to build: all four slices are in the code and the four
-  differences at the top hold in it. Etude's cutover is by hand, after
+- Slices 1 to 4 are in the code and the four differences at the top hold
+  in it. Slice 5 remains. Etude's cutover is by hand, after
   release.
 - Next: gate runs the lists above. Open choices are in
   `scratch/questions.md`; the review's five questions are at the end of

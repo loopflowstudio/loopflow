@@ -210,7 +210,10 @@ Stored and wire value is `off` (`AutoState::Off`, `task_graph_auto.sql`,
 Run 2026-11-19: `task_graph_launch_tests::{auto_o,a_ship,task_ship,a_stopped_ship}`
 15 passed; storage `sqlite::task_work sqlite::task_summaries` 7 passed;
 execution `task_graph:: ops::task::explain::tests:: store::task_work_lifecycle_tests`
-14 passed; `golden_prompt` passed.
+14 passed; `golden_prompt` passed; `server::schema::tests:: lf::tests::
+lf::commands::write::tests::` with the two auto-off fixtures, 51 passed;
+`dto_fixtures::` 50 passed; `documented_commands::` 4 passed; clippy clean.
+Swift not built since `Auto.State.off`. Gate/CI.
 
 ## To build: the Task run takes the conversation's outlook type
 
@@ -225,7 +228,7 @@ run's own sentence maker beside the conversation's `SessionOutlook`
 - "no server runs here" applies to the run as it does to a conversation.
 - The three run sentences use the conversation's words: clock time,
   "starting again", no "pass".
-- DTO fixtures, Swift and `SCHEMA`-free: no stored change expected.
+- DTO fixtures and Swift follow; no stored change is expected.
 
 Not started. If it proves a separate outcome once opened, file it as its own
 Task instead.

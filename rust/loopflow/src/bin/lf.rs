@@ -17,6 +17,7 @@ use loopflow_execution::definition::DefinitionKind;
 use loopflow_execution::journal::{self, with_runtime, LfEventFields, LfEventType, LfNode};
 
 use loopflow_execution::ops::project::update_project;
+use loopflow_execution::ops::task::auto::AutoAsk;
 use loopflow_execution::store::planning_sync::LostAnswer;
 
 #[derive(Clone, Default)]
@@ -2720,7 +2721,7 @@ fn dispatch_here(
                 Some(task) => task,
                 // Shipping a branch with no Task first gives it one.
                 None if matches!(&cli.command, Some(Commands::Ship { .. })) => {
-                    let task = loopflow_execution::ops::task::ship::ship_branch_task(
+                    let task = loopflow_execution::ops::task::auto::ship_branch_task(
                         &loopflow_execution::repo::working_directory()?,
                         cli.wave.as_deref(),
                     )?;
@@ -2853,9 +2854,9 @@ fn dispatch_here(
                 branch: None,
                 from_last_fetch: false,
                 auto: if cli.batch {
-                    loopflow_execution::ops::task::ship::AutoAsk::Batch
+                    AutoAsk::Batch
                 } else {
-                    loopflow_execution::ops::task::ship::AutoAsk::Nobody
+                    AutoAsk::Nobody
                 },
             },
             *json || cli.json,
@@ -2872,12 +2873,21 @@ fn dispatch_here(
         let issue = cli.task.clone().context("No Task selected")?;
         let directory = loopflow_execution::repo::working_directory()?;
         let repo = selected_task_repository(&cli, &directory, Some(&issue))?;
-        return loopflow::lf::commands::ship::run(
+        // `lf ship`, spelled `lf task auto on` too: the Task's run, asked for
+        // auto. It stands in at each interactive step because auto is on, not
+        // because of how it was launched.
+        return loopflow::lf::commands::graph::carry_task_run(
             &cli,
             &repo,
             &issue,
-            graph.as_deref(),
-            reason.as_deref(),
+            loopflow_execution::ops::task::TaskProcessOptions {
+                wave: cli.wave.clone(),
+                graph: graph.clone(),
+                auto: AutoAsk::Person {
+                    note: reason.clone(),
+                },
+                ..Default::default()
+            },
             *json,
         );
     }

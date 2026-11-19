@@ -81,16 +81,12 @@ pub struct TaskDetail {
 /// What `lf task status` adds to a Task's state line: " · auto: on by Maya, Nov 18 09:04".
 pub fn auto_phrase(auto: &loopflow_storage::sqlite::Auto) -> String {
     use loopflow_storage::process::Starter;
-    use loopflow_storage::sqlite::AutoState;
     // A mark an earlier lf wrote may name nobody.
     let by = match &auto.by {
         Starter::Person { name: None } => String::new(),
         by => format!(" by {by}"),
     };
-    let state = match auto.state {
-        AutoState::On => "on",
-        AutoState::Off => "off",
-    };
+    let state = auto.state.as_str();
     let at = loopflow_execution::output::format_time(auto.at);
     format!(" · auto: {state}{by}, {at}")
 }

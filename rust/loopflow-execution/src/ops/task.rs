@@ -43,9 +43,9 @@ use snapshot::{
     validate_task_relative_path,
 };
 pub use snapshot::{task_changes, task_diff, task_file, task_snapshot, MAX_FILE_BYTES};
+pub mod auto;
 mod file_save;
 pub mod run_recovery;
-pub mod ship;
 pub use directory::{task_files, TaskDirectory, TaskFileEntry, TaskFileKind};
 pub use file_save::{task_save, TaskFileRecovery, TaskFileSave};
 
@@ -106,7 +106,7 @@ pub struct TaskProcessOptions {
     /// network: the caller exchanges planning and the assignee afterwards.
     pub from_last_fetch: bool,
     /// Who asks the run for auto.
-    pub auto: ship::AutoAsk,
+    pub auto: auto::AutoAsk,
 }
 
 impl TaskProcessOptions {
@@ -894,7 +894,7 @@ async fn start_task_run(
     requested: Option<&str>,
     from: Option<&str>,
     mode: TaskRunMode,
-    ask: &ship::AutoAsk,
+    ask: &auto::AutoAsk,
     merges: fn(&[String]) -> bool,
 ) -> OpsResult<TaskRunStart> {
     loop {
@@ -913,10 +913,10 @@ async fn try_start_task_run(
     requested: Option<&str>,
     from: Option<&str>,
     mode: TaskRunMode,
-    ask: &ship::AutoAsk,
+    ask: &auto::AutoAsk,
     merges: fn(&[String]) -> bool,
 ) -> OpsResult<Option<TaskRunStart>> {
-    let person = matches!(ask, ship::AutoAsk::Person { .. });
+    let person = matches!(ask, auto::AutoAsk::Person { .. });
     let standing = crate::store::task_work::task_graph_row(&store.sqlite, &task.id)
         .map_err(task_error)?
         .filter(|row| person && requested.is_none_or(|name| name == row.graph.name));
@@ -926,8 +926,8 @@ async fn try_start_task_run(
         Some((row, Some((cursor, carrier))))
             if crate::store::task_work::carrier_may_run(carrier) =>
         {
-            if let Some(graph_process) = ship::running_graph(store, task, &carrier.id).await? {
-                ship::ask(store, task, ask)?;
+            if let Some(graph_process) = auto::running_graph(store, task, &carrier.id).await? {
+                auto::ask(store, task, ask)?;
                 let at = row.graph.step_name_of(cursor);
                 return Ok(Some(TaskRunStart::Live {
                     run: format!(
@@ -982,7 +982,7 @@ async fn try_start_task_run(
             return Ok(None);
         }
     }
-    ship::ask(store, task, ask)?;
+    auto::ask(store, task, ask)?;
     // Auto on runs through the interactive steps, standing in at each;
     // off, no run merges.
     let (on, merges) = match store

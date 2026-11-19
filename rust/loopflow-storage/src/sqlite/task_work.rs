@@ -294,7 +294,8 @@ pub enum AutoState {
 }
 
 impl AutoState {
-    pub(super) fn as_str(self) -> &'static str {
+    /// The word people type and the store keeps: `on` or `off`.
+    pub fn as_str(self) -> &'static str {
         match self {
             Self::On => "on",
             Self::Off => "off",
@@ -876,13 +877,10 @@ impl SqliteStore {
             return Ok(None);
         }
         if before.as_ref().map(|before| before.state) != Some(mark.state) {
-            let what = match mark.state {
-                AutoState::On => "auto on",
-                AutoState::Off => "auto off",
-            };
+            let what = mark.state.as_str();
             let summary = match note {
-                Some(note) => format!("{what}: {}: {note}", mark.by),
-                None => format!("{what}: {}", mark.by),
+                Some(note) => format!("auto {what}: {}: {note}", mark.by),
+                None => format!("auto {what}: {}", mark.by),
             };
             super::children::insert_task_event_in(
                 &tx,

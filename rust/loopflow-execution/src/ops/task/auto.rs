@@ -24,14 +24,6 @@ pub enum AutoAsk {
     Person { note: Option<String> },
 }
 
-async fn task_by_issue(store: &SharedStore, issue: &str) -> OpsResult<Task> {
-    store
-        .get_task_by_issue(issue)
-        .await
-        .map_err(task_error)?
-        .ok_or_else(|| task_error(format!("no Task exists for {issue:?}")))
-}
-
 /// Who started a run: the Session whose agent started it, with the person
 /// named as in `repo`.
 pub fn starter(
@@ -125,10 +117,14 @@ pub(super) async fn running_graph(
 /// Loopflow armed on GitHub. Nothing is killed: the run carries on to its next
 /// interactive step or merging step and waits there, until auto is on again.
 /// Returns whether auto was on.
-pub fn auto_off(issue: &str, note: Option<&str>) -> OpsResult<bool> {
+pub fn off(issue: &str, note: Option<&str>) -> OpsResult<bool> {
     let (task, was_on) = block_on_task(async {
         let store = task_store().await?;
-        let task = task_by_issue(&store, issue).await?;
+        let task = store
+            .get_task_by_issue(issue)
+            .await
+            .map_err(task_error)?
+            .ok_or_else(|| task_error(format!("no Task exists for {issue:?}")))?;
         let was_on = set(&store, &task, AutoState::Off, false, note)?;
         Ok((task, was_on))
     })?;

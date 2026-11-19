@@ -130,7 +130,7 @@ pub(super) async fn read_task_snapshot(store: &SharedStore, task: Task) -> OpsRe
     });
     let completion_pending = completion_pending(store, &task)?;
     let starter = |session: Option<&loopflow_model::id::LfSessionId>| {
-        super::ship::starter(&store.sqlite, &repo, session).map_err(task_error)
+        super::auto::starter(&store.sqlite, &repo, session).map_err(task_error)
     };
     let started_by = store
         .sqlite

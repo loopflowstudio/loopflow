@@ -335,7 +335,15 @@ pub fn carry_task_run(
         loopflow_execution::ops::task::prepare_conversation_beside(&task);
     }
     let issue = task.identifier.clone();
-    let announce = |run: &TaskRun| announce_run(run, json);
+    let announce = |run: &TaskRun| -> Result<()> {
+        loopflow_execution::engine::launch::report(Ok(run));
+        if json {
+            println!("{}", serde_json::to_string(run)?);
+        } else if let Some(text) = run.render() {
+            println!("{text}");
+        }
+        Ok(())
+    };
     let (step, merges) = match start {
         TaskRunStart::Run {
             step,
@@ -373,17 +381,6 @@ pub fn carry_task_run(
         })
     })?;
     Ok(loopflow_execution::ops::task::task_run_finished(&task)?)
-}
-
-/// Report what a Task run set out to do to its launcher, and print it.
-pub fn announce_run(run: &loopflow_execution::engine::task::TaskRun, json: bool) -> Result<()> {
-    loopflow_execution::engine::launch::report(Ok(run));
-    if json {
-        println!("{}", serde_json::to_string(run)?);
-    } else if let Some(text) = run.render() {
-        println!("{text}");
-    }
-    Ok(())
 }
 
 /// Whether a Graph process ended on a signal people and lf send to stop one:

@@ -181,9 +181,12 @@ Shape, for gate's review:
 - The builtin `auto` Graph shares its name with the setting. Renaming it is
   its own Task.
 - Open, nobody has decided: whether `lf -b task run` should write auto on.
-- `ops/task/ship.rs` now holds the auto setting (`AutoAsk`, `set`,
-  `auto_off`) and one ship-only function, `ship_branch_task`. `auto.rs` would
-  name what it is.
+- The auto setting lives in `ops/task/auto.rs` (`AutoAsk`, `ask`, `off`,
+  `running_graph`, and `ship_branch_task` for a branch with no Task).
+  `commands/ship.rs` is gone: `lf ship` is a `carry_task_run` call in
+  `bin/lf.rs` beside `lf task run`'s. Compress 2026-11-19: clippy clean;
+  storage `sqlite::task_work` 6 passed; `loopflow --lib lf::tests
+  task_graph_launch_tests::auto_o …::a_ship_on_a_running` 42 passed.
 - `TaskExecutionSnapshot.outlook` is on the wire and decoded in Swift, and
   no surface reads it: CLI and Desktop print `reason`. Either Desktop uses it
   the way it uses a conversation's outlook, or the field goes and `died` plus

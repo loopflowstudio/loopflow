@@ -380,7 +380,7 @@ Plan: Git origin, 3 not taken.
 
 ```bash
 lf wave rename design design-site     # on either Machine
-lf task sync 3e1c9a                   # then on both: each takes the other's Wave, Projects and Tasks
+lf task sync 3e1c9a                   # on the other: each now holds both Waves, their Projects and Tasks
 ```
 
 The plan is as private as the repository. Anyone who can fetch it can read the

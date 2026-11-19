@@ -284,7 +284,8 @@ nothing.
 **When they run.** `ops/plan_carriers.rs` has two verbs. `send` follows every
 save, from the CLI or the server: the hub takes the records past its cursor and
 Git pushes this Machine's ref as last fetched, with no fetch, both within five
-seconds. A push that fails, runs out of time or is refused (the remote's copy
+seconds. While Git holds something not taken the save fetches and reads as
+well, since the save may be the rename that lets it arrive. A push that fails, runs out of time or is refused (the remote's copy
 of the ref is ahead of the one fetched) leaves its records unsent. `sync` reads
 and sends by each carrier: `lf task sync`, `lf wave status --sync`, before a
 claim, before `lf wave create` or `lf task create --wave` makes a Wave (five

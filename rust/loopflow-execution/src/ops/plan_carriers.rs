@@ -1,6 +1,6 @@
 //! A plan without Linear or Asana travels by a hub ([`super::plan_hub`]), a
 //! Git remote ([`super::plan_git`]) or both. This is when the two run
-//! together. [`send`] follows a save and reads nothing. [`sync`] reads and
+//! together. [`send`] follows a save and reads only what was not taken. [`sync`] reads and
 //! sends: when asked, before a claim or a new Wave, and after a command the
 //! Machine server
 //! answers. [`read`] asks the hub alone, for a read nobody asked for.
@@ -62,7 +62,8 @@ pub(super) async fn on_thread(
 }
 
 /// After a save in `repo`, which has no Linear or Asana: each carrier takes
-/// the records past its cursor and reads nothing, the two at once and for
+/// the records past its cursor and reads only while something it brought was
+/// not taken, the two at once and for
 /// [`WAIT`] at most. A carrier that fails or runs out of time keeps its
 /// records unsent for the next [`sync`]; the first failure is returned.
 pub(crate) async fn send(store: &crate::store::Store, repo: &str) -> Result<()> {

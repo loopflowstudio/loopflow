@@ -2472,11 +2472,15 @@
           ]
         },
         "not_taken": {
-          "description": "What the carrier's last read brought that this Machine could not\nwrite, and reads again at each exchange: `3 not taken: wave design\nfrom mini …`, the count, then why the first was not. `null` when it\ntook everything.",
-          "type": [
-            "string",
-            "null"
-          ]
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NotTaken"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "What the carrier's last read brought that this Machine could not\nwrite, and reads again at each exchange. `null` when it took\neverything."
         },
         "records": {
           "description": "The first of them in change order: a Task's identifier, `wave <name>`,\n`project <name>` or `comment <id>`.",
@@ -3312,11 +3316,15 @@
           "type": "string"
         },
         "not_taken": {
-          "description": "What the carrier's last read brought that this Machine could not\nwrite, and reads again at each exchange: `3 not taken: wave design\nfrom mini …`, the count, then why the first was not. `null` when it\ntook everything.",
-          "type": [
-            "string",
-            "null"
-          ]
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NotTaken"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "What the carrier's last read brought that this Machine could not\nwrite, and reads again at each exchange. `null` when it took\neverything."
         },
         "records": {
           "description": "The first of them in change order: a Task's identifier, `wave <name>`,\n`project <name>` or `comment <id>`.",
@@ -4728,6 +4736,25 @@
         "external"
       ],
       "type": "string"
+    },
+    "NotTaken": {
+      "properties": {
+        "count": {
+          "description": "How many records.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "reason": {
+          "description": "Why the first was not, and what to do about it when something can be\ndone: `wave design from mini has the name of a Wave here; …`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "count",
+        "reason"
+      ],
+      "type": "object"
     },
     "Observation": {
       "description": "Freshness of the GitHub observation behind the Task's returned PR state.\nThe durable attempt metadata lives on `TaskPr`; this derived view tells one\ncaller whether it read GitHub, reused a recent reading, or opened a degraded\ncircuit while preserving the cached PR fields.",

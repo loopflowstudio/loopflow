@@ -50,8 +50,9 @@ CREATE INDEX plan_stamps_at ON plan_stamps(at);
 -- `plan_carriers`: one row per repository and way its plan travels. `sent_seq`
 -- is how far into this Machine's `plan_changes` the carrier has taken, so the
 -- records past it are unsent; `seen_seq` is a hub's own watermark read to.
--- `not_taken` is what the carrier's last read brought and this Machine could
--- not write, as the line a person reads; NULL when it took everything.
+-- `not_taken` counts the records the carrier's last read brought and this
+-- Machine could not write, and `not_taken_reason` says why the first was not;
+-- both NULL when it took everything.
 CREATE TABLE plan_carriers (
     repo TEXT NOT NULL,
     carrier TEXT NOT NULL CHECK(carrier IN ('git','hub')),
@@ -60,7 +61,8 @@ CREATE TABLE plan_carriers (
     seen_seq INTEGER,
     error TEXT,
     failing_since INTEGER,
-    not_taken TEXT,
+    not_taken INTEGER,
+    not_taken_reason TEXT,
     PRIMARY KEY(repo,carrier)
 ) WITHOUT ROWID;
 
@@ -70,7 +72,8 @@ CREATE TRIGGER store_revision_plan_carriers_update AFTER UPDATE ON plan_carriers
 WHEN NEW.repo IS NOT OLD.repo OR NEW.carrier IS NOT OLD.carrier OR
     NEW.peer IS NOT OLD.peer OR NEW.sent_seq IS NOT OLD.sent_seq OR
     NEW.seen_seq IS NOT OLD.seen_seq OR NEW.error IS NOT OLD.error OR
-    NEW.failing_since IS NOT OLD.failing_since OR NEW.not_taken IS NOT OLD.not_taken
+    NEW.failing_since IS NOT OLD.failing_since OR NEW.not_taken IS NOT OLD.not_taken OR
+    NEW.not_taken_reason IS NOT OLD.not_taken_reason
 BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
 CREATE TRIGGER store_revision_plan_carriers_delete AFTER DELETE ON plan_carriers
 BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;

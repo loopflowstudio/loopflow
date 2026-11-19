@@ -117,8 +117,9 @@ after the cutover below the Machines agree on every value anyway.
   `sent_seq`: how far into this Machine's `plan_changes` the carrier has
   taken. `seen_seq`: the hub's `plan_changes` watermark (NULL for Git).
   `peer`: the remote name or the hub's machine id.
-  `not_taken`: what the carrier's last read could not write here, as the
-  text the line shows, NULL when it took everything. A read sets and clears
+  `not_taken`, `not_taken_reason`: how many records the carrier's last read
+  could not write here and why the first was not, NULL when it took
+  everything. A read sets and clears
   it; a send leaves it alone. It replaces `hub_plans`,
   `hub_sends` and their triggers; it keeps the `store_revision_*` triggers so
   views see the lines change.
@@ -229,7 +230,7 @@ review:* 60 s, one `git fetch` per repository per minute, no setting.
 - `lf repo tracker` text and `--json`: `plan: {git: {remote, unsent,
   error, failing_since} | null, hub: {machine, unsent, error,
   failing_since} | null}`, with the unsent records listed under each line by
-  identifier. Each carrier has `not_taken: string | null` beside
+  identifier. Each carrier has `not_taken: {count, reason} | null` beside
   `error`. The per-field `queued` lines go. DTO fixture
   `tests/fixtures/dto/tracker_sync.json`, Rust and Swift fixture tests.
 - Desktop `RepositoryPlanView` / `RepositoryPlan.swift`: the same two lines.
@@ -755,13 +756,17 @@ etude checkout and `lf` version are unknown.
   `test(performance_tests::)`, `binary(session_lifecycle_tests)`,
   `of_two_claims_made_apart_…`.
 - Slice 6 is built and differences 1 to 5 at the top hold in the code;
-  nothing in the plan is unbuilt. Gate runs the lists above. One thing for
-  compress, found reading slice 6 as a reviewer: `not_taken` is one string,
-  `3 not taken: <why>`, that `print_carrier` (`lf/commands/tracker.rs`) and
-  `CarrierStanding.notTakenParts` (`RepositoryPlan.swift`) each split on
-  `": "` to put the count on the line and the reason under it. Two parsers
-  of a sentence; a reason holding `": "` earlier than expected cannot break
-  it (the count comes first), but the wire could carry the count and the
-  reason as two values and neither client would parse. Costs the column
-  (two, or the count derived), the DTO fixture and both fixture tests. Open choices are in `scratch/questions.md`; the review's four
+  nothing in the plan is unbuilt. Gate runs the lists above.
+- Compress after slice 6, 2026-11-18: not taken is a count and a reason
+  everywhere, not a sentence two clients split on `": "`. `plan_carriers` has
+  `not_taken INTEGER` and `not_taken_reason TEXT`; `--json` carries
+  `not_taken: {count, reason} | null`; storage's `NotTaken` is also the
+  exchange's error (execution's wrapper is gone) and the per-record type is
+  `Skipped`. Passed: clippy on the three crates;
+  `cargo nextest run -p loopflow -p loopflow-storage -p loopflow-execution --lib --test integration -E 'test(sqlite::plan_carriers::) | test(ops::plan_git::) | test(server::schema::tests::) | test(planning_update_triggers_compare_every_column) | test(subscribe_frames_carry_each_reads_json_result) | test(revisions::)'`
+  (36); `scripts/test_desktop.sh --filter 'DTOFixtureTests|WorkModelTests'`
+  (100). `server_schema.json` and `SCHEMA.md` regenerated. Not rerun: the
+  acceptance test (gate). A store that ran this branch's earlier
+  `plan_hub.sql` holds a TEXT `not_taken` and no reason column.
+  Open choices are in `scratch/questions.md`; the review's four
   questions are at the end of `scratch/concept-review.html`.

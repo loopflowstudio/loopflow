@@ -47,40 +47,61 @@ pub struct PlanCarrier {
     pub error: Option<String>,
     /// When the carrier stopped working, while it still doesn't.
     pub failing_since: Option<i64>,
-    /// What its last read brought that could not be written here, as
-    /// [`not_taken_line`] reads; `None` when it took everything.
-    pub not_taken: Option<String>,
+    /// What its last read brought that could not be written here; `None`
+    /// when it took everything.
+    pub not_taken: Option<NotTaken>,
 }
 
 /// A record a carrier brought that this Machine could not write.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct NotTaken {
-    pub table: String,
+pub struct Skipped {
     pub id: String,
     /// Why, and what to do about it when something can be done.
     pub reason: String,
 }
 
-/// How many records were not taken and why the first was not:
-/// `3 not taken: wave design from mini …`. `None` when all were taken.
-pub fn not_taken_line(skipped: &[NotTaken]) -> Option<String> {
-    let first = skipped.first()?;
-    let records = skipped
-        .iter()
-        .map(|record| record.id.as_str())
-        .collect::<BTreeSet<_>>();
-    Some(format!("{} not taken: {}", records.len(), first.reason))
+/// What a carrier's read brought that this Machine could not write. As an
+/// error it is the exchange's, never the carrier's own: the carrier worked.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{count} not taken: {reason}")]
+pub struct NotTaken {
+    /// How many records.
+    pub count: usize,
+    /// Why the first was not, and what to do about it when something can be
+    /// done.
+    pub reason: String,
+}
+
+impl NotTaken {
+    /// `None` when nothing was skipped. A record two refs brought counts once.
+    pub fn of(skipped: &[Skipped]) -> Option<Self> {
+        let first = skipped.first()?;
+        let records = skipped
+            .iter()
+            .map(|record| record.id.as_str())
+            .collect::<BTreeSet<_>>();
+        Some(Self {
+            count: records.len(),
+            reason: first.reason.clone(),
+        })
+    }
 }
 
 fn set_not_taken(
     conn: &Connection,
     repo: &str,
     carrier: Carrier,
-    skipped: &[NotTaken],
+    skipped: &[Skipped],
 ) -> StoreResult<()> {
+    let not_taken = NotTaken::of(skipped);
     conn.execute(
-        "UPDATE plan_carriers SET not_taken=?3 WHERE repo=?1 AND carrier=?2",
-        params![repo, carrier.as_str(), not_taken_line(skipped)],
+        "UPDATE plan_carriers SET not_taken=?3,not_taken_reason=?4 WHERE repo=?1 AND carrier=?2",
+        params![
+            repo,
+            carrier.as_str(),
+            not_taken.as_ref().map(|not_taken| not_taken.count as i64),
+            not_taken.map(|not_taken| not_taken.reason),
+        ],
     )?;
     Ok(())
 }
@@ -134,7 +155,8 @@ pub(crate) fn changed(conn: &Connection, table: &str, id: &str) -> StoreResult<(
 fn carrier_in(conn: &Connection, repo: &str, carrier: Carrier) -> StoreResult<Option<PlanCarrier>> {
     Ok(conn
         .query_row(
-            "SELECT peer,sent_seq,seen_seq,error,failing_since,not_taken FROM plan_carriers
+            "SELECT peer,sent_seq,seen_seq,error,failing_since,not_taken,not_taken_reason
+             FROM plan_carriers
              WHERE repo=?1 AND carrier=?2",
             params![repo, carrier.as_str()],
             |row| {
@@ -144,7 +166,12 @@ fn carrier_in(conn: &Connection, repo: &str, carrier: Carrier) -> StoreResult<Op
                     seen_seq: row.get(2)?,
                     error: row.get(3)?,
                     failing_since: row.get(4)?,
-                    not_taken: row.get(5)?,
+                    not_taken: row.get::<_, Option<i64>>(5)?.zip(row.get(6)?).map(
+                        |(count, reason)| NotTaken {
+                            count: count as usize,
+                            reason,
+                        },
+                    ),
                 })
             },
         )
@@ -230,7 +257,7 @@ impl SqliteStore {
         conn.execute(
             "INSERT INTO plan_carriers(repo,carrier,peer,sent_seq) VALUES(?1,?2,?3,0)
              ON CONFLICT(repo,carrier) DO UPDATE SET peer=excluded.peer,sent_seq=0,seen_seq=NULL,
-                error=NULL,failing_since=NULL,not_taken=NULL",
+                error=NULL,failing_since=NULL,not_taken=NULL,not_taken_reason=NULL",
             params![repo, carrier.as_str(), peer],
         )?;
         carrier_in(&conn, repo, carrier)?.ok_or(StoreError::NotFound)
@@ -318,7 +345,7 @@ impl SqliteStore {
         &self,
         repo: &str,
         carrier: Carrier,
-        skipped: &[NotTaken],
+        skipped: &[Skipped],
     ) -> StoreResult<()> {
         set_not_taken(
             &self.conn.lock().expect("store mutex poisoned"),
@@ -389,7 +416,7 @@ impl SqliteStore {
         records: &[StampedRecord],
         from: Option<(Carrier, i64)>,
         names: &MachineNames,
-    ) -> StoreResult<Vec<NotTaken>> {
+    ) -> StoreResult<Vec<Skipped>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let mut tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let caught_up = match from {
@@ -479,7 +506,7 @@ fn apply_each(
     repo: &str,
     records: &[StampedRecord],
     names: &MachineNames,
-) -> StoreResult<(Vec<WorkEdit>, Vec<NotTaken>)> {
+) -> StoreResult<(Vec<WorkEdit>, Vec<Skipped>)> {
     let together = tx.savepoint()?;
     if let Ok(written) = planning_write::apply(&together, repo, records) {
         together.commit()?;
@@ -529,8 +556,7 @@ fn apply_each(
                 drop(one);
                 tracing::warn!(id = %unit[0].id, %error, "skipped a plan record that cannot be written here");
                 let reason = why_not_taken(tx, repo, &unit[0], &error, names)?;
-                skipped.extend(unit.into_iter().map(|record| NotTaken {
-                    table: record.table,
+                skipped.extend(unit.into_iter().map(|record| Skipped {
                     id: record.id,
                     reason: reason.clone(),
                 }));
@@ -930,12 +956,13 @@ mod tests {
         assert!(laptop.task(&theirs).unwrap().is_none());
         // The hub's Wave, its Project and its Task, with what to do; and the
         // hub is read from the same place next time.
-        let (line, seen) = not_taken(&laptop);
-        let line = line.unwrap();
+        let (held, seen) = not_taken(&laptop);
+        let held = held.unwrap();
+        assert_eq!(held.count, 3);
         assert!(
-            line.starts_with("3 not taken: wave plan from ")
-                && line.contains("`lf wave rename plan <new name>`"),
-            "{line}"
+            held.reason.starts_with("wave plan from ")
+                && held.reason.contains("`lf wave rename plan <new name>`"),
+            "{held}"
         );
         assert_eq!(seen, None);
         // Later changes still travel, and the line stays.
@@ -948,8 +975,8 @@ mod tests {
         rename_wave(&laptop, &wave, "laptop-plan");
         exchange(&laptop, &hub);
         assert_eq!(title(&laptop, &theirs), "in the hub's plan");
-        let (line, seen) = not_taken(&laptop);
-        assert_eq!(line, None);
+        let (held, seen) = not_taken(&laptop);
+        assert_eq!(held, None);
         assert!(seen.is_some());
         // The hub took the laptop's Wave with its new name.
         assert_eq!(title(&hub, &mine), "in the laptop's plan");

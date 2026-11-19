@@ -12,6 +12,7 @@ use std::time::{Duration, Instant};
 use anyhow::{anyhow, bail, Result};
 
 use loopflow_model::durable::{RepositoryId, TaskId};
+use loopflow_storage::sqlite::plan_carriers::NotTaken;
 use loopflow_storage::sqlite::SqliteStore;
 
 use super::plan_hub::Why;
@@ -109,14 +110,8 @@ pub(crate) async fn look_first(store: &crate::store::Store, repo: &Path) {
     );
 }
 
-/// A carrier read its peer and this Machine could not write everything it
-/// brought. The carrier itself worked: this is the exchange's error, never
-/// the carrier's `error`.
-#[derive(Debug, thiserror::Error)]
-#[error("{0}")]
-pub(super) struct NotTaken(pub String);
-
-/// The carrier's own failure in `result`, for `lf repo tracker`.
+/// The carrier's own failure in `result`, for `lf repo tracker`. Records it
+/// brought that this Machine could not write are not one: the carrier worked.
 pub(super) fn carrier_error(result: &Result<()>) -> Option<String> {
     result
         .as_ref()

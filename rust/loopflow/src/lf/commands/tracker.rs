@@ -174,10 +174,18 @@ pub(crate) struct CarrierStanding {
     /// When the carrier stopped working (Unix seconds), while it still does not.
     failing_since: Option<i64>,
     /// What the carrier's last read brought that this Machine could not
-    /// write, and reads again at each exchange: `3 not taken: wave design
-    /// from mini …`, the count, then why the first was not. `null` when it
-    /// took everything.
-    not_taken: Option<String>,
+    /// write, and reads again at each exchange. `null` when it took
+    /// everything.
+    not_taken: Option<NotTaken>,
+}
+
+#[derive(Debug, serde::Serialize, schemars::JsonSchema)]
+pub(crate) struct NotTaken {
+    /// How many records.
+    count: usize,
+    /// Why the first was not, and what to do about it when something can be
+    /// done: `wave design from mini has the name of a Wave here; …`.
+    reason: String,
 }
 
 /// How many unsent records a line names.
@@ -248,7 +256,13 @@ fn plan_carriers(store: &Store, repo: &str) -> Result<PlanCarriers> {
         let held = store.sqlite.plan_carrier(repo, carrier)?;
         let unsent = store.sqlite.plan_unsent(repo, carrier, NAMED)?;
         let failing_since = held.as_ref().and_then(|held| held.failing_since);
-        let not_taken = held.as_ref().and_then(|held| held.not_taken.clone());
+        let not_taken = held
+            .as_ref()
+            .and_then(|held| held.not_taken.clone())
+            .map(|not_taken| NotTaken {
+                count: not_taken.count,
+                reason: not_taken.reason,
+            });
         Ok(CarrierStanding {
             unsent: unsent.count,
             records: unsent
@@ -336,13 +350,8 @@ fn print_carrier(mut line: String, standing: &CarrierStanding) {
     if standing.unsent > 0 {
         line.push_str(&format!(", {} unsent", standing.unsent));
     }
-    // `3 not taken: why`: the count joins the line, the reason goes under it.
-    let not_taken = standing
-        .not_taken
-        .as_deref()
-        .map(|text| text.split_once(": ").unwrap_or((text, "")));
-    if let Some((count, _)) = not_taken {
-        line.push_str(&format!(", {count}"));
+    if let Some(not_taken) = &standing.not_taken {
+        line.push_str(&format!(", {} not taken", not_taken.count));
     }
     println!("{line}.");
     for record in &standing.records {
@@ -354,8 +363,8 @@ fn print_carrier(mut line: String, standing: &CarrierStanding) {
     if let Some(error) = &standing.error {
         println!("  {error}");
     }
-    if let Some((_, why)) = not_taken.filter(|(_, why)| !why.is_empty()) {
-        println!("  {why}");
+    if let Some(not_taken) = &standing.not_taken {
+        println!("  {}", not_taken.reason);
     }
 }
 

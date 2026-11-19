@@ -6,12 +6,11 @@ use std::time::Instant;
 
 use anyhow::{anyhow, Context, Result};
 
-use super::plan_carriers::NotTaken;
 use crate::engine::{Error, ErrorCode};
 use crate::machine::client::Connection;
 use crate::machine::wire::{PlanApplied, PlanChanges, Secrets, Selection, Sender, ServerOperation};
 use loopflow_model::durable::{Machine, RepositoryId};
-use loopflow_storage::sqlite::plan_carriers::{not_taken_line, Carrier};
+use loopflow_storage::sqlite::plan_carriers::{Carrier, NotTaken};
 use loopflow_storage::sqlite::SqliteStore;
 use loopflow_storage::work::edit::StampedRecord;
 
@@ -122,10 +121,7 @@ pub(super) fn exchange(store: &SqliteStore, repo: &str, why: Why) -> Result<()> 
             Some((Carrier::Hub, since.unwrap_or(0))),
             &crate::store::ownership::machine_names(store)?,
         )?;
-        match not_taken_line(&skipped) {
-            Some(line) => Err(NotTaken(line).into()),
-            None => Ok(()),
-        }
+        NotTaken::of(&skipped).map_or(Ok(()), |not_taken| Err(not_taken.into()))
     })();
     let error = super::plan_carriers::carrier_error(&result);
     store.record_carrier_exchange(repo, Carrier::Hub, error.as_deref())?;

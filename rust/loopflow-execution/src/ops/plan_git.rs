@@ -13,7 +13,7 @@ use std::time::Instant;
 use anyhow::{anyhow, bail, Context, Result};
 
 use loopflow_model::durable::RepositoryId;
-use loopflow_storage::sqlite::plan_carriers::{not_taken_line, Carrier};
+use loopflow_storage::sqlite::plan_carriers::{Carrier, NotTaken};
 use loopflow_storage::sqlite::SqliteStore;
 use loopflow_storage::work::edit::{StampedRecord, StampedValue};
 
@@ -203,10 +203,7 @@ fn exchange_with(
         until,
     )?;
     failed.map_or(Ok(()), Err)?;
-    match not_taken_line(&not_taken) {
-        Some(line) => Err(super::plan_carriers::NotTaken(line).into()),
-        None => Ok(()),
-    }
+    NotTaken::of(&not_taken).map_or(Ok(()), |not_taken| Err(not_taken.into()))
 }
 
 /// Each fetched plan ref's Machine and commit.
@@ -922,12 +919,13 @@ mod tests {
         // The laptop's Wave, its Project and its Task, on the line and as
         // the exchange's error; mini's own plan still went out.
         let error = exchange(&mini.store, &mini.repo, None).unwrap_err();
-        let line = not_taken(&mini).unwrap();
-        assert_eq!(error.to_string(), line);
+        let held = not_taken(&mini).unwrap();
+        assert_eq!(error.to_string(), held.to_string());
+        assert_eq!(held.count, 3);
         assert!(
-            line.starts_with("3 not taken: wave plan from ")
-                && line.contains("`lf wave rename plan <new name>`"),
-            "{line}"
+            held.reason.starts_with("wave plan from ")
+                && held.reason.contains("`lf wave rename plan <new name>`"),
+            "{held}"
         );
         assert_eq!(mini.unsent(), 0);
         exchange(&laptop.store, &laptop.repo, None).unwrap_err();

@@ -312,7 +312,10 @@
             "records": [],
             "error": null,
             "failing_since": null,
-            "not_taken": "3 not taken: wave design from mini has the name of a Wave here; `lf wave rename design <new name>` on either Machine lets both arrive"
+            "not_taken": {
+              "count": 3,
+              "reason": "wave design from mini has the name of a Wave here; `lf wave rename design <new name>` on either Machine lets both arrive"
+            }
           },
           "hub": {
             "machine": "mini",

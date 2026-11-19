@@ -230,8 +230,9 @@ conflict state between Loopflow Machines and no Machine owns the plan.
   changes nothing bumps nothing, which is what ends an exchange.
 - **`plan_carriers`** holds one row per repository and carrier (`git`, `hub`):
   the peer, how far into `plan_changes` the carrier has taken (`sent_seq`), the
-  hub's watermark read to (`seen_seq`), the last error, and what its last
-  read brought that this Machine could not write (`not_taken`). A carrier's
+  hub's watermark read to (`seen_seq`), the last error, and how many records
+  its last read brought that this Machine could not write, with why
+  (`not_taken`, `not_taken_reason`). A carrier's
   unsent records are those past its `sent_seq`. Sending one twice changes nothing, so
   there is no per-field queue and no sent-but-unconfirmed phase.
 
@@ -262,9 +263,10 @@ taken, with its Projects and Tasks, and the rest applies. The import returns
 those records. Git then leaves that ref's tip out of `plan_refs`, the hub
 carrier keeps its `seen_seq`, and a hub answers `plan.apply` with their count
 so the sender keeps its `sent_seq`: each carrier brings them again at every
-exchange until they can be written. `plan_carriers.not_taken` holds the line
-(`3 not taken: wave design from mini …`), set and cleared by a read; the
-exchange fails with the same text, so `lf task sync` exits 1, and the
+exchange until they can be written. `plan_carriers.not_taken` holds their
+count and `not_taken_reason` why the first was not (`wave design from mini
+…`), set and cleared by a read; the exchange fails with both
+(`3 not taken: wave design from mini …`), so `lf task sync` exits 1, and the
 carrier's own `error` stays empty. Each
 clone keeps its own repository id and records the id every fetched ref names
 as a locator of its checkout (`locate_repository`), so a hub or a move that
@@ -376,7 +378,7 @@ as `repo.tracker.answer` for Desktop's Keep / Use mine on every line; `lf task s
 what it brought that was not taken (`Plan: Git origin, 3 not taken.`), or
 `Plan: this Machine.` with no remote and no hub; `--json` carries the same as
 `plan: {git, hub}`, each `{remote | machine, unsent, records, error,
-failing_since, not_taken}` or null; `unsent` counts and `records` names the first twenty. Linear checks run
+failing_since, not_taken: {count, reason} | null}` or null; `unsent` counts and `records` names the first twenty. Linear checks run
 at the boundaries described below. A short save attempts delivery after its
 answer. No resident, whole-store callback, scheduler or
 implicit turn/Graph replay is involved.

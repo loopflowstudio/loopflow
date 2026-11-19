@@ -75,7 +75,7 @@ to one. `uv run python scripts/due_removals.py` prints when each may drop.
 
 ## Shared plan
 
-- `plan_carriers`: repo, carrier, peer, sent_seq, seen_seq, error, failing_since, not_taken
+- `plan_carriers`: repo, carrier, peer, sent_seq, seen_seq, error, failing_since, not_taken, not_taken_reason
 - `plan_changes`: seq, repo, owner_table, owner_id
 - `plan_refs`: repo, machine_id, tip
 - `plan_stamps`: owner_id, field, at, machine_id

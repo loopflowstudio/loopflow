@@ -508,8 +508,8 @@ pub struct SessionOutlook {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionOutlookKind {
-    /// A Task's conversation that no agent has run yet: the server here is
-    /// starting it.
+    /// No agent runs yet and one is on its way: a Task's conversation the
+    /// server here is starting, or a start whose agent has no pid recorded.
     Starting,
     /// It died and the server here starts it again, at `at`.
     ComingBack,
@@ -575,6 +575,20 @@ fn session_ending(
             start,
             outlook: None,
             status_line: Some(status_line),
+        };
+    }
+    if session.launching {
+        // Between the old agent's end and the new one's pid.
+        return SessionEnding {
+            ended,
+            start,
+            outlook: Some(SessionOutlook {
+                kind: SessionOutlookKind::Starting,
+                at: None,
+                reason: None,
+                command: None,
+            }),
+            status_line: Some("starting".to_string()),
         };
     }
     let command = match (&session.task_identifier, session.task_primary) {

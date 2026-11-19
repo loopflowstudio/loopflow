@@ -44,7 +44,8 @@ line (stdin stays open for steers, so never `cat` it), waits for a marker
 file, then prints a stream-json `result` line. A detached launch shows as
 `lf task run …` with parent 1 and its stdout on `logs/graph-<id>.log`; `-b` at
 a PTY tails unlinked temp files. PTY drivers must drain output continuously:
-an undrained PTY blocks the caller on write and looks like a hang.
+an undrained PTY blocks the caller on write and looks like a hang. Don't name
+a Python driver `pty.py`: it shadows the module it imports.
 
 An earlier build's Session owner: in a fresh home, before the branch opens it,
 run the installed `lf -i -a claude : '<msg>'` (with `LF_BIN` unset) under a PTY
@@ -68,7 +69,8 @@ prepares the conversation and the pass starts it (`Conversation: starting`
 until its first agent is recorded). `kill -9` the provider (find
 it by `pgrep -f 'w/bin/claude --name <task>'`) and poll `lf task status <task> |
 grep Conversation` once a second: `died … · starting again`, then `running
-(started again …, attempt n)`. A second kill with no finished turn waits the
+(started again …, attempt n)`. To see the `starting` between them (about
+150 ms), read `status_line` from `lf task status <task> --json` in a loop. A second kill with no finished turn waits the
 backoff; `outlook.at` in `--json` says when, and the start lands on that
 second. The world stand-in finishes no turns, so the count never resets: five
 kills give up with "started 5 times". Type `quit` through `lf resume --task` in
@@ -105,7 +107,8 @@ A returning user: in a fresh `LF_HOME` with the world's `launchctl` and
 `claude` stand-ins first on `PATH`, run the installed
 `/Applications/Loopflow.app/Contents/MacOS/lf server run` detached, then its
 `task create` and `task checkout` (the installed lf starts the conversation
-itself). Kill one provider, stop that server, and start the branch's on the
+itself). Call it by that path: through a symlink of another name, checkout
+answers "cannot resolve an executable path for `lf`" and starts nothing. Kill one provider, stop that server, and start the branch's on the
 same home: the dead one resumes, the live one keeps its provider. The
 installed build's `lf holder run` has no QA path in its argv; find it with
 `lsof -c lf | grep <home>` and stop that pid.

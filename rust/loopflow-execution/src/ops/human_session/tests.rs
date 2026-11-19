@@ -234,6 +234,7 @@ fn summary_fixture() -> crate::session::SessionSummary {
         task_terminal: false,
         task_primary: false,
         in_task_checkout: false,
+        launching: false,
         task_ids: vec![task.clone()],
         captured: Some(1),
         id: "metadata".into(),
@@ -441,9 +442,19 @@ fn a_task_conversation_says_how_it_ended_and_what_happens_next() {
     summary.starts_since_turn = 0;
     assert_eq!(line(&surfaced(&summary)), "running");
 
+    // A start under way: its agent is attached and has no pid to check yet.
+    summary.agent_process_evidence = crate::store::ProcessIdentityEvidence::Unknown;
+    summary.launching = true;
+    summary.starts_since_turn = 1;
+    let row = surfaced(&summary);
+    assert_eq!(row.state, SessionState::Unknown);
+    assert_eq!(line(&row), "starting");
+    assert_eq!(row.outlook.unwrap().kind, Starting);
+    summary.starts_since_turn = 0;
+    summary.launching = false;
+
     // Prepared, and no agent has run yet: the server is starting it. With no
     // agent its state is unknown, not closed.
-    summary.agent_process_evidence = crate::store::ProcessIdentityEvidence::Unknown;
     summary.last_started_at = None;
     let prepared = surfaced(&summary);
     assert_eq!(prepared.state, SessionState::Unknown);

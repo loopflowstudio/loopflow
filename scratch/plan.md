@@ -764,16 +764,40 @@ Private lf-world Machine, branch `lf`. Two fixes:
 Seen, left as it is:
 - With the server up, a carrier's death is noticed on the minute tick, not at
   once (nothing writes when a process dies); a server start reads at once.
-- For about a second while a start is in flight, and after `lf task checkout`
-  before the pass's first start, the line reads `Conversation: unknown`.
 - A conversation killed while no server runs has no recorded end, so it reads
   `closed; \`lf resume --task X\` opens it` with no outlook. `waiting_for_you`
   "no server runs here to start it" shows only for an end a server settled
   before it stopped.
-- After failed first starts, the first one that succeeds keeps the failed
-  count: `running (started again 14:58, attempt 3)`.
 - "Run died at implement; the server's next pass carries it again" prints
   with no server running too.
+
+## qa after slice 8 (2026-11-18, `scratch/qa.html`)
+
+Private lf-world Machine `/tmp/lf-qa-959h`, branch `lf` at `159ebe2001` plus
+the two fixes. Kill, backoff, quit, a person's resume, server restart under a
+live conversation, simulated reboot with three Tasks (one mid-Graph, one with
+its transcript removed), a run killed three times, five starts, a completed
+Task, a missing provider, SIGTERM shutdown, and a home made by the installed
+`lf 0.16.0+7bb879aff`: all as the lines said. Two fixes:
+
+- **A start under way read `unknown`.** For about 125 ms the new agent is
+  attached to its open held terminal with no pid recorded, which has no
+  liveness to read. `SessionSummary.launching` (one column in
+  `summary_query`) says so and `session_ending` answers `starting` with
+  outlook `starting`.
+- **A first start after failed ones read `running (started again 20:00,
+  attempt 1)`**, with the failed start's time, for a conversation that had
+  never run. The pass's successful first start now clears the failed count
+  and time (`record_first_start`), so it reads `running` and its first death
+  comes back at once.
+
+Seen, left as it is:
+- While the server launches a died run's carrier the run line flashes the
+  next backoff for about 170 ms ("carried again in 2 min (restart 4 of 5)"),
+  because the count is written before the launch. The run line is prose
+  until LOO-968 (1a).
+- Quitting prints "Continue with: lf resume <session id>" while the status
+  line offers `lf resume --task <ID>`. Both work.
 
 ## Remaining
 
@@ -941,6 +965,14 @@ behavior choice, asked on the page as questions 1–6:
   `lf::commands::session::tests::` (2), `task_graph_launch_tests::a_task_run_whose_carrier_died`
   (123 s: a carrier's death is noticed on the minute tick), `…::a_killed_graph`,
   `context_launch_tests::a_killed_task_conversation`; clippy `--all-targets` clean.
+
+- qa after slice 8: `ops::human_session::tests::` (33), storage `sqlite::sessions::`,
+  `query_plans::`, `session_recovery` (17), `server::recovery::` (9),
+  `server::schema::tests::` (8, fixture regenerated), `lf::commands::session::`,
+  `dto_fixtures::` + `documented_commands::` + `context_launch_tests::a_killed_task_conversation`,
+  `…a_task_conversation_whose_agent`, `…a_task_checkout_starts` (57); clippy
+  `--all-targets` and fmt clean. Gate: `test(performance_tests::)`
+  (`summary_query` gained one column with a key lookup on `held_terminals`).
 
 ## Docs
 

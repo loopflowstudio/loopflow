@@ -112,6 +112,18 @@ impl SqliteStore {
         Ok(())
     }
 
+    /// The first agent of `session` started: the failed starts before it are
+    /// forgotten, so it reads as running, not as started again, and its first
+    /// death comes back at once.
+    pub fn record_first_start(&self, session: &LfSessionId) -> StoreResult<()> {
+        self.conn.lock().expect("store mutex poisoned").execute(
+            "UPDATE agent_sessions SET starts_since_turn=0,start_failure=NULL,last_started_at=NULL
+             WHERE id=?1 AND (starts_since_turn>0 OR start_failure IS NOT NULL)",
+            [session.as_str()],
+        )?;
+        Ok(())
+    }
+
     /// Why the last start of `session` failed, or `None` once one succeeded.
     pub fn record_start_failure(
         &self,

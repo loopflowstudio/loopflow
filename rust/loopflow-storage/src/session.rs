@@ -363,6 +363,9 @@ pub struct SessionSummary {
     /// elsewhere, a completed conversation, or one moved to another Machine,
     /// is not.
     pub in_task_checkout: bool,
+    /// Its held terminal is open and its agent's pid is not recorded yet: a
+    /// start under way, which has no liveness to read.
+    pub launching: bool,
     pub task_ids: Vec<TaskId>,
     pub captured: Option<i64>,
     pub id: LfSessionId,

@@ -87,7 +87,10 @@ turn or step the Session and the Task run show the command that continues. A
 start that fails records its reason on the Session
 (`agent_sessions.start_failure`, for example `claude is not installed on this
 Machine's PATH`), cleared by the next start that succeeds, and retries on the
-same backoff. A Session's `ended {at, exit_code}` and `start {attempts,
+same backoff. A first start that succeeds after failed ones clears their
+count too: nothing started again. A start under way (the agent is attached to
+its open held terminal and has no pid yet, `SessionSummary.launching`) reads
+`starting`, not `unknown`. A Session's `ended {at, exit_code}` and `start {attempts,
 last_started_at}` carry these facts, and its `outlook {kind, at, reason,
 command}` says once what happens next: `starting`, `coming_back`,
 `waiting_for_you`, `quit` or `could_not_start`. Whether the server starts a

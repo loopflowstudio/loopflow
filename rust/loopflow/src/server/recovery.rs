@@ -223,7 +223,10 @@ fn recover_conversations(
         );
         match start(&conversation, request) {
             Ok(()) => {
-                store.record_start_failure(session, None)?;
+                match agent {
+                    Some(_) => store.record_start_failure(session, None)?,
+                    None => store.record_first_start(session)?,
+                }
                 tracing::info!(%session, task = %conversation.task, exit = ?conversation.exit_code, attempt, "Task conversation started")
             }
             Err(error) => {
@@ -509,6 +512,9 @@ mod tests {
         .unwrap();
         assert_eq!(fixture.attempts(), (1, Some(NOW)));
         assert!(fixture.pass(NOW + 30, false).is_empty());
+        // The start that succeeds is its first: nothing started "again".
+        assert_eq!(fixture.pass(NOW + 60, false).len(), 1);
+        assert_eq!((fixture.attempts(), fixture.failure()), ((0, None), None));
     }
 
     #[test]

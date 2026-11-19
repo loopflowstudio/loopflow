@@ -1,5 +1,5 @@
 <!doctype html>
-<html><head><meta charset="utf-8"><title>LOO-959 qa after slice 7</title>
+<html><head><meta charset="utf-8"><title>LOO-959 qa after slice 8</title>
 <style>
 body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:900px;margin:2rem auto;padding:0 1rem;color:#1d1d1f;background:#fff}
 h1{font-size:1.5rem}h2{font-size:1.15rem;margin-top:2rem;border-top:1px solid #ddd;padding-top:1rem}
@@ -8,135 +8,173 @@ code{font-size:13px}
 .ok{color:#1a7f37;font-weight:600}.fix{color:#9a6700;font-weight:600}.open{color:#cf222e;font-weight:600}
 @media (prefers-color-scheme: dark){body{background:#1d1d1f;color:#f5f5f7}pre{background:#2c2c2e}h2{border-color:#444}}
 </style></head><body>
-<h1>LOO-959 qa after slice 7: kill, quit, restart, reboot, runs</h1>
-<p>Branch <code>lf</code> at 9bd82e340f plus the two fixes below, on a private lf-world Machine at
-<code>/tmp/lf-qa-959g</code> with its own <code>lf server run</code> and the world's stand-in <code>claude</code>.
-Status lines are <code>lf task status &lt;task&gt;</code>; the JSON is the Task's conversation in
-<code>lf task status --json</code>. A "reboot" is SIGKILL to the server, every holder, every provider and the run's
-processes, then a new server. Times are local (UTC−8).</p>
+<h1>LOO-959 qa after slice 8: first visit, kill, quit, restart, reboot, runs</h1>
+<p>Branch <code>lf</code> at 159ebe2001 (slice 8, main 3496a8761d merged, compress) plus the two fixes below, on a new
+private lf-world Machine at <code>/tmp/lf-qa-959h</code> with its own <code>lf server run</code> and the world's stand-in
+<code>claude</code>. Lines are <code>lf task status &lt;task&gt;</code>; the JSON is the Task's conversation in
+<code>lf task status --json</code>, whose <code>status_line</code> is the sentence the server wrote. A "reboot" is SIGKILL to
+the server, every holder, every provider and the run's processes, then a new server. Times are local (UTC−8).</p>
 
-<h2>1. A reboot with three Tasks: the run was never carried again <span class="fix">fixed</span></h2>
-<p>Three Tasks: two with conversations, one also mid-Graph at <code>implement</code> with an interactive step ahead.
-Before the fix, after the new server started:</p>
-<pre>fe9aaa Conversation: running (started again 14:44, attempt 2)
-2895db Conversation: running (started again 14:44, attempt 1)      (fresh thread: its transcript was removed)
-c9dfe6 Conversation: running (started again 14:44, attempt 1)
-c9dfe6   latest Graph: implement: process left no exit record. Inspect its history and effects, then launch fresh work
-         (unchanged 100 s later; no `lf task run` process)</pre>
-<p>While the server was down the same Task read <code>Run died at implement; the server's next pass carries it again</code>.
-The server's log shows why: main's maintenance thread ran store retention before the server was ready
-(<code>store retention report=RetentionReport { ended_owners: 7, … }</code>). Retention ends a dead carrier by clearing
-<code>task_graphs.run_pid</code>, and a pid left behind was the only thing that told "died" from "exited". The same
-erasure would hit a run waiting its backoff, or one given up on, at each hourly retention.</p>
-<p>Fix: retention writes <code>task_graphs.run_died_at</code> when it clears a dead carrier; <code>died_run</code> and
-<code>local_task_runs</code> read it; a new run, an arrival and a step move clear it. The pass's own hourly retention was a
-second caller of the same prune and is deleted. After the fix, on a fresh world:</p>
-<pre>--- down 14:53:01
-9286d0 Conversation: closed; `lf resume --task 9286d0` opens it
-54c776 Conversation: closed; `lf resume --task 54c776` opens it
-61f4bf Conversation: closed; `lf resume --task 61f4bf` opens it
-61f4bf   latest Graph: Run died at implement; the server's next pass carries it again
--- up 14:53:03
-9286d0 Conversation: died 14:53 (exit 137) · starting again
-54c776 Conversation: running (started again 14:53, attempt 1)
-61f4bf Conversation: running (started again 14:53, attempt 1)
-61f4bf   latest Graph: Step c5c2f86e-… is running implement
--- up 14:53:05   all three: running (started again 14:53, attempt 1)
+<h2>1. First visit: a Task checked out before any server runs <span class="ok">works</span></h2>
+<pre>lf task create 'Recover a report'; lf task checkout 91a26a        (no server)
+Conversation: not started · no server runs here to start it; `lf resume --task 91a26a` opens it
+  outlook {"kind":"waiting_for_you","reason":"no server runs here to start it","command":"lf resume --task 91a26a"}
+lf server run
+19:43:14  Conversation: starting          outlook {"kind":"starting"}
+19:43:15  Conversation: running           one holder, one claude</pre>
 
---name 61f4bf  --resume deddad34-…         (same thread)
---name 54c776  --session-id 6d725a4e-…     (fresh thread, transcript was gone)
---name 9286d0  --resume e01ae174-…
-33273 33229 lf task run 61f4bf             (parent: the server)</pre>
-<p>Released, the carried run finished <code>implement</code> and stopped at <code>human-review</code>; the Task is not
-shipping, <code>restarts</code> is back to 0, and no second run started on later passes.</p>
-
-<h2>2. A run killed twice, with a server restart during its backoff <span class="ok">works</span></h2>
-<pre>killed 14:54:16
-  latest Graph: Run died at implement; it is carried again in 1 min (restart 2 of 5)
-server restarted 14:54:21      task_graphs: run_pid NULL, run_died_at set, restarts 1
-14:54:21   Run died at implement; it is carried again in 1 min (restart 2 of 5)
-14:55:01   Step 080d8b89-… is running implement        (restarted_at 14:54:01 + 60 s)</pre>
-<p>This is the case the fix in 1 also covers: the start-up retention cleared the pid and the line and the restart held.</p>
-
-<h2>3. Kill, backoff, quit, a person's resume <span class="ok">works</span></h2>
+<h2>2. Kill, backoff <span class="ok">works</span>; the start in flight read <code>unknown</code> <span class="fix">fixed</span></h2>
 <pre>kill -9 &lt;claude&gt;
-14:40:18 Conversation: died 14:40 (exit 137) · starting again
-14:40:21 Conversation: running (started again 14:40, attempt 1)          --resume 9f58524d-…
+19:43:29  died 19:43 (exit 137) · starting again          outlook coming_back, ended {exit_code:137}
+19:43:31  running (started again 19:43, attempt 1)        --resume d2a05937-…  (same thread)
 second kill, no finished turn
-14:40:35 Conversation: died 14:40 (exit 137) · starts again 14:41
-         outlook {"kind":"coming_back","at":"…22:41:20Z","reason":null,"command":null}
-14:41:20 Conversation: running (started again 14:41, attempt 2)
-type `quit` through `lf resume --task fe9aaa`
-14:42:27 Conversation: quit 14:42; `lf resume --task fe9aaa` opens it    (no provider; still quit after a tick)
-         outlook {"kind":"quit","command":"lf resume --task fe9aaa"}  ended {"by":"person","exit_code":0}  start null
-`lf resume --task fe9aaa`, type a line        Conversation: running      (count back to zero)
+19:43:35  died 19:43 (exit 137) · starts again 19:44      outlook.at 03:44:31Z
+19:44:31  running (started again 19:44, attempt 2)
+third kill
+19:45:05.321  died 19:45 (exit 137) · starts again 19:45
+19:45:31.0    died 19:45 (exit 137) · starting again
+19:45:31.249  unknown            state unknown, outlook null       ← about 200 ms on every start
+19:45:31.462  running (started again 19:45, attempt 3)</pre>
+<p>Sampling the Session's row through a restart showed the window: the new agent is attached to its open held terminal
+(<code>agent_started_at</code> set, end cleared) and its pid arrives about 125 ms later. With no pid there is no liveness to
+read, so the state is <code>unknown</code> and the sentence was too. Desktop prints that sentence.</p>
+<pre>122.041  starts 1, ended 1795060073, exit 137                     the pass counted the start
+122.195  agent_started_at 1795060122, ended NULL, pid NULL        attached
+122.319  pid 67366                                                running</pre>
+<p>Fix: the summary read carries <code>launching</code> (no pid, no end, its held terminal open), and the fold answers
+<code>starting</code> with outlook <code>starting</code>. After it, on the same Machine:</p>
+<pre>20:06:16.456  died 20:06 (exit 137) · starting again
+(20:01:10.252 starting)                                           seen on other restarts, about 300 ms
+20:06:18.724  running (started again 20:06, attempt 1)
+checkout of a new Task:   19:52:01.643 starting  →  19:52:02.583 running        (no `unknown`)</pre>
+
+<h2>3. Quit stays quit; a person's resume <span class="ok">works</span></h2>
+<pre>`lf resume --task 91a26a`, type quit
+Conversation: quit 19:46; `lf resume --task 91a26a` opens it
+  outlook {"kind":"quit","command":"lf resume --task 91a26a"}  ended {"at":…,"exit_code":0}  start null
+62 s later: the same line, no provider
+`lf resume --task 91a26a`, type hello     reply d2a05937-…: hello      Conversation: running   (starts_since_turn 0)
 kill within a minute of that resume
-14:42:45 Conversation: died 14:42 (exit 137) · starts again 14:43
-14:43:40 Conversation: running (started again 14:43, attempt 1)</pre>
-<p>The pass holds off one backoff after a person's start, so a kill inside that minute waits it out.</p>
+19:47:53  died 19:47 (exit 137) · starts again 19:48
+19:48:42  running (started again 19:48, attempt 1)</pre>
 
-<h2>4. Server killed and restarted under a live conversation <span class="ok">works</span></h2>
-<p><code>kill -9</code> the server, start a new one: the line stays <code>running</code>, one provider, one holder.</p>
+<h2>4. Server killed and replaced under a live conversation <span class="ok">works</span></h2>
+<p><code>kill -9</code> the server, swap in a rebuilt <code>lf</code>, start it: the line stays
+<code>running (started again 19:48, attempt 1)</code>, the same provider pid, under the earlier build's holder.</p>
 
-<h2>5. The provider is missing <span class="fix">fixed</span></h2>
-<p>Server started with no <code>claude</code> on its <code>PATH</code>. A conversation that had died, and a Task checked out
-for the first time. Before the fix the died one read, for the whole backoff:</p>
-<pre>Conversation: died 14:56 (exit 137) · starting again · last start failed: claude is not installed on this Machine's PATH</pre>
-<p>The fold took any start counted after the death as one under way. It now does so only when that start left no failure:</p>
-<pre>Conversation: died 14:56 (exit 137) · starts again 14:59 · last start failed: claude is not installed on this Machine's PATH
-Conversation: could not start: claude is not installed on this Machine's PATH · tries again 15:00
-  outlook {"kind":"could_not_start","at":"…23:00:35Z","reason":"claude is not installed on this Machine's PATH"}</pre>
-<p>With <code>claude</code> back on the server's <code>PATH</code>, the first started at 14:59:25 and the second at 15:00:35,
-the times their lines gave.</p>
+<h2>5. A reboot with three Tasks <span class="ok">works</span></h2>
+<p>Two conversations (one with its transcript removed first), a third also mid-Graph at <code>implement</code> with an
+interactive step ahead.</p>
+<pre>--- down 19:52:31
+91a26a Conversation: closed; `lf resume --task 91a26a` opens it
+13dfca Conversation: closed; `lf resume --task 13dfca` opens it
+d32638 Conversation: closed; `lf resume --task d32638` opens it
+d32638   latest Graph: Run died at implement; the server's next pass carries it again
+--- up 19:52:47
+19:52:47 d32638 died 19:52 (exit 137) · starting again | Step d87ae454-… is running implement
+19:52:47 91a26a died 19:52 (exit 137) · starting again
+19:52:47 13dfca died 19:52 (exit 137) · starting again
+19:52:48 d32638 running (started again 19:52, attempt 1)
+19:52:48 13dfca running (started again 19:52, attempt 1)
+19:52:48 91a26a starting
+19:52:49 91a26a running (started again 19:52, attempt 2)
 
-<h2>6. Five starts, then it waits for a person <span class="ok">works</span></h2>
-<p>Shortcut: <code>starts_since_turn=4</code> set in the store to skip 15 minutes of backoff; then two kills.</p>
-<pre>Conversation: running (started again 15:01, attempt 5)
-Conversation: died 15:01 (exit 137) · started 5 times; `lf resume --task 9286d0` opens it
-  outlook {"kind":"waiting_for_you","reason":"started 5 times","command":"lf resume --task 9286d0"}
-(a full tick later: the same line, no provider)
-`lf resume --task 9286d0`      Conversation: running</pre>
+--name d32638  --resume 6002450e-…
+--name 13dfca  --session-id 703b22f1-…      (fresh thread, transcript was gone)
+--name 91a26a  --resume d2a05937-…
+40204 40142 lf task run d32638              (parent: the server)</pre>
+<p>Most recently active Task first. Released, the carried run finished <code>implement</code> and stands
+<code>Graph qarun: at human-review</code>; the Task is not shipping, <code>task_graphs</code> has <code>run_pid</code>,
+<code>run_died_at</code> NULL and <code>restarts</code> 0, and no further run started.</p>
 
-<h2>7. A returning user: a home made by the installed lf <span class="ok">works</span></h2>
-<p>Installed <code>lf 0.16.0+7bb879aff</code> ran the server, created two Tasks and checked them out. One provider killed
-there stays <code>closed</code>. Then the branch server on the same home:</p>
-<pre>4c9861 Conversation: running (started again 15:03, attempt 1)     --resume 3f802e7b-…
-cd2ed3 Conversation: running                                      same provider, under the installed build's holder</pre>
+<h2>6. A run killed three times with the server up <span class="ok">works</span></h2>
+<pre>19:53:33  kill      Run died at implement; the server's next pass carries it again
+19:54:29            Step 1c4ad94e-… is running implement                    (noticed on the minute tick, 56 s)
+19:54:33  kill      Run died at implement; it is carried again in 1 min (restart 2 of 5)
+19:55:31            Step a9aad3a2-… is running implement
+19:56:05  kill      Run died at implement; it is carried again in 1 min (restart 3 of 5)
+19:56:33.185        Run died at implement; it is carried again in 2 min (restart 4 of 5)     ← 170 ms, while it launches
+19:56:33.359        Step aca330ae-… is running implement</pre>
+
+<h2>7. Five starts, a completed Task <span class="ok">works</span></h2>
+<pre>(starts_since_turn=4 set in the store to skip the backoff; two kills)
+Conversation: running (started again 19:58, attempt 5)
+Conversation: died 19:58 (exit 137) · started 5 times; `lf resume --task 91a26a` opens it
+  outlook {"kind":"waiting_for_you","reason":"started 5 times","command":"lf resume --task 91a26a"}
+`lf resume --task 91a26a`, type back      reply d2a05937-…: back      Conversation: running
+
+lf task complete d32638; kill -9 its claude
+Conversation: died 19:58 (exit 137); `lf resume --task d32638` opens it
+  outlook {"kind":"waiting_for_you","reason":null,"command":"lf resume --task d32638"}     (62 s later: no provider)</pre>
+
+<h2>8. The provider is missing <span class="fix">fixed</span></h2>
+<p>Server started with no <code>claude</code> on its <code>PATH</code>: a conversation killed there, and a Task checked out
+for the first time. Then the server again with <code>claude</code>.</p>
+<pre>13dfca  died 20:00 (exit 137) · starts again 20:01 · last start failed: claude is not installed on this Machine's PATH
+d8a17b  could not start: claude is not installed on this Machine's PATH · tries again 20:01
+          outlook {"kind":"could_not_start","at":"…04:01:09Z","reason":"claude is not installed on this Machine's PATH"}
+20:01:09  d8a17b  could not start: … · trying again
+20:01:10  d8a17b  running (started again 20:00, attempt 1)        ← it had never run; 20:00 is the failed start
+20:01:10  13dfca  running (started again 20:01, attempt 3)</pre>
+<p>Both started on the second their lines gave. The first line after is wrong for a conversation whose first agent just
+started. Fix: the pass's successful first start clears the failed starts' count and time. On a new Task:</p>
+<pre>350501  could not start: claude is not installed on this Machine's PATH · tries again 20:06
+20:06:05.038  could not start: … · trying again
+20:06:05.888  starting
+20:06:06.090  running                                   starts_since_turn 0, last_started_at NULL, start_failure NULL
+kill -9     20:06:16 died 20:06 (exit 137) · starting again  →  20:06:18 running (started again 20:06, attempt 1)</pre>
+
+<h2>9. Shutdown: SIGTERM to each holder's group and the server <span class="ok">works</span></h2>
+<pre>--- down 20:06:31     every conversation: closed; `lf resume --task X` opens it
+--- up
+350501  died 20:06 (exit 137) · starts again 20:07            (its last start was 13 s earlier)
+d8a17b  died 20:06 (exit 137) · starting again  →  running (started again 20:06, attempt 2)
+13dfca  died 20:06 (exit 137) · starting again  →  running (started again 20:06, attempt 4)</pre>
+
+<h2>10. A returning user: a home made by the installed lf <span class="ok">works</span></h2>
+<p><code>lf 0.16.0+7bb879aff</code> from <code>/Applications</code> ran the server in a fresh home, created two Tasks and
+checked them out. One provider killed there. Then the branch server on the same home:</p>
+<pre>25bb43 Conversation: running (started again 20:07, attempt 1)     --resume e1f103b1-…
+185380 Conversation: running                                      same provider pid, under the installed build's holder</pre>
 
 <h2>What it leaves behind</h2>
 <ul>
-<li><code>task_graphs</code>: a carried run has <code>run_pid</code> of the new carrier, <code>run_died_at</code> NULL,
-<code>restarts</code> counted; all three clear when the run arrives.</li>
-<li><code>lf machine doctor</code>: <code>ok ptys 87 of 511 PTYs in use (kern.tty.ptmx_max), 424 left; each Task conversation holds one</code>.</li>
-<li><code>lf session list --json</code> carries <code>outlook</code> and <code>start</code> on every Session; <code>lf session card</code> does not.</li>
-<li>Every server, holder and stand-in of both QA homes was stopped by pid.</li>
+<li><code>lf session list</code>: running ones <code>detached</code> with "Reconnect", ended ones <code>closed</code> with "Open here";
+<code>--json</code> carries <code>outlook</code>, <code>start</code> and <code>status_line</code> on each.</li>
+<li><code>lf machine doctor</code>: <code>ok ptys 116 of 511 PTYs in use (kern.tty.ptmx_max), 395 left; each Task conversation holds one</code>.</li>
+<li>Every server, holder, run and stand-in of both QA homes was stopped by pid; none is left.</li>
 </ul>
 
+<h2>Checks after the fixes</h2>
+<p><code>ops::human_session::tests::</code> (33), storage <code>sqlite::sessions::</code>, <code>query_plans::</code>,
+<code>session_recovery</code> (17), <code>server::recovery::</code> (9), <code>server::schema::tests::</code> (8, fixture
+regenerated), <code>dto_fixtures::</code>, <code>documented_commands::</code> and the three
+<code>context_launch_tests</code> recovery fixtures (57) pass; clippy <code>--all-targets</code> and fmt clean.</p>
+
 <h2>What works now</h2>
-<p>After a kill, a quit, a server restart or a simulated reboot, each of three Tasks either runs again or says what
-stopped it and gives one command: conversations in about two seconds, a died run on the server's first reading, both on
-the backoff their lines print.</p>
+<p>From a first checkout through a kill, a quit, a server swap, a shutdown and a simulated reboot, each Task either
+runs again or says what stopped it and gives one command. No read in the walkthrough said <code>unknown</code> for a
+Task's conversation.</p>
 
 <h2>Not reached</h2>
 <ul>
 <li>A real Machine reboot (launchd bringing the server back). A person runs it.</li>
 <li>Real Claude: whether it exits 0 on SIGTERM, which decides the shutdown-as-quit window.</li>
-<li>Desktop's conversation line on a running app. Its printer was not changed here; the Swift fixture suites run at gate.</li>
+<li>Desktop's conversation line in a live window: <code>Loopflow Dev.app</code> was open on another checkout
+(<code>loopflow.loo-515-make-task-pr</code>). Desktop prints <code>status_line</code> as given; its Swift suites run at gate.</li>
 </ul>
 
 <h2>Still wrong or open, worst first</h2>
 <ol>
-<li><span class="open">open</span> With the server up, a run whose carrier dies is noticed on the minute tick, not at once: the line read
-"the server's next pass carries it again" for 14 s and more. Conversations come back in two seconds because their
-holder reports the end; nothing reports a carrier's.</li>
-<li><span class="open">open</span> <code>Conversation: unknown</code> for about a second while a start is in flight, and after
-<code>lf task checkout</code> until the first start.</li>
+<li><span class="open">open</span> With the server up, a run whose carrier dies is noticed on the minute tick: 56 s here.
+Conversations come back in two seconds because their holder reports the end; nothing reports a carrier's.</li>
 <li><span class="open">open</span> A conversation killed while no server runs has no recorded end, so it reads
-<code>closed; `lf resume --task X` opens it</code> with <code>outlook</code> null. "no server runs here to start it"
-shows only for an end a server settled before stopping.</li>
-<li><span class="open">open</span> After failed first starts, the start that succeeds keeps their count and time:
-<code>running (started again 14:58, attempt 3)</code> for a conversation that started once, at 15:00.</li>
+<code>closed; `lf resume --task X` opens it</code> with <code>outlook</code> null until a server starts and settles it.</li>
 <li><span class="open">open</span> "the server's next pass carries it again" prints with no server running.</li>
+<li><span class="open">open</span> While the server launches a died run's carrier, the run line shows the next backoff
+for about 170 ms ("carried again in 2 min (restart 4 of 5)"): the count is written before the launch.</li>
+<li>Quitting prints "Continue with: lf resume &lt;session id&gt;"; the status line offers
+<code>lf resume --task &lt;ID&gt;</code>. Both work.</li>
 <li>On upgrade, the first pass starts every Task conversation that died earlier on an open Task checked out here,
 however long ago.</li>
 </ol>

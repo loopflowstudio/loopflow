@@ -468,7 +468,9 @@ fn summary_query(page: &str, by_id: bool, now: i64) -> String {
         EXISTS(SELECT 1 FROM task_primary_sessions tp
          JOIN tasks pt ON pt.id=tp.task_id
          JOIN task_checkouts pc ON pc.task_id=tp.task_id
-         WHERE tp.session_id=a.id AND {here})
+         WHERE tp.session_id=a.id AND {here}),
+        a.agent_pid IS NULL AND a.agent_ended_at IS NULL
+         AND EXISTS(SELECT 1 FROM held_terminals t WHERE t.id=a.held_terminal_id AND t.ended_at IS NULL)
         FROM page s JOIN agent_sessions a ON a.id=s.id
         LEFT JOIN session_events captured ON captured.seq=s.current_capture
         LEFT JOIN graph_process_steps gs ON gs.lf_process_id=captured.lf_process_id
@@ -577,6 +579,7 @@ fn read_summary(
             task_terminal: row.get(27)?,
             task_primary: row.get(28)?,
             in_task_checkout: row.get(47)?,
+            launching: row.get(48)?,
             captured: row.get(15)?,
             id: row.get(0)?,
             artifact_key: row

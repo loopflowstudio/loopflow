@@ -9930,7 +9930,7 @@
       "oneOf": [
         {
           "const": "starting",
-          "description": "A Task's conversation that no agent has run yet: the server here is\nstarting it.",
+          "description": "No agent runs yet and one is on its way: a Task's conversation the\nserver here is starting, or a start whose agent has no pid recorded.",
           "type": "string"
         },
         {

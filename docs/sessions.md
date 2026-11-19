@@ -365,8 +365,8 @@ fresh thread with its original request, whether the server starts it or you
 do with `lf resume`, and the old thread stays in `lf session history`.
 
 A work session that has never run reads as that, not as a death. Until its
-first agent runs it is starting, and a start that cannot happen says why
-instead of retrying silently:
+first agent runs it is starting, as is any start still under way, and a start
+that cannot happen says why instead of retrying silently:
 
 ```bash
 lf task status LOO-12

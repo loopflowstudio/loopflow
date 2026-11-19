@@ -86,14 +86,12 @@ pub async fn execution_of_latest_graph(
     );
     snapshot.captured = input.map(|(_, _, captured)| *captured);
     if snapshot.state == TaskExecutionState::Blocked {
-        if let Some(step) = step {
-            if let Some(question) = sqlite.unanswered_question(step.id.as_str())? {
-                let label = snapshot.step.as_deref().unwrap_or("Step");
-                snapshot.reason = format!(
-                    "{label} stopped: {question}; {}",
-                    question_advice(&task.identifier)
-                );
-            }
+        if let Some(question) = step.and_then(|step| facts.unanswered_questions.get(&step.id)) {
+            let label = snapshot.step.as_deref().unwrap_or("Step");
+            snapshot.reason = format!(
+                "{label} stopped: {question}; {}",
+                question_advice(&task.identifier)
+            );
         }
     }
     if let Some(recovery) = step.and_then(|step| facts.limit_recoveries.get(&step.id)) {

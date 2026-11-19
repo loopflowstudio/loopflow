@@ -428,8 +428,14 @@ def _server(endpoint: str, home: Path) -> None:
     with socket.socket(socket.AF_UNIX) as listener:
         listener.bind(endpoint)
         listener.listen()
-        while True:
-            client, _ = listener.accept()
+        release = home / "release-child-tier-server"
+        if (home / "check-child-tiers").exists():
+            listener.settimeout(0.1)
+        while home.is_dir() and not release.exists():
+            try:
+                client, _ = listener.accept()
+            except socket.timeout:
+                continue
             threading.Thread(target=serve, args=(client,), daemon=True).start()
 
 

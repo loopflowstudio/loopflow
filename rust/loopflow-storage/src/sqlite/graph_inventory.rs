@@ -174,15 +174,15 @@ pub fn entry_of(
     })
 }
 
-/// What a reading of Graphs' execution asks of the store once: the input each
-/// step captured last, unended Graph runs in the selected Tasks' work, and
-/// the selected Tasks that never ran their Graph.
+/// Facts read together for Graph execution: each step's latest captured input,
+/// unanswered question and limit recovery, plus the selected Tasks' Graph state.
 #[derive(Debug, Default)]
 pub struct GraphExecutionFacts {
     pub open_graphs: HashMap<TaskId, Vec<Execution>>,
     pub unrun: HashMap<TaskId, UnrunGraph>,
     pub tasks_with_carrier_records: HashSet<TaskId>,
     pub inputs: HashMap<LfProcessId, (String, String, i64)>,
+    pub unanswered_questions: HashMap<LfProcessId, String>,
     pub limit_recoveries: HashMap<LfProcessId, AgentLimitRecovery>,
 }
 
@@ -584,7 +584,8 @@ impl SqliteStore {
     /// What the agent of the Graph run `id`'s last failed step asked with
     /// nobody there to answer, if it failed on that.
     pub fn graph_unanswered_question(&self, id: &LfProcessId) -> StoreResult<Option<String>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut connection = self.conn.lock().expect("store mutex poisoned");
+        let conn = connection.savepoint()?;
         let Some(run) = graphs_in(&conn, "g.lf_process_id=?1", &[id])?.pop() else {
             return Ok(None);
         };
@@ -596,7 +597,7 @@ impl SqliteStore {
         else {
             return Ok(None);
         };
-        super::turns::unanswered_question_in(&conn, step.run.id.as_str())
+        Ok(super::turns::unanswered_questions_in(&conn, &[&step.run.id])?.remove(&step.run.id))
     }
 
     /// Whether the Graph run `id` failed at a skill step that opened no
@@ -659,6 +660,7 @@ impl SqliteStore {
             open_graphs.entry(task).or_default().push(run);
         }
         let inputs = process_inputs(&conn, &steps)?;
+        let unanswered_questions = super::turns::unanswered_questions_in(&conn, &steps)?;
         let limit_recoveries = limit_recoveries(&conn, &steps)?;
         let unrun = unrun_graphs_in(&conn, &ids)?;
         let mut carriers = conn.prepare(
@@ -674,6 +676,7 @@ impl SqliteStore {
             unrun,
             tasks_with_carrier_records,
             inputs,
+            unanswered_questions,
             limit_recoveries,
         })
     }

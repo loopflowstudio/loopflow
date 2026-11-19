@@ -3,13 +3,15 @@
 //! row; the first reading of each is kept, and a different second one is a
 //! recording gap.
 
+use std::collections::HashMap;
+
 use rusqlite::{params, OptionalExtension, Transaction};
 use serde_json::Value;
 
 use crate::session::{RecordedUsage, SessionTurnOrigin, Turn, TurnContext};
 use crate::{StoreError, StoreResult};
 use loopflow_model::chat::types::TurnUsage;
-use loopflow_model::id::AgentSessionId;
+use loopflow_model::id::{AgentSessionId, LfProcessId};
 
 use super::SqliteStore;
 
@@ -411,13 +413,6 @@ impl SqliteStore {
             .flatten())
     }
 
-    /// What the agent of process `step` asked with nobody there to answer:
-    /// the message of its latest turn that failed on one.
-    pub fn unanswered_question(&self, step: &str) -> StoreResult<Option<String>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        unanswered_question_in(&conn, step)
-    }
-
     /// Every turn of `session`, in the order they were first recorded.
     pub fn session_turns(&self, session: &str) -> StoreResult<Vec<Turn>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
@@ -430,20 +425,27 @@ impl SqliteStore {
     }
 }
 
-pub(crate) fn unanswered_question_in(
+/// The latest question each step asked with nobody there to answer.
+pub(crate) fn unanswered_questions_in(
     conn: &rusqlite::Connection,
-    step: &str,
-) -> StoreResult<Option<String>> {
-    Ok(conn
-        .query_row(
-            "SELECT json_extract(error,'$.message') FROM history.turns
-             WHERE lf_process_id=?1 AND json_extract(error,'$.code')=?2
-             ORDER BY ended_at DESC, id DESC LIMIT 1",
-            params![step, crate::session::UNANSWERED_QUESTION],
-            |row| row.get(0),
-        )
-        .optional()?
-        .flatten())
+    steps: &[&LfProcessId],
+) -> StoreResult<HashMap<LfProcessId, String>> {
+    let ids = super::children::ids_json(steps.iter().map(|id| id.as_str()));
+    let mut query = conn.prepare(
+        "SELECT step.value, (
+             SELECT json_extract(t.error,'$.message') FROM history.turns t
+             WHERE t.lf_process_id=step.value AND json_extract(t.error,'$.code')=?2
+             ORDER BY t.ended_at DESC, t.id DESC LIMIT 1
+         ) FROM json_each(?1) step",
+    )?;
+    let mut questions = HashMap::new();
+    let mut rows = query.query(params![ids, crate::session::UNANSWERED_QUESTION])?;
+    while let Some(row) = rows.next()? {
+        if let Some(question) = row.get::<_, Option<String>>(1)? {
+            questions.insert(row.get(0)?, question);
+        }
+    }
+    Ok(questions)
 }
 
 /// Threads converted per pass of [`convert_turn_rows`].

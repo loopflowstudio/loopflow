@@ -244,23 +244,10 @@ fn assert_codex_service_tier(mode: &str, setting: Option<&str>, expected: Option
         let probe = read("native-child-tiers.json");
         assert_eq!(probe["new"], resume_tier.unwrap_or("priority"));
         assert_eq!(probe["fork"], resume_tier.unwrap_or("priority"));
+        // Give the fixture's private provider an exit signal if it is still live.
+        fs::write(home.path().join("release-child-tier-server"), "").unwrap();
     }
-    if mode == "-i" {
-        // The probe's new thread is a conversation started beside this
-        // one, so its app-server outlives the exit. Stop the stand-in.
-        let pids: Vec<i64> = database
-            .prepare("SELECT pid FROM processes WHERE kind='agent' AND completed_at IS NULL")
-            .unwrap()
-            .query_map([], |row| row.get(0))
-            .unwrap()
-            .map(Result::unwrap)
-            .collect();
-        assert_eq!(pids.len(), 1, "{setting:?}: {pids:?}");
-        // SAFETY: the pid is this fixture's own stand-in app-server.
-        unsafe { libc::kill(pids[0] as i32, libc::SIGKILL) };
-    } else {
-        assert_eq!(settled_live_agents(&database), 0);
-    }
+    assert_eq!(settled_live_agents(&database), 0);
     assert_eq!(
         fs::read_to_string(native.join("config.toml")).unwrap(),
         provider_config

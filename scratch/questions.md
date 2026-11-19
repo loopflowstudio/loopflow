@@ -144,3 +144,4 @@ Jack, as a comment on this Task: "From LOO-959's concept review (answer 1a, defe
 Jack, quoting option 3 ("Delete it. … unless verify also stands in when auto is on."): "Should we allow a fully auto setting instead?"
 Then: "so that waves can have default graphs with an optional auto modifier"
 Open: `-b` — offered "batch only, writes no auto" (1), keep (2), `--auto` (3); no answer yet. Built as 1, made for review.
+- Jack, on `-b`: "no i think its right as it is -- -b should work on task run much like it does a regular graph". Plan: `-b` stands in for its own run, writes no auto.

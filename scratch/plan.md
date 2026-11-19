@@ -407,10 +407,13 @@ graph is that minus `verify`, under the setting's word.
   the branch as `code` with the auto default, marked with the Task that
   removes it; file that Task in this change. Released lf must ignore the new
   `auto:` key (settings already tolerate unknown keys; confirm with a test).
-- `-b` means batch only (made for review; open in questions.md): `lf -b task
-  run` runs headless and waits, writes no auto. It stands in only where auto
-  is on; `lf ship` is the spelling for "take my steps and merge". Auto's
-  writers become `lf ship` / `lf task auto on|off` and the config default.
-  Update `stands_in` in `lf/commands/graph.rs` (today `launcher.batch`
-  returns stand-in), `task.run`'s `approve` docs, getting-started's "`lf -b
-  task run <ID>` runs straight through both stops", and the operate skills.
+- `-b` on `task run` works as it does on any Graph (`lf -b graph X`): this
+  run goes headless, stands in at every interactive step, and the caller
+  waits for it. It writes no auto: the setting's writers are `lf ship` /
+  `lf task auto on|off` and the config default. `stands_in` in
+  `lf/commands/graph.rs` keeps `launcher.batch` → stand in; remove the auto
+  write `-b` does today (`AutoAsk`/`TaskRunMode::Headless` path in
+  `start_task_run`). Recovery restarts a died `-b` run as a bare `lf task
+  run`, so a restarted run stops at its next interactive step unless auto is
+  on. Update `task.run`'s `approve` docs ("turning auto on" goes), docs and
+  the operate skills that use `-b` to ship (they say `lf ship`).

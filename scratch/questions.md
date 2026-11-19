@@ -11,8 +11,8 @@ Made for review in `scratch/plan.md`; each is reversible before release.
   `lf` before installing.
 - A repository with no remote writes no plan ref.
 - Git fetch every 60 s per repository, by the Machine server, no setting. A
-  command run without the server leaves Git unsent until the server or
-  `lf task sync`.
+  save pushes its own records at once (slice 4); without the server, other
+  Machines' changes wait for `lf task sync`.
 - Tracker repositories are untouched in this Task: a person's own Machines do
   not exchange through Git or the hub there. The design says they do. Needs
   "which refs are mine" and one owner per field; left for the tracker Task
@@ -101,11 +101,9 @@ Still open from before:
     reads. Without it a teammate's fresh clone showed an empty plan and
     `Plan: Git origin.` for good, since the server only fetches registered
     repositories. Desktop's reads of such a clone do not do this.
-  - A save made by the CLI is pushed on the server's minute, not "a few
-    seconds after a change": 38 s to push and 97 s to show on the other
-    Machine, measured. A `task.create` over the socket pushed in 1.6 s.
-    `docs/work.md` now says "within a couple of minutes". Should a CLI save
-    ask the running server to push?
+  - Measured before slice 4: a CLI save took 38 s to push and 97 s to show
+    on the other Machine; a `task.create` over the socket pushed in 1.6 s.
+    Slice 4 answered it: the save pushes itself.
   - A second clone of one remote under the same `LF_HOME` shows an empty plan
     (its Task ids already belong to the first clone) and, with a hub, an error
     telling the person to `--bind`. Its own saves go out on the Machine's ref.

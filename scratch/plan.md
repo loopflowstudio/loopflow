@@ -442,8 +442,11 @@ etude checkout and `lf` version are unknown.
 4. **One door for a save.** *Built.* `plan_carriers::send` follows every
    save (`planning_sync::sync_saved`, `machine/task.rs`): the hub's
    `send_only` exchange and `plan_git::send` at once, five seconds at most.
-   `plan_hub::sync` lost its `send_only` argument; nothing outside
-   `ops/plan_*` names it.
+   `plan_hub::sync` lost its `send_only` argument: the only sends after a
+   save are the two calls to `plan_carriers::send`. `plan_hub::sync` is still
+   called by name where a read nobody asked for reads the hub alone
+   (`ops/task.rs`, `planning_sync.rs`, `session_move.rs`, `tracker.rs`
+   `--subscribe`).
 
    What it taught:
    - The five seconds had to be made true in three places, or a slow carrier
@@ -563,6 +566,14 @@ etude checkout and `lf` version are unknown.
   `task_create_tests::`, `ops::task::tests::` and the Task launch fixtures
   (every save in a fixture with a local remote now pushes a plan ref, four
   Git processes a save).
+- Slice 4's tests ran before main (#1982, provider limits) was merged in at
+  `e710120257`; the merge touched `ops/task.rs` and `agent/mod.rs` among plan
+  callers. After it,
+  `cargo check -p loopflow-storage -p loopflow-execution -p loopflow --all-targets`
+  ran clean, 2026-11-18. No test was rerun.
+- Nothing remains to build: all four slices are in the code and the four
+  differences at the top hold in it. Etude's cutover is by hand, after
+  release.
 - Next: gate runs the lists above. Open choices are in
   `scratch/questions.md`; the review's five questions are at the end of
   `scratch/concept-review.html`.

@@ -384,3 +384,33 @@ so its step name stays until it takes a Graph up again.
 
 Not run here: `world_recipes::`, `local_planning` (renamed step in
 assertions). CI.
+
+## To build: a Wave's default graph takes an optional auto modifier; the `auto` graph goes
+
+Direction 2026-11-19 (exact words in `scratch/questions.md`, "The auto graph").
+Auto already stands in at every interactive step, `verify` included, so
+`code` with auto on is the whole path to done with nobody there. The `auto`
+graph is that minus `verify`, under the setting's word.
+
+- Config key `auto: on` beside `graph:` in `.lf/wave/<wave>/config.yaml` and
+  `.lf/config.yaml` (read next to `work/wave/config.rs::wave_graph` and the
+  repository `graph:` in `config/settings.rs`). When a Task first takes up its
+  Graph and its auto is unset, it is written `on`, attributed to the config
+  (`auto: on by wave config` / `by repository config`). After that it is the
+  ordinary setting: `lf task auto off` works per Task. No other value; absent
+  means unset.
+- Delete the builtin `task/graph/auto.yaml` and `.lf/graphs/autonomous.yaml`
+  (a duplicate of it, no Wave uses it). README, `docs/index.md`,
+  `docs/getting-started.md` say `graph: code` + `auto: on` instead of
+  `graph: auto`. Tests and fixtures that write `graph: auto` move to the key.
+- Shared-file rule: a released config naming `graph: auto` keeps resolving on
+  the branch as `code` with the auto default, marked with the Task that
+  removes it; file that Task in this change. Released lf must ignore the new
+  `auto:` key (settings already tolerate unknown keys; confirm with a test).
+- `-b` means batch only (made for review; open in questions.md): `lf -b task
+  run` runs headless and waits, writes no auto. It stands in only where auto
+  is on; `lf ship` is the spelling for "take my steps and merge". Auto's
+  writers become `lf ship` / `lf task auto on|off` and the config default.
+  Update `stands_in` in `lf/commands/graph.rs` (today `launcher.batch`
+  returns stand-in), `task.run`'s `approve` docs, getting-started's "`lf -b
+  task run <ID>` runs straight through both stops", and the operate skills.

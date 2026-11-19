@@ -138,3 +138,9 @@ mostly i think we dont need like a true "code review" or go/no decisions -- conc
 ## Run outlook (2026-11-19)
 
 Jack, as a comment on this Task: "From LOO-959's concept review (answer 1a, deferred to this Task because 959 merged first as #1972): give the Task run the conversation's outlook type. The run's died {at_step, at} and the SessionOutlook shape replace DiedRun::reason in waiting/blocked; 'no server runs here' applies to the run too; the three run sentences use the conversation's words (clock time, 'starting again', no 'pass'). Fold it into this Task if it fits after ship's restart rule; otherwise file it as its own Task."
+
+## The auto graph (2026-11-19)
+
+Jack, quoting option 3 ("Delete it. … unless verify also stands in when auto is on."): "Should we allow a fully auto setting instead?"
+Then: "so that waves can have default graphs with an optional auto modifier"
+Open: `-b` — offered "batch only, writes no auto" (1), keep (2), `--auto` (3); no answer yet. Built as 1, made for review.

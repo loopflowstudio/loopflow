@@ -43,10 +43,13 @@ read, so the state is <code>unknown</code> and the sentence was too. Desktop pri
 122.319  pid 67366                                                running</pre>
 <p>Fix: the summary read carries <code>launching</code> (no pid, no end, its held terminal open), and the fold answers
 <code>starting</code> with outlook <code>starting</code>. After it, on the same Machine:</p>
-<pre>20:06:16.456  died 20:06 (exit 137) · starting again
-(20:01:10.252 starting)                                           seen on other restarts, about 300 ms
-20:06:18.724  running (started again 20:06, attempt 1)
-checkout of a new Task:   19:52:01.643 starting  →  19:52:02.583 running        (no `unknown`)</pre>
+<pre>checkout of a new Task:   19:52:01.643 starting  →  19:52:02.583 running        (no `unknown`)
+a restart (first build of the fix, which printed "starting again"; it now prints "starting"):
+20:01:10.252  starting again
+20:01:10.589  running (started again 20:01, attempt 3)
+the final build, a first start after a failed one:
+20:06:05.888  starting
+20:06:06.090  running</pre>
 
 <h2>3. Quit stays quit; a person's resume <span class="ok">works</span></h2>
 <pre>`lf resume --task 91a26a`, type quit
@@ -76,7 +79,7 @@ d32638   latest Graph: Run died at implement; the server's next pass carries it 
 19:52:47 13dfca died 19:52 (exit 137) · starting again
 19:52:48 d32638 running (started again 19:52, attempt 1)
 19:52:48 13dfca running (started again 19:52, attempt 1)
-19:52:48 91a26a starting
+19:52:48 91a26a starting again                (the fix's first build; it now prints "starting")
 19:52:49 91a26a running (started again 19:52, attempt 2)
 
 --name d32638  --resume 6002450e-…

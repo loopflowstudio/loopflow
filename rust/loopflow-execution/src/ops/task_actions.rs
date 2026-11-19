@@ -38,6 +38,7 @@ pub struct TaskActionEvidence<'a> {
     pub latest_pr_phase: Option<PrPhase>,
     pub latest_pr_merge_request: Option<&'a PrMergeRequest>,
     pub latest_pr_presentation_current: Option<bool>,
+    pub open_children: u32,
     pub completion_refusal: Option<&'a str>,
     pub run_refusal: Option<&'a str>,
     pub ci: Option<&'a CiObservation>,
@@ -113,7 +114,18 @@ fn phase_action(evidence: &TaskActionEvidence) -> TaskActionModel {
     }
 }
 
+pub fn merged_children_reason(count: u32) -> String {
+    let children = if count == 1 { "child" } else { "children" };
+    format!("Merged · {count} {children} open")
+}
+
 fn merged_action(evidence: &TaskActionEvidence) -> TaskActionModel {
+    if evidence.open_children > 0 {
+        return action(
+            TaskAction::NoAction,
+            merged_children_reason(evidence.open_children),
+        );
+    }
     if let Some(refusal) = evidence.completion_refusal {
         return action(TaskAction::NoAction, refusal);
     }
@@ -178,6 +190,7 @@ mod tests {
             latest_pr_phase: Some(phase),
             latest_pr_merge_request: None,
             latest_pr_presentation_current: Some(true),
+            open_children: 0,
             completion_refusal: None,
             run_refusal: None,
             ci,
@@ -270,6 +283,20 @@ mod tests {
 
         assert_eq!(model.recommended, Some(TaskAction::Run));
         assert!(model.reason.contains("reviewer-facing PR title and body"));
+    }
+
+    #[test]
+    fn a_merged_task_with_open_children_is_not_asked_to_complete() {
+        let mut evidence = evidence(PrPhase::Merged, None);
+        assert_eq!(
+            derive_task_actions(&evidence).reason,
+            "Merged; complete the Task"
+        );
+        evidence.open_children = 1;
+        assert_eq!(
+            derive_task_actions(&evidence).reason,
+            "Merged · 1 child open"
+        );
     }
 
     #[test]

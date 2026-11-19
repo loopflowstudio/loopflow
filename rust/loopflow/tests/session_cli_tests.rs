@@ -709,6 +709,105 @@ fn a_task_filed_from_a_tasks_conversation_shows_under_it() {
     assert!(shown.contains(&format!("parent: {parent_name}")), "{shown}");
 }
 
+#[test]
+fn a_merged_parent_stays_open_until_it_is_completed_with_its_children() {
+    let home = tempfile::tempdir().unwrap();
+    let repo = loopflow_test_support::TestRepo::new();
+    let lf = |args: &[&str]| {
+        let mut command = command(home.path(), args);
+        command.current_dir(repo.path()).env("HOME", home.path());
+        let output = command.output().unwrap();
+        assert!(
+            output.status.success(),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout).unwrap()
+    };
+    let json = |text: String| serde_json::from_str::<serde_json::Value>(&text).unwrap();
+    let file = |title: &str, parent: Option<&str>| {
+        let mut args = vec!["task", "create", "--title", title, "--json"];
+        args.extend(parent.into_iter().flat_map(|parent| ["--parent", parent]));
+        let task = json(lf(&args))["task"].clone();
+        (
+            task["id"].as_str().unwrap().to_owned(),
+            task["identifier"].as_str().unwrap().to_owned(),
+        )
+    };
+    let (parent_id, parent) = file("Retry requests", None);
+    let (landed_id, landed) = file("Retry budget per host", Some(&parent));
+    let (reviewing_id, reviewing) = file("Log each retry", Some(&parent));
+    let (_, unstarted) = file("Document the budget", Some(&parent));
+
+    let database = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    let publish = |task: &str, number: u32, merged: bool| {
+        let branch = format!("pr-{number}");
+        database
+            .execute(
+                "INSERT INTO task_checkouts(task_id,worktree,branch,base_commit) VALUES(?1,?2,?3,'base')
+                 ON CONFLICT(task_id) DO UPDATE SET branch=excluded.branch,base_commit=excluded.base_commit",
+                rusqlite::params![task, home.path().join(&branch).to_str(), branch],
+            )
+            .unwrap();
+        database
+            .execute(
+                "UPDATE tasks SET workspace_slug=?2 WHERE id=?1",
+                [task, &branch],
+            )
+            .unwrap();
+        database
+            .execute(
+                "INSERT INTO task_prs(id,task_id,sequence,slug,branch,base_commit,publication_requested_at,created_at,updated_at,github_number,github_url,merge_commit)
+                 VALUES(?1,?2,1,?3,?3,'base',1,1,1,?4,'https://example.test/pr/'||?4,?5)",
+                rusqlite::params![
+                    uuid::Uuid::new_v4().to_string(),
+                    task,
+                    branch,
+                    number,
+                    merged.then_some("abc123")
+                ],
+            )
+            .unwrap();
+    };
+    publish(&parent_id, 1979, true);
+    publish(&landed_id, 1980, true);
+    publish(&reviewing_id, 1981, false);
+
+    // Merged with children open: it says so, and nothing asks to complete it.
+    let status = json(lf(&["task", "status", &parent, "--json"]));
+    assert_eq!(status["task"]["pr"]["phase"], "merged");
+    assert_eq!(status["task"]["reason"], "Merged · 3 children open");
+    assert!(status["task"]["next"].is_null(), "{}", status["task"]);
+    assert_ne!(status["task"]["state"], "done");
+    assert_eq!(status["children"][0]["parent"], parent_id);
+    let listed = lf(&["task", "list"]);
+    let line = |listed: &str, start: String| listed.lines().any(|line| line.starts_with(&start));
+    assert!(line(&listed, format!("  {reviewing} ·")), "{listed}");
+
+    let completed = lf(&["task", "complete", &parent]);
+    assert_eq!(
+        completed,
+        format!(
+            "{parent} done\n  {landed} done: #1980 merged\n  {unstarted} abandoned: never started\n  {reviewing} stays open: #1981 open\n"
+        )
+    );
+    let state = |task: &str| json(lf(&["task", "status", task, "--json"]))["task"]["state"].clone();
+    assert_eq!(state(&parent), "done");
+    assert_eq!(state(&landed), "done");
+    assert_eq!(state(&unstarted), "abandoned");
+
+    // The child left open keeps its link and is listed on its own.
+    let left = json(lf(&["task", "status", &reviewing, "--json"]));
+    assert_eq!(left["parent"], parent);
+    assert!(
+        !matches!(left["task"]["state"].as_str(), Some("done" | "abandoned")),
+        "{}",
+        left["task"]
+    );
+    let listed = lf(&["task", "list"]);
+    assert!(line(&listed, format!("{reviewing} ·")), "{listed}");
+}
+
 #[cfg(unix)]
 #[test]
 fn a_closed_tasks_conversation_resumes_in_the_main_checkout() {

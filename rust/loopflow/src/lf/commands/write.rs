@@ -125,7 +125,7 @@ writes! {
     #[serde(rename = "task.complete")]
     TaskComplete { directory: PathBuf, issue: String } => loopflow_storage::work::task::Task;
     { issue, .. } => {
-        loopflow_execution::ops::task::task_complete(&task_repo(issue)?, issue, None)?
+        loopflow_execution::ops::task::task_complete(&task_repo(issue)?, issue, None)?.task
     },
 
     /// `lf task reopen <issue>`.

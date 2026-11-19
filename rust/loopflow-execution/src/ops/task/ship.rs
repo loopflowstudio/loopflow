@@ -447,6 +447,8 @@ pub enum ShipMerge {
     Verifying(String),
     /// Its PR merged and the Task is done.
     Done,
+    /// Its PR merged and the Task remains open to conduct its children.
+    Conducting(u32),
 }
 
 /// The interactive step that checks merged work: the last step of the graph.
@@ -508,13 +510,21 @@ pub fn ship_settle_merge(issue: &str) -> OpsResult<ShipMerge> {
         {
             super::settle_completion(&store, &mut task, request).await?;
         }
-        Ok(
-            if store.sqlite.task_state(&task.id).map_err(task_error)? == TaskState::Done {
-                ShipMerge::Done
-            } else {
-                ShipMerge::Open
-            },
-        )
+        if store.sqlite.task_state(&task.id).map_err(task_error)? == TaskState::Done {
+            return Ok(ShipMerge::Done);
+        }
+        let children = store
+            .sqlite
+            .open_task_child_count(&task.id)
+            .map_err(task_error)?;
+        if children > 0 {
+            store
+                .sqlite
+                .stop_shipping(&task.id, "its PR merged with children open", None)
+                .map_err(task_error)?;
+            return Ok(ShipMerge::Conducting(children));
+        }
+        Ok(ShipMerge::Open)
     })
 }
 

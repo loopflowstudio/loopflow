@@ -93,7 +93,11 @@ impl Store {
         .await
     }
 
-    pub(crate) async fn complete_task(&self, task: &Task, request: i64) -> StoreResult<bool> {
+    pub(crate) async fn complete_task(
+        &self,
+        task: &Task,
+        request: i64,
+    ) -> StoreResult<loopflow_storage::sqlite::children::CompletionSettlement> {
         let task = task.clone();
         run_sqlite(&self.sqlite, move |store| {
             store.complete_task(&task, request)

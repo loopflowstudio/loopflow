@@ -12541,6 +12541,25 @@
         {
           "properties": {
             "kind": {
+              "const": "family_completion_requested",
+              "type": "string"
+            },
+            "reason": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "reason"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
               "const": "completed",
               "type": "string"
             },
@@ -13914,6 +13933,13 @@
         "name": {
           "type": "string"
         },
+        "parent_id": {
+          "description": "The stable ID of the Task this one was filed from.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "project_id": {
           "type": [
             "string",
@@ -13965,6 +13991,7 @@
         "sync",
         "id",
         "tracker_id",
+        "parent_id",
         "identifier",
         "name",
         "description",

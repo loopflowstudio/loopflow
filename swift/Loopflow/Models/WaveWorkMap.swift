@@ -91,6 +91,8 @@ public struct TaskPlanningSnapshot: Decodable, Sendable, Identifiable, Hashable 
     public let projectId: String?
     public internal(set) var waveId: String?
     public let trackerId: String?
+    /// The Task this one was filed from.
+    public let parentId: String?
     public let identifier: String
     public let name: String
     public let description: String
@@ -106,6 +108,7 @@ public struct TaskPlanningSnapshot: Decodable, Sendable, Identifiable, Hashable 
         case id, identifier, name, description, rank, state, assignee, sync
         case trackerState = "tracker_state"
         case trackerId = "tracker_id"
+        case parentId = "parent_id"
         case completedAt = "completed_at"
         case dueDate = "due_date"
     }
@@ -120,6 +123,7 @@ public struct TaskPlanningSnapshot: Decodable, Sendable, Identifiable, Hashable 
         projectId = try values.decode(String?.self, forKey: .projectId)
         waveId = try values.decode(String?.self, forKey: .waveId)
         trackerId = try values.decode(String?.self, forKey: .trackerId)
+        parentId = try values.decode(String?.self, forKey: .parentId)
         identifier = try values.decode(String.self, forKey: .identifier)
         name = try values.decode(String.self, forKey: .name)
         description = try values.decode(String.self, forKey: .description)

@@ -32,6 +32,29 @@ use loopflow_model::id::WaveId;
 
 use super::{SqliteStore, TaskCheckout};
 
+/// What completing a parent did with one child, in the order they are reported.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ChildDisposition {
+    Completed,
+    Abandoned,
+    Open,
+}
+
+#[derive(Debug)]
+pub struct ChildCompletion {
+    pub task: Task,
+    pub disposition: ChildDisposition,
+    pub pr: Option<TaskPr>,
+    pub step: Option<String>,
+}
+
+#[derive(Debug)]
+pub enum CompletionSettlement {
+    Settled(Vec<ChildCompletion>),
+    WaitingForChildren,
+    Superseded,
+}
+
 const BRANCH_TASK_IDS: &str = "SELECT task_id FROM task_checkouts WHERE branch=?1
     UNION SELECT task_id FROM task_prs WHERE branch=?1";
 
@@ -465,6 +488,24 @@ impl SqliteStore {
         Ok(request)
     }
 
+    /// Explicit completion settles the Task and its direct children together.
+    pub fn request_family_completion(
+        &self,
+        task: &TaskId,
+        note: Option<&str>,
+    ) -> StoreResult<Option<i64>> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let request = request_completion(&tx, task, note, true)?;
+        tx.commit()?;
+        Ok(request)
+    }
+
+    pub fn open_task_child_count(&self, task: &TaskId) -> StoreResult<u32> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        open_task_child_count(&conn, task)
+    }
+
     pub fn task_completion_pending(&self, task: &TaskId) -> StoreResult<Option<(i64, String)>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn.query_row(
@@ -499,25 +540,21 @@ impl SqliteStore {
     }
 
     /// Settle one completion request without changing execution.
-    pub fn complete_task(&self, task: &Task, request: i64) -> StoreResult<bool> {
+    pub fn complete_task(&self, task: &Task, request: i64) -> StoreResult<CompletionSettlement> {
         validate_task(task)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        validate_task_project(&transaction, task)?;
-        let state = super::durable::task_state_in(&transaction, &task.id)?;
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        validate_task_project(&tx, task)?;
+        let state = super::durable::task_state_in(&tx, &task.id)?;
         if state == TaskState::Done {
-            return Ok(true);
+            return Ok(CompletionSettlement::Settled(Vec::new()));
         }
-        let current_request: Option<i64> = transaction.query_row(
-            "SELECT completion_request FROM tasks WHERE id=?1",
-            [task.id.as_str()],
-            |row| row.get(0),
-        )?;
-        if current_request != Some(request) {
-            return Ok(false);
+        let (current, family, _) = completion_request(&tx, &task.id)?;
+        if current != Some(request) {
+            return Ok(CompletionSettlement::Superseded);
         }
-        let current = active_task_pr_on(&transaction, &task.id)?;
-        if current.is_some_and(|pr| pr.phase() != PrPhase::Merged) {
+        let current_pr = active_task_pr_on(&tx, &task.id)?;
+        if current_pr.is_some_and(|pr| pr.phase() != PrPhase::Merged) {
             return Err(StoreError::InvalidAuthority(
                 "Task requires a verified merge".into(),
             ));
@@ -528,28 +565,22 @@ impl SqliteStore {
                 task.id
             )));
         }
-        transaction.execute(
-            "UPDATE tasks SET completion_request=NULL,completion_error=NULL WHERE id=?1",
-            params![task.id.as_str()],
-        )?;
-        super::task_state::decide_in(&transaction, &task.id, "completed")?;
-        insert_task_event_in(
-            &transaction,
-            &task.id,
-            &TaskEventKind::Completed {
-                summary: "Task completed".into(),
-            },
-        )?;
-        super::task_summaries::write_in(
-            &transaction,
-            &task.id,
-            super::task_summaries::TaskEnd::Done,
-        )?;
-        transaction.commit()?;
-        Ok(true)
+        if !family && open_task_child_count(&tx, &task.id)? > 0 {
+            clear_completion_request(&tx, &task.id)?;
+            super::task_work::unship_in(&tx, &task.id)?;
+            tx.commit()?;
+            return Ok(CompletionSettlement::WaitingForChildren);
+        }
+        record_task_completion(&tx, &task.id)?;
+        let children = if family {
+            complete_children(&tx, &task.id)?
+        } else {
+            Vec::new()
+        };
+        tx.commit()?;
+        Ok(CompletionSettlement::Settled(children))
     }
 
-    /// Reopen planning without touching Workflow, placement, PR or Process history.
     pub fn reopen_task(&self, id: &TaskId, note: Option<&str>) -> StoreResult<Task> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -709,7 +740,7 @@ impl SqliteStore {
         let conn = conn.savepoint()?;
         let query = format!(
             "{TASK_COLUMNS} WHERE t.parent_task_id=?1 AND {TASK_VISIBLE}
-             ORDER BY t.created_at, t.id"
+             ORDER BY t.created_at, t.rowid"
         );
         let mut statement = conn.prepare(&query)?;
         // A few rows: each reads its own identifier, not every Task's.
@@ -2554,35 +2585,148 @@ pub(super) fn insert_project_event_in(
     })
 }
 
+pub(super) fn open_task_children_where() -> String {
+    format!("{} AND {TASK_VISIBLE}", super::durable::task_open_sql("t"))
+}
+
+pub(super) fn open_task_child_count(conn: &Connection, task: &TaskId) -> StoreResult<u32> {
+    Ok(conn.query_row(
+        &format!(
+            "SELECT COUNT(*) FROM tasks t WHERE t.parent_task_id=?1 AND {}",
+            open_task_children_where()
+        ),
+        [task.as_str()],
+        |row| row.get(0),
+    )?)
+}
+
+fn completion_request(conn: &Connection, task: &TaskId) -> StoreResult<(Option<i64>, bool, bool)> {
+    Ok(conn.query_row(
+        "SELECT t.completion_request,
+                COALESCE(json_extract(e.kind_json,'$.kind')='family_completion_requested',0),
+                t.planning_completed IS 1
+         FROM tasks t LEFT JOIN task_events e ON e.id=t.completion_request WHERE t.id=?1",
+        [task.as_str()],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+    )?)
+}
+
 pub(super) fn request_completion_in(
     conn: &Connection,
     task: &TaskId,
     note: Option<&str>,
 ) -> StoreResult<Option<i64>> {
-    let (completed, pending): (Option<i64>, Option<i64>) = conn.query_row(
-        "SELECT CASE WHEN planning_completed=1 THEN 1 END,completion_request FROM tasks WHERE id=?1",
-        [task.as_str()],
-        |row| Ok((row.get(0)?, row.get(1)?)),
-    )?;
-    if completed.is_some() {
-        return Ok(None);
-    }
-    if pending.is_some() {
+    request_completion(conn, task, note, false)
+}
+
+fn request_completion(
+    conn: &Connection,
+    task: &TaskId,
+    note: Option<&str>,
+    family: bool,
+) -> StoreResult<Option<i64>> {
+    let (pending, family_requested, completed) = completion_request(conn, task)?;
+    if pending.is_some() && (!family || family_requested) {
         return Ok(pending);
     }
-    insert_task_event_in(
-        conn,
-        task,
-        &TaskEventKind::CompletionRequested {
-            reason: note.map(str::to_string),
-        },
-    )?;
+    if completed || (!family && open_task_child_count(conn, task)? > 0) {
+        return Ok(None);
+    }
+    let reason = note.map(str::to_string);
+    let event = if family {
+        TaskEventKind::FamilyCompletionRequested { reason }
+    } else {
+        TaskEventKind::CompletionRequested { reason }
+    };
+    insert_task_event_in(conn, task, &event)?;
     let request = conn.last_insert_rowid();
     conn.execute(
         "UPDATE tasks SET completion_request=?2,completion_error=NULL WHERE id=?1",
         params![task.as_str(), request],
     )?;
     Ok(Some(request))
+}
+
+fn clear_completion_request(conn: &Connection, task: &TaskId) -> StoreResult<()> {
+    conn.execute(
+        "UPDATE tasks SET completion_request=NULL,completion_error=NULL WHERE id=?1",
+        [task.as_str()],
+    )?;
+    Ok(())
+}
+
+fn record_task_completion(conn: &Connection, task: &TaskId) -> StoreResult<()> {
+    clear_completion_request(conn, task)?;
+    super::task_state::decide_in(conn, task, "completed")?;
+    insert_task_event_in(
+        conn,
+        task,
+        &TaskEventKind::Completed {
+            summary: "Task completed".into(),
+        },
+    )?;
+    super::task_summaries::write_in(conn, task, super::task_summaries::TaskEnd::Done)
+}
+
+fn complete_children(conn: &Connection, parent: &TaskId) -> StoreResult<Vec<ChildCompletion>> {
+    let mut statement = conn.prepare(&format!(
+        "{TASK_COLUMNS} WHERE t.parent_task_id=?1 AND {} ORDER BY t.created_at,t.rowid",
+        open_task_children_where()
+    ))?;
+    let children = statement
+        .query_map([parent.as_str()], |row| map_task_row(conn, row))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let mut completions = Vec::with_capacity(children.len());
+    for task in children {
+        let pr = active_task_pr_on(conn, &task.id)?;
+        let disposition = if pr.as_ref().is_some_and(|pr| pr.phase() == PrPhase::Merged) {
+            record_task_completion(conn, &task.id)?;
+            ChildDisposition::Completed
+        } else if pr.is_none() && never_started(conn, &task.id)? {
+            conn.execute(
+                "UPDATE tasks SET abandoned_at=?2 WHERE id=?1",
+                params![task.id.as_str(), now_unix()],
+            )?;
+            super::durable::record_task_abandonment(conn, &task.id, "parent Task completed")?;
+            ChildDisposition::Abandoned
+        } else {
+            ChildDisposition::Open
+        };
+        let step = conn
+            .query_row(
+                "SELECT step FROM task_graphs WHERE task_id=?1 AND run_start IS NULL",
+                [task.id.as_str()],
+                |row| row.get(0),
+            )
+            .optional()?;
+        completions.push(ChildCompletion {
+            task,
+            disposition,
+            pr,
+            step,
+        });
+    }
+    completions.sort_by_key(|child| child.disposition);
+    Ok(completions)
+}
+
+fn never_started(conn: &Connection, task: &TaskId) -> StoreResult<bool> {
+    if super::durable::task_state_in(conn, task)? != TaskState::Unstarted
+        || super::task_started::task_begun_in(conn, task)?
+    {
+        return Ok(false);
+    }
+    Ok(conn.query_row(
+        "SELECT NOT (
+            EXISTS(SELECT 1 FROM task_prs WHERE task_id=?1)
+            OR EXISTS(SELECT 1 FROM graph_processes WHERE task_id=?1)
+            OR EXISTS(SELECT 1 FROM task_events WHERE task_id=?1
+               AND json_extract(kind_json,'$.kind') IN
+                   ('checkout_initializing','checkout_ready','worktree_initializing'))
+        )",
+        [task.as_str()],
+        |row| row.get(0),
+    )?)
 }
 
 pub(super) fn tasks_in(conn: &Connection, wave_id: Option<&WaveId>) -> StoreResult<Vec<Task>> {

@@ -259,6 +259,60 @@ fn reaching_end_without_remaining_steps_approves_shipping() {
     assert!(!store.end_task_graph(&task, (&by, &reserved)).unwrap());
 }
 
+#[test]
+fn reaching_end_leaves_a_task_with_open_children_open() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = crate::store::opening::open_ephemeral(&dir.path().join("db")).unwrap();
+    let [parent, child] = [TaskId::new(), TaskId::new()];
+    let by = LfProcessId::new();
+    for (id, parent_task_id) in [(&parent, None), (&child, Some(parent.clone()))] {
+        store
+            .create_task(&loopflow_storage::work::task::NewTask {
+                parent_task_id,
+                repository_id: loopflow_storage::test_fixture::repository(&store, "/repo"),
+                id: id.clone(),
+                project_id: None,
+                title: "Retry requests".into(),
+                description: String::new(),
+                due_date: None,
+            })
+            .unwrap();
+    }
+    store
+        .conn
+        .lock()
+        .unwrap()
+        .execute(
+            "INSERT INTO processes(id,trace_id,cwd,started_at) VALUES(?1,?2,'/repo',1)",
+            params![by, TraceId::new()],
+        )
+        .unwrap();
+    crate::store::task_work::take_up_task_graph(
+        &store,
+        &parent,
+        &crate::task_graph::CapturedGraph {
+            name: "review".into(),
+            steps: Vec::new(),
+        },
+    )
+    .unwrap();
+    store.set_task_graph_step(&parent, "review").unwrap();
+    let reserved = loopflow_storage::graph_process::ExecutionStart::reserved(1);
+    assert!(store.end_task_graph(&parent, (&by, &reserved)).unwrap());
+    assert!(store.task_completion_pending(&parent).unwrap().is_none());
+    assert!(store.task_shipping(&parent).unwrap().is_none());
+    assert_eq!(store.open_task_child_count(&parent).unwrap(), 1);
+
+    // Once the child is closed, an explicit request settles as before.
+    store
+        .abandon(&loopflow_model::durable::WorkRef::Task(child), "not needed")
+        .unwrap();
+    assert!(store
+        .request_task_completion(&parent, None)
+        .unwrap()
+        .is_some());
+}
+
 #[tokio::test]
 async fn task_checkout_machine_keeps_session_filters_beside_other_machines() {
     let repo = loopflow_test_support::TestRepo::new();

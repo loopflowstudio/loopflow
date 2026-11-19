@@ -128,6 +128,9 @@ pub struct TaskSummary {
     pub id: String,
     #[serde(deserialize_with = "Option::deserialize")]
     pub tracker_id: Option<String>,
+    /// The stable ID of the Task this one was filed from.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub parent_id: Option<String>,
     pub identifier: String,
     pub name: String,
     pub description: String,
@@ -503,6 +506,19 @@ pub struct RoadmapTask {
     /// Carried to `lf task status`'s `TaskRow`, not on the wire.
     #[serde(skip)]
     pub(crate) step: Option<String>,
+    #[serde(skip)]
+    pub(crate) open_children: u32,
+}
+
+impl RoadmapTask {
+    pub(crate) fn conducts_after_merge(&self) -> bool {
+        self.open_children > 0
+            && !self.lifecycle.is_terminal()
+            && self
+                .pr
+                .as_ref()
+                .is_some_and(|pr| pr.phase == PrPhase::Merged)
+    }
 }
 
 /// `lf wave list` — every durable Wave identity the registry knows.
@@ -896,7 +912,7 @@ pub fn list_tasks(repo: &Path, query: &TaskListArgs, json: bool) -> Result<()> {
         } else if let Some(store) = &store {
             // Without a store there are no Tasks to print.
             let local = loopflow_execution::store::machines::local_machine(&store.sqlite)?.id;
-            for task in tasks {
+            for (task, depth, _) in task_hierarchy(&tasks) {
                 let id = loopflow_model::durable::TaskId::from_raw(task.task.id.clone());
                 let ownership =
                     loopflow_execution::store::ownership::task_ownership(&store.sqlite, &id)?;
@@ -909,7 +925,11 @@ pub fn list_tasks(repo: &Path, query: &TaskListArgs, json: bool) -> Result<()> {
                 if let Some(place) = place {
                     owner = format!("{owner} · {place}");
                 }
-                println!("{} · {owner} · {}", task.task.identifier, task.task.name);
+                let indent = "  ".repeat(depth);
+                println!(
+                    "{indent}{} · {owner} · {}",
+                    task.task.identifier, task.task.name
+                );
             }
         }
         Ok(())
@@ -2131,7 +2151,16 @@ async fn snapshot_task_detail(
     } else {
         None
     };
-    let next_move = if unassigned(&runtime) {
+    let open_children = facts.open_children.get(&task.id).copied().unwrap_or(0);
+    let conducting = open_children > 0
+        && pr.as_ref().is_some_and(|pr| pr.phase() == PrPhase::Merged)
+        && !status.is_terminal();
+    let next_move = if conducting {
+        NextMove {
+            owner: NextMoveOwner::Task,
+            reason: loopflow_execution::ops::task_actions::merged_children_reason(open_children),
+        }
+    } else if unassigned(&runtime) {
         NextMove {
             owner: NextMoveOwner::User,
             reason: "Unassigned; nothing moves it until `lf task claim` or `lf task run`".into(),
@@ -2191,6 +2220,7 @@ async fn snapshot_task_detail(
             .as_ref()
             .filter(|pr| pr.phase() == PrPhase::Open)
             .map(|pr| pr.presentation().is_some()),
+        open_children,
         completion_refusal: completion_refusal.as_deref(),
         run_refusal: run_refusal.as_deref(),
         ci: active.and_then(|pr| pr.fresh_ci()),
@@ -2292,6 +2322,7 @@ async fn snapshot_task_detail(
         }),
         section,
         step: facts.steps.get(&task.id).cloned(),
+        open_children,
     })
 }
 
@@ -2579,6 +2610,7 @@ fn task_summary(
         id: task.id.to_string(),
         tracker_id: task.tracker_id.as_ref().map(|id| id.as_str().to_string()),
         identifier: task.identifier.clone(),
+        parent_id: task.parent_task_id.as_ref().map(ToString::to_string),
         name: task.title.clone(),
         description: task.description.clone(),
         rank: task.rank,
@@ -3106,10 +3138,14 @@ fn task_roadmap_row(task: &RoadmapTask, now: time::OffsetDateTime) -> RoadmapRow
             .as_ref()
             .map(|workspace| workspace.slug.clone()),
         condition: Some(task.condition.state),
-        reason: std::iter::once(task.condition.reason.clone())
-            .chain(task.task.sync.lines())
-            .collect::<Vec<_>>()
-            .join(" · "),
+        reason: std::iter::once(if task.conducts_after_merge() {
+            task.next_move.reason.clone()
+        } else {
+            task.condition.reason.clone()
+        })
+        .chain(task.task.sync.lines())
+        .collect::<Vec<_>>()
+        .join(" · "),
     }
 }
 
@@ -3155,6 +3191,45 @@ fn section_label(section: TaskSection) -> &'static str {
     }
 }
 
+fn task_hierarchy<'a>(
+    tasks: impl IntoIterator<Item = &'a RoadmapTask>,
+) -> Vec<(&'a RoadmapTask, usize, TaskSection)> {
+    let tasks: Vec<_> = tasks.into_iter().collect();
+    let open: HashSet<_> = tasks
+        .iter()
+        .filter(|task| !task.lifecycle.is_terminal())
+        .map(|task| task.task.id.as_str())
+        .collect();
+    let mut children = HashMap::<_, Vec<_>>::new();
+    let mut roots = Vec::new();
+    for task in tasks {
+        if let Some(parent) = task
+            .task
+            .parent_id
+            .as_deref()
+            .filter(|id| open.contains(id))
+        {
+            children.entry(parent).or_default().push(task);
+        } else {
+            roots.push((task, 0, task.section));
+        }
+    }
+    let mut ordered = Vec::new();
+    let mut stack: Vec<_> = roots.into_iter().rev().collect();
+    while let Some((task, depth, section)) = stack.pop() {
+        ordered.push((task, depth, section));
+        if let Some(children) = children.remove(task.task.id.as_str()) {
+            stack.extend(
+                children
+                    .into_iter()
+                    .rev()
+                    .map(|child| (child, depth + 1, section)),
+            );
+        }
+    }
+    ordered
+}
+
 fn print_roadmap(roadmap: &RoadmapSnapshot) {
     if roadmap.waves.is_empty() {
         println!("No waves in the registry.");
@@ -3173,9 +3248,9 @@ fn print_roadmap(roadmap: &RoadmapSnapshot) {
             }
             Evidence::Ok { items, .. } => items,
         };
-        let rows: Vec<RoadmapRow> = tasks
+        let rows: Vec<_> = task_hierarchy(tasks)
             .into_iter()
-            .map(|task| task_roadmap_row(task, now))
+            .map(|(task, depth, section)| (task_roadmap_row(task, now), depth, section))
             .collect();
         if rows.is_empty() {
             println!("  (no plan rows)");
@@ -3184,7 +3259,7 @@ fn print_roadmap(roadmap: &RoadmapSnapshot) {
         // Wide enough for an unnamed owner's email key.
         let owner_width = rows
             .iter()
-            .map(|row| row.owner.chars().count())
+            .map(|(row, _, _)| row.owner.chars().count())
             .max()
             .unwrap_or(0)
             .clamp(12, 32);
@@ -3195,15 +3270,23 @@ fn print_roadmap(roadmap: &RoadmapSnapshot) {
             TaskSection::Done,
             TaskSection::Abandoned,
         ] {
-            let in_section: Vec<&RoadmapRow> =
-                rows.iter().filter(|row| row.section == section).collect();
+            let in_section: Vec<_> = rows
+                .iter()
+                .filter(|(_, _, root)| *root == section)
+                .collect();
             if in_section.is_empty() {
                 continue;
             }
             println!("  {}", section_label(section));
-            for row in in_section {
+            for (row, depth, _) in in_section {
+                let indent = "  ".repeat(*depth);
+                let nested_section = if row.section == section {
+                    String::new()
+                } else {
+                    format!(" · {}", section_label(row.section))
+                };
                 println!(
-                    "    {id}  {rank:>4}  {owner:<owner_width$}  next:{next:<8}  {age:>5}  {condition:<7}  {workspace:<20}  {pr:<24}  {title}",
+                    "    {indent}{id}  {rank:>4}  {owner:<owner_width$}  next:{next:<8}  {age:>5}  {condition:<7}  {workspace:<20}  {pr:<24}  {title}{nested_section}",
                     id = task_identifier_label(
                         &row.id,
                         row.issue_url.as_deref(),
@@ -3228,7 +3311,7 @@ fn print_roadmap(roadmap: &RoadmapSnapshot) {
                     pr = truncate(row.pr.as_deref().unwrap_or("-"), 24),
                     title = truncate(&row.title, 36),
                 );
-                println!("      {}", row.reason);
+                println!("      {indent}{}", row.reason);
             }
         }
     }
@@ -4531,6 +4614,7 @@ mod tests {
                 latest_pr_phase: None,
                 latest_pr_merge_request: None,
                 latest_pr_presentation_current: None,
+                open_children: 0,
                 completion_refusal: None,
                 run_refusal: None,
                 ci: None,
@@ -4651,6 +4735,7 @@ mod tests {
                     latest_pr_phase: None,
                     latest_pr_merge_request: None,
                     latest_pr_presentation_current: None,
+                    open_children: 0,
                     completion_refusal: None,
                     run_refusal: None,
                     ci: None,
@@ -4681,6 +4766,7 @@ mod tests {
             latest_pr_phase: Some(PrPhase::Open),
             latest_pr_merge_request: None,
             latest_pr_presentation_current: Some(true),
+            open_children: 0,
             completion_refusal: None,
             run_refusal: None,
             ci: None,

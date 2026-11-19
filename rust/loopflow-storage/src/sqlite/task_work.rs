@@ -612,7 +612,9 @@ fn arrive_in(
     if ended {
         // A routed path may reach end even though another path had an
         // interactive step, so launch-time prediction is not sufficient.
-        if !super::durable::task_state_in(tx, task)?.is_terminal() {
+        if !super::durable::task_state_in(tx, task)?.is_terminal()
+            && super::children::request_completion_in(tx, task, None)?.is_some()
+        {
             let start = start.expect("an arrived run was on the Task");
             ship_in(
                 tx,
@@ -622,7 +624,6 @@ fn arrive_in(
                 Approval::Route,
             )?;
         }
-        super::children::request_completion_in(tx, task, None)?;
     }
     Ok(ended)
 }
@@ -1087,9 +1088,8 @@ impl SqliteStore {
             "UPDATE task_graphs SET step=?2,updated_at=?3 WHERE task_id=?1 AND step!=?2 AND lf_process_id IS NULL",
             rusqlite::params![task.as_str(), END, crate::rows::now_unix()],
         )? > 0;
-        if ended {
+        if ended && super::children::request_completion_in(&tx, task, None)?.is_some() {
             ship_in(&tx, task, by, "its run reached the end", Approval::Route)?;
-            super::children::request_completion_in(&tx, task, None)?;
         }
         tx.commit()?;
         Ok(ended)
@@ -1476,8 +1476,14 @@ mod tests {
             Some((request, "provider unavailable".into()))
         );
         let retained = store.task(&task).unwrap().unwrap();
-        assert!(store.complete_task(&retained, request).unwrap());
-        assert!(store.complete_task(&retained, request).unwrap());
+        assert!(matches!(
+            store.complete_task(&retained, request).unwrap(),
+            super::super::children::CompletionSettlement::Settled(_)
+        ));
+        assert!(matches!(
+            store.complete_task(&retained, request).unwrap(),
+            super::super::children::CompletionSettlement::Settled(_)
+        ));
         assert!(store.task_completion_pending(&task).unwrap().is_none());
         assert_eq!(
             store.task_graph_row(&task).unwrap().map(|row| row.graph),
@@ -1489,7 +1495,10 @@ mod tests {
         assert_eq!(completed, 1);
         drop(conn);
         store.reopen_task(&task, Some("Continue findings")).unwrap();
-        assert!(!store.complete_task(&retained, request).unwrap());
+        assert!(matches!(
+            store.complete_task(&retained, request).unwrap(),
+            super::super::children::CompletionSettlement::Superseded
+        ));
         assert!(store.task_completion_pending(&task).unwrap().is_none());
         assert_eq!(
             store.task_graph_row(&task).unwrap().map(|row| row.graph),

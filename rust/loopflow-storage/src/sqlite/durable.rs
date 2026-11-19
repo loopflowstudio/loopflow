@@ -146,16 +146,7 @@ impl SqliteStore {
             )));
         }
         if let WorkRef::Task(task_id) = work {
-            tx.execute(
-                "UPDATE tasks SET abandon_reason=?2 WHERE id=?1",
-                params![task_id.as_str(), reason],
-            )?;
-            super::task_state::decide_in(&tx, task_id, "canceled")?;
-            super::task_summaries::write_in(
-                &tx,
-                task_id,
-                super::task_summaries::TaskEnd::Abandoned,
-            )?;
+            record_task_abandonment(&tx, task_id, reason)?;
         }
         tx.commit()?;
         Ok(AbandonReceipt {
@@ -365,6 +356,19 @@ pub(crate) fn task_state_sql(t: &str) -> String {
 /// SQL: Task row `t` is neither done nor abandoned.
 pub(crate) fn task_open_sql(t: &str) -> String {
     format!("({t}.abandoned_at IS NULL AND {t}.planning_completed IS NOT 1)")
+}
+
+pub(super) fn record_task_abandonment(
+    conn: &Connection,
+    task: &TaskId,
+    reason: &str,
+) -> StoreResult<()> {
+    conn.execute(
+        "UPDATE tasks SET abandon_reason=?2 WHERE id=?1",
+        params![task.as_str(), reason],
+    )?;
+    super::task_state::decide_in(conn, task, "canceled")?;
+    super::task_summaries::write_in(conn, task, super::task_summaries::TaskEnd::Abandoned)
 }
 
 pub(crate) fn task_state_in(conn: &Connection, task: &TaskId) -> StoreResult<TaskState> {

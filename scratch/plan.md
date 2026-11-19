@@ -343,10 +343,12 @@ existing update a conversation gets about its own Task; Waves and
    the human output. Shown by
    `session_cli_tests::a_task_filed_from_a_tasks_conversation_shows_under_it`
    and `adoption::tests::a_task_filed_from_a_tasks_conversation_is_its_child`.
+   Built with slice 4: `parent` on `TaskRow` and `parent_id` on
+   `TaskSummary` (both the parent's stable ID, so a list nests by `id`),
+   the Swift mirror `TaskPlanningSnapshot.parentId` and every fixture,
+   `lf wave show` and `lf task list` indenting a child under an open
+   parent in the list.
    Remaining:
-   - `parent` on `TaskRow` and `RoadmapTask` (`TaskSummary.parent_id`), the
-     Swift mirror and its fixtures, `lf wave show` indenting a child, a
-     child of a closed parent listed top-level. Nothing lists nest yet.
    - `lf task show` (`TaskStatus`, `DesktopTaskPane`): the same two keys.
    - served `task.create`: `parent`. Today it files top-level
      (`write.rs` passes `parent: None, caller: None`).
@@ -381,17 +383,38 @@ existing update a conversation gets about its own Task; Waves and
    waking the parent). Delivery is the unchanged steer path; the acceptance
    check at gate is where it runs end to end. Not measured: a hook boundary
    with ten open children.
-4. **Merged and open; closing.** Reason and `next` for a parent with open
-   children, Auto-Ship's skipped completion, `lf task complete` over children,
-   a child of a done parent listed top-level.
+4. **Merged and open; closing.** Built. A merged Task with open children
+   reads "Merged · N children open" with `next` null (`task_actions::
+   merged_action`, `snapshot_task_detail`, `task_row::next_command`). A
+   run reaching `end`, and Auto-Ship's merge, request no completion while
+   children are open (`request_completion`); `lf ship` prints the reason
+   and returns (`ShipMerge::Conducting`). `lf task complete` records a
+   `family_completion_requested` event, so a completion that waits for the
+   parent's merge still settles the children when it lands; one
+   transaction closes the parent, completes merged children and abandons
+   never-started ones (`complete_children`), and the command prints one
+   line per child: done, abandoned, left open. A child whose parent is
+   closed or not in the list prints top-level (`task_hierarchy`).
+   Shown by `session_cli_tests::a_merged_parent_stays_open_until_it_is_completed_with_its_children`
+   (the CLI end to end over seeded PRs: acceptance steps 3 and 7),
+   `task_work_lifecycle_tests::reaching_end_leaves_a_task_with_open_children_open`
+   and `task_actions::tests::a_merged_task_with_open_children_is_not_asked_to_complete`.
+   What it taught: a parent that reaches `end` with children open is not
+   approved to ship either, so a PR still unmerged there waits for
+   `lf land`; and "never started" needed its own definition (no PR, no
+   Graph process, no checkout event, not begun), stricter than
+   `unstarted`.
+   Not built: `lf task complete --json` prints the parent only; the served
+   `task.complete` returns the parent only. Desktop does not nest yet
+   (`parentId` is decoded and unused). A done parent run through
+   `lf task complete` again does not revisit children left open.
 5. **The link travels.** `TaskParent` through the plan exchange and to Linear
    and Asana, on LOO-938. Until then a child reaches the tracker as an
    ordinary issue: `task_creation_intents` carries no parent.
 
-Next: slice 4, which finishes the demo's middle (a merged parent stays
-open, `lf task complete` over children). Its "listed top-level" rule needs
-`parent` on `TaskRow`, so the `TaskRow`/`RoadmapTask` item from slice 2 goes
-with it; the rest of slice 2 follows.
+Next: the rest of slice 2 (`lf task show`, served `task.create`,
+`.parent.identifier` on the creation receipt, the leaving marks), then
+slice 5.
 
 One PR. If LOO-938 is still unmerged when slices 1–4 are done, slice 5 is
 built on `lf sync LOO-938` and the PR waits behind #1983.

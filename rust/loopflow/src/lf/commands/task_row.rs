@@ -28,6 +28,9 @@ pub struct TaskRow {
     pub wave: Option<String>,
     /// Its Project's name; `null` outside any Project.
     pub project: Option<String>,
+    /// The stable ID of the Task this one was filed from.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub parent: Option<String>,
     pub state: TaskState,
     /// Why it is in that state, or what it waits on.
     pub reason: String,
@@ -78,15 +81,12 @@ pub struct TaskDetail {
 impl TaskRow {
     /// Where the Task stands, in a few words: "idle at human-review".
     pub fn standing(&self) -> String {
-        let state = serde_json::to_value(self.state)
-            .ok()
-            .and_then(|state| state.as_str().map(str::to_owned))
-            .unwrap_or_default();
+        let state = self.state.label();
         match self.graph.as_ref().and_then(|graph| graph.step.as_deref()) {
             Some(step) if !matches!(self.state, TaskState::Done | TaskState::Abandoned) => {
                 format!("{state} at {step}")
             }
-            _ => state,
+            _ => state.to_owned(),
         }
     }
 }
@@ -173,6 +173,7 @@ impl TaskNames {
     pub(crate) fn row(&self, task: RoadmapTask) -> TaskRow {
         let state = task.lifecycle;
         let next = next_command(&task);
+        let conducting = task.conducts_after_merge();
         let summary = task.task;
         TaskRow {
             wave: summary
@@ -186,11 +187,15 @@ impl TaskNames {
             id: summary.id,
             identifier: summary.identifier,
             title: summary.name,
+            parent: summary.parent_id,
             state,
             // An approved Task waits on its ship, whatever its next move says.
-            reason: task
-                .shipping
-                .map_or(task.next_move.reason, |shipping| shipping.reason),
+            reason: if conducting {
+                task.next_move.reason
+            } else {
+                task.shipping
+                    .map_or(task.next_move.reason, |shipping| shipping.reason)
+            },
             graph: task.graph_name.map(|name| TaskRowGraph {
                 name,
                 step: task.step,
@@ -217,7 +222,7 @@ fn next_command(task: &RoadmapTask) -> Option<String> {
             .as_ref()
             .is_some_and(|pr| pr.phase == PrPhase::Merged) =>
         {
-            Some(format!("lf task complete {id}"))
+            (task.open_children == 0).then(|| format!("lf task complete {id}"))
         }
         _ if task.run_control.unavailable.is_none() => Some(format!("lf task run {id}")),
         _ => None,

@@ -664,6 +664,9 @@ pub enum TaskEventKind {
     CompletionRequested {
         reason: Option<String>,
     },
+    FamilyCompletionRequested {
+        reason: Option<String>,
+    },
     Completed {
         summary: String,
     },

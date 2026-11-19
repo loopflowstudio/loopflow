@@ -96,6 +96,7 @@
         "state": null,
         "completed_at": null,
         "tracker_id": null,
+        "parent_id": null,
         "tracker_state": {
           "state": "available",
           "synced_at": null
@@ -223,6 +224,7 @@
         "state": null,
         "completed_at": null,
         "tracker_id": null,
+        "parent_id": null,
         "tracker_state": {
           "state": "available",
           "synced_at": null

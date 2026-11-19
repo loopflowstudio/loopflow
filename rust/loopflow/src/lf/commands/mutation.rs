@@ -225,12 +225,19 @@ fn task(repo: &Path, command: &TaskCommand, io: &mut CommandIo<'_>) -> Result<()
             reason,
             json,
         } => {
-            let task =
+            let completion =
                 loopflow_execution::ops::task::task_complete(repo, issue, reason.as_deref())?;
             if *json {
-                writeln!(io.output, "{}", serde_json::to_string_pretty(&task)?)?;
+                writeln!(
+                    io.output,
+                    "{}",
+                    serde_json::to_string_pretty(&completion.task)?
+                )?;
             } else {
-                writeln!(io.output, "{issue}: completed")?;
+                writeln!(io.output, "{} done", completion.task.identifier)?;
+                for child in &completion.children {
+                    writeln!(io.output, "  {}", child_completion_line(child))?;
+                }
             }
             Ok(())
         }
@@ -388,4 +395,29 @@ pub fn read_task_draft(input: &mut dyn Read) -> Result<String> {
     input.take(limit as u64 + 1).read_to_end(&mut bytes)?;
     anyhow::ensure!(bytes.len() <= limit, "Draft exceeds 1 MB");
     Ok(String::from_utf8(bytes)?)
+}
+
+fn child_completion_line(child: &loopflow_storage::sqlite::children::ChildCompletion) -> String {
+    use loopflow_storage::sqlite::children::ChildDisposition;
+
+    let id = &child.task.identifier;
+    let pr = child.pr.as_ref().and_then(|pr| {
+        pr.github()
+            .map(|github| format!("#{} {}", github.number, pr.phase().as_str()))
+    });
+    match child.disposition {
+        ChildDisposition::Completed => {
+            format!("{id} done: {}", pr.as_deref().unwrap_or("PR merged"))
+        }
+        ChildDisposition::Abandoned => format!("{id} abandoned: never started"),
+        ChildDisposition::Open => {
+            let step = child.step.as_ref().map(|step| format!("at {step}"));
+            let reasons = pr.into_iter().chain(step).collect::<Vec<_>>();
+            if reasons.is_empty() {
+                format!("{id} stays open")
+            } else {
+                format!("{id} stays open: {}", reasons.join(", "))
+            }
+        }
+    }
 }

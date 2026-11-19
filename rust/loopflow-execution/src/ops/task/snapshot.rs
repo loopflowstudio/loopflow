@@ -104,6 +104,10 @@ pub(super) async fn read_task_snapshot(store: &SharedStore, task: Task) -> OpsRe
                 .as_ref()
                 .filter(|pr| pr.phase() == PrPhase::Open)
                 .map(|pr| pr.presentation().is_some()),
+            open_children: store
+                .sqlite
+                .open_task_child_count(&task.id)
+                .map_err(task_error)?,
             completion_refusal: completion_refusal.as_deref(),
             run_refusal: run_refusal.as_deref(),
             ci: active.and_then(|pr| pr.fresh_ci()),

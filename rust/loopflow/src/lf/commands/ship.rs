@@ -56,7 +56,7 @@ pub fn run(
     headless.batch = true;
     headless.interactive = false;
     loop {
-        if merged(&issue) == ShipMerge::Done {
+        if matches!(merged(&issue), ShipMerge::Done | ShipMerge::Conducting(_)) {
             return Ok(());
         }
         let from = match ship_next(&issue)? {
@@ -98,6 +98,10 @@ fn merged(issue: &str) -> ShipMerge {
             match &merge {
                 ShipMerge::Done => println!("{issue}: its PR merged; completed"),
                 ShipMerge::Verifying(step) => println!("{issue}: its PR merged; on to {step}"),
+                ShipMerge::Conducting(count) => println!(
+                    "{issue}: {}",
+                    loopflow_execution::ops::task_actions::merged_children_reason(*count)
+                ),
                 ShipMerge::Open => {}
             }
             merge

@@ -86,6 +86,8 @@ fn wave_detail_preserves_graph_and_machine() {
     assert_eq!(tasks[0].task.id, tasks[0].runtime.as_ref().unwrap().work_id);
     assert!(tasks[0].runtime.as_ref().unwrap().provider.is_none());
     assert_eq!(tasks[0].task.tracker_id.as_deref(), Some("issue-1"));
+    assert_eq!(tasks[0].task.parent_id, None);
+    assert_eq!(tasks[1].task.parent_id.as_ref(), Some(&tasks[0].task.id));
     let Evidence::Ok { items: runs, .. } = &snapshot.history else {
         panic!("fixture contains recorded Runs");
     };

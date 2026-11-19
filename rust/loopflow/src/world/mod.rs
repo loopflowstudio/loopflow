@@ -529,7 +529,8 @@ impl World {
     /// completion `completed_days_ago` through the planning writer.
     pub fn complete(&self, task: &Task, note: &str, completed_days_ago: f64) -> Result<Task> {
         let task =
-            loopflow_execution::ops::task::task_complete(&self.repo, &task.identifier, Some(note))?;
+            loopflow_execution::ops::task::task_complete(&self.repo, &task.identifier, Some(note))?
+                .task;
         let at = time::OffsetDateTime::from_unix_timestamp(self.days_ago(completed_days_ago))?
             .format(&time::format_description::well_known::Rfc3339)?;
         self.dispose(

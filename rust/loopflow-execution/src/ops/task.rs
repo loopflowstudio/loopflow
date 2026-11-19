@@ -2675,20 +2675,25 @@ pub fn task_copied_sessions(
     })
 }
 
-/// Complete the Task without moving its Graph or changing its Processes.
-pub fn task_complete(repo: &Path, issue: &str, note: Option<&str>) -> OpsResult<Task> {
+#[derive(Debug)]
+pub struct TaskCompletion {
+    pub task: Task,
+    pub children: Vec<loopflow_storage::sqlite::children::ChildCompletion>,
+}
+
+/// Complete the Task and settle its direct children without moving their Graphs.
+pub fn task_complete(repo: &Path, issue: &str, note: Option<&str>) -> OpsResult<TaskCompletion> {
     block_on_task(async {
         let (store, mut task) = resolve_saved_task(repo, None, issue).await?;
-        if let Some(request) = store
+        let children = match store
             .sqlite
-            .request_task_completion(&task.id, note)
+            .request_family_completion(&task.id, note)
             .map_err(task_error)?
         {
-            settle_completion(&store, &mut task, request).await?;
-        } else {
-            reconcile_task_completion(&store, &mut task).await?;
-        }
-        Ok(task)
+            Some(request) => settle_completion(&store, &mut task, request).await?,
+            None => Vec::new(),
+        };
+        Ok(TaskCompletion { task, children })
     })
 }
 
@@ -2834,7 +2839,13 @@ pub fn completion_pending_text(task: &Task, reason: &str) -> String {
     )
 }
 
-async fn settle_completion(store: &SharedStore, task: &mut Task, request: i64) -> OpsResult<()> {
+async fn settle_completion(
+    store: &SharedStore,
+    task: &mut Task,
+    request: i64,
+) -> OpsResult<Vec<loopflow_storage::sqlite::children::ChildCompletion>> {
+    use loopflow_storage::sqlite::children::{ChildDisposition, CompletionSettlement};
+
     let result = async {
         if task_work_status(store, task).await? == WorkStatus::Abandoned {
             return Err(task_error("An abandoned Task cannot be completed"));
@@ -2843,46 +2854,42 @@ async fn settle_completion(store: &SharedStore, task: &mut Task, request: i64) -
         if let Some(refusal) = task_completion_refusal(store, task).await? {
             return Err(task_error(refusal));
         }
-        // Recheck after observation: a newer authored status may have superseded the request.
-        if store
-            .sqlite
-            .task_completion_pending(&task.id)
-            .map_err(task_error)?
-            .map(|(id, _)| id)
-            != Some(request)
-        {
-            return if task_work_status(store, task).await? == WorkStatus::Done {
-                Ok(())
-            } else {
-                Err(task_error(
-                    "Completion request was superseded by newer Task status",
-                ))
-            };
-        }
-        if !store
+        let children = match store
             .complete_task(task, request)
             .await
             .map_err(task_error)?
         {
-            return Err(task_error(
-                "Completion request was superseded by newer Task status",
-            ));
-        }
+            CompletionSettlement::Settled(children) => children,
+            CompletionSettlement::WaitingForChildren => return Ok(Vec::new()),
+            CompletionSettlement::Superseded => {
+                return Err(task_error(
+                    "Completion request was superseded by newer Task status",
+                ));
+            }
+        };
         *task = store
             .get_task(&task.id)
             .await
             .map_err(task_error)?
             .ok_or_else(|| task_error("completed Task is missing"))?;
-        let repo = repository_for_task(store, task)?;
-        super::planning_sync::sync_after_save(
-            store,
-            &repo.to_string_lossy(),
-            &loopflow_storage::sqlite::tracker_actions::ActionOwner::Task(task.id.clone()),
-        )
-        .await;
-        // Cleanup retains live work and unpublished artifacts independently of status.
-        retirement::schedule(store, task).await?;
-        Ok(())
+        for child in &children {
+            let result = match child.disposition {
+                ChildDisposition::Completed => finish_completion(store, &child.task).await,
+                ChildDisposition::Abandoned => {
+                    let result = retirement::close_conversations(&store.sqlite, &child.task.id);
+                    sync_completion(store, &child.task).await.and(result)
+                }
+                ChildDisposition::Open => continue,
+            };
+            if let Err(error) = result {
+                crate::journal::request::diagnostic(format_args!(
+                    "{} was settled; follow-up failed: {error}",
+                    child.task.identifier
+                ));
+            }
+        }
+        finish_completion(store, task).await?;
+        Ok(children)
     }
     .await;
     if let Err(error) = &result {
@@ -2892,6 +2899,23 @@ async fn settle_completion(store: &SharedStore, task: &mut Task, request: i64) -
             .map_err(task_error)?;
     }
     result
+}
+
+async fn sync_completion(store: &SharedStore, task: &Task) -> OpsResult<()> {
+    let repo = repository_for_task(store, task)?;
+    super::planning_sync::sync_after_save(
+        store,
+        &repo.to_string_lossy(),
+        &loopflow_storage::sqlite::tracker_actions::ActionOwner::Task(task.id.clone()),
+    )
+    .await;
+    Ok(())
+}
+
+async fn finish_completion(store: &SharedStore, task: &Task) -> OpsResult<()> {
+    sync_completion(store, task).await?;
+    // Cleanup retains live work and unpublished artifacts independently of status.
+    retirement::schedule(store, task).await
 }
 
 /// Publication-state label carried by the PR's Linear linkage.

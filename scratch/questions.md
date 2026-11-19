@@ -60,6 +60,27 @@ rest is not chosen.
 - A run that ends without succeeding and leaves the Task at an interactive
   step sends both in one notice: "failed at gate and stopped at human-review".
 
+## Made while building slice 4, for review
+
+- `TaskRow.parent` and `TaskSummary.parent_id` are the parent's stable ID,
+  the key a list nests by; `lf task status --json`'s top-level `parent`
+  stays the identifier. Two keys named `parent` with different values in
+  one document: rename one?
+- A parent with open children whose run reaches `end` is not approved to
+  ship and requests no completion. If its PR is still open there, it waits
+  for `lf land`.
+- `lf task complete <parent>` prints children in the order done, abandoned,
+  left open, as the docs example has it, not filing order.
+- "Never started": unstarted, not begun, no PR row, no Graph process and no
+  checkout event. A child with a checkout and no commits stays open.
+- A child abandoned by its parent's completion records the reason "parent
+  Task completed".
+- `lf task complete --json` and served `task.complete` still return the
+  parent Task alone.
+- In `lf wave show`, a child prints under its parent in the parent's
+  section, with its own section named at the end of the line when it
+  differs.
+
 ## Raised by writing the docs (2026-11-18)
 
 - "Parent" already means the stack parent across `docs/work.md`,

@@ -248,7 +248,7 @@ Proposed (not decided): the tour records the commit it was written at (`at: <sha
 
 Jack: "i wonder if there is some way we can also to smarter changes over itme. we could allow repo level settings to prioritize certain folders or file extensions ro something". Not decided. Today By kind is a fixed rule in `ReviewKind` (`ReviewOrder.swift`): generated and lock files, tests, docs, source by path patterns.
 
-## Next for implement — the tour skill and its button (November 19)
+## The tour skill and its button (November 19) — built
 
 Jack, quoting the proposal ("a small skill whose whole job is to read the diff and write the YAML … the worker and the button write the same thing the same way"): "We need this, plus we need to put this into other skills and/or the overall loopflow guide."
 
@@ -259,3 +259,27 @@ Jack, quoting the proposal ("a small skill whose whole job is to read the diff a
 5. Tests a person would notice: a tour written at an older commit reads as stale; the skill's golden; the button's command line.
 
 Not in this slice: the repository `diff_order` setting, `.gitattributes`, "Always hide?" (proposed in the section above, not decided).
+
+Built: builtin `tour` (`rust/loopflow-definitions/src/builtins/task/skill/tour.md`, golden `tests/goldens/builtin_tour.md`). `implement`, `compress` (a final step) and `human-review` (when the file is missing or behind) point at `lf help tour`; `demo` and `pr-publish` don't change what a reader opens. `LOOPFLOW.md` unchanged: a plain chat's change gets its tour from Desktop's button, so every run need not pay for the line. Desktop parses `at:`; stale means a commit after `at` changed a file outside `scratch/` (committing the tour itself keeps it current), and the stream says "The tour was written at <sha> · N files changed since" — files changed, not commits, since that is the read that exists (`task.changes --base <at> --head <head>`). **Write tour** / **Update tour** sends the served `skill.run` write with the Task's checkout; a remote Task offers neither (the write would run outside its checkout). Limit: a run that fails after launching stays "Writing the tour…"; its log path is in the notice.
+
+Jack, on ordering layers: "right, and we could say that the review guides basically stack ontop of the default diff_Order, but we still fall back. and likewise, the repo (or potentially peronsal) settings could also add more. and i think maybe a whole diff seciton that has filters and ordered list of groups"
+
+Direction from that (sent to the running worker as a steer):
+- One `diff:` setting section replaces `diff_hidden`: `diff.hidden` (path text to hide) and `diff.groups` (ordered list of `{title, paths}`). Settable in the repository's `.lf/config.yaml` (shared) and in personal settings, globally or per repository.
+- Layers, top first: the tour (`scratch/diff-order.yaml`, this change only) → personal groups → repository groups → the built-in groups (today's `ReviewKind` rule, which becomes the default value). A file sits in the first group that matches it; files no layer names come last. Every layer only adds; nothing below it is lost.
+- Hidden is the union of the tour's `hide`, personal and repository `hidden`; each stays labelled with where it came from in the sidebar, and only your own are editable there.
+- The migration of an existing `diff_hidden` value: per AGENTS.md's shared-file rule, the released `lf` 0.16.0 doesn't know `diff_hidden` at all, so no fallback is needed; drop the key.
+
+Jack: "i would also imagine that we want sort of anyting not covered to go between e.g. docs and generated". So unmatched files do not go last: `diff.groups` has one "everything else" slot, an entry `- rest: Everything else` (title optional). The built-in default is Source, Tests, Docs, rest, Generated. A layer that lists its own `rest` moves the slot; otherwise the slot stays where the lowest layer put it. Files no group matches land there.
+
+Jack: "btw i would want doccs up top, then like core data mdoel stuff". Read as the default order: Docs, Data model, rest (source not otherwise named), Tests, Generated. Source as its own built-in group goes; it is what `rest` holds. Built-in Data model uses generic paths (migrations, `*.sql`, `schema`, `models/`, `*.proto`, `dto`); this repository adds its own in `.lf/config.yaml`: `rust/loopflow-model/`, `rust/loopflow-storage/`, `tests/fixtures/dto/`.
+
+Jack: "ideally we would roughly suggest similar overall guidance in our default skill, and have it eplicitly codified in our repo config". So the order lives in two places on purpose: the tour skill says it as reading guidance (docs and the outcome first, then the data model and public APIs, then the logic that uses them, tests, generated last), and this repository's `.lf/config.yaml` writes the full `diff.groups` list out explicitly rather than leaning on the built-in default.
+
+Jack, on the layers: "For this we should use the existing config parser to get final values". So Desktop does no layering of its own: it reads the final `diff` value from lf's settings resolution, and only the tour (a per-change file, not a setting) sits on top in Desktop. Found: list settings with `AppendReset` (e.g. `docs`, `exclude`) append each higher layer after the lower ones (`settings.rs:825`), so a "first match wins" rule would let the built-in groups win. The matching and display rule has to fall out of that final list.
+
+Jack: "a little complicated on what do on how to combine groups from multiple config files (and/or the represetnation from scratch)". Chosen in this conversation (the operator's call, not Jack's; reversible): no group merging at all.
+- `diff.groups`: Replace. The most specific layer that sets it wins whole (personal for this repo > personal > repository > built-in). To add to it, copy the list `lf config explain diff` shows.
+- `diff.hidden`: AppendReset, the existing list combination: every layer adds; `[]` clears below.
+- The tour is not groups: `first:` pins files above whatever groups resolve to, `hide:` adds to hidden for this change. Nothing to merge.
+This supersedes the steer about same-title groups merging and last-match-wins.

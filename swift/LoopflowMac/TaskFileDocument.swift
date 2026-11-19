@@ -851,10 +851,16 @@ final class TaskFilesStore {
             var cut = false
             if next.truncated { (parsed, cut) = await completed(parsed, base: base, head: target.head) }
             let order = await readOrder()
+            let age = await readTourAge(order)
             guard !Task.isCancelled, generation == reviewGeneration, comparison == target else { return }
             for path in openedGaps.keys where review?.file(path) != parsed.file(path) { openedGaps[path] = nil }
             comments = comments.map { $0.anchored(in: parsed.file($0.selection.path).map(opened)) }
+            if isWritingTour, let order, order.at != diffOrder?.at {
+                tourWriting = .idle
+                orderingChoice = .tour
+            }
             diffOrder = order
+            tourAge = age
             review = parsed
             reviewTruncated = cut
             reviewError = nil
@@ -956,6 +962,81 @@ final class TaskFilesStore {
         guard let file = try? await query.taskFile(issue: issue, path: DiffOrder.path),
               file.state == .text, let content = file.content else { return nil }
         return DiffOrder.parse(content)
+    }
+
+    // MARK: Tour
+
+    /// How far the change has moved since its tour was written.
+    struct TourAge: Equatable {
+        /// The commit the tour names; nil when it names none.
+        let at: String?
+        /// Files outside `scratch/` that commits since `at` changed; nil when
+        /// that could not be read.
+        let changedFiles: Int?
+    }
+
+    /// Set when the tour is behind the head; nil while it is current or there is none.
+    private(set) var tourAge: TourAge?
+
+    enum TourWriting: Equatable {
+        case idle
+        /// The `tour` skill is running headless; `log` is where its output
+        /// goes, once its launch answers.
+        case running(log: String?)
+        case failed(String)
+    }
+    private(set) var tourWriting = TourWriting.idle
+    var isWritingTour: Bool { if case .running = tourWriting { true } else { false } }
+
+    /// A tour is stale when it names no commit, or when a commit after the one
+    /// it names changed a file outside `scratch/`. Committing the tour itself
+    /// leaves it current.
+    private func readTourAge(_ order: DiffOrder?) async -> TourAge? {
+        guard let order, let head = changes?.headCommit else { return nil }
+        guard let at = order.at else { return TourAge(at: nil, changedFiles: nil) }
+        if head.hasPrefix(at) || at.hasPrefix(head) { return nil }
+        guard let since = try? await query.taskChanges(issue: issue, base: at, head: head) else {
+            return TourAge(at: at, changedFiles: nil)
+        }
+        let changed = since.files.filter { !$0.path.hasPrefix("scratch/") }.count
+        return changed == 0 ? nil : TourAge(at: at, changedFiles: changed)
+    }
+
+    /// What the Diff says about the tour; nil while it is current or there is none.
+    var tourStatus: String? {
+        switch tourWriting {
+        case .running(let log): return log.map { "Writing the tour… · its output: \($0)" } ?? "Writing the tour…"
+        case .failed(let reason): return reason
+        case .idle: break
+        }
+        guard diffOrder != nil, let age = tourAge else { return nil }
+        guard let at = age.at else { return "The tour names no commit, so it may be behind the change" }
+        guard let changed = age.changedFiles else { return "The tour was written at \(at.prefix(7)), before the latest commits" }
+        return "The tour was written at \(at.prefix(7)) · \(changed == 1 ? "1 file" : "\(changed) files") changed since"
+    }
+
+    /// Write tour when there is none, Update tour when it is behind; nil
+    /// while it is current, being written, or the checkout is on another Machine.
+    var tourAction: String? {
+        guard canWriteTour, !isWritingTour else { return nil }
+        if diffOrder == nil { return "Write tour" }
+        return tourAge != nil ? "Update tour" : nil
+    }
+
+    /// The `tour` skill only runs in a checkout on this Machine.
+    var canWriteTour: Bool { query.remoteMachine == nil }
+
+    /// Run the `tour` skill headless in the Task's checkout. The order
+    /// switches to Tour when the file it writes lands.
+    func writeTour() async {
+        guard canWriteTour, !isWritingTour else { return }
+        noteInteraction()
+        tourWriting = .running(log: nil)
+        do {
+            tourWriting = .running(log: try await query.runSkill("tour", checkout: cwd))
+        } catch {
+            tourWriting = .failed("The tour could not start: \(error.localizedDescription)")
+        }
     }
 
     // MARK: Skipped lines

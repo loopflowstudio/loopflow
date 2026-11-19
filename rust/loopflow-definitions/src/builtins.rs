@@ -256,6 +256,7 @@ mod tests {
             "demo",
             "measure",
             "optimize-plan",
+            "tour",
         ] {
             assert!(get_builtin_skill(name).is_some(), "{name}");
         }

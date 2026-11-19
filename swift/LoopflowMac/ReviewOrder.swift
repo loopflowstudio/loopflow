@@ -3,8 +3,10 @@ import Foundation
 
 /// What a worker says about reading its change: which files come first and
 /// which are not worth opening, each with an optional reason. Read from
-/// `scratch/diff-order.yaml` in the Task's checkout:
+/// `scratch/diff-order.yaml` in the Task's checkout, written by the `tour`
+/// skill at the head commit it read:
 ///
+///     at: 81d3fa5973e63a4394a25357502e635a3baf5d5b
 ///     first:
 ///       - path: swift/LoopflowMac/TaskFileDocument.swift
 ///         why: A change over 1 MB no longer loses its last files
@@ -24,10 +26,12 @@ struct DiffOrder: Equatable, Sendable {
 
     static let path = "scratch/diff-order.yaml"
 
+    /// The head commit the order was written at; nil when the file does not say.
+    var at: String?
     var first: [Entry] = []
     var hide: [Entry] = []
 
-    /// The two lists of this one shape; anything else in the file is ignored.
+    /// `at:` and the two lists of this one shape; anything else in the file is ignored.
     static func parse(_ yaml: String) -> DiffOrder {
         var order = DiffOrder()
         var section: WritableKeyPath<DiffOrder, [Entry]>?
@@ -42,6 +46,10 @@ struct DiffOrder: Equatable, Sendable {
             let line = raw.trimmingCharacters(in: .whitespaces)
             guard !line.isEmpty, !line.hasPrefix("#") else { continue }
             if raw.first?.isWhitespace == false, !line.hasPrefix("-") {
+                if line.hasPrefix("at:") {
+                    let commit = value(line.dropFirst("at:".count))
+                    order.at = commit.isEmpty ? nil : commit
+                }
                 section = line == "first:" ? \.first : line == "hide:" ? \.hide : nil
                 continue
             }
@@ -67,7 +75,7 @@ struct DiffOrder: Equatable, Sendable {
                 return path.isEmpty ? nil : Entry(path: path, why: entry.why)
             }
         }
-        return DiffOrder(first: named(order.first), hide: named(order.hide))
+        return DiffOrder(at: order.at, first: named(order.first), hide: named(order.hide))
     }
 }
 

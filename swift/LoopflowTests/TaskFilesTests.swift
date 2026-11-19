@@ -938,6 +938,71 @@ struct TaskFilesTests {
         #expect(store.comments.map(\.detached) == [false])
     }
 
+    /// A tour names the commit it was written at. Once a later commit changes a
+    /// file outside `scratch/`, the Diff says how far behind it is and offers
+    /// Update tour, which runs the `tour` skill headless in the Task's checkout;
+    /// the order switches to Tour when the new file lands.
+    @Test func aTourWrittenAtAnOlderCommitReadsAsStaleAndUpdateTourRewritesIt() async throws {
+        let fixture = try Data(contentsOf: URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("tests/fixtures/dto/task_files.json"))
+        let old = String(repeating: "c", count: 40), head = String(repeating: "b", count: 40)
+        let tour = OSAllocatedUnfairLock(initialState: "at: \(old)\nfirst:\n  - path: a.swift\n    why: Start here\n")
+        let sinceTour = OSAllocatedUnfairLock(initialState: ["a.swift", "scratch/diff-order.yaml"])
+        let launches = OSAllocatedUnfairLock<[[String]]>(initialState: [])
+        let store = TaskFilesStore(issue: "TEST-1", cwd: "/fixture", query: RegistryQuery { args, cwd in
+            if args.first == "--batch" {
+                launches.withLock { $0.append(args + [cwd ?? ""]) }
+                return #"{"operation":"skill.run","lf_process_id":"p1","run":"skill tour","log":"/logs/tour.log"}"#
+            }
+            let root = try JSONSerialization.jsonObject(with: fixture) as! [String: Any]
+            var value = root[args[1]] as! [String: Any]
+            switch args[1] {
+            case "changes":
+                let file = (value["files"] as! [[String: Any]])[0]
+                let paths = args[4] == old ? sinceTour.withLock({ $0 }) : ["a.swift", "z.swift"]
+                value["files"] = paths.map { file.merging(["path": $0, "old_path": NSNull()]) { $1 } }
+            case "file":
+                value["path"] = args[3]
+                value["content"] = args[3] == DiffOrder.path ? tour.withLock({ $0 }) : "one\n"
+            default:
+                value["patch"] = ["a.swift", "z.swift"].map { path in
+                    "diff --git a/\(path) b/\(path)\n--- a/\(path)\n+++ b/\(path)\n@@ -1 +1 @@\n-uno\n+one\n"
+                }.joined()
+            }
+            return String(decoding: try JSONSerialization.data(withJSONObject: value), as: UTF8.self)
+        })
+        store.autosave = false
+        await store.loadReview()
+        #expect(store.tourStatus == "The tour was written at ccccccc · 1 file changed since")
+        #expect(store.tourAction == "Update tour")
+
+        // Committing only the tour itself leaves it current.
+        sinceTour.withLock { $0 = ["scratch/diff-order.yaml"] }
+        await store.loadReview()
+        #expect(store.tourStatus == nil && store.tourAction == nil)
+
+        sinceTour.withLock { $0 = ["a.swift"] }
+        await store.loadReview()
+        store.orderingChoice = .path
+        await store.writeTour()
+        #expect(launches.withLock { $0 } == [["--batch", "skill", "tour", "/fixture"]])
+        #expect(store.tourStatus == "Writing the tour… · its output: /logs/tour.log")
+        #expect(store.tourAction == nil)
+
+        tour.withLock { $0 = "at: \(head)\nfirst:\n  - path: z.swift\n    why: Now here\n" }
+        await store.loadReview()
+        #expect(store.ordering == .tour)
+        #expect(store.shownGroups.first?.title == "Now here")
+        #expect(store.tourStatus == nil && store.tourAction == nil)
+    }
+
+    @Test func aDiffWithoutATourOffersToWriteOne() async throws {
+        let store = try twoFileStore()
+        await store.loadReview()
+        #expect(store.tourAction == "Write tour")
+    }
+
     @Test func diffSteppingPastAFilesLastChangeOpensTheNextFilesDiff() async throws {
         let store = try twoFileStore()
         store.selectFile("a.swift", mode: .diff)

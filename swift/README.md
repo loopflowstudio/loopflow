@@ -341,9 +341,10 @@ or behind-the-checkout reading stays readable but loses its colors, and merged
 never reads as a finished Task.
 
 The files read in the worker's order when the checkout has
-`scratch/diff-order.yaml`:
+`scratch/diff-order.yaml`, which the `tour` skill writes (`lf help tour`):
 
 ```yaml
+at: 81d3fa5973e63a4394a25357502e635a3baf5d5b
 first:
   - path: swift/LoopflowMac/TaskFileDocument.swift
     why: A change over 1 MB no longer loses its last files
@@ -359,6 +360,14 @@ Without the file the Diff reads By kind. The order menu switches between
 **Tour**, **By kind** and **By path**. `hide` leaves those paths out from the
 start; the sidebar lists each with its reason and **Show**, and they never join
 your own hidden paths.
+
+`at` is the commit the tour was written at. Once a later commit changes a file
+outside `scratch/`, the stream says so ("The tour was written at 81d3fa5 · 3
+files changed since") and the toolbar offers **Update tour**; with no tour it
+offers **Write tour**. Either runs the `tour` skill headless in the Task's
+checkout and reads in Tour when the new file lands. Files changed since `at`
+still follow the named ones. Nothing rewrites the tour on its own, and a Task
+on another Machine offers neither button.
 
 The sidebar lists the files in that order: type to narrow the stream, click a
 file to bring it to the top. Under them, **Always hidden** is your own

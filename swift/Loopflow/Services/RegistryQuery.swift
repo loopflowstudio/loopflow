@@ -1116,6 +1116,13 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(Customized.self, from: await write(.graphCustomize(directory: cwd ?? "/", name: name))).path
     }
 
+    /// `lf -b skill <name>` in `checkout`, started detached: returns once it
+    /// runs, with the log its output goes to.
+    public func runSkill(_ name: String, checkout: String) async throws -> String {
+        struct Launched: Decodable { let log: String }
+        return try Self.decode(Launched.self, from: await write(.skillRun(directory: checkout, name: name, message: nil, agent: nil))).log
+    }
+
     /// Run the Task's graph until its next interactive step; returns once it
     /// runs. `graph` takes up another graph; `from` starts at that step instead,
     /// and an interactive `from` only puts the Task there.

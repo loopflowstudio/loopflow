@@ -203,6 +203,7 @@ struct ReviewDiffTests {
     @Test func aWorkersOrderPutsItsFilesFirstAndTheRestByKind() {
         let order = DiffOrder.parse("""
         # written when the change is handed over
+        at: 81d3fa5973e63a4394a25357502e635a3baf5d5b
         first:
           - path: swift/Store.swift
             why: "A change over 1 MB no longer loses its last files"
@@ -215,6 +216,8 @@ struct ReviewDiffTests {
         other:
           - path: ignored
         """)
+        #expect(order.at == "81d3fa5973e63a4394a25357502e635a3baf5d5b")
+        #expect(DiffOrder.parse("first:\n  - a.swift\n").at == nil)
         #expect(order.first.map(\.path) == ["swift/Store.swift", "swift/StoreTests.swift", "gone.swift"])
         #expect(order.hide == [DiffOrder.Entry(path: "docs/", why: "Path literal renamed, nothing else")])
         #expect(order.hide[0].matches("docs/config.md") && !order.hide[0].matches("src/docs.rs"))

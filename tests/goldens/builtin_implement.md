@@ -208,9 +208,8 @@ Mark the plan's remaining work in place: what this slice built, what it
 taught, what is next. If you had to discover an undocumented convention, add
 it to the agent guide so the next run doesn't rediscover it.
 
-When the change is ready for someone to read, write `scratch/diff-order.yaml`:
-under `first:` the files to read first, and under `hide:` the paths not worth
-opening, each a `- path:` with a one-line `why:`.
+When the change is ready for someone to read, write its reading order as
+`lf help tour` describes.
 
 This is one step of someone's work. Stay in this checkout and build the Task
 you were given; don't pick up backlog, create a second Task or start a

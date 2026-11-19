@@ -218,6 +218,7 @@ struct TaskChangesView: View {
             .disabled(store.review == nil)
             ReviewStepper(store: store, reader: .changes, isFocused: isFocused)
             orderMenu
+            tourButton
             Spacer(minLength: 4)
             ReviewCommentsControl(store: store, isFocused: isFocused, addToConversation: addToConversation)
             Button { toggleFocus() } label: {
@@ -263,6 +264,21 @@ struct TaskChangesView: View {
               : "Order of the files. A worker's \(DiffOrder.path) adds its tour")
         .disabled(store.review == nil)
         .accessibilityIdentifier("changes-order")
+    }
+
+    /// Write tour or Update tour: the `tour` skill rewrites the worker's order,
+    /// and the Diff reads in it once the file lands.
+    @ViewBuilder private var tourButton: some View {
+        if store.isWritingTour {
+            ProgressView().controlSize(.mini).help(store.tourStatus ?? "")
+                .accessibilityLabel("Writing the tour")
+        } else if let action = store.tourAction {
+            Button(action) { Task { await store.writeTour() } }
+                .buttonStyle(WorkPlainButtonStyle())
+                .help("Run the tour skill in the Task's checkout to write \(DiffOrder.path)")
+                .disabled(store.review == nil)
+                .accessibilityIdentifier("changes-write-tour")
+        }
     }
 
     /// The file at the top of the stream: the focused one, else the one the
@@ -338,6 +354,9 @@ struct TaskChangesView: View {
     @ViewBuilder private var stream: some View {
         if let review = store.shownReview {
             let files = store.focusedPath.map { path in review.files.filter { $0.path == path } } ?? review.files
+            if let tour = store.tourStatus {
+                ReviewNotice(text: tour)
+            }
             if store.reviewTruncated {
                 ReviewNotice(text: "A file is over 1 MB or could not be read · the stream is missing part of it")
             }

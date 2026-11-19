@@ -2707,7 +2707,7 @@ fn task_ship_runs_every_remaining_step_standing_in_at_each_interactive_step() {
     // Reaching the end completed the Task; nothing remains to ship.
     assert_eq!(task.state(), "done");
     let error = refusal(task.run(&["-b", "--task", "INF-123", "ship"]));
-    assert!(error.contains("INF-123 is complete"), "{error}");
+    assert!(error.contains("INF-123 is done"), "{error}");
 }
 
 #[test]
@@ -2809,6 +2809,11 @@ fn a_ship_on_a_running_task_reports_its_run_and_starts_nothing() {
     );
     assert!(text.contains("at review running as Graph run"), "{text}");
     assert!(text.contains("merges:"), "{text}");
+    assert!(
+        task.text_status().contains("auto: on by "),
+        "{}",
+        task.text_status()
+    );
     fs::remove_file(task.home.path().join("hold")).unwrap();
     assert!(first.wait().unwrap().success());
     assert_eq!(task.graph()["position"], at("end"));

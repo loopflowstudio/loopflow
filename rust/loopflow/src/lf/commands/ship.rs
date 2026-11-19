@@ -1,17 +1,17 @@
-//! `lf ship`, spelled `lf task auto on` too: turn auto on for the Task's
-//! Graph and run it. The run stands in at each interactive step because auto
-//! is on, not because of how it was launched; a Task waiting at one is stood
-//! in for there.
+//! `lf ship`, spelled `lf task auto on` too: the Task's run, asked for auto.
+//! The run stands in at each interactive step because auto is on, not
+//! because of how it was launched; a Task waiting at one is stood in for
+//! there.
 
 use std::path::Path;
 
 use anyhow::Result;
 
 use crate::lf::Cli;
-use loopflow_execution::ops::task::ship::{ship_on, ShipStart};
+use loopflow_execution::ops::task::ship::AutoAsk;
 use loopflow_execution::ops::task::TaskProcessOptions;
 
-/// `lf ship`: auto on, then the Task's run, reported as `task.run` reports it.
+/// `lf ship`: `lf task run` with auto on, reported as `task.run` reports it.
 pub fn run(
     cli: &Cli,
     repo: &Path,
@@ -20,20 +20,16 @@ pub fn run(
     reason: Option<&str>,
     json: bool,
 ) -> Result<()> {
-    let (issue, from) = match ship_on(issue, graph, reason)? {
-        ShipStart::Run { issue, from } => (issue, from),
-        ShipStart::Reported(run) => return super::graph::announce_run(&run, json),
-    };
-    if let Some(step) = &from {
-        eprintln!("{issue}: standing in at {step}");
-    }
     super::graph::carry_task_run(
         cli,
         repo,
-        &issue,
+        issue,
         TaskProcessOptions {
             wave: cli.wave.clone(),
-            from,
+            graph: graph.map(str::to_owned),
+            auto: AutoAsk::Person {
+                note: reason.map(str::to_owned),
+            },
             ..TaskProcessOptions::default()
         },
         json,

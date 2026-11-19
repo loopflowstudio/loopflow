@@ -337,7 +337,27 @@ pub fn carry_task_run(
     let issue = task.identifier.clone();
     let announce = |run: &TaskRun| announce_run(run, json);
     let (step, merges) = match start {
-        TaskRunStart::Run { step, merges } => (step, merges),
+        TaskRunStart::Run {
+            step,
+            merges,
+            stands_in,
+        } => {
+            if let Some(step) = stands_in {
+                eprintln!("{issue}: standing in at {step}");
+            }
+            (step, merges)
+        }
+        TaskRunStart::Live { run, graph_process } => {
+            return announce(&TaskRun::Running {
+                log: Some(loopflow_execution::process::launch_log::graph_log_path(
+                    graph_process.as_str(),
+                )),
+                issue,
+                run,
+                merges: true,
+                graph_process,
+            })
+        }
         TaskRunStart::Waiting(step) => return announce(&TaskRun::Waiting { issue, step }),
         TaskRunStart::Ended => return announce(&TaskRun::Ended { issue }),
     };

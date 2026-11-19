@@ -2227,6 +2227,7 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
                 directive: directive.clone(),
                 branch: None,
                 from_last_fetch: false,
+                auto: Default::default(),
             },
             cli.batch || cli.interactive,
         )?;
@@ -2851,6 +2852,11 @@ fn dispatch_here(
                 directive: directive.clone(),
                 branch: None,
                 from_last_fetch: false,
+                auto: if cli.batch {
+                    loopflow_execution::ops::task::ship::AutoAsk::Batch
+                } else {
+                    loopflow_execution::ops::task::ship::AutoAsk::Nobody
+                },
             },
             *json || cli.json,
         );

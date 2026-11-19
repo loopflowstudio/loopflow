@@ -750,6 +750,16 @@ impl SqliteStore {
         Ok(())
     }
 
+    /// Take `graph` up for a Task that has none. Returns false, writing
+    /// nothing, when it has one: another run took its Graph up first.
+    pub fn take_up_first_task_graph(&self, task: &TaskId, graph: &str) -> StoreResult<bool> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn.execute(
+            "INSERT OR IGNORE INTO task_graphs(task_id,graph,step,updated_at) VALUES(?1,?2,?3,?4)",
+            rusqlite::params![task.as_str(), graph, START, crate::rows::now_unix()],
+        )? > 0)
+    }
+
     /// Put the Task on a run from `cursor`, carried by `by`. Returns false,
     /// writing nothing, when the Task no longer stands where `row` read it, so
     /// two runs cannot both set out.

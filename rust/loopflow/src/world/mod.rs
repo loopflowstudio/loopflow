@@ -622,6 +622,7 @@ impl World {
             &checkout,
             graph,
             from,
+            false,
             crate::lf::navigation::command_merges,
         )?;
         let Some(start) = start else {

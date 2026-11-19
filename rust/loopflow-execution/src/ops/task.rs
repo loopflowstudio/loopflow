@@ -105,6 +105,8 @@ pub struct TaskProcessOptions {
     /// Place a new branch from the refs the last fetch left, without the
     /// network: the caller exchanges planning and the assignee afterwards.
     pub from_last_fetch: bool,
+    /// Who asks the run for auto.
+    pub auto: ship::AutoAsk,
 }
 
 impl TaskProcessOptions {
@@ -607,7 +609,19 @@ pub enum TaskRunStart {
     /// A run of the Task's Graph from this step; the caller starts it as
     /// `lf --task ISSUE graph run`. With `merges`, the run may merge the PR:
     /// Auto is on, or no interactive step is left ahead, and nobody stopped it.
-    Run { step: String, merges: bool },
+    /// With `stands_in`, a person asked for auto and the run sets out at that
+    /// interactive step.
+    Run {
+        step: String,
+        merges: bool,
+        stands_in: Option<String>,
+    },
+    /// A person asked for auto while the Task's run was live: auto is on, and
+    /// that run carries on.
+    Live {
+        run: String,
+        graph_process: loopflow_model::id::LfProcessId,
+    },
     /// The Task now waits at this interactive step; nothing runs.
     Waiting(String),
     /// Nothing remained: the Task reached `end`.
@@ -629,6 +643,7 @@ pub fn task_place(
         graph,
         from,
         reason,
+        auto,
         ..
     } = options.clone();
     let source = remote::source_for_task(issue)?;
@@ -649,6 +664,7 @@ pub fn task_place(
             graph.as_deref(),
             from.as_deref(),
             mode,
+            &auto,
             merges,
         )
         .await?;
@@ -667,7 +683,7 @@ pub enum TaskRunMode {
     Stop,
     /// Run each with a person in this terminal (`-i`).
     InPlace,
-    /// Run each headless, standing in for the person (`-b`, `lf ship`).
+    /// Run each headless, standing in for the person (`-b`).
     Headless,
 }
 
@@ -776,6 +792,7 @@ pub fn select_task_run(
     checkout: &Path,
     requested: Option<&str>,
     from: Option<&str>,
+    stands_in: bool,
     merges: fn(&[String]) -> bool,
 ) -> OpsResult<TaskRunSelection> {
     use crate::task_graph::{END, START};
@@ -850,7 +867,13 @@ pub fn select_task_run(
                         graph.describe_steps()
                     ))
                 })?;
-                graph.after(&place).map(RunStart::from)
+                // A bare run means the person finished this step; a run asked
+                // for auto stands in at it.
+                if stands_in {
+                    Some(place.into())
+                } else {
+                    graph.after(&place).map(RunStart::from)
+                }
             }
         },
     };
@@ -863,16 +886,73 @@ pub fn select_task_run(
 
 /// Put the Task where `lf task run` sets out: on a run carried by this
 /// process, at the interactive step `--from` names, or at `end` when nothing
-/// remains.
+/// remains. `ask` is written once the Task has its Graph. Two runs setting out
+/// together leave one: the other reads the Task again.
 async fn start_task_run(
     store: &SharedStore,
     task: &mut Task,
     requested: Option<&str>,
     from: Option<&str>,
     mode: TaskRunMode,
+    ask: &ship::AutoAsk,
     merges: fn(&[String]) -> bool,
 ) -> OpsResult<TaskRunStart> {
-    let selection = select_task_run(store, task, task.worktree()?, requested, from, merges)?;
+    loop {
+        if let Some(start) =
+            try_start_task_run(store, task, requested, from, mode, ask, merges).await?
+        {
+            return Ok(start);
+        }
+    }
+}
+
+/// `None` when another run moved the Task while this one was setting out.
+async fn try_start_task_run(
+    store: &SharedStore,
+    task: &mut Task,
+    requested: Option<&str>,
+    from: Option<&str>,
+    mode: TaskRunMode,
+    ask: &ship::AutoAsk,
+    merges: fn(&[String]) -> bool,
+) -> OpsResult<Option<TaskRunStart>> {
+    let person = matches!(ask, ship::AutoAsk::Person { .. });
+    let standing = crate::store::task_work::task_graph_row(&store.sqlite, &task.id)
+        .map_err(task_error)?
+        .filter(|row| person && requested.is_none_or(|name| name == row.graph.name));
+    match standing.as_ref().map(|row| (row, &row.run)) {
+        // A live run reads auto at each interactive step, so it stands in
+        // from here without being started again.
+        Some((row, Some((cursor, carrier))))
+            if crate::store::task_work::carrier_may_run(carrier) =>
+        {
+            if let Some(graph_process) = ship::running_graph(store, task, &carrier.id).await? {
+                ship::ask(store, task, ask)?;
+                let at = row.graph.step_name_of(cursor);
+                return Ok(Some(TaskRunStart::Live {
+                    run: format!(
+                        "{} at {}",
+                        row.graph.name,
+                        at.as_deref().unwrap_or(&row.step)
+                    ),
+                    graph_process,
+                }));
+            }
+        }
+        Some((row, None)) if row.step == crate::task_graph::END && from.is_none() => {
+            return Ok(Some(TaskRunStart::Ended));
+        }
+        _ => {}
+    }
+    let selection = select_task_run(
+        store,
+        task,
+        task.worktree()?,
+        requested,
+        from,
+        person,
+        merges,
+    )?;
     let reaches_end = selection.reaches_end(mode);
     let TaskRunSelection {
         graph,
@@ -886,14 +966,25 @@ async fn start_task_run(
     // This lf carries the run; it ends with this lf.
     crate::journal::mark_run_owner(loopflow_storage::graph_process::RunOwner::TaskCarrier);
     if take_up {
-        crate::store::task_work::take_up_task_graph(&store.sqlite, &task.id, &graph)
-            .map_err(task_error)?;
+        let graph = serde_json::to_string(&graph).map_err(task_error)?;
+        // A Task with no Graph takes its first one up once; naming another
+        // replaces the one it has.
+        if requested.is_some() {
+            store
+                .sqlite
+                .take_up_task_graph(&task.id, &graph)
+                .map_err(task_error)?;
+        } else if !store
+            .sqlite
+            .take_up_first_task_graph(&task.id, &graph)
+            .map_err(task_error)?
+        {
+            return Ok(None);
+        }
     }
-    if mode == TaskRunMode::Headless {
-        ship::batch_on(store, task)?;
-    }
+    ship::ask(store, task, ask)?;
     // Auto on runs through the interactive steps, standing in at each;
-    // stopped, no run merges.
+    // off, no run merges.
     let (on, merges) = match store
         .sqlite
         .task_auto(&task.id)
@@ -912,15 +1003,16 @@ async fn start_task_run(
         if store.sqlite.end_task_graph(&task.id).map_err(task_error)? {
             settle_pending_completion(store, task).await?;
         }
-        return Ok(TaskRunStart::Ended);
+        return Ok(Some(TaskRunStart::Ended));
     };
     // Starting at an interactive step without running past it puts the Task there.
-    if let Some(step) = graph.interactive_at(&start.place).filter(|_| !through) {
+    let interactive = graph.interactive_at(&start.place);
+    if let Some(step) = interactive.filter(|_| !through) {
         store
             .sqlite
             .set_task_graph_step(&task.id, step)
             .map_err(task_error)?;
-        return Ok(TaskRunStart::Waiting(step.to_owned()));
+        return Ok(Some(TaskRunStart::Waiting(step.to_owned())));
     }
     let label = if start.place == crate::task_graph::Place::default() {
         format!("{} from start", graph.name)
@@ -936,15 +1028,13 @@ async fn start_task_run(
     )
     .map_err(task_error)?
     {
-        return Err(task_error(format!(
-            "Task {issue} moved on graph {} while this run was starting; read `lf task status {issue}` and run again",
-            graph.name
-        )));
+        return Ok(None);
     }
-    Ok(TaskRunStart::Run {
+    Ok(Some(TaskRunStart::Run {
         step: label,
         merges,
-    })
+        stands_in: interactive.filter(|_| person).map(str::to_owned),
+    }))
 }
 
 /// The run this process carried ended; settle a completion its arrival at

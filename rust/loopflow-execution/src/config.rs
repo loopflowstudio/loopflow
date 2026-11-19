@@ -7,6 +7,7 @@
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
@@ -690,18 +691,72 @@ pub fn load_wave_config(
     repo_root: Option<&Path>,
     wave: Option<&str>,
 ) -> Result<Option<Config>, LoadError> {
-    load_wave_config_with(repo_root, wave, &PersonalSettings::read(repo_root, wave))
+    Ok(Some(resolved(repo_root, wave)?.config.clone()))
 }
 
-/// [`load_wave_config`] with your `lf set` values already read, so a reading
-/// of many Tasks reads them once per repository and Wave.
-pub fn load_wave_config_with(
+/// Settings for work in a checkout and Wave. Served readings share one value
+/// until a file it came from changes; a bare command resolves for itself.
+pub fn resolved(
     repo_root: Option<&Path>,
     wave: Option<&str>,
-    personal: &PersonalSettings,
-) -> Result<Option<Config>, LoadError> {
-    let layers = config_layers_with(repo_root, wave, personal)?;
-    settings::resolve_layers(&layers, None).map(|resolved| Some(resolved.config))
+) -> Result<Arc<settings::ResolvedSettings>, LoadError> {
+    resolved_with(repo_root, repo_root, wave, &settings::outside()?)
+}
+
+/// [`resolved`] for a Task: checked-in files come from its checkout, your own
+/// file from its repository, which is there before the checkout and after it.
+pub fn resolved_for_task(
+    checkout: &Path,
+    repository: &Path,
+    wave: Option<&str>,
+) -> Result<Arc<settings::ResolvedSettings>, LoadError> {
+    resolved_with(
+        Some(checkout),
+        Some(repository),
+        wave,
+        &settings::outside()?,
+    )
+}
+
+/// [`resolved`] inside a computation whose key already holds `outside`.
+/// `repository` is the checkout your settings file is found from.
+pub(crate) fn resolved_with(
+    repo_root: Option<&Path>,
+    repository: Option<&Path>,
+    wave: Option<&str>,
+    outside: &settings::Outside,
+) -> Result<Arc<settings::ResolvedSettings>, LoadError> {
+    // A Wave named by ID is found by walking the checkout, which no reading
+    // observes: the shared value is kept under the name.
+    let wave = selected_wave(repo_root, wave)?;
+    let key = crate::observe::Derived::Settings {
+        checkout: repo_root.map(Path::to_owned),
+        repository: repository.map(Path::to_owned),
+        wave: wave.clone(),
+        outside: outside.clone(),
+    };
+    outside.shared(key, || {
+        let layers = file_layers(
+            repo_root,
+            repository,
+            wave.as_deref(),
+            &outside.home,
+            outside.remote.as_deref(),
+        )?;
+        settings::resolve_with(&layers, None, outside).map(Arc::new)
+    })
+}
+
+fn selected_wave(
+    repo_root: Option<&Path>,
+    wave: Option<&str>,
+) -> Result<Option<String>, LoadError> {
+    match (repo_root, wave) {
+        (Some(repo), Some(wave)) => files::wave_name(repo, wave)
+            .map(Some)
+            .map_err(|error| LoadError::InvalidGraph(error.to_string())),
+        (_, wave) => Ok(wave.map(str::to_owned)),
+    }
 }
 
 /// The effective planning transport, resolved once per bounded planning hook.
@@ -725,22 +780,25 @@ pub fn config_layers(
     repo_root: Option<&Path>,
     wave: Option<&str>,
 ) -> Result<Vec<ConfigDeclarations>, LoadError> {
-    config_layers_with(repo_root, wave, &PersonalSettings::read(repo_root, wave))
+    let wave = selected_wave(repo_root, wave)?;
+    file_layers(
+        repo_root,
+        repo_root,
+        wave.as_deref(),
+        &crate::store::lf_home_dir(),
+        remote::incoming_text().as_deref(),
+    )
 }
 
-pub fn config_layers_with(
+/// The checkout's `.lf/config.yaml`, the named Wave's own file, then your
+/// settings files under `home` and beside `repository`.
+fn file_layers(
     repo_root: Option<&Path>,
+    repository: Option<&Path>,
     wave: Option<&str>,
-    personal_values: &PersonalSettings,
+    home: &Path,
+    remote: Option<&str>,
 ) -> Result<Vec<ConfigDeclarations>, LoadError> {
-    let wave = match (repo_root, wave) {
-        (Some(repo), Some(wave)) => Some(
-            files::wave_name(repo, wave)
-                .map_err(|error| LoadError::InvalidGraph(error.to_string()))?,
-        ),
-        (_, wave) => wave.map(str::to_owned),
-    };
-    let wave = wave.as_deref();
     let mut layers = Vec::new();
     if let Some(repo_root) = repo_root {
         let repo_path = repo_root.join(".lf/config.yaml");
@@ -765,24 +823,8 @@ pub fn config_layers_with(
             }
         }
     }
-    layers.extend(
-        personal_values
-            .0
-            .as_ref()
-            .map_err(|message| LoadError::InvalidGraph(message.clone()))?
-            .clone(),
-    );
+    layers.extend(personal_file_layers(repository, wave, home, remote)?);
     Ok(layers)
-}
-
-/// Personal file declarations cached for one bounded Work reading.
-#[derive(Debug, Clone)]
-pub struct PersonalSettings(Result<Vec<ConfigDeclarations>, String>);
-
-impl PersonalSettings {
-    pub fn read(repo_root: Option<&Path>, wave: Option<&str>) -> Self {
-        Self(personal_file_layers(repo_root, wave).map_err(|error| error.to_string()))
-    }
 }
 
 pub(crate) fn private_wave_layers(
@@ -830,22 +872,15 @@ pub(crate) fn private_wave_layers(
 fn personal_file_layers(
     repo_root: Option<&Path>,
     wave: Option<&str>,
+    home: &Path,
+    remote: Option<&str>,
 ) -> Result<Vec<ConfigDeclarations>, LoadError> {
-    let wave = match (repo_root, wave) {
-        (Some(repo), Some(wave)) => Some(
-            files::wave_name(repo, wave)
-                .map_err(|error| LoadError::InvalidGraph(error.to_string()))?,
-        ),
-        (_, wave) => wave.map(str::to_owned),
-    };
-    let wave = wave.as_deref();
-    if let Some(layers) = remote::layers(repo_root, wave)
-        .map_err(|error| LoadError::InvalidGraph(error.to_string()))?
-    {
-        return Ok(layers);
+    if let Some(profile) = remote {
+        return remote::layers(profile, home, repo_root, wave)
+            .map_err(|error| LoadError::InvalidGraph(error.to_string()));
     }
     let mut layers = Vec::new();
-    let path = global_config_path();
+    let path = home.join("config.yaml");
     if let Some(value) = load_yaml_file(&path)? {
         layers.push(ConfigDeclarations {
             source: ConfigSource::Personal,
@@ -855,6 +890,9 @@ fn personal_file_layers(
         });
     }
     if let Some(repo) = repo_root {
+        // Where the personal file lives depends on whether `repo` is a
+        // checkout yet: a worktree that appears later moves it.
+        crate::observe::exists(&repo.join(".git"));
         let path = files::private_path(repo)
             .map_err(|error| LoadError::InvalidGraph(error.to_string()))?;
         if let Some(mut value) = load_yaml_file(&path)? {

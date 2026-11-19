@@ -928,11 +928,20 @@ fn claude_opens_lf_created_worktree_already_trusted() {
 
 /// A stand-in Claude that keeps what it saw under `$HOME`, for one launch environment.
 fn claude_launch(home: &Path, script: &str) -> Command {
+    install_claude_fixture(home, script);
+    claude_command(home)
+}
+
+fn install_claude_fixture(home: &Path, script: &str) {
     let bin = home.join("bin");
     fs::create_dir_all(&bin).unwrap();
     let provider = bin.join("claude");
     fs::write(&provider, format!("#!/bin/sh\n{script}\n")).unwrap();
     fs::set_permissions(&provider, fs::Permissions::from_mode(0o755)).unwrap();
+}
+
+fn claude_command(home: &Path) -> Command {
+    let bin = home.join("bin");
     let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
     command
         .env_clear()
@@ -1115,23 +1124,24 @@ fn assert_background_conversation(run_graph: bool) {
         "while [ -d \"$HOME\" ] && [ ! -e '{}' ]; do sleep 0.1; done",
         stop.display()
     );
-    succeed(
-        claude_launch(home.path(), &script)
-            .current_dir(repo.path())
-            .args(["set", "--global", "default_agent", "claude"]),
-    );
-    let created: serde_json::Value = serde_json::from_str(&succeed(
-        claude_launch(home.path(), &script)
-            .current_dir(repo.path())
-            .args([
-                "task",
-                "create",
-                "--title",
-                "Background conversation",
-                "--json",
-            ]),
-    ))
-    .unwrap();
+    // Polling must leave the script intact while the background launch opens it.
+    install_claude_fixture(home.path(), &script);
+    let command = || claude_command(home.path());
+    succeed(command().current_dir(repo.path()).args([
+        "set",
+        "--global",
+        "default_agent",
+        "claude",
+    ]));
+    let created: serde_json::Value =
+        serde_json::from_str(&succeed(command().current_dir(repo.path()).args([
+            "task",
+            "create",
+            "--title",
+            "Background conversation",
+            "--json",
+        ])))
+        .unwrap();
     let id = created["task"]["id"].as_str().unwrap();
     let db = home.path().join("machine/loopflow.db");
     // Older open Tasks must not prevent this newly checked-out conversation
@@ -1159,7 +1169,7 @@ fn assert_background_conversation(run_graph: bool) {
 
     let worktree = if run_graph {
         succeed(
-            claude_launch(home.path(), &script)
+            command()
                 .current_dir(repo.path())
                 .args(["task", "run", id, "pause"]),
         );
@@ -1174,7 +1184,7 @@ fn assert_background_conversation(run_graph: bool) {
         PathBuf::from(path)
     } else {
         let placed: serde_json::Value = serde_json::from_str(&succeed(
-            claude_launch(home.path(), &script)
+            command()
                 .current_dir(repo.path())
                 .args(["checkout", id, "--json"]),
         ))
@@ -1186,7 +1196,7 @@ fn assert_background_conversation(run_graph: bool) {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
     loop {
         let listed: serde_json::Value = serde_json::from_str(&succeed(
-            claude_launch(home.path(), &script)
+            command()
                 .current_dir(&worktree)
                 .args(["session", "list", "--json"]),
         ))
@@ -1214,7 +1224,7 @@ fn assert_background_conversation(run_graph: bool) {
 
     // Checking the Task out again keeps the one conversation.
     succeed(
-        claude_launch(home.path(), &script)
+        command()
             .current_dir(repo.path())
             .args(["checkout", id, "--json"]),
     );
@@ -1223,7 +1233,7 @@ fn assert_background_conversation(run_graph: bool) {
     assert_eq!(timing.matches("background_start").count(), 1, "{timing}");
 
     succeed(
-        claude_launch(home.path(), &script)
+        command()
             .current_dir(repo.path())
             .args(["task", "abandon", id]),
     );

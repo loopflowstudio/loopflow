@@ -4,11 +4,24 @@ use std::io::IsTerminal;
 use std::process::{Command, Stdio};
 
 pub const EXPECTED_MACHINE_ID_ENV: &str = "LF_EXPECTED_MACHINE_ID";
-// Non-interactive SSH skips shell profiles, including the npm prefix.
-pub const REMOTE_PATH: &str = "export PATH=\"$HOME/.cargo/bin:$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH\"; if command -v npm >/dev/null 2>&1; then PATH=\"$PATH:$(npm config get prefix 2>/dev/null)/bin\"; fi";
+/// Shell that finds `lf` and npm-installed providers before lf can repair its
+/// own `PATH`: non-interactive SSH skips shell profiles.
+pub fn remote_path() -> String {
+    let dirs: Vec<String> = crate::os_process::TOOL_DIRS
+        .iter()
+        .map(|dir| match dir.strip_prefix("~/") {
+            Some(rest) => format!("$HOME/{rest}"),
+            None => (*dir).to_owned(),
+        })
+        .collect();
+    format!(
+        "export PATH=\"$PATH:{}\"; if command -v npm >/dev/null 2>&1; then PATH=\"$PATH:$(npm config get prefix 2>/dev/null)/bin\"; fi",
+        dirs.join(":")
+    )
+}
 
 pub fn build_preamble(cmd: &[String], extra_env: &[(&str, &str)]) -> String {
-    let mut lines = vec![REMOTE_PATH.to_string()];
+    let mut lines = vec![remote_path()];
     for (name, value) in extra_env {
         lines.push(format!("export {name}={}", sh_quote(value)));
     }

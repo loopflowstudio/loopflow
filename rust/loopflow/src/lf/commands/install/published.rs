@@ -648,7 +648,7 @@ fn launchd_schedule(
             })
         })
     });
-    let payload = schedule_plist(home, binary, logs, frequency);
+    let payload = schedule_plist(binary, logs, frequency);
     if !install_launchd(home, "com.loopflow.refresh", &payload)? {
         println!("Installation already scheduled: {}", path.display());
         return Ok(());
@@ -761,7 +761,7 @@ fn cleanup_plist(home: &Path, binary: &Path, logs: &Path) -> String {
 <plist version="1.0"><dict>
 <key>Label</key><string>com.loopflow.cleanup</string>
 <key>ProgramArguments</key><array><string>{binary}</string><string>task</string><string>retire</string></array>
-<key>EnvironmentVariables</key><dict><key>LF_HOME</key><string>{machine}</string><key>HOME</key><string>{home}</string><key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string></dict>
+<key>EnvironmentVariables</key><dict><key>LF_HOME</key><string>{machine}</string><key>HOME</key><string>{home}</string></dict>
 <key>WorkingDirectory</key><string>{machine}</string>
 <key>RunAtLoad</key><true/>
 <key>StartInterval</key><integer>60</integer>
@@ -937,10 +937,9 @@ fn plist_path(path: &Path) -> String {
         .replace('>', "&gt;")
 }
 
-fn schedule_plist(home: &Path, binary: &Path, logs: &Path, frequency: InstallFrequency) -> String {
+fn schedule_plist(binary: &Path, logs: &Path, frequency: InstallFrequency) -> String {
     launch_agent_plist(
         "com.loopflow.refresh",
-        home,
         binary,
         &["install"],
         &logs.join("refresh.log"),
@@ -955,7 +954,6 @@ fn schedule_plist(home: &Path, binary: &Path, logs: &Path, frequency: InstallFre
 /// and PATH, logging to `log`; `timing` holds its schedule keys.
 fn launch_agent_plist(
     label: &str,
-    home: &Path,
     binary: &Path,
     args: &[&str],
     log: &Path,
@@ -966,7 +964,6 @@ fn launch_agent_plist(
         .map(|arg| format!("<string>{arg}</string>"))
         .collect();
     let bin = plist_path(binary.parent().expect("installation binary has a parent"));
-    let home = plist_path(home);
     let log = plist_path(log);
     format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -974,7 +971,7 @@ fn launch_agent_plist(
 <plist version="1.0"><dict>
 <key>Label</key><string>{label}</string>
 <key>ProgramArguments</key><array>{program}</array>
-<key>EnvironmentVariables</key><dict><key>LF_INSTALL_DIR</key><string>{bin}</string><key>PATH</key><string>{bin}:{home}/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string></dict>
+<key>EnvironmentVariables</key><dict><key>LF_INSTALL_DIR</key><string>{bin}</string><key>PATH</key><string>{bin}:/usr/bin:/bin:/usr/sbin:/sbin</string></dict>
 {timing}
 <key>StandardOutPath</key><string>{log}</string>
 <key>StandardErrorPath</key><string>{log}</string>
@@ -1027,7 +1024,6 @@ mod tests {
             .join("Library/LaunchAgents/com.loopflow.refresh.plist");
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         let payload = super::schedule_plist(
-            temp.path(),
             &bin.join("lf"),
             temp.path(),
             crate::lf::InstallFrequency::Hourly,
@@ -1168,7 +1164,6 @@ printf updated > "$LF_APPLICATIONS_DIR/Loopflow.app/Contents/MacOS/lf"
         fs::write(
             &plist,
             super::schedule_plist(
-                temp.path(),
                 &directory.join("lf"),
                 temp.path(),
                 crate::lf::InstallFrequency::Daily,

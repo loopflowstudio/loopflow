@@ -265,15 +265,6 @@ pub(super) fn resolve(target: &mut Resolved, prepare: bool) -> Result<()> {
             }
         };
         let session = store.session(&id).await?.context("Session not found")?;
-        target.agent = match &session.provider {
-            Some(provider) => Some(
-                session
-                    .model
-                    .as_ref()
-                    .map_or_else(|| provider.clone(), |model| format!("{provider}:{model}")),
-            ),
-            None => loopflow_execution::config::agent_override(),
-        };
         if prepare && session.provider.is_none() {
             loopflow_execution::config::load_wave_config(
                 Some(&session.cwd),

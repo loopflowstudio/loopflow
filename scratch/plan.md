@@ -363,10 +363,7 @@ existing update a conversation gets about its own Task; Waves and
    Not built: Swift does not decode the receipt's `parent` or the pane's
    two keys (it has no `TaskRow` mirror and nothing draws them yet); the
    iOS target was not compiled here, only the macOS Swift tests.
-   Remaining:
-   - The cycle refusal: nothing can make one at filing (a new Task has no
-     children). It belongs with the first write that changes a parent
-     (slice 5's tracker edit). `docs/work.md` Reference still names it.
+   The cycle refusal was built with slice 5.
 3. **Hearing about children.** Built. `task_work::conducted_tasks` is the
    one definition; `task_updates::write` reads the Session's conducted Tasks
    after its own (`session_conducted_tasks`: id and closed, two columns, no

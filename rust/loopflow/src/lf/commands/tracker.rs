@@ -1,4 +1,4 @@
-//! Where the repository's plan lives and what is still on its way there.
+//! How the repository's plan travels and what is still unsent.
 
 use std::path::Path;
 

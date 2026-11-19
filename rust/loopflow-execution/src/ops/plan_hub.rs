@@ -2,6 +2,7 @@
 //! exchanged with live. It carries stamped records and decides nothing; this
 //! is which Machine it is, one exchange with it, and its answers.
 use std::path::Path;
+use std::time::Instant;
 
 use anyhow::{anyhow, Context, Result};
 
@@ -51,38 +52,37 @@ pub fn set_hub(
 
 // ---- Another Machine's side ----
 
-/// Exchange `repo`'s plan with this Machine's hub, when it has one and the
-/// repository has no Linear or Asana.
+/// [`exchange`] for `repo`, when it has no Linear or Asana.
 pub async fn sync(store: &crate::store::Store, repo: &str) -> Result<()> {
     if crate::ops::tracker::connected(repo) {
         return Ok(());
     }
-    let Some(hub) = hub(&store.sqlite)? else {
-        return Ok(());
-    };
     let (sqlite, repo) = (store.sqlite.clone(), repo.to_owned());
-    crate::journal::request::spawn_blocking(move || exchange(&sqlite, &repo, &hub, false)).await?
+    crate::journal::request::spawn_blocking(move || exchange(&sqlite, &repo, None)).await?
 }
 
-/// Send `hub` the records of `repo` it has not taken, then take in what
-/// changed there. Either order gives the same plan. With `send_only`, after a
-/// save, a repository with nothing unsent that has read the hub before asks
-/// it nothing, and an exchange already running is waited for only briefly.
-/// The outcome is recorded for `lf repo tracker`.
-pub fn exchange(store: &SqliteStore, repo: &str, hub: &Machine, send_only: bool) -> Result<()> {
+/// Send this Machine's hub, when it has one, the records of `repo` it has not
+/// taken, then take in what changed there. Either order gives the same plan.
+/// With `send_until`, after a save, a repository with nothing unsent that has
+/// read the hub before asks it nothing, and an exchange already running is
+/// waited for only until then. The outcome is recorded for `lf repo tracker`.
+pub(super) fn exchange(store: &SqliteStore, repo: &str, send_until: Option<Instant>) -> Result<()> {
+    let Some(hub) = hub(store)? else {
+        return Ok(());
+    };
     let Some(repository) = store.repository_id(repo)? else {
         return Ok(());
     };
-    // One exchange per repository at a time; the next one reads what this one wrote.
-    let until = send_only.then(super::plan_carriers::send_until);
-    let _turn = super::plan_carriers::lock(store, "plan-hub", &repository, until)?;
+    let _turn = super::plan_carriers::lock(store, "plan-hub", &repository, send_until)?;
     let held = store.select_carrier(repo, Carrier::Hub, hub.id.as_str())?;
-    if send_only && held.seen_seq.is_some() && store.plan_unsent(repo, Carrier::Hub, 0)?.count == 0
+    if send_until.is_some()
+        && held.seen_seq.is_some()
+        && store.plan_unsent(repo, Carrier::Hub, 0)?.count == 0
     {
         return Ok(());
     }
     let result = (|| {
-        let mut connection = open(store, repo, hub, &repository)?;
+        let mut connection = open(store, repo, &hub, &repository)?;
         send(store, &mut connection, repo, &repository, held.sent_seq)?;
         let mut since = held.seen_seq;
         let mut records = Vec::new();

@@ -241,7 +241,7 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
                 for listing in &listings {
                     print_machine(&listing.machine, false)?;
                     if listing.hub {
-                        println!("  hub: holds this Machine's plan");
+                        println!("  hub: this Machine exchanges its plan with it");
                     }
                     for default in &listing.defaults {
                         let scope = match &default.scope {
@@ -377,7 +377,7 @@ pub struct MachineListing {
     #[serde(flatten)]
     machine: Machine,
     defaults: Vec<MachineDefault>,
-    /// It holds this Machine's plan (`lf machine hub`).
+    /// This Machine exchanges its plan with it (`lf machine hub`).
     hub: bool,
     /// Unfinished Tasks it owns, as this Machine reads their ownership.
     tasks: Vec<HeldTask>,

@@ -13,21 +13,12 @@ use anyhow::{anyhow, bail, Result};
 use loopflow_model::durable::{RepositoryId, TaskId};
 use loopflow_storage::sqlite::SqliteStore;
 
-/// One exchange for `repo` with this Machine's hub, when it has one. With
-/// `send_only`, see [`super::plan_hub::exchange`].
-fn by_hub(store: &SqliteStore, repo: &str, send_only: bool) -> Result<()> {
-    match super::plan_hub::hub(store)? {
-        Some(hub) => super::plan_hub::exchange(store, repo, &hub, send_only),
-        None => Ok(()),
-    }
-}
-
 /// One exchange for `repo` by each carrier it has: the hub first, since it
 /// answers in less time than a fetch and what it gives goes out by Git in the
 /// same turn. Git runs whether or not the hub answered; the first failure is
 /// returned.
 fn exchange(store: &SqliteStore, repo: &str) -> Result<()> {
-    let by_hub = by_hub(store, repo, false);
+    let by_hub = super::plan_hub::exchange(store, repo, None);
     super::plan_git::exchange(store, repo).and(by_hub)
 }
 
@@ -40,18 +31,17 @@ pub async fn sync(store: &crate::store::Store, repo: &str) -> Result<()> {
     crate::journal::request::spawn_blocking(move || exchange(&sqlite, &repo)).await?
 }
 
-/// After a save in `repo`, when it has no Linear or Asana: each carrier takes
+/// After a save in `repo`, which has no Linear or Asana: each carrier takes
 /// the records past its cursor and reads nothing, the two at once and for
 /// [`WAIT`] at most. A carrier that fails or runs out of time keeps its
 /// records unsent for the next [`sync`]; the first failure is returned.
 pub(crate) async fn send(store: &crate::store::Store, repo: &str) -> Result<()> {
-    if crate::ops::tracker::connected(repo) {
-        return Ok(());
-    }
     let until = Instant::now() + WAIT;
     let hub = {
         let (sqlite, repo) = (store.sqlite.clone(), repo.to_owned());
-        crate::journal::request::spawn_blocking(move || by_hub(&sqlite, &repo, true))
+        crate::journal::request::spawn_blocking(move || {
+            super::plan_hub::exchange(&sqlite, &repo, Some(until))
+        })
     };
     let git = {
         let (sqlite, repo) = (store.sqlite.clone(), repo.to_owned());
@@ -77,25 +67,14 @@ pub(crate) async fn before_claim(store: &crate::store::Store, repo: &Path, task:
         return;
     }
     let repo = repo.to_string_lossy();
-    briefly(&repo, async {
-        Ok::<_, std::convert::Infallible>(sync(store, &repo).await)
-    })
-    .await;
+    briefly(&repo, sync(store, &repo)).await;
 }
 
 /// A clone this Machine has not met reads its remote's plan when first
 /// asked what the plan is (`lf task list`, `lf repo tracker`), before the
 /// command opens the store it reads. See [`super::plan_git::first_exchange`].
 pub async fn before_first_read(directory: &Path) {
-    let path = crate::store::default_db_path();
-    let Ok(repo) = crate::repository::discover(directory) else {
-        return;
-    };
-    let repo = repo.to_string();
-    if !path.exists() || crate::ops::tracker::connected(&repo) {
-        return;
-    }
-    let Ok(store) = crate::store::open_sqlite(&path) else {
+    let Ok(Some((store, repo))) = carried(directory) else {
         return;
     };
     let exchanged = {
@@ -104,20 +83,27 @@ pub async fn before_first_read(directory: &Path) {
             super::plan_git::first_exchange(&store, &repo).map(drop)
         })
     };
-    briefly(&repo, exchanged).await;
+    briefly(&repo, async { exchanged.await? }).await;
+}
+
+/// The store and repository of `directory`, when this Machine has a store
+/// and the repository has no Linear or Asana.
+fn carried(directory: &Path) -> Result<Option<(SqliteStore, String)>> {
+    let repo = crate::repository::discover(directory)?.to_string();
+    let path = crate::store::default_db_path();
+    if !path.exists() || crate::ops::tracker::connected(&repo) {
+        return Ok(None);
+    }
+    Ok(Some((crate::store::open_sqlite(&path)?, repo)))
 }
 
 /// Wait [`WAIT`] for an exchange, which runs on past it.
-async fn briefly<E: std::fmt::Display>(
-    repo: &str,
-    exchange: impl std::future::Future<Output = Result<Result<()>, E>>,
-) {
+async fn briefly(repo: &str, exchange: impl std::future::Future<Output = Result<()>>) {
     match tokio::time::timeout(WAIT, exchange).await {
-        Ok(Ok(Ok(()))) => {}
-        Ok(Ok(Err(error))) => {
+        Ok(Ok(())) => {}
+        Ok(Err(error)) => {
             tracing::debug!(%repo, error = %format!("{error:#}"), "going on without the plan exchange");
         }
-        Ok(Err(error)) => tracing::debug!(%repo, %error, "the plan exchange did not run"),
         Err(_) => tracing::debug!(%repo, "going on before the plan exchange finished"),
     }
 }
@@ -145,12 +131,9 @@ struct Turn {
 static TURNS: Mutex<BTreeMap<String, Turn>> = Mutex::new(BTreeMap::new());
 
 fn exchange_after_command(directory: &Path) -> Result<()> {
-    let repo = crate::repository::discover(directory)?.to_string();
-    let path = crate::store::default_db_path();
-    if crate::ops::tracker::connected(&repo) || !path.exists() {
+    let Some((store, repo)) = carried(directory)? else {
         return Ok(());
-    }
-    let store = crate::store::open_sqlite(&path)?;
+    };
     {
         let mut turns = TURNS.lock().expect("plan turns are never poisoned");
         let turn = turns.entry(repo.clone()).or_default();
@@ -213,9 +196,4 @@ pub(super) fn lock(
             Err(_) => std::thread::sleep(Duration::from_millis(20)),
         }
     }
-}
-
-/// A send after a save waits this long for an exchange already running.
-pub(super) fn send_until() -> Instant {
-    Instant::now() + WAIT
 }

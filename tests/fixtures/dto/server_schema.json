@@ -3886,7 +3886,7 @@
           "type": "array"
         },
         "hub": {
-          "description": "It holds this Machine's plan (`lf machine hub`).",
+          "description": "This Machine exchanges its plan with it (`lf machine hub`).",
           "type": "boolean"
         },
         "id": {

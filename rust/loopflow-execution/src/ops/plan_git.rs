@@ -779,31 +779,18 @@ mod tests {
 
         // A push the remote refuses, its copy of the ref being ahead of the
         // one this clone holds, is left for the next exchange.
-        let me = refs();
-        let me = me.lines().find_map(|line| {
-            let name = line.rsplit('/').next()?;
-            (name != mini_machine(&mini)).then(|| name.to_owned())
-        });
+        let me = crate::store::machines::local_machine(&laptop.store)
+            .unwrap()
+            .id;
         git(
             Path::new(&laptop.repo),
-            &[
-                "update-ref",
-                "-d",
-                &format!("refs/loopflow/plan-seen/{}", me.unwrap()),
-            ],
+            &["update-ref", "-d", &format!("refs/loopflow/plan-seen/{me}")],
         );
         laptop.send().unwrap_err();
         assert_eq!(laptop.unsent(), 1);
         laptop.exchange();
         assert_eq!(laptop.unsent(), 0);
         assert_eq!(laptop.title(&theirs).as_deref(), Some("made on mini"));
-    }
-
-    fn mini_machine(machine: &Machine) -> String {
-        crate::store::machines::local_machine(&machine.store)
-            .unwrap()
-            .id
-            .to_string()
     }
 
     #[test]

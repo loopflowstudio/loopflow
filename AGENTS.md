@@ -146,8 +146,8 @@ reduction. The best fix makes the system smaller.
 Waves hold durable objectives, memory, cadence and budget under
 `.lf/wave/<name>/`; top-level `wave/` is ordinary content. A Wave's current
 Project is its In Progress Linear Project, which holds Tasks, KRs and targets.
-Linear or Asana is the repository's tracker; without one the plan lives in the
-store, on the Machine's hub when it has one. A Task belongs to a repository
+Linear or Asana is the repository's tracker; without one each Machine's store
+holds the plan, carried by Git and a hub when one is named. A Task belongs to a repository
 and optionally a Project.
 
 A Task takes up one Graph on its first `lf task run` (its own, else the Wave's

@@ -176,7 +176,8 @@ from `lf task list`: the list reads by the selected id and
 carriers' timing.
 
 - `send(repo)`, after a save (slice 4): each carrier takes the records past
-  its cursor and reads nothing. The hub's is today's `send_only` exchange.
+  its cursor and reads nothing. The hub's is `plan_hub::exchange` with the
+  send's deadline.
   Git's is `publish` on the own ref as last fetched (`plan-seen/<me>`), with
   no fetch; a push the remote refuses as not a fast-forward is left for the
   next `sync`. Five seconds at most (`WAIT`); the cursor moves only on
@@ -440,10 +441,9 @@ etude checkout and `lf` version are unknown.
      and checkout adoption exchanging first.
 
 4. **One door for a save.** *Built.* `plan_carriers::send` follows every
-   save (`planning_sync::sync_saved`, `machine/task.rs`): the hub's
-   `send_only` exchange and `plan_git::send` at once, five seconds at most.
-   `plan_hub::sync` lost its `send_only` argument: the only sends after a
-   save are the two calls to `plan_carriers::send`. `plan_hub::sync` is still
+   save (`planning_sync::sync_saved`, `machine/task.rs`): the hub's exchange
+   and `plan_git::send` at once, under one deadline five seconds out. The
+   only sends after a save are the two calls to `plan_carriers::send`. `plan_hub::sync` is still
    called by name where a read nobody asked for reads the hub alone
    (`ops/task.rs`, `planning_sync.rs`, `session_move.rs`, `tracker.rs`
    `--subscribe`).
@@ -571,6 +571,13 @@ etude checkout and `lf` version are unknown.
   callers. After it,
   `cargo check -p loopflow-storage -p loopflow-execution -p loopflow --all-targets`
   ran clean, 2026-11-18. No test was rerun.
+- Compress after slice 4, 2026-11-18: `plan_carriers::send` hands both
+  carriers one deadline (`plan_hub::exchange` takes it and finds the hub
+  itself; `by_hub`, `send_until` and the `send_only` flag are gone), and help
+  text no longer says the hub holds the plan. Passed:
+  `cargo nextest run -p loopflow-execution -p loopflow --lib -E 'test(ops::plan_git::) | test(server::schema::tests::)'`
+  (13 tests) and clippy on both crates. The acceptance test, the only one
+  that sends to a hub after a save, was not rerun: gate.
 - Nothing remains to build: all four slices are in the code and the four
   differences at the top hold in it. Etude's cutover is by hand, after
   release.

@@ -359,10 +359,20 @@ lf task status LOO-12
 # Conversation: died 12:01 (exit 137) · no server runs here to start it; `lf resume --task LOO-12` opens it
 ```
 
-A crash can take the provider's transcript with it, as when the provider was
-killed before saving its first turn. Then the conversation starts again on a
-fresh thread with its original request, whether the server starts it or you
-do with `lf resume`, and the old thread stays in `lf session history`.
+A launch can end before the provider saves anything: `claude` missing from
+`PATH`, a failed login or trust prompt, a crash, or Ctrl+C before you typed.
+Opening that conversation again starts it on a fresh thread with its original
+request, whether the server starts it, you run `lf resume` or `lf session
+resume`, or a pane opens it. The same happens when the provider's transcript
+was deleted. The old thread stays in `lf session history`.
+
+```bash
+lf resume 7f3a2c
+# Claude has no saved copy of this conversation; starting it again from its first request.
+```
+
+A conversation the provider did save always resumes its thread. If the
+provider then refuses that resume, the Session stays as it was.
 
 A work session that has never run reads as that, not as a death. Until its
 first agent runs it is starting, as is any start still under way, and a start

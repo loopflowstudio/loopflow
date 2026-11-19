@@ -129,3 +129,8 @@ this case is rare.
    named above.
 3. **Real Claude quit-before-typing check** through `lf`, using a PTY like the
    probe; result in the PR body.
+
+## Docs (written first)
+
+- `docs/sessions.md`, the paragraph after the `lf task status` "no server" example: any launch that ended before the provider saved (missing CLI, login/trust exit, crash, Ctrl+C before typing) opens again from its first request on every opener, with the diagnostic line; a saved conversation that the provider refuses to resume stays as it was.
+- `docs/subscriptions.md`, Resume paragraph: "Missing history is reported" replaced by "starts again from its first request and says so; it never opens empty."

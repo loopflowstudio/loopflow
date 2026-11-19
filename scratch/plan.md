@@ -385,7 +385,7 @@ so its step name stays until it takes a Graph up again.
 Not run here: `world_recipes::`, `local_planning` (renamed step in
 assertions). CI.
 
-## To build: a Wave's default graph takes an optional auto modifier; the `auto` graph goes
+## Built: a Wave's default graph takes an optional auto modifier; the `auto` graph goes
 
 Direction 2026-11-19 (exact words in `scratch/questions.md`, "The auto graph").
 Auto already stands in at every interactive step, `verify` included, so
@@ -417,3 +417,44 @@ graph is that minus `verify`, under the setting's word.
   run`, so a restarted run stops at its next interactive step unless auto is
   on. Update `task.run`'s `approve` docs ("turning auto on" goes), docs and
   the operate skills that use `-b` to ship (they say `lf ship`).
+
+Built 2026-11-19:
+
+- `auto: Option<AutoDefault>` (`on` only) in the config catalogue, General
+  applicability, so Wave, repository and personal configs take it.
+  `auto::configured` runs after any take-up in `try_start_task_run` and writes
+  `on` only when unset (`set_task_auto`'s `keeps_off` became `unset_only`).
+  Attribution is a new `Starter::Config { layer: wave | repository |
+  personal }` ("auto: on by wave config"); Swift `Starter.config(layer:)`;
+  `task_detail.json` carries it.
+- `-b` writes no auto (`auto::ask` takes only `ship`); `stands_in` unchanged.
+- `task/graph/auto.yaml` and `.lf/graphs/autonomous.yaml` deleted.
+  `keys::fold` reads `graph: auto` as `graph: code` + `auto: on`, marked for
+  removal by Task d3af77 (filed here). Released lf ignoring `auto:`: not
+  tested here; the released reader's unknown-key handling is for gate/QA.
+- Docs: README, `docs/index.md`, getting-started, orchestration, planning,
+  launch-plan and task-operate skills, `task.run` help and `approve` docs.
+- Test: `a_waves_auto_on_takes_every_step_of_its_tasks_and_an_off_still_wins`;
+  the batch fixture asserts `auto` stays null; `keys::tests::a_released_auto_graph_reads_as_code_with_auto_on`.
+
+Gate: regenerate `server_schema.json` (Starter variant, `approve` doc), run
+`dto_fixtures::`, `server::schema::tests::`, `golden_prompt` (skill text),
+`documented_commands::`, `config::` catalogue tests, Swift DTOFixtureTests.
+
+## To build: `lf ship` goes; `lf task auto on` is the command
+
+Direction 2026-11-19: "lets kill lf ship; isnt that just lf task auto on?"
+It is: `lf ship`'s own help says "`lf task auto on` is this command".
+
+- Delete `Commands::Ship` and its rewrite in `lf/mod.rs` (the `--task …
+  ship` respelling, the ISSUE→`--task` shim) and `spell_ship`. `lf task auto
+  on [ISSUE] [--graph <g>] [--reason] [--json]` takes what `lf ship` had:
+  `--graph` (take up another graph), `--reason` (the run's reason), and no
+  ISSUE = the checkout's Task, or a new one for its branch.
+- Wire: `task.ship` → `task.auto.on`, beside `task.auto.off`; Swift
+  `DesktopActions`, `server/schema.rs`, DTO fixtures follow. No alias.
+- Every printed sentence that says "`lf ship` lands it" / "`lf ship <ID>`"
+  says `lf task auto on <ID>`. Docs (~50 files name `lf ship`), README,
+  builtin skills (task-session, task-operate, repo/wave operate, pr-land),
+  `.lf/skills`, `.lf/qa`, help text.
+- `ship-review` keeps its name: it reviews what ships, not the command.

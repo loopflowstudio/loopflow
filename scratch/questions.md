@@ -143,5 +143,7 @@ Jack, as a comment on this Task: "From LOO-959's concept review (answer 1a, defe
 
 Jack, quoting option 3 ("Delete it. … unless verify also stands in when auto is on."): "Should we allow a fully auto setting instead?"
 Then: "so that waves can have default graphs with an optional auto modifier"
-Open: `-b` — offered "batch only, writes no auto" (1), keep (2), `--auto` (3); no answer yet. Built as 1, made for review.
+Open: `-b` — offered "batch only, writes no auto" (1), keep (2), `--auto` (3); no answer yet. Then a steer (Jack Heart): "-b keeps standing in at every interactive step for its own run and the caller waits, as on any Graph; it writes no auto. Do not remove the launcher.batch stand-in in stands_in; only remove the auto write." Built that way.
+- Made for review: the config default applies at every take-up (also `lf task run X <other graph>`), not only the first, and only when auto is unset. Attribution is a new `Starter::Config` variant rather than a separate type for auto's setter.
 - Jack, on `-b`: "no i think its right as it is -- -b should work on task run much like it does a regular graph". Plan: `-b` stands in for its own run, writes no auto.
+- Jack: "lets kill lf ship; isnt that just lf task auto on?"

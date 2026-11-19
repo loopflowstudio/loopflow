@@ -63,14 +63,8 @@ async fn mark(store: &SharedStore, task: &Task, state: AutoState) -> OpsResult<A
     })
 }
 
-/// The open Task and its Graph, ready for auto: a Task with no graph takes up
-/// its default first; naming `graph` takes that one up in place of the
-/// remaining steps.
-async fn graph_for_auto(
-    store: &SharedStore,
-    issue: &str,
-    graph: Option<&str>,
-) -> OpsResult<(Task, crate::task_graph::TaskGraph)> {
+/// The Task auto is turned on for: open, and launchable here.
+async fn task_for_auto(store: &SharedStore, issue: &str) -> OpsResult<Task> {
     let task = task_by_issue(store, issue).await?;
     let issue = &task.identifier;
     match store.sqlite.task_state(&task.id).map_err(task_error)? {
@@ -86,6 +80,18 @@ async fn graph_for_auto(
         .sqlite
         .require_task_launch(&task.id)
         .map_err(task_error)?;
+    Ok(task)
+}
+
+/// The Graph `lf ship` runs: a Task with none takes up its default; naming
+/// `graph` takes that one up in place of the remaining steps. Only a caller
+/// that starts the run next takes one up: a Task that took up a Graph and
+/// never ran it reads as starting, and its conversation starts the run.
+async fn graph_for_ship(
+    store: &SharedStore,
+    task: &Task,
+    graph: Option<&str>,
+) -> OpsResult<crate::task_graph::TaskGraph> {
     let current =
         crate::store::task_work::task_graph(&store.sqlite, &task.id).map_err(task_error)?;
     if current.is_none() || graph.is_some() {
@@ -93,7 +99,7 @@ async fn graph_for_auto(
             graph: selected,
             take_up,
             ..
-        } = super::select_task_run(store, &task, task.worktree()?, graph, Some("start"), |_| {
+        } = super::select_task_run(store, task, task.worktree()?, graph, Some("start"), |_| {
             false
         })?;
         if take_up {
@@ -101,10 +107,9 @@ async fn graph_for_auto(
                 .map_err(task_error)?;
         }
     }
-    let graph = crate::store::task_work::task_graph(&store.sqlite, &task.id)
+    crate::store::task_work::task_graph(&store.sqlite, &task.id)
         .map_err(task_error)?
-        .ok_or_else(|| task_error(format!("Task {issue} has no graph")))?;
-    Ok((task, graph))
+        .ok_or_else(|| task_error(format!("Task {} has no graph", task.identifier)))
 }
 
 /// Save `state` as this caller's mark. Returns whether auto was on before.
@@ -124,11 +129,21 @@ async fn set(
 
 /// `lf task auto on`: turn auto on for the Task's Graph, lifting any stop.
 /// Nothing starts; a live run stands in from its next interactive step.
-/// Returns whether auto was on already.
+/// The setting lives on the Graph the Task took up, so a Task with none is
+/// pointed at `lf ship`. Returns whether auto was on already.
 pub fn auto_on(issue: &str, note: Option<&str>) -> OpsResult<bool> {
     block_on_task(async {
         let store = task_store().await?;
-        let (task, _) = graph_for_auto(&store, issue, None).await?;
+        let task = task_for_auto(&store, issue).await?;
+        if crate::store::task_work::task_graph(&store.sqlite, &task.id)
+            .map_err(task_error)?
+            .is_none()
+        {
+            let issue = &task.identifier;
+            return Err(task_error(format!(
+                "Task {issue} has not taken up a Graph, and auto is set on one; `lf ship {issue}` turns auto on and runs it"
+            )));
+        }
         set(&store, &task, AutoState::On, note).await
     })
 }
@@ -138,7 +153,8 @@ pub fn auto_on(issue: &str, note: Option<&str>) -> OpsResult<bool> {
 pub fn ship_on(issue: &str, graph: Option<&str>, note: Option<&str>) -> OpsResult<ShipStart> {
     block_on_task(async {
         let store = task_store().await?;
-        let (task, graph) = graph_for_auto(&store, issue, graph).await?;
+        let task = task_for_auto(&store, issue).await?;
+        let graph = graph_for_ship(&store, &task, graph).await?;
         let issue = task.identifier.clone();
         let (from, live) = match &graph.position {
             TaskGraphPosition::At { step } if step == END => {

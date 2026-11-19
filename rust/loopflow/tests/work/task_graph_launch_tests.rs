@@ -2780,6 +2780,27 @@ fn auto_on_starts_nothing_and_the_next_bare_run_stands_in() {
 }
 
 #[test]
+fn auto_on_a_task_that_never_ran_takes_up_no_graph_and_the_next_run_is_the_only_one() {
+    let task = shipping_task();
+    let error = refusal(task.run(&["task", "auto", "on", "INF-123"]));
+    assert!(
+        error.contains("INF-123 has not taken up a Graph") && error.contains("`lf ship INF-123`"),
+        "{error}"
+    );
+    // Nothing was taken up, so nothing reads as starting and no
+    // conversation starts a run of its own.
+    let status = task.text_status();
+    assert!(!status.contains("Starting"), "{status}");
+    assert!(task.status()["auto"].is_null());
+    // The person's run is the one run, and says what `lf task run` says.
+    let ran = task.task_run(&["task", "run", "INF-123"]);
+    assert!(ran.success(), "{}", ran.text);
+    assert_eq!(task.graph()["position"], at("review"));
+    assert_eq!(support::recorded_graphs(task.home.path()).len(), 1);
+    assert!(stand_ins(&task).is_empty());
+}
+
+#[test]
 fn a_ship_on_a_running_task_reports_its_run_and_starts_nothing() {
     let task = shipping_task();
     fs::write(task.home.path().join("hold"), "").unwrap();

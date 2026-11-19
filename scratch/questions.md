@@ -37,10 +37,11 @@ Questions 1 and 2 got no written answer in scratch.
   land step finishes its steps into `end`.
 - **Stored value `stopped`, shown as "off".** Reverse by renaming the value in
   the unmerged migration.
-- **`auto on` takes up the default graph** for a Task with none (needs a
-  checkout) but claims nothing; `lf ship` still claims. `auto off` on a Task
-  with no Graph saves nothing and answers "auto was not on". Passed over:
-  taking up a graph just to turn it off.
+- **`auto on` on a Task with no Graph is an error naming `lf ship`** (was:
+  take up the default graph, which made the Task read "Starting" and its
+  conversation start a run). `auto off` there saves nothing and answers "auto
+  was not on". Reverse by storing auto on the Task instead of `task_graphs`,
+  so it can be set before the first run.
 - **Reopening a Task clears auto.**
 - **State never reads the setting**, so auto on, waiting at an interactive
   step with nothing running, reads `active` (was `idle`).
@@ -64,3 +65,5 @@ Questions 1 and 2 got no written answer in scratch.
 - A Graph process killed with its carrier stays open until the hourly prune,
   so the Task reads `moving` with nothing running. Base behavior;
   `lf machine prune` settles it.
+- Whether `lf ship` should set auto inside the run's own take-up
+  (`start_task_run`) instead of taking the Graph up just before it.

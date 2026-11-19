@@ -293,7 +293,8 @@ waits there, or reaches a merging step (`lf land`, `lf pr arm`, `pr-land`) and
 waits before it: "Waiting at pr land: auto is off (Maya). `lf ship` lands it."
 Auto-merge that Loopflow armed is disarmed. Off stands:
 `lf -b task run` turns auto on unless someone turned it off, and only
-`lf task auto on` or `lf ship` turns it back on. Other Graphs in the Task's worktree never move it. There is no
+`lf task auto on` or `lf ship` turns it back on. Auto is set on the Graph a Task took up, so a Task that has
+not run yet takes `lf ship`: `lf task auto on` there points at it and takes up nothing. Other Graphs in the Task's worktree never move it. There is no
 approve command: give feedback in the Task's conversation, which knows its step
 and how to go on.
 

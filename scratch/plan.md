@@ -75,35 +75,27 @@ when the PR merges.
 
 ## Remaining
 
-One bug, reproduced 2026-11-19 with a throwaway test in
-`rust/loopflow/tests/work/task_graph_launch_tests.rs` (`shipping_task()`, then
-the two commands):
+Gate.
 
-- `lf task auto on INF-123` on a never-run Task prints "INF-123: auto on" and
-  takes up `feature` at `start`. Status then reads `idle · auto: on`,
-  "Conversation: starting", "latest Graph: Starting feature", action
-  `no_action`.
-- A bare `lf task run INF-123` next exits 1 with "Task INF-123 is running
-  graph feature from start; read `lf task status` …"
-  (`select_task_run`, `rust/loopflow-execution/src/ops/task.rs:801`), while the
-  Graph position reads `run`, `running: true`, at `sync --plan`, and status
-  reads `moving`. A run did start; the command that started or met it
-  reported a refusal.
-- Bare `lf --task INF-123 ship` on the same never-run Task works: the run
-  goes start to `end`, Task `done`.
+Built 2026-11-19: `lf task auto on` no longer takes up a Graph. On a Task with
+none it exits 1 with "Task INF-123 has not taken up a Graph, and auto is set on
+one; `lf ship INF-123` turns auto on and runs it", and the next bare
+`lf task run` is the one run
+(`auto_on_a_task_that_never_ran_takes_up_no_graph_and_the_next_run_is_the_only_one`,
+passed with `auto_on_starts_nothing_and_the_next_bare_run_stands_in`).
 
-Not traced: which process holds the run the refusal names. A Task that has
-taken up a Graph and never run it is a position main only reaches inside a
-run; `unrun_execution` (`ops/task_execution.rs:140`) reads it as "Starting".
-`graph_for_auto` (`ops/task/ship.rs:69`) is what leaves a Task there.
+What the reproduction showed: after the early take-up the Task read
+"Conversation: starting", "latest Graph: Starting feature", with an open
+Session. A Task that took up a Graph and never ran it owes setup
+(`ops/human_session/setup.rs`): its conversation starts `lf task run`
+detached, and the person's own `lf task run` then met that live run and
+refused. So the early take-up was itself a request to run.
 
-Implement fixes it and keeps the reproduction as a test: `lf task auto on`
-then `lf task run` on a never-run Task starts one run and prints what
-`lf task run` prints. Two ways, the second smaller: find and remove the
-second start, or have `auto on` reach the run's own take-up instead of doing
-one early.
-
-Then gate.
+`lf ship` still takes up the Graph a moment before its own run starts
+(`graph_for_ship`), across `prepare_task`. A conversation opening inside that
+window would start a second run and the ship would report the refusal. Not
+seen in a fixture. Closing it means setting auto inside `start_task_run`,
+after its take-up.
 
 Checks nobody has run since main was merged in (2026-11-19):
 
@@ -139,8 +131,10 @@ Shape, for gate's review:
 - The stored value is `stopped` while every surface says "off"
   (`auto.state: "stopped"`, `lf task auto off`). The migration is unmerged, so
   renaming the value to `off` is one edit.
-- `lf task auto on` on a Task with no Graph takes up its default one;
-  `auto off` there saves nothing and answers "auto was not on".
+- `lf task auto on` on a Task with no Graph is an error pointing at
+  `lf ship`; `auto off` there saves nothing and answers "auto was not on".
+  The mark has no home before a Graph row exists. Letting it be set ahead of
+  the first run means moving `auto` off `task_graphs` onto the Task.
 - Open, nobody has decided: whether `lf -b task run` should write auto on.
 
 ## Exclusions

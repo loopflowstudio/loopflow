@@ -228,9 +228,6 @@ them as the spec for wording and output:
 - `docs/agent-api.md`: Task updates and the notice to a conductor.
 - `docs/glossary.md`: Parent, child.
 
-The examples use `--parent`, which Clap does not have until slice 2, so the
-`documented_commands` check fails on this branch until then.
-
 Settled while writing, for review: the human `lf task status` prints one
 `child:` line per child (identifier, title, standing) and the reason line;
 `lf task complete <parent>` prints one line per child with what happened to
@@ -361,7 +358,8 @@ existing update a conversation gets about its own Task; Waves and
    (`.parent.identifier` on the receipt, both keys on `lf task show`) and
    the `dto_fixtures::` round trips of `task_create_receipt.json`,
    `task_status.json` (now read as `DesktopTaskPane`) and
-   `subscribe_frames.json`.
+   `subscribe_frames.json`. Run on 3514139603, 2026-11-18: all 50
+   `dto_fixtures::` tests and both parent `session_cli_tests` passed.
    Not built: Swift does not decode the receipt's `parent` or the pane's
    two keys (it has no `TaskRow` mirror and nothing draws them yet); the
    iOS target was not compiled here, only the macOS Swift tests.

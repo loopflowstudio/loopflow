@@ -608,6 +608,11 @@ fn subscribe_frames_carry_each_reads_json_result() {
                 assert_eq!(body["plan"]["git"]["remote"], "origin");
                 assert_eq!(body["plan"]["hub"]["machine"], "mini");
                 assert_eq!(body["plan"]["hub"]["unsent"], 1);
+                assert!(body["plan"]["git"]["not_taken"]
+                    .as_str()
+                    .unwrap()
+                    .starts_with("3 not taken: "));
+                assert_eq!(body["plan"]["hub"]["not_taken"], serde_json::Value::Null);
             }
             other => panic!("unknown subscription {other}"),
         }

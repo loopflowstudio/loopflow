@@ -77,10 +77,14 @@ public struct CarrierStanding: Decodable, Sendable, Equatable {
     public let error: String?
     /// Unix seconds since the carrier stopped working.
     public let failingSince: Int?
+    /// What the carrier's last read brought that this Machine could not
+    /// write: `3 not taken: wave design from mini …`.
+    public let notTaken: String?
 
     enum CodingKeys: String, CodingKey {
         case unsent, records, error
         case failingSince = "failing_since"
+        case notTaken = "not_taken"
     }
 
     public init(from decoder: Decoder) throws {
@@ -89,15 +93,28 @@ public struct CarrierStanding: Decodable, Sendable, Equatable {
         records = try values.decode([String].self, forKey: .records)
         error = try values.decode(String?.self, forKey: .error)
         failingSince = try values.decode(Int?.self, forKey: .failingSince)
+        notTaken = try values.decode(String?.self, forKey: .notTaken)
     }
 
-    /// `name`, then since when it has not worked and how much is unsent.
+    /// `name`, then since when it has not worked, how much is unsent and how
+    /// much was not taken.
     public func line(_ name: String) -> String {
         var line = name
         if let failingSince {
             line += ", unreachable since \(Date(timeIntervalSince1970: TimeInterval(failingSince)).formatted(date: .omitted, time: .shortened))"
         }
         if unsent > 0 { line += ", \(unsent) unsent" }
+        if let count = notTakenParts?.count { line += ", \(count)" }
         return line + "."
+    }
+
+    /// Why the first record not taken was not, and what to do about it.
+    public var notTakenReason: String? { notTakenParts?.reason }
+
+    /// `3 not taken: why` as its count and its reason.
+    private var notTakenParts: (count: Substring, reason: String?)? {
+        guard let notTaken else { return nil }
+        guard let colon = notTaken.range(of: ": ") else { return (Substring(notTaken), nil) }
+        return (notTaken[..<colon.lowerBound], String(notTaken[colon.upperBound...]))
     }
 }

@@ -1467,7 +1467,9 @@ async fn served(
             records,
         }) => {
             plan_here(reservation, move |store| {
-                loopflow_execution::ops::plan_hub::apply_here(store, &repository, &records)
+                Ok(serde_json::to_value(
+                    loopflow_execution::ops::plan_hub::apply_here(store, &repository, &records)?,
+                )?)
             })
             .await
         }

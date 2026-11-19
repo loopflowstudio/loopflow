@@ -1,7 +1,8 @@
 //! A plan without Linear or Asana travels by a hub ([`super::plan_hub`]), a
 //! Git remote ([`super::plan_git`]) or both. This is when the two run
 //! together. [`send`] follows a save and reads nothing. [`sync`] reads and
-//! sends: when asked, before a claim, and after a command the Machine server
+//! sends: when asked, before a claim or a new Wave, and after a command the
+//! Machine server
 //! answers. [`read`] asks the hub alone, for a read nobody asked for.
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -88,18 +89,40 @@ pub(crate) async fn send(store: &crate::store::Store, repo: &str) -> Result<()> 
 pub(super) const WAIT: Duration = Duration::from_secs(5);
 
 /// Before this Machine claims `task`, which nobody owns as far as it has
-/// seen: one exchange by each carrier, so a claim already made elsewhere is
-/// read first. A carrier that fails or is stopped at [`WAIT`] leaves the
-/// claim to go ahead; whichever claim was first holds once they meet.
+/// seen: [`look_first`], so a claim already made elsewhere is read. Whichever
+/// claim was first holds once they meet.
 pub(crate) async fn before_claim(store: &crate::store::Store, repo: &Path, task: &TaskId) {
-    if !matches!(store.sqlite.task_owned(task), Ok(false)) {
-        return;
+    if matches!(store.sqlite.task_owned(task), Ok(false)) {
+        look_first(store, repo).await;
     }
+}
+
+/// Before this Machine makes something another may have made already (a
+/// claim, a Wave of some name): one exchange by each carrier, so theirs is
+/// read first. A carrier that fails or is stopped at [`WAIT`] leaves the
+/// command to go ahead.
+pub(crate) async fn look_first(store: &crate::store::Store, repo: &Path) {
     let repo = repo.to_string_lossy();
     went_on(
         &repo,
         sync_until(store, &repo, Some(Instant::now() + WAIT)).await,
     );
+}
+
+/// A carrier read its peer and this Machine could not write everything it
+/// brought. The carrier itself worked: this is the exchange's error, never
+/// the carrier's `error`.
+#[derive(Debug, thiserror::Error)]
+#[error("{0}")]
+pub(super) struct NotTaken(pub String);
+
+/// The carrier's own failure in `result`, for `lf repo tracker`.
+pub(super) fn carrier_error(result: &Result<()>) -> Option<String> {
+    result
+        .as_ref()
+        .err()
+        .filter(|error| !error.is::<NotTaken>())
+        .map(|error| format!("{error:#}"))
 }
 
 /// A clone this Machine has not met reads its remote's plan when first

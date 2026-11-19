@@ -28,7 +28,8 @@ struct RepositoryPlanView: View {
         .accessibilityIdentifier("repository-plan")
     }
 
-    /// A carrier's unsent records and why it did not take them.
+    /// A carrier's unsent records, why it did not take them, and why this
+    /// Machine could not write what it brought.
     @ViewBuilder
     private func standing(_ standing: CarrierStanding) -> some View {
         ForEach(standing.records, id: \.self) { Text($0) }
@@ -36,5 +37,6 @@ struct RepositoryPlanView: View {
             Text("and \(standing.unsent - standing.records.count) more")
         }
         if let error = standing.error { Text(error) }
+        if let reason = standing.notTakenReason { Text(reason) }
     }
 }

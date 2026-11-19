@@ -263,9 +263,9 @@ pub enum ServerOperation {
     /// The hub's side of a plan exchange: take in another Machine's stamped
     /// records of `repository`'s plan, in one transaction. Each field is
     /// written only when its stamp is newer than the one held here, so
-    /// repeating it changes nothing. Answers `{}`.
+    /// repeating it changes nothing.
     #[serde(rename = "plan.apply")]
-    #[schemars(extend("x-result" = schemars::json_schema!({"type": "object", "additionalProperties": false})))]
+    #[schemars(extend("x-result" = generator.subschema_for::<PlanApplied>()))]
     PlanApply {
         repository: loopflow_model::durable::RepositoryId,
         #[schemars(with = "Vec<Untyped>")]
@@ -281,6 +281,16 @@ pub enum ServerOperation {
         #[serde(deserialize_with = "Option::deserialize")]
         since: Option<i64>,
     },
+}
+
+/// What `plan.apply` answers.
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PlanApplied {
+    /// How many of the records could not be written here (a Wave whose name
+    /// a Wave here holds, and what hangs from it). The sender keeps them
+    /// unsent and sends them again.
+    pub not_taken: usize,
 }
 
 /// What `plan.changes` answers.

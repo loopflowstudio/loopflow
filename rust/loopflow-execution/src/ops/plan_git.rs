@@ -13,7 +13,7 @@ use std::time::Instant;
 use anyhow::{anyhow, bail, Context, Result};
 
 use loopflow_model::durable::RepositoryId;
-use loopflow_storage::sqlite::plan_carriers::Carrier;
+use loopflow_storage::sqlite::plan_carriers::{not_taken_line, Carrier};
 use loopflow_storage::sqlite::SqliteStore;
 use loopflow_storage::work::edit::{StampedRecord, StampedValue};
 
@@ -69,7 +69,8 @@ pub fn first_exchange(store: &SqliteStore, repo: &str, until: Instant) -> Result
 /// commit the records changed here onto this Machine's ref and push it. The
 /// outcome is recorded for `lf repo tracker`. A repository with no remote
 /// does nothing. With `until`, Git is stopped then and the next exchange
-/// carries what this one did not.
+/// carries what this one did not. A ref holding a record this Machine could
+/// not write is read from the same place next time, and that is the error.
 pub fn exchange(store: &SqliteStore, repo: &str, until: Option<Instant>) -> Result<()> {
     let Some(remote) = remote(Path::new(repo)) else {
         return Ok(());
@@ -120,7 +121,7 @@ fn turn(
     let _turn = super::plan_carriers::lock(store, "plan-git", repository, until)?;
     let sent_seq = store.select_carrier(repo, Carrier::Git, remote)?.sent_seq;
     let result = carry(sent_seq);
-    let error = result.as_ref().err().map(|error| format!("{error:#}"));
+    let error = super::plan_carriers::carrier_error(&result);
     store.record_carrier_exchange(repo, Carrier::Git, error.as_deref())?;
     result
 }
@@ -155,6 +156,7 @@ fn exchange_with(
 
     // A ref that cannot be read does not stop the others or this Machine's push.
     let mut failed = None;
+    let mut not_taken = Vec::new();
     let taken = store.plan_ref_tips(repo)?;
     let names = crate::store::ownership::machine_names(store)?;
     for (machine, tip) in &seen {
@@ -167,24 +169,30 @@ fn exchange_with(
                 .filter(|base| commit_exists(path, base))
                 .or(mine);
             let (records, theirs) = changed_records(path, base.map(String::as_str), tip)?;
-            store.apply_plan_records(repo, &records, None, &names)?;
-            store.record_plan_ref(repo, machine, tip)?;
-            Ok::<_, anyhow::Error>(theirs)
+            let skipped = store.apply_plan_records(repo, &records, None, &names)?;
+            // A ref with anything not taken is read from the same place again.
+            if skipped.is_empty() {
+                store.record_plan_ref(repo, machine, tip)?;
+            }
+            Ok::<_, anyhow::Error>((theirs, skipped))
         })();
         match read {
-            // A hub or a move that names the repository by that Machine's id
-            // finds this checkout. Tasks keep the id they were saved under.
-            Ok(Some(theirs)) => {
-                if !store.locate_repository(repo, &theirs)? {
-                    tracing::warn!(%repo, %theirs, "another checkout here already answers to that repository id")
+            Ok((theirs, skipped)) => {
+                not_taken.extend(skipped);
+                // A hub or a move that names the repository by that Machine's
+                // id finds this checkout. Tasks keep the id they were saved under.
+                if let Some(theirs) = theirs {
+                    if !store.locate_repository(repo, &theirs)? {
+                        tracing::warn!(%repo, %theirs, "another checkout here already answers to that repository id")
+                    }
                 }
             }
-            Ok(None) => {}
             Err(error) => {
                 failed.get_or_insert(error.context(format!("read the plan ref of {machine}")));
             }
         }
     }
+    store.record_not_taken(repo, Carrier::Git, &not_taken)?;
     publish(
         store,
         path,
@@ -194,7 +202,11 @@ fn exchange_with(
         sent_seq,
         until,
     )?;
-    failed.map_or(Ok(()), Err)
+    failed.map_or(Ok(()), Err)?;
+    match not_taken_line(&not_taken) {
+        Some(line) => Err(super::plan_carriers::NotTaken(line).into()),
+        None => Ok(()),
+    }
 }
 
 /// Each fetched plan ref's Machine and commit.
@@ -888,6 +900,65 @@ mod tests {
 
         mini.exchange();
         assert_eq!(mini.title(&task).as_deref(), Some("from a later build"));
+    }
+
+    #[test]
+    fn a_wave_made_on_two_machines_is_not_taken_until_one_is_renamed() {
+        let (_root, _origin, laptop, mini) = machines();
+        // Each made a Wave called "plan" before reading the other's.
+        let mine = laptop.task("on the laptop");
+        let theirs = mini.task("on mini");
+        laptop.exchange();
+        let not_taken = |machine: &Machine| {
+            let held = machine
+                .store
+                .plan_carrier(&machine.repo, Carrier::Git)
+                .unwrap()
+                .unwrap();
+            // The remote itself worked.
+            assert_eq!((held.error, held.failing_since), (None, None));
+            held.not_taken
+        };
+        // The laptop's Wave, its Project and its Task, on the line and as
+        // the exchange's error; mini's own plan still went out.
+        let error = exchange(&mini.store, &mini.repo, None).unwrap_err();
+        let line = not_taken(&mini).unwrap();
+        assert_eq!(error.to_string(), line);
+        assert!(
+            line.starts_with("3 not taken: wave plan from ")
+                && line.contains("`lf wave rename plan <new name>`"),
+            "{line}"
+        );
+        assert_eq!(mini.unsent(), 0);
+        exchange(&laptop.store, &laptop.repo, None).unwrap_err();
+        assert!(not_taken(&laptop).is_some());
+        assert_eq!(laptop.title(&theirs), None);
+
+        // One is renamed: each reads the other's ref again and writes it.
+        let project = laptop.store.task(&mine).unwrap().unwrap().project_id;
+        let wave = laptop
+            .store
+            .project(&project.unwrap())
+            .unwrap()
+            .unwrap()
+            .wave_id;
+        loopflow_storage::test_fixture::arrive(
+            &laptop.store,
+            &laptop.repo,
+            &loopflow_storage::work::edit::WorkEdit::for_target(
+                wave.as_str(),
+                &[loopflow_storage::work::edit::WorkValue::WaveName(
+                    "laptop-plan".into(),
+                )],
+            ),
+        )
+        .unwrap();
+        laptop.exchange();
+        assert_eq!(laptop.title(&theirs).as_deref(), Some("on mini"));
+        assert_eq!(not_taken(&laptop), None);
+        mini.exchange();
+        assert_eq!(mini.title(&mine).as_deref(), Some("on the laptop"));
+        assert_eq!(not_taken(&mini), None);
     }
 
     #[test]

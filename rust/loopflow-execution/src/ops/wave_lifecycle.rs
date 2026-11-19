@@ -58,11 +58,19 @@ pub async fn add(repo: &Path, name: &str, objective: Option<&str>) -> OpsResult<
     // A clone's authored Waves join the store with the first explicit write here.
     crate::work::wave::bootstrap::register_authored_waves(&store.sqlite, &main.to_string_lossy())
         .map_err(lifecycle_error)?;
-    let created = store
-        .get_wave_at(&locator)
-        .await
-        .map_err(lifecycle_error)?
-        .is_none();
+    let held = || async {
+        store
+            .get_wave_at(&locator)
+            .await
+            .map(|wave| wave.is_some())
+            .map_err(lifecycle_error)
+    };
+    // Another Machine may have made a Wave of this name: read the plan first,
+    // so this command joins that Wave and does not make a second.
+    let created = !held().await? && {
+        super::plan_carriers::look_first(&store, &main).await;
+        !held().await?
+    };
     let wave = crate::work::wave::ensure_wave_row(&store, &main, locator.slug())
         .await
         .map_err(lifecycle_error)?;

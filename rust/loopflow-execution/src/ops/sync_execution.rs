@@ -87,24 +87,17 @@ pub(crate) fn run_sync_in(
     };
     let detach =
         stacked.is_some() && onto.is_some_and(|target| target == default || target == upstream);
+    let mut stacked_onto = None;
     if let Some(stacked) = stacked.as_ref().filter(|_| !detach) {
-        if matches!(
-            stacked.parent,
-            crate::ops::task::StackParentPr::Closed { .. }
-        ) {
-            return Err(stacked.closed_parent_error(&default).into());
+        stacked_onto = stacked
+            .live_parent_branch(&default)?
+            .map(|branch| format!("origin/{branch}"));
+        if let Some(onto) = onto {
+            return Err(anyhow!(
+                "{onto} names no other open Task; name one to restack this Task on it, the default branch to detach it, or omit the target to sync its parent"
+            ));
         }
     }
-    if stacked.is_some() && onto.is_some() && !detach {
-        return Err(anyhow!(
-            "{} names no other open Task; name one to restack this Task on it, the default branch to detach it, or omit the target to sync its parent",
-            onto.unwrap_or_default()
-        ));
-    }
-    let stacked_onto = stacked
-        .as_ref()
-        .and_then(|stacked| stacked.live_parent_branch())
-        .map(|branch| format!("origin/{branch}"));
     let fork_base = stacked.as_ref().map(|stacked| stacked.fork_base.clone());
     let default_target = if on_main { &upstream } else { &default };
     let target = if detach {

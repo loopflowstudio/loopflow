@@ -70,10 +70,10 @@ pub struct StackedSync {
   merged yields `Merged`, so bare sync takes the existing merged-parent path
   onto the default branch. `fork_base` is unchanged: the recorded base is on
   the parent's branch, which the successor row shares.
-- `live_parent_branch()` is `Some` only for `Open`.
-- `StackedSync::closed_parent_error()` writes the sentence above. Every
-  consumer that needs a parent and gets `Closed` returns it: `run_sync_in`
-  when not detaching, `stack_for_landing`, `pr.rs::publication_base`.
+- `live_parent_branch(default)` returns `Some` for `Open`, `None` for
+  `Merged`, and the sentence above as its error for `Closed`. Every consumer
+  already calls it (`run_sync_in` when not detaching, `stack_for_landing`,
+  `pr.rs::publication_base`), so none checks `Closed` itself (compress).
 - `record_stack_sync`: when not clearing and `parent_pr` differs from
   `child.parent_pr_id`, record `parent_pr` with the new base in the same write.
   `record_control_task_state`'s `clear_parent` reads `parent == Merged`.

@@ -1016,7 +1016,7 @@ fn stacking_on_a_different_parent_keeps_inherited_files_on_sync() {
         );
         let stacked = task_stack(&child_path).unwrap().unwrap();
         assert_eq!(stacked.fork_base, main);
-        assert_eq!(stacked.live_parent_branch(), Some("next"));
+        assert_eq!(stacked.live_parent_branch("main").unwrap(), Some("next"));
     }
     assert_eq!(git(&child_path, &["rev-parse", "HEAD"]), original_head);
 
@@ -1069,7 +1069,7 @@ fn stacking_on_an_unpushed_parent_pushes_its_branch_and_sync_follows_it() {
         .unwrap();
     assert_eq!(child.parent_pr_id, Some(parent_pr.id));
     let stacked = task_stack(&child_path).unwrap().expect("child is stacked");
-    assert_eq!(stacked.live_parent_branch(), Some("parent"));
+    assert_eq!(stacked.live_parent_branch("main").unwrap(), Some("parent"));
     let output = lf(&child_path, &["sync", "--plan"]);
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("base: origin/parent\n"), "{stdout}");
@@ -1111,7 +1111,7 @@ fn stacked_child_targets_main_after_merged_parent_checkout_is_removed() {
     let stacked = task_stack(&child_path)
         .expect("stack resolves without the parent checkout")
         .expect("child is stacked");
-    assert_eq!(stacked.live_parent_branch(), None);
+    assert_eq!(stacked.live_parent_branch("main").unwrap(), None);
     let output = Command::new(env!("CARGO_BIN_EXE_lf"))
         .args(["sync", "--plan"])
         .current_dir(&child_path)
@@ -2771,7 +2771,7 @@ fn sync_onto_an_open_task_stacks_it_moves_its_pr_and_main_detaches_it() {
     let stacked = task_stack(&child_path)
         .unwrap()
         .expect("sync records the stack");
-    assert_eq!(stacked.live_parent_branch(), Some("parent"));
+    assert_eq!(stacked.live_parent_branch("main").unwrap(), Some("parent"));
     assert!(gh_log(home.path()).contains("pr edit 42 --base parent"));
     let status = lf(&child_path, &["task", "status", "INF-124"]);
     let status = String::from_utf8_lossy(&status.stdout);

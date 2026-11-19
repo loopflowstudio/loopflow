@@ -434,23 +434,21 @@ pub struct StackedSync {
 }
 
 impl StackedSync {
-    /// The live parent branch, or `None` once the parent has merged or closed.
-    pub fn live_parent_branch(&self) -> Option<&str> {
-        (self.parent == StackParentPr::Open).then_some(self.parent_branch.as_str())
-    }
-
-    /// What a person runs when the parent closed with no PR to follow.
-    pub fn closed_parent_error(&self, default_branch: &str) -> OpsError {
-        let parent = &self.parent_identifier;
-        let pr = match &self.parent {
-            StackParentPr::Closed {
-                number: Some(number),
-            } => format!("PR #{number}"),
-            _ => "PR".to_string(),
-        };
-        task_error(format!(
-            "stack parent {parent}'s {pr} closed without merging; `lf sync {parent}` restacks this Task on its branch, `lf sync {default_branch}` detaches it"
-        ))
+    /// The parent branch to build on while its PR is open, `None` once it
+    /// merged. A parent that closed with no PR to follow is an error naming
+    /// both ways out.
+    pub fn live_parent_branch(&self, default_branch: &str) -> OpsResult<Option<&str>> {
+        match &self.parent {
+            StackParentPr::Open => Ok(Some(&self.parent_branch)),
+            StackParentPr::Merged => Ok(None),
+            StackParentPr::Closed { number } => {
+                let parent = &self.parent_identifier;
+                let pr = number.map_or("PR".to_string(), |number| format!("PR #{number}"));
+                Err(task_error(format!(
+                    "stack parent {parent}'s {pr} closed without merging; `lf sync {parent}` restacks this Task on its branch, `lf sync {default_branch}` detaches it"
+                )))
+            }
+        }
     }
 }
 
@@ -574,17 +572,11 @@ fn contains_commit(worktree: &Path, commit: &str) -> OpsResult<bool> {
 pub fn stack_for_landing(worktree: &Path) -> OpsResult<Option<StackedSync>> {
     let stacked = task_stack(worktree)?;
     if let Some(stacked) = &stacked {
-        match stacked.parent {
-            StackParentPr::Merged => {}
-            StackParentPr::Open => {
-                return Err(task_error(format!(
-                    "Task PR is stacked on {}, which has not merged; land the parent first",
-                    stacked.parent_branch
-                )))
-            }
-            StackParentPr::Closed { .. } => {
-                return Err(stacked.closed_parent_error(&crate::git::get_default_branch(worktree)?))
-            }
+        let default = crate::git::get_default_branch(worktree)?;
+        if let Some(parent) = stacked.live_parent_branch(&default)? {
+            return Err(task_error(format!(
+                "Task PR is stacked on {parent}, which has not merged; land the parent first"
+            )));
         }
     }
     Ok(stacked)

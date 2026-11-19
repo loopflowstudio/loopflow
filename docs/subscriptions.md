@@ -60,11 +60,11 @@ model fallthrough and explicit pins.
 | Launch | After a classified refusal |
 | --- | --- |
 | Graph step, with or without a Task | Follow configured model/harness fallbacks |
-| Other headless work (`lf -b <skill>`, commit and PR text, sync conflicts) | Follow the same fallbacks; never wait |
+| Other headless work (`lf -b <skill>`, commit and PR text, sync conflicts) | Follow the same fallbacks and stop when the order runs out of usage |
 | Pi or OpenCode | Stop with the provider error; neither reports why it refused |
 | Interactive, with or without a Task | Keep the provider, thread and refusal visible; wait for an explicit retry or move |
 | Explicit agent | Keep the harness; bare Claude retains model fallthrough |
-| Explicit model pin | Wait on that choice, then stop |
+| Explicit model pin | Keep the model; only a Graph step waits on a usage limit |
 | Graph step's order exhausted on a usage limit | Wait 5, 15, 30, then 60 minutes, trying the order again after each; then stop with the provider error and a next step |
 | Revoked login | Skip that provider's other models; with no other provider left, stop and say how to sign in again |
 | Order exhausted otherwise, or by a command | Stop with the provider error and a next step |

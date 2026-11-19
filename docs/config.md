@@ -70,12 +70,13 @@ lf pr open
 ```
 
 Each entry uses its native client's own login. An explicit agent pins the
-harness; an explicit model pin stays on that model. A command fails once every
-entry has refused, with the last entry's reason and what it tried:
+harness; an explicit model pin stays on that model. Once the order runs out,
+the command reports the last entry's reason and the order it tried. If commit
+message generation exhausts the order, `lf commit` uses its default message.
+A PR copy failure looks like this:
 
 ```
-Error: agent stopped after provider usage limit.
-provider_rate_limited: rejected: five_hour
+Error: PR copy generation failed (exit 1): provider_rate_limited: rejected: five_hour
 claude_result: You've hit your limit.
 Nothing is left in its order after codex, claude:fable, claude:opus; add another agent to `agents`
 ```
@@ -84,8 +85,8 @@ Only a Graph step waits for more usage: once every entry has refused on a usage
 limit, it waits 5, 15, 30, then 60 minutes, trying the whole order again after
 each, and then stops. The steps of `lf -b <graph>` are Graph steps and wait
 the same way, which includes a name that is both a skill and a Graph, such as
-`lf -b research`. A command never waits. Pi and OpenCode do not report why
-they refused, so an entry for either stops there.
+`lf -b research`. Other commands stop when the order runs out of usage. Pi and
+OpenCode do not report why they refused, so an entry for either stops there.
 Interactive Sessions keep the refusal visible and require an explicit retry or
 move, with or without a Task.
 

@@ -293,9 +293,10 @@ still try its other models. When the whole order, or an explicit model pin, is
 refused on a usage limit, a Graph step waits 5, 15, 30, then 60 minutes, trying
 again from the first entry after each; then it stops with the provider error
 and a next step. Commands (`lf -b <skill>`, `lf commit`, `lf pr open`, sync
-conflict resolution) never wait: they stop there, naming every agent tried. A revoked login skips its provider's other models and, with no
-other provider left, stops with how to sign in again. Other refusals stop at
-once. Interactive Sessions retain the
+conflict resolution) stop trying agents when the order runs out of usage and
+name the agents tried. A revoked login skips its provider's other models and,
+with no other provider left, stops with how to sign in again. Other refusals
+stop at once. Interactive Sessions retain the
 refusal and require an explicit retry or move, even when attached to a Task.
 
 ```bash

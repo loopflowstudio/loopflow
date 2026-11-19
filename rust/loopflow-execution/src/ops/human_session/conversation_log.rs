@@ -53,10 +53,17 @@ pub fn continuation(store: &SqliteStore, session: &LfSession) -> Result<String> 
 /// run's own prompt says more than an excerpt of it.
 pub fn continuation_of_work(store: &SqliteStore, session: &LfSession) -> Result<Option<String>> {
     let turns = turns(store, session)?;
-    let worked = turns
-        .iter()
-        .flat_map(|turn| &turn.items)
-        .any(|item| matches!(item, TurnItem::Agent(_)));
+    let worked = turns.iter().flat_map(|turn| &turn.items).any(|item| {
+        matches!(
+            item,
+            TurnItem::Agent(
+                ConversationItem::Message { .. }
+                    | ConversationItem::Tool { .. }
+                    | ConversationItem::Command { .. }
+                    | ConversationItem::File { .. }
+            )
+        )
+    });
     if !worked {
         return Ok(None);
     }

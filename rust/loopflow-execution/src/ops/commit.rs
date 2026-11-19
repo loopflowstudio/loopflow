@@ -283,21 +283,16 @@ fn generate_commit_message(repo: &Path, agent: MessageAgent<'_>) -> OpsResult<Co
         skip_permissions: true,
         ..message_launch(repo, &skill, agent, prompt)?
     };
-    let writer = &launch.agent;
     let failure = match run_agent(&launch, &process, crate::harness::LaunchKind::Batch) {
         Ok(result) if result.exit_code == 0 => {
             let combined = format!("{}\n{}", result.stdout, result.stderr);
             if let Some(message) = parse_commit_message(&combined) {
                 return Ok(message);
             }
-            format!("{writer}: no commit message in the reply")
+            "no commit message in the reply".to_owned()
         }
-        Ok(result) => format!(
-            "{writer}: exit {}: {}",
-            result.exit_code,
-            result.stderr.trim()
-        ),
-        Err(error) => format!("{writer}: {error}"),
+        Ok(result) => format!("exit {}: {}", result.exit_code, result.stderr.trim()),
+        Err(error) => error.to_string(),
     };
     Err(OpsError::Message(format!(
         "commit message generation failed ({failure})"

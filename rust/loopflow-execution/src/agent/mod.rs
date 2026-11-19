@@ -1206,7 +1206,10 @@ fn _climb(
         Ok(None) => (launch.skill_invocation.clone(), launch.task_prompt.clone()),
         Err(error) => {
             tracing::warn!(%error, "conversation could not move providers; the task starts over");
-            (None, _with_original_task(AGENT_FAILOVER_PROMPT, launch))
+            (
+                launch.skill_invocation.clone(),
+                _with_original_task(AGENT_FAILOVER_PROMPT, launch),
+            )
         }
     };
     next
@@ -2321,6 +2324,10 @@ trust_level = "trusted"
             agent: crate::config::Agent::parse("codex").unwrap(),
             fallback_agents: vec![crate::config::Agent::parse("claude").unwrap()],
             task_prompt: "describe the diff".into(),
+            skill_invocation: Some(crate::skills::invocation::SkillInvocation {
+                skill: crate::graph::Skill::named("describe"),
+                arguments: "this diff".into(),
+            }),
             ..crate::agent::AgentConfig::default()
         };
         let refused = || failed_result("codex_error: You’ve hit your usage limit");
@@ -2339,6 +2346,8 @@ trust_level = "trusted"
                 &ProcessConfig::default(),
                 &[],
                 |config, _| {
+                    assert_eq!(config.skill_invocation, launch.skill_invocation);
+                    assert!(config.task_prompt.contains(&launch.task_prompt));
                     attempts.push(config.agent.to_string());
                     Ok(scripted.next().expect("scripted attempt"))
                 },

@@ -320,7 +320,10 @@ echo '{"jsonrpc":"2.0","id":3,"result":{"turn":{"id":"'"$turn"'"}}}'
 echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"'"$thread"'","turn":{"id":"'"$turn"'","status":"inProgress"}}}'
 day="$CODEX_HOME/sessions/$(date -u +%Y/%m/%d)"
 mkdir -p "$day"
-echo '{"type":"session_meta","payload":{"id":"'"$thread"'","cwd":"'"$PWD"'"}}' > "$day/rollout-$(date -u +%Y-%m-%dT%H-%M-%S)-$thread.jsonl"
+printf '%s\n' \
+  '{"type":"session_meta","payload":{"id":"'"$thread"'","cwd":"'"$PWD"'"}}' \
+  '{"type":"response_item","payload":{"type":"reasoning","id":"thought","summary":[{"type":"summary_text","text":"Checking the task."}]}}' \
+  > "$day/rollout-$(date -u +%Y-%m-%dT%H-%M-%S)-$thread.jsonl"
 echo '{"jsonrpc":"2.0","method":"error","params":{"threadId":"'"$thread"'","turnId":"'"$turn"'","willRetry":false,"error":{"message":"You’ve hit your usage limit. Upgrade to Pro, or try again at 9:41 PM.","codexErrorInfo":null,"additionalDetails":null}}}'
 echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"'"$thread"'","turn":{"id":"'"$turn"'","status":"failed","error":{"message":"You’ve hit your usage limit. Upgrade to Pro, or try again at 9:41 PM.","codexErrorInfo":null,"additionalDetails":null}}}}'
 if [ -n "$LF_TEST_CODEX_STDIO" ]; then exit 0; fi

@@ -187,23 +187,23 @@ choice and `DiffTier` as attribution reads it.
 
 ## Slices
 
-1. **`Change` and the commit writer.** `prompt/change.rs` with `read` and
-   `prompt_section`, wired into `generate_commit_message`; commit.rs's
-   `truncate_chars` goes. Unit tests on a temporary repository: a staged
-   change whose patch is over the rule and whose meaningful file sorts last
-   lists every file with counts, carries the read command and no patch; a
-   small one carries its whole patch; a rename and a binary file render
-   usable paths. Then the real run below with `lf commit`. This is the slice
-   that could prove the plan wrong: it shows whether a cheap writer reads the
-   right file when handed only the list.
-2. **The PR writer.** `generate_pr_copy` uses `Change` with
-   `Since(origin/<base>)`, scratch notes marked; pr.rs's `truncate_chars` and
-   the two git reads go; `pr_tests.rs` updated.
-3. **Skill context and the shared number.** `gather_diff_tiered` reads a
-   `Change`; its three limits and stat reads go; its tests keep their cases
-   (none on main, uncommitted fallback, whole patch) and gain one for a large
-   branch that gets the list and the command. `task_workspace_context` reads
-   `PATCH_INLINE_TOKENS`. Docs lines.
+All three are built; nothing is left to implement.
+
+1. **`Change` and the commit writer.** Built. Real run, 2026-11-18,
+   `lf commit -a claude:haiku` on a staged 275,665-byte patch (6,000-line
+   `aaa_generated.txt`, eleven-line `src/zzz_retry.rs`): the title was "Retry
+   export once on timeout and regenerate schema fixture" and the body gave the
+   retry's reason from the code comment. A cheap writer handed only the list
+   read the right file.
+2. **The PR writer.** Built; `pr_tests.rs` asserts the `## Change` heading and
+   all 1,200 lines. Not yet run with a real agent: that needs a GitHub remote.
+3. **Skill context and the shared number.** Built. One thing differed from the
+   plan: the text `gather_diff_tiered` returned was never shown to the agent.
+   `ContextDelivery::prepare` wrote a `changes` reference file holding only
+   "Inspect current changes with `git diff` and `git diff main...HEAD`" and
+   counted the gathered diff's tokens in attribution. That file now holds the
+   section, so the agent gets what attribution counts and what
+   `docs/config.md` describes. With `diff_files` alone the old sentence stays.
 
 ## Demo
 
@@ -222,7 +222,7 @@ Before this change both describe only `aaa_generated.txt`.
 - `cargo test -p loopflow-execution --lib prompt::` — `Change` unit tests and the Skill context cases; implement runs it.
 - `cargo test -p loopflow --lib pr_tests::` (the `tests/work` module) — implement runs the touched test.
 - `cargo test -p loopflow-execution --lib ops::task::tests::task_workspace_context` — implement runs it after slice 3.
-- The demo with a real agent, both writers — qa or gate runs it; no fixture stands in for a writer choosing what to read.
+- The demo with a real agent — `lf commit` ran in implement (above); `lf pr submit` is qa's or gate's, on a branch with a GitHub remote.
 
 ## Docs written first
 

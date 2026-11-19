@@ -18,6 +18,9 @@ Made headless at kickoff and concept review; each is reversible. Detail in
 - AGENTS.md says `lf pr submit` runs `lf scratch clear`; in code only
   `ops/land.rs:171` and `lf scratch clear` itself do. Which is meant?
 - `docs/config.md` "Raw Diff" said "Point to Git inspection commands rather
-  than inlining a frozen patch", but `gather_diff_tiered` inlines under its
-  limits today. The section now says the patch is included under 15,000
-  tokens. Was never-inline the intent for Skill context?
+  than inlining a frozen patch", and that is what ran: the gathered diff was
+  counted but never delivered. The section now goes in the `changes`
+  reference file the context block lists, read on demand and written once at
+  launch. Was a launch-time copy what the old sentence meant to avoid?
+- With `diff_files` and no `diff`, the `changes` file still says `git diff
+  main...HEAD`, whatever the default branch is. Left alone.

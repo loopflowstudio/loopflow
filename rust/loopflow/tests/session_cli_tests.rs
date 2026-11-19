@@ -873,7 +873,7 @@ fn terminal_titles_follow_session_rename_and_reconnect_without_provider_accounts
         let native = uuid::Uuid::new_v4().to_string();
         let transcript = if provider == "codex" {
             home.path()
-                .join("codex/sessions")
+                .join("codex/sessions/2026/01/01")
                 .join(format!("rollout-{native}.jsonl"))
         } else {
             home.path()
@@ -1397,7 +1397,7 @@ fn terminal_first_launch_and_failed_startup_reopen_the_same_conversation() {
 
 #[cfg(unix)]
 #[test]
-fn provider_switch_without_transcript_preserves_conversation_and_retries() {
+fn provider_switch_without_transcript_seeds_from_the_original_request() {
     let home = tempfile::tempdir().unwrap();
     let (id, input, _) =
         prepare_conversation(home.path(), home.path(), "claude", "Keep this conversation");
@@ -1421,45 +1421,19 @@ fn provider_switch_without_transcript_preserves_conversation_and_retries() {
             .output()
             .unwrap()
     };
-    for prepare in [true, false] {
-        let failed = connect(prepare);
-        assert!(!failed.status.success());
-        let error = String::from_utf8_lossy(&failed.stderr);
-        assert!(
-            error.contains("transcript") && error.contains("retry"),
-            "{error}"
-        );
-        let retained = store.session(&id).unwrap().unwrap();
-        assert_eq!(retained.artifact_key.as_ref(), Some(&input));
-        assert_eq!(retained.provider, before.provider);
-        assert_eq!(retained.title, before.title);
-        let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
-        let thread: String = db
-            .query_row(
-                "SELECT provider_thread FROM agent_sessions WHERE id=?1",
-                [&id],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(thread, native);
-        assert_eq!(
-            store.session_history(&id, 0, 1000).unwrap().len(),
-            history.len()
-        );
-    }
-    let transcripts = home.path().join("claude/projects/fixture");
-    std::fs::create_dir_all(&transcripts).unwrap();
-    std::fs::write(transcripts.join(format!("{native}.jsonl")),
-        r#"{"type":"user","userType":"external","message":{"content":"Keep the original request"}}"#).unwrap();
     let prepared = connect(true);
+    assert!(!prepared.status.success());
+    let error = String::from_utf8_lossy(&prepared.stderr);
     assert!(
-        prepared.status.success(),
-        "{}",
-        String::from_utf8_lossy(&prepared.stderr)
+        error.contains("transcript") && error.contains("retry"),
+        "{error}"
     );
+    let retained = store.session(&id).unwrap().unwrap();
+    assert_eq!(retained.artifact_key.as_ref(), Some(&input));
+    assert_eq!(retained.provider, before.provider);
     assert_eq!(
-        store.session(&id).unwrap().unwrap().artifact_key.as_ref(),
-        Some(&input)
+        store.session_history(&id, 0, 1000).unwrap().len(),
+        history.len()
     );
     install_codex_fixture(home.path(), None);
     let recovered = connect(false);
@@ -1475,7 +1449,7 @@ fn provider_switch_without_transcript_preserves_conversation_and_retries() {
     assert!(continued
         .request
         .unwrap()
-        .contains("Keep the original request"));
+        .contains("Keep this conversation"));
     assert!(store.session_history(&id, 0, 1000).unwrap().len() > history.len());
 }
 

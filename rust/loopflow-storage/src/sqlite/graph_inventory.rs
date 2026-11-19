@@ -181,6 +181,7 @@ pub fn entry_of(
 pub struct GraphExecutionFacts {
     pub open_graphs: HashMap<TaskId, Vec<Execution>>,
     pub unrun: HashMap<TaskId, UnrunGraph>,
+    pub tasks_with_carrier_records: HashSet<TaskId>,
     pub inputs: HashMap<LfProcessId, (String, String, i64)>,
     pub limit_recoveries: HashMap<LfProcessId, AgentLimitRecovery>,
 }
@@ -642,9 +643,18 @@ impl SqliteStore {
         let inputs = process_inputs(&conn, &steps)?;
         let limit_recoveries = limit_recoveries(&conn, &steps)?;
         let unrun = unrun_graphs_in(&conn, &ids)?;
+        let mut carriers = conn.prepare(
+            "SELECT task_id FROM task_graphs WHERE task_id IN (SELECT value FROM json_each(?1))
+             AND (run_pid IS NOT NULL OR run_died_at IS NOT NULL)",
+        )?;
+        let tasks_with_carrier_records = carriers
+            .query_map([&ids], |row| row.get::<_, String>(0))?
+            .map(|id| TaskId::parse(&id?).map_err(invalid))
+            .collect::<StoreResult<_>>()?;
         Ok(GraphExecutionFacts {
             open_graphs,
             unrun,
+            tasks_with_carrier_records,
             inputs,
             limit_recoveries,
         })

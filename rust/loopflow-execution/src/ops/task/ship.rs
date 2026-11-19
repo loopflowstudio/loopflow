@@ -165,7 +165,7 @@ pub(crate) fn shipping_snapshot(
         let Some((due, error)) = restart else {
             return shipping(
                 ShippingState::Restarting,
-                "Ship process exited; it restarts on the next read of this Machine's Tasks".into(),
+                "Ship process exited; the server's next pass starts it again".into(),
             );
         };
         let error = error
@@ -176,7 +176,7 @@ pub(crate) fn shipping_snapshot(
             .trim_end_matches('.');
         let wait = due - loopflow_storage::rows::now_unix();
         let when = match wait {
-            ..=0 => "retrying on the next read of this Machine's Tasks".to_string(),
+            ..=0 => "retrying on the server's next pass".to_string(),
             1..=60 => "retrying within a minute".to_string(),
             _ => format!("retrying in {} min", (wait + 59) / 60),
         };
@@ -555,7 +555,10 @@ fn next_step(graph: &TaskGraph, issue: &str) -> OpsResult<ShipStep> {
 pub fn ship_progressed(task: &loopflow_storage::work::task::TaskId) -> OpsResult<()> {
     block_on_task(async {
         let store = task_store().await?;
-        store.sqlite.reset_ship_restarts(task).map_err(task_error)
+        store
+            .sqlite
+            .reset_task_run_restarts(task)
+            .map_err(task_error)
     })
 }
 
@@ -581,63 +584,215 @@ pub(super) fn restart_lf_in(
     Ok(())
 }
 
-/// Start `lf --task ISSUE ship` again for each shipping Task checked out on
-/// and owned by this Machine whose ship process has exited. Unassigned,
-/// moved and finished Tasks wait.
-/// After a failure the restart waits, longer each time in a row; a process
-/// that ended without failing (killed, interrupted) restarts at once.
-pub(crate) fn restart_ships() -> OpsResult<()> {
+/// How many times in a row a run whose carrier died is carried again before
+/// it waits for a person's `lf task run`.
+pub const RUN_RESTARTS: u32 = 5;
+
+/// A Task run whose carrier (`lf task run`) died before the run stopped: it
+/// was killed, or ended with no exit record, rather than exiting on its own.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiedRun {
+    /// The step the run reached.
+    pub at: String,
+    /// The carrier that died, which the next carrier takes the run over from.
+    pub carrier: LfProcessId,
+    /// Starts since the run last finished a step, and when the last one was.
+    pub restarts: loopflow_storage::sqlite::task_work::TaskRunRestarts,
+}
+
+impl DiedRun {
+    /// When the next start is due (0: at once), or `None` once
+    /// [`RUN_RESTARTS`] ran out.
+    pub fn next_at(&self) -> Option<i64> {
+        (self.restarts.count < RUN_RESTARTS).then(|| {
+            crate::ops::recovery::next_start_at(self.restarts.count, self.restarts.at).unwrap_or(0)
+        })
+    }
+
+    /// One line for the Task's run.
+    pub fn reason(&self, issue: &str, now: i64) -> String {
+        let at = &self.at;
+        match self.next_at() {
+            None => format!(
+                "Run died {} times at {at}; `lf task run {issue}` starts it again",
+                self.restarts.count
+            ),
+            Some(due) if due <= now => {
+                format!("Run died at {at}; the server's next pass carries it again")
+            }
+            Some(due) => format!(
+                "Run died at {at}; it is carried again in {} min (restart {} of {RUN_RESTARTS})",
+                (due - now + 59) / 60,
+                self.restarts.count + 1
+            ),
+        }
+    }
+}
+
+/// The Task's run, when its carrier died and nothing of the run still runs.
+/// Shipping Tasks answer through their shipping instead.
+pub fn died_run(
+    sqlite: &loopflow_storage::sqlite::SqliteStore,
+    task: &loopflow_storage::work::task::TaskId,
+) -> crate::store::StoreResult<Option<DiedRun>> {
+    let Some(row) = crate::store::task_work::task_graph_row(sqlite, task)? else {
+        return Ok(None);
+    };
+    let Some((cursor, carrier)) = row.run else {
+        return Ok(None);
+    };
+    // A carrier that exited on its own (failed, interrupted, waiting on a
+    // limit) cleared its OS process; one that died left it behind, until
+    // retention cleared it and recorded the death.
+    let died = carrier.died_at.is_some()
+        || (carrier.pid.is_some() && !crate::store::task_work::carrier_may_run(&carrier));
+    if !died
+        || sqlite.task_shipping(task)?.is_some()
+        || crate::ops::task_execution::open_graph_execution(sqlite, task)?.is_some()
+    {
+        return Ok(None);
+    }
+    Ok(Some(DiedRun {
+        at: row.graph.step_name_of(&cursor).unwrap_or(row.step),
+        carrier: carrier.id,
+        restarts: sqlite.task_run_restarts(task)?,
+    }))
+}
+
+/// Carry again each run on this Machine whose carrier is gone: a shipping
+/// Task's ship process that exited (`lf --task ISSUE ship`), and a moving
+/// Task's `lf task run` that died (`lf task run ISSUE`, which stops at the next
+/// interactive step as before). Unassigned, moved and finished Tasks wait.
+/// Returns when the soonest run still waiting its backoff comes due.
+pub(crate) fn restart_runs() -> OpsResult<Option<i64>> {
     block_on_task(async {
         let store = task_store().await?;
         let now = loopflow_storage::rows::now_unix();
+        let mut soonest: Option<i64> = None;
+        let mut wait = |due: i64| soonest = Some(soonest.map_or(due, |at| at.min(due)));
         for (id, shipping) in store.sqlite.local_shipping_tasks().map_err(task_error)? {
-            let state = store.sqlite.task_state(&id).map_err(task_error)?;
-            if state.is_terminal()
-                || !store.sqlite.task_claimed_here(&id).map_err(task_error)?
-                || ship_carrier_evidence(&shipping) != ProcessIdentityEvidence::Dead
-            {
-                continue;
+            if let Some(due) = restart_ship(&store, &id, &shipping, now).await? {
+                wait(due);
             }
-            // A run another `lf task run` carries, such as one a move continued
-            // on this Machine, ships once it stops.
-            if crate::store::task_work::task_graph(&store.sqlite, &id)
-                .map_err(task_error)?
-                .is_some_and(|graph| {
-                    matches!(graph.position, TaskGraphPosition::Run { running: true, .. })
-                })
-            {
-                continue;
-            }
-            let failure = carrier_failure(&store.sqlite, &id, &shipping).map_err(task_error)?;
-            if let Some((failed_at, _)) = &failure {
-                if restart_due(&shipping, *failed_at) > now {
-                    continue;
-                }
-            }
-            // A run waiting out a limit starts again when it resets, not into the wait.
-            let wait =
-                super::limit_recovery::waiting_on_limit(&store.sqlite, &id).map_err(task_error)?;
-            if wait.as_ref().is_some_and(|wait| wait.retry_at > now) {
-                continue;
-            }
-            let Some(task) = store.get_task(&id).await.map_err(task_error)? else {
-                continue;
-            };
-            let Some(worktree) = task.worktree.as_ref().filter(|path| path.is_dir()) else {
-                continue;
-            };
-            if failure.is_some() {
-                store.sqlite.count_ship_restart(&id).map_err(task_error)?;
-            }
-            restart_lf_in(
-                worktree,
-                wait.as_ref().and_then(|wait| wait.agent.as_deref()),
-                &["--task", &task.identifier, "ship"],
-            )?;
-            tracing::info!("restarted the ship process for {}", task.identifier);
         }
-        Ok(())
+        for id in store.sqlite.local_task_runs().map_err(task_error)? {
+            let Some(died) = died_run(&store.sqlite, &id).map_err(task_error)? else {
+                continue;
+            };
+            let Some(due) = died.next_at() else {
+                continue;
+            };
+            if due > now {
+                wait(due);
+                continue;
+            }
+            let Some((task, worktree, _)) = continuable(&store, &id, now).await? else {
+                continue;
+            };
+            if !store
+                .sqlite
+                .count_task_run_restart(&id, Some(&died.carrier), died.restarts.count)
+                .map_err(task_error)?
+            {
+                continue;
+            }
+            restart_lf_in(&worktree, None, &["task", "run", &task.identifier])?;
+            tracing::info!(
+                "carried {}'s run again at {} after its carrier died",
+                task.identifier,
+                died.at
+            );
+        }
+        Ok(soonest)
     })
+}
+
+/// The Task, its checkout and the agent a usage limit that reset left it on,
+/// when a run of it may start here now: open, claimed here, checked out, and
+/// not waiting out a limit.
+async fn continuable(
+    store: &SharedStore,
+    id: &loopflow_storage::work::task::TaskId,
+    now: i64,
+) -> OpsResult<Option<(Task, std::path::PathBuf, Option<String>)>> {
+    if store
+        .sqlite
+        .task_state(id)
+        .map_err(task_error)?
+        .is_terminal()
+        || !store.sqlite.task_claimed_here(id).map_err(task_error)?
+    {
+        return Ok(None);
+    }
+    let wait = super::limit_recovery::waiting_on_limit(&store.sqlite, id).map_err(task_error)?;
+    if wait.as_ref().is_some_and(|wait| wait.retry_at > now) {
+        return Ok(None);
+    }
+    let Some(task) = store.get_task(id).await.map_err(task_error)? else {
+        return Ok(None);
+    };
+    let Some(worktree) = task.worktree.clone().filter(|path| path.is_dir()) else {
+        return Ok(None);
+    };
+    Ok(Some((task, worktree, wait.and_then(|wait| wait.agent))))
+}
+
+/// Start `lf --task ISSUE ship` again when its ship process has exited. After
+/// a failure the restart waits, longer each time in a row; a process that
+/// ended without failing (killed, interrupted) restarts at once. Returns when
+/// a restart still waiting its backoff comes due.
+async fn restart_ship(
+    store: &SharedStore,
+    id: &loopflow_storage::work::task::TaskId,
+    shipping: &TaskShipping,
+    now: i64,
+) -> OpsResult<Option<i64>> {
+    if ship_carrier_evidence(shipping) != ProcessIdentityEvidence::Dead {
+        return Ok(None);
+    }
+    // The carrier can record its exit after the sweep reads it, before the OS
+    // reports it dead. Read its final result before deciding whether to back off.
+    let carrier = shipping.carrier.as_ref().map(|run| &run.id);
+    let Some(shipping) = store.sqlite.task_shipping(id).map_err(task_error)? else {
+        return Ok(None);
+    };
+    if shipping.carrier.as_ref().map(|run| &run.id) != carrier {
+        return Ok(None);
+    }
+    // A run another `lf task run` carries, such as one a move continued
+    // on this Machine, ships once it stops.
+    if crate::store::task_work::task_graph(&store.sqlite, id)
+        .map_err(task_error)?
+        .is_some_and(|graph| matches!(graph.position, TaskGraphPosition::Run { running: true, .. }))
+    {
+        return Ok(None);
+    }
+    let failure = carrier_failure(&store.sqlite, id, &shipping).map_err(task_error)?;
+    if let Some(due) = failure
+        .as_ref()
+        .map(|(failed_at, _)| restart_due(&shipping, *failed_at))
+        .filter(|due| *due > now)
+    {
+        return Ok(Some(due));
+    }
+    let Some((task, worktree, agent)) = continuable(store, id, now).await? else {
+        return Ok(None);
+    };
+    if failure.is_some()
+        && !store
+            .sqlite
+            .count_task_run_restart(id, None, shipping.restarts)
+            .map_err(task_error)?
+    {
+        return Ok(None);
+    }
+    restart_lf_in(
+        &worktree,
+        agent.as_deref(),
+        &["--task", &task.identifier, "ship"],
+    )?;
+    tracing::info!("restarted the ship process for {}", task.identifier);
+    Ok(None)
 }
 
 #[cfg(test)]
@@ -646,6 +801,7 @@ mod tests {
     use crate::durable::TaskState;
     use crate::store::ProcessIdentityEvidence;
     use crate::task_graph::{CapturedGraph, TaskGraph, TaskGraphPosition};
+    use loopflow_model::id::LfProcessId;
     use loopflow_storage::pr_landing::{NewPrLanding, PrLanding, PrLandingState};
     use loopflow_storage::sqlite::TaskShipping;
 
@@ -659,6 +815,31 @@ mod tests {
             interactive_steps: graph.interactive_summary(),
             position,
         }
+    }
+
+    #[test]
+    fn a_died_run_is_carried_again_at_once_then_later_then_waits_for_a_person() {
+        use loopflow_storage::sqlite::task_work::TaskRunRestarts;
+        let died = |count, at| super::DiedRun {
+            at: "implement".into(),
+            carrier: LfProcessId::new(),
+            restarts: TaskRunRestarts { count, at },
+        };
+        assert_eq!(died(0, None).next_at(), Some(0));
+        assert_eq!(
+            died(0, None).reason("LOO-1", 100),
+            "Run died at implement; the server's next pass carries it again"
+        );
+        assert_eq!(died(3, Some(100)).next_at(), Some(100 + 2 * 60));
+        assert_eq!(
+            died(3, Some(100)).reason("LOO-1", 100),
+            "Run died at implement; it is carried again in 2 min (restart 4 of 5)"
+        );
+        assert_eq!(died(5, Some(100)).next_at(), None);
+        assert_eq!(
+            died(5, Some(100)).reason("LOO-1", 100),
+            "Run died 5 times at implement; `lf task run LOO-1` starts it again"
+        );
     }
 
     #[test]
@@ -698,6 +879,63 @@ mod tests {
         );
         // A process that ended without failing restarts on the next read.
         assert!(read(None).reason.starts_with("Ship process exited"));
+    }
+
+    #[tokio::test]
+    async fn a_ship_that_records_failure_after_the_sweep_reads_it_waits_to_restart() {
+        use crate::store::{open_ephemeral_store, StorageConfig};
+        use loopflow_model::durable::TaskId;
+        use loopflow_storage::graph_process::{ExecutionStart, RunOwner};
+        use loopflow_storage::work::task::NewTask;
+        use std::sync::Arc;
+
+        let home = tempfile::tempdir().unwrap();
+        let store = Arc::new(
+            open_ephemeral_store(&StorageConfig::sqlite(home.path().join("db")))
+                .await
+                .unwrap(),
+        );
+        let task = TaskId::new();
+        store
+            .sqlite
+            .create_task(&NewTask {
+                repository_id: loopflow_storage::test_fixture::repository(&store.sqlite, "/repo"),
+                id: task.clone(),
+                project_id: None,
+                title: "Verify the release".into(),
+                description: String::new(),
+                due_date: None,
+            })
+            .unwrap();
+        let carrier = LfProcessId::new();
+        let start = ExecutionStart {
+            // The old carrier's PID now belongs to this test process.
+            pid: Some(std::process::id()),
+            os_started_at: Some(1),
+            ..ExecutionStart::reserved(1)
+        };
+        let before_exit = store
+            .sqlite
+            .ship_task(&task, (&carrier, &start), "verify")
+            .unwrap();
+        let now = 100;
+        store
+            .sqlite
+            .finish_run(
+                RunOwner::ShipCarrier,
+                &carrier,
+                now,
+                Some(i32::from(crate::process::GraphHeld::EXIT)),
+                Some("verification blocked"),
+            )
+            .unwrap();
+
+        assert_eq!(
+            super::restart_ship(&store, &task, &before_exit, now)
+                .await
+                .unwrap(),
+            Some(now + 60),
+        );
     }
 
     #[test]

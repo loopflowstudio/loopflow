@@ -591,7 +591,12 @@ impl Holder<'_> {
             return Ok(held.pid);
         }
         let program = start.argv.first().context("start has no command")?;
-        let (master, slave) = crate::transport::terminal_pair()?;
+        let (master, slave) = crate::transport::terminal_pair().map_err(|error| {
+            anyhow::anyhow!(crate::transport::pty_failure(
+                &error,
+                crate::transport::pty_usage()
+            ))
+        })?;
         crate::transport::resize(master.as_raw_fd(), start.rows, start.cols)?;
         let cooked = attributes(master.as_raw_fd());
         let mut command = Command::new(program);

@@ -149,6 +149,7 @@ impl Fixture {
             } else {
                 r#"#!/usr/bin/python3
 import json, os, sys, runpy
+from pathlib import Path
 args = sys.argv[1:]
 if '--version' in args:
     print('fixture'); sys.exit(0)
@@ -168,6 +169,10 @@ if stream:
     message = json.loads(sys.stdin.readline())
     record['input'] = message
 elif os.path.basename(sys.argv[0]) == 'claude':
+    if '--session-id' in args:
+        project = Path(native) / 'projects' / 'fixture'
+        project.mkdir(parents=True, exist_ok=True)
+        (project / (args[args.index('--session-id')+1] + '.jsonl')).write_text('{}\n')
     # Resume opens history with no seed; a held terminal keeps stdin open.
     record['input'] = '' if '--resume' in args else sys.stdin.read()
 with open(os.environ['HOME']+'/received.json.tmp', 'w') as out:
@@ -1612,7 +1617,7 @@ fn contextual_resume_uses_scope_and_recovers_unassociated_checkouts() {
 }
 
 #[test]
-fn missing_native_history_fails_without_replacing_the_selected_conversation() {
+fn provider_rejected_resume_keeps_the_selected_conversation() {
     let fixture = Fixture::new("claude:sonnet");
     fixture.run(&["-i", ":", "existing history"]);
     let id = fixture.session();

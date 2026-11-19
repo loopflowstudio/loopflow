@@ -1233,9 +1233,17 @@ pub(crate) async fn task_detail(
             sessions.push(SessionFacts::of(record));
         }
     }
+    let conversation = task_conversation(store, &task.id)?;
+    let conversation_id = conversation.as_ref().map(|facts| facts.id.clone());
+    if let Some(facts) = conversation {
+        if !sessions.iter().any(|session| session.id == facts.id) {
+            sessions.insert(0, facts);
+        }
+    }
     let summary = store.sqlite.task_summary(&task.id)?;
     Ok(TaskDetail {
         summary,
+        conversation: conversation_id,
         stack_parent: status
             .execution
             .and_then(|execution| execution.stack_parent),
@@ -1248,6 +1256,36 @@ pub(crate) async fn task_detail(
             .collect(),
         comments: status.comments.map(TaskThread::from),
     })
+}
+
+/// The Task's conversation, as `lf session list` reads it; `None` before it
+/// has one.
+fn task_conversation(
+    store: &SharedStore,
+    task: &loopflow_model::durable::TaskId,
+) -> Result<Option<SessionFacts>> {
+    let Some(session) =
+        store
+            .sqlite
+            .primary_session(&loopflow_execution::session::PrimaryScope::Task(
+                task.clone(),
+            ))?
+    else {
+        return Ok(None);
+    };
+    Ok(
+        loopflow_execution::ops::human_session::listed(store, session.id.as_str())?
+            .map(SessionFacts::of),
+    )
+}
+
+/// `lf task status`'s conversation line for `task`, as the server wrote it;
+/// `None` before it has one.
+pub fn task_conversation_line(task: &loopflow_model::durable::TaskId) -> Result<Option<String>> {
+    let Some(store) = loopflow_execution::store::read_existing_registry()? else {
+        return Ok(None);
+    };
+    Ok(task_conversation(&std::sync::Arc::new(store), task)?.and_then(|facts| facts.status_line))
 }
 
 /// The open Tasks `query` selects, read from the store's filter rather than

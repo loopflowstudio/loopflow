@@ -59,6 +59,10 @@ pub struct TaskDetail {
     pub task: TaskRow,
     /// As `lf session list` lists them, joined by `id`.
     pub sessions: Vec<SessionFacts>,
+    /// Which of `sessions` is the Task's conversation, the one the server
+    /// starts again when it dies; `null` before the Task has one.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub conversation: Option<loopflow_model::id::LfSessionId>,
     pub graph_processes: Vec<TaskGraphRow>,
     pub comments: Option<TaskThread>,
     /// What the Task's run came to, written when it completed or was

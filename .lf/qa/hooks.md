@@ -8,7 +8,7 @@ with the real `HOME`, a private `LF_HOME` and that home's `lf server run`,
 `lf -b --task <id> -a claude:haiku : '<msg>'` in the Task checkout answers.
 Starting a private server resumes every Task whose Auto-Ship was approved:
 abandon old QA Tasks first. Dead AgentProcesses are reaped by
-`lf process prune`, not by `lf session list`.
+the server's recovery pass, not by `lf session list`.
 Interactive (`-i`) launches run in a PTY. A stand-in
 `claude` on `PATH` can read `--settings` and run each hook command exactly as
 installed, with Claude's callback JSON on stdin; release its turns with marker

@@ -1799,7 +1799,8 @@ pub enum SessionCommand {
         /// Leave the other client running; continue in a new conversation forked from it
         #[arg(long, conflicts_with = "message")]
         fork: bool,
-        /// Time a new Task's setup steps under the creation request that started it
+        /// The request this start answers: a new Task's setup steps are timed
+        /// under it, and the server's recovery pass names its own starts
         #[arg(long)]
         request_id: Option<String>,
     },

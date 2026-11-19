@@ -71,6 +71,7 @@ pub fn report() -> Result<DoctorReport> {
         time::OffsetDateTime::now_utc().unix_timestamp() - CONTENTION_WINDOW_SECONDS,
     ));
     checks.push(loopflow_execution::desktop_exits::check());
+    checks.push(check_ptys());
     Ok(DoctorReport {
         store: store_report,
         checks,
@@ -108,6 +109,37 @@ fn check_running_binaries() -> Check {
                 format!("{count} live lf process(es) run {selected}"),
             )
         }
+    }
+}
+
+const PTYS: &str = "ptys";
+
+/// PTYs in use against the Machine's limit. Each Task conversation's held
+/// terminal takes one, as does every terminal tab; they run out first.
+fn check_ptys() -> Check {
+    match loopflow_execution::transport::pty_usage() {
+        Some(usage) => pty_check(usage),
+        None => Check::warn(PTYS, "cannot read this Machine's PTY limit"),
+    }
+}
+
+/// Fewer PTYs left than this warns: a reboot starts every Task conversation again.
+const PTY_HEADROOM: u64 = 32;
+
+fn pty_check(usage: loopflow_execution::transport::PtyUsage) -> Check {
+    use loopflow_execution::transport::PtyUsage;
+    let PtyUsage { in_use, max, limit } = usage;
+    let left = max.saturating_sub(in_use);
+    let detail = format!(
+        "{in_use} of {max} PTYs in use ({limit}), {left} left; each Task conversation holds one"
+    );
+    if left < PTY_HEADROOM.min(max / 10).max(1) {
+        Check::warn(
+            PTYS,
+            format!("{detail}. A conversation that cannot get one says so in `lf task status`"),
+        )
+    } else {
+        Check::ok(PTYS, detail)
     }
 }
 
@@ -578,8 +610,9 @@ fn print_checks(store: &StoreReport, checks: &[Check]) {
 
 #[cfg(test)]
 mod tests {
-    use super::{check_contention, inspect_store, strays, Status};
+    use super::{check_contention, inspect_store, pty_check, strays, Status};
     use loopflow_execution::process::OsProcess;
+    use loopflow_execution::transport::PtyUsage;
 
     const STRAY_CHILD: &str = "LOOPFLOW_DOCTOR_STRAY_CHILD";
 
@@ -589,6 +622,24 @@ mod tests {
         if std::env::var_os(STRAY_CHILD).is_some() {
             std::thread::sleep(std::time::Duration::from_secs(30));
         }
+    }
+
+    /// Headroom is the room left under the limit; little of it warns.
+    #[test]
+    fn pty_headroom_counts_what_is_left_and_warns_when_little_is() {
+        let usage = |in_use| PtyUsage {
+            in_use,
+            max: 511,
+            limit: "kern.tty.ptmx_max",
+        };
+        let roomy = pty_check(usage(144));
+        assert_eq!(roomy.status, Status::Ok);
+        assert_eq!(
+            roomy.detail,
+            "144 of 511 PTYs in use (kern.tty.ptmx_max), 367 left; each Task conversation holds one"
+        );
+        assert_eq!(pty_check(usage(490)).status, Status::Warn);
+        assert_eq!(pty_check(usage(511)).status, Status::Warn);
     }
 
     #[test]

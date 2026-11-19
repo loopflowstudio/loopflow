@@ -908,6 +908,15 @@ impl SqliteStore {
         Ok(())
     }
 
+    /// The provider's own exit code, as the launcher that became it saw it.
+    pub fn record_agent_exit_code(&self, agent: &AgentProcessId, code: i32) -> StoreResult<()> {
+        self.conn.lock().expect("store mutex poisoned").execute(
+            "UPDATE agent_sessions SET agent_exit_code=?2 WHERE agent_process_id=?1",
+            params![agent, code],
+        )?;
+        Ok(())
+    }
+
     pub fn record_agent_process_identity(
         &self,
         session: &str,

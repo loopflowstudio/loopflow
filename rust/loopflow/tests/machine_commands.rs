@@ -3131,6 +3131,9 @@ fn mini_starts_nothing_for_a_task_that_moved_back() {
             .output()
             .unwrap();
         assert_success(&output);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains("Auto-Ship approval moved to"), "{stderr}");
+        assert!(!stderr.contains("did not continue"), "{stderr}");
     };
     move_to("mini");
     assert!(
@@ -3141,33 +3144,33 @@ fn mini_starts_nothing_for_a_task_that_moved_back() {
         wait_step_live(&remote_home.join("loopflow.db")),
         "mini's step never started"
     );
+    let remote_db = remote_home.join("loopflow.db");
+    assert_eq!(
+        first_steps_run(&remote_db, &task),
+        0,
+        "shipping replayed the first step"
+    );
     let laptop = gethostname::gethostname().to_string_lossy().into_owned();
     move_to(laptop.split('.').next().unwrap());
+    assert!(
+        wait_step_live(&local_home.join("loopflow.db")),
+        "the laptop did not resume shipping"
+    );
 
-    // Each Session read on mini runs its recovery, which restarts ship processes.
-    for _ in 0..5 {
-        let read = fixture
-            .command(&["session", "list", "--json"])
-            .env("HOME", fixture.root.path().join("remote"))
-            .env("LF_HOME", &remote_home)
-            .current_dir(fixture.root.path().join("remote"))
-            .stdin(Stdio::null())
-            .output()
-            .unwrap();
-        assert_success(&read);
-        std::thread::sleep(std::time::Duration::from_millis(500));
-    }
-    let remote_db = remote_home.join("loopflow.db");
     assert_eq!(live_graph(&remote_db, &task), None, "a Graph runs on mini");
     let ships: i64 = rusqlite::Connection::open(&remote_db)
         .unwrap()
         .query_row(
-            "SELECT count(*) FROM task_ship_events WHERE pid IS NOT NULL OR ended_at IS NOT NULL",
-            [],
+            "SELECT count(*) FROM task_ship_events WHERE task_id=?1 AND kind='carried'
+             AND (pid IS NOT NULL OR ended_at IS NOT NULL)",
+            [task.as_str()],
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(ships, 0, "mini started shipping a Task it no longer owns");
+    assert_eq!(
+        ships, 1,
+        "mini should ship only once, while it owns the Task"
+    );
 }
 
 /// A Task move that continues a run starts it for real on mini: each home
@@ -3217,8 +3220,10 @@ fn task_move_leaves_a_live_graph_running_on_mini() {
     );
 
     // The Graph was running on mini when the move returned.
-    let graph =
-        live_graph(&remote_db, &task).expect("no live Graph on mini when the move returned");
+    assert!(
+        live_graph(&remote_db, &task).is_some(),
+        "no live Graph on mini when the move returned"
+    );
     // Mini's Graph stands at the step the laptop stopped, not the route's start.
     let stopped_at = stderr
         .lines()
@@ -3247,15 +3252,11 @@ fn task_move_leaves_a_live_graph_running_on_mini() {
     // Once mini's `task wait` runs, a restarted route would already have
     // recorded its `task status` step.
     assert!(wait_step_live(&remote_db), "mini's step never started");
-    let first_steps: i64 = rusqlite::Connection::open(&remote_db)
-        .unwrap()
-        .query_row(
-            "SELECT count(*) FROM graph_process_steps WHERE graph_lf_process_id=?1 AND node=0",
-            [&graph],
-            |row| row.get(0),
-        )
-        .unwrap();
-    assert_eq!(first_steps, 0, "mini ran the route's first step again");
+    assert_eq!(
+        first_steps_run(&remote_db, &task),
+        0,
+        "mini ran the route's first step again"
+    );
 }
 
 /// A move killed after it stopped the Graph, before it pushed: the laptop's
@@ -3497,7 +3498,7 @@ fn start_hold_run(
     )
     .unwrap();
     let mut run = fixture
-        .command(&["-b", "task", "run", task.as_str(), "hold"])
+        .command(&["task", "run", task.as_str(), "hold"])
         .current_dir(worktree)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -3528,7 +3529,7 @@ fn exits_within_ten_seconds(run: &mut std::process::Child) -> bool {
     exited
 }
 
-/// The process id of `task`'s running Graph in `db`.
+/// The carrier id of `task`'s running Graph in `db`.
 fn live_graph(db: &Path, task: &loopflow_execution::durable::TaskId) -> Option<String> {
     use rusqlite::OptionalExtension;
     rusqlite::Connection::open(db)
@@ -3539,6 +3540,19 @@ fn live_graph(db: &Path, task: &loopflow_execution::durable::TaskId) -> Option<S
             |row| row.get(0),
         )
         .optional()
+        .unwrap()
+}
+
+fn first_steps_run(db: &Path, task: &loopflow_execution::durable::TaskId) -> i64 {
+    rusqlite::Connection::open(db)
+        .unwrap()
+        .query_row(
+            "SELECT count(*) FROM graph_process_steps s
+             JOIN graph_processes g ON g.lf_process_id=s.graph_lf_process_id
+             WHERE g.task_id=?1 AND s.node=0",
+            [task.as_str()],
+            |row| row.get(0),
+        )
         .unwrap()
 }
 

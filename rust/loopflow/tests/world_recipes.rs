@@ -389,6 +389,7 @@ fn one_task_waits_at_human_review_after_planning_and_building() {
         keys,
         [
             "comments",
+            "conversation",
             "graph_processes",
             "sessions",
             "stack_parent",

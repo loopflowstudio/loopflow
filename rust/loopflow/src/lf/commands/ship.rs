@@ -78,8 +78,8 @@ pub fn run(
             loopflow_execution::ops::task::TaskRunMode::Headless,
             crate::lf::navigation::command_merges,
         )?;
-        // A Task that already has a conversation keeps it; this starts one only once.
-        loopflow_execution::ops::task::start_conversation_beside(&task);
+        // A Task that already has a conversation keeps it; this prepares one only once.
+        loopflow_execution::ops::task::prepare_conversation_beside(&task);
         if let TaskRunStart::Run { step, .. } = start {
             // This ship has already let its launcher go, or keeps it to the end.
             super::graph::run_task_graph_for(&headless, &task, &step, false, &mut |_, _| Ok(()))?;

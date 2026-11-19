@@ -121,14 +121,12 @@ pub(crate) fn run_sync_in(
         && !on_main
         && matches!(plan.strategy, crate::ops::SyncStrategy::MergeTarget)
         && crate::git::intervention_state(repo_root)?.is_none()
-        && {
-            progress.status("Committing uncommitted edits before merging...");
-            checkpoint_uncommitted_work(
-                repo_root,
-                &format!("Checkpoint edits before syncing onto {}", plan.base_ref),
-            )?
-        }
+        && checkpoint_uncommitted_work(
+            repo_root,
+            &format!("Checkpoint edits before syncing onto {}", plan.base_ref),
+        )?
     {
+        progress.status("Committed uncommitted edits before merging.");
         plan = plan_sync(repo_root, Some(target), fork_base.clone())?;
     }
     let options = SyncOptions {

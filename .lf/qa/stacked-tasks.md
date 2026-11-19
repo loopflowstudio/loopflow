@@ -32,3 +32,16 @@ delete its branch, mark the PR merged in the state file.
 
 Never pipe `lf sync` into `head`: SIGPIPE kills it after it records a stack
 and before it merges.
+
+A parent that closes and reopens: set the PR's `state: CLOSED` in the state
+file, commit in the parent's checkout and run `lf pr open` there again. lf
+marks the old `task_prs` row `abandoned_at` and adds a new `sequence` row with
+the next number, while the child's `task_checkouts.parent_pr_id` still names
+the old row: the real-world shape. `lf task status <child> --json` shows the
+recorded row's `stack_parent.pr_number` until a sync records the followed one.
+
+`sqlite3 "file:…/loopflow.db?mode=ro"` answers "unable to open database file"
+in a fresh private home with no `-wal`; with no lf process running, open it
+plainly. A merge lf read as open less than 60 s earlier stays open to it: the
+next sync fetches the deleted branch and fails with `couldn't find remote ref`.
+Wait out the cache before landing-then-syncing.

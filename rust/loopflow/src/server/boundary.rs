@@ -12,6 +12,7 @@ use anyhow::{anyhow, Result};
 use crate::server::wire::{BoundaryMoment, SessionBoundary, SessionBoundaryAnswer};
 use loopflow_execution::context_block::ContextDelivery;
 use loopflow_execution::steer::NativeBoundary;
+use loopflow_execution::store::SharedStore;
 use loopflow_storage::sqlite::SqliteStore;
 
 /// How long a hook waits for the server before its turn goes on without it.
@@ -24,17 +25,22 @@ const CODEX_HISTORY: Duration = Duration::from_secs(10);
 /// The longest a turn end's planning refresh may take.
 const PLANNING_REFRESH: Duration = Duration::from_secs(8);
 
-/// What a `stop` leaves for after its answer: the Session's planning and any
-/// pending move.
+/// What a boundary leaves for after its answer.
 #[derive(Debug)]
-pub(super) struct After {
+pub(super) enum After {
+    /// A turn ended: the Session's planning, its wake and any pending move.
+    TurnEnd(TurnEnd),
+    /// A conversation the server could not reach before named its inbox: wake
+    /// the Session with what was saved while it was closed.
+    Reachable(String),
+}
+
+#[derive(Debug)]
+pub(super) struct TurnEnd {
     repo: PathBuf,
     session: Option<String>,
     /// A Codex Session's app-server and the conversation whose turn ended.
     codex: Option<(PathBuf, loopflow_model::id::AgentSessionId)>,
-    /// False for a conversation that only became reachable: nothing ended,
-    /// and only the wake runs.
-    turn_ended: bool,
 }
 
 /// Record the boundary; blocking.
@@ -72,12 +78,11 @@ pub(super) fn answer(
             *moment == BoundaryMoment::Stop,
             "Only a turn end needs no provider context"
         );
-        let after = After {
+        let after = After::TurnEnd(TurnEnd {
             repo: delivery.repo,
             session: None,
             codex: None,
-            turn_ended: true,
-        };
+        });
         return Ok((nothing, Some(after)));
     };
     // OpenCode's turn end names no conversation: it records no turn, and
@@ -114,12 +119,9 @@ pub(super) fn answer(
     // One it could not reach before may hold steers saved while it was closed:
     // a reopened conversation sits idle until someone types.
     let reachable = match inbox {
-        Some(inbox) if store.record_agent_inbox(adapter, inbox)? => Some(After {
-            repo: delivery.repo.clone(),
-            session: Some(adapter.session.clone()),
-            codex: None,
-            turn_ended: false,
-        }),
+        Some(inbox) if store.record_agent_inbox(adapter, inbox)? => {
+            Some(After::Reachable(adapter.session.clone()))
+        }
         _ => None,
     };
     if *moment == BoundaryMoment::Event {
@@ -139,12 +141,11 @@ pub(super) fn answer(
         let codex = connection
             .zip(thread)
             .map(|((endpoint, _), thread)| (PathBuf::from(endpoint), thread.into()));
-        let after = After {
+        let after = After::TurnEnd(TurnEnd {
             repo: delivery.repo,
             session: Some(adapter.session.clone()),
             codex,
-            turn_ended: true,
-        };
+        });
         return Ok((nothing, Some(after)));
     }
     // A provider start declares the conversation it now runs; every other
@@ -161,11 +162,13 @@ pub(super) fn answer(
     Ok((nothing, reachable))
 }
 
-/// After a Stop's answer: record a Codex Session's turns, refresh the Session's
-/// planning, wake it with any Task update its turn missed, then continue it on
-/// a pending move's agent. After a conversation became reachable: the wake alone.
-/// Blocking; failures are logged, since no one waits for them.
+/// Run what a boundary left, after its answer. Blocking; failures are logged,
+/// since no one waits for them.
 pub(super) fn after(after: After) {
+    let session = match &after {
+        After::TurnEnd(ended) => ended.session.clone(),
+        After::Reachable(session) => Some(session.clone()),
+    };
     let ran = (|| -> Result<()> {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -174,50 +177,54 @@ pub(super) fn after(after: After) {
             let Some(store) = loopflow_execution::store::open_existing_store().await? else {
                 return Ok(());
             };
-            let store = std::sync::Arc::new(store);
-            if !after.turn_ended {
-                let (sqlite, session) = (store.sqlite.clone(), after.session.clone());
-                return loopflow_execution::journal::request::spawn_blocking(move || {
-                    if let Some(session) = session {
-                        super::wake::after_turn(&sqlite, &session)
-                    }
-                })
-                .await
-                .map_err(Into::into);
+            match after {
+                After::TurnEnd(ended) => turn_end(std::sync::Arc::new(store), ended).await,
+                After::Reachable(session) => wake(&store.sqlite, session).await,
             }
-            if let (Some(session), Some((endpoint, thread))) = (&after.session, &after.codex) {
-                record_codex_turns(&store.sqlite, session, thread, endpoint).await;
-            }
-            let repo = after.repo.to_string_lossy();
-            if tokio::time::timeout(
-                PLANNING_REFRESH,
-                loopflow_execution::ops::tracker_events::sync_repository(&store, &repo),
-            )
-            .await
-            .is_err()
-            {
-                tracing::warn!(repo = %repo, "planning refresh outlasted its turn-end budget");
-            }
-            let Some(session) = &after.session else {
-                return Ok(());
-            };
-            // The turn ended: an update that arrived during it goes out now.
-            let (sqlite, ended) = (store.sqlite.clone(), session.clone());
-            loopflow_execution::journal::request::spawn_blocking(move || {
-                super::wake::after_turn(&sqlite, &ended)
-            })
-            .await?;
-            if store.sqlite.pending_session_move(session)?.is_none() {
-                return Ok(());
-            }
-            tokio::time::sleep(MOVE_AFTER_STOP).await;
-            loopflow_execution::ops::human_session::moves_bulk::apply_pending_move(&store, session)
-                .await
         })
     })();
     if let Err(error) = ran {
-        tracing::warn!(session = ?after.session, error = %format!("{error:#}"), "turn-end work failed");
+        tracing::warn!(?session, error = %format!("{error:#}"), "boundary follow-up failed");
     }
+}
+
+/// Record a Codex Session's turns, refresh the Session's planning, wake it
+/// with any Task update its turn missed, then continue it on a pending move's
+/// agent.
+async fn turn_end(store: SharedStore, ended: TurnEnd) -> Result<()> {
+    if let (Some(session), Some((endpoint, thread))) = (&ended.session, &ended.codex) {
+        record_codex_turns(&store.sqlite, session, thread, endpoint).await;
+    }
+    let repo = ended.repo.to_string_lossy();
+    if tokio::time::timeout(
+        PLANNING_REFRESH,
+        loopflow_execution::ops::tracker_events::sync_repository(&store, &repo),
+    )
+    .await
+    .is_err()
+    {
+        tracing::warn!(repo = %repo, "planning refresh outlasted its turn-end budget");
+    }
+    let Some(session) = ended.session else {
+        return Ok(());
+    };
+    // The turn ended: an update that arrived during it goes out now.
+    wake(&store.sqlite, session.clone()).await?;
+    if store.sqlite.pending_session_move(&session)?.is_none() {
+        return Ok(());
+    }
+    tokio::time::sleep(MOVE_AFTER_STOP).await;
+    loopflow_execution::ops::human_session::moves_bulk::apply_pending_move(&store, &session).await
+}
+
+/// Wake `session` if it is idle and has news.
+async fn wake(store: &SqliteStore, session: String) -> Result<()> {
+    let store = store.clone();
+    loopflow_execution::journal::request::spawn_blocking(move || {
+        super::wake::after_turn(&store, &session)
+    })
+    .await?;
+    Ok(())
 }
 
 /// Read a Codex conversation's turns from its app-server into the Session's
@@ -246,11 +253,19 @@ async fn record_codex_turns(
 mod tests {
     use loopflow_execution::process::attachment;
 
-    use super::answer;
+    use super::{answer, After, TurnEnd};
     use crate::server::wire::{BoundaryGap, BoundaryMoment, SessionBoundary};
     use loopflow_execution::context_block::ContextDelivery;
     use loopflow_execution::steer::{NativeBoundary, SteerAdapter};
     use loopflow_storage::sqlite::SqliteStore;
+
+    /// The turn end a boundary left.
+    fn ended(after: Option<After>) -> TurnEnd {
+        match after {
+            Some(After::TurnEnd(ended)) => ended,
+            other => panic!("no turn end: {other:?}"),
+        }
+    }
 
     /// A native Session whose provider selected conversation `native`, and a
     /// delivery file for its checkout.
@@ -487,9 +502,10 @@ mod tests {
         );
         listening.inbox = Some("/tmp/lf-wake-fixture/s".into());
         let (_, after) = answer(&store, &listening).unwrap();
-        let after = after.expect("the wake runs");
-        assert_eq!(after.session.as_deref(), Some("session"));
-        assert!(!after.turn_ended);
+        assert!(
+            matches!(&after, Some(After::Reachable(session)) if session == "session"),
+            "{after:?}"
+        );
         // It has run no turn, so it is idle: the wake can reach it.
         let idle: (bool, String) = store
             .conn
@@ -533,7 +549,7 @@ mod tests {
         let (answered, after) = answer(&store, &stop).unwrap();
         // A turn end delivers nothing; the steer waits for the next boundary.
         assert_eq!(answered.steers, None);
-        assert_eq!(after.unwrap().session.as_deref(), Some("session"));
+        assert_eq!(ended(after).session.as_deref(), Some("session"));
         let conn = store.conn.lock().unwrap();
         let yielded: bool = conn
             .query_row(
@@ -665,7 +681,7 @@ mod tests {
             serde_json::json!({}),
         );
         let (_, after) = answer(&store, &stop).unwrap();
-        assert_eq!(after.unwrap().session.as_deref(), Some("session"));
+        assert_eq!(ended(after).session.as_deref(), Some("session"));
         let bare_tool = boundary(
             BoundaryMoment::Tool,
             &adapter,
@@ -689,7 +705,7 @@ mod tests {
         };
         let (answered, after) = answer(&store, &stop(BoundaryMoment::Stop)).unwrap();
         assert_eq!(answered.steers, None);
-        let after = after.unwrap();
+        let after = ended(after);
         assert!(after.repo.ends_with("repo") && after.session.is_none());
         assert!(answer(&store, &stop(BoundaryMoment::Tool)).is_err());
     }

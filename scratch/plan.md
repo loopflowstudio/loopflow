@@ -71,7 +71,7 @@ Pi, `scratch/qa.html`) added two things:
   runs the wake (`boundary::After`, `record_agent_inbox`).
 - `idle_wake.py` left its holder and provider running after every run.
 
-Checks after those: `server::boundary::` 11 passed, `server::wake::` 8 passed,
+Checks after those: `server::` 106 passed (after `boundary::After` became an enum),
 `harness::context::tests::` 13 passed, both `idle_wake.py` runs passed.
 
 ## Built: the configured model reaches a new work session

@@ -470,7 +470,7 @@ mod tests {
         let codex = AgentLimitRecovery {
             provider: "codex".into(),
             reason: format!(
-                "codex_error: You've hit your usage limit{}claude",
+                "codex_error: You’ve hit your usage limit{}claude",
                 super::MOVED_TO
             ),
             ..recovery(None)
@@ -478,7 +478,7 @@ mod tests {
         apply_limit_recovery(&mut moved, &codex, "LOO-1", || true);
         assert_eq!(
             moved.reason,
-            "implement went on under claude after: codex_error: You've hit your usage limit"
+            "implement went on under claude after: codex_error: You’ve hit your usage limit"
         );
 
         // A step that recovered and then failed for its own reasons failed.
@@ -490,7 +490,7 @@ mod tests {
         let mut stopped = snapshot(TaskExecutionState::Blocked);
         let nowhere = AgentLimitRecovery {
             reason: format!(
-                "codex_error: You've hit your usage limit.{}no `agents` list is set",
+                "codex_error: You’ve hit your usage limit.{}no `agents` list is set",
                 super::STOPPED
             ),
             ..recovery(None)
@@ -499,7 +499,7 @@ mod tests {
         assert_eq!(stopped.state, TaskExecutionState::Blocked);
         assert_eq!(
             stopped.reason,
-            "implement stopped after a provider refusal: codex_error: You've hit your usage limit. no `agents` list is set; `lf task run LOO-1` starts the run again at it"
+            "implement stopped after a provider refusal: codex_error: You’ve hit your usage limit. no `agents` list is set; `lf task run LOO-1` starts the run again at it"
         );
 
         let mut ended = snapshot(TaskExecutionState::Blocked);

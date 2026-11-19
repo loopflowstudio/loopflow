@@ -57,18 +57,62 @@ nothing the list lacks is tried. A lone bare `claude` (`agents: claude`) has no
 next entry, so it tries Claude's other models instead: Opus, then Sonnet, then
 Haiku.
 
-When a usage limit or model-unavailable error refuses a Graph step, it tries
-the next configured model or harness; other headless work stops at once. It uses each native client's own login.
-An explicit agent pins the harness; an explicit model pin stays on that model.
-Once every entry has refused on a usage limit, the step waits 5, 15, 30, then
-60 minutes, trying the whole order again after each, and then stops.
+When a usage limit or model-unavailable error refuses headless work, it tries
+the next entry and says so. That covers Graph steps, `lf -b <skill>`, commit
+messages, PR titles and bodies, and sync conflict resolution:
+
+```bash
+lf set --global agents codex,claude:fable,claude:opus
+lf pr open
+# codex: provider usage limit; continuing on claude:fable
+# claude:fable: provider usage limit; continuing on claude:opus
+# https://github.com/acme/app/pull/412
+```
+
+Each entry uses its native client's own login. An explicit agent pins the
+harness; an explicit model pin stays on that model. Once the order runs out,
+the command reports the last entry's reason and the order it tried. If commit
+message generation exhausts the order, `lf commit` uses its default message.
+A PR copy failure looks like this:
+
+```
+Error: PR copy generation failed (exit 1): provider_rate_limited: rejected: five_hour
+claude_result: You've hit your limit.
+Nothing is left in its order after codex, claude:fable, claude:opus; add another agent to `agents`
+```
+
+Only a Graph step waits for more usage: once every entry has refused on a usage
+limit, it waits 5, 15, 30, then 60 minutes, trying the whole order again after
+each, and then stops. The steps of `lf -b <graph>` are Graph steps and wait
+the same way, which includes a name that is both a skill and a Graph, such as
+`lf -b research`. Other commands stop when the order runs out of usage. Pi and
+OpenCode do not report why they refused, so an entry for either stops there.
 Interactive Sessions keep the refusal visible and require an explicit retry or
 move, with or without a Task.
 
 ```bash
 lf task status MTG-328
-#   compress went on under claude after: codex_error: You've hit your usage limit
+#   compress went on under claude after: provider_rate_limited: You’ve hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/settings/usage to purchase more credits or try again at 3:36 PM.
 ```
+
+The first word is the cause the provider stated and the rest is its own
+message. The stated cause decides the move, so a reworded message still moves
+on; [Rate limits](troubleshooting.md#rate-limits) lists the causes.
+
+A model the account can't use counts as unavailable, and so does a model name
+that doesn't exist:
+
+```yaml
+agents: [codex:gpt-6.1-astra, claude]
+```
+
+```bash
+lf task status MTG-328
+#   compress went on under claude after: provider_model_unavailable: The 'gpt-6.1-astra' model is not supported when using Codex with a ChatGPT account.
+```
+
+A misspelled entry moves on the same way, so read that line when work runs
+somewhere you didn't expect.
 
 | Setting | Compress tries | Everything else tries |
 | --- | --- | --- |
@@ -79,8 +123,7 @@ lf task status MTG-328
 | `lf -a codex graph code` | Codex only | Codex only |
 
 An `agent` choice or `-a` pins the harness. Bare Claude can still try its other
-models; `claude:opus` pins the model too. An exhausted fallback order waits and
-tries again on a usage limit, then stops. Loopflow never switches logins or
+models; `claude:opus` pins the model too. Loopflow never switches logins or
 reads reset times.
 Neither choice is checked against `agents`, so `-a pi` runs Pi for that command
 whatever the list says.

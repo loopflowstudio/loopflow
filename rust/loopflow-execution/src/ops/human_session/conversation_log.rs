@@ -23,6 +23,10 @@ const EXCERPT_TAIL_CHARS: usize = 14_000;
 
 /// Read the history before preparing a provider change or releasing its terminal.
 pub fn read(store: &SqliteStore, session: &LfSession) -> Result<String> {
+    Ok(render(&turns(store, session)?))
+}
+
+fn turns(store: &SqliteStore, session: &LfSession) -> Result<Vec<Turn>> {
     let id = &session.id;
     let from = session.provider.as_deref().unwrap_or_default();
     let harness = HarnessKind::parse(from)
@@ -35,13 +39,36 @@ pub fn read(store: &SqliteStore, session: &LfSession) -> Result<String> {
     let transcript::Located::Found { source, .. } = located else {
         bail!("The {from} transcript of Session {id} ({thread}) was not found. Keep this conversation open and retry after {from} saves its first turn.");
     };
-    Ok(render(&transcript::read(harness, &source)?))
+    transcript::read(harness, &source)
 }
 
 /// Save the current conversation and return the first turn for another provider.
 pub fn continuation(store: &SqliteStore, session: &LfSession) -> Result<String> {
     let from = session.provider.as_deref().unwrap_or_default();
     continue_from(session, from, &read(store, session)?)
+}
+
+/// [`continuation`] for a run moving providers by itself. None while the
+/// agent has said and done nothing: there is no work to pick up, and the
+/// run's own prompt says more than an excerpt of it.
+pub fn continuation_of_work(store: &SqliteStore, session: &LfSession) -> Result<Option<String>> {
+    let turns = turns(store, session)?;
+    let worked = turns.iter().flat_map(|turn| &turn.items).any(|item| {
+        matches!(
+            item,
+            TurnItem::Agent(
+                ConversationItem::Message { .. }
+                    | ConversationItem::Tool { .. }
+                    | ConversationItem::Command { .. }
+                    | ConversationItem::File { .. }
+            )
+        )
+    });
+    if !worked {
+        return Ok(None);
+    }
+    let from = session.provider.as_deref().unwrap_or_default();
+    continue_from(session, from, &render(&turns)).map(Some)
 }
 
 /// Save `log`, a conversation that began in `from`, with the Session's

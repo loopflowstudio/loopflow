@@ -188,7 +188,7 @@ impl TaskNames {
 fn next_command(task: &RoadmapTask) -> Option<String> {
     let id = &task.task.identifier;
     match task.lifecycle {
-        TaskState::Done | TaskState::Abandoned | TaskState::Moving | TaskState::Shipping => None,
+        TaskState::Done | TaskState::Abandoned | TaskState::Moving => None,
         _ if task
             .pr
             .as_ref()

@@ -179,7 +179,7 @@ impl CapturedGraph {
             .map(|(place, _)| place)
     }
 
-    /// The step that merges named `step`, where a Task someone stopped shipping waits.
+    /// The step that merges named `step`, where a Task someone turned auto off waits.
     pub fn landing_step(&self, step: &str, merges: fn(&[String]) -> bool) -> Option<Place> {
         let mut found = None;
         walk(&self.steps, &[], &mut |place, concrete| {
@@ -411,7 +411,7 @@ impl TaskGraph {
             }
         }];
         lines.push(format!(
-            "`lf task run {issue} --from <step>` starts anywhere, to go back or skip ahead; `lf -b task run {issue}` and `lf ship {issue}` run headless to `end` and approve Auto-Ship, which may merge the PR, as does `lf task run {issue}` with no interactive step left ahead, so run them only when the person asks to ship or land; `lf graph <graph>` in the Task worktree runs a Graph without moving the Task."
+            "`lf task run {issue} --from <step>` starts anywhere, to go back or skip ahead; `lf -b task run {issue}` and `lf ship {issue}` run headless to `end` and turn auto on, which may merge the PR, as does `lf task run {issue}` with no interactive step left ahead, so run them only when the person asks to ship or land; `lf graph <graph>` in the Task worktree runs a Graph without moving the Task."
         ));
         lines.join("\n")
     }

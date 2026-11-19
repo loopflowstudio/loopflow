@@ -338,8 +338,8 @@ pub(super) fn map_machine_by_id(
 
 /// Completion and abandonment are durable. An open Task's state follows
 /// what it is doing: its Task run's carrier still has an OS process, or a
-/// Graph run in its work has not ended. Auto-Ship on makes that run shipping;
-/// on with nothing running, it is idle, since no person is needed.
+/// Graph run in its work has not ended. The auto setting says who takes the
+/// interactive steps; state never reads it.
 /// A Task with neither a checkout nor a Graph taken up is unstarted; creation
 /// admits a Graph before setup makes the checkout.
 pub(crate) fn task_state_sql(t: &str) -> String {
@@ -348,16 +348,13 @@ pub(crate) fn task_state_sql(t: &str) -> String {
          WHEN {t}.planning_completed=1 THEN 'done' \
          WHEN EXISTS(SELECT 1 FROM task_graphs tg WHERE tg.task_id={t}.id AND tg.run_pid IS NOT NULL) \
              OR EXISTS({open_graphs}) \
-         THEN CASE WHEN {auto_ship_on} THEN 'shipping' ELSE 'moving' END \
-         WHEN NOT {auto_ship_on} AND EXISTS(SELECT 1 FROM task_graphs tg WHERE tg.task_id={t}.id \
+         THEN 'moving' \
+         WHEN EXISTS(SELECT 1 FROM task_graphs tg WHERE tg.task_id={t}.id \
              AND tg.lf_process_id IS NULL AND tg.step NOT IN ('start','end')) THEN 'active' \
          WHEN NOT EXISTS(SELECT 1 FROM task_checkouts c WHERE c.task_id={t}.id) \
              AND NOT EXISTS(SELECT 1 FROM task_graphs tg WHERE tg.task_id={t}.id) THEN 'unstarted' \
          ELSE 'idle' END",
         open_graphs = super::task_work::task_open_graph_pairs(&format!("{t}.id")),
-        auto_ship_on = format!(
-            "EXISTS(SELECT 1 FROM task_graphs tg WHERE tg.task_id={t}.id AND tg.auto_ship='on')"
-        ),
     )
 }
 

@@ -290,13 +290,14 @@ Unreadable app/default/selection/cursor text prevents Apply; ANSI colors keep
 their source values. Personal non-color Ghostty settings still load; its `theme =` is ignored and its file never written.
 Source and license notices ship offline with the catalogue.
 
-**Auto-Ship** turns Auto-Ship on and runs the Task: its run stands in at each
-interactive step and lands the PR. It sits at the right end of the Workflow bar
-under the jump bar, beside the Task's stages as dots (click them for each stage)
-and what is running now. While Auto-Ship is on, the same spot holds Stop
-Auto-Ship, running or not. Clicking it raises the Notice
-"LOO-5 Auto-Ship requested · Undo"; Undo is Stop Auto-Ship.
-Open a Dashboard with `state:shipping` to watch Tasks executing autonomously.
+The **Auto** toggle turns a Task's auto setting on and runs it, as `lf ship`
+does: its run stands in at each interactive step and lands the PR. It sits at
+the right end of the Workflow bar under the jump bar, beside the Task's stages
+as dots (click them for each stage) and what is running now. Turning it on
+raises the Notice "LOO-5 Auto on requested · Undo"; Undo is auto off, the same
+as switching the toggle off (`lf task auto off`). While auto is on, the Task's
+board card and sidebar row carry an Auto badge.
+Open a Dashboard with `state:auto` to watch those Tasks.
 
 ```text
 ⌘T          new shell tab in the Task’s Shell tool

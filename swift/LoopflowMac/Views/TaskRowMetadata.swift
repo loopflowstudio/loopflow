@@ -5,6 +5,8 @@ struct TaskRowMetadata: View {
     let id: String
     let task: RoadmapTask?
     let status: SessionProgramStatus
+    /// The Task's auto setting is on.
+    var auto = false
     var selected = false
     var slotHint: String?
     /// The hint shows while ⌘ is held, or while `hover` reports the row hovered.
@@ -48,6 +50,7 @@ struct TaskRowMetadata: View {
                     .accessibilityLabel(Text(verbatim: status.help))
                     .accessibilityIdentifier("work-program-status-unavailable-\(id)")
             }
+            if auto { AutoBadge().accessibilityIdentifier("work-task-auto-\(id)") }
             if let task {
                 if let pr = task.pr?.publication?.github {
                     destination("#\(pr.number)", url: pr.url, kind: "pr")

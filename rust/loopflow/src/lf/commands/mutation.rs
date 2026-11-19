@@ -22,7 +22,7 @@ pub fn accepts(cli: &Cli) -> bool {
                 | TaskCommand::Abandon { .. }
                 | TaskCommand::Update { .. }
                 | TaskCommand::Move { .. }
-                | TaskCommand::Hold { .. }
+                | TaskCommand::Auto { .. }
         ),
         Some(Commands::Wave { cmd }) => matches!(
             cmd,
@@ -53,7 +53,7 @@ fn execute(cli: &Cli, args: &[String], directory: &Path, io: &mut CommandIo<'_>)
     if let Some(forward) = super::work_route::forward(cli, args, directory)? {
         return forward.run(cli, directory, io);
     }
-    // Session, shipping, holding and arrangement select their own Work. Other
+    // Session, shipping, auto and arrangement select their own Work. Other
     // commands retain the CLI's explicit Task placement without changing
     // process cwd.
     let binding = if !matches!(
@@ -63,7 +63,7 @@ fn execute(cli: &Cli, args: &[String], directory: &Path, io: &mut CommandIo<'_>)
                 | Commands::Ship { .. }
                 | Commands::Desktop { .. }
                 | Commands::Task {
-                    cmd: TaskCommand::Hold { .. }
+                    cmd: TaskCommand::Auto { .. }
                 }
         )
     ) {
@@ -109,7 +109,8 @@ fn local(
     match cli.command.as_ref().context("missing mutation")? {
         Commands::Task {
             cmd:
-                TaskCommand::Hold {
+                TaskCommand::Auto {
+                    state,
                     issue,
                     reason,
                     json,
@@ -119,20 +120,21 @@ fn local(
                 .as_deref()
                 .or(cli.task.as_deref())
                 .context("No Task selected")?;
-            // A Task another Machine runs is held there.
-            let super::write::WriteResult::TaskHold(held) = super::write::Write::TaskHold {
+            // A Task another Machine runs is set there.
+            let super::write::WriteResult::TaskAuto(set) = super::write::Write::TaskAuto {
                 directory: directory.to_path_buf(),
                 issue: issue.to_owned(),
+                on: matches!(state, crate::lf::AutoSetting::On),
                 reason: reason.clone(),
             }
             .run()?
             else {
-                unreachable!("task.hold answers with a hold")
+                unreachable!("task.auto answers with the setting")
             };
             if *json {
-                writeln!(io.output, "{}", serde_json::to_string(&held)?)?;
+                writeln!(io.output, "{}", serde_json::to_string(&set)?)?;
             } else {
-                writeln!(io.output, "{}", held.render())?;
+                writeln!(io.output, "{}", set.render())?;
             }
             Ok(())
         }

@@ -74,7 +74,7 @@ pub struct ExecutionStart {
     pub pid: Option<u32>,
     pub os_started_at: Option<i64>,
     /// The Session whose agent started this run, when one did. Owners that
-    /// show who started them (Graph runs, Auto-Ship) record it.
+    /// show who started them (Graph runs, auto) record it.
     pub caller_session: Option<loopflow_model::id::LfSessionId>,
 }
 

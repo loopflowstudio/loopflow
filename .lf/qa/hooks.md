@@ -6,7 +6,7 @@ A Session launched in a Task's checkout is Task work. Headless (`-b`) there
 confines the agent and runs on the native login, like every other launch:
 with the real `HOME`, a private `LF_HOME` and that home's `lf server run`,
 `lf -b --task <id> -a claude:haiku : '<msg>'` in the Task checkout answers.
-Starting a private server resumes every Task whose Auto-Ship was approved:
+Starting a private server resumes every Task with auto on:
 abandon old QA Tasks first. Dead AgentProcesses are reaped by
 the server's recovery pass, not by `lf session list`.
 Interactive (`-i`) launches run in a PTY. A stand-in

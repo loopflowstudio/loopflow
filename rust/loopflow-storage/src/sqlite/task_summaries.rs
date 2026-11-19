@@ -1,5 +1,5 @@
 //! TaskSummary: what a Task's run came to, written once when the Task ends.
-//! Derived from Graph processes, their steps, the Auto-Ship mark and Sessions;
+//! Derived from Graph processes, their steps, the auto mark and Sessions;
 //! nothing else records into it.
 
 use std::collections::BTreeMap;
@@ -41,9 +41,9 @@ pub struct TaskSummary {
     pub graph: Option<String>,
     /// Times each loop decider sent its loop around again, by step label.
     pub loop_passes: BTreeMap<String, u32>,
-    /// The Task's Auto-Ship mark when it ended; `null` when nobody set one.
+    /// The Task's auto mark when it ended; `null` when nobody set one.
     #[serde(deserialize_with = "Option::deserialize")]
-    pub auto_ship: Option<super::AutoShipState>,
+    pub auto: Option<super::AutoState>,
     /// From the first Graph process's start, else the Task's creation.
     pub wall_seconds: i64,
     /// First line the latest `reflect` step said last; `null` without one.
@@ -83,7 +83,7 @@ pub(super) fn write_in(conn: &Connection, task: &TaskId, ended: TaskEnd) -> Stor
             |row| row.get(0),
         )?,
     };
-    let auto_ship = super::task_work::auto_ship_in(conn, task)?.map(|mark| mark.state);
+    let auto = super::task_work::auto_in(conn, task)?.map(|mark| mark.state);
     let reflect = conn
         .query_row(
             "SELECT json_extract(a.preview,'$.text') FROM agent_sessions s
@@ -103,10 +103,10 @@ pub(super) fn write_in(conn: &Connection, task: &TaskId, ended: TaskEnd) -> Stor
         });
     conn.execute(
         // `ship_events` is leaving (LOO-971); new rows write it empty.
-        "INSERT INTO task_summaries(task_id,ended,ended_at,graph,loop_passes,ship_events,auto_ship,wall_seconds,reflect)
+        "INSERT INTO task_summaries(task_id,ended,ended_at,graph,loop_passes,ship_events,auto,wall_seconds,reflect)
          VALUES(?1,?2,?3,?4,?5,'{}',?6,?7,?8)
          ON CONFLICT(task_id) DO UPDATE SET ended=excluded.ended,ended_at=excluded.ended_at,
-             graph=excluded.graph,loop_passes=excluded.loop_passes,auto_ship=excluded.auto_ship,
+             graph=excluded.graph,loop_passes=excluded.loop_passes,auto=excluded.auto,
              wall_seconds=excluded.wall_seconds,reflect=excluded.reflect",
         params![
             task.as_str(),
@@ -114,7 +114,7 @@ pub(super) fn write_in(conn: &Connection, task: &TaskId, ended: TaskEnd) -> Stor
             ended_at,
             graphs.last().map(|graph| graph.name.as_str()),
             serde_json::to_string(&loop_passes(&graphs))?,
-            auto_ship.map(|state| state.as_str()),
+            auto.map(|state| state.as_str()),
             (ended_at - started_at).max(0),
             reflect,
         ],
@@ -128,7 +128,7 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let row = conn
             .query_row(
-                "SELECT ended,ended_at,graph,loop_passes,auto_ship,wall_seconds,reflect
+                "SELECT ended,ended_at,graph,loop_passes,auto,wall_seconds,reflect
                  FROM task_summaries WHERE task_id=?1",
                 [task.as_str()],
                 |row| {
@@ -144,7 +144,7 @@ impl SqliteStore {
                 },
             )
             .optional()?;
-        let Some((ended, ended_at, graph, passes, auto_ship, wall_seconds, reflect)) = row else {
+        let Some((ended, ended_at, graph, passes, auto, wall_seconds, reflect)) = row else {
             return Ok(None);
         };
         Ok(Some(TaskSummary {
@@ -152,8 +152,8 @@ impl SqliteStore {
             ended_at,
             graph,
             loop_passes: serde_json::from_str(&passes)?,
-            auto_ship: auto_ship
-                .map(|state| super::AutoShipState::parse(&state))
+            auto: auto
+                .map(|state| super::AutoState::parse(&state))
                 .transpose()?,
             wall_seconds,
             reflect,
@@ -197,14 +197,12 @@ mod tests {
         store
             .take_up_task_graph(&task, r#"{"name":"polish","steps":[]}"#)
             .unwrap();
-        let stopped = super::super::AutoShip {
-            state: super::super::AutoShipState::Stopped,
+        let stopped = super::super::Auto {
+            state: super::super::AutoState::Stopped,
             at: 4,
             by: crate::process::Starter::Person { name: None },
         };
-        store
-            .set_task_auto_ship(&task, &stopped, false, None)
-            .unwrap();
+        store.set_task_auto(&task, &stopped, false, None).unwrap();
         assert_eq!(store.task_summary(&task).unwrap(), None);
 
         let statements = crate::query_plans::statements(&store, || {
@@ -221,7 +219,7 @@ mod tests {
             ended,
             graph,
             loop_passes,
-            auto_ship,
+            auto,
             wall_seconds,
             reflect,
             ..
@@ -229,7 +227,7 @@ mod tests {
         assert_eq!(ended, TaskEnd::Abandoned);
         assert_eq!(graph.as_deref(), Some("polish"));
         assert_eq!(loop_passes, [("review".to_owned(), 2)].into());
-        assert_eq!(auto_ship, Some(super::super::AutoShipState::Stopped));
+        assert_eq!(auto, Some(super::super::AutoState::Stopped));
         assert!(wall_seconds >= 0);
         assert_eq!(reflect, None);
     }

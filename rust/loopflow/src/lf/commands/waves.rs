@@ -876,7 +876,7 @@ pub struct TaskListArgs {
     pub wave: Option<String>,
     /// Project ID, provider ID, slug or name.
     pub project: Option<String>,
-    /// An open `TaskState` label: unstarted, idle, active, moving or shipping.
+    /// An open `TaskState` label: unstarted, idle, active or moving.
     pub state: Option<String>,
 }
 
@@ -2231,8 +2231,8 @@ async fn snapshot_task_detail(
     );
     let ship_control = TaskRunControl {
         unavailable: run_control.unavailable.clone().or_else(|| {
-            if facts.shipped.contains(&task.id) {
-                Some("Auto-Ship is already on".to_string())
+            if facts.auto_on.contains(&task.id) {
+                Some("auto is already on".to_string())
             } else if facts
                 .steps
                 .get(&task.id)
@@ -2275,6 +2275,7 @@ async fn snapshot_task_detail(
             status,
             runtime.owner.is_some(),
             pr.as_ref().is_some_and(|pr| pr.publication.is_some()),
+            facts.auto_on.contains(&task.id),
             task.state.as_deref(),
             reads.selection_readings[&task.repository_id]
                 .activity
@@ -3155,7 +3156,6 @@ fn section_label(section: TaskSection) -> &'static str {
     match section {
         TaskSection::Backlog => "BACKLOG",
         TaskSection::Working => "WORKING",
-        TaskSection::Autonomous => "AUTONOMOUS",
         TaskSection::Done => "DONE",
         TaskSection::Abandoned => "ABANDONED",
     }
@@ -3196,7 +3196,6 @@ fn print_roadmap(roadmap: &RoadmapSnapshot) {
             .clamp(12, 32);
         for section in [
             TaskSection::Working,
-            TaskSection::Autonomous,
             TaskSection::Backlog,
             TaskSection::Done,
             TaskSection::Abandoned,
@@ -4814,7 +4813,7 @@ mod tests {
         conn.execute_batch(&fixture).unwrap();
         loopflow_execution::store::migrations::upgrade_from_migration(&conn, "task_paused");
         // The planning read, not this setup, fails.
-        conn.execute_batch("ALTER TABLE task_graphs RENAME COLUMN auto_ship TO auto_ship_gone")
+        conn.execute_batch("ALTER TABLE task_graphs RENAME COLUMN auto TO auto_gone")
             .unwrap();
         let frontier =
             loopflow_execution::store::migrations::latest_applied_version_sqlite(&conn).unwrap();
@@ -4844,7 +4843,7 @@ mod tests {
                 roadmap.tasks
             );
         };
-        assert!(reason.contains("no such column: tg.auto_ship"), "{reason}");
+        assert!(reason.contains("no such column: auto"), "{reason}");
         let graph = loopflow_execution::store::task_work::task_overview(&store.sqlite, &task)
             .unwrap()
             .0

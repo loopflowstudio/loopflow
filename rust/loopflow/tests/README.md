@@ -111,7 +111,7 @@ The rest of `session_launch_contract` covers native authentication, provider swi
 OpenCode diagnostics and Machine dispatch.
 
 Task Graph run and its previews (`task_graph_launch_tests` in the library,
-`global_commands`), one Graph run to an interactive step and one to Auto-Ship:
+`global_commands`), one Graph run to an interactive step and one with auto on:
 
 | Test | Wiring it proves |
 |---|---|
@@ -160,7 +160,7 @@ Transport cleanup checks wait for both the recorded exit and socket removal:
 the interruption hook records completion before later cleanup hooks run.
 Relay exec changes also run `task_graph_launch_tests` and `land_tests`: a
 viewer's OS exit and its original command's recorded result must agree, including
-failed placement, failed shipping and a Graph held at landing.
+failed placement, failed shipping and a Graph waiting at landing with auto off.
 
 `session_activity` fixtures that stand for a provider's own facts (open tools,
 pending input, yielded) carry the AgentProcess's `attachment_token`; a row

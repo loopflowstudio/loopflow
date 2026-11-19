@@ -1,8 +1,8 @@
-//! `lf ship`: turn Auto-Ship on for the Task's Graph, then run it as
-//! `lf task run` does. Auto-Ship is one mark on `task_graphs`; the run reads
-//! it at each interactive step, standing in for the person while it is on, and
-//! at each step that merges, waiting there while it is stopped. `lf task hold`
-//! stops it; only `lf ship` turns a stopped mark on again.
+//! A Task's auto setting, and `lf ship`: auto on, then the run `lf task run`
+//! starts. Auto is one mark on `task_graphs`; the run reads it at each
+//! interactive step, standing in for the person while it is on, and at each
+//! step that merges, waiting there while it is off. `lf task auto off` turns
+//! it off; `lf task auto on` and `lf ship` turn it on again.
 
 use crate::durable::{GraphProcessFilter, TaskState};
 use crate::engine::task::TaskRun;
@@ -10,7 +10,7 @@ use crate::ops::error::OpsResult;
 use crate::session::GraphProcessSummaryState;
 use crate::task_graph::{TaskGraphPosition, END};
 use loopflow_model::id::LfProcessId;
-use loopflow_storage::sqlite::{AutoShip, AutoShipState};
+use loopflow_storage::sqlite::{Auto, AutoState};
 use loopflow_storage::work::task::Task;
 
 use super::{block_on_task, task_error, task_store, SharedStore, TaskRunSelection};
@@ -18,7 +18,7 @@ use super::{block_on_task, task_error, task_store, SharedStore, TaskRunSelection
 /// What `lf ship` found before running anything.
 #[derive(Debug)]
 pub enum ShipStart {
-    /// Auto-Ship is on; run the Task, standing in from `from` when it waits
+    /// Auto is on; run the Task, standing in from `from` when it waits
     /// at that interactive step.
     Run {
         task: Box<Task>,
@@ -49,9 +49,9 @@ pub fn starter(
 }
 
 /// The mark this caller sets now: who is asking, resolved as it is written.
-async fn mark(store: &SharedStore, task: &Task, state: AutoShipState) -> OpsResult<AutoShip> {
+async fn mark(store: &SharedStore, task: &Task, state: AutoState) -> OpsResult<Auto> {
     let repo = super::repository_for_task(store, task)?;
-    Ok(AutoShip {
+    Ok(Auto {
         state,
         at: loopflow_storage::rows::now_unix(),
         by: starter(
@@ -63,50 +63,83 @@ async fn mark(store: &SharedStore, task: &Task, state: AutoShipState) -> OpsResu
     })
 }
 
-/// Turn Auto-Ship on, lifting any stop. A Task with no graph takes up its
-/// default first; naming `graph` takes that one up in place of the remaining
-/// steps. An unowned Task is claimed, as `lf task run` would.
+/// The open Task and its Graph, ready for auto: a Task with no graph takes up
+/// its default first; naming `graph` takes that one up in place of the
+/// remaining steps.
+async fn graph_for_auto(
+    store: &SharedStore,
+    issue: &str,
+    graph: Option<&str>,
+) -> OpsResult<(Task, crate::task_graph::TaskGraph)> {
+    let task = task_by_issue(store, issue).await?;
+    let issue = &task.identifier;
+    match store.sqlite.task_state(&task.id).map_err(task_error)? {
+        TaskState::Done => return Err(task_error(format!("Task {issue} is complete"))),
+        TaskState::Abandoned => {
+            return Err(task_error(format!(
+                "Task {issue} is abandoned; recover it before turning auto on"
+            )))
+        }
+        _ => {}
+    }
+    store
+        .sqlite
+        .require_task_launch(&task.id)
+        .map_err(task_error)?;
+    let current =
+        crate::store::task_work::task_graph(&store.sqlite, &task.id).map_err(task_error)?;
+    if current.is_none() || graph.is_some() {
+        let TaskRunSelection {
+            graph: selected,
+            take_up,
+            ..
+        } = super::select_task_run(store, &task, task.worktree()?, graph, Some("start"), |_| {
+            false
+        })?;
+        if take_up {
+            crate::store::task_work::take_up_task_graph(&store.sqlite, &task.id, &selected)
+                .map_err(task_error)?;
+        }
+    }
+    let graph = crate::store::task_work::task_graph(&store.sqlite, &task.id)
+        .map_err(task_error)?
+        .ok_or_else(|| task_error(format!("Task {issue} has no graph")))?;
+    Ok((task, graph))
+}
+
+/// Save `state` as this caller's mark. Returns whether auto was on before.
+async fn set(
+    store: &SharedStore,
+    task: &Task,
+    state: AutoState,
+    note: Option<&str>,
+) -> OpsResult<bool> {
+    let mark = mark(store, task, state).await?;
+    let before = store
+        .sqlite
+        .set_task_auto(&task.id, &mark, false, note)
+        .map_err(task_error)?;
+    Ok(before.is_some_and(|before| before.state == AutoState::On))
+}
+
+/// `lf task auto on`: turn auto on for the Task's Graph, lifting any stop.
+/// Nothing starts; a live run stands in from its next interactive step.
+/// Returns whether auto was on already.
+pub fn auto_on(issue: &str, note: Option<&str>) -> OpsResult<bool> {
+    block_on_task(async {
+        let store = task_store().await?;
+        let (task, _) = graph_for_auto(&store, issue, None).await?;
+        set(&store, &task, AutoState::On, note).await
+    })
+}
+
+/// `lf ship`: auto on, then what `lf task run` would start. An unowned Task
+/// is claimed, as `lf task run` would.
 pub fn ship_on(issue: &str, graph: Option<&str>, note: Option<&str>) -> OpsResult<ShipStart> {
     block_on_task(async {
         let store = task_store().await?;
-        let task = task_by_issue(&store, issue).await?;
+        let (task, graph) = graph_for_auto(&store, issue, graph).await?;
         let issue = task.identifier.clone();
-        match store.sqlite.task_state(&task.id).map_err(task_error)? {
-            TaskState::Done => return Err(task_error(format!("Task {issue} is complete"))),
-            TaskState::Abandoned => {
-                return Err(task_error(format!(
-                    "Task {issue} is abandoned; recover it before shipping"
-                )))
-            }
-            _ => {}
-        }
-        store
-            .sqlite
-            .require_task_launch(&task.id)
-            .map_err(task_error)?;
-        let current =
-            crate::store::task_work::task_graph(&store.sqlite, &task.id).map_err(task_error)?;
-        if current.is_none() || graph.is_some() {
-            let TaskRunSelection {
-                graph: selected,
-                take_up,
-                ..
-            } = super::select_task_run(
-                &store,
-                &task,
-                task.worktree()?,
-                graph,
-                Some("start"),
-                |_| false,
-            )?;
-            if take_up {
-                crate::store::task_work::take_up_task_graph(&store.sqlite, &task.id, &selected)
-                    .map_err(task_error)?;
-            }
-        }
-        let graph = crate::store::task_work::task_graph(&store.sqlite, &task.id)
-            .map_err(task_error)?
-            .ok_or_else(|| task_error(format!("Task {issue} has no graph to ship")))?;
         let (from, live) = match &graph.position {
             TaskGraphPosition::At { step } if step == END => {
                 return Ok(ShipStart::Reported(TaskRun::Ended { issue }));
@@ -119,14 +152,10 @@ pub fn ship_on(issue: &str, graph: Option<&str>, note: Option<&str>) -> OpsResul
         if !store.sqlite.task_owned(&task.id).map_err(task_error)? {
             crate::store::ownership::claim_task(&store.sqlite, &task.id).map_err(task_error)?;
         }
-        let on = mark(&store, &task, AutoShipState::On).await?;
-        store
-            .sqlite
-            .set_task_auto_ship(&task.id, &on, false, note)
-            .map_err(task_error)?;
+        set(&store, &task, AutoState::On, note).await?;
         if let (Some(graph_process), TaskGraphPosition::Run { at, .. }) = (live, &graph.position) {
-            // The run reads Auto-Ship at each interactive step, so it stands
-            // in from here without being started again.
+            // The run reads auto at each interactive step, so it stands in
+            // from here without being started again.
             return Ok(ShipStart::Reported(TaskRun::Running {
                 log: Some(crate::process::launch_log::graph_log_path(&graph_process)),
                 issue,
@@ -160,33 +189,26 @@ async fn live_graph_run(store: &SharedStore, task: &Task) -> OpsResult<Option<St
         .map(|entry| entry.summary.id))
 }
 
-/// `lf -b task run`: Auto-Ship on unless someone stopped it.
+/// `lf -b task run`: auto on unless someone turned it off.
 pub(super) async fn batch_on(store: &SharedStore, task: &Task) -> OpsResult<()> {
-    let on = mark(store, task, AutoShipState::On).await?;
+    let on = mark(store, task, AutoState::On).await?;
     store
         .sqlite
-        .set_task_auto_ship(&task.id, &on, true, None)
+        .set_task_auto(&task.id, &on, true, None)
         .map_err(task_error)?;
     Ok(())
 }
 
-/// Stop Auto-Ship and take back any merge request Loopflow armed on GitHub.
-/// Nothing is killed: the run carries on to its next interactive step or
-/// merging step and waits there. The stop stands until `lf ship`. Returns
-/// whether Auto-Ship was on.
-pub fn ship_stop(issue: &str, note: Option<&str>) -> OpsResult<bool> {
+/// `lf task auto off`: turn auto off and take back any merge request
+/// Loopflow armed on GitHub. Nothing is killed: the run carries on to its next
+/// interactive step or merging step and waits there, until auto is on again.
+/// Returns whether auto was on.
+pub fn auto_off(issue: &str, note: Option<&str>) -> OpsResult<bool> {
     let (task, was_on) = block_on_task(async {
         let store = task_store().await?;
         let task = task_by_issue(&store, issue).await?;
-        let stopped = mark(&store, &task, AutoShipState::Stopped).await?;
-        let before = store
-            .sqlite
-            .set_task_auto_ship(&task.id, &stopped, false, note)
-            .map_err(task_error)?;
-        Ok((
-            task,
-            before.is_some_and(|before| before.state == AutoShipState::On),
-        ))
+        let was_on = set(&store, &task, AutoState::Stopped, note).await?;
+        Ok((task, was_on))
     })?;
     if was_on {
         if let Ok(worktree) = task.worktree() {
@@ -318,7 +340,7 @@ pub fn died_run(
 }
 
 /// Carry again each run on this Machine whose `lf task run` died, as
-/// `lf task run ISSUE`: it stands in at interactive steps when Auto-Ship is
+/// `lf task run ISSUE`: it stands in at interactive steps when auto is
 /// on and stops at the next one otherwise. Unassigned, moved and finished
 /// Tasks wait. Returns when the soonest run still waiting its backoff comes due.
 pub(crate) fn restart_runs() -> OpsResult<Option<i64>> {

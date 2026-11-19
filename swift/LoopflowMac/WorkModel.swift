@@ -1286,7 +1286,7 @@ final class WorkModel {
     private(set) var comments = TaskReadings<TaskComments>()
     /// The shown Task's work, from the workspace reader's `task` part.
     private(set) var taskWork = TaskReadings<TaskOverview>()
-    /// Its recorded Sessions, Processes and Auto-Ship marks, from the same part.
+    /// Its recorded Sessions, Processes and auto setting, from the same part.
     private(set) var taskExecution = TaskReadings<TaskExecution>()
     /// That Task's Graph processes keyed by Graph process, from the same part.
     private(set) var graphProcesses: [String: GraphProcessDetail] = [:]
@@ -2193,7 +2193,14 @@ final class WorkModel {
 
     /// The repository or Wave's Working Tasks from the started list, or a
     /// Dashboard's; the filter reads each Task's states as the phone does.
-    var sidebarTaskIDs: [String] {
+    var sidebarTaskIDs: [String] { sidebarShownRows.map(\.id) }
+
+    /// The shown sidebar Tasks whose auto setting is on; their rows carry the Auto badge.
+    var sidebarAutoTaskIDs: Set<String> {
+        Set(sidebarShownRows.filter { $0.states.contains(.auto) }.map(\.id))
+    }
+
+    private var sidebarShownRows: [(id: String, states: [WorkSelectionState])] {
         let rows: [(id: String, states: [WorkSelectionState])]
         switch navigation.sidebarScope {
         case .repository, .wave: rows = sidebarTaskRows.filter { $0.states.contains(.working) }
@@ -2209,20 +2216,12 @@ final class WorkModel {
             case .available: row.states.contains(.available)
             case .busy: row.states.contains(.busy)
             }
-        }.map(\.id)
+        }
     }
 
-    /// A Wave or repository row's count: its board's Working and Autonomous columns.
+    /// A Wave or repository row's count: its board's Working column.
     func startedTaskCount(_ board: WorkNavigation.Board) -> Int {
-        (standupTasks(board)?.items ?? []).count { $0.section == .working || $0.section == .autonomous }
-    }
-
-    /// Below the Working Tasks: the started list's Autonomous Tasks (shipping, no
-    /// one's turn). Dashboards and Available/Busy filters have none.
-    var sidebarAutonomousTaskIDs: [String] {
-        guard navigation.sidebarFilter == .working else { return [] }
-        if case .dashboard = navigation.sidebarScope { return [] }
-        return sidebarTaskRows.filter { $0.states.contains(.autonomous) }.map(\.id)
+        (standupTasks(board)?.items ?? []).count { $0.section == .working }
     }
 
     /// Display identity comes from the same scoped readings as membership, never from IDs.
@@ -2682,17 +2681,18 @@ final class WorkModel {
         }
     }
 
-    /// Ship the Task: the Notice says Auto-Ship was requested and its Undo
-    /// stops it. The Task moves when the Machine's reading says so.
+    /// Turn auto on and run the Task, as `lf ship` does: the Notice says auto on
+    /// was requested and its Undo turns auto off. The Task moves when the
+    /// Machine's reading says so.
     func shipTask(_ task: RoadmapTask) {
-        request(task, "Auto-Ship", .taskShip(directory: directory(task), issue: task.task.identifier),
-                      undo: Notice.Action("Undo", help: "Stop Auto-Ship") { [weak self] in
-                          self?.stopShipping(task)
+        request(task, "Auto on", .taskShip(directory: directory(task), issue: task.task.identifier),
+                      undo: Notice.Action("Undo", help: "Auto off") { [weak self] in
+                          self?.turnAutoOff(task)
                       })
     }
 
-    func stopShipping(_ task: RoadmapTask) {
-        request(task, "Stop Auto-Ship", .taskHold(directory: directory(task), issue: task.task.identifier))
+    func turnAutoOff(_ task: RoadmapTask) {
+        request(task, "Auto off", .taskAuto(directory: directory(task), issue: task.task.identifier, on: false))
     }
 
     /// The Work the Machine control describes: the current started Task, else the
@@ -2891,7 +2891,7 @@ final class WorkModel {
     /// Complete and Abandon select the next row below, else the one above, else nothing.
     private func moveSelection(past task: RoadmapTask) {
         guard isSelected(.task(id: task.id)) else { return }
-        let rows = sidebarTaskIDs + sidebarAutonomousTaskIDs
+        let rows = sidebarTaskIDs
         let index = rows.firstIndex(of: task.id) ?? rows.count
         let next = rows.dropFirst(index + 1).first ?? rows.prefix(index).last
         select(next.map { .task(id: $0) })
@@ -2908,7 +2908,7 @@ final class WorkModel {
         }
     }
 
-    /// Start, Auto-Ship and Stop Auto-Ship say "requested" in the click.
+    /// Start, Auto on and Auto off say "requested" in the click.
     private func request(_ task: RoadmapTask, _ name: String, _ write: ServedWrite, undo: Notice.Action? = nil,
                          refused: @escaping @MainActor () -> Void = {}) {
         pendingChanges.request(name, subject: task.task.identifier, write: write, notices: navigation.notices,

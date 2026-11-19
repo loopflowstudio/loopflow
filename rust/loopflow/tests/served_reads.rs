@@ -1254,7 +1254,7 @@ fn server_operations_match_their_lf_commands() {
         | Write::TaskUpdate { .. }
         | Write::TaskClaim { .. }
         | Write::TaskUnassign { .. }
-        | Write::TaskHold { .. }
+        | Write::TaskAuto { .. }
         | Write::TaskMove { .. }
         // Starting a run or a ship starts Processes; task_run_waits_at_an_interactive_step
         // compares the run, and comments differ by their saved IDs.
@@ -1515,7 +1515,7 @@ fn server_operations_match_their_lf_commands() {
         assert_eq!(written["owner"], printed["owner"], "{args:?}");
         assert_eq!(written["owner"].is_null(), !claimed, "{written}");
     }
-    // Auto-Ship is a mark on the Task's Graph; this Task has none, so a stop
+    // Auto is a mark on the Task's Graph; this Task has none, so a stop
     // saves nothing, served or through `lf`. The ship tests hold Tasks that do.
     // No run is live, so an interrupt reaches nothing, in the app as through `lf`.
     let interrupt = Write::TaskInterrupt {
@@ -1575,9 +1575,10 @@ fn server_operations_match_their_lf_commands() {
         assert_eq!(last(&written), last(&printed), "{args:?}");
         assert_eq!(last(&written).0, format!("served {steer}"));
     }
-    let stop = Write::TaskHold {
+    let stop = Write::TaskAuto {
         directory: directory.clone(),
         issue: "INF-123".into(),
+        on: false,
         reason: None,
     };
     let stopped = || {
@@ -1586,7 +1587,7 @@ fn server_operations_match_their_lf_commands() {
             issue: "INF-123".into(),
         }
         .read()
-        .unwrap()["execution"]["auto_ship"]["by"]
+        .unwrap()["execution"]["auto"]["by"]
             .clone()
     };
     compare(stop.clone(), &|| stop.clone(), &stopped);
@@ -2048,12 +2049,14 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             path(directory),
             words(&["task", "unassign", issue, "--json"]),
         ),
-        Write::TaskHold {
+        Write::TaskAuto {
             directory,
             issue,
+            on,
             reason,
         } => {
-            let mut spelled = words(&["task", "hold", issue, "--json"]);
+            let state = if *on { "on" } else { "off" };
+            let mut spelled = words(&["task", "auto", state, issue, "--json"]);
             if let Some(reason) = reason {
                 spelled.extend(words(&["--reason", reason]));
             }

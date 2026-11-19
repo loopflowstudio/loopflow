@@ -96,8 +96,8 @@ The Mac app shows the same records the commands print; it keeps no copy of its o
 - **Dashboards**: Tasks side by side, chosen by a query.
 - **Wave view**: the Wave conversation beside a standup board, with the Tasks
   being worked on three to a page below. The board shows one section at a time:
-  Backlog (unstarted or unassigned), Working (with Task conversation availability),
-  Autonomous (shipping) and Done. The repository page is the same view over every repository Task.
+  Backlog (unstarted or unassigned), Working (with Task conversation availability)
+  and Done. A Task with auto on carries an Auto badge on its card and row. The repository page is the same view over every repository Task.
   Every pane and view part zooms and hides from buttons on hover, its dividers
   drag, and the header's `Show…` menu brings hidden parts back.
 - **⌘K**: search Waves, Tasks, Sessions and Graphs.
@@ -113,7 +113,8 @@ lf desktop dashboard query attention 'state:available or state:blocked'   # save
 ```
 
 Queries take `wave:`, `task:`, `kind:task|wave` and
-`state:open|available|busy|blocked|unstarted|idle|active|moving|shipping|backlog|working|autonomous|done`;
+`state:open|available|busy|blocked|unstarted|idle|active|moving|backlog|working|done|auto`
+(`auto` is an open Task whose auto setting is on);
 whitespace means AND, and `or` and parentheses compose.
 
 ### Changes show at once
@@ -130,7 +131,7 @@ count drops by one. The same holds on a remote Machine and on the phone.
 | Unassign | no owner; the Task moves to Backlog |
 | Move | the Task leaves one Wave's list and joins the other |
 | Rename a Session | the new title |
-| Start, Auto-Ship, Stop Auto-Ship | a Notice: "LOO-5 Auto-Ship requested" |
+| Start, the **Auto** toggle on or off | a Notice: "LOO-5 Auto on requested" |
 
 The Machine's next reading replaces what the click showed. If the Machine
 refuses, the row comes back and one Notice says why:
@@ -140,8 +141,8 @@ LOO-4 couldn't be completed: its PR #12 is open · Show
 ```
 
 A Notice is one line at the bottom of the window with at most one action. A new
-one replaces the last; it goes after six seconds. Auto-Ship's Notice carries
-**Undo**, which stops Auto-Ship. A read that fails also raises a Notice, once,
+one replaces the last; it goes after six seconds. Auto on's Notice carries
+**Undo**, which turns auto off. A read that fails also raises a Notice, once,
 and the view keeps what it last showed. Some Notices stand until what they say
 ends: the Machine away, a Wave with Tasks outside its plan (**Copy recovery**),
 a new Task saved before its Machine answered. They wait under the six-second
@@ -177,7 +178,7 @@ lf --task LOO-12 desktop send -p session 'also cover the timeout path'   # into 
 lf desktop browse http://localhost:5173
 lf desktop move -p browser --destination session --axis vertical
 lf desktop goto 2                                 # what ⌘2 does
-lf desktop do section -p board section=working    # the Wave board: backlog, working, autonomous or done
+lf desktop do section -p board section=working    # the Wave board: backlog, working or done
 lf desktop do filter -p board days=14             # Done covers 14 days; kept on this Mac
 lf desktop zoom --on -p board                     # the board fills the view; --off returns
 ```
@@ -225,7 +226,7 @@ Every Task list read (`lf task list`, `lf wave show`, `lf wave status`,
 ```
 
 `runtime.status` is one of `unstarted`, `idle`, `active`, `moving`,
-`shipping`, `done` or `abandoned`. `lifecycle` includes completion or cancellation
+`done` or `abandoned`. `lifecycle` includes completion or cancellation
 of never-started work; `selection_states` supplies the same lifecycle, board
 section and conversation activity used by Dashboard filters;
 `next_move.owner` (`user`, `wave`, `task`, `ci`, `external`) says who moves it

@@ -182,13 +182,13 @@ pub struct SavedTaskGraphRow {
 
 /// A Task's Graph as another Machine takes it up: the graph it took up, the
 /// step it stands at, the cursor its run sets out from again, if it is on
-/// one, and its Auto-Ship mark. The run's Process stays behind.
+/// one, and its auto mark. The run's Process stays behind.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SavedTaskGraphRecord {
     pub graph: String,
     pub step: String,
     pub run_start: Option<String>,
-    pub auto_ship: Option<AutoShip>,
+    pub auto: Option<Auto>,
 }
 
 fn task_graph_row(
@@ -262,20 +262,20 @@ pub struct TaskRunRestarts {
     pub at: Option<i64>,
 }
 
-/// Auto-Ship on a Task's Graph: whether its interactive steps run headless,
+/// Auto on a Task's Graph: whether its interactive steps run headless,
 /// standing in for the person, and whether its landing may merge.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
 )]
 #[serde(rename_all = "snake_case")]
-pub enum AutoShipState {
-    /// `lf ship` or `lf -b task run` turned it on.
+pub enum AutoState {
+    /// `lf task auto on`, `lf ship` or `lf -b task run` turned it on.
     On,
-    /// `lf task hold` stopped it; only `lf ship` turns it on again.
+    /// `lf task auto off` turned it off; `-b` leaves it off.
     Stopped,
 }
 
-impl AutoShipState {
+impl AutoState {
     pub(super) fn as_str(self) -> &'static str {
         match self {
             Self::On => "on",
@@ -288,31 +288,28 @@ impl AutoShipState {
             "on" => Ok(Self::On),
             "stopped" => Ok(Self::Stopped),
             other => Err(crate::StoreError::InvalidData(format!(
-                "unknown Auto-Ship state {other:?}"
+                "unknown auto state {other:?}"
             ))),
         }
     }
 }
 
-/// The Task's Auto-Ship mark: its state, when it was set and who set it.
+/// The Task's auto mark: its state, when it was set and who set it.
 #[derive(
     Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
 )]
-pub struct AutoShip {
-    pub state: AutoShipState,
+pub struct Auto {
+    pub state: AutoState,
     pub at: i64,
     pub by: crate::process::Starter,
 }
 
-pub(super) fn auto_ship_in(
-    conn: &rusqlite::Connection,
-    task: &TaskId,
-) -> StoreResult<Option<AutoShip>> {
+pub(super) fn auto_in(conn: &rusqlite::Connection, task: &TaskId) -> StoreResult<Option<Auto>> {
     use rusqlite::OptionalExtension;
     let Some((state, at, by)) = conn
         .query_row(
-            "SELECT auto_ship,auto_ship_at,auto_ship_by FROM task_graphs
-             WHERE task_id=?1 AND auto_ship IS NOT NULL",
+            "SELECT auto,auto_at,auto_by FROM task_graphs
+             WHERE task_id=?1 AND auto IS NOT NULL",
             [task.as_str()],
             |row| {
                 Ok((
@@ -326,8 +323,8 @@ pub(super) fn auto_ship_in(
     else {
         return Ok(None);
     };
-    Ok(Some(AutoShip {
-        state: AutoShipState::parse(&state)?,
+    Ok(Some(Auto {
+        state: AutoState::parse(&state)?,
         at,
         by: serde_json::from_str(&by)?,
     }))
@@ -685,7 +682,7 @@ impl SqliteStore {
             graph,
             step,
             run_start,
-            auto_ship: auto_ship_in(&conn, task)?,
+            auto: auto_in(&conn, task)?,
         }))
     }
 
@@ -700,10 +697,10 @@ impl SqliteStore {
     ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let run = record.run_start.as_ref().zip(by);
-        let auto_ship = record.auto_ship.as_ref();
+        let auto = record.auto.as_ref();
         conn.execute(
             "INSERT OR REPLACE INTO task_graphs(task_id,graph,step,run_start,lf_process_id,updated_at,
-                 auto_ship,auto_ship_at,auto_ship_by)
+                 auto,auto_at,auto_by)
              VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)",
             rusqlite::params![
                 task.as_str(),
@@ -712,21 +709,21 @@ impl SqliteStore {
                 run.map(|(start, _)| start),
                 run.map(|(_, by)| by.as_str()),
                 crate::rows::now_unix(),
-                auto_ship.map(|mark| mark.state.as_str()),
-                auto_ship.map(|mark| mark.at),
-                auto_ship.map(|mark| serde_json::to_string(&mark.by)).transpose()?
+                auto.map(|mark| mark.state.as_str()),
+                auto.map(|mark| mark.at),
+                auto.map(|mark| serde_json::to_string(&mark.by)).transpose()?
             ],
         )?;
         Ok(())
     }
 
     /// Take up `graph` for the Task as it is defined now, at `start`. It
-    /// replaces the Task's earlier Graph and keeps its Auto-Ship mark.
+    /// replaces the Task's earlier Graph and keeps its auto mark.
     pub fn take_up_task_graph(&self, task: &TaskId, graph: &str) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
-            "INSERT OR REPLACE INTO task_graphs(task_id,graph,step,updated_at,auto_ship,auto_ship_at,auto_ship_by)
-             SELECT ?1,?2,?3,?4,old.auto_ship,old.auto_ship_at,old.auto_ship_by
+            "INSERT OR REPLACE INTO task_graphs(task_id,graph,step,updated_at,auto,auto_at,auto_by)
+             SELECT ?1,?2,?3,?4,old.auto,old.auto_at,old.auto_by
              FROM (SELECT 1) LEFT JOIN task_graphs old ON old.task_id=?1",
             rusqlite::params![task.as_str(), graph, START, crate::rows::now_unix()],
         )?;
@@ -816,34 +813,34 @@ impl SqliteStore {
         Ok(set)
     }
 
-    /// Set the Task's Auto-Ship mark, noting it in the Task's history. With
+    /// Set the Task's auto mark, noting it in the Task's history. With
     /// `keeps_stop`, a standing stop stays and nothing is written. Returns the
     /// mark it had; a Task with no Graph has none and keeps none.
-    pub fn set_task_auto_ship(
+    pub fn set_task_auto(
         &self,
         task: &TaskId,
-        mark: &AutoShip,
+        mark: &Auto,
         keeps_stop: bool,
         note: Option<&str>,
-    ) -> StoreResult<Option<AutoShip>> {
+    ) -> StoreResult<Option<Auto>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction()?;
-        let before = auto_ship_in(&tx, task)?;
+        let before = auto_in(&tx, task)?;
         if keeps_stop
             && before
                 .as_ref()
-                .is_some_and(|before| before.state == AutoShipState::Stopped)
+                .is_some_and(|before| before.state == AutoState::Stopped)
         {
             return Ok(before);
         }
         let state = super::durable::task_state_in(&tx, task)?;
-        if mark.state == AutoShipState::On && state.is_terminal() {
+        if mark.state == AutoState::On && state.is_terminal() {
             return Err(crate::StoreError::InvalidAuthority(format!(
                 "Task is {state}; it cannot ship"
             )));
         }
         let set = tx.execute(
-            "UPDATE task_graphs SET auto_ship=?2,auto_ship_at=?3,auto_ship_by=?4 WHERE task_id=?1",
+            "UPDATE task_graphs SET auto=?2,auto_at=?3,auto_by=?4 WHERE task_id=?1",
             rusqlite::params![
                 task.as_str(),
                 mark.state.as_str(),
@@ -856,8 +853,8 @@ impl SqliteStore {
         }
         if before.as_ref().map(|before| before.state) != Some(mark.state) {
             let what = match mark.state {
-                AutoShipState::On => "Auto-Ship on",
-                AutoShipState::Stopped => "Auto-Ship stopped",
+                AutoState::On => "auto on",
+                AutoState::Stopped => "auto off",
             };
             let summary = match note {
                 Some(note) => format!("{what}: {}: {note}", mark.by),
@@ -873,14 +870,14 @@ impl SqliteStore {
         Ok(before)
     }
 
-    /// The Task's Auto-Ship mark, if anyone set one.
-    pub fn task_auto_ship(&self, task: &TaskId) -> StoreResult<Option<AutoShip>> {
+    /// The Task's auto mark, if anyone set one.
+    pub fn task_auto(&self, task: &TaskId) -> StoreResult<Option<Auto>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        auto_ship_in(&conn, task)
+        auto_in(&conn, task)
     }
 
     /// Tasks checked out here whose run's carrier has not cleared its OS
-    /// process, shipping or not.
+    /// process.
     pub fn local_task_runs(&self) -> StoreResult<Vec<TaskId>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(
@@ -1042,7 +1039,7 @@ mod tests {
     }
 
     #[test]
-    fn an_auto_ship_stop_stands_until_ship_and_survives_reopening_the_store() {
+    fn an_auto_stop_stands_until_ship_and_survives_reopening_the_store() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("db");
         let store = crate::test_fixture::open(&path).unwrap();
@@ -1056,49 +1053,45 @@ mod tests {
                 due_date: None,
             })
             .unwrap();
-        let mark = |state, at| super::AutoShip {
+        let mark = |state, at| super::Auto {
             state,
             at,
             by: crate::process::Starter::Person {
                 name: Some("Casey".into()),
             },
         };
-        let on = mark(super::AutoShipState::On, 10);
-        let stopped = mark(super::AutoShipState::Stopped, 20);
+        let on = mark(super::AutoState::On, 10);
+        let stopped = mark(super::AutoState::Stopped, 20);
         // No Graph, nothing to carry the mark.
-        store
-            .set_task_auto_ship(&task.id, &on, false, None)
-            .unwrap();
-        assert_eq!(store.task_auto_ship(&task.id).unwrap(), None);
+        store.set_task_auto(&task.id, &on, false, None).unwrap();
+        assert_eq!(store.task_auto(&task.id).unwrap(), None);
         store
             .take_up_task_graph(&task.id, r#"{"name":"code","steps":[]}"#)
             .unwrap();
         assert_eq!(
-            store
-                .set_task_auto_ship(&task.id, &on, false, None)
-                .unwrap(),
+            store.set_task_auto(&task.id, &on, false, None).unwrap(),
             None
         );
         store
-            .set_task_auto_ship(&task.id, &stopped, false, Some("hold"))
+            .set_task_auto(&task.id, &stopped, false, Some("hold"))
             .unwrap();
         // `lf -b task run` keeps a stop; taking up another graph keeps it too.
         store
-            .set_task_auto_ship(&task.id, &mark(super::AutoShipState::On, 30), true, None)
+            .set_task_auto(&task.id, &mark(super::AutoState::On, 30), true, None)
             .unwrap();
         store
             .take_up_task_graph(&task.id, r#"{"name":"feature","steps":[]}"#)
             .unwrap();
         drop(store);
         let store = crate::test_fixture::open(&path).unwrap();
-        assert_eq!(store.task_auto_ship(&task.id).unwrap(), Some(stopped));
+        assert_eq!(store.task_auto(&task.id).unwrap(), Some(stopped));
         // `lf ship` lifts it.
         store
-            .set_task_auto_ship(&task.id, &mark(super::AutoShipState::On, 40), false, None)
+            .set_task_auto(&task.id, &mark(super::AutoState::On, 40), false, None)
             .unwrap();
         assert_eq!(
-            store.task_auto_ship(&task.id).unwrap(),
-            Some(mark(super::AutoShipState::On, 40))
+            store.task_auto(&task.id).unwrap(),
+            Some(mark(super::AutoState::On, 40))
         );
     }
 
@@ -1252,7 +1245,7 @@ mod tests {
     }
 
     #[test]
-    fn a_moved_task_keeps_its_auto_ship_mark_where_it_arrives() {
+    fn a_moved_task_keeps_its_auto_mark_where_it_arrives() {
         let (laptop_dir, mini_dir) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
         let id = TaskId::new();
         let open = |dir: &tempfile::TempDir| {
@@ -1273,23 +1266,23 @@ mod tests {
         laptop
             .take_up_task_graph(&id, r#"{"name":"code","steps":[]}"#)
             .unwrap();
-        let on = super::AutoShip {
-            state: super::AutoShipState::On,
+        let on = super::Auto {
+            state: super::AutoState::On,
             at: 7,
             by: crate::process::Starter::Person {
                 name: Some("Casey".into()),
             },
         };
-        laptop.set_task_auto_ship(&id, &on, false, None).unwrap();
+        laptop.set_task_auto(&id, &on, false, None).unwrap();
         let record = laptop.task_graph_record(&id).unwrap().unwrap();
         // Delivered twice, as a retried move is.
         mini.place_moved_task_graph(&id, &record, None).unwrap();
         mini.place_moved_task_graph(&id, &record, None).unwrap();
-        assert_eq!(mini.task_auto_ship(&id).unwrap(), Some(on));
+        assert_eq!(mini.task_auto(&id).unwrap(), Some(on));
     }
 
     #[test]
-    fn a_released_tasks_ship_log_becomes_its_auto_ship_mark() {
+    fn a_released_tasks_ship_log_becomes_its_auto_mark() {
         use crate::migration_runner::{apply_before_migration, upgrade_from_migration};
 
         let conn = rusqlite::Connection::open_in_memory().unwrap();
@@ -1297,7 +1290,7 @@ mod tests {
             &crate::test_fixture::observers(),
             &crate::test_fixture::build(),
             &conn,
-            "task_graph_auto_ship",
+            "task_graph_auto",
         );
         let (shipping, stopped, withdrawn, never) =
             (TaskId::new(), TaskId::new(), TaskId::new(), TaskId::new());
@@ -1330,32 +1323,29 @@ mod tests {
             &crate::test_fixture::observers(),
             &crate::test_fixture::build(),
             &conn,
-            "task_graph_auto_ship",
+            "task_graph_auto",
         );
-        let mark = |task| super::auto_ship_in(&conn, task).unwrap();
+        let mark = |task| super::auto_in(&conn, task).unwrap();
         let person = |name: Option<&str>| crate::process::Starter::Person {
             name: name.map(str::to_owned),
         };
         assert_eq!(
             mark(&shipping),
-            Some(super::AutoShip {
-                state: super::AutoShipState::On,
+            Some(super::Auto {
+                state: super::AutoState::On,
                 at: 30,
                 by: person(None),
             })
         );
         assert_eq!(
             mark(&stopped),
-            Some(super::AutoShip {
-                state: super::AutoShipState::Stopped,
+            Some(super::Auto {
+                state: super::AutoState::Stopped,
                 at: 20,
                 by: person(Some("Casey")),
             })
         );
-        assert_eq!(
-            mark(&withdrawn).unwrap().state,
-            super::AutoShipState::Stopped
-        );
+        assert_eq!(mark(&withdrawn).unwrap().state, super::AutoState::Stopped);
         assert_eq!(mark(&never), None);
         // A released lf reads no Task as shipping.
         let shipped: i64 = conn

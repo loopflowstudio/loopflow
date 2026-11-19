@@ -164,11 +164,11 @@ inside one IMMEDIATE transaction:
 | Someone else's | Your own Wave Machine; your later claim wins |
 
 A write for a Task another Machine runs travels as the operation itself, not
-as a command line. Running, shipping, holding, claiming or unassigning the Task,
-and opening or resuming its Session, reach the writer the same way:
+as a command line. Running, shipping, claiming or unassigning the Task, setting
+its auto, and opening or resuming its Session, reach the writer the same way:
 
 ```bash
-lf task hold LOO-123 --json             # LOO-123 runs on mini; mini's server answers
+lf task auto off LOO-123 --json         # LOO-123 runs on mini; mini's server answers
 ssh mini lf server status               # while it runs, the laptop is a connected client
 ```
 
@@ -403,10 +403,10 @@ If it did, its answer lost, the Task runs on mini and the claim is written
 there. If it did not, or mini is gone, the laptop takes the Task back and the
 move ends.
 
-Auto-Ship travels with the move, as the Graph position does: it is one mark
-on the Task's Graph (on or stopped, who, when). The continued run is a plain
-`lf task run`; with Auto-Ship on it stands in at interactive steps on mini, as
-it would have on the laptop. `lf task hold MTG-321` stops Auto-Ship on either
+Auto travels with the move, as the Graph position does: it is one setting
+on the Task's Graph (on or off, who, when). The continued run is a plain
+`lf task run`; with auto on it stands in at interactive steps on mini, as
+it would have on the laptop. `lf task auto off MTG-321` turns it off on either
 Machine. A Machine ships only Tasks it owns: once a Task has
 left, its old checkout starts nothing.
 

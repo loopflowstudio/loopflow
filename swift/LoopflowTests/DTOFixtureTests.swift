@@ -588,15 +588,15 @@ struct DTOFixtureTests {
         }
     }
 
-    @Test("Task execution names who started its Graph and who stopped Auto-Ship, requiring every mark")
+    @Test("Task execution names who started its Graph and who set auto, requiring every mark")
     func taskExecutionAttributionFixture() throws {
         let data = try loadFixtureData("task_checkout.json")
         let execution = try JSONDecoder().decode(TaskExecution.self, from: data)
         #expect(execution.startedBy?.label == "Session \"LOO-291 task\" for Maya")
-        #expect(execution.autoShip == AutoShip(state: .stopped, at: 1793266380, by: .person(name: "Maya")))
+        #expect(execution.auto == Auto(state: .stopped, at: 1793266380, by: .person(name: "Maya")))
         #expect(Starter.person(name: nil).label == "attribution unresolved")
         var root = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
-        root.removeValue(forKey: "auto_ship")
+        root.removeValue(forKey: "auto")
         #expect(throws: DecodingError.self) {
             try JSONDecoder().decode(TaskExecution.self, from: JSONSerialization.data(withJSONObject: root))
         }
@@ -605,7 +605,7 @@ struct DTOFixtureTests {
             let status = try #require(capture["status"] as? [String: Any], "\(phase)")
             let recorded = try JSONDecoder().decode(
                 TaskExecution.self, from: JSONSerialization.data(withJSONObject: try #require(status["execution"])))
-            #expect(recorded.startedBy == nil && recorded.autoShip == nil, "\(phase)")
+            #expect(recorded.startedBy == nil && recorded.auto == nil, "\(phase)")
         }
     }
 

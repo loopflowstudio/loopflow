@@ -7,7 +7,7 @@ use rusqlite::params;
 use std::num::NonZeroU32;
 
 #[test]
-fn defer_holds_the_lifecycle_and_a_run_ships_only_with_auto_ship_on() {
+fn defer_holds_the_lifecycle_and_a_run_is_moving_whatever_its_auto_setting() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("db");
     let store = crate::store::opening::open_ephemeral(&path).unwrap();
@@ -105,8 +105,7 @@ fn defer_holds_the_lifecycle_and_a_run_ships_only_with_auto_ship_on() {
         Some(std::path::PathBuf::from("/repo/task"))
     );
 
-    // A run with nothing interactive ahead moves the Task; nobody turned
-    // Auto-Ship on, so it is not shipping.
+    // A run moves the Task.
     assert!(crate::store::task_work::start_task_graph_run(
         &store,
         &task,
@@ -126,39 +125,23 @@ fn defer_holds_the_lifecycle_and_a_run_ships_only_with_auto_ship_on() {
     .unwrap());
     let state = || store.task_state(&task).unwrap();
     assert_eq!(state(), crate::durable::TaskState::Moving);
-    let mark = |state| loopflow_storage::sqlite::AutoShip {
+    let mark = |state| loopflow_storage::sqlite::Auto {
         state,
         at: loopflow_storage::rows::now_unix(),
         by: crate::process::Starter::Person { name: None },
     };
-    // Auto-Ship on makes the running Task shipping; a stop makes it moving again.
-    store
-        .set_task_auto_ship(
-            &task,
-            &mark(loopflow_storage::sqlite::AutoShipState::On),
-            false,
-            None,
-        )
-        .unwrap();
-    assert_eq!(state(), crate::durable::TaskState::Shipping);
-    store
-        .set_task_auto_ship(
-            &task,
-            &mark(loopflow_storage::sqlite::AutoShipState::Stopped),
-            false,
-            None,
-        )
-        .unwrap();
-    assert_eq!(state(), crate::durable::TaskState::Moving);
-    store
-        .set_task_auto_ship(
-            &task,
-            &mark(loopflow_storage::sqlite::AutoShipState::On),
-            false,
-            None,
-        )
-        .unwrap();
-    // The carrier exits: with Auto-Ship on and nothing running, no person is needed.
+    // State says what is happening, whoever takes the interactive steps:
+    // the running Task is moving with auto off and with it on.
+    for setting in [
+        loopflow_storage::sqlite::AutoState::Stopped,
+        loopflow_storage::sqlite::AutoState::On,
+    ] {
+        store
+            .set_task_auto(&task, &mark(setting), false, None)
+            .unwrap();
+        assert_eq!(state(), crate::durable::TaskState::Moving);
+    }
+    // The carrier exits and nothing runs.
     store
         .finish_run(RunOwner::TaskCarrier, &by, 2, Some(0), None)
         .unwrap();
@@ -202,7 +185,7 @@ fn reaching_end_without_remaining_steps_requests_completion_once() {
     store.set_task_graph_step(&task, "review").unwrap();
     assert!(store.end_task_graph(&task).unwrap());
     assert!(store.task_completion_pending(&task).unwrap().is_some());
-    assert_eq!(store.task_auto_ship(&task).unwrap(), None);
+    assert_eq!(store.task_auto(&task).unwrap(), None);
     assert!(!store.end_task_graph(&task).unwrap());
 }
 

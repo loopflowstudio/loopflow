@@ -3096,7 +3096,7 @@ fn task_move_to_a_mini_without_the_repository_takes_it_in_from_planning() {
     );
 }
 
-/// The laptop's run approved Auto-Ship, and the approval travels in planning.
+/// The laptop's run turned auto on, and the approval travels in planning.
 /// Once the Task moved back, mini's recovery must not start shipping it.
 #[test]
 fn mini_starts_nothing_for_a_task_that_moved_back() {
@@ -4051,10 +4051,10 @@ tee -a '{record}/input' | env -i HOME='{remote}' PATH=/usr/bin:/bin bash -c "$re
             remote = remote.display(),
         ),
     );
-    let held = fixture.json(&["task", "hold", task.as_str(), "--json"]);
+    let held = fixture.json(&["task", "auto", "off", task.as_str(), "--json"]);
     assert_eq!(
         held,
-        serde_json::json!({"issue": task.as_str(), "stopped": false})
+        serde_json::json!({"issue": task.as_str(), "on": false, "was_on": false})
     );
 
     let commands = fs::read_to_string(record.join("commands")).unwrap();
@@ -4064,11 +4064,11 @@ tee -a '{record}/input' | env -i HOME='{remote}' PATH=/usr/bin:/bin bash -c "$re
             .any(|line| line == "exec 'lf' 'server' 'connect'"),
         "{commands}"
     );
-    assert!(!commands.contains("hold"), "{commands}");
+    assert!(!commands.contains("auto"), "{commands}");
     let (hello, request) = entry_input(&record);
     assert_eq!(hello["client"]["kind"], "machine");
     assert_eq!(request["sender"]["repository"], plan.repository.as_str());
-    assert_eq!(request["operation"]["kind"], "task.hold");
+    assert_eq!(request["operation"]["kind"], "task.auto");
     assert_eq!(request["operation"]["issue"], task.as_str());
 }
 
@@ -4328,7 +4328,7 @@ esac
             ran.display()
         ),
     );
-    let output = fixture.run(&["task", "hold", task.as_str(), "--json"]);
+    let output = fixture.run(&["task", "auto", "off", task.as_str(), "--json"]);
     assert!(!output.status.success());
     let error = String::from_utf8_lossy(&output.stderr);
     assert!(
@@ -4352,7 +4352,7 @@ fn an_lf_that_dies_before_answering_says_so_and_what_it_printed() {
             1,
         ),
     );
-    let output = fixture.run(&["task", "hold", task.as_str(), "--json"]);
+    let output = fixture.run(&["task", "auto", "off", task.as_str(), "--json"]);
     assert_eq!(output.status.code(), Some(1));
     let error = String::from_utf8_lossy(&output.stderr);
     assert!(
@@ -4377,7 +4377,7 @@ fn an_unreachable_destination_names_the_ssh_check_not_its_server() {
             1,
         ),
     );
-    let output = fixture.run(&["task", "hold", task.as_str(), "--json"]);
+    let output = fixture.run(&["task", "auto", "off", task.as_str(), "--json"]);
     assert_eq!(output.status.code(), Some(1));
     let error = String::from_utf8_lossy(&output.stderr);
     assert!(

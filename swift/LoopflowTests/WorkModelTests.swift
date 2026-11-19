@@ -1399,7 +1399,7 @@ struct TaskPlanningReadabilityTests {
     }
 
     @Test("Loaded empty descriptions omit the preview, also while updating", arguments: [false, true])
-    func emptyDescription(shipping: Bool) throws {
+    func emptyDescription(saved: Bool) throws {
         let fixture = try WorkTestFixture.load()
         var root = try #require(JSONSerialization.jsonObject(with: Data(fixture.roadmapJSON.utf8)) as? [String: Any])
         var tasks = try #require(root["tasks"] as? [String: Any])
@@ -1416,21 +1416,21 @@ struct TaskPlanningReadabilityTests {
         let cache = WorkCache(directory: directory)
         cache.saveRoadmap(String(decoding: wire, as: UTF8.self))
         cache.flush()
-        let model = WorkModel(query: fixture.query, repoPath: "/src/loopflow", cache: shipping ? cache : nil)
-        if !shipping {
+        let model = WorkModel(query: fixture.query, repoPath: "/src/loopflow", cache: saved ? cache : nil)
+        if !saved {
             model.applyFixture(roadmap: .available(try JSONDecoder().decode(RoadmapSnapshot.self, from: wire)),
                 waves: .available(fixture.waves), workActivity: .available(fixture.workActivity), repos: [], fixed: true)
         }
         let record = try #require(model.task(id: "issue-now")?.task)
         let member = WorkViewPlan.Content(
             work: .init(repository: "repo", kind: .task, id: record.runtime?.workId ?? record.id),
-            title: record.task.name, states: shipping ? [.autonomous] : [.working], identifier: record.task.identifier,
+            title: record.task.name, states: [.working], identifier: record.task.identifier,
             primarySession: nil, location: nil, argv: nil, unavailable: [])
         model.applyTaskList(fixtureViewPlan(owner: key, members: [member]), wave: nil, reason: "")
         let navigator = WorkNavigator(model: model, onOpenSession: { _ in })
         #expect(try navigator.inspect().find(text: record.task.name).string() == record.task.name)
         #expect(throws: (any Error).self) { try navigator.inspect().find(text: "Loading planning…") }
-        if shipping {
+        if saved {
             #expect(try navigator.inspect().find(text: "Updating…").string() == "Updating…")
         }
     }

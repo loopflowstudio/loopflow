@@ -561,10 +561,10 @@ attempts settlement. Failed settlement retains end and its reason; retry only
 Accepted Linear completion or reopening updates status without moving the graph
 or terminating Processes. Reopening supersedes old requests. Ordinary reads do
 not execute completion. Task state is derived: `active` at an interactive step
-with nothing running, `moving` while a run carries it with an interactive step
-ahead, `shipping` once Auto-Ship is approved and running; abandonment is its own mark.
-An unfinished Graph or step in the Task's work also makes it `moving` (or
-`shipping` when approved), including a Graph started before checkout adoption.
+with nothing running, `moving` while a run carries it, whatever its auto
+setting; abandonment is its own mark.
+An unfinished Graph or step in the Task's work also makes it `moving`,
+including a Graph started before checkout adoption.
 That execution does not add the Graph to the Task's history.
 
 On-demand team checks acquire issue membership/state independently of

@@ -179,7 +179,7 @@ writes! {
 
     /// `lf [-b] [-a <agent>] task run <issue> [--from <step>] --json`, started
     /// detached: the Graph process it started, or where the Task now waits.
-    /// `approve` is `-b`: every step headless to `end`, approving Auto-Ship.
+    /// `approve` is `-b`: every step headless to `end`, turning auto on.
     #[serde(rename = "task.run")]
     TaskRun {
         directory: PathBuf,
@@ -209,7 +209,7 @@ writes! {
         )?,
     },
 
-    /// `lf --task <issue> ship --json`, started detached: turns Auto-Ship on
+    /// `lf --task <issue> ship --json`, started detached: turns auto on
     /// and returns the run, as `task.run` does.
     #[serde(rename = "task.ship")]
     TaskShip { directory: PathBuf, issue: String } => task::TaskRun;
@@ -218,18 +218,19 @@ writes! {
         None => task::ship(directory, issue, environment)?,
     },
 
-    /// `lf task hold <issue> --json`: stops the Task's Auto-Ship.
-    #[serde(rename = "task.hold")]
-    TaskHold {
+    /// `lf task auto on|off <issue> --json`: sets the Task's auto setting.
+    #[serde(rename = "task.auto")]
+    TaskAuto {
         directory: PathBuf,
         issue: String,
+        on: bool,
         /// Why, as `--reason` records it.
         #[serde(deserialize_with = "Option::deserialize")]
         reason: Option<String>,
-    } => task::Hold;
-    { issue, reason, .. } => match remote {
+    } => task::AutoSet;
+    { issue, on, reason, .. } => match remote {
         Some(remote) => remote.call()?,
-        None => task::hold(issue, reason.as_deref())?,
+        None => task::auto(issue, *on, reason.as_deref())?,
     },
 
     /// `lf task sync <issue> [--keep-theirs | --use-mine]`: exchange the
@@ -1088,7 +1089,7 @@ macro_rules! directory_of {
             | Write::TaskUnassign { directory, .. }
             | Write::TaskRun { directory, .. }
             | Write::TaskShip { directory, .. }
-            | Write::TaskHold { directory, .. }
+            | Write::TaskAuto { directory, .. }
             | Write::TaskSync { directory, .. }
             | Write::TrackerAnswer { directory, .. }
             | Write::TaskSteer { directory, .. }
@@ -1155,7 +1156,7 @@ impl Write {
             Self::TaskRun { issue, .. } | Self::TaskShip { issue, .. } => {
                 (remote_task(issue)?, true)
             }
-            Self::TaskHold { issue, .. } => (remote_task(issue)?, false),
+            Self::TaskAuto { issue, .. } => (remote_task(issue)?, false),
             Self::TaskClaim { issue, .. } | Self::TaskUnassign { issue, .. } => {
                 (remote_ownership_writer(issue)?, false)
             }
@@ -1178,7 +1179,7 @@ impl Write {
         let mut write = self.clone();
         if let Self::TaskRun { issue, .. }
         | Self::TaskShip { issue, .. }
-        | Self::TaskHold { issue, .. }
+        | Self::TaskAuto { issue, .. }
         | Self::TaskClaim { issue, .. }
         | Self::TaskUnassign { issue, .. } = &mut write
         {
@@ -1506,7 +1507,7 @@ mod tests {
             r#"{"kind":"task.move","directory":"/r","issue":"FIX-1","wave":null,"machine":null}"#,
             r#"{"kind":"desktop.dashboard.unpin","directory":"/r","id":"picked","revision":3}"#,
             r#"{"kind":"desktop.dashboard.query","directory":"/r","id":"picked","expression":"-state:done","revision":null}"#,
-            r#"{"kind":"task.hold","directory":"/r","issue":"FIX-1","reason":null}"#,
+            r#"{"kind":"task.auto","directory":"/r","issue":"FIX-1","on":false,"reason":null}"#,
             r#"{"kind":"desktop.portfolio.set","change":{"action":"remove","path":"/r"}}"#,
             r#"{"kind":"session.resume","directory":"/r","id":null,"task":null,"wave":null,"agent":null}"#,
             r#"{"kind":"session.new","directory":"/r","request_id":"new-thread","id":"session_1","agent":"codex"}"#,

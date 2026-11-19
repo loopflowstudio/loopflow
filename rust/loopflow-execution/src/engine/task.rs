@@ -1,4 +1,4 @@
-//! The `task` namespace's core loop: run, ship, hold, steer, report, wait and
+//! The `task` namespace's core loop: run, ship, auto, steer, report, wait and
 //! interrupt a Task, and claim or unassign it.
 //!
 //! A run and a ship outlive the request that starts them. From a terminal the
@@ -30,8 +30,8 @@ pub enum TaskRun {
         issue: String,
         /// The graph and where the run set out: `code from implement`.
         run: String,
-        /// The run may merge the PR: Auto-Ship is on, or no interactive step
-        /// is left ahead, and nobody stopped Auto-Ship.
+        /// The run may merge the PR: auto is on, or no interactive step is
+        /// left ahead, and nobody turned auto off.
         ships: bool,
         graph_process: LfProcessId,
         /// Where the run's output goes once its launcher lets go; null while a
@@ -57,7 +57,7 @@ impl TaskRun {
             } => Some(format!(
                 "{issue} · {run} running as Graph process {graph_process}{}\n  follow: lf task status {issue}\n  log:    {}",
                 if *ships {
-                    format!("\n  ships:  this run may merge the PR; `lf task hold {issue}` stops it")
+                    format!("\n  ships:  this run may merge the PR; `lf task auto off {issue}` stops it")
                 } else {
                     String::new()
                 },
@@ -70,22 +70,24 @@ impl TaskRun {
     }
 }
 
-/// What `task.hold` stopped.
+/// What `task.auto` set.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct Hold {
+pub struct AutoSet {
     pub issue: String,
-    /// Auto-Ship was on; otherwise only the stop was saved.
-    pub stopped: bool,
+    /// The Task's auto setting now.
+    pub on: bool,
+    /// Auto was on before this.
+    pub was_on: bool,
 }
 
-impl Hold {
+impl AutoSet {
     pub fn render(&self) -> String {
         let issue = &self.issue;
-        if self.stopped {
-            format!("{issue} stopped shipping")
-        } else {
-            format!("{issue} was not shipping; no run merges it until `lf ship {issue}`")
+        match (self.on, self.was_on) {
+            (true, _) => format!("{issue}: auto on"),
+            (false, true) => format!("{issue}: auto off"),
+            (false, false) => format!("{issue}: auto was not on"),
         }
     }
 }
@@ -100,7 +102,7 @@ pub struct Waited {
 
 /// `task.run`: start the Task's run detached, as `lf [-b] [-a <agent>] task
 /// run <issue> [--from <step>]` does, and return once it is known. `approve`
-/// runs every step headless to `end` and approves Auto-Ship, as `-b` does;
+/// runs every step headless to `end` and turns auto on, as `-b` does;
 /// without it the run stops before the next interactive step. With no
 /// `agent`, each step's harness is the repository's configured default.
 pub fn run(
@@ -119,21 +121,29 @@ pub fn run(
     )
 }
 
-/// `task.ship`: turn Auto-Ship on and start the Task's run detached, as
+/// `task.ship`: turn auto on and start the Task's run detached, as
 /// `lf --task <issue> ship` does: it returns what `task.run` returns, and the
 /// run stands in at each interactive step until the PR lands.
 pub fn ship(directory: &Path, issue: &str, environment: &[(String, String)]) -> Result<TaskRun> {
     launch::start_with(directory, &spell_ship(issue), environment)
 }
 
-/// `task.hold`: stop Auto-Ship, as `lf task hold <issue>` does, until the
-/// next `task.ship`. Nothing is killed; the run waits at its next interactive
-/// or merging step.
-pub fn hold(issue: &str, reason: Option<&str>) -> Result<Hold> {
-    let stopped = crate::ops::task::ship::ship_stop(issue, reason).map_err(written)?;
-    Ok(Hold {
+/// `task.auto`: set the Task's auto setting, as `lf task auto on|off <issue>`
+/// does. On, its run stands in at each interactive step and may merge. Off,
+/// nothing is killed: the run waits at its next interactive or merging step
+/// until auto is on again.
+pub fn auto(issue: &str, on: bool, reason: Option<&str>) -> Result<AutoSet> {
+    use crate::ops::task::ship;
+    let was_on = if on {
+        ship::auto_on(issue, reason)
+    } else {
+        ship::auto_off(issue, reason)
+    }
+    .map_err(written)?;
+    Ok(AutoSet {
         issue: issue.to_owned(),
-        stopped,
+        on,
+        was_on,
     })
 }
 
@@ -280,7 +290,7 @@ pub fn spell_ship(issue: &str) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Hold, TaskRun};
+    use super::{AutoSet, TaskRun};
     use serde::{de::DeserializeOwned, Serialize};
 
     /// A response fixture's `result` decodes as `T` and encodes back unchanged.
@@ -319,11 +329,18 @@ mod tests {
         assert!(ships
             .render()
             .unwrap()
-            .contains("this run may merge the PR; `lf task hold LOO-1` stops it"));
-        let held: Hold = result(include_str!(
-            "../../tests/fixtures/dto/server/task_held.json"
+            .contains("this run may merge the PR; `lf task auto off LOO-1` stops it"));
+        let set: AutoSet = result(include_str!(
+            "../../tests/fixtures/dto/server/task_auto_set.json"
         ));
-        assert_eq!(held.render(), "LOO-1 stopped shipping");
+        assert_eq!(set.render(), "LOO-1: auto off");
+        let was_off = AutoSet {
+            was_on: false,
+            ..set.clone()
+        };
+        assert_eq!(was_off.render(), "LOO-1: auto was not on");
+        let on = AutoSet { on: true, ..set };
+        assert_eq!(on.render(), "LOO-1: auto on");
         // A missing field is an error, never a default.
         assert!(serde_json::from_str::<TaskRun>(r#"{"state":"running","issue":"LOO-1"}"#).is_err());
         let waiting = TaskRun::Waiting {

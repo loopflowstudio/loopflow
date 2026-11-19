@@ -242,7 +242,7 @@ lf task run LOO-12 feature          # runs up to explore and stops; the Task wai
 lf task run LOO-12                  # after you're done there: on to human-review
 lf task run LOO-12 --from explore   # back to choosing what to build
 lf -b task run LOO-12               # the rest, straight through to a merged PR
-lf ship LOO-12                      # turn Auto-Ship on, then exactly `lf task run LOO-12`
+lf ship LOO-12                      # turn auto on, then exactly `lf task run LOO-12`
 ```
 
 At `human-review` you read one page, `scratch/human-review.html`, built from
@@ -268,45 +268,46 @@ lf task run LOO-12 --from gate      # when gate's work must be redone
 starting from an interactive step only puts the Task there. After the last step
 the Task reaches `end`, which requests completion.
 
-### Auto-Ship
+### Auto
 
-Auto-Ship is one mark on the Task's Graph: on, stopped, or never set. While it
-is on, the Task's run stands in for you at each interactive step it reaches and
-lands the PR. `lf ship` turns it on and runs the Task, so it prints what
+Auto is one setting on the Task's Graph: on, off, or never set. Status says
+what is happening; auto says who takes the interactive steps. While it is on,
+the Task's runs stand in for you at each interactive step they reach and may
+merge the PR. `lf ship` turns it on and runs the Task, so it prints what
 `lf task run` prints and leaves one Graph process:
 
 ```bash
 lf ship LOO-12                      # LOO-12 · code from human-review running as Graph process …
-lf task status LOO-12               # Auto-Ship: on by Maya, Nov 18 09:04
-lf task hold LOO-12                 # LOO-12 stopped shipping
+lf task status LOO-12               # LOO-12  moving · auto: on by Maya, Nov 18 09:04
+lf task auto off LOO-12             # LOO-12: auto off
+lf task auto on LOO-12              # LOO-12: auto on; starts nothing
 ```
 
-The run reads Auto-Ship at each interactive step, not at launch: turn it on
+The run reads auto at each interactive step, not at launch: turn it on
 while `build` runs and the run stands in at `human-review` when it gets there.
-`lf task hold`, or Desktop's **Stop Auto-Ship**, kills nothing. The run carries on to its next interactive step and
+`lf task auto off`, or Desktop's **Auto** toggle, kills nothing. The run carries on to its next interactive step and
 waits there, or reaches a merging step (`lf land`, `lf pr arm`, `pr-land`) and
-stops with "not approved to merge (Maya stopped shipping). `lf ship` lands it."
-The stop stands:
-`lf -b task run` turns Auto-Ship on unless it is stopped, and only `lf ship`
-lifts a stop. Other Graphs in the Task's worktree never move it. There is no
+waits before it: "Waiting at pr land: auto is off (Maya). `lf ship` lands it."
+Auto-merge that Loopflow armed is disarmed. Off stands:
+`lf -b task run` turns auto on unless someone turned it off, and only
+`lf task auto on` or `lf ship` turns it back on. Other Graphs in the Task's worktree never move it. There is no
 approve command: give feedback in the Task's conversation, which knows its step
 and how to go on.
 
-Auto-Ship decides who takes the interactive steps; it is not what lets a PR
-merge. Any run that reaches a merging step lands unless Auto-Ship is stopped:
-`lf task run` after `human-review` goes through `deliver`, and `auto`, which has
-no interactive step, lands without Auto-Ship ever being on. `lf task run` says
-so on its `ships:` line. A failing run leaves Auto-Ship alone: the Task stops at
+Auto decides who takes the interactive steps; it is not what lets a PR
+merge. Any run that reaches a merging step lands unless auto is off:
+`lf task run` after `human-review` goes through `deliver`, and the `auto` Graph, which has
+no interactive step, lands without the setting ever being on. `lf task run` says
+so on its `ships:` line. A failing run leaves auto alone: the Task stops at
 the failed step, and the next `lf task run` stands in again. A PR merged by hand
 is met by the run's own landing step, which sees the merge and goes on.
 
 | Task state | When |
 |---|---|
 | `unstarted` | no checkout yet |
-| `idle` | a checkout, nothing running, not at an interactive step (or Auto-Ship on, waiting for the next run) |
+| `idle` | a checkout, nothing running, not at an interactive step |
 | `active` | at an interactive step, in its Task Session |
-| `moving` | a run carries it and Auto-Ship is not on |
-| `shipping` | a run carries it and Auto-Ship is on |
+| `moving` | a run carries it, whatever the auto setting |
 | `done` · `abandoned` | completed, dropped |
 
 Builtins are `feature` (explore, then plan, build, human-review, deliver, verify), `code`

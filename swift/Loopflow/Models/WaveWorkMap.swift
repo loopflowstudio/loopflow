@@ -242,7 +242,7 @@ public struct TaskWorktreeSnapshot: Decodable, Sendable, Hashable {
 /// Where a Task sits on the Wave board, derived once in Rust: the board, the
 /// sidebar's Working Tasks and every count read it.
 public enum TaskSection: String, Decodable, Sendable, Hashable {
-    case backlog, working, autonomous, done, abandoned
+    case backlog, working, done, abandoned
 }
 
 public struct RoadmapTask: Decodable, Sendable, Identifiable, Hashable {

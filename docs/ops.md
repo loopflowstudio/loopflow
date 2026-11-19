@@ -29,10 +29,10 @@ Nothing repairs its PR until a waited landing does.
 To go from review-ready to merged in one step, ship the Task:
 
 ```bash
-lf ship LOO-12               # Auto-Ship on, then the remaining steps: reflect, gate, land --wait-and-fix
+lf ship LOO-12               # auto on, then the remaining steps: reflect, gate, land --wait-and-fix
 ```
 
-`lf ship` turns [Auto-Ship](orchestration.md#auto-ship) on and runs the Task, so
+`lf ship` turns [auto](orchestration.md#auto) on and runs the Task, so
 its run stands in for you at `human-review` and `verify`. A PR someone merges
 by hand meanwhile is met by the landing step, which sees the merge and goes on
 to `verify`.
@@ -122,7 +122,7 @@ directory), name that step in your agent guide. Gate does it before publishing.
 ### When CI fails
 
 ```bash
-lf ship                        # a Task: Auto-Ship on, the remaining steps, land and repair until merge
+lf ship                        # a Task: auto on, the remaining steps, land and repair until merge
 lf land --wait-and-fix         # this PR: land and repair in the foreground
 lf repo ci --since 7d    # how each failure was detected, repaired and landed
 ```
@@ -130,7 +130,7 @@ lf repo ci --since 7d    # how each failure was detected, repaired and landed
 The waiting process is the only one that repairs. It starts one `ci-fix` when
 its PR fails a required check or GitHub drops its merge request, stops when a
 person removes that request, and returns on merge or closure. A Task run
-that died, shipping or not, starts again as `lf task run` from the Machine server's recovery pass,
+that died, auto on or not, starts again as `lf task run` from the Machine server's recovery pass,
 within a minute, up to five times before it waits for you. After bare `lf land` returns, nothing
 repairs its PR.
 
@@ -407,7 +407,7 @@ retain service authentication through `lf account`. See
 | `lf pr publish` / `lf pr open` | Ready PR, printed / draft PR, opened |
 | `lf pr abandon [BRANCH]` | Close the PR, remove the worktree, delete the branch |
 | `lf pr reconcile` | Check recorded landings once; recover a Task's missing PR |
-| `lf ship [ISSUE]` / `lf task hold ISSUE` | Turn Auto-Ship on and run the Task / stop Auto-Ship at its next interactive or merging step |
+| `lf ship [ISSUE]` / `lf task auto on\|off [ISSUE]` | Turn auto on and run the Task / set auto: off makes the run wait at its next interactive or merging step |
 | `lf repo ci [--since 7d]` | Report CI incidents and their repairs |
 | `lf repo release run\|check\|status\|notes\|bump\|tag\|publish` | Release stages, together or one at a time |
 | `lf commit`, `lf sync`, `lf wt create\|switch\|list\|prune\|delete` | Git, with Task and stack awareness |

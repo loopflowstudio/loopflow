@@ -1115,7 +1115,7 @@ os.execv({binary}, [{binary}, *sys.argv[1:]])
                 ".lf/graphs/held.yaml",
                 "- cmd: task sync --plan\n- cmd: graph show late\n",
             ),
-            // The same, with a stop for a person: running it approves no Auto-Ship.
+            // The same, with a stop for a person: running it turns no auto on.
             (
                 ".lf/graphs/held-review.yaml",
                 "- cmd: task sync --plan\n- cmd: graph show late\n- interactive: {name: demo, id: review}\n",
@@ -1911,11 +1911,11 @@ sys.exit(code)
     );
     assert!(!ran.text.contains("starting it again"), "{}", ran.text);
     assert_eq!(support::recorded_graphs(task.home.path()).len(), 1);
-    // `-b` turned Auto-Ship on, and the refusal leaves it on; nothing starts
+    // `-b` turned auto on, and the refusal leaves it on; nothing starts
     // the stopped run again.
     for _ in 0..2 {
         let status = task.text_status();
-        assert!(status.contains("Auto-Ship: on"), "{status}");
+        assert!(status.contains("auto: on"), "{status}");
         assert!(
             status.contains("stopped after a provider refusal"),
             "{status}"
@@ -1929,8 +1929,8 @@ sys.exit(code)
     assert_eq!(support::recorded_graphs(task.home.path()).len(), 1);
 
     // Once capacity is available, a manual run picks up the refused step; with
-    // Auto-Ship stopped it waits at review for a person.
-    task.ok(&["task", "hold", "INF-123"]);
+    // auto off it waits at review for a person.
+    task.ok(&["task", "auto", "off", "INF-123"]);
     fs::write(
         task.repo.path().join(".lf/graphs/late.yaml"),
         "- cmd: task sync --plan\n",
@@ -2247,10 +2247,10 @@ fn end_is_retained_while_the_tasks_pr_blocks_completion() {
     assert_eq!(task.graph()["position"], at("end"));
     // Nothing runs while completion waits on the PR, so the Task reads idle.
     assert_eq!(task.state(), "idle");
-    // Nothing turned Auto-Ship on; a stop stands at `end` all the same.
-    let stop = task.run(&["--task", "INF-123", "ship", "--stop"]);
+    // Nothing turned auto on; a stop stands at `end` all the same.
+    let stop = task.run(&["--task", "INF-123", "task", "auto", "off"]);
     let stop = String::from_utf8_lossy(&stop.stdout);
-    assert!(stop.contains("INF-123 was not shipping"), "{stop}");
+    assert!(stop.contains("INF-123: auto was not on"), "{stop}");
     let error = refusal(task.run(&["task", "complete", "INF-123"]));
     assert!(error.to_lowercase().contains("pull request"), "{error}");
     assert_eq!(task.graph()["position"], at("end"));
@@ -2614,7 +2614,7 @@ fn stand_ins(task: &GraphTask) -> Vec<String> {
         .collect()
 }
 
-/// The Task history lines that record Auto-Ship turning on.
+/// The Task history lines that record auto turning on.
 fn handoffs(task: &GraphTask) -> Vec<String> {
     tokio::runtime::Runtime::new()
         .unwrap()
@@ -2627,7 +2627,7 @@ fn handoffs(task: &GraphTask) -> Vec<String> {
         .into_iter()
         .filter_map(|event| match event.kind {
             loopflow_execution::work::task::TaskEventKind::Progress { summary }
-                if summary.starts_with("Auto-Ship on: ") =>
+                if summary.starts_with("auto on: ") =>
             {
                 Some(summary)
             }
@@ -2706,11 +2706,11 @@ fn task_ship_stands_in_at_the_step_the_task_waits_at() {
 }
 
 #[test]
-fn a_bare_ship_stands_in_because_auto_ship_is_on() {
+fn a_bare_ship_stands_in_because_auto_is_on() {
     let task = shipping_task();
     task.task_run_ok(&["task", "run", "INF-123"]);
     assert_eq!(task.graph()["position"], at("review"));
-    // Bare, not `-b`: the run stands in at review because Auto-Ship is on.
+    // Bare, not `-b`: the run stands in at review because auto is on.
     let shipped = task.task_run(&["--task", "INF-123", "ship"]);
     assert!(shipped.success(), "{}", shipped.text);
     assert!(
@@ -2721,8 +2721,38 @@ fn a_bare_ship_stands_in_because_auto_ship_is_on() {
     assert_eq!(task.graph()["position"], at("end"));
     assert_eq!(stand_ins(&task).len(), 1);
     let status = task.status();
-    assert_eq!(status["auto_ship"]["state"], "on", "{status}");
-    assert_eq!(status["auto_ship"]["by"]["kind"], "person");
+    assert_eq!(status["auto"]["state"], "on", "{status}");
+    assert_eq!(status["auto"]["by"]["kind"], "person");
+}
+
+#[test]
+fn auto_on_starts_nothing_and_the_next_bare_run_stands_in() {
+    let task = shipping_task();
+    task.task_run_ok(&["task", "run", "INF-123"]);
+    assert_eq!(task.graph()["position"], at("review"));
+    let graphs = support::recorded_graphs(task.home.path()).len();
+    let on = task.run(&["task", "auto", "on", "INF-123"]);
+    assert_eq!(
+        String::from_utf8_lossy(&on.stdout).trim(),
+        "INF-123: auto on",
+        "{}",
+        String::from_utf8_lossy(&on.stderr)
+    );
+    // The setting changed and nothing else: the Task still waits at review.
+    assert_eq!(support::recorded_graphs(task.home.path()).len(), graphs);
+    assert_eq!(task.graph()["position"], at("review"));
+    assert!(stand_ins(&task).is_empty());
+    assert!(
+        task.text_status().contains("active · auto: on by "),
+        "{}",
+        task.text_status()
+    );
+    // Bare, not `-b`: a run reaching review stands in there because auto is on.
+    let ran = task.task_run(&["task", "run", "INF-123", "--from", "review"]);
+    assert!(ran.success(), "{}", ran.text);
+    assert_eq!(task.graph()["position"], at("end"));
+    assert_eq!(stand_ins(&task).len(), 1);
+    assert_eq!(handoffs(&task).len(), 1);
 }
 
 #[test]
@@ -2773,19 +2803,25 @@ fn a_stopped_ship_kills_nothing_and_its_run_carries_on() {
     .spawn()
     .unwrap();
     wait_for("the stand-in", || !stand_ins(&task).is_empty());
-    assert_eq!(task.state(), "shipping");
-    let stopped = task.run(&["--task", "INF-123", "ship", "--stop"]);
+    // State says a Graph runs; the setting says who takes its steps.
+    assert_eq!(task.state(), "moving");
+    assert!(
+        task.text_status().contains("moving · auto: on by "),
+        "{}",
+        task.text_status()
+    );
+    let stopped = task.run(&["--task", "INF-123", "task", "auto", "off"]);
     let stopped = String::from_utf8_lossy(&stopped.stdout);
-    assert!(stopped.contains("INF-123 stopped shipping"), "{stopped}");
-    // Auto-Ship is stopped; the step already standing in finishes.
+    assert!(stopped.contains("INF-123: auto off"), "{stopped}");
+    // Auto is off; the step already standing in finishes.
     assert_eq!(task.state(), "moving");
     fs::remove_file(task.home.path().join("hold")).unwrap();
     assert!(first.wait().unwrap().success());
-    let again = task.run(&["--task", "INF-123", "ship", "--stop"]);
+    let again = task.run(&["--task", "INF-123", "task", "auto", "off"]);
     let again = String::from_utf8_lossy(&again.stdout);
-    assert!(again.contains("INF-123 was not shipping"), "{again}");
+    assert!(again.contains("INF-123: auto was not on"), "{again}");
     assert!(
-        task.text_status().contains("Auto-Ship: stopped by "),
+        task.text_status().contains("auto: off by "),
         "{}",
         task.text_status()
     );
@@ -2798,22 +2834,20 @@ fn task_ship_stop_sticks_through_a_headless_relaunch() {
         ".lf/graphs/landing.yaml",
         "- graph: proof\n- cmd: pr land\n",
     );
-    // A person stops shipping; the stop stands though nothing was shipping.
+    // A person turns auto off; it stands though auto was never on.
     task.task_run_ok(&["task", "run", "INF-123"]);
-    let stopped = task.run(&["--task", "INF-123", "ship", "--stop"]);
+    let stopped = task.run(&["--task", "INF-123", "task", "auto", "off"]);
     assert!(stopped.status.success());
     // A run with nothing interactive ahead would merge; under the stop it
     // waits at the landing step instead.
     let ran = task.task_run(&["task", "run", "INF-123", "landing"]);
     assert!(ran.success(), "{}", ran.text);
     assert!(
-        ran.text
-            .contains("Waiting at pr land: not approved to merge"),
+        ran.text.contains("Waiting at pr land: auto is off ("),
         "{}",
         ran.text
     );
     assert_eq!(task.graph()["position"], at("pr land"));
-    assert_ne!(task.state(), "shipping");
     // Relaunched headless from its first step, `-b` keeps the stop.
     let again = task.run(&["-b", "task", "run", "INF-123", "--from", "proof"]);
     assert!(
@@ -2822,24 +2856,23 @@ fn task_ship_stop_sticks_through_a_headless_relaunch() {
         String::from_utf8_lossy(&again.stderr)
     );
     assert_eq!(task.graph()["position"], at("pr land"));
-    assert_ne!(task.state(), "shipping");
     assert!(handoffs(&task).is_empty());
     let status = task.status();
-    assert_eq!(status["auto_ship"]["state"], "stopped", "{status}");
-    assert_eq!(status["auto_ship"]["by"]["kind"], "person");
+    assert_eq!(status["auto"]["state"], "stopped", "{status}");
+    assert_eq!(status["auto"]["by"]["kind"], "person");
     // Standing at the landing step, a plain relaunch waits there again.
     let waiting = task.task_run(&["task", "run", "INF-123"]);
     assert!(waiting.success(), "{}", waiting.text);
     assert_eq!(task.graph()["position"], at("pr land"));
     assert!(
-        task.text_status().contains("Auto-Ship: stopped by "),
+        task.text_status().contains("auto: off by "),
         "{}",
         task.text_status()
     );
 }
 
 #[test]
-fn a_ship_whose_run_fails_the_same_way_stops_and_keeps_auto_ship_on() {
+fn a_ship_whose_run_fails_the_same_way_stops_and_keeps_auto_on() {
     let task = shipping_task();
     // `gate` refuses identically until the repository defines `late`.
     let output = task.run(&["-b", "--task", "INF-123", "ship", "--graph", "gate"]);
@@ -2849,16 +2882,16 @@ fn a_ship_whose_run_fails_the_same_way_stops_and_keeps_auto_ship_on() {
         stderr.contains("failed 3 times with the same error"),
         "{stderr}"
     );
-    // The run stopped on its own, so nothing carries it again; Auto-Ship is
+    // The run stopped on its own, so nothing carries it again; auto is
     // still on for the next `lf task run`.
     for _ in 0..3 {
         task.ok(&["task", "list"]);
     }
     assert_eq!(task.state(), "idle");
-    assert_eq!(task.status()["auto_ship"]["state"], "on");
-    let stopped = task.run(&["--task", "INF-123", "ship", "--stop"]);
+    assert_eq!(task.status()["auto"]["state"], "on");
+    let stopped = task.run(&["--task", "INF-123", "task", "auto", "off"]);
     let stopped = String::from_utf8_lossy(&stopped.stdout);
-    assert!(stopped.contains("INF-123 stopped shipping"), "{stopped}");
+    assert!(stopped.contains("INF-123: auto off"), "{stopped}");
 }
 
 #[test]
@@ -2932,7 +2965,7 @@ fn a_ship_whose_carrier_dies_still_reaches_its_end() {
     wait_for("the run to reach end", || {
         task.graph()["position"] == at("end")
     });
-    // Auto-Ship was turned on once.
+    // Auto was turned on once.
     assert_eq!(handoffs(&task).len(), 1);
 }
 
@@ -2943,7 +2976,7 @@ fn debug_run(task: &GraphTask) -> String {
         "SELECT json_array(step,run_start,lf_process_id,restarts,restarted_at) FROM task_graphs",
         "SELECT json_array(p.id,p.pid,p.completed_at,p.outcome,p.exit_code,p.command) FROM processes p WHERE p.id IN (SELECT lf_process_id FROM task_graphs)",
         "SELECT json_array(lf_process_id,graph,started_at,ended_at,pid,exit_code) FROM graph_processes",
-        "SELECT json_array(task_id,auto_ship) FROM task_graphs",
+        "SELECT json_array(task_id,auto) FROM task_graphs",
     ] {
         let mut query = db.prepare(sql).unwrap();
         for row in query.query_map([], |row| row.get::<_, String>(0)).unwrap() {
@@ -3033,11 +3066,11 @@ fn a_task_run_whose_carrier_died_is_carried_again_and_gives_up_after_five() {
     kill_a_carried_run(&task, &["carried"], true, || {});
     fs::remove_file(task.home.path().join("hold")).unwrap();
     // The recovery pass runs `lf task run` again, which stops at review as
-    // the first one would have; nothing approved Auto-Ship.
+    // the first one would have; nothing turned auto on.
     wait_for("the carried run to stop at review", || {
         task.graph()["position"] == at("review")
     });
-    assert_ne!(task.state(), "shipping");
+    assert!(task.status()["auto"].is_null());
     let graphs = support::recorded_graphs(task.home.path()).len();
     assert_eq!(graphs, 2, "one Graph killed, one carried again");
     std::thread::sleep(Duration::from_secs(2));

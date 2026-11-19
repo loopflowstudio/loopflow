@@ -203,10 +203,10 @@ pub struct TaskSnapshot {
     pub actions: TaskActionModel,
     /// Who started the Task's latest Graph.
     pub started_by: Option<crate::process::Starter>,
-    /// Auto-Ship on the Task's Graph: on, stopped, and who set it when;
+    /// Auto on the Task's Graph: on, stopped, and who set it when;
     /// `null` when nobody has.
     #[serde(deserialize_with = "Option::deserialize")]
-    pub auto_ship: Option<loopflow_storage::sqlite::AutoShip>,
+    pub auto: Option<loopflow_storage::sqlite::Auto>,
 }
 
 #[derive(
@@ -549,7 +549,7 @@ pub(crate) async fn task_work_status(store: &Store, task: &Task) -> OpsResult<Wo
 pub enum TaskRunStart {
     /// A run of the Task's Graph from this step; the caller starts it as
     /// `lf --task ISSUE graph run`. With `ships`, the run may merge the PR:
-    /// Auto-Ship is on, or no interactive step is left ahead, and nobody stopped it.
+    /// Auto is on, or no interactive step is left ahead, and nobody stopped it.
     Run { step: String, ships: bool },
     /// The Task now waits at this interactive step; nothing runs.
     Waiting(String),
@@ -832,16 +832,16 @@ async fn start_task_run(
     if mode == TaskRunMode::Headless {
         ship::batch_on(store, task).await?;
     }
-    // Auto-Ship on runs through the interactive steps, standing in at each;
+    // Auto on runs through the interactive steps, standing in at each;
     // stopped, no run merges.
     let (on, ships) = match store
         .sqlite
-        .task_auto_ship(&task.id)
+        .task_auto(&task.id)
         .map_err(task_error)?
         .map(|mark| mark.state)
     {
-        Some(loopflow_storage::sqlite::AutoShipState::On) => (true, true),
-        Some(loopflow_storage::sqlite::AutoShipState::Stopped) => (false, false),
+        Some(loopflow_storage::sqlite::AutoState::On) => (true, true),
+        Some(loopflow_storage::sqlite::AutoState::Stopped) => (false, false),
         None => (false, reaches_end),
     };
     let through = mode.runs_through() || on;

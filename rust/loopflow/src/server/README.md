@@ -68,7 +68,7 @@ first reading after start is the restart and reboot case. Each reading:
    with `LF_RECOVERING_SESSION=<session>`; any other `lf session resume` of it
    is a person's, and sets the count to zero and clears `start_failure`.
 3. **Carries Task runs.** A Task whose `lf task run` carrier is dead gets
-   `lf task run <ID>` again, from its checkpoint; with Auto-Ship on it stands
+   `lf task run <ID>` again, from its checkpoint; with auto on it stands
    in at interactive steps by itself. A carrier that exits on its own clears
    its OS process; a dead carrier left it behind. The pass counts those starts
    (`task_graphs.restarts`, `restarted_at`), reset when the run finishes a
@@ -128,7 +128,7 @@ Machine's null `sender` is `invalid`, and a client on this Machine sends null:
 ```text
 → {"type":"hello","revision":8,"min_revision":8,"client":{"kind":"machine",…}}
 ← {"type":"welcome",…}
-→ {"type":"request","id":"…","operation":{"kind":"task.hold","directory":"/laptop/repo",…},"select":null,"sender":{"repository":"repo_…","selection":{"profile":{…},"participant":"…","agent":null,"settings":null,"source":null},"secrets":{}}}
+→ {"type":"request","id":"…","operation":{"kind":"task.auto","directory":"/laptop/repo",…},"select":null,"sender":{"repository":"repo_…","selection":{"profile":{…},"participant":"…","agent":null,"settings":null,"source":null},"secrets":{}}}
 ← {"type":"response","id":"…","result":{…}}
 ```
 
@@ -335,7 +335,7 @@ case names one operation, including distinct claim/unassign and pin/unpin writes
 | `creation.get` | `lf server receipt <request-id> --json` | read; no creation or launch |
 | `task.run` | `lf task run <issue>` | `engine::task` |
 | `task.ship` | `lf ship` | `engine::task` |
-| `task.hold` | `lf task hold <issue>` | `engine::task` |
+| `task.auto` | `lf task auto on\|off <issue>` | `engine::task` |
 | `task.steer` | `lf steer <issue> <message>` | `engine::task`; the thread entry the store saves as the Task's steer |
 | `task.report` | `lf task report <issue> <message>` | `engine::task` |
 | `task.interrupt` | `lf task interrupt <issue>` | `engine::task` |
@@ -465,13 +465,13 @@ the phone's `view.select` Task list and its creation destinations all read it.
   as a detached process and answers what that process reports once it
   knows: `{state: running, ships, graph_process, log}` when the
   Graph registers, `waiting {step}` or `ended` when nothing ran, or the
-  refusal it printed; `task.ship` answers the same after turning Auto-Ship
+  refusal it printed; `task.ship` answers the same after turning auto
   on. The connection never waits on the run. `approve` is `-b`: every step
-  headless to `end`, turning Auto-Ship on unless it is stopped; without it
-  the run stands in at interactive steps only while Auto-Ship is on, and
+  headless to `end`, turning auto on unless someone turned it off; without it
+  the run stands in at interactive steps only while auto is on, and
   otherwise stops before the next one. A null `agent` uses each step's
   configured harness. `lf task run <issue> --json` and `lf ship --json`
-  print the same value. `task.hold` stops Auto-Ship (`{issue, stopped}`), `task.steer` and `task.report {message}` save to the
+  print the same value. `task.auto {directory, issue, on, reason}` sets auto (`{issue, on, was_on}`), `task.steer` and `task.report {message}` save to the
   thread and return it, and `task.interrupt` returns its receipt.
 - A write uses the shared `Write` shape. `Write::run` calls the shared Rust
   function its CLI handler calls and returns the typed value; the CLI prints
@@ -481,7 +481,7 @@ the phone's `view.select` Task list and its creation destinations all read it.
   which makes the checkout and starts the Graph after the answer.
   A null `wave` selects the repository. Both paths return the same creation
   receipt, described below. A write whose Work
-  lives on another Machine (`task.run`, `task.ship`, `task.hold`,
+  lives on another Machine (`task.run`, `task.ship`, `task.auto`,
   `task.claim`, `task.unassign`, `session.resume`) goes to that Machine's
   server over SSH and returns its answer; it never falls back to
   local execution. Requests create no Process rows; diagnostics the shared
@@ -874,7 +874,7 @@ only.
 | `task.steer` | `task_id`, `steer {id,sequence,source,revision,author,text}`, `comment`: immutable direction and the original `TaskComment` when present (`null` for other direction) |
 | `graph.step_finished` | `task_id`, `graph_process_id`, `step`: the same `GraphStepProcess` as a Task reading, including its recorded outcome |
 
-`task.shipped` means a PR merge was recorded, not that Auto-Ship was enabled or
+`task.shipped` means a PR merge was recorded, not that auto was turned on or
 the Task was completed. `graph.step_finished` includes failed and interrupted
 steps; inspect `step.outcome` before presenting a successful finish.
 
@@ -940,7 +940,7 @@ operation returns in `response.result`.
 | `task.detail` | Task, PR, checks, Graph processes, comments and current Session |
 | `session.card` | Session, liveness, occupied terminal and last line |
 
-Use `section` to place a Task in Backlog, Working, Autonomous, Done or
+Use `section` to place a Task in Backlog, Working, Done or
 Abandoned; `state` describes its progress within that grouping. To populate a
 board row's detail, request `task.detail`; for its Session, request `session.card`.
 A card observes the Session: reading it does not resume a provider, attach a

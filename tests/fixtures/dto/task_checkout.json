@@ -47,7 +47,7 @@
     "name": "LOO-291 task",
     "requester": "Maya"
   },
-  "auto_ship": {
+  "auto": {
     "state": "stopped",
     "at": 1793266380,
     "by": {

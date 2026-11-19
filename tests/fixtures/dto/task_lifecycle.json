@@ -450,7 +450,7 @@
         "workspace_slug": "delivery",
         "worktree": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
         "started_by": null,
-        "auto_ship": null
+        "auto": null
       },
       "graph_processes": [
         {
@@ -1414,7 +1414,7 @@
         "workspace_slug": "delivery",
         "worktree": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
         "started_by": null,
-        "auto_ship": null
+        "auto": null
       },
       "graph_processes": [
         {
@@ -2055,18 +2055,13 @@
         },
         "provider": "codex",
         "reason": "Step Process ad653185-cde7-4ed4-9c19-d91aa2e1192e is running session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py",
-        "status": "shipping",
+        "status": "moving",
         "updated_at": "2026-10-28T02:59:00Z",
         "work_id": "task_9d1de6a17408459aa2db78181c5fb02a"
       },
-      "section": "autonomous",
+      "section": "working",
       "ship_control": {
-        "unavailable": "Task is already shipping"
-      },
-      "shipping": {
-        "reason": "running from start",
-        "shipped_at": 1793156340,
-        "state": "building"
+        "unavailable": null
       },
       "task": {
         "tracker_state": {
@@ -2127,11 +2122,11 @@
         },
         "wave_id": "b007dd43-6b65-410d-8a0e-c58be2910faf"
       },
-      "lifecycle": "shipping",
+      "lifecycle": "moving",
       "selection_states": [
         "open",
-        "shipping",
-        "autonomous"
+        "moving",
+        "working"
       ]
     },
     "status": {
@@ -2279,7 +2274,7 @@
         "project_id": "proj_e7b7e8a944a340d0ad66d4701134ce98",
         "provider": "codex",
         "repo_id": "repo_e5aa50b1a744490b8ebb7f1b02455c36",
-        "status": "shipping",
+        "status": "moving",
         "task_id": "task_9d1de6a17408459aa2db78181c5fb02a",
         "updated_at": "2026-10-28T02:59:00Z",
         "wave": "product",
@@ -2312,7 +2307,7 @@
         "workspace_slug": "delivery",
         "worktree": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
         "started_by": null,
-        "auto_ship": null
+        "auto": null
       },
       "graph_processes": [
         {
@@ -2591,18 +2586,13 @@
           },
           "provider": "codex",
           "reason": "Step Process ad653185-cde7-4ed4-9c19-d91aa2e1192e is running session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py",
-          "status": "shipping",
+          "status": "moving",
           "updated_at": "2026-10-28T02:59:00Z",
           "work_id": "task_9d1de6a17408459aa2db78181c5fb02a"
         },
-        "section": "autonomous",
+        "section": "working",
         "ship_control": {
-          "unavailable": "Task is already shipping"
-        },
-        "shipping": {
-          "reason": "running from start",
-          "shipped_at": 1793156340,
-          "state": "building"
+          "unavailable": null
         },
         "task": {
           "tracker_state": {
@@ -2663,11 +2653,11 @@
           },
           "wave_id": "b007dd43-6b65-410d-8a0e-c58be2910faf"
         },
-        "lifecycle": "shipping",
+        "lifecycle": "moving",
         "selection_states": [
           "open",
-          "shipping",
-          "autonomous"
+          "moving",
+          "working"
         ]
       },
       "sync": {

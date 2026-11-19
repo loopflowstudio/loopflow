@@ -57,8 +57,8 @@ lf task status LOO-12 --json | jq .summary   # one row, written when the Task co
 ```
 
 The summary names how the Task ended and when, the Graph it ran, how many times
-each loop went around again (`loop_passes`, by the deciding step), whether Auto-Ship
-was `on` or `stopped` at the end (`auto_ship`, `null` if never set), wall time from its first Graph process, and the
+each loop went around again (`loop_passes`, by the deciding step), whether auto
+was `on` or `stopped` at the end (`auto`, `null` if never set), wall time from its first Graph process, and the
 first line its last `reflect` step said. It is `null` until the Task ends.
 Cost stays in `lf session usage --task`. Each recorded run also carries
 `skill_version`, the SHA-256 of the skill text it launched with, in

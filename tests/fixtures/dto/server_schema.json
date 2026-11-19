@@ -312,8 +312,8 @@
         }
       ]
     },
-    "AutoShip": {
-      "description": "The Task's Auto-Ship mark: its state, when it was set and who set it.",
+    "Auto": {
+      "description": "The Task's auto mark: its state, when it was set and who set it.",
       "properties": {
         "at": {
           "format": "int64",
@@ -323,7 +323,7 @@
           "$ref": "#/$defs/Starter"
         },
         "state": {
-          "$ref": "#/$defs/AutoShipState"
+          "$ref": "#/$defs/AutoState"
         }
       },
       "required": [
@@ -333,17 +333,40 @@
       ],
       "type": "object"
     },
-    "AutoShipState": {
-      "description": "Auto-Ship on a Task's Graph: whether its interactive steps run headless,\nstanding in for the person, and whether its landing may merge.",
+    "AutoSet": {
+      "additionalProperties": false,
+      "description": "What `task.auto` set.",
+      "properties": {
+        "issue": {
+          "type": "string"
+        },
+        "on": {
+          "description": "The Task's auto setting now.",
+          "type": "boolean"
+        },
+        "was_on": {
+          "description": "Auto was on before this.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "issue",
+        "on",
+        "was_on"
+      ],
+      "type": "object"
+    },
+    "AutoState": {
+      "description": "Auto on a Task's Graph: whether its interactive steps run headless,\nstanding in for the person, and whether its landing may merge.",
       "oneOf": [
         {
           "const": "on",
-          "description": "`lf ship` or `lf -b task run` turned it on.",
+          "description": "`lf task auto on`, `lf ship` or `lf -b task run` turned it on.",
           "type": "string"
         },
         {
           "const": "stopped",
-          "description": "`lf task hold` stopped it; only `lf ship` turns it on again.",
+          "description": "`lf task auto off` turned it off; `-b` leaves it off.",
           "type": "string"
         }
       ]
@@ -3319,24 +3342,6 @@
         "revision",
         "min_revision",
         "client"
-      ],
-      "type": "object"
-    },
-    "Hold": {
-      "additionalProperties": false,
-      "description": "What `task.hold` stopped.",
-      "properties": {
-        "issue": {
-          "type": "string"
-        },
-        "stopped": {
-          "description": "Auto-Ship was on; otherwise only the stop was saved.",
-          "type": "boolean"
-        }
-      },
-      "required": [
-        "issue",
-        "stopped"
       ],
       "type": "object"
     },
@@ -8648,9 +8653,7 @@
             "idle",
             "active",
             "moving",
-            "shipping",
             "working",
-            "autonomous",
             "done"
           ],
           "type": "string"
@@ -8673,6 +8676,11 @@
         {
           "const": "backlog",
           "description": "Board axis: the Task's `TaskSection`.",
+          "type": "string"
+        },
+        {
+          "const": "auto",
+          "description": "Setting axis: the open Task's auto setting is on.",
           "type": "string"
         }
       ]
@@ -13414,7 +13422,7 @@
               "type": "string"
             },
             "ships": {
-              "description": "The run may merge the PR: Auto-Ship is on, or no interactive step\nis left ahead, and nobody stopped Auto-Ship.",
+              "description": "The run may merge the PR: auto is on, or no interactive step is\nleft ahead, and nobody turned auto off.",
               "type": "boolean"
             },
             "state": {
@@ -13558,11 +13566,6 @@
           "const": "working",
           "description": "Someone's idle, active or moving Task.",
           "type": "string"
-        },
-        {
-          "const": "autonomous",
-          "description": "Someone's shipping Task, running to merge with nothing left for a person.",
-          "type": "string"
         }
       ]
     },
@@ -13607,16 +13610,16 @@
         "actions": {
           "$ref": "#/$defs/TaskActionModel"
         },
-        "auto_ship": {
+        "auto": {
           "anyOf": [
             {
-              "$ref": "#/$defs/AutoShip"
+              "$ref": "#/$defs/Auto"
             },
             {
               "type": "null"
             }
           ],
-          "description": "Auto-Ship on the Task's Graph: on, stopped, and who set it when;\n`null` when nobody has."
+          "description": "Auto on the Task's Graph: on, stopped, and who set it when;\n`null` when nobody has."
         },
         "base_commit": {
           "type": [
@@ -13787,12 +13790,12 @@
         "observation",
         "actions",
         "started_by",
-        "auto_ship"
+        "auto"
       ],
       "type": "object"
     },
     "TaskState": {
-      "description": "A Task's state, derived from its checkout, Graph position, whether a\nGraph runs for it and its Auto-Ship mark. Completion and abandonment\nare durable; the open states follow what the Task is doing now. Whether\nanyone owns it is ownership, not state.",
+      "description": "A Task's state, derived from its checkout, Graph position, whether a\nGraph runs for it. Completion and abandonment\nare durable; the open states follow what the Task is doing now. Whether\nanyone owns it is ownership, not state.",
       "oneOf": [
         {
           "enum": [
@@ -13807,7 +13810,7 @@
         },
         {
           "const": "idle",
-          "description": "A checkout, no Graph running and not at an interactive step: before its first run,\nafter a stopped one, or with Auto-Ship on and nothing running.",
+          "description": "A checkout, no Graph running and not at an interactive step: before its first run,\nor after a stopped one.",
           "type": "string"
         },
         {
@@ -13817,12 +13820,7 @@
         },
         {
           "const": "moving",
-          "description": "A Graph runs for it with an interactive step still ahead that will stop for a person.",
-          "type": "string"
-        },
-        {
-          "const": "shipping",
-          "description": "A Graph runs for it with Auto-Ship on: it stands in at each interactive\nstep and finishes on its own to merge.",
+          "description": "A Graph runs for it. Its auto setting says whether the run stands in\nat interactive steps or stops there for a person.",
           "type": "string"
         },
         {
@@ -15613,7 +15611,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "`lf [-b] [-a <agent>] task run <issue> [--from <step>] --json`, started\ndetached: the Graph process it started, or where the Task now waits.\n`approve` is `-b`: every step headless to `end`, approving Auto-Ship.",
+          "description": "`lf [-b] [-a <agent>] task run <issue> [--from <step>] --json`, started\ndetached: the Graph process it started, or where the Task now waits.\n`approve` is `-b`: every step headless to `end`, turning auto on.",
           "examples": [
             {
               "agent": "claude",
@@ -15682,7 +15680,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "`lf --task <issue> ship --json`, started detached: turns Auto-Ship on\nand returns the run, as `task.run` does.",
+          "description": "`lf --task <issue> ship --json`, started detached: turns auto on\nand returns the run, as `task.run` does.",
           "examples": [
             {
               "directory": "/repo",
@@ -15722,18 +15720,20 @@
         },
         {
           "additionalProperties": false,
-          "description": "`lf task hold <issue> --json`: stops the Task's Auto-Ship.",
+          "description": "`lf task auto on|off <issue> --json`: sets the Task's auto setting.",
           "examples": [
             {
               "directory": "/repo",
               "issue": "LOO-1",
-              "kind": "task.hold",
+              "kind": "task.auto",
+              "on": false,
               "reason": null
             },
             {
               "directory": "/laptop/repo",
               "issue": "LOO-1",
-              "kind": "task.hold",
+              "kind": "task.auto",
+              "on": false,
               "reason": null
             }
           ],
@@ -15745,8 +15745,11 @@
               "type": "string"
             },
             "kind": {
-              "const": "task.hold",
+              "const": "task.auto",
               "type": "string"
+            },
+            "on": {
+              "type": "boolean"
             },
             "reason": {
               "description": "Why, as `--reason` records it.",
@@ -15760,15 +15763,17 @@
             "kind",
             "directory",
             "issue",
+            "on",
             "reason"
           ],
           "type": "object",
           "x-result": {
-            "$ref": "#/$defs/Hold"
+            "$ref": "#/$defs/AutoSet"
           },
           "x-result-example": {
             "issue": "LOO-1",
-            "stopped": true
+            "on": false,
+            "was_on": true
           }
         },
         {

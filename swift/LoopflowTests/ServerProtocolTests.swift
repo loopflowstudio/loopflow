@@ -250,7 +250,7 @@ struct ServerProtocolTests {
         let writes: [(String, String, ServedWrite)] = [
             ("task_run", "run-1", .taskRun(directory: "/repo", issue: "LOO-1", graph: nil, from: "implement", agent: "claude", approve: false)),
             ("task_ship", "ship-1", .taskShip(directory: "/repo", issue: "LOO-1")),
-            ("task_hold", "hold-1", .taskHold(directory: "/repo", issue: "LOO-1")),
+            ("task_auto", "auto-1", .taskAuto(directory: "/repo", issue: "LOO-1", on: false)),
             ("task_steer", "steer-1", .taskSteer(directory: "/repo", issue: "LOO-1", message: "Keep the API small")),
             ("task_report", "report-1", .taskReport(directory: "/repo", issue: "LOO-1", message: "Demo recorded")),
             ("task_interrupt", "interrupt-1", .taskInterrupt(directory: "/repo", issue: "LOO-1")),
@@ -296,7 +296,7 @@ struct ServerProtocolTests {
         ]
         for (name, id, write) in writes {
             do {
-                // Auto-Ship names itself so a repeat after a lost reply runs once.
+                // `task.ship` names itself so a repeat after a lost reply runs once.
                 let requestID = name == "task_ship" ? "5d0f7f5e-1c1a-4a53-9d39-2f7c7a1b0e01" : nil
                 #expect(try encoded(.request(id: id, operation: .command(write), select: nil, requestID: requestID)) == value(name), "\(name)")
             } catch { Issue.record("\(name): \(error)") }
@@ -308,16 +308,17 @@ struct ServerProtocolTests {
         }
         #expect(running["state"] == .string("running"))
         #expect(running["graph_process"] == .string("85c31c1e-850c-4821-878d-55527b6dba46"))
-        guard case .response(_, _, .object(let shipping)) = try answer("task_shipping") else {
+        guard case .response(_, _, .object(let ship)) = try answer("task_shipping") else {
             Issue.record("Missing task.ship result"); return
         }
         // `task.ship` returns the run, as `task.run` does.
-        #expect(shipping["state"] == .string("running"))
-        #expect(shipping["ships"] == .bool(true))
-        guard case .response(_, _, .object(let held)) = try answer("task_held") else {
-            Issue.record("Missing task.hold result"); return
+        #expect(ship["state"] == .string("running"))
+        #expect(ship["ships"] == .bool(true))
+        guard case .response(_, _, .object(let autoSet)) = try answer("task_auto_set") else {
+            Issue.record("Missing task.auto result"); return
         }
-        #expect(held["stopped"] == .bool(true))
+        #expect(autoSet["on"] == .bool(false))
+        #expect(autoSet["was_on"] == .bool(true))
         guard case .response(_, _, .object(let steered)) = try answer("session_steered") else {
             Issue.record("Missing session.steer result"); return
         }

@@ -719,8 +719,23 @@ fn print_task_snapshot(
             "provider {}",
             snapshot.provider.as_deref().unwrap_or("not selected")
         );
+        let auto = snapshot.auto.as_ref().map_or_else(String::new, |mark| {
+            use loopflow_storage::process::Starter;
+            use loopflow_storage::sqlite::AutoState;
+            // A mark an earlier lf wrote may name nobody.
+            let by = match &mark.by {
+                Starter::Person { name: None } => String::new(),
+                by => format!(" by {by}"),
+            };
+            let state = match mark.state {
+                AutoState::On => "on",
+                AutoState::Stopped => "off",
+            };
+            let at = loopflow_execution::output::format_time(mark.at);
+            format!(" · auto: {state}{by}, {at}")
+        });
         println!(
-            "{}  {}\n  task: {}\n  body: {}\n  worktree: {}\n  branch: {}\n  tracker writeback: {}",
+            "{}  {}{auto}\n  task: {}\n  body: {}\n  worktree: {}\n  branch: {}\n  tracker writeback: {}",
             snapshot.issue_identifier,
             snapshot.status,
             snapshot.task_id,
@@ -731,23 +746,6 @@ fn print_task_snapshot(
         );
         if let Some(graph) = &snapshot.work.graph {
             println!("  {}", graph.summary());
-        }
-        if let Some(mark) = &snapshot.auto_ship {
-            use loopflow_storage::process::Starter;
-            use loopflow_storage::sqlite::AutoShipState;
-            // A mark an earlier lf wrote may name nobody.
-            let by = match &mark.by {
-                Starter::Person { name: None } => String::new(),
-                by => format!(" by {by}"),
-            };
-            let at = loopflow_execution::output::format_time(mark.at);
-            match mark.state {
-                AutoShipState::On => println!("  Auto-Ship: on{by}, {at}"),
-                AutoShipState::Stopped => println!(
-                    "  Auto-Ship: stopped{by}, {at} · `lf ship {}` turns it on",
-                    snapshot.issue_identifier
-                ),
-            }
         }
         if let Some(conflict) = &snapshot.completion_pending {
             println!("  error: {conflict}");
@@ -1110,7 +1108,7 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
             }
         }
         TaskCommand::Run { .. } => unreachable!("task run dispatches as an ordinary run"),
-        TaskCommand::Hold { .. } => unreachable!("shared mutation dispatch precedes this command"),
+        TaskCommand::Auto { .. } => unreachable!("shared mutation dispatch precedes this command"),
         TaskCommand::Detail { issue, .. } => {
             loopflow::lf::commands::screens::print(loopflow::lf::commands::read::Read::TaskDetail {
                 directory: repo.to_owned(),
@@ -2651,7 +2649,7 @@ fn dispatch_here(
         if matches!(
             &cli.command,
             Some(Commands::Task {
-                cmd: TaskCommand::Hold { issue: None, .. }
+                cmd: TaskCommand::Auto { issue: None, .. }
             })
         ) && cli.task.is_none()
         {

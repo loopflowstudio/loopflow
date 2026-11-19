@@ -483,13 +483,13 @@ pub enum Commands {
         #[arg(long = "json", id = "steer_json")]
         json: bool,
     },
-    /// Ship the Task: turn Auto-Ship on and run it as `lf task run` does, standing in at each interactive step
+    /// Ship the Task: `lf task auto on`, then `lf task run`, standing in at each interactive step
     ///
     /// Prints what `lf task run` prints and returns once the run registers
     /// (`-b` waits for it); `lf task status` follows it. A Task waiting at an
     /// interactive step is stood in for there. With no ISSUE, ships the
-    /// checkout's Task, or a new one for its branch. `lf task hold` stops
-    /// Auto-Ship: the run waits at its next interactive or merging step.
+    /// checkout's Task, or a new one for its branch. `lf task auto off` turns
+    /// auto off: the run waits at its next interactive or merging step.
     Ship {
         issue: Option<String>,
         /// Take up this graph in place of the Task's remaining steps
@@ -1197,7 +1197,7 @@ impl TaskCommand {
             | Self::Delete { .. }
             | Self::Update { .. }
             | Self::Move { .. }
-            | Self::Hold { .. }
+            | Self::Auto { .. }
             | Self::Interrupt { .. } => true,
         }
     }
@@ -2088,6 +2088,13 @@ pub struct SyncArgs {
     pub json: bool,
 }
 
+/// A Task's auto setting, as `lf task auto` spells it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum AutoSetting {
+    On,
+    Off,
+}
+
 #[derive(Subcommand, Debug)]
 pub enum TaskCommand {
     /// Read one Task, its PR, checks, Graphs, comments and current Session
@@ -2109,7 +2116,7 @@ pub enum TaskCommand {
         #[arg(long, conflicts_with = "closed")]
         project: Option<String>,
         /// Only Tasks in this state
-        #[arg(long, conflicts_with = "closed", value_parser = ["unstarted", "idle", "active", "moving", "shipping"])]
+        #[arg(long, conflicts_with = "closed", value_parser = ["unstarted", "idle", "active", "moving"])]
         state: Option<String>,
         #[arg(long)]
         json: bool,
@@ -2177,15 +2184,15 @@ pub enum TaskCommand {
         json: bool,
     },
     /// Run the Task's Graph in its worktree until the next interactive step;
-    /// returns once it runs (`-b` runs every step headless to `end`, approving Auto-Ship)
+    /// returns once it runs (`-b` runs every step headless to `end`, turning auto on)
     #[command(
         after_help = "A Task runs the graph it took up: its Wave's default, its repository's \
 `graph:`, or `code`. A run stops before each interactive step, where the Task waits for its \
 conversation; the next `lf task run` continues after it. A run that fails starts again at the \
 step that failed; the steps before it stay done, and --from reruns them. `-i` runs every step \
-with you in this terminal instead. A run that reaches `end`, as `-b` does, approves Auto-Ship like `lf ship`, \
-which may merge the PR, unless someone stopped shipping; then it waits at the landing step \
-until `lf ship`. Add --open to open its primary conversation locally when the launch returns, \
+with you in this terminal instead. A run that reaches `end`, as `-b` does, turns auto on like `lf ship`, \
+which may merge the PR, unless someone turned auto off; then it waits at the landing step \
+until `lf ship` or `lf task auto on`. Add --open to open its primary conversation locally when the launch returns, \
 using lf open's ordinary host selection. Preview and --quote open nothing."
     )]
     Run {
@@ -2242,7 +2249,7 @@ using lf open's ordinary host selection. Preview and --quote open nothing."
     },
     /// Create a Task; with --run, also start its Graph
     #[command(
-        after_help = "Plain creation files new work, regardless of the current checkout or invoking Session. --run starts the created Task; it does not select work to adopt. Pass --session SESSION or --worktree PATH to adopt existing work, with or without --run. Find Loopflow Session IDs with `lf session list --json`; an agent keeping its chat passes its own ID explicitly. Explicit-source retries return the same Task. Main and Wave checkouts stay shared. Adoption preserves files, branch, history and live attachment; creation alone starts no Graph and approves no Auto-Ship. Remote calls use sources on the selected Machine."
+        after_help = "Plain creation files new work, regardless of the current checkout or invoking Session. --run starts the created Task; it does not select work to adopt. Pass --session SESSION or --worktree PATH to adopt existing work, with or without --run. Find Loopflow Session IDs with `lf session list --json`; an agent keeping its chat passes its own ID explicitly. Explicit-source retries return the same Task. Main and Wave checkouts stay shared. Adoption preserves files, branch, history and live attachment; creation alone starts no Graph and turns no auto on. Remote calls use sources on the selected Machine."
     )]
     Create {
         /// Retry a submitted creation with the same identity and content
@@ -2462,17 +2469,21 @@ using lf open's ordinary host selection. Preview and --quote open nothing."
         #[arg(long)]
         json: bool,
     },
-    /// Stop Auto-Ship until the next `lf ship` and disarm auto-merge it armed
+    /// Turn the Task's auto setting on or off: who takes its interactive steps
     ///
-    /// Nothing is killed: the run waits at its next interactive step, or before
-    /// a step that merges. The stop stands until `lf ship`. With no ISSUE,
-    /// holds the checkout's Task.
-    Hold {
+    /// On, the Task's runs stand in for you at each interactive step and may
+    /// merge the PR; nothing starts, and a live run stands in from its next
+    /// interactive step. Off, nothing is killed: the run waits at its next
+    /// interactive step, or before a step that merges, and auto-merge Loopflow
+    /// armed is disarmed. `lf ship` is `auto on`, then `lf task run`. With no
+    /// ISSUE, sets the checkout's Task.
+    Auto {
+        state: AutoSetting,
         issue: Option<String>,
         /// Why, kept in the Task's history
         #[arg(long)]
         reason: Option<String>,
-        /// Print the Task and whether it was shipping
+        /// Print the Task, its setting and whether auto was on before
         #[arg(long)]
         json: bool,
     },
@@ -2502,7 +2513,7 @@ impl TaskCommand {
             | Self::Status { issue, .. }
             | Self::Abandon { issue, .. }
             | Self::Run { issue, .. }
-            | Self::Hold { issue, .. }
+            | Self::Auto { issue, .. }
             | Self::Checkout { issue, .. } => issue.as_deref(),
             Self::Detail { issue, .. }
             | Self::Show { issue, .. }
@@ -2536,7 +2547,7 @@ impl TaskCommand {
             | Self::Status { issue, .. }
             | Self::Abandon { issue, .. }
             | Self::Run { issue, .. }
-            | Self::Hold { issue, .. }
+            | Self::Auto { issue, .. }
             | Self::Checkout { issue, .. } => issue.as_mut(),
             Self::Detail { issue, .. }
             | Self::Show { issue, .. }
@@ -3631,7 +3642,8 @@ mod tests {
             vec![
                 "lf",
                 "task",
-                "hold",
+                "auto",
+                "off",
                 "LOO-1",
                 "--reason",
                 "waiting on review",
@@ -4179,7 +4191,7 @@ mod tests {
             checked(&["lf", "--agent", "claude:opus", "--task", "LOO-1", "ship"])
                 .may_launch_agent()
         );
-        assert!(!checked(&["lf", "--task", "LOO-1", "task", "hold"]).may_launch_agent());
+        assert!(!checked(&["lf", "--task", "LOO-1", "task", "auto", "off"]).may_launch_agent());
         // A Session id beside its Work selects the Session; Task and Wave
         // together stay one selection too many.
         for argv in [

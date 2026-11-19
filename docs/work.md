@@ -141,7 +141,7 @@ person's work.
 Plain `lf task create` files new work, including from an owned checkout or
 Session. `--run` starts the created Task; it does not opt into adoption.
 Explicit sources work with or without `--run`. Creation alone starts no Graph
-and approves no Auto-Ship. Binding also requires an explicit Session ID.
+and leaves auto unset. Binding also requires an explicit Session ID.
 
 Main and Wave checkouts remain shared. A selected Session there can become a
 Task conversation without moving its cwd; an explicit later `lf task checkout`

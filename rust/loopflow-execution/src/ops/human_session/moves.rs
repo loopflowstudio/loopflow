@@ -59,8 +59,8 @@ pub struct MovedTask {
     /// Absent unless the move stopped a running Graph, which continues where
     /// the Task arrives.
     pub stopped: Option<StoppedGraph>,
-    /// Auto-Ship on, as a released receiver reads it: its Task ships there.
-    /// Receivers read `graph.auto_ship`; LOO-971 deletes the key.
+    /// Auto on, as a released receiver reads it: its Task ships there.
+    /// Receivers read `graph.auto`; LOO-971 deletes the key.
     pub approval: Option<ReleasedShipApproval>,
 }
 
@@ -269,8 +269,8 @@ pub async fn send_task(
             stopped,
             approval: store
                 .sqlite
-                .task_auto_ship(&task.id)?
-                .filter(|mark| mark.state == loopflow_storage::sqlite::AutoShipState::On)
+                .task_auto(&task.id)?
+                .filter(|mark| mark.state == loopflow_storage::sqlite::AutoState::On)
                 .map(|mark| ReleasedShipApproval {
                     at: mark.at,
                     by: None,
@@ -786,7 +786,7 @@ pub fn checkout_of(
 }
 
 /// This Machine owns the Task from here: the move's claim, then its checkout of
-/// the carried branch, then its Graph where it stood, with its Auto-Ship mark.
+/// the carried branch, then its Graph where it stood, with its auto mark.
 async fn take_in_task(
     store: &SharedStore,
     main: &Path,

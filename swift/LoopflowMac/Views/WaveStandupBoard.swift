@@ -13,9 +13,11 @@ struct WaveStandup: Equatable {
         let person: Person?
         /// Detail that follows the name: next move, waiting reason, or "merged".
         let note: String?
-        /// A Working or Autonomous Task's Session: Available or Busy.
+        /// A Working Task's Session: Available or Busy.
         let session: SessionAttention?
         var id: String { task.id }
+        /// The Task's auto setting is on.
+        var auto: Bool { task.selectionStates.contains(.auto) }
     }
 
     enum SessionAttention: String, Equatable {
@@ -36,13 +38,12 @@ struct WaveStandup: Equatable {
 
     let backlog: [Row]
     let working: [Row]
-    let autonomous: [Row]
     let done: [Row]
     let doneDays: Int
     /// Pictures and names appear once the started and finished Tasks span two people.
     let showsPeople: Bool
 
-    /// `tasks` fill Backlog, Working and Autonomous; `closed` fills Done. Today both come from the
+    /// `tasks` fill Backlog and Working; `closed` fills Done. Today both come from the
     /// Wave roadmap; LOO-604 moves closed Tasks to `lf task list --done`, which then
     /// becomes `closed` alone. `github` maps lowercase owner emails to their users.
     init(tasks: [RoadmapTask], closed: [RoadmapTask], doneDays: Int, now: Date, github: [String: GitHubPerson]) {
@@ -65,26 +66,21 @@ struct WaveStandup: Equatable {
             return date <= now && date >= since
         }.sorted { ($0.task.completedAt ?? "") > ($1.task.completedAt ?? "") }
             .map { Row(task: $0, person: person($0), note: nil, session: nil) }
-        func started(_ section: TaskSection) -> [Row] {
-            tasks.filter { $0.section == section }.map { task in
-                let note = task.pr?.phase == .merged ? "merged" : task.nextMove.reason
-                return Row(task: task, person: person(task), note: note.isEmpty ? nil : note,
-                           session: task.selectionStates.contains(.available) ? .available
-                            : task.selectionStates.contains(.busy) ? .busy : nil)
-            }
+        working = tasks.filter { $0.section == .working }.map { task in
+            let note = task.pr?.phase == .merged ? "merged" : task.nextMove.reason
+            return Row(task: task, person: person(task), note: note.isEmpty ? nil : note,
+                       session: task.selectionStates.contains(.available) ? .available
+                        : task.selectionStates.contains(.busy) ? .busy : nil)
         }
-        working = started(.working)
-        autonomous = started(.autonomous)
         backlog = tasks.filter { $0.section == .backlog }
             .map { Row(task: $0, person: nil, note: nil, session: nil) }
-        showsPeople = Set((working + autonomous + done).compactMap { $0.person?.key }).count >= 2
+        showsPeople = Set((working + done).compactMap { $0.person?.key }).count >= 2
     }
 
     func rows(_ section: WaveBoardSection) -> [Row] {
         switch section {
         case .backlog: backlog
         case .working: working
-        case .autonomous: autonomous
         case .done: done
         }
     }
@@ -121,6 +117,7 @@ struct WaveStandup: Equatable {
             var line = "  \(row.task.task.identifier) \(row.task.task.name)"
             if let person = row.person, showsPeople { line += " · \(person.name)" }
             if let session = row.session { line += " · \(session.rawValue)" }
+            if row.auto { line += " · Auto" }
             if let note = row.note { line += " · \(note)" }
             return line
         }
@@ -396,6 +393,7 @@ struct WaveStandupRow: View {
                             .foregroundStyle(session == .available ? palette.available : palette.textSecondary)
                             .accessibilityIdentifier("wave-session-\(row.id)")
                     }
+                    if row.auto { AutoBadge().accessibilityIdentifier("wave-auto-\(row.id)") }
                 }
                 if let detail {
                     Text(detail).font(Typography.body(13)).foregroundStyle(palette.textSecondary).lineLimit(1)

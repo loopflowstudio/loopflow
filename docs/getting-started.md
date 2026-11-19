@@ -108,11 +108,11 @@ week. After a crash or reboot, use the same command to reopen its saved history.
 ## 5. Land it
 
 ```bash
-lf ship <ID>                     # Auto-Ship on: the remaining steps, then merge; repairs failing CI until it lands
-lf task hold <ID>                # stop Auto-Ship; disarms the auto-merge it armed
+lf ship <ID>                     # auto on: the remaining steps, then merge; repairs failing CI until it lands
+lf task auto off <ID>            # the run waits at its next interactive step; disarms the auto-merge it armed
 ```
 
-`lf ship` turns Auto-Ship on and runs the Task: the run stands in for you at
+`lf ship` turns auto on and runs the Task: the run stands in for you at
 each remaining interactive step and runs `deliver`: `reflect`,
 `gate`, then `lf land --wait-and-fix`. `reflect` turns what you said during the
 Task into edits to your skills. `gate` publishes the PR first, so CI is already

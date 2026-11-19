@@ -1,6 +1,6 @@
-//! `lf ship`: turn Auto-Ship on for the Task's Graph, then do what
+//! `lf ship`: turn auto on for the Task's Graph, then do what
 //! `lf task run` does. The run stands in at each interactive step because
-//! Auto-Ship is on, not because of how it was launched; a Task waiting at one
+//! Auto is on, not because of how it was launched; a Task waiting at one
 //! is stood in for there.
 
 use std::path::Path;
@@ -11,7 +11,7 @@ use crate::lf::Cli;
 use loopflow_execution::ops::task::ship::{ship_on, ShipStart};
 use loopflow_execution::ops::task::TaskProcessOptions;
 
-/// `lf ship`: Auto-Ship on, then the Task's run, reported as `task.run` reports it.
+/// `lf ship`: auto on, then the Task's run, reported as `task.run` reports it.
 pub fn run(
     cli: &Cli,
     repo: &Path,

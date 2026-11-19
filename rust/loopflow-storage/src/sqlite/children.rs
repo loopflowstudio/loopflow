@@ -569,10 +569,10 @@ impl SqliteStore {
                 [id.as_str()],
             )?;
             super::task_state::decide_in(&tx, id, "unstarted")?;
-            // Reopening clears Auto-Ship: it ended with the Task.
+            // Reopening clears auto: it ended with the Task.
             tx.execute(
-                "UPDATE task_graphs SET auto_ship=NULL,auto_ship_at=NULL,auto_ship_by=NULL
-                 WHERE task_id=?1 AND auto_ship IS NOT NULL",
+                "UPDATE task_graphs SET auto=NULL,auto_at=NULL,auto_by=NULL
+                 WHERE task_id=?1 AND auto IS NOT NULL",
                 [id.as_str()],
             )?;
             insert_task_event_in(

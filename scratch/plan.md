@@ -357,7 +357,45 @@ the auto setting says who takes the interactive steps. One word: **auto**.
 - `.lf/graphs/autonomous.yaml` is a graph name; leave it.
 - Still open, not this pass: whether `lf -b task run` writes auto on.
 
-The checkout holds an uncommitted, interrupted vision-A diff (also at
-`refs/wip/loo-968-auto-ship-rename`): it renamed `Shipping`/`Autonomous` to
-`AutoShip`. Keep what applies (docs and stop-copy edits, reworded to auto);
-drop the variant renames, since those variants are deleted.
+### Built (implement, 2026-11-19)
+
+All of the pass above, in one slice. The vision-A diff was dropped (it stays at
+`refs/wip/loo-968-auto-ship-rename`); nothing of it was needed.
+
+- Storage and wire: no `shipping` state, no `autonomous` section; the mark is
+  `Auto`/`AutoState` on `task_graphs.auto{,_at,_by}` and `task_summaries.auto`
+  (migration renamed `task_graph_auto`); snapshot field `auto`; server schema
+  and DTO fixtures regenerated or edited.
+- `lf task auto on|off [ISSUE] [--reason] [--json]`, served as `task.auto
+  {directory, issue, on, reason}` → `{issue, on, was_on}`. `lf task hold`,
+  `task.hold`, `ship_stop` and the `ship --stop` alias are gone. `lf ship` is
+  `auto_on`'s steps, then the run.
+- Rows learn the setting from a new selection state `auto` (`state:auto`).
+- Status line `LOO-1  moving · auto: on by Maya, Nov 18 09:04`; landing wait
+  "Waiting at pr land: auto is off (Maya). `lf ship` lands it."
+- Desktop: `TaskAutoControl` toggle (on sends `task.ship`, off `task.auto`),
+  `AutoBadge` on board cards and sidebar rows, no Autonomous sidebar section
+  or board column. iOS toolbar edited the same way but not compiled here.
+- Docs, builtin operate skills, `.lf/qa/auto.md`, AGENTS.md say auto.
+
+Taught:
+
+- `lf task auto on` + bare `lf task run` is not `lf ship` for a Task waiting
+  at an interactive step: a bare run continues after that step, and only
+  `lf ship` stands in there (`from`). `lf task run --from <step>` does.
+- In the launch fixture, a never-run Task that takes up its default graph
+  through `auto on` (or bare `lf ship`) and then runs bare fails with "is
+  running graph feature from start" while a run sits at `sync --plan`. Not
+  traced; QA should try `lf task auto on` then `lf task run` on a fresh Task
+  in a real repository.
+
+Checks run (2026-11-19):
+
+- `cargo nextest run -p loopflow-storage -p loopflow-execution --lib -E 'test(task_work::) | test(task_summaries::) | test(query_plans::) | test(selection) | test(execution::tests::) | test(task_work_lifecycle_tests::) | test(engine::task::) | test(machine::wire::) | test(migration_runner::)'`: 221 passed.
+- `cargo nextest run -p loopflow -p loopflow-execution -E 'test(lf::tests::) | test(cli_discovery::) | test(dto_fixtures::) | test(server::schema::tests::) | test(lf::commands::write::tests::) | test(server::wire::) | test(lifecycle_tests::) | test(waves::tests::) | test(task_row::) | test(/task_graph_launch_tests::.*(ship|auto_on|hand_merged|stand)/) | …'`: 240 of 245 passed; `planning_failure_keeps_the_stored_workflow_readable` and the new `auto_on_starts_nothing_and_the_next_bare_run_stands_in` were fixed and pass alone; `a_ship_meets_a_hand_merged_pr_at_its_landing_step` and `a_ship_whose_run_fails_the_same_way_stops_and_keeps_auto_on` failed on "read the fixture's Machine server status" beside a Swift build and pass rerun at `-j 2`; `a_shipping_tasks_restarted_wait_keeps_its_explicit_agent` times out "waiting for the restart", as it did before this pass (see questions). Gate/CI: check those three.
+- `documented_commands::`, `binary(golden_prompt)`: pass. `cargo clippy --all-targets -- -D warnings`: clean.
+- `scripts/test_desktop.sh --filter 'DTOFixtureTests|ServerProtocolTests|RegistryQueryTests|WorkModelTests|WorkNavigationTests|WaveStandupTests|WorkSelectionTests|TaskStatusTests|TaskConceptTests|DesktopHeadlessTests|PendingChangesTests|WorkCacheTests|TaskRowMetadataTests'`: 285 tests, 3 failures, all the base branch's `WorkPart(rawValue: "activity")`.
+- Not run here, for gate/CI: `served_reads`, `machine_commands` (both edited for `task.auto`), `performance_tests::`, `world_recipes::`, `two_people`, the iOS suite (`uv run python scripts/test_ios.py`; `TaskWorkspaceView.swift`, `TaskListView.swift` are unbuilt), the website docs check.
+
+Next: gate. The branch still sits on LOO-959's branch; #1972 has merged, so
+it rebases onto main first.

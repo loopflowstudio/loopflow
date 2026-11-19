@@ -60,7 +60,7 @@ pub struct DesktopViewPart {
     pub kind: DesktopViewPartKind,
     /// The Work a session part converses with.
     pub work: Option<WorkWorkspaceKey>,
-    /// A board's shown section: `backlog`, `working`, `autonomous` or `done`.
+    /// A board's shown section: `backlog`, `working` or `done`.
     pub section: Option<String>,
     /// A board's Done window in days; 0 includes all ages.
     pub done_days: Option<u32>,

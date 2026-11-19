@@ -38,7 +38,7 @@ The Task's Graphs keep running on their own, and settled progress arrives here
 as posts while the conversation is open.
 
 **A post is an observation, not direction.** Report it briefly, name each
-changed run by its id, and leave review and shipping state as they are. Don't
+changed run by its id, and leave review and the auto setting as they are. Don't
 promise follow-ups for when the conversation is closed.
 
 **Wait, don't poll.** Within a turn, `lf task wait <issue> --until submitted`

@@ -26,7 +26,7 @@ use loopflow_execution::store::SharedStore;
 use loopflow_model::durable::WorkRef;
 use loopflow_model::id::LfProcessId;
 use loopflow_storage::graph_process::RunOwner;
-use loopflow_storage::sqlite::{AutoShipState, SqliteStore};
+use loopflow_storage::sqlite::{AutoState, SqliteStore};
 use loopflow_storage::work::task::Task;
 use std::path::Path;
 use std::sync::Mutex;
@@ -145,7 +145,7 @@ pub fn list(repo: &Path, json: bool) -> Result<()> {
 /// How many times one `lf task run` starts its Graph before giving up.
 const TASK_RUN_ATTEMPTS: u32 = 3;
 
-/// A Task run that must stop rather than retry, shipping or not.
+/// A Task run that must stop rather than retry, auto on or not.
 #[derive(Debug, thiserror::Error)]
 enum TaskRunStopped {
     #[error("the run of {run} failed {TASK_RUN_ATTEMPTS} times with the same error; this Task run stops here: {cause}")]
@@ -162,7 +162,7 @@ enum TaskRunStopped {
 }
 
 impl TaskRunStopped {
-    /// Auto-Ship stays as it was: the next `lf task run` stands in again.
+    /// Auto stays as it was: the next `lf task run` stands in again.
     fn stop(self, status: std::process::ExitStatus) -> Result<()> {
         // Render before the detached run's log closes when its process exits.
         eprintln!("{self}");
@@ -774,7 +774,7 @@ struct RunningGraph<'a> {
     /// The `lf task run` this Graph carries its Task for: a stop keeps it from
     /// merging, and each checkpoint is where that run's next attempt sets out.
     task_run: Option<LfProcessId>,
-    /// A bare Task run: at each interactive step it stands in while Auto-Ship
+    /// A bare Task run: at each interactive step it stands in while auto
     /// is on, and otherwise stops there for the person.
     stops_at_interactive: bool,
     /// The Task's latest interrupt when its run began; a later one stops the Graph.
@@ -832,7 +832,7 @@ impl RunningGraph<'_> {
     }
 
     /// Where a Task run waits instead of merging: the step about to run merges
-    /// and someone stopped Auto-Ship. Read when the step is reached, so a stop
+    /// and someone turned auto off. Read when the step is reached, so a stop
     /// made mid-run counts; an unreadable mark fails the step.
     fn stopped_landing(&self) -> Result<Option<String>> {
         let Some(task) = self.task.as_ref().filter(|_| self.task_run.is_some()) else {
@@ -849,13 +849,13 @@ impl RunningGraph<'_> {
         let Some(stop) = self
             .store
             .sqlite
-            .task_auto_ship(task)?
-            .filter(|mark| mark.state == AutoShipState::Stopped)
+            .task_auto(task)?
+            .filter(|mark| mark.state == AutoState::Stopped)
         else {
             return Ok(None);
         };
         eprintln!(
-            "Waiting at {step}: not approved to merge ({} stopped shipping). `lf ship` lands it.",
+            "Waiting at {step}: auto is off ({}). `lf ship` lands it.",
             stop.by
         );
         Ok(Some(step))
@@ -863,7 +863,7 @@ impl RunningGraph<'_> {
 
     /// Whether this run stands in for the person at interactive `skill`, or
     /// stops before it (`None`). `-b` always stands in and `-i` runs it with
-    /// the person here; a bare Task run reads Auto-Ship as it gets there, so
+    /// the person here; a bare Task run reads auto as it gets there, so
     /// turning it on mid-run counts.
     fn stands_in(&self, skill: &ConcreteSkill) -> Result<Option<bool>> {
         if !skill.interactive || self.launcher.interactive {
@@ -879,8 +879,8 @@ impl RunningGraph<'_> {
         let on = self
             .store
             .sqlite
-            .task_auto_ship(task)?
-            .is_some_and(|mark| mark.state == AutoShipState::On);
+            .task_auto(task)?
+            .is_some_and(|mark| mark.state == AutoState::On);
         Ok(on.then_some(true))
     }
 

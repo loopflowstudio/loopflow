@@ -50,3 +50,14 @@ Jack, quoting vision C ("A mark, not a state: delete TaskState::Shipping and Tas
 
 Open: the word (auto vs Auto-Ship), whether `lf ship` stays as shorthand, what replaces `lf task hold`.
 - Jack, on whether Auto-Ship becomes "auto" in product copy too: "ok lets take the next pass. Just become an Auto toggle works."
+
+## Implement: auto is a setting (2026-11-19, headless)
+
+- The stored mark keeps `on | stopped` (plan's words), so `lf task auto off` writes `stopped` and JSON reads `auto.state: "stopped"`. Reverse by renaming the value to `off` in the unmerged migration.
+- `lf task auto on` does everything `lf ship` does before it runs: a Task with no Graph takes up its default one (and needs a checkout for that, as ship does). It does not claim an unowned Task; `lf ship` still does. `lf task auto off` on a Task with no Graph still saves nothing and answers "auto was not on".
+- State never reads the setting, so auto on, waiting at an interactive step with nothing running, reads `active` (was `idle`).
+- Rows learn the setting through a new selection state `auto` (`state:auto` replaces `state:shipping` as the Dashboard query); a done or abandoned Task never carries it. Passed over: a separate `auto` field on `RoadmapTask` and every row DTO.
+- Desktop's Auto toggle turned on sends `task.ship` (auto on, then the run), as the Auto-Ship button did; off sends `task.auto`. Reverse to `task.auto on` if the toggle should start nothing.
+- `lf task status` carries the setting on its first line (`LOO-1  moving · auto: on by Maya, Nov 18 09:04`); the "`lf ship` turns it on" hint went with the separate line.
+- Still open from the plan: whether `lf -b task run` writes auto on.
+- `lf task auto on` then a bare `lf task run` skips a waiting interactive step instead of standing in at it; only `lf ship` (or `--from <step>`) stands in there. Left as is: a bare run has always meant "the person finished this step".

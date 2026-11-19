@@ -520,7 +520,7 @@ mod tests {
     }
 
     #[test]
-    fn auto_ship_reads_and_writes_plan_by_index() {
+    fn auto_reads_and_writes_plan_by_index() {
         let (_home, store, _task, _viewer) = fixture();
         let task = TaskId::new();
         store
@@ -536,14 +536,14 @@ mod tests {
         store
             .take_up_task_graph(&task, r#"{"name":"code","steps":[]}"#)
             .unwrap();
-        let mark = crate::sqlite::AutoShip {
-            state: crate::sqlite::AutoShipState::On,
+        let mark = crate::sqlite::Auto {
+            state: crate::sqlite::AutoState::On,
             at: 1,
             by: crate::process::Starter::Person { name: None },
         };
         let traced = statements(&store, || {
-            store.set_task_auto_ship(&task, &mark, true, None).unwrap();
-            store.task_auto_ship(&task).unwrap();
+            store.set_task_auto(&task, &mark, true, None).unwrap();
+            store.task_auto(&task).unwrap();
             store.task_state(&task).unwrap();
         });
         let scans = growing_scans(&store, &traced);

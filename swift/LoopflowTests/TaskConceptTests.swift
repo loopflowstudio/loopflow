@@ -125,7 +125,7 @@ struct TaskConceptTests {
             let siblings = try #require(projection.breadcrumb(selection: nil, sessionId: "checkout")?.siblings)
             #expect(Set(siblings.map(\.id)) == ["bound", "checkout", "unknown"])
             let board = model.standup(phase.tasks, doneDays: 0)
-            for section in [WaveBoardSection.backlog, .working, .autonomous] {
+            for section in [WaveBoardSection.backlog, .working] {
                 #expect(board.rows(section).map(\.id) == phase.tasks.filter { $0.section.rawValue == section.rawValue }.map(\.id))
             }
             let row = (board.working + board.backlog).first { $0.id == active.id }

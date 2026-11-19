@@ -133,7 +133,7 @@ impl StoppedRun {
                 eprintln!("  follow: lf task status {name}");
                 if ships {
                     eprintln!(
-                        "  ships:  this run may merge the PR; `lf task hold {name}` stops it"
+                        "  ships:  this run may merge the PR; `lf task auto off {name}` stops it"
                     );
                 }
             }

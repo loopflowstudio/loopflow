@@ -1,17 +1,17 @@
--- Auto-Ship is one mark on the Task's Graph: 'on' (`lf ship`, `lf -b task run`)
--- or 'stopped' (`lf task hold`), with when and who (`Starter` JSON, resolved
--- when it was set). NULL when nobody has set it. `lf ship` is `lf task run`
--- with Auto-Ship on; no ship process carries a Task, so its log and the shared
--- handoff stamp leave.
-ALTER TABLE task_graphs ADD COLUMN auto_ship TEXT CHECK (auto_ship IN ('on','stopped'));
-ALTER TABLE task_graphs ADD COLUMN auto_ship_at INTEGER;
-ALTER TABLE task_graphs ADD COLUMN auto_ship_by TEXT CHECK (auto_ship_by IS NULL OR json_valid(auto_ship_by));
--- A finished Task's last Auto-Ship mark, in place of counting its log.
-ALTER TABLE task_summaries ADD COLUMN auto_ship TEXT CHECK (auto_ship IN ('on','stopped'));
+-- A Task's auto setting is one mark on its Graph: 'on' (`lf task auto on`,
+-- `lf ship`, `lf -b task run`) or 'stopped' (`lf task auto off`), with when
+-- and who (`Starter` JSON, resolved when it was set). NULL when nobody has set
+-- it. `lf ship` is `lf task auto on`, then `lf task run`; no ship process
+-- carries a Task, so its log and the shared handoff stamp leave.
+ALTER TABLE task_graphs ADD COLUMN auto TEXT CHECK (auto IN ('on','stopped'));
+ALTER TABLE task_graphs ADD COLUMN auto_at INTEGER;
+ALTER TABLE task_graphs ADD COLUMN auto_by TEXT CHECK (auto_by IS NULL OR json_valid(auto_by));
+-- A finished Task's last auto mark, in place of counting its log.
+ALTER TABLE task_summaries ADD COLUMN auto TEXT CHECK (auto IN ('on','stopped'));
 
 -- Each Task's latest approval or stop becomes its mark. A withdrawal (a
 -- failure that ended shipping) reads as stopped.
-UPDATE task_graphs SET (auto_ship,auto_ship_at,auto_ship_by)=(
+UPDATE task_graphs SET (auto,auto_at,auto_by)=(
     SELECT CASE e.kind WHEN 'approved' THEN 'on' ELSE 'stopped' END,
         e.at,
         CASE WHEN e.caller_session_id IS NOT NULL THEN json_object(

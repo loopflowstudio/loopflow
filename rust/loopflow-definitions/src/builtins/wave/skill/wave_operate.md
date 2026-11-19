@@ -70,7 +70,7 @@ that fits:
 Tasks progress independently of this pass; their Graphs do the work, so don't
 perform a Graph's steps here. `lf task run <issue-id>` continues a Task you
 own to its next interactive step, and `lf task status` follows it. `lf -b
-task run` and `lf ship` turn Auto-Ship on, so the run stands in at interactive
+task run` and `lf ship` turn auto on, so the run stands in at interactive
 steps and may merge the PR; a run with no interactive step left ahead may merge
 it too. Use them only when asked to ship or land. Start
 remaining work on your Tasks without asking. Don't approve reviews, cancel

@@ -334,7 +334,7 @@ lf task status LOO-12
 A Task run whose `lf task run` or `lf ship` died is carried again the same
 way, as `lf task run`, from the step it reached, and its workers with it. A
 run that was waiting for you at an interactive step stops there again; being
-carried again never turns Auto-Ship on.
+carried again never turns auto on.
 
 After a reboot the server brings work back one start at a time, the most
 recently active Task first. The first start after a death is immediate; each

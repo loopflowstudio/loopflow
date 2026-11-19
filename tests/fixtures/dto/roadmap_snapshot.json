@@ -190,7 +190,7 @@
         },
         "runtime": {
           "work_id": "issue-now",
-          "status": "shipping",
+          "status": "moving",
           "completion_pending": null,
           "reason": "ready",
           "updated_at": "2026-07-14T23:44:00Z",
@@ -396,14 +396,15 @@
           "unavailable": null
         },
         "ship_control": {
-          "unavailable": "Auto-Ship is already on"
+          "unavailable": "auto is already on"
         },
         "pr": null,
         "graph_source": null,
-        "lifecycle": "shipping",
+        "lifecycle": "moving",
         "selection_states": [
-          "shipping",
-          "backlog"
+          "moving",
+          "backlog",
+          "auto"
         ]
       },
       {

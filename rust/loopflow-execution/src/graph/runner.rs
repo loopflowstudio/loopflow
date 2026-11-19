@@ -51,7 +51,7 @@ pub enum SkillOutcome {
     Routed(String),
     Blocked(String),
     /// The Graph stops before this step, at this name: a person takes part
-    /// there, or it merges and someone stopped Auto-Ship.
+    /// there, or it merges and someone turned auto off.
     StopsAt(String),
 }
 

@@ -7,9 +7,8 @@ marked **made for review**; the still-open ones are in `scratch/questions.md`.
 
 ## What to build
 
-A Task can have children, and the conversation that filed them keeps
-conducting them: it hears when one stops, fails or lands, and it stays open
-until it is closed.
+A Task can have children, and its conversation conducts them: it hears when
+one stops, fails or lands, and it stays open until it is closed.
 
 ## The model
 
@@ -105,8 +104,11 @@ The cost: the conductor reads a branch that stops moving once it merges.
 from a Task's conversation files a child. The caller's Task comes from
 `conversation_task(store, caller_session)` (`ops/human_session/moves.rs:161`)
 with the Session taken from `LF_AGENT_CALLER`. Flat by default: when the
-calling Task itself has a parent, the new Task takes that same parent and is
-its sibling. `--parent <ID>` says otherwise; `--parent none` files top-level.
+calling Task itself has an open parent, the new Task takes that same parent
+and is its sibling. When that parent is done, abandoned or not on this
+Machine, the new Task goes under the calling Task, so a follow-up is never
+filed under work whose conversation nobody has open (slice 6).
+`--parent <ID>` says otherwise; `--parent none` files top-level.
 The caller is any Session that belongs to the Task, a step of its Graph
 included, so Tasks filed by `launch-plan` or `ship-decomposed` are children
 too. Outside a Task nothing changes. The link is written at filing and
@@ -163,7 +165,9 @@ conducts it.
 - The notice is its own steer source beside `update:` and is written only
   when the child's standing moved: it stopped at an interactive step, a run
   ended failed or stopped, its PR merged, it was closed or abandoned. Steps
-  passing inside a run are not news to a conductor. Each notice wakes an idle
+  passing inside a run are not news to a conductor, and neither is the same
+  failure at the same step again: a relaunch that fails where the last run
+  did says nothing until the Task's step or PR moves (slice 6). Each notice wakes an idle
   conversation into a paid turn, and today's `update:` steer fires at every
   step start; five children on an eight-step Graph would be forty turns.
 - `TaskObservation` (`task_updates.rs:56`) gains the PR phase and whether the
@@ -198,7 +202,9 @@ added. What changes for a Task with open children:
   becomes done; each child never started (no checkout, no PR, no run) is
   abandoned, which destroys nothing. A child with anything unmerged (an open
   PR, a live run, a checkout with commits) stays open with its link, and the
-  command names each one with its step. Jack Heart: "3: i think probably
+  command names each one with its step. A child that becomes done this way
+  settles its own children by the same rule, so completing a Task means one
+  thing whichever command reached it (slice 6). Jack Heart: "3: i think probably
   close by default"; and on Asana, "There's some combination of completed and
   discarded".
 - A child whose parent is done, abandoned or unknown to this Machine is
@@ -245,11 +251,11 @@ filing time; no stored child list. Open, merged and closed derive as today
 | Surface | Change |
 |---|---|
 | `lf task create` | `--parent <ID\|none>`; default from the calling conversation; receipt carries `parent` |
-| `lf task status --json` (`task_row::TaskDetail`) | `parent` (identifier, required and nullable) beside `stack_parent`; `children: [TaskRow]`, the row type every list already uses, not a second shape |
+| `lf task status --json` (`task_row::TaskDetail`) | `parent`, the parent's `TaskRow` or `null`, beside `stack_parent`; `children: [TaskRow]`, the row type every list already uses, not a second shape |
 | `lf task show` (`TaskStatus`, `DesktopTaskPane`) | same two keys; human output lists children |
-| `TaskRow`, `RoadmapTask` (lists, server, Swift mirror) | `parent`, required and nullable, so a list can nest and the sidebar has something to draw |
+| `TaskRow`, `RoadmapTask` (lists, server, Swift mirror) | `parent_id`, the parent's stable ID, required and nullable, so a list can nest and the sidebar has something to draw |
 | `lf wave show` | a child prints indented under its parent |
-| `lf task complete` | closes merged and never-started children; names the ones left open |
+| `lf task complete` | closes merged and never-started children; names the ones left open; `--json` and served `task.complete` carry `children`, one entry per child with what happened to it |
 | served `task.create` | `parent` |
 | Task updates | merge and close for a Task's own conversation; a notice to its parent's when its standing moves |
 | Fixtures | `task_detail.json`, `task_status.json`, `roadmap_snapshot.json`, `task_create_receipt.json`, `local_task.json`, `server_schema.json`, Swift `DTOFixtureTests` |
@@ -484,7 +490,56 @@ existing update a conversation gets about its own Task; Waves and
    failed twice from this checkout and passed from an empty directory with
    a temp `HOME`.
 
-Next: nothing in the plan's slices. QA walked the acceptance check by hand
+6. **What the built branch showed.** Not built. The concept review of the
+   whole branch (`scratch/concept-review.html`, 2026-11-18, 3e7bbedb16)
+   found five places where one idea has two behaviours or two spellings.
+   Each is small and removes a case; none adds a concept. Choices are
+   **made for review**.
+   - **Flatten only to an open parent.** `TaskParentChoice::resolve`
+     (`ops/task.rs:2281`) takes the calling Task's parent whatever its
+     state, so after LOO-12 closes, a follow-up filed from LOO-14's
+     conversation goes under LOO-12: listed top-level, its news sent to a
+     conversation nobody has open (QA). Take the calling Task's parent only
+     when that Task is open on this Machine; otherwise the calling Task.
+     Also removes the error "--parent names an unknown Task" for a command
+     that passed no `--parent`. Test: in `adoption/tests.rs`, a follow-up
+     filed from a child whose parent is done is that child's child.
+   - **Completing a Task settles its children, by any path.**
+     `complete_children` (`sqlite/children.rs:2674`) calls
+     `record_task_completion` on a merged child and stops, so that child's
+     never-started child stays open, where `lf task complete <child>` typed
+     directly abandons it (QA: `bd062e` under `c2b6ef`). A child completed
+     there runs `complete_children` itself; the command prints the
+     grandchildren indented under their parent. Test: extend
+     `a_merged_parent_stays_open_until_it_is_completed_with_its_children`.
+   - **The same failure is said once.** `TaskObservation::news`
+     (`harness/task_updates.rs:86`) dedups a run and its relaunches inside
+     one reading; across two readings a relaunch failing at the same step
+     woke the conductor twice with the same sentence (QA). A failure
+     sentence a completed run in the old reading already gave is not news.
+     Test: beside the "failed at gate" case in `task_updates::tests`.
+   - **One spelling for the parent on the wire.** `parent` is an ID on
+     `TaskRow`, an identifier on `lf task status` / `lf task show`, and a
+     row on the creation receipt. `TaskRow.parent` becomes `parent_id`,
+     matching `TaskSummary.parent_id` and the `id` it nests by; `parent` is
+     the parent's `TaskRow` or `null` wherever it appears, so
+     `.parent.identifier` reads the same from all three commands. Fixtures
+     `task_detail.json`, `task_status.json`, `roadmap_snapshot.json`,
+     `subscribe_frames.json`, `server_schema.json`; `docs/work.md`
+     Reference (Parent).
+   - **An agent can read what its completion did.** `lf task complete
+     --json` and served `task.complete` return the parent alone, and the
+     conductor completing a parent is an agent. They gain `children`, one
+     entry per child: its `TaskRow` and `outcome` (`done`, `abandoned`,
+     `open`), `[]` when there were none; nested for grandchildren.
+   Passed over, left as they are: notices to the conversation that just
+   completed the parent (one prompt, already carrying its own update);
+   `lf task create` typed in a terminal in the Task's checkout filing
+   top-level (the caller is the conversation; making the checkout count is
+   new behaviour); `TaskEventKind::FamilyCompletionRequested`, a record the
+   person never sees, kept for the reason in its doc comment.
+
+Next: slice 6. QA walked the acceptance check by hand
 on a private Machine, 2026-11-18 (`scratch/qa.html`): every line of it held,
 and a real Claude conversation was woken two seconds after its child stopped.
 A prompt hook for a parent with ten children at a review step took about

@@ -125,6 +125,25 @@ rest is not chosen.
   inventories in test fixtures still decode. The type is not an `lf --json`
   DTO.
 
+## Made at the concept review of the built branch, for review (slice 6)
+
+- Flat only to an open parent: filed from a child whose parent is done,
+  abandoned or not on this Machine, a follow-up goes under the calling Task.
+  Passed over: under the closed parent as built; top-level.
+- A child completed by its parent's completion settles its own children by
+  the same rule.
+- A relaunch that fails at the step the last run failed at is not a second
+  notice. A person's deliberate rerun failing the same way is also silent to
+  the conductor until the Task's step or PR moves.
+- `parent_id` is the ID and `parent` is the parent's `TaskRow` everywhere;
+  `lf task status --json`'s `parent` changes from an identifier string to a
+  row. Answers the two "rename one?" items below.
+- `lf task complete --json` and served `task.complete` gain `children`.
+  Answers the slice 4 item below.
+- Left as built: one notice per child settled by a parent's completion, sent
+  to the conversation that completed it; a terminal in the Task's checkout
+  files top-level.
+
 ## Raised by QA on a private Machine (2026-11-18, `scratch/qa.html`)
 
 Changed there, for review: the human `lf task create` receipt prints a second

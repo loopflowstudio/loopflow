@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Concept review: work with children</title>
+<title>Concept review: work with children, third pass</title>
 <style>
   :root {
     --bg: #fbfaf7; --fg: #1d1c1a; --soft: #5d5a55; --line: #dcd8d0; --card: #ffffff;
@@ -25,7 +25,7 @@
   h2 { font-size: 21px; margin: 46px 0 12px; }
   h3 { font-size: 16px; margin: 0 0 8px; }
   p { margin: 0 0 12px; }
-  .lede { color: var(--soft); max-width: 760px; }
+  .lede { color: var(--soft); max-width: 780px; }
   code { background: var(--code); padding: 1px 5px; border-radius: 4px;
     font: 13px/1.4 ui-monospace, "SF Mono", Menlo, monospace; }
   pre { background: var(--code); padding: 12px 14px; border-radius: 8px; overflow-x: auto;
@@ -45,190 +45,185 @@
   .card.before { border-left: 4px solid var(--no); }
   .card.after { border-left: 4px solid var(--new); }
   .big { background: var(--card); border: 2px solid var(--no); border-radius: 12px; padding: 20px 22px; }
-  svg { width: 100%; height: auto; display: block; }
-  svg text { font: 13px -apple-system, "Segoe UI", system-ui, sans-serif; fill: var(--fg); }
-  svg .s { fill: var(--soft); font-size: 12px; }
-  svg .box { fill: var(--card); stroke: var(--line); stroke-width: 1.5; }
-  svg .nbox { fill: var(--newbg); stroke: var(--new); stroke-width: 1.5; }
-  svg .bad { stroke: var(--no); stroke-width: 2; fill: none; }
-  svg .good { stroke: var(--new); stroke-width: 2; fill: none; stroke-dasharray: 5 4; }
-  svg .plain { stroke: var(--soft); stroke-width: 1.5; fill: none; }
   ol.q > li { margin-bottom: 16px; }
   ol.q ol { list-style: lower-alpha; margin-top: 4px; }
   .legend span { margin-right: 14px; }
   .timeline { list-style: none; padding: 0; margin: 0; }
   .timeline li { padding: 8px 0 8px 18px; border-left: 2px solid var(--line); position: relative; }
   .timeline li::before { content: ""; position: absolute; left: -6px; top: 15px; width: 10px; height: 10px; border-radius: 50%; background: var(--soft); }
-  .timeline li.n::before { background: var(--new); }
   .timeline li.x::before { background: var(--no); }
 </style>
 </head>
 <body>
 <main>
 
-<h1>Work with children, as built: do the product's concepts and the code's line up?</h1>
+<h1>Work with children, after slice 6: do the product's concepts and the code's line up?</h1>
 <p class="lede">The area taken is everything a follow-up touches with the whole branch in it: how one
-Task relates to another (parent, stack, Project), which conversation is told about which work, what
-merging and closing do, and how the link reads on the wire and in a tracker. Reviewed against
-<code>origin/main</code> at <code>3e7bbedb16</code>, 2026-11-18, with nobody present, after slices 1 to 5
-and QA. The first review of this plan, before anything was built, is in Git history at
-<code>7582f08e48</code>.</p>
+Task relates to another, which conversation is told about which work, what merging, finishing and
+closing do, and how the link reads on the wire, in a tracker and on a second Machine. Reviewed at
+<code>e3f0806302</code>, 2026-11-18, with nobody present, after slices 1 to 6 and a second QA pass
+(<code>scratch/qa.html</code>). The two earlier reviews are in Git history: before anything was built
+at <code>7582f08e48</code>, of slices 1 to 5 at <code>b53a53bd45</code>.</p>
 <p class="legend"><span><span class="yes">yes</span> lines up</span>
 <span><span class="no">no</span> does not</span>
-<span><span class="new">proposed</span> slice 6, not built</span></p>
+<span><span class="new">proposed</span> slice 7, not built</span></p>
 
-<h2>One interaction, walked on the built branch</h2>
+<h2>What the last pass set out to do, and what happened</h2>
+<table>
+  <tr><th style="width:38%">Slice 6 intended</th><th>Seen by hand in QA's second pass</th></tr>
+  <tr><td>A follow-up is never filed under a closed parent by the flat rule</td><td>Filed from open child 94067e after f5a0f9 closed: <code>parent: 94067e</code>, and that conversation heard it abandoned.</td></tr>
+  <tr><td>A child finished by its parent's completion settles its own children</td><td><code>4f0cb4 done</code>, <code>0c41ee abandoned: never started</code> indented under it.</td></tr>
+  <tr><td>The same failure is said once</td><td>Six failed runs of one step woke real Claude once; news again after the child had stood at <code>demo</code>.</td></tr>
+  <tr><td><code>parent_id</code> the ID, <code>parent</code> the row</td><td>Held on <code>lf task create</code>, <code>status</code>, <code>show</code> and served <code>task.create</code>.</td></tr>
+  <tr><td><code>lf task complete --json</code> carries <code>children</code></td><td>Held, and on served <code>task.complete</code>.</td></tr>
+</table>
+<p style="margin-top:12px">All five landed. The four pairings they answered now read yes below.</p>
+
+<h2>One interaction, walked on the branch as it stands</h2>
+<p>A Task whose Graph plans the work and files it as children, with no PR of its own.</p>
 <ul class="timeline">
-  <li>In LOO-12's conversation: <code>lf task create --title "Retry budget per host"</code>. The receipt
-    prints <code>parent: LOO-12</code>. Holds.</li>
-  <li>LOO-12 merges. <code>lf task status LOO-12</code> reads <code>Merged · 3 children open</code>,
-    <code>next</code> is null, Auto-Ship leaves it open. Holds.</li>
-  <li>LOO-15 stops at human-review. LOO-12's idle conversation is woken two seconds later (QA, real
-    Claude) with one line naming the child. A steer for LOO-15 stays with LOO-15. Holds.</li>
-  <li class="x">Failure: LOO-14's Graph fails at gate; <code>lf task run</code> relaunches it and it fails
-    there again in a later reading. The conductor is woken twice with the same sentence.</li>
-  <li class="x">LOO-12 is completed. Later, LOO-15's conversation files a follow-up with no flag. It goes
-    under closed LOO-12: listed top-level, and its news goes to a conversation nobody has open.</li>
-  <li class="x">Recovery: <code>lf task complete LOO-12</code> finishes merged LOO-14 and leaves LOO-14's
-    own never-started child open. Typed as <code>lf task complete LOO-14</code>, the same child is
-    abandoned.</li>
-  <li class="x">The agent that ran <code>lf task complete LOO-12 --json</code> gets the parent back and
-    nothing about which child stayed open.</li>
-  <li>The checkout is retired; <code>lf resume</code> reopens the conversation in the main checkout.
-    Holds.</li>
+  <li><code>lf task run a32d33</code>. A step files <code>e80c18</code>; the receipt prints
+    <code>parent: a32d33</code>. Holds.</li>
+  <li>The Graph reaches <code>end</code>. A childless Task is done here. This one has a child open, so
+    no completion is requested and it stays open. Holds, as slice 4 built it.</li>
+  <li class="x"><code>lf task status a32d33</code>:
+    <code>action: run (run the next work with `lf task run`; inspect earlier Graphs and independent Sessions first)</code>.
+    Its own work is over. Nothing says the child is why it is open, and the conductor is told to run it again.</li>
+  <li><code>e80c18</code> stops at its review; a32d33's conversation is told. Holds.</li>
+  <li class="x">Failure: <code>e80c18</code> is abandoned by hand. a32d33 now has nothing open under it
+    and still reads <code>run the next work</code>. A merged parent in the same place reads
+    <code>Merged; complete the Task</code>.</li>
+  <li>Recovery: <code>lf task complete a32d33</code> closes it. Works, though nothing pointed there.</li>
 </ul>
 
 <h2>The pairings</h2>
 <table>
   <tr><th style="width:23%">What a person knows</th><th style="width:31%">What the code has</th><th style="width:9%">Lines up</th><th>What is wrong</th></tr>
   <tr><td>A follow-up of a Task</td><td><code>tasks.parent_task_id</code>, <code>WorkValue::TaskParent</code>, Linear <code>parentId</code>, Asana <code>parent</code></td>
-    <td><span class="yes">yes</span></td><td>One link, one writer (<code>planning_write::create</code>), the tracker's own field.</td></tr>
+    <td><span class="yes">yes</span></td><td></td></tr>
   <tr><td>"The Task's conversation"</td><td><code>session_tasks()</code>, unchanged</td><td><span class="yes">yes</span></td><td></td></tr>
-  <tr><td>"This conversation conducts those follow-ups"</td><td><code>task_work::conducted_tasks</code>, read by the update writer and the steer audience</td>
-    <td><span class="yes">yes</span></td><td>One definition, derived from the link. The mismatch the first review found is gone.</td></tr>
-  <tr><td>Where a follow-up goes when I pass no flag</td><td><code>TaskParentChoice::resolve</code>: the caller's Task, or that Task's parent whatever its state</td>
-    <td><span class="no">no</span></td><td><strong>The biggest mismatch.</strong> Below.</td></tr>
-  <tr><td>Being told a child's standing moved</td><td><code>TaskObservation::news</code>, <code>notice:&lt;Task&gt;:&lt;key&gt;</code> steers</td>
-    <td><span class="no">no</span></td><td>"Moved" is compared per run, so a relaunch failing at the same step is news again.</td></tr>
-  <tr><td>Completing a Task</td><td><code>complete_task</code> → <code>complete_children</code>; a child done inside it gets <code>record_task_completion</code> only</td>
-    <td><span class="no">no</span></td><td>One action, two behaviours: a Task completed by its parent's completion does not settle its own children.</td></tr>
-  <tr><td>What my completion did</td><td>human output: one line per child; <code>--json</code> and served <code>task.complete</code>: the parent</td>
-    <td><span class="no">no</span></td><td>The result exists for a person and not for the agent that conducts.</td></tr>
-  <tr><td>"Its parent"</td><td><code>parent</code>: an ID on <code>TaskRow</code>, an identifier on <code>lf task status</code>, a row on the receipt; plus <code>parent_id</code>, <code>parent_task_id</code></td>
-    <td><span class="no">no</span></td><td>One key, three values.</td></tr>
-  <tr><td>Merged, still open</td><td><code>task_actions::conducting_reason</code>, <code>RoadmapTask.conducting</code></td>
-    <td><span class="yes">yes</span></td><td>One place decides. The field says a Task "conducts", where everywhere else a conversation does; left.</td></tr>
-  <tr><td>Closed, still talking to it</td><td><code>admit_workspace</code> falls back to the main checkout</td><td><span class="yes">yes</span></td><td>A precondition dropped, nothing added.</td></tr>
+  <tr><td>"This conversation conducts those follow-ups"</td><td><code>task_work::conducted_tasks</code></td>
+    <td><span class="yes">yes</span></td><td></td></tr>
+  <tr><td>Where a follow-up goes with no flag</td><td><code>TaskParentChoice::resolve</code>: the caller's parent while it is open, else the caller</td>
+    <td><span class="yes">yes</span></td><td>Slice 6.</td></tr>
+  <tr><td>Being told a child's standing moved</td><td><code>TaskObservation::news</code>, <code>notice:</code> steers</td>
+    <td><span class="yes">yes</span></td><td>Slice 6: one failure, one wake.</td></tr>
+  <tr><td>"Its parent" in JSON</td><td><code>parent_id</code> the ID, <code>parent</code> the row</td>
+    <td><span class="yes">yes</span></td><td>Slice 6.</td></tr>
+  <tr><td>What my completion did</td><td><code>TaskCompleted.children</code>, <code>ChildOutcome</code></td>
+    <td><span class="yes">yes</span></td><td>Slice 6.</td></tr>
+  <tr><td>"Its own work is over; it is open for its children"</td><td><code>task_actions::conducting_reason</code>: PR merged and children open</td>
+    <td><span class="no">no</span></td><td><strong>The biggest mismatch.</strong> The code knows one of the two ways a Task's own work ends. Below.</td></tr>
+  <tr><td>Completing a parent settles what is under it</td><td><code>complete_children</code> recurses into a child it marks done, not one it abandons</td>
+    <td><span class="no">no</span></td><td>One settlement, two depths: a never-started child's never-started child survives (QA: <code>e1dd86</code> under <code>a1e338</code>).</td></tr>
+  <tr><td>Abandoned</td><td><code>tasks.abandoned_at</code> here; <code>planning_state='canceled'</code> when it arrives from another Machine; <code>TaskState::lifecycle</code> joins them in three reads and <code>task_open_sql</code> does not</td>
+    <td><span class="no">no</span></td><td>One idea, two records. On <code>main</code> too; this change makes it show, since completing a parent abandons children. Larger than this work.</td></tr>
+  <tr><td>Closed, still talking to it</td><td><code>admit_workspace</code> falls back to the main checkout</td><td><span class="yes">yes</span></td><td></td></tr>
   <tr><td>(nothing)</td><td><code>TaskEventKind::FamilyCompletionRequested</code></td>
-    <td><span class="no">no</span></td><td>A record the person never sees, and a third word for parent and children. It keeps who asked while a completion waits for a merge; the derived form needs every write that adds a child to withdraw a Graph's request. Left.</td></tr>
+    <td><span class="no">no</span></td><td>A record the person never sees. Kept for the reason in its doc comment.</td></tr>
   <tr><td>Stacked on another Task</td><td><code>stack_parent</code>, <code>parent_pr_id</code>, <code>--stack-on</code></td>
-    <td><span class="no">no</span></td><td>"Parent" is still two ideas in the docs and skills. Larger than this work.</td></tr>
-  <tr><td>A sub-issue a coworker made</td><td>Linear: <code>tracker_items.parent_id</code>, <code>observe_parents</code>. Asana: not read</td>
-    <td><span class="no">no</span></td><td>Half of one idea. The docs claim Linear only. Larger than this work.</td></tr>
+    <td><span class="no">no</span></td><td>"Parent" is still two ideas in the docs. Larger than this work.</td></tr>
+  <tr><td>A sub-issue a coworker made</td><td>Linear read back; Asana not</td>
+    <td><span class="no">no</span></td><td>Half of one idea. Larger than this work.</td></tr>
 </table>
 
-<h2>The biggest mismatch: a follow-up can be filed under work nobody conducts</h2>
+<h2>The biggest mismatch: a finished Task kept open by its children is only recognised when it has a merged PR</h2>
 <div class="big">
-<p>The person's idea is "follow-ups stay flat, and somebody's conversation hears about each one". The
-code's rule is "take my Task's parent". Those agree while the parent is open. Once it closes they
-part: the link points at a Task whose conversation is shut, the list shows the follow-up top-level
-because its parent is closed, and the conversation that filed it is told nothing.</p>
+<p>The person's idea is one standing: "this Task has done its own part and is open because follow-ups
+are." There are two ways to get there, a PR that merged and a Graph that reached <code>end</code> with
+no PR, and slice 4 built the staying-open for both. The words for it exist for the first only, so the
+second falls through to the line for a Task that has work left.</p>
 <div class="grid">
 <div class="card before">
 <h3>Built</h3>
-<pre>LOO-12  done
-LOO-15  idle at human-review     (parent: LOO-12)
+<pre>$ lf task status f5a0f9      # PR merged
+  action: no_action (Merged · 4 children open)
 
-# in LOO-15's conversation
-$ lf task create --title "Trim the log line"
-Trim the log line · LOO-21
-  parent: LOO-12          # closed; nobody hears</pre>
+$ lf task status a32d33      # no PR, Graph at end
+  action: run (run the next work with `lf task run`;
+    inspect earlier Graphs and independent Sessions first)
+  child: e80c18  Open kid  unstarted
+
+# after e80c18 closes
+$ lf task status a32d33
+  action: run (run the next work with `lf task run`; …)</pre>
 </div>
 <div class="card after">
 <h3>After <span class="new">proposed</span></h3>
-<pre>LOO-12  done
-LOO-15  idle at human-review     (parent: LOO-12)
+<pre>$ lf task status f5a0f9      # PR merged
+  action: no_action (Merged · 4 children open)
 
-# in LOO-15's conversation
-$ lf task create --title "Trim the log line"
-Trim the log line · LOO-21
-  parent: LOO-15          # open; this conversation hears</pre>
+$ lf task status a32d33      # no PR, Graph at end
+  action: no_action (Finished · 1 child open)
+  child: e80c18  Open kid  unstarted
+
+# after e80c18 closes
+$ lf task status a32d33
+  action: no_action (Finished; complete the Task)
+  next: lf task complete a32d33</pre>
 </div>
 </div>
-<p style="margin-top:12px">The rule becomes: a follow-up takes the calling Task's parent only while
-that parent is open on this Machine, and the calling Task otherwise. It also removes an error: today a
-parent that cannot be read fails the command with "--parent names an unknown Task" though no
-<code>--parent</code> was passed.</p>
-<p>Tested against the cases. <em>Normal:</em> parent open, a sibling as now. <em>The closed parent's
-own reopened conversation files one:</em> its Task has no parent, so the follow-up goes under it and
-that conversation, open by definition, hears. <em>Counterexample kept:</em> LOO-15 and LOO-21 then sit
-two levels deep in Linear, which the flat rule was avoiding; "generally flatter hierarchies are better
-... if we don't need a limit, we should avoid it" (<code>scratch/said.md</code>). Depth here appears
-only after a parent closed, and the closed parent's children already list top-level.</p>
+<p style="margin-top:12px">One definition, "its own work is over": its PR merged, or it has no PR and
+stands at <code>end</code>. <code>conducting_reason</code> and the complete nudge both read it; the step
+is already in <code>TaskDetailFacts.steps</code>.</p>
+<p>Tested against the cases. <em>Normal:</em> a childless Task reaching <code>end</code> is completed
+there and never shows this line. <em>Failure:</em> a Task at <code>end</code> with an open PR is not
+finished; it keeps today's <code>lf land</code> line. <em>Recovery:</em> the last child closes on its
+own and the parent is pointed at <code>lf task complete</code>, which nothing does today.
+<em>Counterexample kept:</em> a person may want to run another Graph on a Task that stands at
+<code>end</code>; <code>lf task run &lt;ID&gt; &lt;graph&gt;</code> still works, only the suggestion changes.</p>
 </div>
 
-<h2>The other four, before and after</h2>
+<h2>The other one, before and after</h2>
 <table>
-  <tr><th style="width:22%"></th><th>Built</th><th>After <span class="new">proposed</span></th></tr>
-  <tr><td>Completing a parent whose merged child has a never-started child</td>
-    <td><pre>$ lf task complete LOO-12
-LOO-12 done
-  LOO-14 done: #1980 merged
-# LOO-22, under LOO-14, stays open</pre></td>
-    <td><pre>$ lf task complete LOO-12
-LOO-12 done
-  LOO-14 done: #1980 merged
-    LOO-22 abandoned: never started</pre></td></tr>
-  <tr><td>A child relaunched twice, failing at gate each time</td>
-    <td>Two wakes: "LOO-14 … failed at gate." twice</td>
-    <td>One. The same failure at the same step is said once until the Task's step or PR moves.</td></tr>
-  <tr><td><code>parent</code> on the wire</td>
-    <td><pre>lf task list     .[].parent         "task_01…"
-lf task status   .parent            "LOO-12"
-lf task create   .parent.identifier "LOO-12"</pre></td>
-    <td><pre>lf task list     .[].parent_id      "task_01…"
-lf task status   .parent.identifier "LOO-12"
-lf task create   .parent.identifier "LOO-12"</pre></td></tr>
-  <tr><td><code>lf task complete --json</code>, served <code>task.complete</code></td>
-    <td>The parent Task.</td>
-    <td>The parent, and <code>children</code>: each child's row and <code>outcome</code> (<code>done</code>, <code>abandoned</code>, <code>open</code>).</td></tr>
+  <tr><th style="width:26%"></th><th>Built</th><th>After <span class="new">proposed</span></th></tr>
+  <tr><td>Completing a parent whose never-started child has a never-started child</td>
+    <td><pre>$ lf task complete 220927
+220927 done
+  a1e338 abandoned: never started
+# e1dd86, under a1e338, stays open,
+# top-level in the backlog</pre></td>
+    <td><pre>$ lf task complete 220927
+220927 done
+  a1e338 abandoned: never started
+    e1dd86 abandoned: never started</pre></td></tr>
 </table>
+<p style="margin-top:12px">A child the completion closes, done or abandoned, has its own children
+settled by the same rule. <code>lf task abandon &lt;ID&gt;</code> typed directly still touches one Task
+(question 2).</p>
 
 <h2>Larger than this work</h2>
 <table>
-  <tr><th style="width:36%">What</th><th>What it would take</th></tr>
-  <tr><td>"Parent" names both the filing link and the stack across <code>docs/work.md</code>, <code>docs/agent-api.md</code>, <code>docs/ops.md</code> and <code>ship-decomposed</code></td><td>One word chosen for each and a sweep of docs, skills and <code>stack_parent</code>; the dependency design decides whether stack becomes a setting on the one link.</td></tr>
-  <tr><td>A subtask made or moved in Asana does not become a child</td><td>Storing Asana gids beside Loopflow's <code>external</code> id so a parent can be read back.</td></tr>
-  <tr><td>A child's parent can differ between two Machines after a skipped import (a cycle), and a child whose parent's creation was rejected is sent to the tracker with no parent for good</td><td>A skipped link keeping its old stamp so the next exchange retries it; a queued <code>task_parent</code> field action once the parent has a tracker item.</td></tr>
+  <tr><th style="width:38%">What</th><th>What it would take</th></tr>
+  <tr><td>A second Machine lists Tasks abandoned on the first as open backlog, the children a parent's completion abandoned among them; a parent there would count them in "N children open"</td><td>One definition of open that every read uses: <code>task_open_sql</code> and <code>task_state_sql</code> treating a never-started Task whose plan says <code>canceled</code> or <code>duplicate</code> as abandoned, as <code>TaskState::lifecycle</code> does. It touches every list and the query plans behind them, and belongs with the plan exchange (LOO-938).</td></tr>
+  <tr><td>"Parent" names both the filing link and the stack across the docs and <code>ship-decomposed</code></td><td>One word for each and a sweep; the dependency design decides whether stack becomes a setting on the one link.</td></tr>
+  <tr><td>A subtask made or moved in Asana does not become a child</td><td>Storing Asana gids so a parent can be read back.</td></tr>
+  <tr><td>A skipped parent import leaves two Machines with different parents; a child whose parent's creation was rejected reaches the tracker with no parent for good</td><td>A skipped link keeping its old stamp; a queued <code>task_parent</code> action once the parent has a tracker item.</td></tr>
   <tr><td>A merge made by hand on GitHub is not news until lf reconciles the PR</td><td>A server-side reader of PR state.</td></tr>
-  <tr><td>Desktop decodes <code>parentId</code> and draws nothing; Swift does not decode the receipt's or the pane's parent</td><td>The sidebar work, in the running app.</td></tr>
-  <tr><td>A Wave's conversation is told nothing about its Tasks</td><td>A second source for <code>conducted_tasks</code> and a volume rule for a Wave with hundreds of Tasks.</td></tr>
+  <tr><td>Desktop decodes <code>parentId</code> and draws nothing; Swift decodes <code>task.complete</code> as a Task</td><td>The sidebar work, in the running app.</td></tr>
+  <tr><td>A Wave's conversation is told nothing about its Tasks</td><td>A second source for <code>conducted_tasks</code> and a volume rule.</td></tr>
   <tr><td>Several PRs in a row on one Task</td><td>Its own Task; eight tests change.</td></tr>
 </table>
 
 <h2>Choices made for review</h2>
 <ol class="q">
-  <li>A follow-up filed with no flag from a child whose parent is closed.
-    <ol><li><strong>Chosen:</strong> under the calling Task.</li>
-    <li>Under the closed parent, as built.</li>
+  <li>A Task with no PR whose Graph reached <code>end</code> with children open.
+    <ol><li><strong>Chosen:</strong> the same standing as a merged parent: "Finished · N children open", then "Finished; complete the Task".</li>
+    <li>As built: "run the next work with <code>lf task run</code>".</li>
+    <li>Complete it at <code>end</code> anyway and settle its children there, which abandons never-started follow-ups the moment a planning Graph finishes.</li></ol></li>
+  <li>How far a parent's completion reaches.
+    <ol><li><strong>Chosen:</strong> into every child it closes, done or abandoned; <code>lf task abandon</code> typed directly stays one Task.</li>
+    <li>Into done children only, as built.</li>
+    <li>Closing by either command settles children: <code>lf task abandon &lt;parent&gt;</code> finishes merged children and abandons never-started ones too. Needs a result on <code>task.abandon</code> like <code>task.complete</code>'s.</li></ol></li>
+  <li>A child whose last run failed prints <code>idle</code> on its parent's status.
+    <ol><li><strong>Chosen:</strong> as built; the notice and the child's own status say it failed.</li>
+    <li>The child line carries the failure.</li></ol></li>
+  <li>Served <code>task.create</code> with an unknown parent answers <code>outcome_unknown</code> though nothing was written.
+    <ol><li><strong>Chosen:</strong> as built; how the served request classes its other refusals was not read.</li>
+    <li>A refusal kind of its own for input that names nothing.</li></ol></li>
+  <li>The closed parent's own reopened conversation files a follow-up.
+    <ol><li><strong>Chosen:</strong> under the closed parent, as built: that conversation is open and hears.</li>
     <li>Top-level.</li></ol></li>
-  <li>A Task completed by its parent's completion, with children of its own.
-    <ol><li><strong>Chosen:</strong> its children are settled by the same rule.</li>
-    <li>Left as they are, as built.</li></ol></li>
-  <li>A child that fails at the same step again.
-    <ol><li><strong>Chosen:</strong> said once until its step or PR moves, a person's own rerun included.</li>
-    <li>Said each time a run ends, as built.</li>
-    <li>Said once per <code>lf task run</code>, which needs relaunches marked apart from reruns.</li></ol></li>
-  <li><code>parent</code> in JSON.
-    <ol><li><strong>Chosen:</strong> <code>parent_id</code> is the ID, <code>parent</code> is the parent's row, everywhere.</li>
-    <li><code>parent</code> is the identifier everywhere and the receipt loses the row.</li>
-    <li>As built.</li></ol></li>
-  <li>The conversation that completes a parent gets one notice per child it settled.
-    <ol><li><strong>Chosen:</strong> as built; they arrive in one prompt.</li>
-    <li>No notice for a child settled by its parent's completion.</li></ol></li>
-  <li><code>lf task create</code> typed in a terminal inside a Task's checkout, outside any conversation.
-    <ol><li><strong>Chosen:</strong> top-level, as built; the caller is the conversation.</li>
-    <li>A child of that checkout's Task.</li></ol></li>
   <li>The word for the filing link, given "parent" already means the stack parent in the docs.
     <ol><li>Parent for filing; the stack is always "stack".</li>
     <li>"Follow-up of" for filing; parent stays with the stack.</li></ol></li>

@@ -197,6 +197,22 @@ Nothing in the code changed in this pass. Seen and left as built:
   child failed, real Claude read the child, said it had not relaunched it and
   stopped; told a child stopped at `demo`, it named the conversation to open.
 
+## Made at the third concept review, for review (slice 7)
+
+Answers two of the second QA pass's items above; the rest stay as listed.
+
+- A no-PR parent at `end` with children open reads "Finished · N children
+  open", then "Finished; complete the Task". Passed over: "run the next
+  work" as built; completing it at `end`.
+- A parent's completion settles the children of a child it abandons, as it
+  does for one it finishes. `lf task abandon <parent>` typed directly still
+  touches one Task. Should abandoning a parent settle its children too?
+- Not taken on, on the page as larger than this work: a second Machine
+  reading Tasks abandoned elsewhere as open (`planning_state='canceled'`
+  with no `abandoned_at`; `task_open_sql` does not read it, so a parent
+  there counts them in "N children open"). Its own Task, with the plan
+  exchange?
+
 ## Raised by reading slice 4 (not run)
 
 - `lf task complete <parent>` closes or abandons children, and each of

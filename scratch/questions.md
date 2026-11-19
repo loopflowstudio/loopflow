@@ -34,3 +34,8 @@ Made headless at kickoff and concept review; each is reversible. Detail in
   (`agent::validate_terminal_turn`), as the clipboard does. A list of several
   thousand files, or a patch near 15,000 tokens beside a large clipboard,
   could refuse an interactive launch. Not bounded here.
+- In the `<lf:change>` block every `$` in the patch reads `&#36;`, under the
+  one-line notation key (`prompt::render_reference`), as in the clipboard and
+  explicit docs. The commit and PR writers get the patch unescaped. A Skill
+  reviewing shell or Swift string interpolation reads the encoded form; the
+  read command still returns the real bytes. Left as the shared rule.

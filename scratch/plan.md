@@ -18,8 +18,8 @@ the brief's "lf chooses whole files within a budget":
 
 ## What exists
 
-Built and committed (`ff02472439`, `6863c3607a`, `9f5f1fd770`), except how a
-Skill is handed the section, at the end of this part.
+Built and committed (`ff02472439`, `6863c3607a`, `9f5f1fd770`,
+`39c5ae5706`).
 
 `prompt/change.rs` owns showing an agent a change: `Change::read(repo, range)`
 and `Change::prompt_section()`, over `ChangeRange::{Staged, Since(base),
@@ -121,7 +121,8 @@ records the block as a `Diff` asset on the Task channel.
    section is bounded (the list plus at most 15,000 tokens), opt-in, and no
    more frozen than a file written once at launch. Passed over: leaving the
    listed file, which keeps a flag that does less than its name; and taking
-   `context: {diff: true}` back off `Change`. Open: whether the old docs
+   `context: {diff: true}` back off `Change`. Built in `39c5ae5706`; the run
+   under "What runs showed" named both files. Open: whether the old docs
    sentence "rather than inlining a frozen patch" meant never to do this
    (`questions.md`).
 

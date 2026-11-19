@@ -8,12 +8,14 @@ Research: `scratch/task-details-research.md`. Pages: `scratch/explore-diff-rival
 The step-by-step account this file replaced: `ade953f915:scratch/loo-515-task-details.md`
 (PR #1949's branch).
 
-Status: built; nothing since the November 18 first try in the Dev app has been
-seen on screen. PR #1949 is open.
+Status: built, the tour skill and the two diff settings included; nothing since
+the November 18 first try in the Dev app has been seen on screen. PR #1949 is
+open at `2b27c7eaef`.
 
 ## What exists
 
-One PR, Swift plus Rust for a served read, a setting and the private settings file.
+One PR: Swift, plus Rust for a served read, two settings, the private settings
+file and a builtin skill.
 
 - **Pages.** The Files tool has Brief, Diff and Files as the first tabs of one
   pane strip, then other open tabs; the strip's menu is labelled with the Task
@@ -36,12 +38,35 @@ One PR, Swift plus Rust for a served read, a setting and the private settings fi
     headings, comment counts, "Hidden by the worker for this change" with
     reasons and Show, "Always hidden" with its add field. Under 620 pt it opens
     over the stream from a toolbar button.
-  - **Order** (`DiffOrder`): `scratch/diff-order.yaml` with `at:`, `first:`
-    (files, optional why) and `hide:`, written by the builtin `tour` skill or
-    the Write tour / Update tour button; unnamed files follow by `diff_groups`.
-    Tour is the default when `first` has entries; By path groups by folder.
-  - **Always hidden**: `diff_hidden`, every layer added, each pattern labelled
-    with its layer; Desktop edits only yours, in `.lf/config.local.yaml`.
+  - **Order** (`DiffOrder`, `ReviewGroup.arrange`): the tour's `first:` files,
+    then the rest under the `diff_groups` headings. The menu reads Tour / By
+    group / By path; Tour is the default when `first` has entries. `ReviewKind`
+    is deleted.
+  - **Tour**: `scratch/diff-order.yaml` with `at:`, `first:` (files, optional
+    why) and `hide:`, written by the builtin `tour` skill
+    (`builtins/task/skill/tour.md`). `implement`, `compress` and `human-review`
+    point at `lf help tour`; `LOOPFLOW.md` does not, so a plain chat's change
+    gets its tour from the button. Behind means a commit after `at` changed a
+    file outside `scratch/`; the stream says "The tour was written at <sha> ·
+    N files changed since" (`task.changes --base <at> --head <head>`). **Write
+    tour** / **Update tour** sends the served `skill.run` write with the Task's
+    checkout.
+  - **Groups**: `diff_groups`, `Repository` applicability, `Replace`: the
+    nearest layer that sets it wins whole, first match wins within it. A group
+    is `{title, paths}` or `{rest: <title or null>}`, the slot for files no
+    group matches. Default: Docs, Data model, `rest: Everything else`, Tests,
+    Generated and lock files (`catalog.rs`). This repository's
+    `.lf/config.yaml` writes the full list with its own Data model paths and
+    `tests/goldens/` under Generated.
+  - **Always hidden**: `diff_hidden`, `AppendReset`, default `[scratch/]`;
+    every layer adds, each pattern labelled with the layer that last added it
+    (Default, Repository, Personal, Override). Desktop edits only yours, in
+    `.lf/config.local.yaml`; removing your last one unsets the key, since `[]`
+    would clear the layers below.
+  - One pattern rule for both settings: matched against `/` + the path,
+    ignoring case; contained anywhere, or at the end when it starts with `*`.
+  - Desktop reads both settings through `config.explain` and layers nothing
+    itself; only the tour sits on top.
   - **File bar** above the stream holds the header of the file under the top
     edge (`ReviewFileTitle`, the same view as the in-stream header).
   - `ReviewStepper` (`]`/`[`, arrows) crosses files; Focus shows one file with
@@ -104,9 +129,40 @@ One PR, Swift plus Rust for a served read, a setting and the private settings fi
   just jump files to the top" and "maybe also auto sets filters as well". On
   the worker's hide and the reading mode: "1 hidden at start 2 stream, clicking
   beings it to top, headers lock into to a fixed top bar as you scroll".
+- November 19, the tour after publish: "Tour doesnt need to survive submitting
+  the tour, but are there any good alternatives to how to implement it?" On
+  Devin Review's "hasn't analyzed the latest changes" banner: "Maybe a button
+  would make sense here too". On a skill that reads the diff and writes the
+  YAML: "We need this, plus we need to put this into other skills and/or the
+  overall loopflow guide."
+- November 19, ordering: "i wonder if there is some way we can also to smarter
+  changes over itme. we could allow repo level settings to prioritize certain
+  folders or file extensions ro something"; "the review guides basically stack
+  ontop of the default diff_Order, but we still fall back. and likewise, the
+  repo (or potentially peronsal) settings could also add more. and i think
+  maybe a whole diff seciton that has filters and ordered list of groups";
+  "i would also imagine that we want sort of anyting not covered to go between
+  e.g. docs and generated"; "btw i would want doccs up top, then like core data
+  mdoel stuff"; "ideally we would roughly suggest similar overall guidance in
+  our default skill, and have it eplicitly codified in our repo config".
+- November 19, layering: "For this we should use the existing config parser to
+  get final values"; "a little complicated on what do on how to combine groups
+  from multiple config files (and/or the represetnation from scratch)".
 
 Assumed, not answered: sidebar on the left docking at 620 pt; ⌥⌘1/2/3; the file
 bar outside the scroll view as "headers lock"; several comments as one line.
+
+Chosen while building, not by Jack, reversible before release:
+
+- No group merging. Jack asked for layers that "add more"; `AppendReset`
+  appends higher layers after lower ones, so first-match over an appended list
+  would let the built-ins win. Groups replace whole instead; hidden adds.
+- Two flat keys, `diff_hidden` and `diff_groups`, where Jack said "a whole diff
+  seciton": top-level `diff` is the released shorthand for `context.diff`, and
+  `lf` 0.16.0 read `diff: {groups: …}` as that and warned "skipping
+  context.diff: invalid value".
+- "Docs up top, then data model" read as the default order Docs, Data model,
+  rest, Tests, Generated.
 
 ## Limits found
 
@@ -122,59 +178,62 @@ bar outside the scroll view as "headers lock"; several comments as one line.
 - Moves are found only between a pure removal and a pure addition in one file.
 - The file menu and sidebar carry no per-file +/−; file headers do.
 - `lf pr submit` and `lf pr land` clear added `scratch/` files in every
-  repository, so `scratch/diff-order.yaml` ends at publish. In the `code` Graph
-  `human-review` comes before `deliver`, so the tour exists when a person first
-  reads the Diff and is gone for `verify` and for anyone reopening the Task
-  after its PR is published.
+  repository, so `scratch/diff-order.yaml` ends at publish; after that the Diff
+  offers Write tour again. Jack: "Tour doesnt need to survive".
+- A remote Task offers neither Write tour nor Update tour (the `skill.run`
+  write would run outside its checkout), and its files sit under one "Changed
+  files" heading: there is no Swift copy of the default groups. The same
+  heading shows until the settings read answers.
+- A tour run that fails after launching stays "Writing the tour…" with its log
+  path in the notice; no served read reports a launched Process ending.
+- The released `lf` 0.16.0 prints "skipping diff_groups: unknown setting" on
+  every command in a checkout whose `.lf/config.yaml` has the list (seen on
+  `lf task status` here).
 
 ## Concept review, November 19 (fifth pass)
 
-Page: `scratch/concept-review.html`. Reviewed: the two commits since the fourth
-pass (`7a7e367634`, `7b3484d303`). Both wording repairs that pass named are in:
-Focus's strip reads "Only X · N more files", and the Swift `["scratch/"]` says
-it is a copy of the catalog default. No concept merges or splits; the model
-holds as one comparison read three ways (order, hidden, filter). Nothing here
-needs a build before the demo.
+Page: `scratch/concept-review.html`. It reviewed through `7b3484d303`, before
+the tour skill and `diff_groups`; those two have had no concept review. Its
+model: one comparison read three ways (order, hidden, filter).
 
-Stays different on purpose:
-
-- Two hide lists. The worker's `hide:` is per change, matches a path or folder
-  prefix, carries a reason and is revealed entry by entry. Yours
-  (`diff_hidden`) is per repository, matches text anywhere ignoring case
-  ("always filter tests/") and is revealed by one toggle. Neither writes into
-  the other; both stay in the count ("4 of 9 files").
-
-Open, for the person at the demo (not answered by any recorded decision):
-
-1. What is the pane called? It has four names: **Toggle Browser** (View menu
-   and ⇧⌘E, on main), **Show Task Details** (this branch's action), "Files"
-   (`swift/README.md`: "show / hide Files", "Toggle Files", which is not a menu
-   item on main either) and the Task identifier on its own menu. Its first
-   three tabs are now Brief, Diff and Files, so "Files" names both the pane and
-   one tab. This is the same question as Task identity below.
-2. Focus: with a sidebar click bringing a file to the top, the filter narrowing
-   the stream and Files' Diff showing one file, does Focus keep its button?
-3. Should the worker's order outlive publish (see Limits found)?
+Stays different on purpose: two hide lists. The worker's `hide:` is per change,
+matches a path or folder prefix, carries a reason and is revealed entry by
+entry. `diff_hidden` is a setting, uses the pattern rule above and is revealed
+by one toggle. Neither writes into the other; both stay in the count ("4 of 9
+files").
 
 ## Remaining
 
 - Demo/review on screen (below). Unseen so far: the tab strip, the Diff
   rename, the completed comparison, sidebar (narrow too), file bar, skipped
-  lines, comments with Send into a live conversation, the order file, and
-  Desktop's read and save of `diff_hidden` against a running server.
-- Task identity. The brief asks that nobody wonders "which Task they are
-  viewing"; the pane now shows only the identifier on the strip's menu, after
-  "why does files show up three times" removed the header row. Whether that is
-  enough is for the demo.
-- Open choices: the three under Concept review; the parts shown on the page
-  and not named (read marks, syntax colors, pause, depth slider, folded
-  renames, hunk grouping) stay out.
+  lines, comments with Send into a live conversation, the tour with Write tour
+  / Update tour and its behind notice, By group under this repository's
+  `diff_groups`, and Always hidden's layers and save against a running server.
+- Open, for the person at the demo:
+  1. What is the pane called? It has four names: **Toggle Browser** (View menu
+     and ⇧⌘E, on main), **Show Task Details** (this branch's action), "Files"
+     (`swift/README.md`: "show / hide Files", "Toggle Files", not a menu item
+     on main either) and the Task identifier on its own menu. "Files" names
+     both the pane and one tab.
+  2. Task identity. The brief asks that nobody wonders "which Task they are
+     viewing"; the pane shows only the identifier on the strip's menu, after
+     "why does files show up three times" removed the header row.
+  3. Focus: with a sidebar click bringing a file to the top, the filter
+     narrowing the stream and Files' Diff showing one file, does Focus keep
+     its button?
+  4. The three choices under "Chosen while building": replace instead of
+     merge, flat keys instead of a `diff:` section, the default order.
+  5. This repository's `diff_groups` block makes the released `lf` warn on
+     every command in every checkout from merge until a release knows the key.
+     Keep the block and take the warning, or land the block with that release.
+     The block is what "eplicitly codified in our repo config" asked for.
+- Answered: the tour does not outlive publish.
+- The parts shown on the explore pages and not named (read marks, syntax
+  colors, pause, depth slider, folded renames, hunk grouping) stay out.
 - The released `lf` reads private settings at `lf.config.local.yaml`; once a
   branch build moves the file, the released one stops seeing them until it
-  ships. Not checked: what the released `lf` prints on the unknown
-  `diff_hidden` key. Task b108f6 removes the former-path move in
-  `config/files.rs` (filed locally; its Linear export was queued behind a rate
-  limit).
+  ships. Task b108f6 removes the former-path move in `config/files.rs` (filed
+  locally; its Linear export was queued behind a rate limit).
 - `global_commands::open_delivers_exact_task_to_desktop_without_preparing_its_execution`
   failed on this Machine in an isolated home ("No agent selected ... exactly
   one supported harness must be installed"); not run on unmodified code. CI
@@ -191,8 +250,10 @@ files:
 
 1. ⌥⌘1, **Brief**: state line, outline, related Task chips that open in-app.
    Scroll halfway.
-2. ⌥⌘2, **Diff**: starts on the files `scratch/diff-order.yaml` names, with
-   `scratch/` hidden. Click a file in the sidebar; it comes to the top with its
+2. ⌥⌘2, **Diff**: with no tour, Write tour; then it starts on the files
+   `scratch/diff-order.yaml` names, the rest under Docs, Data model, Everything
+   else, Tests, Generated, with `scratch/` hidden. Commit a source change:
+   Update tour. Click a file in the sidebar; it comes to the top with its
    header in the bar. `]` steps across files; open the skipped lines above a
    hunk; expand a move; toggle Side by side. Comment on two lines in two
    files, Send; the conversation's unsent input holds both.
@@ -239,38 +300,4 @@ files:
   page and Task switches.
 - No GitHub patch renderer remains.
 
-Check (implement, November 19, after the merge of main `932702681e`): `scripts/test_desktop.sh --filter 'TaskFilesTests|ReviewDiffTests|TaskBriefTests|PullRequestTests'` → 52 passed; `cargo test -p loopflow-execution --lib config::` → 104 passed (again after compress). Gate/CI: clippy, `documented_commands::`, golden, the full swift suite, `global_commands`. Demo: the pane on screen.
-
-Jack, on the tour after publish: "Tour doesnt need to survive submitting the tour, but are there any good alternatives to how to implement it?" Then, on Devin Review's "hasn't analyzed the latest changes" banner with Analyze latest / Analyze automatically: "Maybe a button would make sense here too". Not yet built; proposal below.
-
-Jack: "i wonder if there is some way we can also to smarter changes over itme. we could allow repo level settings to prioritize certain folders or file extensions ro something". Built as `diff_groups` below.
-
-## The tour skill and its button (November 19) — built
-
-Jack, quoting the proposal ("a small skill whose whole job is to read the diff and write the YAML … the worker and the button write the same thing the same way"): "We need this, plus we need to put this into other skills and/or the overall loopflow guide."
-
-Built: builtin `tour` (`rust/loopflow-definitions/src/builtins/task/skill/tour.md`, golden `tests/goldens/builtin_tour.md`). `implement`, `compress` (a final step) and `human-review` (when the file is missing or behind) point at `lf help tour`; `demo` and `pr-publish` don't change what a reader opens. `LOOPFLOW.md` unchanged: a plain chat's change gets its tour from Desktop's button, so every run need not pay for the line. Desktop parses `at:`; stale means a commit after `at` changed a file outside `scratch/` (committing the tour itself keeps it current), and the stream says "The tour was written at <sha> · N files changed since" — files changed, not commits, since that is the read that exists (`task.changes --base <at> --head <head>`). **Write tour** / **Update tour** sends the served `skill.run` write with the Task's checkout; a remote Task offers neither (the write would run outside its checkout). Limit: a run that fails after launching stays "Writing the tour…"; its log path is in the notice.
-
-Jack, on ordering layers: "right, and we could say that the review guides basically stack ontop of the default diff_Order, but we still fall back. and likewise, the repo (or potentially peronsal) settings could also add more. and i think maybe a whole diff seciton that has filters and ordered list of groups"
-
-Jack: "i would also imagine that we want sort of anyting not covered to go between e.g. docs and generated". So unmatched files go to a `- rest:` slot in the list.
-
-Jack: "btw i would want doccs up top, then like core data mdoel stuff". Read as the default order: Docs, Data model, rest, Tests, Generated.
-
-Jack: "ideally we would roughly suggest similar overall guidance in our default skill, and have it eplicitly codified in our repo config". So the tour skill says the order as reading guidance and this repository's `.lf/config.yaml` writes the full list out.
-
-Jack, on the layers: "For this we should use the existing config parser to get final values". So Desktop does no layering of its own; only the tour sits on top. (`AppendReset` lists append higher layers after lower ones, so first-match over an appended group list would let the built-ins win.)
-
-Jack: "a little complicated on what do on how to combine groups from multiple config files (and/or the represetnation from scratch)". Chosen in this conversation (the operator's call, not Jack's; reversible): no group merging at all.
-Groups replace whole, hidden adds across layers, and the tour pins `first:` above the groups and adds `hide:` for this change (built below).
-
-### Built (November 19): `diff_hidden` and `diff_groups`
-
-- Two flat settings, not a `diff:` section: top-level `diff` is already the released shorthand for `context.diff` (include the branch diff in a prompt). The released `lf` 0.16.0 read `diff: {groups: …}` in `.lf/config.yaml` as `context.diff` and warned "skipping context.diff: invalid value".
-- `diff_hidden`: `Repository` applicability (every layer but Wave scope), `AppendReset`, default `[scratch/]`. `diff_groups`: `Repository`, `Replace`, default Docs, Data model, `rest: Everything else`, Tests, Generated and lock files (`catalog.rs`). A group is `{title, paths}` or `{rest: <title or null>}` (`DiffGroup`, untagged; a bare `{}` is refused).
-- One pattern rule for both: matched against `/` + the path, ignoring case; contained anywhere, or at the end when it starts with `*`.
-- Desktop reads both through `config.explain` at the repository's personal file and applies only the tour on top (`ReviewGroup.arrange`). `ReviewKind` is deleted; the order menu reads Tour / By group / By path. Until the read answers, and for a remote Task, the files sit under one "Changed files" heading (no Swift copy of the default groups); hidden keeps its `scratch/` copy.
-- Always hidden lists every pattern with the layer that last added it (Default, Repository, Personal, Override); only yours have ✕, and removing your last one unsets your key instead of writing `[]`, which would clear the layers below.
-- This repository's `.lf/config.yaml` writes the full `diff_groups` list, with `rust/loopflow-model/`, `rust/loopflow-storage/` and `tests/fixtures/dto/` in Data model and `tests/goldens/` in Generated.
-- Check: `cargo test -p loopflow-execution --lib config::` → 105 passed; `scripts/test_desktop.sh --filter 'TaskFilesTests|ReviewDiffTests'` → 50 passed; branch `lf config explain diff_groups` here selects the repository's list.
-- Compress (November 19): `tourAction` holds the remote and running gates once; `scripts/test_desktop.sh --filter TaskFilesTests` → 40 passed.
+Check (November 19, before the conflict-free merge of main `2750c9e0fb`, which touched none of this branch's files): `cargo test -p loopflow-execution --lib config::` → 105 passed; `scripts/test_desktop.sh --filter 'TaskFilesTests|ReviewDiffTests'` → 50 passed, `TaskFilesTests` again after compress → 40 passed; branch `lf config explain diff_groups` selects the repository's list. Gate/CI: clippy, `documented_commands::`, goldens, the full swift suite, `global_commands` (PR #1949's suites are skipped at `2b27c7eaef`). Demo: the pane on screen.

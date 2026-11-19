@@ -696,24 +696,25 @@ Mac README and CLI reference.
   Jack's overall demo approval. A wrapper's returned launch argv must retain its
   Home context; successful initial launch does not prove nested commands do.
 
-## Task Brief, Diff and Files pages (LOO-515, 2026-11-19; PR #1949 unmerged, latest build unseen on screen)
+## Task Brief, Diff and Files pages (LOO-515, 2026-11-19; PR #1949 unmerged, unseen on screen)
 
-- Brief, Diff and Files are tabs of the one Files tool. Jack, November 18:
-  "why does files show up three times"; "Changes should probably just be
-  called Diff? is that not more normal".
-- Diff reads the PR-equivalent comparison through one renderer shared with
-  Files' Diff. Jack's brief: "focus on clarity, polish, and delight".
-- A cut read hid the work: `lf task diff` stopped at 1 MB in path order and the
-  stream showed scratch HTML, no Swift. Jack: "where else do we do stuff like
-  this"; "that we felt we couldnt afford to see a full diff". Complete a capped
-  read or say it is cut. Tasks d92894 and 4556d0 carry the other limits.
+- Brief, Diff and Files are tabs of the one Files tool (Jack, November 18:
+  "why does files show up three times"); Jack named Diff. One renderer reads
+  the PR-equivalent comparison.
+- `lf task diff` stopped at 1 MB in path order; the stream showed no Swift.
+  Jack: "that we felt we couldnt afford to see a full diff". Complete a capped
+  read or say it is cut.
 - Jack: "The diff is really about the underlying worker not the highest-level
-  session." Tracking the diff by conversation turn was dropped.
-- Jack chose comments sent to the session, a sidebar and worker order
-  (`scratch/diff-order.yaml`). Private per-repository settings, `diff_hidden`
-  included, live in `.lf/config.local.yaml`, which Jack chose.
-- Desktop types one literal line into a session's unsent input; several
-  comments share it.
+  session."
+- Jack chose comments sent to the session, a sidebar and a reading order:
+  the `tour` skill writes `scratch/diff-order.yaml`; Desktop has a button.
+  It ends at publish (Jack: "Tour doesnt need to survive").
+- `diff_hidden` adds per layer; `diff_groups` replaces whole (an agent's
+  choice over merging, unreviewed). Jack: "use the existing config parser to
+  get final values": Desktop layers nothing. Jack chose
+  `.lf/config.local.yaml` for private settings.
+- Top-level `diff` in config is `context.diff`'s shorthand. A key the released
+  `lf` doesn't know in `.lf/config.yaml` warns on every command.
 
 ## Accepted calmer workspace (2026-09-25)
 

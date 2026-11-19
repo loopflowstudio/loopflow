@@ -30,7 +30,13 @@ What to read afterwards:
 - OpenCode's own record: `sqlite3 "file:$HOME/.local/share/opencode/opencode.db?mode=ro"`,
   table `session_v2` (`id`, `directory`, tokens) and `session_message`
   (`session_id`, `seq`, `type`, `data`). `directory` must be the Task checkout.
-  OpenCode takes it from `$PWD`, not the process cwd.
+  OpenCode takes it from `$PWD`, not the process cwd. The model a TUI session
+  runs is `session_v2.model`; a `run` session leaves it empty, so read
+  `json_extract(data,'$.model.id')` of its `assistant` rows. The account's
+  default is `model` in `~/.config/opencode/opencode.json`; configure a
+  different one in `agent:` to tell them apart on screen.
+- `lf session history` shows an open OpenCode work session's finished turns as
+  `running`: completions are written when OpenCode exits.
 - A steer the plugin claimed: `steer_delivered` in `$LF_HOME/loopflow.db`;
   `.lf/prompts/*-steer.md` in the checkout. Plugin context goes into the
   request's system text, which OpenCode does not store, so a steer is never in

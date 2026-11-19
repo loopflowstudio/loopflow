@@ -90,6 +90,12 @@ not change its model. Stopped there, per the slice; `questions.md` 7.
 Checks: `cargo test -p loopflow-execution --lib harness::opencode::tests::`:
 5 passed, 1 ignored (live). `scratch/probes/oc_model.py` on 2.2.1: as above.
 
+QA on a real model (2026-11-19, `scratch/qa.html`): a new work session and a
+worker both ran `gemini-4-carbon` from `agent:` (account default: neon); an
+idle steer and a steer saved while quit both woke it after the compress; a
+changed `agent:` on reopen stayed on carbon. `idle_wake.py` passed on
+OpenCode 2.2.1 and Pi 1.3.0.
+
 ## Remaining
 
 - Claude reopened with a steer waiting marks it delivered through its start

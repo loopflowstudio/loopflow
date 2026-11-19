@@ -115,6 +115,12 @@ rest is not chosen.
 - Asana: a follow-up is created as a subtask (one extra `GET` for the
   parent's gid); a subtask made or moved in Asana is not read back. Store
   Asana gids so it can be / leave?
+- `docs/work.md` says a coworker's sub-issue becomes a child for Linear
+  only, since Asana's is not read. Restore "or subtask" when it is.
+- The Linear stand-ins accept any input key, so a mutation carrying a field
+  Linear does not have passes every test (a stray `"parent":null` in the
+  reorder input did). Have the stand-in refuse keys outside each input type
+  / leave to the live check?
 - `TrackerItem.parent_observed` takes `#[serde(default)]` so captured
   inventories in test fixtures still decode. The type is not an `lf --json`
   DTO.

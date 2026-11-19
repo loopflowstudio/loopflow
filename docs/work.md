@@ -421,7 +421,7 @@ Each Task is one item in the tracker, and the tracker is where coworkers work:
 | edits the title or description | updates the Task and tells a running agent |
 | comments | delivers it to the Task's agents as direction |
 | completes, cancels or reopens it | moves the Task to match |
-| makes it a sub-issue or subtask of another | lists it as that Task's child |
+| makes it a sub-issue of another (Linear) | lists it as that Task's child |
 
 | You, in Loopflow… | Coworkers see… |
 |---|---|

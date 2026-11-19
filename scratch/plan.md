@@ -457,8 +457,8 @@ existing update a conversation gets about its own Task; Waves and
    - Asana reads no parent. Its API names a parent by gid and Loopflow
      keeps only its own `external` id, so `TrackerItem.parent_observed` is
      false for Asana and a subtask made in Asana does not become a child.
-     `docs/work.md` says it does ("makes it a sub-issue or subtask of
-     another"); the Linear half is true.
+     `docs/work.md` now claims the Linear half only; whether Asana gids are
+     stored so it can be read is open (`scratch/questions.md`).
    - Asana's edit of a parent retires as unsupported. Nothing local changes
      a parent after filing, so no `task_parent` field action is queued by
      either tracker today; Linear's `issueUpdate` arm has no caller yet.
@@ -469,6 +469,13 @@ existing update a conversation gets about its own Task; Waves and
      Machines keep different parents until one is edited again.
    - `test(local_planning::)`, `binary(two_people)` and the Swift suites
      were not run here: gate.
+   Found at realign and fixed: slice 5's fixture edit had also put
+   `"parent":null` into `linear/actions.rs` `move_input`, the `issueUpdate`
+   input a reorder sends. `IssueUpdateInput` has `parentId` and no `parent`
+   (Linear's published schema, as decision 5 read it), so a real reorder
+   would have been rejected. The fake Linear in `planning_order_tests`
+   accepts any key: all four passed before and after, so no test here
+   notices an unknown key in a mutation input.
    Failing on this merge and not from this slice:
    `planning_lookup_tests::missing_git_task_never_falls_through_to_linear`
    (expects "not found in the Git tracker", a message LOO-938 removed) and

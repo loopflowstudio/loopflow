@@ -783,10 +783,10 @@ fn move_input(issues: &[&OrderedIssue], position: usize) -> Option<Value> {
     let primary = match (left, right) {
         (Some(l), Some(r)) if l.priority_sort_order != r.priority_sort_order => {
             return between(Some(l.priority_sort_order), Some(r.priority_sort_order))
-                .map(|p| json!({"parent":null,"prioritySortOrder":p}))
+                .map(|p| json!({"prioritySortOrder":p}))
                 .or_else(|| {
                     between(Some(l.sort_order), None)
-                        .map(|s| json!({"parent":null,"prioritySortOrder":l.priority_sort_order,"sortOrder":s}))
+                        .map(|s| json!({"prioritySortOrder":l.priority_sort_order,"sortOrder":s}))
                 });
         }
         (Some(l), _) => l.priority_sort_order,
@@ -794,7 +794,7 @@ fn move_input(issues: &[&OrderedIssue], position: usize) -> Option<Value> {
         _ => return None,
     };
     between(left.map(|i| i.sort_order), right.map(|i| i.sort_order))
-        .map(|s| json!({"parent":null,"prioritySortOrder":primary,"sortOrder":s}))
+        .map(|s| json!({"prioritySortOrder":primary,"sortOrder":s}))
 }
 
 /// The next single move toward `desired`: the issue, its sort-key input and

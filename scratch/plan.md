@@ -36,6 +36,14 @@ Built 2026-11-19:
   `auto_on_a_task_that_never_ran_leaves_exactly_one_run`, and the parse row in
   `lf::tests`.
 
+Run 2026-11-19 at `56e542adac`: `cargo test -p loopflow --lib --
+task_graph_launch_tests::auto_o lf::tests`, 41 passed (the two `auto_on_*`
+fixtures, `auto_off_sticks_through_a_headless_relaunch`, the parse tests).
+Not run since this change: `documented_commands::`, the `write.rs` wire tests,
+`dto_fixtures`, clippy, Swift (`RegistryQuery.swift`, `WorkModel.swift`,
+`ServerProtocolTests`, `RegistryQueryTests`, iOS `TaskWorkspaceView.swift`
+were edited for `task.auto.off` and `merges`). Gate and CI.
+
 Passed over: keeping `auto on` a pure setting stored on the Task so it can
 precede a Graph, with a bare run standing in at the waiting step. That keeps
 two actions and changes what a bare `lf task run` means at an interactive step

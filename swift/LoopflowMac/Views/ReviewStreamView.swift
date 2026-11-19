@@ -5,28 +5,52 @@ import SwiftUI
 
 /// The one diff reader. Changes shows the whole comparison through it; Files'
 /// Diff mode shows one file, draft included. Rows, layout, word emphasis,
-/// moves and line selection are the same in both.
+/// moves, skipped lines that open in place, line selection and the comments
+/// left under lines are the same in both.
 struct ReviewStream: View {
     @Bindable var store: TaskFilesStore
     let reader: TaskFilesStore.ReviewReader
     let files: [ReviewFile]
     /// Side by side; callers fall back to unified in a narrow pane.
     let split: Bool
+    /// Words to read above a file, by its path.
+    var headings: [String: String] = [:]
+    let addToConversation: ((String) -> Bool)?
     @Environment(\.palette) private var palette
 
     var body: some View {
-        ForEach(files) { file in
-            fileHeader(file).id("file:\(file.path)")
+        if let error = store.gapError { ReviewNotice(text: error) }
+        if reader == .changes {
+            // A comment whose file left the comparison still waits to be sent.
+            ForEach(store.comments.filter { store.review?.file($0.selection.path) == nil }) { comment in
+                ReviewCommentRow(store: store, comment: comment)
+            }
+        }
+        ForEach(files) { unopened in
+            let file = store.opened(unopened)
+            if let heading = headings[file.path] {
+                Text(heading).font(Typography.strong(13)).foregroundStyle(palette.text)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 12).padding(.top, 22)
+                    .accessibilityAddTraits(.isHeader)
+            }
+            fileHeader(file, headed: headings[file.path] != nil).id("file:\(file.path)")
+            ForEach(store.comments.filter { $0.detached && $0.selection.path == file.path }) { comment in
+                ReviewCommentRow(store: store, comment: comment)
+            }
             if file.status == .binary {
                 ReviewNotice(text: "Binary file · no text to compare")
             } else if file.blocks.isEmpty {
                 ReviewNotice(text: file.status == .renamed ? "Renamed without changes" : "No textual changes")
             }
-            ForEach(Array(file.blocks.enumerated()), id: \.offset) { _, block in
-                blockView(block, file: file).id(Self.blockID(block, path: file.path))
+            let gaps = file.gaps
+            ForEach(Array(file.blocks.enumerated()), id: \.offset) { index, block in
+                blockView(block, gap: gaps[index], file: file).id(Self.blockID(block, path: file.path))
             }
         }
     }
+
+    static let gutterWidth: CGFloat = 36
 
     static func blockID(_ block: ReviewBlock, path: String) -> String {
         switch block {
@@ -37,66 +61,113 @@ struct ReviewStream: View {
         }
     }
 
-    private func fileHeader(_ file: ReviewFile) -> some View {
-        HStack(spacing: 8) {
-            Text(file.path).font(Typography.code(11).weight(.semibold)).lineLimit(1).truncationMode(.middle)
-            if let old = file.oldPath { Text("from \(old)").font(Typography.code(10)).foregroundStyle(palette.textSecondary).lineLimit(1) }
-            if file.status != .modified { Text(file.status.rawValue).font(.caption2).foregroundStyle(palette.textSecondary) }
+    /// The file's name leads; its directory is quiet beside it.
+    private func fileHeader(_ file: ReviewFile, headed: Bool) -> some View {
+        let name = (file.path as NSString).lastPathComponent
+        let directory = (file.path as NSString).deletingLastPathComponent
+        return HStack(spacing: 8) {
+            HStack(spacing: 0) {
+                if !directory.isEmpty {
+                    Text(directory + "/").font(Typography.code(11)).foregroundStyle(palette.textSecondary)
+                        .lineLimit(1).truncationMode(.head)
+                }
+                Text(name).font(Typography.code(12).weight(.semibold)).lineLimit(1).layoutPriority(1)
+            }
+            if let old = file.oldPath { Text("from \(old)").font(Typography.code(11)).foregroundStyle(palette.textSecondary).lineLimit(1) }
+            if file.status != .modified { Text(file.status.rawValue).font(Typography.caption(11)).foregroundStyle(palette.textSecondary) }
             Spacer(minLength: 4)
-            Text("+\(file.additions)").foregroundStyle(palette.successTone.ink).font(Typography.code(10))
-            Text("−\(file.deletions)").foregroundStyle(palette.failureTone.ink).font(Typography.code(10))
-            Button { store.selectFile(file.path, mode: .read) } label: { Image(systemName: "doc.text") }
-                .buttonStyle(.plain).help("Read \(file.path) in Files").accessibilityLabel("Read \(file.path) in Files")
+            Text("+\(file.additions)").foregroundStyle(palette.successTone.ink).font(Typography.code(11))
+            Text("−\(file.deletions)").foregroundStyle(palette.failureTone.ink).font(Typography.code(11))
+            Button("Open") { store.selectFile(file.path, mode: .read) }
+                .buttonStyle(.plain).font(Typography.caption(11)).foregroundStyle(palette.textSecondary)
+                .help("Read \(file.path) in Files").accessibilityLabel("Read \(file.path) in Files")
         }
-        .padding(.horizontal, 10).padding(.vertical, 6)
+        .padding(.horizontal, 12).padding(.vertical, 7)
         .background(palette.surfaceMuted)
         .overlay(alignment: .top) { Divider() }
-        .padding(.top, 12)
+        .padding(.top, headed ? 6 : 16)
+        .help(file.path)
+        .contextMenu {
+            Button("Open in Files") { store.selectFile(file.path, mode: .diff) }
+            Button("Read file") { store.selectFile(file.path, mode: .read) }
+        }
     }
 
     @ViewBuilder
-    private func blockView(_ block: ReviewBlock, file: ReviewFile) -> some View {
+    private func blockView(_ block: ReviewBlock, gap: ReviewGap?, file: ReviewFile) -> some View {
         switch block {
         case .hunk(let header):
-            Text(header).font(Typography.code(10)).foregroundStyle(palette.textSecondary)
-                .lineLimit(1).truncationMode(.tail)
-                .padding(.horizontal, 10).padding(.vertical, 3)
+            gapRow(header, gap: gap, path: file.path)
         case .context(let line):
             pairRow(ReviewPair(removed: line, added: line, removedSegments: nil, addedSegments: nil),
-                    path: file.path, context: true)
+                    file: file, context: true)
         case .change(let change):
             VStack(spacing: 0) {
                 if split {
                     ForEach(Array(change.pairs.enumerated()), id: \.offset) { _, pair in
-                        pairRow(pair, path: file.path, context: false)
+                        pairRow(pair, file: file, context: false)
                     }
                 } else {
                     // Unified: every removed line, then every added line.
                     let pairs = Array(change.pairs.enumerated())
                     ForEach(pairs, id: \.offset) { _, pair in
-                        if let line = pair.removed { lineRow(line, segments: pair.removedSegments, path: file.path) }
+                        if let line = pair.removed { lineRow(line, segments: pair.removedSegments, file: file) }
                     }
                     ForEach(pairs, id: \.offset) { _, pair in
-                        if let line = pair.added { lineRow(line, segments: pair.addedSegments, path: file.path) }
+                        if let line = pair.added { lineRow(line, segments: pair.addedSegments, file: file) }
                     }
                 }
             }
-            .overlay(alignment: .leading) { currentMark(change.id) }
+            .overlay { currentMark(change.id) }
         case .moved(let move):
-            movedView(move, path: file.path)
-                .overlay(alignment: .leading) { currentMark(move.id) }
+            movedView(move, file: file)
+                .overlay { currentMark(move.id) }
+        }
+    }
+
+    /// The lines between two hunks: how many, and the declaration git names.
+    /// A click reads them from the file and shows them in place.
+    @ViewBuilder private func gapRow(_ header: String, gap: ReviewGap?, path: String) -> some View {
+        let label = gap?.label ?? ""
+        let row = HStack(spacing: 8) {
+            if !label.isEmpty {
+                Text(label).font(Typography.caption(11)).foregroundStyle(palette.textTertiary)
+                    .lineLimit(1).truncationMode(.tail)
+            }
+            Rectangle().fill(palette.border).frame(height: 1)
+        }
+        .padding(.leading, Self.gutterWidth + 6).padding(.trailing, 12).padding(.vertical, 5)
+        if let gap, !gap.new.isEmpty, store.canOpenGaps {
+            Button {
+                Task { await store.openGap(header, gap: gap, path: path, reader: reader) }
+            } label: {
+                row.overlay(alignment: .leading) {
+                    Image(systemName: "arrow.up.and.down").font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(palette.textSecondary).frame(width: Self.gutterWidth, alignment: .trailing)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(gap.new.count == 1 ? "Show the unchanged line" : "Show the \(gap.new.count) unchanged lines")
+            .accessibilityLabel("Show \(label)")
+        } else {
+            row
         }
     }
 
     @ViewBuilder private func currentMark(_ id: String) -> some View {
         if store[place: reader].current == id {
-            Rectangle().fill(palette.actionInk).frame(width: 3).accessibilityLabel("Current change")
+            ZStack(alignment: .leading) {
+                LandingFlash(stepped: store.steppedAt, color: palette.accent)
+                Rectangle().fill(palette.accent).frame(width: 3).accessibilityLabel("Current change")
+            }
+            .allowsHitTesting(false)
         }
     }
 
     // MARK: Moved code
 
-    private func movedView(_ move: ReviewMove, path: String) -> some View {
+    private func movedView(_ move: ReviewMove, file: ReviewFile) -> some View {
         let expanded = store.expandedMoves.contains(move.id)
         return VStack(alignment: .leading, spacing: 0) {
             Button {
@@ -110,16 +181,16 @@ struct ReviewStream: View {
                 store.noteInteraction()
             } label: {
                 HStack(spacing: 6) {
-                    Image(systemName: move.end == .source ? "arrow.turn.right.down"
-                          : expanded ? "chevron.down" : "chevron.right")
-                        .frame(width: 12)
+                    Image(systemName: move.end == .source ? "arrow.turn.right.down" : "arrow.left.arrow.right")
+                        .frame(width: 14)
                     Text(Self.movedLabel(move))
                     Spacer(minLength: 0)
+                    if move.end == .destination { Image(systemName: expanded ? "chevron.down" : "chevron.right") }
                 }
-                .font(Typography.caption(11))
-                .foregroundStyle(palette.textSecondary)
-                .padding(.horizontal, 10).padding(.vertical, 4)
-                .background(palette.surfaceMuted.opacity(0.6))
+                .font(Typography.caption(12))
+                .foregroundStyle(palette.text)
+                .padding(.leading, Self.gutterWidth + 6).padding(.trailing, 12).padding(.vertical, 5)
+                .background(palette.surfaceElement)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -127,7 +198,7 @@ struct ReviewStream: View {
             .accessibilityValue(move.end == .destination ? (expanded ? "Expanded" : "Collapsed") : "")
             if expanded, move.end == .destination {
                 ForEach(Array(move.pairs.enumerated()), id: \.offset) { _, pair in
-                    pairRow(pair, path: path, context: false)
+                    pairRow(pair, file: file, context: false)
                 }
             }
         }
@@ -136,42 +207,63 @@ struct ReviewStream: View {
     private static func movedLabel(_ move: ReviewMove) -> String {
         let changed = move.changedLines == 0 ? "unchanged" : "\(move.changedLines) lines changed"
         switch move.end {
-        case .destination: return "Moved from L\(move.from) · \(move.lines.count) lines, \(changed)"
+        case .destination: return "Moved here from L\(move.from) · \(move.lines.count) lines, \(changed)"
         case .source: return "Moved to L\(move.to) · \(move.lines.count) lines"
         }
     }
 
     // MARK: Lines
 
-    /// Unified: one line with both numbers.
-    private func lineRow(_ line: ReviewLine, segments: [ReviewSegment]?, path: String) -> some View {
+    /// Unified: one line with one number, the old one on a removed line.
+    private func lineRow(_ line: ReviewLine, segments: [ReviewSegment]?, file: ReviewFile) -> some View {
         let side: ReviewSelection.Side = line.kind == .removed ? .old : .new
-        return HStack(spacing: 0) {
-            gutter(line.old, side: .old, path: path)
-            gutter(line.new, side: .new, path: path)
-            cell(line, segments: segments, side: side, path: path)
+        return VStack(spacing: 0) {
+            HStack(spacing: 0) {
+                gutter(side == .old ? line.old : line.new, line: line, side: side, path: file.path)
+                cell(line, segments: segments, side: side, path: file.path)
+            }
+            attachments(old: line.kind == .added ? nil : line.old, new: line.kind == .removed ? nil : line.new, file: file)
         }
     }
 
     /// Side by side: before on the left, after on the right. Context repeats on
     /// both sides; a pure addition or removal leaves the other side empty.
-    private func pairRow(_ pair: ReviewPair, path: String, context: Bool) -> some View {
-        HStack(spacing: 0) {
-            if split || !context {
+    @ViewBuilder private func pairRow(_ pair: ReviewPair, file: ReviewFile, context: Bool) -> some View {
+        if split || !context {
+            VStack(spacing: 0) {
                 HStack(spacing: 0) {
-                    gutter(pair.removed?.old, side: .old, path: path)
-                    if let line = pair.removed { cell(line, segments: pair.removedSegments, side: .old, path: path) }
-                    else { empty }
+                    HStack(spacing: 0) {
+                        gutter(pair.removed?.old, line: pair.removed, side: .old, path: file.path)
+                        if let line = pair.removed { cell(line, segments: pair.removedSegments, side: .old, path: file.path) }
+                        else { empty }
+                    }
+                    Divider()
+                    HStack(spacing: 0) {
+                        gutter(pair.added?.new, line: pair.added, side: .new, path: file.path)
+                        if let line = pair.added { cell(line, segments: pair.addedSegments, side: .new, path: file.path) }
+                        else { empty }
+                    }
                 }
-                Divider()
-                HStack(spacing: 0) {
-                    gutter(pair.added?.new, side: .new, path: path)
-                    if let line = pair.added { cell(line, segments: pair.addedSegments, side: .new, path: path) }
-                    else { empty }
-                }
-            } else if let line = pair.added {
-                lineRow(line, segments: nil, path: path)
+                attachments(old: pair.removed?.old, new: pair.added?.new, file: file)
             }
+        } else if let line = pair.added {
+            lineRow(line, segments: nil, file: file)
+        }
+    }
+
+    /// What sits under a row: the comment being written when the selection
+    /// ends on it, then the comments left there. `old` and `new` are the line
+    /// numbers the row shows.
+    @ViewBuilder private func attachments(old: Int?, new: Int?, file: ReviewFile) -> some View {
+        if let selection = store.reviewSelection, selection.path == file.path,
+           selection.last == (selection.side == .old ? old : new) {
+            ReviewCommentEditor(store: store, selection: selection, file: file, addToConversation: addToConversation)
+        }
+        ForEach(store.comments.filter { comment in
+            !comment.detached && comment.selection.path == file.path
+                && comment.selection.last == (comment.selection.side == .old ? old : new)
+        }) { comment in
+            ReviewCommentRow(store: store, comment: comment)
         }
     }
 
@@ -179,15 +271,16 @@ struct ReviewStream: View {
         palette.surfaceMuted.opacity(0.4).frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private func gutter(_ number: Int?, side: ReviewSelection.Side, path: String) -> some View {
-        Text(number.map(String.init) ?? "")
-            .font(Typography.code(10)).monospacedDigit()
-            .foregroundStyle(palette.textSecondary)
-            .frame(width: 38, alignment: .trailing)
-            .padding(.trailing, 4)
-            .contentShape(Rectangle())
-            .onTapGesture { if let number { select(number, side: side, path: path) } }
-            .help(number == nil ? "" : "Select line; ⇧-click extends")
+    private func gutter(_ number: Int?, line: ReviewLine?, side: ReviewSelection.Side, path: String) -> some View {
+        ReviewGutter(number: number, selected: line.map { isSelected($0, side: side, path: path) } ?? false) {
+            if let number { select(number, side: side, path: path) }
+        }
+    }
+
+    private func isSelected(_ line: ReviewLine, side: ReviewSelection.Side, path: String) -> Bool {
+        store.reviewSelection.map {
+            $0.contains(line, path: path) && (line.kind == .context || $0.side == side)
+        } ?? false
     }
 
     private func cell(_ line: ReviewLine, segments: [ReviewSegment]?, side: ReviewSelection.Side, path: String) -> some View {
@@ -196,9 +289,7 @@ struct ReviewStream: View {
         case .removed: palette.failureTone
         case .context: nil
         }
-        let selected = store.reviewSelection.map {
-            $0.contains(line, path: path) && (line.kind == .context || $0.side == side)
-        } ?? false
+        let selected = isSelected(line, side: side, path: path)
         return HStack(alignment: .top, spacing: 4) {
             // A marker as well as color: + and − read without hue.
             Text(line.kind == .added ? "+" : line.kind == .removed ? "−" : " ")
@@ -210,22 +301,20 @@ struct ReviewStream: View {
         .font(Typography.code(12))
         .padding(.vertical, 1).padding(.trailing, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(tone?.fill.opacity(0.55) ?? .clear)
-        .background(selected ? palette.actionInk.opacity(0.18) : .clear)
+        .background(selected ? palette.accent.opacity(0.16) : tone?.fill.opacity(0.4) ?? .clear)
         .textSelection(.enabled)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(line.kind == .added ? "Added" : line.kind == .removed ? "Removed" : "Line") \(side == .old ? line.old ?? 0 : line.new ?? 0): \(line.text)")
     }
 
-    /// The changed words of an edited line carry a stronger fill and an underline.
+    /// The changed words of an edited line carry a stronger fill.
     static func attributed(_ text: String, segments: [ReviewSegment]?, tone: ThemeTone?) -> AttributedString {
         guard let segments, let tone else { return AttributedString(text.isEmpty ? " " : text) }
         var result = AttributedString()
         for segment in segments {
             var part = AttributedString(segment.text)
             if segment.changed {
-                part.backgroundColor = tone.ink.opacity(0.28)
-                part.underlineStyle = .single
+                part.backgroundColor = tone.ink.opacity(0.26)
             }
             result.append(part)
         }
@@ -243,38 +332,182 @@ struct ReviewStream: View {
     }
 }
 
-/// Selected lines: copy them, or put a reference to them into the conversation's unsent input.
-struct ReviewSelectionBar: View {
+/// A line number: it lights under the pointer, and a click selects the line.
+private struct ReviewGutter: View {
+    let number: Int?
+    let selected: Bool
+    let select: () -> Void
+    @Environment(\.palette) private var palette
+    @State private var hovered = false
+
+    var body: some View {
+        Text(number.map(String.init) ?? "")
+            .font(Typography.code(11)).monospacedDigit()
+            .foregroundStyle(selected || hovered ? palette.text : palette.textTertiary)
+            .frame(width: ReviewStream.gutterWidth, alignment: .trailing)
+            .padding(.trailing, 6)
+            .frame(maxHeight: .infinity)
+            .background(hovered && number != nil ? palette.surfaceElement : .clear)
+            .contentShape(Rectangle())
+            .onHover { hovered = $0 }
+            .onTapGesture(perform: select)
+            .help(number == nil ? "" : "Select line; ⇧-click extends")
+    }
+}
+
+/// One outline pulse on the change next/previous just landed on.
+private struct LandingFlash: View {
+    let stepped: Date
+    let color: Color
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var opacity = 0.0
+
+    var body: some View {
+        Rectangle().strokeBorder(color, lineWidth: 1.5).opacity(opacity)
+            .onAppear {
+                guard !reduceMotion, Date.now.timeIntervalSince(stepped) < 0.6 else { return }
+                opacity = 1
+                withAnimation(.easeOut(duration: 0.9)) { opacity = 0 }
+            }
+    }
+}
+
+/// Under the selected lines: write a comment that stays there, copy the lines,
+/// or put a bare reference to them into the conversation's unsent input.
+private struct ReviewCommentEditor: View {
     @Bindable var store: TaskFilesStore
     let selection: ReviewSelection
-    /// The diff the selection was made in, for Copy.
-    let diff: ReviewDiff
-    let addToConversation: ((String) -> Void)?
+    /// The file as the stream shows it, opened lines included.
+    let file: ReviewFile
+    let addToConversation: ((String) -> Bool)?
+    @Environment(\.palette) private var palette
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            TextField("Comment on \((selection.path as NSString).lastPathComponent):\(selection.range) · \(selection.side.rawValue)",
+                      text: $store.commentDraft, axis: .vertical)
+                .lineLimit(1...5).textFieldStyle(.plain).font(Typography.body(12))
+                .focused($focused)
+                .onSubmit { store.addComment(in: file) }
+                .accessibilityIdentifier("changes-comment")
+            HStack(spacing: 8) {
+                Button("Comment") { store.addComment(in: file) }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(store.commentDraft.allSatisfy(\.isWhitespace))
+                    .help("Keep this comment under its lines until you send every comment")
+                Button("Copy") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(selection.text(in: file), forType: .string)
+                }
+                .buttonStyle(.bordered)
+                Button("Reference in conversation") {
+                    let revision = store.comparisonDescription ?? store.comparison.title
+                    if addToConversation?(selection.reference(revision: revision)) == true { store.reviewSelection = nil }
+                }
+                .buttonStyle(.bordered)
+                .disabled(addToConversation == nil)
+                .help(addToConversation == nil ? "Open the Task conversation to refer to these lines"
+                      : "Names these lines in the conversation's unsent input; sending stays yours")
+                .accessibilityIdentifier("changes-ask")
+                Spacer(minLength: 4)
+                Button("Cancel") { store.reviewSelection = nil }
+                    .buttonStyle(.plain).foregroundStyle(palette.textSecondary)
+                    .keyboardShortcut(.cancelAction)
+            }
+            .controlSize(.small)
+            .font(Typography.caption(11))
+        }
+        .padding(.horizontal, 10).padding(.vertical, 8)
+        .background(palette.surface, in: RoundedRectangle(cornerRadius: 8))
+        .overlay { RoundedRectangle(cornerRadius: 8).strokeBorder(palette.accent.opacity(0.6)) }
+        .padding(.leading, ReviewStream.gutterWidth + 6).padding(.trailing, 12).padding(.vertical, 5)
+        .onAppear { focused = true }
+    }
+}
+
+/// A comment waiting under its lines. One whose lines changed says so and
+/// keeps the place it had.
+private struct ReviewCommentRow: View {
+    @Bindable var store: TaskFilesStore
+    let comment: ReviewComment
     @Environment(\.palette) private var palette
 
     var body: some View {
-        HStack(spacing: 10) {
-            Text("\(selection.path):\(selection.range) · \(selection.side.rawValue)")
-                .font(Typography.code(10)).lineLimit(1).truncationMode(.head)
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Image(systemName: "text.bubble").foregroundStyle(palette.accent)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(comment.text).font(Typography.body(12)).foregroundStyle(palette.text)
+                    .fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+                Text(place).font(Typography.caption(11))
+                    .foregroundStyle(comment.detached ? palette.warning : palette.textSecondary)
+            }
             Spacer(minLength: 4)
-            Button("Copy") {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(selection.text(in: diff), forType: .string)
+            Button { store.comments.removeAll { $0.id == comment.id } } label: {
+                Image(systemName: "xmark").font(.system(size: 9, weight: .semibold)).frame(width: 18, height: 18)
+                    .contentShape(Rectangle())
             }
-            Button("Ask in conversation") {
-                addToConversation?(selection.reference(revision: store.comparisonDescription ?? store.comparison.title))
-            }
-            .disabled(addToConversation == nil)
-            .help(addToConversation == nil ? "Open the Task conversation to ask about these lines"
-                  : "Adds a reference to these lines to the conversation's unsent input")
-            .accessibilityIdentifier("changes-ask")
-            Button { store.reviewSelection = nil } label: { Image(systemName: "xmark") }
-                .buttonStyle(.plain).accessibilityLabel("Clear selection")
+            .buttonStyle(.plain).help("Delete this comment").accessibilityLabel("Delete comment")
         }
-        .font(Typography.caption(11))
-        .padding(.horizontal, 10).padding(.vertical, 6)
-        .background(palette.surfaceMuted)
-        .overlay(alignment: .top) { Divider() }
+        .padding(.horizontal, 10).padding(.vertical, 7)
+        .background(palette.accent.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+        .overlay { RoundedRectangle(cornerRadius: 8).strokeBorder(palette.accent.opacity(0.3)) }
+        .padding(.leading, ReviewStream.gutterWidth + 6).padding(.trailing, 12).padding(.vertical, 4)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("changes-comment-row")
+    }
+
+    private var place: String {
+        let selection = comment.selection
+        let lines = "\((selection.path as NSString).lastPathComponent):\(selection.range) · \(selection.side.rawValue)"
+        return comment.detached ? "\(lines) · these lines have changed since; still sent" : lines
+    }
+}
+
+/// How many comments wait, and the one action that puts them all into the
+/// conversation's unsent input as one message. Sending stays yours.
+struct ReviewCommentsControl: View {
+    @Bindable var store: TaskFilesStore
+    let isFocused: Bool
+    let addToConversation: ((String) -> Bool)?
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        if !store.comments.isEmpty {
+            let count = store.comments.count
+            HStack(spacing: 6) {
+                Text(count == 1 ? "1 comment" : "\(count) comments").foregroundStyle(palette.accent)
+                    .lineLimit(1).accessibilityIdentifier("changes-comment-count")
+                Button(action: send) {
+                    HStack(spacing: 5) {
+                        Text("Send to conversation")
+                        Text("⌘↩").opacity(0.7)
+                    }
+                    .lineLimit(1)
+                    .foregroundStyle(palette.background)
+                    .padding(.horizontal, 9).frame(height: 20)
+                    .background(addToConversation == nil ? palette.textTertiary : palette.accent, in: RoundedRectangle(cornerRadius: 6))
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(addToConversation == nil)
+                .help(addToConversation == nil ? "Open the Task conversation to send these comments"
+                      : "Puts every comment into the conversation's unsent input as one message; sending stays yours")
+                .accessibilityIdentifier("changes-send")
+            }
+            .font(Typography.caption(11))
+            .background {
+                Button("Send to conversation", action: send).keyboardShortcut(.return, modifiers: .command)
+                    .disabled(!isFocused || addToConversation == nil).hidden().accessibilityHidden(true).frame(width: 0, height: 0)
+            }
+        }
+    }
+
+    /// Comments are spent once they are in the conversation; a failed send keeps them.
+    private func send() {
+        guard let addToConversation, !store.comments.isEmpty else { return }
+        let message = ReviewComment.message(store.comments, revision: store.comparisonDescription ?? store.comparison.title)
+        if addToConversation(message) { store.comments = [] }
     }
 }
 
@@ -288,9 +521,8 @@ struct ReviewNotice: View {
     }
 }
 
-/// Unified or side by side; side by side needs a wide pane.
-/// Previous/next change buttons and the position, with `[`/`]` while the pane
-/// has focus. Changes crosses files in its stream; Files' Diff opens the
+/// Previous/next change around the position, with `[`/`]` while the pane has
+/// focus. Changes crosses files in its stream; Files' Diff opens the
 /// neighbouring changed file past either end.
 struct ReviewStepper: View {
     @Bindable var store: TaskFilesStore
@@ -299,13 +531,20 @@ struct ReviewStepper: View {
     @Environment(\.palette) private var palette
 
     var body: some View {
-        HStack(spacing: 8) {
-            Button { go(-1) } label: { Image(systemName: "chevron.up") }
-                .help("Previous change ([)").accessibilityLabel("Previous change")
-            Button { go(1) } label: { Image(systemName: "chevron.down") }
-                .help("Next change (])").accessibilityLabel("Next change")
-            Text(store.position(reader)).font(Typography.caption(11)).foregroundStyle(palette.textSecondary)
-                .monospacedDigit().accessibilityIdentifier("review-position")
+        HStack(spacing: 6) {
+            HStack(spacing: 0) {
+                arrow("chevron.up", "Previous change", key: "[", offset: -1)
+                Divider().frame(height: 14)
+                Text(store.position(reader)).font(Typography.caption(11)).foregroundStyle(palette.text)
+                    .monospacedDigit().lineLimit(1).padding(.horizontal, 8).frame(minWidth: 54)
+                    .accessibilityIdentifier("review-position")
+                Divider().frame(height: 14)
+                arrow("chevron.down", "Next change", key: "]", offset: 1)
+            }
+            .background(palette.surface, in: RoundedRectangle(cornerRadius: 6))
+            .overlay { RoundedRectangle(cornerRadius: 6).strokeBorder(palette.border) }
+            Text("[ ]").font(Typography.code(10)).foregroundStyle(palette.textTertiary)
+                .help("[ previous change · ] next change").accessibilityHidden(true)
         }
         .background {
             HStack {
@@ -314,6 +553,14 @@ struct ReviewStepper: View {
             }
             .disabled(!isFocused).hidden().accessibilityHidden(true).frame(width: 0, height: 0)
         }
+    }
+
+    private func arrow(_ symbol: String, _ label: String, key: String, offset: Int) -> some View {
+        Button { go(offset) } label: {
+            Image(systemName: symbol).font(.system(size: 10, weight: .semibold))
+                .frame(width: 26, height: 20).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain).help("\(label) (\(key))").accessibilityLabel(label)
     }
 
     private func go(_ offset: Int) {
@@ -329,16 +576,40 @@ extension TaskFilesStore {
     }
 }
 
+/// Unified or side by side. Side by side needs a wide pane; a narrow one says
+/// so and reads unified.
 struct ReviewLayoutPicker: View {
     @Bindable var store: TaskFilesStore
     let width: CGFloat
+    @Environment(\.palette) private var palette
 
     var body: some View {
-        Picker("Layout", selection: $store.reviewLayout) {
-            ForEach(TaskFilesStore.ReviewLayout.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+        HStack(spacing: 0) {
+            segment(.unified, symbol: "text.justify.left", help: "Unified")
+            Divider().frame(height: 14)
+            segment(.split, symbol: "rectangle.split.2x1",
+                    help: narrow ? "Side by side needs a pane at least \(Int(TaskFilesStore.splitWidth)) pt wide" : "Side by side")
+                .disabled(narrow)
         }
-        .pickerStyle(.menu).labelsHidden().fixedSize()
-        .help(width < TaskFilesStore.splitWidth ? "Side by side needs a wider pane" : "Unified or side by side")
+        .background(palette.surface, in: RoundedRectangle(cornerRadius: 6))
+        .overlay { RoundedRectangle(cornerRadius: 6).strokeBorder(palette.border) }
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+    }
+
+    private var narrow: Bool { width < TaskFilesStore.splitWidth }
+
+    private func segment(_ layout: TaskFilesStore.ReviewLayout, symbol: String, help: String) -> some View {
+        // What the stream is actually reading, so a narrow pane shows unified as on.
+        let on = (layout == .split) == store.readsSplit(width: width)
+        return Button { store.reviewLayout = layout } label: {
+            Image(systemName: symbol).font(.system(size: 11))
+                .foregroundStyle(on ? palette.background : palette.text)
+                .frame(width: 28, height: 20)
+                .background(on ? palette.text : .clear)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain).help(help).accessibilityLabel(layout.rawValue)
+        .accessibilityAddTraits(on ? .isSelected : [])
     }
 }
 #endif

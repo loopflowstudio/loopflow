@@ -3,44 +3,77 @@ import AppKit
 import Loopflow
 import SwiftUI
 
-/// The Changes page: where the work is delivered, then the whole comparison as
-/// one review stream. Next/previous crosses files; selecting lines puts a
-/// reference to them into the conversation's unsent input.
+/// The Diff page: what is compared and how much changed, then the changed
+/// files beside the whole comparison as one review stream. The files are in
+/// the worker's order when it left one, else by kind; the file you are in
+/// stays named in a bar above the stream. Comments wait under their lines
+/// until you send them to the conversation's unsent input as one message.
 struct TaskChangesView: View {
     @Bindable var store: TaskFilesStore
     let task: RoadmapTask?
     let isFocused: Bool
-    /// Types into the Task conversation without sending; nil when no conversation is open.
-    let addToConversation: ((String) -> Void)?
+    /// Types into the Task conversation without sending and says whether it
+    /// did; nil when no conversation is open.
+    let addToConversation: ((String) -> Bool)?
     @Environment(\.palette) private var palette
+    /// The pane's width, and the stream's beside the sidebar.
+    @State private var paneWidth: CGFloat = 0
     @State private var width: CGFloat = 0
+    @State private var showsDelivery = false
+    /// The hidden paths as `diff_hidden` last read or saved them; nil until read.
+    @State private var savedHidden: [String]?
+    @State private var hiddenNotice: String?
 
     private var prURL: URL? { task?.pr?.publication?.github?.url }
 
+    /// Below this the sidebar no longer fits beside the stream and opens over it.
+    private static let dockedWidth: CGFloat = 620
+    private var docksSidebar: Bool { paneWidth >= Self.dockedWidth }
+    private var showsSidebar: Bool { store.review != nil && (store.showsSidebar ?? docksSidebar) }
+
     var body: some View {
         VStack(spacing: 0) {
+            header
+            Divider()
             toolbar
             Divider()
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    DeliveryCard(store: store.pullRequest, record: task?.pr, taskOpen: task?.isCompleted == false,
-                                 url: prURL, localHead: store.changes?.headCommit)
-                        .id("delivery")
-                    changedFiles.id("files")
-                    stream
-                    footer.id("footer")
+            focusStrip
+            HStack(spacing: 0) {
+                if showsSidebar, docksSidebar {
+                    sidebar
+                    Divider()
                 }
-                .scrollTargetLayout()
+                VStack(spacing: 0) {
+                    currentFileBar
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 0) {
+                            stream
+                            footer.id("footer")
+                        }
+                        .scrollTargetLayout()
+                    }
+                    .scrollPosition(id: store.anchor(.changes), anchor: .top)
+                    .onScrollPhaseChange { _, phase in if phase == .interacting { store.noteInteraction() } }
+                    .onGeometryChange(for: CGFloat.self, of: \.size.width) { width = $0 }
+                }
             }
-            .scrollPosition(id: store.anchor(.changes), anchor: .top)
-            .onScrollPhaseChange { _, phase in if phase == .interacting { store.noteInteraction() } }
-            .onGeometryChange(for: CGFloat.self, of: \.size.width) { width = $0 }
-            if let selection = store.reviewSelection, let review = store.review {
-                ReviewSelectionBar(store: store, selection: selection, diff: review, addToConversation: addToConversation)
+            .overlay(alignment: .leading) {
+                if showsSidebar, !docksSidebar {
+                    sidebar
+                        .background(palette.background)
+                        .overlay(alignment: .trailing) { Divider() }
+                        .shadow(color: .black.opacity(0.18), radius: 10, x: 4)
+                }
             }
         }
         .background(palette.background)
+        .onGeometryChange(for: CGFloat.self, of: \.size.width) { paneWidth = $0 }
         .accessibilityIdentifier("browser-changes")
+        .task(id: store.cwd) { await readHidden() }
+        .onChange(of: store.hiddenPaths) { _, paths in
+            guard savedHidden != nil, paths != savedHidden else { return }
+            Task { await saveHidden(paths) }
+        }
         .task(id: "\(store.comparison)|\(task?.reference.workspace?.baseCommit ?? "")") {
             store.observeFiles()
             await store.loadReview()
@@ -55,18 +88,150 @@ struct TaskChangesView: View {
         }
     }
 
+    // MARK: Header
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 8) {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(title).font(Typography.strong(13))
+                        .foregroundStyle(store.changesError == nil ? palette.text : palette.warning)
+                        .lineLimit(2).multilineTextAlignment(.leading)
+                        .accessibilityIdentifier("changes-title")
+                    if let compared = store.comparisonDescription {
+                        Text(compared).font(Typography.caption(11)).foregroundStyle(palette.textSecondary)
+                            .lineLimit(1).truncationMode(.middle).help(compared)
+                            .accessibilityIdentifier("changes-comparison")
+                    }
+                }
+                Spacer(minLength: 8)
+                deliveryPill
+            }
+            if showsDelivery {
+                DeliveryCard(store: store.pullRequest, record: task?.pr, taskOpen: task?.isCompleted == false,
+                             url: prURL, localHead: store.changes?.headCommit)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+            }
+        }
+        .padding(.horizontal, 12).padding(.vertical, 8)
+    }
+
+    // MARK: Hidden paths
+
+    /// Your own setting for this repository: `diff_hidden` in its `.lf/config.local.yaml`.
+    private var hiddenFile: JSONValue {
+        ConfigurationDestination.personalRepository.address(repository: store.cwd, wave: "")
+    }
+
+    private func readHidden() async {
+        // A checkout on another Machine keeps the list for this window only.
+        guard store.query.remoteMachine == nil else { return }
+        do {
+            let data = try await ServerClient.configuration(.configExplain(destination: hiddenFile, key: "diff_hidden"))
+            let explained = try JSONDecoder().decode(ConfigurationExplanation.self, from: data)
+            guard case .array(let values)? = explained.inspections.first?.settings["diff_hidden"]?.value else { return }
+            let paths = values.compactMap { if case .string(let path) = $0 { path } else { nil } }
+            savedHidden = paths
+            store.hiddenPaths = paths
+            hiddenNotice = nil
+        } catch {
+            hiddenNotice = "Hidden paths are not saved: \(error.localizedDescription)"
+        }
+    }
+
+    private func saveHidden(_ paths: [String]) async {
+        do {
+            let yaml = String(decoding: try JSONEncoder().encode(paths), as: UTF8.self)
+            _ = try await ServerClient.configuration(.configSet(destination: hiddenFile, key: "diff_hidden", value: yaml))
+            savedHidden = paths
+            hiddenNotice = nil
+        } catch {
+            hiddenNotice = "Hidden paths are not saved: \(error.localizedDescription)"
+        }
+    }
+
+    /// "7 changes in 4 files", or why there is nothing to count. Hidden files,
+    /// yours and the worker's, stay in the total: "7 changes in 4 of 9 files".
+    private var title: String {
+        if let reason = store.changesError { return "Comparison unavailable: \(reason)" }
+        guard let changes = store.changes else { return "Reading changes…" }
+        guard !changes.files.isEmpty else { return "No changed files" }
+        let all = changes.files.count
+        guard let review = store.review, let shown = store.shownReview else {
+            return all == 1 ? "1 file changed" : "\(all) files changed"
+        }
+        let stops = shown.stops.count
+        let files = shown.files.count == review.files.count
+            ? (all == 1 ? "1 file" : "\(all) files") : "\(shown.files.count) of \(review.files.count) files"
+        return "\(stops == 1 ? "1 change" : "\(stops) changes") in \(files)"
+    }
+
+    /// The delivery headline's first part and a dot for its checks. The dot
+    /// has color only while the reading is current.
+    private var deliveryPill: some View {
+        TimelineView(.periodic(from: .now, by: 10)) { context in
+            let pullRequest = store.pullRequest
+            let delivery = TaskDelivery.describe(record: task?.pr, taskOpen: task?.isCompleted == false,
+                reading: pullRequest.pullRequest, error: pullRequest.error, readAt: pullRequest.readAt,
+                localHead: store.changes?.headCommit, now: context.date)
+            let checks = pullRequest.pullRequest?.statusCheckRollup ?? []
+            let dot: Color = delivery.warning ? palette.warning
+                : !delivery.readingIsCurrent ? palette.textTertiary
+                : checks.contains { $0.failed } ? palette.failureTone.ink
+                : checks.contains { $0.passed } ? palette.successTone.ink : palette.textTertiary
+            Button { showsDelivery.toggle() } label: {
+                HStack(spacing: 5) {
+                    Circle().fill(dot).frame(width: 7, height: 7)
+                    Text(delivery.headline.components(separatedBy: " · ").first ?? delivery.headline)
+                        .lineLimit(1).truncationMode(.tail)
+                    Image(systemName: showsDelivery ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 8, weight: .semibold)).foregroundStyle(palette.textSecondary)
+                }
+                .font(Typography.caption(11))
+                .padding(.horizontal, 9).padding(.vertical, 3)
+                .frame(maxWidth: 220)
+                .background(palette.surface, in: Capsule())
+                .overlay { Capsule().strokeBorder(palette.border) }
+                .contentShape(Capsule())
+            }
+            .buttonStyle(.plain)
+            .help(delivery.headline)
+            .accessibilityIdentifier("changes-delivery-toggle")
+            .accessibilityValue(showsDelivery ? "Expanded" : "Collapsed")
+        }
+        .fixedSize()
+    }
+
     // MARK: Toolbar
 
     private var toolbar: some View {
         HStack(spacing: 8) {
-            ReviewStepper(store: store, reader: .changes, isFocused: isFocused)
-            if let path = store.focusedPath {
-                Text(path).font(Typography.code(10)).lineLimit(1).truncationMode(.head).help(path)
+            Button { store.showsSidebar = !showsSidebar } label: {
+                Image(systemName: "sidebar.left").font(.system(size: 12))
+                    .foregroundStyle(showsSidebar ? palette.text : palette.textSecondary)
+                    .frame(width: 24, height: 20).contentShape(Rectangle())
             }
+            .help(showsSidebar ? "Hide the changed files" : "Show the changed files")
+            .accessibilityLabel("Changed files")
+            .accessibilityIdentifier("changes-sidebar-toggle")
+            .accessibilityValue(showsSidebar ? "Expanded" : "Collapsed")
+            .disabled(store.review == nil)
+            ReviewStepper(store: store, reader: .changes, isFocused: isFocused)
+            orderMenu
             Spacer(minLength: 4)
-            Button(store.focusedPath == nil ? "Focus file" : "All files") { toggleFocus() }
-                .help("Show one file at a time; next and previous still cross files")
-                .disabled(store.review?.files.isEmpty ?? true)
+            ReviewCommentsControl(store: store, isFocused: isFocused, addToConversation: addToConversation)
+            Button { toggleFocus() } label: {
+                let on = store.focusedPath != nil
+                Text("Focus")
+                    .foregroundStyle(on ? palette.background : palette.text)
+                    .padding(.horizontal, 9).frame(height: 20)
+                    .background(on ? palette.text : palette.surface, in: RoundedRectangle(cornerRadius: 6))
+                    .overlay { RoundedRectangle(cornerRadius: 6).strokeBorder(palette.border) }
+                    .contentShape(Rectangle())
+            }
+            .help("Show one file at a time; next and previous still cross files")
+            .disabled(store.shownReview?.files.isEmpty ?? true)
+            .accessibilityAddTraits(store.focusedPath != nil ? .isSelected : [])
             ReviewLayoutPicker(store: store, width: width)
             if store.reviewError != nil || store.isRefreshingChanges {
                 Image(systemName: store.reviewError != nil ? "exclamationmark.triangle" : "arrow.triangle.2.circlepath")
@@ -77,102 +242,344 @@ struct TaskChangesView: View {
         .buttonStyle(.plain)
         .font(Typography.caption(11))
         .padding(.horizontal, 10)
-        .frame(height: TaskFileChrome.headerHeight)
+        .frame(height: TaskFileChrome.headerHeight + 4)
+        .background(palette.surfaceMuted.opacity(0.5))
+    }
+
+    /// Tour, By kind or By path. Tour is offered when the worker left one.
+    private var orderMenu: some View {
+        Menu {
+            ForEach(ReviewOrdering.allCases.filter { $0 != .tour || store.hasTour }, id: \.self) { ordering in
+                Toggle(ordering.rawValue, isOn: Binding(get: { store.ordering == ordering }, set: { _ in
+                    store.orderingChoice = ordering
+                    store.noteInteraction()
+                }))
+            }
+        } label: {
+            Text(store.ordering.rawValue)
+        }
+        .menuStyle(.borderlessButton).fixedSize()
+        .help(store.hasTour ? "Order of the files. Tour is the worker's \(DiffOrder.path)"
+              : "Order of the files. A worker's \(DiffOrder.path) adds its tour")
+        .disabled(store.review == nil)
+        .accessibilityIdentifier("changes-order")
+    }
+
+    /// The file at the top of the stream: the focused one, else the one the
+    /// reading anchor or the current change is in.
+    private var currentPath: String? {
+        if let focused = store.focusedPath { return focused }
+        let files = store.shownReview?.files ?? []
+        let place = store[place: .changes]
+        guard let id = place.anchor ?? place.current else { return files.first?.path }
+        if id.hasPrefix("file:") { return String(id.dropFirst("file:".count)) }
+        if id == "footer" { return files.last?.path }
+        return files.first { id.hasPrefix($0.path + "#") }?.path ?? files.first?.path
+    }
+
+    /// The header of the file you are in, fixed above the stream while its
+    /// lines scroll under it.
+    @ViewBuilder private var currentFileBar: some View {
+        if let currentPath, let file = store.shownReview?.file(currentPath) {
+            let name = (file.path as NSString).lastPathComponent
+            let directory = (file.path as NSString).deletingLastPathComponent
+            let group = store.shownGroups.first { group in group.isTour && group.files.contains { $0.path == file.path } }
+            HStack(spacing: 8) {
+                HStack(spacing: 0) {
+                    if !directory.isEmpty {
+                        Text(directory + "/").font(Typography.code(11)).foregroundStyle(palette.textSecondary)
+                            .lineLimit(1).truncationMode(.head)
+                    }
+                    Text(name).font(Typography.code(12).weight(.semibold)).lineLimit(1).layoutPriority(1)
+                }
+                if file.status != .modified {
+                    Text(file.status.rawValue).font(Typography.caption(11)).foregroundStyle(palette.textSecondary)
+                }
+                if let why = group?.title, !why.isEmpty {
+                    Text(why).font(Typography.caption(11)).foregroundStyle(palette.textSecondary)
+                        .lineLimit(1).truncationMode(.tail).help(why)
+                }
+                Spacer(minLength: 4)
+                Text("+\(file.additions)").foregroundStyle(palette.successTone.ink).font(Typography.code(11))
+                Text("−\(file.deletions)").foregroundStyle(palette.failureTone.ink).font(Typography.code(11))
+                Button("Open") { store.selectFile(file.path, mode: .read) }
+                    .buttonStyle(.plain).font(Typography.caption(11)).foregroundStyle(palette.textSecondary)
+                    .help("Read \(file.path) in Files")
+            }
+            .padding(.horizontal, 12).frame(height: TaskFileChrome.headerHeight)
+            .background(palette.surfaceMuted)
+            .help(file.path)
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("changes-current-file")
+            Divider()
+        }
     }
 
     private func toggleFocus() {
         if store.focusedPath != nil {
             store.focusedPath = nil
         } else {
-            let current = store[place: .changes].current.flatMap { id in store.review?.stops.first { $0.id == id }?.path }
-            store.focusedPath = current ?? store.review?.files.first?.path
+            let current = store[place: .changes].current.flatMap { id in store.shownReview?.stops.first { $0.id == id }?.path }
+            store.focusedPath = current ?? currentPath
         }
         store.noteInteraction()
     }
 
-    // MARK: Changed files
-
-    private var changedFiles: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            if let reason = store.changesError {
-                Text("Comparison unavailable: \(reason)").font(.caption).foregroundStyle(palette.warning)
-            } else if let changes = store.changes {
-                Text(changes.files.isEmpty ? "No changed files" : "\(changes.files.count) changed files")
-                    .font(Typography.strong(12)).padding(.bottom, 4)
-                ForEach(changes.files, id: \.path) { file in
-                    let reviewed = store.review?.file(file.path)
-                    Button { jump(to: file.path) } label: {
-                        HStack(spacing: 8) {
-                            Text(file.path).font(Typography.code(11)).lineLimit(1).truncationMode(.middle)
-                            if store.documents[file.path]?.dirty == true { Text("•").help("Unsaved draft") }
-                            Spacer(minLength: 4)
-                            if let reviewed {
-                                if reviewed.status == .binary { Text("binary").foregroundStyle(palette.textSecondary) }
-                                Text("+\(reviewed.additions)").foregroundStyle(palette.successTone.ink)
-                                Text("−\(reviewed.deletions)").foregroundStyle(palette.failureTone.ink)
-                            }
-                        }
-                        .font(Typography.code(10))
-                        .padding(.horizontal, 4).padding(.vertical, 2)
-                        .workSelection(store.focusedPath == file.path)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain).help(file.path)
-                    .contextMenu {
-                        Button("Open in Files") { store.selectFile(file.path, mode: .diff) }
-                        Button("Read file") { store.selectFile(file.path, mode: .read) }
-                    }
-                }
-            } else {
-                ProgressView().controlSize(.small)
+    @ViewBuilder private var focusStrip: some View {
+        if let focused = store.focusedPath, let review = store.shownReview {
+            HStack(spacing: 6) {
+                Text("Only \((focused as NSString).lastPathComponent)").font(Typography.strong(11))
+                Text(review.files.count == 2 ? "· 1 other file hidden" : "· \(review.files.count - 1) other files hidden")
+                    .font(Typography.caption(11)).foregroundStyle(palette.textSecondary)
+                Spacer(minLength: 4)
+                Button { toggleFocus() } label: { Image(systemName: "xmark").font(.system(size: 9, weight: .semibold)) }
+                    .buttonStyle(.plain).help("Show all files").accessibilityLabel("Show all files")
             }
+            .lineLimit(1)
+            .padding(.horizontal, 12).padding(.vertical, 5)
+            .background(palette.surfaceElement)
+            .help(focused)
+            Divider()
         }
-        .padding(.horizontal, 14).padding(.vertical, 10)
     }
 
+    private var sidebar: some View {
+        ChangedFilesSidebar(store: store, current: currentPath, notice: hiddenNotice, jump: jump)
+            .frame(width: ChangedFilesSidebar.width)
+    }
+
+    /// Bring a file to the top of the stream.
     private func jump(to path: String) {
         if store.focusedPath != nil { store.focusedPath = path }
-        store[place: .changes] = .init(anchor: "file:\(path)", current: store.review?.stops.first { $0.path == path }?.id)
+        store[place: .changes] = .init(anchor: "file:\(path)", current: store.shownReview?.stops.first { $0.path == path }?.id)
+        // Over a narrow stream the sidebar gives the room back.
+        if !docksSidebar { store.showsSidebar = nil }
         store.noteInteraction()
     }
 
     // MARK: Stream
 
     @ViewBuilder private var stream: some View {
-        if let review = store.review {
+        if let review = store.shownReview {
             let files = store.focusedPath.map { path in review.files.filter { $0.path == path } } ?? review.files
             if store.reviewTruncated {
-                ReviewNotice(text: "Comparison truncated at 1 MB · later files are missing from the stream")
+                ReviewNotice(text: "A file is over 1 MB or could not be read · the stream is missing part of it")
+            }
+            if review.files.isEmpty, store.review?.files.isEmpty == false {
+                ReviewNotice(text: "Every changed file is hidden or filtered out · the changed files list what is hidden")
             }
             if let error = store.reviewError {
                 ReviewNotice(text: "Showing the last reading · \(error)")
             }
-            if let focused = store.focusedPath {
-                ReviewNotice(text: "Showing \(focused) · \(review.files.count - 1) other files hidden")
-            }
-            ReviewStream(store: store, reader: .changes, files: files, split: store.readsSplit(width: width))
+            ReviewStream(store: store, reader: .changes, files: files, split: store.readsSplit(width: width),
+                         headings: headings, addToConversation: addToConversation)
         } else if let error = store.reviewError {
             ContentUnavailableView("Comparison unavailable", systemImage: "doc", description: Text(error))
                 .padding(.vertical, 24)
-        } else {
+        } else if store.changesError == nil {
             ProgressView().frame(maxWidth: .infinity).padding(24)
         }
     }
 
+    /// The worker's reason, above the first file it heads.
+    private var headings: [String: String] {
+        var headings: [String: String] = [:]
+        for group in store.shownGroups where group.isTour && !group.title.isEmpty {
+            if let first = group.files.first { headings[first.path] = group.title }
+        }
+        return headings
+    }
+
     // MARK: Footer
 
+    /// The stream says where it ends, and offers the way back.
     @ViewBuilder private var footer: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            if let compared = store.comparisonDescription {
-                Text(compared).font(Typography.code(10)).foregroundStyle(palette.textSecondary)
-                    .accessibilityIdentifier("changes-comparison")
+        VStack(spacing: 6) {
+            if let first = store.shownReview?.stops.first, store.focusedPath == nil {
+                Text("End of changes").font(Typography.caption(11)).foregroundStyle(palette.textSecondary)
+                Button("Back to the first change") {
+                    store[place: .changes] = .init(anchor: "file:\(first.path)", current: first.id)
+                    store.noteInteraction()
+                }
+                .buttonStyle(WorkPlainButtonStyle()).font(.caption)
             }
             if store.query.remoteMachine == nil, let directory = store.changes?.recoveryDirectory {
                 Button("Open saved versions ↗") { NSWorkspace.shared.open(URL(fileURLWithPath: directory)) }
                     .buttonStyle(WorkPlainButtonStyle()).font(.caption)
             }
         }
-        .padding(14)
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 24)
+    }
+}
+
+/// The changed files beside the stream, in its order and under its headings.
+/// Type to narrow the stream and click a file to bring it to the top. Below
+/// them, what the worker hid for this change with its reasons, and the path
+/// text you always hide in this repository.
+private struct ChangedFilesSidebar: View {
+    static let width: CGFloat = 236
+
+    @Bindable var store: TaskFilesStore
+    /// The file at the top of the stream.
+    let current: String?
+    /// Why the hidden paths last failed to read or save.
+    let notice: String?
+    let jump: (String) -> Void
+    @Environment(\.palette) private var palette
+    @State private var hiding = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            TextField("Filter files", text: $store.reviewFilter)
+                .textFieldStyle(.roundedBorder).font(Typography.caption(12))
+                .padding(8)
+                .accessibilityIdentifier("changes-filter")
+            Divider()
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    ForEach(store.shownGroups) { group in
+                        groupRow(group)
+                        ForEach(group.files) { file in fileRow(file, in: group) }
+                    }
+                    if store.shownGroups.isEmpty {
+                        Text("No files to show").foregroundStyle(palette.textSecondary).padding(8)
+                    }
+                    workerHidden
+                    alwaysHidden
+                }
+                .padding(.bottom, 12)
+            }
+        }
+        .font(Typography.caption(11))
+        .frame(maxHeight: .infinity, alignment: .top)
+        .background(palette.surfaceMuted.opacity(0.35))
+        .accessibilityIdentifier("changes-files")
+    }
+
+    private func heading(_ text: String) -> some View {
+        Text(text).font(Typography.strong(11)).foregroundStyle(palette.textSecondary)
+            .padding(.horizontal, 8).padding(.top, 12).padding(.bottom, 3)
+    }
+
+    @ViewBuilder private func groupRow(_ group: ReviewGroup) -> some View {
+        if !group.title.isEmpty {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(group.title).font(Typography.strong(11))
+                    .foregroundStyle(group.isTour ? palette.text : palette.textSecondary)
+                    .lineLimit(group.isTour ? 3 : 1).fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 4)
+                if group.id.hasPrefix("path:"), group.title.hasSuffix("/") {
+                    Button("Hide") { hide(group.title) }.buttonStyle(WorkPlainButtonStyle())
+                        .help("Always leave \(group.title) out of the Diff")
+                }
+            }
+            .padding(.horizontal, 8).padding(.top, 10).padding(.bottom, 3)
+        }
+    }
+
+    private func fileRow(_ file: ReviewFile, in group: ReviewGroup) -> some View {
+        let folder = group.id.hasPrefix("path:") && group.title.hasSuffix("/") ? group.title.count : nil
+        let comments = store.comments.count { $0.selection.path == file.path }
+        return Button { jump(file.path) } label: {
+            HStack(spacing: 6) {
+                Text(folder.map { String(file.path.dropFirst($0)) } ?? (file.path as NSString).lastPathComponent)
+                    .font(Typography.code(11)).lineLimit(1).truncationMode(.head)
+                Spacer(minLength: 4)
+                if comments > 0 {
+                    Label("\(comments)", systemImage: "text.bubble").labelStyle(.titleAndIcon)
+                        .foregroundStyle(palette.accent)
+                        .accessibilityLabel(comments == 1 ? "1 comment" : "\(comments) comments")
+                }
+                counts(added: file.additions, removed: file.deletions)
+            }
+            .padding(.horizontal, 8).padding(.vertical, 3)
+            .background(file.path == current ? palette.surfaceElement : .clear)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain).help(file.path)
+        .accessibilityAddTraits(file.path == current ? .isSelected : [])
+    }
+
+    private func counts(added: Int, removed: Int) -> some View {
+        HStack(spacing: 4) {
+            Text("+\(added)").foregroundStyle(palette.successTone.ink)
+            Text("−\(removed)").foregroundStyle(palette.failureTone.ink)
+        }
+        .font(Typography.code(10))
+    }
+
+    private func fileCount(_ count: Int) -> String { count == 1 ? "1 file" : "\(count) files" }
+
+    /// Paths the worker left out of this change, each with its reason and one
+    /// click to read it anyway. They never join your own hidden paths.
+    @ViewBuilder private var workerHidden: some View {
+        let files = store.review?.files ?? []
+        let entries = (store.diffOrder?.hide ?? []).filter { entry in files.contains { entry.matches($0.path) } }
+        if !entries.isEmpty {
+            heading("Hidden by the worker for this change")
+            ForEach(entries, id: \.path) { entry in
+                let shown = store.shownWorkerHides.contains(entry.path)
+                VStack(alignment: .leading, spacing: 1) {
+                    HStack(spacing: 6) {
+                        Text(entry.path).font(Typography.code(11)).lineLimit(1).truncationMode(.head)
+                        Text(fileCount(files.count { entry.matches($0.path) })).foregroundStyle(palette.textSecondary)
+                        Spacer(minLength: 4)
+                        Button(shown ? "Hide" : "Show") {
+                            if shown { store.shownWorkerHides.remove(entry.path) } else { store.shownWorkerHides.insert(entry.path) }
+                        }
+                        .buttonStyle(WorkPlainButtonStyle())
+                    }
+                    if !entry.why.isEmpty {
+                        Text(entry.why).foregroundStyle(palette.textSecondary).fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .padding(.horizontal, 8).padding(.vertical, 3)
+            }
+        }
+    }
+
+    /// What you always leave out, each removable, and a field to add another.
+    @ViewBuilder private var alwaysHidden: some View {
+        let files = store.review?.files ?? []
+        let hidden = files.count { store.hides($0.path) }
+        heading("Always hidden")
+        ForEach(store.hiddenPaths, id: \.self) { path in
+            HStack(spacing: 6) {
+                Text(path).font(Typography.code(11)).lineLimit(1).truncationMode(.head)
+                Text(fileCount(files.count { $0.path.range(of: path, options: .caseInsensitive) != nil }))
+                    .foregroundStyle(palette.textSecondary)
+                Spacer(minLength: 4)
+                Button { store.hiddenPaths.removeAll { $0 == path } } label: {
+                    Image(systemName: "xmark").font(.system(size: 8, weight: .bold)).frame(width: 16, height: 16)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain).help("Stop hiding paths containing \(path)")
+                .accessibilityLabel("Stop hiding \(path)")
+            }
+            .padding(.horizontal, 8).padding(.vertical, 2)
+        }
+        TextField("tests/, .lock…", text: $hiding)
+            .textFieldStyle(.roundedBorder).font(Typography.code(11))
+            .onSubmit { hide(hiding); hiding = "" }
+            .help("Hide every changed file whose path contains this text")
+            .padding(.horizontal, 8).padding(.vertical, 4)
+            .accessibilityIdentifier("changes-hide")
+        if hidden > 0 {
+            Toggle(hidden == 1 ? "Show 1 hidden file" : "Show \(hidden) hidden files", isOn: $store.showsHidden)
+                .toggleStyle(.checkbox).controlSize(.small)
+                .padding(.horizontal, 8)
+        }
+        if let notice {
+            Text(notice).foregroundStyle(palette.warning).textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true).padding(8)
+        }
+    }
+
+    private func hide(_ text: String) {
+        let path = text.trimmingCharacters(in: .whitespaces)
+        guard !path.isEmpty, !store.hiddenPaths.contains(path) else { return }
+        store.hiddenPaths.append(path)
     }
 }
 

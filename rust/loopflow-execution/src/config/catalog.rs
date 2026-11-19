@@ -294,6 +294,7 @@ definitions! {
     repo_root: Option<PathBuf> = "null", Personal, Replace, HostLocal, NextRead, Desktop, "Local repository discovery directory";
     theme: Option<String> = "null", Personal, Replace, ReferencedAssets, NextRead, Desktop, "Appearance theme or light:name,dark:name pair";
     portfolio: Option<crate::portfolio::Selection> = "null", Personal, Replace, HostLocal, NextRead, Desktop, "Repository navigation selection";
+    diff_hidden: Vec<String> = "[scratch/]", PersonalScoped, Replace, Portable, NextRead, Desktop, "Text that hides a changed file from a Task's Diff when its path contains it, ignoring case";
     planning: Option<TrackerConfig> = "null", Repository, Replace, Portable, DomainAction, Planning, "Repository tracker and its settings";
     release: ReleaseConfig = "{targets: {}}", Repository, Merge, ReferencedAssets, DomainAction, Release, "Repository release targets";
     land: String = "gh", Repository, Replace, Portable, DomainAction, Release, "Landing strategy: gh or local";

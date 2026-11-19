@@ -440,7 +440,7 @@ both. Repository settings (`planning`, `release`,
 `id`, `linear.initiative` and `chat`. A Task with no Wave uses the repository's
 settings.
 
-`lf set` edits your private `lf.config.local.yaml`, shared across this clone's
+`lf set` edits your private `.lf/config.local.yaml`, shared across this clone's
 Task worktrees. `--wave` selects a Wave within that file; `--global` edits
 `~/.lf/config.yaml`. Independent clones have independent private preferences.
 The same values can be edited by hand or through Desktop. `lf unset <key>` removes

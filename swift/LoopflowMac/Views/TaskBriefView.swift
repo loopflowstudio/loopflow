@@ -101,7 +101,7 @@ struct TaskBriefView: View {
                 Button { store.page = .changes; store.noteInteraction() } label: {
                     Label(delivery.headline, systemImage: "arrow.triangle.pull").lineLimit(1)
                 }
-                .buttonStyle(WorkPlainButtonStyle()).help("Show Changes")
+                .buttonStyle(WorkPlainButtonStyle()).help("Show Diff")
                 if let due = task.task.dueDate { Text("Due \(due)") }
             }
             .font(.caption).foregroundStyle(palette.textSecondary)

@@ -544,9 +544,7 @@ pub(crate) fn apply_document(path: &Path, document: &mut Value) -> Result<()> {
     };
     if path == crate::store::lf_home_dir().join("config.yaml") {
         replace_projection(document, &profile.global);
-    } else if path
-        .file_name()
-        .is_some_and(|name| name == super::files::PRIVATE_FILE)
+    } else if path.ends_with(super::files::PRIVATE_FILE)
         && path
             .parent()
             .and_then(|repo| crate::repository::RepoId::discover(repo).ok())

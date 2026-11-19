@@ -666,11 +666,8 @@ struct TaskFilesTests {
         store.selection = "draft.txt"
         store.page = .brief
         let view = TaskFilesView(store: store, checkoutBase: nil, task: task)
-        // The Task is named in the header on every page.
-        #expect(try view.inspect().find(text: task.task.name).string() == task.task.name)
         _ = try view.inspect().find(viewWithAccessibilityIdentifier: "browser-task-overview")
         store.page = .changes
-        #expect(try view.inspect().find(text: task.task.name).string() == task.task.name)
         _ = try view.inspect().find(viewWithAccessibilityIdentifier: "browser-changes")
         store.page = .files
         try view.inspect().find(viewWithAccessibilityIdentifier: "files-toggle-navigator").button().tap()
@@ -678,7 +675,7 @@ struct TaskFilesTests {
         #expect(store.selection == "draft.txt")
         store.navigator = .pinned
         store.page = .brief
-        // Brief and Changes keep the Files page's navigator and selection.
+        // Brief and Diff keep the Files page's navigator and selection.
         store.page = .files
         #expect(store.navigator == .pinned)
         try view.inspect().find(viewWithAccessibilityIdentifier: "files-toggle-navigator").button().tap()
@@ -844,6 +841,101 @@ struct TaskFilesTests {
         let store = TaskFilesStore(issue: "TEST-1", cwd: "/fixture", query: RegistryQuery { args, _ in try reply(args) })
         store.autosave = false
         return store
+    }
+
+    /// The whole-comparison read stops at its size limit partway through a file;
+    /// the files past the cut still reach the stream, and hidden paths stay out of it.
+    @Test func aComparisonCutAtTheReadLimitStillShowsEveryFile() async throws {
+        let fixture = try Data(contentsOf: URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("tests/fixtures/dto/task_files.json"))
+        let paths = ["a.swift", "scratch/notes.md", "z.swift"]
+        let patch: @Sendable (String) -> String = { path in
+            "diff --git a/\(path) b/\(path)\n--- a/\(path)\n+++ b/\(path)\n@@ -1 +1 @@\n-one\n+uno\n@@ -9 +9 @@\n-nine\n+nueve\n"
+        }
+        let store = TaskFilesStore(issue: "TEST-1", cwd: "/fixture", query: RegistryQuery { args, _ in
+            let root = try JSONSerialization.jsonObject(with: fixture) as! [String: Any]
+            var value = root[args[1] == "changes" ? "changes" : "diff"] as! [String: Any]
+            if args[1] == "changes" {
+                let file = (value["files"] as! [[String: Any]])[0]
+                value["files"] = paths.map { file.merging(["path": $0, "old_path": NSNull()]) { $1 } }
+            } else if args[3].hasPrefix("--") {
+                // Cut inside the second file: its second change and all of z.swift are missing.
+                value["patch"] = patch(paths[0]) + String(patch(paths[1]).dropLast(22))
+                value["truncated"] = true
+            } else {
+                value["patch"] = patch(args[3])
+            }
+            return String(decoding: try JSONSerialization.data(withJSONObject: value), as: UTF8.self)
+        })
+        store.autosave = false
+        await store.loadReview()
+        #expect(store.review?.files.map(\.path) == paths)
+        #expect(store.review?.stops.count == 6)
+        #expect(!store.reviewTruncated)
+        #expect(store.shownReview?.files.map(\.path) == ["a.swift", "z.swift"])
+        #expect(store.position(.changes) == "4 changes")
+        store.hiddenPaths = []
+        store.reviewFilter = "NOTES"
+        #expect(store.shownReview?.files.map(\.path) == ["scratch/notes.md"])
+    }
+
+    /// The checkout's `scratch/diff-order.yaml` orders the Diff and hides what
+    /// the worker named, until you ask for it; your own hidden paths are untouched.
+    @Test func aWorkersOrderFileOrdersTheDiffAndHidesItsPathsUntilShown() async throws {
+        let fixture = try Data(contentsOf: URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("tests/fixtures/dto/task_files.json"))
+        let paths = ["a.swift", "docs/guide.md", "z.swift"]
+        let content = "one\ntwo\nthree\nfour\nfive\nsix\nseven\neight\nnueve\n"
+        let store = TaskFilesStore(issue: "TEST-1", cwd: "/fixture", query: RegistryQuery { args, _ in
+            let root = try JSONSerialization.jsonObject(with: fixture) as! [String: Any]
+            var value = root[args[1]] as! [String: Any]
+            switch args[1] {
+            case "changes":
+                let file = (value["files"] as! [[String: Any]])[0]
+                value["files"] = paths.map { file.merging(["path": $0, "old_path": NSNull()]) { $1 } }
+            case "file":
+                value["path"] = args[3]
+                value["content"] = args[3] == DiffOrder.path
+                    ? "first:\n  - path: z.swift\n    why: Start here\nhide:\n  - path: docs/\n    why: Rename only\n" : content
+            default:
+                value["patch"] = paths.map { path in
+                    "diff --git a/\(path) b/\(path)\n--- a/\(path)\n+++ b/\(path)\n@@ -1 +1 @@\n-uno\n+one\n@@ -9 +9 @@\n-nine\n+nueve\n"
+                }.joined()
+            }
+            return String(decoding: try JSONSerialization.data(withJSONObject: value), as: UTF8.self)
+        })
+        store.autosave = false
+        await store.loadReview()
+        #expect(store.ordering == .tour)
+        #expect(store.shownReview?.files.map(\.path) == ["z.swift", "a.swift"])
+        #expect(store.shownGroups.first?.title == "Start here")
+        #expect(store.step(1, in: .changes)?.path == "z.swift")
+        #expect(store.workerHides("docs/guide.md")?.why == "Rename only")
+        #expect(store.hiddenPaths == ["scratch/"])
+        store.shownWorkerHides = ["docs/"]
+        #expect(store.shownReview?.files.map(\.path) == ["z.swift", "a.swift", "docs/guide.md"])
+        // By path reads folder by folder, top-level files first.
+        store.orderingChoice = .path
+        #expect(store.shownReview?.files.map(\.path) == ["a.swift", "z.swift", "docs/guide.md"])
+
+        // Skipped lines open from the file as it stands, and a comment on one stays through a reload.
+        let file = try #require(store.shownReview?.file("a.swift"))
+        let (index, header) = try #require(file.blocks.enumerated().compactMap { index, block -> (Int, String)? in
+            if case .hunk(let header) = block, index > 0 { return (index, header) }
+            return nil
+        }.first)
+        await store.openGap(header, gap: try #require(file.gaps[index]), path: "a.swift", reader: .changes)
+        #expect(store.gapError == nil)
+        #expect(store.opened(file).lines.compactMap(\.new).contains(5))
+        store.reviewSelection = ReviewSelection(path: "a.swift", side: .new, first: 5, last: 5)
+        store.commentDraft = "what is five?"
+        store.addComment(in: file)
+        #expect(store.reviewSelection == nil && store.commentDraft.isEmpty)
+        #expect(store.comments.map(\.anchor) == [["five"]])
+        await store.loadReview()
+        #expect(store.comments.map(\.detached) == [false])
     }
 
     @Test func diffSteppingPastAFilesLastChangeOpensTheNextFilesDiff() async throws {

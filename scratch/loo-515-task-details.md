@@ -8,6 +8,36 @@ inputs: LOO-497 (one Files tool per Task, document/Brief/Changes tabs, hidden
 tools keep drafts), LOO-489 Console (one titlebar, Lato, neutral selection),
 LOO-327 (document per Task/path, drafts, recovery), the LOO-515 brief.
 
+## Changes pane redesign — November 18
+
+Jack, on the before/after page (`scratch/explore.html`, as built beside redesigned): "yeah looks good". The brief for it, in his words: "focus on clarity, polish, and delight, not trying to change the fundamental behavior that it enables or functionality". The page's four questions were not answered; the choices below marked *assumed* are the page as shown.
+
+Next for implement — restyle `TaskChangesView` and `ReviewStream`; behaviour stays:
+
+1. Pane title: `<n> changes in <m> files`, then `against <base> at <sha> · includes uncommitted`. The comparison line leaves the footer.
+2. The inline changed-file list goes; the current file's name in the bar opens a menu of files with +/− and a proportion bar; choosing one jumps. *Assumed: menu, not inline or a side column.*
+3. Delivery card collapses to a pill (status dot, `#<n> · <state>`) in the title row; click shows the same card, every reading and its age kept.
+4. `ReviewStepper`: one bordered control, position in the middle, `[` `]` shown beside it.
+5. File headers pin while their file is on screen (`pinnedViews`); bar always names the current file; name bold, directory quiet; `Open` replaces the `doc.text` icon.
+6. Hunk headers: no raw `@@`; a dashed rule with `<k> unchanged lines · <function>`.
+7. Unified has one gutter: new number, old on a removed line.
+8. Lighter row tint, darker changed word, no underline; `+`/`−` markers stay.
+9. Moved rows get their own tint and `Moved here from L<n> · <k> lines, <unchanged | j lines changed>`; whole row expands.
+10. Selection: line numbers highlight on hover and drag to select (⇧-click still extends); actions float over the code, Ask primary with ⌘↩. *Assumed: drag and the key are in.*
+11. Focus: tinted strip `Only <file> · <n> other files hidden` with a close button; the Focus button stays in place and shows as on.
+12. Landing on a change flashes it once; an edit arriving outside the view shows `<n> new change(s) below` and never scrolls; the stream ends with `End of changes · n of n · Back to the first change`. *Assumed: the chip is in.*
+
+Built November 18 (`TaskChangesView`, `ReviewStreamView`), with these departures from the page:
+
+- 5: file headers do not pin. A pinned header covers the row `scrollPosition` puts at the top, which is where next/previous lands; the bar names the current file instead. Open: pin with an offset landing.
+- 2: the file menu lists paths (and `•` for a draft) without +/− or bars; counting lines for every file on each render is too slow on a large comparison. File headers keep the counts.
+- 10: hover and click/⇧-click, no drag. ⌘↩ asks while the pane has focus.
+- 12: no "new changes below" chip. Change ids are line-anchored, so an edit above shifts every id after it and would read as new.
+
+Side by side stays as built (one gutter per side), offered only at ≥ 640 pt and visibly disabled with its reason below that. Files' Diff shares `ReviewStream`, so 5–10 reach it through the reader; its header and bar are not redesigned here. *Assumed.*
+
+Dropped on November 18: tracking the diff by agent turn. Jack: "in our system the task session is not even the one actually making the changes. The diff is really about the underlying worker not the highest-level session."
+
 ## Build direction — November 14
 
 Jack, asked whether the B+A hybrid is the direction and how moved code appears (a paired inline, b collapsed with expand, c both): "yeah lets build it with (b)". Latest page: `scratch/explore.html` (B).
@@ -208,3 +238,97 @@ the navigator's `Changed files` section, Files' patch renderer (`TaskPatch*`).
 - Demo/review (Jack): the six-step loop above on a real Task, including a
   no-PR Task and offline `gh`.
 
+
+## After the first try in the Dev app — November 18
+
+Jack, trying the build:
+
+- "we need to change the whole paradigm of [pane strip screenshot] why does files show up three times"
+- "Also Changes should probably just be called Diff? is that not more normal"
+- On "24 changes in 44 files": "this is also weird, how can there be fewer changes than filkes. and i scrolled through all 24 and didnt find anything actually meaningful"
+- "i think there neeeds to be some way to expand the 44 files thing sn then filter files/dirs"
+- "in diff mode i also think we kinda want to ignore scratch/ and i want some way to always filter tests/ and maybe other things. what do the most loved diff-viewing tools do for these kinds of things"
+
+What the run showed: this branch's comparison is 1,832,409 bytes and `lf task
+diff` stops at 1 MB. Files arrive in path order (rust, scratch, swift), so the
+24 changes were five Rust files and `scratch/` HTML; no Swift reached the stream.
+
+Built in answer, not yet seen on screen:
+
+- One row of tabs in the pane strip (Brief, Diff, Files, then other open tabs);
+  the second header row with the Task name and segmented control is gone, and
+  the strip's menu is labelled with the Task identifier. The Task name no
+  longer appears in the pane.
+- Page renamed Diff (`lf desktop` page argument `diff`). Files' per-file mode is
+  also called Diff.
+- A truncated comparison is completed with one read per remaining file.
+- The title opens the changed files by top-level folder: a filter field, click
+  to jump, Hide per folder, and an "Always hidden" list of path text matched
+  anywhere in the path, ignoring case. It is one list for the whole app
+  (`diff.hiddenPaths` in UserDefaults), starting with `scratch/`.
+
+Where the hidden list lives. Jack: "I think this is personal, per-repo config.
+I think we have that in like <repo>/.lf/config.yaml.local or something". That
+file is `lf.config.local.yaml` at the repository root. Built: a `diff_hidden`
+setting (personal, global or per repository, default `[scratch/]`); Desktop
+reads its effective value and saves edits to the repository's private file.
+Checked with the branch `lf` in a throwaway repository: `lf config set
+diff_hidden '["scratch/","tests"]'` wrote the file and `lf config settings
+--json` returned it. Not checked: Desktop's read and save against a running
+server, and what the released `lf` prints on meeting the unknown key.
+
+## Silent limits — November 18
+
+Jack, on the 1 MB cut: "This is ... really bad, where else do we do stuff like this", then "what does it imply aobut our overall architecture that needs to chagen", and his own answer: "that we felt we couldnt afford to see a full diff".
+
+Filed from it: d92894 (commit and PR writers' 20,000-character diff prefix; "file and start a task for fixing this", running) and 4556d0 (everything else; "i think all the other ones can be one more catch all", not started, lands after LOO-515).
+
+On the writers' budget: "We should also let teh agent decide what to read in waht order i think". Sent to d92894 as a steer.
+
+Private settings file location. Jack: "lf.config.local.yaml Is this the right place to keep this file? looks weird", then chose ".lf/config.local.yaml". Filed as Task 7333f4, not started.
+
+Then: "you should jsut move it here its fien" and "make sure it gets auto hidden for users too". Done in this checkout: `PRIVATE_FILE` is `.lf/config.local.yaml`; a file at the old root path moves on first lookup, with the Git exclude rule written first. Task 7333f4 abandoned as done here. `global_commands::open_delivers_exact_task_to_desktop_without_preparing_its_execution` fails on this Machine with "No agent selected ... exactly one supported harness must be installed" in an isolated home; not run on unmodified code.
+
+## Comparison with other diff tools — November 19
+
+Pages: `scratch/diff-tools-guide.html` (comparison), `scratch/explore-diff-rivals.html` (three directions: A review then send once, B reader, C ordered by the worker).
+
+Jack, on commenting: "do any of these diff readers allow commenting in the diff? I think we should add that (where the ocmment sends to the session)". Suggested Rune (https://rune.build/) as another tool to compare.
+
+Jack, quoting T3's "Joins the composer draft with file, range and diff context; several collect before you send": "This feels right. doe t3 have tuis or is it chat only?"
+
+Jack asked for the page: "can you show me 3 explorations that each redesign the experience around trying to match the best of the compettiors?" No direction chosen yet.
+
+Built November 19: a Comment field in the selection bar. The comment travels on the same line as the reference into the session's unsent input (`ReviewSelection.reference(revision:comment:)`); each is typed as it is added. Collecting in the Diff and sending once is direction A, not built.
+
+Jack, after the three directions: "I like the commenting from A. I like the context/sidedbar of B. I like the idea of auto-ordering from C". The page now leads with one combined pane built from those three parts; its four questions are unanswered. Read marks, one-file-at-a-time, syntax colors, pause, depth slider and folded renames were not named and are left out of the combined pane.
+
+Jack, on how the tour is stored: "i would think the tour could live as some sort of simple yaml or something in scratch that basically just jump files to the top". The page's tour is now that: a list of files, optional why, unnamed files follow in the default order. Hunk grouping, the accounting check and the stale banner are dropped from the combined pane.
+
+Jack, on the same file: "and maybe also auto sets filters as well". The page's file now has `first:` and `hide:`; how a worker's hide behaves on open is an open question on the page.
+
+Jack, answering the page's questions on the worker's hide and stream-or-one-file: "1 hidden at start 2 stream, clicking beings it to top, headers lock into to a fixed top bar as you scroll". The left-out parts (read marks, syntax colors, pause, depth slider, folded renames) were not answered.
+
+## Combined Diff pane — built November 19
+
+Mock: `scratch/explore-diff-rivals.html`, the "Combined" panel. Comparison behind it: `scratch/diff-tools-guide.html`. Jack's words for each part are in the section above. Built, not yet seen on screen.
+
+Demo: open a Task whose change spans many files. The Diff starts on the files `scratch/diff-order.yaml` names, not on `docs/`. Click a file in the sidebar and it comes to the top with its header in the bar. Open the skipped lines above a hunk. Comment on two lines in two files, press Send; the conversation's unsent input holds both, each naming its file and lines.
+
+1. **Sidebar** (`ChangedFilesSidebar`, left of the stream): filter, files under the order's headings, comment counts, "Hidden by the worker for this change" with reasons and Show, "Always hidden" with its add field. `ChangedFilesPanel` and the title's toggle are deleted. Below 620 pt it opens over the stream from a toolbar button and closes on choosing a file. *Assumed: 620 pt, left side as in the mock.*
+2. **File bar.** A fixed bar above the stream holds the header of the file under the stream's top edge (name, status, the tour's why, counts, Open). It sits outside the scroll view, so nothing next/previous lands on is covered. Departure: the in-stream file headers still scroll; they do not themselves stick. `LazyVStack` pinned headers were not used because `scrollPosition(id:)` lands rows under them.
+3. **Skipped lines.** The row between hunks is a button; its lines are read with `lf task file` (the unsaved draft in Files' Diff) and replace the hunk header (`ReviewGap`, `ReviewFile.opening`). Offered only while the comparison reads the working tree. Opened lines close when their file's diff changes.
+4. **Comments** (`ReviewComment`, `store.comments`): written in an editor under the selected lines, kept under their last line, counted in the sidebar; `ReviewCommentsControl` in both readers' bars sends them. `ReviewSelectionBar` is deleted; Copy and a bare reference are in the editor. Re-anchoring matches the commented lines' text to the nearest lines that still read the same; none is detached, shown under its file header (or at the top when the file left the comparison) and still sent. Sent comments clear only when the text reached the terminal (`addToConversation` returns Bool).
+5. **Order** (`DiffOrder`, `ReviewGroup.arrange`, `ReviewKind`): as specified. Tour is the default when `first` has entries. The builtin `implement` skill carries the sentence telling the worker to write the file.
+
+Limits found while building:
+
+- The unsent input takes one line only. Desktop's literal typing refuses control characters, and a newline is safe only under bracketed paste, which Desktop cannot confirm for the program in the terminal. Several comments go as one line: `2 comments on the diff, <comparison>: (1) `path:L4` (after): … (2) …`.
+- A comment on an opened (unchanged) line detaches when its file's diff changes, because the opened lines close then.
+- A repeated short line (`}`) re-anchors to the nearest identical line, which can be the wrong one after an edit between them.
+- This repository's gate clears `scratch/`, so a tour does not outlive gate here.
+- By path groups by top-level folder, top-level files first, so it is not strict path order.
+
+Not in this slice (shown on the page, not asked for): read marks, syntax colors, pause, a depth slider, folded renames, hunk-level grouping.
+
+Check: `scripts/test_desktop.sh --filter 'TaskFilesTests|ReviewDiffTests'` → 47 passed; `cargo test -p loopflow --test golden_prompt` → passed after regenerating `builtin_implement.md`. Gate: `documented_commands::`, the full swift suite. Demo: the pane on screen, including the narrow sidebar and Send into a live conversation.

@@ -158,7 +158,7 @@ lf set skill.implement.agent codex
 lf --wave frontend set skill.implement.agent claude
 ```
 
-The first two commands save your repository preferences in `lf.config.local.yaml`.
+The first two commands save your repository preferences in `.lf/config.local.yaml`.
 The third makes implementation use Claude for the `frontend` Wave; the rest of
 the repository still uses Codex. These private settings do not change the team's files.
 
@@ -186,7 +186,7 @@ Suppose `release` runs implementation twice:
 Give implementation a personal default, then make one occurrence an exception:
 
 ```yaml
-# lf.config.local.yaml
+# .lf/config.local.yaml
 skill:
   implement:
     agent: codex
@@ -372,7 +372,7 @@ a setter to edit that file; setters preserve comments and unrelated content.
 | File | Applies to | Shared through Git? |
 | --- | --- | --- |
 | `~/.lf/config.yaml` | Your global preferences | No |
-| `./lf.config.local.yaml` | Your repository and Wave preferences | No |
+| `.lf/config.local.yaml` | Your repository and Wave preferences | No |
 | `.lf/config.yaml` | The repository's shared preferences | Yes |
 | `.lf/wave/<name>/config.yaml` | The Wave's shared preferences | Yes |
 
@@ -1167,9 +1167,11 @@ other hosts need publication, identity and completion support together.
 Independent clones have independent private preferences, even when they have the
 same Git remote. This includes machine preferences. New clones
 start without another clone's private overrides; copy or import them deliberately.
-Task worktrees share the main checkout's `lf.config.local.yaml`. LF resolves that
+Task worktrees share the main checkout's `.lf/config.local.yaml`. LF resolves that
 file through Git's worktree metadata; a Task's working directory does not give it
-another private preference file. The first LF write adds `/lf.config.local.yaml`
+another private preference file. A `lf.config.local.yaml` left in the checkout
+root by an earlier release moves there the first time LF looks for it. The first
+LF write, or that move, adds `/.lf/config.local.yaml`
 to the repository's private Git exclude file if needed. It preserves existing
 ignore rules and does not edit the committed `.gitignore`. An already tracked
 file needs to be removed from tracking before Git can ignore it.

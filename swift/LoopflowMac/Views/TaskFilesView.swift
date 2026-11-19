@@ -16,7 +16,7 @@ struct TaskFilesView: View {
     var task: RoadmapTask? = nil
     var isFocused = true
     /// Types into the Task conversation without sending.
-    var addToConversation: ((String) -> Void)? = nil
+    var addToConversation: ((String) -> Bool)? = nil
     @Environment(\.palette) private var palette
     @FocusState private var navigatorFocused: Bool
     @FocusState private var treeFocused: Bool
@@ -26,19 +26,13 @@ struct TaskFilesView: View {
         "\(store.selection ?? "")|\(store.changes?.baseCommit ?? "")|\(store.selectedDocument?.editVersion ?? 0)|\(store.mode)"
     }
 
-    /// Brief needs the Task's row; a Files pane without one has Changes and Files.
-    private var pages: [TaskFilesStore.Page] {
-        task == nil ? [.changes, .files] : TaskFilesStore.Page.allCases
-    }
-
+    /// Brief needs the Task's row; a pane without one reads Files instead.
     private var page: TaskFilesStore.Page {
         store.page == .brief && task == nil ? .files : store.page
     }
 
     var body: some View {
         VStack(spacing: 0) {
-            header
-            Divider()
             switch page {
             case .brief:
                 if let task { TaskBriefView(store: store, task: task) }
@@ -70,40 +64,6 @@ struct TaskFilesView: View {
             if store.mode != .diff { await store.loadFile() }
         }
         .task(id: diffIdentity) { if store.mode == .diff { await store.loadDiff() } }
-    }
-
-    // MARK: Header
-
-    /// Which Task, and which of its pages, on every page.
-    private var header: some View {
-        HStack(spacing: 8) {
-            Text(task?.task.identifier ?? store.issue)
-                .font(Typography.code(11)).foregroundStyle(palette.textSecondary)
-                .fixedSize()
-            if let task {
-                Text(task.task.name).font(Typography.strong(12)).lineLimit(1).truncationMode(.tail)
-                    .help(task.task.name)
-            }
-            Spacer(minLength: 8)
-            ViewThatFits(in: .horizontal) {
-                Picker("Page", selection: pageBinding) {
-                    ForEach(pages, id: \.self) { Text($0.rawValue).tag($0) }
-                }
-                .pickerStyle(.segmented).labelsHidden().fixedSize()
-                Picker("Page", selection: pageBinding) {
-                    ForEach(pages, id: \.self) { Label($0.rawValue, systemImage: $0.symbol).tag($0) }
-                }
-                .pickerStyle(.menu).labelsHidden().fixedSize()
-            }
-            .accessibilityIdentifier("files-pages")
-            .help("Brief ⌥⌘1 · Changes ⌥⌘2 · Files ⌥⌘3")
-        }
-        .padding(.horizontal, 10)
-        .frame(height: TaskFileChrome.headerHeight)
-    }
-
-    private var pageBinding: Binding<TaskFilesStore.Page> {
-        Binding(get: { page }, set: { store.page = $0; store.noteInteraction() })
     }
 
     /// Open documents and their controls; only the Files page has them.
@@ -603,7 +563,7 @@ private struct TaskFileDiffView: View {
     @Bindable var store: TaskFilesStore
     let review: TaskFilesStore.FileReview
     let isFocused: Bool
-    let addToConversation: ((String) -> Void)?
+    let addToConversation: ((String) -> Bool)?
     @Environment(\.palette) private var palette
     @State private var width: CGFloat = 0
 
@@ -618,6 +578,7 @@ private struct TaskFileDiffView: View {
                     .lineLimit(1).truncationMode(.middle)
                     .accessibilityIdentifier("files-diff-comparison")
                 Spacer(minLength: 4)
+                ReviewCommentsControl(store: store, isFocused: isFocused, addToConversation: addToConversation)
                 ReviewLayoutPicker(store: store, width: width)
             }
             .buttonStyle(.plain)
@@ -630,7 +591,8 @@ private struct TaskFileDiffView: View {
                     if review.diff.files.isEmpty {
                         ReviewNotice(text: "No changes in \(review.path)")
                     }
-                    ReviewStream(store: store, reader: reader, files: review.diff.files, split: store.readsSplit(width: width))
+                    ReviewStream(store: store, reader: reader, files: review.diff.files, split: store.readsSplit(width: width),
+                                 addToConversation: addToConversation)
                 }
                 .scrollTargetLayout()
             }
@@ -638,9 +600,6 @@ private struct TaskFileDiffView: View {
             .onScrollPhaseChange { _, phase in if phase == .interacting { store.noteInteraction() } }
             .onGeometryChange(for: CGFloat.self, of: \.size.width) { width = $0 }
             .accessibilityIdentifier("files-diff")
-            if let selection = store.reviewSelection, review.diff.file(selection.path) != nil {
-                ReviewSelectionBar(store: store, selection: selection, diff: review.diff, addToConversation: addToConversation)
-            }
         }
     }
 }

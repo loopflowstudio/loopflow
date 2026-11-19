@@ -93,12 +93,20 @@ struct ReviewDiff: Equatable, Sendable {
 
     /// `@@ -12,7 +12,9 @@` → (12, 12).
     private static func hunkStarts(_ header: String) -> (Int, Int) {
+        let span = hunkSpan(header)
+        return (span.old, span.new)
+    }
+
+    /// Where a hunk starts on each side and how many lines it holds there.
+    static func hunkSpan(_ header: String) -> (old: Int, oldCount: Int, new: Int, newCount: Int) {
         let parts = header.split(separator: " ")
-        func start(_ prefix: Character) -> Int {
-            guard let part = parts.first(where: { $0.first == prefix }) else { return 0 }
-            return Int(part.dropFirst().split(separator: ",").first ?? "") ?? 0
+        func side(_ prefix: Character) -> (Int, Int) {
+            guard let part = parts.dropFirst().first(where: { $0.first == prefix }) else { return (0, 0) }
+            let numbers = part.dropFirst().split(separator: ",")
+            return (Int(numbers.first ?? "") ?? 0, numbers.count > 1 ? Int(numbers[1]) ?? 1 : 1)
         }
-        return (start("-"), start("+"))
+        let (old, oldCount) = side("-"), (new, newCount) = side("+")
+        return (old, oldCount, new, newCount)
     }
 
     private struct FileBuilder {
@@ -165,13 +173,27 @@ struct ReviewFile: Equatable, Sendable, Identifiable {
     let oldPath: String?
     let status: Status
     let blocks: [ReviewBlock]
+    let additions: Int
+    let deletions: Int
     var id: String { path }
 
-    var additions: Int { lines.filter { $0.kind == .added }.count }
-    var deletions: Int { lines.filter { $0.kind == .removed }.count }
+    init(path: String, oldPath: String?, status: Status, blocks: [ReviewBlock]) {
+        self.path = path
+        self.oldPath = oldPath
+        self.status = status
+        self.blocks = blocks
+        var additions = 0, deletions = 0
+        for line in Self.lines(blocks) {
+            if line.kind == .added { additions += 1 } else if line.kind == .removed { deletions += 1 }
+        }
+        self.additions = additions
+        self.deletions = deletions
+    }
 
     /// Every line the patch shows for this file, context included.
-    var lines: [ReviewLine] {
+    var lines: [ReviewLine] { Self.lines(blocks) }
+
+    private static func lines(_ blocks: [ReviewBlock]) -> [ReviewLine] {
         blocks.flatMap { block -> [ReviewLine] in
             switch block {
             case .context(let line): [line]
@@ -179,6 +201,73 @@ struct ReviewFile: Equatable, Sendable, Identifiable {
             case .moved(let move): move.lines
             case .hunk: []
             }
+        }
+    }
+
+    /// What each hunk header skips, by block index: the unchanged lines between
+    /// the last line shown above it and its first, and the declaration git names.
+    var gaps: [Int: ReviewGap] {
+        var gaps: [Int: ReviewGap] = [:]
+        var lastNew = 0
+        for (index, block) in blocks.enumerated() {
+            switch block {
+            case .hunk(let header): gaps[index] = ReviewGap(header, after: lastNew)
+            case .context(let line): lastNew = max(lastNew, line.new ?? 0)
+            case .change(let change): lastNew = max(lastNew, change.added.last?.new ?? 0)
+            case .moved(let move): lastNew = max(lastNew, move.lines.compactMap(\.new).max() ?? 0)
+            }
+        }
+        return gaps
+    }
+
+    /// The file with skipped lines shown: each hunk header that has lines here
+    /// gives way to them, so the hunks on either side read as one run.
+    func opening(_ opened: [String: [ReviewLine]]) -> ReviewFile {
+        guard !opened.isEmpty else { return self }
+        return ReviewFile(path: path, oldPath: oldPath, status: status, blocks: blocks.flatMap { block -> [ReviewBlock] in
+            if case .hunk(let header) = block, let lines = opened[header] { return lines.map { .context($0) } }
+            return [block]
+        })
+    }
+}
+
+/// The unchanged lines a hunk header stands for.
+struct ReviewGap: Equatable, Sendable {
+    /// The skipped lines' numbers after the change; empty when nothing is skipped.
+    let new: Range<Int>
+    /// The first skipped line's number before the change.
+    let old: Int
+    /// The declaration git names for the hunk, when it names one.
+    let declaration: String
+
+    /// `@@ -86,5 +90,5 @@ final class Store {` after new line 40 skips new lines 41–89.
+    init(_ header: String, after lastNew: Int) {
+        let span = ReviewDiff.hunkSpan(header)
+        // A side with no lines names the line before it.
+        let start = max(span.newCount == 0 ? span.new + 1 : span.new, lastNew + 1)
+        new = (lastNew + 1)..<start
+        old = (span.oldCount == 0 ? span.old + 1 : span.old) - new.count
+        let parts = header.split(separator: " ", maxSplits: 4, omittingEmptySubsequences: true)
+        declaration = parts.count == 5 ? String(parts[4]) : ""
+    }
+
+    /// "49 unchanged lines · final class Store {".
+    var label: String {
+        var pieces: [String] = []
+        if !new.isEmpty { pieces.append(new.count == 1 ? "1 unchanged line" : "\(new.count) unchanged lines") }
+        if !declaration.isEmpty { pieces.append(declaration) }
+        return pieces.joined(separator: " · ")
+    }
+
+    /// The skipped lines, read from the file as it stands; nil when the file is
+    /// too short to hold them, so it is no longer the file the hunk describes.
+    func lines(in content: String) -> [ReviewLine]? {
+        let text = content.split(separator: "\n", omittingEmptySubsequences: false)
+        guard !new.isEmpty, new.upperBound - 1 <= text.count else { return nil }
+        return new.map { number in
+            let line = text[number - 1]
+            return ReviewLine(kind: .context, text: String(line.hasSuffix("\r") ? line.dropLast() : line),
+                              old: old + number - new.lowerBound, new: number)
         }
     }
 }
@@ -390,19 +479,84 @@ struct ReviewSelection: Equatable, Sendable {
 
     var range: String { first == last ? "L\(first)" : "L\(first)-\(last)" }
 
-    /// One line for the conversation draft. Terminal input cannot carry a
-    /// newline without submitting, so the code stays in the file and the draft
-    /// names exactly where: file, side, lines and the revision compared.
+    /// One line for the conversation's unsent input. Desktop types literal text
+    /// only, and a newline there would send, so the code stays in the file and
+    /// the line names exactly where: file, side, lines and the revision compared.
     func reference(revision: String) -> String {
         "`\(path):\(range)` (\(side.rawValue), \(revision)) "
     }
 
     /// The selected lines as plain text, without patch markers or line numbers.
-    func text(in diff: ReviewDiff) -> String {
-        guard let file = diff.file(path) else { return "" }
-        return file.lines.filter { contains($0, path: path) }
+    func text(in file: ReviewFile) -> String {
+        file.lines.filter { contains($0, path: path) }
             .sorted { (side == .old ? $0.old : $0.new) ?? 0 < (side == .old ? $1.old : $1.new) ?? 0 }
             .map(\.text).joined(separator: "\n")
+    }
+
+    /// This side's lines of a file by number.
+    func numbered(in file: ReviewFile) -> [Int: String] {
+        var lines: [Int: String] = [:]
+        for line in file.lines {
+            if let number = side == .old ? line.old : line.new { lines[number] = line.text }
+        }
+        return lines
+    }
+}
+
+/// A comment you left on lines of the Diff. It waits under its lines until you
+/// send every comment to the conversation as one message.
+struct ReviewComment: Equatable, Sendable, Identifiable {
+    let id: UUID
+    var selection: ReviewSelection
+    let text: String
+    /// The commented lines as they read when you wrote it, to find them again.
+    let anchor: [String]
+    /// The lines are no longer in the Diff as they were; the comment keeps its
+    /// last place and is still sent.
+    var detached = false
+
+    init(id: UUID = UUID(), selection: ReviewSelection, text: String, in file: ReviewFile) {
+        self.id = id
+        self.selection = selection
+        self.text = text
+        let lines = selection.numbered(in: file)
+        anchor = (selection.first...selection.last).map { lines[$0] ?? "" }
+    }
+
+    /// The comment after the file changed: on the nearest lines that still read
+    /// as they did, or detached when none do. Nil is a file that left the Diff.
+    func anchored(in file: ReviewFile?) -> ReviewComment {
+        var next = self
+        guard let file else { next.detached = true; return next }
+        let lines = selection.numbered(in: file)
+        let starts = lines.keys.filter { start in
+            anchor.enumerated().allSatisfy { lines[start + $0.offset] == $0.element }
+        }
+        guard let start = starts.min(by: { (abs($0 - selection.first), $0) < (abs($1 - selection.first), $1) }) else {
+            next.detached = true
+            return next
+        }
+        next.detached = false
+        next.selection = ReviewSelection(path: selection.path, side: selection.side,
+                                         first: start, last: start + selection.last - selection.first)
+        return next
+    }
+
+    /// Every comment as one line for the conversation's unsent input, each
+    /// naming its file, lines and side.
+    static func message(_ comments: [ReviewComment], revision: String) -> String {
+        func words(_ comment: ReviewComment) -> String {
+            comment.text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        }
+        func place(_ comment: ReviewComment) -> String {
+            let selection = comment.selection
+            return "`\(selection.path):\(selection.range)` (\(selection.side.rawValue)\(comment.detached ? ", lines since changed" : ""))"
+        }
+        if comments.count == 1, let comment = comments.first {
+            return "\(place(comment)): \(words(comment)) (\(revision)) "
+        }
+        let parts = comments.enumerated().map { "(\($0.offset + 1)) \(place($0.element)): \(words($0.element))" }
+        return "\(comments.count) comments on the diff, \(revision): \(parts.joined(separator: " ")) "
     }
 }
 #endif

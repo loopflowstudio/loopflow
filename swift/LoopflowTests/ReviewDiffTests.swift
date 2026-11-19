@@ -110,7 +110,138 @@ struct ReviewDiffTests {
         let reference = selection.reference(revision: "working tree on abc1234")
         #expect(reference == "`a.swift:L4-6` (after, working tree on abc1234) ")
         #expect(!reference.contains("\n"))
-        #expect(selection.text(in: review) == "func first() {\n    let value = compute(2)\n    return value")
+        #expect(selection.text(in: try #require(review.file("a.swift"))) == "func first() {\n    let value = compute(2)\n    return value")
+    }
+
+    @Test func hunkHeadersReadAsSkippedLinesAndTheirDeclaration() {
+        #expect(ReviewGap("@@ -86,5 +90,5 @@ final class Store {", after: 40).label == "49 unchanged lines · final class Store {")
+        #expect(ReviewGap("@@ -2,3 +2,4 @@", after: 0).label == "1 unchanged line")
+        // A hunk that starts the file, or follows the last line shown, skips nothing.
+        #expect(ReviewGap("@@ -1,3 +1,4 @@", after: 0).label == "")
+        // A hunk that only removes names the line before it: line 4 is skipped too.
+        #expect(ReviewGap("@@ -5,2 +4,0 @@", after: 0).new == 1..<5)
+        // Each hunk counts from the last new line shown above it.
+        let gaps = ReviewDiff.parse(Self.patch).files[0].gaps
+        #expect(gaps.count == ReviewDiff.parse(Self.patch).files[0].blocks.filter { if case .hunk = $0 { true } else { false } }.count)
+    }
+
+    /// Two hunks of `a.swift` with new lines 3–7 skipped between them; one line
+    /// was added above, so old numbers trail new ones by one.
+    static let gapped = """
+    diff --git a/a.swift b/a.swift
+    --- a/a.swift
+    +++ b/a.swift
+    @@ -1,1 +1,2 @@
+     one
+    +two
+    @@ -7,2 +8,2 @@ struct Kept {
+     eight
+    -nine
+    +nueve
+
+    """
+
+    @Test func skippedLinesOpenInPlaceFromTheFile() throws {
+        let file = ReviewDiff.parse(Self.gapped).files[0]
+        let (index, header) = try #require(file.blocks.enumerated().compactMap { index, block -> (Int, String)? in
+            if case .hunk(let header) = block, index > 0 { return (index, header) }
+            return nil
+        }.first)
+        let gap = try #require(file.gaps[index])
+        #expect(gap.label == "5 unchanged lines · struct Kept {")
+        let content = "one\ntwo\nthree\nfour\nfive\nsix\nseven\neight\nnueve\n"
+        let lines = try #require(gap.lines(in: content))
+        #expect(lines.map(\.text) == ["three", "four", "five", "six", "seven"])
+        #expect(lines.map(\.new) == [3, 4, 5, 6, 7] && lines.map(\.old) == [2, 3, 4, 5, 6])
+        // The header gives way to its lines: one run from line 1 to the change, same changes.
+        let opened = file.opening([header: lines])
+        #expect(opened.lines.filter { $0.kind != .removed }.compactMap(\.new) == Array(1...9))
+        #expect(!opened.blocks.dropFirst().contains { if case .hunk = $0 { true } else { false } })
+        #expect(ReviewDiff(files: [opened]).stops == ReviewDiff(files: [file]).stops)
+        // A file too short to hold the skipped lines is not the file this hunk describes.
+        #expect(gap.lines(in: "one\ntwo\n") == nil)
+    }
+
+    @Test func commentsFollowTheirLinesAndGoToTheConversationAsOneLine() throws {
+        let file = ReviewDiff.parse(Self.gapped).files[0]
+        let kept = ReviewComment(selection: ReviewSelection(path: "a.swift", side: .new, first: 8, last: 9),
+                                 text: "why Spanish?\nsay so", in: file)
+        let gone = ReviewComment(selection: ReviewSelection(path: "a.swift", side: .old, first: 8, last: 8),
+                                 text: "keep this", in: file)
+        #expect(kept.anchor == ["eight", "nueve"] && gone.anchor == ["nine"])
+        // The worker adds three lines above and stops removing `nine`.
+        let edited = ReviewDiff.parse("""
+        diff --git a/a.swift b/a.swift
+        --- a/a.swift
+        +++ b/a.swift
+        @@ -1,1 +1,5 @@
+         one
+        +two
+        +a
+        +b
+        +c
+        @@ -7,2 +11,2 @@ struct Kept {
+         eight
+        -neuf
+        +nueve
+
+        """).files[0]
+        let moved = kept.anchored(in: edited)
+        #expect(moved.selection.range == "L11-12" && !moved.detached)
+        let detached = gone.anchored(in: edited)
+        #expect(detached.detached && detached.selection.range == "L8")
+        // A file that left the comparison detaches its comments; none is dropped.
+        #expect(kept.anchored(in: nil).detached)
+        let message = ReviewComment.message([moved, detached], revision: "Compared with main at abc1234")
+        #expect(message == "2 comments on the diff, Compared with main at abc1234: "
+            + "(1) `a.swift:L11-12` (after): why Spanish? say so "
+            + "(2) `a.swift:L8` (before, lines since changed): keep this ")
+        #expect(!message.unicodeScalars.contains { $0.value < 0x20 })
+        #expect(ReviewComment.message([moved], revision: "abc") == "`a.swift:L11-12` (after): why Spanish? say so (abc) ")
+    }
+
+    @Test func aWorkersOrderPutsItsFilesFirstAndTheRestByKind() {
+        let order = DiffOrder.parse("""
+        # written when the change is handed over
+        first:
+          - path: swift/Store.swift
+            why: "A change over 1 MB no longer loses its last files"
+          - swift/StoreTests.swift
+          - path: ./gone.swift
+            why: Not in this change
+        hide:
+          - path: docs/
+            why: Path literal renamed, nothing else
+        other:
+          - path: ignored
+        """)
+        #expect(order.first.map(\.path) == ["swift/Store.swift", "swift/StoreTests.swift", "gone.swift"])
+        #expect(order.hide == [DiffOrder.Entry(path: "docs/", why: "Path literal renamed, nothing else")])
+        #expect(order.hide[0].matches("docs/config.md") && !order.hide[0].matches("src/docs.rs"))
+
+        func file(_ path: String, lines: Int) -> ReviewFile {
+            let added = (1...lines).map { ReviewLine(kind: .added, text: "x", old: nil, new: $0) }
+            return ReviewFile(path: path, oldPath: nil, status: .modified,
+                              blocks: [.change(ReviewChange(id: "\(path)#n1", removed: [], added: added))])
+        }
+        let files = [file("Cargo.lock", lines: 90), file("README.md", lines: 5), file("rust/a.rs", lines: 2),
+                     file("rust/b.rs", lines: 40), file("rust/tests/a.rs", lines: 60), file("swift/Store.swift", lines: 1),
+                     file("swift/StoreTests.swift", lines: 3)]
+        let kinds = ReviewGroup.arrange(files, ordering: .kind, order: order)
+        #expect(kinds.map(\.title) == ["Source", "Tests", "Docs", "Generated and lock files"])
+        // Largest change first within a kind.
+        #expect(kinds.flatMap(\.files).map(\.path) == ["rust/b.rs", "rust/a.rs", "swift/Store.swift", "rust/tests/a.rs",
+                                                        "swift/StoreTests.swift", "README.md", "Cargo.lock"])
+        let tour = ReviewGroup.arrange(files, ordering: .tour, order: order)
+        // An entry without a reason reads on under the one above; unnamed files follow by kind.
+        #expect(tour.map(\.title) == ["A change over 1 MB no longer loses its last files", "Source", "Tests", "Docs",
+                                       "Generated and lock files"])
+        #expect(tour[0].isTour && tour[0].files.map(\.path) == ["swift/Store.swift", "swift/StoreTests.swift"])
+        #expect(Set(tour.flatMap(\.files).map(\.path)) == Set(files.map(\.path)))
+        let paths = ReviewGroup.arrange(files, ordering: .path, order: order)
+        #expect(paths.map(\.title) == ["Top level", "rust/", "swift/"])
+        // No tour: the tour order is the kind order.
+        #expect(ReviewGroup.arrange(files, ordering: .tour, order: nil) == kinds)
     }
 }
 #endif

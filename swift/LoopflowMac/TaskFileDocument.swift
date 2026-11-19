@@ -267,7 +267,7 @@ final class TaskFilesStore {
     /// Task details beside the conversation: what was asked, what changed, where.
     enum Page: String, CaseIterable {
         case brief = "Brief"
-        case changes = "Changes"
+        case changes = "Diff"
         case files = "Files"
 
         var symbol: String {
@@ -810,7 +810,7 @@ final class TaskFilesStore {
 
     /// The whole comparison as one stream. A reload replaces it in place; the
     /// reading anchor and current stop are ids, so new evidence never moves them.
-    private(set) var review: ReviewDiff?
+    private(set) var review: ReviewDiff? { didSet { arrange() } }
     private(set) var reviewError: String?
     private(set) var reviewTruncated = false
     private var reviewGeneration = 0
@@ -818,11 +818,13 @@ final class TaskFilesStore {
     private var places: [ReviewReader: ReviewPlace] = [:]
     /// The file next/previous crossed into, and from which end its first stop is taken.
     @ObservationIgnored private var entering: (path: String, offset: Int)?
+    /// When next/previous last moved, so the change it landed on can pulse once.
+    @ObservationIgnored private(set) var steppedAt = Date.distantPast
     var reviewLayout = ReviewLayout.unified
     /// One file at a time; next/previous still crosses into the next file.
     var focusedPath: String?
     var expandedMoves: Set<String> = []
-    var reviewSelection: ReviewSelection?
+    var reviewSelection: ReviewSelection? { didSet { if reviewSelection != oldValue { commentDraft = "" } } }
     /// Where the Brief was scrolled, and the brief it was showing.
     var briefOffset = CGPoint.zero
     var briefShown: Int?
@@ -841,10 +843,16 @@ final class TaskFilesStore {
         let target = comparison
         do {
             let next = try await query.taskDiff(issue: issue, path: nil, base: base, head: target.head)
-            let parsed = await Task.detached(priority: .userInitiated) { ReviewDiff.parse(next.patch) }.value
+            var parsed = await Task.detached(priority: .userInitiated) { ReviewDiff.parse(next.patch) }.value
+            var cut = false
+            if next.truncated { (parsed, cut) = await completed(parsed, base: base, head: target.head) }
+            let order = await readOrder()
             guard !Task.isCancelled, generation == reviewGeneration, comparison == target else { return }
+            for path in openedGaps.keys where review?.file(path) != parsed.file(path) { openedGaps[path] = nil }
+            comments = comments.map { $0.anchored(in: parsed.file($0.selection.path).map(opened)) }
+            diffOrder = order
             review = parsed
-            reviewTruncated = next.truncated
+            reviewTruncated = cut
             reviewError = nil
             if let focusedPath, parsed.file(focusedPath) == nil { self.focusedPath = nil }
         } catch {
@@ -852,6 +860,150 @@ final class TaskFilesStore {
             // Keep the last readable stream; the error says it may be behind.
             reviewError = error.localizedDescription
         }
+    }
+
+    /// A comparison over the read limit arrives cut off partway through a file.
+    /// That file and every changed file after it are read one at a time; the
+    /// flag says a file is still missing or cut short on its own.
+    private func completed(_ partial: ReviewDiff, base: String, head: String?) async -> (ReviewDiff, Bool) {
+        let order = changes?.files.map(\.path) ?? []
+        var files = Dictionary(partial.files.dropLast().map { ($0.path, $0) }) { first, _ in first }
+        var missing = order.filter { files[$0] == nil }[...]
+        var cut = false
+        let query = self.query, issue = self.issue
+        let read: @Sendable (String) async -> (String, ReviewFile?, Bool) = { path in
+            guard let next = try? await query.taskDiff(issue: issue, path: path, base: base, head: head) else {
+                return (path, nil, true)
+            }
+            return (path, ReviewDiff.parse(next.patch).files.first, next.truncated)
+        }
+        await withTaskGroup(of: (String, ReviewFile?, Bool).self) { group in
+            for path in missing.prefix(6) { group.addTask { await read(path) } }
+            missing = missing.dropFirst(6)
+            for await (path, file, short) in group {
+                files[path] = file
+                cut = cut || short
+                if let path = missing.popFirst() { group.addTask { await read(path) } }
+            }
+        }
+        let place = Dictionary(order.enumerated().map { ($1, $0) }) { first, _ in first }
+        return (ReviewDiff(files: files.values.sorted {
+            (place[$0.path] ?? .max, $0.path) < (place[$1.path] ?? .max, $1.path)
+        }), cut)
+    }
+
+    // MARK: Hidden paths and order
+
+    /// Paths the Diff leaves out: a changed file is hidden when its path contains
+    /// one of these, ignoring case. The `diff_hidden` setting; this is its default.
+    var hiddenPaths = ["scratch/"] { didSet { arrange() } }
+    /// Read the hidden files too, without forgetting what is hidden.
+    var showsHidden = false { didSet { arrange() } }
+    /// Narrows the stream to paths containing this text.
+    var reviewFilter = "" { didSet { arrange() } }
+    /// The worker's `scratch/diff-order.yaml`, when the checkout has one.
+    private(set) var diffOrder: DiffOrder? { didSet { if diffOrder != oldValue { arrange() } } }
+    /// The order you chose; until then the worker's tour when there is one.
+    var orderingChoice: ReviewOrdering? { didSet { arrange() } }
+    /// Paths the worker hid that you asked to see.
+    var shownWorkerHides: Set<String> = [] { didSet { arrange() } }
+    /// The changed files beside the stream: your choice, else open when there is room.
+    var showsSidebar: Bool?
+
+    var hasTour: Bool { diffOrder?.first.isEmpty == false }
+
+    var ordering: ReviewOrdering {
+        let choice = orderingChoice ?? .tour
+        return choice == .tour && !hasTour ? .kind : choice
+    }
+
+    func hides(_ path: String) -> Bool {
+        hiddenPaths.contains { path.range(of: $0, options: .caseInsensitive) != nil }
+    }
+
+    /// The worker's reason to leave a path out, until you ask to see it.
+    func workerHides(_ path: String) -> DiffOrder.Entry? {
+        diffOrder?.hide.first { $0.matches(path) && !shownWorkerHides.contains($0.path) }
+    }
+
+    /// The comparison as the Diff reads it: your hidden paths and the worker's
+    /// left out, then the filter, in the chosen order.
+    private(set) var shownGroups: [ReviewGroup] = []
+    private(set) var shownReview: ReviewDiff?
+
+    private func arrange() {
+        guard let review else {
+            shownGroups = []
+            shownReview = nil
+            return
+        }
+        let filter = reviewFilter.trimmingCharacters(in: .whitespaces)
+        let files = review.files.filter { file in
+            (showsHidden || !hides(file.path)) && workerHides(file.path) == nil
+                && (filter.isEmpty || file.path.range(of: filter, options: .caseInsensitive) != nil)
+        }
+        shownGroups = ReviewGroup.arrange(files, ordering: ordering, order: diffOrder)
+        shownReview = ReviewDiff(files: shownGroups.flatMap(\.files))
+    }
+
+    private func readOrder() async -> DiffOrder? {
+        guard let file = try? await query.taskFile(issue: issue, path: DiffOrder.path),
+              file.state == .text, let content = file.content else { return nil }
+        return DiffOrder.parse(content)
+    }
+
+    // MARK: Skipped lines
+
+    /// Unchanged lines you opened between hunks, by file and hunk header.
+    private(set) var openedGaps: [String: [String: [ReviewLine]]] = [:]
+    private(set) var gapError: String?
+
+    /// The skipped lines are read from the file as it stands, which is the
+    /// comparison's newer side only while it reads the working tree.
+    var canOpenGaps: Bool { comparison.head == nil }
+
+    func opened(_ file: ReviewFile) -> ReviewFile {
+        openedGaps[file.path].map(file.opening) ?? file
+    }
+
+    /// Show the lines a hunk header skips. Files' Diff of an unsaved draft
+    /// reads the draft; everything else reads the checkout.
+    func openGap(_ header: String, gap: ReviewGap, path: String, reader: ReviewReader) async {
+        noteInteraction()
+        do {
+            let content: String
+            if case .file = reader, fileReview?.draft == true, let draft = documents[path]?.text {
+                content = draft
+            } else {
+                let file = try await query.taskFile(issue: issue, path: path)
+                guard file.state == .text, let text = file.content else {
+                    throw RegistryQueryError("\(file.state.title) cannot be shown as text.")
+                }
+                content = text
+            }
+            guard let lines = gap.lines(in: content) else {
+                throw RegistryQueryError("the file changed since this comparison was read.")
+            }
+            openedGaps[path, default: [:]][header] = lines
+            gapError = nil
+        } catch {
+            gapError = "Skipped lines of \(path) unavailable: \(error.localizedDescription)"
+        }
+    }
+
+    // MARK: Comments
+
+    /// Comments waiting to be sent, kept for this window like drafts.
+    var comments: [ReviewComment] = []
+    /// The comment being written on the selected lines.
+    var commentDraft = ""
+
+    /// Leave the draft on the selected lines of `file`.
+    func addComment(in file: ReviewFile) {
+        guard let selection = reviewSelection, !commentDraft.allSatisfy(\.isWhitespace) else { return }
+        comments.append(ReviewComment(selection: selection, text: commentDraft, in: opened(file)))
+        reviewSelection = nil
+        noteInteraction()
     }
 
     /// One of the two diff readers: Changes' whole comparison, or Files' Diff of one path.
@@ -871,7 +1023,7 @@ final class TaskFilesStore {
     /// The diff a reader shows, once it has been read.
     func diff(_ reader: ReviewReader) -> ReviewDiff? {
         switch reader {
-        case .changes: review
+        case .changes: shownReview
         case .file(let path): fileReview?.path == path ? fileReview?.diff : nil
         }
     }
@@ -894,6 +1046,7 @@ final class TaskFilesStore {
     @discardableResult
     func step(_ offset: Int, in reader: ReviewReader) -> ReviewStop? {
         noteInteraction()
+        steppedAt = .now
         if let diff = diff(reader), let stop = diff.stop(after: self[place: reader].current, offset: offset) {
             self[place: reader].current = stop.id
             if reader == .changes, focusedPath != nil { focusedPath = stop.path }
@@ -956,6 +1109,8 @@ final class TaskFilesStore {
             let parsed = await Task.detached(priority: .userInitiated) { ReviewDiff.parse(next.patch) }.value
             guard !Task.isCancelled, generation == diffGeneration, selection == path, changes?.baseCommit == base, comparison == target,
                   selectedDocument?.editVersion == version else { return }
+            if let shown = fileReview, shown.diff != parsed { openedGaps[path] = nil }
+            comments = comments.map { $0.selection.path == path ? $0.anchored(in: parsed.files.first.map(opened)) : $0 }
             fileReview = FileReview(path: path, baseCommit: base, diff: parsed, truncated: next.truncated, draft: draft != nil)
             if let entry = entering, entry.path == path {
                 entering = nil

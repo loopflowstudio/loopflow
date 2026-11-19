@@ -136,8 +136,8 @@ Wave lists, boards and Task pickers keep that relative order after refresh.
 Filtering or opening a Task leaves the order intact. Saved Dashboard arrangements,
 search results and Done's completion-date ordering keep their own order.
 
-Each Work keeps one pane layout and document store. The browser offers Files,
-Changes, Task & workflow, Graph processes and web pages. Rex, Herdr and cmux
+Each Work keeps one pane layout and document store. The browser offers Brief,
+Diff, Files, Task & workflow, Graph processes and web pages. Rex, Herdr and cmux
 open only a Task's conversation and never read Desktop's layouts.
 
 Repository and Wave
@@ -321,28 +321,71 @@ Task workspaces start with the Session on the left and Files on the right,
 at 61.8/38.2. Use **View → Toggle Shell** or **Toggle Files**, or their shortcuts.
 If every pane is hidden, **Show pane** restores the retained pane; **Open conversation**
 remains available when the Work has no conversation open.
-Shell holds retained shell tabs. Files names its Task in the header and has three
-pages, **Brief**, **Changes** and **Files** (Option-Command-1/2/3 or the header's
-segmented control). Hidden tools keep their clients and drafts.
+Shell holds retained shell tabs. The Task's pane has one row of tabs: **Brief**,
+**Diff** and **Files** (Option-Command-1/2/3), then anything else open beside
+them. Hidden tools keep their clients and drafts.
 
 **Brief** shows the Task's state, next move and PR state above its text, the
 Tasks the brief names (click one to open it), and an outline when the brief has
 headings or an `Acceptance:` lead. Its scroll position survives page and Task
 switches in this window; a brief that changed since you last read it says so.
 
-**Changes** says where the work is delivered, then reads the whole comparison as
-one stream. Loopflow's record decides whether there is a PR: none, publishing,
-open, merged or abandoned. GitHub's reading adds checks, review and description
-with its age; a failed, stale (over two minutes) or behind-the-checkout reading
-stays readable but loses its colors, and merged never reads as a finished Task.
-The stream follows the comparison live without moving what you are reading.
-Press `]` and `[` (or the toolbar arrows) to step through changes across files;
-**Focus file** shows one file and still steps into the next. Edited lines
-emphasize the changed words. A block moved within a file collapses to one row,
-"Moved from L12", that expands to its old and new lines. Click a line number
-(Shift-click extends) to **Copy** the lines without patch markers or **Ask in
-conversation**, which types `path:L4-6 (after, working tree on <sha>)` into the
-conversation's unsent input. **Side by side** needs a pane at least 640 pt wide.
+**Diff** opens on what is compared and how much changed ("7 changes in 4
+files", then the base branch and commit), with the changed files beside the
+whole comparison as one stream. A comparison over the 1 MB read limit is
+completed one file at a time. A pill in the title says where the work is
+delivered and opens the delivery card. Loopflow's record decides whether there
+is a PR: none, publishing, open, merged or abandoned. GitHub's reading adds
+checks, review and description with its age; a failed, stale (over two minutes)
+or behind-the-checkout reading stays readable but loses its colors, and merged
+never reads as a finished Task.
+
+The files read in the worker's order when the checkout has
+`scratch/diff-order.yaml`:
+
+```yaml
+first:
+  - path: swift/LoopflowMac/TaskFileDocument.swift
+    why: A change over 1 MB no longer loses its last files
+hide:
+  - path: docs/
+    why: Path literal renamed, nothing else
+```
+
+`first` puts those files at the top in that order, each `why` heading its files
+in the stream and the sidebar. Every file it does not name follows **By kind**:
+source, tests, docs, then generated and lock files, largest change first.
+Without the file the Diff reads By kind. The order menu switches between
+**Tour**, **By kind** and **By path**. `hide` leaves those paths out from the
+start; the sidebar lists each with its reason and **Show**, and they never join
+your own hidden paths.
+
+The sidebar lists the files in that order: type to narrow the stream, click a
+file to bring it to the top. Under them, **Always hidden** is your own
+`diff_hidden` setting for the repository, saved in its `.lf/config.local.yaml`
+(`scratch/` by default): path text matched anywhere in a path. Hidden files stay
+in the count: "7 changes in 4 of 9 files". Below 620 pt the sidebar opens over
+the stream from its button and closes when you choose a file.
+
+The stream follows the comparison live without moving what you are reading. A
+bar above it names the file you are in, with its counts and **Open**. Press `]`
+and `[` (or the arrows around the position) to step through changes across
+files; the change you land on pulses once. **Focus** shows one file and still
+steps into the next. Between hunks the stream says how many lines it skipped
+and which declaration follows; click that row to read the lines in place.
+Edited lines emphasize the changed words. A block moved within a file collapses
+to one row, "Moved here from L12", that expands to its old and new lines.
+**Side by side** needs a stream at least 640 pt wide.
+
+Click a line number (Shift-click extends) to write a comment under those lines;
+Return keeps it there. **Send to conversation** (Command-Return) puts every
+comment into the conversation's unsent input as one line, each naming its file,
+lines and side, and sending stays yours. A comment follows its lines when the
+worker edits above them; when the lines themselves change it says so, keeps its
+place and is still sent. Comments last as long as the window. **Copy** takes
+the selected lines without patch markers, and **Reference in conversation**
+types `path:L4-6 (after, working tree on <sha>)` alone. Files' Diff has the
+same comments, skipped lines and Send.
 
 **Files** holds open documents and their Read, Edit and Diff controls, with the
 Machine, checkout and directory of the selection under them. Files starts with

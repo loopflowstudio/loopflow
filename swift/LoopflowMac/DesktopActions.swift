@@ -541,12 +541,12 @@ struct DesktopAction {
         },
         DesktopAction("details", "Show Task Details", scope: .pane,
             arguments: [.init(name: "page", kind: .string, required: true)],
-            keys: [(Character("1"), "brief"), (Character("2"), "changes"), (Character("3"), "files")].map {
+            keys: [(Character("1"), "brief"), (Character("2"), "diff"), (Character("3"), "files")].map {
                 DesktopKeyBinding(.character($0.0), [.command, .option], args: ["page": $0.1])
             }, available: taskTool) { context in
             let value = try context.string("page")
             guard let page = TaskFilesStore.Page.allCases.first(where: { $0.rawValue.lowercased() == value }) else {
-                throw DesktopArgumentError("page=\(value) is not brief, changes or files; nothing changed.")
+                throw DesktopArgumentError("page=\(value) is not brief, diff or files; nothing changed.")
             }
             let outcome = try show(.files, context)
             let workspace = try context.task

@@ -39,9 +39,8 @@ Built 2026-11-19:
 Run 2026-11-19 at `56e542adac`: `cargo test -p loopflow --lib --
 task_graph_launch_tests::auto_o lf::tests`, 41 passed (the two `auto_on_*`
 fixtures, `auto_off_sticks_through_a_headless_relaunch`, the parse tests).
-Not run since this change: `documented_commands::`, the `write.rs` wire tests,
-`dto_fixtures`, clippy, Swift (`RegistryQuery.swift`, `WorkModel.swift`,
-`ServerProtocolTests`, `RegistryQueryTests`, iOS `TaskWorkspaceView.swift`
+Not run since this change: Swift `ServerProtocolTests`, `RegistryQueryTests`
+and iOS (`RegistryQuery.swift`, `WorkModel.swift`, `TaskWorkspaceView.swift`
 were edited for `task.auto.off` and `merges`). Gate and CI.
 
 Passed over: keeping `auto on` a pure setting stored on the Task so it can
@@ -82,7 +81,8 @@ auto setting says who takes the interactive steps. One word: **auto**.
   `moving` in Working while it runs. Rows learn the setting through the
   selection state `auto` (`state:auto`).
 - **One carrier, one recovery path:** a dead run of any Task is carried again
-  as `lf task run ISSUE` under `RUN_RESTARTS` (5, then it waits for a person);
+  as `lf task run ISSUE` under the conversation's start limit
+  (`CONVERSATION_STARTS`, 5, then it waits for a person);
   a Task that moves Machines continues the same way. The ship carrier loop,
   `restart_ship`, `ship_halt`, `ship_settle_merge`, the ship log API,
   `ShippingSnapshot`, `TaskShip`, `lf task hold`, `task.hold` and the
@@ -184,6 +184,10 @@ Shape, for gate's review:
 - `ops/task/ship.rs` now holds the auto setting (`AutoAsk`, `set`,
   `auto_off`) and one ship-only function, `ship_branch_task`. `auto.rs` would
   name what it is.
+- `TaskExecutionSnapshot.outlook` is on the wire and decoded in Swift, and
+  no surface reads it: CLI and Desktop print `reason`. Either Desktop uses it
+  the way it uses a conversation's outlook, or the field goes and `died` plus
+  `reason` carry the run.
 - `ship::running_graph` polls up to 30 s for a carrier's Graph to register so
   `TaskRunStart::Live` can name a Graph run. If `Live` named the carrier
   instead, the wait and its second sentence ("is running graph …" after 30 s)
@@ -230,7 +234,6 @@ execution `task_graph:: ops::task::explain::tests:: store::task_work_lifecycle_t
 14 passed; `golden_prompt` passed; `server::schema::tests:: lf::tests::
 lf::commands::write::tests::` with the two auto-off fixtures, 51 passed;
 `dto_fixtures::` 50 passed; `documented_commands::` 4 passed; clippy clean.
-Swift not built since `Auto.State.off`. Gate/CI.
 
 ## Built: the Task run takes the conversation's outlook type
 

@@ -1,6 +1,8 @@
 # Open questions (LOO-974)
 
-Choices made for review; `scratch/concept-review.html` shows each one.
+Choices made for review; `scratch/concept-review.html` shows the open ones
+as the change stands after QA. Slice 7 of `scratch/plan.md` takes up 19, 21,
+22 and 25; 18 stays unread and the README says so.
 
 1. **Should managed Tasks deny writes outside the checkout?** The brief says
    "Keep the existing managed filesystem write boundary … writes elsewhere are
@@ -90,7 +92,8 @@ Choices made for review; `scratch/concept-review.html` shows each one.
     `lf task run` starts it again twice and the model asks again each time
     (`a_question_with_nobody_there_ends_the_step` takes 72s for that reason).
     Stopping after the first question needs the retry loop to tell a question
-    from another failure; not built.
+    from another failure. Chosen for review: slice 7 stops after one, by a
+    code on the failed turn.
 
 20. **Pi's question text is read from `title` and `message`** of its
     `extension_ui_request`, taken from memory of Pi's RPC shape and the
@@ -101,12 +104,13 @@ Choices made for review; `scratch/concept-review.html` shows each one.
     starts the step again".** A worker's Session is a Run and `lf resume`
     refuses Runs, so the interrupted conversation's native thread is never
     continued; the step gets a new one. The test keeps the name the docs gave
-    it. Should an interrupted step continue its own conversation instead?
+    it; slice 7 renames it to what it shows. Should an interrupted step
+    continue its own conversation instead?
 
 22. **What does an interrupted Claude or Codex worker record for its turn?**
     Not read. The test runs OpenCode and Pi; the README says "not shown" for
     the other two. On OpenCode and Pi the turn was recorded `failed` until
-    this slice.
+    this slice. Slice 7 adds both to the test.
 
 23. **Ctrl-C in a terminal reaches the provider and lf together.** If the
     provider dies before lf's handler runs, `agent::interrupted()` is still
@@ -122,8 +126,10 @@ Choices made for review; `scratch/concept-review.html` shows each one.
     Seen on the stand-in only. Fix candidates: name the Pi turn after the
     session file's user entry, as OpenCode's driver does with its store row,
     or have the transcript read attach usage to the recorded turn that
-    `covers` it, as it already does for completions. Not built: no real Pi
-    session file from an RPC run has been read.
+    `covers` it, as it already does for completions. Chosen for review: the
+    second, in slice 7. QA's real RPC runs left session files under
+    `~/.pi/agent/sessions/--private-tmp-loo974-*--/`, and real Pi showed the
+    same missing usage.
 
 26. **`Driver::send_current` has no production caller.** Claude, Codex and Pi
     implement it and test it; steers reach a running turn only through the

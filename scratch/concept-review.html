@@ -27,90 +27,80 @@
 <body>
 
 <h1>A stack parent is a Task, not a PR attempt</h1>
-<p class="lede">Area: Task stacking end to end — how a child names its parent, and the four readers of that record (sync, owned-sync recording, landing, publication). Taken because the refusal sits in the one resolver all four share, not in sync.</p>
+<p class="lede">Area: Task stacking end to end, reviewed as built against <code>main</code> (through <code>ecf38679e6</code>): how a child names its parent, and the four readers of that record (sync, owned-sync recording, landing, publication). Taken because the fix lives in the one resolver all four share, <code>task_stack</code>.</p>
 
-<h2>The interaction</h2>
+<h2>The interaction, as built</h2>
 <div class="cols">
   <div class="card">
-    <h3>What happened on LOO-995</h3>
-    <pre>$ lf checkout LOO-995 --stack-on LOO-938
-  # records parent = LOO-938's PR row #1971
-  ... #1971 closed unmerged; LOO-938 opens #1983
-$ lf sync
+    <h3>Before (main)</h3>
+    <pre>$ lf sync            # LOO-995, parent #1971 closed, #1983 open
 error: stack parent … closed without merging;
        re-place the child deliberately
-$ lf sync main      # same error
-$ lf sync LOO-938   # stacks, then the same read dies (installed build)</pre>
-    <p>The Graph <code>sync</code> step fails three times and the Task stops.</p>
+$ lf sync main       # same error
+$ lf sync LOO-938    # same error after stacking</pre>
   </div>
-  <div class="card prop">
-    <h3><span class="tag">Proposed</span></h3>
+  <div class="card">
+    <h3>Built (QA run, <code>scratch/qa.html</code>)</h3>
     <pre>$ lf sync
-Synced onto origin/&lt;LOO-938 branch&gt;.
-  # task_stack followed LOO-938 to #1983;
-  # the sync recorded #1983 as the parent
-$ lf task status LOO-995 --json | jq .stack_parent.pr_number
-1983</pre>
-    <p>No successor: one sentence, <code>lf sync LOO-938</code> or <code>lf sync main</code>; the latter works because the read no longer errors.</p>
+Merging origin/qa/8bc8a4-parent-feature...
+Synced onto origin/qa/8bc8a4-parent-feature.
+  # stack_parent.pr_number: 100 → 101
+$ lf sync            # no successor
+Error: stack parent 8bc8a4's PR #101 closed without merging;
+`lf sync 8bc8a4` restacks this Task on its branch,
+`lf sync main` detaches it
+$ lf sync main
+Synced onto origin/main.   # stack_parent: null</pre>
   </div>
 </div>
 
 <h2>Do the concepts line up?</h2>
 <table>
-  <tr><th>What a person knows</th><th>What the code has</th><th></th><th>Where it is wrong</th></tr>
-  <tr><td>"LOO-995 is stacked on LOO-938"</td><td><code>task_checkouts.parent_pr_id</code> → one <code>task_prs</code> row</td><td class="no">no</td><td>One name for two ideas. The person's parent is the Task; the record pins one PR attempt. A reopen is a new row, so the person's parent is alive while the record's is dead.</td></tr>
-  <tr><td>The parent's current PR</td><td><code>select_stack_parent</code>: recorded row unless abandoned, else <code>active_task_pr</code></td><td class="no">no</td><td>The rule exists once, but only for stacking. <code>task_stack</code> (every read) applies a different rule and refuses.</td></tr>
-  <tr><td>"Sync follows my parent"</td><td><code>run_sync_in</code> → <code>task_stack</code> → <code>live_parent_branch</code></td><td class="yes">yes</td><td>One owner. Breaks only through the resolver above.</td></tr>
-  <tr><td>"Stack on that Task instead"</td><td><code>lf sync &lt;Task&gt;</code> → <code>open_task_named</code> + <code>stack_task</code></td><td class="yes">yes</td><td></td></tr>
-  <tr><td>"Detach onto main"</td><td><code>lf sync main</code> → detach path, needs only <code>fork_base</code></td><td class="no">no</td><td>Blocked by a read it doesn't need: <code>task_stack</code> errors before the target is looked at.</td></tr>
-  <tr><td>Parent merged</td><td><code>StackedSync.parent_merged: bool</code></td><td class="no">no</td><td>A bool for a three-state fact (open, merged, closed). Closed hides as an error.</td></tr>
-  <tr><td>"Land the parent first"</td><td><code>stack_for_landing</code></td><td class="yes">yes</td><td>Right message once the resolver follows; today it reports the refusal instead.</td></tr>
+  <tr><th>What a person knows</th><th>What the code has</th><th></th><th>Notes</th></tr>
+  <tr><td>"LOO-995 is stacked on LOO-938"</td><td><code>task_checkouts.parent_pr_id</code> → one row, resolved by <code>current_parent_pr</code> to the parent Task's active row when it closed</td><td class="yes">yes</td><td>The record still pins an attempt; every read now answers with the Task's current PR, and the next sync writes it back.</td></tr>
+  <tr><td>Parent open / merged / closed</td><td><code>StackParentPr { Open, Merged, Closed { number } }</code></td><td class="yes">yes</td><td>Replaces <code>parent_merged: bool</code>. <code>Closed</code> means nothing left to follow.</td></tr>
+  <tr><td>"Sync follows my parent"</td><td><code>run_sync_in</code> → <code>live_parent_branch(default)?</code></td><td class="yes">yes</td><td>One owner; the closed sentence is written once, in <code>live_parent_branch</code>, and landing and publication return it too.</td></tr>
+  <tr><td>"Stack on that Task instead"</td><td><code>lf sync &lt;Task&gt;</code> → <code>stack_task</code></td><td class="yes">yes</td><td></td></tr>
+  <tr><td>"Detach onto main"</td><td>detach path; <code>task_stack</code> no longer errors</td><td class="yes">yes</td><td><code>fork_base</code> skips branch recovery for a closed parent whose branch may be gone.</td></tr>
+  <tr><td>"The sync records where I am"</td><td><code>sync_task_placement(task, base, Option&lt;&amp;TaskPrId&gt;)</code></td><td class="yes">yes</td><td>A bool flag became the parent to record: base and followed row land in one write; <code>None</code> clears.</td></tr>
+  <tr><td>"The parent's current PR" when stacking</td><td><code>select_stack_parent</code>'s own abandoned check</td><td class="no">no (small)</td><td>Same rule written twice: here and in <code>current_parent_pr</code>. Merging them doesn't shrink anything: stacking also refuses a merged parent and drops to the branch when the active row is closed. Left as is.</td></tr>
+  <tr><td>Status before any sync</td><td><code>lf task status</code> reads the record</td><td class="no">no</td><td>Shows the closed #1971 until a sync runs (plan exclusion). Larger than this work: the status snapshot would need the resolver.</td></tr>
 </table>
 
-<h2>Biggest mismatch: the parent's identity</h2>
+<h2>Biggest mismatch left: status reads the record, sync reads the Task</h2>
 <div class="cols">
   <div class="card">
-    <h3>Earlier plan (existing in <code>scratch/plan.md</code> before this review)</h3>
-    <p><code>task_stack</code> returns <code>Closed</code>; a new <code>restack_closed_parent</code> in <code>run_sync_in</code> calls <code>stack_existing_task</code>, then reads <code>task_stack</code> again. Passed over <em>following in <code>task_stack</code></em> because "re-placing there turns a read into a write".</p>
-    <p>Leaves two re-placement paths, and landing and publication still refuse a parent that is open on GitHub.</p>
+    <h3>Now</h3>
+    <p><code>lf task status LOO-995 --json</code> says <code>pr_number: 1971</code>; <code>lf sync</code> merges #1983's branch. Once any sync runs they agree.</p>
   </div>
   <div class="card prop">
-    <h3><span class="tag">Proposed</span>: follow on read, record on sync</h3>
-    <p>Following needs no write. <code>task_stack</code> resolves the parent Task's current row with the same rule <code>select_stack_parent</code> uses (one function, <code>current_parent_pr</code>). The sync's existing write, <code>record_stack_sync</code>, records the row it merged along with the base it reached.</p>
-    <p>All four readers see the live parent. A successor that already merged becomes the ordinary merged-parent path. <code>Closed</code> means nothing left to follow, and one sentence covers it.</p>
+    <h3><span class="tag">Possible follow-up</span></h3>
+    <p>The status snapshot resolves the parent through <code>current_parent_pr</code>, so both read one rule. Costs a store read per stacked Task in the Work projection; not this Task.</p>
   </div>
 </div>
-<pre><span class="tag">proposed</span>
-pub enum StackParentPr { Open, Merged, Closed { number: Option&lt;u64&gt; } }
-StackedSync { fork_base, child, parent_identifier, parent_branch,
-              parent_pr: TaskPrId,   // resolved row, may differ from the recorded one
-              parent: StackParentPr } // replaces parent_merged</pre>
 
 <h2>Tested against</h2>
 <table>
-  <tr><th>Case</th><th>Proposed result</th></tr>
-  <tr><td>Normal: recorded row open</td><td>Unchanged; <code>parent_pr</code> equals the recorded id, no extra write.</td></tr>
-  <tr><td>Failure: closed, no successor</td><td><code>Closed</code>; bare sync, landing and publication print the two-command sentence; Graph retries end on it.</td></tr>
-  <tr><td>Recovery: <code>lf sync main</code></td><td>Detaches with the recorded fork base; parent cleared.</td></tr>
-  <tr><td>Recovery: parent reopens</td><td>Bare sync follows and records #1983; status names it.</td></tr>
-  <tr><td>Counterexample: successor already merged</td><td>Treated as merged parent: child syncs onto main. The brief said "with none, say which two commands"; this is a choice made for review (3).</td></tr>
-  <tr><td>Counterexample: parent reopened with different work</td><td>Followed, same as a force-pushed live parent. Stacking on a Task means following its work.</td></tr>
-  <tr><td>Status before any sync</td><td>Still shows #1971 (excluded; the snapshot reads the record).</td></tr>
+  <tr><th>Case</th><th>Result</th></tr>
+  <tr><td>Recorded row open</td><td>Unchanged; same row rewritten with the new base.</td></tr>
+  <tr><td>Closed, successor open</td><td>Followed and recorded (QA 1, fixture).</td></tr>
+  <tr><td>Closed, no successor</td><td>Two-command sentence; dirty edits untouched (QA 2).</td></tr>
+  <tr><td>Recovery: <code>lf sync &lt;parent&gt;</code> / <code>lf sync main</code></td><td>Both work (QA 3, 4).</td></tr>
+  <tr><td>Successor merged</td><td>Ordinary merged-parent path onto main (QA 5).</td></tr>
+  <tr><td>Landing a child of a closed parent</td><td>Not run; shares <code>live_parent_branch</code>. Gate/CI.</td></tr>
 </table>
 
 <h2>Outcome</h2>
-<p>The plan changed: <code>restack_closed_parent</code> and the second <code>task_stack</code> read are gone; <code>current_parent_pr</code> is shared by stacking and every read; <code>record_stack_sync</code> records the followed row. Slice 1 is the same fixture.</p>
+<p>Nothing to change. The built code matches the plan's model, and none of what's left (status lag, the stacking duplicate) belongs in this Task.</p>
 
 <h2>Questions</h2>
 <ol>
-  <li>Should <code>task_stack</code> follow the parent Task to its successor row on every read?
-    <br>a) yes, as proposed &nbsp; b) no, only bare sync follows (the earlier plan)</li>
-  <li>Which successor rows count as "current"?
-    <br>a) open or not yet published, as <code>select_stack_parent</code> does &nbsp; b) only a GitHub-open PR</li>
+  <li>Successor rows that count as "current":
+    <br>a) open or not yet published (built) &nbsp; b) only a GitHub-open PR</li>
   <li>A successor that already merged:
-    <br>a) the ordinary merged-parent path onto main &nbsp; b) the two-command error</li>
-  <li>Should <code>lf task status</code> apply the same rule before any sync, so it shows #1983 immediately?
-    <br>a) yes, in this Task &nbsp; b) a separate Task &nbsp; c) no</li>
+    <br>a) merged-parent path onto main (built) &nbsp; b) the two-command error</li>
+  <li>Should <code>lf task status</code> resolve the parent the same way before any sync?
+    <br>a) separate Task &nbsp; b) no</li>
 </ol>
 </body>
 </html>

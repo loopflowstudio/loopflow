@@ -5932,39 +5932,6 @@
       ],
       "type": "object"
     },
-    "ProjectActivation": {
-      "properties": {
-        "completed_at": {
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "error": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "lf_process_id": {
-          "type": "string"
-        },
-        "outcome": {
-          "type": [
-            "string",
-            "null"
-          ]
-        }
-      },
-      "required": [
-        "lf_process_id",
-        "completed_at",
-        "outcome",
-        "error"
-      ],
-      "type": "object"
-    },
     "ProjectKR": {
       "properties": {
         "holds": {
@@ -5980,60 +5947,6 @@
       ],
       "type": "object"
     },
-    "ProjectReadiness": {
-      "properties": {
-        "activation": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/ProjectActivation"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "observed_at": {
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "pending_successor": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "project_id": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "state": {
-          "$ref": "#/$defs/ProjectReadinessState"
-        }
-      },
-      "required": [
-        "state",
-        "project_id",
-        "observed_at",
-        "pending_successor",
-        "activation"
-      ],
-      "type": "object"
-    },
-    "ProjectReadinessState": {
-      "enum": [
-        "unconfigured",
-        "unavailable",
-        "inactive",
-        "ready",
-        "terminal"
-      ],
-      "type": "string"
-    },
     "ProjectStatus": {
       "description": "Shared Project status, independent of a provider’s display label.",
       "enum": [
@@ -6048,9 +5961,6 @@
     },
     "ProjectSummary": {
       "properties": {
-        "current": {
-          "type": "boolean"
-        },
         "id": {
           "type": "string"
         },
@@ -6087,7 +5997,6 @@
       },
       "required": [
         "sync",
-        "current",
         "id",
         "tracker_id",
         "slug",
@@ -14680,9 +14589,6 @@
         "name": {
           "type": "string"
         },
-        "project": {
-          "$ref": "#/$defs/Project"
-        },
         "summary": {
           "items": {
             "type": "string"
@@ -14694,7 +14600,6 @@
         "id",
         "name",
         "created",
-        "project",
         "main_checkout",
         "files",
         "summary"
@@ -14711,9 +14616,6 @@
         "metric_portfolio": {
           "$ref": "#/$defs/MetricPortfolioDto",
           "description": "Wave-owned live evidence derived once by Rust for every consumer."
-        },
-        "project_readiness": {
-          "$ref": "#/$defs/ProjectReadiness"
         },
         "projects": {
           "$ref": "#/$defs/Evidence2"
@@ -14737,7 +14639,6 @@
         }
       },
       "required": [
-        "project_readiness",
         "wave",
         "projects",
         "tasks",
@@ -14950,9 +14851,6 @@
         "metric_portfolio": {
           "$ref": "#/$defs/MetricPortfolioDto"
         },
-        "project_readiness": {
-          "$ref": "#/$defs/ProjectReadiness"
-        },
         "projects": {
           "$ref": "#/$defs/Evidence2"
         },
@@ -14968,7 +14866,6 @@
       },
       "required": [
         "graph",
-        "project_readiness",
         "wave",
         "projects",
         "metric_portfolio",
@@ -16731,43 +16628,6 @@
                 "type": "null"
               }
             ]
-          }
-        },
-        {
-          "additionalProperties": false,
-          "description": "`lf wave plan bind <wave> <project> --json`: the tracker Project\nbound as the Wave's current Project.",
-          "examples": [
-            {
-              "directory": "/repo",
-              "kind": "wave.plan.bind",
-              "project": "5e55105e-0000-4000-8000-000000000042",
-              "wave": "product"
-            }
-          ],
-          "properties": {
-            "directory": {
-              "type": "string"
-            },
-            "kind": {
-              "const": "wave.plan.bind",
-              "type": "string"
-            },
-            "project": {
-              "type": "string"
-            },
-            "wave": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "kind",
-            "directory",
-            "wave",
-            "project"
-          ],
-          "type": "object",
-          "x-result": {
-            "$ref": "#/$defs/Project"
           }
         },
         {

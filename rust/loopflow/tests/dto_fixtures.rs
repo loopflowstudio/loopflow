@@ -62,11 +62,6 @@ fn wave_detail_preserves_graph_and_machine() {
         snapshot.wave.machine.as_ref().unwrap().label.as_deref(),
         Some("mini")
     );
-    assert_eq!(
-        snapshot.project_readiness.state,
-        loopflow_execution::store::sqlite::ProjectReadinessState::Ready
-    );
-    assert!(snapshot.project_readiness.activation.is_none());
     assert_eq!(snapshot.setup.graph.value.as_deref(), Some("code"));
     assert_eq!(
         snapshot.setup.skill_agents["implement"].source,
@@ -98,8 +93,6 @@ fn wave_detail_preserves_graph_and_machine() {
     let loopflow::lf::commands::waves::Evidence::Ok { items, .. } = &snapshot.projects else {
         panic!("missing Projects")
     };
-
-    assert!(items[0].current);
     assert_eq!(
         items[0].status,
         loopflow_execution::work::project::ProjectStatus::Started
@@ -1250,7 +1243,6 @@ fn wave_added_receipt_round_trips_with_its_leftover() {
     let json = include_str!("../../../tests/fixtures/dto/wave_added.json");
     let added: WaveAdded = serde_json::from_str(json).unwrap();
     assert!(added.created);
-    assert_eq!(added.project.wave_id, added.id);
     assert_eq!(added.summary.len(), 1);
     assert_eq!(
         serde_json::to_value(&added).unwrap(),

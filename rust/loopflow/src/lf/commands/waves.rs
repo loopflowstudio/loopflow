@@ -3942,18 +3942,6 @@ mod tests {
             super::project_planning(&store, &wave).await,
             super::Evidence::Ok { items, truncated: false } if items.is_empty()
         ));
-        let missing = loopflow_execution::ops::metrics::wave_metric_portfolio(
-            &store,
-            &wave,
-            OffsetDateTime::now_utc(),
-        )
-        .await
-        .unwrap();
-        assert!(missing.metrics.is_empty());
-        assert!(matches!(
-            &missing.contract_issues[..],
-            [loopflow_execution::work::wave::metrics::MetricContractIssueDto::ProjectUnavailable { .. }]
-        ));
         store.seed_inventory(crate::test_linear_input::InventoryFixture {
             wave_id: wave.id().clone(), initiative: "initiative".into(), synced_at: 2,
             snapshot: serde_json::from_value(serde_json::json!({"projects":[{
@@ -3965,7 +3953,6 @@ mod tests {
         let super::Evidence::Ok { items, .. } = super::project_planning(&store, &wave).await else {
             panic!("Project plan unavailable");
         };
-        assert!(items[0].current);
         assert_eq!(items[0].krs[0].text, "Edited proof");
         assert_eq!(
             items[0].status,
@@ -3985,7 +3972,7 @@ mod tests {
             super::project_planning(&store, &wave).await,
             super::Evidence::Ok { items, .. } if items.len() == 1
         ));
-        // Invalid provider evidence cannot erase the owned plan, but prevents metric evaluation.
+        // Invalid provider evidence cannot erase the owned plan.
         rusqlite::Connection::open(directory.path().join("registry.db"))
             .unwrap()
             .execute("UPDATE tracker_projects SET initiative_ids='not-json'", [])
@@ -3998,167 +3985,10 @@ mod tests {
             panic!("saved Project plan unavailable");
         };
         assert_eq!(items.len(), 1);
-        assert!(items[0].current);
         assert_eq!(items[0].krs[0].text, "Edited proof");
         assert_eq!(
             items[0].status,
             loopflow_storage::work::project::ProjectStatus::Started
-        );
-        let missing = loopflow_execution::ops::metrics::wave_metric_portfolio(
-            &store,
-            &wave,
-            OffsetDateTime::now_utc(),
-        )
-        .await
-        .unwrap();
-        assert!(matches!(
-            &missing.contract_issues[..],
-            [loopflow_execution::work::wave::metrics::MetricContractIssueDto::ProjectUnavailable { .. }]
-        ));
-    }
-
-    #[tokio::test]
-    async fn configured_project_selection_retains_predecessor_backlog() {
-        let directory = tempfile::tempdir().unwrap();
-        let store = Arc::new(
-            loopflow_execution::store::open_ephemeral_store(
-                &loopflow_execution::store::StorageConfig::sqlite(
-                    directory.path().join("loopflow.db"),
-                ),
-            )
-            .await
-            .unwrap(),
-        );
-        let wave = Wave::new(
-            loopflow_model::id::WaveId::new(),
-            "product".into(),
-            directory.path().display().to_string(),
-        );
-        store.create_wave(&wave).await.unwrap();
-        let selected = "999bdbdd-c045-41a6-8ffc-a97c4a40b0b3";
-        let predecessor = "218967b6-a760-4b7c-9a46-11d9d61a42c2";
-        let project = |id: &str, name: &str| loopflow_storage::planning::TrackerProject {
-            description: None,
-            id: id.into(),
-            name: name.into(),
-            slug: name.into(),
-            summary: String::new(),
-            revision: None,
-            status: loopflow_storage::work::project::ProjectStatus::Started,
-            metric_targets: Vec::new(),
-            krs: Vec::new(),
-            initiative_ids: vec!["initiative".into()],
-            team_ids: vec!["team".into()],
-        };
-        let item = loopflow_storage::planning::TrackerItem {
-            id: "issue".into(),
-            identifier: "FIX-1".into(),
-            name: "Unreviewed backlog".into(),
-            description: String::new(),
-            rank: 0,
-            completed: false,
-            completed_at: None,
-            due_date: None,
-            state: Some("unstarted".into()),
-            project_id: Some(predecessor.into()),
-            team_id: Some("team".into()),
-            assignee: None,
-            branch_name: None,
-            revision: None,
-            url: None,
-        };
-        store
-            .seed_inventory(
-                crate::test_linear_input::InventoryFixture {
-                    wave_id: wave.id().clone(),
-                    initiative: "initiative".into(),
-                    synced_at: 2,
-                    snapshot: crate::test_linear_input::Inventory {
-                        projects: vec![
-                            project(predecessor, "Old ordinary plan"),
-                            project(selected, "Summer work — customer requests"),
-                        ],
-                        items: vec![item.clone()],
-                    },
-                },
-                None,
-            )
-            .await
-            .unwrap();
-        assert!(loopflow_execution::ops::project::current_project(&store, &wave).is_err());
-        assert!(!directory.path().join("waves").exists());
-        let before = (
-            store.list_projects(Some(wave.id())).await.unwrap(),
-            store.list_tasks(Some(wave.id())).await.unwrap(),
-        );
-        for _ in 0..2 {
-            let current = loopflow_execution::ops::project::current_project(&store, &wave).unwrap();
-            assert_eq!(current.tracker_id.as_ref().unwrap().as_str(), selected);
-
-            let super::Evidence::Ok {
-                items: projects, ..
-            } = super::project_planning(&store, &wave).await
-            else {
-                panic!("planning unavailable")
-            };
-            assert_eq!(projects.len(), 2);
-            assert_eq!(
-                projects
-                    .iter()
-                    .filter(|p| p.current)
-                    .map(|p| p.id.as_str())
-                    .collect::<Vec<_>>(),
-                vec![current.id.as_str()]
-            );
-            let tasks = super::wave_tasks(
-                &store,
-                &wave,
-                false,
-                None,
-                &super::SharedTaskReads::read(&store).await.unwrap(),
-            )
-            .await
-            .unwrap();
-            let super::Evidence::Ok { items, .. } = tasks.tasks else {
-                panic!("Task evidence unavailable")
-            };
-            assert_eq!(items.len(), 1);
-            let saved = store
-                .get_task_by_issue(&item.identifier)
-                .await
-                .unwrap()
-                .unwrap();
-            assert_eq!(items[0].task.id, saved.id.as_str());
-            assert_eq!(items[0].task.tracker_id.as_deref(), Some(item.id.as_str()));
-            assert!(tasks.unavailable_tasks.is_empty());
-        }
-        let after = (
-            store.list_projects(Some(wave.id())).await.unwrap(),
-            store.list_tasks(Some(wave.id())).await.unwrap(),
-        );
-        assert_eq!(before, after);
-        // An unaccepted UUID cannot become a selection or silently pick another Project.
-        assert!(
-            loopflow_storage::sqlite::project_selection::write_project_binding(
-                &store.sqlite,
-                wave.id(),
-                Some(selected),
-                "5a3aaee8-a95a-4726-9578-22a4700270ac",
-                &guard,
-            )
-            .is_err()
-        );
-        let retained = super::wave_tasks(
-            &store,
-            &wave,
-            false,
-            None,
-            &super::SharedTaskReads::read(&store).await.unwrap(),
-        )
-        .await
-        .unwrap();
-        assert!(
-            matches!(retained.tasks, super::Evidence::Ok { items, .. } if items.len() == 1 && items[0].task.tracker_id.as_deref() == Some(item.id.as_str()))
         );
     }
 

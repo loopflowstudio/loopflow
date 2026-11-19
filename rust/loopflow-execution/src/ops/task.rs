@@ -778,7 +778,19 @@ pub async fn wave_graph(
     selector: Option<&str>,
     in_wave: bool,
 ) -> OpsResult<WaveGraph> {
-    let store = task_store().await?;
+    // A read: it opens the registry as it is and creates none.
+    #[cfg(any(test, feature = "test-support"))]
+    let scoped = super::linear::LINEAR_TEST_CONTEXT
+        .try_with(|context| Store::from_sqlite_for_test(context.store.sqlite.clone()))
+        .ok();
+    #[cfg(not(any(test, feature = "test-support")))]
+    let scoped = None;
+    let store = match scoped {
+        Some(store) => store,
+        None => crate::store::read_existing_registry()
+            .map_err(task_error)?
+            .ok_or_else(|| task_error("Planning unavailable: local registry is absent"))?,
+    };
     let wave = if in_wave {
         Some(
             crate::work::wave::context::resolve_managed_wave(

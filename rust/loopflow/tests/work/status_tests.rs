@@ -65,12 +65,8 @@ fn test_project(wave: &Wave, slug: &str, updated_at: OffsetDateTime) -> Project 
     }
 }
 
-fn select_project(home: &Path, wave: &Wave, project_id: &str) {
+fn start_only(home: &Path, wave: &Wave, project_id: &str) {
     let connection = rusqlite::Connection::open(home.join("loopflow.db")).unwrap();
-    connection.execute(
-        "UPDATE waves SET current_project_id=(SELECT id FROM projects WHERE wave_id=?1 AND external_project_id=?2) WHERE id=?1",
-        rusqlite::params![wave.id().as_str(), project_id],
-    ).unwrap();
     connection.execute(
         "UPDATE projects SET status=CASE WHEN external_project_id=?2 THEN 'started' ELSE 'completed' END WHERE wave_id=?1",
         rusqlite::params![wave.id().as_str(), project_id],
@@ -95,7 +91,7 @@ fn put_project_snapshot(home: &Path, wave: &Wave, project: &Project) {
     });
     let store = loopflow_execution::store::open_sqlite(&home.join("loopflow.db"))
         .expect("open status store");
-    select_project(home, wave, project.tracker_id.as_ref().unwrap().as_str());
+    start_only(home, wave, project.tracker_id.as_ref().unwrap().as_str());
     store
         .seed_inventory(&InventoryFixture {
             wave_id: wave.id().clone(),
@@ -246,7 +242,7 @@ fn seed_stale_project_work(
         updated_at: now,
     };
     store.insert_project(&stale).expect("seed stale Project");
-    select_project(home, &wave, stale.tracker_id.as_ref().unwrap().as_str());
+    start_only(home, &wave, stale.tracker_id.as_ref().unwrap().as_str());
     let stale_task = Task {
         repository_id: loopflow_execution::repository::location::ensure_repository(
             &store,
@@ -349,7 +345,7 @@ fn seed_stale_project_work(
     store
         .insert_project(&current)
         .expect("seed current Project");
-    select_project(home, &wave, current.tracker_id.as_ref().unwrap().as_str());
+    start_only(home, &wave, current.tracker_id.as_ref().unwrap().as_str());
 
     let bin = home.join("bin");
     std::fs::create_dir_all(&bin).expect("test bin");
@@ -471,7 +467,7 @@ fn seed_previous_release_task_pr(home: &Path) {
         PrMergeMode::User
     );
     let wave = store.list_waves(None).unwrap().pop().unwrap();
-    select_project(home, &wave, "95159066-9098-4d0b-8903-01459dc7ec14");
+    start_only(home, &wave, "95159066-9098-4d0b-8903-01459dc7ec14");
     drop(store);
 
     let connection = rusqlite::Connection::open(&database).expect("reopen migrated store");
@@ -503,7 +499,6 @@ fn project_operator_failures_remain_historical_without_reappearing_on_the_wave()
             "slug": project.slug,
             "name": project.name,
             "status": "started",
-            "current": true,
             "metric_targets": [],
             "krs": [{"text": "Current state and history stay distinct", "holds": false}],
             "sync": {"actions": []}
@@ -667,7 +662,7 @@ Count dispatched Task loops that settle without rescue.
             snapshot: serde_json::from_value(project_payload.clone()).expect("parse PM snapshot"),
         })
         .expect("seed PM snapshot");
-    select_project(home.path(), &wave, "d19956b2-9955-437d-aea6-d91766231c77");
+    start_only(home.path(), &wave, "d19956b2-9955-437d-aea6-d91766231c77");
     drop(sqlite);
 
     let contract = load_metric_contract(&contract_path, wave.id().as_str()).expect("contract");

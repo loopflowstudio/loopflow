@@ -659,7 +659,6 @@
         "slug": "release-feedback",
         "name": "current",
         "status": "started",
-        "current": true,
         "metric_targets": [
           {
             "metric_id": "task-loop-trust",
@@ -716,13 +715,6 @@
       }
     ],
     "truncated": false
-  },
-  "project_readiness": {
-    "state": "ready",
-    "project_id": "proj_0123456789ab40008000000000000001",
-    "observed_at": null,
-    "pending_successor": null,
-    "activation": null
   },
   "setup": {
     "graph": {

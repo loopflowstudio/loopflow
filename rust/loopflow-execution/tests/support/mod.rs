@@ -610,13 +610,6 @@ fn register_task_fixture(
             .create_project(&project)
             .await
             .expect("create test project");
-        rusqlite::Connection::open(home.join("loopflow.db"))
-            .expect("open fixture database")
-            .execute(
-                "UPDATE waves SET current_project_id=?2 WHERE id=?1",
-                rusqlite::params![wave.id(), project.id.as_str()],
-            )
-            .expect("select fixture Project");
         planning::seed_unplaced_task(&home.join("loopflow.db"), &task);
         planning::seed_linear_admission(&home.join("loopflow.db"), &wave, &project, &task);
         pr.task_id = task.id.clone();

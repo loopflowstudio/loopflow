@@ -55,6 +55,16 @@ class _Tui:
             if b"\x1b[c" in data or b"\x1b[>c" in data:
                 os.write(self.master, b"\x1b[?1;2c")
 
+    def wait(self, predicate, description: str, seconds: float = 30) -> None:
+        deadline = time.monotonic() + seconds
+        while time.monotonic() < deadline:
+            self.drain(0.1)
+            if predicate():
+                return
+            if self.child.poll() is not None:
+                break
+        raise AssertionError(description + "\n" + "\n".join(self.screen.display))
+
     def enter(self, text: str) -> None:
         os.write(self.master, text.encode())
         self.drain(0.3)

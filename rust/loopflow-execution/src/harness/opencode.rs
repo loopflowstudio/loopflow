@@ -145,12 +145,9 @@ impl Driver {
     ) -> Result<(Command, std::fs::File)> {
         let mut command = Command::new("opencode");
         command.args(["run", "--standalone", "--format", "json", "--auto"]);
-        if let Some(model) = &config.agent.model {
-            command.args(["--model", model]);
-        }
         command.args(["--session", thread.as_str()]);
         super::configure_agent_env(&mut command, config);
-        command.envs(environment(config, None, self.kind)?);
+        command.envs(environment(config, None, self.kind, thread)?);
         super::configure_vendor_std_env(command.as_std_mut())?;
         let log = match diagnostics(config)? {
             Some(log) => log,
@@ -459,6 +456,24 @@ mod tests {
         assert_eq!(content.as_deref(), Some("task"));
     }
 
+    #[test]
+    fn the_configured_model_reaches_opencode_through_its_configuration() {
+        let config = AgentConfig {
+            agent: crate::config::Agent::parse("opencode:opencode/gemini-4-carbon").unwrap(),
+            ..AgentConfig::default()
+        };
+        let environment = super::environment(
+            &config,
+            Some(std::path::Path::new("/tmp/context.md")),
+            LaunchKind::WorkSession,
+            &loopflow_model::id::AgentSessionId::from("ses_model"),
+        )
+        .unwrap();
+        let settings: serde_json::Value =
+            serde_json::from_str(&environment["OPENCODE_CONFIG_CONTENT"]).unwrap();
+        assert_eq!(settings["model"], "opencode/gemini-4-carbon");
+    }
+
     /// A stand-in `opencode` that records its argv and stdin, then prints
     /// `lines` and leaves with `code`.
     fn stand_in(home: &std::path::Path, lines: &str, code: i32) -> crate::test_ambient::EnvGuard {
@@ -548,8 +563,6 @@ mod tests {
                 "--format",
                 "json",
                 "--auto",
-                "--model",
-                "opencode/fixture",
                 "--session",
                 thread.as_str()
             ]
@@ -631,6 +644,7 @@ fn environment(
     config: &AgentConfig,
     context_file: Option<&std::path::Path>,
     kind: LaunchKind,
+    thread: &AgentSessionId,
 ) -> Result<std::collections::BTreeMap<String, String>> {
     let mut environment = config.env.clone();
     // An inherited value is the calling OpenCode conversation's, with its plugin.
@@ -642,6 +656,10 @@ fn environment(
     if !settings.is_object() {
         bail!("OPENCODE_CONFIG_CONTENT must be a JSON object");
     }
+    // The TUI has no `--model`; configuration sets it for workers and work sessions alike.
+    if let Some(model) = &config.agent.model {
+        settings["model"] = serde_json::json!(model);
+    }
     if config.skip_permissions {
         settings["permissions"] =
             serde_json::json!([{ "action":"*", "resource":"*", "effect":"allow" }]);
@@ -652,6 +670,7 @@ fn environment(
             context,
             &crate::agent::system_prompt_with_structured_replies(config),
             kind,
+            thread.as_str(),
         )?;
     } else {
         let instructions = match context_file {
@@ -797,6 +816,7 @@ impl super::Harness for OpenCode {
                 launch.config,
                 launch.context_file,
                 launch.kind,
+                &thread,
             )?)
             .args(["--standalone", "--session", thread.as_str()]);
         if let Some(prompt) = input.filter(|prompt| !prompt.is_empty()) {

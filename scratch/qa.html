@@ -1,0 +1,68 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>LOO-974 QA: the configured model on OpenCode</title>
+<style>
+body{font:15px/1.5 -apple-system,sans-serif;max-width:1100px;margin:2em auto;padding:0 1em;color:#222}
+pre{background:#111;color:#ddd;padding:10px;overflow-x:auto;font:12px/1.3 Menlo,monospace;border-radius:4px}
+h2{margin-top:2em;font-size:18px}code{background:#eee;padding:1px 4px;border-radius:3px}section{border-top:1px solid #ddd}
+</style></head><body>
+<h1>LOO-974 QA: the configured model on OpenCode, and the reopen wake after compress</h1>
+<p>2026-11-19, branch <code>lf</code> at e87e68c599 on a private Machine (<code>LF_HOME=/tmp/lfq974m/home</code>), the
+account's real OpenCode 2.2.1 login. The account's own default model is <code>opencode/gemini-4-neon</code>; the
+repository says <code>agent: opencode:opencode/gemini-4-carbon</code>, so the two are told apart on screen.
+The earlier run (idle wake on OpenCode, Pi and Claude) is at <code>bc6cca5603:scratch/qa.html</code>.</p>
+
+<section><h2>1. A new work session runs the configured model</h2>
+<p><b>Did:</b> <code>lf task create</code>, <code>lf checkout d744d9</code>, viewed with <code>lf resume --task d744d9</code> in a PTY.</p>
+<p><b>Saw:</b> the footer and every answer say Gemini 4 Carbon. OpenCode's own record agrees:
+<code>session_v2.model = {"id":"gemini-4-carbon","providerID":"opencode"}</code>. The earlier run, same config,
+showed Gemini 4 Neon.</p>
+<pre>     Build · Gemini 4 Carbon · 33.5s · 57.5 tok/s
+  ┃  Build · Gemini 4 Carbon Default / OpenCode
+  /private/tmp/lfq974m/oc.d744d9-add-a-divide:qa/d744d9-add-a-divide             26.1K (2%) · $0.08</pre></section>
+
+<section><h2>2. Idle steer</h2>
+<p><b>Did:</b> <code>lf steer d744d9 'Reply with only the word QUINCE.'</code>, nothing typed.</p>
+<p><b>Saw:</b> the <code>synthetic</code> message landed the same second as the steer; Carbon took 60 s to answer.
+<code>lf session steers</code>: delivered, 0 pending.</p>
+<pre>     QUINCE
+     Build · Gemini 4 Carbon · 1m 0s · 1.0 tok/s</pre></section>
+
+<section><h2>3. Quit, steer, reopen (the <code>After::Reachable</code> path compress rewrote)</h2>
+<p><b>Did:</b> <code>/exit</code>; status read <i>Conversation: quit 14:01; `lf resume --task d744d9` opens it</i>;
+<code>lf steer … RAMBUTAN</code>; <code>lf resume --task d744d9</code>.</p>
+<p><b>Saw:</b> RAMBUTAN on screen 15 s after the reopen, nothing typed; 0 pending.</p>
+<pre>     RAMBUTAN
+     Build · Gemini 4 Carbon · 6.3s · 2.7 tok/s</pre></section>
+
+<section><h2>4. A worker step takes the model without <code>--model</code></h2>
+<p><b>Did:</b> <code>lf task run d744d9</code> (Graph <code>implement</code> → <code>interactive: human-review</code>).</p>
+<p><b>Saw:</b> the step committed <code>Add divide(a, b) to calc.py</code> and stopped at human-review. Every assistant
+message of the worker's OpenCode session names <code>gemini-4-carbon</code>; <code>lf history usage --task</code>: 50,603 in,
+1,062 out, $0.15. The Graph's end then woke the work session, which summarised it on Carbon.</p></section>
+
+<section><h2>5. Changing <code>agent:</code> and reopening</h2>
+<p><b>Did:</b> set <code>agent: opencode:opencode/glm-5.2</code> in the checkout, reopened, steered LYCHEE.</p>
+<p><b>Saw:</b> LYCHEE answered on Gemini 4 Carbon. As <code>questions.md</code> 7 says: a reopened OpenCode session
+keeps its last model.</p></section>
+
+<section><h2>6. Scripted idle wake</h2>
+<p><code>tests/e2e/idle_wake.py --harness opencode</code> (2.2.1) and <code>--harness pi</code> (1.3.0): both passed.
+No process naming either run's root was left afterwards.</p></section>
+
+<h2>Works now</h2>
+<ul>
+<li>An OpenCode work session and an OpenCode worker both run the model in <code>agent:</code>.</li>
+<li>Idle steers and steers saved while the conversation was quit still start a turn after the compress.</li>
+</ul>
+<h2>Not reached</h2>
+<ul><li>Pi on a real model this run: its path did not change; the scripted run covers the shared server side.</li></ul>
+<h2>Still wrong, worst first</h2>
+<ul>
+<li>Changing <code>agent:</code> does not change an existing OpenCode work session's model (question 7).</li>
+<li>While an OpenCode work session is open, <code>lf session history</code> lists its finished turns as
+<code>running</code>; they read <code>completed</code> once OpenCode exits (the exit read writes completions). Not
+changed by this branch.</li>
+<li>From the earlier run, unchanged: after Esc a steer waits until someone types (question 4); OpenCode shows a
+woken answer with no sign of the steer (question 1).</li>
+</ul>
+</body></html>

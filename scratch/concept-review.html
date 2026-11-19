@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8">
-<title>LOO-968 concept review: auto as built</title>
+<title>LOO-968 concept review: auto as built, third pass</title>
 <style>
 :root{--bg:#fff;--fg:#1d1d1f;--mute:#6e6e73;--line:#d2d2d7;--yes:#1a7f37;--no:#b42318;--part:#9a6700;--prop:#f3efe2;--propline:#c9a227;--card:#f6f6f8}
 @media (prefers-color-scheme:dark){:root{--bg:#161618;--fg:#e8e8ea;--mute:#9a9aa0;--line:#3a3a3f;--yes:#4ac26b;--no:#ff7b72;--part:#d4a72c;--prop:#2c2818;--propline:#c9a227;--card:#1f1f22}}
@@ -11,103 +11,110 @@ td,th{border-bottom:1px solid var(--line);padding:.45rem .5rem;text-align:left;v
 .yes{color:var(--yes);font-weight:600}.no{color:var(--no);font-weight:600}.part{color:var(--part);font-weight:600}
 .mute{color:var(--mute)}
 .prop{background:var(--prop);border-left:3px solid var(--propline)}
+li.prop{padding:.3rem .6rem;list-style-position:inside;margin:.3rem 0}
 .cols{display:grid;grid-template-columns:1fr 1fr;gap:1rem}
 .card{background:var(--card);padding:.7rem 1rem;border-radius:6px}
 pre{background:var(--card);padding:.7rem 1rem;border-radius:6px;overflow:auto;margin:.4rem 0}
 .card pre{background:transparent;padding:0}
 @media (max-width:46rem){.cols{grid-template-columns:1fr}}
 </style></head><body>
-<h1>Do the concepts line up? Auto, second pass</h1>
-<p><b>Area:</b> how a Task goes on without a person: the auto setting, what turns it on and off, what a run does with it, and the review step a person meets before delivery (<code>human-review</code>, to become <code>ship-review</code>). Taken this wide because the Task's claim is about the whole: "ship is shorthand for auto on the Task's Graph". Reviewed at <code>7db74c96e6</code> against base <code>f5ff6a6c79</code> (156 files, +2,668 / −3,261), as someone meeting it for the first time.</p>
-<p class="mute">Tan panels are proposed and not built. Everything else exists. The first pass's proposal (auto on is one action) is built and was driven in QA (<code>scratch/qa.html</code>).</p>
+<h1>Do the concepts line up? Auto, third pass</h1>
+<p><b>Area:</b> how a Task goes on without a person: the auto setting, what turns it on and off, what a run does with it, what each surface is told about it, and the review step before delivery. Taken this wide because the Task's claim is about the whole ("ship is shorthand for auto on the Task's Graph … reduce its impact on the overall system and protocol"). Reviewed at <code>cb20b422a6</code> against base <code>main</code> (181 files, +3,567 / −3,536), as someone meeting it for the first time.</p>
+<p class="mute">Tan panels are proposed and not built. Everything else exists. The second pass's three proposals are built: ship is a run that asks for auto, the stored word is <code>off</code>, <code>human-review</code> is <code>ship-review</code>. QA drove them (<code>scratch/qa.html</code>).</p>
 
 <h2>One interaction, with its failure and recovery</h2>
-<pre>lf task run LOO-12      # runs build, stops: the Task waits at human-review
-lf task auto on LOO-12  # LOO-12: standing in at human-review … running      (same as lf ship LOO-12)
-lf task status LOO-12   # LOO-12  moving · auto: on by Maya, Nov 19 09:04
-kill -9 &lt;carrier&gt;       # the Machine carries it again as `lf task run LOO-12`; it stands in because auto is on
-lf task auto off LOO-12 # nothing is killed; the run waits at its next interactive or merging step
-lf task status --json   # "auto": {"state": "stopped", …}                    ← the person typed "off"
+<pre>lf task run LOO-12                 # runs build, stops: the Task waits at ship-review
+lf ship LOO-12 --reason "CI is green"
+                                   # LOO-12: standing in at ship-review … running, merges: true
+lf task status LOO-12              # LOO-12  moving · auto: on by Maya, Nov 19 09:04
+                                   #   "CI is green" is in task_events as a progress row. Nothing prints it.   ← 2
+kill -9 &lt;carrier&gt;                  # Run died at gate · starting again; carried as `lf task run LOO-12`
+lf task auto off LOO-12 --reason "legal is reading it"
+                                   # LOO-12: auto off. The run goes on and waits:
+                                   # Waiting at pr land: auto is off (Maya). `lf ship` lands it.
+                                   #   the reason is nowhere a person looks                                    ← 2
 
-# failure seen in QA: two people turn auto on for a never-run Task at the same moment
-lf ship INF-9           # running
-lf ship INF-9           # exit 1: Task INF-9 is running graph code from …     ← a ship on a live run should report it</pre>
+# Desktop, the same Task, every row read:
+"run_control":  {"unavailable": null}
+"ship_control": {"unavailable": "auto is already on"}                                                          ← 1</pre>
 
 <h2>Pairings</h2>
 <table>
 <tr><th>What a person knows</th><th>In the code</th><th></th><th>Note</th></tr>
-<tr><td>Auto, a setting on the Task</td><td><code>task_graphs.auto{,_at,_by}</code>, <code>Option&lt;Auto&gt;</code>, <code>TaskDetail.auto</code>, selection state <code>auto</code>, Swift <code>AutoBadge</code></td><td class="yes">yes</td><td>One word from column to badge.</td></tr>
+<tr><td>Auto, a setting on the Task</td><td><code>task_graphs.auto{,_at,_by}</code>, <code>Option&lt;Auto&gt;</code>, <code>AutoState {On, Off}</code>, selection state <code>auto</code>, <code>AutoBadge</code></td><td class="yes">yes</td><td>One word from column to badge, and now one word for off.</td></tr>
 <tr><td>Status and auto are separate</td><td><code>task_state_sql</code>, <code>TaskSection::of</code> never read auto</td><td class="yes">yes</td><td></td></tr>
-<tr><td>Turning auto on: <code>lf ship</code>, <code>lf task auto on</code>, the toggle</td><td>one parse (<code>Commands::Ship</code>), one wire method (<code>task.ship</code>)</td><td class="yes">yes</td><td>Built since the first pass. <code>auto_on</code> and the no-Graph refusal are gone.</td></tr>
-<tr><td>"<code>lf ship</code> is auto on, then the run <code>lf task run</code> starts"</td><td><code>ship_on</code> does its own take-up (<code>graph_for_ship</code>), claim, done/abandoned check, live-run lookup and start choice (<code>from</code>); then <code>carry_task_run</code> → <code>start_task_run</code> does take-up, claim, launch check, live-run check and start choice again</td><td class="no">no</td><td>Ship is still a second front door to the run, not a run with auto on. The two disagree in the gap between them. Biggest mismatch, below.</td></tr>
-<tr><td>Off</td><td><code>AutoState::Stopped</code>, column value <code>stopped</code>, <code>"state": "stopped"</code> in <code>--json</code></td><td class="no">no</td><td>One idea, two names. Every sentence a person reads or types says "off"; the JSON they script against says "stopped". The migration is unmerged.</td></tr>
-<tr><td>Off, on, never set</td><td><code>stopped</code> blocks a merging step; NULL lets a run that reaches one land; <code>on</code> also stands in</td><td class="part">partly</td><td>Three values behind a two-position toggle. Never set earns its place. Off means "I take the interactive steps" and "nothing merges"; docs say so.</td></tr>
-<tr><td><code>lf -b task run</code></td><td><code>batch_on</code> inside <code>start_task_run</code>: on unless off</td><td class="part">partly</td><td>The one auto write that already lives where the run starts. It is what the ship write should sit beside.</td></tr>
-<tr><td>"this run may merge"</td><td><code>merges</code> on <code>TaskRun::Running</code>, <code>TaskRunStart::Run</code></td><td class="yes">yes</td><td>Renamed from <code>ships</code>.</td></tr>
-<tr><td>A run that died comes back</td><td><code>ops/task/run_recovery.rs</code></td><td class="yes">yes</td><td>Moved out of <code>ship.rs</code>.</td></tr>
-<tr><td>The review before delivery</td><td>step and skill <code>human-review</code>: "put everything the run learned … on one page"; headless, "stand in only for what can be judged"</td><td class="no">no</td><td>Named for who attends, in a product whose point here is that nobody has to. With auto on the step "human-review" runs with no human. Direction given: <code>ship-review</code>, new goals. Planned, not built.</td></tr>
-<tr><td>The <code>auto</code> Graph</td><td><code>builtins/task/graph/auto.yaml</code></td><td class="no">no</td><td>One name, two ideas (<code>--graph auto</code> beside <code>auto: on</code>). A separate outcome: renaming a builtin Graph people name in config.</td></tr>
+<tr><td><code>lf ship</code> is the Task's run, asked for auto</td><td><code>carry_task_run</code> with <code>AutoAsk::Person</code>; <code>start_task_run</code> writes it after its own take-up</td><td class="yes">yes</td><td>Built since the second pass. <code>ship_on</code>, <code>commands/ship.rs</code> and the second take-up are gone. "Ship is shorthand" is the shape of the code: 14 lines in <code>bin/lf.rs</code> beside <code>lf task run</code>'s.</td></tr>
+<tr><td>Who may turn it on: a person, or <code>-b</code> unless someone said off</td><td><code>AutoAsk { Nobody, Batch, Person }</code></td><td class="yes">yes</td><td>The enum reads as the sentence.</td></tr>
+<tr><td>Off, on, never set</td><td><code>Off</code> blocks a merging step; <code>None</code> lets a run that reaches one land; <code>On</code> also stands in</td><td class="part">partly</td><td>Three values behind a two-position toggle. Tried collapsing it: a run past review that dies and is carried again has no interactive step ahead, so with two values it would merge after someone said off. The third value stays. Question 3.</td></tr>
+<tr><td>"Can I turn Auto on for this Task?"</td><td><code>ship_control: TaskRunControl</code> on every Task row, beside <code>run_control</code></td><td class="no">no</td><td>A wire field named for the concept this work removed, restating three things the row already says. Biggest mismatch, below.</td></tr>
+<tr><td><code>--reason</code>: "Why, kept in the Task's history"</td><td><code>set_task_auto(…, note)</code> folds it into a <code>progress</code> Task event's summary</td><td class="no">no</td><td>No read prints it: not <code>lf task status</code>, not Desktop, not the tracker. A flag whose help names a place nobody can look. <code>lf task run --reason</code> beside it means something else ("Direction for this run, published to the Task").</td></tr>
+<tr><td>Turning it on, on the wire</td><td><code>task.ship</code> on, <code>task.auto.off</code> off</td><td class="part">partly</td><td>The pair is lopsided, as the CLI's is on purpose: on is an action that runs, off is a setting. Question 4.</td></tr>
+<tr><td>A run that died comes back, and says so the way a conversation does</td><td><code>run_recovery.rs</code>, <code>TaskExecutionSnapshot.{died, outlook, reason}</code>, one start limit</td><td class="yes">yes</td><td><code>outlook</code> has no reader yet. A conversation's is read only for "is there one". Left as shaped: it is the type asked for.</td></tr>
+<tr><td>The review before delivery</td><td>step and skill <code>ship-review</code></td><td class="yes">yes</td><td>Named for what it decides, with goals that hold with nobody there.</td></tr>
+<tr><td>Process ownership, as the developer reference tells it</td><td><code>docs/dev/reference-models.md</code>: "ship event" owns a process; "<code>lf ship</code>" is a spawner</td><td class="no">no</td><td>Two sentences describe the carrier this work deleted.</td></tr>
+<tr><td>The <code>auto</code> Graph</td><td><code>builtins/task/graph/auto.yaml</code></td><td class="no">no</td><td>One name, two ideas. Its own outcome; question 5.</td></tr>
 </table>
 
-<h2>Biggest mismatch: ship is a second front door to the run</h2>
-<p>The Task's sentence is "<code>lf ship</code> turns it on and runs the Graph the way <code>lf task run</code> does". As built, <code>ship_on</code> decides, in the CLI process and before any run exists, most of what the run then decides again: which Graph (and takes it up), who owns the Task, whether a run is live, where to start. Then it hands a <code>--from</code> to the real thing. Each duplicated decision is a place the two can disagree, and the gap between them is real time: a Task that took up a Graph and has no run reads as "starting", so its conversation starts one, and the ship that caused it reports a refusal. QA saw the same gap with two ships at once.</p>
+<h2>Biggest mismatch: <code>ship_control</code> is the old concept, still on every row</h2>
+<p>The Task asks to delete "the wire fields that only restate auto mode". One is left. Every Task row in every list carries <code>ship_control</code> (12 DTO fixtures, the server schema, Swift <code>RoadmapTask.shipControl</code>, <code>WorkCache</code>'s key list). It has one reader, the Auto toggle, and it is built from three reasons:</p>
 <div class="cols">
-<div class="card"><b>Existing</b>
-<pre>lf ship X
-  ship_on:            Task open? launchable?
-                      take up Graph        ← Task now reads "starting"
-                      claim
-                      write auto on
-                      live run? → report
-                      from = waiting step
-  carry_task_run:     prepare_task
-    start_task_run:   select (refuses a live run)
-                      take up (already done)
-                      -b: write auto on unless off
-                      read auto → through, merges
-                      position → Run, carried here</pre></div>
+<div class="card"><b>Existing</b> <span class="mute">(<code>commands/waves.rs</code>)</span>
+<pre>ship_control.unavailable =
+    run_control.unavailable        // the row already has it
+ or "auto is already on"           // the row has state:auto;
+                                   // the toggle never reads this:
+                                   // when on, it shows "off" instead
+ or "Task is at the end of its graph"
+                                   // `lf ship` there is not refused:
+                                   // it answers "ended", exit 0
+
+Toggle (off): disabled by ship_control.unavailable
+Run button:   disabled by run_control.unavailable</pre></div>
 <div class="card prop"><b>Proposed</b>
-<pre>lf ship X  =  lf task run X, asking for auto on
-  carry_task_run:     prepare_task
-    start_task_run:   live run + auto asked → write on, report it
-                      select; auto asked at a waiting
-                        interactive step → start at it
-                      take up
-                      auto asked: write on (lifts off)
-                      -b:         write on unless off
-                      read auto → through, merges
-                      position → Run, carried here</pre></div>
+<pre>(no ship_control)
+
+Toggle (off): disabled by run_control.unavailable
+Run button:   disabled by run_control.unavailable
+
+A Task at `end` that is not yet done:
+  the toggle sends task.ship, the answer is
+  {"state":"ended"}, auto stays unset and the
+  toggle reads off again, as `lf ship` prints.</pre></div>
 </div>
-<p>One request type says who is asking for auto (<span class="mute">nobody · <code>-b</code>, which an off outranks · a person, which lifts off, with their note</span>), and the run's own take-up writes it. <code>ship_on</code>, <code>ShipStart</code>, <code>graph_for_ship</code>, <code>task_for_auto</code> and <code>live_graph_run</code> go; <code>ship.rs</code> keeps the mark (<code>set</code>, <code>auto_off</code>, <code>starter</code>) and <code>ship_branch_task</code>. "Ship is shorthand" becomes the shape of the code: a run with one field set.</p>
+<p>Ship is the run, asked for auto, so what makes it unavailable is what makes the run unavailable. That was already true in the CLI and the server after the second pass; this makes the row say it. One predicate, one field, and the last <code>ship</code> word leaves the row DTOs.</p>
 <p><b>Tested against:</b></p>
 <ul>
-<li><i>Normal.</i> Never-run Task: the run takes up, writes on, runs. Waiting at <code>ship-review</code>: the selection starts at that step instead of after it, because auto was asked for. A bare <code>lf task run</code> there still means "I finished this step".</li>
-<li><i>Failure.</i> Two ships at once: the second meets a live run, writes on, reports that run, exits 0. A conversation opening mid-ship sees what it sees for any <code>lf task run</code>.</li>
-<li><i>Recovery.</i> Unchanged: a dead run is carried as bare <code>lf task run</code> and reads the mark.</li>
-<li><i>Counterexample kept.</i> A ship that fails in <code>prepare_task</code> (no worktree, launch refused) now leaves auto unset, where today it leaves auto on with nothing running. That is the truer result: nothing was turned on that isn't going.</li>
-<li><i>Must survive.</i> Done and abandoned Tasks still answer in a sentence; at <code>end</code> nothing is written; off outranks <code>-b</code>; the unowned Task is claimed once, by the run.</li>
+<li><i>Normal.</i> Idle Task, auto unset: toggle enabled, as today. Auto on: the toggle never read <code>ship_control</code>.</li>
+<li><i>Failure.</i> Missing worktree, abandoned Task, launch refused: <code>run_control</code> carries the sentence, as it did through <code>ship_control</code>.</li>
+<li><i>Counterexample kept.</i> A Task at <code>end</code> whose completion is pending shows an enabled toggle that does nothing. A done Task hides the toggle, so this is the window between reaching <code>end</code> and completing. The CLI's answer there is the same "ended"; if the toggle must be disabled in that window, the row's step is the fact to read, not a second control.</li>
+<li><i>Must survive.</i> Desktop never offers auto on a done or abandoned Task; <code>run_control</code> is unchanged.</li>
 </ul>
-<p><b>Passed over:</b> leaving the two doors and documenting the window (it is rare), and moving only the auto write. The first keeps a refusal QA already hit; the second keeps <code>ship_on</code>'s copy of the start choice.</p>
+<p><b>Passed over:</b> renaming it <code>auto_control</code> and dropping the dead reason. That keeps a second control whose only difference from the first is a case the server does not refuse.</p>
 
 <h2>Same pass</h2>
 <ul>
-<li class="prop" style="padding:.3rem .6rem;list-style-position:inside">Stored and wire value <code>stopped</code> → <code>off</code>; <code>AutoState::Stopped</code> → <code>AutoState::Off</code>. One edit in the unmerged migration, the enum, fixtures and Swift.</li>
-<li class="prop" style="padding:.3rem .6rem;list-style-position:inside"><code>human-review</code> → <code>ship-review</code>, with the goals already written in the plan, and the concept-review skill's "larger than this work" rule tightened.</li>
+<li class="prop"><b><code>--reason</code> goes where reasons are read.</b> <code>lf ship --reason</code> becomes the run's own <code>--reason</code> (<code>TaskProcessOptions.reason</code>, "Direction for this run, published to the Task"), since it is the same operation. <code>lf task auto off --reason</code> is saved as a Task comment. <code>AutoAsk::Person</code> loses its <code>note</code>, <code>set_task_auto</code> loses its <code>note</code> parameter, and the <code>progress</code> row says only "auto on: Maya". Help says what happens. <span class="mute">Passed over: a note on the mark that <code>lf task status</code> prints (a column and a wire field for one sentence), and deleting both flags (a person's why at an off is worth one line).</span></li>
+<li class="prop"><b>The developer reference tells the one-carrier story.</b> <code>docs/dev/reference-models.md</code> drops "ship event" from the records that own a process and "<code>lf ship</code>" from the spawners.</li>
+<li class="prop">The <code>task.ship</code> answer fixture is named <code>task_shipping.json</code>, beside <code>task_running.json</code> with the same shape. Rename it <code>task_ship_answer.json</code>, as <code>task_auto_off_answer.json</code> is named.</li>
 </ul>
 
-<h2>A separate outcome</h2>
+<h2>Larger than this work</h2>
 <ul>
-<li>The <code>auto</code> Graph's name. Renaming it touches <code>graph: auto</code> in people's configs and the catalog.</li>
-<li><code>lf task auto off</code> on a Task that never took up a Graph saves nothing, so a later <code>lf -b task run</code> turns auto on. The setting reads as a Task's and lives on its Graph row. Storing it on the Task would close this; nobody has asked to set auto before a first run.</li>
+<li><b>"latest Graph: Graph code finished; nothing further is launched"</b> on a Task that waits at an interactive step. The sentence is the base's, and it is wrong about the common case: the Graph run finished, the Task has not, and <code>lf ship</code> or <code>lf task run</code> launches more. It needs the execution snapshot to know the Task's position, not only its latest Graph process.</li>
+<li><b>Auto before a first Graph.</b> The setting reads as the Task's and lives on its Graph row, so <code>lf task auto off</code> on a never-run Task answers "auto was not on" and saves nothing; a later <code>lf -b task run</code> turns auto on. A released hold on such a Task is lost in the upgrade the same way. Storing auto on the Task closes both.</li>
+<li><b>The 30 s wait.</b> A ship that meets a carrier whose Graph has not registered polls so its answer can name a Graph process. If the answer named the carrier, the wait and its fallback sentence would go. Not driven in QA.</li>
+<li><b><code>task.shipped</code></b>, the subscription event, means "the PR merged". With ship now meaning "run with auto", that is one word for two ideas on the wire. Released Desktop reads it.</li>
+<li><b>The <code>auto</code> Graph's name.</b></li>
 </ul>
 
 <h2>Questions</h2>
 <ol>
-<li>Ship as a run with auto asked for: (a) as proposed, the run's take-up owns the write and <code>ship_on</code> goes; (b) keep <code>ship_on</code>, move only the write; (c) leave as built.</li>
-<li>The stored word: (a) <code>off</code>; (b) keep <code>stopped</code>.</li>
-<li><code>lf -b task run</code> writes auto on: (a) keep; (b) stands in for its own run only.</li>
-<li>After <code>auto off</code>, your own <code>lf task run</code> past review: (a) waits at <code>pr land</code> until <code>lf ship</code>, as built; (b) lands, because you ran it.</li>
-<li><code>auto off</code> before a first run: (a) leave, as built; (b) store auto on the Task so it sticks.</li>
+<li><code>ship_control</code>: (a) delete it, the toggle reads <code>run_control</code>, as proposed; (b) rename it <code>auto_control</code> and keep the at-<code>end</code> refusal; (c) leave it.</li>
+<li><code>--reason</code>: (a) ship's is the run's direction and off's is a Task comment, as proposed; (b) a note on the mark, printed by <code>lf task status</code> and the landing wait; (c) delete both flags.</li>
+<li>After <code>auto off</code>, your own <code>lf task run</code> past review: (a) waits at <code>pr land</code> until <code>lf ship</code>, as built; (b) lands, because you ran it, and off only holds a run that got there by standing in.</li>
+<li>On the wire: (a) keep <code>task.ship</code> / <code>task.auto.off</code>; (b) <code>task.auto.on</code> / <code>task.auto.off</code>.</li>
+<li><code>lf -b task run</code> writes auto on: (a) keep; (b) it stands in for its own run only, and a died <code>-b</code> run carried again stops at the next interactive step.</li>
+<li>Auto before a first Graph: (a) leave; (b) file a Task to store auto on the Task.</li>
 <li>The <code>auto</code> Graph's name: (a) leave; (b) file a Task to rename it (to what?).</li>
 </ol>
 </body></html>

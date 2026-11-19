@@ -114,7 +114,62 @@ when the PR merges.
 
 ## Remaining
 
-1. Gate.
+1. The last ship words on the wire (below).
+2. Gate.
+
+### Next: the last ship words on the wire
+
+Concept review, third pass, 2026-11-19 at `cb20b422a6`
+(`scratch/concept-review.html`). Ship is the run asked for auto, so what
+makes it unavailable is what makes the run unavailable, and a reason goes
+where reasons are read. Choices made for review; each is reversible.
+
+Start with `ship_control`: it shows soonest whether Desktop holds with one
+control.
+
+1. **Delete `ship_control`.** It sits on every Task row beside `run_control`
+   (`RoadmapTask` in `rust/loopflow/src/lf/commands/waves.rs`, built near
+   line 2196), with one reader, the Auto toggle
+   (`swift/LoopflowMac/Views/TaskWorkView.swift`, `toggle(refusal:)`). Its
+   reasons: `run_control.unavailable`; "auto is already on", which the toggle
+   never reads; "Task is at the end of its graph", which `lf ship` does not
+   refuse (it answers `ended`). The toggle takes `task.runControl.unavailable`.
+   Goes with it: `shipControl` in `swift/Loopflow/Models/WaveWorkMap.swift`,
+   the key in `swift/LoopflowMac/WorkCache.swift` and
+   `MockWaveFixture.swift`, the `steps` fact in `waves.rs` if
+   nothing else reads them, the key in the 12 fixtures under
+   `tests/fixtures/dto/` (`grep -rl ship_control tests/fixtures`), and
+   `server_schema.json` regenerated. Kept on purpose: a Task at `end` whose
+   completion is pending shows an enabled toggle; turning it on answers
+   `ended` and leaves auto unset. Passed over: renaming it `auto_control`.
+   Check: `dto_fixtures::`, `server::schema::tests::`, and
+   `scripts/test_desktop.sh --filter 'DTOFixtureTests|WorkCacheTests|DesktopHeadlessTests|TaskStatusTests'`.
+2. **`--reason` goes where reasons are read.** Today `set_task_auto` folds it
+   into a `progress` Task event no read prints, under help that says "kept in
+   the Task's history". `lf ship --reason` becomes the run's own
+   (`TaskProcessOptions.reason`, the steer `task_place` already appends), in
+   `bin/lf.rs`; `AutoAsk::Person` becomes a unit variant. `lf task auto off
+   --reason` is saved as a Task comment (`append_task_comment`, not a steer)
+   in `auto::off`. `set_task_auto` and `auto::set` lose `note`; the progress
+   row says "auto on: Maya". Help for `lf ship`, `lf task auto` and the
+   served `task.ship` / `task.auto.off` `reason` fields say what happens
+   (`rust/loopflow/src/lf/mod.rs`, `server/wire.rs`). A test: after
+   `lf task auto off X --reason why`, the Task's comments hold "why". Passed
+   over: a note on the mark printed by `lf task status` (a column and a wire
+   field), and deleting both flags.
+3. **`docs/dev/reference-models.md`** still names "ship event" among the
+   records that own a process (LfProcess row) and "`lf ship`" among the
+   spawners. Both go.
+4. **`task_shipping.json`** (the `task.ship` answer, under
+   `rust/loopflow-execution/tests/fixtures/dto/server/`) becomes
+   `task_ship_answer.json`; readers are `server/schema.rs` and
+   `lf/commands/write.rs`.
+
+Larger than this work, on the page and not filed: the "Graph … finished;
+nothing further is launched" sentence on a Task waiting at an interactive
+step (base behavior); auto stored on the Task so it can precede a Graph; the
+30 s wait in `auto::running_graph`; `task.shipped` meaning "merged"; the
+`auto` Graph's name. Ship-review decides which become Tasks.
 
 QA 2026-11-19 at `75abe5ce1c` plus two fixes (`scratch/qa.html`), on a private
 lf-world Machine with the branch `lf` and its server:
@@ -155,7 +210,7 @@ What QA found and left (also in `scratch/questions.md`):
   on such a Task answers "auto was not on", exit 0. A later `lf -b task run`
   turns auto on and may merge.
 - `--reason` is stored as a `progress` Task event and no read prints it; the
-  help says "kept in the Task's history".
+  help says "kept in the Task's history". Taken up in "Next" above.
 - A Task waiting at an interactive step reads "latest Graph: Graph qaship
   finished; nothing further is launched".
 - Not driven: the Desktop window (toggle and badge), iOS, a ship arriving in

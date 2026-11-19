@@ -83,10 +83,16 @@ Questions 1 and 2 got no written answer in scratch.
 - **Runs and conversations share one start limit** (`CONVERSATION_STARTS`);
   `RUN_RESTARTS` is gone.
 
+- **`ship_control` is deleted; the Auto toggle reads `run_control`** (concept
+  review, third pass). A Task at `end` whose completion is pending shows an
+  enabled toggle that answers `ended`. Reverse by restoring the field as
+  `auto_control` with the at-`end` reason.
+- **`lf ship --reason` is the run's direction and `lf task auto off --reason`
+  is a Task comment** (same pass); the mark's write takes no note. Reverse by
+  a note column on the mark that `lf task status` prints, or by deleting both
+  flags.
+
 ## Open
-- QA 2026-11-19: `--reason` on `lf ship` / `lf task auto off` is written to
-  `task_events` and shown nowhere. Either the mark carries the note and
-  `lf task status` prints it, or the flag goes.
 - QA 2026-11-19: a released hold on a never-run Task does not survive the
   upgrade; same root as the last item below.
 - QA 2026-11-19: Task checkout waits 10 s for the worktree lease instead of

@@ -2281,7 +2281,7 @@ fn acknowledge_open() {
 
 /// Why this opening failed, for `lf open` to report. The first answer stands:
 /// the launcher's own error beats the output its viewer relayed afterwards.
-pub fn fail_open(reason: &str) {
+fn fail_open(reason: &str) {
     answer_open(reason);
 }
 

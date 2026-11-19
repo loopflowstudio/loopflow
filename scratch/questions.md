@@ -33,3 +33,9 @@
 - The bare-PATH fixture hides `claude` only because no tool directory holds
   one; on a Machine with `claude` in `/opt/homebrew/bin` it would find it.
   Not changed here.
+
+## Realign (headless)
+
+- How the bare-PATH provider fixture should hide `claude` on a Machine that
+  has it in a tool directory is left open; the three options are in
+  `scratch/plan.md` "Remaining".

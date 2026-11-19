@@ -105,16 +105,16 @@ viewer's tail written after the launcher's precise error would replace it.
 **Mechanism.** One failure writer, `transport::fail_open(text)`, beside
 `acknowledge_open`, under the rule above; it clears the env var, so it runs at
 most once per process.
-- The viewer keeps the last 4 KiB of relayed live output (`Tag::Out`, not
-  `Tag::Snapshot`: replayed history of an existing conversation is not why
-  this opening failed) while the receipt is unacknowledged (nothing once
-  acknowledged, nothing without the env var). When
-  the relay ends before acknowledgement, it calls `fail_open` with that tail,
-  ANSI-stripped and trimmed, plus the exit line. This also carries a provider's
-  own message when the provider itself exits before it is ready.
-- `bin/lf.rs` `main`'s error path, where the `tracing::warn!` already checks the
-  env var, calls `fail_open(format!("{error:#}"))` for any error that isn't a
-  `CommandExit`. The warn line stays as the log record.
+- The viewer keeps the last 4 KiB of relayed live output (`Tag::Out` and
+  `Tag::Err`, not `Tag::Snapshot`: replayed history of an existing conversation
+  is not why this opening failed) while the receipt is unacknowledged (nothing
+  once acknowledged, nothing without the env var). This also carries a
+  provider's own message when the provider itself exits before it is ready.
+- `bin/lf.rs` `main` calls `transport::end_open(&result, code)` for a failed
+  command still holding the env var: an error that isn't a `CommandExit` is
+  the answer itself; a `CommandExit` answers with the tail, ANSI-stripped and
+  blank lines dropped, plus the exit line. The warn line stays as the log
+  record.
 - The shell wrapper keeps its `[ ! -f "$receipt" ]` fallback for a command that
   died without lf writing anything (killed, `lf` missing).
 - `Attachment::settle` reports the receipt text as the reason, ending "; retry
@@ -192,6 +192,27 @@ Not run here: the `env -i … lf session resume <throwaway>` acceptance (needs a
 PTY, a server and a real provider; a branch build against the real store) and
 Rex `lf open --json` with `claude` off `PATH`. Both go to qa.
 
+## Remaining
+
+- **Bare-`PATH` fixtures no longer hide Machine tools.** Every `lf` a test
+  starts now appends the tool directories, so `PATH=/usr/bin:/bin` hides
+  nothing in `/opt/homebrew/bin` or `/usr/local/bin`. Seen on this Machine
+  (2026-11-19): `/opt/homebrew/bin/gh` exists; no `claude` or `codex` in either
+  directory. Some twenty fixtures under `rust/loopflow/tests/` set such a
+  `PATH` (`grep -rn '"PATH", *"/usr/bin:/bin' rust/loopflow/tests`). Only the
+  focused tests ran after the change; the suites have not. CI's Linux runners
+  never hid `gh` this way, so the exposure is a macOS Machine: a fixture that
+  counted on `gh` being absent now reaches an unauthenticated real one. Gate
+  reads the first CI run for this, macOS job included.
+- **`a_launch_that_found_no_provider_leaves_nothing_to_resume` depends on the
+  Machine.** It passes only where no `claude` sits in `/opt/homebrew/bin` or
+  `/usr/local/bin` (a Homebrew-installed Claude Code would). Open choice, not
+  made: (a) lf skips a tool directory under a variable only fixtures set — a
+  test-only knob in production code; (b) the fixture skips when
+  `/opt/homebrew/bin/claude` or `/usr/local/bin/claude` exists; (c) leave it
+  and accept the failure on such a Machine. Nothing in the code can subtract a
+  directory today.
+
 ## Exclusions
 
 - **Known cost of part 1.** Today (#1981) a person running `lf open` from a
@@ -221,7 +242,8 @@ Rex `lf open --json` with `claude` off `PATH`. Both go to qa.
 
 - `cargo test -p loopflow --lib open::` and `server::` — implementer.
 - `cargo test -p loopflow --test transport_tests a_launch_that_found_no_provider` — implementer.
-- `env -i … lf session resume <throwaway>` — implementer, by hand.
+- `env -i … lf session resume <throwaway>` — qa, by hand.
+- The Rust suites on macOS and Linux — CI; watch fixtures with a bare `PATH`.
 - Rex `lf open --task <ID> --json` with `claude` off `PATH` — qa.
 
 Open PRs on the same files: #1978, #1976, #1967 (`native_session.rs`,

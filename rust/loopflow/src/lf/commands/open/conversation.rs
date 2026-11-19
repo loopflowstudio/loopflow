@@ -288,6 +288,14 @@ pub(super) fn resolve(target: &mut Resolved, prepare: bool) -> Result<()> {
     })
 }
 
+/// The `PATH` a conversation started in a host pane resolves commands on.
+fn conversation_path() -> String {
+    crate::server::supervised_path(
+        &std::env::var("PATH").unwrap_or_default(),
+        &dirs::home_dir().unwrap_or_default(),
+    )
+}
+
 /// A launch-scoped acknowledgement, removed after its caller settles. The
 /// transport writes it only after the native conversation is ready for input.
 /// A failed child leaves its error visible and reports failure through this file.
@@ -338,6 +346,10 @@ exit "$result""#.into(),
             loopflow_execution::transport::OPEN_RECEIPT_ENV,
             self.path().display()
         ));
+        // A host's server started by launchd keeps launchd's `PATH`, which
+        // holds no provider CLI. The conversation resolves them as this caller
+        // does, and as a terminal does when the caller's own `PATH` is as bare.
+        argv.push(format!("PATH={}", conversation_path()));
         argv.extend(command);
         argv
     }
@@ -345,6 +357,12 @@ exit "$result""#.into(),
         match self.wait(Duration::from_secs(30)) {
             Ok(()) => receipt.status = OpenStatus::Usable,
             Err(error) => {
+                tracing::warn!(
+                    url = receipt.url,
+                    destination = receipt.destination.as_deref().unwrap_or_default(),
+                    error = format!("{error:#}"),
+                    "lf open: the conversation did not attach; its pane shows why"
+                );
                 receipt.status = OpenStatus::Failed;
                 receipt.reason = Some(format!(
                     "{error:#}; see the destination for diagnostics and retry the same command"
@@ -435,6 +453,32 @@ mod tests {
         assert!(output.status.success(), "{output:?}");
         assert!(output.stdout.is_empty(), "{output:?}");
         assert!(output.stderr.is_empty(), "{output:?}");
+    }
+
+    #[test]
+    fn conversation_resolves_commands_on_the_callers_path_not_the_hosts() {
+        let _lock = loopflow_test_support::env_lock().lock().unwrap();
+        let attachment = Attachment::new().unwrap();
+        let argv = attachment.argv(vec![
+            "/bin/sh".into(),
+            "-c".into(),
+            r#"printf %s "$PATH"; printf attached > "$LF_OPEN_RECEIPT""#.into(),
+        ]);
+        let output = Command::new(&argv[0])
+            .args(&argv[1..])
+            .env("PATH", "/usr/bin:/bin:/usr/sbin:/sbin")
+            .stdin(std::process::Stdio::null())
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+        let path = String::from_utf8_lossy(&output.stdout).into_owned();
+        assert!(path.ends_with(&std::env::var("PATH").unwrap()), "{path}");
+        let local = dirs::home_dir().unwrap().join(".local/bin");
+        assert!(
+            path.split(':')
+                .any(|entry| entry == local.to_str().unwrap()),
+            "{path}"
+        );
     }
 
     #[test]

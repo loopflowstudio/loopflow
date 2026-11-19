@@ -1000,3 +1000,17 @@ Slice 4 checked these against what shipped (`5adee6450c`): `docs/sessions.md`
 ("After a kill, a crash or a reboot"), `docs/work.md`, `docs/troubleshooting.md`,
 `docs/server.md`, `rust/loopflow/src/server/README.md` ("Recovery pass") and
 `rust/loopflow-execution/src/transport/README.md` (holder "Lifetime").
+
+## Human review (2026-11-18, headless, HEAD `fcfa554e2c`)
+
+`scratch/human-review.html`. Nobody was in the conversation; the page records
+no reaction and its seven questions are open. Nothing promised is missing, so
+the run goes on to delivery ("This run ships").
+
+- Ran here, the one named fixture unrun since the merge of main `3496a8761d`:
+  `cargo test -p loopflow --lib task_graph_launch_tests::a_task_run_whose_carrier_died`,
+  1 pass (148 s).
+- CI's suites have not run on this branch: with notes in `scratch/`,
+  `rust-test`, `rust-lint`, `macos` and `migration-check` skip, and the PR's
+  green is `scratch-clear` and `macos-inputs`. Gate reads the suites' result
+  after clearing scratch.

@@ -267,3 +267,16 @@ what ships understood and decides what happens to every finding.
   separate outcome goes on the page as outside it. Say the same in "After the
   change is built": a wrong model after build means another full pass, not a
   follow-up.
+
+## To build: the Task run speaks the conversation's outlook
+
+Carried from LOO-959's concept review (answer 1a; #1972 merged first). Folded
+in here: this branch owns run recovery (`ops/task/run_recovery.rs`) and its
+restart rule.
+
+- The Task run gets the conversation's outlook type: `SessionOutlook`
+  (`ops/human_session.rs`) replaces `DiedRun::reason` in waiting/blocked; the
+  run's death is `died { at_step, at }`.
+- "no server runs here" applies to the run as it does to the conversation.
+- The three run sentences use the conversation's words: clock time,
+  "starting again", no "pass".

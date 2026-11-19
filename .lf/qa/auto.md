@@ -16,6 +16,8 @@ human-review`, `- cmd: land`, `- interactive: verify`; commit, push, then
 `git merge origin/main` in each Task checkout (the graph is read from the
 checkout). For a run with no interactive step ahead, `- implement` then
 `- cmd: land`, on a fresh `lf task create '<words>' --json`.
+`lf task auto on` takes no `--graph`: set `graph: qaship` in `.lf/config.yaml`
+(committed, pushed, merged into the checkouts) so a never-run Task takes it up.
 
 Headless steps: a `claude` ahead of the world's on `PATH` that, for `-p`
 with no terminal, reads one line, waits while a marker file exists, then
@@ -33,6 +35,9 @@ takes nothing else (a never-run Task takes up the repository's graph), and
 `task.auto.off` takes `"reason":null` beside them and answers `{issue, was_on}`.
 `lf task auto on` is `lf ship`: check both spellings on a Task waiting at
 `human-review` (each stands in there) and on a never-run Task (one Graph run).
+With `--json` the run is the only thing on stdout; "standing in at …" goes to
+stderr. Both spellings at the same moment on a never-run Task leave one run:
+one prints it, the other exits 1 with "is running graph …".
 
 Selection state `auto` is a Dashboard expression (`lf desktop dashboard query
 'Auto' 'state:auto'` prints JSON), not a `lf task list` filter. Never run
@@ -40,8 +45,10 @@ Selection state `auto` is a Dashboard expression (`lf desktop dashboard query
 registers the world's repository in the real `~/.lf` and starts real
 conversations there.
 
-Recovery: a shipped run's carrier is `lf ship <id>` with parent 1 (find it with
-`ps -axo pid,pgid,command | grep 'lf ship'`); `kill -9 -<its pgid>` and its
+Recovery: a shipped run's carrier is the command as typed, with parent 1:
+`lf ship <id>`, `lf task auto on <id>`, or a bare `lf task auto on` from the
+checkout (find it with `ps -axo pid,ppid,pgid,command | grep <LF_HOME's bin>`);
+`kill -9 -<its pgid>` and its
 headless `claude`; the server's pass carries it again as `lf task run <id>`
 within about a minute. The killed Graph process stays `Current` (and the
 Task reads `moving`) until the hourly prune; `lf machine prune`

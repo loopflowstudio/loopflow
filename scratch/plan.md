@@ -116,7 +116,13 @@ when the PR merges.
 
 Gate.
 
-QA 2026-11-19 (`scratch/qa.html`): the CLI, socket, recovery and 0.16 upgrade
+QA 2026-11-19 at `08e047dfe8` (`scratch/qa.html`): `lf task auto on`, `lf ship`
+and `task.ship` are one operation on a never-run, waiting, stopped, running and
+Task-less-branch start; `task.auto.off` and recovery work. Two `on`s at the
+same moment on a never-run Task leave one run, and the second exits 1 with
+"is running graph …" (the `graph_for_ship` window below, now seen). The
+upgrade from 0.16 was driven at `679f658cbf`; the migration is unchanged since.
+Earlier the same day: the CLI, socket, recovery and 0.16 upgrade
 paths work on a private Machine. `lf task status --json` now carries `auto`
 (`TaskDetail.auto`), and a Task read from another Machine prints it; the
 remote line was compiled, not driven.
@@ -131,8 +137,8 @@ refused. So the early take-up was itself a request to run.
 
 `lf ship` still takes up the Graph a moment before its own run starts
 (`graph_for_ship`), across `prepare_task`. A conversation opening inside that
-window would start a second run and the ship would report the refusal. Not
-seen in a fixture. Closing it means setting auto inside `start_task_run`,
+window would start a second run and the ship would report the refusal. Seen
+in QA with two ships at once; not in a fixture. Closing it means setting auto inside `start_task_run`,
 after its take-up.
 
 Checks nobody has run since main was merged in (2026-11-19):

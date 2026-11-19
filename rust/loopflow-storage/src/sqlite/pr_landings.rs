@@ -29,13 +29,13 @@ fn invalid_column(
 }
 
 fn map_landing(row: &rusqlite::Row<'_>) -> rusqlite::Result<PrLanding> {
-    let generation = row.get::<_, i64>(12)? as u64;
-    let placement = match row.get::<_, Option<String>>(13)?.as_deref() {
+    let generation = row.get::<_, i64>(10)? as u64;
+    let placement = match row.get::<_, Option<String>>(11)?.as_deref() {
         None => None,
         Some("local") => Some(LandingPlacement::Local),
         Some(value) => {
             return Err(invalid_column(
-                13,
+                11,
                 crate::pr_landing::PrLandingDataError::InvalidInvariant(format!(
                     "invalid stored landing placement: {value}"
                 )),
@@ -45,15 +45,15 @@ fn map_landing(row: &rusqlite::Row<'_>) -> rusqlite::Result<PrLanding> {
     let supervisor = match placement {
         Some(placement) => Some(LandingSupervisor {
             placement,
-            process_id: row.get::<_, i64>(15)? as u32,
-            heartbeat_at: datetime(16, row.get(16)?)?,
+            process_id: row.get::<_, i64>(13)? as u32,
+            heartbeat_at: datetime(14, row.get(14)?)?,
         }),
         None => None,
     };
     let state = row
-        .get::<_, String>(11)?
+        .get::<_, String>(9)?
         .parse()
-        .map_err(|error| invalid_column(11, error))?;
+        .map_err(|error| invalid_column(9, error))?;
     Ok(PrLanding {
         id: PrLandingId::from_raw(row.get::<_, String>(0)?),
         repo: row.get(1)?,
@@ -67,16 +67,16 @@ fn map_landing(row: &rusqlite::Row<'_>) -> rusqlite::Result<PrLanding> {
         state,
         generation,
         supervisor,
-        blocked_reason: row.get(17)?,
-        created_at: datetime(18, row.get(18)?)?,
-        updated_at: datetime(19, row.get(19)?)?,
+        blocked_reason: row.get(15)?,
+        created_at: datetime(16, row.get(16)?)?,
+        updated_at: datetime(17, row.get(17)?)?,
     })
 }
 
 const LANDING_COLUMNS: &str = "
     id, repo, pr_number, worktree, branch, task_id,
-    requested_head_sha, observed_head_sha, merge_commit, after_merge,
-    next_slug, state, generation, supervisor_placement, supervisor_machine_id,
+    requested_head_sha, observed_head_sha, merge_commit, state, generation,
+    supervisor_placement, supervisor_machine_id,
     supervisor_process_id, supervisor_heartbeat_at,
     blocked_reason, created_at, updated_at";
 

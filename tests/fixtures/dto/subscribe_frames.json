@@ -285,6 +285,8 @@
           "conflicts": {}
         },
         "row": null,
+        "parent": null,
+        "children": [],
         "tracker_state": {
           "state": "available",
           "synced_at": null

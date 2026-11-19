@@ -349,16 +349,23 @@ existing update a conversation gets about its own Task; Waves and
    the Swift mirror `TaskPlanningSnapshot.parentId` and every fixture,
    `lf wave show` and `lf task list` indenting a child under an open
    parent in the list.
+   Built after slice 4: `lf task create --json` carries `parent`, the
+   parent's `TaskRow` or `null` (`created_rows` reads both rows in one
+   snapshot); served `task.create` takes `parent`, required and nullable,
+   and Swift's `ServedWrite.taskCreate` sends it (every caller passes
+   `nil`); `lf task show --json` (`DesktopTaskPane`) carries `parent` and
+   `children` as `lf task status` does; `task_prs.after_merge` /
+   `next_slug` and the `pr_landings` pair are out of every read and marked
+   `-- leaving:` LOO-996. Shown by
+   `session_cli_tests::a_task_filed_from_a_tasks_conversation_shows_under_it`
+   (`.parent.identifier` on the receipt, both keys on `lf task show`) and
+   the `dto_fixtures::` round trips of `task_create_receipt.json`,
+   `task_status.json` (now read as `DesktopTaskPane`) and
+   `subscribe_frames.json`.
+   Not built: Swift does not decode the receipt's `parent` or the pane's
+   two keys (it has no `TaskRow` mirror and nothing draws them yet); the
+   iOS target was not compiled here, only the macOS Swift tests.
    Remaining:
-   - `lf task show` (`TaskStatus`, `DesktopTaskPane`): the same two keys.
-   - served `task.create`: `parent`. Today it files top-level
-     (`write.rs` passes `parent: None, caller: None`).
-   - `lf task create --json` carries `task.parent_task_id` (an ID), not the
-     `.parent.identifier` the acceptance check names; `row.parent` arrives
-     with `RoadmapTask`.
-   - The leaving marks for `task_prs.after_merge` / `next_slug` and the
-     `pr_landings` pair. `map_task_pr_row` reads columns by position, so
-     taking them out of `TASK_PR_COLUMNS` renumbers every read after 7.
    - The cycle refusal: nothing can make one at filing (a new Task has no
      children). It belongs with the first write that changes a parent
      (slice 5's tracker edit). `docs/work.md` Reference still names it.
@@ -411,27 +418,23 @@ existing update a conversation gets about its own Task; Waves and
    cannot read which children stayed open. Desktop does not nest yet
    (`parentId` is decoded and unused). A done parent run through
    `lf task complete` again does not revisit children left open.
-   Read once as a reviewer, remaining:
-   - "Merged with children open" is derived three times: `merged_action`
-     (`task_actions.rs`), the `conducting` branch in `waves.rs` next-move,
-     and `RoadmapTask::conducts_after_merge`, which then swaps the reason
-     when the row is built. One derivation, read by all three.
-   - `TaskEventKind::FamilyCompletionRequested` is a second event kind
-     carrying one bit (a person asked, not a Graph reaching `end`), read
-     back with `json_extract` in `completion_request`
-     (`sqlite/children.rs`). It is what stops a Graph's pending request
-     from abandoning a child filed afterwards. A simpler form may be for a
-     Graph's request not to outlive the first child; not decided.
-   - `complete_children` writes `abandoned_at` itself beside
-     `durable.rs`'s abandon; both end in `record_task_abandonment`.
+   The three review items, settled:
+   - "Merged with children open" is `task_actions::conducting_reason`,
+     read by `merged_action` and the list's next move; `RoadmapTask`
+     carries its answer (`conducting`) for `TaskRow` and `lf wave show`.
+   - `TaskEventKind::FamilyCompletionRequested` stays. The other form, a
+     Graph's request withdrawn when a child appears, needs every write
+     that can put an open child under a waiting Task (filing, reopening,
+     slice 5's parent edit) to remember to withdraw it; one missed and a
+     Graph's request abandons a child nobody asked to close. The variant
+     says why in its doc comment.
+   - `durable::abandon_task_in` is the one abandon write; `lf task
+     abandon` and `complete_children` both call it.
 5. **The link travels.** `TaskParent` through the plan exchange and to Linear
    and Asana, on LOO-938. Until then a child reaches the tracker as an
    ordinary issue: `task_creation_intents` carries no parent.
 
-Next: the rest of slice 2, which makes the acceptance check's first line
-true: `.parent.identifier` on the creation receipt, `parent` on served
-`task.create`, the two keys on `lf task show`, the leaving marks. With it,
-the three review items under slice 4. Then slice 5.
+Next: slice 5, on `lf sync LOO-938`, and with it the cycle refusal.
 
 One PR. #1983 (LOO-938) was open and unmerged at 2026-11-18, with nothing
 new on origin/main since this branch's base, so slice 5 is built on

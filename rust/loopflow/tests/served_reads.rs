@@ -256,6 +256,7 @@ fn served_session_adoption_matches_cli_without_new_execution() {
             request_id: format!("adoption-{served_first}"),
             request: None,
             wave: None,
+            parent: None,
             graph: None,
             run: false,
         };
@@ -334,6 +335,7 @@ fn served_session_adoption_matches_cli_without_new_execution() {
             request_id: "bad-adoption".into(),
             request: None,
             wave: None,
+            parent: None,
             graph: None,
             run: false,
         })
@@ -2004,6 +2006,7 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             title,
             request,
             wave,
+            parent,
             graph,
             session,
             run,
@@ -2013,6 +2016,7 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
                 ("--title", title),
                 ("--notes", request),
                 ("--wave", wave),
+                ("--parent", parent),
                 ("--graph", graph),
                 ("--session", session),
             ] {
@@ -2903,6 +2907,7 @@ fn served_task_create_survives_a_dropped_connection_and_server_restart() {
         title: Some("One Task".into()),
         request: None,
         wave: None,
+        parent: None,
         graph: None,
         session: None,
         run: false,

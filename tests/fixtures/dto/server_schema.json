@@ -1830,6 +1830,13 @@
     "DesktopTaskPane": {
       "description": "The full Task reading used by Desktop and terminal Task views, plus the\nDesktop row that keeps the pane current after the Task leaves the plan.",
       "properties": {
+        "children": {
+          "description": "The Tasks filed from this one, in filing order.",
+          "items": {
+            "$ref": "#/$defs/TaskRow"
+          },
+          "type": "array"
+        },
         "comments": {
           "anyOf": [
             {
@@ -1876,6 +1883,13 @@
             {
               "type": "null"
             }
+          ]
+        },
+        "parent": {
+          "description": "The Task this one was filed from, by identifier; `null` for top-level work.",
+          "type": [
+            "string",
+            "null"
           ]
         },
         "plan_error": {
@@ -1943,7 +1957,9 @@
         "overview",
         "graph_processes",
         "comments",
-        "row"
+        "row",
+        "parent",
+        "children"
       ],
       "type": "object"
     },
@@ -11852,7 +11868,7 @@
       "type": "object"
     },
     "TaskCreated": {
-      "description": "`task.create`'s answer: its receipt, the primary conversation's record and\nthe Task's row in the Work projection's shape, read when answering, so a\nclient selects the Task and opens the conversation before its planning\nsubscription lists it. The stored receipt holds neither.",
+      "description": "`task.create`'s answer: its receipt, the primary conversation's record, the\nTask's parent and its row in the Work projection's shape, read when answering, so a\nclient selects the Task and opens the conversation before its planning\nsubscription lists it. The stored receipt holds neither.",
       "properties": {
         "graph": {
           "type": [
@@ -11862,6 +11878,17 @@
         },
         "milestone": {
           "type": "string"
+        },
+        "parent": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TaskRow"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The Task this one was filed from, as lists show it; `null` for\ntop-level work."
         },
         "row": {
           "$ref": "#/$defs/RoadmapTask"
@@ -11896,7 +11923,8 @@
         "session_id",
         "milestone",
         "session",
-        "row"
+        "row",
+        "parent"
       ],
       "type": "object"
     },
@@ -12539,6 +12567,7 @@
           "type": "object"
         },
         {
+          "description": "A person asked to complete the Task, so settling it settles its\nchildren too. A Graph reaching `end` writes `CompletionRequested`,\nwhich waits while a child is open. The request can pend until the\nTask's PR merges, and a child can be filed, reopened or moved under\nthe Task meanwhile, so who asked is kept with the request.",
           "properties": {
             "kind": {
               "const": "family_completion_requested",
@@ -13330,6 +13359,130 @@
       "required": [
         "issue_url",
         "workspace"
+      ],
+      "type": "object"
+    },
+    "TaskRow": {
+      "description": "One Task. Wire type; no defaults.",
+      "properties": {
+        "graph": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TaskRowGraph"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "identifier": {
+          "type": "string"
+        },
+        "next": {
+          "description": "The command that moves it on; `null` while it moves by itself or is closed.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "parent": {
+          "description": "The stable ID of the Task this one was filed from.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "pr": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TaskRowPr"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Its published pull request."
+        },
+        "project": {
+          "description": "Its Project's name; `null` outside any Project.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reason": {
+          "description": "Why it is in that state, or what it waits on.",
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/TaskState"
+        },
+        "title": {
+          "type": "string"
+        },
+        "wave": {
+          "description": "Its Wave's name; `null` outside any Wave.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "identifier",
+        "title",
+        "wave",
+        "project",
+        "parent",
+        "state",
+        "reason",
+        "graph",
+        "pr",
+        "next"
+      ],
+      "type": "object"
+    },
+    "TaskRowGraph": {
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "step": {
+          "description": "The step it stands at (`start`, `end` or an interactive step); `null` while a run carries it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "name",
+        "step"
+      ],
+      "type": "object"
+    },
+    "TaskRowPr": {
+      "properties": {
+        "number": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "phase": {
+          "$ref": "#/$defs/PrPhase"
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "number",
+        "url",
+        "phase"
       ],
       "type": "object"
     },
@@ -15454,6 +15607,7 @@
               "directory": "/repo",
               "graph": null,
               "kind": "task.create",
+              "parent": null,
               "request": null,
               "request_id": "fixture-creation",
               "run": false,
@@ -15465,6 +15619,7 @@
               "directory": "/repo",
               "graph": null,
               "kind": "task.create",
+              "parent": null,
               "request": "Fix the retry test",
               "request_id": "00000000-0000-4000-8000-000000000001",
               "run": true,
@@ -15486,6 +15641,13 @@
             "kind": {
               "const": "task.create",
               "type": "string"
+            },
+            "parent": {
+              "description": "The Task this one is filed from, by ID or identifier; `null` files top-level.",
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "request": {
               "type": [
@@ -15525,6 +15687,7 @@
             "title",
             "request",
             "wave",
+            "parent",
             "graph",
             "session",
             "run"

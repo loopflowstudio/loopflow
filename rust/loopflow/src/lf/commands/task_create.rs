@@ -11,8 +11,8 @@ use loopflow_execution::engine::creation::{self, TaskCreation};
 use loopflow_storage::graph_process::{Execution, ExecutionResult};
 use loopflow_storage::sqlite::SqliteStore;
 
-/// `task.create`'s answer: its receipt, the primary conversation's record and
-/// the Task's row in the Work projection's shape, read when answering, so a
+/// `task.create`'s answer: its receipt, the primary conversation's record, the
+/// Task's parent and its row in the Work projection's shape, read when answering, so a
 /// client selects the Task and opens the conversation before its planning
 /// subscription lists it. The stored receipt holds neither.
 #[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
@@ -22,6 +22,10 @@ pub struct TaskCreated {
     #[serde(deserialize_with = "Option::deserialize")]
     pub session: Option<loopflow_execution::ops::human_session::SessionRecord>,
     pub row: super::waves::RoadmapTask,
+    /// The Task this one was filed from, as lists show it; `null` for
+    /// top-level work.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub parent: Option<super::task_row::TaskRow>,
 }
 
 /// Read the created Task's row after its commit and join it to the answer, as
@@ -37,11 +41,12 @@ pub(crate) fn answer(
             let store = loopflow_execution::store::read_existing_registry()?
                 .map(std::sync::Arc::new)
                 .context("no Loopflow store exists on this Machine")?;
-            let row = super::waves::task_row(&store, &receipt.task).await?;
+            let (row, parent) = super::waves::created_rows(&store, &receipt.task).await?;
             Ok(TaskCreated {
                 receipt,
                 session,
                 row,
+                parent,
             })
         })
     })

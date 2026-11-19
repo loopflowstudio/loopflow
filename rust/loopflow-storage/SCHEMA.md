@@ -42,7 +42,7 @@ to one. `uv run python scripts/due_removals.py` prints when each may drop.
 - `task_linear_observations`: task_id, last_revision, last_title, last_description, last_success_at, degraded_reason, updated_at
 - `task_moves`: id, task_id, from_machine_id, to_machine_id, state, at, claim_id, stopped, payload
 - `task_primary_sessions`: task_id, session_id
-- `task_prs`: id, task_id, sequence, slug, branch, base_commit, publication_requested_at, after_merge, next_slug, github_number, github_url, merge_commit, abandoned_at, created_at, updated_at, github_head_sha, ci_observation, parent_pr_id, github_observation, linear_attachment_id, linear_comment_id, linear_link_error, merge_mode, merge_requested_at, merge_head_sha, merged_at, merge_tracking_complete, ~~repair_tracking_complete~~ (leaving → LOO-954, unused_store_members), pr_title, pr_body, pr_copy_head_sha, historical
+- `task_prs`: id, task_id, sequence, slug, branch, base_commit, publication_requested_at, ~~after_merge~~ (leaving → LOO-996, task_parent), ~~next_slug~~ (leaving → LOO-996, task_parent), github_number, github_url, merge_commit, abandoned_at, created_at, updated_at, github_head_sha, ci_observation, parent_pr_id, github_observation, linear_attachment_id, linear_comment_id, linear_link_error, merge_mode, merge_requested_at, merge_head_sha, merged_at, merge_tracking_complete, ~~repair_tracking_complete~~ (leaving → LOO-954, unused_store_members), pr_title, pr_body, pr_copy_head_sha, historical
 - `task_retirements`: task_id, completion, checkout, branch, due_at, phase, reason, retry_at, failures
 - `task_ship_events`: id, task_id, kind, at, lf_process_id, person, pid, os_started_at, ended_at, exit_code, error, caller_session_id
 - `task_state_deliveries`: seq, id, task_id, target, base_revision, base_state, attempted, settled, error, conflict_json
@@ -53,7 +53,7 @@ to one. `uv run python scripts/due_removals.py` prints when each may drop.
 ## PR landing
 
 - `ci_incidents`: identity, landing_id, task_id, pr_id, repo, pr_number, failed_head_sha, failure_set_json, provider_completed_at, poll_observed_at, webhook_received_at, claimed_landing_generation, responded_at, green_at, merged_at, blocked_at, blocked_reason, created_at, updated_at, repaired_head_sha, repair_lf_process_id, repair_session_id, repair_retries, repair_finished_at, repair_error, repair_conclusion, repair_started_at, repair_pid, repair_os_started_at
-- `pr_landings`: id, repo, pr_number, worktree, branch, task_id, requested_head_sha, observed_head_sha, merge_commit, after_merge, next_slug, state, generation, supervisor_placement, supervisor_machine_id, supervisor_process_id, supervisor_heartbeat_at, blocked_reason, created_at, updated_at, retired_supervisor_json
+- `pr_landings`: id, repo, pr_number, worktree, branch, task_id, requested_head_sha, observed_head_sha, merge_commit, ~~after_merge~~ (leaving → LOO-996, task_parent), ~~next_slug~~ (leaving → LOO-996, task_parent), state, generation, supervisor_placement, supervisor_machine_id, supervisor_process_id, supervisor_heartbeat_at, blocked_reason, created_at, updated_at, retired_supervisor_json
 
 ## Linear events
 

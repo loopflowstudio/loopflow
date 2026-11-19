@@ -19,7 +19,7 @@ struct RegistryQueryTests {
         }
         let adoption = Adoption()
         let query = RegistryQuery(write: { change in
-            guard case .taskCreate(_, _, let title?, _, _, _, _, _) = change else {
+            guard case .taskCreate(_, _, let title?, _, _, _, _, _, _) = change else {
                 throw RegistryQueryError("Unexpected write")
             }
             return try await adoption.submit(title: title)

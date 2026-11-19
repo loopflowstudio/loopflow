@@ -62,3 +62,10 @@ WHEN NEW.merge_commit IS NOT OLD.merge_commit
 BEGIN
     UPDATE store_revisions SET revision=revision+1 WHERE domain='task_updates';
 END;
+
+-- Nothing writes or reads what a merge should do next: one Task has one PR,
+-- and work after a merge is a child Task.
+-- leaving: task_prs.after_merge LOO-996
+-- leaving: task_prs.next_slug LOO-996
+-- leaving: pr_landings.after_merge LOO-996
+-- leaving: pr_landings.next_slug LOO-996

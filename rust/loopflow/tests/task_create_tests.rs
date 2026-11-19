@@ -103,6 +103,7 @@ fn task_create_answers_and_its_conversation_starts_the_graph_across_a_server_res
         session: None,
         run: true,
         wave: None,
+        parent: None,
         graph: Some("feature".into()),
     };
     let operation = || Operation::Write(change.clone());
@@ -220,6 +221,7 @@ fn task_create_answers_and_its_conversation_checks_out_without_the_network() {
             session: None,
             run: true,
             wave: None,
+            parent: None,
             graph: Some("feature".into()),
         }))
         .unwrap()

@@ -123,5 +123,25 @@
   "tracker_state": {
     "state": "available",
     "synced_at": 1790683200
-  }
+  },
+  "row": null,
+  "parent": "LOO-1",
+  "children": [
+    {
+      "id": "task_33333333333333333333333333333333",
+      "identifier": "LOO-3",
+      "title": "Retry the bounced mail",
+      "wave": null,
+      "project": "Mail",
+      "parent": "task_11111111111111111111111111111111",
+      "state": "idle",
+      "reason": "Waiting at human-review",
+      "graph": {
+        "name": "code",
+        "step": "human-review"
+      },
+      "pr": null,
+      "next": "lf task run LOO-3"
+    }
+  ]
 }

@@ -586,7 +586,8 @@ ambiguous prefix lists its matches.
 **Parent.** `--parent <ID>` on `lf task create` names the parent;
 `--parent none` files top-level; an unknown ID is an error naming it, and so
 is a parent that would be its own descendant. `lf task create --json` carries
-the parent's ID as `task.parent_task_id`. `lf task status --json` carries
+`parent`, the parent's row as `lf task list --json` prints it, or `null`.
+`lf task status --json` and `lf task show --json` carry
 `parent`, the parent's identifier or `null`, and `children`, the same rows
 `lf task list --json` prints, `[]` when there are none. Each of those rows
 carries its own `parent`, the parent's `id` or `null`, so a list can nest. A

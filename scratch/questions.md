@@ -81,6 +81,19 @@ rest is not chosen.
   section, with its own section named at the end of the line when it
   differs.
 
+## Made while finishing slice 2, for review
+
+- The creation receipt's `parent` is the parent's whole `TaskRow`, the row
+  lists print, so `.parent.identifier` holds and no new shape exists. That
+  makes three spellings in one receipt: `task.parent_task_id` (ID),
+  `row.task.parent_id` (ID), `parent` (row). `lf task status` and
+  `lf task show` keep `parent` as the identifier string. One spelling
+  everywhere / leave?
+- Served `task.create` has no caller, so `parent: null` files top-level;
+  a client names the parent or gets none.
+- `tests/fixtures/dto/task_status.json` is now read as `DesktopTaskPane`,
+  what `lf task show --json` prints, with `row: null`.
+
 ## Raised by reading slice 4 (not run)
 
 - `lf task complete <parent>` closes or abandons children, and each of

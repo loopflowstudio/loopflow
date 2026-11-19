@@ -506,19 +506,10 @@ pub struct RoadmapTask {
     /// Carried to `lf task status`'s `TaskRow`, not on the wire.
     #[serde(skip)]
     pub(crate) step: Option<String>,
+    /// Why a merged Task stays open: it has open children to conduct.
+    /// Stands for the reason in `TaskRow` and the lists, not on the wire.
     #[serde(skip)]
-    pub(crate) open_children: u32,
-}
-
-impl RoadmapTask {
-    pub(crate) fn conducts_after_merge(&self) -> bool {
-        self.open_children > 0
-            && !self.lifecycle.is_terminal()
-            && self
-                .pr
-                .as_ref()
-                .is_some_and(|pr| pr.phase == PrPhase::Merged)
-    }
+    pub(crate) conducting: Option<String>,
 }
 
 /// `lf wave list` — every durable Wave identity the registry knows.
@@ -1181,17 +1172,30 @@ pub struct DesktopTaskPane {
     #[serde(flatten)]
     pub status: loopflow_execution::ops::task::TaskStatus,
     pub row: Option<RoadmapTask>,
+    /// The Task this one was filed from, by identifier; `null` for top-level work.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub parent: Option<String>,
+    /// The Tasks filed from this one, in filing order.
+    pub children: Vec<TaskRow>,
 }
 
 pub(crate) async fn task_pane(
     store: &SharedStore,
     status: loopflow_execution::ops::task::TaskStatus,
 ) -> Result<DesktopTaskPane> {
-    let row = match &status.task {
-        Some(task) => Some(task_row(store, task).await?),
-        None => None,
+    let (row, (parent, children)) = match &status.task {
+        Some(task) => (
+            Some(task_row(store, task).await?),
+            task_family(store, task).await?,
+        ),
+        None => (None, (None, Vec::new())),
     };
-    Ok(DesktopTaskPane { status, row })
+    Ok(DesktopTaskPane {
+        status,
+        row,
+        parent,
+        children,
+    })
 }
 
 /// One Task's row in the Work projection's shape, as the plan reads it.
@@ -1200,6 +1204,32 @@ pub(crate) async fn task_row(store: &SharedStore, task: &Task) -> Result<Roadmap
     Ok(snapshot_task_details(store, vec![task], false, &shared)?
         .pop()
         .expect("one Task reads one row"))
+}
+
+/// A created Task's row, and the row of the Task it was filed from.
+pub(crate) async fn created_rows(
+    store: &SharedStore,
+    task: &Task,
+) -> Result<(RoadmapTask, Option<TaskRow>)> {
+    let parent = match &task.parent_task_id {
+        Some(parent) => store.get_task(parent).await?,
+        None => None,
+    };
+    let shared = SharedTaskReads::read(store).await?;
+    let mut rows = snapshot_task_details(
+        store,
+        std::iter::once(task).chain(&parent).collect(),
+        false,
+        &shared,
+    )?;
+    let parent = match rows.len() {
+        2 => {
+            let names = TaskNames::read(Some(store)).await?;
+            rows.pop().map(|row| names.row(row))
+        }
+        _ => None,
+    };
+    Ok((rows.pop().expect("one Task reads one row"), parent))
 }
 
 /// The Task `task` was filed from, by identifier, and the Tasks filed from it.
@@ -2152,13 +2182,15 @@ async fn snapshot_task_detail(
         None
     };
     let open_children = facts.open_children.get(&task.id).copied().unwrap_or(0);
-    let conducting = open_children > 0
-        && pr.as_ref().is_some_and(|pr| pr.phase() == PrPhase::Merged)
-        && !status.is_terminal();
-    let next_move = if conducting {
+    let conducting = loopflow_execution::ops::task_actions::conducting_reason(
+        &status.work_status(),
+        pr.as_ref().map(TaskPr::phase),
+        open_children,
+    );
+    let next_move = if let Some(reason) = conducting.clone() {
         NextMove {
             owner: NextMoveOwner::Task,
-            reason: loopflow_execution::ops::task_actions::merged_children_reason(open_children),
+            reason,
         }
     } else if unassigned(&runtime) {
         NextMove {
@@ -2322,7 +2354,7 @@ async fn snapshot_task_detail(
         }),
         section,
         step: facts.steps.get(&task.id).cloned(),
-        open_children,
+        conducting,
     })
 }
 
@@ -3138,11 +3170,11 @@ fn task_roadmap_row(task: &RoadmapTask, now: time::OffsetDateTime) -> RoadmapRow
             .as_ref()
             .map(|workspace| workspace.slug.clone()),
         condition: Some(task.condition.state),
-        reason: std::iter::once(if task.conducts_after_merge() {
-            task.next_move.reason.clone()
-        } else {
-            task.condition.reason.clone()
-        })
+        reason: std::iter::once(
+            task.conducting
+                .clone()
+                .unwrap_or_else(|| task.condition.reason.clone()),
+        )
         .chain(task.task.sync.lines())
         .collect::<Vec<_>>()
         .join(" · "),

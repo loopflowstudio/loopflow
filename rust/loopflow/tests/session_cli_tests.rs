@@ -673,6 +673,10 @@ fn a_task_filed_from_a_tasks_conversation_shows_under_it() {
         Some(&caller),
     ));
     assert_eq!(child["task"]["parent_task_id"], parent_id);
+    // The receipt names the Task it was filed from as a list would show it.
+    assert_eq!(child["parent"]["identifier"], parent_name);
+    assert_eq!(child["parent"]["state"], "unstarted");
+    assert!(parent["parent"].is_null());
     let child_name = child["task"]["identifier"].as_str().unwrap();
     let apart = json(lf(
         &[
@@ -687,6 +691,15 @@ fn a_task_filed_from_a_tasks_conversation_shows_under_it() {
         Some(&caller),
     ));
     assert!(apart["task"]["parent_task_id"].is_null());
+    assert!(apart["parent"].is_null());
+
+    // `lf task show` carries the same two keys as `lf task status`.
+    let shown = json(lf(&["task", "show", &parent_name, "--json"], None));
+    assert!(shown["parent"].is_null());
+    assert_eq!(shown["children"][0]["identifier"], child_name);
+    let shown = json(lf(&["task", "show", child_name, "--json"], None));
+    assert_eq!(shown["parent"], parent_name);
+    assert_eq!(shown["children"], serde_json::json!([]));
 
     let status = json(lf(&["task", "status", &parent_name, "--json"], None));
     assert!(status["parent"].is_null());

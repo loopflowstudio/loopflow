@@ -1862,7 +1862,7 @@ const TASK_COLUMNS: &str = "SELECT t.id,t.external_issue_id,
     LEFT JOIN task_checkouts c ON c.task_id=t.id";
 pub(super) const TASK_PR_COLUMNS: &str = "SELECT
     id, task_id, sequence, slug, branch, base_commit,
-    publication_requested_at, after_merge, next_slug, github_number, github_url,
+    publication_requested_at, github_number, github_url,
     merge_commit, abandoned_at, created_at, updated_at,
     github_head_sha, ci_observation, parent_pr_id, github_observation,
     linear_attachment_id, linear_comment_id, linear_link_error,
@@ -1871,7 +1871,7 @@ pub(super) const TASK_PR_COLUMNS: &str = "SELECT
     FROM task_prs";
 const TASK_PR_SELECT: &str = "SELECT
     id, task_id, sequence, slug, branch, base_commit,
-    publication_requested_at, after_merge, next_slug, github_number, github_url,
+    publication_requested_at, github_number, github_url,
     merge_commit, abandoned_at, created_at, updated_at,
     github_head_sha, ci_observation, parent_pr_id, github_observation,
     linear_attachment_id, linear_comment_id, linear_link_error,
@@ -2340,33 +2340,33 @@ fn map_task_columns(
 
 pub(super) fn map_task_pr_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskPr> {
     let publication_requested_at = row.get::<_, Option<i64>>(6)?;
-    let github_number = row.get::<_, Option<i64>>(9)?.map(|number| number as u32);
-    let github_url = row.get::<_, Option<String>>(10)?;
-    let github_head_sha = row.get::<_, Option<String>>(15)?;
+    let github_number = row.get::<_, Option<i64>>(7)?.map(|number| number as u32);
+    let github_url = row.get::<_, Option<String>>(8)?;
+    let github_head_sha = row.get::<_, Option<String>>(13)?;
     let ci_observation = row
-        .get::<_, Option<String>>(16)?
+        .get::<_, Option<String>>(14)?
         .map(|json| serde_json::from_str::<CiObservation>(&json))
         .transpose()
-        .map_err(|error| invalid_column(16, error))?;
+        .map_err(|error| invalid_column(14, error))?;
     let github_observation = row
-        .get::<_, Option<String>>(18)?
+        .get::<_, Option<String>>(16)?
         .map(|json| serde_json::from_str::<GithubObservation>(&json))
         .transpose()
-        .map_err(|error| invalid_column(18, error))?;
+        .map_err(|error| invalid_column(16, error))?;
     let merge = match (
+        row.get::<_, Option<String>>(20)?,
+        row.get::<_, Option<i64>>(21)?,
         row.get::<_, Option<String>>(22)?,
-        row.get::<_, Option<i64>>(23)?,
-        row.get::<_, Option<String>>(24)?,
     ) {
         (Some(mode), Some(requested_at), Some(head_sha)) => Some(PrMergeRequest {
-            mode: mode.parse().map_err(|error| invalid_column(22, error))?,
+            mode: mode.parse().map_err(|error| invalid_column(20, error))?,
             requested_at: crate::rows::unix_to_datetime(requested_at),
             head_sha,
         }),
         (None, None, None) => None,
         _ => {
             return Err(invalid_column(
-                22,
+                20,
                 std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
                     "PR merge request fields must all be present or absent",
@@ -2375,9 +2375,9 @@ pub(super) fn map_task_pr_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskP
         }
     };
     let presentation = match (
+        row.get::<_, Option<String>>(23)?,
+        row.get::<_, Option<String>>(24)?,
         row.get::<_, Option<String>>(25)?,
-        row.get::<_, Option<String>>(26)?,
-        row.get::<_, Option<String>>(27)?,
     ) {
         (Some(title), Some(body), Some(head_sha)) => Some(PrPresentation {
             title,
@@ -2387,7 +2387,7 @@ pub(super) fn map_task_pr_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskP
         (None, None, None) => None,
         _ => {
             return Err(invalid_column(
-                25,
+                23,
                 std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
                     "PR presentation fields must all be present or absent",
@@ -2408,7 +2408,7 @@ pub(super) fn map_task_pr_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskP
                 (None, None) => None,
                 _ => {
                     return Err(invalid_column(
-                        9,
+                        7,
                         std::io::Error::new(
                             std::io::ErrorKind::InvalidData,
                             "GitHub PR number and URL must both be present or absent",
@@ -2427,19 +2427,19 @@ pub(super) fn map_task_pr_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskP
         slug: row.get(3)?,
         branch: row.get(4)?,
         base_commit: row.get(5)?,
-        parent_pr_id: row.get::<_, Option<String>>(17)?.map(TaskPrId::from_raw),
+        parent_pr_id: row.get::<_, Option<String>>(15)?.map(TaskPrId::from_raw),
         publication,
-        merge_commit: row.get(11)?,
+        merge_commit: row.get(9)?,
         abandoned_at: row
-            .get::<_, Option<i64>>(12)?
+            .get::<_, Option<i64>>(10)?
             .map(crate::rows::unix_to_datetime),
         ci_observation,
         github_observation,
-        linear_attachment_id: row.get::<_, Option<String>>(19)?,
-        linear_comment_id: row.get::<_, Option<String>>(20)?,
-        linear_link_error: row.get::<_, Option<String>>(21)?,
-        created_at: crate::rows::unix_to_datetime(row.get(13)?),
-        updated_at: crate::rows::unix_to_datetime(row.get(14)?),
+        linear_attachment_id: row.get::<_, Option<String>>(17)?,
+        linear_comment_id: row.get::<_, Option<String>>(18)?,
+        linear_link_error: row.get::<_, Option<String>>(19)?,
+        created_at: crate::rows::unix_to_datetime(row.get(11)?),
+        updated_at: crate::rows::unix_to_datetime(row.get(12)?),
     };
     pr.validate_persisted()
         .map_err(|error| invalid_column(6, error))?;
@@ -2683,11 +2683,7 @@ fn complete_children(conn: &Connection, parent: &TaskId) -> StoreResult<Vec<Chil
             record_task_completion(conn, &task.id)?;
             ChildDisposition::Completed
         } else if pr.is_none() && never_started(conn, &task.id)? {
-            conn.execute(
-                "UPDATE tasks SET abandoned_at=?2 WHERE id=?1",
-                params![task.id.as_str(), now_unix()],
-            )?;
-            super::durable::record_task_abandonment(conn, &task.id, "parent Task completed")?;
+            super::durable::abandon_task_in(conn, &task.id, "parent Task completed", now_unix())?;
             ChildDisposition::Abandoned
         } else {
             ChildDisposition::Open

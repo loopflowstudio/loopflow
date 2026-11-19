@@ -119,12 +119,26 @@ pub fn merged_children_reason(count: u32) -> String {
     format!("Merged · {count} {children} open")
 }
 
+/// A merged Task with open children stays open to conduct them. Its reason
+/// stands where "complete the Task" would; `None` for every other Task.
+pub fn conducting_reason(
+    status: &WorkStatus,
+    pr: Option<PrPhase>,
+    open_children: u32,
+) -> Option<String> {
+    (open_children > 0
+        && pr == Some(PrPhase::Merged)
+        && !matches!(status, WorkStatus::Done | WorkStatus::Abandoned))
+    .then(|| merged_children_reason(open_children))
+}
+
 fn merged_action(evidence: &TaskActionEvidence) -> TaskActionModel {
-    if evidence.open_children > 0 {
-        return action(
-            TaskAction::NoAction,
-            merged_children_reason(evidence.open_children),
-        );
+    if let Some(reason) = conducting_reason(
+        &evidence.status,
+        evidence.latest_pr_phase,
+        evidence.open_children,
+    ) {
+        return action(TaskAction::NoAction, reason);
     }
     if let Some(refusal) = evidence.completion_refusal {
         return action(TaskAction::NoAction, refusal);

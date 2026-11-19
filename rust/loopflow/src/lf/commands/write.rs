@@ -95,11 +95,13 @@ writes! {
         title: Option<String>,
         request: Option<String>,
         wave: Option<String>,
+        /// The Task this one is filed from, by ID or identifier; `null` files top-level.
+        parent: Option<String>,
         graph: Option<String>,
         session: Option<String>,
         run: bool,
     } => super::task_create::TaskCreated;
-    { request_id, title, request, wave, graph, session, run, .. } => {
+    { request_id, title, request, wave, parent, graph, session, run, .. } => {
     // Served, planning exchange starts once the answer is written.
     let created = loopflow_execution::engine::creation::create(
         request_id,
@@ -108,7 +110,7 @@ writes! {
             title: title.clone(),
             request: request.clone(),
             wave: wave.clone(),
-            parent: None,
+            parent: parent.clone(),
             caller: None,
             graph: graph.clone(),
             session: session.clone(),

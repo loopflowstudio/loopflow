@@ -173,7 +173,8 @@
       "shipping": null,
       "pr": null,
       "section": "working"
-    }
+    },
+    "parent": null
   },
   {
     "task": {
@@ -301,6 +302,7 @@
       "shipping": null,
       "pr": null,
       "section": "working"
-    }
+    },
+    "parent": null
   }
 ]

@@ -664,6 +664,11 @@ pub enum TaskEventKind {
     CompletionRequested {
         reason: Option<String>,
     },
+    /// A person asked to complete the Task, so settling it settles its
+    /// children too. A Graph reaching `end` writes `CompletionRequested`,
+    /// which waits while a child is open. The request can pend until the
+    /// Task's PR merges, and a child can be filed, reopened or moved under
+    /// the Task meanwhile, so who asked is kept with the request.
     FamilyCompletionRequested {
         reason: Option<String>,
     },

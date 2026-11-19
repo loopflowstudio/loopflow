@@ -19,7 +19,7 @@ use loopflow_storage::rows::unix_to_datetime;
 use loopflow_storage::work::task::PrPhase;
 
 /// One Task. Wire type; no defaults.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TaskRow {
     pub id: String,
     pub identifier: String,
@@ -41,14 +41,14 @@ pub struct TaskRow {
     pub next: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TaskRowGraph {
     pub name: String,
     /// The step it stands at (`start`, `end` or an interactive step); `null` while a run carries it.
     pub step: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TaskRowPr {
     pub number: u32,
     pub url: String,
@@ -173,7 +173,6 @@ impl TaskNames {
     pub(crate) fn row(&self, task: RoadmapTask) -> TaskRow {
         let state = task.lifecycle;
         let next = next_command(&task);
-        let conducting = task.conducts_after_merge();
         let summary = task.task;
         TaskRow {
             wave: summary
@@ -190,12 +189,10 @@ impl TaskNames {
             parent: summary.parent_id,
             state,
             // An approved Task waits on its ship, whatever its next move says.
-            reason: if conducting {
-                task.next_move.reason
-            } else {
+            reason: task.conducting.unwrap_or_else(|| {
                 task.shipping
                     .map_or(task.next_move.reason, |shipping| shipping.reason)
-            },
+            }),
             graph: task.graph_name.map(|name| TaskRowGraph {
                 name,
                 step: task.step,
@@ -222,7 +219,9 @@ fn next_command(task: &RoadmapTask) -> Option<String> {
             .as_ref()
             .is_some_and(|pr| pr.phase == PrPhase::Merged) =>
         {
-            (task.open_children == 0).then(|| format!("lf task complete {id}"))
+            task.conducting
+                .is_none()
+                .then(|| format!("lf task complete {id}"))
         }
         _ if task.run_control.unavailable.is_none() => Some(format!("lf task run {id}")),
         _ => None,

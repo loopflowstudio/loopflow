@@ -224,10 +224,10 @@ impl SqliteStore {
     /// Save where an idle conversation takes messages: the inbox key file a
     /// Claude hook found, or the socket an OpenCode plugin or Pi extension
     /// listens on. The Session's provider says which. Written only when it
-    /// changes.
-    pub fn record_agent_inbox(&self, adapter: &SteerAdapter, key: &Path) -> StoreResult<()> {
+    /// changes, which is the answer.
+    pub fn record_agent_inbox(&self, adapter: &SteerAdapter, key: &Path) -> StoreResult<bool> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.execute(
+        let changed = conn.execute(
             "UPDATE agent_sessions SET agent_inbox=?3 WHERE id=?1 AND agent_process_id=?2
                 AND agent_inbox IS NOT ?3 AND EXISTS(SELECT 1 FROM steer_adapters a
                 WHERE a.agent_process_id=?2 AND a.capability=?4)",
@@ -238,7 +238,19 @@ impl SqliteStore {
                 adapter.capability
             ],
         )?;
-        Ok(())
+        if changed > 0 {
+            // A provider naming its inbox for the first time has run no turn
+            // yet, whatever the one before it on this Session was doing: a
+            // reopened conversation is idle until its first turn says otherwise.
+            conn.execute(
+                "UPDATE session_activity SET agent_process_id=?2,yielded=1,open_tools=0,pending_input=0,
+                    observed_at=unixepoch(),program_status=NULL,cpu_sampled_at=NULL,cpu_quiet_since=NULL,
+                    attachment_token=COALESCE((SELECT attachment_token FROM agent_sessions WHERE id=?1),attachment_token)
+                 WHERE session_id=?1 AND agent_process_id IS NOT ?2",
+                params![adapter.session, adapter.agent_process_id],
+            )?;
+        }
+        Ok(changed > 0)
     }
 
     /// Managed conversations whose last boundary was a turn end, on a live

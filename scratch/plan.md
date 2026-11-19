@@ -61,11 +61,31 @@ Checks, each run once on this tree:
 - `tests/e2e/idle_wake.py --harness opencode` (2.2.1) and `--harness pi`
   (1.3.0): passed by hand; gate and QA rerun them where the CLIs exist.
 
+QA on real models (2026-11-19, private Machine, Gemini through OpenCode and
+Pi, `scratch/qa.html`) added two things:
+
+- A work session quit and reopened could not be woken until someone typed:
+  OpenCode's plugin named its socket only at a turn, and Pi's activity row
+  stayed on the earlier process. The plugin now names its socket as it loads,
+  and the first boundary naming a new inbox records the provider as idle and
+  runs the wake (`boundary::After`, `record_agent_inbox`).
+- `idle_wake.py` left its holder and provider running after every run.
+
+Checks after those: `server::boundary::` 11 passed, `server::wake::` 8 passed,
+`harness::context::tests::` 13 passed, both `idle_wake.py` runs passed.
+
 ## Remaining
 
-- Not tested: a wake racing a typed prompt, and a wake while a permission or
-  question dialog is open. Both providers say they queue the message as a
-  steer; only the Node stand-ins and the idle case were run.
+- An OpenCode work session ignores the model in `agent:`: `Harness::open`
+  passes no `--model`, so `opencode:opencode/gemini-4-carbon` ran Gemini 4
+  Neon, the account's default. Workers and Pi use the configured model.
+- Claude reopened with a steer waiting marks it delivered through its start
+  hook and starts no turn; OpenCode and Pi now start one.
+- A provider killed with SIGKILL leaves its empty `/tmp/lf-wake-*` directory.
+
+- Not tested: a wake while a permission or question dialog is open. A wake
+  racing a typed prompt ran on real OpenCode: the steer's turn, then the typed
+  one, each once.
 - OpenCode 2.0.32 has no end-to-end run of the wake (the probe covered its
   `session.synthetic`): `idle_wake.py` on it stops at the first turn with
   "Reconnect OpenCode Console to continue", the fixture's `opencode` provider

@@ -800,6 +800,12 @@ that lapses for the next boundary:
   A turn already running takes the message as a steer. OpenCode's TUI shows
   the answer but not the message that caused it.
 
+A conversation reopened after it was quit runs no turn until someone types.
+The first boundary that names a new inbox or socket records its provider as
+idle and sends what was saved while it was closed: an OpenCode plugin names
+its socket as it loads, a Pi extension at `session_start`. Claude's start hook
+reads those steers into its context instead, and starts no turn.
+
 A server that restarts reads the same conversations again. An unreachable
 Claude inbox or socket leaves its news unclaimed. After a failed send the steers arrive
 again. Chats and batches are never woken. No

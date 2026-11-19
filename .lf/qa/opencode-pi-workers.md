@@ -79,6 +79,23 @@ What to read afterwards:
   <task>` starts the work session in its holder; `lf resume --task <task>` in
   a PTY views it. The plugin's socket is under `/tmp/lf-wake-*/` and is
   recorded in `agent_sessions.agent_inbox`.
+- Idle wake on a real model: on the private Machine above, `lf checkout <task>`
+  then hold the view with `uv run python tests/e2e/hold_tui.py $Q/v $Q/<repo>
+  $Q/bin/lf resume --task <task>` in the background and read `$Q/v/screen.txt`.
+  Idle is `session_activity.yielded=1` for the Session; then `lf steer <task>
+  'Reply with only the word X.'` and wait for X on the screen. `lf session
+  steers <session> --json` shows `delivered_at` and `pending`. OpenCode's own
+  record of the wake is a `synthetic` row in `session_message`. The harness's
+  terminal replies leave `65535u…` in the prompt: send `hex 7f7f…` first.
+- Quit and reopen: `/exit` (OpenCode) or `/quit` (Pi; Ctrl+C does not quit it)
+  in the view, `lf steer`, then `lf resume --task <task>` again: the steer
+  arrives with nothing typed. A conversation quit this way stays quit; one
+  whose provider died (`kill -9`) is restarted by the server's recovery pass.
+- A first Claude launch in a new `/tmp` checkout stops at its folder-trust
+  prompt: `hex 1b5b42` then `hex 0d` picks "Yes, add it" for that session.
+- Stopping the Machine: match `LF_HOME=/private/tmp/…` as well as `/tmp/…` in
+  `ps eww`; the holder records the canonical path. Replacing `$Q/bin/lf` does
+  not replace a running holder: stop it, or the old plugin keeps running.
 
 Run from an agent shell, lf inherits that shell's caller markers
 (`OPENCODE_SESSION_ID`, `OPENCODE_CONFIG_CONTENT`, `CLAUDECODE`); keep them, as

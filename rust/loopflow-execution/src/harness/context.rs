@@ -97,8 +97,11 @@ pub(crate) fn add_opencode_context(
     context: &ContextDelivery,
     instructions: &str,
     kind: LaunchKind,
+    thread: &str,
 ) -> Result<()> {
-    let spec = json!({"executable":crate::os_process::resolve_lf_binary()?, "delivery":context, "instructions":instructions, "turns":kind.is_managed(), "wake":kind == LaunchKind::WorkSession,
+    // A work session listens for the server on the conversation lf named.
+    let wake = (kind == LaunchKind::WorkSession).then_some(thread);
+    let spec = json!({"executable":crate::os_process::resolve_lf_binary()?, "delivery":context, "instructions":instructions, "turns":kind.is_managed(), "wake":wake,
         "steers":loopflow_storage::steer_markers::latest_marker(&context.home), "server":server_spec("lf opencode plugin")});
     let delivery = write_prompt_log(
         &context.repo,
@@ -520,7 +523,7 @@ const wake = (path, thread, text) => new Promise((resolve, reject) => {
             references: Vec::new(),
         };
         let mut config = serde_json::json!({});
-        add_opencode_context(&mut config, &context, "Fixed instructions", kind).unwrap();
+        add_opencode_context(&mut config, &context, "Fixed instructions", kind, "native").unwrap();
         let plugin = config["plugins"][0].as_str().unwrap();
         run_probe(
             repo.path(),
@@ -580,24 +583,28 @@ await close();
             .map(|call| call.rsplit(' ').next().unwrap())
             .collect();
         assert_eq!(calls, ["start", "steer", "compact"], "{}", managed.calls);
-        // The turn's first request also says a turn began, and its end names
-        // the conversation, so the server knows when the work session is idle.
+        // Before any prompt it names its conversation and socket, so one
+        // reopened idle can be woken. The turn's first request also says a
+        // turn began, and its end names the conversation, so the server knows
+        // when the work session is idle.
         assert_eq!(
             moments(&managed),
-            ["start", "tool", "tool", "compact", "stop"]
+            ["tool", "start", "tool", "tool", "compact", "stop"]
         );
         let requests = managed.server["requests"].as_array().unwrap();
+        assert_eq!(requests[0]["callback"]["session_id"], "native");
+        assert!(requests[0]["inbox"].is_string(), "{}", requests[0]);
         assert_eq!(
-            requests[1]["callback"],
+            requests[2]["callback"],
             serde_json::json!({"session_id":"native","hook_event_name":"UserPromptSubmit"})
         );
         assert_eq!(
-            requests[4]["callback"],
+            requests[5]["callback"],
             serde_json::json!({"session_id":"native","hook_event_name":"Stop"})
         );
         // One connection per boundary, each opened with a hook's hello.
         let hellos = managed.server["hellos"].as_array().unwrap();
-        assert_eq!(hellos.len(), 5, "{}", managed.server);
+        assert_eq!(hellos.len(), 6, "{}", managed.server);
         assert!(hellos
             .iter()
             .all(|hello| hello["client"]["kind"] == "plugin"));
@@ -905,6 +912,7 @@ await fire('session_shutdown', {{}});
             &context,
             "Fixed instructions",
             LaunchKind::WorkSession,
+            "native",
         )
         .unwrap();
         assert_eq!(config["permissions"], original["permissions"]);

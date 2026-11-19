@@ -140,6 +140,10 @@ Pi 1.3.0. On OpenCode 2.0.32 the scripted model's config is refused ("Reconnect
 OpenCode Console to continue") and the first turn never reaches the model, so
 the wake is not exercised there.
 
+`tests/e2e/hold_tui.py <dir> <cwd> <command…>` holds any TUI in a PTY for a
+walkthrough from another shell: keys go in through `<dir>/in`, the rendered
+screen comes out in `<dir>/screen.txt`.
+
 ## Released capture-history preservation
 
 ```bash

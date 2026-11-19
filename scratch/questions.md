@@ -24,3 +24,9 @@
 5. The wake socket sits in a `0700` directory under `/tmp` and takes no key;
    Claude's inbox takes one. Is directory permission enough, or should the
    boundary carry a token the server sends back?
+
+6. A newly reachable provider is recorded as idle whatever the earlier one on
+   that Session was doing, so a conversation interrupted, quit and reopened
+   takes its waiting steers at once. Launched with an opening prompt, the wake
+   and the prompt both run, each once. Assumed right; question 4's case (Esc,
+   then no quit) is unchanged.

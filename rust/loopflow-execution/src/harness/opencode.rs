@@ -150,7 +150,7 @@ impl Driver {
         }
         command.args(["--session", thread.as_str()]);
         super::configure_agent_env(&mut command, config);
-        command.envs(environment(config, None, self.kind)?);
+        command.envs(environment(config, None, self.kind, thread)?);
         super::configure_vendor_std_env(command.as_std_mut())?;
         let log = match diagnostics(config)? {
             Some(log) => log,
@@ -631,6 +631,7 @@ fn environment(
     config: &AgentConfig,
     context_file: Option<&std::path::Path>,
     kind: LaunchKind,
+    thread: &AgentSessionId,
 ) -> Result<std::collections::BTreeMap<String, String>> {
     let mut environment = config.env.clone();
     // An inherited value is the calling OpenCode conversation's, with its plugin.
@@ -652,6 +653,7 @@ fn environment(
             context,
             &crate::agent::system_prompt_with_structured_replies(config),
             kind,
+            thread.as_str(),
         )?;
     } else {
         let instructions = match context_file {
@@ -797,6 +799,7 @@ impl super::Harness for OpenCode {
                 launch.config,
                 launch.context_file,
                 launch.kind,
+                &thread,
             )?)
             .args(["--standalone", "--session", thread.as_str()]);
         if let Some(prompt) = input.filter(|prompt| !prompt.is_empty()) {

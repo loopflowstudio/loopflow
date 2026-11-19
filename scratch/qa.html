@@ -1,0 +1,100 @@
+<!doctype html><meta charset="utf-8"><title>LOO-974 QA: idle wake on OpenCode and Pi</title>
+<style>body{font:15px/1.5 -apple-system,sans-serif;max-width:1100px;margin:2em auto;padding:0 1em;color:#222}
+pre{background:#111;color:#ddd;padding:10px;overflow-x:auto;font:12px/1.3 Menlo,monospace;border-radius:4px}
+h2{margin-top:2em;font-size:18px}code{background:#eee;padding:1px 4px;border-radius:3px}section{border-top:1px solid #ddd}</style>
+<h1>LOO-974 QA: steering idle OpenCode and Pi work sessions</h1>
+<p>2026-11-19. Branch <code>lf</code> on a private Machine (<code>LF_HOME=/tmp/lfq974/home</code>), the account's real provider logins,
+OpenCode 2.2.1 and Pi 1.3.0 on Gemini, Claude on Haiku. Every step was a command a person runs or a key typed into the TUI in a PTY.</p>
+<section><h2>1. Scripted idle wake, both providers</h2><p><b>Did:</b> <code>tests/e2e/idle_wake.py</code> on OpenCode 2.2.1 and Pi 1.3.0, before and after the fixes.</p><p><b>Saw:</b> Both passed each time. The first run left its <code>lf holder run</code> and provider alive: the cleanup listed processes with <code>ps eww</code>, which omits ones with no terminal. Four holders from earlier runs were still running.</p><p><b>Fixed:</b> <code>ps -axeww</code>. After the final run no process names the run's root.</p></section><section><h2>2. OpenCode, real model: steer an idle work session</h2><p><b>Did:</b> Private Machine, real <code>HOME</code>. <code>lf task create</code>, <code>lf checkout</code>, view with <code>lf resume --task</code> in a PTY. After the first turn ended, <code>lf steer</code>; nothing typed.</p><p><b>Saw:</b> The turn started and the reply was on screen 10 s after the steer. The model wrote the direction into <code>scratch/notes.md</code> and replied. <code>lf session steers</code>: delivered, 0 pending.</p><pre>  ┃
+  ┃   1 - QA (comment `bf29f47e-3ec1-4ccb-a5c0-76f7b2e6c134`): &quot;divide must raise ValueError on a zero divisor.&quot;
+  ┃   2
+  ┃
+     PINEAPPLE
+     Build · Gemini 4 Neon · 9.6s · 51.6 tok/s
+  ┃
+  ┃
+  ┃
+  ┃  Build · Gemini 4 Neon Default / OpenCode · medium
+  ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+  /private/tmp/lfq974/oc.8647b2-add-a-divide:qa/8647b2-add-a-divide              29.7K (3%) · $0.14  ctrl+p commands    /…/oc.8647b2-add-…/8647b2-add-</pre></section><section><h2>3. OpenCode: steer during a running turn</h2><p><b>Did:</b> Typed a prompt that runs <code>sleep 12</code>; steered 5 s in.</p><p><b>Saw:</b> One turn, one answer carrying both (<code>MANGO KIWI</code>). No second turn afterwards.</p><pre>  ┃
+  ┃  slept
+  ┃
+     + Thought: Discovering Hidden Controls · 68ms
+     MANGO KIWI
+     Build · Gemini 4 Neon · 20.4s · 38.5 tok/s
+  ┃
+  ┃
+  ┃
+  ┃  Build · Gemini 4 Neon Default / OpenCode · medium
+  ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+  /private/tmp/lfq974/oc.8647b2-add-a-divide:qa/8647b2-add-a-divide              30.3K (3%) · $0.25  ctrl+p commands    /…/oc.8647b2-add-…/8647b2-add-</pre></section><section><h2>4. OpenCode: two steers with the view closed</h2><p><b>Did:</b> Killed the viewing terminal (the holder keeps OpenCode), sent two steers, reattached.</p><p><b>Saw:</b> Two turns ran unattended, <code>PAPAYA</code> then <code>GUAVA</code>, each steer delivered once. The screen shows the answers and nothing about what caused them (open question 1).</p><pre>     PAPAYA
+     Build · Gemini 4 Neon · 6.5s · 4.7 tok/s
+     GUAVA
+     Build · Gemini 4 Neon · 3.6s · 9.1 tok/s
+  ┃
+  ┃  65535u5;1u
+  ┃
+  ┃  Build · Gemini 4 Neon Default / OpenCode · medium
+  ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+  /private/tmp/lfq974/oc.8647b2-add-a-divide:qa/8647b2-add-a-divide              31.0K (3%) · $0.27  ctrl+p commands    /…/oc.8647b2-add-…/8647b2-add-</pre></section><section><h2>5. OpenCode: Esc, then steer</h2><p><b>Did:</b> Interrupted a turn with Esc, then <code>lf steer</code>.</p><p><b>Saw:</b> Nothing happened for 20 s; <code>lf task status</code> said <code>Conversation: running</code>; 1 pending. Typing <code>hello again</code> delivered it. This is open question 4, unchanged.</p><pre>  ┃
+  ┃
+  ┃
+  ┃  Build · Gemini 4 Neon Default / OpenCode · medium
+  ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+  /private/tmp/lfq974/oc.8647b2-add-a-divide:qa/8647b2-add-a-divide              31.0K (3%) · $0.27  ctrl+p commands    /…/oc.8647b2-add-…/8647b2-add-</pre></section><section><h2>6. OpenCode: typed prompt and steer at the same moment</h2><p><b>Did:</b> Wrote the prompt and ran <code>lf steer</code> together.</p><p><b>Saw:</b> OpenCode's own record: a <code>synthetic</code> message answered <code>PLUM</code>, then the typed prompt answered <code>FIG</code>. Each ran once.</p></section><section><h2>7. OpenCode: quit, steer, reopen</h2><p><b>Did:</b> <code>/exit</code>; <code>lf steer</code> (status: <code>quit 12:03; `lf resume --task 8647b2` opens it</code>, 1 pending, wake directory removed); <code>lf resume --task</code>.</p><p><b>Saw:</b> <b>Broken before the fix:</b> the reopened session sat idle with the steer pending, and <code>agent_inbox</code> was empty, so no later steer could wake it either until someone typed.</p><p><b>Fixed:</b> the plugin names its socket as it loads and the server runs the wake when a conversation first becomes reachable. Reopened on the new build, <code>QUINCE</code> arrived 10 s after start with nothing typed; a further steer (<code>RAMBUTAN</code>) woke it in 5 s.</p><pre>     QUINCE
+     Build · Gemini 4 Neon · 4.4s · 11.0 tok/s
+  ┃
+  ┃
+  ┃
+  ┃  Build · Gemini 4 Neon Default / OpenCode · medium
+  ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+  /private/tmp/lfq974/oc.8647b2-add-a-divide:qa/8647b2-add-a-divide              32.0K (3%) · $0.50  ctrl+p commands    /…/oc.8647b2-add-…/8647b2-add-</pre></section><section><h2>8. OpenCode: Esc, quit, steer, reopen</h2><p><b>Did:</b> The case where the store still says a turn is running.</p><p><b>Saw:</b> <code>TAMARIND</code> answered after reopening, nothing typed.</p><p>Covered by the second fix below.</p><pre>     TAMARIND
+     Build · Gemini 4 Neon · 26.8s · 4.4 tok/s
+  ┃
+  ┃
+  ┃
+  ┃  Build · Gemini 4 Neon Default / OpenCode · medium
+  ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+  /private/tmp/lfq974/oc.8647b2-add-a-divide:qa/8647b2-add-a-divide              32.7K (3%) · $0.53  ctrl+p commands    /…/oc.8647b2-add-…/8647b2-add-</pre></section><section><h2>9. Pi, real model: steer an idle work session</h2><p><b>Did:</b> Same journey with <code>agent: pi:opencode/gemini-4-carbon</code>.</p><p><b>Saw:</b> Delivered 2 s after the steer; Pi shows the steer block and the reply. A second idle steer (<code>QUINCE</code>) also woke it. Ctrl+C twice does not quit Pi; <code>/quit</code> does.</p><pre> I&#x27;m focusing on the role of scratch/ for capturing working notes and scratch/plan.md for detailing the overall plan.
+ write scratch/plan.md
+ # Add `divide(a, b)` to `calc.py`
+ - Add `divide(a, b)` to `calc.py`, returning `a / b` and raising `ValueError` when `b == 0`.
+ - Add tests covering normal division and `ValueError` on a zero divisor.
+ PINEAPPLE
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+/private/tmp/lfq974/pi.331da3-add-a-divide (qa/331da3-add-a-divide)
+↑56k ↓4.4k R129k CH90.8% $0.169 2.6%/1.0M (auto)                                                                             (opencode) gemini-4-carbo</pre></section><section><h2>10. Pi: quit, steer, reopen</h2><p><b>Did:</b> <code>/quit</code>, <code>lf steer</code>, <code>lf resume --task</code>.</p><p><b>Saw:</b> <b>Broken after the first fix alone:</b> the new socket was recorded, but <code>session_activity</code> still belonged to the earlier Pi process, so the server did not count the session idle. 1 pending for 60 s.</p><p><b>Fixed:</b> the first boundary naming a new inbox records that provider as idle. Reopened on the final build, <code>GUAVA</code> was answered at once.</p><pre>     &quot;title&quot;: &quot;Add a divide(a, b) function to calc.py&quot;,
+     &quot;wave&quot;: null
+   }
+ }
+ Took 0.7s
+ GUAVA
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+/private/tmp/lfq974/pi.331da3-add-a-divide (qa/331da3-add-a-divide)
+↑118k ↓4.6k R182k CH90.6% $0.301 2.9%/1.0M (auto)                                                                            (opencode) gemini-4-carbo</pre></section><section><h2>11. Claude, same server</h2><p><b>Did:</b> <code>agent: claude:haiku</code>: idle steer, then quit, steer, reopen.</p><p><b>Saw:</b> Idle steer started a turn through the inbox, as before. Reopened, the waiting steer was marked delivered by Claude's start hook and no turn started: existing behaviour, not changed here.</p><pre>  the PINEAPPLE one, and both come from the same comment author, &quot;QA.&quot;
+  Task 49efe8 is unchanged: idle, with no graph running and no worktree changes. Two steers are now on record and neither has been acted on. Should I 
+  either of them, or start the code graph with lf task run 49efe8?
+✻ Cooked for 4s · done 1:39 PM
+─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 49efe8 Add a d
+❯ go ahead and start the code graph
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  jack@Jacks-MacBook-Pro-2 cl.49efe8-add-a-divide (qa/49efe8-add-a-divide)
+  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← 2 agents</pre></section>
+<section><h2>Works now</h2><ul>
+<li><code>lf steer</code> to an idle OpenCode or Pi work session starts a turn within seconds, viewed or not.</li>
+<li>A steer during a turn, or racing a typed prompt, is delivered once.</li>
+<li>A work session that was quit (or interrupted and quit) takes the steers saved meanwhile as soon as it is reopened.</li>
+<li>A clean quit removes the wake socket; status says how to reopen; nothing is logged as an error.</li>
+<li>Claude's idle wake is unchanged.</li></ul></section>
+<section><h2>Not reached</h2><ul>
+<li>A wake while a permission or question dialog is open: the account's OpenCode config allows everything and Gemini declined to ask.</li>
+<li>OpenCode 2.0.32 (the first <code>opencode</code> on this Machine's PATH): its scripted-model config is refused, and the real-model runs used 2.2.1.</li>
+<li>Desktop and Mobile views of a woken session.</li></ul></section>
+<section><h2>Still wrong, worst first</h2><ol>
+<li>An OpenCode work session ignores the configured model. <code>agent: opencode:opencode/gemini-4-carbon</code> ran "Gemini 4 Neon", the account default: the work-session launch passes no <code>--model</code>. Pi and workers use the configured one. Present since PR #1985.</li>
+<li>After Esc, a steer waits until someone types, and status keeps saying <code>Conversation: running</code> (open question 4).</li>
+<li>OpenCode's screen shows a woken turn's answer with no sign of the steer that caused it (open question 1). Pi shows the steer.</li>
+<li>Claude reopened with a steer waiting takes it into context without starting a turn; OpenCode and Pi now start one.</li>
+<li>A provider killed with SIGKILL leaves an empty <code>/tmp/lf-wake-*</code> directory.</li></ol></section>

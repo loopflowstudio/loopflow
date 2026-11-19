@@ -27,18 +27,21 @@ const PLANNING_REFRESH: Duration = Duration::from_secs(8);
 /// What a `stop` leaves for after its answer: the Session's planning and any
 /// pending move.
 #[derive(Debug)]
-pub(super) struct AfterStop {
+pub(super) struct After {
     repo: PathBuf,
     session: Option<String>,
     /// A Codex Session's app-server and the conversation whose turn ended.
     codex: Option<(PathBuf, loopflow_model::id::AgentSessionId)>,
+    /// False for a conversation that only became reachable: nothing ended,
+    /// and only the wake runs.
+    turn_ended: bool,
 }
 
 /// Record the boundary; blocking.
 pub(super) fn answer(
     store: &SqliteStore,
     boundary: &SessionBoundary,
-) -> Result<(SessionBoundaryAnswer, Option<AfterStop>)> {
+) -> Result<(SessionBoundaryAnswer, Option<After>)> {
     let SessionBoundary {
         moment,
         delivery: path,
@@ -69,10 +72,11 @@ pub(super) fn answer(
             *moment == BoundaryMoment::Stop,
             "Only a turn end needs no provider context"
         );
-        let after = AfterStop {
+        let after = After {
             repo: delivery.repo,
             session: None,
             codex: None,
+            turn_ended: true,
         };
         return Ok((nothing, Some(after)));
     };
@@ -107,12 +111,20 @@ pub(super) fn answer(
     }
     let connection = attachment::session_connection(store, &adapter.session)?;
     // Where the server wakes this conversation once it is idle.
-    if let Some(inbox) = inbox {
-        store.record_agent_inbox(adapter, inbox)?;
-    }
+    // One it could not reach before may hold steers saved while it was closed:
+    // a reopened conversation sits idle until someone types.
+    let reachable = match inbox {
+        Some(inbox) if store.record_agent_inbox(adapter, inbox)? => Some(After {
+            repo: delivery.repo.clone(),
+            session: Some(adapter.session.clone()),
+            codex: None,
+            turn_ended: false,
+        }),
+        _ => None,
+    };
     if *moment == BoundaryMoment::Event {
         loopflow_execution::harness::pi::observe_native(store, adapter, callback)?;
-        return Ok((nothing, None));
+        return Ok((nothing, reachable));
     }
     if *moment == BoundaryMoment::Stop {
         // The transcript is the only writer of usage rows; the exit read
@@ -127,10 +139,11 @@ pub(super) fn answer(
         let codex = connection
             .zip(thread)
             .map(|((endpoint, _), thread)| (PathBuf::from(endpoint), thread.into()));
-        let after = AfterStop {
+        let after = After {
             repo: delivery.repo,
             session: Some(adapter.session.clone()),
             codex,
+            turn_ended: true,
         };
         return Ok((nothing, Some(after)));
     }
@@ -145,14 +158,14 @@ pub(super) fn answer(
         _ => NativeBoundary::Turn,
     };
     store.with_provider_context(adapter, thread, selects, || Ok(()))?;
-    Ok((nothing, None))
+    Ok((nothing, reachable))
 }
 
 /// After a Stop's answer: record a Codex Session's turns, refresh the Session's
 /// planning, wake it with any Task update its turn missed, then continue it on
-/// a pending move's agent.
+/// a pending move's agent. After a conversation became reachable: the wake alone.
 /// Blocking; failures are logged, since no one waits for them.
-pub(super) fn after_stop(after: AfterStop) {
+pub(super) fn after(after: After) {
     let ran = (|| -> Result<()> {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -162,6 +175,16 @@ pub(super) fn after_stop(after: AfterStop) {
                 return Ok(());
             };
             let store = std::sync::Arc::new(store);
+            if !after.turn_ended {
+                let (sqlite, session) = (store.sqlite.clone(), after.session.clone());
+                return loopflow_execution::journal::request::spawn_blocking(move || {
+                    if let Some(session) = session {
+                        super::wake::after_turn(&sqlite, &session)
+                    }
+                })
+                .await
+                .map_err(Into::into);
+            }
             if let (Some(session), Some((endpoint, thread))) = (&after.session, &after.codex) {
                 record_codex_turns(&store.sqlite, session, thread, endpoint).await;
             }
@@ -436,6 +459,51 @@ mod tests {
             serde_json::json!({"session_id":"child","hook_event_name":"PostToolUse","tool_use_id":"t"}),
         );
         assert!(answer(&store, &foreign).is_err());
+    }
+
+    #[test]
+    fn a_conversation_that_becomes_reachable_is_checked_for_news_once() {
+        let (_home, store, adapter, delivery) = fixture();
+        // The provider that ran this Session before was stopped mid-turn.
+        let prompt = boundary(
+            BoundaryMoment::Tool,
+            &adapter,
+            &delivery,
+            serde_json::json!({"session_id":"native","hook_event_name":"UserPromptSubmit"}),
+        );
+        answer(&store, &prompt).unwrap();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute("UPDATE session_activity SET agent_process_id='earlier'", [])
+            .unwrap();
+        // A reopened work session names its socket before anyone types.
+        let mut listening = boundary(
+            BoundaryMoment::Tool,
+            &adapter,
+            &delivery,
+            serde_json::json!({"session_id":"native","hook_event_name":"OpenCodeMessagesTransform"}),
+        );
+        listening.inbox = Some("/tmp/lf-wake-fixture/s".into());
+        let (_, after) = answer(&store, &listening).unwrap();
+        let after = after.expect("the wake runs");
+        assert_eq!(after.session.as_deref(), Some("session"));
+        assert!(!after.turn_ended);
+        // It has run no turn, so it is idle: the wake can reach it.
+        let idle: (bool, String) = store
+            .conn
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT yielded,agent_process_id FROM session_activity WHERE session_id='session'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(idle, (true, adapter.agent_process_id.to_string()));
+        // The same socket again is nothing new.
+        assert!(answer(&store, &listening).unwrap().1.is_none());
     }
 
     #[test]

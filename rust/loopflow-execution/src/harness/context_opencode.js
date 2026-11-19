@@ -10,7 +10,9 @@ export default {
     // then reused; a block lf could not render is tried again next request.
     let refresh = "start";
     let block;
-    let owner;
+    // A work session runs the conversation lf named; any other launch owns
+    // the first one that prompts.
+    let owner = spec.wake ?? undefined;
     // OpenCode keeps no system text between requests, so a steer heard once is
     // sent with every later request of this conversation, as a transcript would.
     let heard = "";
@@ -40,6 +42,12 @@ export default {
     }, log) : null;
     // A launch that reports no turns opens no connection and reports no turn end.
     const server = spec.turns ? machineServer(delivery, log, wake) : undefined;
+    // A reopened work session runs no turn until someone types: it names its
+    // socket now, and the server sends what was saved while it was closed.
+    if (wake) {
+      server.boundary("tool", { session_id: owner, hook_event_name: "OpenCodeMessagesTransform",
+        adapter_invocation_id: randomUUID() });
+    }
     // A work session's turn is recorded from its first request to its end, so
     // the server knows when it is idle.
     let turn = false;

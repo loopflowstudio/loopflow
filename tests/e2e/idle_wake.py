@@ -63,7 +63,8 @@ def _heard(marker: str, since: int = 0) -> bool:
 def _owned(root: Path) -> list[int]:
     """Processes whose environment names this run's private root."""
     listing = subprocess.run(
-        ["ps", "eww", "-o", "pid=,command="], capture_output=True, text=True, check=True
+        # -ax: the holder has no terminal, and plain `ps` lists only those that do.
+        ["ps", "-axeww", "-o", "pid=,command="], capture_output=True, text=True, check=True
     ).stdout
     return [
         int(line.split(None, 1)[0])

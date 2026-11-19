@@ -125,7 +125,9 @@ An idle work session is woken through the provider's own way in
 Claude's inbox, Codex's app-server, and for OpenCode and Pi a socket their
 plugin or extension listens on, which asks the provider to start the turn.
 An OpenCode work session reports each turn's first request and its end, so the
-server knows when it is idle; Pi reports every event.
+server knows when it is idle; Pi reports every event. Both name their socket
+as they start, so a work session reopened idle takes the steers saved while it
+was closed.
 
 A skill keeps one `LfProcess` across successive provider `AgentProcess` instances.
 Its shared `LfProcessRuntime` in [`process/runtime.rs`](../process/runtime.rs)

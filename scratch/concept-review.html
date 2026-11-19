@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>LOO-974 concept review: steering OpenCode and Pi work sessions</title>
+<style>
+  :root { color-scheme: light dark; --fg:#1d1d1f; --bg:#fbfbfa; --mute:#6b6b70; --line:#d9d9dc; --yes:#1f7a3f; --no:#b3261e; --part:#9a6700; --new:#2457c5; --card:#fff; }
+  @media (prefers-color-scheme: dark) { :root { --fg:#ececee; --bg:#151517; --mute:#9a9aa2; --line:#34343a; --yes:#5fd08a; --no:#ff8a80; --part:#e3b341; --new:#82a8ff; --card:#1d1d21; } }
+  body { font: 15px/1.55 -apple-system, system-ui, sans-serif; color:var(--fg); background:var(--bg); max-width: 960px; margin: 2rem auto; padding: 0 1.2rem; }
+  h1 { font-size: 1.5rem; margin-bottom: .2rem; } h2 { font-size: 1.15rem; margin-top: 2.2rem; }
+  p.lede { color: var(--mute); margin-top: 0; }
+  table { border-collapse: collapse; width: 100%; margin: .8rem 0; }
+  th, td { border-bottom: 1px solid var(--line); padding: .45rem .5rem; text-align: left; vertical-align: top; }
+  th { font-weight: 600; }
+  code { font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .yes { color: var(--yes); font-weight: 600; } .no { color: var(--no); font-weight: 600; } .part { color: var(--part); font-weight: 600; }
+  .proposed { border-left: 3px solid var(--new); padding: .2rem .9rem; background: var(--card); }
+  .existing { border-left: 3px solid var(--line); padding: .2rem .9rem; background: var(--card); }
+  .tag { font-size: 12px; color: var(--new); font-weight: 600; }
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; } @media (max-width: 720px) { .cols { grid-template-columns: 1fr; } }
+  ol li { margin-bottom: .5rem; }
+</style>
+
+<h1>Do the steering concepts line up?</h1>
+<p class="lede">Area: how a person's steer reaches a managed conversation on each of the four providers, and how a work session is launched to match its worker. The idle-wake diff (<code>git diff 2a3b6d11d8 HEAD</code>) sits in the middle of it; the review covers the area with that diff in it.</p>
+
+<h2>One interaction, walked</h2>
+<div class="existing">
+<p>Someone runs <code>lf steer LOO-974 'use the staging bucket'</code> while the Task's OpenCode work session sits idle in its terminal.</p>
+<ol>
+  <li>The steer is stored. The Machine server's watcher sees the revision move and finds the Session idle: <code>session_activity.yielded</code>, recorded at the plugin's <code>Stop</code>.</li>
+  <li>The reach comes from the row: <code>provider = opencode</code> → <code>IdleReach::Extension(agent_inbox)</code>.</li>
+  <li>The server connects to <code>/tmp/lf-wake-*/s</code>, writes <code>{"thread","text"}</code> and waits up to 15s for <code>started</code>. The plugin calls <code>session.synthetic</code>, and the turn runs in the TUI.</li>
+  <li><b>Failure:</b> the socket is gone or answers nothing, so the steers stay undelivered and the next boundary carries them as context. Nothing is stamped read.</li>
+  <li><b>Recovery:</b> the person quits and reopens. The plugin names a new socket as it loads, <code>record_agent_inbox</code> sees a change, marks the new process idle, and the wake runs before anyone types.</li>
+</ol>
+<p>This holds on the normal path, the failure and the recovery. QA on real models showed the same sequence (<code>scratch/qa.html</code>).</p>
+</div>
+
+<h2>Product concepts against code concepts</h2>
+<table>
+  <tr><th>What a person knows</th><th>What the code has</th><th>Line up?</th><th>Where it is off</th></tr>
+  <tr><td>A steer</td><td><code>steers</code> rows, <code>steer::claim</code> / <code>delivered</code></td><td class="yes">yes</td><td>One record, shared by all four providers.</td></tr>
+  <tr><td>"It's idle, so my steer starts a turn"</td><td><code>session_activity.yielded</code> per agent process; <code>wake::after_turn</code>, <code>wake_idle</code></td><td class="yes">yes</td><td>The README row now reads "yes" for all four.</td></tr>
+  <tr><td>Where an idle conversation can be reached (never seen)</td><td><code>IdleReach</code> built from <code>agent_endpoint</code>, <code>agent_inbox</code> and <code>provider</code></td><td class="part">partly</td><td>One column, <code>agent_inbox</code>, holds two different things: Claude's key file and an OpenCode or Pi socket. <code>provider</code> picks which one it is, and any other provider falls through to Claude. The enum puts them back together when read, so nobody sees the split.</td></tr>
+  <tr><td>"I reopened it, so it's waiting for me"</td><td>The activity reset inside <code>record_agent_inbox</code></td><td class="part">partly</td><td>The rule "a new provider process is idle until its first turn" lives in a function named for saving an address. It applies only to providers that name an inbox; Codex's reopen goes through its app-server and was not checked against it.</td></tr>
+  <tr><td>Reopen with steers waiting</td><td>Claude: start hook folds them into context, no turn. OpenCode/Pi: the wake starts a turn.</td><td class="no">no</td><td>One action, two outcomes, depending on provider. Larger than this Task (Claude's start path predates it).</td></tr>
+  <tr><td><b>The model in <code>agent:</code></b></td><td>Worker: <code>opencode run --model</code>. Work session: <code>Harness::open</code> passes nothing.</td><td class="no">no</td><td><b>Biggest mismatch.</b> <code>opencode:opencode/gemini-4-carbon</code> ran Gemini 4 Neon in the work session, the account's default, with no warning. The person configured one model and got another. Pi and Claude honor it in both.</td></tr>
+  <tr><td>(nothing)</td><td><code>/tmp/lf-wake-*</code> directory, removed on exit</td><td class="part">partly</td><td>A SIGKILL leaves an empty directory. It is harmless and clears on reboot. Accepted.</td></tr>
+</table>
+
+<h2>The biggest mismatch: one model setting, two outcomes</h2>
+<div class="cols">
+<div class="existing">
+<p><b>Before</b></p>
+<p>The OpenCode TUI (2.2.1) has no <code>--model</code> flag: <code>opencode --help</code> lists <code>--standalone --server --auto --continue --session --prompt</code>. The worker passes <code>--model</code> to <code>run</code>; the work session drops the setting. Steering, context and resume are the same in both, but the model is not.</p>
+</div>
+<div class="proposed">
+<p class="tag">PROPOSED</p>
+<p><b>After</b></p>
+<p><code>opencode::environment</code> writes <code>"model"</code> into <code>OPENCODE_CONFIG_CONTENT</code>, which both launches already build. <code>run --model</code> is deleted, so the model goes through one place for workers and work sessions alike. A test on <code>environment</code> checks the key; a real TUI run checks that the configured model answers.</p>
+</div>
+</div>
+<p>Choice made for review: config over a CLI flag. The other option is to wait for OpenCode to add <code>--model</code> to its TUI, which leaves work sessions on the wrong model until it does. Config is the one path the TUI reads today, and it is reversible.</p>
+
+<h2>Larger than this work</h2>
+<ul>
+  <li><b>Reopen semantics across providers.</b> Making Claude start a turn on reopen with steers waiting means changing Claude's start hook so it leaves the steers to the wake instead of folding them into context. That touches every Claude work session.</li>
+  <li><b>An owner for "a new process is idle".</b> This could be one store write at a process's first boundary, used by every provider, with <code>record_agent_inbox</code> back to saving the address. First it needs a check of Codex's reopen and of the opening-prompt race (questions.md 6).</li>
+</ul>
+
+<h2>Questions</h2>
+<ol>
+  <li>OpenCode work-session model: (a) through <code>OPENCODE_CONFIG_CONTENT</code> for both launches, as planned; (b) keep <code>run --model</code> for workers and add config only for the TUI; (c) leave it until OpenCode's TUI takes <code>--model</code>.</li>
+  <li>Reopen with steers waiting: (a) a turn starts, on every provider; (b) the steers become context for the next typed turn, on every provider; (c) leave the providers different.</li>
+  <li>The "new process is idle" rule: (a) leave it in <code>record_agent_inbox</code>; (b) move it to a process's first boundary for every provider, as its own Task.</li>
+  <li><code>agent_inbox</code> holding two shapes: (a) fine, since <code>provider</code> tells them apart; (b) split into a key-file column and a socket column.</li>
+</ol>
+</html>

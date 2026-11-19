@@ -74,14 +74,33 @@ Pi, `scratch/qa.html`) added two things:
 Checks after those: `server::boundary::` 11 passed, `server::wake::` 8 passed,
 `harness::context::tests::` 13 passed, both `idle_wake.py` runs passed.
 
+## Next slice: the configured model reaches the work session
+
+An OpenCode work session ignores the model in `agent:`. `Harness::open`
+passes no model, so `opencode:opencode/gemini-4-carbon` ran Gemini 4 Neon,
+the account's default. The OpenCode 2.2.1 TUI has no `--model` flag
+(`opencode --help`). Workers and Pi use the configured model.
+
+- `opencode::environment` sets `"model"` in `OPENCODE_CONFIG_CONTENT` from
+  `config.agent.model`. Both launches build that value already.
+- Delete `--model` from `opencode run` in `command()`, so the model is set in
+  one place.
+- A unit test on `environment` checks the key. A real 2.2.1 TUI launch with
+  `agent: opencode:<non-default model>` checks that the configured model
+  answers, through `tests/e2e/opencode_terminal.py` or by hand. If OpenCode
+  ignores a config `model` for an existing `--session`, record what it did
+  in `probes.md` and stop there.
+
+Choice made for review (`scratch/concept-review.html`): config, not waiting
+for a TUI flag.
+
 ## Remaining
 
-- An OpenCode work session ignores the model in `agent:`: `Harness::open`
-  passes no `--model`, so `opencode:opencode/gemini-4-carbon` ran Gemini 4
-  Neon, the account's default. Workers and Pi use the configured model.
 - Claude reopened with a steer waiting marks it delivered through its start
-  hook and starts no turn; OpenCode and Pi now start one.
+  hook and starts no turn; OpenCode and Pi now start one. Larger than this
+  Task; on the concept-review page.
 - A provider killed with SIGKILL leaves its empty `/tmp/lf-wake-*` directory.
+  Accepted: empty, and cleared on reboot.
 
 - Not tested: a wake while a permission or question dialog is open. A wake
   racing a typed prompt ran on real OpenCode: the steer's turn, then the typed

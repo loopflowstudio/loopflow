@@ -322,3 +322,21 @@ Auto-Ship line in `task_operate.md`, `repo_operate.md`, `wave_operate.md`,
 and the iOS README.
 
 `lf ship --stop` doesn't exist on main; `lf task hold` is the one stop.
+
+## Build pass after human review: one word for Auto-Ship (in scope)
+
+The state `shipping`, the board section `Autonomous` and the mark Auto-Ship are
+one idea under three words. This pass makes Auto-Ship the only word:
+
+- `TaskState::Shipping` → `TaskState::AutoShip` (label `auto-ship`) and
+  `TaskSection::Autonomous` → `TaskSection::AutoShip` (title "Auto-Ship"),
+  through `task_state_sql`, the wire DTOs and their fixtures in
+  `tests/fixtures/dto/`, Swift, Desktop, CLI output, docs, AGENTS.md's work
+  model and the operate skills. No compat alias: nothing has shipped.
+- The stop's words follow (concept review question 1a): `lf task hold` keeps
+  its name and prints "LOO-12: Auto-Ship stopped" / "Auto-Ship was not on";
+  the run waits with "Auto-Ship stopped by Maya. `lf ship` lands it." Tests
+  call `task hold`, not the `ship --stop` alias, and the alias goes.
+- `.lf/graphs/autonomous.yaml` is a graph name, not the section; leave it.
+- Still open, not part of this pass: whether `lf -b task run` writes Auto-Ship
+  on (concept review question 2).

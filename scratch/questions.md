@@ -35,3 +35,7 @@
 ## Concept review after QA (2026-11-18, headless)
 
 - Nothing to change before gate; page `scratch/concept-review.html`. Open: the stop's five names (`task hold`, Stop Auto-Ship, "stopped shipping", `ship_stop`, `ship --stop` alias), `-b` writing a lasting mark, `shipping`/Autonomous wording. Gate can switch the fixtures from the `ship --stop` alias to `task hold`.
+
+## Human review (2026-11-19)
+
+Jack, on the concept review's "one idea, three words" (shipping state, Autonomous section, Auto-Ship mark): "I tink this should be in scope"

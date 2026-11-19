@@ -1,8 +1,8 @@
 # Open questions (LOO-974)
 
 Choices made for review; `scratch/concept-review.html` shows the open ones
-as the change stands after QA. Slice 7 of `scratch/plan.md` takes up 19, 21,
-22 and 25; 18 stays unread and the README says so.
+as they stood after QA. Slice 7 built 19, 22 and the Pi usage join; 18 stays
+unread and the README says so.
 
 1. **Should managed Tasks deny writes outside the checkout?** The brief says
    "Keep the existing managed filesystem write boundary … writes elsewhere are
@@ -44,9 +44,9 @@ as the change stands after QA. Slice 7 of `scratch/plan.md` takes up 19, 21,
 10. **How is a worker's question answered?** `docs/orchestration.md` now says:
     the step fails with the question as its reason; answer with
     `lf steer LOO-12 "…"` and `lf task run` again. The reason on OpenCode and
-    Pi is now "<harness> asked a question with nobody there to answer it:
-    <question>" (Pi's "open this Session in Pi to answer it" is gone). Is
-    steer-then-run the answer path, and should the reason print that command?
+    Pi is "<harness> asked a question with nobody there to answer it:
+    <question>", and `lf task run` now stops after one attempt and prints the
+    `lf steer` and `lf task run` commands. Is steer-then-run the answer path?
 
 11. **The parity table's "no" cells name no Task** for idle steer wake
     (OpenCode, Pi) or Pi limit classification; only LOO-518 exists. File them,
@@ -107,7 +107,8 @@ as the change stands after QA. Slice 7 of `scratch/plan.md` takes up 19, 21,
     Not looked into; nextest's limit is 300s, so this is close.
 
 25. **Real Pi usage after the join.** QA saw Pi omit usage from
-    `lf history usage --task`. Slice 7 tests the join with the RPC stand-in.
+    `lf history usage --task`. Slice 7 joins by time span and tests it with
+    the RPC stand-in; nobody has rerun a real Pi Task since. Demo rechecks.
     The pre-fix real RPC session files are under
     `~/.pi/agent/sessions/--private-tmp-loo974-*--/`.
 

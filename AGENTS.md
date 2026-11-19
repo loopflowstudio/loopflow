@@ -14,7 +14,6 @@ How we build Loopflow. Contributors and agents follow it.
 - Run `cargo fmt` and `cargo clippy --all-targets -- -D warnings` before committing; CI treats warnings as errors
 - Return `Option<T>` for "not found", `Result<T, E>` for failures
 - Use `expect("why this is safe")` over `unwrap()` outside tests
-- Derive `Debug` on all public types
 
 **Both:**
 - Mock side effects; don't test mock wiring or reshape production code for tests
@@ -237,6 +236,10 @@ Round-trip fixtures under `tests/fixtures/dto/` cover the wire shape; a new
 field goes into the fixture and each language's fixture test. UI state types
 that carry DTO values are not DTOs.
 
+A sentence about state that both the CLI and Desktop show is written once, in
+Rust, and carried on the wire; each surface prints it. The same goes for the
+answer behind it (is it coming back, who starts it): one value, one predicate.
+
 # File-Type Guidelines
 
 **`*.py`:** imports at the top, type hints on public functions, one-line
@@ -293,6 +296,7 @@ them.
 - Explicit imports in submodules, not `use super::*`.
 - Derive `Debug` on public types; add `Clone`, `PartialEq`, `Default` where sensible.
 - Canonicalize Clap aliases in shared navigation so help, remote routing and execution agree.
+- Pass the named skill to `config::settings::resolve` before calling `Config::resolve_agents`. Test that the skill's settings take effect through the command that launches it.
 - `lf help <path>` renders Clap's short help; text it must show goes in `after_help`.
 - Give nested global Clap flags a distinct argument `id` when a root flag shares their name, or their values leak into the root command.
 - Use `thiserror` for library errors callers match on. Never use `()` as an error type.
@@ -302,7 +306,7 @@ them.
 - Every `unsafe` block gets a `// SAFETY:` comment. Keyword clashes use `r#type` or `type_`.
 - `#[non_exhaustive]` on public enums that may grow.
 - SQLite read helpers that join statements use savepoints so they work inside the Work reader's pinned snapshot and standalone. Write transactions stay at their command boundaries.
-- External facts in shared reads go through `observe`: bare reads observe inline, served reads capture cached answers and their revisions. Bounded threads inherit the reading with `observe::inherit`; `journal::request::spawn_blocking` carries it automatically.
+- External facts in shared reads go through `observe`: bare reads observe inline, served reads capture cached answers and their revisions. Bounded threads inherit the reading with `observe::inherit`; `journal::request::spawn_blocking` carries it automatically. A value computed from observed facts that served reads repeat (resolved settings, the skill catalog) goes through `observe::derived` under an `observe::Derived` key; its computation reads observed facts and that key, nothing else.
 - Served mutations take a directory and `CommandIo`; never redirect process cwd, env or file descriptors. Nested blocking operations use `journal::request::spawn_blocking` to keep request attribution and diagnostics. A request trace is not an OS Process; execution launches keep their owners.
 - Forward stdin only to commands that consume it; a mutation with no body must finish while terminal stdin stays open.
 - Public APIs get `# Panics` / `# Errors` / `# Safety` sections where they aren't obvious.

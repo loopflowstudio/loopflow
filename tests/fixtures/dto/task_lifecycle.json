@@ -450,7 +450,8 @@
         "workspace_slug": "delivery",
         "worktree": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
         "started_by": null,
-        "auto": null
+        "auto": null,
+        "stack_parent": null
       },
       "graph_processes": [
         {
@@ -1414,7 +1415,8 @@
         "workspace_slug": "delivery",
         "worktree": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
         "started_by": null,
-        "auto": null
+        "auto": null,
+        "stack_parent": null
       },
       "graph_processes": [
         {
@@ -2307,7 +2309,8 @@
         "workspace_slug": "delivery",
         "worktree": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
         "started_by": null,
-        "auto": null
+        "auto": null,
+        "stack_parent": null
       },
       "graph_processes": [
         {

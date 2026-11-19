@@ -21,7 +21,7 @@ pub(crate) fn run_sync_in(
 ) -> Result<crate::engine::checkout::Sync> {
     use crate::engine::checkout::Sync;
     let crate::engine::checkout::SyncInput {
-        onto,
+        mut onto,
         preview: plan_only,
         manual,
         continue_sync,
@@ -68,6 +68,16 @@ pub(crate) fn run_sync_in(
             });
         }
     }
+    // Another open Task as the target stacks this Task on it; the stacked sync
+    // below then merges the parent the record now names.
+    if let Some(target) =
+        onto.filter(|target| !plan_only && !on_main && *target != default && *target != upstream)
+    {
+        if let Some(parent) = crate::ops::task::open_task_named(repo_root, target)? {
+            progress.status(&crate::ops::task::stack_task(repo_root, &parent)?);
+            onto = None;
+        }
+    }
     // An explicit default branch detaches the child using its recorded fork;
     // ordinary sync continues to follow the live parent.
     let stacked = if on_main {
@@ -79,12 +89,13 @@ pub(crate) fn run_sync_in(
         stacked.is_some() && onto.is_some_and(|target| target == default || target == upstream);
     if stacked.is_some() && onto.is_some() && !detach {
         return Err(anyhow!(
-            "use the default branch to detach this Task, or omit the target to sync its parent"
+            "{} names no other open Task; name one to restack this Task on it, the default branch to detach it, or omit the target to sync its parent",
+            onto.unwrap_or_default()
         ));
     }
     let stacked_onto = stacked
         .as_ref()
-        .and_then(|stacked| stacked.parent_branch.as_ref())
+        .and_then(|stacked| stacked.live_parent_branch())
         .map(|branch| format!("origin/{branch}"));
     let fork_base = stacked.as_ref().map(|stacked| stacked.fork_base.clone());
     let default_target = if on_main { &upstream } else { &default };
@@ -214,9 +225,9 @@ pub fn checkpoint_uncommitted_work(repo: &Path, message: &str) -> Result<bool> {
     Ok(true)
 }
 
-/// Hand a conflicted sync to exactly one recovery agent under the owning
-/// operation's scoped ids. The agent continues the existing sequencer; the
-/// caller keeps ownership and performs verification and the single push.
+/// Run one conflict resolution under the owning operation's scoped IDs.
+/// The agent continues the existing sequencer. The caller keeps ownership
+/// and performs verification and the single push.
 fn resolve_sync_conflict(
     repo_root: &Path,
     onto: &str,
@@ -349,10 +360,15 @@ fn process_skill_agent(
     capture.finish(outcome)?;
     let result = result?;
     if result.exit_code != 0 {
+        let reason = result.stderr.trim();
+        let reason = if reason.is_empty() {
+            String::new()
+        } else {
+            format!("\n{reason}")
+        };
         return Err(anyhow!(
-            "agent exited with code {} while resolving {}",
-            result.exit_code,
-            skill_name,
+            "agent exited with code {} while resolving {skill_name}{reason}",
+            result.exit_code
         ));
     }
     Ok(())

@@ -265,6 +265,26 @@ fixture `ANALYZE` sees a handful of rows and would wave any walk through. When
 you add one, copy its `sqlite_stat1` row from a Machine store into `MEASURED`
 in `store/query_plans.rs`.
 
+A table with one row per Session counts as growing even when each read wants
+a few rows of it. `session_activity` holds 20,000 rows on a Machine where 37
+agents run, so a read across Sessions starts from the live subset and reaches
+the row by primary key:
+
+```sql
+SELECT DISTINCT act.observed_at + ?1 FROM agent_sessions s
+JOIN session_activity act ON act.session_id = s.id
+WHERE s.agent_process_id IS NOT NULL AND s.agent_ended_at IS NULL ...
+```
+
+```text
+SEARCH s USING INDEX agent_sessions_unended_agent (agent_process_id>?)
+SEARCH act USING INDEX sqlite_autoindex_session_activity_1 (session_id=?)
+```
+
+Filtering the big table by a time window instead (`observed_at > ?`) scans it,
+and an index on a column every reading rewrites is paid for under the write
+lock.
+
 A new hot path gets a test there (`server::boundary` uses the same helpers).
 Foreign-key checks never appear in `EXPLAIN QUERY PLAN`: deleting a parent row
 or changing its key looks up every child. The guard reads each foreign key from

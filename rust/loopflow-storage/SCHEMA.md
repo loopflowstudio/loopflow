@@ -12,7 +12,7 @@ to one. `uv run python scripts/due_removals.py` prints when each may drop.
 
 ## Task graph
 
-- `task_graphs`: task_id, graph, step, run_start, lf_process_id, updated_at, run_pid, run_os_started_at, restarts, restarted_at, auto, auto_at, auto_by
+- `task_graphs`: task_id, graph, step, run_start, lf_process_id, updated_at, run_pid, run_os_started_at, restarts, restarted_at, run_died_at, auto, auto_at, auto_by
 
 ## Wave
 
@@ -130,9 +130,6 @@ to one. `uv run python scripts/due_removals.py` prints when each may drop.
 
 - `agent_limit_recoveries`: lf_process_id, provider, reason, retry_at, agent, updated_at
 - `processes` — **leaving → LOO-965, process_rows_on_owners**: id, trace_id, parent_lf_process_id, via_agent, caller_session_id, caller_provider_generation, command, repo, cwd, started_at, completed_at, outcome, exit_code, error, signal, pid, kind, agent_session_id, os_started_at, endpoint, agent_provider, agent_interactive, caller_agent_process_id, attached_lf_process_id, attachment_token, attachment_exit_seq, spawn_state, terminal_id, receipt_locator, journal_trace_locator, ~~viewed~~ (leaving → LOO-954, unused_store_members), ~~native_input~~ (leaving → LOO-954, unused_store_members), ~~viewer_hold~~ (leaving → LOO-954, unused_store_members), ~~viewer_hold_at~~ (leaving → LOO-954, unused_store_members), inbox, held_terminal_id
-
-## AgentProcess
-
 
 ## Provider authentication
 

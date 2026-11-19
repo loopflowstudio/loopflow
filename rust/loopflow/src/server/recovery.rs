@@ -1,5 +1,4 @@
-//! The recovery pass: this Machine's work settles, its store keeps only what
-//! is needed, and Task conversations that died, or were prepared and never
+//! The recovery pass: this Machine's work settles, and Task conversations that died, or were prepared and never
 //! started, come back. One watcher reads
 //! the store when its planning, Session or process revisions move, and at
 //! least every minute for backoffs and deaths nothing recorded. Each due
@@ -15,7 +14,7 @@ use anyhow::Result;
 
 use loopflow_execution::transport::registry::Registry;
 use loopflow_model::id::LfSessionId;
-use loopflow_storage::sqlite::session_recovery::ConversationToStart;
+use loopflow_storage::sqlite::session_recovery::TaskConversation;
 use loopflow_storage::sqlite::{SqliteStore, StoreRevisions};
 
 /// How long the watcher goes without reading when nothing it reads moved:
@@ -24,9 +23,6 @@ const UNREAD: Duration = Duration::from_secs(60);
 /// The shortest time between two settlements: each one writes what it
 /// settles, which moves the revisions the watcher reads.
 const SETTLE_EVERY: Duration = Duration::from_secs(10);
-/// The shortest time between two retention passes over the store. The first
-/// reading runs one; each is a few short transactions and, rarely, a VACUUM.
-const RETAIN_EVERY: Duration = Duration::from_secs(60 * 60);
 /// The longest one start holds the next: after a reboot, conversations come
 /// back one at a time rather than all at once.
 const PACE: Duration = Duration::from_secs(3);
@@ -57,16 +53,15 @@ fn watch(terminals: &Registry) {
     }
 }
 
-/// The watcher's store, what it read last and when, when it last settled
-/// and retained, and when the pass must read again though nothing moved: a
-/// due conversation's terminal was still ending, or a conversation's or a
-/// run's backoff comes due.
+/// The watcher's store, what it read last and when, when it last settled,
+/// and when the pass must read again though nothing moved: a
+/// due conversation's terminal was still ending, a backoff comes due, or
+/// settlement was throttled when run records changed.
 #[derive(Default)]
 struct Watcher {
     store: Option<SqliteStore>,
     seen: Option<(StoreRevisions, SystemTime)>,
     settled: Option<SystemTime>,
-    retained: Option<SystemTime>,
     conversations_due: Option<SystemTime>,
     runs_due: Option<SystemTime>,
 }
@@ -88,8 +83,7 @@ impl Watcher {
     }
 
     /// Whether this reading settles: [`SETTLE_EVERY`] passed, or a run's
-    /// backoff came due. Settling answers when the next run comes due, always
-    /// later, so a due run never settles twice.
+    /// backoff came due. Settling answers when the next run comes due.
     fn settles(&self, now: SystemTime) -> bool {
         due(self.settled, now, SETTLE_EVERY) || self.runs_due.is_some_and(|at| at <= now)
     }
@@ -123,25 +117,38 @@ impl Watcher {
         if unchanged && self.wake().is_none_or(|at| now < at) {
             return;
         }
-        self.seen = Some((revisions, now));
         if self.settles(now) {
             self.settled = Some(now);
             self.runs_due = loopflow_execution::ops::recovery::settle().map(time_at);
+        } else if self.seen.is_some_and(|(seen, _)| {
+            (seen.planning, seen.processes) != (revisions.planning, revisions.processes)
+        }) {
+            // A move can restore Auto-Ship while settlement is throttled.
+            // Revisit that change even if nothing else writes to the store.
+            self.runs_due = self
+                .runs_due
+                .into_iter()
+                .chain(self.settled.map(|at| at + SETTLE_EVERY))
+                .min();
         }
+        self.seen = Some((revisions, now));
         let held = |session: &LfSessionId| {
             terminals.session_terminal(session).is_some()
                 || terminals.pending_terminal(session, None).is_some()
         };
-        let start = |conversation: &ConversationToStart, request: String| {
+        let start = |conversation: &TaskConversation, request: String| {
             if let Some(failure) = loopflow_execution::ops::recovery::launch_failure(conversation) {
                 anyhow::bail!(failure);
             }
-            let mut start = super::service::continuing(conversation.session.clone(), request, 0, 0)
-                .map_err(|error| anyhow::anyhow!("{}", error.message))?;
-            start.env.push((
-                loopflow_execution::ops::recovery::RECOVERING_ENV.into(),
-                conversation.session.to_string(),
-            ));
+            let mut start =
+                super::service::continuing(conversation.session.clone(), request.clone(), 0, 0)
+                    .map_err(|error| anyhow::anyhow!("{}", error.message))?;
+            // The resume reads who started it from its request, not from an
+            // environment the agent's own shells would inherit.
+            let target = start.argv.len() - 2;
+            start
+                .argv
+                .splice(target..target, ["--request-id".to_string(), request]);
             terminals.start(start)?;
             pace(store, conversation);
             Ok(())
@@ -153,16 +160,11 @@ impl Watcher {
                 tracing::warn!(error = %format!("{error:#}"), "recovery pass failed; it runs again at the next change");
             }
         }
-        // After the starts, so a VACUUM never holds a conversation back.
-        if due(self.retained, now, RETAIN_EVERY) {
-            self.retained = Some(now);
-            loopflow_execution::ops::recovery::retain();
-        }
     }
 }
 
 /// Hold the next start until this one's agent has attached, or [`PACE`].
-fn pace(store: &SqliteStore, conversation: &ConversationToStart) {
+fn pace(store: &SqliteStore, conversation: &TaskConversation) {
     let deadline = std::time::Instant::now() + PACE;
     while std::time::Instant::now() < deadline {
         let attached = store
@@ -203,12 +205,12 @@ fn recover_conversations(
     store: &SqliteStore,
     now: i64,
     held: impl Fn(&LfSessionId) -> bool,
-    mut start: impl FnMut(&ConversationToStart, String) -> Result<()>,
+    mut start: impl FnMut(&TaskConversation, String) -> Result<()>,
 ) -> Result<Option<i64>> {
     let due = loopflow_execution::ops::recovery::due_task_conversations(store, now)?;
     let mut wake = due.next_at;
     for conversation in due.now {
-        let ConversationToStart { session, agent, .. } = &conversation;
+        let TaskConversation { session, agent, .. } = &conversation;
         if held(session) {
             wake = Some(now + ENDING.as_secs() as i64);
             continue;
@@ -224,10 +226,16 @@ fn recover_conversations(
             None => conversation.starts_since_turn + 1,
         };
         let generation = agent.as_ref().map_or("new", |agent| agent.as_str());
-        let request = format!("recover:{session}:{generation}:{attempt}");
+        let request = format!(
+            "{}{session}:{generation}:{attempt}",
+            loopflow_execution::ops::recovery::RECOVER_REQUEST
+        );
         match start(&conversation, request) {
             Ok(()) => {
-                store.record_start_failure(session, None)?;
+                match agent {
+                    Some(_) => store.record_start_failure(session, None)?,
+                    None => store.record_first_start(session)?,
+                }
                 tracing::info!(%session, task = %conversation.task, exit = ?conversation.exit_code, attempt, "Task conversation started")
             }
             Err(error) => {
@@ -346,31 +354,30 @@ mod tests {
     }
 
     impl Fixture {
-        fn agent_identity(&self, pid: u32, started_at: i64) {
+        fn execute(&self, sql: &str, params: impl rusqlite::Params) {
             self.store
                 .conn
                 .lock()
                 .unwrap()
-                .execute(
-                    "UPDATE agent_sessions SET agent_pid=?2,agent_os_started_at=?3
-                     WHERE agent_process_id=?1",
-                    params![self.agent, pid, started_at],
-                )
+                .execute(sql, params)
                 .unwrap();
+        }
+
+        fn agent_identity(&self, pid: u32, started_at: i64) {
+            self.execute(
+                "UPDATE agent_sessions SET agent_pid=?2,agent_os_started_at=?3
+                 WHERE agent_process_id=?1",
+                params![self.agent, pid, started_at],
+            );
         }
 
         /// The provider exited with `code`, as the holder's settlement records it.
         fn exited(&self, code: i32) {
-            self.store
-                .conn
-                .lock()
-                .unwrap()
-                .execute(
-                    "UPDATE agent_sessions SET agent_ended_at=?2,agent_exit_code=?3,agent_pid=NULL,
-                         agent_os_started_at=NULL WHERE agent_process_id=?1",
-                    params![self.agent, NOW - 5, code],
-                )
-                .unwrap();
+            self.execute(
+                "UPDATE agent_sessions SET agent_ended_at=?2,agent_exit_code=?3,agent_pid=NULL,
+                     agent_os_started_at=NULL WHERE agent_process_id=?1",
+                params![self.agent, NOW - 5, code],
+            );
         }
 
         /// The requests one pass at `now` starts, with `held` Sessions skipped.
@@ -470,48 +477,30 @@ mod tests {
 
     #[test]
     fn a_closed_task_or_a_conversation_out_of_starts_is_not_started() {
-        let fixture = fixture();
-        fixture.exited(137);
-        fixture
-            .store
-            .conn
-            .lock()
-            .unwrap()
-            .execute(
-                "UPDATE agent_sessions SET starts_since_turn=5,last_started_at=?2 WHERE id=?1",
-                params![fixture.session.as_str(), NOW - 3600],
-            )
-            .unwrap();
-        assert!(fixture.pass(NOW, false).is_empty(), "gave up after 5");
+        let out_of_starts = fixture();
+        out_of_starts.exited(137);
+        out_of_starts.execute(
+            "UPDATE agent_sessions SET starts_since_turn=5,last_started_at=?2 WHERE id=?1",
+            params![out_of_starts.session.as_str(), NOW - 3600],
+        );
+        assert!(out_of_starts.pass(NOW, false).is_empty(), "gave up after 5");
 
-        let fixture = super::tests::fixture();
-        fixture.exited(137);
-        fixture
-            .store
-            .conn
-            .lock()
-            .unwrap()
-            .execute(
-                "UPDATE tasks SET abandoned_at=?2 WHERE id=?1",
-                params![fixture.task.as_str(), NOW - 60],
-            )
-            .unwrap();
-        assert!(fixture.pass(NOW, false).is_empty(), "abandoned");
+        let abandoned = fixture();
+        abandoned.exited(137);
+        abandoned.execute(
+            "UPDATE tasks SET abandoned_at=?2 WHERE id=?1",
+            params![abandoned.task.as_str(), NOW - 60],
+        );
+        assert!(abandoned.pass(NOW, false).is_empty(), "abandoned");
     }
 
     #[test]
     fn a_prepared_task_conversation_that_never_ran_is_started() {
         let fixture = fixture();
-        fixture
-            .store
-            .conn
-            .lock()
-            .unwrap()
-            .execute(
-                "UPDATE agent_sessions SET agent_process_id=NULL WHERE id=?1",
-                [fixture.session.as_str()],
-            )
-            .unwrap();
+        fixture.execute(
+            "UPDATE agent_sessions SET agent_process_id=NULL WHERE id=?1",
+            [fixture.session.as_str()],
+        );
         assert_eq!(
             fixture.pass(NOW, false),
             [format!("recover:{}:new:1", fixture.session)]
@@ -532,37 +521,40 @@ mod tests {
         .unwrap();
         assert_eq!(fixture.attempts(), (1, Some(NOW)));
         assert!(fixture.pass(NOW + 30, false).is_empty());
+        // The start that succeeds is its first: nothing started "again".
+        assert_eq!(fixture.pass(NOW + 60, false).len(), 1);
+        assert_eq!((fixture.attempts(), fixture.failure()), ((0, None), None));
     }
 
     #[test]
     fn a_persons_start_counts_the_passs_starts_from_zero() {
         let fixture = fixture();
         fixture.exited(137);
-        {
-            let conn = fixture.store.conn.lock().unwrap();
-            conn.execute(
-                "UPDATE agent_sessions SET starts_since_turn=4,last_started_at=?2,
-                    start_failure='no PTY left' WHERE id=?1",
-                params![fixture.session.as_str(), NOW - 3600],
-            )
-            .unwrap();
-        }
-        // `lf resume` by a person; the pass's own resume names its Session.
-        let _env = loopflow_test_support::env_lock().lock().unwrap();
-        std::env::set_var(
-            loopflow_execution::ops::recovery::RECOVERING_ENV,
-            fixture.session.as_str(),
+        fixture.execute(
+            "UPDATE agent_sessions SET starts_since_turn=4,last_started_at=?2,
+                start_failure='no PTY left' WHERE id=?1",
+            params![fixture.session.as_str(), NOW - 3600],
         );
-        loopflow_execution::ops::recovery::record_start(&fixture.store, &fixture.session, NOW)
-            .unwrap();
-        std::env::remove_var(loopflow_execution::ops::recovery::RECOVERING_ENV);
+        // `lf resume` by a person; the pass's own resume carries its request.
+        let record = |request: Option<&str>| {
+            loopflow_execution::ops::recovery::record_start(
+                &fixture.store,
+                &fixture.session,
+                request,
+                NOW,
+            )
+            .unwrap()
+        };
+        record(Some(&format!(
+            "recover:{}:{}:4",
+            fixture.session, fixture.agent
+        )));
         assert_eq!(
             fixture.attempts().0,
             4,
             "the pass's start is not a person's"
         );
-        loopflow_execution::ops::recovery::record_start(&fixture.store, &fixture.session, NOW)
-            .unwrap();
+        record(None);
         assert_eq!(fixture.failure(), None);
         // While the person's start comes up, the pass does not race it.
         assert!(fixture.pass(NOW + 1, false).is_empty());

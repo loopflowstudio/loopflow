@@ -588,24 +588,38 @@ struct DTOFixtureTests {
         }
     }
 
-    @Test("Task execution names who started its Graph and who set auto, requiring every mark")
+    @Test("Task execution names who started its Graph, who set auto and its stack parent, requiring every mark")
     func taskExecutionAttributionFixture() throws {
         let data = try loadFixtureData("task_checkout.json")
         let execution = try JSONDecoder().decode(TaskExecution.self, from: data)
         #expect(execution.startedBy?.label == "Session \"LOO-291 task\" for Maya")
         #expect(execution.auto == Auto(state: .stopped, at: 1793266380, by: .person(name: "Maya")))
+        #expect(execution.stackParent?.identifier == "LOO-290")
+        #expect(execution.stackParent?.branch == "maya/loo-290-parent")
+        #expect(execution.stackParent != nil && execution.stackParent?.prNumber == nil)
         #expect(Starter.person(name: nil).label == "attribution unresolved")
         var root = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
         root.removeValue(forKey: "auto")
         #expect(throws: DecodingError.self) {
             try JSONDecoder().decode(TaskExecution.self, from: JSONSerialization.data(withJSONObject: root))
         }
+        var unstacked = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        var parent = try #require(unstacked["stack_parent"] as? [String: Any])
+        parent.removeValue(forKey: "pr_number")
+        unstacked["stack_parent"] = parent
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode(TaskExecution.self, from: JSONSerialization.data(withJSONObject: unstacked))
+        }
+        unstacked.removeValue(forKey: "stack_parent")
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode(TaskExecution.self, from: JSONSerialization.data(withJSONObject: unstacked))
+        }
         let lifecycle = try #require(JSONSerialization.jsonObject(with: loadFixtureData("task_lifecycle.json")) as? [String: [String: Any]])
         for (phase, capture) in lifecycle {
             let status = try #require(capture["status"] as? [String: Any], "\(phase)")
             let recorded = try JSONDecoder().decode(
                 TaskExecution.self, from: JSONSerialization.data(withJSONObject: try #require(status["execution"])))
-            #expect(recorded.startedBy == nil && recorded.auto == nil, "\(phase)")
+            #expect(recorded.startedBy == nil && recorded.auto == nil && recorded.stackParent == nil, "\(phase)")
         }
     }
 
@@ -906,20 +920,19 @@ struct DTOFixtureTests {
         #expect(decoded == sessions)
     }
 
-    @Test("A Session says how its agent ended and whether the server starts it again; both keys are required")
+    @Test("A Session carries how its agent ended, its outlook and the server's sentence; every key is required")
     func sessionEndingFixture() throws {
         let data = try loadFixtureData("session_memberships.json")
         let sessions = try JSONDecoder().decode([SessionRecord].self, from: data)
-        #expect(sessions[1].ended?.by == .person)
-        #expect(sessions[1].conversationLine == "Quit")
+        #expect(sessions.compactMap(\.outlook?.kind) == [.quit, .comingBack, .waitingForYou, .couldNotStart, .starting])
+        #expect(sessions[0].statusLine == "running")
+        #expect(sessions[1].statusLine == "quit 12:01; `lf resume run_00000000000000000000000000000002` opens it")
         #expect(sessions[3].ended?.exitCode == 137)
         #expect(sessions[3].start?.attempts == 1)
-        #expect(sessions[3].conversationLine
-            == "Died (exit 137) · starting again · last start failed: claude is not installed on this Machine's PATH")
         #expect(sessions[4].ended?.exitCode == nil)
-        #expect(sessions[0].conversationLine == nil)
+        #expect(sessions[6].statusLine == "starting")
         let objects = try #require(JSONSerialization.jsonObject(with: data) as? [[String: Any]])
-        for key in ["ended", "start"] {
+        for key in ["ended", "start", "outlook", "status_line"] {
             var value = objects[3]
             value.removeValue(forKey: key)
             #expect(throws: DecodingError.self) {

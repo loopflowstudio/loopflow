@@ -28,8 +28,6 @@ pub fn task_snapshot(task: &Task) -> OpsResult<TaskSnapshot> {
 pub(super) async fn read_task_snapshot(store: &SharedStore, task: Task) -> OpsResult<TaskSnapshot> {
     let wave = owning_wave(store, &task).await?;
     let repo = repository_for_task(store, &task)?;
-    let personal =
-        crate::config::PersonalSettings::read(Some(&repo), wave.as_ref().map(|w| w.slug()));
     let project = match &task.project_id {
         Some(id) => Some(
             store
@@ -60,20 +58,32 @@ pub(super) async fn read_task_snapshot(store: &SharedStore, task: Task) -> OpsRe
     let work_set =
         crate::store::task_work::task_work(&store.sqlite, &task.id).map_err(task_error)?;
     let status = store.task_state(&task.id).await.map_err(task_error)?;
+    let parent_pr = match task.parent_pr_id.as_ref() {
+        Some(parent_id) => store
+            .get_task_pr(parent_id)
+            .await
+            .map_err(|error| task_error(format!("failed to read parent PR: {error}")))?,
+        None => None,
+    };
+    let stack_parent = match parent_pr.as_ref() {
+        Some(parent) => store
+            .get_task(&parent.task_id)
+            .await
+            .map_err(task_error)?
+            .map(|parent_task| super::TaskStackParent {
+                identifier: parent_task.identifier,
+                branch: parent.branch.clone(),
+                pr_number: parent.github().map(|github| u64::from(github.number)),
+            }),
+        None => None,
+    };
     let actions = if store.sqlite.task_deleted(&task).map_err(task_error)? {
         TaskActionModel {
             recommended: Some(crate::ops::task_actions::TaskAction::NoAction),
             reason: "Task was deleted; retained history is read-only".into(),
         }
     } else {
-        let predecessor_phase = match task.parent_pr_id.as_ref() {
-            Some(parent_id) => store
-                .get_task_pr(parent_id)
-                .await
-                .map_err(|error| task_error(format!("failed to read parent PR: {error}")))?
-                .map(|pr| pr.phase()),
-            None => None,
-        };
+        let predecessor_phase = parent_pr.as_ref().map(TaskPr::phase);
         let completion_refusal = completion_refusal(pr.as_ref(), &task.identifier);
         let worktree_blocker = task_worktree_blocker(store, &task).await?;
         let run_refusal = worktree_blocker
@@ -82,7 +92,7 @@ pub(super) async fn read_task_snapshot(store: &SharedStore, task: Task) -> OpsRe
         let launch_refusal = if worktree_blocker.is_some() {
             None
         } else {
-            task_configuration_refusal(&task, wave.as_ref().map(|w| w.slug()), &personal, None)
+            task_configuration_refusal(&task, &repo, wave.as_ref().map(|w| w.slug()), None)
                 .or_else(|| task_event_process_refusal(latest_event.as_ref()).map(str::to_string))
         };
         let action_evidence = TaskActionEvidence {
@@ -104,8 +114,8 @@ pub(super) async fn read_task_snapshot(store: &SharedStore, task: Task) -> OpsRe
     };
     let agent = resolve_task_agent(
         task.worktree.as_deref().unwrap_or(&repo),
+        &repo,
         wave.as_ref().map(|w| w.slug()),
-        &personal,
         None,
     );
     let provider = agent.ok().map(|agent| agent.harness.as_str().to_owned());
@@ -162,6 +172,7 @@ pub(super) async fn read_task_snapshot(store: &SharedStore, task: Task) -> OpsRe
         actions,
         started_by,
         auto,
+        stack_parent,
     })
 }
 

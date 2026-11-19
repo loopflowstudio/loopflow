@@ -107,6 +107,7 @@ mod tests {
                             .unwrap()
                             .unwrap()
                     }),
+                    died_at: None,
                 },
             )),
         };

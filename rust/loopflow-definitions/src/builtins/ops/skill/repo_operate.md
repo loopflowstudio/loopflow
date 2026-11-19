@@ -47,7 +47,7 @@ Operate each Wave that has started work by following `lf help wave-operate`,
 here or with `lf --wave <wave> wave-operate "<direction>"`, and operate your
 started Tasks outside any Wave with `lf task-operate <issue>`. Sending someone
 to another conversation is not operating. Follow each intervention to its
-result. Never start a competing Graph process.
+result. Never start a competing Graph run.
 
 `lf task run <issue>` continues a Task to its next interactive step. `lf -b
 task run` and `lf ship` turn auto on, so the run stands in at interactive

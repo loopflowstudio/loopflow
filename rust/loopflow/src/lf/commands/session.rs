@@ -9,7 +9,7 @@ use crate::lf::SessionCommand;
 use crate::lf::SessionConnectionArgs;
 use crate::lf::SessionListArgs;
 use loopflow_execution::ops::human_session::{
-    ConversationLaunch, Opening, SessionEnd, SessionEndedBy, SessionRecord, SessionStarts,
+    ConversationLaunch, Opening, SessionEnd, SessionOutlook, SessionRecord, SessionStarts,
     SessionState,
 };
 use loopflow_execution::session_record::SessionTitleSource;
@@ -409,14 +409,21 @@ pub struct SessionFacts {
     /// Ready for a person's input.
     pub available: bool,
     pub cwd: String,
-    /// The provider's current AgentProcess, as `lf ps` lists it.
+    /// The provider's current AgentProcess generation.
     pub agent_process_id: Option<loopflow_model::id::AgentProcessId>,
     /// How its last agent ended, as `lf session list` reads it.
     #[serde(deserialize_with = "Option::deserialize")]
     pub ended: Option<SessionEnd>,
-    /// The server starting it again after a death.
+    /// The server's starts of it since it last finished a turn.
     #[serde(deserialize_with = "Option::deserialize")]
     pub start: Option<SessionStarts>,
+    /// Whether it comes up while it is not running, and what brings it.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub outlook: Option<SessionOutlook>,
+    /// All of the above as the server's one sentence; `lf task status`
+    /// prints the Task's conversation's as given.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub status_line: Option<String>,
 }
 
 impl SessionFacts {
@@ -432,79 +439,10 @@ impl SessionFacts {
             agent_process_id: session.agent_process_id,
             ended: session.ended,
             start: session.start,
+            outlook: session.outlook,
+            status_line: session.status_line,
         }
     }
-
-    /// `lf task status`'s line for the Task's conversation: running, died and
-    /// coming back, or quit, with the command that opens it. Only a running
-    /// server (`server_runs`) starts a died conversation again.
-    pub fn conversation_line(&self, task: &str, now: i64, server_runs: bool) -> String {
-        let resume = format!("`lf resume --task {task}` opens it");
-        let running = matches!(self.state, SessionState::Active | SessionState::Detached);
-        let start = self.start.as_ref();
-        if running {
-            return match start
-                .and_then(|start| Some((start.attempts, start.last_started_at.as_deref()?)))
-            {
-                Some((attempts, at)) if attempts > 0 => {
-                    format!("running (started again {}, attempt {attempts})", clock(at))
-                }
-                _ => "running".to_string(),
-            };
-        }
-        let ending = match &self.ended {
-            Some(SessionEnd {
-                at,
-                by: SessionEndedBy::Person,
-                ..
-            }) => return format!("quit {}; {resume}", clock(at)),
-            Some(SessionEnd {
-                at,
-                by: SessionEndedBy::Died,
-                exit_code,
-            }) => format!(
-                "died {} ({})",
-                clock(at),
-                exit_code.map_or("no exit recorded".to_string(), |code| format!(
-                    "exit {code}"
-                ))
-            ),
-            None if self.state == SessionState::Unknown => return "unknown".to_string(),
-            None => "closed".to_string(),
-        };
-        let Some(start) = start else {
-            return format!("{ending}; {resume}");
-        };
-        let mut line = if start.gave_up {
-            format!("{ending} · started {} times; {resume}", start.attempts)
-        } else if !server_runs {
-            format!("{ending} · starts again when the server runs")
-        } else {
-            match start.next_at.as_deref() {
-                Some(at) if seconds(at).is_some_and(|at| at > now) => {
-                    format!("{ending} · starts again {}", clock(at))
-                }
-                _ => format!("{ending} · starting again"),
-            }
-        };
-        if let Some(failure) = &start.failure {
-            line.push_str(&format!(" · last start failed: {failure}"));
-        }
-        line
-    }
-}
-
-fn seconds(rfc3339: &str) -> Option<i64> {
-    chrono::DateTime::parse_from_rfc3339(rfc3339)
-        .ok()
-        .map(|at| at.timestamp())
-}
-
-/// Local `HH:MM` for an RFC 3339 time.
-fn clock(rfc3339: &str) -> String {
-    chrono::DateTime::parse_from_rfc3339(rfc3339)
-        .map(|at| at.with_timezone(&chrono::Local).format("%H:%M").to_string())
-        .unwrap_or_else(|_| rfc3339.to_string())
 }
 
 /// `lf session list`.
@@ -886,12 +824,7 @@ async fn resume(
     let cwd = std::env::current_dir()?;
     drop(progress);
     if let Some(message) = message {
-        let id = select(&store, &cwd, target).await?;
-        loopflow_execution::ops::recovery::record_start(
-            &store.sqlite,
-            &id.as_str().into(),
-            time::OffsetDateTime::now_utc().unix_timestamp(),
-        )?;
+        let id = select(&store, &cwd, target, request_id).await?;
         let session = loopflow_execution::ops::human_session::session_by_id(&store, &id)
             .await?
             .context("Session not found")?;
@@ -934,11 +867,13 @@ async fn resume(
     }
 }
 
-/// The conversation `lf resume` run from `directory` selects.
+/// The conversation `lf resume` run from `directory` selects, recorded as
+/// started by a person unless `request_id` is the recovery pass's own.
 async fn select(
     store: &Arc<Store>,
     directory: &Path,
     target: loopflow_execution::ops::human_session::SessionTarget<'_>,
+    request_id: Option<&str>,
 ) -> anyhow::Result<String> {
     let selected =
         loopflow_execution::ops::human_session::select_connection(store, directory, target).await?;
@@ -947,6 +882,12 @@ async fn select(
             "Nothing to resume here; starting a new conversation."
         ));
     }
+    loopflow_execution::ops::recovery::record_start(
+        &store.sqlite,
+        &selected.id.as_str().into(),
+        request_id,
+        time::OffsetDateTime::now_utc().unix_timestamp(),
+    )?;
     Ok(selected.id)
 }
 
@@ -963,12 +904,7 @@ async fn reopen(
     fork: bool,
     json: bool,
 ) -> anyhow::Result<Opening> {
-    let id = select(store, directory, target).await?;
-    loopflow_execution::ops::recovery::record_start(
-        &store.sqlite,
-        &id.as_str().into(),
-        time::OffsetDateTime::now_utc().unix_timestamp(),
-    )?;
+    let id = select(store, directory, target, request_id).await?;
     loopflow_execution::ops::human_session::open(
         store,
         directory,
@@ -1275,99 +1211,4 @@ pub(super) fn mutate(
             _ => unreachable!("is_mutation selects Session mutations"),
         }
     })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{SessionEnd, SessionEndedBy, SessionFacts, SessionStarts, SessionState};
-
-    fn conversation(
-        state: SessionState,
-        ended: Option<SessionEnd>,
-        start: Option<SessionStarts>,
-    ) -> SessionFacts {
-        SessionFacts {
-            id: "conversation".into(),
-            title: "LOO-9 conversation".into(),
-            provider: Some("claude".into()),
-            interactive: true,
-            state,
-            available: false,
-            cwd: "/src/loopflow.loo-9".into(),
-            agent_process_id: None,
-            ended,
-            start,
-        }
-    }
-
-    fn end(by: SessionEndedBy, exit_code: Option<i32>) -> Option<SessionEnd> {
-        Some(SessionEnd {
-            at: "2026-11-17T12:01:00Z".into(),
-            by,
-            exit_code,
-        })
-    }
-
-    fn starts(attempts: u32, gave_up: bool) -> Option<SessionStarts> {
-        Some(SessionStarts {
-            attempts,
-            last_started_at: Some("2026-11-17T12:01:02Z".into()),
-            next_at: None,
-            gave_up,
-            failure: None,
-        })
-    }
-
-    /// Running, quit and given up each say what a person does next, if anything.
-    #[test]
-    fn the_conversation_line_says_running_quit_or_how_it_comes_back() {
-        assert_eq!(
-            conversation(SessionState::Active, None, None).conversation_line("LOO-9", 0, true),
-            "running"
-        );
-        assert!(conversation(SessionState::Active, None, starts(1, false))
-            .conversation_line("LOO-9", 0, true)
-            .starts_with("running (started again "));
-        let quit = conversation(
-            SessionState::Closed,
-            end(SessionEndedBy::Person, Some(0)),
-            None,
-        )
-        .conversation_line("LOO-9", 0, true);
-        assert!(quit.starts_with("quit "), "{quit}");
-        assert!(
-            quit.ends_with("; `lf resume --task LOO-9` opens it"),
-            "{quit}"
-        );
-        let gave_up = conversation(
-            SessionState::Closed,
-            end(SessionEndedBy::Died, None),
-            starts(5, true),
-        )
-        .conversation_line("LOO-9", 0, true);
-        assert!(
-            gave_up.ends_with(
-                "(no exit recorded) · started 5 times; `lf resume --task LOO-9` opens it"
-            ),
-            "{gave_up}"
-        );
-    }
-
-    /// A died conversation promises a start only while a server runs to make it.
-    #[test]
-    fn with_no_server_a_died_conversation_waits_for_one() {
-        let died = conversation(
-            SessionState::Closed,
-            end(SessionEndedBy::Died, Some(137)),
-            starts(1, false),
-        );
-        assert!(died
-            .conversation_line("LOO-9", 0, true)
-            .ends_with("(exit 137) · starting again"));
-        let line = died.conversation_line("LOO-9", 0, false);
-        assert!(
-            line.ends_with("(exit 137) · starts again when the server runs"),
-            "{line}"
-        );
-    }
 }

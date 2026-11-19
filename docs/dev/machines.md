@@ -290,7 +290,7 @@ Checked mini: it can take MTG-321
 Stopped MTG-321 at `implement`
 Committed and pushed MTG-321 on mtg-321
 Arrived on mini (Graph at `implement`); its Session moved with it
-Running on mini as Graph process 0199a213-81c0-7800-8aa1-bbab2a035a55
+Running on mini as Graph run 0199a213-81c0-7800-8aa1-bbab2a035a55
   follow: lf task status MTG-321
 ```
 
@@ -393,10 +393,10 @@ label; then the refusal prints the same check and retry. Addressed to mini from 
 runs on the laptop, which holds the move. A leaving move carries on: it
 commits, pushes and takes the conversation, which are safe to repeat. A sent
 move is delivered as it was sent, conversation included, without committing or
-pushing again. Either way the Graph continues on mini at the step it was on. If
-the Graph does not start on mini, the move still stands and the last line prints
-`lf task run MTG-321 --from 'implement'`, which starts it at that step on the
-Task's owner.
+pushing again. For a Task outside Auto-Ship, the move continues a Graph it
+stopped, starting it on mini at the saved step. If the Graph does not start,
+the move still stands and prints `lf task run MTG-321 --from 'implement'` to
+start it on the Task's owner.
 
 `lf task claim MTG-321` on the laptop first asks mini whether the move arrived.
 If it did, its answer lost, the Task runs on mini and the claim is written

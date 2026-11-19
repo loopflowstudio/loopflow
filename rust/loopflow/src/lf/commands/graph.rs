@@ -919,6 +919,13 @@ impl RunningGraph<'_> {
             tokio::process::Command::new(loopflow_execution::os_process::resolve_lf_binary()?);
         command.current_dir(self.cwd);
         command.env(graph_process::GRAPH_ID_ENV, self.process.as_str());
+        // The step runs as the id this Graph mints and records for it.
+        let run = LfProcessId::default();
+        command.env(
+            loopflow_execution::journal::LF_EXECUTION_ID_ENV,
+            run.as_str(),
+        );
+        let step = (kind != StepKind::Commit).then_some(run);
         command.env(
             loopflow_execution::journal::GRAPH_STEP_ENV,
             if self.task_run.is_some() {
@@ -927,13 +934,6 @@ impl RunningGraph<'_> {
                 "bare"
             },
         );
-        // The step runs as the id this Graph mints and records for it.
-        let run = LfProcessId::default();
-        command.env(
-            loopflow_execution::journal::LF_EXECUTION_ID_ENV,
-            run.as_str(),
-        );
-        let step = (kind != StepKind::Commit).then_some(run);
         command.env_remove(graph_process::TASK_INTERRUPT_CURSOR_ENV);
         if self.launcher.verbose {
             command.arg("--verbose");
@@ -1354,6 +1354,24 @@ mod tests {
     use std::fs;
     use tempfile::tempdir;
 
+    /// Record the Graph run `execute` writes before any step, which each
+    /// step's row references.
+    fn record_run(running: &super::RunningGraph<'_>) {
+        running
+            .store
+            .sqlite
+            .record_graph(
+                &running.process,
+                &loopflow_execution::graph::compiled::compile(running.graph, running.steps),
+                running.task.as_ref(),
+                &loopflow_storage::graph_process::ExecutionStart::reserved(0),
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+    }
+
     #[test]
     fn linear_on_demand_graph_steps_acquire_before_spawning() {
         use crate::lf::Cli;
@@ -1412,6 +1430,7 @@ mod tests {
                 stops_at_interactive: false,
                 interrupt: None,
             };
+            record_run(&running);
             runtime.block_on(async {
                 let conn = rusqlite::Connection::open(&fixture.database).unwrap();
                 for index in 0..2 {
@@ -1499,6 +1518,7 @@ mod tests {
                         .unwrap(),
                 ),
             };
+            record_run(&running);
             let begun = std::time::Instant::now();
             let outcome = runtime.block_on(async {
                 let interrupt = async {

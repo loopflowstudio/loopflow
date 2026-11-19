@@ -64,19 +64,21 @@ first reading after start is the restart and reboot case. Each reading:
    provider across server restarts. `lf task run`, `lf ship` and
    `lf task checkout` only prepare the Session; this pass starts it. That
    first start counts only if it fails, so the first death after it comes
-   back at once; its terminal holds later passes off. The pass's start runs
-   with `LF_RECOVERING_SESSION=<session>`; any other `lf session resume` of it
-   is a person's, and sets the count to zero and clears `start_failure`.
+   back at once; its terminal holds later passes off. The pass's
+   `lf session resume` carries that request as `--request-id`; a resume with
+   any other request, or none, is a person's, and sets the count to zero and
+   clears `start_failure`.
 3. **Carries Task runs.** A Task whose `lf task run` carrier is dead gets
    `lf task run <ID>` again, from its checkpoint; with auto on it stands
    in at interactive steps by itself. A carrier that exits on its own clears
-   its OS process; a dead carrier left it behind. The pass counts those starts
+   its OS process; one found dead died, and retention, which clears it too,
+   records when (`task_graphs.run_died_at`). The pass counts those starts
    (`task_graphs.restarts`, `restarted_at`), reset when the run finishes a
    step, and waits for a person after five.
-4. **Retains**, at most every hour: closes Process rows whose OS process is
-   gone, forgets finished ones nothing references, merges per-receipt usage,
-   reclaims pages, then removes receipts of Processes proven dead
-   (`ops::recovery::retain`).
+
+Store retention runs beside the pass, on the maintenance thread
+(`maintenance.rs`): at start and every hour it ends owners whose OS process
+is gone.
 
 One start is in flight at a time: the next begins when the last one's
 agent attaches, or after 3 seconds, most recently updated Task first. Sessions
@@ -86,9 +88,23 @@ turn or step the Session and the Task run show the command that continues. A
 start that fails records its reason on the Session
 (`agent_sessions.start_failure`, for example `claude is not installed on this
 Machine's PATH`), cleared by the next start that succeeds, and retries on the
-same backoff. A Session's `ended {at, by, exit_code}` and `start {attempts,
-last_started_at, next_at, gave_up, failure}` carry these facts to
-`lf session list`, `lf task status` and Desktop. Only a Task's work session is
+same backoff. A first start that succeeds after failed ones clears their
+count too: nothing started again. A start under way (the agent is attached to
+its open held terminal and has no pid yet, `SessionSummary.launching`) reads
+`starting`, not `unknown`. A Session's `ended {at, exit_code}` and `start {attempts,
+last_started_at}` carry these facts, and its `outlook {kind, at, reason,
+command}` says once what happens next: `starting`, `coming_back`,
+`waiting_for_you`, `quit` or `could_not_start`. Whether the server starts a
+conversation is one rule, `ops::recovery::server_start`: quit, the give-up,
+whether the Task is open, checked out and claimed here, whether a server
+runs, then the backoff. The pass asks it of each open Task's conversation
+here (`task_conversations_here`) and the Session read
+(`ops::human_session::session_ending`) asks it for the outlook, so a line
+never promises a start the pass will not make. That read also writes the
+sentence, `status_line`; `lf task status` and Desktop print it and derive
+nothing.
+A holder that gets no PTY answers `no PTY left: N in use (<limit>)`, read the
+way `lf machine doctor`'s `ptys` check reads it. Only a Task's work session is
 started; a Wave's or repository's work session, a chat and a batch are
 reported, never started.
 
@@ -312,6 +328,36 @@ selected answer sends no new reading. External dependencies come from the read
 itself, without a separate clock, checkout or probe policy for each operation.
 Database-derived joins retain their transactional snapshot; external
 observations do not share that transaction.
+
+Resolved settings and the skill catalog are worked out once per change to the
+files they came from, not once per reading. Save `.lf/config.yaml`, a personal
+or global settings file, a Wave's files or a skill under `.lf/skills`,
+`.claude`, `.agents` or `.codex`, and every subscription that read it gets a
+new reading within about a second:
+
+```bash
+lf wave show mac --subscribe --json &
+lf set default_agent codex    # a new line: Tasks with no agent of their own name codex
+```
+
+An edit that changes nothing in the selected answer sends no line. Until a
+file changes, readings share one resolved value per checkout and Wave, one for
+your global `config.yaml`, and one catalog per set of skill directories. A file that fails to load gives every
+reading the same error it gives `lf config settings`, and the server warns
+about it once per edit. A `--setting` override belongs to the command that
+carries it: a read with one resolves for itself and leaves the shared value
+alone. Settings from the environment are the server's own, the same for every
+reading, and identify the shared value along with the checkout and Wave.
+
+In code this is `observe::derived`: a value computed from observed facts,
+kept with the facts its computation read and computed again when one changes.
+`observe::Derived` lists every such value and what identifies it. A
+computation reads observed facts and its key, nothing else; an input from the
+environment, a thread-local or the store goes in the key. With no reading
+active (any bare `lf` command) `derived` computes inline and keeps nothing.
+A bare read that asks for one value many times, as Task details do for every
+Task in a checkout, runs inside `observe::reading`: one reading that lasts for
+that call.
 
 Every operation names its `kind` as a dotted resource and verb, beside its
 fields. `lf/commands/read.rs` (`Read`) and `lf/commands/write.rs` (`Write`) own

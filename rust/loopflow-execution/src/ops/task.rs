@@ -207,6 +207,21 @@ pub struct TaskSnapshot {
     /// `null` when nobody has.
     #[serde(deserialize_with = "Option::deserialize")]
     pub auto: Option<loopflow_storage::sqlite::Auto>,
+    /// The Task this one is stacked on.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub stack_parent: Option<TaskStackParent>,
+}
+
+/// The Task a stacked Task builds on, as people name it.
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+pub struct TaskStackParent {
+    pub identifier: String,
+    pub branch: String,
+    /// `None` until the parent opens its PR.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub pr_number: Option<u64>,
 }
 
 #[derive(
@@ -389,8 +404,18 @@ pub struct StackedSync {
     /// The recorded base, or the parent's merge commit once HEAD holds it.
     pub fork_base: String,
     pub child: Task,
+    /// The parent Task's identifier.
+    pub parent_identifier: String,
+    /// The parent's PR branch, kept after it merges.
+    pub parent_branch: String,
+    pub parent_merged: bool,
+}
+
+impl StackedSync {
     /// The live parent branch, or `None` once the parent has merged.
-    pub parent_branch: Option<String>,
+    pub fn live_parent_branch(&self) -> Option<&str> {
+        (!self.parent_merged).then_some(self.parent_branch.as_str())
+    }
 }
 
 /// Resolve a Task's current cross-Task stack from durable ids, consulting
@@ -448,8 +473,39 @@ pub fn task_stack(worktree: &Path) -> OpsResult<Option<StackedSync>> {
         Ok(Some(StackedSync {
             fork_base,
             child: *task,
-            parent_branch: (!merged).then_some(parent.branch),
+            parent_identifier: parent_task.identifier,
+            parent_branch: parent.branch,
+            parent_merged: merged,
         }))
+    })
+}
+
+/// The identifier of another open Task that `target` names, by identifier or
+/// by branch: one neither finished nor abandoned whose PR has not merged.
+/// Outside a Task's checkout there is no other Task to name.
+pub fn open_task_named(worktree: &Path, target: &str) -> OpsResult<Option<String>> {
+    block_on_task(async move {
+        let ManagedTask::Managed { store, task: own } = resolve_managed_task(worktree).await?
+        else {
+            return Ok(None);
+        };
+        let named = match store.get_task_by_issue(target).await.map_err(task_error)? {
+            Some(task) => Some(task),
+            None => store.get_task_by_branch(target).await.map_err(task_error)?,
+        };
+        let Some(task) = named.filter(|task| task.id != own.id) else {
+            return Ok(None);
+        };
+        let state = store.task_state(&task.id).await.map_err(task_error)?;
+        if matches!(state, TaskState::Done | TaskState::Abandoned) {
+            return Ok(None);
+        }
+        let merged = store
+            .active_task_pr(&task.id)
+            .await
+            .map_err(task_error)?
+            .is_some_and(|pr| pr.phase() == PrPhase::Merged);
+        Ok((!merged).then_some(task.identifier))
     })
 }
 
@@ -463,7 +519,7 @@ fn contains_commit(worktree: &Path, commit: &str) -> OpsResult<bool> {
 pub fn stack_for_landing(worktree: &Path) -> OpsResult<Option<StackedSync>> {
     let stacked = task_stack(worktree)?;
     if let Some(stacked) = &stacked {
-        if let Some(parent) = &stacked.parent_branch {
+        if let Some(parent) = stacked.live_parent_branch() {
             return Err(task_error(format!(
                 "Task PR is stacked on {parent}, which has not merged; land the parent first"
             )));
@@ -675,14 +731,17 @@ pub(crate) fn scope_graph_default(
     repo: &Path,
     wave: Option<&str>,
 ) -> OpsResult<(String, ConfigSource)> {
-    let layers = crate::config::config_layers(Some(repo), wave).map_err(task_error)?;
-    let resolved = crate::config::settings::resolve_layers(&layers, None).map_err(task_error)?;
+    let resolved = crate::config::resolved(Some(repo), wave).map_err(task_error)?;
     let source = resolved.settings["graph"]
         .selected()
         .expect("graph has a builtin default")
         .source;
     Ok((
-        resolved.config.graph.expect("graph has a builtin default"),
+        resolved
+            .config
+            .graph
+            .clone()
+            .expect("graph has a builtin default"),
         source,
     ))
 }
@@ -1069,7 +1128,11 @@ fn prepare_task(
             task
         } else {
             if let Some(parent) = options.stack_on.as_deref() {
-                stack_existing_task(&store, &main, &task, parent).await?;
+                let stacked = stack_existing_task(&store, &main, &task, parent).await?;
+                eprintln!(
+                    "{stacked}\nRun `lf sync` in {} to merge it.",
+                    task.worktree()?.display()
+                );
             }
             restore_task_checkout(&store, &task, recover_from).await?;
             task
@@ -1253,12 +1316,28 @@ async fn finish_task_checkout(store: &SharedStore, task: &Task) -> OpsResult<()>
     Ok(())
 }
 
+/// Stack the Task checked out at `worktree` on the open Task `parent`, moving
+/// its PR's base, and say so. Merging the parent is the caller's sync.
+pub fn stack_task(worktree: &Path, parent: &str) -> OpsResult<String> {
+    block_on_task(async move {
+        let ManagedTask::Managed { store, task } = resolve_managed_task(worktree).await? else {
+            return Err(task_error(
+                "only a Task's checkout can stack on another Task",
+            ));
+        };
+        let main = crate::git::worktrees::main_repo_root(worktree).map_err(task_error)?;
+        stack_existing_task(&store, &main, &task, parent).await
+    })
+}
+
+/// Record `requested` as the Task's parent and retarget its open PR there.
+/// Returns the line that reports both.
 async fn stack_existing_task(
     store: &SharedStore,
     main_repo: &Path,
     task: &Task,
     requested: &str,
-) -> OpsResult<()> {
+) -> OpsResult<String> {
     fetch_task_refs(main_repo)?;
     let (parent, note) = record_stack_parent(store, main_repo, task, requested).await?;
     let _mutation = lock_task_pr_mutation(task.worktree()?)?;
@@ -1278,14 +1357,28 @@ async fn stack_existing_task(
         .stack_task_placement(task, &parent.id, &base_commit)
         .await
         .map_err(|error| task_error(error.to_string()))?;
-    eprintln!(
-        "Task {} stacks on {requested} ({}){}. This Task's checkout and PR are unchanged; run `lf sync` in {} to integrate it.",
-        task.identifier,
-        parent.branch,
-        note.map(|note| format!("; {note}")).unwrap_or_default(),
-        task.worktree()?.display()
-    );
-    Ok(())
+    let mut line = format!("Stacked {} on {requested}", task.identifier);
+    if let Some(note) = note {
+        line.push_str(&format!("; {note}"));
+    }
+    let open_pr = store
+        .active_task_pr(&task.id)
+        .await
+        .map_err(task_error)?
+        .filter(|pr| pr.phase() == PrPhase::Open)
+        .and_then(|pr| pr.github().map(|github| u64::from(github.number)));
+    if let Some(number) = open_pr {
+        crate::ops::pr::retarget_pr(task.worktree()?, number, &parent.branch, &|_| {}).map_err(
+            |error| {
+                task_error(format!(
+                    "{line}, but PR #{number} still targets its old base ({error}); run `gh pr edit {number} --base {}`",
+                    parent.branch
+                ))
+            },
+        )?;
+        line.push_str(&format!("; PR #{number} now targets {}", parent.branch));
+    }
+    Ok(line)
 }
 
 /// The Task a stacked Task names, with the PR record it already has.
@@ -2180,28 +2273,32 @@ fn truncate_task_title(value: &str, max_chars: usize) -> String {
 }
 
 /// Current launch preferences at the Task checkout, with no saved Task agent.
+/// Your own settings are found from `repository`, so they hold for a Task
+/// whose checkout is gone.
 pub fn resolve_task_agent(
     worktree: &Path,
+    repository: &Path,
     wave: Option<&str>,
-    personal: &crate::config::PersonalSettings,
     skill: Option<&crate::graph::Skill>,
 ) -> OpsResult<crate::config::Agent> {
-    let config =
-        crate::config::load_wave_config_with(Some(worktree), wave, personal)?.unwrap_or_default();
-    let resolved = crate::config::settings::resolve(&config, skill)?;
+    let shared = crate::config::resolved_for_task(worktree, repository, wave)?;
+    let Some(skill) = skill else {
+        return Ok(crate::config::Agent::parse(shared.config.agent()?)?);
+    };
+    let resolved = crate::config::settings::resolve(&shared.config, Some(skill))?;
     Ok(crate::config::Agent::parse(resolved.config.agent()?)?)
 }
 
 fn task_configuration_refusal(
     task: &Task,
+    repository: &Path,
     wave: Option<&str>,
-    personal: &crate::config::PersonalSettings,
     skill: Option<&crate::graph::Skill>,
 ) -> Option<String> {
     let worktree = task.worktree.as_deref()?;
     // A Graph's steps may choose different agents; no general preference is
     // required to inspect or start the Graph. Each launch resolves its own choice.
-    let agent = match resolve_task_agent(worktree, wave, personal, skill) {
+    let agent = match resolve_task_agent(worktree, repository, wave, skill) {
         Ok(agent) => agent,
         Err(OpsError::Load(crate::error::LoadError::AgentSelection)) if skill.is_none() => {
             return None
@@ -2217,11 +2314,11 @@ fn task_configuration_refusal(
 /// non-resumable failure as its latest event.
 pub fn task_process_refusal_after(
     task: &Task,
+    repository: &Path,
     wave: Option<&str>,
-    personal: &crate::config::PersonalSettings,
     latest: Option<&loopflow_storage::work::task::TaskEvent>,
 ) -> Option<String> {
-    task_configuration_refusal(task, wave, personal, None)
+    task_configuration_refusal(task, repository, wave, None)
         .or_else(|| task_event_process_refusal(latest).map(str::to_string))
 }
 

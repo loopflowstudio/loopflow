@@ -119,6 +119,9 @@ struct WorkSurfaceView: View {
                                 .buttonStyle(WorkPlainButtonStyle())
                                 .font(Typography.body(12.5))
                         }
+                        if let parent = model.taskExecution[task.id].value?.stackParent {
+                            TaskStackParentLabel(parent: parent)
+                        }
                         if let github = task.pr?.publication?.github {
                             Link("PR #\(github.number)", destination: github.url)
                                 .buttonStyle(WorkLinkStyle())
@@ -148,9 +151,12 @@ struct WorkSurfaceView: View {
                     .font(Typography.body(12))
                     .foregroundStyle(palette.textSecondary)
                     .accessibilityIdentifier("task-debug")
-                // A Task conversation that died says so, and whether the server is starting it again.
-                if let line = (sessions ?? []).first(where: \.taskPrimary)?.conversationLine {
-                    Label(line, systemImage: "arrow.clockwise")
+                // A Task conversation that is not running, or that the server started again, prints the
+                // server's sentence: starting, coming back, or the command that opens it.
+                if let conversation = (sessions ?? []).first(where: \.taskPrimary),
+                   conversation.outlook != nil || conversation.start != nil,
+                   let line = conversation.statusLine {
+                    Label("Conversation: \(line)", systemImage: "arrow.clockwise")
                         .font(Typography.body(12.5))
                         .foregroundStyle(palette.textSecondary)
                         .accessibilityIdentifier("task-conversation-line")
@@ -298,4 +304,24 @@ struct TaskDirectiveEditor: View {
         .interactiveDismissDisabled(isSaving)
     }
 }
+
+/// The open Task a stacked Task builds on, as `lf task status` names it.
+struct TaskStackParentLabel: View {
+    let parent: TaskStackParent
+    @Environment(\.palette) private var palette
+
+    var help: String {
+        let pr = parent.prNumber.map { " (PR #\($0))" } ?? ""
+        return "Builds on \(parent.identifier)'s branch \(parent.branch)\(pr). lf sync main detaches it."
+    }
+
+    var body: some View {
+        Text("Stacked on \(parent.identifier)")
+            .font(Typography.body(12.5))
+            .foregroundStyle(palette.textSecondary)
+            .help(help)
+            .accessibilityIdentifier("task-stack-parent")
+    }
+}
+
 #endif

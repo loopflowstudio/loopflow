@@ -33,10 +33,6 @@ file, and move the disposable checkout aside and back. Read-only queries of
 a store write. A simultaneous selection of `task.title` should send no frame
 for those edits. `graph.list` and `config.settings` are request-only reads;
 repeat them after editing `.lf/graphs/` or `.lf/config.yaml` externally.
-For process liveness, start `lf task create --title ...` with a pipe held open
-on stdin. Watch its PID through `process.list`, kill and reap it before sending
-input, and expect its removal without a store revision. Repeat through
-`lf process list --subscribe --json` with the server stopped.
 
 A Swift command-line probe can import the built module with
 `swiftc -I swift/.build/debug/Modules probe.swift swift/.build/debug/Loopflow.build/*.o -o probe`.

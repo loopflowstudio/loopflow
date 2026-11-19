@@ -22,7 +22,6 @@ pub struct SessionCaller {
 #[derive(Debug, PartialEq, Eq)]
 pub struct SessionProcessIdentity {
     pub id: String,
-    pub completed_at: Option<i64>,
     pub pid: Option<u32>,
     pub os_started_at: Option<i64>,
     pub started_at: i64,
@@ -72,13 +71,19 @@ impl SessionProjection {
     }
 }
 
+/// What a Session reading must learn outside SQL, found from the agents that
+/// have not ended. An ended agent is dead by its own row and appears nowhere here.
 #[derive(Debug, PartialEq, Eq)]
 pub struct SessionProjectionInputs {
     read_at: i64,
     session: Option<String>,
+    /// The agents the OS must be asked about.
     pub identities: Vec<SessionProcessIdentity>,
-    /// The unended Graph runs whose steps captured these Sessions' inputs.
+    /// The Graph runs the OS must be asked about: every unended run when
+    /// reading all Sessions, else the unended run whose step captured the one
+    /// Session's input.
     pub graph_runs: Vec<crate::graph_process::Execution>,
+    /// When a live agent's quiet time next makes its Session available with no write.
     pub deadlines: Vec<i64>,
 }
 
@@ -87,30 +92,42 @@ pub(crate) fn session_projection_inputs_in(
     now: i64,
     session: Option<&str>,
 ) -> StoreResult<SessionProjectionInputs> {
-    let predicate = if session.is_some() {
-        "id=?1"
+    // Reading all Sessions starts from the unended agents, never from history.
+    let (sessions, selected, graphs) = if session.is_some() {
+        (
+            "agent_sessions s",
+            "s.id=?1",
+            format!(
+                "g.lf_process_id IN (SELECT {SESSION_GRAPH} FROM agent_sessions s WHERE s.id=?1)"
+            ),
+        )
     } else {
-        "completed_at IS NULL AND ?1 IS NULL"
+        (
+            "agent_sessions s INDEXED BY agent_sessions_unended_agent",
+            "?1 IS NULL AND s.agent_process_id IS NOT NULL",
+            "?1 IS NULL".to_owned(),
+        )
     };
     let mut query = conn.prepare(&format!(
-        "SELECT agent_process_id,agent_ended_at,agent_pid,agent_os_started_at,agent_started_at,
-         attached_lf_process_id IS NOT NULL,attached_pid,attached_os_started_at
-         FROM agent_sessions WHERE {predicate} AND agent_started_at IS NOT NULL ORDER BY agent_process_id"
+        "SELECT s.agent_process_id,s.agent_pid,s.agent_os_started_at,s.agent_started_at,
+         s.attached_lf_process_id IS NOT NULL,s.attached_pid,s.attached_os_started_at
+         FROM {sessions} WHERE {selected} AND s.agent_ended_at IS NULL
+         AND s.agent_started_at IS NOT NULL
+         ORDER BY s.agent_process_id"
     ))?;
     let identities = query
         .query_map([session], |row| {
             Ok(SessionProcessIdentity {
                 id: row.get(0)?,
-                completed_at: row.get(1)?,
-                pid: row.get(2)?,
-                os_started_at: row.get(3)?,
-                started_at: row.get(4)?,
+                pid: row.get(1)?,
+                os_started_at: row.get(2)?,
+                started_at: row.get(3)?,
                 holder: row
-                    .get::<_, bool>(5)?
+                    .get::<_, bool>(4)?
                     .then(|| -> rusqlite::Result<_> {
                         Ok(crate::process::AttachmentHolder {
-                            pid: row.get(6)?,
-                            os_started_at: row.get(7)?,
+                            pid: row.get(5)?,
+                            os_started_at: row.get(6)?,
                         })
                     })
                     .transpose()?,
@@ -118,21 +135,22 @@ pub(crate) fn session_projection_inputs_in(
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     let mut query = conn.prepare(&format!(
-        "SELECT {} FROM graph_processes g WHERE g.ended_at IS NULL
-         AND g.lf_process_id IN (SELECT {SESSION_GRAPH} FROM agent_sessions s WHERE s.{predicate})
+        "SELECT {} FROM graph_processes g WHERE g.ended_at IS NULL AND {graphs}
          ORDER BY g.lf_process_id",
         super::graph_inventory::run_columns("g")
     ))?;
     let graph_runs = query
         .query_map([session], super::graph_inventory::read_run)?
         .collect::<rusqlite::Result<Vec<_>>>()?;
-    let mut query = conn.prepare(
-        "SELECT DISTINCT observed_at + ?1 FROM session_activity
-        WHERE observed_at + ?1 > ?2 ORDER BY 1",
-    )?;
+    let mut query = conn.prepare(&format!(
+        "SELECT DISTINCT act.observed_at + ?2 FROM {sessions}
+         JOIN session_activity act ON {}
+         WHERE {selected} AND act.observed_at > ?3 - ?2 ORDER BY 1",
+        current_agent_activity("s")
+    ))?;
     let deadlines = query
         .query_map(
-            params![crate::session::AVAILABILITY_QUIET_SECONDS, now],
+            params![session, crate::session::AVAILABILITY_QUIET_SECONDS, now],
             |row| row.get(0),
         )?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -302,14 +320,24 @@ pub(super) fn session_in(conn: &Connection, id: &str) -> StoreResult<Option<LfSe
     .transpose()
 }
 
+/// Activity row `act` counts toward Session `session`'s availability: the
+/// Session is open and the reading is its current agent's, which has not ended.
+/// The quiet deadlines join on this too, so the rule and the time its answer
+/// next changes read the same rows.
+fn current_agent_activity(session: &str) -> String {
+    format!(
+        "act.session_id={session}.id AND {session}.completed_at IS NULL
+            AND act.agent_process_id IS {session}.agent_process_id
+            AND {session}.agent_ended_at IS NULL"
+    )
+}
+
 /// Reported status wins for the current AgentProcess; otherwise use the
 /// current attachment's input/hand-back/quiet reading. Filter before pagination.
 fn available_sql(session: &str, now: i64) -> String {
     format!(
         "EXISTS(SELECT 1 FROM session_activity act
-            WHERE act.session_id={session}.id
-            AND {session}.completed_at IS NULL AND act.agent_process_id IS {session}.agent_process_id
-            AND {session}.agent_ended_at IS NULL
+            WHERE {current}
             AND CASE WHEN act.program_status IS NOT NULL THEN
                 EXISTS(SELECT 1 FROM json_each(act.program_status,'$.records') r
                     WHERE json_extract(r.value,'$.state')='blocked'
@@ -317,6 +345,7 @@ fn available_sql(session: &str, now: i64) -> String {
             ELSE act.attachment_token={session}.attachment_token
                 AND (act.pending_input>0 OR (act.open_tools=0 AND (({session}.interactive=1 AND act.yielded=1)
                     OR {now}-act.observed_at>={quiet}))) END)",
+        current = current_agent_activity(session),
         quiet = crate::session::AVAILABILITY_QUIET_SECONDS
     )
 }
@@ -433,9 +462,15 @@ fn summary_query(page: &str, by_id: bool, now: i64) -> String {
         (SELECT pin.account_id FROM provider_session_accounts pin WHERE pin.provider=s.provider AND pin.provider_session_id=a.provider_thread),
         COALESCE(captured.provider_thread IS NOT NULL,0),
         EXISTS(SELECT 1 FROM held_terminals t WHERE t.id=a.held_terminal_id AND t.ended_at IS NULL),
-        graph.pid,graph.os_started_at,graph.exit_code,graph.error,a.attached_pid,a.attached_os_started_at,
+        graph.pid,graph.os_started_at,graph.exit_code,graph.error,a.agent_ended_at IS NOT NULL,
         a.agent_ended_at,a.agent_exit_code,
-        a.starts_since_turn,a.last_started_at,a.start_failure
+        a.starts_since_turn,a.last_started_at,a.start_failure,
+        EXISTS(SELECT 1 FROM task_primary_sessions tp
+         JOIN tasks pt ON pt.id=tp.task_id
+         JOIN task_checkouts pc ON pc.task_id=tp.task_id
+         WHERE tp.session_id=a.id AND {here}),
+        a.agent_pid IS NULL AND a.agent_ended_at IS NULL
+         AND EXISTS(SELECT 1 FROM held_terminals t WHERE t.id=a.held_terminal_id AND t.ended_at IS NULL)
         FROM page s JOIN agent_sessions a ON a.id=s.id
         LEFT JOIN session_events captured ON captured.seq=s.current_capture
         LEFT JOIN graph_process_steps gs ON gs.lf_process_id=captured.lf_process_id
@@ -443,7 +478,8 @@ fn summary_query(page: &str, by_id: bool, now: i64) -> String {
         LEFT JOIN wave_addresses w ON w.id=s.wave_id
         LEFT JOIN tasks t ON t.id=s.task_id
         ORDER BY {order}", super::task_work::session_tasks("a"),
-        task_state = super::durable::task_state_sql("t"))
+        task_state = super::durable::task_state_sql("t"),
+        here = super::session_recovery::task_conversation_here_sql("a", "pt", "pc"))
 }
 
 fn read_summary(
@@ -491,7 +527,12 @@ fn read_summary(
             None => None,
         };
         let agent_process_id: Option<loopflow_model::id::AgentProcessId> = row.get(30)?;
-        let agent_process_evidence = projection.evidence(agent_process_id.as_ref());
+        // An agent whose end is recorded is dead by its row; the OS is asked about the rest.
+        let agent_process_evidence = if row.get(41)? {
+            crate::ProcessIdentityEvidence::Dead
+        } else {
+            projection.evidence(agent_process_id.as_ref())
+        };
         let live = agent_process_evidence == crate::ProcessIdentityEvidence::Live;
         let unviewed: bool = row.get(33)?;
         let task_identifier = task_id
@@ -516,15 +557,15 @@ fn read_summary(
             unviewed,
             held: live && row.get(36)?,
             agent_end: row
-                .get::<_, Option<i64>>(43)?
+                .get::<_, Option<i64>>(42)?
                 .map(|at| {
-                    row.get(44)
+                    row.get(43)
                         .map(|exit_code| crate::session::AgentEnd { at, exit_code })
                 })
                 .transpose()?,
-            starts_since_turn: row.get(45)?,
-            last_started_at: row.get(46)?,
-            start_failure: row.get(47)?,
+            starts_since_turn: row.get(44)?,
+            last_started_at: row.get(45)?,
+            start_failure: row.get(46)?,
             task_ids: serde_json::from_str(&row.get::<_, String>(24)?)?,
             primary_scope: row.get(25)?,
             agent_process_evidence,
@@ -537,6 +578,8 @@ fn read_summary(
             agent_process_id,
             task_terminal: row.get(27)?,
             task_primary: row.get(28)?,
+            in_task_checkout: row.get(47)?,
+            launching: row.get(48)?,
             captured: row.get(15)?,
             id: row.get(0)?,
             artifact_key: row

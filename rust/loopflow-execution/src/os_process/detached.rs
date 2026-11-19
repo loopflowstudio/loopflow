@@ -148,9 +148,15 @@ impl Launched {
     /// The child, once it is admitted. Its child is reaped in the background;
     /// this process no longer waits on it.
     pub fn acknowledged(mut self) -> Result<Started> {
+        let pid = self.child.id();
+        // Read before anything can reap the child: a run that exits right
+        // after acknowledging keeps an identity its watchers can call dead.
+        // The shell execs lf, so the start stays lf's.
+        let os_started_at = crate::process::os_process::process_started_at(pid)
+            .ok()
+            .flatten();
         let mut line = String::new();
         let read = self.lines.read_line(&mut line);
-        let pid = self.child.id();
         let mut child = self.child;
         std::thread::spawn(move || {
             let _ = child.wait();
@@ -163,10 +169,6 @@ impl Launched {
         let id = LfProcessId::parse(line.trim()).with_context(|| {
             format!("The process acknowledged {:?}, not a Process", line.trim())
         })?;
-        // The shell execs lf, so the child's pid is lf's.
-        let os_started_at = crate::process::os_process::process_started_at(pid)
-            .ok()
-            .flatten();
         Ok(Started {
             id,
             pid,

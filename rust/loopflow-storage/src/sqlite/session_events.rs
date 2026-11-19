@@ -333,12 +333,17 @@ impl SqliteStore {
     }
 
     /// The provider turn that answered `input`: its newest ended turn, when
-    /// that turn completed. Its text is in the provider's transcript.
+    /// that turn completed. Its text is in the provider's transcript. The
+    /// capture names the agent the input was first sent to; when a refusal
+    /// moved the input to another, the Session names the one whose thread
+    /// answered.
     pub fn input_answered_turn(&self, input: &str) -> StoreResult<Option<AnsweredTurn>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn
             .query_row(
-                "SELECT c.session_id,COALESCE(json_extract(c.payload,'$.provider'),s.provider),
+                "SELECT c.session_id,
+                        CASE WHEN c.turn_thread=s.provider_thread THEN s.provider
+                             ELSE COALESCE(json_extract(c.payload,'$.provider'),s.provider) END,
                         c.turn_thread,c.turn_id,COALESCE(json_extract(c.payload,'$.cwd'),s.cwd)
                  FROM session_events c JOIN agent_sessions s ON s.id=c.session_id
                  WHERE c.kind='captured' AND c.receipt_key=?1 AND c.turn_status='completed'

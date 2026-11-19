@@ -56,7 +56,9 @@
           "worktree": "/repo/fix-2"
         },
         "ended": null,
-        "start": null
+        "start": null,
+        "outlook": null,
+        "status_line": "unknown"
       },
       {
         "account": null,
@@ -112,7 +114,9 @@
           "worktree": "/repo/fix-2"
         },
         "ended": null,
-        "start": null
+        "start": null,
+        "outlook": null,
+        "status_line": "unknown"
       },
       {
         "account": null,
@@ -166,7 +170,9 @@
           "worktree": "/repo/fix-2"
         },
         "ended": null,
-        "start": null
+        "start": null,
+        "outlook": null,
+        "status_line": "unknown"
       },
       {
         "account": null,
@@ -222,7 +228,9 @@
           "worktree": "/repo/fix-2"
         },
         "ended": null,
-        "start": null
+        "start": null,
+        "outlook": null,
+        "status_line": "unknown"
       },
       {
         "account": null,
@@ -276,7 +284,9 @@
           "worktree": "/repo/fix-2"
         },
         "ended": null,
-        "start": null
+        "start": null,
+        "outlook": null,
+        "status_line": "unknown"
       }
     ],
     "tasks": [
@@ -736,7 +746,9 @@
           "worktree": "/repo/fix-2"
         },
         "ended": null,
-        "start": null
+        "start": null,
+        "outlook": null,
+        "status_line": "running"
       },
       {
         "account": null,
@@ -792,7 +804,9 @@
           "worktree": "/repo/fix-2"
         },
         "ended": null,
-        "start": null
+        "start": null,
+        "outlook": null,
+        "status_line": "unknown"
       },
       {
         "account": null,
@@ -846,7 +860,9 @@
           "worktree": "/repo/fix-2"
         },
         "ended": null,
-        "start": null
+        "start": null,
+        "outlook": null,
+        "status_line": "unknown"
       },
       {
         "account": null,
@@ -902,7 +918,9 @@
           "worktree": "/repo/fix-2"
         },
         "ended": null,
-        "start": null
+        "start": null,
+        "outlook": null,
+        "status_line": "unknown"
       },
       {
         "account": null,
@@ -956,7 +974,9 @@
           "worktree": "/repo/fix-2"
         },
         "ended": null,
-        "start": null
+        "start": null,
+        "outlook": null,
+        "status_line": "unknown"
       }
     ],
     "tasks": [
@@ -1425,7 +1445,9 @@
           "worktree": "/repo/fix-2"
         },
         "ended": null,
-        "start": null
+        "start": null,
+        "outlook": null,
+        "status_line": "running"
       },
       {
         "account": null,
@@ -1481,7 +1503,9 @@
           "worktree": "/repo/fix-2"
         },
         "ended": null,
-        "start": null
+        "start": null,
+        "outlook": null,
+        "status_line": "unknown"
       },
       {
         "account": null,
@@ -1535,7 +1559,9 @@
           "worktree": "/repo/fix-2"
         },
         "ended": null,
-        "start": null
+        "start": null,
+        "outlook": null,
+        "status_line": "unknown"
       },
       {
         "account": null,
@@ -1591,7 +1617,9 @@
           "worktree": "/repo/fix-2"
         },
         "ended": null,
-        "start": null
+        "start": null,
+        "outlook": null,
+        "status_line": "unknown"
       },
       {
         "account": null,
@@ -1645,7 +1673,9 @@
           "worktree": "/repo/fix-2"
         },
         "ended": null,
-        "start": null
+        "start": null,
+        "outlook": null,
+        "status_line": "unknown"
       }
     ],
     "tasks": [
@@ -2105,7 +2135,9 @@
           "worktree": "/repo/fix-2"
         },
         "ended": null,
-        "start": null
+        "start": null,
+        "outlook": null,
+        "status_line": "running"
       },
       {
         "account": null,
@@ -2161,7 +2193,9 @@
           "worktree": "/repo/fix-2"
         },
         "ended": null,
-        "start": null
+        "start": null,
+        "outlook": null,
+        "status_line": "unknown"
       },
       {
         "account": null,
@@ -2215,7 +2249,9 @@
           "worktree": "/repo/fix-2"
         },
         "ended": null,
-        "start": null
+        "start": null,
+        "outlook": null,
+        "status_line": "unknown"
       },
       {
         "account": null,
@@ -2271,7 +2307,9 @@
           "worktree": "/repo/fix-2"
         },
         "ended": null,
-        "start": null
+        "start": null,
+        "outlook": null,
+        "status_line": "unknown"
       },
       {
         "account": null,
@@ -2325,7 +2363,9 @@
           "worktree": "/repo/fix-2"
         },
         "ended": null,
-        "start": null
+        "start": null,
+        "outlook": null,
+        "status_line": "unknown"
       }
     ],
     "tasks": [
@@ -2796,7 +2836,9 @@
           "worktree": "/repo/fix-2"
         },
         "ended": null,
-        "start": null
+        "start": null,
+        "outlook": null,
+        "status_line": "running"
       },
       {
         "account": null,
@@ -2852,7 +2894,9 @@
           "worktree": "/repo/fix-2"
         },
         "ended": null,
-        "start": null
+        "start": null,
+        "outlook": null,
+        "status_line": "unknown"
       },
       {
         "account": null,
@@ -2906,7 +2950,9 @@
           "worktree": "/repo/fix-2"
         },
         "ended": null,
-        "start": null
+        "start": null,
+        "outlook": null,
+        "status_line": "unknown"
       },
       {
         "account": null,
@@ -2962,7 +3008,9 @@
           "worktree": "/repo/fix-2"
         },
         "ended": null,
-        "start": null
+        "start": null,
+        "outlook": null,
+        "status_line": "unknown"
       },
       {
         "account": null,
@@ -3016,7 +3064,9 @@
           "worktree": "/repo/fix-2"
         },
         "ended": null,
-        "start": null
+        "start": null,
+        "outlook": null,
+        "status_line": "unknown"
       }
     ],
     "tasks": [

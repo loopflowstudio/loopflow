@@ -55,7 +55,7 @@ impl TaskRun {
                 graph_process,
                 log: Some(log),
             } => Some(format!(
-                "{issue} · {run} running as Graph process {graph_process}{}\n  follow: lf task status {issue}\n  log:    {}",
+                "{issue} · {run} running as Graph run {graph_process}{}\n  follow: lf task status {issue}\n  log:    {}",
                 if *ships {
                     format!("\n  ships:  this run may merge the PR; `lf task auto off {issue}` stops it")
                 } else {
@@ -307,7 +307,7 @@ mod tests {
             "../../tests/fixtures/dto/server/task_running.json"
         ));
         let text = running.render().unwrap();
-        assert!(text.contains("running as Graph process"));
+        assert!(text.contains("running as Graph run"));
         assert!(!text.contains("may merge the PR"));
         let TaskRun::Running {
             issue,

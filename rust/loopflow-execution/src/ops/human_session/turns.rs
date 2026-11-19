@@ -209,6 +209,8 @@ fn record(
         raw: true,
         ended: None,
         start: None,
+        outlook: None,
+        status_line: None,
     }
 }
 

@@ -795,6 +795,16 @@ async fn take_in_task(
 ) -> Result<Task> {
     let name = &moved.identifier;
     arriving_task(store, main, &moved.task_id, name).await?;
+    // Publish the new claim only after replacing the old carrier. Recovery
+    // could otherwise restart the graph this Machine owned before the move.
+    if let Some(graph) = &moved.graph {
+        crate::store::task_work::place_moved_task_graph(
+            &store.sqlite,
+            &moved.task_id,
+            graph,
+            crate::journal::current_lf_process_id().as_ref(),
+        )?;
+    }
     crate::store::ownership::ingest_ownership_marker(
         &store.sqlite,
         &moved.task_id,
@@ -816,14 +826,6 @@ async fn take_in_task(
                 .join()
                 .expect("Task checkout thread panicked")
         })?;
-    }
-    if let Some(graph) = &moved.graph {
-        crate::store::task_work::place_moved_task_graph(
-            &store.sqlite,
-            &moved.task_id,
-            graph,
-            crate::journal::current_lf_process_id().as_ref(),
-        )?;
     }
     store
         .get_task(&moved.task_id)

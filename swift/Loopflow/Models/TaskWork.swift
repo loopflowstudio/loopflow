@@ -21,10 +21,13 @@ public struct TaskExecution: Decodable, Sendable, Equatable {
     /// On: the run stands in at interactive steps. Stopped: it waits at its
     /// landing step until `lf ship`. `nil` when nobody set it.
     public let auto: Auto?
+    /// The Task this one is stacked on; `nil` when it builds on the default branch.
+    public let stackParent: TaskStackParent?
 
     enum CodingKeys: String, CodingKey {
         case work
         case startedBy = "started_by", auto
+        case stackParent = "stack_parent"
     }
 
     public init(from decoder: Decoder) throws {
@@ -32,6 +35,27 @@ public struct TaskExecution: Decodable, Sendable, Equatable {
         work = try container.decode(TaskWork.self, forKey: .work)
         startedBy = try container.decode(Starter?.self, forKey: .startedBy)
         auto = try container.decode(Auto?.self, forKey: .auto)
+        stackParent = try container.decode(TaskStackParent?.self, forKey: .stackParent)
+    }
+}
+
+/// The open Task a stacked Task builds on, named by Task rather than PR row.
+public struct TaskStackParent: Decodable, Sendable, Hashable {
+    public let identifier: String
+    public let branch: String
+    /// `nil` until the parent opens its PR.
+    public let prNumber: UInt64?
+
+    enum CodingKeys: String, CodingKey {
+        case identifier, branch
+        case prNumber = "pr_number"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        identifier = try container.decode(String.self, forKey: .identifier)
+        branch = try container.decode(String.self, forKey: .branch)
+        prNumber = try container.decode(UInt64?.self, forKey: .prNumber)
     }
 }
 

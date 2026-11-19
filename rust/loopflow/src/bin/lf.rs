@@ -671,15 +671,25 @@ impl Drop for EnvGuard {
 /// One PR's line in `lf task status`. A degraded Linear linkage is named here
 /// because this reading is where an operator already looks for writeback health —
 /// the Task's `tracker writeback` line sits directly above. Silence means linked.
-fn format_task_pr_line(pr: &loopflow_execution::work::task::TaskPr) -> String {
+fn format_task_pr_line(
+    pr: &loopflow_execution::work::task::TaskPr,
+    stack_parent: Option<&loopflow_execution::ops::task::TaskStackParent>,
+) -> String {
     let provider = pr
         .github()
         .map(|github| format!("GitHub #{}", github.number))
         .unwrap_or_else(|| "not opened on GitHub".to_string());
-    let placement = pr
-        .parent_pr_id
-        .as_ref()
-        .map(|parent| format!("  stacked on {parent}"))
+    let placement = stack_parent
+        .map(|parent| {
+            let number = parent
+                .pr_number
+                .map(|number| format!("#{number}, "))
+                .unwrap_or_default();
+            format!(
+                "  stacked on {} ({number}{})",
+                parent.identifier, parent.branch
+            )
+        })
         .unwrap_or_default();
     let linkage = pr
         .linear_link_error
@@ -794,7 +804,10 @@ fn print_task_snapshot(
             println!("  project: {project}");
         }
         if let Some(pr) = &snapshot.pr {
-            println!("{}", format_task_pr_line(pr));
+            println!(
+                "{}",
+                format_task_pr_line(pr, snapshot.stack_parent.as_ref())
+            );
         }
         match &snapshot.observation {
             loopflow_execution::work::task::Observation::Cached { observed_at } => {
@@ -1211,10 +1224,9 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
                             loopflow_execution::ops::task_ownership::render(ownership)
                         );
                     }
-                    if let Some(line) = loopflow::lf::commands::waves::task_conversation_line(
-                        &task.id,
-                        &task.identifier,
-                    )? {
+                    if let Some(line) =
+                        loopflow::lf::commands::waves::task_conversation_line(&task.id)?
+                    {
                         println!("Conversation: {line}");
                     }
                     for session in loopflow_execution::ops::task::task_copied_sessions(&task.id)? {
@@ -3599,7 +3611,7 @@ mod tests {
     /// reading quiet enough that a degraded one stands out.
     #[test]
     fn task_pr_line_is_quiet_when_the_linear_link_is_healthy() {
-        let line = format_task_pr_line(&published_pr());
+        let line = format_task_pr_line(&published_pr(), None);
         assert!(line.contains("GitHub #931"), "{line}");
         assert!(!line.contains("Linear"), "{line}");
     }
@@ -3610,11 +3622,31 @@ mod tests {
     fn task_pr_line_names_a_degraded_linear_link() {
         let mut pr = published_pr();
         pr.linear_link_error = Some("linear token expired".to_string());
-        let line = format_task_pr_line(&pr);
+        let line = format_task_pr_line(&pr, None);
         assert!(line.contains("Linear link degraded"), "{line}");
         assert!(line.contains("linear token expired"), "{line}");
         // The publication reading survives alongside the degraded linkage.
         assert!(line.contains("GitHub #931"), "{line}");
+    }
+
+    #[test]
+    fn task_pr_line_names_the_stack_parent_by_task() {
+        let mut parent = loopflow_execution::ops::task::TaskStackParent {
+            identifier: "LOO-953".to_string(),
+            branch: "jack/loo-953-parent".to_string(),
+            pr_number: Some(1974),
+        };
+        let line = format_task_pr_line(&published_pr(), Some(&parent));
+        assert!(
+            line.ends_with("  stacked on LOO-953 (#1974, jack/loo-953-parent)"),
+            "{line}"
+        );
+        parent.pr_number = None;
+        let line = format_task_pr_line(&published_pr(), Some(&parent));
+        assert!(
+            line.ends_with("  stacked on LOO-953 (jack/loo-953-parent)"),
+            "{line}"
+        );
     }
 
     #[test]

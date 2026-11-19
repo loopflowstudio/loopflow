@@ -449,10 +449,19 @@ pub struct SessionRecord {
     #[serde(deserialize_with = "Option::deserialize")]
     pub ended: Option<SessionEnd>,
     /// The server's starts of a Task's conversation since it last finished a
-    /// turn: after it died, or a first start that failed; `null` when nothing
-    /// was or will be started.
+    /// turn; `null` when it made none, and once the person quit.
     #[serde(deserialize_with = "Option::deserialize")]
     pub start: Option<SessionStarts>,
+    /// What happens next to a conversation that is not running, as this
+    /// Machine reads it; `null` while it runs, and when nothing says why it
+    /// is down.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub outlook: Option<SessionOutlook>,
+    /// Whether it runs, how it ended and its outlook, as one sentence in this
+    /// Machine's local time: "died 12:01 (exit 137) · starting again". Every
+    /// client prints it as given; `null` for a headless Session.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub status_line: Option<String>,
 }
 
 /// A conversation's last agent end.
@@ -460,96 +469,280 @@ pub struct SessionRecord {
 pub struct SessionEnd {
     /// RFC 3339.
     pub at: String,
-    pub by: SessionEndedBy,
     /// The provider's exit; `null` when nobody saw it (the holder died, or
     /// the Machine restarted).
     #[serde(deserialize_with = "Option::deserialize")]
     pub exit_code: Option<i32>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum SessionEndedBy {
-    /// `/exit`, Ctrl+D or Ctrl+C at the prompt (exit 0 or 130). It stays quit.
-    Person,
-    /// Killed, crashed, or gone with its holder or the Machine.
-    Died,
-}
-
-/// What the server's recovery pass did and will do for a Task conversation.
+/// What the server's recovery pass did for a Task conversation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct SessionStarts {
     /// Starts since it last finished a turn.
     pub attempts: u32,
-    /// RFC 3339: the pass's last start; `null` before its first.
+    /// RFC 3339: the pass's last start.
     #[serde(deserialize_with = "Option::deserialize")]
     pub last_started_at: Option<String>,
-    /// RFC 3339: when the next start is due, while it is down and the pass
-    /// has starts left; `null` otherwise.
-    #[serde(deserialize_with = "Option::deserialize")]
-    pub next_at: Option<String>,
-    /// The pass made its last start; `lf resume --task <ID>` continues it.
-    pub gave_up: bool,
-    /// Why the last start failed; `null` once one succeeded.
-    #[serde(deserialize_with = "Option::deserialize")]
-    pub failure: Option<String>,
 }
 
-/// How an interactive Session's agent ended, and what the recovery pass does
-/// about a Task conversation that died. A quit conversation has no starts.
+/// Whether a conversation that is not running comes up, and what brings it.
+/// The server works this out; no client does it again from `ended` and
+/// `start`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct SessionOutlook {
+    pub kind: SessionOutlookKind,
+    /// RFC 3339: when the server starts it next; a time already past is a
+    /// start under way. `null` when the server will not start it, and for
+    /// one that is starting.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub at: Option<String>,
+    /// Ready to print. Why it could not start; for one coming back, that its
+    /// last start failed and why; for one waiting, why the server leaves it.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub reason: Option<String>,
+    /// The command that opens it; `null` while the server brings it up.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub command: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionOutlookKind {
+    /// No agent runs yet and one is on its way: a Task's conversation the
+    /// server here is starting, or a start whose agent has no pid recorded.
+    Starting,
+    /// It died and the server here starts it again, at `at`.
+    ComingBack,
+    /// It is down and only its command brings it up: it is not a Task's
+    /// conversation, or the server here does not or no longer starts it.
+    WaitingForYou,
+    /// The person quit it. It stays quit.
+    Quit,
+    /// No agent has run yet: its start failed, for `reason`. The server
+    /// tries again at `at`, or left it to `command`.
+    CouldNotStart,
+}
+
+/// What a Session's record says about its agent's end and what comes next.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct SessionEnding {
+    ended: Option<SessionEnd>,
+    start: Option<SessionStarts>,
+    outlook: Option<SessionOutlook>,
+    status_line: Option<String>,
+}
+
+/// How an interactive Session's agent ended, what the recovery pass did for
+/// a Task's conversation, what happens next to one that is not running, and
+/// the sentence that says all of it. Whether the server starts it is
+/// [`crate::ops::recovery::server_start`]'s answer, the one the pass acts on;
+/// `claimed_here` and `server_runs` are this Machine's part of it.
 fn session_ending(
     session: &crate::session::SessionSummary,
-    state: SessionState,
-) -> (Option<SessionEnd>, Option<SessionStarts>) {
+    now: i64,
+    claimed_here: impl FnOnce() -> bool,
+    server_runs: impl FnOnce() -> bool,
+) -> SessionEnding {
+    use crate::ops::recovery::{Left, ServerStart};
+    use loopflow_storage::session::quit_by_person;
     if !session.interactive {
-        return (None, None);
+        return SessionEnding::default();
     }
-    let ended = session
-        .agent_end
-        .filter(|_| state == SessionState::Closed)
-        .and_then(|end| {
-            Some(SessionEnd {
-                at: crate::transcript::rfc3339(end.at)?,
-                by: if end.by_person() {
-                    SessionEndedBy::Person
-                } else {
-                    SessionEndedBy::Died
-                },
-                exit_code: end.exit_code,
-            })
-        });
-    let quit = ended
-        .as_ref()
-        .is_some_and(|end| end.by == SessionEndedBy::Person);
-    let died = ended.is_some() && !quit;
-    let recovering = session.starts_since_turn > 0 || session.start_failure.is_some();
-    if !session.task_primary || session.task_terminal || quit || !(died || recovering) {
-        return (ended, None);
-    }
-    let attempts = session.starts_since_turn;
-    let gave_up = attempts >= loopflow_storage::sqlite::session_recovery::CONVERSATION_STARTS;
-    let down = state == SessionState::Closed;
-    // A start counted after the agent ended is the one under way: it was due
-    // then. The backoff names the start after the next death.
-    let starting = session
-        .last_started_at
-        .zip(session.agent_end)
-        .filter(|(started, end)| *started >= end.at)
-        .map(|(started, _)| started);
-    let next_at = (down && !gave_up).then(|| {
-        starting
-            .or_else(|| crate::ops::recovery::next_start_at(attempts, session.last_started_at))
-            .or(session.agent_end.map(|end| end.at))
-            .and_then(crate::transcript::rfc3339)
+    let state = session_state(session);
+    let closed = state == SessionState::Closed;
+    let end = session.agent_end.filter(|_| closed);
+    let ended = end.and_then(|end| {
+        Some(SessionEnd {
+            at: crate::transcript::rfc3339(end.at)?,
+            exit_code: end.exit_code,
+        })
     });
-    let start = SessionStarts {
+    let quit = end.is_some_and(|end| quit_by_person(end.exit_code));
+    let conversation =
+        session.task_primary && !session.task_terminal && session.completed_at.is_none();
+    let attempts = session.starts_since_turn;
+    let start = (conversation && !quit && attempts > 0).then(|| SessionStarts {
         attempts,
         last_started_at: session.last_started_at.and_then(crate::transcript::rfc3339),
-        next_at: next_at.flatten(),
-        gave_up: down && gave_up,
-        failure: session.start_failure.clone(),
+    });
+    if is_running(state) {
+        let status_line = match session.last_started_at.filter(|_| start.is_some()) {
+            Some(at) => format!("running (started again {}, attempt {attempts})", clock(at)),
+            None => "running".to_string(),
+        };
+        return SessionEnding {
+            ended,
+            start,
+            outlook: None,
+            status_line: Some(status_line),
+        };
+    }
+    if session.launching {
+        // Between the old agent's end and the new one's pid.
+        return SessionEnding {
+            ended,
+            start,
+            outlook: Some(SessionOutlook {
+                kind: SessionOutlookKind::Starting,
+                at: None,
+                reason: None,
+                command: None,
+            }),
+            status_line: Some("starting".to_string()),
+        };
+    }
+    let command = match (&session.task_identifier, session.task_primary) {
+        (Some(task), true) => format!("lf resume --task {task}"),
+        _ => format!("lf resume {}", session.id),
     };
-    (ended, Some(start))
+    let failure = session.start_failure.as_deref().filter(|_| conversation);
+    // One that never had an agent has no liveness to read: it is not Closed.
+    let never_ran = session.agent_process_id.is_none() && ended.is_none();
+    let ending = match end {
+        Some(end) => format!(
+            "died {} ({})",
+            clock(end.at),
+            end.exit_code
+                .map_or("no exit recorded".to_string(), |code| format!(
+                    "exit {code}"
+                ))
+        ),
+        None if never_ran => "not started".to_string(),
+        None => "closed".to_string(),
+    };
+    if ended.is_none() && failure.is_none() && !(never_ran && conversation) {
+        // Nothing says why it is down: a recorded agent this Machine cannot
+        // check, or one that went with no end recorded.
+        let status_line = match state {
+            SessionState::Unknown => "unknown".to_string(),
+            _ => format!("{ending}; `{command}` opens it"),
+        };
+        return SessionEnding {
+            ended,
+            start,
+            outlook: None,
+            status_line: Some(status_line),
+        };
+    }
+    let facts = crate::ops::recovery::DownConversation {
+        here: conversation && session.in_task_checkout,
+        exit_code: end.and_then(|end| end.exit_code),
+        starts_since_turn: attempts,
+        last_started_at: session.last_started_at,
+    };
+    let again = |later: &str, now_doing: &str, at: Option<i64>| match at {
+        Some(at) if at > now => format!(" · {later} again {}", clock(at)),
+        Some(_) => format!(" · {now_doing} again"),
+        None => String::new(),
+    };
+    let printed = |reason: &Option<String>| {
+        reason
+            .as_deref()
+            .map_or(String::new(), |reason| format!(" · {reason}"))
+    };
+    let verdict = crate::ops::recovery::server_start(&facts, claimed_here, server_runs);
+    let at = match verdict {
+        // A start counted after the agent ended is the one under way: it was
+        // due then. The backoff names the start after the next death, or
+        // after a start that failed before any agent ran.
+        ServerStart::At(next) => session
+            .last_started_at
+            .zip(end)
+            .filter(|(started, end)| *started >= end.at && failure.is_none())
+            .map(|(started, _)| started)
+            .or(next)
+            .or(end.map(|end| end.at)),
+        ServerStart::Left(_) => None,
+    };
+    let (kind, at, reason, mut line) = match (verdict, failure.filter(|_| never_ran)) {
+        (ServerStart::Left(Left::Quit), _) => (
+            SessionOutlookKind::Quit,
+            None,
+            None,
+            end.map_or("quit".to_string(), |end| format!("quit {}", clock(end.at))),
+        ),
+        (ServerStart::At(_), None) if never_ran => (
+            SessionOutlookKind::Starting,
+            None,
+            None,
+            "starting".to_string(),
+        ),
+        (_, Some(failure)) => (
+            SessionOutlookKind::CouldNotStart,
+            at,
+            Some(failure.to_string()),
+            format!("could not start: {failure}{}", again("tries", "trying", at)),
+        ),
+        (ServerStart::Left(left), None) => {
+            let left = match left {
+                Left::OutOfStarts => Some(format!("started {attempts} times")),
+                Left::Elsewhere if conversation => {
+                    Some("its Task is not checked out here".to_string())
+                }
+                // Not a Task's conversation: nothing here ever starts it.
+                Left::Elsewhere | Left::Quit => None,
+                Left::NotClaimedHere => Some("its Task is not claimed on this Machine".to_string()),
+                Left::NoServer => Some("no server runs here to start it".to_string()),
+            };
+            let reason = match (left, failure) {
+                (Some(left), Some(failure)) => {
+                    Some(format!("{left}; last start failed: {failure}"))
+                }
+                (left, _) => left,
+            };
+            let line = format!("{ending}{}", printed(&reason));
+            (SessionOutlookKind::WaitingForYou, None, reason, line)
+        }
+        (ServerStart::At(_), None) => {
+            let reason = failure.map(|failure| format!("last start failed: {failure}"));
+            let line = format!(
+                "{ending}{}{}",
+                again("starts", "starting", at),
+                printed(&reason)
+            );
+            (SessionOutlookKind::ComingBack, at, reason, line)
+        }
+    };
+    // The server brings it up, or its command does.
+    let command = matches!(verdict, ServerStart::Left(_)).then_some(command);
+    if let Some(command) = &command {
+        line.push_str(&format!("; `{command}` opens it"));
+    }
+    SessionEnding {
+        ended,
+        start,
+        outlook: Some(SessionOutlook {
+            kind,
+            at: at.and_then(crate::transcript::rfc3339),
+            reason,
+            command,
+        }),
+        status_line: Some(line),
+    }
+}
+
+/// [`session_ending`] as this Machine answers it: whether it claims the
+/// Session's Task and whether a server runs here.
+fn ending_here(
+    store: &SqliteStore,
+    session: &crate::session::SessionSummary,
+    now: i64,
+) -> SessionEnding {
+    let claimed = || {
+        session
+            .task_id
+            .as_ref()
+            .is_some_and(|task| crate::ops::recovery::claimed_here(store, task))
+    };
+    session_ending(session, now, claimed, crate::ops::recovery::server_runs)
+}
+
+/// This Machine's local `HH:MM` for a Unix time.
+fn clock(at: i64) -> String {
+    chrono::DateTime::from_timestamp(at, 0).map_or_else(
+        || at.to_string(),
+        |at| at.with_timezone(&chrono::Local).format("%H:%M").to_string(),
+    )
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -670,7 +863,10 @@ pub async fn list(
     let mut sessions = Vec::new();
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
     for session in store.session_summaries(&selection, now).await? {
-        sessions.push(summary_surface(&session));
+        sessions.push(summary_surface(
+            &session,
+            ending_here(&store.sqlite, &session, now),
+        ));
     }
     let mut workspaces = workspace::associate(store, &mut sessions).await?;
     turns::read(&store.sqlite, &mut sessions)?;
@@ -755,7 +951,7 @@ fn graph_occurrence(
 pub fn listed(store: &SharedStore, id: &str) -> Result<Option<SessionRecord>> {
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
     let Some(mut session) = session_projection::session_summary(&store.sqlite, id, now)?
-        .map(|session| summary_surface(&session))
+        .map(|session| summary_surface(&session, ending_here(&store.sqlite, &session, now)))
     else {
         return Ok(turns::raw(&store.sqlite, None)?
             .into_iter()
@@ -773,7 +969,10 @@ fn runs_on(on: &crate::config::Agent, session: &SessionRecord) -> bool {
 
 /// Passive listing reads record metadata and exact local client receipts only.
 /// Connect/complete still enter find_session and surface, with full validation.
-fn summary_surface(session: &crate::session::SessionSummary) -> SessionRecord {
+fn summary_surface(
+    session: &crate::session::SessionSummary,
+    ending: SessionEnding,
+) -> SessionRecord {
     let work = match (&session.task_id, &session.wave_id) {
         (Some(task), _) => Some(WorkRef::Task(task.clone())),
         (None, Some(wave)) => Some(WorkRef::Wave(wave.clone())),
@@ -810,7 +1009,12 @@ fn summary_surface(session: &crate::session::SessionSummary) -> SessionRecord {
         },
     };
     let state = session_state(session);
-    let (ended, start) = session_ending(session, state);
+    let SessionEnding {
+        ended,
+        start,
+        outlook,
+        status_line,
+    } = ending;
     // Without a command that opens it, nothing here can open it.
     let (action, open_argv) = match human_session_argv(&session.id) {
         Ok(argv) => (session_action(session), argv),
@@ -857,6 +1061,8 @@ fn summary_surface(session: &crate::session::SessionSummary) -> SessionRecord {
         raw: false,
         ended,
         start,
+        outlook,
+        status_line,
     }
 }
 
@@ -1572,7 +1778,16 @@ pub async fn surface(store: &SharedStore, session: &LfSession) -> Result<Session
     let metadata = viewed_summary(&store.sqlite, &session.id)?
         .ok_or_else(|| session_not_found(&session.id))?;
     let state = session_state(&metadata);
-    let (ended, start) = session_ending(&metadata, state);
+    let SessionEnding {
+        ended,
+        start,
+        outlook,
+        status_line,
+    } = ending_here(
+        &store.sqlite,
+        &metadata,
+        time::OffsetDateTime::now_utc().unix_timestamp(),
+    );
     let action = session_action(&metadata);
     let open_argv = human_session_argv(&session.id)?;
     let graph_membership = match (&session.graph_lf_process_id, &metadata.graph) {
@@ -1626,6 +1841,8 @@ pub async fn surface(store: &SharedStore, session: &LfSession) -> Result<Session
         raw: false,
         ended,
         start,
+        outlook,
+        status_line,
     };
     workspace::associate(store, std::slice::from_mut(&mut reading)).await?;
     turns::read(&store.sqlite, std::slice::from_mut(&mut reading))?;

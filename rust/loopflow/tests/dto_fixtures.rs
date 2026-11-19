@@ -349,26 +349,11 @@ fn task_detail_says_each_fact_once() {
         .iter()
         .find(|session| Some(&session.id) == detail.conversation.as_ref())
         .unwrap();
-    let next = time::OffsetDateTime::parse(
-        conversation
-            .start
-            .as_ref()
-            .unwrap()
-            .next_at
-            .as_deref()
-            .unwrap(),
-        &time::format_description::well_known::Rfc3339,
-    )
-    .unwrap()
-    .unix_timestamp();
-    let line = conversation.conversation_line("LOO-2", next, true);
-    assert!(
-        line.starts_with("died ") && line.ends_with("(exit 137) · starting again"),
-        "{line}"
+    assert_eq!(
+        conversation.status_line.as_deref(),
+        Some("died 12:01 (exit 137) · starts again 12:02"),
+        "the server's sentence, printed as given"
     );
-    assert!(conversation
-        .conversation_line("LOO-2", next - 1, true)
-        .contains("· starts again "));
     assert_eq!(
         serde_json::to_value(&detail).unwrap(),
         serde_json::from_str::<serde_json::Value>(json).unwrap()
@@ -471,6 +456,9 @@ fn prepared_checkout_retains_owning_home_without_starting_execution() {
     );
     assert!(snapshot.provider.is_none());
     assert!(snapshot.pr.is_none());
+    let parent = snapshot.stack_parent.as_ref().unwrap();
+    assert_eq!(parent.identifier, "LOO-290");
+    assert_eq!(parent.pr_number, None);
     assert!(!snapshot.branch.as_ref().unwrap().is_empty());
     assert_eq!(
         snapshot.execution.state,

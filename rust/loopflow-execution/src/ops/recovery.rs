@@ -3,12 +3,12 @@
 //! ancestry that was never recorded, carries a Task's run again
 //! when its `lf task run` died, starts a run that ended waiting on
 //! a usage limit, and gives back rented Machines whose work drained or whose
-//! soft deadline came. [`retain`] keeps the store to what is still needed.
+//! soft deadline came.
 //! [`due_task_conversations`] names the Task conversations to start, and
 //! [`launch_failure`] what would stop one.
 
 use loopflow_model::id::LfSessionId;
-use loopflow_storage::sqlite::session_recovery::ConversationToStart;
+use loopflow_storage::sqlite::session_recovery::{TaskConversation, CONVERSATION_STARTS};
 use loopflow_storage::sqlite::SqliteStore;
 
 use crate::store::ProcessIdentityEvidence;
@@ -40,35 +40,22 @@ pub fn settle() -> Option<i64> {
     runs_due
 }
 
-/// End owners whose OS process is gone, forget finished rows nothing needs
-/// and reclaim pages. Failures are logged; the next pass tries again.
-pub fn retain() {
-    let now = time::OffsetDateTime::now_utc().unix_timestamp();
-    match crate::store::database_path_from_env() {
-        Ok(database) if database.exists() => {
-            if let Err(error) = crate::store::retention::prune(&database, now) {
-                tracing::warn!(%error, "store retention");
-            }
-        }
-        Ok(_) => {}
-        Err(error) => tracing::warn!(%error, "store retention has no store"),
-    }
-}
-
-/// Names the Session the recovery pass is starting, in the environment of the
-/// `lf session resume` it runs. Any other start of a Session is a person's.
-pub const RECOVERING_ENV: &str = "LF_RECOVERING_SESSION";
+/// How the recovery pass names each start it makes:
+/// `recover:<session>:<ended agent>:<attempt>`. The held terminal's
+/// `lf session resume` carries it as `--request-id`.
+pub const RECOVER_REQUEST: &str = "recover:";
 
 /// A person started `session` at `at` (`lf resume`, Desktop, the phone),
-/// unless this process is the pass's own start of it: the pass's count of
+/// unless `request` is the pass's own start of it: the pass's count of
 /// starts after a death begins again, an earlier start's failure is
 /// forgotten, and the pass holds off while the person's start comes up.
 pub fn record_start(
     store: &SqliteStore,
     session: &LfSessionId,
+    request: Option<&str>,
     at: i64,
 ) -> crate::store::StoreResult<()> {
-    if std::env::var(RECOVERING_ENV).is_ok_and(|recovering| *session == recovering) {
+    if request.is_some_and(|request| request.starts_with(RECOVER_REQUEST)) {
         return Ok(());
     }
     store.record_persons_start(session, at)
@@ -76,45 +63,131 @@ pub fn record_start(
 
 /// Why starting `conversation` would fail before any provider runs: its
 /// agent's CLI is not on this Machine's `PATH`. `None` when it can start.
-pub fn launch_failure(conversation: &ConversationToStart) -> Option<String> {
+pub fn launch_failure(conversation: &TaskConversation) -> Option<String> {
     let provider = conversation.provider.as_deref()?;
     (!crate::agent::check_cli_available(provider))
         .then(|| format!("{provider} is not installed on this Machine's PATH"))
+}
+
+/// What decides whether this Machine's server starts a conversation that is
+/// down. The recovery pass builds one from each row it lists and a Session's
+/// outlook from its summary; both ask [`server_start`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DownConversation {
+    /// It is an open Task's conversation in the Task's checkout here.
+    pub here: bool,
+    /// Its last agent's exit; `None` when nobody saw one.
+    pub exit_code: Option<i32>,
+    pub starts_since_turn: u32,
+    pub last_started_at: Option<i64>,
+}
+
+/// Whether the server starts a conversation that is down.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ServerStart {
+    /// It does: at this time, or at once when nothing started it since it
+    /// last made progress.
+    At(Option<i64>),
+    Left(Left),
+}
+
+/// Why the server leaves a conversation that is down to a person.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Left {
+    /// The person quit it.
+    Quit,
+    /// It was started [`CONVERSATION_STARTS`] times without finishing a turn.
+    OutOfStarts,
+    /// It is not an open Task's conversation in that Task's checkout here.
+    Elsewhere,
+    /// Another Machine claims its Task.
+    NotClaimedHere,
+    NoServer,
+}
+
+/// The one rule for "the server starts it". `claimed_here` and `server_runs`
+/// are asked only when everything on the Session's own row allows a start.
+/// The first start after a death is immediate; one after a start waits the
+/// landing's repair backoff (1 minute, doubling to 30) from it.
+pub fn server_start(
+    conversation: &DownConversation,
+    claimed_here: impl FnOnce() -> bool,
+    server_runs: impl FnOnce() -> bool,
+) -> ServerStart {
+    let left = if loopflow_storage::session::quit_by_person(conversation.exit_code) {
+        Left::Quit
+    } else if conversation.starts_since_turn >= CONVERSATION_STARTS {
+        Left::OutOfStarts
+    } else if !conversation.here {
+        Left::Elsewhere
+    } else if !claimed_here() {
+        Left::NotClaimedHere
+    } else if !server_runs() {
+        Left::NoServer
+    } else {
+        return ServerStart::At(next_start_at(
+            conversation.starts_since_turn,
+            conversation.last_started_at,
+        ));
+    };
+    ServerStart::Left(left)
+}
+
+/// Whether this Machine claims `task`; a claim that cannot be read is not one.
+pub fn claimed_here(store: &SqliteStore, task: &loopflow_model::durable::TaskId) -> bool {
+    store
+        .task_claimed_here(task)
+        .inspect_err(|error| tracing::warn!(%task, %error, "Task claim unreadable"))
+        .unwrap_or(false)
+}
+
+/// Whether a Machine server answers here.
+pub fn server_runs() -> bool {
+    crate::machine::socket_path()
+        .is_ok_and(|socket| std::os::unix::net::UnixStream::connect(socket).is_ok())
 }
 
 /// The Task conversations to start again now, most recently active Task
 /// first, and when the soonest one still waiting its backoff comes due.
 #[derive(Debug, Default)]
 pub struct DueConversations {
-    pub now: Vec<ConversationToStart>,
+    pub now: Vec<TaskConversation>,
     pub next_at: Option<i64>,
 }
 
-/// Open Tasks claimed here whose conversation was never started, or whose
-/// agent died rather than being quit. An agent still unfinished in the store
-/// counts as died only when its recorded process is gone; unknown liveness
-/// waits. The first start after a death is immediate; one after a start
-/// waits the landing's repair backoff (1 minute, doubling to 30) from it.
+/// The server's own reading: open Tasks' conversations here that are down
+/// and that [`server_start`] says it starts. One was never started, or its
+/// agent ended. An agent still unfinished in the store counts as down only
+/// when its recorded process is gone; unknown liveness waits.
 pub fn due_task_conversations(
     store: &SqliteStore,
     now: i64,
 ) -> crate::store::StoreResult<DueConversations> {
     let mut due = DueConversations::default();
-    for conversation in store.conversations_to_start()? {
-        let died = conversation.agent.is_none()
+    for conversation in store.task_conversations_here()? {
+        let down = conversation.agent.is_none()
             || conversation.ended_at.is_some()
             || conversation.identity.is_some_and(|(pid, start)| {
                 crate::process::os_process::process_identity_evidence(pid, start)
                     == ProcessIdentityEvidence::Dead
             });
-        if !died || !store.task_claimed_here(&conversation.task)? {
+        if !down {
             continue;
         }
-        match next_start_at(conversation.starts_since_turn, conversation.last_started_at) {
-            Some(at) if at > now => {
+        let facts = DownConversation {
+            here: true,
+            exit_code: conversation.exit_code,
+            starts_since_turn: conversation.starts_since_turn,
+            last_started_at: conversation.last_started_at,
+        };
+        // This is the server asking: one runs.
+        let start = server_start(&facts, || claimed_here(store, &conversation.task), || true);
+        match start {
+            ServerStart::At(Some(at)) if at > now => {
                 due.next_at = Some(due.next_at.map_or(at, |soonest| soonest.min(at)));
             }
-            _ => due.now.push(conversation),
+            ServerStart::At(_) => due.now.push(conversation),
+            ServerStart::Left(_) => {}
         }
     }
     Ok(due)

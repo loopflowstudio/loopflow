@@ -44,7 +44,8 @@ line (stdin stays open for steers, so never `cat` it), waits for a marker
 file, then prints a stream-json `result` line. A detached launch shows as
 `lf task run …` with parent 1 and its stdout on `logs/graph-<id>.log`; `-b` at
 a PTY tails unlinked temp files. PTY drivers must drain output continuously:
-an undrained PTY blocks the caller on write and looks like a hang.
+an undrained PTY blocks the caller on write and looks like a hang. Don't name
+a Python driver `pty.py`: it shadows the module it imports.
 
 An earlier build's Session owner: in a fresh home, before the branch opens it,
 run the installed `lf -i -a claude : '<msg>'` (with `LF_BIN` unset) under a PTY
@@ -64,11 +65,13 @@ takes the Desktop pane's relayed route.
 
 Start the branch's `lf server run` detached (Python `os.fork()`/`os.setsid()`,
 stdin `/dev/null`); the recovery pass lives in it. `lf task checkout <task>`
-prepares the conversation and the pass starts it. `kill -9` the provider (find
+prepares the conversation and the pass starts it (`Conversation: starting`
+until its first agent is recorded). `kill -9` the provider (find
 it by `pgrep -f 'w/bin/claude --name <task>'`) and poll `lf task status <task> |
 grep Conversation` once a second: `died … · starting again`, then `running
-(started again …, attempt n)`. A second kill with no finished turn waits the
-backoff; `start.next_at` in `--json` says when, and the start lands on that
+(started again …, attempt n)`. To see the `starting` between them (about
+150 ms), read `status_line` from `lf task status <task> --json` in a loop. A second kill with no finished turn waits the
+backoff; `outlook.at` in `--json` says when, and the start lands on that
 second. The world stand-in finishes no turns, so the count never resets: five
 kills give up with "started 5 times". Type `quit` through `lf resume --task` in
 a PTY for exit 0; Ctrl+] steps away and leaves it running. A reboot is SIGKILL
@@ -85,7 +88,30 @@ read `died … (exit 137)`; a `quit` there means an end was settled after the
 pass reaped its agent. A shutdown is `kill -TERM -<holder pgid>` and the server.
 
 Replace a binary a server or holder runs with `rm` then `cp`: `cp` over it
-breaks its macOS signature and every next exec dies with 137.
+breaks its macOS signature and every next exec dies with 137. When the
+branch's own migration changed, rebuild and copy `lf-world` too and build a
+new world: the old home fails with "checksum does not match this lf build".
+
+For a provider that is missing, start the server from a wrapper whose `PATH`
+has no `claude` (starts run with the server's environment, not the CLI's):
+a died conversation reads `· starts again HH:MM · last start failed: claude
+is not installed on this Machine's PATH`, a Task checked out then reads
+`could not start: … · tries again HH:MM`. Restart the server with the full
+`PATH` and each starts at the time its line gave.
+
+To skip the 15 minutes of backoff before the five-start give-up, set
+`starts_since_turn=4,last_started_at=unixepoch()-3600` on the Session's
+`agent_sessions` row, then kill twice.
+
+A returning user: in a fresh `LF_HOME` with the world's `launchctl` and
+`claude` stand-ins first on `PATH`, run the installed
+`/Applications/Loopflow.app/Contents/MacOS/lf server run` detached, then its
+`task create` and `task checkout` (the installed lf starts the conversation
+itself). Call it by that path: through a symlink of another name, checkout
+answers "cannot resolve an executable path for `lf`" and starts nothing. Kill one provider, stop that server, and start the branch's on the
+same home: the dead one resumes, the live one keeps its provider. The
+installed build's `lf holder run` has no QA path in its argv; find it with
+`lsof -c lf | grep <home>` and stop that pid.
 
 The world stand-in writes no transcript, so every thread it starts reads as
 lost: the next start (the pass's or `lf resume`'s) opens a fresh thread
@@ -108,4 +134,8 @@ process group (`kill -9 -<pid of lf task run>`) and the step's provider: the
 run reads `Run died at implement; the server's next pass carries it again`,
 then a new `lf task run <task>` (parent: the server) continues at `implement`.
 Killing only the carrier leaves the Graph running; it arrives by itself.
+With the server up the death is noticed on the minute tick; a server start
+reads at once, after its start-up retention has cleared the dead carrier's
+pid (`task_graphs.run_died_at` keeps that it died). The headless stand-in is
+`lf --batch`'s child, in its own group: kill it by pid as well.
 `lf task run <task> qarun` at the interactive step passes it and ends the run.

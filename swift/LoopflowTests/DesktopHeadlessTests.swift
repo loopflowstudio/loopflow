@@ -209,7 +209,8 @@ struct DesktopHeadlessTests {
         feed.send(try frame("task", sequence: 2, answers: 2, task: task.task.identifier,
                             body: ["overview": work, "graph_processes": [run], "execution": ["work": work,
                                                  "started_by": ["kind": "session", "id": "session_1", "name": "LOO-1 task", "requester": "Maya"],
-                                                 "auto": ["state": "on", "at": 1793266000, "by": ["kind": "person", "name": "Maya"]]],
+                                                 "auto": ["state": "on", "at": 1793266000, "by": ["kind": "person", "name": "Maya"]],
+                                                 "stack_parent": ["identifier": "LOO-0", "branch": "maya/loo-0-parent", "pr_number": 7]],
                                    "comments": ["identifier": task.task.identifier, "comments": [], "pending_sync": [], "conflicts": [String: String](), "refresh_error": NSNull()]]))
         try await eventually { model.taskWork[task.id].value != nil }
         let shown = try #require(model.taskWork[task.id].value)
@@ -227,6 +228,11 @@ struct DesktopHeadlessTests {
         // Turning it off says who did and when.
         let line = TaskWorkflowBar.autoLine(Auto(state: .stopped, at: 1793266380, by: .person(name: "Maya")))
         #expect(line.hasPrefix("auto off by Maya "))
+        // A stacked Task names its parent by Task beside its PR line.
+        let parent = try #require(model.taskExecution[task.id].value?.stackParent)
+        let stacked = TaskStackParentLabel(parent: parent)
+        #expect(try stacked.inspect().find(text: "Stacked on LOO-0").string() == "Stacked on LOO-0")
+        #expect(stacked.help == "Builds on LOO-0's branch maya/loo-0-parent (PR #7). lf sync main detaches it.")
 
         // Any Graph process is one line that opens to its id, its launched graph,
         // where it stands and every step it started.

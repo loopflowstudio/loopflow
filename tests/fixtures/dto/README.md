@@ -33,7 +33,8 @@ condition, reason, and actions through the existing Wave Task row.
 session, its explicit readiness state, and its exact Machine-local attach route.
 
 `session_memberships.json` also pins `ended` (a quit, a death with exit 137,
-a death nobody saw) and a Task conversation's `start`.
+a death nobody saw), a Task conversation's `start`, one `outlook` of each
+kind and the `status_line` the server writes from them.
 
 `session_memberships.json` pins each Session's required `graph_membership`:
 the current Graph step, an earlier step, an independent conversation, a Session that
@@ -44,11 +45,6 @@ Session whose canonical name lives on its Machine (`title_source: unavailable`).
 backlog, completion, external and review waits, local recovery blockers, and
 unavailable evidence. Rust and Swift decode the same Task rows; consumers never
 reconstruct the condition from process flags.
-
-`activity_snapshot.json` pins `lf process list --json`: exact live Process and provider
-processes carry OS-derived state, while a provider without exact ownership
-stays separate from the call tree. Desktop receives the same wire type through
-the Work observation stream; it does not poll `lf process list`.
 
 `session_history_summary.json` and `wave_detail.json` pin the `SessionHistory`
 shape used by `lf session usage --json` and Wave detail. Captured event sequences

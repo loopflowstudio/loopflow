@@ -55,7 +55,9 @@
     },
     "raw": false,
     "ended": null,
-    "start": null
+    "start": null,
+    "outlook": null,
+    "status_line": "unknown"
   },
   "liveness": "unknown",
   "control_holder": null,

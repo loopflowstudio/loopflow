@@ -282,7 +282,8 @@ another Machine's change arrives with no hub; with no server it waits for
 `lf task sync`. The first `lf task list` or `lf repo tracker` in a clone the Machine
 has saved nothing in does one exchange before it reads, which registers the
 clone for the server's minute. A served read of such a clone answers with an
-empty plan once and exchanges after its reply. Task creation, a
+empty plan once and exchanges after its reply. Task creation reads
+nothing first: the send after its save takes in what changed at the hub. A
 provider exit and `lf repo tracker --subscribe` read the hub only. Every
 exchange a command waits on without asking for it (a save, a claim, a first
 read, a read of the hub) is stopped at five seconds: Git is killed and the

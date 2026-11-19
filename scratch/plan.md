@@ -445,7 +445,7 @@ etude checkout and `lf` version are unknown.
    and `plan_git::send` at once, under one deadline five seconds out. The
    only sends after a save are the two calls to `plan_carriers::send`. `plan_hub::sync` is still
    called by name where a read nobody asked for reads the hub alone
-   (`ops/task.rs`, `planning_sync.rs`, `session_move.rs`, `tracker.rs`
+   (`planning_sync.rs`, `session_move.rs`, `tracker.rs`
    `--subscribe`).
 
    What it taught:
@@ -484,8 +484,8 @@ etude checkout and `lf` version are unknown.
      test asserted `unsent` right after a create; it now asserts the ref is on
      the remote, and the unsent list by identifier on the refused push.
 
-5. **A create is one save and one send.** *To build* (second concept review,
-   `scratch/concept-review.html`). Delete the `plan_hub::read` calls in
+5. **A create is one save and one send.** *Built* (second concept review,
+   `scratch/concept-review.html`). Deleted the `plan_hub::read` calls in
    `ops/task.rs` `task_create` (before the save) and `sync_admitted` (after
    it). They are the hub-owns design's pull before push, and stamps don't need
    them: the send after the save already reads `plan.changes`, since after a
@@ -499,6 +499,13 @@ etude checkout and `lf` version are unknown.
    by hand the hanging-hub create from `.lf/qa/tracker.md` (expect about 5 s).
    *Passed over:* one deadline per command passed down from the command; it
    would also cover the claim's two waits, but it adds plumbing to every caller.
+
+   What it showed, 2026-11-18: `ops::task::tests::` (33) and the acceptance
+   test passed (34 tests). By hand in `/tmp/lfq3`, no server, hub stand-in
+   hanging: `lf task create` returned in 5.4 s, `lf repo tracker` read
+   `Hub mini, unreachable since …, 1 unsent.` with "mini did not answer
+   within 5s"; with the hub back, `lf task sync` sent it and the line read
+   `Hub mini.`
 
 ## Checks
 
@@ -610,7 +617,7 @@ etude checkout and `lf` version are unknown.
   pushed with the save, so Grace's claim saw it and took over. It now cuts
   Grace's remote while she claims, and passes (11 s).
 - Slices 1 to 4 are in the code and the four differences at the top hold
-  in it. Slice 5 remains. Etude's cutover is by hand, after
+  in it, and slice 5 is built. Etude's cutover is by hand, after
   release.
 - Next: gate runs the lists above. Open choices are in
   `scratch/questions.md`; the review's five questions are at the end of

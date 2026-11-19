@@ -55,8 +55,8 @@ command keeps to its five seconds, make the remote hang instead: an
 executable that runs `sleep 60`, set as `git config core.sshCommand <it>`,
 with `remote set-url origin git@slow.example:x/y.git`. Time each command
 (`python3 -I -c 'import time;print(time.time())'` before and after); with a
-hanging remote or hub a save, a claim or a first read returns in 5 to 15 s
-(a create reads the hub, then sends: two waits), `lf task sync` waits as
+hanging remote or hub a save, a claim, a create or a first read returns in
+about 5 s (a create's send reads the hub too: one wait), `lf task sync` waits as
 long as the carriers take. Unset `core.sshCommand` afterwards. For a first-wins claim race, point one home's
 remote at the missing path while both run `lf task claim <id>`, restore it,
 then `lf task sync <id>` on each; the losing home's steer is a row in

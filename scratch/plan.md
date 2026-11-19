@@ -117,28 +117,25 @@ this case is rare.
   is recording the thread only once the provider saved it (a later Task).
   Noted on `scratch/concept-review.html`, not changed here.
 
-## Slices
+## Status
 
-1. **Delete the guards; add the exit-1 stand-in test.** This slice could prove
-   the plan wrong: it shows `lost_thread` (still in place) recovers a provider
-   that started and died, not only one that never started. Run the three
-   transport tests.
-2. **Add `saved_thread`; use it in `resume_native_session` and
-   `new_thread`; delete `lost_thread`.**
-   Rerun slice 1's tests and the session_launch_contract and session_cli tests
-   named above.
-Slices 1 and 2 are built. Slice 1 showed `lost_thread` already recovered a
-provider that started and exited 1; slice 2 moved that decision into
-`saved_thread`. Passing: the three transport tests,
-`provider_rejected_resume_keeps_the_selected_conversation`,
+Built (commits 4b607058ed, c87ed69001): guards and `lost_thread` deleted,
+`saved_thread` decides for `resume_native_session` and `new_thread`, docs
+updated. Slice 1 showed `lost_thread` already recovered a provider that
+started and exited 1; `saved_thread` now owns that decision. Passing:
+the three transport tests, `provider_rejected_resume_keeps_the_selected_conversation`,
 `provider_switch_without_transcript_seeds_from_the_original_request`,
 `a_killed_task_conversation_comes_back_once_and_a_quit_one_stays_quit` (the
 recovery watcher's lost-transcript case, now through `append_input`) and
-`transcript::`. `new_thread` on a lost thread prints both the "no saved copy"
-line and its own "seeded with its original request" line.
+`transcript::`.
 
-3. **Real Claude quit-before-typing check** (next; not run in this step) through `lf`, using a PTY like the
-   probe; result in the PR body.
+Remaining:
+
+- **Real Claude quit-before-typing check** (qa/gate, needs a Claude login):
+  the acceptance item above, through `lf` under a PTY like the probe; result
+  in the PR body.
+- Small wart, left as is: `new_thread` on a lost thread prints both the
+  "no saved copy" line and its own "seeded with its original request" line.
 
 ## Docs (written first)
 

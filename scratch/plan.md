@@ -10,8 +10,10 @@ scope". Then, choosing from `scratch/explore.html`: "this is cloest" (vision C,
 a setting and no state); "i think lf task auto on lf task auto off maybe?";
 "ok lets take the next pass. Just become an Auto toggle works."
 
-PR #1976, base `main`. Main (with #1972 and #1974) is merged in at
-`39b87d6262`.
+PR #1976, base `main`. Main (through #1985) is merged in at `726f8a320f`;
+that merge resolved `sqlite.rs`, `commands/graph.rs` and `lf/mod.rs` by hand.
+`cargo check -p loopflow --all-targets` passes at that merge (2026-11-19); no
+test has run since it.
 
 ## Auto on is one action
 
@@ -114,10 +116,10 @@ when the PR merges.
 
 ## Remaining
 
-1. The last ship words on the wire (below).
-2. Gate.
+Gate. Nothing is left to build. The checks under "Checks nobody has run"
+below are gate's and CI's.
 
-### Built: the last ship words on the wire
+## Built: the last ship words on the wire
 
 Concept review, third pass, 2026-11-19 at `cb20b422a6`
 (`scratch/concept-review.html`). Choices made for review; reversals are in
@@ -188,8 +190,8 @@ What QA found and left (also in `scratch/questions.md`):
   the upgrade (no `task_graphs` row to hold the mark), and `lf task auto off`
   on such a Task answers "auto was not on", exit 0. A later `lf -b task run`
   turns auto on and may merge.
-- `--reason` is stored as a `progress` Task event and no read prints it; the
-  help says "kept in the Task's history". Taken up in "Next" above.
+- `--reason` was stored as a `progress` Task event no read printed. Since
+  fixed: see "the last ship words on the wire".
 - A Task waiting at an interactive step reads "latest Graph: Graph qaship
   finished; nothing further is launched".
 - Not driven: the Desktop window (toggle and badge), iOS, a ship arriving in
@@ -252,7 +254,7 @@ Shape, for gate's review:
   no surface reads it: CLI and Desktop print `reason`. Either Desktop uses it
   the way it uses a conversation's outlook, or the field goes and `died` plus
   `reason` carry the run.
-- `ship::running_graph` polls up to 30 s for a carrier's Graph to register so
+- `auto::running_graph` polls up to 30 s for a carrier's Graph to register so
   `TaskRunStart::Live` can name a Graph run. If `Live` named the carrier
   instead, the wait and its second sentence ("is running graph …" after 30 s)
   would go. Not driven: a ship arriving inside that window.
@@ -260,9 +262,9 @@ Shape, for gate's review:
 ## Built: ship is a run that asks for auto
 
 Built 2026-11-19 (concept review, second pass). `lf ship` is `carry_task_run`
-with `TaskProcessOptions.auto = AutoAsk::Person { note }`; `lf -b task run`
+with `TaskProcessOptions.auto = AutoAsk::Person`; `lf -b task run`
 sends `AutoAsk::Batch`. `start_task_run` (`ops/task.rs`) writes the ask once,
-after its own take-up (`ship::ask`).
+after its own take-up (`auto::ask`).
 
 - A person's ask on a Task waiting at an interactive step starts at that step
   (`select_task_run`'s `stands_in`); on a live run it turns auto on and
@@ -278,7 +280,7 @@ after its own take-up (`ship::ask`).
   while this run was starting" is gone: a bare run that loses gets "is running
   graph …", a ship reports the live run.
 - A ship that meets a carrier whose Graph process has not registered waits up
-  to 30 s for it (`ship::running_graph`), then falls to the bare run's
+  to 30 s for it (`auto::running_graph`), then falls to the bare run's
   sentence.
 - Changed on purpose: a ship that fails before its run starts leaves auto
   unset. A done or abandoned Task gets the run's sentences ("is done; `lf task

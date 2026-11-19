@@ -379,8 +379,9 @@ transcript; `LF_PROCESS_ID` names the lf they run under and `LF_EXECUTION_ID`
 hands a spawned child the id its owner row already holds.
 
 A spawner (the Task-run loop, the Graph runner, the CI repair launcher) mints
-its child's id and writes the owner row with pid and OS start at spawn. The child writes its own end, exit and error; the spawner writes them
-if the child died first. One result rule covers every owner
+its child's id and writes the owner row with pid and OS start at spawn. The
+child writes its own end, exit and error; the spawner writes them if the child
+died first. One result rule covers every owner
 (`ExecutionResult::of`): no end is running, exit 0 succeeded, 130 with no error
 interrupted, another exit failed, an end with no exit unknown. An AgentProcess
 records no outcome, only its end and exit code. Missing or incompatible storage

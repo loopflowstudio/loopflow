@@ -2,7 +2,7 @@
 //! Git remote ([`super::plan_git`]) or both. This is when the two run
 //! together. [`send`] follows a save and reads nothing. [`sync`] reads and
 //! sends: when asked, before a claim, and after a command the Machine server
-//! answers.
+//! answers. [`read`] asks the hub alone, for a read nobody asked for.
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -32,11 +32,31 @@ pub async fn sync(store: &crate::store::Store, repo: &str) -> Result<()> {
 }
 
 async fn sync_until(store: &crate::store::Store, repo: &str, until: Option<Instant>) -> Result<()> {
+    on_thread(store, repo, move |store, repo| exchange(store, repo, until)).await
+}
+
+/// A read nobody asked for, riding on a command (`lf repo tracker
+/// --subscribe`, a provider exit): the hub only, for [`WAIT`] at most. A
+/// fetch would cost the command too long; Git is read by [`sync`].
+pub async fn read(store: &crate::store::Store, repo: &str) -> Result<()> {
+    let until = Instant::now() + WAIT;
+    on_thread(store, repo, move |store, repo| {
+        super::plan_hub::exchange(store, repo, Why::Read(until))
+    })
+    .await
+}
+
+/// `carry` for `repo` on a blocking thread, when it has no Linear or Asana.
+pub(super) async fn on_thread(
+    store: &crate::store::Store,
+    repo: &str,
+    carry: impl FnOnce(&SqliteStore, &str) -> Result<()> + Send + 'static,
+) -> Result<()> {
     if crate::ops::tracker::connected(repo) {
         return Ok(());
     }
     let (sqlite, repo) = (store.sqlite.clone(), repo.to_owned());
-    crate::journal::request::spawn_blocking(move || exchange(&sqlite, &repo, until)).await?
+    crate::journal::request::spawn_blocking(move || carry(&sqlite, &repo)).await?
 }
 
 /// After a save in `repo`, which has no Linear or Asana: each carrier takes

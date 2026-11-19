@@ -55,23 +55,8 @@ pub fn set_hub(
 /// [`exchange`] for `repo`, when it has no Linear or Asana, for as long as
 /// the hub takes: a move waits for its plan to be there.
 pub async fn sync(store: &crate::store::Store, repo: &str) -> Result<()> {
-    exchanged(store, repo, Why::Asked).await
-}
-
-/// [`exchange`] for `repo`, when it has no Linear or Asana, as a read nobody
-/// asked for: the command it rides on waits [`super::plan_carriers::WAIT`] at
-/// most.
-pub async fn read(store: &crate::store::Store, repo: &str) -> Result<()> {
-    let until = Instant::now() + super::plan_carriers::WAIT;
-    exchanged(store, repo, Why::Read(until)).await
-}
-
-async fn exchanged(store: &crate::store::Store, repo: &str, why: Why) -> Result<()> {
-    if crate::ops::tracker::connected(repo) {
-        return Ok(());
-    }
-    let (sqlite, repo) = (store.sqlite.clone(), repo.to_owned());
-    crate::journal::request::spawn_blocking(move || exchange(&sqlite, &repo, why)).await?
+    super::plan_carriers::on_thread(store, repo, |store, repo| exchange(store, repo, Why::Asked))
+        .await
 }
 
 /// Why an exchange runs, which is how long it may take.

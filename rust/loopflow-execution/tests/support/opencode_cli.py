@@ -121,6 +121,34 @@ def _fail(session, message, reason):
     raise SystemExit(1)
 
 
+def _plugins():
+    """Each lf plugin's launch spec and the delivery file it reads context for."""
+    for plugin in CONFIG.get("plugins", []):
+        source = (Path(plugin.removeprefix("file://")) / "index.js").read_text()
+        constant = lambda name: json.JSONDecoder().raw_decode(source.split(f"const {name} = ", 1)[1])[0]
+        yield constant("spec"), constant("delivery")
+
+
+def _tool_turn(session):
+    """The plugin's calls to lf around a tool, for a fixture that left `tool_turn.py`."""
+    script = HOME / "tool_turn.py"
+    if not script.exists():
+        return
+    for spec, delivery in _plugins():
+        lf = {
+            "env": {"LF_HOME": spec["delivery"]["home"]},
+            "cwd": spec["delivery"]["repo"],
+            "event": "OpenCodeMessagesTransform",
+        }
+        block = [spec["executable"], "__context-block", "--delivery", delivery, "--moment"]
+        hooks = {
+            # The block is rendered without the launch's capability.
+            "start": lf | {"argv": [*block, "start"], "without": ["LF_PROVIDER_CONTEXT", "LF_BARE_STEER"]},
+            "steer": lf | {"argv": [*block, "steer"]},
+        }
+        subprocess.run([sys.executable, str(script), session, json.dumps(hooks)], check=True)
+
+
 def _run(session, text):
     """One `opencode run`: a turn that prints its parts and exits."""
     _record_launch()
@@ -136,11 +164,7 @@ def _run(session, text):
             )
         )
     # The native context hook carries structured response instructions.
-    instructions = ""
-    for plugin in CONFIG.get("plugins", []):
-        source = (Path(plugin.removeprefix("file://")) / "index.js").read_text()
-        spec = json.JSONDecoder().raw_decode(source.split("const spec = ", 1)[1])[0]
-        instructions += spec.get("instructions", "")
+    instructions = "".join(spec.get("instructions", "") for spec, _ in _plugins())
     prompt = [{"text": instructions}, {"text": text}]
     sessions[session].append({"id": "msg_" + uuid.uuid4().hex, "type": "user", "text": text})
     _save(sessions)
@@ -156,6 +180,7 @@ def _run(session, text):
     sessions[session].append(message)
     _save(sessions)
     _line("step_start", session, id="prt_" + uuid.uuid4().hex, messageID=assistant, type="step-start")
+    _tool_turn(session)
     # The turn is under way, as the real CLI's first line shows, and stays open.
     deadline = time.monotonic() + 30
     if (HOME / "hold-turn").exists():

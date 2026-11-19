@@ -6,7 +6,7 @@ pub fn holding_claude() -> String {
 }
 
 const HOLDING_CLAUDE: &str = r#"#!/usr/bin/python3
-import json, os, sys, time
+import json, os, subprocess, sys, time
 if '--version' in sys.argv:
     print('fixture')
     sys.exit(0)
@@ -18,6 +18,11 @@ with open(os.path.join(home, 'ready'), 'w') as ready:
 if streamed:
     with open(os.path.join(home, 'stream-ready'), 'w') as ready:
         ready.write('ready')
+# A fixture that left `tool_turn.py` gets the hooks lf declared, run around a tool.
+turn = os.path.join(home, 'tool_turn.py')
+if streamed and os.path.exists(turn):
+    hooks = json.load(open(sys.argv[sys.argv.index('--settings') + 1]))['hooks']
+    subprocess.run([sys.executable, turn, 'stand-in', json.dumps(hooks)], check=True)
 while not os.path.exists(os.path.join(home, 'release')):
     time.sleep(0.02)
 if not streamed:

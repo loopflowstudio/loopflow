@@ -1986,6 +1986,10 @@ fn pi_stand_in() -> String {
     )
 }
 
+/// One `implement` step on each stand-in: it settles and the Graph moves on,
+/// with its answer, native thread and usage recorded. While its one tool
+/// runs, `lf steer` saves a steer; the hooks lf gave the harness return the
+/// step's context before the tool and the steer after it.
 #[test]
 fn a_task_step_runs_as_a_worker_on_every_harness() {
     let opencode = opencode_stand_in();
@@ -2013,9 +2017,21 @@ fn a_task_step_runs_as_a_worker_on_every_harness() {
         );
         task.repo.stage_all();
         task.repo.commit("Define a worker followed by a review");
-        fs::write(task.home.path().join("release"), "").unwrap();
+        let home = task.home.path();
+        fs::write(home.join("release"), "").unwrap();
+        // Each stand-in runs the hooks lf gave its harness around one tool.
+        fs::write(
+            home.join("tool_turn.py"),
+            include_str!("../../../loopflow-execution/tests/support/tool_turn.py"),
+        )
+        .unwrap();
 
-        task.task_run_ok(&["task", "run", "INF-123", "worker", "-a", agent]);
+        let started = task.run(&["task", "run", "INF-123", "worker", "-a", agent]);
+        wait_for("the worker's tool", || home.join("holding").exists());
+        task.ok(&["steer", "INF-123", "WORKER_DIRECTION"]);
+        fs::write(home.join("tool-done"), "").unwrap();
+        let ran = task.ran(started);
+        assert!(ran.success(), "{provider}: {}", ran.text);
         assert_eq!(task.graph()["position"], at("review"), "{provider}");
         let graphs = support::recorded_graphs(task.home.path());
         assert_eq!(graphs.len(), 1, "{provider}");
@@ -2042,6 +2058,38 @@ fn a_task_step_runs_as_a_worker_on_every_harness() {
             String::from_utf8_lossy(&history.stdout).contains(answer),
             "{provider}: {history:?}"
         );
+
+        // The start hook named this worker's Session and Task, and the hook
+        // after the tool brought the steer saved while the tool ran.
+        let context = fs::read_to_string(home.join("hook-context")).unwrap();
+        assert!(
+            context.contains(&format!("This Session: {session}\n")),
+            "{provider}: {context}"
+        );
+        assert!(
+            context.contains("This Session's Task: INF-123"),
+            "{provider}: {context}"
+        );
+        let steer = fs::read_to_string(home.join("hook-steer")).unwrap();
+        assert!(steer.contains("WORKER_DIRECTION"), "{provider}: {steer}");
+
+        let runs = task.run(&[
+            "history", "usage", "--days", "0", "--task", "INF-123", "--json",
+        ]);
+        let runs: serde_json::Value = serde_json::from_slice(&runs.stdout).unwrap();
+        let usage = runs
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|run| run["session_id"] == session.as_str())
+            .map(|run| &run["usage"])
+            .unwrap();
+        // Pi's session file names a turn by its entry id and lf by its own
+        // request id, so the usage lf reads there is not the Run's.
+        if provider != "pi" {
+            assert_eq!(usage["input_tokens"], 20, "{provider}: {usage}");
+            assert_eq!(usage["output_tokens"], 5, "{provider}: {usage}");
+        }
     }
 }
 

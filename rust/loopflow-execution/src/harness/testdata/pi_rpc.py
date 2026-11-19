@@ -91,6 +91,26 @@ def _record(text):
     Path(os.environ["PI_FIXTURE_RECORD"]).write_text(json.dumps(record))
 
 
+def _tool_turn():
+    """The extension's calls to lf around a tool, for a fixture that left `tool_turn.py`."""
+    script = HOLD.with_name("tool_turn.py")
+    if not script.exists():
+        return
+    extension = Path(args[args.index("--extension") + 1]).read_text()
+    spec = json.loads(extension.split("\n", 1)[0].removeprefix("const spec = ").removesuffix(";"))
+    block = [spec["executable"], "__context-block", "--moment"]
+    hooks = {
+        # The block is rendered without the launch's capability.
+        "start": {
+            "argv": [*block, "start"],
+            "event": "PiContext",
+            "without": ["LF_PROVIDER_CONTEXT", "LF_BARE_STEER"],
+        },
+        "steer": {"argv": [*block, "steer"], "event": "PiSteer"},
+    }
+    subprocess.run([sys.executable, str(script), str(file), json.dumps(hooks)], check=True)
+
+
 if "--mode" not in args:
     # The extension's one Machine server connection, opened with the address
     # its launch spec (the source's first line) carries.
@@ -259,6 +279,7 @@ for line in sys.stdin:
                 "isError": False,
             }
         )
+    _tool_turn()
     entries = [json.loads(line) for line in file.read_text().splitlines()]
     count = sum(entry.get("message", {}).get("role") == "user" for entry in entries) + 1
     answer = '{"path":"alpha"}' if "PI_ROUTE_SENTINEL" in text else f"answer {count}: {text}"

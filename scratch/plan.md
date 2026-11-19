@@ -15,9 +15,9 @@ checked, and how the next gap is seen.
 | behavior | shown by |
 |---|---|
 | a worker starts, settles, records answer, native thread and usage; the Graph advances | `a_task_step_runs_as_a_worker_on_every_harness` |
-| the step's context reaches the provider | not asserted yet: slice 6 |
-| a steer sent while the step runs reaches it | not asserted yet: slice 6 |
-| the step's usage is recorded | not asserted yet: slice 6 |
+| the step's context reaches the provider | `a_task_step_runs_as_a_worker_on_every_harness` |
+| a steer sent while the step runs reaches it | same test |
+| the step's usage is recorded | same test for Claude, Codex, OpenCode. Pi: no (kept under Pi's turn id) |
 | a harness that is not installed is passed over, or named once | `a_step_that_cannot_launch_is_not_started_again` |
 | a question with nobody there ends the turn | OpenCode, Pi: `a_question_with_nobody_there_ends_the_step`. Claude, Codex: not shown |
 | interrupt stops a worker with its turn recorded interrupted; the next run starts the step again | OpenCode, Pi: `a_worker_stops_on_interrupt_and_its_session_resumes`. Claude, Codex: not shown |
@@ -278,10 +278,7 @@ The docs commit the implementation to three things the plan had left open:
    runs `implement` as a worker on all four stand-ins and reads back one
    settled step, the Graph at `review`, a recorded native thread and the final
    answer through `lf history show --final`.
-   - Not asserted by that test yet: the context the stand-in received, a steer
-     sent mid-step, recorded usage. The README table's "same" cells for those
-     rows are unshown. On OpenCode, context and steers travel through the JS
-     plugin, which a Python stand-in never runs; see "Seen on the real CLI".
+   - Context, a mid-step steer and usage were added in slice 6.
    - Not run: `lf task run` on a real Task with real OpenCode or Pi. A worker
      needs the Machine server, and the branch `lf` was only run against an
      isolated `LF_HOME`. Demo owns it.
@@ -374,15 +371,41 @@ The docs commit the implementation to three things the plan had left open:
      (`send_current` is `NotSteerable`); the plugin's between-tool check
      delivers them, and one that arrives after the last tool seeds the next turn.
 
-6. **Next: the worker test reads back context, a steer and usage.** Gate's
-   acceptance asks `a_task_step_runs_as_a_worker_on_every_harness` for these,
-   and it asserts none of them; the README rows read "not shown" until it does
-   (they read "yes" before this realign). Per stand-in: the step's context in
-   the input it received, a steer sent with `lf steer` while it holds mid-turn
-   (the `hold-turn`/`holding` handshake slice 4 added), and usage in the
-   Task's history. OpenCode delivers context and steers through the JS plugin,
-   which `opencode_cli.py` never runs; if the stand-in cannot show them, the
-   OpenCode cells say so and demo checks them on the real CLI.
+6. **The worker test reads back context, a steer and usage. Built.**
+   - `a_task_step_runs_as_a_worker_on_every_harness` leaves
+     `tests/support/tool_turn.py` in the home. Each stand-in that finds it
+     runs, mid-turn, the two `lf __context-block` calls its harness makes
+     around a tool: Claude from `--settings`, Codex from `thread/start`'s
+     `config.hooks`, OpenCode from the plugin's `spec` and `delivery`, Pi from
+     the extension's `spec`. The test runs `lf steer INF-123` while the tool
+     holds, then reads the block (this worker's Session and Task) and the steer.
+   - What it found: nothing in production calls `Driver::send_current`. Every
+     harness hears a mid-turn steer only through the hook after its next tool.
+     Slice 5's note that OpenCode's `send_current` is `NotSteerable` changed
+     nothing a person sees.
+   - What it found: a Pi worker's usage is not in the Task's history. lf reads
+     usage from the provider's transcript and writes it to the turn the
+     transcript names. Pi's session file names the turn by its entry id
+     (`rpc-user-1`); lf recorded the same turn under its own request id, with
+     the Task, Graph and step on it. `history.turns` ends with two rows for one
+     turn, and `lf history usage --task` counts the one without usage. OpenCode
+     avoids this by naming the turn after its store's `user` row. The README
+     cell says no; the test skips the usage assertion for Pi.
+   - The Claude and Codex stand-ins reported no usage. `keep_claude_turn` now
+     dates its rows and gives the answer a `usage` (lf skips a turn whose
+     transcript has no timestamp); `codex_rollout.py` writes a `token_count`
+     with a running total. Every fixture using them now records 20 input and 5
+     output tokens a turn.
+   - The stand-in shows lf's side of the hook. The OpenCode plugin and the Pi
+     extension run under Node in `harness::context::tests::`. Nothing has run
+     either on a real CLI as a worker; demo owns that.
+   - Passed here 2026-11-18: the worker test alone 42s (115s on the first run
+     after a build); with the question and interrupt tests under nextest, 104s
+     and 106s each. Nextest's limit is 300s.
+
+Next: demo on the real CLIs. Open from this Task: Pi usage attribution
+(`scratch/questions.md` 25), and Claude and Codex in the question and
+interrupt tests (18, 22).
 
 ## Seen on the real CLI (OpenCode 2.2.1, 2026-11-18)
 

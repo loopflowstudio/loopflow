@@ -80,15 +80,29 @@ row names the test that shows it; "no" is a gap with its owner.
 | a Task step | Claude | Codex | OpenCode | Pi | test |
 |---|---|---|---|---|---|
 | starts as a worker, settles, records its answer and native thread; the Graph advances | yes | yes | yes | yes | `task_graph_launch_tests::a_task_step_runs_as_a_worker_on_every_harness` |
-| records its usage | not shown | not shown | not shown | not shown | |
-| receives the step's context | not shown | not shown | not shown | not shown | |
-| hears a steer sent while it runs | not shown | not shown | not shown | not shown | |
+| records its usage in the Task's history | yes | yes | yes | no: kept under Pi's turn id | same test |
+| receives the step's context | yes | yes | yes | yes | same test; `harness::context::tests::` |
+| hears a steer sent while it runs, after its next tool | yes | yes | yes | yes | same test; `harness::context::tests::` |
 | runs as `yolo` in its Task's checkout | yes | yes | yes | yes | `harness::launch_matrix` |
 | is passed over when its CLI is not installed, or named once when it was the only choice | yes | yes | yes | yes | `task_graph_launch_tests::a_step_that_cannot_launch_is_not_started_again` |
 | fails the turn, with the question as its reason, when it asks one and nobody is there | not shown | not shown | yes | yes | `task_graph_launch_tests::a_question_with_nobody_there_ends_the_step` |
 | stops on `lf task interrupt` with its turn recorded interrupted; the next `lf task run` starts the step again | not shown | not shown | yes | yes | `task_graph_launch_tests::a_worker_stops_on_interrupt_and_its_session_resumes` |
 | moves to the next agent on a usage limit | yes | yes | no: failures unclassified (LOO-518) | no: failures unclassified | `agent::tests::` fallthrough tests |
 | as an idle work session, hears a steer | yes | yes | no: next turn only | no: next turn only | `server::wake::tests::` |
+
+Context and steers reach every harness the same way: it runs
+`lf __context-block` when the conversation starts and after each tool. Claude
+and Codex run it as a declared hook; OpenCode's plugin and Pi's extension start
+it themselves. In the worker test each stand-in makes those two calls around
+one tool (`tests/support/tool_turn.py`) while `lf steer` runs in between, and
+reads back the block naming its Session and Task, then the steer. The plugin
+and the extension themselves run under Node in `harness::context::tests::`.
+Neither path has been seen on a real OpenCode or Pi worker.
+
+lf reads usage from each provider's own transcript. Pi's session file names a
+turn by its entry id and lf's record of the same turn uses its request id, so
+a Pi worker's usage lands on a second turn row that `lf history usage --task`
+does not count.
 
 `opencode run --auto` cancels a question itself and tells the model to go on
 with assumptions; lf fails the turn at that tool call and stops the run. Pi

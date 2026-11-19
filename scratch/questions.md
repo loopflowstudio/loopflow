@@ -114,3 +114,19 @@ Choices made for review; `scratch/concept-review.html` shows each one.
 
 24. **The worker tests are slow only on the first run after a build**
     (120-175s against 39s). Not looked into; nextest's limit is 300s.
+
+25. **A Pi worker's usage is missing from `lf history usage --task`.** The
+    session file's turn id (`rpc-user-1`) and lf's request id name the same
+    turn in two `history.turns` rows; usage sits on the one with no Task.
+    Seen on the stand-in only. Fix candidates: name the Pi turn after the
+    session file's user entry, as OpenCode's driver does with its store row,
+    or have the transcript read attach usage to the recorded turn that
+    `covers` it, as it already does for completions. Not built: no real Pi
+    session file from an RPC run has been read.
+
+26. **`Driver::send_current` has no production caller.** Claude, Codex and Pi
+    implement it and test it; steers reach a running turn only through the
+    hook after a tool. Delete it, or is same-turn input coming back?
+
+27. **`lf history usage --task` lists the Task's interactive `task-session`
+    beside the worker**, with no usage. Not looked into.

@@ -980,6 +980,14 @@ Attachment-rejection fixtures must also supply provider version probes and restr
 PATH to their stand-ins: Claude checks `--version` before launching on first input.
 A locally installed provider must not make an otherwise incomplete fixture pass.
 
+A provider stand-in shows lf's hooks only if it runs them. A fixture that
+copies `loopflow-execution/tests/support/tool_turn.py` into `LF_HOME` gets a
+turn with one tool from the Claude, Codex, OpenCode and Pi stand-ins: the start
+hook's block in `hook-context`, `holding` while the tool runs, and after the
+fixture writes `tool-done`, the tool hook's steers in `hook-steer`. lf reads
+usage and final answers from the provider's transcript and skips a turn with
+no timestamp, so a stand-in dates the rows it writes.
+
 Changes to terminal provider probes or spawning must run both `session_cli_tests`
 and `agent_startup_tests`. An executable that exits with an error still started
 and must record its opening; use an absent or non-executable fixture for spawn

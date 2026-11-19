@@ -14,7 +14,7 @@ use anyhow::Result;
 
 use loopflow_execution::transport::registry::Registry;
 use loopflow_model::id::LfSessionId;
-use loopflow_storage::sqlite::session_recovery::ConversationToStart;
+use loopflow_storage::sqlite::session_recovery::TaskConversation;
 use loopflow_storage::sqlite::{SqliteStore, StoreRevisions};
 
 /// How long the watcher goes without reading when nothing it reads moved:
@@ -127,7 +127,7 @@ impl Watcher {
             terminals.session_terminal(session).is_some()
                 || terminals.pending_terminal(session, None).is_some()
         };
-        let start = |conversation: &ConversationToStart, request: String| {
+        let start = |conversation: &TaskConversation, request: String| {
             if let Some(failure) = loopflow_execution::ops::recovery::launch_failure(conversation) {
                 anyhow::bail!(failure);
             }
@@ -155,7 +155,7 @@ impl Watcher {
 }
 
 /// Hold the next start until this one's agent has attached, or [`PACE`].
-fn pace(store: &SqliteStore, conversation: &ConversationToStart) {
+fn pace(store: &SqliteStore, conversation: &TaskConversation) {
     let deadline = std::time::Instant::now() + PACE;
     while std::time::Instant::now() < deadline {
         let attached = store
@@ -196,12 +196,12 @@ fn recover_conversations(
     store: &SqliteStore,
     now: i64,
     held: impl Fn(&LfSessionId) -> bool,
-    mut start: impl FnMut(&ConversationToStart, String) -> Result<()>,
+    mut start: impl FnMut(&TaskConversation, String) -> Result<()>,
 ) -> Result<Option<i64>> {
     let due = loopflow_execution::ops::recovery::due_task_conversations(store, now)?;
     let mut wake = due.next_at;
     for conversation in due.now {
-        let ConversationToStart { session, agent, .. } = &conversation;
+        let TaskConversation { session, agent, .. } = &conversation;
         if held(session) {
             wake = Some(now + ENDING.as_secs() as i64);
             continue;

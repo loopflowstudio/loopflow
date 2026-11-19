@@ -270,9 +270,10 @@ fn summary_fixture() -> crate::session::SessionSummary {
 /// A Session's row read at `now`, on a Machine that claims its Task and runs
 /// a server.
 fn row_at(summary: &crate::session::SessionSummary, now: i64) -> super::SessionRecord {
-    super::summary_surface(summary, |state| {
-        super::session_ending(summary, state, now, || true, || true)
-    })
+    super::summary_surface(
+        summary,
+        super::session_ending(summary, now, || true, || true),
+    )
 }
 
 /// A Session's row long after everything it records.
@@ -362,9 +363,10 @@ fn a_task_conversation_says_how_it_ended_and_what_happens_next() {
     );
 
     // This Machine's pass leaves it: nothing promises a start.
-    let no_server = super::summary_surface(&summary, |state| {
-        super::session_ending(&summary, state, 2_600, || true, || false)
-    });
+    let no_server = super::summary_surface(
+        &summary,
+        super::session_ending(&summary, 2_600, || true, || false),
+    );
     assert!(
         line(&no_server).ends_with(
             " (exit 137) · no server runs here to start it; last start failed: no PTY left: \
@@ -377,9 +379,10 @@ fn a_task_conversation_says_how_it_ended_and_what_happens_next() {
     assert_eq!((left.kind, left.at), (WaitingForYou, None));
     assert_eq!(left.command.as_deref(), Some("lf resume --task INF-123"));
     summary.start_failure = None;
-    let unclaimed = super::summary_surface(&summary, |state| {
-        super::session_ending(&summary, state, 2_600, || false, || true)
-    });
+    let unclaimed = super::summary_surface(
+        &summary,
+        super::session_ending(&summary, 2_600, || false, || true),
+    );
     assert_eq!(
         unclaimed.outlook.unwrap().reason.as_deref(),
         Some("its Task is not claimed on this Machine")
@@ -456,9 +459,10 @@ fn a_task_conversation_says_how_it_ended_and_what_happens_next() {
         (Starting, None, None, None)
     );
     // With no server here nothing is starting it.
-    let unstarted = super::summary_surface(&summary, |state| {
-        super::session_ending(&summary, state, 5_000, || true, || false)
-    });
+    let unstarted = super::summary_surface(
+        &summary,
+        super::session_ending(&summary, 5_000, || true, || false),
+    );
     assert_eq!(
         line(&unstarted),
         "not started · no server runs here to start it; `lf resume --task INF-123` opens it"
@@ -591,7 +595,6 @@ fn the_pass_starts_what_the_outlook_says_the_server_starts() {
             .unwrap();
         let ending = super::session_ending(
             &summary,
-            super::session_state(&summary),
             NOW,
             || crate::ops::recovery::claimed_here(&store, &task),
             || true,

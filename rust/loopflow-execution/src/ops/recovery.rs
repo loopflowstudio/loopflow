@@ -8,7 +8,7 @@
 //! [`launch_failure`] what would stop one.
 
 use loopflow_model::id::LfSessionId;
-use loopflow_storage::sqlite::session_recovery::{ConversationToStart, CONVERSATION_STARTS};
+use loopflow_storage::sqlite::session_recovery::{TaskConversation, CONVERSATION_STARTS};
 use loopflow_storage::sqlite::SqliteStore;
 
 use crate::store::ProcessIdentityEvidence;
@@ -63,7 +63,7 @@ pub fn record_start(
 
 /// Why starting `conversation` would fail before any provider runs: its
 /// agent's CLI is not on this Machine's `PATH`. `None` when it can start.
-pub fn launch_failure(conversation: &ConversationToStart) -> Option<String> {
+pub fn launch_failure(conversation: &TaskConversation) -> Option<String> {
     let provider = conversation.provider.as_deref()?;
     (!crate::agent::check_cli_available(provider))
         .then(|| format!("{provider} is not installed on this Machine's PATH"))
@@ -151,7 +151,7 @@ pub fn server_runs() -> bool {
 /// first, and when the soonest one still waiting its backoff comes due.
 #[derive(Debug, Default)]
 pub struct DueConversations {
-    pub now: Vec<ConversationToStart>,
+    pub now: Vec<TaskConversation>,
     pub next_at: Option<i64>,
 }
 

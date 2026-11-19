@@ -518,7 +518,7 @@ Must survive:
      (`kernel.pty.max` on Linux), warns under 32 left. 178 of 511 here.
    - Steers from the concept review (`scratch/concept-review.html`, Jack "1) a
      2) a 3) b"): columns renamed `starts_since_turn`, `last_started_at`,
-     `start_failure`; types `ConversationToStart`, `conversations_to_start`,
+     `start_failure`; types `TaskConversation` (was `ConversationToStart`), `task_conversations_here`,
      `record_conversation_start`, `record_start_failure`,
      `CONVERSATION_STARTS`; the wire field is `start`. One restart count:
      `task_graphs.restarts` for shipping and moving runs, reset by a finished
@@ -782,10 +782,12 @@ run then goes on through reflect, gate and land (Jack, 2026-11-18: "don't
 stop at human-review. This run ships"). Left for later steps:
 
 - gate: the named checks under Checks, and CI's full matrix. Slice 8's tests
-  ran on the tree with main `a0548bfe28` (#1977) merged. Nothing has been
-  built or run since the later merge of main `3496a8761d` (`55b60b4edd`, no
-  conflicts). It rewrote much of `rust/loopflow/tests/context_launch_tests.rs`
-  (362 lines) and touched `loopflow-storage/src/sqlite/processes.rs`,
+  ran on the tree with main `a0548bfe28` (#1977) merged. Since the later
+  merge of main `3496a8761d` (`55b60b4edd`, no conflicts), compress ran
+  `cargo clippy --all-targets -- -D warnings` (clean),
+  `ops::human_session::tests::` (33 pass) and `server::recovery::` (9 pass);
+  the integration tests below have not run. That merge rewrote much of
+  `rust/loopflow/tests/context_launch_tests.rs` (362 lines) and touched `loopflow-storage/src/sqlite/processes.rs`,
   `lf/commands/waves.rs`, `server/README.md` and
   `task_graph_launch_tests.rs`, all files this branch changes. First at gate:
   `cargo clippy --all-targets -- -D warnings`, then

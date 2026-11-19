@@ -15,7 +15,7 @@ pub const CONVERSATION_STARTS: u32 = 5;
 /// An open Task's conversation in the Task's checkout on this Machine, with
 /// what decides whether the server starts it.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ConversationToStart {
+pub struct TaskConversation {
     pub session: LfSessionId,
     pub task: TaskId,
     /// The agent generation that ended, `None` before the first. A start
@@ -51,7 +51,7 @@ impl SqliteStore {
     /// Every open Task's primary conversation in this Machine's checkout of
     /// the Task, most recently active Task first. Whether the server starts
     /// one is the caller's rule, not this read's.
-    pub fn task_conversations_here(&self) -> StoreResult<Vec<ConversationToStart>> {
+    pub fn task_conversations_here(&self) -> StoreResult<Vec<TaskConversation>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut statement = conn.prepare_cached(&format!(
             "SELECT s.id,t.id,s.agent_process_id,s.agent_ended_at,s.agent_exit_code,
@@ -65,7 +65,7 @@ impl SqliteStore {
             here = task_conversation_here_sql("s", "t", "c"),
         ))?;
         let rows = statement.query_map([], |row| {
-            Ok(ConversationToStart {
+            Ok(TaskConversation {
                 session: row.get(0)?,
                 task: TaskId::from_raw(row.get::<_, String>(1)?),
                 agent: row.get(2)?,

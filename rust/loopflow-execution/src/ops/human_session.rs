@@ -539,7 +539,6 @@ struct SessionEnding {
 /// `claimed_here` and `server_runs` are this Machine's part of it.
 fn session_ending(
     session: &crate::session::SessionSummary,
-    state: SessionState,
     now: i64,
     claimed_here: impl FnOnce() -> bool,
     server_runs: impl FnOnce() -> bool,
@@ -549,6 +548,7 @@ fn session_ending(
     if !session.interactive {
         return SessionEnding::default();
     }
+    let state = session_state(session);
     let closed = state == SessionState::Closed;
     let end = session.agent_end.filter(|_| closed);
     let ended = end.and_then(|end| {
@@ -627,14 +627,39 @@ fn session_ending(
             .map_or(String::new(), |reason| format!(" · {reason}"))
     };
     let verdict = crate::ops::recovery::server_start(&facts, claimed_here, server_runs);
-    let (kind, at, reason, mut line) = match verdict {
-        ServerStart::Left(Left::Quit) => (
+    let at = match verdict {
+        // A start counted after the agent ended is the one under way: it was
+        // due then. The backoff names the start after the next death, or
+        // after a start that failed before any agent ran.
+        ServerStart::At(next) => session
+            .last_started_at
+            .zip(end)
+            .filter(|(started, end)| *started >= end.at && failure.is_none())
+            .map(|(started, _)| started)
+            .or(next)
+            .or(end.map(|end| end.at)),
+        ServerStart::Left(_) => None,
+    };
+    let (kind, at, reason, mut line) = match (verdict, failure.filter(|_| never_ran)) {
+        (ServerStart::Left(Left::Quit), _) => (
             SessionOutlookKind::Quit,
             None,
             None,
             end.map_or("quit".to_string(), |end| format!("quit {}", clock(end.at))),
         ),
-        ServerStart::Left(left) => {
+        (ServerStart::At(_), None) if never_ran => (
+            SessionOutlookKind::Starting,
+            None,
+            None,
+            "starting".to_string(),
+        ),
+        (_, Some(failure)) => (
+            SessionOutlookKind::CouldNotStart,
+            at,
+            Some(failure.to_string()),
+            format!("could not start: {failure}{}", again("tries", "trying", at)),
+        ),
+        (ServerStart::Left(left), None) => {
             let left = match left {
                 Left::OutOfStarts => Some(format!("started {attempts} times")),
                 Left::Elsewhere if conversation => {
@@ -645,62 +670,23 @@ fn session_ending(
                 Left::NotClaimedHere => Some("its Task is not claimed on this Machine".to_string()),
                 Left::NoServer => Some("no server runs here to start it".to_string()),
             };
-            match (never_ran, failure) {
-                (true, Some(failure)) => (
-                    SessionOutlookKind::CouldNotStart,
-                    None,
-                    Some(failure.to_string()),
-                    format!("could not start: {failure}"),
-                ),
-                (_, failure) => {
-                    let reason = match (left, failure) {
-                        (Some(left), Some(failure)) => {
-                            Some(format!("{left}; last start failed: {failure}"))
-                        }
-                        (left, _) => left,
-                    };
-                    let line = format!("{ending}{}", printed(&reason));
-                    (SessionOutlookKind::WaitingForYou, None, reason, line)
+            let reason = match (left, failure) {
+                (Some(left), Some(failure)) => {
+                    Some(format!("{left}; last start failed: {failure}"))
                 }
-            }
+                (left, _) => left,
+            };
+            let line = format!("{ending}{}", printed(&reason));
+            (SessionOutlookKind::WaitingForYou, None, reason, line)
         }
-        ServerStart::At(_) if never_ran && failure.is_none() => (
-            SessionOutlookKind::Starting,
-            None,
-            None,
-            "starting".to_string(),
-        ),
-        ServerStart::At(next) => {
-            // A start counted after the agent ended is the one under way:
-            // it was due then. The backoff names the start after the next
-            // death, or after a start that failed before any agent ran.
-            let under_way = session
-                .last_started_at
-                .zip(end)
-                .filter(|(started, end)| *started >= end.at && failure.is_none())
-                .map(|(started, _)| started);
-            let at = under_way.or(next).or(end.map(|end| end.at));
-            match (never_ran, failure) {
-                (true, failure) => (
-                    SessionOutlookKind::CouldNotStart,
-                    at,
-                    failure.map(str::to_string),
-                    format!(
-                        "could not start: {}{}",
-                        failure.unwrap_or("no reason recorded"),
-                        again("tries", "trying", at)
-                    ),
-                ),
-                (false, failure) => {
-                    let reason = failure.map(|failure| format!("last start failed: {failure}"));
-                    let line = format!(
-                        "{ending}{}{}",
-                        again("starts", "starting", at),
-                        printed(&reason)
-                    );
-                    (SessionOutlookKind::ComingBack, at, reason, line)
-                }
-            }
+        (ServerStart::At(_), None) => {
+            let reason = failure.map(|failure| format!("last start failed: {failure}"));
+            let line = format!(
+                "{ending}{}{}",
+                again("starts", "starting", at),
+                printed(&reason)
+            );
+            (SessionOutlookKind::ComingBack, at, reason, line)
         }
     };
     // The server brings it up, or its command does.
@@ -726,7 +712,6 @@ fn session_ending(
 fn ending_here(
     store: &SqliteStore,
     session: &crate::session::SessionSummary,
-    state: SessionState,
     now: i64,
 ) -> SessionEnding {
     let claimed = || {
@@ -735,13 +720,7 @@ fn ending_here(
             .as_ref()
             .is_some_and(|task| crate::ops::recovery::claimed_here(store, task))
     };
-    session_ending(
-        session,
-        state,
-        now,
-        claimed,
-        crate::ops::recovery::server_runs,
-    )
+    session_ending(session, now, claimed, crate::ops::recovery::server_runs)
 }
 
 /// This Machine's local `HH:MM` for a Unix time.
@@ -870,9 +849,10 @@ pub async fn list(
     let mut sessions = Vec::new();
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
     for session in store.session_summaries(&selection, now).await? {
-        sessions.push(summary_surface(&session, |state| {
-            ending_here(&store.sqlite, &session, state, now)
-        }));
+        sessions.push(summary_surface(
+            &session,
+            ending_here(&store.sqlite, &session, now),
+        ));
     }
     let mut workspaces = workspace::associate(store, &mut sessions).await?;
     turns::read(&store.sqlite, &mut sessions)?;
@@ -956,12 +936,8 @@ fn graph_occurrence(
 /// open raw conversation whose provider ID it is. `None` once it is gone.
 pub fn listed(store: &SharedStore, id: &str) -> Result<Option<SessionRecord>> {
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
-    let Some(mut session) =
-        session_projection::session_summary(&store.sqlite, id, now)?.map(|session| {
-            summary_surface(&session, |state| {
-                ending_here(&store.sqlite, &session, state, now)
-            })
-        })
+    let Some(mut session) = session_projection::session_summary(&store.sqlite, id, now)?
+        .map(|session| summary_surface(&session, ending_here(&store.sqlite, &session, now)))
     else {
         return Ok(turns::raw(&store.sqlite, None)?
             .into_iter()
@@ -981,7 +957,7 @@ fn runs_on(on: &crate::config::Agent, session: &SessionRecord) -> bool {
 /// Connect/complete still enter find_session and surface, with full validation.
 fn summary_surface(
     session: &crate::session::SessionSummary,
-    ending: impl FnOnce(SessionState) -> SessionEnding,
+    ending: SessionEnding,
 ) -> SessionRecord {
     let work = match (&session.task_id, &session.wave_id) {
         (Some(task), _) => Some(WorkRef::Task(task.clone())),
@@ -1024,7 +1000,7 @@ fn summary_surface(
         start,
         outlook,
         status_line,
-    } = ending(state);
+    } = ending;
     // Without a command that opens it, nothing here can open it.
     let (action, open_argv) = match human_session_argv(&session.id) {
         Ok(argv) => (session_action(session), argv),
@@ -1796,7 +1772,6 @@ pub async fn surface(store: &SharedStore, session: &LfSession) -> Result<Session
     } = ending_here(
         &store.sqlite,
         &metadata,
-        state,
         time::OffsetDateTime::now_utc().unix_timestamp(),
     );
     let action = session_action(&metadata);

@@ -565,8 +565,18 @@ existing update a conversation gets about its own Task; Waves and
    and `session_cli_tests::a_merged_parent_stays_open_until_it_is_completed_with_its_children`
    (reason and `next` before and after the child closes; a never-started
    child's never-started child abandoned). Implement reported both passing
-   and clippy clean on the three crates; not rerun since. QA has not walked
-   scenario 11 by hand on this build.
+   and clippy clean on the three crates. QA walked it by hand on 7b4c673ab4
+   plus the fix below (`scratch/qa.html`, third pass).
+   Found by QA's third pass (`scratch/qa.html`) and fixed: a run launched
+   with no interactive step ahead is approved for Auto-Ship, and a parent
+   reaching `end` with children open kept that approval. Every read of the
+   Machine's Tasks then started `lf ship` for it again ("already at its
+   end"), and once its children closed its row's reason read "Ship process
+   exited; it restarts on the next read" beside `next` `lf task complete`.
+   `task_work::end_in` is now the one thing both arrivals at `end` do: ask
+   to complete and ship, or withdraw the approval. Shown by
+   `task_work_lifecycle_tests::reaching_end_leaves_a_task_with_open_children_open`,
+   which now approves the parent first.
    Passed over: completing the parent at `end` and settling its children
    there, which abandons never-started follow-ups the moment a planning
    Graph finishes; `lf task abandon <parent>` settling children, which needs

@@ -298,9 +298,15 @@ fn reaching_end_leaves_a_task_with_open_children_open() {
     .unwrap();
     store.set_task_graph_step(&parent, "review").unwrap();
     let reserved = loopflow_storage::graph_process::ExecutionStart::reserved(1);
+    // A run with no interactive step ahead was approved to ship when it launched.
+    store
+        .ship_task(&parent, (&by, &reserved), "no interactive step is left")
+        .unwrap();
     assert!(store.end_task_graph(&parent, (&by, &reserved)).unwrap());
     assert!(store.task_completion_pending(&parent).unwrap().is_none());
+    // Nothing is left to ship, so no read starts its ship process again.
     assert!(store.task_shipping(&parent).unwrap().is_none());
+    assert!(store.local_shipping_tasks().unwrap().is_empty());
     assert_eq!(store.open_task_child_count(&parent).unwrap(), 1);
 
     // Once the child is closed, an explicit request settles as before.

@@ -612,20 +612,28 @@ fn arrive_in(
     if ended {
         // A routed path may reach end even though another path had an
         // interactive step, so launch-time prediction is not sufficient.
-        if !super::durable::task_state_in(tx, task)?.is_terminal()
-            && super::children::request_completion_in(tx, task, None)?.is_some()
-        {
+        if !super::durable::task_state_in(tx, task)?.is_terminal() {
             let start = start.expect("an arrived run was on the Task");
-            ship_in(
-                tx,
-                task,
-                (carrier, &start),
-                "its run reached the end",
-                Approval::Route,
-            )?;
+            end_in(tx, task, (carrier, &start))?;
         }
     }
     Ok(ended)
+}
+
+/// A Task that reached `end` asks to complete and ships its way there. One
+/// its open children keep open has nothing left to ship, so an approval it
+/// arrived with is withdrawn: no ship process is started for it again.
+fn end_in(
+    tx: &rusqlite::Transaction<'_>,
+    task: &TaskId,
+    by: (&LfProcessId, &ExecutionStart),
+) -> StoreResult<()> {
+    if super::children::request_completion_in(tx, task, None)?.is_some() {
+        ship_in(tx, task, by, "its run reached the end", Approval::Route)?;
+    } else {
+        unship_in(tx, task)?;
+    }
+    Ok(())
 }
 
 fn set_step_in(tx: &rusqlite::Transaction<'_>, task: &TaskId, step: &str) -> StoreResult<bool> {
@@ -1088,8 +1096,8 @@ impl SqliteStore {
             "UPDATE task_graphs SET step=?2,updated_at=?3 WHERE task_id=?1 AND step!=?2 AND lf_process_id IS NULL",
             rusqlite::params![task.as_str(), END, crate::rows::now_unix()],
         )? > 0;
-        if ended && super::children::request_completion_in(&tx, task, None)?.is_some() {
-            ship_in(&tx, task, by, "its run reached the end", Approval::Route)?;
+        if ended {
+            end_in(&tx, task, by)?;
         }
         tx.commit()?;
         Ok(ended)

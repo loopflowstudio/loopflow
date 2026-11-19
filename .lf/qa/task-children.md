@@ -35,6 +35,17 @@ delivered.
 - A Graph that reaches `end`: `qa-end.yaml` holding only `- cmd: help task`.
   Run on a childless Task it completes it; on a Task with an open child it
   leaves it open.
+- A parent whose own Graph ends: `lf task run <parent> qa-end` with a child
+  open. The launch approves Auto-Ship ("ships: no interactive step is left"),
+  and reaching `end` must withdraw it: `lf task status <parent>` shows no
+  `Auto-Ship approved` line, and its `--json` `.task.reason` matches the text
+  `action:` line. `$LF_HOME/logs/detached.log` gets one line per ship process a
+  read restarts ("<id> is already at its end"); a count that grows with each
+  `lf task status` means a Task is approved with nothing to ship.
+- Wait on output, not time, before depending on what a `!` line did: a
+  conversation that is still starting runs the line seconds after the driver
+  has left. `["wait","parent: [0-9a-f]{6}",20]` after each `!lf task create`,
+  and read `lf task status <parent>` for the children before running its Graph.
 - Served writes need no client: after `hello`, send
   `{"kind":"task.create","directory":…,"request_id":<uuid>,"title":null,"request":"…","wave":null,"parent":"<id>","graph":null,"session":null,"run":false}`
   and `{"kind":"task.complete","directory":…,"issue":"<id>"}` in the envelope
@@ -57,6 +68,9 @@ delivered.
   after completion (nothing else runs the pass), restarting when a viewer
   leaves. Complete early, run `lf task retire <task>` at once, and read
   `task_retirements.due_at` for when the second call will take the checkout.
+- A completed Task with no PR is never retired: `lf task retire <task>` exits
+  1 with "Retained PR-less checkout", and its conversation reopens in that
+  checkout. Use a parent with a merged PR to see the main-checkout resume.
 - For a hook's cost, set `CLAUDE_QA_LOG`: the stand-in logs each launch's
   `LF_*` environment, enough to run `lf __context-block --moment tool` by hand
   with Claude's callback JSON on stdin and time it.

@@ -315,3 +315,11 @@ looked at rendered, and predates the one-type direction.
   finished outrank unassigned?
 - A never-started child with a started child of its own: the first is
   abandoned, the second stays open and is listed top-level by the flat rule.
+- Found by QA's third pass, not changed: a parent at `end` with an open PR
+  and a child open reads three ways. The text `action:` line says "PR is
+  published but settlement is not armed; run `lf land`", `--json`
+  `.task.reason` says "…not armed with `lf pr land -c`", and `.task.next` is
+  `lf task run <ID>`, which errors: "Task … is at the end of graph qa-end".
+  A held childless Task at `end` with an open PR reads the same on main; a
+  parent now reaches it without a hold. Should `next` be `lf land` there?
+

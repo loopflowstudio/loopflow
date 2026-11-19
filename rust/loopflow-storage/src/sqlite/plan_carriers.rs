@@ -850,6 +850,7 @@ mod tests {
                 title: "in another Wave".into(),
                 description: "Brief".into(),
                 due_date: None,
+                parent_task_id: None,
             })
             .unwrap();
         exchange(&laptop, &hub);

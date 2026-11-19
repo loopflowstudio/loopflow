@@ -1452,7 +1452,7 @@ async fn refresh_reads_ownership_without_reconstructing_tracker_content() {
             )
             .unwrap();
             conn.execute(
-                "UPDATE tracker_projects SET name='[]',krs='unrelated bad content' WHERE id='project-1'",
+                "UPDATE tracker_projects SET name='[]',summary='unrelated bad content' WHERE id='project-1'",
                 [],
             )
             .unwrap();

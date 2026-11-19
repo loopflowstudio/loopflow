@@ -42,8 +42,8 @@ pub fn seed_linear_admission(
         [project.id.as_str()],
     ).unwrap();
     conn.execute(
-        "INSERT INTO tracker_projects(repo,tracker,id,observed_at,slug,name,summary,status,krs,metric_targets,initiative_ids,team_ids)
-         VALUES(?1,'linear',?2,?3,?4,?5,?6,'started','[]','[]','[\"initiative-task-pr-tests\"]','[\"team-task-pr-tests\"]')",
+        "INSERT INTO tracker_projects(repo,tracker,id,observed_at,slug,name,summary,status,initiative_ids,team_ids)
+         VALUES(?1,'linear',?2,?3,?4,?5,?6,'started','[\"initiative-task-pr-tests\"]','[\"team-task-pr-tests\"]')",
         params![wave.repo(),external_project,project.tracker_synced_at,project.slug,project.name,project.summary],
     ).unwrap();
     conn.execute(

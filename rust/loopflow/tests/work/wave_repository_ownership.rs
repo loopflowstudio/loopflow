@@ -73,8 +73,6 @@ fn project(wave: &Wave) -> Project {
         slug: "architecture".to_string(),
         name: "Architecture".to_string(),
         description: "Keep identity boring.".to_string(),
-        krs: Vec::new(),
-        metric_targets: Vec::new(),
         tracker_synced_at: Some(now.unix_timestamp()),
 
         wave_id: wave.id().clone(),

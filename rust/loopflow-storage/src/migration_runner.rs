@@ -402,12 +402,10 @@ pub(crate) fn validate_persisted_json(conn: &rusqlite::Connection) -> StoreResul
         [],
         |row| row.get::<_, bool>(0),
     )? {
-        failures.extend(
-            validate_json_column::<Vec<crate::work::project::ProjectKR>>(
-                conn, "projects", "id", "krs",
-            )?,
-        );
-        failures.extend(validate_json_column::<Vec<crate::metric::MetricTarget>>(
+        failures.extend(validate_json_column::<
+            Vec<crate::planning::project_document::ReleasedKr>,
+        >(conn, "projects", "id", "krs")?);
+        failures.extend(validate_json_column::<Vec<serde_json::Value>>(
             conn,
             "projects",
             "id",
@@ -785,7 +783,7 @@ pub(crate) fn convert_released_data(conn: &rusqlite::Connection, sql: &str) -> S
             UNION ALL SELECT json_extract(export_json,'$.baseline') FROM task_creation_intents WHERE export_json IS NOT NULL",
         )?;
         for row in query.query_map([], |row| row.get::<_, String>(0))? {
-            for value in serde_json::from_str::<Vec<crate::work::edit::WorkValue>>(&row?)? {
+            for value in crate::work::edit::known_values(serde_json::from_str(&row?)?)? {
                 value.validate()?;
             }
         }
@@ -799,13 +797,15 @@ pub(crate) fn convert_released_data(conn: &rusqlite::Connection, sql: &str) -> S
             ))
         })? {
             let (value, base, conflict) = row?;
-            serde_json::from_str::<crate::work::edit::WorkValue>(&value)?.validate()?;
+            let mut values = vec![serde_json::from_str::<serde_json::Value>(&value)?];
             for retained in [base, conflict].into_iter().flatten() {
-                let baseline: super::planning_sync::PlanningBaseline =
-                    serde_json::from_str(&retained)?;
-                if let Some(value) = baseline.value {
-                    value.validate()?;
+                let baseline = serde_json::from_str::<serde_json::Value>(&retained)?;
+                if !baseline["value"].is_null() {
+                    values.push(baseline["value"].clone());
                 }
+            }
+            for value in crate::work::edit::known_values(serde_json::Value::Array(values))? {
+                value.validate()?;
             }
         }
     }

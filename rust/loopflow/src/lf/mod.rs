@@ -3734,14 +3734,14 @@ mod tests {
             "--wave",
             "product",
             ":",
-            "Which KR matters?",
+            "Which Task matters?",
         ])
         .expect("parse bound inline prompt");
 
         assert_eq!(cli.wave.as_deref(), Some("product"));
         assert!(matches!(
             cli.command,
-            Some(Commands::Inline { prompt }) if prompt == vec!["Which KR matters?"]
+            Some(Commands::Inline { prompt }) if prompt == vec!["Which Task matters?"]
         ));
     }
 

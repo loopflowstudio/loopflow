@@ -15,7 +15,7 @@ pub async fn planning_repo(fixture: &Fixture) -> (PathBuf, crate::work::wave::Wa
     let (repo, wave) = fixture.planning_repo().await;
     let project = serde_json::from_value(json!({
         "id": "project-1", "slug": "Project", "name": "Project", "summary": "",
-        "metric_targets": [], "workflow": "feature", "status": "started", "krs": [],
+        "workflow": "feature", "status": "started",
         "initiative_ids": ["initiative-1"], "team_ids": ["team-1"]
     }))
     .unwrap();

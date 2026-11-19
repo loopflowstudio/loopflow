@@ -350,14 +350,7 @@ struct RegistryQueryTests {
         "slug": "release-feedback",
         "name": "current",
         "workflow": "task-design",
-        "status": "started",
-        "metric_targets": [],
-        "krs": [
-          {
-            "text": "Fast loops",
-            "holds": false
-          }
-        ]
+        "status": "started"
       }
     ],
     "truncated": false

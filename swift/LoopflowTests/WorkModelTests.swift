@@ -191,7 +191,7 @@ struct WorkModelTests {
         var historical = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: fixtures.appendingPathComponent("wave_detail.json"))) as? [String: Any])
         historical["projects"] = ["state": "ok", "truncated": false, "items": [[
             "id": "old-plan", "tracker_id": NSNull(), "slug": "old", "name": "Previous",
-            "workflow": "feature", "status": "completed", "metric_targets": [], "krs": [],
+            "workflow": "feature", "status": "completed",
             "sync": ["actions": []]
         ]]]
         let reply = try JSONSerialization.data(withJSONObject: historical)

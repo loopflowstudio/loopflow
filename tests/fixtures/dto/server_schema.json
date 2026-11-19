@@ -4465,21 +4465,6 @@
       ],
       "type": "string"
     },
-    "MetricTarget": {
-      "properties": {
-        "metric_id": {
-          "type": "string"
-        },
-        "target": {
-          "$ref": "#/$defs/Threshold"
-        }
-      },
-      "required": [
-        "metric_id",
-        "target"
-      ],
-      "type": "object"
-    },
     "MetricUnknownCauseDto": {
       "oneOf": [
         {
@@ -5868,18 +5853,6 @@
         "id": {
           "type": "string"
         },
-        "krs": {
-          "items": {
-            "$ref": "#/$defs/ProjectKR"
-          },
-          "type": "array"
-        },
-        "metric_targets": {
-          "items": {
-            "$ref": "#/$defs/MetricTarget"
-          },
-          "type": "array"
-        },
         "name": {
           "type": "string"
         },
@@ -5921,29 +5894,12 @@
         "slug",
         "name",
         "description",
-        "krs",
-        "metric_targets",
         "status",
         "tracker_id",
         "tracker_synced_at",
         "wave_id",
         "created_at",
         "updated_at"
-      ],
-      "type": "object"
-    },
-    "ProjectKR": {
-      "properties": {
-        "holds": {
-          "type": "boolean"
-        },
-        "text": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "text",
-        "holds"
       ],
       "type": "object"
     },
@@ -5963,18 +5919,6 @@
       "properties": {
         "id": {
           "type": "string"
-        },
-        "krs": {
-          "items": {
-            "$ref": "#/$defs/ProjectKR"
-          },
-          "type": "array"
-        },
-        "metric_targets": {
-          "items": {
-            "$ref": "#/$defs/MetricTarget"
-          },
-          "type": "array"
         },
         "name": {
           "type": "string"
@@ -6001,9 +5945,7 @@
         "tracker_id",
         "slug",
         "name",
-        "status",
-        "metric_targets",
-        "krs"
+        "status"
       ],
       "type": "object"
     },

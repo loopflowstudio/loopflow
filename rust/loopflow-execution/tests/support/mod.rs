@@ -31,7 +31,7 @@ pub fn seed_wave_project(
     name: &str,
 ) -> loopflow_storage::StoreResult<Project> {
     let wave = loopflow::work::wave::bootstrap::ensure_wave(store, repo, name)?;
-    Ok(store.join_project(&wave, name)?)
+    store.join_project(&wave, name)
 }
 
 #[allow(dead_code)] // Shared helper compiled into each integration test binary.
@@ -556,8 +556,6 @@ fn register_task_fixture(
         slug: "task-pr-tests".to_string(),
         name: "Task PR tests".to_string(),
         description: "Keep Task PR transitions durable.".to_string(),
-        krs: Vec::new(),
-        metric_targets: Vec::new(),
         tracker_synced_at: Some(now.unix_timestamp()),
 
         wave_id: wave.id().clone(),

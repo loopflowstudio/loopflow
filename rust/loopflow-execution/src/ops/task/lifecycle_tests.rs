@@ -326,8 +326,6 @@ fn fixture(
         name: "Project".into(),
         status: loopflow_storage::work::project::ProjectStatus::Started,
         description: String::new(),
-        krs: Vec::new(),
-        metric_targets: Vec::new(),
         tracker_synced_at: Some(now.unix_timestamp()),
 
         wave_id: wave.id().clone(),

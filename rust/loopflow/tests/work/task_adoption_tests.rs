@@ -103,16 +103,14 @@ fn task_adopts_linear_checkout_and_preserves_graph_history() {
             name: "Project".into(),
             status: loopflow_execution::work::project::ProjectStatus::Started,
             description: "Adopt existing work".into(),
-            krs: Vec::new(),
-            metric_targets: Vec::new(),
             tracker_synced_at: Some(now.unix_timestamp()),
             created_at: now,
             updated_at: now,
         };
         let snapshot: crate::test_linear_input::Inventory = serde_json::from_value(json!({
             "projects": [{"id":"project-1", "slug":"project", "name":"Project",
-                "summary":"", "metric_targets":[], "status":"started",
-                "krs":[], "initiative_ids":["initiative-1"], "team_ids":["team-1"]}],
+                "summary":"", "status":"started",
+                "initiative_ids":["initiative-1"], "team_ids":["team-1"]}],
             "items": [{"id":"issue-1", "identifier":"FIX-1", "branch_name":branch, "revision":"2026-09-29T12:00:00Z",
                 "url":null, "name":"A different title", "description":"Existing implementation",
                 "rank":0, "completed":false, "state":"started", "project_id":"project-1",

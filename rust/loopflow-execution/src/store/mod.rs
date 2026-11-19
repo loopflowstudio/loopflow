@@ -853,8 +853,6 @@ mod tests {
             slug: "developer-efficiency".to_string(),
             name: "Developer Efficiency".to_string(),
             description: "Definition:\nKeep local work fast.".to_string(),
-            krs: Vec::new(),
-            metric_targets: Vec::new(),
             tracker_synced_at: Some(now.unix_timestamp()),
 
             wave_id: wave.id().clone(),
@@ -986,10 +984,6 @@ mod tests {
             store.create_project(&project).await.unwrap();
             let task = make_task(&store, &wave, &project);
             let mut snapshot = task_planning_snapshot(&wave, &project, &task);
-            snapshot.snapshot.projects[0].krs = vec![loopflow_storage::work::project::ProjectKR {
-                text: "Work remains readable".into(),
-                holds: false,
-            }];
             let item = &mut snapshot.snapshot.items[0];
             item.state = Some("unstarted".into());
             item.rank = 0;
@@ -1012,15 +1006,6 @@ mod tests {
             assert_eq!(record.description, snapshot.snapshot.items[0].description);
             assert_eq!(record.assignee, snapshot.snapshot.items[0].assignee);
             assert_eq!(record.rank, snapshot.snapshot.items[0].rank);
-            assert_eq!(
-                store
-                    .sqlite
-                    .project(record.project_id.as_ref().unwrap())
-                    .unwrap()
-                    .unwrap()
-                    .krs,
-                snapshot.snapshot.projects[1].krs
-            );
             assert_eq!(record.tracker_synced_at, Some(17));
             let process = loopflow_model::id::LfProcessId::new();
             rusqlite::Connection::open(directory.path().join("registry.db")).unwrap().execute(
@@ -1821,12 +1806,6 @@ mod tests {
         let mut confirmed = snapshot.snapshot.projects[0].clone();
         confirmed.name = "Ordinary work".into();
         confirmed.slug = "ordinary-work".into();
-        confirmed
-            .krs
-            .push(loopflow_storage::work::project::ProjectKR {
-                text: "Preserve the authored proof".into(),
-                holds: false,
-            });
         confirmed.revision = Some("2026-10-05T12:00:01Z".into());
         loopflow_storage::sqlite::linear_events::accept_linear_project_in(
             &store.sqlite,
@@ -1856,8 +1835,7 @@ mod tests {
         );
         let durable = store.get_project(&project.id).await.unwrap().unwrap();
         assert_eq!(durable.tracker_synced_at, Some(10));
-        assert_eq!(durable.metric_targets, confirmed.metric_targets);
-        assert_eq!(durable.krs, confirmed.krs);
+        assert_eq!(durable.name, confirmed.name);
         let other = Wave::new(WaveId::new(), "other".into(), wave.repo().into());
         store.create_wave(&other).await.unwrap();
         assert!(

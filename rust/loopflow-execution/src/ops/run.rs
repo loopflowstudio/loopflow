@@ -36,10 +36,8 @@ pub fn render_task_context(
     );
     if let Some(project) = project {
         context.push_str(&format!(
-            "\n\nProject: {} (source {})\n{}",
-            project.name,
-            project.id,
-            render_project_context(project)
+            "\n\nProject: {} (source {})\n{}\n",
+            project.name, project.id, project.description
         ));
     }
     if let Some(wave) = wave_name {
@@ -66,22 +64,6 @@ pub fn render_task_context(
         context.push_str(&format!("\nPull request: {}", pr.url));
     }
     context
-}
-
-fn render_project_context(project: &loopflow_storage::work::project::Project) -> String {
-    let targets = serde_json::to_string_pretty(&project.metric_targets)
-        .expect("validated metric targets serialize");
-    let mut content = format!(
-        "{}\n## Metric targets\n\n```json\n{targets}\n```",
-        project.description
-    );
-    content.push_str("\n\n## KRs");
-    for kr in &project.krs {
-        let marker = if kr.holds { "x" } else { " " };
-        content.push_str(&format!("\n\n- [{marker}] {}", kr.text.trim()));
-    }
-    content.push('\n');
-    content
 }
 
 fn render_wave_context(repo: &Path, wave: &str, metric_context: &str) -> String {
@@ -357,7 +339,6 @@ mod tests {
     use loopflow_model::id::WaveId;
     use loopflow_storage::planning::TrackerProject;
     use loopflow_storage::work::project::Project;
-    use loopflow_storage::work::project::ProjectKR;
     use loopflow_storage::work::task::{LinearWritebackState, Observation, Task, TaskPr, TaskPrId};
     use std::path::PathBuf;
 
@@ -382,8 +363,6 @@ mod tests {
             slug: slug.to_string(),
             name: slug.to_string(),
             description: "Ship the requested behavior.".to_string(),
-            krs: Vec::new(),
-            metric_targets: Vec::new(),
             tracker_synced_at: Some(now.unix_timestamp()),
 
             wave_id: wave.id().clone(),
@@ -1305,13 +1284,7 @@ mod tests {
                 slug: "loopflow-api".to_string(),
                 name: "Loopflow API".to_string(),
                 summary: String::new(),
-
-                metric_targets: Vec::new(),
                 status: loopflow_storage::work::project::ProjectStatus::Started,
-                krs: vec![ProjectKR {
-                    text: "One model everywhere".to_string(),
-                    holds: false,
-                }],
                 initiative_ids: vec!["initiative-1".to_string()],
                 team_ids: vec!["team-1".to_string()],
             }],

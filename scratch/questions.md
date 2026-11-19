@@ -187,3 +187,23 @@ Each is reversible before release.
   on the same store report normally. Some step on the Wave path reopens the
   store and validates its schema after the failure. Not chased here; the
   rollback is covered by `store::ownership::tests::a_failed_save_into_an_empty_wave_makes_no_project`.
+
+## 43bf9b implement, slice 3 (2026-11-18)
+
+- A Linear Project's `content` still goes through the Markdown reader, but only
+  to keep released `## KRs` / `## Metric targets` sections (and `workflow:`
+  lines) out of the description and in place when the description is edited.
+  Passed over: reading `content` as the description verbatim, which would show
+  old KR text as prose in every agent context and drop it from Linear on the
+  next description edit. The reader yields KRs only for released-store
+  conversion (`ReleasedKr`, raw target JSON); nothing writes those sections.
+- `projects.krs` / `metric_targets` are no longer read or written; queued
+  tracker actions for either are retired by `remove_chapters.sql`. A saved
+  `create` action or plan record carrying them decodes without them
+  (`work::edit::known_values`).
+- `SqliteStore::edit_project` has only test callers since `lf wave
+  edit-project` went. Left in place pending the open rename question above.
+- `ops::linear::oauth_tests::pm_read_linear_oauth_sqlite_contention_has_bounded_failure_and_recovers`
+  fails on this branch and identically on the stack base 0f00665f (LOO-938):
+  the refresh hits its 5s deadline before sending the OAuth request
+  (`requests.len()` 0, expected 1). Not caused here.

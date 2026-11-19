@@ -62,8 +62,9 @@ planning selection and Wave/Desktop lists. They read Task/planning
 fields independently of graph position and provider inventory, retaining known
 provider conflicts. Local state decisions and delivery receipts commit
 together; observed Linear conflicts retire losing intentions while preserving
-their receipts and local execution. Planning ingestion stores
-editable content so KRs and targets survive the shared reader. Task creation/edits
+their receipts and local execution. Planning ingestion keeps a Linear Project's
+released `## KRs` and `## Metric targets` sections out of its description and in
+place when the description is edited. Task creation/edits
 and plan creation/edits and membership moves use common transactions and field
 receipts. Task deletion commits local removal and its pending receipt without changing execution.
 Field conflicts go to the change sent last: an unsent save rebases onto the observed

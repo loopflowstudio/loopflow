@@ -75,9 +75,7 @@ impl ActionKind {
             | WorkValue::ProjectName(_)
             | WorkValue::ProjectSummary(_)
             | WorkValue::ProjectDescription(_)
-            | WorkValue::ProjectStatus(_)
-            | WorkValue::Krs(_)
-            | WorkValue::MetricTargets(_) => Some(Self::Field),
+            | WorkValue::ProjectStatus(_) => Some(Self::Field),
             WorkValue::Disposition(_) => Some(Self::State),
             WorkValue::CommentContent(_) => Some(Self::Comment),
             WorkValue::TaskDeletedAt(Some(_)) => Some(Self::Delete),
@@ -583,8 +581,6 @@ fn field_baseline(
         WorkValue::ProjectDescription(_) => ("o.description", "o.description_observed_at IS NOT NULL"),
         WorkValue::ProjectSummary(_) => ("o.summary", "o.summary IS NOT NULL"),
         WorkValue::ProjectStatus(_) => ("o.status", "o.status IS NOT NULL"),
-        WorkValue::Krs(_) => ("o.krs", "o.krs IS NOT NULL"),
-        WorkValue::MetricTargets(_) => ("o.metric_targets", "o.metric_targets IS NOT NULL"),
         WorkValue::TaskAssignee(_) => ("o.assignee", "o.assignee_observed"),
         WorkValue::TaskProject(_) => ("COALESCE((SELECT id FROM projects WHERE id=o.claimed_project_id OR external_project_id=o.claimed_project_id),o.claimed_project_id)", "o.project_id_observed"),
         _ => return Ok(None),
@@ -597,15 +593,9 @@ fn field_baseline(
     let mut query = conn.prepare(&format!(
         "SELECT {revision},{column} FROM {source} AND {presence}"
     ))?;
-    // KRs and targets are stored as JSON; every other column is the value's text.
-    let json = matches!(edit, WorkValue::Krs(_) | WorkValue::MetricTargets(_));
     let baseline = query
         .query_and_then([owner.id()], |row| -> StoreResult<PlanningBaseline> {
-            let raw: Option<String> = row.get(1)?;
-            let value = match raw {
-                Some(raw) if json => serde_json::from_str(&raw)?,
-                raw => Value::from(raw),
-            };
+            let value = Value::from(row.get::<_, Option<String>>(1)?);
             Ok(PlanningBaseline {
                 revision: row.get(0)?,
                 value: Some(serde_json::from_value(
@@ -683,8 +673,6 @@ fn creation_baseline(conn: &Connection, owner: &ActionOwner) -> StoreResult<Vec<
                 WorkValue::ProjectSummary(project.summary),
                 WorkValue::ProjectDescription(Some(project.description)),
                 WorkValue::ProjectStatus(project.status),
-                WorkValue::Krs(project.krs),
-                WorkValue::MetricTargets(project.metric_targets),
             ]
         }
         ActionOwner::Wave(_) => {
@@ -941,7 +929,7 @@ pub(crate) fn attach_in(
     )?;
     let column = owner.column();
     let mut bases: Vec<(ActionKind, Option<&str>, WorkValue)> = Vec::new();
-    let baseline: Vec<WorkValue> = serde_json::from_str(&baseline)?;
+    let baseline = crate::work::edit::known_values(serde_json::from_str(&baseline)?)?;
     for value in &baseline {
         bases.push((ActionKind::Field, Some(value.field()), value.clone()));
     }

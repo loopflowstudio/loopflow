@@ -606,7 +606,7 @@ Add `session` to open an existing Task conversation in its terminal pane. A
 missing or unrelated Session leaves the current workspace intact and offers Retry.
 Opening a conversation does not complete a review or start a Task Graph.
 
-Wave details show the objective, the plan and its KRs, the Wave's Workflow,
+Wave details show the objective, the Wave's Projects and their status, its Workflow,
 current Tasks and plan history. Completed Tasks start hidden.
 **Completed** adds the last 7 days. Click **7 Days** to edit the number inline;
 Enter or clicking away applies it, Escape cancels. Enter **0** for **All Tasks**
@@ -622,7 +622,7 @@ Task previews use the same template view until an invocation exists, including
 Tasks with independent conversations. Captured invocations keep their expanded
 graph. Changing a template resets its disclosure; it does not change a capture.
 A Wave's planning adds no navigation tier. Task
-details include the directive, recorded condition, current KRs, Activity, PR and
+details include the directive, recorded condition, Activity, PR and
 worktree references. Choose **Edit directive**, then
 **Save directive** to write through the shared planning API. Failed saves retain your
 text; an accepted write with unavailable readback retains the draft and explains

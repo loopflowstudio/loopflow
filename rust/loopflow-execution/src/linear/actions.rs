@@ -157,7 +157,7 @@ impl LinearClient {
         let team = repository_scope(repo)?;
         let id = creation_id(project.as_str())?;
         let mut input = json!({"id": id, "teamIds": [team], "useDefaultTemplate": false});
-        let (mut description, mut krs, mut targets) = (String::new(), Vec::new(), Vec::new());
+        let mut description = String::new();
         for value in values(action)? {
             match value {
                 WorkValue::ProjectName(name) => input["name"] = json!(name),
@@ -170,15 +170,10 @@ impl LinearClient {
                         .map_err(message)?["statusId"]
                         .clone()
                 }
-                WorkValue::Krs(values) => krs = values,
-                WorkValue::MetricTargets(values) => targets = values,
                 _ => {}
             }
         }
-        input["content"] = json!(format!(
-            "{description}\n{}",
-            loopflow_storage::planning::render_project_content(&krs, &targets)
-        ));
+        input["content"] = json!(description);
         let project = match crate::linear::urgent(self.deliver_planning_creation(true, input)).await
         {
             Ok(PlanningResponse::Project { project, .. }) => *project,
@@ -255,7 +250,7 @@ impl LinearClient {
         action: &TrackerAction,
     ) -> OpsResult<Sent> {
         let external = remote_project(store, project).await?;
-        // Prose, KRs and targets share the Project's one content document.
+        // The description shares the content document with released sections.
         let (_, content) = self
             .fetch_project_content(&external)
             .await

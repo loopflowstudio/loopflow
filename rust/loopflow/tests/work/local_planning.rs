@@ -1115,7 +1115,7 @@ fn project_reads_keep_canonical_identity_and_authored_order_after_edits() {
             .map(|name| {
                 serde_json::from_value(serde_json::json!({
                     "id": format!("linear-{name}"), "slug": name, "name": name,
-                    "summary": "", "revision": null, "status": "started", "krs": [], "metric_targets": [], "initiative_ids": ["initiative"],
+                    "summary": "", "revision": null, "status": "started", "initiative_ids": ["initiative"],
                     "team_ids": ["team"]
                 }))
                 .unwrap()
@@ -1260,8 +1260,6 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
             name: "Product".into(),
             summary: "".into(),
             status: loopflow_execution::work::project::ProjectStatus::Started,
-            krs: vec![],
-            metric_targets: vec![],
             initiative_ids: vec!["initiative".into()],
             team_ids: vec!["fixture-team".into()],
         };
@@ -1615,8 +1613,6 @@ fn moving_saves_membership_offline_and_retains_inbound_changes() {
                     summary: project.summary.clone(),
                     description: Some(project.description.clone()),
                     status: project.status,
-                    krs: project.krs.clone(),
-                    metric_targets: project.metric_targets.clone(),
                     initiative_ids: vec![name.into()],
                     team_ids: vec!["fixture-team".into()],
                     revision: None,
@@ -2408,8 +2404,9 @@ fn canonical_status_retains_content_and_execution_across_acquisition_states() {
     let observed: loopflow_storage::planning::TrackerProject = serde_json::from_value(json!({
         "id":"provider-project", "slug":project.slug, "name":project.name,
         "summary":"", "description":"Saved Project prose", "status":"started",
-        "krs":[], "metric_targets":[], "initiative_ids":["initiative"], "team_ids":["team"], "revision":null
-    })).unwrap();
+        "initiative_ids":["initiative"], "team_ids":["team"], "revision":null
+    }))
+    .unwrap();
     loopflow_execution::store::sqlite::linear_events::accept_linear_project_in(
         &store,
         task.wave_id.as_ref().unwrap(),

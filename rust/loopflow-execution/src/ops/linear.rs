@@ -2790,10 +2790,7 @@ mod tests {
             slug: crate::linear::project_slug(name),
             name: name.to_string(),
             summary: String::new(),
-
-            metric_targets: Vec::new(),
             status: loopflow_storage::work::project::ProjectStatus::Started,
-            krs: Vec::new(),
             initiative_ids: vec!["initiative-1".to_string()],
             team_ids: vec!["team-loo".to_string()],
         };

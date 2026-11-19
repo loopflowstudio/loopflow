@@ -282,8 +282,6 @@ pub fn task() -> (tempfile::TempDir, SqliteStore, Task, TaskPr) {
         slug: "probe".to_string(),
         name: "Probe".to_string(),
         description: "Probe Task execution".to_string(),
-        krs: Vec::new(),
-        metric_targets: Vec::new(),
         tracker_synced_at: Some(now.unix_timestamp()),
 
         wave_id: wave_id.clone(),

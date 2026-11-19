@@ -370,7 +370,7 @@ fn fields(data: &mut Value, value: &WorkValue) {
 }
 
 /// A created Project as the Asana mirror holds it. Asana shows its name and
-/// summary; status, KRs and targets stay the creation values Loopflow owns.
+/// summary; status stays the creation value Loopflow owns.
 fn mirrored_project(
     id: &str,
     team: &str,
@@ -384,9 +384,7 @@ fn mirrored_project(
         name: String::new(),
         summary: String::new(),
         description: None,
-        metric_targets: Vec::new(),
         status: loopflow_storage::work::project::ProjectStatus::Backlog,
-        krs: Vec::new(),
         initiative_ids: vec![team.to_owned()],
         team_ids: vec![team.to_owned()],
     };
@@ -399,8 +397,6 @@ fn mirrored_project(
             WorkValue::ProjectSummary(summary) => project.summary = summary,
             WorkValue::ProjectDescription(description) => project.description = description,
             WorkValue::ProjectStatus(status) => project.status = status,
-            WorkValue::Krs(krs) => project.krs = krs,
-            WorkValue::MetricTargets(targets) => project.metric_targets = targets,
             _ => {}
         }
     }

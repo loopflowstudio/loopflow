@@ -114,8 +114,6 @@ async fn pm_read_linear_oauth_recovers() {
         slug: "reliability".into(),
         name: "Reliability".into(),
         description: "Retain this planning history.".into(),
-        krs: Vec::new(),
-        metric_targets: Vec::new(),
         tracker_synced_at: Some(1),
 
         wave_id: wave.id().clone(),
@@ -173,8 +171,8 @@ async fn pm_read_linear_oauth_recovers() {
         .await
         .unwrap()
         .unwrap();
-    assert!(refreshed.metric_targets.is_empty());
-    assert_eq!(refreshed.krs[0].text, "Fresh proof");
+    // The KR section released lf wrote stays in Linear and out of the description.
+    assert_eq!(refreshed.description, "## Definition\n\nFresh definition.");
     assert_eq!(refreshed.id, project.id);
     assert_eq!(refreshed.wave_id, project.wave_id);
     assert_eq!(refreshed.created_at, project.created_at);
@@ -185,7 +183,6 @@ async fn pm_read_linear_oauth_recovers() {
         loopflow_storage::work::project::ProjectStatus::Started
     );
 
-    assert!(refreshed.krs.iter().any(|kr| kr.text == "Fresh proof"));
     assert!(refreshed.tracker_synced_at > project.tracker_synced_at);
     assert_eq!(
         fixture

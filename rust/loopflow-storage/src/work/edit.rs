@@ -68,8 +68,17 @@ pub struct StampedRecord {
 fn known_fields<'de, D: serde::Deserializer<'de>>(
     deserializer: D,
 ) -> Result<Vec<StampedValue>, D::Error> {
-    let fields = Vec::<Value>::deserialize(deserializer)?;
-    Ok(fields
+    Ok(skip_unknown(Vec::<Value>::deserialize(deserializer)?))
+}
+
+/// A saved list of values, such as a queued tracker `create`, without the
+/// fields this build no longer has (`krs`, `metric_targets`).
+pub fn known_values(values: Value) -> StoreResult<Vec<WorkValue>> {
+    Ok(skip_unknown(serde_json::from_value::<Vec<Value>>(values)?))
+}
+
+fn skip_unknown<T: serde::de::DeserializeOwned>(fields: Vec<Value>) -> Vec<T> {
+    fields
         .into_iter()
         .filter_map(|field| {
             let name = field.get("field").cloned();
@@ -79,7 +88,7 @@ fn known_fields<'de, D: serde::Deserializer<'de>>(
                 })
                 .ok()
         })
-        .collect())
+        .collect()
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -143,8 +152,6 @@ work_values! {
     (TaskBranch, "task_branch", Option<String>),
     (TaskTeam, "task_team", Option<String>),
     (CommentTask, "comment_task", String),
-    (Krs, "krs", Vec<crate::work::project::ProjectKR>),
-    (MetricTargets, "metric_targets", Vec<crate::metric::MetricTarget>),
     (Disposition, "disposition", Disposition),
     (CommentContent, "comment_content", CommentContent),
 }
@@ -189,9 +196,6 @@ impl WorkValue {
         match self {
             Self::Disposition(v) if !matches!(v.planning_completed, 0 | 1) => {
                 return Err(StoreError::InvalidData("invalid completion value".into()))
-            }
-            Self::MetricTargets(v) => {
-                crate::work::project::validate_metric_targets(v).map_err(StoreError::InvalidData)?
             }
             _ => {}
         }

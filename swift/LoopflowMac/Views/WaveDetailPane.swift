@@ -827,23 +827,6 @@ struct WaveProjectView: View {
                     .font(Typography.caption()).foregroundStyle(palette.textSecondary)
             }
             TrackerSyncView(sync: project.sync, repo: repo)
-            ForEach(project.krs) { kr in
-                HStack(alignment: .firstTextBaseline, spacing: 10) {
-                    Circle()
-                        .fill(kr.holds ? palette.success : Color.clear)
-                        .overlay(Circle().strokeBorder(kr.holds ? palette.success : palette.borderStrong, lineWidth: 1.5))
-                        .frame(width: 12, height: 12)
-                        .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4 }
-                    Text(kr.text)
-                        .font(Typography.body(13))
-                        .lineSpacing(2)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .textSelection(.enabled)
-                }
-                .accessibilityElement(children: .combine)
-                .accessibilityValue(kr.holds ? "Holds" : "Open")
-            }
-
         }.accessibilityIdentifier("wave-project")
     }
 }

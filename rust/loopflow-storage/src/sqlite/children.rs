@@ -1210,8 +1210,7 @@ impl SqliteStore {
         .map_err(StoreError::from)
     }
 
-    // Projects are durable KR-pursuit children. They share the same
-    // process/receipt shape as Tasks but deliberately own no worktree.
+    // Projects group a Wave's Tasks and deliberately own no worktree.
 
     pub fn insert_project(&self, project: &Project) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
@@ -1231,8 +1230,6 @@ impl SqliteStore {
                     Edit::ProjectSummary(project.summary.clone()),
                     Edit::ProjectDescription(Some(project.description.clone())),
                     Edit::ProjectStatus(project.status),
-                    Edit::Krs(project.krs.clone()),
-                    Edit::MetricTargets(project.metric_targets.clone()),
                 ],
             ),
             crate::sqlite::planning_write::WriteOrigin::Local,
@@ -2507,12 +2504,12 @@ pub(super) fn join_project_in(
 const PROJECT_COLUMNS: &str = "SELECT
     id, external_project_id, project_slug, project_name, description,
     wave_id, pm_snapshot_synced_at,
-    created_at, updated_at, status, project_summary, krs, metric_targets
+    created_at, updated_at, status, project_summary
     FROM projects";
 pub(super) const PROJECT_SELECT: &str = "SELECT
     id, external_project_id, project_slug, project_name, description,
     wave_id, pm_snapshot_synced_at,
-    created_at, updated_at, status, project_summary, krs, metric_targets
+    created_at, updated_at, status, project_summary
     FROM projects WHERE id=?1";
 pub(super) fn project_in(conn: &Connection, id: &ProjectId) -> rusqlite::Result<Project> {
     conn.query_row(PROJECT_SELECT, [id.as_str()], map_project_row)
@@ -2529,10 +2526,6 @@ pub(super) fn map_project_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Proje
         slug: row.get(2)?,
         name: row.get(3)?,
         description: row.get(4)?,
-        krs: serde_json::from_str(&row.get::<_, String>(11)?)
-            .map_err(|error| invalid_column(11, error))?,
-        metric_targets: serde_json::from_str(&row.get::<_, String>(12)?)
-            .map_err(|error| invalid_column(12, error))?,
         tracker_synced_at: row.get(6)?,
         status: serde_json::from_value(serde_json::Value::String(row.get(9)?))
             .map_err(|error| invalid_column(9, error))?,

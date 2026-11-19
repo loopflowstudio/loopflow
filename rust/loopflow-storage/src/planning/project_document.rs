@@ -1,8 +1,10 @@
-//! Linear Markdown and released-content conversion; never an ordinary Work model.
+//! A Linear Project's Markdown `content`: its description, and the `## KRs`
+//! and `## Metric targets` sections released `lf` wrote there. Nothing writes
+//! those sections now; they are kept out of the description and left in place
+//! when the description changes. Released stores convert them once, on upgrade.
 
 use super::ProjectDocumentError;
-use crate::metric::MetricTarget;
-use crate::work::project::ProjectKR;
+use serde::{Deserialize, Serialize};
 
 type ProjectDocumentResult<T> = Result<T, ProjectDocumentError>;
 
@@ -13,11 +15,19 @@ pub enum ProjectField {
     Targets,
 }
 
+/// A KR as released `lf` stored it in `projects.krs`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReleasedKr {
+    pub text: String,
+    pub holds: bool,
+}
+
 /// A Linear Markdown boundary, not a stored Project or another planning owner.
 #[derive(Debug)]
 pub struct ProjectDocument<'a> {
-    pub metric_targets: Vec<MetricTarget>,
-    pub krs: Vec<ProjectKR>,
+    /// The `## Metric targets` JSON array, unread except by released conversion.
+    pub metric_targets: serde_json::Value,
+    pub krs: Vec<ReleasedKr>,
     source: &'a str,
     fields: Vec<(std::ops::Range<usize>, ProjectField)>,
 }
@@ -74,27 +84,6 @@ impl ProjectDocument<'_> {
         }
         Ok(result)
     }
-
-    pub fn rewrite(&self, field: ProjectField, replacement: &str) -> String {
-        let mut result = String::new();
-        let mut start = 0;
-        let mut pending = Some(replacement);
-        for (range, owner) in &self.fields {
-            if field == *owner {
-                result.push_str(&self.source[start..range.start]);
-                if let Some(replacement) = pending.take() {
-                    result.push_str(replacement);
-                }
-                start = range.end;
-            }
-        }
-        result.push_str(&self.source[start..]);
-        if let Some(replacement) = pending.filter(|replacement| !replacement.is_empty()) {
-            result.push_str("\n\n");
-            result.push_str(replacement);
-        }
-        result
-    }
 }
 
 pub fn parse_project_document(source: &str) -> ProjectDocumentResult<ProjectDocument<'_>> {
@@ -106,7 +95,7 @@ pub fn parse_project_document(source: &str) -> ProjectDocumentResult<ProjectDocu
     let mut targets = Vec::new();
     let mut raw_targets = Vec::new();
     let mut krs = Vec::new();
-    let mut current_kr: Option<ProjectKR> = None;
+    let mut current_kr: Option<ReleasedKr> = None;
     let mut offset = 0;
     for line in source.split_inclusive('\n') {
         let range = offset..offset + line.len();
@@ -179,7 +168,7 @@ pub fn parse_project_document(source: &str) -> ProjectDocumentResult<ProjectDocu
                         krs.push(kr);
                     }
                     if !text.trim().is_empty() {
-                        current_kr = Some(ProjectKR {
+                        current_kr = Some(ReleasedKr {
                             text: text.trim().into(),
                             holds,
                         });
@@ -217,13 +206,14 @@ pub fn parse_project_document(source: &str) -> ProjectDocumentResult<ProjectDocu
     }
 
     let metric_targets = if targets.iter().all(|line| line.trim().is_empty()) {
-        Vec::new()
+        serde_json::Value::Array(Vec::new())
     } else {
-        serde_json::from_str(&targets.concat()).map_err(|error| {
-            ProjectDocumentError(format!("invalid Project metric targets: {error}"))
-        })?
+        serde_json::from_str::<Vec<serde_json::Value>>(&targets.concat())
+            .map(serde_json::Value::Array)
+            .map_err(|error| {
+                ProjectDocumentError(format!("invalid Project metric targets: {error}"))
+            })?
     };
-    crate::work::project::validate_metric_targets(&metric_targets).map_err(ProjectDocumentError)?;
     fields.sort_unstable_by_key(|(range, _)| range.start);
     Ok(ProjectDocument {
         metric_targets,
@@ -235,73 +225,42 @@ pub fn parse_project_document(source: &str) -> ProjectDocumentResult<ProjectDocu
 
 #[cfg(test)]
 mod tests {
-    use super::parse_project_document;
-    use crate::metric::MetricTarget;
-    use crate::planning::render_project_content;
-    use crate::work::project::ProjectKR;
+    use super::{parse_project_document, ReleasedKr};
 
     #[test]
-    fn project_content_without_workflow_preserves_krs() {
-        let content = parse_project_document("## KRs\n- [ ] Keep this proof\n").unwrap();
-        assert_eq!(content.krs[0].text, "Keep this proof");
-        let rendered = render_project_content(&content.krs, &content.metric_targets);
-        assert!(!rendered.contains("flow:"));
-        let reparsed = parse_project_document(&rendered).unwrap();
-        assert_eq!(reparsed.krs, content.krs);
-        assert_eq!(reparsed.metric_targets, content.metric_targets);
-    }
-
-    #[test]
-    fn released_workflow_content_is_readable_but_never_republished() {
-        let source = "flow: research\nworkflow: code\n\n## KRs\n";
+    fn released_sections_stay_out_of_the_description_and_survive_its_edit() {
+        let source = "flow: research\nworkflow: code\n\nA measured bet.\n\n## Metric targets\n```json\n[{\"metric_id\":\"rate\"}]\n```\n\n## KRs\n\n- [x] One proof holds\n- Another\n  across wrapped lines.\n";
         let document = parse_project_document(source).unwrap();
-        assert!(!render_project_content(&document.krs, &document.metric_targets).contains("flow:"));
-        let edited = document.replace_description("New prose").unwrap();
-        assert!(edited.contains("flow: research\nworkflow: code\n"));
-    }
-
-    #[test]
-    fn project_content_round_trips_linear_markdown() {
-        let targets = vec![MetricTarget {
-            metric_id: "throughput".into(),
-            target: crate::metric::Threshold::AtLeast { value: 0.95 },
-        }];
-        let krs = vec![
-            ProjectKR {
-                text: "One proof holds".into(),
-                holds: true,
-            },
-            ProjectKR {
-                text: "Another remains".into(),
-                holds: false,
-            },
-        ];
-        let rendered = render_project_content(&krs, &targets);
-        let parsed = parse_project_document(&rendered).unwrap();
-        assert_eq!(parsed.krs, krs);
-        assert_eq!(parsed.metric_targets, targets);
-
-        let local = "# Project Name\n\nA measured bet.\n\n## KRs\n\n- One proof holds\n  across wrapped lines.\n";
-        let parsed = parse_project_document(local).unwrap();
-        assert!(parsed.metric_targets.is_empty());
+        assert_eq!(document.observed_description(), "A measured bet.");
         assert_eq!(
-            parsed.krs,
-            vec![ProjectKR {
-                text: "One proof holds across wrapped lines.".into(),
-                holds: false,
-            }]
+            document.krs,
+            vec![
+                ReleasedKr {
+                    text: "One proof holds".into(),
+                    holds: true
+                },
+                ReleasedKr {
+                    text: "Another across wrapped lines.".into(),
+                    holds: false
+                },
+            ]
         );
+        assert_eq!(document.metric_targets[0]["metric_id"], "rate");
+        let edited = document.replace_description("New prose").unwrap();
+        assert!(edited.starts_with("New prose\n\n"));
+        for kept in [
+            "workflow: code\n",
+            "## KRs\n",
+            "- [x] One proof holds",
+            "\"rate\"",
+        ] {
+            assert!(edited.contains(kept), "{edited}");
+        }
     }
 
     #[test]
-    fn project_markdown_rejects_ambiguous_targets() {
-        let duplicate = r##"## Metric targets
-```json
-[{"metric_id":"rate","target":{"kind":"at_least","value":0.9}},
- {"metric_id":"rate","target":{"kind":"at_most","value":0.1}}]
-```
-"##;
-        assert!(parse_project_document(duplicate).is_err());
+    fn unreadable_targets_are_refused() {
         assert!(parse_project_document("## Metric targets\nnot JSON").is_err());
+        assert!(parse_project_document("## Metric targets\n```json\n[1\n").is_err());
     }
 }

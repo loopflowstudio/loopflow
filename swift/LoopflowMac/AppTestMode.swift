@@ -117,7 +117,7 @@ enum AppTestMode: String {
     /// `LOOPFLOW_UI_TEST_SELECT_BRANCH`. The `mock-waves` fixture reads it to
     /// target a list state; `live` reads it to drive a real Wave into its full
     /// detail hierarchy headlessly — so a screenshot run captures the real
-    /// objective/Projects/KRs/task rows, not just the list.
+    /// objective/Projects/task rows, not just the list.
     static var selectBranch: String? {
         let env = ProcessInfo.processInfo.environment["LOOPFLOW_UI_TEST_SELECT_BRANCH"]
         return (env?.isEmpty == false ? env : nil)

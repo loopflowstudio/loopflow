@@ -284,13 +284,3 @@ public enum MetricContractIssue: Decodable, Sendable, Hashable {
         }
     }
 }
-
-public struct MetricTarget: Decodable, Sendable, Hashable, Identifiable {
-    public var id: String { metricId }
-    public let metricId: String
-    public let target: Threshold
-    enum CodingKeys: String, CodingKey {
-        case metricId = "metric_id"
-        case target
-    }
-}

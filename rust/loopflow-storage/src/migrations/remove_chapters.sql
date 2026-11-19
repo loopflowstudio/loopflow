@@ -13,3 +13,13 @@
 -- Nothing wrote a successor rollover; its row also marked a Project as made
 -- on this Machine, which `plan_stamps` now answers.
 -- leaving: project_transitions LOO-995
+-- KRs and metric targets are no longer sent to a tracker; an unsent edit of
+-- either is retired, and their columns stay unwritten until the contract.
+UPDATE tracker_actions SET phase='retired',error='KRs and metric targets are no longer sent'
+WHERE subject IN ('krs','metric_targets') AND phase IN ('queued','sent','conflicted');
+-- leaving: projects.krs LOO-995
+-- leaving: projects.metric_targets LOO-995
+-- leaving: tracker_projects.krs LOO-995
+-- leaving: tracker_projects.metric_targets LOO-995
+-- leaving: pm_projects.krs LOO-995
+-- leaving: pm_projects.metric_targets LOO-995

@@ -393,8 +393,6 @@ pub struct ProjectSummary {
     pub slug: String,
     pub name: String,
     pub status: loopflow_storage::work::project::ProjectStatus,
-    pub metric_targets: Vec<loopflow_execution::work::wave::metrics::MetricTarget>,
-    pub krs: Vec<loopflow_storage::work::project::ProjectKR>,
 }
 
 async fn project_planning(store: &SharedStore, wave: &Wave) -> Evidence<ProjectSummary> {
@@ -410,8 +408,6 @@ async fn project_planning(store: &SharedStore, wave: &Wave) -> Evidence<ProjectS
                     slug: project.slug,
                     name: project.name,
                     status: project.status,
-                    metric_targets: project.metric_targets,
-                    krs: project.krs,
                 })
             })
             .collect::<Result<Vec<_>>>()?;
@@ -434,21 +430,6 @@ fn print_projects(projects: &Evidence<ProjectSummary>) {
                 );
                 for line in project.sync.lines() {
                     println!("    {line}");
-                }
-                for target in &project.metric_targets {
-                    use loopflow_execution::work::wave::metrics::Threshold;
-                    let comparison = match target.target {
-                        Threshold::AtLeast { .. } => ">=",
-                        Threshold::AtMost { .. } => "<=",
-                    };
-                    println!(
-                        "    target {} {comparison} {}",
-                        target.metric_id,
-                        target.target.value()
-                    );
-                }
-                for kr in &project.krs {
-                    println!("  [{}] {}", if kr.holds { "x" } else { " " }, kr.text);
                 }
             }
         }
@@ -3785,8 +3766,7 @@ mod tests {
                         synced_at: 2,
                         snapshot: serde_json::from_value(serde_json::json!({"projects":[{
                     "id":format!("{repository}-{name}"), "slug":name, "name":name,
-                    "summary":"", "metric_targets":[], "workflow":"feature", "status":"started",
-                    "krs":[{"text":"Retained planning is readable", "holds":false}],
+                    "summary":"", "workflow":"feature", "status":"started",
                     "initiative_ids":["initiative"], "team_ids":["team"]
                 }], "items":[]}))
                         .unwrap(),
@@ -3870,8 +3850,7 @@ mod tests {
             synced_at: 1,
             snapshot: serde_json::from_value(serde_json::json!({"projects":[{
                 "id":"current", "slug":"current", "name":"Current project", "summary":"",
-                "metric_targets":[], "workflow":"feature", "status":"started", "krs":[],
-                "initiative_ids":["initiative"], "team_ids":["team"]
+                "workflow":"feature", "status":"started", "initiative_ids":["initiative"], "team_ids":["team"]
             }], "items":items}))
             .unwrap(),
         };
@@ -3946,14 +3925,13 @@ mod tests {
             wave_id: wave.id().clone(), initiative: "initiative".into(), synced_at: 2,
             snapshot: serde_json::from_value(serde_json::json!({"projects":[{
                 "id":"999bdbdd-c045-41a6-8ffc-a97c4a40b0b3", "slug":"first", "name":"First project", "summary":"",
-                "metric_targets":[], "workflow":"feature", "status":"started", "krs":[{"text":"Edited proof", "holds":false}],
-                "initiative_ids":["initiative"], "team_ids":["team"]
+                "workflow":"feature", "status":"started", "initiative_ids":["initiative"], "team_ids":["team"]
             }], "items":[]})).unwrap(),
         }, None).await.unwrap();
         let super::Evidence::Ok { items, .. } = super::project_planning(&store, &wave).await else {
             panic!("Project plan unavailable");
         };
-        assert_eq!(items[0].krs[0].text, "Edited proof");
+        assert_eq!(items[0].name, "First project");
         assert_eq!(
             items[0].status,
             loopflow_storage::work::project::ProjectStatus::Started
@@ -3985,7 +3963,7 @@ mod tests {
             panic!("saved Project plan unavailable");
         };
         assert_eq!(items.len(), 1);
-        assert_eq!(items[0].krs[0].text, "Edited proof");
+        assert_eq!(items[0].name, "First project");
         assert_eq!(
             items[0].status,
             loopflow_storage::work::project::ProjectStatus::Started

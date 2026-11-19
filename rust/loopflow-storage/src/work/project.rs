@@ -1,7 +1,6 @@
-//! Durable tracking for one Project's KRs.
-//!
-//! A Wave selects its current Project. A Project owns no worktree, shipping branch, PR, permanent
-//! memory, cadence, chat, or controller state.
+//! A Project: a group of a Wave's Tasks that starts and ends, mirrored to a
+//! tracker Project when one is connected. It owns no worktree, shipping branch,
+//! PR, permanent memory, cadence, chat, or controller state.
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
@@ -35,12 +34,6 @@ impl ProjectStatus {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct ProjectKR {
-    pub text: String,
-    pub holds: bool,
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Project {
     pub id: ProjectId,
@@ -48,8 +41,6 @@ pub struct Project {
     pub slug: String,
     pub name: String,
     pub description: String,
-    pub krs: Vec<ProjectKR>,
-    pub metric_targets: Vec<crate::metric::MetricTarget>,
     pub status: ProjectStatus,
     /// The record’s ID in the repository's tracker.
     #[serde(deserialize_with = "Option::deserialize")]
@@ -145,20 +136,4 @@ impl Project {
             .as_ref()
             .ok_or(LinearBindingError::NoLinearMapping)
     }
-}
-
-pub fn validate_metric_targets(targets: &[crate::metric::MetricTarget]) -> Result<(), String> {
-    let mut ids = std::collections::BTreeSet::new();
-    for metric in targets {
-        if metric.metric_id.trim().is_empty()
-            || !metric.target.value().is_finite()
-            || !ids.insert(&metric.metric_id)
-        {
-            return Err(
-                "Project metric targets require unique nonempty metric IDs and finite values"
-                    .into(),
-            );
-        }
-    }
-    Ok(())
 }

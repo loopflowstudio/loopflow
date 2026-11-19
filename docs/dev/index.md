@@ -278,7 +278,7 @@ ledger.
 Repository
   |-- Task                    repository work, optionally outside a Wave
   `-- Wave                    enduring objective, memory, cadence and default graph
-        `-- Project           plan, Tasks, KRs and targets; optional provider binding
+        `-- Project           a group of Tasks that starts and ends; optional provider binding
               `-- Task        identity, worktree, PR and captured graph position
 
 Process                          one actual lf process; immutable causal parent

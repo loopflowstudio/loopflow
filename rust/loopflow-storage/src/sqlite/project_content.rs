@@ -3,9 +3,7 @@
 use crate::work::edit::WorkValue as Edit;
 use rusqlite::TransactionBehavior;
 
-use crate::metric::MetricTarget;
 use crate::planning_sync::PlanningChange;
-use crate::work::project::ProjectKR;
 use crate::{StoreError, StoreResult};
 use loopflow_model::durable::ProjectId;
 
@@ -51,29 +49,6 @@ impl SqliteStore {
         tx.commit()?;
         Ok(())
     }
-
-    pub fn update_project_content(
-        &self,
-        project: &ProjectId,
-        krs: &[ProjectKR],
-        metric_targets: &[MetricTarget],
-    ) -> StoreResult<()> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        super::planning_write::local(
-            &tx,
-            &crate::work::edit::WorkEdit::for_target(
-                project.as_str(),
-                &[
-                    Edit::Krs(krs.to_vec()),
-                    Edit::MetricTargets(metric_targets.to_vec()),
-                ],
-            ),
-        )
-        .map(|_| ())?;
-        tx.commit()?;
-        Ok(())
-    }
 }
 
 #[cfg(test)]
@@ -90,7 +65,7 @@ mod tests {
         crate::test_fixture::wave(&store, &wave);
         let observed = serde_json::from_value(serde_json::json!({
             "id":"linear-project", "revision":"2026-10-10T12:00:00Z", "slug":"product", "name":"Product", "summary":"",
-            "workflow":"", "krs":[], "metric_targets":[], "status":"started", "initiative_ids":["initiative"], "team_ids":["team"]
+            "workflow":"", "status":"started", "initiative_ids":["initiative"], "team_ids":["team"]
         })).unwrap();
         crate::sqlite::linear_events::accept_linear_project_in(
             &store,
@@ -145,7 +120,7 @@ mod tests {
         crate::test_fixture::wave(&store, &wave);
         let mut observed: crate::planning::TrackerProject = serde_json::from_value(serde_json::json!({
             "id":"linear-project", "revision":"2026-10-10T12:00:00Z", "slug":"product", "name":"Product", "summary":"",
-            "workflow":"", "krs":[], "metric_targets":[], "status":"started", "initiative_ids":["initiative"], "team_ids":["team"]
+            "workflow":"", "status":"started", "initiative_ids":["initiative"], "team_ids":["team"]
         })).unwrap();
         crate::sqlite::linear_events::accept_linear_project_in(
             &store,
@@ -204,7 +179,7 @@ mod tests {
         crate::test_fixture::wave(&store, &wave);
         let mut observed: crate::planning::TrackerProject = serde_json::from_value(serde_json::json!({
             "id":"linear-project", "revision":"2026-10-10T12:00:00Z", "slug":"product", "name":"Product", "summary":"", "description":"Baseline",
-            "workflow":"", "krs":[], "metric_targets":[], "status":"started", "initiative_ids":["initiative"], "team_ids":["team"]
+            "workflow":"", "status":"started", "initiative_ids":["initiative"], "team_ids":["team"]
         })).unwrap();
         crate::sqlite::linear_events::accept_linear_project_in(
             &store,
@@ -322,18 +297,13 @@ mod tests {
                     rusqlite::params![project.as_str(), wave.id(), mapping, name],
                 )
                 .unwrap();
-            store.update_project_content(&project, &[], &[]).unwrap();
             let before = store.revisions().unwrap();
             let changes = store.pending_project_changes(&project).unwrap();
-            store.update_project_content(&project, &[], &[]).unwrap();
             store
                 .edit_project(&project, Some(name), Some(""), None)
                 .unwrap();
             assert_eq!(store.revisions().unwrap(), before);
             assert_eq!(store.pending_project_changes(&project).unwrap(), changes);
         }
-        assert!(store
-            .update_project_content(&loopflow_model::durable::ProjectId::new(), &[], &[])
-            .is_err());
     }
 }

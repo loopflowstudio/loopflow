@@ -2,7 +2,7 @@
 
 pub mod events;
 
-use self::project_document::parse_project_document;
+use loopflow_storage::planning::project_document::parse_project_document;
 mod actions;
 mod cooldown;
 pub mod request_log;
@@ -17,8 +17,6 @@ use serde_json::{json, Value};
 
 #[cfg(test)]
 use loopflow_model::comment::{TaskComment, TaskCommentAuthor};
-
-pub(crate) mod project_document;
 
 use thiserror::Error;
 
@@ -1423,9 +1421,9 @@ impl LinearClient {
             WorkValue::ProjectStatus(value) => {
                 Ok(json!({"statusId": self.project_status_id(*value).await?}))
             }
-            WorkValue::ProjectDescription(_) | WorkValue::Krs(_) | WorkValue::MetricTargets(_) => {
-                Ok(json!({"content": patch_project_field(content, value)?}))
-            }
+            WorkValue::ProjectDescription(Some(description)) => Ok(json!({
+                "content": parse_project_document(content)?.replace_description(description)?
+            })),
             _ => Err(LinearError::Message(format!(
                 "unsupported Project field {}",
                 value.field()
@@ -2302,34 +2300,6 @@ struct ProjectNode {
     teams: IdConnection,
 }
 
-// Replace only the selected planning field, retaining unrelated tracker prose.
-fn patch_project_field(
-    content: &str,
-    value: &loopflow_storage::work::edit::WorkValue,
-) -> LinearResult<String> {
-    use loopflow_storage::work::edit::WorkValue;
-    use project_document::ProjectField::{Krs, Targets};
-    let document = parse_project_document(content)?;
-    let (owner, replacement) = match value {
-        WorkValue::ProjectDescription(Some(description)) => {
-            return Ok(document.replace_description(description)?)
-        }
-        WorkValue::Krs(krs) => (Krs, project_document::render_krs(krs)),
-        WorkValue::MetricTargets(targets) => {
-            loopflow_storage::work::project::validate_metric_targets(targets)
-                .map_err(LinearError::Message)?;
-            (Targets, project_document::render_metric_targets(targets))
-        }
-        _ => {
-            return Err(LinearError::Message(format!(
-                "unsupported content field {}",
-                value.field()
-            )))
-        }
-    };
-    Ok(document.rewrite(owner, &format!("{replacement}\n\n")))
-}
-
 impl ProjectNode {
     fn into_tracker_project(self) -> LinearResult<TrackerProject> {
         let content = parse_project_document(self.content.as_deref().unwrap_or_default())?;
@@ -2340,18 +2310,7 @@ impl ProjectNode {
             slug: project_slug(&self.name),
             name: self.name,
             summary: self.description.unwrap_or_default(),
-
-            metric_targets: content.metric_targets,
-            // Older rotation archived its predecessor without changing status.
-            // Retain that history without presenting it as a current plan.
-            status: if self.archived_at.is_some()
-                && self.status.type_ != loopflow_storage::work::project::ProjectStatus::Canceled
-            {
-                loopflow_storage::work::project::ProjectStatus::Completed
-            } else {
-                self.status.type_
-            },
-            krs: content.krs,
+            status: self.status.type_,
             initiative_ids: self
                 .initiatives
                 .nodes
@@ -2557,64 +2516,6 @@ mod tests {
             .project_field_input(&WorkValue::ProjectDescription(None), source)
             .await
             .is_err());
-    }
-
-    #[test]
-    fn project_markdown_edits_preserve_examples_and_unknown_prose() {
-        for example in [
-            "````markdown\n```yaml\nworkflow: example\nflow: legacy\n```\n## KRs\n- [x] Example only\n````\n",
-            "~~~yaml\nworkflow: example\n## Metric targets\nnot JSON\n~~~\n",
-        ] {
-            let source = format!("## Example\n{example}\nworkflow: actual\n## Metric targets\nTarget rationale.\n```json\n[]\n```\nTarget note.\n## KRs\nKR preamble.\n- [ ] Original criterion\n\nParagraph after the criterion.\n{example}## Notes\nKeep these bytes.\n");
-            let before = super::parse_project_document(&source).unwrap();
-            assert_eq!(before.krs.len(), 1);
-            assert_eq!(before.krs[0].text, "Original criterion");
-            assert!(before.metric_targets.is_empty());
-            for (field, value) in [
-                ("krs", serde_json::json!([{"text":"New criterion","holds":true}])),
-                ("metric_targets", serde_json::json!([{"metric_id":"proof","target":{"kind":"at_least","value":1.0}}])),
-            ] {
-                let after = super::patch_project_field(&source, &serde_json::from_value(serde_json::json!({"field":field,"value":value})).unwrap()).unwrap();
-                assert_eq!(after.matches(example).count(), 2, "{field}: {after}");
-                for prose in ["Target rationale.\n", "Target note.\n", "KR preamble.\n", "Paragraph after the criterion.\n", "## Notes\nKeep these bytes.\n"] {
-                    assert!(after.contains(prose), "{field}: {after}");
-                }
-                let parsed = super::parse_project_document(&after).unwrap();
-                assert!(after.contains("workflow: actual\n"));
-                assert_eq!(parsed.krs, if field == "krs" { serde_json::from_value(value.clone()).unwrap() } else { before.krs.clone() });
-                assert_eq!(parsed.metric_targets, if field == "metric_targets" { serde_json::from_value(value).unwrap() } else { before.metric_targets.clone() });
-            }
-        }
-    }
-
-    #[test]
-    fn project_markdown_edits_reject_duplicate_targets() {
-        let targets = serde_json::from_value(serde_json::json!([
-            {"metric_id":"rate","target":{"kind":"at_least","value":1.0}},
-            {"metric_id":"rate","target":{"kind":"at_most","value":2.0}}
-        ]))
-        .unwrap();
-        assert!(
-            super::patch_project_field("workflow: code", &WorkValue::MetricTargets(targets))
-                .is_err()
-        );
-    }
-
-    #[test]
-    fn project_markdown_edits_keep_unfenced_targets_separate_from_kr_prose() {
-        let source = "## Metric targets\n[]\n## KRs\nPreamble.\n- [ ] Existing proof\n";
-        let after = super::patch_project_field(
-            source,
-            &WorkValue::Krs(vec![loopflow_storage::work::project::ProjectKR {
-                text: "New proof".into(),
-                holds: true,
-            }]),
-        )
-        .unwrap();
-        assert!(after.contains("Preamble.\n"));
-        let content = super::parse_project_document(&after).unwrap();
-        assert!(content.metric_targets.is_empty());
-        assert_eq!(content.krs[0].text, "New proof");
     }
 
     use super::*;
@@ -3493,7 +3394,7 @@ mod model_tests {
     fn project_snapshot_requires_flow_and_status() {
         let value = serde_json::json!({
             "id":"project-1", "slug":"plan", "name":"Plan", "summary":"",
-            "metric_targets":[], "krs":[], "initiative_ids":[], "team_ids":[]
+            "initiative_ids":[], "team_ids":[]
         });
         assert!(serde_json::from_value::<TrackerProject>(value).is_err());
     }

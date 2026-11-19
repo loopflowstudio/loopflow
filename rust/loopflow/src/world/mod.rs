@@ -29,12 +29,10 @@ use loopflow_execution::provider_auth::Provider;
 use loopflow_execution::session::TitleSource;
 use loopflow_execution::store::{SharedStore, StorageConfig};
 use loopflow_execution::task_graph::END;
-use loopflow_execution::work::wave::metrics::MetricTarget;
 pub use loopflow_execution::work::wave::metrics::Threshold;
 use loopflow_model::durable::TaskId;
 use loopflow_model::id::{LfProcessId, TraceId};
 use loopflow_storage::work::edit::Disposition;
-use loopflow_storage::work::project::ProjectKR;
 use loopflow_storage::work::task::{Task, TaskEventKind};
 
 const DAY: i64 = 24 * 60 * 60;
@@ -349,43 +347,6 @@ impl World {
             .block_on(loopflow_execution::ops::wave_lifecycle::add(
                 &self.repo, name, None,
             ))?;
-        Ok(())
-    }
-
-    /// Set the KRs and metric targets of the Project new Tasks join. Targets name metrics already authored with [`Self::metric`].
-    pub fn plan(
-        &self,
-        wave: &str,
-        krs: &[(&str, bool)],
-        targets: &[(&str, Threshold)],
-    ) -> Result<()> {
-        let krs: Vec<ProjectKR> = krs
-            .iter()
-            .map(|(text, holds)| ProjectKR {
-                text: (*text).to_string(),
-                holds: *holds,
-            })
-            .collect();
-        let targets: Vec<MetricTarget> = targets
-            .iter()
-            .map(|(metric_id, target)| MetricTarget {
-                metric_id: (*metric_id).to_string(),
-                target: target.clone(),
-            })
-            .collect();
-        let store = self.store()?;
-        let wave = self.runtime.block_on(
-            loopflow_execution::work::wave::context::resolve_managed_wave(
-                Some(&store),
-                Some(&self.repo),
-                Some(wave),
-                None,
-            ),
-        )?;
-        let project = store.sqlite.join_project(wave.id(), wave.slug())?;
-        store
-            .sqlite
-            .update_project_content(&project.id, &krs, &targets)?;
         Ok(())
     }
 

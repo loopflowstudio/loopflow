@@ -727,8 +727,6 @@ async fn task_fixture_at(identifier: &str, repository: std::path::PathBuf) -> Ta
         slug: "task-recovery".to_string(),
         name: "Task recovery".to_string(),
         description: "Keep automatic Task recovery bounded.".to_string(),
-        krs: Vec::new(),
-        metric_targets: Vec::new(),
         tracker_synced_at: Some(now.unix_timestamp()),
 
         wave_id: wave.id().clone(),

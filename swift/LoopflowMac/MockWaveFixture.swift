@@ -169,14 +169,7 @@ enum MockWaveFixture {
                 "slug": "release-feedback",
                 "name": "current",
                 "workflow": "incident",
-                "status": "started",
-                "metric_targets": [],
-                "krs": [
-                  {
-                    "text": "Every failed run has an owner",
-                    "holds": false
-                  }
-                ]
+                "status": "started"
               }
             ],
             "truncated": false

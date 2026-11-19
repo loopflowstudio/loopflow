@@ -23,17 +23,14 @@ public struct ProjectPlanningSnapshot: Decodable, Sendable, Identifiable, Hashab
     public let slug: String
     public let name: String
     public let status: ProjectStatus
-    public let metricTargets: [MetricTarget]
-    public let krs: [PlanningKeyResult]
 
     public func matches(reference: String) -> Bool {
         id == reference || slug == reference || trackerId == reference
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, slug, name, status, krs, sync
+        case id, slug, name, status, sync
         case trackerId = "tracker_id"
-        case metricTargets = "metric_targets"
     }
 
     public init(from decoder: Decoder) throws {
@@ -44,16 +41,7 @@ public struct ProjectPlanningSnapshot: Decodable, Sendable, Identifiable, Hashab
         slug = try values.decode(String.self, forKey: .slug)
         name = try values.decode(String.self, forKey: .name)
         status = try values.decode(ProjectStatus.self, forKey: .status)
-        metricTargets = try values.decode([MetricTarget].self, forKey: .metricTargets)
-        krs = try values.decode([PlanningKeyResult].self, forKey: .krs)
     }
-}
-
-public struct PlanningKeyResult: Decodable, Sendable, Identifiable, Hashable {
-    public var id: String { text }
-
-    public let text: String
-    public let holds: Bool
 }
 
 public struct TrackerState: Decodable, Sendable, Hashable {

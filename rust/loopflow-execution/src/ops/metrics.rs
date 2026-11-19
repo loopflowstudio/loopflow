@@ -18,12 +18,7 @@ pub async fn wave_metric_portfolio(
     wave: &Wave,
     evaluation_time: OffsetDateTime,
 ) -> Result<MetricPortfolioDto> {
-    let targets = store
-        .sqlite
-        .new_task_project(wave.id())?
-        .map(|project| project.metric_targets)
-        .unwrap_or_default();
-    project_metric_portfolio(store, wave, &targets, evaluation_time).await
+    project_metric_portfolio(store, wave, &[], evaluation_time).await
 }
 
 pub(crate) async fn project_metric_portfolio(

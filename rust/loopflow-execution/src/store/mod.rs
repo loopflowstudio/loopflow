@@ -1275,7 +1275,7 @@ mod tests {
                     .unwrap()
                     .unwrap()
             } else {
-                let project = crate::work::wave::bootstrap::ensure_wave_project(
+                let project = crate::test_support::seed_wave_project(
                     &store.sqlite,
                     directory.path().to_str().unwrap(),
                     "inbox",

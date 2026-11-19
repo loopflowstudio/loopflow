@@ -123,24 +123,20 @@ struct WaveStandupTests {
         #expect(standup.text(heading: [], section: .done).hasSuffix("Done 0]\n  last 7 days\n  None"))
     }
 
-    @Test func boardRendersHeaderColumnsAndMetrics() throws {
+    @Test func boardRendersWaveHeaderAndTaskSections() throws {
         let roadmap = try roadmap()
         let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Rendering is passive") },
                               repoPath: roadmap.wave.repo)
         model.applyFixture(roadmap: .available(try snapshot()), waves: .available([]), workActivity: .loading, repos: [])
         let board = WaveStandupBoard(model: model, view: .wave(roadmap.wave.id))
         #expect(try board.inspect().find(viewWithAccessibilityIdentifier: "wave-title").text().string() == roadmap.wave.displayName)
-        #expect(try board.inspect().find(viewWithAccessibilityIdentifier: "wave-metric-headline").text().string()
-            == WaveMetricPortfolioPresentation(portfolio: roadmap.metricPortfolio).headline)
+        #expect(try board.inspect().find(viewWithAccessibilityIdentifier: "wave-objective").text().string()
+            == roadmap.wave.goal.split(separator: "\n").first.map(String.init))
         // One section at a time, Backlog first; `lf desktop do section` turns it.
         _ = try board.inspect().find(viewWithAccessibilityIdentifier: "wave-section-backlog")
         model.navigation.boardSections[.wave(roadmap.wave.id)] = .done
         _ = try board.inspect().find(viewWithAccessibilityIdentifier: "wave-section-done")
         _ = try board.inspect().find(viewWithAccessibilityIdentifier: "wave-done-days")
-        if let project = roadmap.currentProject {
-            #expect(try board.inspect().find(viewWithAccessibilityIdentifier: "wave-current-project").text().string()
-                .hasPrefix(project.name))
-        }
     }
 
     @Test func repositoryPageIsTheSameBoardOverEveryRepositoryTask() throws {
@@ -156,7 +152,6 @@ struct WaveStandupTests {
         for row in standup.backlog.prefix(WaveBoardList.pageSize) {
             _ = try board.inspect().find(viewWithAccessibilityIdentifier: "wave-row-\(row.id)")
         }
-        #expect(throws: (any Error).self) { try board.inspect().find(viewWithAccessibilityIdentifier: "wave-current-project") }
     }
 
     @Test func wavePartsHideOnHoverAndTheBoardHeaderShowsThem() throws {

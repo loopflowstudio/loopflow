@@ -6,7 +6,6 @@ use crate::store::{StoreError, StoreResult};
 use loopflow_model::id::WaveId;
 use loopflow_storage::sqlite::wave_definitions::WaveBootstrapRow;
 use loopflow_storage::sqlite::SqliteStore;
-use loopflow_storage::work::project::Project;
 
 fn invalid(error: impl std::fmt::Display) -> StoreError {
     StoreError::InvalidData(error.to_string())
@@ -26,12 +25,6 @@ pub fn upsert_wave(store: &SqliteStore, wave: &crate::work::wave::Wave) -> Store
             return Ok(());
         }
     }
-}
-
-/// Provision a Wave hierarchy without a provider, preserving authored files.
-pub fn ensure_wave_project(store: &SqliteStore, repo: &str, name: &str) -> StoreResult<Project> {
-    let wave = ensure_wave(store, repo, name)?;
-    Ok(store.join_project(&wave, name)?.project)
 }
 
 pub fn ensure_wave(store: &SqliteStore, repo: &str, name: &str) -> StoreResult<WaveId> {

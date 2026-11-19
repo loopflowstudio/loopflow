@@ -157,8 +157,8 @@ tracker deletion evidence apply regardless of planning mode. Local completion
 records its planning decision and optional tracker action without moving the Task's graph.
 GitHub delivery still requires confirmed merge evidence. Stable
 local IDs select the rows and retry actions; tracker aliases select existing
-Projects through their stored mapping. Membership, Project fields, selection and
-pending effects commit together. Connected commands report a pending planning sync.
+Projects through their stored mapping. Membership, Project fields and pending
+effects commit together. Connected commands report a pending planning sync.
 Inbound events preserve pending membership against an unchanged baseline;
 conflicting Linear membership wins while the losing local intention remains in history.
 Mapped membership and Project fields use foreground delivery below; local settlement

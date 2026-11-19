@@ -129,7 +129,7 @@ pub fn wave(store: &SqliteStore, wave: &crate::work::wave::Wave) {
 pub fn project(store: &SqliteStore, repo: &str, name: &str) -> Project {
     let wave = crate::work::wave::Wave::new(WaveId::new(), name.into(), repo.into());
     self::wave(store, &wave);
-    store.join_project(wave.id(), name).unwrap().project
+    store.join_project(wave.id(), name).unwrap()
 }
 
 pub fn ownership(store: &SqliteStore, scope: TaskScope) -> OwnershipFacts {

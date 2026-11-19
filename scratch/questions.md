@@ -174,3 +174,16 @@ Each is reversible before release.
 - Without a tracker, a Wave keeps the one Project its first Task made: no `lf`
   command renames, adds or ends a Project once `lf wave edit-project` goes.
   `docs/work.md` "Projects" states this. Wanted, or does a local rename stay?
+
+## 43bf9b implement, slice 2 (2026-11-18)
+
+- A new Task's Project is now chosen and, when the Wave has none, made inside
+  the same transaction as the Task's save or move (`join_project_in`), so a
+  failed save leaves no orphan Project for the drain to export.
+- Seen while testing it: with a `RAISE(ABORT)` trigger on `tasks` or
+  `task_creation_intents`, `lf task create --wave` and `lf task move --wave`
+  report "migration history or schema differs ... last migrated by lf
+  0.16.0 (91038e53d)" instead of the abort; `lf task list` and `lf task edit`
+  on the same store report normally. Some step on the Wave path reopens the
+  store and validates its schema after the failure. Not chased here; the
+  rollback is covered by `store::ownership::tests::a_failed_save_into_an_empty_wave_makes_no_project`.

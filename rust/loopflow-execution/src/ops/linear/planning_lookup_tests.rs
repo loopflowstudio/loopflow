@@ -1526,7 +1526,7 @@ async fn inventory_refresh_retains_unmapped_local_projects() {
     let _restore = PlanningEnvironment::isolate();
     let fixture = Fixture::new().await;
     let (repo, wave) = fixture.planning_repo().await;
-    let local = crate::work::wave::bootstrap::ensure_wave_project(
+    let local = crate::test_support::seed_wave_project(
         &fixture.store.sqlite,
         repo.to_str().unwrap(),
         "product",

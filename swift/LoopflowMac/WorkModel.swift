@@ -2013,15 +2013,6 @@ final class WorkModel {
         // Planning refresh owns that reconciliation once its evidence is complete.
     }
 
-    // Command ownership survives navigation. These are transport handles and feedback;
-    // selected Project, readiness and execution outcomes arrive in Work frames.
-    private var projectCommands: [String: Task<Void, Never>] = [:]
-    private(set) var projectCommandErrors: [String: String] = [:]
-
-    func isProjectActivationPending(id: String) -> Bool {
-        projectCommands[id] != nil
-    }
-
     /// Add a Wave through `lf wave create`; the planning stream then delivers its row.
     /// The receipt's `summary` names anything left to finish.
     @discardableResult
@@ -2043,20 +2034,6 @@ final class WorkModel {
         let removal = try await query.removeWave(name: name, preview: preview, cwd: repo)
         if !preview { await refreshPlanning() }
         return removal
-    }
-
-    @discardableResult
-    func activateProject(id: String, name: String, repo: String) -> Task<Void, Never>? {
-        guard !usesFixedFixture else { return nil }
-        if let command = projectCommands[id] { return command }
-        projectCommandErrors[id] = nil
-        let command = Task {
-            defer { projectCommands[id] = nil }
-            do { try await query.addWave(name: name, cwd: repo) }
-            catch { projectCommandErrors[id] = error.localizedDescription }
-        }
-        projectCommands[id] = command
-        return command
     }
 
     func setRepoPath(_ path: String?) {
@@ -2325,8 +2302,8 @@ final class WorkModel {
         }
         let selection: WorkReference?
         if let requested, requested.kind == .project {
-            if let current = waveForProject(projectId: requested.id) {
-                selection = .wave(id: current.wave.id)
+            if let wave = waveForProject(projectId: requested.id) {
+                selection = .wave(id: wave.wave.id)
             } else {
                 historyLookup = Task { await openHistoricalReference(requested.id) }
                 return
@@ -2363,7 +2340,7 @@ final class WorkModel {
             let result = try? await query.status(wave: wave.wave.name, cwd: wave.wave.repo)
             guard !Task.isCancelled else { return }
             guard let entries = result?.projects.items else { continue }
-            if entries.contains(where: { $0.id == reference || $0.slug == reference || $0.trackerId == reference }) {
+            if entries.contains(where: { $0.matches(reference: reference) }) {
                 select(.wave(id: wave.wave.id))
                 historyReference = reference
                 historyWave = wave.wave
@@ -3038,7 +3015,7 @@ final class WorkModel {
     }
 
     func waveForProject(projectId: String) -> WaveRoadmap? {
-        roadmap.value?.waves.first { $0.currentProject?.id == projectId || $0.currentProject?.slug == projectId || $0.currentProject?.trackerId == projectId }
+        roadmap.value?.waves.first { $0.projects.items.contains { $0.matches(reference: projectId) } }
     }
 
     /// Current repository inventory only; retained navigation evidence is display-only.

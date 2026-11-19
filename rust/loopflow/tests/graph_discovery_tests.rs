@@ -222,7 +222,7 @@ fn graph_catalog_and_wave_selection_read_the_same_graphs() {
     let customized = run(&["graph", "customize", "feature"]);
     assert!(customized.status.success());
     let store = loopflow_execution::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
-    loopflow_execution::work::wave::bootstrap::ensure_wave_project(
+    loopflow_execution::test_support::seed_wave_project(
         &store,
         repo.path().canonicalize().unwrap().to_str().unwrap(),
         "proof",

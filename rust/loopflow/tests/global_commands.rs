@@ -622,7 +622,7 @@ fn repo_selection_carries_scoped_task_prefix_through_reads_and_writes() {
                 |row| row.get(0),
             )
             .unwrap();
-        let project = store.join_project(&wave, "inbox").unwrap().project.id;
+        let project = store.join_project(&wave, "inbox").unwrap().id;
         store
             .create_task(&loopflow_execution::work::task::NewTask {
                 repository_id: loopflow_execution::repository::location::ensure_repository(
@@ -2199,13 +2199,13 @@ fn task_planning_explain_creation_provenance_follows_resolved_selection() {
     fs::create_dir_all(path.parent().unwrap()).unwrap();
     let store = loopflow_execution::store::open_sqlite(&path).unwrap();
     let canonical = repo.path().canonicalize().unwrap();
-    let selected = loopflow_execution::work::wave::bootstrap::ensure_wave_project(
+    let selected = loopflow_execution::test_support::seed_wave_project(
         &store,
         canonical.to_str().unwrap(),
         "selected",
     )
     .unwrap();
-    loopflow_execution::work::wave::bootstrap::ensure_wave_project(
+    loopflow_execution::test_support::seed_wave_project(
         &store,
         canonical.to_str().unwrap(),
         "inbox",
@@ -2295,12 +2295,7 @@ fn task_planning_explain_move_resolves_destination_and_retains_recorded_work() {
                 row.get(0)
             })
             .unwrap();
-        store
-            .join_project(&id, wave)
-            .unwrap()
-            .project
-            .id
-            .to_string()
+        store.join_project(&id, wave).unwrap().id.to_string()
     };
     let source = project("source");
     let destination = project("destination");

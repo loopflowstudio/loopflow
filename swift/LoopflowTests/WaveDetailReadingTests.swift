@@ -22,16 +22,16 @@ struct WaveDetailReadingTests {
         #expect(reading.snapshot == nil)
     }
 
-    @Test("a readable status with no project does not revive cached KRs")
-    func missingCurrentProjectReplacesCachedPlan() throws {
+    @Test("an unavailable Project reading replaces cached Projects")
+    func unavailableProjectsReplaceCachedPlan() throws {
         let cached = WavePlan(objective: "Earlier objective", projects: try planningWave().workMap.projects)
-        #expect(cached.currentProject?.krs.isEmpty == false)
+        #expect(!cached.projects.items.isEmpty)
 
         let current = try planningWave { $0["projects"] = ["state": "unavailable", "reason": "Provider unavailable"] }
         var reading = WaveDetailReading()
         reading.update(current)
 
-        #expect(reading.plan(cached: cached).currentProject == nil)
+        #expect(reading.plan(cached: cached).projects == .unavailable(reason: "Provider unavailable"))
         #expect(reading.plan(cached: cached).objective == current.workMap.objective)
 
         reading.clear()

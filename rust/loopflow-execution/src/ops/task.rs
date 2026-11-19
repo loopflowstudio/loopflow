@@ -2226,7 +2226,8 @@ async fn file_task_in(
         )
         .await?;
         let id = task.id.clone();
-        let task = adoption::save(store, main, id, None, source, None, false, receipt).await?;
+        let task =
+            adoption::save(store, main, id, None, None, source, None, false, receipt).await?;
         return store
             .get_task(&task.id)
             .await
@@ -2246,16 +2247,9 @@ async fn file_task_in(
     }
     let selected = select_task_creation_wave(store, main, wave).await?;
     let wave_slug = selected.as_ref().map(|wave| wave.slug().to_string());
-    let (creation_project, acquisition) = match selected {
-        Some(wave) => {
-            let acquisition = super::planning_sync::lock_wave_planning(&wave).await?;
-            let joined = store
-                .sqlite
-                .join_project(wave.id(), wave.slug())
-                .map_err(task_error)?;
-            (Some(joined), Some(acquisition))
-        }
-        None => (None, None),
+    let acquisition = match &selected {
+        Some(wave) => Some(super::planning_sync::lock_wave_planning(wave).await?),
+        None => None,
     };
     let repository_id =
         crate::repository::location::ensure_repository(&store.sqlite, &main.to_string_lossy())
@@ -2264,9 +2258,7 @@ async fn file_task_in(
         due_date: None,
         id: loopflow_model::durable::TaskId::new(),
         repository_id,
-        project_id: creation_project
-            .as_ref()
-            .map(|joined| joined.project.id.clone()),
+        project_id: None,
         title: input.title,
         description: input.report,
     };
@@ -2287,6 +2279,7 @@ async fn file_task_in(
         main,
         creation.id.clone(),
         Some(creation),
+        selected.map(|wave| wave.id().clone()),
         source,
         acquisition,
         false,
@@ -3147,19 +3140,17 @@ pub fn task_move_membership(repo: &Path, issue: &str, wave: Option<&str>) -> Ops
         for wave in &waves {
             guards.push(super::planning_sync::lock_wave_planning(wave).await?);
         }
-        let joined = destination
-            .as_ref()
-            .map(|wave| store.sqlite.join_project(wave.id(), wave.slug()))
-            .transpose()
-            .map_err(task_error)?;
-        store
-            .sqlite
-            .move_task(
-                &task.id,
-                task.project_id.as_ref(),
-                joined.as_ref().map(|joined| &joined.project.id),
-            )
-            .map_err(task_error)?;
+        match destination {
+            Some(wave) => {
+                store
+                    .sqlite
+                    .move_task_to_wave(&task.id, task.project_id.as_ref(), wave.id())
+            }
+            None => store
+                .sqlite
+                .move_task(&task.id, task.project_id.as_ref(), None),
+        }
+        .map_err(task_error)?;
         drop(guards);
         super::planning_sync::sync_after_save(
             &store,

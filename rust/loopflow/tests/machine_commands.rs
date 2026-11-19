@@ -1363,7 +1363,7 @@ impl SharedPlan {
         store: &loopflow_execution::store::sqlite::SqliteStore,
         path: &Path,
     ) -> loopflow_execution::durable::TaskId {
-        let project = loopflow_execution::work::wave::bootstrap::ensure_wave_project(
+        let project = loopflow_execution::test_support::seed_wave_project(
             store,
             path.to_str().unwrap(),
             "owners",
@@ -1815,7 +1815,7 @@ fn set_machine_changes_local_preferences_without_copying_or_moving_work() {
     let laptop = loopflow_execution::store::machines::local_machine(&plan.local)
         .unwrap()
         .id;
-    let wave = loopflow_execution::work::wave::bootstrap::ensure_wave_project(
+    let wave = loopflow_execution::test_support::seed_wave_project(
         &plan.local,
         plan.local_path.to_str().unwrap(),
         "owners",

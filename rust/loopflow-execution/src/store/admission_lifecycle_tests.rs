@@ -43,7 +43,6 @@ fn a_task_launches_in_any_project_of_its_wave() {
             .new_task_project(task.wave_id.as_ref().unwrap())
             .unwrap()
             .unwrap()
-            .project
             .id,
         newer.id
     );
@@ -361,6 +360,7 @@ fn promotion_directory_survives_an_opening_prepared_before_binding() {
         &task_id,
         None,
         None,
+        None,
         Some(&session),
         task.worktree.as_deref(),
         None,
@@ -403,6 +403,7 @@ fn promotion_binding_survives_completion_after_placement_preparation() {
         let bound = crate::store::ownership::promote_task(
             &store,
             &task_id,
+            None,
             None,
             Some(&placement),
             Some(&session),

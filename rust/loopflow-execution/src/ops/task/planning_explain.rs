@@ -208,8 +208,7 @@ async fn read_planning(
                 .as_ref()
                 .map(|wave| store.sqlite.new_task_project(wave.id()))
                 .transpose()?
-                .flatten()
-                .map(|joined| joined.project);
+                .flatten();
             report.action = Some(TaskPlanningAction::Move {
                 wave: destination.as_ref().map(|w| w.id().to_string()),
                 project: project.as_ref().map(|p| p.id.to_string()),
@@ -391,7 +390,7 @@ async fn read_creation(
         project: selected, ..
     }) = &mut report.action
     {
-        *selected = joined.map(|joined| joined.project.id.to_string());
+        *selected = joined.map(|project| project.id.to_string());
     }
     Ok(())
 }

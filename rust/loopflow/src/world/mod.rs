@@ -382,7 +382,7 @@ impl World {
                 None,
             ),
         )?;
-        let project = store.sqlite.join_project(wave.id(), wave.slug())?.project;
+        let project = store.sqlite.join_project(wave.id(), wave.slug())?;
         store
             .sqlite
             .update_project_content(&project.id, &krs, &targets)?;

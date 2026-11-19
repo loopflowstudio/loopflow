@@ -73,18 +73,22 @@ impl SqliteStore {
     ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let current = validate_move(&tx, id, expected_project, destination)?;
-        if current.project_id.as_ref() == destination {
-            return Ok(());
-        }
-        super::planning_write::local(
-            &tx,
-            &crate::work::edit::WorkEdit::for_target(
-                id.as_str(),
-                &[Edit::TaskProject(destination.map(ToString::to_string))],
-            ),
-        )
-        .map(|_| ())?;
+        move_task_in(&tx, id, expected_project, destination)?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Pick the new Task's Project and save membership in the same transaction.
+    pub fn move_task_to_wave(
+        &self,
+        id: &TaskId,
+        expected_project: Option<&ProjectId>,
+        wave: &loopflow_model::id::WaveId,
+    ) -> StoreResult<()> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let dest = super::children::join_project_in(&tx, wave, None)?.id;
+        move_task_in(&tx, id, expected_project, Some(&dest))?;
         tx.commit()?;
         Ok(())
     }
@@ -170,6 +174,27 @@ fn validate_edit(
         return Err(StoreError::InvalidData("Task title cannot be empty".into()));
     }
     Ok(task)
+}
+
+fn move_task_in(
+    conn: &rusqlite::Connection,
+    id: &TaskId,
+    expected_project: Option<&ProjectId>,
+    destination: Option<&ProjectId>,
+) -> StoreResult<()> {
+    let current = validate_move(conn, id, expected_project, destination)?;
+    if current.project_id.as_ref() == destination {
+        return Ok(());
+    }
+    super::planning_write::local(
+        conn,
+        &crate::work::edit::WorkEdit::for_target(
+            id.as_str(),
+            &[Edit::TaskProject(destination.map(ToString::to_string))],
+        ),
+    )
+    .map(|_| ())?;
+    Ok(())
 }
 
 fn validate_move(

@@ -97,7 +97,7 @@ struct DTOFixtureTests {
         let added = try RegistryQuery.decode(
             WaveAdded.self, from: String(decoding: loadFixtureData("wave_added.json"), as: UTF8.self))
         #expect(added.created)
-        #expect(added.project.id == "proj_283eee0d35124e709d4bd0ecadce83f3")
+        #expect(added.name == "research")
         #expect(added.files == .uncommitted(reason: "HEAD is detached"))
         #expect(added.summary.count == 1)
     }
@@ -622,29 +622,21 @@ struct DTOFixtureTests {
         }
     }
 
-    @Test("Configured Project selection survives competing statuses and provider renames")
-    func configuredProjectSelection() throws {
+    @Test("Wave detail keeps ended and started Projects in the supplied order")
+    func projectOrderAndStatus() throws {
         var root = try #require(JSONSerialization.jsonObject(with: loadFixtureData("wave_detail.json")) as? [String: Any])
         var projects = try #require(root["projects"] as? [String: Any])
         let rows = try #require(projects["items"] as? [[String: Any]])
-        var previous = try #require(rows.first)
-        previous["current"] = false
-        var selected = previous
-        selected["id"] = "configured-project"
-        selected["name"] = "Summer work — customer requests"
-        selected["current"] = true
-        selected["workflow"] = ""
-        projects["items"] = [previous, selected]
+        var ended = try #require(rows.first)
+        ended["id"] = "ended-project"
+        ended["status"] = "completed"
+        projects["items"] = [ended] + rows
         root["projects"] = projects
+
         let status = try JSONDecoder().decode(WaveDetailSnapshot.self, from: JSONSerialization.data(withJSONObject: root))
-        #expect(status.currentProject?.id == "configured-project")
         #expect(status.projects.items.count == 2)
-        selected.removeValue(forKey: "current")
-        projects["items"] = [selected]
-        root["projects"] = projects
-        #expect(throws: DecodingError.self) {
-            try JSONDecoder().decode(WaveDetailSnapshot.self, from: JSONSerialization.data(withJSONObject: root))
-        }
+        #expect(status.projects.items.first?.id == "ended-project")
+        #expect(status.projects.items.map(\.status) == [.completed, .started])
     }
 
     @Test("Work Activity fixture carries Session records tagged with Work")
@@ -684,9 +676,6 @@ struct DTOFixtureTests {
         let data = try loadFixtureData("wave_detail.json")
         let detail = try JSONDecoder().decode(WaveDetailSnapshot.self, from: data)
 
-        #expect(detail.projectReadiness.state == .ready)
-        #expect(detail.projectReadiness.projectId == detail.currentProject?.id)
-        #expect(detail.projectReadiness.activation == nil)
         #expect(detail.wave.machine?.id == "home_00000000000000000000000000000001")
         #expect(detail.wave.machine?.route == "ssh://jack@mini-heart")
         #expect(detail.wave.machine?.label == "mini")
@@ -694,7 +683,7 @@ struct DTOFixtureTests {
         // The Machine runtime evidence carries the state and the one contextual action.
 
 
-        #expect(detail.currentProject?.sync.actions[1].kind == "order")
+        #expect(detail.projects.items.first?.sync.actions[1].kind == "order")
         #expect(detail.unavailableTasks[0].taskIdentifier == "W2-127")
         #expect(detail.unavailableTasks[0].status == .unstarted)
         #expect(detail.unavailableTasks[0].owner == .wave)

@@ -94,11 +94,31 @@ pub(crate) fn new_task_scope_in(
             )
         })
         .transpose()?;
+    filing_scope_in(conn, repository, project, wave)
+}
+
+fn filing_scope_in(
+    conn: &Connection,
+    repository: &RepositoryId,
+    project: Option<&ProjectId>,
+    wave: Option<String>,
+) -> StoreResult<TaskScope> {
     Ok(TaskScope {
         repository: repository.clone(),
         project: project.cloned(),
         placement: scope_in(conn, wave, Some(repository.to_string()))?,
     })
+}
+
+pub(super) fn promotion_scope_in(
+    conn: &Connection,
+    task: &crate::work::task::NewTask,
+    wave: Option<&WaveId>,
+) -> StoreResult<TaskScope> {
+    match wave {
+        Some(wave) => filing_scope_in(conn, &task.repository_id, None, Some(wave.to_string())),
+        None => new_task_scope_in(conn, &task.repository_id, task.project_id.as_ref()),
+    }
 }
 
 pub(crate) fn task_scope_in(conn: &Connection, task: &TaskId) -> StoreResult<TaskScope> {
@@ -132,6 +152,16 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let snapshot = conn.savepoint()?;
         new_task_scope_in(&snapshot, repository, project)
+    }
+
+    pub fn promotion_scope(
+        &self,
+        task: &crate::work::task::NewTask,
+        wave: Option<&WaveId>,
+    ) -> StoreResult<TaskScope> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let snapshot = conn.savepoint()?;
+        promotion_scope_in(&snapshot, task, wave)
     }
 
     pub fn placement_scope(

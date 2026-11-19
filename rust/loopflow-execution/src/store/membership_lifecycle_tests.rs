@@ -11,10 +11,9 @@ fn membership_moves_preserve_work_and_capture_owners() {
     let canonical = repo.path().canonicalize().unwrap();
     let path = canonical.to_str().unwrap();
     let repository = crate::repository::location::ensure_repository(&store, path).unwrap();
-    let product =
-        crate::work::wave::bootstrap::ensure_wave_project(&store, path, "product").unwrap();
-    let other = crate::work::wave::bootstrap::ensure_wave_project(&store, path, "other").unwrap();
-    let foreign = crate::work::wave::bootstrap::ensure_wave_project(
+    let product = crate::test_support::seed_wave_project(&store, path, "product").unwrap();
+    let other = crate::test_support::seed_wave_project(&store, path, "other").unwrap();
+    let foreign = crate::test_support::seed_wave_project(
         &store,
         foreign_repo.path().to_str().unwrap(),
         "foreign",

@@ -94,14 +94,10 @@ struct WaveStandup: Equatable {
         return try? Date.ISO8601FormatStyle().parse(timestamp)
     }
 
-    /// A Wave's heading lines: name and status, objective, Project and KRs.
+    /// A Wave's heading lines: name, status and objective.
     static func heading(_ roadmap: WaveRoadmap) -> [String] {
         var lines = ["\(roadmap.wave.displayName) · \(roadmap.wave.status.label)"]
         if let objective = roadmap.wave.goal.split(separator: "\n").first { lines.append(String(objective)) }
-        if let project = roadmap.currentProject {
-            lines.append("\(project.name) · \(project.status.rawValue.capitalized)")
-            lines += project.krs.map { "\($0.holds ? "✓" : "✗") \($0.text)" }
-        }
         return lines
     }
 
@@ -156,7 +152,6 @@ struct WaveStandupBoard: View {
         VStack(alignment: .leading, spacing: Spacing.lg) {
             if let roadmap {
                 header(roadmap)
-                project(roadmap)
             } else if view == .repository {
                 HStack(alignment: .firstTextBaseline, spacing: Spacing.md) {
                     Text(model.repositoryName).font(Typography.strong(24))
@@ -198,10 +193,10 @@ struct WaveStandupBoard: View {
             Spacer(minLength: 0)
             ShowHiddenMenu(model: model, view: view)
             Menu {
-                Button("Project history") {
+                Button("Projects") {
                     model.historyReference = nil
                     model.historyWave = roadmap.wave
-                }.accessibilityIdentifier("wave-project-history")
+                }.accessibilityIdentifier("wave-projects")
                 if let workflow = roadmap.graph {
                     Button("Workflow · \(workflow)") {
                         Task {
@@ -213,32 +208,6 @@ struct WaveStandupBoard: View {
             } label: { Image(systemName: "ellipsis.circle") }
                 .menuStyle(.borderlessButton).fixedSize()
                 .accessibilityIdentifier("wave-board-menu")
-        }
-    }
-
-    @ViewBuilder
-    private func project(_ roadmap: WaveRoadmap) -> some View {
-        if let error = roadmap.projects.unavailableReason {
-            Text("Project unavailable · \(error)").foregroundStyle(palette.warning)
-        } else if let project = roadmap.currentProject {
-            VStack(alignment: .leading, spacing: Spacing.sm) {
-                HStack(spacing: Spacing.md) {
-                    Text("\(project.name) · \(project.status.rawValue.capitalized)")
-                        .font(Typography.strong(15)).accessibilityIdentifier("wave-current-project")
-                    Text(WaveMetricPortfolioPresentation(portfolio: roadmap.metricPortfolio).headline)
-                        .font(Typography.body(13)).foregroundStyle(palette.textSecondary).lineLimit(1)
-                        .accessibilityIdentifier("wave-metric-headline")
-                    TrackerSyncView(sync: project.sync, repo: roadmap.wave.repo)
-                }
-                ForEach(project.krs) { kr in
-                    Label(kr.text, systemImage: kr.holds ? "checkmark.circle.fill" : "xmark.circle")
-                        .font(Typography.body(15)).lineLimit(1)
-                        .foregroundStyle(kr.holds ? palette.success : palette.textSecondary)
-                }
-            }
-        } else {
-            Text("No current Project").font(Typography.body(15)).foregroundStyle(palette.textSecondary)
-                .accessibilityIdentifier("wave-no-project")
         }
     }
 

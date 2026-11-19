@@ -78,12 +78,9 @@ fn changed_repository_rejects_stale_claim_and_uses_its_git_identity() {
 fn new_task_reacquires_placement_after_wave_ancestry_changes() {
     let (_home, store) = store();
     let repo = TestRepo::new();
-    let project = crate::work::wave::bootstrap::ensure_wave_project(
-        &store,
-        repo.path().to_str().unwrap(),
-        "child",
-    )
-    .unwrap();
+    let project =
+        crate::test_support::seed_wave_project(&store, repo.path().to_str().unwrap(), "child")
+            .unwrap();
     let old_parent =
         crate::work::wave::bootstrap::ensure_wave(&store, repo.path().to_str().unwrap(), "old")
             .unwrap();
@@ -140,6 +137,7 @@ fn new_task_reacquires_placement_after_wave_ancestry_changes() {
             None,
             None,
             None,
+            None,
             &stale,
             &loopflow_storage::sqlite::SessionCaller {
                 agent: None,
@@ -157,6 +155,7 @@ fn new_task_reacquires_placement_after_wave_ancestry_changes() {
         None,
         None,
         None,
+        None,
     )
     .unwrap();
     let claim = claim_task(&store, &creation.id).unwrap().unwrap();
@@ -167,18 +166,10 @@ fn new_task_reacquires_placement_after_wave_ancestry_changes() {
 fn existing_claim_rejects_a_changed_project_scope() {
     let (_home, store) = store();
     let repo = TestRepo::new();
-    let old = crate::work::wave::bootstrap::ensure_wave_project(
-        &store,
-        repo.path().to_str().unwrap(),
-        "old",
-    )
-    .unwrap();
-    let new = crate::work::wave::bootstrap::ensure_wave_project(
-        &store,
-        repo.path().to_str().unwrap(),
-        "new",
-    )
-    .unwrap();
+    let old = crate::test_support::seed_wave_project(&store, repo.path().to_str().unwrap(), "old")
+        .unwrap();
+    let new = crate::test_support::seed_wave_project(&store, repo.path().to_str().unwrap(), "new")
+        .unwrap();
     let mut creation = input(&store, repo.path());
     creation.project_id = Some(old.id);
     let task = store.create_task(&creation).unwrap();
@@ -280,12 +271,9 @@ fn linked_checkout_resolves_the_same_private_placement_file() {
             checkout.to_str().unwrap(),
         ],
     );
-    let project = crate::work::wave::bootstrap::ensure_wave_project(
-        &store,
-        repo.path().to_str().unwrap(),
-        "work",
-    )
-    .unwrap();
+    let project =
+        crate::test_support::seed_wave_project(&store, repo.path().to_str().unwrap(), "work")
+            .unwrap();
     let target = MachineId::new();
     set_machine_default(
         &store,
@@ -428,6 +416,7 @@ fn promotion_refuses_a_replaced_caller_for_either_title_source() {
             &creation.id,
             Some(&creation),
             None,
+            None,
             Some(&before),
             None,
             None,
@@ -443,4 +432,71 @@ fn promotion_refuses_a_replaced_caller_for_either_title_source() {
         assert_eq!(store.session_history(&id, 0, 0).unwrap(), history);
         assert_eq!(store.session_attachment(&id).unwrap(), Some(replacement));
     }
+}
+
+#[test]
+fn a_failed_save_into_an_empty_wave_makes_no_project() {
+    let (_home, store) = store();
+    let repo = TestRepo::new();
+    let wave =
+        crate::work::wave::bootstrap::ensure_wave(&store, repo.path().to_str().unwrap(), "product")
+            .unwrap();
+    let standalone = input(&store, repo.path());
+    super::promote_task(
+        &store,
+        &standalone.id,
+        Some(&standalone),
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+    .unwrap();
+    let fail = |sql: &str| store.conn.lock().unwrap().execute_batch(sql).unwrap();
+
+    fail("CREATE TRIGGER reject BEFORE INSERT ON tasks BEGIN SELECT RAISE(ABORT,'injected'); END;");
+    let creation = input(&store, repo.path());
+    let filed = super::promote_task(
+        &store,
+        &creation.id,
+        Some(&creation),
+        Some(&wave),
+        None,
+        None,
+        None,
+        None,
+    );
+    assert!(filed.is_err());
+    assert!(store.list_projects(Some(&wave)).unwrap().is_empty());
+    fail("DROP TRIGGER reject;
+          CREATE TRIGGER reject BEFORE UPDATE OF project_id ON tasks BEGIN SELECT RAISE(ABORT,'injected'); END;");
+    assert!(store
+        .move_task_to_wave(&standalone.id, None, &wave)
+        .is_err());
+    assert!(store.list_projects(Some(&wave)).unwrap().is_empty());
+    fail("DROP TRIGGER reject;");
+
+    let filed = super::promote_task(
+        &store,
+        &creation.id,
+        Some(&creation),
+        Some(&wave),
+        None,
+        None,
+        None,
+        None,
+    )
+    .unwrap();
+    store
+        .move_task_to_wave(&standalone.id, None, &wave)
+        .unwrap();
+    let projects = store.list_projects(Some(&wave)).unwrap();
+    assert_eq!(projects.len(), 1);
+    assert_eq!(projects[0].name, "product");
+    assert_eq!(filed.project_id.as_ref(), Some(&projects[0].id));
+    assert_eq!(
+        store.task(&standalone.id).unwrap().unwrap().project_id,
+        Some(projects[0].id.clone())
+    );
 }

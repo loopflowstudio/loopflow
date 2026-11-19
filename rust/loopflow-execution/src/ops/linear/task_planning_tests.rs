@@ -522,7 +522,6 @@ fn with_export_plan(
         .sqlite
         .join_project(wave.id(), "Local project")
         .unwrap()
-        .project
         .id;
     let task = fixture
         .store

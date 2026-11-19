@@ -1480,11 +1480,9 @@ public struct RoadmapSnapshot: Decodable, Sendable, Hashable {
 public struct WaveRoadmap: Sendable, Hashable {
     /// The graph the Wave's Tasks take up by default.
     public let graph: String?
-    public let projectReadiness: ProjectReadiness
     public let wave: WaveSnapshot
     public let metricPortfolio: MetricPortfolio
     public let projects: WorkEvidence<ProjectPlanningSnapshot>
-    public var currentProject: ProjectPlanningSnapshot? { projects.currentProject }
     /// This Wave's share of the roadmap's Tasks, which the wire sends once.
     public let tasks: WorkEvidence<RoadmapTask>
     public let unavailableTasks: [UnavailableTaskEvidence]
@@ -1494,7 +1492,6 @@ public struct WaveRoadmap: Sendable, Hashable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case projectReadiness = "project_readiness"
         case wave, projects, graph
         case metricPortfolio = "metric_portfolio"
         case unavailableTasks = "unavailable_tasks"
@@ -1503,7 +1500,6 @@ public struct WaveRoadmap: Sendable, Hashable {
     init(from decoder: Decoder, roadmapTasks: WorkEvidence<RoadmapTask>) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         graph = try container.decode(String?.self, forKey: .graph)
-        projectReadiness = try container.decode(ProjectReadiness.self, forKey: .projectReadiness)
         let wave = try container.decode(WaveSnapshot.self, forKey: .wave)
         self.wave = wave
         metricPortfolio = try container.decode(MetricPortfolio.self, forKey: .metricPortfolio)
@@ -1537,10 +1533,8 @@ public struct UnavailableTaskEvidence: Decodable, Sendable, Hashable {
 /// `lf wave status <wave>` snapshot. Mirrors Rust `WaveDetailSnapshot` without
 /// reshaping or dropping fields, so every Wave surface starts from one reading.
 public struct WaveDetailSnapshot: Decodable, Sendable {
-    public let projectReadiness: ProjectReadiness
     public let wave: WaveSnapshot
     public let projects: WorkEvidence<ProjectPlanningSnapshot>
-    public var currentProject: ProjectPlanningSnapshot? { projects.currentProject }
     public let tasks: WorkEvidence<RoadmapTask>
     public let metricPortfolio: MetricPortfolio
     public let unavailableTasks: [UnavailableTaskEvidence]
@@ -1551,7 +1545,6 @@ public struct WaveDetailSnapshot: Decodable, Sendable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case projectReadiness = "project_readiness"
         case wave, projects, tasks, history
         case metricPortfolio = "metric_portfolio"
         case unavailableTasks = "unavailable_tasks"
@@ -1930,29 +1923,6 @@ public struct CodeSlice: Decodable, Sendable, Identifiable {
     public let ext: String
     public let lines: Int
     public let tokens: Int
-}
-
-public struct ProjectReadiness: Decodable, Sendable, Hashable {
-    public enum State: String, Decodable, Sendable { case unconfigured, unavailable, inactive, ready, terminal }
-    public let state: State
-    public let projectId: String?
-    public let observedAt: Int64?
-    public let pendingSuccessor: String?
-    public let activation: Activation?
-
-    public struct Activation: Decodable, Sendable, Hashable {
-        public let lfProcessId: String
-        public let completedAt: Int64?
-        public let outcome: String?
-        public let error: String?
-        enum CodingKeys: String, CodingKey {
-            case lfProcessId = "lf_process_id", completedAt = "completed_at", outcome, error
-        }
-    }
-    enum CodingKeys: String, CodingKey {
-        case state, activation
-        case projectId = "project_id", observedAt = "observed_at", pendingSuccessor = "pending_successor"
-    }
 }
 
 /// `[flag, value]` for a present value, the bare value with no flag, nothing when absent.

@@ -26,7 +26,7 @@ fn local_repository_path(store: &SqliteStore) -> String {
 
 fn local_project(store: &SqliteStore) -> ProjectId {
     local_repository(store);
-    crate::work::wave::bootstrap::ensure_wave_project(
+    crate::test_support::seed_wave_project(
         store,
         store.home_dir().unwrap().to_str().unwrap(),
         "inbox",
@@ -916,6 +916,7 @@ fn an_admitted_creation_commits_task_graph_claim_and_conversation_together() {
             &store,
             &creation.id,
             Some(&creation),
+            None,
             None,
             None,
             None,

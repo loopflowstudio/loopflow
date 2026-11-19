@@ -26,20 +26,17 @@ struct WaveDetailPane: View {
     let repoPath: String
     /// This Wave's share of the window's planning reading, once one has arrived.
     let streamed: StreamedWaveDetail?
-    let isProjectActivationPending: Bool
-    let transportError: String?
-    let onActivateProject: () -> Void
     let onClose: () -> Void
     let onOpenTask: (String) -> Void
 
     @Environment(\.palette) private var palette
-    @State private var showHistory = false
+    @State private var showProjects = false
 
     var body: some View {
         VStack(spacing: 0) {
             header
             HStack {
-                Button("Project history") { showHistory = true }
+                Button("Projects") { showProjects = true }
             }.padding(.bottom, 8)
             Divider()
             HSplitView {
@@ -47,22 +44,16 @@ struct WaveDetailPane: View {
                     plan: wave.plan ?? WavePlan(objective: ""),
                     wave: wave,
                     streamed: streamed,
-                    isProjectActivationPending: isProjectActivationPending,
-                    transportError: transportError,
-                    onActivateProject: onActivateProject,
                     onOpenTask: onOpenTask
                 )
                 .id("\(repoPath)|\(wave.id)")
                 .frame(minWidth: 230, idealWidth: 320, maxWidth: 440, maxHeight: .infinity)
-
-
             }
         }
-        .sheet(isPresented: $showHistory) {
-            ProjectHistoryView(wave: wave.name, repo: repoPath, sourceReference: nil)
+        .sheet(isPresented: $showProjects) {
+            WaveProjectsView(wave: wave.name, repo: repoPath, sourceReference: nil)
         }
     }
-
 
     private var header: some View {
         HStack(spacing: Spacing.sm) {
@@ -93,9 +84,6 @@ private struct WavePlanView: View {
     let plan: WavePlan
     let wave: WaveViewModel
     let streamed: StreamedWaveDetail?
-    let isProjectActivationPending: Bool
-    let transportError: String?
-    let onActivateProject: () -> Void
     let onOpenTask: (String) -> Void
 
     @Environment(\.palette) private var palette
@@ -115,9 +103,6 @@ private struct WavePlanView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: Spacing.xl) {
                 objective
-                ProjectReadinessView(readiness: reading.snapshot?.projectReadiness,
-                                     isPending: isProjectActivationPending,
-                                     transportError: transportError, retry: onActivateProject)
                 projectAndTasks
                 if let portfolio = reading.snapshot?.metricPortfolio {
                     WaveMetricPortfolioView(
@@ -237,7 +222,7 @@ private struct WavePlanView: View {
 
     private var projectAndTasks: some View {
         VStack(alignment: .leading, spacing: Spacing.md) {
-            if let project = displayedPlan.currentProject { WaveProjectView(project: project, repo: wave.repo) }
+            ForEach(displayedPlan.projects.items) { WaveProjectView(project: $0, repo: wave.repo) }
             if isAwaitingDetail {
                 WorkSectionHeading("Tasks")
                 ProgressView("Loading Tasks…").accessibilityIdentifier("wave-detail-loading")
@@ -836,7 +821,11 @@ struct WaveProjectView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(project.name).font(Typography.sectionTitle(15)).textSelection(.enabled)
+            HStack(alignment: .firstTextBaseline) {
+                Text(project.name).font(Typography.sectionTitle(15)).textSelection(.enabled)
+                Text(project.status.rawValue.capitalized)
+                    .font(Typography.caption()).foregroundStyle(palette.textSecondary)
+            }
             TrackerSyncView(sync: project.sync, repo: repo)
             ForEach(project.krs) { kr in
                 HStack(alignment: .firstTextBaseline, spacing: 10) {

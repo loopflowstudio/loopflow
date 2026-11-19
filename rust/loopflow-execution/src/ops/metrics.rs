@@ -21,7 +21,7 @@ pub async fn wave_metric_portfolio(
     let targets = store
         .sqlite
         .new_task_project(wave.id())?
-        .map(|joined| joined.project.metric_targets)
+        .map(|project| project.metric_targets)
         .unwrap_or_default();
     project_metric_portfolio(store, wave, &targets, evaluation_time).await
 }

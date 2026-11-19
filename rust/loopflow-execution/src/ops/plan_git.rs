@@ -493,8 +493,7 @@ mod tests {
 
         fn task(&self, title: &str) -> loopflow_model::durable::TaskId {
             let project =
-                crate::work::wave::bootstrap::ensure_wave_project(&self.store, &self.repo, "plan")
-                    .unwrap();
+                crate::test_support::seed_wave_project(&self.store, &self.repo, "plan").unwrap();
             self.store
                 .create_task(&NewTask {
                     repository_id: crate::repository::location::ensure_repository(

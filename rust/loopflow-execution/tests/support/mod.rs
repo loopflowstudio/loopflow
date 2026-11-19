@@ -23,6 +23,17 @@ pub mod rex;
 // Shared with the library's cfg(test) store setup; production never embeds it.
 pub use loopflow_storage::test_database;
 
+/// Create the Wave and a Project for fixtures that need Task membership.
+#[allow(dead_code)] // Shared helper compiled into each integration test binary.
+pub fn seed_wave_project(
+    store: &loopflow_storage::sqlite::SqliteStore,
+    repo: &str,
+    name: &str,
+) -> loopflow_storage::StoreResult<Project> {
+    let wave = loopflow::work::wave::bootstrap::ensure_wave(store, repo, name)?;
+    Ok(store.join_project(&wave, name)?)
+}
+
 #[allow(dead_code)] // Shared helper compiled into each integration test binary.
 pub fn seed_store(home: &Path) {
     test_database::copy(&home.join("loopflow.db")).expect("copy fixture store");

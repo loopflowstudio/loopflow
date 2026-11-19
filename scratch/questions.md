@@ -49,3 +49,4 @@ Jack, quoting vision C ("A mark, not a state: delete TaskState::Shipping and Tas
 - "4) b"
 
 Open: the word (auto vs Auto-Ship), whether `lf ship` stays as shorthand, what replaces `lf task hold`.
+- Jack, on whether Auto-Ship becomes "auto" in product copy too: "ok lets take the next pass. Just become an Auto toggle works."

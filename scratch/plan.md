@@ -323,20 +323,41 @@ and the iOS README.
 
 `lf ship --stop` doesn't exist on main; `lf task hold` is the one stop.
 
-## Build pass after human review: one word for Auto-Ship (in scope)
+## Build pass after human review: Auto is a setting, not a state
 
-The state `shipping`, the board section `Autonomous` and the mark Auto-Ship are
-one idea under three words. This pass makes Auto-Ship the only word:
+Chosen from `scratch/explore.html` (vision C, with `lf task auto on|off`).
+Jack: "this is cloest" (on C); "i think lf task auto on lf task auto off
+maybe?"; "ok lets take the next pass. Just become an Auto toggle works."
 
-- `TaskState::Shipping` → `TaskState::AutoShip` (label `auto-ship`) and
-  `TaskSection::Autonomous` → `TaskSection::AutoShip` (title "Auto-Ship"),
-  through `task_state_sql`, the wire DTOs and their fixtures in
-  `tests/fixtures/dto/`, Swift, Desktop, CLI output, docs, AGENTS.md's work
-  model and the operate skills. No compat alias: nothing has shipped.
-- The stop's words follow (concept review question 1a): `lf task hold` keeps
-  its name and prints "LOO-12: Auto-Ship stopped" / "Auto-Ship was not on";
-  the run waits with "Auto-Ship stopped by Maya. `lf ship` lands it." Tests
-  call `task hold`, not the `ship --stop` alias, and the alias goes.
-- `.lf/graphs/autonomous.yaml` is a graph name, not the section; leave it.
-- Still open, not part of this pass: whether `lf -b task run` writes Auto-Ship
-  on (concept review question 2).
+Status and setting are separate axes. `TaskState` says what is happening;
+the auto setting says who takes the interactive steps. One word: **auto**.
+
+- Delete `TaskState::Shipping` and `TaskSection::Autonomous`. `Moving` means
+  "a Graph runs for it"; a Task with auto on reads `moving` while it runs and
+  sits in Working. `task_state_sql` and `TaskSection::of` never read the
+  setting. Wire, DTO fixtures (`tests/fixtures/dto/`), Swift (`WorkTone`,
+  `PendingChanges`, `WaveStandupBoard`, `WorkNavigator`, `RoadmapView`,
+  `WorkModel` counts), Wave counts, AGENTS.md's work model and the operate
+  skills follow. No compat alias.
+- Rename the mark to auto: `AutoShip`/`AutoShipState` → `Auto`/`AutoState`
+  (on | stopped), columns `task_graphs.auto{,_at,_by}` (unmerged migration,
+  edit in place), snapshot field `auto`.
+- `lf task auto on <task>` / `lf task auto off <task>` set it. `auto off`
+  replaces `lf task hold`, `task.hold`, `ship_stop` and the `ship --stop`
+  alias; all of those go. Output: "LOO-12: auto on" / "LOO-12: auto off" /
+  "LOO-12: auto was not on". Engine/served op names follow (`task.auto`).
+- `lf ship <task>` stays as shorthand: `auto on`, then exactly `lf task run`.
+- Status line: `moving · auto: on by Maya, 09:04`. A run waiting at landing
+  with auto off: "Waiting at pr land: auto is off (Maya). `lf ship` lands it."
+- Desktop: one Auto toggle replaces the Auto-Ship / Stop Auto-Ship buttons;
+  the Task's card and row carry an Auto badge while it is on.
+- Docs and copy say auto everywhere Auto-Ship / shipping-the-mode appears
+  (docs, builtin skills, Notice, help text). "ship" stays only as the `lf ship`
+  command; the `deliver` steps' own words are untouched.
+- `.lf/graphs/autonomous.yaml` is a graph name; leave it.
+- Still open, not this pass: whether `lf -b task run` writes auto on.
+
+The checkout holds an uncommitted, interrupted vision-A diff (also at
+`refs/wip/loo-968-auto-ship-rename`): it renamed `Shipping`/`Autonomous` to
+`AutoShip`. Keep what applies (docs and stop-copy edits, reworded to auto);
+drop the variant renames, since those variants are deleted.

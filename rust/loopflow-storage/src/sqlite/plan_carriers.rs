@@ -333,7 +333,7 @@ impl SqliteStore {
         names: &MachineNames,
     ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let mut tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let caught_up = match from {
             Some((carrier, _)) => {
                 let held = carrier_in(&tx, repo, carrier)?.ok_or(StoreError::NotFound)?;
@@ -342,7 +342,7 @@ impl SqliteStore {
             None => false,
         };
         let arriving = new_comments(&tx, records)?;
-        let written = planning_write::apply(&tx, repo, records)?;
+        let written = apply_each(&mut tx, repo, records)?;
         comments_arrived(&tx, &written, &arriving, names)?;
         if let Some((carrier, seen_seq)) = from {
             tx.execute(
@@ -362,6 +362,69 @@ impl SqliteStore {
         tx.commit()?;
         Ok(())
     }
+}
+
+/// Write `records` together; when one cannot be written here (a Wave whose
+/// name another Wave already holds, a comment whose Task is missing), take
+/// them a record at a time, parents first, skip and log what fails, so the
+/// rest of the plan still arrives. A Wave goes with its Projects: each names
+/// the other.
+fn apply_each(
+    tx: &mut rusqlite::Transaction<'_>,
+    repo: &str,
+    records: &[StampedRecord],
+) -> StoreResult<Vec<WorkEdit>> {
+    let together = tx.savepoint()?;
+    if let Ok(written) = planning_write::apply(&together, repo, records) {
+        together.commit()?;
+        return Ok(written);
+    }
+    drop(together);
+    let wave_of = |record: &StampedRecord| {
+        record.fields.iter().find_map(|field| match &field.value {
+            WorkValue::ProjectWave(wave) => Some(wave.clone()),
+            _ => None,
+        })
+    };
+    let arriving_waves = records
+        .iter()
+        .filter(|record| record.table == "waves")
+        .map(|record| record.id.as_str())
+        .collect::<BTreeSet<_>>();
+    let mut units = Vec::<Vec<StampedRecord>>::new();
+    for table in planning_write::WORK_TABLES {
+        for record in records.iter().filter(|record| record.table == table) {
+            match table {
+                "waves" => units.push(
+                    std::iter::once(record)
+                        .chain(records.iter().filter(|project| {
+                            project.table == "projects"
+                                && wave_of(project).as_deref() == Some(record.id.as_str())
+                        }))
+                        .cloned()
+                        .collect(),
+                ),
+                "projects"
+                    if wave_of(record)
+                        .is_some_and(|wave| arriving_waves.contains(wave.as_str())) => {}
+                _ => units.push(vec![record.clone()]),
+            }
+        }
+    }
+    let mut written = Vec::new();
+    for unit in units {
+        let one = tx.savepoint()?;
+        match planning_write::apply(&one, repo, &unit) {
+            Ok(edits) => {
+                one.commit()?;
+                written.extend(edits);
+            }
+            Err(error) => {
+                tracing::warn!(id = %unit[0].id, %error, "skipped a plan record that cannot be written here");
+            }
+        }
+    }
+    Ok(written)
 }
 
 /// The comments in `records` this Machine does not have yet.
@@ -723,6 +786,35 @@ mod tests {
             hub.get_wave(&wave).unwrap().unwrap().name(),
             "renamed later"
         );
+    }
+
+    #[test]
+    fn a_wave_named_like_one_held_here_is_skipped_and_the_rest_arrives() {
+        let dir = tempfile::tempdir().unwrap();
+        let (laptop, hub) = (machine(&dir, "laptop"), machine(&dir, "hub"));
+        // Each Machine made a Wave called "plan" before seeing the other's.
+        let (_, theirs) = task(&hub, "in the hub's plan");
+        let (_, mine) = task(&laptop, "in the laptop's plan");
+        let other = crate::test_fixture::project(&laptop, REPO, "other");
+        let apart = TaskId::new();
+        laptop
+            .create_task(&NewTask {
+                repository_id: crate::test_fixture::repository(&laptop, REPO),
+                id: apart.clone(),
+                project_id: Some(other.id),
+                title: "in another Wave".into(),
+                description: "Brief".into(),
+                due_date: None,
+            })
+            .unwrap();
+        exchange(&laptop, &hub);
+        assert_eq!(title(&hub, &apart), "in another Wave");
+        assert!(hub.task(&mine).unwrap().is_none());
+        assert!(laptop.task(&theirs).unwrap().is_none());
+        // Later changes still travel.
+        retitle(&laptop, &apart, "still arriving");
+        exchange(&laptop, &hub);
+        assert_eq!(title(&hub, &apart), "still arriving");
     }
 
     #[test]

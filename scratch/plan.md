@@ -188,9 +188,11 @@ carriers' timing.
 
 One server task runs the Git exchange for every repository without Linear or
 Asana that has a remote, every 60 s; that is how another Machine's change
-arrives with no hub. Reads nobody asked for (a provider exit,
-`lf repo tracker --subscribe`) read the hub only: a hub read is one
-request and a fetch is not. With no server, saves still go out by both
+arrives with no hub. A read nobody asked for (a provider exit) reads the
+hub only: a hub read is one request and a fetch is not.
+`lf repo tracker --subscribe` reads the store alone (QA after slice 5: its
+hub read failed on the stream's read-only store every time, logged at
+debug). With no server, saves still go out by both
 carriers and other Machines' changes wait for `lf task sync`. *Made for
 review:* 60 s, one `git fetch` per repository per minute, no setting.
 
@@ -237,7 +239,9 @@ review:* 60 s, one `git fetch` per repository per minute, no setting.
 - Push rejected because the remote's own-Machine ref moved (a second store
   using this Machine's id): shown as the error; never forced.
 - A file that does not parse, or a field this build does not know: that field
-  is skipped and logged; the rest of the ref applies.
+  is skipped and logged; the rest of the ref applies. A record either carrier
+  brings that cannot be written (a Wave named like one held here): that record
+  and what hangs from it are skipped and logged; the rest applies.
 - A hub older than this build: the existing skew error naming the fix.
 - A released `lf` on another Machine keeps reading the old
   `refs/loopflow/planning/*` and sees no new changes. `TrackerConfig::ReleasedGit`
@@ -499,6 +503,9 @@ etude checkout and `lf` version are unknown.
    by hand the hanging-hub create from `.lf/qa/tracker.md` (expect about 5 s).
    *Passed over:* one deadline per command passed down from the command; it
    would also cover the claim's two waits, but it adds plumbing to every caller.
+   QA after it: the counterexample above is wrong. `--wave W` for a Wave
+   this Machine does not have makes one (as on main), so the plan holds two
+   Waves of one name; see the next point.
 
    What it showed, 2026-11-18: `ops::task::tests::` (33) and the acceptance
    test passed (34 tests). By hand in `/tmp/lfq3`, no server, hub stand-in
@@ -616,6 +623,20 @@ etude checkout and `lf` version are unknown.
   `of_two_claims_made_apart_…` failed as written since slice 4: Ada's claim is
   pushed with the save, so Grace's claim saw it and took over. It now cuts
   Grace's remote while she claims, and passes (11 s).
+- QA after slice 5 and its compress, 2026-11-18 (`scratch/qa.html`): two
+  fixes. A record the import cannot write (a Wave whose name a Wave here
+  holds) failed the whole exchange, for the hub always and for Git on
+  anything but a parse error; `apply_plan_records` now takes a failed batch
+  a record at a time, a Wave with its Projects, and skips what fails
+  (`a_wave_named_like_one_held_here_is_skipped_and_the_rest_arrives`).
+  `plan_git`'s own fallback is gone. `lf repo tracker --subscribe`'s hub
+  read, which never ran, is deleted.
+  Checks after it: clippy on the three crates clean; storage
+  `sqlite::plan_carriers::`, `sqlite::planning_write::` and
+  `ops::plan_git::` (19) passed; the acceptance test passed (60 s).
+  `of_two_claims_made_apart_…` timed out at 300 s three times (once alone,
+  load 90 to 145) and then passed in 29 s unchanged: the third such run.
+  Flaky by the repository's rule; gate finds the cause or rewrites it.
 - Slices 1 to 4 are in the code and the four differences at the top hold
   in it, and slice 5 is built. Etude's cutover is by hand, after
   release.

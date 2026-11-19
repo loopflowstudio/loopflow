@@ -35,10 +35,10 @@ async fn sync_until(store: &crate::store::Store, repo: &str, until: Option<Insta
     on_thread(store, repo, move |store, repo| exchange(store, repo, until)).await
 }
 
-/// A read nobody asked for, riding on a command (`lf repo tracker
-/// --subscribe`, a provider exit): the hub only, for [`WAIT`] at most. A
-/// fetch would cost the command too long; Git is read by [`sync`].
-pub async fn read(store: &crate::store::Store, repo: &str) -> Result<()> {
+/// A read nobody asked for, riding on a provider exit: the hub only, for
+/// [`WAIT`] at most. A fetch would cost the exit too long; Git is read by
+/// [`sync`].
+pub(crate) async fn read(store: &crate::store::Store, repo: &str) -> Result<()> {
     let until = Instant::now() + WAIT;
     on_thread(store, repo, move |store, repo| {
         super::plan_hub::exchange(store, repo, Why::Read(until))

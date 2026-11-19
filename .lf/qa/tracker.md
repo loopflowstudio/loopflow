@@ -96,3 +96,22 @@ preview and prints context only. A bad `origin` URL does not make
 `fetch_repository` return an error (the failure is stored on the destination),
 so the post-creation `tracker fetch after creation failed` warning is not
 reachable that way.
+
+`lf repo tracker --subscribe` needs `--json` and reads the store only (the
+stream's store is read-only); run it in the background into a file and
+`pkill -f` its exact command line. Off a TTY, `lf task show` prints JSON;
+`lf task list | grep <id>` is the quick read of a title.
+
+Two Machines making a Wave of one name is the import's hardest case:
+`lf wave create design` on both homes (or `lf task create --wave design` on
+one, which makes the Wave), a Task in each, then `lf task sync <id>` on both.
+Each keeps its own `design` and its Tasks; everything else still crosses. The
+skipped records are `WARN loopflow_storage::sqlite::plan_carriers` lines in
+each home's `logs/lf.log`.
+
+The hub home's server comes back after `pkill`: a command reaching it
+through the stand-in `ssh` registers a launchd job for that home
+(`com.loopflow.server.<hash>`, plist under `<home>/.lf/server.plist`). Find
+it with `launchctl print gui/$(id -u)/<label> | grep path` and stop it with
+`launchctl bootout gui/$(id -u)/<label>` when done. Replace the home's binary
+(`rm`, then copy) before restarting it.

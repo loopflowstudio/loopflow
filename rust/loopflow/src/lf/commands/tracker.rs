@@ -102,7 +102,7 @@ fn answer(directory: &Path, id: &str, keep_theirs: bool, json: bool) -> Result<(
 }
 
 /// `lf repo tracker --subscribe`: `lf repo tracker --json` now and each time
-/// it changes. With a hub it also exchanges with the hub while it runs.
+/// it changes. It reads the store only; the store is opened read-only.
 pub(crate) fn subscribe_status(
     repo: &Path,
     transport: loopflow_execution::read_stream::Transport,
@@ -113,16 +113,7 @@ pub(crate) fn subscribe_status(
         (),
         move |store, ()| {
             let repo_key = repo_key.clone();
-            async move {
-                if let Some(store) = store.as_deref() {
-                    if let Err(error) =
-                        loopflow_execution::ops::plan_carriers::read(store, &repo_key).await
-                    {
-                        tracing::debug!(error = %format!("{error:#}"), "hub exchange pending");
-                    }
-                }
-                status(store.as_deref(), &repo_key)
-            }
+            async move { status(store.as_deref(), &repo_key) }
         },
         transport,
     )

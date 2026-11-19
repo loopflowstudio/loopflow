@@ -21,7 +21,7 @@ pub enum WriteOrigin {
     Import,
 }
 
-const WORK_TABLES: [&str; 4] = ["waves", "projects", "tasks", "task_comments"];
+pub(crate) const WORK_TABLES: [&str; 4] = ["waves", "projects", "tasks", "task_comments"];
 
 // SQL ownership is private to the writer. Callers address fields by their
 // typed variant and target, without another public object/kind model.

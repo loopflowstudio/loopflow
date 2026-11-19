@@ -1,645 +1,222 @@
-<!doctype html><meta charset=utf-8><title>LOO-938 QA</title>
-<style>body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:60rem;margin:2rem auto;padding:0 1rem;color:#222}
-pre{background:#f6f6f4;padding:.8rem;overflow-x:auto;font-size:12.5px;line-height:1.35;border-radius:4px}
-section{border-top:1px solid #ddd;margin-top:1.6rem} .v{background:#eef5ee;padding:.5rem .8rem;border-radius:4px}
-td,th{vertical-align:top;padding:.3rem .6rem;border-bottom:1px solid #eee;text-align:left} code{font-size:13px}</style>
-<h1>LOO-938: a save goes out by every carrier, used by hand</h1>
-<p>2026-11-18, after slice 4. The branch <code>lf</code> (debug build, rebuilt at each fix) in private homes under <code>/tmp/lfq3</code>: one <code>HOME</code>/<code>LF_HOME</code> per Machine, bare remotes beside them, a stand-in <code>ssh</code> for the hub with flags for down, asleep (10 s then fail) and hanging (120 s), a stand-in Git SSH command that sleeps 60 s for a hanging remote, and the installed <code>lf 0.16.0+7bb879aff</code> for the returning home. [L] laptop, [M] mini (the hub), [N] a third Machine, [U] the upgraded home. Each command prints its exit code and wall time. Load average was about 90 the whole run, so times are high.</p>
+<!doctype html><html><head><meta charset="utf-8"><title>LOO-938 QA after slice 5</title>
+<style>body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:60rem;margin:2rem auto;padding:0 1rem;color:#1d1d1f}
+pre{background:#f5f5f7;padding:.8rem;overflow:auto;font-size:12.5px;max-height:32rem}table{border-collapse:collapse}td,th{border:1px solid #ddd;padding:.4rem .6rem;vertical-align:top;text-align:left}
+section{margin:2rem 0}code{font-size:13px}</style></head><body>
+<h1>LOO-938: one import for every carrier, used by hand after slice 5</h1>
+<p>2026-11-18, after slice 5 (a create is one save and one send) and its compress. The branch <code>lf</code> (debug build, rebuilt at each fix) in the private homes under <code>/tmp/lfq3</code> from the run after slice 4: [L] laptop, [M] mini, which is the hub through a stand-in <code>ssh</code>, and a bare <code>origin.git</code>. Load average 50 to 145 the whole run. The run after slice 4 is in this file's Git history.</p>
 <h2>What broke and was fixed</h2>
 <table><tr><th>Seen</th><th>Cause</th><th>Fix</th></tr>
-<tr><td>With a hub that accepts and never answers, <code>lf task create</code> took 240.8 s; with the mini asleep, 21.6 s, and every update 11 s.</td><td>The hub's connection waited the client's 120 s per answer whatever the caller's deadline; the save's five seconds only stopped waiting for the result, and the create's hub read had no deadline.</td><td><code>Connection::open_on</code> takes an optional end and gives the welcome and every answer what is left of it (<code>machine/client.rs</code>). <code>plan_hub::exchange</code> takes why it runs (<code>Why::Asked | Read | Save</code>); <code>plan_hub::read</code> is the unasked read, bounded at five seconds; <code>sync</code> stays unbounded for a move.</td></tr>
-<tr><td><code>lf task claim</code> against a hanging Git remote took 122.3 s.</td><td>The exchange before a claim ran on past its five seconds and the command waited for it to finish anyway.</td><td><code>plan_git::exchange</code> and <code>first_exchange</code> take an end that stops <code>git fetch</code> and the push; <code>before_claim</code> and <code>before_first_read</code> pass five seconds and no longer wrap a timeout. Test <code>an_exchange_with_an_end_is_stopped_at_it</code>.</td></tr>
+<tr><td>After two Machines each made a Wave called <code>q5wave</code>, every later exchange failed by both carriers: <code>UNIQUE constraint failed: index 'idx_waves_active_locator'</code>. The plan stopped crossing between them.</td>
+<td>The import wrote a page or ref in one statement batch. The hub had no fallback. Git's took records one at a time only on a parse error, and alone a new Wave and its selected Project cannot be written, since each names the other.</td>
+<td><code>apply_plan_records</code>, the one import, writes the batch in a savepoint. When that fails it writes a record at a time, a Wave together with its Projects, parents first, and skips and logs what fails. <code>plan_git</code>'s own fallback is gone. Test <code>a_wave_named_like_one_held_here_is_skipped_and_the_rest_arrives</code>.</td></tr>
+<tr><td><code>lf repo tracker --subscribe</code> never brought in a hub change.</td><td>Its hub read ran on the stream's read-only store and failed every time, logged at debug.</td><td>Deleted, along with the sentence in <code>docs/work.md</code> promising it.</td></tr>
 </table>
-<h2>Scenarios</h2><section><h3>1. One Machine, no remote</h3><p>A new home, a new repository with no remote.</p><pre>[L] $ lf repo tracker
-Plan: this Machine.
-(exit 0, 6.7s)
-[L] $ lf task create Write the changelog
-Write the changelog · fea081
-(exit 0, 0.4s)
-[L] $ lf task list
-fea081 · — · Write the changelog
-(exit 0, 0.4s)
-[L] $ lf repo tracker
-Plan: this Machine.
-(exit 0, 0.3s)
-[L] $ lf repo tracker --json
-{&quot;actions&quot;:[],&quot;plan&quot;:{&quot;git&quot;:null,&quot;hub&quot;:null},&quot;tracker&quot;:null}
-(exit 0, 0.3s)
-</pre><p class=v>Works. <code>Plan: this Machine.</code>, nothing sent.</p></section><section><h3>2. A save goes out by itself</h3><p>A bare remote added; each save, with no server and no <code>lf task sync</code>.</p><pre>[L] $ lf repo tracker
-Plan: Git origin, 1 unsent.
-  fea081
-(exit 0, 0.3s)
-# remote refs:
-[L] $ lf task create Fix the login bug
-Fix the login bug · a94e3d
-(exit 0, 0.7s)
-# remote refs:
-refs/loopflow/plan/home_6c3d6b807a1157b044c7529d9915e965 c8e662e
+<h2>Scenarios</h2>
+<section><h3>1. A create with the hub up, hanging and asleep</h3><p>The laptop home with <code>lf machine hub mini</code> through the stand-in <code>ssh</code>; flags make the hub hang (120 s) or sleep (10 s, then fail).</p><pre>[L] $ lf repo tracker
+Plan: Git origin.
+Hub mini.
+(exit 0, 0.2s)
+[L] $ lf machine hub
+Hub mini.
+(exit 0, 0.1s)
+[L] $ lf task create Q5 hub up
+Q5 hub up · 90b90b
+(exit 0, 2.9s)
+# M list:
+90b90b · — · Q5 hub up
 [L] $ lf repo tracker
 Plan: Git origin.
-(exit 0, 0.3s)
-# files in the ref:
-repository
-tasks/a9/task_a94e3d5370a0412280bc2e62f8d4f410.json
-tasks/fe/task_fea081837d064f3c988786d35c4a4105.json
-home_6c3d6b807a1157b044c7529d9915e965 &lt;loopflow@localhost&gt; plan
-[L] $ lf task update fea081 --title Write the changelog for 0.17
-task_fea081837d064f3c988786d35c4a4105: updated
+Hub mini.
+(exit 0, 0.1s)
+[L] $ lf task create Q5 hub hangs
+Saved locally; planning synchronization pending. See `lf repo tracker`.
+Q5 hub hangs · 9f6b5e
+(exit 0, 5.3s)
+[L] $ lf repo tracker
+Plan: Git origin.
+Hub mini, unreachable since Nov 18 19:06, 1 unsent.
+  9f6b5e
+  mini did not answer within 5s; check `ssh mini lf server status`
+(exit 0, 0.1s)
+[L] $ lf task update 90b90b --notes edit while hub hangs
+task_90b90b50f83d40a882426b53938c1a4d: updated
+Saved locally; planning synchronization pending. See `lf repo tracker`.
+(exit 0, 5.2s)
+[L] $ lf task create Q5 mini asleep
+Saved locally; planning synchronization pending. See `lf repo tracker`.
+Q5 mini asleep · 469e01
+(exit 0, 5.3s)
+[L] $ lf task sync 90b90b
+90b90b: nothing unsent
+(exit 0, 0.7s)
+[L] $ lf repo tracker
+Plan: Git origin.
+Hub mini.
+(exit 0, 0.1s)
+</pre><p><b>Works.</b> Up: 2.9 s, on the mini when the command returns. Hanging: 5.3 s (240.8 s before slice 4, 10 to 15 s before slice 5). Asleep: 5.3 s (13.3 s before). An update with the hub hanging: 5.2 s. <code>lf task sync</code> sends what waited.</p></section>
+<section><h3>2. A Wave of one name on both Machines</h3><p>The mini makes Wave <code>q5wave</code>; the laptop, before seeing it, files a Task with <code>--wave q5wave</code>.</p><pre>[M] $ lf wave create q5wave
+Added Wave q5wave; committed .lf/wave/q5wave on /private/tmp/lfq3/M/repo (ba90f0bdf9)
 (exit 0, 0.5s)
-# remote refs:
-refs/loopflow/plan/home_6c3d6b807a1157b044c7529d9915e965 0db11e3
-[L] $ lf repo tracker
-Plan: Git origin.
-(exit 0, 0.3s)
-[L] $ lf comment fea081 Keep it short
-Saved 70aecafa-0dcf-4c55-a32e-5a5f332d03ea
-(exit 0, 0.4s)
-[L] $ lf wave create billing
-Added Wave billing; committed .lf/wave/billing on /private/tmp/lfq3/L/repo (6eddfc68e3)
-(exit 0, 0.6s)
-[L] $ lf repo tracker
-Plan: Git origin.
-(exit 0, 0.2s)
-# remote refs:
-refs/loopflow/plan/home_6c3d6b807a1157b044c7529d9915e965 2d30a88
-comments/54/54244846-ea09-48cf-b896-7c8f79032cb6.json
-projects/proj_c0e02fa187a94da0b41afd9b4ef6c0af.json
-repository
-tasks/a9/task_a94e3d5370a0412280bc2e62f8d4f410.json
-tasks/fe/task_fea081837d064f3c988786d35c4a4105.json
-waves/507f4d19-a3cf-4a3d-8a04-dac37c057616.json
-</pre><p class=v>Works. The first save after adding the remote put the ref on the remote, carrying the earlier Task too; every later save moved the ref. Saves took 0.4 to 0.7 s.</p></section><section><h3>3. A second Machine, later edit wins</h3><p>A fresh clone in a second home; both retitle one Task, the mini a second later.</p><pre>[M] $ lf task list
-fea081 · — · Write the changelog for 0.17
-a94e3d · — · Fix the login bug
-(exit 0, 4.9s)
-[M] $ lf repo tracker
-Plan: Git origin.
-(exit 0, 0.3s)
-# remote refs:
-refs/loopflow/plan/home_6c3d6b807a1157b044c7529d9915e965 2d30a88
-refs/loopflow/plan/home_7456d4ce982ab3078cccb4a3bbf658c0 da15b27
-[M] $ lf task create Made on the mini
-Made on the mini · ae4ecc
-(exit 0, 0.6s)
-# remote refs:
-refs/loopflow/plan/home_6c3d6b807a1157b044c7529d9915e965 2d30a88
-refs/loopflow/plan/home_7456d4ce982ab3078cccb4a3bbf658c0 d5d901b
-[M] $ lf repo tracker
-Plan: Git origin.
-(exit 0, 0.3s)
-# L has no server: does a read show it?
-[L] $ lf task list
-fea081 · — · Write the changelog for 0.17
-a94e3d · — · Fix the login bug
-(exit 0, 0.4s)
-[L] $ lf task sync fea081
-fea081: nothing unsent
-(exit 0, 0.9s)
-[L] $ lf task list
-fea081 · — · Write the changelog for 0.17
-a94e3d · — · Fix the login bug
-ae4ecc · — · Made on the mini
-(exit 0, 0.4s)
-# both retitle one Task; M second
-[L] $ lf task update a94e3d --title Login bug (laptop)
-task_a94e3d5370a0412280bc2e62f8d4f410: updated
-(exit 0, 1.0s)
-[M] $ lf task update a94e3d --title Login bug (mini, later)
-task_a94e3d5370a0412280bc2e62f8d4f410: updated
+[L] $ lf task create Q5 in a mini wave --wave q5wave
+Saved locally; planning synchronization pending. See `lf repo tracker`.
+Saved locally; planning synchronization pending. See `lf repo tracker`.
+Q5 in a mini wave · cf0f6e
+(exit 0, 1.2s)
+[L] $ lf task sync 90b90b
+Error: read the plan ref of home_7456d4ce982ab3078cccb4a3bbf658c0: sqlite error: UNIQUE constraint failed: index &#x27;idx_waves_active_locator&#x27;: UNIQUE constraint failed: index &#x27;idx_waves_active_locator&#x27;: Error code 2067: constraint failed
+(exit 1, 0.6s)
+[L] $ lf task create Q5 in a mini wave --wave q5wave
+Saved locally; planning synchronization pending. See `lf repo tracker`.
+Q5 in a mini wave · 4fa0e8
 (exit 0, 0.5s)
-[L] $ lf task sync a94e3d
-a94e3d: nothing unsent
-(exit 0, 0.7s)
-[M] $ lf task sync a94e3d
-a94e3d: nothing unsent
-(exit 0, 0.5s)
-[L] $ lf task list
-fea081 · — · Write the changelog for 0.17
-a94e3d · — · Login bug (mini, later)
-ae4ecc · — · Made on the mini
-(exit 0, 0.3s)
-[M] $ lf task list
-fea081 · — · Write the changelog for 0.17
-a94e3d · — · Login bug (mini, later)
-ae4ecc · — · Made on the mini
-(exit 0, 0.3s)
-[L] $ lf repo tracker
-Plan: Git origin.
-(exit 0, 0.2s)
-[M] $ lf repo tracker
-Plan: Git origin.
-(exit 0, 0.2s)
-[M] $ lf wave list
-WAVE              REPOSITORY                    STATUS    TASKS  MACHINE         
-billing           /private/tmp/lfq3/M/repo      ready         0  unplaced        
-(exit 0, 0.3s)
-</pre><p class=v>Works. The fresh clone's first <code>lf task list</code> showed the laptop's Tasks (4.9 s: its one exchange). The laptop, with no server, sees the mini's Task after <code>lf task sync</code>. Both end on the later title.</p></section><section><h3>4. Offline and back</h3><p>The laptop's remote points at a missing path; two saves; the remote returns and the next save carries all three.</p><pre># L&#x27;s remote stops answering
-[L] $ lf task create Made offline
-Saved locally; planning synchronization pending. See `lf repo tracker`.
-Made offline · 157d3c
-(exit 0, 0.7s)
-[L] $ lf task update fea081 --title Changelog 0.17 (offline edit)
-task_fea081837d064f3c988786d35c4a4105: updated
-Saved locally; planning synchronization pending. See `lf repo tracker`.
-(exit 0, 0.7s)
-[L] $ lf repo tracker
-Plan: Git origin, unreachable since Nov 18 18:03, 2 unsent.
-  157d3c
-  fea081
-  fatal: &#x27;/tmp/lfq3/gone.git&#x27; does not appear to be a git repository
-(exit 0, 0.4s)
-[L] $ lf repo tracker --json
-{&quot;actions&quot;:[],&quot;plan&quot;:{&quot;git&quot;:{&quot;error&quot;:&quot;fatal: &#x27;/tmp/lfq3/gone.git&#x27; does not appear to be a git repository&quot;,&quot;failing_since&quot;:1795053815,&quot;records&quot;:[&quot;157d3c&quot;,&quot;fea081&quot;],&quot;remote&quot;:&quot;origin&quot;,&quot;unsent&quot;:2},&quot;hub&quot;:null},&quot;tracker&quot;:null}
-(exit 0, 0.3s)
-[L] $ lf task list
-fea081 · — · Changelog 0.17 (offline edit)
-a94e3d · — · Login bug (mini, later)
-ae4ecc · — · Made on the mini
-157d3c · — · Made offline
-(exit 0, 0.7s)
-# remote back; the next save carries all three
-[L] $ lf repo tracker
-Plan: Git origin, unreachable since Nov 18 18:03, 2 unsent.
-  157d3c
-  fea081
-  fatal: &#x27;/tmp/lfq3/gone.git&#x27; does not appear to be a git repository
-(exit 0, 0.3s)
-[L] $ lf task create Made after coming back
-Made after coming back · 620dd0
-(exit 0, 1.0s)
-[L] $ lf repo tracker
-Plan: Git origin.
-(exit 0, 0.4s)
-# remote refs:
-refs/loopflow/plan/home_6c3d6b807a1157b044c7529d9915e965 c8872fc
-refs/loopflow/plan/home_7456d4ce982ab3078cccb4a3bbf658c0 2dc82f9
-# M with no server reads after a sync
-[M] $ lf task sync fea081
-fea081: nothing unsent
-(exit 0, 1.0s)
-[M] $ lf task list
-fea081 · — · Changelog 0.17 (offline edit)
-a94e3d · — · Login bug (mini, later)
-ae4ecc · — · Made on the mini
-157d3c · — · Made offline
-620dd0 · — · Made after coming back
-(exit 0, 0.6s)
-</pre><p class=v>Works. Saves return in 0.7 s with <code>Saved locally; planning synchronization pending</code>; the line names Git's reason; the next save after the remote returns clears the unsent records.</p></section><section><h3>5. A refused push and a hanging remote</h3><p>The laptop loses its local copy of its own ref (the push is then refused); then the remote accepts the connection and never answers.</p><pre># the laptop loses its copy of its own ref (plan-seen/&lt;me&gt;), then saves
-  c8872fc83f3dd38506b707fb76536d459bcf01f1 commit	refs/loopflow/plan-seen/home_6c3d6b807a1157b044c7529d9915e965
-  2dc82f98a686fcfe730cf0ff2c9f14f701187efa commit	refs/loopflow/plan-seen/home_7456d4ce982ab3078cccb4a3bbf658c0
-  c8872fc83f3dd38506b707fb76536d459bcf01f1 commit	refs/loopflow/plan/home_6c3d6b807a1157b044c7529d9915e965
-[L] $ lf task create Saved after losing the ref
-Saved locally; planning synchronization pending. See `lf repo tracker`.
-Saved after losing the ref · 8a5e14
-(exit 0, 0.6s)
-[L] $ lf repo tracker
-Plan: Git origin, unreachable since Nov 18 18:03, 1 unsent.
-  8a5e14
-  error: failed to push some refs to &#x27;/tmp/lfq3/origin.git&#x27;
-(exit 0, 0.3s)
-[L] $ lf task create A second save while refused
-Saved locally; planning synchronization pending. See `lf repo tracker`.
-A second save while refused · 8b29b2
-(exit 0, 0.6s)
-[L] $ lf repo tracker
-Plan: Git origin, unreachable since Nov 18 18:03, 2 unsent.
-  8a5e14
-  8b29b2
-  error: failed to push some refs to &#x27;/tmp/lfq3/origin.git&#x27;
-(exit 0, 0.7s)
-# lf task sync heals it
-[L] $ lf task sync fea081
-fea081: nothing unsent
-(exit 0, 1.3s)
-[L] $ lf repo tracker
-Plan: Git origin.
-(exit 0, 0.4s)
-# remote refs:
-refs/loopflow/plan/home_6c3d6b807a1157b044c7529d9915e965 88c2a5e
-refs/loopflow/plan/home_7456d4ce982ab3078cccb4a3bbf658c0 b65aa83
-# a remote that accepts the connection and never answers (ssh stand-in sleeps 60 s)
-[L] $ lf task create Saved against a hanging remote
-Saved locally; planning synchronization pending. See `lf repo tracker`.
-Saved against a hanging remote · fe063c
-(exit 0, 5.6s)
-# processes left behind:
-[L] $ lf repo tracker
-Plan: Git origin, unreachable since Nov 18 18:03, 1 unsent.
-  fe063c
-  git push did not answer in time
-(exit 0, 0.3s)
-[L] $ lf task update fea081 --notes second save while hanging
-task_fea081837d064f3c988786d35c4a4105: updated
-Saved locally; planning synchronization pending. See `lf repo tracker`.
-(exit 0, 5.5s)
-[L] $ lf repo tracker
-Plan: Git origin, unreachable since Nov 18 18:03, 2 unsent.
-  fe063c
-  fea081
-  git push did not answer in time
-(exit 0, 0.3s)
-[L] $ lf task create Back again
-Back again · e02401
-(exit 0, 0.7s)
-[L] $ lf repo tracker
-Plan: Git origin.
-(exit 0, 0.3s)
-# remote refs:
-refs/loopflow/plan/home_6c3d6b807a1157b044c7529d9915e965 a133d76
-refs/loopflow/plan/home_7456d4ce982ab3078cccb4a3bbf658c0 b65aa83
-</pre><p class=v>Works. A refused push shows as <code>unreachable</code> with Git's reason until <code>lf task sync</code>; a hanging push is stopped at five seconds (5.6 s, nothing left running).</p></section><section><h3>6. Both servers running</h3><p>A CLI save on the laptop, timed to the remote and to the mini's list.</p><pre># both servers running; a CLI save on L, then poll the remote and M&#x27;s list
-[L] $ lf task create Timing probe
-Timing probe · d6cd54
-(exit 0, 0.8s)
-# files on the remote 1 s after the save:       14
-# on M&#x27;s list 53 s after the save
-fe063c · — · Saved against a hanging remote
-e02401 · — · Back again
-d6cd54 · — · Timing probe
-(exit 0, 0.3s)
-</pre><p class=v>Works. On the remote within a second; on the mini's list after 53 s (its server's minute). Before slice 4 this was 97 s.</p></section><section><h3>7. A hub: up, down, hanging</h3><p><code>lf machine hub mini</code> through a stand-in <code>ssh</code>; saves with the hub up, refusing, and accepting but never answering.</p><pre>[L] $ lf machine hub
-No hub.
-(exit 0, 0.3s)
-[L] $ lf machine add mini
-mini  mini  home_7456d4ce982ab3078cccb4a3bbf658c0
-(exit 0, 3.7s)
-[L] $ lf machine hub mini
-This Machine exchanges its plan with mini.
-(exit 0, 0.2s)
-[L] $ lf repo tracker
-Plan: Git origin.
-Hub mini, 13 unsent.
-  comment 54244846
-  project billing
-  wave billing
-  ae4ecc
-  a94e3d
-  157d3c
-  620dd0
-  8a5e14
-  8b29b2
-  fe063c
-  fea081
-  e02401
-  d6cd54
-(exit 0, 0.3s)
-[L] $ lf task sync fea081
-fea081: nothing unsent
-(exit 0, 1.8s)
+</pre><p><b>Broke.</b> <code>--wave</code> made a second <code>q5wave</code> on the laptop (it does on main too). The next import failed whole on <code>idx_waves_active_locator</code>, by Git and by the hub, so from then on <em>nothing</em> crossed between the two Machines: <code>lf repo tracker</code> showed the hub stuck at 4 unsent with the sqlite error. Fixed: see below.</p></section>
+<section><h3>3. The same, after the fix</h3><p>Same homes, after the import change; then a fresh collision (<code>design</code> on both) beside a Wave only the laptop has (<code>docs</code>).</p><pre>[L] $ lf task sync 90b90b
+90b90b: nothing unsent
+(exit 0, 4.5s)
 [L] $ lf repo tracker
 Plan: Git origin.
 Hub mini.
 (exit 0, 0.4s)
-# a save with the hub up: on the hub when the command returns
-[L] $ lf task create Through the hub
-Through the hub · f8818c
+[M] $ lf task sync 90b90b
+90b90b: nothing unsent
+(exit 0, 0.7s)
+[M] $ lf repo tracker
+Plan: Git origin.
+(exit 0, 0.3s)
+[L] $ lf wave create design
+Added Wave design; committed .lf/wave/design on /private/tmp/lfq3/L/repo (49314c7dae)
+Saved locally; planning synchronization pending. See `lf repo tracker`.
+(exit 0, 5.9s)
+[M] $ lf wave create design
+Added Wave design; committed .lf/wave/design on /private/tmp/lfq3/M/repo (de75bbf0f8)
 (exit 0, 2.1s)
-# M&#x27;s list right after:
-f8818c · — · Through the hub
-[L] $ lf repo tracker
-Plan: Git origin.
-Hub mini.
-(exit 0, 0.3s)
-# hub down (ssh exits 255)
-[L] $ lf task create Hub is down
-Saved locally; planning synchronization pending. See `lf repo tracker`.
-Hub is down · 4f7a68
-(exit 0, 0.9s)
-[L] $ lf repo tracker
-Plan: Git origin.
-Hub mini, unreachable since Nov 18 18:05, 1 unsent.
-  4f7a68
-  machine &quot;mini&quot;: unreachable: run `ssh -o ControlPath=none -- &#x27;mini&#x27;` to check the address, network and SSH service; ssh: connect to host mini port 22: Operation timed out
-(exit 0, 0.3s)
-[L] $ lf repo tracker --json
-{&quot;actions&quot;:[],&quot;plan&quot;:{&quot;git&quot;:{&quot;error&quot;:null,&quot;failing_since&quot;:null,&quot;records&quot;:[],&quot;remote&quot;:&quot;origin&quot;,&quot;unsent&quot;:0},&quot;hub&quot;:{&quot;error&quot;:&quot;machine \&quot;mini\&quot;: unreachable: run `ssh -o ControlPath=none -- &#x27;mini&#x27;` to check the address, network and SSH service; ssh: connect to host mini port 22: Operation timed out&quot;,&quot;failing_since&quot;:1795053940,&quot;machine&quot;:&quot;mini&quot;,&quot;records&quot;:[&quot;4f7a68&quot;],&quot;unsent&quot;:1}},&quot;tracker&quot;:null}
-(exit 0, 0.3s)
-# remote has it by Git:
-refs/loopflow/plan/home_6c3d6b807a1157b044c7529d9915e965:tasks/4f/task_4f7a68b92ecb4f5086ec99918eefe029.json
-# hub back
-[L] $ lf task update fea081 --notes after the hub came back
-task_fea081837d064f3c988786d35c4a4105: updated
+[M] $ lf task create Mini&#x27;s design Task --wave design
+Mini&#x27;s design Task · 6df450
+(exit 0, 1.0s)
+[L] $ lf task create Laptop&#x27;s design Task --wave design
+Laptop&#x27;s design Task · e8eb43
+(exit 0, 1.6s)
+[L] $ lf wave create docs
+Added Wave docs; committed .lf/wave/docs on /private/tmp/lfq3/L/repo (504871b6ca)
+(exit 0, 1.6s)
+[L] $ lf task create In a Wave only the laptop has --wave docs
+In a Wave only the laptop has · 29b69e
+(exit 0, 1.8s)
+[L] $ lf task sync 90b90b
+90b90b: nothing unsent
+(exit 0, 1.9s)
+[M] $ lf task sync 90b90b
+90b90b: nothing unsent
 (exit 0, 1.2s)
 [L] $ lf repo tracker
 Plan: Git origin.
 Hub mini.
-(exit 0, 0.5s)
-4f7a68 · — · Hub is down
-# hub accepts and never answers (ssh sleeps 120 s)
-[L] $ lf task create Hub hangs
-Saved locally; planning synchronization pending. See `lf repo tracker`.
-Hub hangs · 2363b4
-(exit 0, 240.8s)
-[L] $ lf repo tracker
-Plan: Git origin.
-Hub mini, unreachable since Nov 18 18:07, 1 unsent.
-  2363b4
-  mini did not answer within 120s; check `ssh mini lf server status`
-(exit 0, 0.3s)
-[L] $ lf task sync fea081
-fea081: nothing unsent
-(exit 0, 1.3s)
-[L] $ lf repo tracker
-Plan: Git origin.
-Hub mini.
 (exit 0, 0.4s)
-</pre><p class=v><strong>Broke.</strong> Up and down work: the save is on the mini when the command returns, and Git carries it while the hub is down. With a hub that accepts and never answers, <code>lf task create</code> took <strong>240.8 s</strong>: it read the hub before creating and sent after, each waiting the client's 120 s. Fixed, scenario 8.</p></section><section><h3>8. The hub asleep or hanging, before and after the fix</h3><p>A sleeping mini (SSH fails after its 10 s connect timeout) and a hanging hub, on the build before and after the fix.</p><h4>Before</h4><pre># the mini is asleep: ssh gives up after its 10 s ConnectTimeout
-[L] $ lf task create Mini asleep
-Saved locally; planning synchronization pending. See `lf repo tracker`.
-Mini asleep · 8845bb
-(exit 0, 21.6s)
-[L] $ lf task update fea081 --notes while the mini sleeps
-task_fea081837d064f3c988786d35c4a4105: updated
-Saved locally; planning synchronization pending. See `lf repo tracker`.
-(exit 0, 11.1s)
-[L] $ lf repo tracker
+[M] $ lf repo tracker
 Plan: Git origin.
-Hub mini, unreachable since Nov 18 18:11, 2 unsent.
-  8845bb
-  fea081
-  machine &quot;mini&quot;: unreachable: run `ssh -o ControlPath=none -- &#x27;mini&#x27;` to check the address, network and SSH service; ssh: connect to host mini port 22: Operation timed out
-(exit 0, 0.5s)
-</pre><h4>After</h4><pre>[L] $ lf repo tracker
-Plan: Git origin.
-Hub mini, unreachable since Nov 18 18:11, 2 unsent.
-  8845bb
-  fea081
-  machine &quot;mini&quot;: unreachable: run `ssh -o ControlPath=none -- &#x27;mini&#x27;` to check the address, network and SSH service; ssh: connect to host mini port 22: Operation timed out
 (exit 0, 0.4s)
-[L] $ lf task sync fea081
-fea081: nothing unsent
-(exit 0, 4.8s)
+# M:
+29b69e · — · In a Wave only the laptop has
+6df450 · — · Mini&#x27;s design Task
+WAVE              REPOSITORY                    STATUS    TASKS  MACHINE         
+billing           /private/tmp/lfq3/M/repo      ready         0  unplaced        
+design            /private/tmp/lfq3/M/repo      ready         1  unplaced        
+docs              /private/tmp/lfq3/M/repo      ready         1  unplaced        
+q5wave            /private/tmp/lfq3/M/repo      ready         0  unplaced        
+# L:
+29b69e · — · In a Wave only the laptop has
+e8eb43 · — · Laptop&#x27;s design Task
+</pre><p><b>Works, with a gap.</b> Both carriers exchange again. A new Wave with its Project and Task (<code>docs</code>) arrives. The two <code>design</code> Waves stay apart, each with its own Task, and each skipped record is a <code>WARN … skipped a plan record that cannot be written here</code> line in <code>logs/lf.log</code>. Nothing on screen says so (questions).</p></section>
+<section><h3>4. <code>lf repo tracker --subscribe</code></h3><p>Subscribed on the laptop while the mini retitled a Task and the hub went down and came back.</p><pre>{&quot;answers&quot;:null,&quot;unavailable&quot;:null,&quot;body&quot;:{&quot;actions&quot;:[],&quot;plan&quot;:{&quot;git&quot;:{&quot;error&quot;:null,&quot;failing_since&quot;:null,&quot;records&quot;:[],&quot;remote&quot;:&quot;origin&quot;,&quot;unsent&quot;:0},&quot;hub&quot;:{&quot;error&quot;:null,&quot;failing_since&quot;:null,&quot;machine&quot;:&quot;mini&quot;,&quot;records&quot;:[],&quot;unsent&quot;:0}},&quot;tracker&quot;:null},&quot;work&quot;:null,&quot;read_at&quot;:{&quot;graphs&quot;:0,&quot;history&quot;:0,&quot;planning&quot;:372,&quot;processes&quot;:0,&quot;sessions&quot;:1,&quot;task_updates&quot;:43,&quot;usage&quot;:1}}
+
+…
+# after 40 s: one frame; the laptop still shows the old title
+# RUST_LOG=debug:
+DEBUG loopflow::lf::commands::tracker: hub exchange pending error=sqlite error: attempt to write a readonly database</pre><p><b>Broke.</b> Its hub read, added on this branch, ran against the stream's read-only store and failed every time, logged at debug. It would also run only when the local store changed. Deleted, and the docs that promised it fixed.</p></section>
+<section><h3>5. Last pass with every fix in</h3><p>Rebuilt binary, the mini's server restarted.</p><pre>## hub up
+[L] $ lf task create Final: hub up
+Saved locally; planning synchronization pending. See `lf repo tracker`.
+Final: hub up · 07f1dc
+(exit 0, 6.2s)
+# M:
+## hub hangs
+[L] $ lf task create Final: hub hangs
+Saved locally; planning synchronization pending. See `lf repo tracker`.
+Final: hub hangs · ea83f6
+(exit 0, 6.2s)
 [L] $ lf repo tracker
 Plan: Git origin.
-Hub mini.
-(exit 0, 0.8s)
-# the mini is asleep: ssh gives up after its 10 s ConnectTimeout
-[L] $ lf task create Mini asleep again
-Saved locally; planning synchronization pending. See `lf repo tracker`.
-Mini asleep again · bdfdc8
-(exit 0, 13.3s)
-[L] $ lf task update fea081 --notes again while the mini sleeps
-task_fea081837d064f3c988786d35c4a4105: updated
-Saved locally; planning synchronization pending. See `lf repo tracker`.
-(exit 0, 15.2s)
-[L] $ lf repo tracker
-Plan: Git origin.
-Hub mini, unreachable since Nov 18 18:19, 2 unsent.
-  bdfdc8
-  fea081
+Hub mini, unreachable since Nov 18 20:21, 2 unsent.
+  07f1dc
+  ea83f6
   mini did not answer within 5s; check `ssh mini lf server status`
-(exit 0, 0.1s)
-# awake
-[L] $ lf task create Mini awake
-Mini awake · 295a3d
-(exit 0, 3.1s)
-[L] $ lf repo tracker
-Plan: Git origin.
-Hub mini.
-(exit 0, 0.9s)
-# the hub accepts and never answers
-[L] $ lf task create Hub hangs again
-Saved locally; planning synchronization pending. See `lf repo tracker`.
-Hub hangs again · 22ef42
-(exit 0, 10.6s)
-[L] $ lf repo tracker
-Plan: Git origin.
-Hub mini, unreachable since Nov 18 18:19, 1 unsent.
-  22ef42
-  mini did not answer within 5s; check `ssh mini lf server status`
-(exit 0, 0.3s)
-# ssh left behind:
-[L] $ lf task update fea081 --notes hub back
-task_fea081837d064f3c988786d35c4a4105: updated
-(exit 0, 1.4s)
-[L] $ lf repo tracker
-Plan: Git origin.
-Hub mini.
-(exit 0, 0.4s)
-# of the three Tasks, on M: 5
-# the mini is asleep (ssh fails after 10 s)
-[L] $ lf task create Asleep, timed again
-Saved locally; planning synchronization pending. See `lf repo tracker`.
-Asleep, timed again · 0c6519
-(exit 0, 10.9s)
-[L] $ lf task claim bdfdc8
-Owner: ada on Jacks-MacBook-Pro-2
-  Nov 18 18:21  claim  ada on Jacks-MacBook-Pro-2
-Saved locally; planning synchronization pending. See `lf repo tracker`.
-(exit 0, 15.6s)
-22ef42 · — · Hub hangs again
-0c6519 · — · Asleep, timed again
-(exit 0, 0.3s)
-[L] $ lf repo tracker
-Plan: Git origin.
-Hub mini, unreachable since Nov 18 18:20, 3 unsent.
-  fea081
-  0c6519
-  comment 28bb7c44
-  machine &quot;mini&quot;: unreachable: run `ssh -o ControlPath=none -- &#x27;mini&#x27;` to check the address, network and SSH service; ssh: connect to host mini port 22: Operation timed out
-(exit 0, 0.2s)
-# the hub accepts and never answers
-[L] $ lf task create Hang, timed again
-Saved locally; planning synchronization pending. See `lf repo tracker`.
-Hang, timed again · 234773
-(exit 0, 10.5s)
-[L] $ lf task sync fea081
-Error: mini did not answer within 120s; check `ssh mini lf server status`
-(exit 1, 120.8s)
-[L] $ lf task sync fea081
-fea081: nothing unsent
-(exit 0, 1.6s)
-[L] $ lf repo tracker
-Plan: Git origin.
-Hub mini.
-(exit 0, 0.3s)
-[M] $ lf task status bdfdc8
-Tracker state: available
-Mini asleep again · bdfdc8
-Planning: unstarted · current
-Owner: ada on home_6c3d6b807a1157b044c7529d9915e965
-  Nov 18 18:21  claim  ada on home_6c3d6b807a1157b044c7529d9915e965
-bdfdc8  Runs on home_6c3d6b807a1157b044c7529d9915e965 since Nov 18 18:21
-  Not checked out on Jacks-MacBook-Pro-2
-(exit 0, 0.5s)
-</pre><p class=v>Fixed. A save, a claim and the hub read before a create now give the hub what is left of five seconds. Before: create 21.6 s and update 11.1 s with the mini asleep, create 240.8 s with the hub hanging. After: update 5.4 s, create 10.5 to 13.3 s (two waits: read, then send), claim 12 to 15.6 s (exchange, then send). <code>lf task sync</code>, asked for, still waits the full 120 s and says so.</p></section><section><h3>9. A claim against a hanging Git remote</h3><p><code>lf task claim</code> while the remote accepts and never answers; then with the hub asleep too.</p><h4>Before</h4><pre># Git remote accepts and never answers (ssh stand-in sleeps 60 s); hub is up
-[L] $ lf task claim 0c6519
-Owner: ada on Jacks-MacBook-Pro-2
-  Nov 18 18:23  claim  ada on Jacks-MacBook-Pro-2
-Saved locally; planning synchronization pending. See `lf repo tracker`.
-(exit 0, 122.3s)
-# left behind:
-93738 /bin/bash /tmp/lfq3/slowssh -G -o SendEnv=GIT_PROTOCOL git@slow.example
-[L] $ lf task sync fea081
-fea081: nothing unsent
-(exit 0, 127.0s)
-[L] $ lf repo tracker
-Plan: Git origin.
-Hub mini.
-(exit 0, 2.1s)
-</pre><h4>After</h4><pre>[L] $ lf task sync fea081
-fea081: nothing unsent
-(exit 0, 12.9s)
+(exit 0, 0.7s)
+[L] $ lf task sync 90b90b
+90b90b: nothing unsent
+(exit 0, 4.4s)
 [L] $ lf repo tracker
 Plan: Git origin.
 Hub mini.
 (exit 0, 0.7s)
-# Git remote accepts and never answers (ssh stand-in sleeps 60 s); hub is up
-[L] $ lf task claim 234773
-Owner: ada on Jacks-MacBook-Pro-2
-  Nov 18 18:35  claim  ada on Jacks-MacBook-Pro-2
-Saved locally; planning synchronization pending. See `lf repo tracker`.
-(exit 0, 11.2s)
-[L] $ lf repo tracker
-Plan: Git origin, unreachable since Nov 18 18:35, 1 unsent.
-  comment 78d4cd29
-  git push did not answer in time
-Hub mini.
-(exit 0, 1.4s)
-# and the hub asleep as well
-[L] $ lf task claim 22ef42
-Owner: ada on Jacks-MacBook-Pro-2
-  Nov 18 18:35  claim  ada on Jacks-MacBook-Pro-2
-Saved locally; planning synchronization pending. See `lf repo tracker`.
-(exit 0, 14.0s)
-[L] $ lf task create Both carriers out
-Saved locally; planning synchronization pending. See `lf repo tracker`.
-Both carriers out · f62d5a
-(exit 0, 11.3s)
-[L] $ lf repo tracker
-Plan: Git origin, unreachable since Nov 18 18:35, 3 unsent.
-  comment 78d4cd29
-  comment 4a72a567
-  f62d5a
-  git push did not answer in time
-Hub mini, unreachable since Nov 18 18:35, 2 unsent.
-  comment 4a72a567
-  f62d5a
-  mini did not answer within 5s; check `ssh mini lf server status`
-(exit 0, 0.8s)
-# both back: one save carries everything
-[L] $ lf task update fea081 --notes both back
-task_fea081837d064f3c988786d35c4a4105: updated
-(exit 0, 2.7s)
-[L] $ lf repo tracker
-Plan: Git origin.
-Hub mini.
-(exit 0, 0.9s)
-# hub accepts and never answers; a claim
-[L] $ lf task claim 295a3d
-Owner: ada on Jacks-MacBook-Pro-2
-  Nov 18 18:35  claim  ada on Jacks-MacBook-Pro-2
-Saved locally; planning synchronization pending. See `lf repo tracker`.
-(exit 0, 12.1s)
-[L] $ lf task sync fea081
-fea081: nothing unsent
-(exit 0, 7.1s)
-[L] $ lf repo tracker
-Plan: Git origin.
-Hub mini.
-(exit 0, 2.0s)
-295a3d · ada · Runs on home_6c3d6b807a1157b044c7529d9915e965 since Nov 18 18:35 · Mini awake
-22ef42 · ada · Runs on home_6c3d6b807a1157b044c7529d9915e965 since Nov 18 18:35 · Hub hangs again
-0c6519 · ada · Runs on home_6c3d6b807a1157b044c7529d9915e965 since Nov 18 18:23 · Asleep, timed again
-234773 · ada · Runs on home_6c3d6b807a1157b044c7529d9915e965 since Nov 18 18:35 · Hang, timed again
-f62d5a · — · Both carriers out
-(exit 0, 2.0s)
-</pre><p class=v><strong>Broke, fixed.</strong> The claim's exchange was waited for five seconds but went on running, and the command waited for it to finish: 122.3 s. The exchange before a claim and a clone's first read now stop Git at five seconds. After: 11.2 s, 14.0 s with both carriers out, and one save after both return clears everything.</p></section><section><h3>10. Eight saves at once; a fresh clone against a hanging remote</h3><p>Eight <code>lf task create</code> in parallel; then a third Machine's first read while its remote hangs.</p><pre># eight saves at once on L (hub and Git up)
-# all returned in 13 s
-   1 Saved locally; planning synchronization pending. See `lf repo tracker`.
-   1 Burst 8 · 6a76ce
-   1 Burst 7 · d5305b
-   1 Burst 6 · 03453d
-   1 Burst 5 · ffb587
-   1 Burst 4 · 44695f
-   1 Burst 3 · 3fd16e
-   1 Burst 2 · 277be0
-   1 Burst 1 · 6b9bc6
-[L] $ lf repo tracker
-Plan: Git origin.
-Hub mini.
-(exit 0, 0.8s)
-# Burst Tasks on the remote ref: 8; on M&#x27;s list: 8
-[L] $ lf task sync fea081
-fea081: nothing unsent
+## a Wave named on both
+[L] $ lf wave create review
+Added Wave review; committed .lf/wave/review on /private/tmp/lfq3/L/repo (4de3d99017)
+(exit 0, 4.4s)
+[M] $ lf wave create review
+review already exists; committed .lf/wave/review on /private/tmp/lfq3/M/repo (d02a17844d)
 (exit 0, 2.8s)
+[L] $ lf task create Laptop review Task --wave review
+Laptop review Task · 6fbfdd
+(exit 0, 3.4s)
+[M] $ lf task create Mini review Task --wave review
+Mini review Task · 244d11
+(exit 0, 1.7s)
+[L] $ lf task create Outside any Wave, after the collision
+Outside any Wave, after the collision · a767f3
+(exit 0, 2.9s)
+[L] $ lf task sync 90b90b
+90b90b: nothing unsent
+(exit 0, 3.3s)
+[M] $ lf task sync 90b90b
+90b90b: nothing unsent
+(exit 0, 2.1s)
 [L] $ lf repo tracker
 Plan: Git origin.
 Hub mini.
-(exit 0, 0.5s)
-# after a sync, on the remote ref: 8
-# a fresh clone (new Machine N) whose remote hangs: first read
-[N] $ lf task list
-(exit 0, 18.0s)
-[N] $ lf repo tracker
-Plan: Git origin, unreachable since Nov 18 18:37.
-  git fetch did not answer in time
 (exit 0, 0.6s)
-[N] $ lf task list
-(exit 0, 0.8s)
-[N] $ lf repo tracker
-Plan: Git origin, unreachable since Nov 18 18:37.
-  git fetch did not answer in time
-(exit 0, 1.1s)
-# N again, now with a server: does its plan arrive without being asked?
-# N&#x27;s list has 28 Tasks 65 s after its server started
-[N] $ lf repo tracker
+[M] $ lf repo tracker
 Plan: Git origin.
-(exit 0, 0.7s)
-</pre><p class=v>Works. All eight land on the remote and the hub, in 13 s together (one exchange per carrier at a time). A fresh clone whose remote hangs answers in 18 s with an empty list and Git's reason; once its server ran, the plan arrived within 65 s with no command.</p></section><section><h3>11. Returning user</h3><p>A home and remote built with the installed <code>lf 0.16.0+7bb879aff</code>, opened with the branch.</p><pre>[U, released lf] $ lf task create Made before the upgrade
-Made before the upgrade · 98d59a
-(exit 0)
-[U, released lf] $ lf task create Second old Task
-Second old Task · 06fd7c
-(exit 0)
-[U, released lf] $ lf repo tracker
-d340bcd5370f1133f53103590b4de710f8df2b27015d0775c499e42a69a17c7e  refs/loopflow/planning/shared/main (configured)  2 records
-  Retained import: 3e4e03adeeb5b1c8481920c37a7fc5b88a579c3a
-  Fetched: 3e4e03adeeb5b1c8481920c37a7fc5b88a579c3a
-  Publication: confirmed (9dd0d17cc352b19e105005ea4120b6fffc7e10ed)
-Import retention is not publication; `lf repo tracker journal` lists retained values.
-(exit 0)
-# remote refs:
-refs/loopflow/planning/shared/main
-# the same home, opened with the branch
-[U] $ lf task list
-98d59a · — · Made before the upgrade
-06fd7c · — · Second old Task
-(exit 0, 3.3s)
-[U] $ lf repo tracker
-Plan: Git origin, 2 unsent.
-  98d59a
-  06fd7c
-(exit 0, 1.5s)
-# remote refs:
-refs/loopflow/planning/shared/main
-[U] $ lf task create First save after the upgrade
-First save after the upgrade · 4126ad
-(exit 0, 2.0s)
-[U] $ lf repo tracker
-Plan: Git origin.
-(exit 0, 1.3s)
-# remote refs:
-refs/loopflow/plan/home_21c48b57bca091abf6f85d72d10244f0
-refs/loopflow/planning/shared/main
-# Task files on the new ref: 3
-</pre><p class=v>Works. The Tasks stay. <code>lf repo tracker</code> now reads <code>2 unsent</code> right after the upgrade (the earlier QA saw <code>Plan: Git origin.</code> with nothing on the new ref); the first save publishes the whole plan.</p></section>
+(exit 0, 0.5s)
+# M:
+6fbfdd · — · Laptop review Task
+244d11 · — · Mini review Task
+07f1dc · — · Final: hub up
+ea83f6 · — · Final: hub hangs
+a767f3 · — · Outside any Wave, after the collision
+## subscribe
+[L] $ lf task create Made while subscribed
+Made while subscribed · 6ebe41
+(exit 0, 2.4s)
+frame: git unsent 0 hub unsent 0 hub error None
+</pre><p><b>Works.</b> The first create came seconds after the mini's server restarted and missed it (6.2 s, saved locally); the repeat took 2.8 s and was on the mini when it returned. <code>review</code> made on the laptop reached the mini by the hub before the mini made its own, and the mini answered <code>review already exists</code>: both Tasks are in one Wave. The subscription's one frame is right: the create during it sent at once, so nothing it shows changed.</p></section>
+
 <h2>Checks after the fixes</h2>
-<pre>cargo nextest run -p loopflow-execution --lib -E 'test(ops::plan_git::)'      6 passed
-cargo clippy -p loopflow-execution -p loopflow --all-targets -- -D warnings  clean
-cargo nextest run -p loopflow --test integration -E 'test(the_later_change_shows_on_both_machines_through_the_hub)'   passed, 117 s
+<pre>cargo clippy -p loopflow-storage -p loopflow-execution -p loopflow --all-targets -- -D warnings   clean
+cargo nextest run -p loopflow-storage -p loopflow-execution --lib -E 'test(sqlite::plan_carriers::) | test(sqlite::planning_write::) | test(ops::plan_git::)'   19 passed
+cargo nextest run -p loopflow --test integration -E 'test(the_later_change_shows_on_both_machines_through_the_hub)'   passed, 60 s
 cargo nextest run -p loopflow --test integration -E 'test(of_two_claims_made_apart_the_first_holds_on_both_machines)'
-    failed: stale since slice 4. Ada's claim is pushed with the save, so Grace's
-    claim read it first and was a takeover. The test now cuts Grace's remote while
-    she claims; passed, 11 s.</pre>
+    timed out at 300 s three times (twice with the acceptance test beside it, once alone, load 90 to 145),
+    then passed in 29 s with nothing changed. No stopped process of its own; five stopped `lf` of other
+    sessions, hours old, were on the Machine. Third time this test has done this (plan, Checks). Cause unknown.</pre>
 <h2>What works now</h2>
-<p>Every save pushes its own ref at once, with or without a server; a second Machine reads it on <code>lf task sync</code> or its server's minute (53 s). Later edit wins; offline saves wait and go with the next save; a refused push heals on <code>lf task sync</code>; a hanging remote or hub no longer holds a save, a claim or a first read past five seconds per wait; eight concurrent saves all arrive; a fresh clone's first read shows the plan; the upgrade from the released <code>lf</code> keeps the Tasks and publishes them on the first save.</p>
+<p>A create or an update holds about 5 s against a hanging or sleeping hub, and goes to the hub at once when it is up. One Wave name made on two Machines no longer stops the plan crossing: everything else keeps arriving by both carriers. A Wave that arrives before the other Machine makes its own is reused.</p>
 <h2>Not reached</h2>
-<p>Desktop's plan lines in a window (not changed by this pass). A real remote over SSH and a real mini. A teammate who can fetch but not push (file remotes have no permissions; the acceptance test covers it). The full suites: gate and CI.</p>
+<p>Desktop (no change here). A real remote over SSH and a real mini. The full suites: gate and CI.</p>
 <h2>Still wrong, worst first</h2>
 <ol>
-<li>A create or a claim with a carrier hanging still takes 10 to 15 s: two bounded waits in a row (the hub read before a create, or the exchange before a claim, then the send after the save). Each is five seconds; nothing says the command as a whole is.</li>
-<li><code>lf task sync</code> against a hanging hub waits 120 s, and against a hanging Git remote as long as SSH takes (127 s seen). It was asked for, so it is left unbounded; it prints nothing while it waits.</li>
-<li>A fresh clone whose remote hangs shows an empty <code>lf task list</code> with no word about why; only <code>lf repo tracker</code> says <code>git fetch did not answer in time</code>.</li>
-<li>From the earlier QA, unchanged: a second clone of one remote under the same <code>LF_HOME</code> shows an empty plan; teammates' Machines read as ids (<code>Runs on home_6c3d…</code>); <code>lf task sync</code> needs a Task id and prints <code>nothing unsent</code>.</li>
+<li>Two Waves of one name made apart stay apart forever, with their Tasks, and nothing on screen says so: <code>lf repo tracker</code> reads <code>Plan: Git origin.</code> A product choice (join, rename, or show), in <code>scratch/questions.md</code>.</li>
+<li><code>machine_commands::of_two_claims_made_apart_the_first_holds_on_both_machines</code> sometimes runs out nextest's 300 s under load and passes at the next run. That's a flaky test by the repository's rule. Gate has to find the cause or rewrite it.</li>
+<li>A claim with a carrier hanging still makes two five-second waits in a row (the exchange before it, then the send after the save). Not changed.</li>
+<li>From earlier runs, unchanged: <code>lf task sync</code> against a hanging hub waits 120 s and prints nothing while it waits; a fresh clone whose remote hangs shows an empty list with no reason; teammates' Machines read as ids.</li>
 </ol>
+</body></html>

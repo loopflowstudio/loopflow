@@ -150,3 +150,19 @@ Still open from before:
   `lf task create` goes (plan slice 5). Reversible. A `--wave` made on
   another Machine seconds earlier then needs `lf task sync` first.
   `lf task sync` still prints nothing while it waits; left as is.
+
+- QA after slice 5 (2026-11-18), headless:
+  - Two Machines that each make a Wave of one name (`lf wave create design`
+    on both, or `lf task create --wave design` before the other's Wave has
+    arrived, which makes the Wave: on main) hold two Waves that can never
+    meet: `idx_waves_active_locator` allows one active Wave per repository,
+    parent and name. Before this pass that failed every later exchange by
+    both carriers. Now the import skips that Wave, its Projects and Tasks
+    and logs each (`skipped a plan record that cannot be written here`);
+    everything else keeps arriving. Nothing on screen says the plan is split:
+    `lf repo tracker` reads `Plan: Git origin.` Should the later Wave of a
+    name join the earlier one (its Tasks move to it), be renamed, or show on
+    the line as not taken?
+  - `lf repo tracker --subscribe` no longer reads the hub; its read had
+    failed on the stream's read-only store every time. A hub change shows
+    there after the next save, `lf task sync` or the server's exchange.

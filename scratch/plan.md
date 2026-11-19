@@ -388,6 +388,11 @@ existing update a conversation gets about its own Task; Waves and
    and Asana, on LOO-938. Until then a child reaches the tracker as an
    ordinary issue: `task_creation_intents` carries no parent.
 
+Next: slice 4, which finishes the demo's middle (a merged parent stays
+open, `lf task complete` over children). Its "listed top-level" rule needs
+`parent` on `TaskRow`, so the `TaskRow`/`RoadmapTask` item from slice 2 goes
+with it; the rest of slice 2 follows.
+
 One PR. If LOO-938 is still unmerged when slices 1–4 are done, slice 5 is
 built on `lf sync LOO-938` and the PR waits behind #1983.
 

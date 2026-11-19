@@ -68,7 +68,7 @@ auto setting says who takes the interactive steps. One word: **auto**.
 - **Who sets it:** `lf ship`, spelled `lf task auto on` too (on, always, the
   only thing that lifts a stop; served as `task.ship`); `lf task auto off
   [ISSUE] [--reason] [--json]` (served as `task.auto.off`);
-  `lf -b task run` (on, unless stopped). Nothing else: no route
+  `lf -b task run` (on, unless off). Nothing else: no route
   approval, and failures, refusals and reaching `end` leave it alone.
 - **`lf ship <task>`** is the run, asked for auto (detached, `lf task run`'s
   output, `task.ship` returns `TaskRun`). On a live run it reports that run. On
@@ -114,14 +114,20 @@ when the PR merges.
 
 ## Remaining
 
-Gate.
+1. The run outlook ("To build" below), the one section not started.
+2. QA again: everything below was driven before ship became a run asking for
+   auto. Two ships at the same moment on a never-run Task is the case no
+   fixture holds; expected now: one run, both exit 0, the second prints the
+   live run.
+3. Gate.
 
-QA 2026-11-19 at `08e047dfe8` (`scratch/qa.html`): `lf task auto on`, `lf ship`
-and `task.ship` are one operation on a never-run, waiting, stopped, running and
-Task-less-branch start; `task.auto.off` and recovery work. Two `on`s at the
-same moment on a never-run Task leave one run, and the second exits 1 with
-"is running graph …" (the `graph_for_ship` window below, now seen). The
-upgrade from 0.16 was driven at `679f658cbf`; the migration is unchanged since.
+QA 2026-11-19 at `08e047dfe8` (`scratch/qa.html`), before `ship_on` was
+deleted: `lf task auto on`, `lf ship` and `task.ship` are one operation on a
+never-run, waiting, off, running and Task-less-branch start; `task.auto.off`
+and recovery work. Two `on`s at the same moment on a never-run Task left one
+run, and the second exited 1 with "is running graph …"; the take-up moving
+into the run is the answer to that. The upgrade from 0.16 was driven at
+`679f658cbf`; the migration's only change since is the stored word `off`.
 Earlier the same day: the CLI, socket, recovery and 0.16 upgrade
 paths work on a private Machine. `lf task status --json` now carries `auto`
 (`TaskDetail.auto`), and a Task read from another Machine prints it; the
@@ -174,6 +180,13 @@ Shape, for gate's review:
 - The builtin `auto` Graph shares its name with the setting. Renaming it is
   its own Task.
 - Open, nobody has decided: whether `lf -b task run` should write auto on.
+- `ops/task/ship.rs` now holds the auto setting (`AutoAsk`, `set`,
+  `auto_off`) and one ship-only function, `ship_branch_task`. `auto.rs` would
+  name what it is.
+- `ship::running_graph` polls up to 30 s for a carrier's Graph to register so
+  `TaskRunStart::Live` can name a Graph run. If `Live` named the carrier
+  instead, the wait and its second sentence ("is running graph …" after 30 s)
+  would go. Not driven: a ship arriving inside that window.
 
 ## Built: ship is a run that asks for auto
 
@@ -202,6 +215,9 @@ after its own take-up (`ship::ask`).
   unset. A done or abandoned Task gets the run's sentences ("is done; `lf task
   reopen` …", "is abandoned; inspect …"), not ship's own.
 - Not in a fixture: two ships at the same moment. QA drives it.
+- `a_ship_on_a_running_task_reports_its_run_and_starts_nothing` turns auto
+  off before the ship, so the `on` it reads is the ship's, and counts one
+  Graph run. Passed 2026-11-19; the ship call returned in 0.7 s.
 
 Stored and wire value is `off` (`AutoState::Off`, `task_graph_auto.sql`,
 `task_checkout.json`, `server_schema.json`, Swift `Auto.State.off`,

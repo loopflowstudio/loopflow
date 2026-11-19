@@ -2800,6 +2800,13 @@ fn a_ship_on_a_running_task_reports_its_run_and_starts_nothing() {
     .spawn()
     .unwrap();
     wait_for("the stand-in", || !stand_ins(&task).is_empty());
+    // Off first, so the mark below is the ship's and not the batch run's.
+    task.run(&["--task", "INF-123", "task", "auto", "off"]);
+    assert!(
+        task.text_status().contains("auto: off by "),
+        "{}",
+        task.text_status()
+    );
     let shipped = task.run(&["--task", "INF-123", "ship"]);
     let text = String::from_utf8_lossy(&shipped.stdout);
     assert!(
@@ -2817,6 +2824,7 @@ fn a_ship_on_a_running_task_reports_its_run_and_starts_nothing() {
     fs::remove_file(task.home.path().join("hold")).unwrap();
     assert!(first.wait().unwrap().success());
     assert_eq!(task.graph()["position"], at("end"));
+    assert_eq!(support::recorded_graphs(task.home.path()).len(), 1);
     assert_eq!(stand_ins(&task).len(), 1);
 }
 

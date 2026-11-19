@@ -76,3 +76,21 @@ Script: `probes/codex_exec.py`.
 Loopflow's trusted hashes were not exercised. Of about 2,350 non-test
 lines in the four Codex files, roughly 300–450 serve only the headless
 driver; an `exec` decoder with rollout reads would add about as many.
+
+# Configured model in the OpenCode TUI, 2026-11-19
+
+OpenCode 2.2.1 TUI under a PTY, isolated home, scripted local API with three
+models (`neon`, `carbon`, `small` as `small_model`). Each row is one launch of
+`opencode --standalone --session <id> --prompt …` with `model` set in
+`OPENCODE_CONFIG_CONTENT` as shown. Script: `probes/oc_model.py`.
+
+| Launch | Model the prompt's request named |
+|---|---|
+| new session, config `opencode/carbon` | `carbon` |
+| same session reopened, config `opencode/neon` | `carbon` |
+| same session reopened, no config `model` | `carbon` |
+| another new session in the same home, config `opencode/neon` | `neon` |
+
+A config `model` picks the model of a new session. A reopened session keeps
+the model of its last turn and ignores the config. No `model.json` state file
+was written; the model rides with the session.

@@ -74,25 +74,21 @@ Pi, `scratch/qa.html`) added two things:
 Checks after those: `server::boundary::` 11 passed, `server::wake::` 8 passed,
 `harness::context::tests::` 13 passed, both `idle_wake.py` runs passed.
 
-## Next slice: the configured model reaches the work session
+## Built: the configured model reaches a new work session
 
-An OpenCode work session ignores the model in `agent:`. `Harness::open`
-passes no model, so `opencode:opencode/gemini-4-carbon` ran Gemini 4 Neon,
-the account's default. The OpenCode 2.2.1 TUI has no `--model` flag
-(`opencode --help`). Workers and Pi use the configured model.
+An OpenCode work session ignored the model in `agent:`: the 2.2.1 TUI has no
+`--model` flag, so `opencode:opencode/gemini-4-carbon` ran the account's
+default. `opencode::environment` now sets `"model"` in
+`OPENCODE_CONFIG_CONTENT`, and `opencode run` no longer passes `--model`, so
+workers and work sessions take it from one place.
 
-- `opencode::environment` sets `"model"` in `OPENCODE_CONFIG_CONTENT` from
-  `config.agent.model`. Both launches build that value already.
-- Delete `--model` from `opencode run` in `command()`, so the model is set in
-  one place.
-- A unit test on `environment` checks the key. A real 2.2.1 TUI launch with
-  `agent: opencode:<non-default model>` checks that the configured model
-  answers, through `tests/e2e/opencode_terminal.py` or by hand. If OpenCode
-  ignores a config `model` for an existing `--session`, record what it did
-  in `probes.md` and stop there.
+What the real TUI showed (`probes.md`, "Configured model"): the config picks
+the model of a new session; a reopened session keeps the model of its last
+turn. So changing `agent:` between opens of one OpenCode work session does
+not change its model. Stopped there, per the slice; `questions.md` 7.
 
-Choice made for review (`scratch/concept-review.html`): config, not waiting
-for a TUI flag.
+Checks: `cargo test -p loopflow-execution --lib harness::opencode::tests::`:
+5 passed, 1 ignored (live). `scratch/probes/oc_model.py` on 2.2.1: as above.
 
 ## Remaining
 

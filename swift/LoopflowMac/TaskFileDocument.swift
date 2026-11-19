@@ -1060,19 +1060,17 @@ final class TaskFilesStore {
 
     /// Write tour when there is none, Update tour when it is behind; nil
     /// while it is current, being written, or the checkout is on another Machine.
+    /// The `tour` skill only runs in a checkout on this Machine.
     var tourAction: String? {
-        guard canWriteTour, !isWritingTour else { return nil }
+        guard query.remoteMachine == nil, !isWritingTour else { return nil }
         if diffOrder == nil { return "Write tour" }
         return tourAge != nil ? "Update tour" : nil
     }
 
-    /// The `tour` skill only runs in a checkout on this Machine.
-    var canWriteTour: Bool { query.remoteMachine == nil }
-
     /// Run the `tour` skill headless in the Task's checkout. The order
     /// switches to Tour when the file it writes lands.
     func writeTour() async {
-        guard canWriteTour, !isWritingTour else { return }
+        guard tourAction != nil else { return }
         noteInteraction()
         tourWriting = .running(log: nil)
         do {

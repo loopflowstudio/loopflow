@@ -36,13 +36,12 @@ One PR, Swift plus Rust for a served read, a setting and the private settings fi
     headings, comment counts, "Hidden by the worker for this change" with
     reasons and Show, "Always hidden" with its add field. Under 620 pt it opens
     over the stream from a toolbar button.
-  - **Order** (`DiffOrder`): `scratch/diff-order.yaml` with `first:` (files,
-    optional why) and `hide:`; unnamed files follow in the default order. Tour
-    is the default when `first` has entries; By path groups by top-level folder.
-    The builtin `implement` skill tells the worker to write the file.
-  - **Always hidden**: the `diff_hidden` setting (personal, global or per
-    repository, default `[scratch/]`), path text matched anywhere, ignoring
-    case; Desktop saves edits to the repository's `.lf/config.local.yaml`.
+  - **Order** (`DiffOrder`): `scratch/diff-order.yaml` with `at:`, `first:`
+    (files, optional why) and `hide:`, written by the builtin `tour` skill or
+    the Write tour / Update tour button; unnamed files follow by `diff_groups`.
+    Tour is the default when `first` has entries; By path groups by folder.
+  - **Always hidden**: `diff_hidden`, every layer added, each pattern labelled
+    with its layer; Desktop edits only yours, in `.lf/config.local.yaml`.
   - **File bar** above the stream holds the header of the file under the top
     edge (`ReviewFileTitle`, the same view as the in-stream header).
   - `ReviewStepper` (`]`/`[`, arrows) crosses files; Focus shows one file with
@@ -244,45 +243,26 @@ Check (implement, November 19, after the merge of main `932702681e`): `scripts/t
 
 Jack, on the tour after publish: "Tour doesnt need to survive submitting the tour, but are there any good alternatives to how to implement it?" Then, on Devin Review's "hasn't analyzed the latest changes" banner with Analyze latest / Analyze automatically: "Maybe a button would make sense here too". Not yet built; proposal below.
 
-Proposed (not decided): the tour records the commit it was written at (`at: <sha>` in `scratch/diff-order.yaml`). When the head has moved past it, or no tour exists, the Diff's order control offers **Write tour** / **Update tour**, which runs a headless agent in the Task's checkout that rewrites the file; the order switches to Tour when it lands. Files changed since `at` show where they fall today (after the named ones). On demand only; no automatic rewrite.
-
-Jack: "i wonder if there is some way we can also to smarter changes over itme. we could allow repo level settings to prioritize certain folders or file extensions ro something". Not decided. Today By kind is a fixed rule in `ReviewKind` (`ReviewOrder.swift`): generated and lock files, tests, docs, source by path patterns.
+Jack: "i wonder if there is some way we can also to smarter changes over itme. we could allow repo level settings to prioritize certain folders or file extensions ro something". Built as `diff_groups` below.
 
 ## The tour skill and its button (November 19) — built
 
 Jack, quoting the proposal ("a small skill whose whole job is to read the diff and write the YAML … the worker and the button write the same thing the same way"): "We need this, plus we need to put this into other skills and/or the overall loopflow guide."
 
-1. **A builtin skill that writes the tour.** Its whole job: read the Task's comparison (`lf task diff`), write `scratch/diff-order.yaml` with `at:` (the head commit it read), `first:` and `hide:`, each entry `- path:` with an optional one-line `why:`. It rewrites the file whole, never appends. It decides only the order and what to hide; it edits nothing else. Name it for what it makes (*assumed:* `tour`). Keep it short and plain like the other builtins.
-2. **Every skill that hands a change to a reader points at it** instead of restating the format: `implement` (replace its sentence), and any other builtin that changes the diff before someone reads it or builds the reading page (check `compress`, `human-review`, `demo`, `pr-publish`). `LOOPFLOW.md` is paid on every run: add one line there only if a run outside those skills (a plain chat that makes the change) would otherwise never write it; say which you chose and why.
-3. **Desktop reads `at:`.** When the head has moved past it, the order control says how many commits old the tour is; files changed since fall after the named ones as today.
-4. **The button.** In the order control: **Write tour** when there is none, **Update tour** when it is stale. It runs the skill headless in the Task's checkout, the way Desktop already starts Graph runs as children, shows that it is running, and switches to Tour when the new file lands. A failure says why in the pane. No automatic rewrite on push.
-5. Tests a person would notice: a tour written at an older commit reads as stale; the skill's golden; the button's command line.
-
-Not in this slice: the repository `diff_order` setting, `.gitattributes`, "Always hide?" (proposed in the section above, not decided).
-
 Built: builtin `tour` (`rust/loopflow-definitions/src/builtins/task/skill/tour.md`, golden `tests/goldens/builtin_tour.md`). `implement`, `compress` (a final step) and `human-review` (when the file is missing or behind) point at `lf help tour`; `demo` and `pr-publish` don't change what a reader opens. `LOOPFLOW.md` unchanged: a plain chat's change gets its tour from Desktop's button, so every run need not pay for the line. Desktop parses `at:`; stale means a commit after `at` changed a file outside `scratch/` (committing the tour itself keeps it current), and the stream says "The tour was written at <sha> · N files changed since" — files changed, not commits, since that is the read that exists (`task.changes --base <at> --head <head>`). **Write tour** / **Update tour** sends the served `skill.run` write with the Task's checkout; a remote Task offers neither (the write would run outside its checkout). Limit: a run that fails after launching stays "Writing the tour…"; its log path is in the notice.
 
 Jack, on ordering layers: "right, and we could say that the review guides basically stack ontop of the default diff_Order, but we still fall back. and likewise, the repo (or potentially peronsal) settings could also add more. and i think maybe a whole diff seciton that has filters and ordered list of groups"
 
-Direction from that (sent to the running worker as a steer):
-- One `diff:` setting section replaces `diff_hidden`: `diff.hidden` (path text to hide) and `diff.groups` (ordered list of `{title, paths}`). Settable in the repository's `.lf/config.yaml` (shared) and in personal settings, globally or per repository.
-- Layers, top first: the tour (`scratch/diff-order.yaml`, this change only) → personal groups → repository groups → the built-in groups (today's `ReviewKind` rule, which becomes the default value). A file sits in the first group that matches it; files no layer names come last. Every layer only adds; nothing below it is lost.
-- Hidden is the union of the tour's `hide`, personal and repository `hidden`; each stays labelled with where it came from in the sidebar, and only your own are editable there.
-- The migration of an existing `diff_hidden` value: per AGENTS.md's shared-file rule, the released `lf` 0.16.0 doesn't know `diff_hidden` at all, so no fallback is needed; drop the key.
+Jack: "i would also imagine that we want sort of anyting not covered to go between e.g. docs and generated". So unmatched files go to a `- rest:` slot in the list.
 
-Jack: "i would also imagine that we want sort of anyting not covered to go between e.g. docs and generated". So unmatched files do not go last: `diff.groups` has one "everything else" slot, an entry `- rest: Everything else` (title optional). The built-in default is Source, Tests, Docs, rest, Generated. A layer that lists its own `rest` moves the slot; otherwise the slot stays where the lowest layer put it. Files no group matches land there.
+Jack: "btw i would want doccs up top, then like core data mdoel stuff". Read as the default order: Docs, Data model, rest, Tests, Generated.
 
-Jack: "btw i would want doccs up top, then like core data mdoel stuff". Read as the default order: Docs, Data model, rest (source not otherwise named), Tests, Generated. Source as its own built-in group goes; it is what `rest` holds. Built-in Data model uses generic paths (migrations, `*.sql`, `schema`, `models/`, `*.proto`, `dto`); this repository adds its own in `.lf/config.yaml`: `rust/loopflow-model/`, `rust/loopflow-storage/`, `tests/fixtures/dto/`.
+Jack: "ideally we would roughly suggest similar overall guidance in our default skill, and have it eplicitly codified in our repo config". So the tour skill says the order as reading guidance and this repository's `.lf/config.yaml` writes the full list out.
 
-Jack: "ideally we would roughly suggest similar overall guidance in our default skill, and have it eplicitly codified in our repo config". So the order lives in two places on purpose: the tour skill says it as reading guidance (docs and the outcome first, then the data model and public APIs, then the logic that uses them, tests, generated last), and this repository's `.lf/config.yaml` writes the full `diff.groups` list out explicitly rather than leaning on the built-in default.
-
-Jack, on the layers: "For this we should use the existing config parser to get final values". So Desktop does no layering of its own: it reads the final `diff` value from lf's settings resolution, and only the tour (a per-change file, not a setting) sits on top in Desktop. Found: list settings with `AppendReset` (e.g. `docs`, `exclude`) append each higher layer after the lower ones (`settings.rs:825`), so a "first match wins" rule would let the built-in groups win. The matching and display rule has to fall out of that final list.
+Jack, on the layers: "For this we should use the existing config parser to get final values". So Desktop does no layering of its own; only the tour sits on top. (`AppendReset` lists append higher layers after lower ones, so first-match over an appended group list would let the built-ins win.)
 
 Jack: "a little complicated on what do on how to combine groups from multiple config files (and/or the represetnation from scratch)". Chosen in this conversation (the operator's call, not Jack's; reversible): no group merging at all.
-- `diff.groups`: Replace. The most specific layer that sets it wins whole (personal for this repo > personal > repository > built-in). To add to it, copy the list `lf config explain diff` shows.
-- `diff.hidden`: AppendReset, the existing list combination: every layer adds; `[]` clears below.
-- The tour is not groups: `first:` pins files above whatever groups resolve to, `hide:` adds to hidden for this change. Nothing to merge.
-This supersedes the steer about same-title groups merging and last-match-wins.
+Groups replace whole, hidden adds across layers, and the tour pins `first:` above the groups and adds `hide:` for this change (built below).
 
 ### Built (November 19): `diff_hidden` and `diff_groups`
 
@@ -293,4 +273,4 @@ This supersedes the steer about same-title groups merging and last-match-wins.
 - Always hidden lists every pattern with the layer that last added it (Default, Repository, Personal, Override); only yours have ✕, and removing your last one unsets your key instead of writing `[]`, which would clear the layers below.
 - This repository's `.lf/config.yaml` writes the full `diff_groups` list, with `rust/loopflow-model/`, `rust/loopflow-storage/` and `tests/fixtures/dto/` in Data model and `tests/goldens/` in Generated.
 - Check: `cargo test -p loopflow-execution --lib config::` → 105 passed; `scripts/test_desktop.sh --filter 'TaskFilesTests|ReviewDiffTests'` → 50 passed; branch `lf config explain diff_groups` here selects the repository's list.
-
+- Compress (November 19): `tourAction` holds the remote and running gates once; `scripts/test_desktop.sh --filter TaskFilesTests` → 40 passed.

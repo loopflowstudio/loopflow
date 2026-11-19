@@ -1347,6 +1347,18 @@ fn a_task_primary_is_one_of_its_own_conversations() {
     support::register_sibling_task(&task, "INF-125", "task-empty", &empty_path);
     let converse = |checkout: &Path, opened_at: i64| -> String {
         let before = fixture.launches().len();
+        if opened_at == 3_000 {
+            let primary = fixture.session_row(&fixture.launches()[before - 1]).0;
+            fixture.db().execute(
+                "UPDATE agent_sessions SET agent_ended_at=1,agent_exit_code=137,last_started_at=NULL WHERE id=?1",
+                [primary],
+            ).unwrap();
+            let deadline = Instant::now() + Duration::from_secs(15);
+            while fixture.launches().len() == before {
+                assert!(Instant::now() < deadline, "watcher did not restart the primary");
+                std::thread::sleep(Duration::from_millis(20));
+            }
+        }
         let output = fixture
             .command(&LAUNCH)
             .current_dir(checkout)

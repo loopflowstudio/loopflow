@@ -10,6 +10,55 @@ table{border-collapse:collapse}td,th{border:1px solid #ccc;padding:.3em .6em;tex
 <code>claude</code> on <code>PATH</code> recorded what each writer was sent; the writers'
 own transcripts show what they ran. GitHub was <code>.lf/qa/gh-standin.py</code>.</p>
 
+<h2>Third pass, the read command for a renamed file</h2>
+<p>2026-11-18, build <code>cb1f1932a</code>, a new repository under <code>/tmp/lf-qa-d92894</code> with a
+private <code>LF_HOME</code>, real <code>claude</code> (haiku), the <code>tee</code> capture and the stand-in
+GitHub. Nothing broke; no code changed.</p>
+<table>
+<tr><th>What</th><th>Change</th><th>Result</th></tr>
+<tr><td><code>lf commit -a claude:haiku</code></td><td>610,908 bytes, 4 files: 6,000-line fixture, <code>src/old place/limits $v1.toml</code> moved with two lines appended, a file moved untouched, an 8-line retry</td><td class=ok>The writer ran <code>git diff --cached -M -- 'src/config/limits.toml' 'src/old place/limits $v1.toml'</code> and the same for the pure move. Message below. 51 s.</td></tr>
+<tr><td><code>lf pr publish -a claude:haiku</code></td><td>610,699 bytes, 3 files; the renamed file's old path is <code>src/config/limit's $v1.toml</code>, two of its 303 lines edited</td><td class=ok>PR #100 "Lower the export size cap from 4 MiB to 2 MiB". The writer read the new path alone first (303 added lines), then both paths, double-quoting the apostrophe itself. The body gives the two changed values, not a new file. 47 s, no permission flag.</td></tr>
+<tr><td><code>lf -b whatchanged --diff patch</code>, same branch</td><td>old path printed as <code>limit's &amp;#36;v1.toml</code> in the block</td><td class=ok>The agent ran the two-path command with a real <code>$</code> and named lines 302–303 of the renamed file.</td></tr>
+<tr><td><code>--diff patch</code>, branch with only uncommitted work</td><td>a staged rename with one added line, one untracked file</td><td class=ok>"Uncommitted, 2 files", the two-path line spelled <code>git diff HEAD -- …</code>, the rename's patch inlined as a rename; the answer covers both files.</td></tr>
+<tr><td><code>lf commit</code>, no rename</td><td>one line in <code>src/tries.rs</code></td><td class=ok>No "both paths" line; the section reads as it did in the second pass. "Raise TRIES from 2 to 3".</td></tr>
+</table>
+
+<h3>What the commit writer was sent, and wrote</h3>
+<pre>Staged, 4 files. Read one file's patch with:
+  git diff --cached -- '&lt;path&gt;'
+A renamed file needs both paths:
+  git diff --cached -- '&lt;path&gt;' '&lt;old path&gt;'
+
+  +6000  -6000   aaa_generated.txt
+     +2  -0      src/config/limits.toml (from src/old place/limits $v1.toml)
+     +0  -0      src/config/notes.txt (from src/moved_only.txt)
+     +7  -1      src/zzz_retry.rs
+
+The patch is 610,908 bytes, too large to include. Start with the files that
+carry the change.</pre>
+<pre>Retry a failed export once and move config files into src/config
+
+The export endpoint drops roughly one request in forty under load, so `export()` now retries once
+after a failed send instead of failing the whole run. …
+
+The 2026-11 run showed the proxy cutting off exports larger than 4 MiB, so `limits.toml` gains
+`max_export_bytes = 4194304`. The limits file moves from `src/old place/limits $v1.toml` to
+`src/config/limits.toml`, and `src/moved_only.txt` moves to `src/config/notes.txt` with no content change.
+
+`aaa_generated.txt` is regenerated output: all 6000 rows have new hashes …</pre>
+
+<h3>Seen, not wrong</h3>
+<ul>
+<li>With the patch not inlined, the writers took 47–51 s here against 11–25 s in the second pass: two or
+three tool turns, one of them the one-path read before the two-path one.</li>
+<li>The PR body said the <code>scratch/plan.md</code> note "should be removed before merge"; the list marks it
+"cleared when this lands". The writer's wording, from a cheap model.</li>
+<li>Git by hand on the same branch: one path, <code>303 insertions(+)</code>; both,
+<code>2 insertions(+), 2 deletions(-)</code>.</li>
+</ul>
+<p>Still not reached: <code>lf pr submit</code> against real GitHub (the same <code>generate_pr_copy</code>
+ran here through <code>lf pr publish</code>), and Pi or OpenCode as the writer.</p>
+
 <h2>Second pass, after the section moved into the first turn</h2>
 <p>2026-11-18, build <code>cbb3f155a</code>, everything again from an empty repository
 (<code>/tmp/lf-qa-d92894</code>, private <code>LF_HOME</code>, real <code>claude</code> and

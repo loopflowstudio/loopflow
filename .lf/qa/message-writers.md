@@ -44,5 +44,10 @@ instead, so test both sizes.
   prompt in a checkout lf did not create; the capture script's `.stdin` file
   already holds the whole first turn, since interactive Claude takes it on
   stdin, not as an argument. Only Pi and OpenCode check the 122,880-byte cap.
+- **Renames:** `git mv` a 300-line file and change a line or two, beside the
+  generated file so no patch is inlined. The section then carries "A renamed
+  file needs both paths"; the writer's `tool_use` should hold both, and the
+  message should give the changed lines, not a new file. Put `$` and an
+  apostrophe in the old path to check quoting and the `&#36;` form in the block.
 - **Many files:** 3,000 two-line CSVs under `fixtures/tables/generated/region_NN/`
   make a list of about 237 KB with a patch that is not inlined.

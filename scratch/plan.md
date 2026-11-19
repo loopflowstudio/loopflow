@@ -215,6 +215,13 @@ Before this change both describe only `aaa_generated.txt`.
   change. A 3,001-file branch made a 237,456-byte first turn; headless and
   interactive Claude both launched. Nothing fixed.
 
+- 2026-11-18, third qa, build `cb1f1932a` (`scratch/qa.html`, top): with
+  renamed files in a 610 KB change, the `lf commit` writer, the
+  `lf pr publish` writer and a `--diff patch` Skill each ran the two-path
+  read command and described the edited lines, with `$`, a space and an
+  apostrophe in the old path. A change with no rename has no such line.
+  Nothing fixed.
+
 ## What remains
 
 Nothing left to build. The read command for a renamed file is in

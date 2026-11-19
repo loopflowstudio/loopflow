@@ -1,4 +1,4 @@
-//! Local-save delivery to the repository's tracker or hub, and the planning
+//! Local-save delivery to the repository's tracker or plan carriers, and the planning
 //! store and locks every planning command shares.
 
 use crate::work::wave::Wave;
@@ -85,9 +85,9 @@ where
 async fn sync_saved(store: &Store, repo: &str, saved: &ActionOwner) {
     let attempt = async {
         if !super::tracker::connected(repo) {
-            return super::plan_hub::sync(store, repo, true)
+            return super::plan_carriers::send(store, repo)
                 .await
-                .map_err(message);
+                .map_err(|error| message(format!("{error:#}")));
         }
         super::tracker::drain::drain_repository(
             store,
@@ -179,7 +179,7 @@ fn sync_directory(directory: &Path, refresh: bool) -> OpsResult<()> {
                 let synced = if refresh {
                     super::plan_carriers::sync(&store, &repo).await
                 } else {
-                    super::plan_hub::sync(&store, &repo, false).await
+                    super::plan_hub::sync(&store, &repo).await
                 };
                 return synced.map_err(message);
             }

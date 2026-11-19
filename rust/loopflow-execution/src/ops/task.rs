@@ -1944,7 +1944,7 @@ pub fn task_create(
     let main = crate::git::worktrees::main_repo_root(repo).map_err(task_error)?;
     block_on_task(async {
         let store = Arc::new(super::planning_sync::planning_store().await?);
-        if let Err(error) = super::plan_hub::sync(&store, &main.to_string_lossy(), false).await {
+        if let Err(error) = super::plan_hub::sync(&store, &main.to_string_lossy()).await {
             tracing::debug!(error = %format!("{error:#}"), "hub read pending; creating from this Machine's plan");
         }
         let receipt = receipt.map(|identity| Receipt {
@@ -2010,7 +2010,7 @@ pub(crate) fn sync_admitted(main: &Path, task: &loopflow_model::durable::TaskId)
     let synced = block_on_task(async {
         let store = Arc::new(super::planning_sync::planning_store().await?);
         let repo = main.to_string_lossy();
-        if let Err(error) = super::plan_hub::sync(&store, &repo, false).await {
+        if let Err(error) = super::plan_hub::sync(&store, &repo).await {
             tracing::warn!(error = %format!("{error:#}"), "hub read after creation failed");
         }
         super::planning_sync::sync_after_save(

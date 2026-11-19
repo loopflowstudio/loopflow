@@ -90,9 +90,8 @@ pub async fn resolve_task_source(
             }
             return Ok(source);
         }
-        if let Err(error) = crate::ops::plan_hub::sync(&store, &repo.to_string_lossy(), true).await
-        {
-            tracing::warn!(error = %format!("{error:#}"), "hub send pending; remote resolution uses this Machine's plan");
+        if let Err(error) = crate::ops::plan_carriers::send(&store, &repo.to_string_lossy()).await {
+            tracing::warn!(error = %format!("{error:#}"), "plan send pending; remote resolution uses this Machine's plan");
         }
     }
 

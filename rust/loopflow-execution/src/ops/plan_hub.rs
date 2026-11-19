@@ -52,8 +52,8 @@ pub fn set_hub(
 // ---- Another Machine's side ----
 
 /// Exchange `repo`'s plan with this Machine's hub, when it has one and the
-/// repository has no Linear or Asana. With `send_only`, see [`exchange`].
-pub async fn sync(store: &crate::store::Store, repo: &str, send_only: bool) -> Result<()> {
+/// repository has no Linear or Asana.
+pub async fn sync(store: &crate::store::Store, repo: &str) -> Result<()> {
     if crate::ops::tracker::connected(repo) {
         return Ok(());
     }
@@ -61,20 +61,21 @@ pub async fn sync(store: &crate::store::Store, repo: &str, send_only: bool) -> R
         return Ok(());
     };
     let (sqlite, repo) = (store.sqlite.clone(), repo.to_owned());
-    crate::journal::request::spawn_blocking(move || exchange(&sqlite, &repo, &hub, send_only))
-        .await?
+    crate::journal::request::spawn_blocking(move || exchange(&sqlite, &repo, &hub, false)).await?
 }
 
 /// Send `hub` the records of `repo` it has not taken, then take in what
-/// changed there. Either order gives the same plan. With `send_only`, a
-/// repository with nothing unsent that has read the hub before asks it
-/// nothing. The outcome is recorded for `lf repo tracker`.
+/// changed there. Either order gives the same plan. With `send_only`, after a
+/// save, a repository with nothing unsent that has read the hub before asks
+/// it nothing, and an exchange already running is waited for only briefly.
+/// The outcome is recorded for `lf repo tracker`.
 pub fn exchange(store: &SqliteStore, repo: &str, hub: &Machine, send_only: bool) -> Result<()> {
     let Some(repository) = store.repository_id(repo)? else {
         return Ok(());
     };
     // One exchange per repository at a time; the next one reads what this one wrote.
-    let _turn = super::plan_carriers::lock(store, "plan-hub", &repository)?;
+    let until = send_only.then(super::plan_carriers::send_until);
+    let _turn = super::plan_carriers::lock(store, "plan-hub", &repository, until)?;
     let held = store.select_carrier(repo, Carrier::Hub, hub.id.as_str())?;
     if send_only && held.seen_seq.is_some() && store.plan_unsent(repo, Carrier::Hub, 0)?.count == 0
     {

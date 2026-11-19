@@ -4,9 +4,11 @@
 //! the others' from `refs/loopflow/plan-seen/*`. It decides nothing: arriving
 //! records go through the one import, where the newest stamp wins.
 use std::collections::HashMap;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::Path;
 use std::process::{Command, Stdio};
+use std::sync::mpsc::Receiver;
+use std::time::Instant;
 
 use anyhow::{anyhow, bail, Context, Result};
 
@@ -69,16 +71,55 @@ pub fn first_exchange(store: &SqliteStore, repo: &str) -> Result<bool> {
 /// outcome is recorded for `lf repo tracker`. A repository with no remote
 /// does nothing.
 pub fn exchange(store: &SqliteStore, repo: &str) -> Result<()> {
-    let path = Path::new(repo);
-    let Some(remote) = remote(path) else {
+    let Some(remote) = remote(Path::new(repo)) else {
         return Ok(());
     };
     // A clone that has saved nothing still reads the plan its remote carries.
     let repository = crate::repository::location::ensure_repository(store, repo)?;
-    // One Git exchange per repository at a time; the next reads what this one wrote.
-    let _turn = super::plan_carriers::lock(store, "plan-git", &repository)?;
-    let sent_seq = store.select_carrier(repo, Carrier::Git, &remote)?.sent_seq;
-    let result = exchange_with(store, repo, &remote, repository, sent_seq);
+    turn(store, repo, &remote, &repository, None, |sent_seq| {
+        exchange_with(store, repo, &remote, &repository, sent_seq)
+    })
+}
+
+/// Push the records changed here onto this Machine's ref as last fetched,
+/// fetching nothing, and give up at `until`. A push the remote refuses (its
+/// copy of the ref is ahead of the one fetched) is the error, and the next
+/// [`exchange`] sends what this did not.
+pub fn send(store: &SqliteStore, repo: &str, until: Instant) -> Result<()> {
+    let path = Path::new(repo);
+    let Some(remote) = remote(path) else {
+        return Ok(());
+    };
+    let Some(repository) = store.repository_id(repo)? else {
+        return Ok(());
+    };
+    turn(store, repo, &remote, &repository, Some(until), |sent_seq| {
+        let me = crate::store::machines::local_machine(store)?.id;
+        publish(
+            store,
+            path,
+            &remote,
+            me.as_str(),
+            &repository,
+            sent_seq,
+            Some(until),
+        )
+    })
+}
+
+/// One Git exchange per repository at a time, its outcome recorded for
+/// `lf repo tracker`; the next reads what this one wrote.
+fn turn(
+    store: &SqliteStore,
+    repo: &str,
+    remote: &str,
+    repository: &RepositoryId,
+    until: Option<Instant>,
+    carry: impl FnOnce(i64) -> Result<()>,
+) -> Result<()> {
+    let _turn = super::plan_carriers::lock(store, "plan-git", repository, until)?;
+    let sent_seq = store.select_carrier(repo, Carrier::Git, remote)?.sent_seq;
+    let result = carry(sent_seq);
     let error = result.as_ref().err().map(|error| format!("{error:#}"));
     store.record_carrier_exchange(repo, Carrier::Git, error.as_deref())?;
     result
@@ -88,7 +129,7 @@ fn exchange_with(
     store: &SqliteStore,
     repo: &str,
     remote: &str,
-    repository: RepositoryId,
+    repository: &RepositoryId,
     sent_seq: i64,
 ) -> Result<()> {
     let path = Path::new(repo);
@@ -142,15 +183,7 @@ fn exchange_with(
             }
         }
     }
-    publish(
-        store,
-        path,
-        remote,
-        me.as_str(),
-        &repository,
-        mine,
-        sent_seq,
-    )?;
+    publish(store, path, remote, me.as_str(), repository, sent_seq, None)?;
     failed.map_or(Ok(()), Err)
 }
 
@@ -339,19 +372,32 @@ fn record_path(record: &StampedRecord) -> Option<String> {
 }
 
 /// Commit every record changed here since `sent_seq` onto this Machine's ref
-/// as the remote holds it (`mine`), and push. A remote without this Machine's
-/// ref is given the whole plan. Nothing is forced: a push the remote refuses
-/// is the error.
+/// as last fetched from the remote, and push, giving up at `until`. A remote
+/// without this Machine's ref is given the whole plan. Nothing is forced: a
+/// push the remote refuses is the error.
 fn publish(
     store: &SqliteStore,
     repo: &Path,
     remote: &str,
     me: &str,
     repository: &RepositoryId,
-    mine: Option<&String>,
     sent_seq: i64,
+    until: Option<Instant>,
 ) -> Result<()> {
     let key = repo.to_string_lossy();
+    let mine = git(
+        repo,
+        &[
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            &format!("{SEEN}{me}^{{commit}}"),
+        ],
+        None,
+    )
+    .ok()
+    .map(|tip| String::from_utf8_lossy(&tip).trim().to_owned());
+    let mine = mine.as_ref();
     let mut since = if mine.is_some() { sent_seq } else { 0 };
     let mut files = Vec::new();
     loop {
@@ -395,7 +441,7 @@ fn publish(
     git(repo, &["fast-import", "--quiet", "--force"], Some(&stream))?;
     let tree = |commit: &str| git(repo, &["rev-parse", &format!("{commit}^{{tree}}")], None);
     if mine.is_none_or(|mine| tree(mine).ok() != tree(&own).ok()) {
-        git(
+        git_until(
             repo,
             &[
                 "push",
@@ -405,6 +451,7 @@ fn publish(
                 &format!("{own}:{own}"),
             ],
             None,
+            until,
         )?;
         git(repo, &["update-ref", &format!("{SEEN}{me}"), &own], None)?;
     }
@@ -423,6 +470,16 @@ fn file(stream: &mut Vec<u8>, path: &str, content: &[u8]) {
 /// Run Git in `repo` with no terminal to ask on, giving it `input`. A failure
 /// is Git's own reason.
 fn git(repo: &Path, args: &[&str], input: Option<&[u8]>) -> Result<Vec<u8>> {
+    git_until(repo, args, input, None)
+}
+
+/// [`git`], stopped at `until` when it has not answered by then.
+fn git_until(
+    repo: &Path,
+    args: &[&str],
+    input: Option<&[u8]>,
+    until: Option<Instant>,
+) -> Result<Vec<u8>> {
     let mut child = Command::new("git")
         .arg("-C")
         .arg(repo)
@@ -438,6 +495,16 @@ fn git(repo: &Path, args: &[&str], input: Option<&[u8]>) -> Result<Vec<u8>> {
         .spawn()
         .context("start git")?;
     let stdin = child.stdin.take();
+    // A transport helper can outlive a stopped Git and keep the pipes open,
+    // so the readers are never joined.
+    let stdout = read_in_background(child.stdout.take().expect("stdout is piped"));
+    let stderr = read_in_background(child.stderr.take().expect("stderr is piped"));
+    let answered = |pipe: &Receiver<Vec<u8>>| match until {
+        Some(until) => pipe
+            .recv_timeout(until.saturating_duration_since(Instant::now()))
+            .ok(),
+        None => pipe.recv().ok(),
+    };
     let output = std::thread::scope(|scope| {
         if let (Some(mut stdin), Some(input)) = (stdin, input) {
             // Git may answer before it has read everything it is given.
@@ -445,25 +512,43 @@ fn git(repo: &Path, args: &[&str], input: Option<&[u8]>) -> Result<Vec<u8>> {
                 let _ = stdin.write_all(input);
             });
         }
-        child.wait_with_output()
-    })?;
-    if output.status.success() {
-        return Ok(output.stdout);
+        let output = (answered(&stdout), answered(&stderr));
+        if output.0.is_none() || output.1.is_none() {
+            let _ = child.kill();
+        }
+        output
+    });
+    let status = child.wait()?;
+    let (Some(stdout), Some(stderr)) = output else {
+        bail!("git {} did not answer in time", args[0]);
+    };
+    if status.success() {
+        return Ok(stdout);
     }
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stderr = String::from_utf8_lossy(&stderr);
     let reason = stderr
         .lines()
         .find(|line| line.starts_with("fatal:") || line.starts_with("error:"))
         .or_else(|| stderr.lines().rfind(|line| !line.trim().is_empty()));
     match reason {
         Some(reason) => bail!("{}", reason.trim()),
-        None => bail!("git {} failed with {}", args[0], output.status),
+        None => bail!("git {} failed with {}", args[0], status),
     }
+}
+
+fn read_in_background(mut pipe: impl Read + Send + 'static) -> Receiver<Vec<u8>> {
+    let (sender, receiver) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        let _ = pipe.read_to_end(&mut bytes);
+        let _ = sender.send(bytes);
+    });
+    receiver
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{exchange, first_exchange, remote};
+    use super::{exchange, first_exchange, remote, send};
     use loopflow_model::durable::RepositoryId;
     use loopflow_storage::sqlite::plan_carriers::Carrier;
     use loopflow_storage::sqlite::SqliteStore;
@@ -560,6 +645,12 @@ mod tests {
             exchange(&self.store, &self.repo).unwrap();
         }
 
+        /// What follows a save: a push, no fetch.
+        fn send(&self) -> anyhow::Result<()> {
+            let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            send(&self.store, &self.repo, until)
+        }
+
         fn unsent(&self) -> usize {
             self.store
                 .plan_unsent(&self.repo, Carrier::Git, 0)
@@ -646,6 +737,69 @@ mod tests {
         laptop.exchange();
         assert_eq!(refs(), settled);
         assert_eq!((laptop.unsent(), mini.unsent()), (0, 0));
+    }
+
+    #[test]
+    fn a_save_is_pushed_at_once_without_a_fetch() {
+        let (_root, origin, laptop, mini) = machines();
+        let refs = || git(origin.bare_path(), &["for-each-ref", "refs/loopflow/plan"]);
+        let first = laptop.task("first");
+        laptop.send().unwrap();
+        assert_eq!(refs().lines().count(), 1);
+        assert_eq!(laptop.unsent(), 0);
+        // The next save builds on the ref as pushed; nothing was fetched.
+        let second = laptop.task("second");
+        laptop.send().unwrap();
+        mini.exchange();
+        assert_eq!(mini.title(&first).as_deref(), Some("first"));
+        assert_eq!(mini.title(&second).as_deref(), Some("second"));
+        // A send reads nothing: mini's Task waits for an exchange.
+        let theirs = mini.task("made on mini");
+        mini.send().unwrap();
+        laptop.task("third");
+        laptop.send().unwrap();
+        assert_eq!(laptop.title(&theirs), None);
+
+        // With the remote gone the save stays unsent, with Git's reason.
+        let away = origin.bare_path().with_extension("away");
+        std::fs::rename(origin.bare_path(), &away).unwrap();
+        laptop.task("made offline");
+        let error = laptop.send().unwrap_err();
+        assert!(format!("{error:#}").starts_with("fatal:"), "{error:#}");
+        assert_eq!(laptop.unsent(), 1);
+        std::fs::rename(&away, origin.bare_path()).unwrap();
+        // A push that has not answered by the deadline is stopped.
+        let error = send(&laptop.store, &laptop.repo, std::time::Instant::now()).unwrap_err();
+        assert_eq!(format!("{error:#}"), "git push did not answer in time");
+        assert_eq!(laptop.unsent(), 1);
+
+        // A push the remote refuses, its copy of the ref being ahead of the
+        // one this clone holds, is left for the next exchange.
+        let me = refs();
+        let me = me.lines().find_map(|line| {
+            let name = line.rsplit('/').next()?;
+            (name != mini_machine(&mini)).then(|| name.to_owned())
+        });
+        git(
+            Path::new(&laptop.repo),
+            &[
+                "update-ref",
+                "-d",
+                &format!("refs/loopflow/plan-seen/{}", me.unwrap()),
+            ],
+        );
+        laptop.send().unwrap_err();
+        assert_eq!(laptop.unsent(), 1);
+        laptop.exchange();
+        assert_eq!(laptop.unsent(), 0);
+        assert_eq!(laptop.title(&theirs).as_deref(), Some("made on mini"));
+    }
+
+    fn mini_machine(machine: &Machine) -> String {
+        crate::store::machines::local_machine(&machine.store)
+            .unwrap()
+            .id
+            .to_string()
     }
 
     #[test]

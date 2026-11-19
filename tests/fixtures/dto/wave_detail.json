@@ -440,7 +440,8 @@
           "abandoned_at": null
         },
         "graph_source": null,
-        "section": "backlog"
+        "section": "backlog",
+        "owned_by_you": false
       },
       {
         "task": {
@@ -565,7 +566,8 @@
         "shipping": null,
         "pr": null,
         "graph_source": null,
-        "section": "backlog"
+        "section": "backlog",
+        "owned_by_you": false
       }
     ],
     "truncated": false

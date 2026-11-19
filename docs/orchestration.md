@@ -254,9 +254,8 @@ steps:
 $ lf graph list
 auto       Request to merged PR without a person: build and publish, then deliver.
 code       Build, deliver and verify. You try the change, then check it on main.
-feature    Explore, build, deliver and verify. You choose what to build, try the change…
-ship-api   Build the endpoint, audit it, then deliver.
 my-graph
+ship-api   Build the endpoint, audit it, then deliver.
 ```
 
 `description:` is one line saying what running the Graph gets you. Desktop's

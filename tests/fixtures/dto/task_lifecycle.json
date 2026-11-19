@@ -162,6 +162,7 @@
         "work_id": "task_9d1de6a17408459aa2db78181c5fb02a"
       },
       "section": "done",
+      "owned_by_you": false,
       "ship_control": {
         "unavailable": "Task is complete"
       },
@@ -856,6 +857,7 @@
           "work_id": "task_9d1de6a17408459aa2db78181c5fb02a"
         },
         "section": "done",
+        "owned_by_you": false,
         "ship_control": {
           "unavailable": "Task is complete"
         },
@@ -1164,6 +1166,7 @@
         "work_id": "task_9d1de6a17408459aa2db78181c5fb02a"
       },
       "section": "done",
+      "owned_by_you": false,
       "ship_control": {
         "unavailable": "Task is complete"
       },
@@ -1814,6 +1817,7 @@
           "work_id": "task_9d1de6a17408459aa2db78181c5fb02a"
         },
         "section": "done",
+        "owned_by_you": false,
         "ship_control": {
           "unavailable": "Task is complete"
         },
@@ -2122,6 +2126,7 @@
         "work_id": "task_9d1de6a17408459aa2db78181c5fb02a"
       },
       "section": "autonomous",
+      "owned_by_you": false,
       "ship_control": {
         "unavailable": "Task is already shipping"
       },
@@ -2744,6 +2749,7 @@
           "work_id": "task_9d1de6a17408459aa2db78181c5fb02a"
         },
         "section": "autonomous",
+        "owned_by_you": false,
         "ship_control": {
           "unavailable": "Task is already shipping"
         },

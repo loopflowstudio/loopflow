@@ -489,6 +489,8 @@ pub struct RoadmapTask {
     pub shipping: Option<crate::ops::task::ship::ShippingSnapshot>,
     pub pr: Option<PrSnapshot>,
     pub section: TaskSection,
+    /// Whether its owner is you; `false` when nobody owns it.
+    pub owned_by_you: bool,
     /// The graph step the Task stands at; `None` while a run carries it.
     /// Carried to `lf task status`'s `TaskRow`, not on the wire.
     #[serde(skip)]
@@ -1650,6 +1652,8 @@ struct DetailReads<'a> {
         (Option<crate::id::WaveId>, crate::durable::RepositoryId),
         (std::path::PathBuf, crate::config::PersonalSettings),
     >,
+    /// You in each Task's repository, which recognizes your claims; read once per repository.
+    you: HashMap<crate::durable::RepositoryId, crate::store::sqlite::task_ownership::You>,
     /// Each handed-off Task's Auto-Ship progress.
     shipping: HashMap<crate::durable::TaskId, crate::ops::task::ship::ShippingSnapshot>,
     /// Agents already resolved in this reading, by the configuration that chose
@@ -1675,6 +1679,7 @@ impl<'a> DetailReads<'a> {
         let mut selections = HashMap::new();
         let mut wave_names = HashMap::new();
         let mut personal = HashMap::new();
+        let mut you = HashMap::new();
         for task in tasks {
             let selection = match facts.graph_names.get(&task.id) {
                 Some(name) => (name.clone(), None),
@@ -1708,6 +1713,9 @@ impl<'a> DetailReads<'a> {
                     .and_then(|id| wave_names.get(id))
                     .map(String::as_str);
                 let values = crate::config::PersonalSettings::read(Some(&repo), wave);
+                if !you.contains_key(&task.repository_id) {
+                    you.insert(task.repository_id.clone(), store.sqlite.you_in(&repo)?);
+                }
                 entry.insert((repo, values));
             }
         }
@@ -1733,6 +1741,7 @@ impl<'a> DetailReads<'a> {
             selections,
             wave_names,
             personal,
+            you,
             shipping,
             graphs,
             execution,
@@ -1968,6 +1977,12 @@ async fn snapshot_task_detail(
         runtime.owner.is_some(),
         task.state.as_deref(),
     );
+    let owned_by_you = runtime.owner.as_ref().is_some_and(|holder| {
+        reads
+            .you
+            .get(&task.repository_id)
+            .is_some_and(|you| you.holds(holder))
+    });
     Ok(RoadmapTask {
         task: task_summary(
             task,
@@ -2002,6 +2017,7 @@ async fn snapshot_task_detail(
             PrSnapshot::new(pr, empty)
         }),
         section,
+        owned_by_you,
         step: facts.steps.get(&task.id).cloned(),
     })
 }

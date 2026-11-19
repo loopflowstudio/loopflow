@@ -220,9 +220,12 @@ public struct RoadmapTask: Decodable, Sendable, Identifiable, Hashable {
     public let shipping: ShippingSnapshot?
     public let pr: PrSnapshot?
     public let section: TaskSection
+    /// Whether its owner is you, decided in Rust; false when nobody owns it.
+    public let ownedByYou: Bool
 
     enum CodingKeys: String, CodingKey {
         case task, reference, runtime, condition, actions, execution, section, pr
+        case ownedByYou = "owned_by_you"
         case graphName = "graph_name"
         case graphSource = "graph_source"
         case latestGraphProcess = "latest_graph_process"

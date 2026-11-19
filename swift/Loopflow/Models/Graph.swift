@@ -179,11 +179,27 @@ public struct TaskExecutionSnapshot: Decodable, Sendable, Hashable {
 /// One autonomous definition, including an invalid local source.
 public struct GraphCatalogEntry: Decodable, Sendable, Hashable, Identifiable {
     public let name: String
+    /// Its `description:` line; nil when the file has none or does not load.
+    public let description: String?
     public let source: String?
     public let compiled: CompiledGraph?
     public let composition: GraphComposition?
     public let unavailable: String?
     public var id: String { name }
+
+    enum CodingKeys: String, CodingKey {
+        case name, description, source, compiled, composition, unavailable
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        name = try values.decode(String.self, forKey: .name)
+        description = try values.decode(String?.self, forKey: .description)
+        source = try values.decode(String?.self, forKey: .source)
+        compiled = try values.decode(CompiledGraph?.self, forKey: .compiled)
+        composition = try values.decode(GraphComposition?.self, forKey: .composition)
+        unavailable = try values.decode(String?.self, forKey: .unavailable)
+    }
 }
 
 /// A graph as a Workflow: `start`, its interactive steps in order, `end`, and

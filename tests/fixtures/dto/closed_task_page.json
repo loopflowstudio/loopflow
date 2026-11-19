@@ -336,6 +336,7 @@
       },
       "graph_source": null,
       "section": "done",
+      "owned_by_you": false,
       "ship_control": {
         "unavailable": null
       },

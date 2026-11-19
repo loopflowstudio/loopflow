@@ -3409,6 +3409,13 @@
             }
           ]
         },
+        "description": {
+          "description": "Its `description:` line; `None` when the file has none or does not load.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "name": {
           "type": "string"
         },
@@ -3429,6 +3436,7 @@
       },
       "required": [
         "name",
+        "description",
         "source",
         "compiled",
         "composition",
@@ -9617,6 +9625,10 @@
         "next_move": {
           "$ref": "#/$defs/NextMove"
         },
+        "owned_by_you": {
+          "description": "Whether its owner is you; `false` when nobody owns it.",
+          "type": "boolean"
+        },
         "pr": {
           "anyOf": [
             {
@@ -9678,7 +9690,8 @@
         "ship_control",
         "shipping",
         "pr",
-        "section"
+        "section",
+        "owned_by_you"
       ],
       "type": "object"
     },
@@ -16767,7 +16780,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "`lf task edit <issue> --notes=<notes>`.",
+          "description": "`lf task edit <issue> [--notes=<notes>] [--rank=<rank>]`: a new brief,\na new position in its Project, or both.",
           "properties": {
             "directory": {
               "type": "string"
@@ -16780,14 +16793,26 @@
               "type": "string"
             },
             "notes": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "rank": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
             }
           },
           "required": [
             "kind",
             "directory",
             "issue",
-            "notes"
+            "notes",
+            "rank"
           ],
           "type": "object",
           "x-result": {

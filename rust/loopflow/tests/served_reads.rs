@@ -1422,7 +1422,8 @@ fn server_operations_match_their_lf_commands() {
                 Write::TaskUpdate {
                     directory: directory.clone(),
                     issue: "INF-123".into(),
-                    notes: "Served from the app".into(),
+                    notes: Some("Served from the app".into()),
+                    rank: Some(1),
                 },
                 Write::TaskMove {
                     machine: None,
@@ -2150,10 +2151,14 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             directory,
             issue,
             notes,
-        } => (
-            path(directory),
-            words(&["task", "edit", issue, &format!("--notes={notes}"), "--json"]),
-        ),
+            rank,
+        } => {
+            let mut args = words(&["task", "edit", issue]);
+            args.extend(notes.iter().map(|notes| format!("--notes={notes}")));
+            args.extend(rank.iter().map(|rank| format!("--rank={rank}")));
+            args.push("--json".into());
+            (path(directory), args)
+        }
         Write::TaskAbandon { directory, issue } => (
             path(directory),
             words(&["task", "abandon", issue, "--json"]),

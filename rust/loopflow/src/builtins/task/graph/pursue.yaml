@@ -1,3 +1,5 @@
+description: Plan, document, build, review and publish a PR, with no person.
+steps:
 - kickoff
 - write-docs
 - implement

@@ -5,7 +5,7 @@
 //! of yours, otherwise on your Machine for its Wave. Each entry names the
 //! Machine that wrote it. An entry another Machine wrote never ends this
 //! Machine's own open claim; only a later entry this Machine wrote does.
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 
@@ -326,31 +326,49 @@ pub(super) fn owned_in(conn: &Connection, task: &TaskId) -> StoreResult<bool> {
     Ok(reading_in(conn, task)?.1.owner.is_some())
 }
 
-/// This Machine, or one registered with `lf machine add`.
-fn is_my_machine_in(
-    conn: &Connection,
-    me: &OwnershipFacts,
-    machine: &MachineId,
-) -> StoreResult<bool> {
-    Ok(machine == &local_machine_in(conn)? || me.declared_machines.contains_key(machine))
+/// You, as an ownership reading recognizes you: your person and your
+/// Machines, this one and those registered with `lf machine add`.
+#[derive(Debug, Clone)]
+pub struct You {
+    person: Person,
+    machines: HashSet<MachineId>,
 }
 
-/// Whether a holder is you, checked in order: your `people` id; else your
-/// person key (Git `user.email`), even on a Machine you registered; else, for
-/// a keyless entry written before keys, one of your Machines. A different id
-/// alone doesn't mean someone else: connecting Linear moves this Machine from
-/// `journal:<key>` to `linear:<viewer>`, and earlier claims keep the journal
-/// id. Names are display only.
-fn is_mine_in(conn: &Connection, me: &OwnershipFacts, holder: &TaskOwner) -> StoreResult<bool> {
-    if holder.person_id.is_some() && holder.person_id == me.person.id {
-        return Ok(true);
+impl You {
+    /// You in `repo`, whose Git `user.email` is your person key. Reading it
+    /// spawns `git` and loads Machine configuration: read once per repository.
+    fn in_repo(conn: &Connection, repo: &str) -> StoreResult<Self> {
+        let mut machines: HashSet<MachineId> = machine_names_in(conn)?.into_keys().collect();
+        machines.insert(local_machine_in(conn)?);
+        Ok(Self {
+            person: Person {
+                name: crate::config::participant_name()
+                    .map_err(|error| StoreError::InvalidData(error.to_string()))?,
+                key: crate::config::participant_email(std::path::Path::new(repo)),
+                id: local_person_in(conn)?,
+            },
+            machines,
+        })
     }
-    if let Some(key) = &holder.person_key {
-        return Ok(me.person.key.as_ref() == Some(key));
-    }
-    match &holder.machine.id {
-        Some(machine) => is_my_machine_in(conn, me, machine),
-        None => Ok(false),
+
+    /// Whether a holder is you, checked in order: your `people` id; else your
+    /// person key (Git `user.email`), even on a Machine you registered; else,
+    /// for a keyless entry written before keys, one of your Machines. A
+    /// different id alone doesn't mean someone else: connecting Linear moves
+    /// this Machine from `journal:<key>` to `linear:<viewer>`, and earlier
+    /// claims keep the journal id. Names are display only.
+    pub fn holds(&self, holder: &TaskOwner) -> bool {
+        if holder.person_id.is_some() && holder.person_id == self.person.id {
+            return true;
+        }
+        if let Some(key) = &holder.person_key {
+            return self.person.key.as_ref() == Some(key);
+        }
+        holder
+            .machine
+            .id
+            .as_ref()
+            .is_some_and(|machine| self.machines.contains(machine))
     }
 }
 
@@ -361,9 +379,8 @@ fn is_mine_in(conn: &Connection, me: &OwnershipFacts, holder: &TaskOwner) -> Sto
 /// configuration files, so callers read them before they take the write lock.
 #[derive(Debug, Clone)]
 pub(crate) struct OwnershipFacts {
-    person: Person,
+    you: You,
     planning_connected: bool,
-    declared_machines: HashMap<MachineId, String>,
     owning_machine: (MachineId, OwningMachineSource),
 }
 
@@ -393,14 +410,8 @@ impl OwnershipFacts {
         repository: String,
     ) -> StoreResult<Self> {
         Ok(Self {
-            person: Person {
-                name: crate::config::participant_name()
-                    .map_err(|error| StoreError::InvalidData(error.to_string()))?,
-                key: crate::config::participant_email(std::path::Path::new(repo)),
-                id: local_person_in(conn)?,
-            },
+            you: You::in_repo(conn, repo)?,
             planning_connected: crate::ops::planning_client::connected(repo),
-            declared_machines: machine_names_in(conn)?,
             owning_machine: super::scope_defaults::owning_machine_in(
                 conn,
                 wave,
@@ -485,7 +496,7 @@ pub(super) fn writer_in(
     let (_, reading) = reading_in(conn, task)?;
     if let Some(holder) = &reading.owner {
         if let Some(machine) = &holder.machine.id {
-            if is_mine_in(conn, me, holder)? && is_my_machine_in(conn, me, machine)? {
+            if me.you.holds(holder) && me.you.machines.contains(machine) {
                 return Ok((machine.clone(), TaskExecutionSource::Owner));
             }
         }
@@ -522,12 +533,10 @@ fn my_claim_in(
     let (_, reading) = reading_in(conn, task)?;
     match reading.owner {
         None => Ok(None),
-        Some(holder) if !is_mine_in(conn, me, &holder)? => {
-            Err(StoreError::InvalidAuthority(format!(
-                "Task {task} is claimed by {}; claim it to take it over",
-                holder.person.as_deref().unwrap_or("someone else")
-            )))
-        }
+        Some(holder) if !me.you.holds(&holder) => Err(StoreError::InvalidAuthority(format!(
+            "Task {task} is claimed by {}; claim it to take it over",
+            holder.person.as_deref().unwrap_or("someone else")
+        ))),
         Some(holder) => Ok(Some((local, holder))),
     }
 }
@@ -695,7 +704,7 @@ pub(super) fn claim_in(
     if owned_here {
         return Ok(None);
     }
-    let key = me.person.key.clone().ok_or_else(|| {
+    let key = me.you.person.key.clone().ok_or_else(|| {
         StoreError::InvalidData(
             "claiming needs your Git user.email, which identifies you to teammates; \
              run `git config --global user.email you@example.com`"
@@ -708,7 +717,7 @@ pub(super) fn claim_in(
         OwnershipKind::Claim,
         Person {
             key: Some(key),
-            ..me.person.clone()
+            ..me.you.person.clone()
         },
         &local,
         me.planning_connected,
@@ -909,6 +918,13 @@ impl SqliteStore {
         ownership_in(&snapshot, task)
     }
 
+    /// You in `repo`; [`You::holds`] then recognizes your claims without a statement each.
+    pub fn you_in(&self, repo: &std::path::Path) -> StoreResult<You> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let snapshot = conn.savepoint()?;
+        You::in_repo(&snapshot, &repo.to_string_lossy())
+    }
+
     pub fn task_owned(&self, task: &TaskId) -> StoreResult<bool> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let snapshot = conn.savepoint()?;
@@ -1044,9 +1060,9 @@ impl SqliteStore {
             return Ok(None);
         };
         let person = Person {
-            name: me.person.name,
-            key: me.person.key.or(holder.person_key),
-            id: me.person.id.or(holder.person_id),
+            name: me.you.person.name,
+            key: me.you.person.key.or(holder.person_key),
+            id: me.you.person.id.or(holder.person_id),
         };
         let entry = append_in(
             &tx,

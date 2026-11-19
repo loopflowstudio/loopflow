@@ -124,6 +124,8 @@ fn composition_items(
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct GraphCatalogEntry {
     pub name: String,
+    /// Its `description:` line; `None` when the file has none or does not load.
+    pub description: Option<String>,
     /// The repository file that defines it; `None` for a builtin.
     pub source: Option<String>,
     /// Topology; `None` for an unusable definition.
@@ -160,17 +162,21 @@ pub fn graph_catalog_entry(
             Ok((
                 CompiledGraph::new(&graph.name, &flatten_resolved(&resolved)),
                 composition,
+                graph.description,
             ))
         }),
     };
-    let (compiled, composition, unavailable) = match compiled {
-        Ok((compiled, composition)) => (Some(compiled), Some(composition), None),
-        Err(error) => (None, None, Some(error.to_string())),
+    let (compiled, composition, description, unavailable) = match compiled {
+        Ok((compiled, composition, description)) => {
+            (Some(compiled), Some(composition), description, None)
+        }
+        Err(error) => (None, None, None, Some(error.to_string())),
     };
     Ok(GraphCatalogEntry {
         name: compiled
             .as_ref()
             .map_or_else(|| name.to_string(), |compiled| compiled.name.clone()),
+        description,
         source: crate::graph::find_graph_source_path(name, repo)?.map(|path| {
             path.strip_prefix(repo)
                 .unwrap_or(&path)

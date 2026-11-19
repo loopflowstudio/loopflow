@@ -68,4 +68,7 @@ Checks, each run once on this tree:
   steer; only the Node stand-ins and the idle case were run.
 - OpenCode 2.0.32 was not run end to end here (the probe covered its
   `session.synthetic`).
+- PR #1985 merged on 2026-11-19 at 18:46 UTC, before the idle-wake commits.
+  The branch is three commits ahead of `origin/main` with no open PR, so
+  gate publishes them as a new one.
 - Complete LOO-1002 when this merges.

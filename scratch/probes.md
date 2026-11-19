@@ -27,8 +27,8 @@ the Task context and a steer sent while the shell tool ran. The step reached
 its interactive review. History had the fixture answer, a native thread
 and 62 input / 14 output tokens for the completed worker. The commit-message
 helper received the same fixture response and reported no commit message.
-The wrapper tested the worker transport through a Task. Production provider
-ownership and native TUI handoff remain design work.
+The wrapper tested the worker transport through a Task. The design since
+chosen keeps `run --standalone` and starts no OpenCode server (`plan.md`).
 
 # Idle wake from inside the provider, 2026-11-19
 
@@ -51,8 +51,9 @@ also has `interrupt` and `wait`. Pi: `pi.sendMessage(..., {triggerTurn:
 true})` and `pi.sendUserMessage(text)` both started the turn and drew the
 text.
 
-Not tested: a wake racing a typed prompt, a wake while a permission or
-question dialog is open, and the real `lf` path end to end.
+Not tested: a wake racing a typed prompt, and a wake while a permission or
+question dialog is open. The real `lf` path has since run end to end
+(`tests/e2e/idle_wake.py`, OpenCode 2.2.1 and Pi 1.3.0).
 
 # `codex exec --json` as a worker, 2026-11-19
 

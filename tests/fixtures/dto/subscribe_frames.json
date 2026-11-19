@@ -301,13 +301,30 @@
   },
   {
     "read": "lf planning status --json --subscribe",
-    "part": "git_destinations",
+    "part": "plan_home",
     "frame": {
       "answers": 7,
       "unavailable": null,
       "body": {
-        "tracker": "git",
-        "destinations": [],
+        "tracker": null,
+        "plan": {
+          "git": {
+            "remote": "origin",
+            "unsent": 0,
+            "records": [],
+            "error": null,
+            "failing_since": null
+          },
+          "hub": {
+            "machine": "mini",
+            "unsent": 1,
+            "records": [
+              "3e1c9a07"
+            ],
+            "error": "ssh: mini: Operation timed out",
+            "failing_since": 1763474520
+          }
+        },
         "actions": []
       },
       "work": null,

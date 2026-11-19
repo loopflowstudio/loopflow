@@ -205,7 +205,7 @@ it answers instantly and offline.
 what `--json` prints. Write `{"id": 1, "args": {"query": "parser"}}` to stdin to
 change what it reads, or `{"id": 2}` to ask for a fresh reading; the next line
 answers that id. It stops when stdin closes. `lf repo tracker --subscribe` also
-keeps the repository's planning exchanged while it runs.
+keeps exchanging with the hub while it runs.
 
 A Graph that stopped or crashed stays as history; nothing resumes it. Read
 `lf task status`, then launch what remains with `lf task run`. The Task keeps
@@ -298,33 +298,106 @@ hearing about any child that is still open.
 ## Share the plan
 
 ```bash
-lf repo tracker                    # which tracker this repository uses, and what's pending
+lf repo tracker                    # how this repository's plan travels, and what's unsent
 lf task claim LOO-12               # take it; the earlier owner's Sessions are told
 lf task unassign LOO-12            # nobody owns it; Linear shows no assignee; history intact
 ```
 
-Tasks, their threads and status sync through your Git remote by default, as a ref
-(`refs/loopflow/planning/shared/main` on `origin`), never a branch. Everyone who
-clones the repository reads and writes the same plan, with no account to
-connect. Every command saves locally first and syncs after, so nothing waits on
-the network.
+Without Linear or Asana, the plan travels with the repository. Clone it on a
+second Machine and the plan is there, with nothing to set up:
 
-Only planning travels: checkouts, Sessions, Graphs and processes stay on the
-machine that ran them. Claims follow your Git `user.email`.
-
-A different ref, or a plan only you see:
-
-```yaml
-# .lf/config.yaml
-tracker:
-  git:
-    shared: team        # refs/loopflow/planning/shared/team
-    # personal: true    # refs/loopflow/planning/users/<key>; see `lf repo tracker key`
+```text
+laptop$ lf task create 'plan smoke'
+plan smoke · 3e1c9a
+laptop$ lf repo tracker
+Plan: Git origin.
 ```
 
-Ref names are not access control; pick a remote whose readers should see the
-plan. When two people edit the same field, the later edit wins; the other
-value shows as lost on its Task and in `lf repo tracker` until you answer it.
+The Task is on the remote in seconds and `lf task list` on the mini shows it
+within a minute; the
+first `lf task list` in a fresh clone reads the remote before it answers. A
+teammate who clones the repository sees the same plan, and their Tasks appear
+in yours: no account and no server, only push access to the repository.
+
+Every Task, Project, Wave, comment and order you change travels: renaming a
+Wave on the laptop renames it on the mini, and reordering the backlog reorders
+it for everyone. Only planning travels: checkouts, Sessions, Graphs and
+processes stay on the Machine that ran them. Claims follow your Git
+`user.email`.
+
+Every command saves on this Machine first, so nothing waits on the network.
+Each Machine pushes its plan to a ref of its own on the remote
+(`refs/loopflow/plan/<machine id>`) as part of the save, for five seconds at
+most, and its server fetches the others' once a minute;
+`lf task sync <issue>` does both now. The refs stay out of
+`git branch`, `git status` and a plain clone. A repository with no remote reads
+`Plan: this Machine.` and sends nothing.
+
+When two Machines change the same field, the later change wins on every
+Machine. Nothing is marked lost and nothing asks you to choose; the earlier
+value is in its Machine's ref history. When two people claim the same Task
+before either has seen the other, the first claim holds: the other's run stops
+and its work stays in its checkout.
+
+Offline, commands still save, read what this Machine last saw, and the changes
+wait:
+
+```text
+$ lf repo tracker
+Plan: Git origin, unreachable since Nov 18 14:02, 3 unsent.
+  3e1c9a
+  5b20c4
+  wave billing
+  fatal: unable to access 'https://github.com/acme/product/': Could not resolve host: github.com
+```
+
+They go when the remote answers again.
+
+The plan is as private as the repository. Anyone who can fetch it can read the
+plan, and anyone who can push to it can change any Task.
+
+### Seconds, not a minute: a hub
+
+```bash
+lf machine add mini        # once, if mini isn't saved yet
+lf machine hub mini        # this Machine also exchanges its plan with mini, live
+```
+
+```text
+$ lf repo tracker
+Plan: Git origin.
+Hub mini.
+```
+
+Name an always-on Machine as the hub and a change on one Machine reaches the
+others in seconds; an open list on the laptop changes when you retitle a Task
+on the mini. The hub is a faster way for the same plan to travel, not its home.
+Git keeps carrying every change, so a hub that is off costs only the speed:
+
+```text
+$ lf repo tracker
+Plan: Git origin.
+Hub mini, unreachable since Nov 18 14:02, 2 unsent.
+  3e1c9a
+  wave billing
+  machine "mini": unreachable: … ssh: connect to host mini port 22: Operation timed out
+```
+
+Set the hub once per Machine, not per repository; it serves every repository
+on that Machine that has no Linear or Asana, and needs its own clone of each.
+It is reached over SSH as you, and a teammate who can SSH to it can name it
+too. A hub running a different `lf` says which side to update and how
+(`ssh -- 'mini' 'lf install'`). `lf machine hub --clear` stops using it and
+loses nothing; `lf machine list` marks the hub.
+
+A repository with no remote can still use a hub. With no ref to tell its
+clones they are the same repository, say so once: `lf config repo` prints the
+repository id on the first Machine and `lf config repo --bind <id>` sets it in
+each other clone, the hub's included.
+
+A Machine still running an earlier `lf` keeps reading the old
+`refs/loopflow/planning/*` and sees none of these changes until it updates. A
+`tracker: { git: … }` key from earlier versions is read as no tracker.
 
 ### Linear or Asana
 
@@ -391,11 +464,7 @@ answer it. `lf repo tracker answer 9f2c41d0 --keep-theirs` closes it;
 `--use-mine` saves yours again and sends it; so does editing that field.
 Desktop's Keep and Use mine buttons on the line do the same, and
 `lf task sync LOO-377 --keep-theirs` answers every line a Task lost. It also closes on its own when a
-coworker changes that field again in the tracker. On Git, a value the journal
-lost shows the same way, as `git`.
-
-A checkout with no `origin` yet keeps its Git plan on this Machine; the first
-save after `git remote add origin` publishes everything since.
+coworker changes that field again in the tracker.
 
 A Wave not yet connected to an Initiative has nothing to exchange. Its Tasks
 stay local and `lf wave sync` shows them without asking Linear, until
@@ -611,10 +680,11 @@ children and abandons never-started ones. `lf task reopen` keeps the same PR.
 
 **Sync.** `lf task sync LOO-12` exchanges that Task with its tracker now. On
 Linear or Asana it looks for every change sent without an answer and resends
-what the tracker lacks; on Git it exchanges the planning ref. Between syncs,
-every `lf` command sends one short batch. It prints what is still open (a
-change queued or sent) and what was lost to the tracker's value, until you
-answer it with `--keep-theirs` or `--use-mine`. `lf repo tracker` lists the same
+what the tracker lacks; between syncs, every `lf` command sends one short batch.
+It prints what is still open (a change queued or sent) and what was lost to the
+tracker's value, until you answer it with `--keep-theirs` or `--use-mine`.
+Without a tracker it pushes and fetches the repository's plan and exchanges
+with the hub, then prints what each still has unsent. `lf repo tracker` lists the same
 lines for the whole repository, and `lf repo tracker answer <id>` answers one.
 `lf wave sync` refreshes from the tracker first; a Wave with no Initiative skips
 the refresh and still succeeds.

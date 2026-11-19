@@ -77,6 +77,12 @@ pub async fn add(repo: &Path, name: &str, objective: Option<&str>) -> OpsResult<
         &[authored_path(wave.slug())],
         &format!("lf wave add: {}", wave.slug()),
     );
+    super::planning_sync::sync_after_save(
+        &store,
+        &main.to_string_lossy(),
+        &loopflow_storage::sqlite::tracker_actions::ActionOwner::Wave(wave.id().clone()),
+    )
+    .await;
     let mut added = WaveAdded {
         id: wave.id().clone(),
         name: wave.slug().to_string(),
@@ -1078,6 +1084,14 @@ pub async fn rename(
         }
         operation.planning_done = true;
         recovery::save(&operation, &store)?;
+        super::planning_sync::sync_after_save(
+            &store,
+            &operation.target_repo,
+            &loopflow_storage::sqlite::tracker_actions::ActionOwner::Wave(
+                operation.waves[0].id.clone(),
+            ),
+        )
+        .await;
     }
     let files = recovery::finish_files(&mut operation, &store, &main);
     let initiative = if let Some(provider) = operation.providers.first() {

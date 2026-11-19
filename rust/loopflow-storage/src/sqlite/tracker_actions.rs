@@ -976,55 +976,6 @@ pub(crate) fn attach_in(
     Ok(())
 }
 
-/// A historical filing recorded its creation intent but no attempt boundary:
-/// it may have reached Linear, so its `create` is sent with the reply
-/// unknown and its values are the intent's, never today's Task.
-pub(crate) fn retain_filing_create_in(
-    conn: &Connection,
-    task: &TaskId,
-    baseline: &[WorkValue],
-) -> StoreResult<()> {
-    let id = insert(
-        conn,
-        &ActionOwner::Task(task.clone()),
-        ActionKind::Create,
-        None,
-        &serde_json::to_value(baseline)?,
-        None,
-        TrackerKind::Linear,
-    )?;
-    conn.execute(
-        "UPDATE tracker_actions SET phase='sent',sent_at=?2,
-         error='Historical creation outcome is unknown; awaiting exact tracker readback'
-         WHERE id=?1",
-        params![id, now_unix()],
-    )?;
-    Ok(())
-}
-
-/// A follow-up relation a historical filing recorded, unless it was confirmed:
-/// a `link` on the source Task, held until both Tasks have tracker objects. Its
-/// id is the relation's, which Linear keeps, so recording it twice queues it once.
-pub(crate) fn retain_relation_in(
-    conn: &Connection,
-    source: &TaskId,
-    relation: &str,
-    target: &str,
-) -> StoreResult<()> {
-    conn.execute(
-        "INSERT OR IGNORE INTO tracker_actions(id,task_id,subject,kind,value_json,phase,tracker)
-         SELECT lower(?2),?1,'relation:'||lower(?2),'link',json_object('target',t.id),'queued','linear'
-         FROM tasks t WHERE (t.id=?3 OR t.external_issue_id=?3 OR t.id='task_'||replace(lower(?3),'-',''))
-            AND t.planning_deleted_at IS NULL
-            AND NOT EXISTS(SELECT 1 FROM task_events c WHERE c.task_id=?1
-                AND json_extract(c.kind_json,'$.kind')='follow_through_relation_confirmed'
-                AND json_extract(c.kind_json,'$.relation_id')=lower(?2))
-         LIMIT 1",
-        params![source.as_str(), relation, target],
-    )?;
-    Ok(())
-}
-
 /// Unbound local Projects, then Tasks, in `repo` with no live `create`.
 fn uncreated(conn: &Connection, repo: &str) -> StoreResult<Vec<ActionOwner>> {
     let mut query = conn.prepare_cached(

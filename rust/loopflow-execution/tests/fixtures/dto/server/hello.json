@@ -1,6 +1,6 @@
 {
   "type": "hello",
-  "revision": 8,
+  "revision": 9,
   "min_revision": 8,
   "client": {
     "kind": "desktop",

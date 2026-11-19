@@ -568,9 +568,11 @@
             "kind": "claim",
             "machine_id": "home_56b1a8e309681768d26f79bf86b9d93c",
             "machine_label": "Jacks-MacBook-Pro-2",
+            "order": 1793156336000,
             "person": "Jack Heart",
             "person_id": null,
             "person_key": "test@test.com",
+            "seen": "own_ff8db95d30544ba0991c85eb5d7f55db",
             "task_id": "task_9d1de6a17408459aa2db78181c5fb02a",
             "writer_machine_id": "home_56b1a8e309681768d26f79bf86b9d93c"
           }
@@ -1526,9 +1528,11 @@
             "kind": "claim",
             "machine_id": "home_56b1a8e309681768d26f79bf86b9d93c",
             "machine_label": "Jacks-MacBook-Pro-2",
+            "order": 1793156336000,
             "person": "Jack Heart",
             "person_id": null,
             "person_key": "test@test.com",
+            "seen": "own_ff8db95d30544ba0991c85eb5d7f55db",
             "task_id": "task_9d1de6a17408459aa2db78181c5fb02a",
             "writer_machine_id": "home_56b1a8e309681768d26f79bf86b9d93c"
           }
@@ -2430,9 +2434,11 @@
             "kind": "claim",
             "machine_id": "home_56b1a8e309681768d26f79bf86b9d93c",
             "machine_label": "Jacks-MacBook-Pro-2",
+            "order": 1793156336000,
             "person": "Jack Heart",
             "person_id": null,
             "person_key": "test@test.com",
+            "seen": "own_ff8db95d30544ba0991c85eb5d7f55db",
             "task_id": "task_9d1de6a17408459aa2db78181c5fb02a",
             "writer_machine_id": "home_56b1a8e309681768d26f79bf86b9d93c"
           }

@@ -161,7 +161,7 @@ pub fn selected_linear_team(repo: &Path) -> OpsResult<Option<String>> {
         .unwrap_or_default()
         .planning_transport();
     Ok(match transport {
-        crate::config::TrackerConfig::Linear { team } => {
+        Some(crate::config::TrackerConfig::Linear { team }) => {
             team.filter(|team| !team.trim().is_empty())
         }
         _ => None,
@@ -2095,13 +2095,7 @@ mod tests {
                             assert!(!result.created && !result.team_created);
                         }
                         let config = crate::config::load_config(Some(&repo)).unwrap().unwrap();
-                        assert_eq!(
-                            config.planning_transport(),
-                            crate::config::TrackerConfig::Git {
-                                remote: "personal".into(),
-                                plan: crate::config::GitPlan::Shared("private".into()),
-                            }
-                        );
+                        assert_eq!(config.planning_transport(), None);
                         assert_eq!(
                             selected_linear_team(&repo).unwrap().as_deref(),
                             Some("team-1")
@@ -2243,9 +2237,9 @@ mod tests {
                 .unwrap();
             assert_eq!(
                 config.planning_transport(),
-                crate::config::TrackerConfig::Linear {
+                Some(crate::config::TrackerConfig::Linear {
                     team: Some("team-product".into())
-                }
+                })
             );
             assert_eq!(config.agent.as_deref(), Some("codex"));
             let updated = std::fs::read_to_string(goal).unwrap();

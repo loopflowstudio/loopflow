@@ -112,12 +112,11 @@ impl ActionOwnerKind {
     }
 }
 
-/// Where a planning change goes: Git's journal, or a queued tracker.
+/// The tracker a queued planning change goes to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum TrackerKind {
-    Git,
     Linear,
     Asana,
 }
@@ -125,16 +124,14 @@ pub enum TrackerKind {
 impl TrackerKind {
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::Git => "git",
             Self::Linear => "linear",
             Self::Asana => "asana",
         }
     }
 
-    /// How a person names it: `Git`, `Linear`, `Asana`.
+    /// How a person names it: `Linear`, `Asana`.
     pub fn display_name(self) -> &'static str {
         match self {
-            Self::Git => "Git",
             Self::Linear => "Linear",
             Self::Asana => "Asana",
         }
@@ -142,7 +139,6 @@ impl TrackerKind {
 
     pub fn parse(value: &str) -> crate::StoreResult<Self> {
         match value {
-            "git" => Ok(Self::Git),
             "linear" => Ok(Self::Linear),
             "asana" => Ok(Self::Asana),
             other => Err(crate::StoreError::InvalidData(format!(

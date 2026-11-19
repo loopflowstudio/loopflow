@@ -197,9 +197,6 @@ fn place_task_in(
             "terminal Task cannot allocate a checkout".into(),
         ));
     }
-    if let Some(project) = &task.project_id {
-        super::durable::require_selected_project(conn, project)?;
-    }
     require_task_planning(conn, &task)?;
     // Allocating a checkout is the actual work reservation: it claims an
     // unowned Task, and refuses one owned on another Machine.
@@ -323,9 +320,6 @@ impl SqliteStore {
             super::sessions::require_current_actor_in(&tx, &session.id, caller)?;
         }
         if let Some(input) = creation {
-            if let Some(project) = &input.project_id {
-                super::durable::require_selected_project(&tx, project)?;
-            }
             create_task_in(&tx, input)?;
         }
         if let Some((path, pr)) = placement {
@@ -424,11 +418,6 @@ impl SqliteStore {
     pub fn create_task(&self, input: &NewTask) -> StoreResult<Task> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        if task_creation_in(&tx, &input.id)?.is_none() {
-            if let Some(project) = &input.project_id {
-                super::durable::require_selected_project(&tx, project)?;
-            }
-        }
         let task = create_task_in(&tx, input)?;
         tx.commit()?;
         Ok(task)
@@ -1286,6 +1275,57 @@ impl SqliteStore {
             )
             .optional()
             .map_err(StoreError::from)
+    }
+
+    /// The Project a new Task in `wave` joins: its newest `started` Project,
+    /// else its newest other open one. Nobody sets it and nothing gates on it.
+    pub fn new_task_project(&self, wave: &WaveId) -> StoreResult<Option<NewTaskProject>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        new_task_project_in(&conn, wave)
+    }
+
+    /// `new_task_project`, or a `started` Project named `name` made now for a
+    /// Wave with no open one.
+    pub fn join_project(&self, wave: &WaveId, name: &str) -> StoreResult<NewTaskProject> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if let Some(joined) = new_task_project_in(&tx, wave)? {
+            return Ok(joined);
+        }
+        let id = ProjectId::new();
+        planning_write::create(
+            &tx,
+            "",
+            &crate::work::edit::WorkEdit::for_target(
+                id.as_str(),
+                &[
+                    Edit::ProjectWave(wave.to_string()),
+                    Edit::ProjectSlug(Some(name.into())),
+                    Edit::ProjectName(Some(name.into())),
+                    Edit::ProjectStatus(crate::work::project::ProjectStatus::Started),
+                ],
+            ),
+            planning_write::WriteOrigin::Local,
+        )?;
+        let project = project_in(&tx, &id)?;
+        tx.commit()?;
+        Ok(NewTaskProject { project, open: 1 })
+    }
+
+    /// `project`'s name when its Wave holds other open Projects: what a
+    /// command says about the Project a Task joined, since nobody chose it.
+    pub fn project_among_several(&self, project: &ProjectId) -> StoreResult<Option<String>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn
+            .query_row(
+                "SELECT p.project_name FROM projects p WHERE p.id=?1 AND 1<(
+                    SELECT COUNT(*) FROM projects o WHERE o.wave_id=p.wave_id AND o.work_state='ready'
+                    AND o.status IN ('started','backlog','planned','paused'))",
+                [project.as_str()],
+                |row| row.get(0),
+            )
+            .optional()?
+            .flatten())
     }
 
     pub fn list_projects(&self, wave_id: Option<&WaveId>) -> StoreResult<Vec<Project>> {
@@ -2437,6 +2477,30 @@ pub(super) fn task_events_after_in(
         .map_err(StoreError::from)
 }
 
+/// The Project a new Task joins and how many open Projects its Wave holds,
+/// so a command can name the one it chose among several.
+#[derive(Debug, Clone, PartialEq)]
+pub struct NewTaskProject {
+    pub project: Project,
+    pub open: usize,
+}
+
+fn new_task_project_in(conn: &Connection, wave: &WaveId) -> StoreResult<Option<NewTaskProject>> {
+    let mut query = conn.prepare_cached(&format!(
+        "{PROJECT_COLUMNS} WHERE wave_id=?1 AND work_state='ready'
+         AND status IN ('started','backlog','planned','paused')
+         ORDER BY status='started' DESC,created_at DESC,id DESC"
+    ))?;
+    let mut open = query
+        .query_map([wave], map_project_row)?
+        .collect::<Result<Vec<_>, _>>()?;
+    let count = open.len();
+    Ok((count > 0).then(|| NewTaskProject {
+        project: open.swap_remove(0),
+        open: count,
+    }))
+}
+
 const PROJECT_COLUMNS: &str = "SELECT
     id, external_project_id, project_slug, project_name, description,
     wave_id, pm_snapshot_synced_at,
@@ -2658,6 +2722,77 @@ mod local_planning_tests {
 
     use loopflow_model::durable::{ProjectId, TaskId};
     use loopflow_model::id::WaveId;
+
+    #[test]
+    fn a_new_task_joins_the_newest_started_project_else_the_newest_open_one() {
+        use crate::work::project::ProjectStatus;
+        let dir = tempfile::tempdir().unwrap();
+        let store = crate::test_fixture::open(&dir.path().join("db")).unwrap();
+        let wave = crate::work::wave::Wave::new(WaveId::new(), "billing".into(), "/repo".into());
+        crate::test_fixture::wave(&store, &wave);
+        assert_eq!(store.new_task_project(wave.id()).unwrap(), None);
+
+        let project = |name: &str, status: ProjectStatus, created_at: i64| {
+            let id = ProjectId::new();
+            store
+                .conn
+                .lock()
+                .unwrap()
+                .execute(
+                    "INSERT INTO projects(id,wave_id,created_at,updated_at,description,project_name,project_slug,status)
+                     VALUES(?1,?2,?3,?3,'',?4,?4,?5)",
+                    params![id.as_str(), wave.id(), created_at, name, status.as_str()],
+                )
+                .unwrap();
+            id
+        };
+        let joined = |store: &crate::sqlite::SqliteStore| {
+            let joined = store.new_task_project(wave.id()).unwrap().unwrap();
+            (joined.project.id, joined.open)
+        };
+        project("done", ProjectStatus::Completed, 9);
+        let planned = project("planned", ProjectStatus::Planned, 5);
+        let paused = project("paused", ProjectStatus::Paused, 6);
+        assert_eq!(joined(&store), (paused.clone(), 2));
+        let old = project("old", ProjectStatus::Started, 1);
+        let new = project("new", ProjectStatus::Started, 2);
+        assert_eq!(joined(&store), (new.clone(), 4));
+        // Joining never makes a Project while one is open, and names none
+        // when the Task had no choice of several.
+        assert_eq!(
+            store.join_project(wave.id(), "billing").unwrap().project.id,
+            new
+        );
+        assert_eq!(
+            store.project_among_several(&new).unwrap().as_deref(),
+            Some("new")
+        );
+
+        // A Project ends in the tracker or by `abandon`; the next Task goes
+        // to what is still open, and a Wave with nothing open gets a Project.
+        let end = |id: &ProjectId| {
+            store
+                .conn
+                .lock()
+                .unwrap()
+                .execute(
+                    "UPDATE projects SET status='completed' WHERE id=?1",
+                    [id.as_str()],
+                )
+                .unwrap();
+        };
+        end(&new);
+        assert_eq!(joined(&store), (old.clone(), 3));
+        for id in [&old, &planned, &paused] {
+            end(id);
+        }
+        let made = store.join_project(wave.id(), "billing").unwrap();
+        assert_eq!(made.project.name, "billing");
+        assert_eq!(made.project.status, ProjectStatus::Started);
+        assert_eq!(made.open, 1);
+        assert_eq!(store.project_among_several(&made.project.id).unwrap(), None);
+        assert_eq!(store.list_projects(Some(wave.id())).unwrap().len(), 6);
+    }
 
     #[test]
     fn retired_branch_lookup_preserves_history_without_full_scans() {

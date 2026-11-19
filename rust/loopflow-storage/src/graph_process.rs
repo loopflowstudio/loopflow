@@ -25,8 +25,6 @@ pub enum RunOwner {
     GraphRun,
     /// `graph_process_steps`: one step a Graph run spawned.
     GraphStep,
-    /// `waves`: a Wave's Project activation.
-    ProjectActivation,
     /// `task_graphs`: the lf carrying a Task's run. It records no result of
     /// its own; its Graph run's is the Task's.
     TaskCarrier,

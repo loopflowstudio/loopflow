@@ -495,18 +495,6 @@ writes! {
         super::waves::desktop_status(directory, refreshed.wave().unwrap_or(wave))?
     },
 
-    /// `lf wave plan bind <wave> <project> --json`: the tracker Project
-    /// bound as the Wave's current Project.
-    #[serde(rename = "wave.plan.bind")]
-    WavePlanBind {
-        directory: PathBuf,
-        wave: String,
-        project: String,
-    } => loopflow_storage::work::project::Project;
-    { wave, project, .. } => {
-        loopflow_execution::engine::wave::planning_bind(directory, wave, project)?
-    },
-
     /// `lf wave plan connect [<wave>|--all] [--team-key <key>]
     /// [--team-name <name>] --json`: one receipt per Wave connected.
     #[serde(rename = "wave.plan.connect")]
@@ -1107,7 +1095,6 @@ macro_rules! directory_of {
             | Write::WaveRemove { directory, .. }
             | Write::WaveMachine { directory, .. }
             | Write::WaveSync { directory, .. }
-            | Write::WavePlanBind { directory, .. }
             | Write::WavePlanConnect { directory, .. }
             | Write::WavePlanReteam { directory, .. }
             | Write::GraphCustomize { directory, .. }
@@ -1513,7 +1500,6 @@ mod tests {
             r#"{"kind":"task.report","directory":"/r","issue":"FIX-1","message":"landed"}"#,
             r#"{"kind":"task.interrupt","directory":"/r","issue":"FIX-1"}"#,
             r#"{"kind":"session.steer","directory":"/r","session":null,"wave":"product","message":"ship by Friday"}"#,
-            r#"{"kind":"wave.plan.bind","directory":"/r","wave":"product","project":"3f1c"}"#,
             r#"{"kind":"wave.plan.connect","directory":"/r","wave":null,"all":true,"team_key":null,"team_name":null}"#,
             r#"{"kind":"wave.plan.reteam","directory":"/r","apply":false}"#,
             r#"{"kind":"repo.release","directory":"/r","version":"minor","target":null}"#,

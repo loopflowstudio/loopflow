@@ -352,8 +352,7 @@ impl World {
         Ok(())
     }
 
-    /// Set the current Project's KRs and metric targets, as `lf wave edit-project`
-    /// does. Targets name metrics already authored with [`Self::metric`].
+    /// Set the KRs and metric targets of the Project new Tasks join. Targets name metrics already authored with [`Self::metric`].
     pub fn plan(
         &self,
         wave: &str,
@@ -374,13 +373,19 @@ impl World {
                 target: target.clone(),
             })
             .collect();
-        self.runtime
-            .block_on(loopflow_execution::ops::project::update_project(
-                &self.repo,
+        let store = self.store()?;
+        let wave = self.runtime.block_on(
+            loopflow_execution::work::wave::context::resolve_managed_wave(
+                Some(&store),
+                Some(&self.repo),
                 Some(wave),
-                &krs,
-                &targets,
-            ))?;
+                None,
+            ),
+        )?;
+        let project = store.sqlite.join_project(wave.id(), wave.slug())?.project;
+        store
+            .sqlite
+            .update_project_content(&project.id, &krs, &targets)?;
         Ok(())
     }
 

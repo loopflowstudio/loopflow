@@ -70,7 +70,6 @@ pub struct WaveSnapshot {
 /// Task conditions and Session history. Wire type; no defaults.
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct WaveDetailSnapshot {
-    pub project_readiness: loopflow_storage::sqlite::ProjectReadiness,
     pub wave: WaveSnapshot,
     pub projects: Evidence<ProjectSummary>,
     pub tasks: Evidence<RoadmapTask>,
@@ -361,7 +360,6 @@ pub struct RoadmapSnapshot {
 pub struct WaveRoadmap {
     /// The graph the Wave's Tasks take up by default.
     pub graph: Option<String>,
-    pub project_readiness: loopflow_storage::sqlite::ProjectReadiness,
     pub wave: WaveSnapshot,
     pub projects: Evidence<ProjectSummary>,
     pub metric_portfolio: MetricPortfolioDto,
@@ -389,7 +387,6 @@ impl RoadmapSnapshot {
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ProjectSummary {
     pub sync: loopflow_storage::planning_sync::TrackerSync,
-    pub current: bool,
     pub id: String,
     #[serde(deserialize_with = "Option::deserialize")]
     pub tracker_id: Option<String>,
@@ -403,22 +400,11 @@ pub struct ProjectSummary {
 async fn project_planning(store: &SharedStore, wave: &Wave) -> Evidence<ProjectSummary> {
     let result = async {
         let projects = store.list_projects(Some(wave.id())).await?;
-        let current = loopflow_storage::sqlite::project_selection::read_project_binding(
-            &store.sqlite,
-            wave.id(),
-        )?;
         let projects = projects
             .into_iter()
             .map(|project| -> Result<ProjectSummary> {
                 Ok(ProjectSummary {
                     sync: store.project_tracker_sync(&project.id)?,
-                    current: current.as_deref().is_some_and(|id| {
-                        id == project.id.as_str()
-                            || project
-                                .tracker_id
-                                .as_ref()
-                                .is_some_and(|linear| linear.as_str() == id)
-                    }),
                     tracker_id: project.tracker_id.map(|id| id.as_str().to_owned()),
                     id: project.id.to_string(),
                     slug: project.slug,
@@ -441,14 +427,9 @@ fn print_projects(projects: &Evidence<ProjectSummary>) {
         Evidence::Ok { items, .. } => {
             for project in items {
                 println!(
-                    "  Project   {} ({}) · {} · {}",
+                    "  Project   {} ({}) · {}",
                     project.name,
                     project.id,
-                    if project.current {
-                        "current"
-                    } else {
-                        "historical"
-                    },
                     project.status.as_str()
                 );
                 for line in project.sync.lines() {
@@ -669,7 +650,6 @@ pub(crate) async fn wave_detail(store: &SharedStore, wave: &Wave) -> Result<Wave
     let metric_portfolio =
         loopflow_execution::ops::metrics::wave_metric_portfolio(store, wave, now()).await?;
     Ok(WaveDetailSnapshot {
-        project_readiness: loopflow_execution::ops::project::readiness(&store.sqlite, wave.id())?,
         history: Evidence::from_result(
             crate::lf::commands::session_history::collect_recent_history(
                 &store.sqlite,
@@ -1503,10 +1483,6 @@ async fn roadmap_snapshot(
         }
         roadmaps.push(WaveRoadmap {
             graph: loopflow_execution::work::wave::config::wave_graph(&checkout, wave.slug())?,
-            project_readiness: loopflow_execution::ops::project::readiness(
-                &store.sqlite,
-                wave.id(),
-            )?,
             wave: snapshot,
             projects: project_planning(store, wave).await,
             unavailable_tasks: Vec::new(),
@@ -3986,14 +3962,6 @@ mod tests {
                 "initiative_ids":["initiative"], "team_ids":["team"]
             }], "items":[]})).unwrap(),
         }, None).await.unwrap();
-        loopflow_storage::sqlite::project_selection::write_project_binding(
-            &store.sqlite,
-            wave.id(),
-            None,
-            "999bdbdd-c045-41a6-8ffc-a97c4a40b0b3",
-            &loopflow_execution::store::PlanningLocks::new(tempfile::tempfile().unwrap()),
-        )
-        .unwrap();
         let super::Evidence::Ok { items, .. } = super::project_planning(&store, &wave).await else {
             panic!("Project plan unavailable");
         };
@@ -4119,15 +4087,6 @@ mod tests {
             .unwrap();
         assert!(loopflow_execution::ops::project::current_project(&store, &wave).is_err());
         assert!(!directory.path().join("waves").exists());
-        let guard = loopflow_execution::store::PlanningLocks::new(tempfile::tempfile().unwrap());
-        loopflow_storage::sqlite::project_selection::write_project_binding(
-            &store.sqlite,
-            wave.id(),
-            None,
-            selected,
-            &guard,
-        )
-        .unwrap();
         let before = (
             store.list_projects(Some(wave.id())).await.unwrap(),
             store.list_tasks(Some(wave.id())).await.unwrap(),

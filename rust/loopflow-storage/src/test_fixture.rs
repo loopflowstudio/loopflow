@@ -129,8 +129,7 @@ pub fn wave(store: &SqliteStore, wave: &crate::work::wave::Wave) {
 pub fn project(store: &SqliteStore, repo: &str, name: &str) -> Project {
     let wave = crate::work::wave::Wave::new(WaveId::new(), name.into(), repo.into());
     self::wave(store, &wave);
-    let project = store.ensure_project(wave.id(), name).unwrap();
-    store.project(&project).unwrap().unwrap()
+    store.join_project(wave.id(), name).unwrap().project
 }
 
 pub fn ownership(store: &SqliteStore, scope: TaskScope) -> OwnershipFacts {
@@ -292,14 +291,6 @@ pub fn task() -> (tempfile::TempDir, SqliteStore, Task, TaskPr) {
         updated_at: now,
     };
     store.insert_project(&project).unwrap();
-    crate::sqlite::project_selection::write_project_binding(
-        &store,
-        &wave_id,
-        None,
-        project.tracker_id.as_ref().unwrap().as_str(),
-        &crate::PlanningLocks::new(tempfile::tempfile().unwrap()),
-    )
-    .unwrap();
     let task = Task {
         repository_id: crate::test_fixture::repository(&store, "/repo"),
         id: task_id.clone(),

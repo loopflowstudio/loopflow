@@ -8,22 +8,20 @@ use crate::rows::now_unix;
 use crate::work::project::ProjectEventKind;
 use crate::work::task::TaskEventKind;
 use crate::{StoreError, StoreResult};
-use loopflow_model::durable::{Author, MachineId, ProjectId, TaskId, WorkRef, WorkStatus};
+use loopflow_model::durable::{Author, MachineId, TaskId, WorkRef, WorkStatus};
 use loopflow_model::id::WaveId;
 
 use super::SqliteStore;
 
 impl SqliteStore {
-    /// A Task may launch a Graph while it is ready, not being abandoned, and
-    /// planned in its Wave's current project.
+    /// A Task may launch a Graph while it is ready and not being abandoned.
     pub fn require_task_launch(&self, task_id: &TaskId) -> StoreResult<()> {
         let mut connection = self.conn.lock().expect("store mutex poisoned");
         let conn = connection.savepoint()?;
         let task = super::children::task_on(&conn, task_id)?.ok_or(StoreError::NotFound)?;
         super::children::require_task_planning(&conn, &task)?;
         let work = WorkRef::Task(task_id.clone());
-        require_ready_work(&conn, &work)?;
-        require_current_task_project(&conn, &work)
+        require_ready_work(&conn, &work)
     }
 
     pub fn task_issue_identifier(&self, external_issue_id: &str) -> StoreResult<Option<String>> {
@@ -407,44 +405,6 @@ pub(super) fn require_ready_work(conn: &Connection, work: &WorkRef) -> StoreResu
             work.id()
         ))),
     }
-}
-
-pub(super) fn require_current_task_project(conn: &Connection, work: &WorkRef) -> StoreResult<()> {
-    let WorkRef::Task(task) = work else {
-        return Ok(());
-    };
-    let project: Option<String> = conn.query_row(
-        "SELECT project_id FROM tasks WHERE id=?1",
-        [task.as_str()],
-        |row| row.get(0),
-    )?;
-    if super::task_ownership::owned_in(conn, task)? {
-        return Ok(());
-    }
-    if let Some(project) = project {
-        require_selected_project(conn, &ProjectId::from_raw(project))?;
-    }
-    Ok(())
-}
-
-pub(super) fn require_selected_project(conn: &Connection, project: &ProjectId) -> StoreResult<()> {
-    let (selected, status): (Option<String>, String) = conn.query_row(
-        "SELECT w.current_project_id,p.status FROM projects p JOIN waves w ON w.id=p.wave_id WHERE p.id=?1",
-        [project.as_str()],
-        |row| Ok((row.get(0)?, row.get(1)?)),
-    )?;
-    if selected.as_deref() != Some(project.as_str()) {
-        return Err(StoreError::InvalidAuthority(
-            "Task Project is not the Wave's configured Project; ensure the Wave before starting new work".into(),
-        ));
-    }
-    if status != "started" {
-        return Err(StoreError::InvalidAuthority(
-            "configured Project is not In Progress; ensure the Wave before starting new work"
-                .into(),
-        ));
-    }
-    Ok(())
 }
 
 fn work_table(work: &WorkRef) -> (&'static str, &str) {

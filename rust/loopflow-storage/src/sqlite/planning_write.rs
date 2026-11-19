@@ -7,7 +7,7 @@ use crate::work::edit::{
     CommentContent, Disposition, StampedRecord, StampedValue, WorkEdit, WorkValue,
 };
 use crate::{StoreError, StoreResult};
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, Connection};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 /// Who a planning write comes from, which decides what else it records.
@@ -27,10 +27,7 @@ const WORK_TABLES: [&str; 4] = ["waves", "projects", "tasks", "task_comments"];
 // typed variant and target, without another public object/kind model.
 pub(crate) fn table(value: &WorkValue) -> &'static str {
     match value {
-        WorkValue::WaveName(_)
-        | WorkValue::WaveParent(_)
-        | WorkValue::WaveRetired(_)
-        | WorkValue::WaveProject(_) => "waves",
+        WorkValue::WaveName(_) | WorkValue::WaveParent(_) | WorkValue::WaveRetired(_) => "waves",
         WorkValue::ProjectWave(_)
         | WorkValue::ProjectLinearId(_)
         | WorkValue::ProjectSlug(_)
@@ -66,7 +63,6 @@ fn column(value: &WorkValue) -> &'static str {
         WorkValue::WaveName(_) => "name",
         WorkValue::WaveParent(_) => "parent_wave_id",
         WorkValue::WaveRetired(_) => "retired_at",
-        WorkValue::WaveProject(_) => "current_project_id",
         WorkValue::ProjectWave(_) => "wave_id",
         WorkValue::ProjectLinearId(_) => "external_project_id",
         WorkValue::ProjectSlug(_) => "project_slug",
@@ -100,17 +96,13 @@ fn column(value: &WorkValue) -> &'static str {
 
 pub(crate) fn read(conn: &Connection, table: &str, id: &str) -> StoreResult<Vec<WorkValue>> {
     let values = match table {
-        "waves" => read_record(conn, "SELECT name,parent_wave_id,current_project_id,retired_at FROM waves WHERE id=?1", id, |row| {
-                    let retired: Option<i64> = row.get(3)?;
-                    let project: Option<String> = row.get(2)?;
+        "waves" => read_record(conn, "SELECT name,parent_wave_id,retired_at FROM waves WHERE id=?1", id, |row| {
+                    let retired: Option<i64> = row.get(2)?;
                     Ok([
                         WorkValue::WaveName(row.get(0)?),
                         WorkValue::WaveParent(row.get(1)?),
                     ]
                     .into_iter()
-                    // A clone registers authored Waves before it acquires their
-                    // planning. Missing selection is not an edit clearing a peer's.
-                    .chain(project.map(|id| WorkValue::WaveProject(Some(id))))
                     .chain(retired.map(|at| WorkValue::WaveRetired(Some(at))))
                     .collect())
         }),
@@ -201,18 +193,6 @@ fn write_record(
     for edit in edits {
         let edit = &edit.change;
         edit.validate()?;
-        if let WorkValue::WaveProject(Some(project)) = edit {
-            let owner: Option<String> = conn
-                .query_row("SELECT wave_id FROM projects WHERE id=?1", [project], |r| {
-                    r.get(0)
-                })
-                .optional()?;
-            if owner.as_deref() != Some(id) {
-                return Err(StoreError::InvalidAuthority(
-                    "selected Project belongs to another Wave or is missing".into(),
-                ));
-            }
-        }
         if before.contains(edit) {
             continue;
         }
@@ -583,14 +563,6 @@ mod tests {
                     ],
                 ),
                 super::WriteOrigin::Local,
-            )
-            .unwrap();
-            local(
-                &tx,
-                &crate::work::edit::WorkEdit::for_target(
-                    wave.id().as_str(),
-                    &[Edit::WaveProject(Some(project.to_string()))],
-                ),
             )
             .unwrap();
             tx.commit().unwrap();

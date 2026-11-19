@@ -13,7 +13,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use loopflow_model::durable::RepositoryId;
 use loopflow_storage::sqlite::plan_carriers::Carrier;
 use loopflow_storage::sqlite::SqliteStore;
-use loopflow_storage::work::edit::{StampedRecord, StampedValue};
+use loopflow_storage::work::edit::StampedRecord;
 use loopflow_storage::StoreError;
 
 /// This Machine's ref, here and on the remote.
@@ -255,40 +255,14 @@ fn next_blob<'a>(rest: &mut &'a [u8]) -> Result<&'a [u8]> {
     Ok(content)
 }
 
-/// A plan ref file as a record. A file that does not parse is skipped, and so
-/// is each field this build does not know; both are logged.
+/// A plan ref file as a record. A file that does not parse is skipped and
+/// logged.
 fn parse_record(file: &str, content: &[u8]) -> Option<StampedRecord> {
-    #[derive(serde::Deserialize)]
-    struct File {
-        table: String,
-        id: String,
-        fields: Vec<serde_json::Value>,
-    }
-    let parsed: File = match serde_json::from_slice(content) {
-        Ok(parsed) => parsed,
-        Err(error) => {
+    serde_json::from_slice(content)
+        .inspect_err(|error| {
             tracing::warn!(%file, %error, "skipped a plan ref file that does not parse");
-            return None;
-        }
-    };
-    let fields = parsed
-        .fields
-        .into_iter()
-        .filter_map(
-            |field| match serde_json::from_value::<StampedValue>(field) {
-                Ok(field) => Some(field),
-                Err(error) => {
-                    tracing::warn!(%file, %error, "skipped a plan ref field this build does not know");
-                    None
-                }
-            },
-        )
-        .collect();
-    Some(StampedRecord {
-        table: parsed.table,
-        id: parsed.id,
-        fields,
-    })
+        })
+        .ok()
 }
 
 /// Take in a ref's records together; when one of them cannot be written, one

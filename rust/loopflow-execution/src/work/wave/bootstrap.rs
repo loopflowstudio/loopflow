@@ -31,8 +31,7 @@ pub fn upsert_wave(store: &SqliteStore, wave: &crate::work::wave::Wave) -> Store
 /// Provision a Wave hierarchy without a provider, preserving authored files.
 pub fn ensure_wave_project(store: &SqliteStore, repo: &str, name: &str) -> StoreResult<Project> {
     let wave = ensure_wave(store, repo, name)?;
-    let project = store.ensure_project(&wave, name)?;
-    store.project(&project)?.ok_or(StoreError::NotFound)
+    Ok(store.join_project(&wave, name)?.project)
 }
 
 pub fn ensure_wave(store: &SqliteStore, repo: &str, name: &str) -> StoreResult<WaveId> {
@@ -422,7 +421,7 @@ mod tests {
         store.create_wave(&collision).await.unwrap();
         store
             .sqlite
-            .ensure_project(collision.id(), "Existing plan")
+            .join_project(collision.id(), "Existing plan")
             .unwrap();
         assert!(crate::work::wave::relocate::relocate_wave(
             &store,

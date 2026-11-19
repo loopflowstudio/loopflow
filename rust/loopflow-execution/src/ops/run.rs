@@ -445,14 +445,6 @@ mod tests {
             created_at: now,
             updated_at: now,
         };
-        loopflow_storage::sqlite::project_selection::write_project_binding(
-            &store.sqlite,
-            wave.id(),
-            None,
-            project.tracker_id.as_ref().unwrap().as_str(),
-            &crate::store::PlanningLocks::new(tempfile::tempfile().unwrap()),
-        )
-        .unwrap();
         store.seed_task(&task, &pr).await.unwrap();
         task
     }
@@ -469,14 +461,6 @@ mod tests {
         store.create_wave(&wave).await.unwrap();
         let project = project(&wave, "runtime", "project-runtime");
         store.create_project(&project).await.unwrap();
-        loopflow_storage::sqlite::project_selection::write_project_binding(
-            &store.sqlite,
-            wave.id(),
-            None,
-            project.tracker_id.as_ref().unwrap().as_str(),
-            &crate::store::PlanningLocks::new(tempfile::tempfile().unwrap()),
-        )
-        .unwrap();
         let task = store
             .sqlite
             .create_task(&loopflow_storage::work::task::NewTask {

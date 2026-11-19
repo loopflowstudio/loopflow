@@ -226,10 +226,10 @@ pub(super) async fn open_planning_store(config: &StorageConfig) -> OpsResult<Sto
 
 pub(crate) async fn lock_wave_planning(wave: &Wave) -> OpsResult<Arc<crate::store::PlanningLocks>> {
     // Keep the existing lock inode namespace shared with already-running callers.
-    let path = crate::store::lf_home_dir().join("chapter-locks");
+    let path = crate::store::lf_home_dir().join("wave-locks");
     #[cfg(any(test, feature = "test-support"))]
     let path = super::linear::LINEAR_TEST_CONTEXT
-        .try_with(|context| context.path.with_extension("chapter-locks"))
+        .try_with(|context| context.path.with_extension("wave-locks"))
         .unwrap_or(path);
     std::fs::create_dir_all(&path).map_err(|error| OpsError::Message(error.to_string()))?;
     let file = OpenOptions::new()

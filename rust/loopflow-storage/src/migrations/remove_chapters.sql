@@ -1,0 +1,15 @@
+-- A Wave no longer selects one of its Projects (LOO-995): a new Task joins
+-- the Wave's newest started Project, read from `projects` each time. Released
+-- lf still reads these members, so they stay, unwritten, until a contract
+-- drops them with their idle triggers and rebuilds `waves`.
+-- leaving: waves.current_project_id LOO-995
+-- leaving: waves.project_activation_lf_process_id LOO-995
+-- leaving: waves.project_activation_started_at LOO-995
+-- leaving: waves.project_activation_pid LOO-995
+-- leaving: waves.project_activation_os_started_at LOO-995
+-- leaving: waves.project_activation_ended_at LOO-995
+-- leaving: waves.project_activation_exit_code LOO-995
+-- leaving: waves.project_activation_error LOO-995
+-- Nothing wrote a successor rollover; its row also marked a Project as made
+-- on this Machine, which `plan_stamps` now answers.
+-- leaving: project_transitions LOO-995

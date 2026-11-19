@@ -17,7 +17,7 @@ to one. `uv run python scripts/due_removals.py` prints when each may drop.
 ## Wave
 
 - `wave_lifecycle_operations`: id, repo, wave_id, kind, operation_json
-- `waves`: id, name, repo, created_at, parent_wave_id, promoted_at, retired_at, superseded_by_wave_id, retirement_reason, work_state, work_terminal_at, current_project_id, project_activation_lf_process_id, project_activation_started_at, project_activation_pid, project_activation_os_started_at, project_activation_ended_at, project_activation_exit_code, project_activation_error
+- `waves`: id, name, repo, created_at, parent_wave_id, promoted_at, retired_at, superseded_by_wave_id, retirement_reason, work_state, work_terminal_at, ~~current_project_id~~ (leaving → LOO-995, remove_chapters), ~~project_activation_lf_process_id~~ (leaving → LOO-995, remove_chapters), ~~project_activation_started_at~~ (leaving → LOO-995, remove_chapters), ~~project_activation_pid~~ (leaving → LOO-995, remove_chapters), ~~project_activation_os_started_at~~ (leaving → LOO-995, remove_chapters), ~~project_activation_ended_at~~ (leaving → LOO-995, remove_chapters), ~~project_activation_exit_code~~ (leaving → LOO-995, remove_chapters), ~~project_activation_error~~ (leaving → LOO-995, remove_chapters)
 
 ## Wave Project
 
@@ -66,7 +66,7 @@ to one. `uv run python scripts/due_removals.py` prints when each may drop.
 - `pm_wave_sync`: wave_id, provider, initiative, synced_at
 - `project_binding_imports` — **leaving → LOO-954, unused_store_members**: wave_id, original_yaml, imported_at
 - `project_transition_items` — **leaving → LOO-954, unused_store_members**: wave_id, successor_id, issue_id
-- `project_transitions`: wave_id, successor_id, predecessor_id, reset_name, create_successor, created_at, settled_at, local_plan_json, export_json, export_attempted, export_link_attempted, export_error, export_observed_at
+- `project_transitions` — **leaving → LOO-995, remove_chapters**: wave_id, successor_id, predecessor_id, reset_name, create_successor, created_at, settled_at, local_plan_json, export_json, export_attempted, export_link_attempted, export_error, export_observed_at
 - `tracker_events`: issue_id, revision_ns, removed
 - `tracker_items`: repo, tracker, id, identifier, project_id, observed_at, needs_refresh, revision, branch_name, url, name, description, rank, completed, completed_at, due_date, state, team_id, assignee, completed_at_observed, due_date_observed, assignee_observed, claimed_project_id, project_id_observed
 - `tracker_projects`: repo, tracker, id, observed_at, archived, membership_unresolved, task_order_json, revision, slug, name, summary, status, krs, metric_targets, initiative_ids, team_ids, description, description_revision, description_observed_at

@@ -976,12 +976,14 @@ pub(crate) fn attach_in(
     Ok(())
 }
 
-/// Unbound local Projects, then Tasks, in `repo` with no live `create`.
+/// Unbound Projects, then Tasks, made on this Machine in `repo` with no live
+/// `create`. A Project is made here unless another Machine stamped its Wave.
 fn uncreated(conn: &Connection, repo: &str) -> StoreResult<Vec<ActionOwner>> {
     let mut query = conn.prepare_cached(
         "SELECT 'project',p.id FROM projects p JOIN waves w ON w.id=p.wave_id
          WHERE w.repo=?1 AND p.external_project_id IS NULL
-         AND EXISTS(SELECT 1 FROM project_transitions c WHERE c.successor_id=p.id AND c.local_plan_json IS NOT NULL)
+         AND NOT EXISTS(SELECT 1 FROM plan_stamps s WHERE s.owner_id=p.id AND s.field='project_wave'
+             AND s.machine_id!=(SELECT id FROM machines WHERE is_local=1))
          AND NOT EXISTS(SELECT 1 FROM tracker_actions e WHERE e.project_id=p.id AND e.kind='create' AND e.phase!='retired')
          UNION ALL
          SELECT 'task',t.id FROM tasks t JOIN repository_plans r ON r.id=t.repository_id
@@ -1397,6 +1399,59 @@ mod tests {
             .tracker_actions_for(&ActionOwner::Task(bound))
             .unwrap()
             .is_empty());
+    }
+
+    #[test]
+    fn a_project_made_here_is_created_in_the_tracker_and_one_from_another_machine_is_not() {
+        let (_dir, store) = store();
+        let wave = crate::work::wave::Wave::new(
+            loopflow_model::id::WaveId::new(),
+            "billing".into(),
+            "/repo".into(),
+        );
+        crate::test_fixture::wave(&store, &wave);
+        let here = store.join_project(wave.id(), "billing").unwrap().project.id;
+        // The released lf made Projects before fields were stamped.
+        let unstamped = loopflow_model::durable::ProjectId::new();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO projects(id,wave_id,created_at,updated_at,description,project_name,project_slug)
+                 VALUES(?1,?2,1,1,'','Earlier','earlier')",
+                rusqlite::params![unstamped.as_str(), wave.id()],
+            )
+            .unwrap();
+        let elsewhere = loopflow_model::durable::ProjectId::new();
+        crate::test_fixture::arrive(
+            &store,
+            "/repo",
+            &crate::work::edit::WorkEdit::for_target(
+                elsewhere.as_str(),
+                &[
+                    WorkValue::ProjectWave(wave.id().to_string()),
+                    WorkValue::ProjectName(Some("Theirs".into())),
+                ],
+            ),
+        )
+        .unwrap();
+        assert_eq!(
+            store
+                .enqueue_tracker_creations("/repo", TrackerKind::Linear)
+                .unwrap(),
+            2
+        );
+        let mut created: Vec<_> = store
+            .unconfirmed_tracker_actions("/repo")
+            .unwrap()
+            .into_iter()
+            .map(|action| action.owner)
+            .collect();
+        created.sort_by_key(|owner| format!("{owner:?}"));
+        let mut expected = vec![ActionOwner::Project(here), ActionOwner::Project(unstamped)];
+        expected.sort_by_key(|owner| format!("{owner:?}"));
+        assert_eq!(created, expected);
     }
 
     #[test]

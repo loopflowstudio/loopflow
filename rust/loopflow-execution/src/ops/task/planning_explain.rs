@@ -203,10 +203,13 @@ async fn read_planning(
                 ),
                 None => None,
             };
+            // A Wave with no open Project gets one when the move is saved.
             let project = destination
                 .as_ref()
-                .map(|wave| crate::ops::project::current_project(store, wave))
-                .transpose()?;
+                .map(|wave| store.sqlite.new_task_project(wave.id()))
+                .transpose()?
+                .flatten()
+                .map(|joined| joined.project);
             report.action = Some(TaskPlanningAction::Move {
                 wave: destination.as_ref().map(|w| w.id().to_string()),
                 project: project.as_ref().map(|p| p.id.to_string()),
@@ -382,18 +385,13 @@ async fn read_creation(
         value: wave.id().to_string(),
         source: "explicit".into(),
     };
-    let project = match crate::ops::project::current_project(store, &wave) {
-        Ok(project) => project,
-        Err(error) => {
-            report.impediments.push(error.to_string());
-            return Ok(());
-        }
-    };
+    // A Wave with no open Project gets one when the Task is saved.
+    let joined = store.sqlite.new_task_project(wave.id())?;
     if let Some(TaskPlanningAction::Create {
         project: selected, ..
     }) = &mut report.action
     {
-        *selected = Some(project.id.to_string());
+        *selected = joined.map(|joined| joined.project.id.to_string());
     }
     Ok(())
 }

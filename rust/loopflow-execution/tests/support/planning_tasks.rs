@@ -28,14 +28,6 @@ pub async fn planning_repo(fixture: &Fixture) -> (PathBuf, crate::work::wave::Wa
         loopflow_storage::planning_sync::TrackerKind::Linear,
     )
     .unwrap();
-    loopflow_storage::sqlite::project_selection::write_project_binding(
-        &fixture.store.sqlite,
-        wave.id(),
-        None,
-        "project-1",
-        &crate::store::PlanningLocks::new(tempfile::tempfile().unwrap()),
-    )
-    .unwrap();
     (repo, wave)
 }
 

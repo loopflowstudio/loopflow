@@ -1305,8 +1305,7 @@ fn task_create_answers_with_the_conversation_record_and_row() {
 #[test]
 fn wave_graph_reports_its_default_with_or_without_a_wave() {
     let json = include_str!("../../../tests/fixtures/dto/wave_graph.json");
-    let graphs: Vec<loopflow_execution::ops::project::WaveGraph> =
-        serde_json::from_str(json).unwrap();
+    let graphs: Vec<loopflow_execution::ops::task::WaveGraph> = serde_json::from_str(json).unwrap();
     assert_eq!(graphs[0].default.source.as_str(), "repository");
     assert!(graphs[1].wave.is_none());
     assert_eq!(

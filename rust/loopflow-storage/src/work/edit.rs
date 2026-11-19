@@ -54,13 +54,32 @@ pub struct StampedValue {
 
 /// A Wave, Project, Task or comment as it travels between Machines: every
 /// field it has, each with its stamp. A hub exchange and a plan ref carry
-/// exactly this.
+/// exactly this. A field this build does not know, from a Machine on another
+/// build, is skipped and logged; the rest of the record still reads.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StampedRecord {
     /// `waves`, `projects`, `tasks` or `task_comments`.
     pub table: String,
     pub id: String,
+    #[serde(deserialize_with = "known_fields")]
     pub fields: Vec<StampedValue>,
+}
+
+fn known_fields<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Vec<StampedValue>, D::Error> {
+    let fields = Vec::<Value>::deserialize(deserializer)?;
+    Ok(fields
+        .into_iter()
+        .filter_map(|field| {
+            let name = field.get("field").cloned();
+            serde_json::from_value(field)
+                .inspect_err(|error| {
+                    tracing::warn!(field = ?name, %error, "skipped a plan field this build does not know");
+                })
+                .ok()
+        })
+        .collect())
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -100,7 +119,6 @@ work_values! {
     (WaveParent, "wave_parent", Option<String>),
     // Captured only once a Wave is removed, so live Waves exchange as before.
     (WaveRetired, "wave_retired", Option<i64>),
-    (WaveProject, "wave_project", Option<String>),
     (ProjectWave, "project_wave", String),
     (ProjectLinearId, "project_linear_id", Option<String>),
     (ProjectSlug, "project_slug", Option<String>),
@@ -144,9 +162,7 @@ impl WorkValue {
                     *v = canonical_uuid(v);
                 }
             }
-            Self::WaveProject(Some(v)) | Self::TaskProject(Some(v)) => {
-                *v = canonical_prefixed(v, "proj_")
-            }
+            Self::TaskProject(Some(v)) => *v = canonical_prefixed(v, "proj_"),
             Self::ProjectWave(v) => *v = canonical_uuid(v),
             Self::CommentTask(v) => *v = canonical_prefixed(v, "task_"),
             Self::TaskIdentifier(v) => *v = canonical_task_identifier(v),
@@ -180,5 +196,26 @@ impl WorkValue {
             _ => {}
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{StampedRecord, WorkValue};
+
+    #[test]
+    fn a_record_from_another_build_reads_without_the_fields_this_build_dropped() {
+        let record: StampedRecord = serde_json::from_str(
+            r#"{"table":"waves","id":"w","fields":[
+                {"field":"wave_name","value":"billing","at":3,"machine":"home_a"},
+                {"field":"wave_project","value":"proj_1","at":4,"machine":"home_a"}]}"#,
+        )
+        .unwrap();
+        assert_eq!(record.fields.len(), 1);
+        assert_eq!(
+            record.fields[0].value,
+            WorkValue::WaveName("billing".into())
+        );
+        assert_eq!(record.fields[0].at, 3);
     }
 }

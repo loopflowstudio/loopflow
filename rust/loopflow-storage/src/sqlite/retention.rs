@@ -247,9 +247,6 @@ const RUNNING_OWNERS: &str = "
         WHERE ended_at IS NULL
     UNION ALL SELECT 'graph_step',lf_process_id,pid,os_started_at,started_at,NULL
         FROM graph_process_steps WHERE ended_at IS NULL
-    UNION ALL SELECT 'activation',project_activation_lf_process_id,project_activation_pid,
-        project_activation_os_started_at,project_activation_started_at,NULL FROM waves
-        WHERE project_activation_lf_process_id IS NOT NULL AND project_activation_ended_at IS NULL
     UNION ALL SELECT 'task_carrier',lf_process_id,run_pid,run_os_started_at,NULL,NULL
         FROM task_graphs WHERE run_pid IS NOT NULL
     UNION ALL SELECT 'ship_carrier',lf_process_id,pid,os_started_at,at,NULL FROM task_ship_events
@@ -270,7 +267,6 @@ fn running_owners_in(conn: &Connection) -> StoreResult<Vec<RunningOwner>> {
         let owner = match row.get::<_, String>(0)?.as_str() {
             "graph_run" => Owner::Run(RunOwner::GraphRun),
             "graph_step" => Owner::Run(RunOwner::GraphStep),
-            "activation" => Owner::Run(RunOwner::ProjectActivation),
             "task_carrier" => Owner::Run(RunOwner::TaskCarrier),
             "ship_carrier" => Owner::Run(RunOwner::ShipCarrier),
             _ => Owner::SessionAgent {

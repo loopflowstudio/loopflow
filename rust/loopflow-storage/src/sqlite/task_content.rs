@@ -189,7 +189,6 @@ fn validate_move(
         ));
     }
     if let Some(destination) = destination {
-        super::durable::require_selected_project(conn, destination)?;
         let same_repo: bool = conn.query_row(
             "SELECT EXISTS(SELECT 1 FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo WHERE p.id=?1 AND r.id=?2)",
             rusqlite::params![destination.as_str(), current.repository_id.as_str()], |row| row.get(0),

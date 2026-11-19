@@ -302,7 +302,7 @@ pub enum Read {
     /// `lf --cwd <directory> wave graph show <wave>|--no-wave`: the graph a
     /// new Task there would take up.
     #[serde(rename = "wave.graph")]
-    #[schemars(extend("x-result" = generator.subschema_for::<loopflow_execution::ops::project::WaveGraph>()))]
+    #[schemars(extend("x-result" = generator.subschema_for::<loopflow_execution::ops::task::WaveGraph>()))]
     WaveGraph {
         directory: PathBuf,
         wave: Option<String>,
@@ -843,7 +843,7 @@ impl Read {
             }
             Self::WaveGraph { directory, wave } => {
                 let repo = loopflow_execution::repo::working_directory_in(directory)?;
-                value(&block_on(loopflow_execution::ops::project::wave_graph(
+                value(&block_on(loopflow_execution::ops::task::wave_graph(
                     &repo,
                     wave.as_deref(),
                     wave.is_some(),

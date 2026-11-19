@@ -227,7 +227,9 @@ as +3000 and -3000.
 Checked 2026-11-18:
 
 - `cargo test -p loopflow-execution --lib prompt::change::`: 7 passed,
-  including `a_renamed_file_gets_the_read_command_that_takes_both_paths`.
+  including `a_renamed_file_gets_the_read_command_that_takes_both_paths`
+  (since folded into
+  `renames_and_binary_files_print_paths_and_commands_that_read_them`).
 - `cargo test -p loopflow --test integration documented_commands::`: 4 passed.
 - `lf commit -a claude:haiku` in a throwaway repository: a 300-line file
   renamed with one appended line, staged beside a 20,000-line generated file

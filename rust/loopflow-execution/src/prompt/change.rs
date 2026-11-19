@@ -103,18 +103,17 @@ impl Change {
     /// The one prompt section that shows this change to an agent.
     pub fn prompt_section(&self) -> String {
         let count = self.files.len();
+        let range = self.range.git_arg();
         let mut section = format!(
             "{}, {count} file{}. Read one file's patch with:\n  git diff {range} -- '<path>'\n",
             self.range.title(),
             if count == 1 { "" } else { "s" },
-            range = self.range.git_arg(),
         );
         // Git pairs a rename only when both paths are in the pathspec; with
         // the new path alone it returns the whole file as added.
         if self.files.iter().any(|file| file.renamed_from.is_some()) {
             section.push_str(&format!(
-                "A renamed file needs both paths:\n  git diff {} -- '<path>' '<old path>'\n",
-                self.range.git_arg()
+                "A renamed file needs both paths:\n  git diff {range} -- '<path>' '<old path>'\n"
             ));
         }
         section.push('\n');
@@ -255,7 +254,8 @@ mod tests {
         let section = change.prompt_section();
 
         assert!(section.starts_with("Staged, 2 files. Read one file's patch with:\n"));
-        assert!(section.contains("  git diff --cached -- '<path>'\n"));
+        assert!(section.contains("  git diff --cached -- '<path>'\n\n"));
+        assert!(!section.contains("both paths"), "{section}");
         assert!(
             section.contains("  +20000  -0   aaa_generated.txt\n"),
             "{section}"
@@ -295,7 +295,7 @@ mod tests {
     }
 
     #[test]
-    fn renames_and_binary_files_print_paths_a_command_can_take() {
+    fn renames_and_binary_files_print_paths_and_commands_that_read_them() {
         let repo = TestRepo::new();
         let body: String = (0..40).map(|n| format!("line {n}\n")).collect();
         repo.create_file("a deeply/nested directory/old name.rs", &body);
@@ -317,54 +317,19 @@ mod tests {
 
         assert!(
             section.contains(
-                "  +0  -0   a deeply/nested directory/new name.rs \
-                 (from a deeply/nested directory/old name.rs)\n"
-            ),
-            "{section}"
-        );
-        assert!(section.contains("  binary   logo.png\n"), "{section}");
-    }
-
-    #[test]
-    fn a_renamed_file_gets_the_read_command_that_takes_both_paths() {
-        let repo = TestRepo::new();
-        let body: String = (0..300).map(|n| format!("line {n}\n")).collect();
-        repo.create_file("old_name.txt", &body);
-        repo.stage_all();
-        repo.commit("add a file to move");
-        git(&repo, &["mv", "old_name.txt", "new_name.txt"]);
-        repo.create_file("new_name.txt", &format!("{body}one more line\n"));
-        let generated: String = (0..20_000).map(|n| format!("row {n} of data\n")).collect();
-        repo.create_file("aaa_generated.txt", &generated);
-        repo.stage_all();
-
-        let change = Change::read(repo.path(), ChangeRange::Staged).unwrap();
-        let section = change.prompt_section();
-
-        assert_eq!(change.patch, None);
-        assert!(
-            section.contains(
                 "Read one file's patch with:\n  git diff --cached -- '<path>'\n\
                  A renamed file needs both paths:\n  git diff --cached -- '<path>' '<old path>'\n\n"
             ),
             "{section}"
         );
         assert!(
-            section.contains("      +1  -0   new_name.txt (from old_name.txt)\n"),
+            section.contains(
+                "  +0  -0   a deeply/nested directory/new name.rs \
+                 (from a deeply/nested directory/old name.rs)\n"
+            ),
             "{section}"
         );
-
-        git(&repo, &["reset", "-q", "--hard"]);
-        repo.create_file("aaa_generated.txt", &generated);
-        repo.stage_all();
-        let section = Change::read(repo.path(), ChangeRange::Staged)
-            .unwrap()
-            .prompt_section();
-        assert!(
-            section.contains("  git diff --cached -- '<path>'\n\n"),
-            "{section}"
-        );
-        assert!(!section.contains("both paths"), "{section}");
+        assert!(section.contains("  binary   logo.png\n"), "{section}");
     }
 
     #[test]

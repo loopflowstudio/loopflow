@@ -1875,7 +1875,7 @@ fn a_run_stopped_by_a_usage_limit_is_not_started_again() {
     let task = GraphTask::new();
     // The failing step ends having recorded that a limit left it nowhere to go.
     let reason = format!(
-        "codex_error: You've hit your usage limit{}there is no `agents` list",
+        "codex_error: You’ve hit your usage limit{}there is no `agents` list",
         loopflow_execution::ops::task_execution::STOPPED
     );
     let lf = task.home.path().join("lf-limit-fixture");
@@ -1917,7 +1917,7 @@ sys.exit(code)
     assert!(!ran.success(), "{}", ran.text);
     assert!(
         ran.text.contains(
-            "stopped after a provider refusal at graph show late: codex_error: You've hit your usage limit. there is no `agents` list; `lf task run INF-123` starts the run again at it"
+            "stopped after a provider refusal at graph show late: codex_error: You’ve hit your usage limit. there is no `agents` list; `lf task run INF-123` starts the run again at it"
         ),
         "{}",
         ran.text
@@ -2028,7 +2028,7 @@ fn a_run_that_failed_after_moving_agents_starts_again_at_the_step_that_failed() 
              (SELECT lf_process_id FROM graph_processes ORDER BY rowid DESC LIMIT 1)
          ORDER BY s.seq DESC LIMIT 1",
         [format!(
-            "codex_error: You've hit your usage limit{}claude",
+            "codex_error: You’ve hit your usage limit{}claude",
             loopflow_execution::ops::task_execution::MOVED_TO
         )],
     )

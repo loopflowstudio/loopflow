@@ -14,7 +14,6 @@ How we build Loopflow. Contributors and agents follow it.
 - Run `cargo fmt` and `cargo clippy --all-targets -- -D warnings` before committing; CI treats warnings as errors
 - Return `Option<T>` for "not found", `Result<T, E>` for failures
 - Use `expect("why this is safe")` over `unwrap()` outside tests
-- Derive `Debug` on all public types
 
 **Both:**
 - Mock side effects; don't test mock wiring or reshape production code for tests
@@ -293,6 +292,7 @@ them.
 - Explicit imports in submodules, not `use super::*`.
 - Derive `Debug` on public types; add `Clone`, `PartialEq`, `Default` where sensible.
 - Canonicalize Clap aliases in shared navigation so help, remote routing and execution agree.
+- Pass the named skill to `config::settings::resolve` before calling `Config::resolve_agents`. Test that the skill's settings take effect through the command that launches it.
 - `lf help <path>` renders Clap's short help; text it must show goes in `after_help`.
 - Give nested global Clap flags a distinct argument `id` when a root flag shares their name, or their values leak into the root command.
 - Use `thiserror` for library errors callers match on. Never use `()` as an error type.

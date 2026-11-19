@@ -2852,7 +2852,7 @@ fn a_stopped_ship_kills_nothing_and_its_run_carries_on() {
 }
 
 #[test]
-fn task_ship_stop_sticks_through_a_headless_relaunch() {
+fn auto_off_sticks_through_a_headless_relaunch() {
     let task = shipping_task();
     task.repo.create_file(
         ".lf/graphs/landing.yaml",

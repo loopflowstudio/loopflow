@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Concept review: work with children, third pass</title>
+<title>Concept review: work with children, fourth pass</title>
 <style>
   :root {
     --bg: #fbfaf7; --fg: #1d1c1a; --soft: #5d5a55; --line: #dcd8d0; --card: #ffffff;
@@ -57,147 +57,106 @@
 <body>
 <main>
 
-<h1>Work with children, after slice 6: do the product's concepts and the code's line up?</h1>
+<h1>Work with children, after slice 7: do the product's concepts and the code's line up?</h1>
 <p class="lede">The area taken is everything a follow-up touches with the whole branch in it: how one
 Task relates to another, which conversation is told about which work, what merging, finishing and
-closing do, and how the link reads on the wire, in a tracker and on a second Machine. Reviewed at
-<code>e3f0806302</code>, 2026-11-18, with nobody present, after slices 1 to 6 and a second QA pass
-(<code>scratch/qa.html</code>). The two earlier reviews are in Git history: before anything was built
-at <code>7582f08e48</code>, of slices 1 to 5 at <code>b53a53bd45</code>.</p>
+closing do, and what a Task's row says to do next. Reviewed at <code>93aae375a3</code>, 2026-11-18,
+with nobody present, after slices 1 to 7 and QA's third pass (<code>scratch/qa.html</code>). Earlier
+reviews are in Git history: <code>7582f08e48</code> (before building), <code>b53a53bd45</code>
+(slices 1 to 5), <code>69f574a003</code> (slices 1 to 6).</p>
+<p class="lede"><strong>Outcome: nothing to change in this work.</strong> Every pairing the work owns
+reads yes. What still reads no is on <code>main</code> too and is listed with what it would take.</p>
 <p class="legend"><span><span class="yes">yes</span> lines up</span>
 <span><span class="no">no</span> does not</span>
-<span><span class="new">proposed</span> slice 7, not built</span></p>
+<span><span class="new">proposed</span> not built, larger than this work</span></p>
 
 <h2>What the last pass set out to do, and what happened</h2>
 <table>
-  <tr><th style="width:38%">Slice 6 intended</th><th>Seen by hand in QA's second pass</th></tr>
-  <tr><td>A follow-up is never filed under a closed parent by the flat rule</td><td>Filed from open child 94067e after f5a0f9 closed: <code>parent: 94067e</code>, and that conversation heard it abandoned.</td></tr>
-  <tr><td>A child finished by its parent's completion settles its own children</td><td><code>4f0cb4 done</code>, <code>0c41ee abandoned: never started</code> indented under it.</td></tr>
-  <tr><td>The same failure is said once</td><td>Six failed runs of one step woke real Claude once; news again after the child had stood at <code>demo</code>.</td></tr>
-  <tr><td><code>parent_id</code> the ID, <code>parent</code> the row</td><td>Held on <code>lf task create</code>, <code>status</code>, <code>show</code> and served <code>task.create</code>.</td></tr>
-  <tr><td><code>lf task complete --json</code> carries <code>children</code></td><td>Held, and on served <code>task.complete</code>.</td></tr>
+  <tr><th style="width:38%">Slice 7 intended</th><th>Seen by hand in QA's third pass</th></tr>
+  <tr><td>A no-PR parent at <code>end</code> says why it is open</td><td><code>3790ad</code>: <code>action: no_action (Finished · 2 children open)</code>, JSON <code>reason</code> the same, <code>next</code> null.</td></tr>
+  <tr><td>Once nothing under it is open, it is pointed at completion</td><td><code>caf133</code>: <code>Finished; complete the Task</code>, <code>next: lf task complete caf133</code>.</td></tr>
+  <tr><td>A completion reaches under a child it abandons</td><td><code>dfbd35 abandoned</code>, <code>03cb8f abandoned</code> indented under it, <code>cde84a stays open: started, no PR</code>.</td></tr>
+  <tr><td>(not intended) found by QA and fixed</td><td>A parent kept open at <code>end</code> kept its Auto-Ship approval; every read started <code>lf ship</code> for it. <code>task_work::end_in</code> now withdraws it; five reads, no new process.</td></tr>
 </table>
-<p style="margin-top:12px">All five landed. The four pairings they answered now read yes below.</p>
+<p style="margin-top:12px">Both intentions held on the first try. The fix made the two arrivals at
+<code>end</code> one function, which is smaller than what it replaced.</p>
 
 <h2>One interaction, walked on the branch as it stands</h2>
-<p>A Task whose Graph plans the work and files it as children, with no PR of its own.</p>
 <ul class="timeline">
-  <li><code>lf task run a32d33</code>. A step files <code>e80c18</code>; the receipt prints
-    <code>parent: a32d33</code>. Holds.</li>
-  <li>The Graph reaches <code>end</code>. A childless Task is done here. This one has a child open, so
-    no completion is requested and it stays open. Holds, as slice 4 built it.</li>
-  <li class="x"><code>lf task status a32d33</code>:
-    <code>action: run (run the next work with `lf task run`; inspect earlier Graphs and independent Sessions first)</code>.
-    Its own work is over. Nothing says the child is why it is open, and the conductor is told to run it again.</li>
-  <li><code>e80c18</code> stops at its review; a32d33's conversation is told. Holds.</li>
-  <li class="x">Failure: <code>e80c18</code> is abandoned by hand. a32d33 now has nothing open under it
-    and still reads <code>run the next work</code>. A merged parent in the same place reads
-    <code>Merged; complete the Task</code>.</li>
-  <li>Recovery: <code>lf task complete a32d33</code> closes it. Works, though nothing pointed there.</li>
+  <li>In <code>caf133</code>'s conversation, two follow-ups are filed with no flag. <code>lf task status caf133</code> lists both. Holds.</li>
+  <li>Its Graph reaches <code>end</code> with no PR: <code>Finished · 2 children open</code>, no next move, no ship process. Holds.</li>
+  <li>One child completes itself, the conversation is told; the reason reads <code>Finished · 1 child open</code>. Holds.</li>
+  <li>Failure: the other child is abandoned by hand. The conversation is told; the row reads <code>Finished; complete the Task</code> with <code>lf task complete caf133</code>. Holds.</li>
+  <li>Recovery: <code>lf task complete</code> closes it; after retirement the conversation reopens in the main checkout (or in its kept checkout when it had no PR). Holds.</li>
+  <li class="x">The one walk that does not hold: a parent whose Graph has no merge step reaches <code>end</code> with its PR open. Text says <code>run `lf land`</code>, JSON <code>reason</code> says <code>not armed with `lf pr land -c`</code>, JSON <code>next</code> is <code>lf task run &lt;ID&gt;</code>, which errors. A held childless Task reads the same on <code>main</code>. Below.</li>
 </ul>
 
 <h2>The pairings</h2>
 <table>
   <tr><th style="width:23%">What a person knows</th><th style="width:31%">What the code has</th><th style="width:9%">Lines up</th><th>What is wrong</th></tr>
-  <tr><td>A follow-up of a Task</td><td><code>tasks.parent_task_id</code>, <code>WorkValue::TaskParent</code>, Linear <code>parentId</code>, Asana <code>parent</code></td>
-    <td><span class="yes">yes</span></td><td></td></tr>
+  <tr><td>A follow-up of a Task</td><td><code>tasks.parent_task_id</code>, <code>WorkValue::TaskParent</code>, Linear <code>parentId</code>, Asana <code>parent</code></td><td><span class="yes">yes</span></td><td></td></tr>
   <tr><td>"The Task's conversation"</td><td><code>session_tasks()</code>, unchanged</td><td><span class="yes">yes</span></td><td></td></tr>
-  <tr><td>"This conversation conducts those follow-ups"</td><td><code>task_work::conducted_tasks</code></td>
-    <td><span class="yes">yes</span></td><td></td></tr>
-  <tr><td>Where a follow-up goes with no flag</td><td><code>TaskParentChoice::resolve</code>: the caller's parent while it is open, else the caller</td>
-    <td><span class="yes">yes</span></td><td>Slice 6.</td></tr>
-  <tr><td>Being told a child's standing moved</td><td><code>TaskObservation::news</code>, <code>notice:</code> steers</td>
-    <td><span class="yes">yes</span></td><td>Slice 6: one failure, one wake.</td></tr>
-  <tr><td>"Its parent" in JSON</td><td><code>parent_id</code> the ID, <code>parent</code> the row</td>
-    <td><span class="yes">yes</span></td><td>Slice 6.</td></tr>
-  <tr><td>What my completion did</td><td><code>TaskCompleted.children</code>, <code>ChildOutcome</code></td>
-    <td><span class="yes">yes</span></td><td>Slice 6.</td></tr>
-  <tr><td>"Its own work is over; it is open for its children"</td><td><code>task_actions::conducting_reason</code>: PR merged and children open</td>
-    <td><span class="no">no</span></td><td><strong>The biggest mismatch.</strong> The code knows one of the two ways a Task's own work ends. Below.</td></tr>
-  <tr><td>Completing a parent settles what is under it</td><td><code>complete_children</code> recurses into a child it marks done, not one it abandons</td>
-    <td><span class="no">no</span></td><td>One settlement, two depths: a never-started child's never-started child survives (QA: <code>e1dd86</code> under <code>a1e338</code>).</td></tr>
-  <tr><td>Abandoned</td><td><code>tasks.abandoned_at</code> here; <code>planning_state='canceled'</code> when it arrives from another Machine; <code>TaskState::lifecycle</code> joins them in three reads and <code>task_open_sql</code> does not</td>
-    <td><span class="no">no</span></td><td>One idea, two records. On <code>main</code> too; this change makes it show, since completing a parent abandons children. Larger than this work.</td></tr>
+  <tr><td>"This conversation conducts those follow-ups"</td><td><code>task_work::conducted_tasks</code></td><td><span class="yes">yes</span></td><td></td></tr>
+  <tr><td>Where a follow-up goes with no flag</td><td><code>TaskParentChoice::resolve</code></td><td><span class="yes">yes</span></td><td></td></tr>
+  <tr><td>Being told a child's standing moved</td><td><code>TaskObservation::news</code>, <code>notice:</code> steers</td><td><span class="yes">yes</span></td><td></td></tr>
+  <tr><td>"Its parent" in JSON</td><td><code>parent_id</code> the ID, <code>parent</code> the row</td><td><span class="yes">yes</span></td><td></td></tr>
+  <tr><td>"Its own work is over; it is open for its children"</td><td><code>task_actions::Finished</code> (<code>Merged</code>, <code>AtEnd</code>), read by the action, the next move, <code>next</code> and Auto-Ship's merge</td><td><span class="yes">yes</span></td><td>Slice 7.</td></tr>
+  <tr><td>Completing a parent settles what is under it</td><td><code>complete_children</code>, recursing under every child it closes; <code>TaskCompleted.children</code></td><td><span class="yes">yes</span></td><td>Slice 7.</td></tr>
+  <tr><td>Reaching the end of the Graph</td><td><code>task_work::end_in</code>: ask to complete and ship, or withdraw the approval</td><td><span class="yes">yes</span></td><td>QA's fix.</td></tr>
   <tr><td>Closed, still talking to it</td><td><code>admit_workspace</code> falls back to the main checkout</td><td><span class="yes">yes</span></td><td></td></tr>
-  <tr><td>(nothing)</td><td><code>TaskEventKind::FamilyCompletionRequested</code></td>
-    <td><span class="no">no</span></td><td>A record the person never sees. Kept for the reason in its doc comment.</td></tr>
-  <tr><td>Stacked on another Task</td><td><code>stack_parent</code>, <code>parent_pr_id</code>, <code>--stack-on</code></td>
-    <td><span class="no">no</span></td><td>"Parent" is still two ideas in the docs. Larger than this work.</td></tr>
-  <tr><td>A sub-issue a coworker made</td><td>Linear read back; Asana not</td>
-    <td><span class="no">no</span></td><td>Half of one idea. Larger than this work.</td></tr>
+  <tr><td>"What do I do with this Task next"</td><td><code>derive_task_actions</code> (the text <code>action:</code>), <code>next_move_for_task</code> (JSON <code>reason</code>), <code>task_row::next_command</code> (JSON <code>next</code>)</td><td><span class="no">no</span></td><td><strong>The biggest mismatch.</strong> One answer, three owners. They agree for a finished Task since slice 7 and disagree elsewhere. On <code>main</code>. Below.</td></tr>
+  <tr><td>Abandoned</td><td><code>tasks.abandoned_at</code> here; <code>planning_state='canceled'</code> from another Machine; <code>task_open_sql</code> does not read the second</td><td><span class="no">no</span></td><td>One idea, two records. On <code>main</code>. Larger than this work.</td></tr>
+  <tr><td>(nothing)</td><td><code>TaskEventKind::FamilyCompletionRequested</code></td><td><span class="no">no</span></td><td>A record the person never sees. Kept for the reason in its doc comment.</td></tr>
+  <tr><td>Stacked on another Task</td><td><code>stack_parent</code>, <code>parent_pr_id</code>, <code>--stack-on</code></td><td><span class="no">no</span></td><td>"Parent" is two ideas in the docs. Larger than this work.</td></tr>
+  <tr><td>A sub-issue a coworker made</td><td>Linear read back; Asana not</td><td><span class="no">no</span></td><td>Half of one idea. Larger than this work.</td></tr>
 </table>
 
-<h2>The biggest mismatch: a finished Task kept open by its children is only recognised when it has a merged PR</h2>
+<h2>The biggest mismatch: the next move has three owners</h2>
 <div class="big">
-<p>The person's idea is one standing: "this Task has done its own part and is open because follow-ups
-are." There are two ways to get there, a PR that merged and a Graph that reached <code>end</code> with
-no PR, and slice 4 built the staying-open for both. The words for it exist for the first only, so the
-second falls through to the line for a Task that has work left.</p>
+<p>A person, or a conducting agent reading <code>--json</code>, asks one question of a row: what now?
+Three functions answer it from overlapping facts. <code>next_command</code> reads
+<code>run_control</code>, which does not know the Graph is at <code>end</code>, so it offers a command
+that refuses. Slices 4 and 7 gave the finished standing one definition that all three read; every
+other standing still has three.</p>
 <div class="grid">
 <div class="card before">
-<h3>Built</h3>
-<pre>$ lf task status f5a0f9      # PR merged
-  action: no_action (Merged · 4 children open)
-
-$ lf task status a32d33      # no PR, Graph at end
-  action: run (run the next work with `lf task run`;
-    inspect earlier Graphs and independent Sessions first)
-  child: e80c18  Open kid  unstarted
-
-# after e80c18 closes
-$ lf task status a32d33
-  action: run (run the next work with `lf task run`; …)</pre>
+<h3>Built (and on main for a held Task)</h3>
+<pre>$ lf task status e56b42      # at end, PR open
+  action: run (PR is published but settlement
+    is not armed; run `lf land`)
+$ lf task status e56b42 --json | jq .task
+  reason: "…not armed with `lf pr land -c`"
+  next:   "lf task run e56b42"
+$ lf task run e56b42
+Error: Task e56b42 is at the end of graph qa-end</pre>
 </div>
 <div class="card after">
 <h3>After <span class="new">proposed</span></h3>
-<pre>$ lf task status f5a0f9      # PR merged
-  action: no_action (Merged · 4 children open)
-
-$ lf task status a32d33      # no PR, Graph at end
-  action: no_action (Finished · 1 child open)
-  child: e80c18  Open kid  unstarted
-
-# after e80c18 closes
-$ lf task status a32d33
-  action: no_action (Finished; complete the Task)
-  next: lf task complete a32d33</pre>
+<pre>$ lf task status e56b42
+  action: land (PR is open; `lf land e56b42`)
+$ lf task status e56b42 --json | jq .task
+  reason: "PR is open; `lf land e56b42`"
+  next:   "lf land e56b42"</pre>
+<p>One function from a Task's facts to (reason, command). The text line, <code>NextMove</code> and
+<code>TaskRow.next</code> print it. <code>Finished</code> becomes one arm of it.</p>
 </div>
 </div>
-<p style="margin-top:12px">One definition, "its own work is over": its PR merged, or it has no PR and
-stands at <code>end</code>. <code>conducting_reason</code> and the complete nudge both read it; the step
-is already in <code>TaskDetailFacts.steps</code>.</p>
-<p>Tested against the cases. <em>Normal:</em> a childless Task reaching <code>end</code> is completed
-there and never shows this line. <em>Failure:</em> a Task at <code>end</code> with an open PR is not
-finished; it keeps today's <code>lf land</code> line. <em>Recovery:</em> the last child closes on its
-own and the parent is pointed at <code>lf task complete</code>, which nothing does today.
-<em>Counterexample kept:</em> a person may want to run another Graph on a Task that stands at
-<code>end</code>; <code>lf task run &lt;ID&gt; &lt;graph&gt;</code> still works, only the suggestion changes.</p>
+<p style="margin-top:12px"><em>Why it is not slice 8.</em> This work reaches the standing only through
+a Graph with no merge step; the builtin Graphs land before <code>end</code>. The same three lines print
+on <code>main</code> for a held Task. The one-line patch (no <code>lf task run</code> at
+<code>end</code>) leaves three owners in place, and the real change rewrites
+<code>next_move_for_task</code>, <code>phase_action</code> and <code>next_command</code> for every
+standing, with the Desktop reading <code>NextMove</code>. Its own Task.</p>
 </div>
-
-<h2>The other one, before and after</h2>
-<table>
-  <tr><th style="width:26%"></th><th>Built</th><th>After <span class="new">proposed</span></th></tr>
-  <tr><td>Completing a parent whose never-started child has a never-started child</td>
-    <td><pre>$ lf task complete 220927
-220927 done
-  a1e338 abandoned: never started
-# e1dd86, under a1e338, stays open,
-# top-level in the backlog</pre></td>
-    <td><pre>$ lf task complete 220927
-220927 done
-  a1e338 abandoned: never started
-    e1dd86 abandoned: never started</pre></td></tr>
-</table>
-<p style="margin-top:12px">A child the completion closes, done or abandoned, has its own children
-settled by the same rule. <code>lf task abandon &lt;ID&gt;</code> typed directly still touches one Task
-(question 2).</p>
 
 <h2>Larger than this work</h2>
 <table>
   <tr><th style="width:38%">What</th><th>What it would take</th></tr>
-  <tr><td>A second Machine lists Tasks abandoned on the first as open backlog, the children a parent's completion abandoned among them; a parent there would count them in "N children open"</td><td>One definition of open that every read uses: <code>task_open_sql</code> and <code>task_state_sql</code> treating a never-started Task whose plan says <code>canceled</code> or <code>duplicate</code> as abandoned, as <code>TaskState::lifecycle</code> does. It touches every list and the query plans behind them, and belongs with the plan exchange (LOO-938).</td></tr>
-  <tr><td>"Parent" names both the filing link and the stack across the docs and <code>ship-decomposed</code></td><td>One word for each and a sweep; the dependency design decides whether stack becomes a setting on the one link.</td></tr>
-  <tr><td>A subtask made or moved in Asana does not become a child</td><td>Storing Asana gids so a parent can be read back.</td></tr>
+  <tr><td>The next move has three owners (above)</td><td>One derivation of (reason, command) per Task; its own Task.</td></tr>
+  <tr><td>The launch line "ships: no interactive step is left, so this run may merge the PR" prints for a parent whose open children will leave it unapproved at <code>end</code></td><td>The line reading the same fact <code>end_in</code> does, or saying what happens at <code>end</code> when children are open. Belongs with "one way to ship".</td></tr>
+  <tr><td>A second Machine lists Tasks abandoned on the first as open, and a parent there counts them in "N children open"</td><td><code>task_open_sql</code> and <code>task_state_sql</code> reading a <code>canceled</code> plan state as abandoned; with the plan exchange (LOO-938).</td></tr>
+  <tr><td>"Parent" names both the filing link and the stack across the docs and <code>ship-decomposed</code></td><td>One word for each and a sweep; the dependency design decides.</td></tr>
+  <tr><td>A subtask made or moved in Asana does not become a child</td><td>Storing Asana gids.</td></tr>
   <tr><td>A skipped parent import leaves two Machines with different parents; a child whose parent's creation was rejected reaches the tracker with no parent for good</td><td>A skipped link keeping its old stamp; a queued <code>task_parent</code> action once the parent has a tracker item.</td></tr>
   <tr><td>A merge made by hand on GitHub is not news until lf reconciles the PR</td><td>A server-side reader of PR state.</td></tr>
   <tr><td>Desktop decodes <code>parentId</code> and draws nothing; Swift decodes <code>task.complete</code> as a Task</td><td>The sidebar work, in the running app.</td></tr>
@@ -207,23 +166,24 @@ settled by the same rule. <code>lf task abandon &lt;ID&gt;</code> typed directly
 
 <h2>Choices made for review</h2>
 <ol class="q">
-  <li>A Task with no PR whose Graph reached <code>end</code> with children open.
-    <ol><li><strong>Chosen:</strong> the same standing as a merged parent: "Finished · N children open", then "Finished; complete the Task".</li>
-    <li>As built: "run the next work with <code>lf task run</code>".</li>
-    <li>Complete it at <code>end</code> anyway and settle its children there, which abandons never-started follow-ups the moment a planning Graph finishes.</li></ol></li>
+  <li>A Task at <code>end</code> with an open PR is told <code>lf task run</code>, which errors.
+    <ol><li><strong>Chosen:</strong> left as on <code>main</code>; one owner for the next move is its own Task.</li>
+    <li>Patch <code>next_command</code> here: <code>lf land &lt;ID&gt;</code> at <code>end</code> with an open PR, nothing otherwise.</li></ol></li>
+  <li>A no-PR Task at <code>end</code> with children open.
+    <ol><li><strong>Built:</strong> "Finished · N children open", then "Finished; complete the Task".</li>
+    <li>Complete it at <code>end</code> and settle its children there.</li></ol></li>
   <li>How far a parent's completion reaches.
-    <ol><li><strong>Chosen:</strong> into every child it closes, done or abandoned; <code>lf task abandon</code> typed directly stays one Task.</li>
-    <li>Into done children only, as built.</li>
-    <li>Closing by either command settles children: <code>lf task abandon &lt;parent&gt;</code> finishes merged children and abandons never-started ones too. Needs a result on <code>task.abandon</code> like <code>task.complete</code>'s.</li></ol></li>
-  <li>A child whose last run failed prints <code>idle</code> on its parent's status.
-    <ol><li><strong>Chosen:</strong> as built; the notice and the child's own status say it failed.</li>
-    <li>The child line carries the failure.</li></ol></li>
-  <li>Served <code>task.create</code> with an unknown parent answers <code>outcome_unknown</code> though nothing was written.
-    <ol><li><strong>Chosen:</strong> as built; how the served request classes its other refusals was not read.</li>
-    <li>A refusal kind of its own for input that names nothing.</li></ol></li>
+    <ol><li><strong>Built:</strong> under every child it closes; <code>lf task abandon</code> typed directly stays one Task.</li>
+    <li><code>lf task abandon &lt;parent&gt;</code> settles children too; needs a result on <code>task.abandon</code>.</li></ol></li>
+  <li>A parent at <code>end</code> with its PR open and children open.
+    <ol><li><strong>Built:</strong> not approved to ship; waits for <code>lf land</code>.</li>
+    <li>Stays approved and ships its PR, then reads "Merged · N children open".</li></ol></li>
   <li>The closed parent's own reopened conversation files a follow-up.
-    <ol><li><strong>Chosen:</strong> under the closed parent, as built: that conversation is open and hears.</li>
+    <ol><li><strong>Built:</strong> under the closed parent; it lists top-level and that conversation hears when open.</li>
     <li>Top-level.</li></ol></li>
+  <li>A finished Task nobody owns reads "Unassigned…" beside <code>next: lf task complete</code>.
+    <ol><li><strong>Built:</strong> as on <code>main</code> for merged Tasks.</li>
+    <li>Finished outranks unassigned.</li></ol></li>
   <li>The word for the filing link, given "parent" already means the stack parent in the docs.
     <ol><li>Parent for filing; the stack is always "stack".</li>
     <li>"Follow-up of" for filing; parent stays with the stack.</li></ol></li>

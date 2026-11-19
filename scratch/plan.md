@@ -603,6 +603,13 @@ gate: the `MachineServer` fixture test of the same check and the suites named
 above. Swift still does not decode the receipt's `parent` or the pane's two
 keys.
 
+A fourth concept review at 93aae375a3 (`scratch/concept-review.html`) changed
+nothing: slice 7's two intentions held in QA's third pass, and every pairing
+this work owns lines up. What it left on the page as larger than this work:
+the next move has three owners (`derive_task_actions`, `next_move_for_task`,
+`task_row::next_command`), so a Task at `end` with an open PR is told
+`lf task run`, which errors, as a held Task is on `main`.
+
 One PR. #1983 (LOO-938) was open and unmerged at 2026-11-18; this branch is
 stacked on it and its PR waits behind #1983. The two LOO-938 test failures
 above come with it.

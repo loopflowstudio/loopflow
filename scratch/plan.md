@@ -448,6 +448,33 @@ limit). Fixed in QA: the exit line no longer glues "." onto a reason ending in
 `lf task status`, which now gives the steer-then-run advice instead of "launch
 fresh work"; the limit-waiting line trims the provider's period.
 
+8. **Human-review pass (`1a 2b 3b`, 2026-11-19). Next.**
+   - **Delete uncalled `Driver::send_current` (and `SendCurrentOutcome` if
+     unused elsewhere)** across `rust/loopflow-execution/src/harness/`
+     (`mod.rs`, `claude.rs`, `codex.rs`, `opencode.rs`, `pi.rs`, and its tests).
+     Every harness delivers mid-turn steers through the between-tool hook;
+     nothing in production calls `send_current`.
+   - **Read `unanswered_question` from `history.turns`, not prose.** Both
+     `lf task run` (`graph.rs`) and `lf task status` (`ops/task`) currently
+     split `"unanswered_question: "` out of the flattened step error string via
+     `harness::asked_question`. Read the failed step's structured turn error
+     (`code == "unanswered_question"` and its `message` / `error` in
+     `history.turns`) through one shared storage/execution predicate and
+     sentence builder, and delete the string-prefix parser. Keep
+     `a_question_with_nobody_there_ends_the_step` passing.
+   - **Name the filed follow-up Tasks in every `no` cell of
+     `rust/loopflow-execution/src/harness/README.md`:** check
+     `lf --repo /Users/jack/src/loopflow task status <id> --json` first and use
+     the synced `LOO-…` identifier if Linear has synced it, else `Task <id>`:
+     - Claude & Codex `fails the turn, with the question as its reason…` →
+       `48edb9` ("Fail headless Claude and Codex worker turns when they ask a
+       question with nobody there")
+     - Pi `moves to the next agent on a usage limit` → `98edc6` ("Classify Pi
+       usage-limit and transient failures so Graph steps fall back and wait";
+       OpenCode keeps `LOO-518`)
+     - OpenCode & Pi `as an idle work session, hears a steer` → `540073` ("Wake
+       idle OpenCode and Pi work sessions when steers arrive").
+
 ## Seen on the real CLI (OpenCode 2.2.1, 2026-11-18)
 
 - `opencode run --standalone --format json --auto -m opencode/gemini-4-carbon`

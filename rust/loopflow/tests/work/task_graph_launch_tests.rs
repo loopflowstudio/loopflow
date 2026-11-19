@@ -901,11 +901,13 @@ import sys
 if '--version' in sys.argv:
     print('fixture')
     sys.exit(0)
-stores = glob.glob(os.path.join(os.path.dirname(shutil.which('security')), 'keychain', '*'))
-stores.append(os.path.join(os.environ['CLAUDE_CONFIG_DIR'], '.credentials.json'))
+security = shutil.which('security')
+stores = glob.glob(os.path.join(os.path.dirname(security), 'keychain', '*')) if security else []
+claude_home = os.environ.get('CLAUDE_CONFIG_DIR') or os.path.join(os.environ['HOME'], '.claude')
+stores.append(os.path.join(claude_home, '.credentials.json'))
 login = next((text for text in (open(path).read() for path in stores if os.path.isfile(path)) if 'claudeAiOauth' in text), None)
 with open(os.path.join(os.environ['LF_HOME'], 'launches.jsonl'), 'a') as launches:
-    launches.write(json.dumps({'args': sys.argv[1:], 'claude_home': os.environ.get('CLAUDE_CONFIG_DIR'), 'claude_login': login}) + '\n')
+    launches.write(json.dumps({'args': sys.argv[1:], 'claude_home': claude_home, 'claude_login': login}) + '\n')
 if '--input-format' not in sys.argv:
     sys.exit(0)
 message = json.loads(sys.stdin.readline())
@@ -923,7 +925,6 @@ fn a_task_run_takes_its_waves_agent_without_flags() {
     support::bind_task_planning(&repo);
     repo.create_branch("wave-setup");
     let home = tempfile::tempdir().unwrap();
-    let _server = MachineServer::start(loopflow_test_support::lf_binary(), home.path());
     let _env = support::EnvGuard::with_home(
         &[
             ("open", "#!/bin/sh\nexit 0\n"),
@@ -931,6 +932,11 @@ fn a_task_run_takes_its_waves_agent_without_flags() {
             ("claude", CLAUDE_RECORDER),
         ],
         Some(home.path()),
+    );
+    let _server = MachineServer::start_with_path(
+        loopflow_test_support::lf_binary(),
+        home.path(),
+        &std::env::var("PATH").unwrap(),
     );
     let registered = support::register_task_without_pr(
         home.path(),
@@ -941,7 +947,10 @@ fn a_task_run_takes_its_waves_agent_without_flags() {
 
     for (path, content) in [
         (".lf/skills/probe.md", "Probe."),
-        (".lf/graphs/proof.yaml", "- step: {name: probe}\n"),
+        (
+            ".lf/graphs/proof.yaml",
+            "- step: {name: probe}\n- interactive: {name: demo}\n",
+        ),
     ] {
         repo.create_file(path, content);
     }
@@ -955,8 +964,11 @@ fn a_task_run_takes_its_waves_agent_without_flags() {
     repo.stage_all();
     repo.commit("Set up the Wave once");
     {
-        let args = &["-b", "task", "run", "INF-123", "proof"];
-        let output = command(repo.path(), home.path(), args).output().unwrap();
+        let args = &["task", "run", "INF-123", "proof"];
+        let output = command(repo.path(), home.path(), args)
+            .env("CLAUDE_CONFIG_DIR", home.path().join(".claude"))
+            .output()
+            .unwrap();
         assert!(
             output.status.success(),
             "{args:?}: {}",
@@ -993,9 +1005,7 @@ fn a_task_run_takes_its_waves_agent_without_flags() {
         // The native home is inherited, without installing a saved login.
         assert_eq!(
             launch["claude_home"].as_str().map(Path::new),
-            std::env::var_os("CLAUDE_CONFIG_DIR")
-                .as_deref()
-                .map(Path::new)
+            Some(home.path().join(".claude").as_path())
         );
         assert!(launch["claude_login"].is_null());
     }
@@ -1004,7 +1014,7 @@ fn a_task_run_takes_its_waves_agent_without_flags() {
 /// A registered Task whose repository defines the Graphs below.
 struct GraphTask {
     /// Agent steps start only once the Task's Machine server answers.
-    _server: MachineServer,
+    server: MachineServer,
     repo: TestRepo,
     home: tempfile::TempDir,
     registered: support::RegisteredTask,
@@ -1152,7 +1162,7 @@ os.execv({binary}, [{binary}, *sys.argv[1:]])
         );
         let fixture = Self {
             // The server restarts what died, with this fixture's tools.
-            _server: MachineServer::start_with_path(
+            server: MachineServer::start_with_path(
                 loopflow_test_support::lf_binary(),
                 home.path(),
                 &std::env::var("PATH").unwrap(),
@@ -1715,9 +1725,10 @@ fn attempts(home: &Path, mark: i64) -> Vec<String> {
 
 #[test]
 fn a_run_that_ended_waiting_on_a_limit_starts_again_at_that_step_without_replaying_the_done_ones() {
-    let task = GraphTask::new();
+    let mut task = GraphTask::new();
     let failed = task.task_run(&["task", "run", "INF-123", "held"]);
     assert!(!failed.success(), "{}", failed.text);
+    drop(task.server);
     let db = rusqlite::Connection::open(task.home.path().join("loopflow.db")).unwrap();
     let steps_of_latest_graph = || -> Vec<String> {
         db.prepare(
@@ -1751,16 +1762,20 @@ fn a_run_that_ended_waiting_on_a_limit_starts_again_at_that_step_without_replayi
         [&waiting],
     )
     .unwrap();
-    // Reading the Task starts the restart by itself. Record that one in place
-    // of running it, so the run below is the only Graph that starts.
+    // Record the server's restart without running it, so the explicit run
+    // below is the only Graph that starts.
     let bin = tempfile::tempdir().unwrap();
     let (lf, _) = restart_recorder(bin.path());
+    task.server = MachineServer::start_with_path(
+        lf.to_str().unwrap(),
+        task.home.path(),
+        &std::env::var("PATH").unwrap(),
+    );
     let read = command(
         task.repo.path(),
         task.home.path(),
         &["task", "status", "INF-123"],
     )
-    .env("LF_BIN", &lf)
     .output()
     .unwrap();
     assert!(
@@ -1774,7 +1789,7 @@ fn a_run_that_ended_waiting_on_a_limit_starts_again_at_that_step_without_replayi
     assert!(steps[0].contains("late"), "{steps:?}");
 }
 
-/// An `lf` that records the restart a read of the Task would start, with the
+/// An `lf` that records the restart the server would start, with the
 /// agent settings it saw, in place of running it. Returns it and its record.
 fn restart_recorder(bin: &Path) -> (PathBuf, PathBuf) {
     let restarts = bin.join("restarts");
@@ -1782,7 +1797,9 @@ fn restart_recorder(bin: &Path) -> (PathBuf, PathBuf) {
     fs::write(
         &lf,
         format!(
-            "#!/bin/sh\ncase \"$*\" in *'task run INF-123'|*'--task INF-123 ship')\n  echo \"$*|$LF_AGENT_OVERRIDE|$LF_SETTINGS\" >> '{}'; exit 0;;\nesac\nexec '{}' \"$@\"\n",
+            "#!/bin/sh\ncase \"$*\" in *'task run INF-123'|*'--task INF-123 ship')\n  printf '%s\\n' \"$*|$LF_AGENT_OVERRIDE|$LF_SETTINGS\" > '{}'.$$; mv '{}'.$$ '{}'; exit 0;;\nesac\nexec '{}' \"$@\"\n",
+            restarts.display(),
+            restarts.display(),
             restarts.display(),
             loopflow_test_support::lf_binary()
         ),
@@ -1792,13 +1809,14 @@ fn restart_recorder(bin: &Path) -> (PathBuf, PathBuf) {
     (lf, restarts)
 }
 
-/// What a read of the Task starts for a run of `graph` that ended waiting on a
+/// What the server starts for a run of `graph` that ended waiting on a
 /// limit with `recorded` as its explicit agent, when that reader exported its
 /// own choice: the restart's arguments and the agent settings it saw.
 fn restart_of_a_finished_wait(graph: &str, recorded: Option<&str>) -> String {
     let task = GraphTask::new();
     let failed = task.task_run(&["task", "run", "INF-123", graph]);
     assert!(!failed.success(), "{}", failed.text);
+    drop(task.server);
     let db = rusqlite::Connection::open(task.home.path().join("loopflow.db")).unwrap();
     let waiting: String = db
         .query_row(
@@ -1843,6 +1861,12 @@ fn restart_of_a_finished_wait(graph: &str, recorded: Option<&str>) -> String {
         read.status.success(),
         "{}",
         String::from_utf8_lossy(&read.stderr)
+    );
+    assert!(!restarts.exists());
+    let _server = MachineServer::start_with_path(
+        lf.to_str().unwrap(),
+        task.home.path(),
+        &std::env::var("PATH").unwrap(),
     );
     wait_for("the restart", || restarts.exists());
     fs::read_to_string(restarts).unwrap().trim().to_string()

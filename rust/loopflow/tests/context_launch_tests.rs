@@ -1009,6 +1009,15 @@ fn saved_claude_model_is_used_by_new_sessions_but_not_changed_on_resume() {
             )
             .unwrap();
         assert_eq!(model.as_deref(), expected);
+        let args = fs::read_to_string(home.path().join("args")).unwrap();
+        let thread = args
+            .lines()
+            .skip_while(|arg| *arg != "--session-id")
+            .nth(1)
+            .unwrap();
+        let project = home.path().join(".claude/projects/fixture");
+        fs::create_dir_all(&project).unwrap();
+        fs::write(project.join(format!("{thread}.jsonl")), "{}\n").unwrap();
         run(&["set", "--global", "claude.model", "sonnet"]);
         run(&["-i", "resume", &session]);
         assert_eq!(launched_model().as_deref(), expected);

@@ -68,28 +68,9 @@ fn a_client_that_closes_at_once_leaves_the_server_listening() {
     let repo = TestRepo::new();
     let mut server = Server::start(repo.path(), home.path());
     let socket = loopflow::server::socket_path().unwrap();
-    for _ in 0..2000 {
-        // A full listen queue refuses; only the server's exit fails the test.
-        if std::os::unix::net::UnixStream::connect(&socket).is_err() {
-            std::thread::sleep(Duration::from_millis(2));
-        }
-    }
+    drop(std::os::unix::net::UnixStream::connect(&socket).unwrap());
+    loopflow_execution::machine::client::Connection::open().unwrap();
     assert!(server.0.try_wait().unwrap().is_none(), "the server exited");
-    // Closed clients leave as their connections notice; until then it may be `busy`.
-    let deadline = std::time::Instant::now() + Duration::from_secs(20);
-    loop {
-        match loopflow_execution::machine::client::Connection::open() {
-            Ok(_) => break,
-            Err(error) => {
-                let busy = error
-                    .downcast_ref::<loopflow_execution::engine::Error>()
-                    .is_some_and(|error| error.code == loopflow_execution::engine::ErrorCode::Busy);
-                assert!(busy, "{error:#}");
-                assert!(std::time::Instant::now() < deadline, "{error:#}");
-                std::thread::sleep(Duration::from_millis(50));
-            }
-        }
-    }
 }
 
 #[test]

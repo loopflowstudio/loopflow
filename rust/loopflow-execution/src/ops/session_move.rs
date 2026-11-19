@@ -257,11 +257,13 @@ async fn relay_task(
             eprintln!("Committed and pushed {name} on {}", checkout.branch);
         }
     }
-    crate::store::ownership::ingest_ownership_marker(
-        &store.sqlite,
-        &task.id,
-        &moved_task.ownership_marker,
-    )?;
+    if target.is_some() {
+        crate::store::ownership::ingest_ownership_marker(
+            &store.sqlite,
+            &task.id,
+            &moved_task.ownership_marker,
+        )?;
+    }
     receive(store, &moved, target.as_ref())
         .await
         .map_err(|error| match &target {

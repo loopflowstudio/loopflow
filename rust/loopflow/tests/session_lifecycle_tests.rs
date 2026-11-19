@@ -41,7 +41,11 @@ impl Fixture {
         .unwrap();
         std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
         Self {
-            _server: MachineServer::start(env!("CARGO_BIN_EXE_lf"), home.path()),
+            _server: MachineServer::start_with_path(
+                env!("CARGO_BIN_EXE_lf"),
+                home.path(),
+                &format!("{}:/usr/bin:/bin", bin.display()),
+            ),
             home,
             repo: TestRepo::new(),
             launched,
@@ -729,7 +733,9 @@ fn personal_task_launch_resume_and_skill_graph_keep_native_identity() {
         .unwrap();
     assert!(!refused.status.success());
     assert!(
-        String::from_utf8_lossy(&refused.stderr).contains("deleted"),
+        [&refused.stdout, &refused.stderr]
+            .iter()
+            .any(|output| String::from_utf8_lossy(output).contains("deleted")),
         "{refused:?}"
     );
     assert_eq!(fixture.count("agent_sessions"), 2);

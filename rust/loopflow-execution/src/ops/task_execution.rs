@@ -121,7 +121,8 @@ pub async fn execution_of_latest_graph(
     if matches!(
         snapshot.state,
         TaskExecutionState::Idle | TaskExecutionState::Blocked
-    ) {
+    ) && facts.tasks_with_carrier_records.contains(&task.id)
+    {
         if let Some(died) = crate::ops::task::ship::died_run(sqlite, &task.id)? {
             let now = loopflow_storage::rows::now_unix();
             snapshot.state = match died.next_at() {

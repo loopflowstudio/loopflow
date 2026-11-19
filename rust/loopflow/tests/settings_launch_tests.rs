@@ -848,6 +848,10 @@ assert '--input-format' not in args, 'Task worker wrongly selected Claude'
 assert not os.environ.get('LF_AGENT_OVERRIDE'), 'Session choice escaped to child policy'
 if 'SETTINGS_TASK' not in os.environ:
     sys.exit(0)  # a Task conversation checkout started in the background, not a launch under test
+if '--session-id' in args:
+    project = Path(os.environ['CLAUDE_CONFIG_DIR']) / 'projects' / 'fixture'
+    project.mkdir(parents=True, exist_ok=True)
+    (project / (args[args.index('--session-id')+1] + '.jsonl')).write_text('{}\n')
 home = Path(os.environ['LF_HOME'])
 db = sqlite3.connect(home / 'loopflow.db')
 def run(*args):

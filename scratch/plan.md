@@ -3,8 +3,8 @@
 The design is `scratch/plan-design.md` (guide: `scratch/plan-design.html`).
 This file is how the branch gets there, and where the two differ this file
 holds. History of the question: `scratch/plan-ownership-history.md`; what was
-said: `scratch/explore.md`; the review that set the three differences below:
-`scratch/concept-review.html`.
+said: `scratch/explore.md`; the review of the branch as built, which set
+difference 4 and slice 4: `scratch/concept-review.html`.
 
 *Made for review, differing from the design:*
 
@@ -22,6 +22,14 @@ said: `scratch/explore.md`; the review that set the three differences below:
 3. **The ref names the repository**, so a fresh clone needs no
    `lf config repo --bind`. Each clone keeps its own id and records the ids
    other refs name as locators of its checkout (QA, below).
+4. **A save goes out by every carrier, whichever door it came through.** One
+   function sends after a save; nothing outside `ops/plan_carriers.rs` names a
+   carrier to send by. As built through slice 3, a CLI save told the hub at
+   once and left Git to the server's minute (38 s to push, 97 s to show on the
+   other Machine, measured in QA) while the same save through the server
+   pushed in 1.6 s. Slice 4. *Passed over:* the CLI asking the running server
+   to exchange (a new wire operation, and nothing with no server); a shorter
+   minute; documenting two minutes.
 
 "Your order of your claimed Tasks" (the design's second order) moves to the
 tracker Task; see Exclusions.
@@ -33,9 +41,10 @@ your claimed tasks is NOT the proejct order, ut your order of hte backlog IS".
 ## What people see
 
 - One Machine: nothing changes. `lf repo tracker` reads `Plan: this Machine.`
-- Two Machines sharing a remote: a Task made on the laptop is on the mini
-  within a minute, with no setting. `lf repo tracker` on the laptop reads
-  `Plan: Git origin, 1 unsent.` then `Plan: Git origin.`
+- Two Machines sharing a remote: a Task made on the laptop is on the remote
+  in seconds and on the mini within a minute, with no setting. Offline,
+  `lf repo tracker` on the laptop reads `Plan: Git origin, unreachable since
+  …, 1 unsent.` and later `Plan: Git origin.`
 - With `lf machine hub mini`: the same change arrives in seconds, and a second
   line reads `Hub mini.` or `Hub mini, unreachable since …, 2 unsent.` Stop the
   mini's server and Git still carries it.
@@ -163,13 +172,26 @@ lower id through `bind_repository`) hid every Task saved under the first id
 from `lf task list`: the list reads by the selected id and
 `task_repository_is_fixed` forbids moving a Task.
 
-**When they run.** The Machine server owns both. After a command it answers,
-the existing coalesced exchange (`ops/plan_carriers.rs` `after_command`, quiet 5 s) does the hub and
-the Git push. One server task runs the Git exchange for every repository
-without Linear or Asana that has a remote, every 60 s. `lf task sync` does
-both in the foreground. A command run with no server sends to the hub as now
-and leaves Git unsent until the server or `lf task sync`. *Made for review:*
-60 s, one `git fetch` per repository per minute, no setting.
+**When they run.** `ops/plan_carriers.rs` has two verbs and owns both
+carriers' timing.
+
+- `send(repo)`, after a save (slice 4): each carrier takes the records past
+  its cursor and reads nothing. The hub's is today's `send_only` exchange.
+  Git's is `publish` on the own ref as last fetched (`plan-seen/<me>`), with
+  no fetch; a push the remote refuses as not a fast-forward is left for the
+  next `sync`. Five seconds at most (`WAIT`); the cursor moves only on
+  success, so the minute sends what a slow push did not.
+- `sync(repo)`, when asked (`lf task sync`, `lf wave status --sync`), before a
+  claim, on a Task lookup that misses, and after a command the server answers
+  (`after_command`, quiet 5 s): read and send by each carrier.
+
+One server task runs the Git exchange for every repository without Linear or
+Asana that has a remote, every 60 s; that is how another Machine's change
+arrives with no hub. Reads nobody asked for (before a create, a provider
+exit, `lf repo tracker --subscribe`) read the hub only: a hub read is one
+request and a fetch is not. With no server, saves still go out by both
+carriers and other Machines' changes wait for `lf task sync`. *Made for
+review:* 60 s, one `git fetch` per repository per minute, no setting.
 
 **Linear / Asana.** Unchanged in this Task: `tracker_actions`, per Machine.
 
@@ -276,6 +298,11 @@ etude checkout and `lf` version are unknown.
   are written in each tracker's own terms, and a Team or Initiative matters
   only as the default for a new Wave.
 - A command that deletes a gone Machine's ref, and squashing a ref's history.
+- One identity for a repository that every clone computes alone. Today an id
+  per clone, locators learned from plan refs, and `--bind` for a hub with no
+  remote; a hub asked by an id it has not fetched answers "no checkout", with
+  an error that still says `--bind`. Changing it re-keys
+  `tasks.repository_id` in every store. Not filed.
 - Who may use someone's hub beyond SSH reach.
 - The phone, presence, the hub's persistent connection: LOO-861.
 - Task identifiers for repositories without a tracker.
@@ -412,6 +439,35 @@ etude checkout and `lf` version are unknown.
    - Not built: showing a lost claim as lost in `lf task status`; `lf ship`
      and checkout adoption exchanging first.
 
+4. **One door for a save.** *Next.* Add `plan_carriers::send` as described
+   under "When they run" and call it where a save sends to the hub alone
+   today: `ops/planning_sync.rs` `sync_saved` and `machine/task.rs`
+   (`plan_hub::sync(.., true)`). `plan_git` gains the push without a fetch;
+   `publish` already takes the own ref's tip as an argument. After it, no
+   caller outside `ops/plan_*` passes `send_only`.
+
+   Shows it worked: two homes and a bare remote, a server running in neither;
+   `lf task create 'x'` on L, then `git ls-remote <remote>
+   'refs/loopflow/plan/*'` lists L's ref at once and `lf repo tracker` reads
+   `Plan: Git origin.`; with the remote moved away it reads `unreachable
+   since …, 1 unsent` and the command still returns within `WAIT`. Then
+   `docs/work.md` "Share the plan" says seconds to the remote and a minute to
+   the other Machine again, and `rust/loopflow/src/server/README.md` and
+   `docs/dev/planning.md` name the two verbs.
+
+   Check before it lands: every save in a fixture with a remote now pushes a
+   plan ref there. Fixtures with a local bare remote gain a hidden ref; grep
+   `rust/loopflow/tests/` for assertions on a remote's ref list
+   (`ls-remote`, `for-each-ref`, `show-ref`) and for an `origin` that is a
+   real URL, which would reach for the network on each save. If one exists,
+   the fixture's remote changes, not the product.
+
+   Also in this slice, since it is the same sentence in the docs: confirm
+   QA's "a served read of a clone the Machine has saved nothing in shows an
+   empty plan". `after_command` runs for served reads that name a directory
+   and `plan_git::exchange` registers the clone, so it may already heal
+   within the quiet period; read it from a server socket and record which.
+
 ## Checks
 
 - Slice 1, run by implement, passed 2026-11-18:
@@ -488,5 +544,6 @@ etude checkout and `lf` version are unknown.
   116 passed. Not rerun after the last edit: `of_two_claims_made_apart_…`,
   `query_plans::`, `store::repository_lifecycle_tests::` (passed one edit
   earlier). What is still wrong is listed at the end of `scratch/qa.html`.
-- Next: nothing in this Task's slices; gate runs the list above. Open choices
-  are in `scratch/questions.md`.
+- Next: slice 4. Then gate runs the list above. Open choices are in
+  `scratch/questions.md`; the review's five questions are at the end of
+  `scratch/concept-review.html`.

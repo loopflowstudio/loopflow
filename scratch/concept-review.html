@@ -2,14 +2,14 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>LOO-938 concept review — one plan at every size</title>
+<title>LOO-938 concept review — one plan at every size, as built</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
 :root{--bg:#fbfaf7;--fg:#1d1c1a;--mute:#6b675f;--line:#dedad2;--card:#fff;--yes:#2f7d4f;--no:#b3402a;--prop:#2b5fb3;--propbg:#eaf1fc;--code:#f1eee8}
 @media (prefers-color-scheme:dark){:root{--bg:#161614;--fg:#ecebe6;--mute:#9b978d;--line:#34322e;--card:#1f1e1b;--yes:#6cc38f;--no:#ef8a72;--prop:#8db4ff;--propbg:#1c2638;--code:#26241f}}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.55 ui-serif,Georgia,serif}
-main{max-width:1000px;margin:0 auto;padding:48px 24px 96px}
+main{max-width:1040px;margin:0 auto;padding:48px 24px 96px}
 h1{font-size:30px;margin:0 0 6px;line-height:1.2}
 h2{font-size:21px;margin:48px 0 12px;border-top:1px solid var(--line);padding-top:24px}
 h3{font-size:17px;margin:22px 0 8px}
@@ -36,114 +36,125 @@ ol.q ol{list-style:lower-alpha;margin-top:4px}
 <body>
 <main>
 <h1>Do the plan's concepts and the code's concepts line up?</h1>
-<p class="lede">Area taken: how a repository's plan is shared — between one person's Machines, between teammates, with and without a hub — as LOO-938's stamped-plan design would leave it. Taken whole (the save, the carriers, what a person reads in <code>lf repo tracker</code>, claims, order, repository identity) because the Task replaces all of it. Reviewed 2026-11-18 against <code>scratch/plan.md</code> at <code>dd2c3b49f9</code> and the branch's hub code; the stamp, the Git carrier and the claim rule are not built yet.</p>
-<p class="key">Blue marks what this review proposes. Everything else is the plan or the branch as it stood. The plan has been updated with every proposal; each is a choice made for review.</p>
+<p class="lede">Area taken: how a repository's plan is shared without Linear or Asana — the save, the stamp, the two carriers, when they run, what <code>lf repo tracker</code> says, claims, and what "this repository" means across clones. Taken whole because the branch replaces all of it. Reviewed 2026-11-18 at <code>3234477ab1</code> against base <code>e55f40bde0</code>, with all three slices built and QA's run (<code>scratch/qa.html</code>) as the record of what it does. The page this replaces reviewed the plan before anything was built; its three proposals were built and are marked below.</p>
+<p class="key">Blue marks what this review proposes. Everything else exists on the branch. The one proposal sent back to implement is in <code>scratch/plan.md</code> as slice 4.</p>
 
 <h2>Answer</h2>
-<p><b>The stamp lines up. The carriers did not.</b> The rule "a save stamps each field; the plan is the newest stamp per field" is one idea in the product and one function in the code, and it deletes first contact, pull-before-push and every conflict state. But the plan then gave each carrier its own shape: the hub sends a queue of fields, Git writes a ref of only-my-newest fields, and each reports "not there yet" in its own word. A person sees "my plan, and how far it has got"; the code had three ideas for that.</p>
+<p><b>What the plan is lines up. When it travels does not.</b> A field, its stamp, a whole record, a cursor per carrier: each is one idea a person can say and one thing in the code. But "I saved; it goes out" has no owner. Seventeen call sites outside the carrier modules decide, each for itself, whether to tell the hub, Git, or both, and the person sees the result as rules they have to learn: a save from the CLI reaches the hub in a second and the remote in up to a minute; the same save from Desktop reaches both in two seconds.</p>
 
 <h2>One interaction, walked</h2>
-<p>Three people's Machines on etude: laptop L and mini M (one person, M is L's hub), teammate T (Git only). L creates a Task. T retitles it. L, offline, edits the description. M's server stops. Everyone comes back.</p>
+<p>Laptop L and mini M share <code>origin</code>. No hub. On L: <code>lf task create 'x'</code>.</p>
 <div class="cols">
 <div class="card">
-<h3>Plan as it stood</h3>
-<pre>L save  → stamps → hub_sends rows (per field)
-                 → plan_changes → L's ref: all 15 fields
-T save  → T's ref: title only
-L sees T's title (by Git) → L drops title from L's ref
-M sees it by hub → M writes nothing to Git (not M's stamp)</pre>
-<p class="mute">A reader needs L's ref <em>and</em> T's ref to have a Task. Each file is a fragment.</p>
+<h3>As built (QA, measured)</h3>
+<pre>L$ lf task create 'x'
+     save → stamps → plan_changes
+     sync_saved → plan_hub::sync(send_only)   no hub: nothing
+L$ lf repo tracker
+     Plan: Git origin, 1 unsent.
+     … L's server minute …            38 s
+     push refs/loopflow/plan/L
+     … M's server minute …            97 s
+M$ lf task list                       x</pre>
+<p class="mute">The same create sent to L's server socket (Desktop's path): pushed in 1.6 s, by <code>plan_carriers::after_command</code>.</p>
 </div>
 <div class="card p">
 <h3><span class="tagp">Proposed</span></h3>
-<pre>L save → stamps → plan_changes
-hub:  records past L's cursor → plan.apply
-Git:  records past L's cursor → files in L's ref
-T, M the same. Every ref is that Machine's whole plan.</pre>
-<p class="mute">Any one ref is a complete plan. A record is the same bytes on the wire and in Git.</p>
+<pre>L$ lf task create 'x'
+     save → stamps → plan_changes
+     sync_saved → plan_carriers::send
+        hub:  records past its cursor, if a hub
+        Git:  records past its cursor → commit → push
+L$ lf repo tracker
+     Plan: Git origin.
+     … M's server minute …            ≤ 60 s
+M$ lf task list                       x</pre>
+<p class="mute">A send does not fetch. Reading stays as it is: the hub when a command wants fresh, Git on the minute or when asked.</p>
 </div>
 </div>
 
 <h3>Failure and recovery</h3>
 <table>
-<tr><th>Case</th><th>Plan as it stood</th><th class="tagp">Proposed</th></tr>
-<tr><td>T cannot push (read-only access, broken credentials) but reaches a hub</td><td class="n">L sees T's title by the hub and drops its own title from L's ref. T's ref never carries it. A Git-only reader now has a Task with no title, or cannot create the record and that ref's tip stalls for good.</td><td>L's ref carries T's title with T's stamp. Nothing is dropped on "seen".</td></tr>
-<tr><td>A Machine is retired</td><td>Its ref must stay "until another adopts its values" — an open question with no owner.</td><td>Delete the ref once any Machine has fetched it. Nothing to adopt.</td></tr>
-<tr><td>A field arrives before its record's creating fields</td><td>Tip held back, log line, read again every fetch.</td><td>Cannot happen: a file is a whole record.</td></tr>
-<tr><td>Hub reply lost</td><td><code>hub_sends</code> row stays <code>sent</code>, retried.</td><td>Cursor did not move; same records sent again; equal stamps change nothing.</td></tr>
-<tr><td>Laptop first meets a hub holding a newer title</td><td>Stamps settle it (first-contact code deleted).</td><td>Same. First send is the whole plan past cursor 0.</td></tr>
-<tr><td>Two edits to one field, never saw each other</td><td colspan="2">Later wall-clock time wins everywhere; the loser is in a ref's Git history, in no view. Kept counterexample.</td></tr>
+<tr><th>Case</th><th>As built</th><th class="tagp">Proposed</th></tr>
+<tr><td>Offline save</td><td>Hub send fails, recorded on its line. Git untouched until the minute, then <code>unreachable since …</code>.</td><td>Both lines say so at once. The push is given five seconds (<code>WAIT</code>), the cursor does not move, the minute sends it later.</td></tr>
+<tr><td>The remote's own ref moved (no fetch before the push)</td><td>Cannot happen: every push follows a fetch.</td><td>The push is refused as not a fast-forward. Nothing is forced; the next full exchange fetches and publishes. Only a second store using this Machine's id does this.</td></tr>
+<tr><td>No server running</td><td>CLI saves never reach Git until <code>lf task sync</code>.</td><td>CLI saves push themselves. Other Machines' changes still wait for a server or <code>lf task sync</code>.</td></tr>
+<tr><td>A test fixture with a remote</td><td>Placing a Task pushes a plan ref to it (owed to gate already).</td><td>Every save does. A fixture whose <code>origin</code> is a real URL would reach for the network; the kept counterexample, in the plan for implement to check before it lands.</td></tr>
 </table>
-<p><b>What the proposal costs.</b> Every change is re-published by every Machine: one small commit per Machine per change, and each Machine reads a diff of blobs it already has. Identical records are identical blobs, so the remote stores one copy however many refs name it. At five people and ten Machines that is ten small commits per change. It is the wrong shape for a hundred Machines without a tracker; that tier is Linear's in the design.</p>
 
 <h2>Concepts, paired</h2>
 <table>
 <tr><th>What a person knows</th><th>What the code has</th><th>Lines up?</th></tr>
-<tr><td>The plan: Waves, Projects, Tasks, comments, order</td><td><code>WorkEdit</code> / <code>WorkValue</code>, one typed writer (<code>planning_write</code>)</td><td class="y">yes</td></tr>
-<tr><td>"The later edit wins"</td><td><code>plan_stamps</code>, one way in for values from elsewhere</td><td class="y">yes — one rule, one function, three callers</td></tr>
-<tr><td>"My plan has / has not reached origin, reached mini"</td><td><code>hub_sends</code> (rows per field, <code>queued</code>/<code>sent</code>, "open") and <code>git_plans.pushed_seq</code> (a cursor, "unsent")</td><td class="n">no — one idea, two mechanisms, two words</td></tr>
-<tr><td>"Each of my Machines holds the plan"</td><td>A ref of the fields whose newest stamp is this Machine's, pruned when superseded</td><td class="n">no — the code has a concept (a Machine's share of the plan) nobody sees, and it loses values when a hub and Git disagree about what was "seen"</td></tr>
-<tr><td>"This repository"</td><td>A <code>RepositoryId</code> minted per clone; the hub needs <code>lf config repo --bind &lt;id&gt;</code> in every clone, Git needs nothing</td><td class="n">no — one thing, two identity rules; the person types an id to make the code agree with what cloning already said</td></tr>
-<tr><td>A hub: "the Machine that is always on"</td><td><code>hub_plans</code>, <code>plan.apply</code>, <code>plan.changes</code></td><td class="y">yes, once it decides nothing</td></tr>
-<tr><td>Who holds a Task</td><td>Ownership entries inside marked comments, read per Machine in arrival order</td><td class="n">no today (two Machines can read one log differently); slice 3 orders entries by stamp — <span class="y">yes</span> after</td></tr>
-<tr><td>Backlog order</td><td><code>task_rank</code>, a stamped field</td><td class="y">yes</td></tr>
-<tr><td>My order of my claimed Tasks</td><td>Nothing yet; slice 4 proposed a rank keyed by (person, Task)</td><td class="n">not built, and it is half of a pair with "backlog order is Linear's manual order"</td></tr>
-<tr><td><code>lf repo tracker</code> prints <code>Plan: Git origin.</code></td><td><code>Tracker { Linear, Asana }</code>; the glossary says a hub is "not a tracker"</td><td class="n">no — the command is named for one of three things it reports. Larger than this Task; not in the plan.</td></tr>
-<tr><td>Linear / Asana: queued, sent, lost</td><td><code>tracker_actions</code></td><td class="y">yes — a tracker really can refuse a value, so its words stay its own</td></tr>
+<tr><td>The plan: Waves, Projects, Tasks, comments, backlog order</td><td><code>WorkValue</code>, <code>planning_write</code>, <code>StampedRecord</code></td><td class="y">yes</td></tr>
+<tr><td>"The later edit wins"</td><td><code>plan_stamps</code>; <code>planning_write::apply</code>, the one way in, called by the hub's import, <code>plan.apply</code> and the Git import</td><td class="y">yes</td></tr>
+<tr><td>"It has / has not reached origin, reached mini"</td><td><code>plan_changes</code> and <code>plan_carriers.sent_seq</code>; <code>CarrierStanding</code> on both lines, "unsent" for both</td><td class="y">yes — built from the first review</td></tr>
+<tr><td>"Each Machine holds the whole plan"</td><td><code>refs/loopflow/plan/&lt;machine&gt;</code>, one whole record per file; <code>plan_refs</code> for the tips read</td><td class="y">yes — built from the first review</td></tr>
+<tr><td>"I saved; it goes out"</td><td>No one function. <code>plan_hub::sync</code> is called from seven places outside the carriers, <code>plan_carriers::sync</code> from four, plus <code>after_command</code>, <code>before_claim</code>, <code>before_first_read</code>, the server's minute. Each picks its carriers.</td><td class="n">no — an action with no single owner. The biggest mismatch.</td></tr>
+<tr><td>"This repository"</td><td>A <code>RepositoryId</code> per clone; the ids other Machines use, kept as locators (<code>locate_repository</code>); a <code>repository</code> file in each ref; <code>lf config repo --bind</code> for a hub with no remote</td><td class="n">no — one thing, an id per clone and three ways to reconcile them. Larger than this work.</td></tr>
+<tr><td>A hub: "the Machine that is always on"</td><td><code>plan_carriers</code> row, <code>plan.apply</code> / <code>plan.changes</code>; decides nothing</td><td class="y">yes</td></tr>
+<tr><td>"The first claim holds"</td><td>Ownership entries inside marked comments, each with <code>order</code> and <code>seen</code>; a claim that had not seen the holder loses</td><td class="y">yes for the race.</td></tr>
+<tr><td>"…and <code>lf task run</code> on a Task a teammate holds"</td><td>Takes it over, as on main; their Sessions are told</td><td class="n">one word, two outcomes: not seeing a claim loses to it, seeing it takes it. Question 2.</td></tr>
+<tr><td><code>lf task sync LOO-12</code></td><td>With a tracker: publish that Task. Without: exchange the whole repository, then print <code>&lt;id&gt;: nothing unsent</code></td><td class="n">one name, two ideas; the id is required and unused. Question 3.</td></tr>
+<tr><td>"Runs on mini"</td><td>A teammate's Machine reads as <code>home_69e17dc1…</code>; names stay on the Machine that gave them</td><td class="n">a name the person knows that does not travel. Question 4.</td></tr>
+<tr><td><code>lf repo tracker</code> prints <code>Plan: Git origin.</code></td><td><code>TrackerStatus { tracker, plan, actions }</code></td><td class="n">the command is named for one of three answers. Larger than this work, unchanged from the first review.</td></tr>
+<tr><td>Linear / Asana: queued, sent, lost</td><td><code>tracker_actions</code>, untouched</td><td class="y">yes</td></tr>
 </table>
 
-<h2>The biggest mismatch: what a Machine publishes</h2>
+<h2>The biggest mismatch: who sends a save</h2>
 <div class="cols">
 <div class="card">
 <h3>Before</h3>
-<p>A ref holds "the fields whose newest stamp is this Machine's". To keep that true a Machine prunes on every arrival, readers merge fragments across refs, a ref can name a record nobody has created yet, and a retired Machine's ref can never be deleted. The hub sends something else again: a queue of single fields.</p>
-<pre>refs/loopflow/plan/L   tasks/3e/3e1c9a.json  {description}
-refs/loopflow/plan/T   tasks/3e/3e1c9a.json  {title}
-hub_sends              (3e1c9a, task_description)</pre>
+<p>The first review made both carriers one shape in storage. The scheduling kept the hub's old call sites and added Git's beside them. So the rule a person would have to learn is a table:</p>
+<pre>                     hub        Git
+CLI save             now        server's minute
+served save          5 s quiet  5 s quiet
+lf task sync         now        now
+claim / place        now        now
+provider exit        read       —
+--subscribe          read       —
+no server            now        never</pre>
+<p class="mute"><code>docs/work.md</code> had to be loosened to "within a couple of minutes" after QA; the plan's own "What people see" says a minute.</p>
 </div>
 <div class="card p">
 <h3><span class="tagp">After</span></h3>
-<p>A Machine publishes its plan. A record file holds every field with the stamp it carries, whoever wrote it. The hub sends the same record. Each carrier keeps one number: how far into <code>plan_changes</code> it has sent.</p>
-<pre>refs/loopflow/plan/L   tasks/3e/3e1c9a.json  {all fields, each with at + machine}
-refs/loopflow/plan/T   tasks/3e/3e1c9a.json  the same blob once T has seen it
-plan_carriers          (etude, git, sent_seq) (etude, hub, sent_seq, seen_seq)</pre>
+<p>Two verbs in <code>ops/plan_carriers.rs</code>, and nothing outside it names a carrier to send by.</p>
+<pre>send(repo)   after a save: each carrier takes the
+             records past its cursor. No read.
+sync(repo)   when asked, before a claim, on the
+             minute: read and send, each carrier.</pre>
+<p>The table becomes one line: a save goes out by every carrier the repository has, whichever door it came through. Reads that nobody asked for still use the hub only, because a hub read is one request and a fetch is not; that distinction has a reason a person can feel.</p>
 </div>
 </div>
-<div class="prop"><b class="tag">Why this one.</b> It is what the design's own phone section already says ("every one of a person's Machines holds the whole plan"). It removes pruning, cross-ref merging, the stalled-tip state, the adoption question, <code>hub_sends</code> and its three triggers, the <code>queued</code>/<code>sent</code> phases and the word "open" for the hub. It adds the echo commits described above. Passed over: newest-own-fields refs (smaller refs, no echo, but the read-only-teammate counterexample breaks it and four pieces of machinery exist only to maintain the fragmenting).</div>
+<div class="prop"><b class="tag">Why this one.</b> It is the plan's second difference from the design ("one shape for both carriers") carried to the place it stopped. It removes a row of QA's "still wrong" list and lets the docs say what the plan promised. Passed over: a CLI save asking the running server to exchange (a new wire operation, and nothing happens with no server); shortening the minute (a fetch per repository per interval for everyone, to fix a push); leaving it and documenting two minutes.</div>
 
-<h2>Two smaller changes written into the plan</h2>
-<div class="prop"><b class="tag">The ref names the repository.</b> A <code>repository</code> file at the ref's root holds the repository id. A clone that fetches a plan ref takes the lowest id it sees, through the existing <code>bind_repository</code>. Then the hub works in a fresh clone with no command, and <code>lf config repo --bind</code> leaves the "share the plan" docs. Unchecked: whether binding moves rows already saved under the clone's first id. The docs say bind "before anything is saved there". Slice 2 checks; if it does not, the manual step stays for the hub and this is dropped.</div>
-<div class="prop"><b class="tag">"Your order of your claimed Tasks" leaves this Task.</b> It is a new value with a new view rule, and it is designed as one half of a pair whose other half (backlog order written to Linear's manual order) is already excluded. Built here it would be a per-person value riding in a shared plan with no tracker answer. It goes with the tracker Task. Backlog order across Machines is still delivered here: it is <code>task_rank</code>.</div>
-
-<h2>What survives, checked</h2>
+<h2>Checked and left alone</h2>
 <table>
-<tr><th>Must survive</th><th>How</th></tr>
-<tr><td>Saves never wait on a carrier</td><td>A save writes the store, stamps, bumps <code>plan_changes</code>. Carriers read cursors afterwards.</td></tr>
-<tr><td>Comment arrivals steer, join the ownership log, re-claim</td><td><code>comments_arrived</code> runs inside the one way in, for every carrier.</td></tr>
-<tr><td>A cold move sends the plan to its target first</td><td><code>session_move::ready</code> calls the same exchange; it now sends records past the cursor.</td></tr>
-<tr><td>An exchange ends</td><td>An arriving record whose stamps are all equal or older writes nothing and does not bump <code>plan_changes</code>. This is the one invariant echo depends on; it gets its own storage test.</td></tr>
-<tr><td>Linear and Asana as on main</td><td>Untouched.</td></tr>
+<tr><th>Looked like a mismatch</th><th>Why it stays</th></tr>
+<tr><td>An ownership entry has its own <code>order</code> beside the plan's stamp: two clocks.</td><td>The entry travels with a move before its comment does and has to sort the same on arrival. <code>order</code> is drawn from the plan clock, so it is one clock read in two places.</td></tr>
+<tr><td>A Git arrival is owed back to the hub and to this Machine's own ref; a hub arrival is not owed back to the hub.</td><td>Follows from whole-plan refs: what a Machine holds, it publishes. The exchange stops because an arrival that changes nothing bumps nothing.</td></tr>
+<tr><td>Clones keep their own repository id instead of converging.</td><td>QA showed converging hid every Task saved under the first id. The id is a local name for a checkout now; that is the honest reading, and the mismatch above is what remains.</td></tr>
+<tr><td><code>plan_stamps</code>, <code>plan_changes</code>, <code>plan_carriers</code>, <code>plan_refs</code>: four tables.</td><td>When a field was written, what changed here last, how far each carrier got, what was read from each ref. None derives from another.</td></tr>
 </table>
 
 <h2>Larger than this work</h2>
 <ul>
-<li><code>lf repo tracker</code> reports where the plan is shared; only one of the three answers is a tracker. Renaming it (<code>lf repo plan</code>) touches the CLI, Desktop and docs.</li>
-<li>Remote history under <code>refs/loopflow/plan/*</code> only grows. A Machine could replace its ref with one parentless commit now and then; that needs the "never forced" rule relaxed for a Machine's own ref.</li>
-<li>The tracker Task (your slice of a Linear Project, both orders, own-Machines-by-Git on a tracker repository) is not filed. Scratch is cleared at submit, so it should be filed before then.</li>
+<li><b>Repository identity.</b> A person means the remote. The code mints an id per clone, then learns the others' from plan refs, and a hub is asked by an id it may not have seen yet: "no checkout" for up to a minute, and an error that tells the person to <code>--bind</code> although the docs say a remote needs none. A second clone of one remote on one Machine shows an empty plan. An identity every clone can compute alone (the repository's root commit, say) would remove locators, the <code>repository</code> file and <code>--bind</code>. It means re-keying <code>tasks.repository_id</code> for every store, which is its own Task.</li>
+<li><b><code>lf repo tracker</code></b> reports where the plan is shared; only one of its three answers is a tracker.</li>
+<li><b>Ref history only grows</b>, and no command deletes a gone Machine's ref.</li>
 </ul>
 
 <h2>Questions</h2>
 <ol class="q">
-<li>What a Machine's ref holds.
-<ol><li>Its whole plan, as proposed: complete refs, echo commits.</li><li>Only the fields it holds the newest stamp on, as the design says: small refs, fragments, pruning.</li></ol></li>
-<li>One word for "saved here, not there yet" on Git and the hub.
-<ol><li>"unsent" for both, counted in records, as proposed.</li><li>Keep "open" with per-field lines for the hub.</li></ol></li>
-<li>A fresh clone and the repository id.
-<ol><li>Taken from the plan ref on first fetch, as proposed.</li><li>Stay with <code>lf config repo --bind</code> wherever a hub is used.</li></ol></li>
-<li>Your order of your claimed Tasks.
-<ol><li>With the tracker Task, as proposed.</li><li>In this Task, as slice 4.</li></ol></li>
-<li>First-wins claims (slice 3).
-<ol><li>In this Task, last, as planned.</li><li>Its own Task; this one ends at Git refs.</li></ol></li>
+<li>A save made by the CLI.
+<ol><li>Pushes its own records by Git as it already sends them to the hub, as proposed (slice 4).</li><li>Asks the running server to exchange; nothing without a server.</li><li>Stays on the server's minute; the docs say two minutes.</li></ol></li>
+<li><code>lf task run</code> on a Task a teammate holds, seen.
+<ol><li>Takes it over and tells their Sessions, as on main and as built.</li><li>Refuses and names the holder; <code>lf task claim</code> is how you take it.</li></ol></li>
+<li><code>lf task sync</code> without a tracker.
+<ol><li>As built: needs a Task id, prints <code>&lt;id&gt;: nothing unsent</code>.</li><li>Takes no id and prints the <code>lf repo tracker</code> lines.</li></ol></li>
+<li>A teammate's Machine in <code>lf task list</code>.
+<ol><li>Its id, as built; names stay private to the Machine that gave them.</li><li>Each plan ref carries the name its Machine gives itself, so everyone who can fetch reads "mini".</li></ol></li>
+<li>Repository identity.
+<ol><li>Leave it: an id per clone, locators, <code>--bind</code> for a hub with no remote.</li><li>File a Task for an identity every clone computes alone.</li></ol></li>
 </ol>
 </main>
 </body>

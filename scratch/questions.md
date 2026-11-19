@@ -115,3 +115,12 @@ Still open from before:
   - A teammate's Machine reads as its id (`ada claimed this on home_69e1…`),
     in `lf task list` too. Main's rule (labels stay on their Machine), now
     seen by everyone who shares a remote.
+
+- Concept review of the built branch (2026-11-18,
+  `scratch/concept-review.html`, questions 1-5), reversible before release:
+  - A CLI save pushes its records by Git itself, without a fetch, as it
+    already sends them to the hub (plan slice 4). Passed over: asking the
+    running server; leaving it on the server's minute.
+  - Left as built and asked on the page: `lf task run` taking over a Task a
+    teammate holds; `lf task sync` needing a Task id without a tracker; a
+    teammate's Machine reading as its id; an id per clone.

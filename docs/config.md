@@ -813,12 +813,13 @@ carry the change.
 Use when the agent needs to inspect exact changes. The list is always complete:
 full paths, added and deleted lines, a rename with the path it came from, and
 a mark on notes the branch added under `scratch/`, which are cleared when it
-lands. Under
-15,000 tokens the whole patch follows it. Over that, none of it does, and the
-agent reads the files it picks; no file is cut short. With nothing committed on
-the branch yet, the change is the uncommitted work and the command is
-`git diff HEAD -- '<path>'`; a file Git doesn't track yet is listed as untracked,
-with no patch to read. On the default branch there is nothing to show.
+lands. Under 15,000 tokens the whole patch follows it. Over that, none of it
+does, and the agent reads the files it picks; no file is cut short.
+
+With nothing committed on the branch yet, the change is the uncommitted work
+and the command is `git diff HEAD -- '<path>'`; a file Git doesn't track yet
+is listed as untracked, with no patch to read. On the default branch there is
+nothing to show.
 
 The commit and PR message writers get the same section for the change they
 describe. `--diff both` also lists changed paths.

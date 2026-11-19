@@ -39,3 +39,11 @@ Made headless at kickoff and concept review; each is reversible. Detail in
   explicit docs. The commit and PR writers get the patch unescaped. A Skill
   reviewing shell or Swift string interpolation reads the encoded form; the
   read command still returns the real bytes. Left as the shared rule.
+- `ops::run::tests::deleted_task_retains_context_and_run_attribution` is
+  flaky, on code this branch does not touch (`ops/run.rs` is unchanged from
+  `main`). 2026-11-18: two failures in six runs of `cargo test -p
+  loopflow-execution --lib -- prompt::change:: attribution`, passing alone.
+  The panic, at `ops/run.rs:1080`: `resumed.unwrap_err()` held "Native launch
+  has no admitted invocation" (`harness/native_session.rs:356`,
+  `journal::current_lf_process_id()` was `None`) where the test expects "was
+  deleted". Not diagnosed here; it wants its own Task.

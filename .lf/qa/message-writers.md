@@ -33,6 +33,6 @@ instead, so test both sizes.
 - **`--diff patch`:** `lf -b <skill> --diff patch` puts the section in the
   first turn, in an `<lf:change>` block after the request; grep the Skill
   run's transcript for it (a step commit's writer leaves a second, newer
-  transcript). No `*-changes.md` is written (that is `--diff files`). On the default branch there is no block; on
-  a branch with no commits the range is the uncommitted work, untracked files
-  included.
+  transcript). No `*-changes.md` is written (that is `--diff files`). On the
+  default branch there is no block; on a branch with no commits the range is
+  the uncommitted work, untracked files included.

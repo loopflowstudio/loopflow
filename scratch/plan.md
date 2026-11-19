@@ -181,6 +181,13 @@ Before this change both describe only `aaa_generated.txt`.
   `cargo test -p loopflow --lib --
   context_choices_override_config_and_omission_inherits`, passed.
 
+- 2026-11-18, second compress (a `match` over the range in `Change::read`,
+  the list-only decision's reason reworded, docs reflowed): `cargo test -p
+  loopflow-execution --lib -- prompt::change:: attribution`, the 16 tests of
+  this change passed in all six runs. The filter also matches
+  `ops::run::tests::deleted_task_retains_context_and_run_attribution`, which
+  failed in two of six runs and passed alone (`questions.md`).
+
 - 2026-11-18, qa, real writers in a throwaway repository (`scratch/qa.html`):
   `lf commit -a claude:haiku` on 354 KB and on 801 files, `lf commit -a codex`,
   a step commit, and `lf pr publish` against the stand-in GitHub all named the

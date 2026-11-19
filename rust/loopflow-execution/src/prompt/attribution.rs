@@ -238,7 +238,7 @@ pub fn attributed_context(
             label: "branch diff".to_string(),
             source_path: None,
             decision: ContextDecisionKind::StatOnly,
-            reason: "unified diff exceeded the context tier limit".to_string(),
+            reason: "the patch is too large to inline".to_string(),
             original_bytes: None,
             original_tokens: None,
             asset_position: None,

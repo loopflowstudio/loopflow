@@ -75,17 +75,18 @@ impl Change {
         let range_arg = range.git_arg();
         let numstat = git_stdout(repo, &["diff", "--numstat", "-z", &range_arg])?;
         let mut files = parse_numstat(&numstat);
-        if let ChangeRange::Since(base) = &range {
-            let merge_base = crate::git::merge_base(repo, "HEAD", base)?;
-            let notes: HashSet<String> = crate::git::scratch::added(repo, &merge_base, "HEAD")?
-                .into_iter()
-                .collect();
-            for file in &mut files {
-                file.working_note = notes.contains(&file.path);
+        match &range {
+            ChangeRange::Staged => {}
+            ChangeRange::Since(base) => {
+                let merge_base = crate::git::merge_base(repo, "HEAD", base)?;
+                let notes: HashSet<String> = crate::git::scratch::added(repo, &merge_base, "HEAD")?
+                    .into_iter()
+                    .collect();
+                for file in &mut files {
+                    file.working_note = notes.contains(&file.path);
+                }
             }
-        }
-        if range == ChangeRange::Uncommitted {
-            files.extend(untracked_files(repo)?);
+            ChangeRange::Uncommitted => files.extend(untracked_files(repo)?),
         }
         let patch = git_stdout(repo, &["diff", &range_arg])?;
         let patch_bytes = patch.len();

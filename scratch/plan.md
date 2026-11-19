@@ -470,6 +470,11 @@ Compress (2026-11-19): Pi's decoder passes the failed turn's error to
 `settle` instead of holding it on `Turn`; `harness::is_turn_in_progress`
 (no caller on main either) is gone. `harness::pi` tests and clippy pass.
 
+Concept review after slice 8 (2026-11-19, `scratch/concept-review.html`):
+nothing changes. The question is read from the turn and `send_current` is
+gone; the agent-move record in `agent_limit_recoveries` is the one small
+mismatch left, larger than this Task.
+
 Next: gate.
 
 ## Seen on the real CLI (OpenCode 2.2.1, 2026-11-18)

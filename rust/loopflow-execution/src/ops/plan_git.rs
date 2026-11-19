@@ -16,7 +16,6 @@ use loopflow_model::durable::RepositoryId;
 use loopflow_storage::sqlite::plan_carriers::Carrier;
 use loopflow_storage::sqlite::SqliteStore;
 use loopflow_storage::work::edit::{StampedRecord, StampedValue};
-use loopflow_storage::StoreError;
 
 /// This Machine's ref, here and on the remote.
 const OWN: &str = "refs/loopflow/plan/";
@@ -168,7 +167,7 @@ fn exchange_with(
                 .filter(|base| commit_exists(path, base))
                 .or(mine);
             let (records, theirs) = changed_records(path, base.map(String::as_str), tip)?;
-            apply(store, repo, &records, &names)?;
+            store.apply_plan_records(repo, &records, None, &names)?;
             store.record_plan_ref(repo, machine, tip)?;
             Ok::<_, anyhow::Error>(theirs)
         })();
@@ -333,30 +332,6 @@ fn parse_record(file: &str, content: &[u8]) -> Option<StampedRecord> {
         id: parsed.id,
         fields,
     })
-}
-
-/// Take in a ref's records together; when one of them cannot be written, one
-/// at a time, parents first, so the rest still arrive.
-fn apply(
-    store: &SqliteStore,
-    repo: &str,
-    records: &[StampedRecord],
-    names: &loopflow_storage::sqlite::plan_carriers::MachineNames,
-) -> Result<()> {
-    match store.apply_plan_records(repo, records, None, names) {
-        Err(StoreError::InvalidData(_) | StoreError::NotFound) => {}
-        applied => return Ok(applied?),
-    }
-    for table in ["waves", "projects", "tasks", "task_comments"] {
-        for record in records.iter().filter(|record| record.table == table) {
-            if let Err(error) =
-                store.apply_plan_records(repo, std::slice::from_ref(record), None, names)
-            {
-                tracing::warn!(id = %record.id, %error, "skipped a plan ref record that cannot be written");
-            }
-        }
-    }
-    Ok(())
 }
 
 /// Where a record's file lives in a plan ref; `None` for an id that cannot

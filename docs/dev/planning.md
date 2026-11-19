@@ -254,7 +254,10 @@ reads the files that changed in each other Machine's ref since the tip in
 `plan_refs`, applies them through the one way in, then commits the records
 past `sent_seq` onto its own ref and pushes. It uses no index and no worktree,
 and runs outside any SQLite transaction. A file that does not parse, or a
-field this build does not know, is skipped and logged; the rest applies. Each
+field this build does not know, is skipped and logged; the rest applies. So
+is a record, from either carrier, that cannot be written here, such as a
+Wave whose name another active Wave of the repository already holds: it
+stays on the Machine that made it, with its Projects and Tasks. Each
 clone keeps its own repository id and records the id every fetched ref names
 as a locator of its checkout (`locate_repository`), so a hub or a move that
 names the repository by another Machine's id finds it and no saved Task
@@ -284,7 +287,8 @@ has saved nothing in does one exchange before it reads, which registers the
 clone for the server's minute. A served read of such a clone answers with an
 empty plan once and exchanges after its reply. Task creation reads
 nothing first: the send after its save takes in what changed at the hub. A
-provider exit and `lf repo tracker --subscribe` read the hub only. Every
+provider exit reads the hub only; `lf repo tracker --subscribe` reads the
+store alone. Every
 exchange a command waits on without asking for it (a save, a claim, a first
 read, a read of the hub) is stopped at five seconds: Git is killed and the
 hub's answer is waited for until then, and the next exchange carries the

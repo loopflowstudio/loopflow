@@ -204,8 +204,7 @@ it answers instantly and offline.
 `{"answers", "unavailable", "body"}`, where `body` is
 what `--json` prints. Write `{"id": 1, "args": {"query": "parser"}}` to stdin to
 change what it reads, or `{"id": 2}` to ask for a fresh reading; the next line
-answers that id. It stops when stdin closes. `lf repo tracker --subscribe` also
-keeps exchanging with the hub while it runs.
+answers that id. It stops when stdin closes.
 
 A Graph that stopped or crashed stays as history; nothing resumes it. Read
 `lf task status`, then launch what remains with `lf task run`. The Task keeps

@@ -84,6 +84,14 @@ Questions 1 and 2 got no written answer in scratch.
   `RUN_RESTARTS` is gone.
 
 ## Open
+- QA 2026-11-19: `--reason` on `lf ship` / `lf task auto off` is written to
+  `task_events` and shown nowhere. Either the mark carries the note and
+  `lf task status` prints it, or the flag goes.
+- QA 2026-11-19: a released hold on a never-run Task does not survive the
+  upgrade; same root as the last item below.
+- QA 2026-11-19: Task checkout waits 10 s for the worktree lease instead of
+  failing at once. Reverse by restoring `acquire_worktree_lease` in
+  `restore_task_checkout`; two starts at once then fail one caller.
 
 - Whether `lf -b task run` should write auto on.
 - A Graph process killed with its carrier stays open until the hourly prune,

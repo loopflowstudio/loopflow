@@ -999,6 +999,15 @@ async fn try_start_task_run(
     let row = crate::store::task_work::task_graph_row(&store.sqlite, &task.id)
         .map_err(task_error)?
         .ok_or_else(|| task_error(format!("Task {issue} lost its graph while starting")))?;
+    // The start below replaces the carrier this row names. One that set out
+    // since the selection was read is live, not stopped: read the Task again.
+    if row
+        .run
+        .as_ref()
+        .is_some_and(|(_, carrier)| crate::store::task_work::carrier_may_run(carrier))
+    {
+        return Ok(None);
+    }
     let Some(start) = start else {
         if store.sqlite.end_task_graph(&task.id).map_err(task_error)? {
             settle_pending_completion(store, task).await?;
@@ -1261,6 +1270,8 @@ fn validate_preparation_status(task: &Task, status: WorkStatus) -> OpsResult<()>
     }
 }
 
+const CHECKOUT_LEASE_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
+
 async fn restore_task_checkout(
     store: &SharedStore,
     task: &Task,
@@ -1268,7 +1279,14 @@ async fn restore_task_checkout(
 ) -> OpsResult<()> {
     let repo = crate::git::worktrees::main_repo_root(&repository_for_task(store, task)?)?;
     let worktree = task.worktree()?;
-    let _lease = crate::git::acquire_worktree_lease(&repo, worktree, "Task checkout")?;
+    // Two starts of one Task at the same moment both restore its checkout;
+    // the second waits out the first's short hold instead of failing.
+    let _lease = crate::git::acquire_worktree_lease_wait(
+        &repo,
+        worktree,
+        "Task checkout",
+        CHECKOUT_LEASE_WAIT,
+    )?;
     let recovered = recover_from
         .map(|commit| {
             let output = git_output_bytes(

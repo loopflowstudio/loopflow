@@ -89,9 +89,9 @@ Never open a copy of the Machine's own store with `lf`, a read included:
 `lf session list`, `lf session history`, `lf task status|list|show`,
 `lf wave status|list|show` and `lf plan list` run recovery first
 (`ops/recovery.rs`), which follows the real worktrees and PIDs the copy
-records. It starts `lf --task <id> ship` in the real checkout of any approved
-Task whose ship process has exited, and can stop a headless agent the stale
-copy takes for orphaned. A copy
+records. It starts `lf task run <id>` in the real checkout of any Task whose
+run's carrier has exited, and can stop a headless agent the stale copy takes
+for orphaned. A copy
 (`sqlite3 "file:$HOME/.lf/loopflow.db?mode=ro" ".backup <copy>"`) is for
 `sqlite3` only: counts, `EXPLAIN QUERY PLAN`, timing a statement. For
 returning-state checks, build the earlier state in a private home with the

@@ -9,7 +9,17 @@ one Task's PR is merged by hand, others are open, draft or unavailable
 `land` step succeeds only on the merged one ("Pull request already merged")
 and fails elsewhere ("could not resolve GitHub owner/repo", "no active PR"); a
 failure there still shows the run got past the auto check. Start the branch's
-`lf server run` detached first (the world's `launchctl` refuses bootstrap).
+`lf server run` detached first.
+
+The private home still ends up with a real launchd job: an `lf task run` or a
+read that finds no server registers `com.loopflow.server.<hash>` (the hash in
+the socket path; the label is in `$LF_HOME/server.plist`), and from then on
+launchd restarts the server and the server restarts its holder and
+conversations, so killing PIDs alone never ends. To stop a world: collect every
+PID whose environment holds its `LF_HOME` (`ps eww -o command= -p <pid>`),
+`kill -STOP` them, `launchctl bootout gui/$(id -u)/<label>`, `kill -9` them,
+then check `launchctl list | grep <hash>` is empty 15 s later. In zsh a PID
+list in a variable needs `${=P}`.
 
 Graph: `.lf/graphs/qaship.yaml` with `- implement`, `- interactive:
 ship-review`, `- cmd: land`, `- interactive: verify`; commit, push, then
@@ -37,7 +47,15 @@ takes nothing else (a never-run Task takes up the repository's graph), and
 `ship-review` (each stands in there) and on a never-run Task (one Graph run).
 With `--json` the run is the only thing on stdout; "standing in at …" goes to
 stderr. Both spellings at the same moment on a never-run Task leave one run:
-both print it and exit 0, and `lf task status` shows one Graph run.
+both print it and exit 0, and `lf task status` shows one Graph run. The losing
+paths are rare, so repeat it: a dozen fresh `lf task create '<words>' --json`
+Tasks (`.task.identifier`), three `lf ship <id> &` each with the stand-in
+holding `implement`, then `wait`; every exit is 0, every output names the same
+Graph run, and `graph_processes` holds one row for the Task. Two bare
+`lf task run` at once leave one run and one "is running graph …" refusal.
+
+`--reason` goes to `task_events` as a `progress` row ("auto off: Demo: <words>");
+no `lf` read prints it, so check it with `sqlite3`.
 
 Selection state `auto` is a Dashboard expression (`lf desktop dashboard query
 'Auto' 'state:auto'` prints JSON), not a `lf task list` filter. Never run
@@ -54,6 +72,12 @@ within about a minute. The killed Graph process stays `Current` (and the
 Task reads `moving`) until the hourly prune; `lf machine prune`
 settles it now.
 
+With no server: stop the server, then kill the carrier. The next
+`lf task status <id>` reads "Run died at <step> · no server runs here to start
+it; `lf task run <id>` starts it again". That read is the only one: the
+`lf task run` (and later reads) bring a server up, after which the sentence is
+"… · starting again" until the pass carries it.
+
 # Upgrade from a released lf
 
 Copy the installed binary out (`cp $(readlink -f ~/.local/bin/lf) …`), make a
@@ -64,6 +88,10 @@ refuses, so the released lf registers no launchd job; start the released
 detached with the marker file holding its step (released `lf ship` blocks its
 caller), and `lf task hold <id>` on another. Stop the released server and
 start the branch's on the same home. The branch migrates it in place on the
-first read; copy the home first to repeat the check. A released ship's row
+first read; copy the home first to repeat the check. The released lf has no
+`ship-review` skill: name the upgrade graph's interactive step `human-review`.
+A Task left waiting there ships after the upgrade (the captured Graph carries
+its skill). A released `lf task hold` on a Task that never took a Graph leaves
+nothing behind: after the upgrade it reads `idle` with no auto. A released ship's row
 names nobody (`person` NULL), so the backfilled setting reads `auto: on,
 <time>` with no "by"; a released hold names its person.

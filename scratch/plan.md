@@ -114,25 +114,52 @@ when the PR merges.
 
 ## Remaining
 
-1. QA again: everything below was driven before ship became a run asking for
-   auto. Two ships at the same moment on a never-run Task is the case no
-   fixture holds; expected now: one run, both exit 0, the second prints the
-   live run. Also a died run with no server: `lf task status` should read
-   "Run died … · no server runs here to start it; `lf task run X` starts it
-   again".
-2. Gate.
+1. Gate.
 
-QA 2026-11-19 at `08e047dfe8` (`scratch/qa.html`), before `ship_on` was
-deleted: `lf task auto on`, `lf ship` and `task.ship` are one operation on a
-never-run, waiting, off, running and Task-less-branch start; `task.auto.off`
-and recovery work. Two `on`s at the same moment on a never-run Task left one
-run, and the second exited 1 with "is running graph …"; the take-up moving
-into the run is the answer to that. The upgrade from 0.16 was driven at
-`679f658cbf`; the migration's only change since is the stored word `off`.
-Earlier the same day: the CLI, socket, recovery and 0.16 upgrade
-paths work on a private Machine. `lf task status --json` now carries `auto`
-(`TaskDetail.auto`), and a Task read from another Machine prints it; the
-remote line was compiled, not driven.
+QA 2026-11-19 at `75abe5ce1c` plus two fixes (`scratch/qa.html`), on a private
+lf-world Machine with the branch `lf` and its server:
+
+- Fixed: a second ship at the same moment exited 1 with "acquire worktree
+  lease: … is owned by another active operation". `restore_task_checkout` now
+  waits up to 10 s for the checkout lease (`CHECKOUT_LEASE_WAIT`).
+- Fixed: with three ships at once, 1 Task in 5 had one ship exit 1 with "the
+  Task's run is carried by another `lf task run`". `try_start_task_run` read
+  the row again after its selection, so its start could name, and replace, a
+  carrier that set out in between. It now reads the Task again when that row
+  names a live carrier. After both fixes: 12 Tasks, three ships each, every
+  exit 0, one Graph run each. Neither fix has a fixture; the race is not
+  deterministic from outside.
+- Driven and working: ship on a never-run, waiting, running, landing-wait,
+  done and Task-less-branch start; `auto off` mid-run stops at `land`
+  ("Waiting at land: auto is off (Demo). `lf ship` lands it."); a failed land
+  stops after 3 and keeps auto on; `lf -b task run` after an off waits at
+  land; reopen clears auto; `task.ship` and `task.auto.off` over the socket;
+  Desktop's spellings (`lf --task X ship --json`, `lf task auto off X --json`);
+  `state:auto` in a Dashboard query.
+- A died run with no server read "Run died at implement · no server runs here
+  to start it; `lf task run cf17c1` starts it again"; with a server, "… ·
+  starting again", and the pass carried it as `lf task run cf17c1` in about a
+  minute.
+- Upgrade from the installed 0.16.0 (`f5ff6a6c7`): a live released ship reads
+  `moving · auto: on, Nov 19 10:51` and finished; a Task waiting at
+  `human-review` shipped with `lf task auto on` (the captured Graph carries
+  the old skill text).
+- `scripts/test_desktop.sh --filter 'ServerProtocolTests|RegistryQueryTests|DTOFixtureTests|WorkModelTests|TaskStatusTests|TaskConceptTests|DesktopHeadlessTests'`:
+  169 tests passed. `task_graph_launch_tests::{auto_o,a_ship,task_ship}`: 14
+  passed. Clippy clean.
+
+What QA found and left (also in `scratch/questions.md`):
+
+- A released `lf task hold` on a Task that never took a Graph is gone after
+  the upgrade (no `task_graphs` row to hold the mark), and `lf task auto off`
+  on such a Task answers "auto was not on", exit 0. A later `lf -b task run`
+  turns auto on and may merge.
+- `--reason` is stored as a `progress` Task event and no read prints it; the
+  help says "kept in the Task's history".
+- A Task waiting at an interactive step reads "latest Graph: Graph qaship
+  finished; nothing further is launched".
+- Not driven: the Desktop window (toggle and badge), iOS, a ship arriving in
+  the 30 s before a carrier's Graph registers, a moved Task.
 
 What an earlier build showed, when `lf task auto on` took up a Graph without
 running it: the Task read

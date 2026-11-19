@@ -921,6 +921,27 @@ struct DTOFixtureTests {
         #expect(decoded == sessions)
     }
 
+    @Test("A Session carries how its agent ended, its outlook and the server's sentence; every key is required")
+    func sessionEndingFixture() throws {
+        let data = try loadFixtureData("session_memberships.json")
+        let sessions = try JSONDecoder().decode([SessionRecord].self, from: data)
+        #expect(sessions.compactMap(\.outlook?.kind) == [.quit, .comingBack, .waitingForYou, .couldNotStart, .starting])
+        #expect(sessions[0].statusLine == "running")
+        #expect(sessions[1].statusLine == "quit 12:01; `lf resume run_00000000000000000000000000000002` opens it")
+        #expect(sessions[3].ended?.exitCode == 137)
+        #expect(sessions[3].start?.attempts == 1)
+        #expect(sessions[4].ended?.exitCode == nil)
+        #expect(sessions[6].statusLine == "starting")
+        let objects = try #require(JSONSerialization.jsonObject(with: data) as? [[String: Any]])
+        for key in ["ended", "start", "outlook", "status_line"] {
+            var value = objects[3]
+            value.removeValue(forKey: key)
+            #expect(throws: DecodingError.self) {
+                try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: value))
+            }
+        }
+    }
+
     @Test("canonical_ids: structured Session IDs decode canonically; native bytes stay exact")
     func canonicalIdsSessionWire() throws {
         let session = try JSONDecoder().decode(SessionRecord.self, from: loadFixtureData("canonical_ids_session.json"))

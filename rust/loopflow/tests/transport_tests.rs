@@ -1228,7 +1228,7 @@ fn headless_run(command: &[&str], resume: bool) {
     let provider = bin.join("opencode");
     std::fs::write(
         &provider,
-        include_str!("../../loopflow-execution/tests/support/opencode_server.py")
+        include_str!("../../loopflow-execution/tests/support/opencode_cli.py")
             .replace("__WAIT__", "False"),
     )
     .unwrap();

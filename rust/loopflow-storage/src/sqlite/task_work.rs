@@ -197,7 +197,7 @@ fn task_graph_row(
     use rusqlite::OptionalExtension;
     let Some((graph, step, start, carrier)) = conn
         .query_row(
-            "SELECT graph,step,run_start,lf_process_id,run_pid,run_os_started_at
+            "SELECT graph,step,run_start,lf_process_id,run_pid,run_os_started_at,run_died_at
              FROM task_graphs WHERE task_id=?1",
             [task.as_str()],
             |row| {
@@ -211,6 +211,7 @@ fn task_graph_row(
                                 id,
                                 pid: row.get(4)?,
                                 os_started_at: row.get(5)?,
+                                died_at: row.get(6)?,
                             })
                         })
                         .transpose()?,
@@ -240,7 +241,7 @@ fn start_run_in(
 ) -> StoreResult<bool> {
     let left = tx.execute(
         "UPDATE task_graphs SET run_start=?2,lf_process_id=?3,run_pid=?7,run_os_started_at=?8,
-            updated_at=?4
+            run_died_at=NULL,updated_at=?4
          WHERE task_id=?1 AND step=?5 AND lf_process_id IS ?6",
         rusqlite::params![
             task.as_str(),
@@ -269,9 +270,35 @@ fn start_run_in(
     Ok(true)
 }
 
+/// How many times a Task's run was carried again after its carrier died, since
+/// it last finished a step, and when it last was.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TaskRunRestarts {
+    pub count: u32,
+    pub at: Option<i64>,
+}
+
+fn run_restarts_in(conn: &rusqlite::Connection, task: &TaskId) -> StoreResult<TaskRunRestarts> {
+    use rusqlite::OptionalExtension;
+    Ok(conn
+        .query_row(
+            "SELECT restarts,restarted_at FROM task_graphs WHERE task_id=?1",
+            [task.as_str()],
+            |row| {
+                Ok(TaskRunRestarts {
+                    count: row.get(0)?,
+                    at: row.get(1)?,
+                })
+            },
+        )
+        .optional()?
+        .unwrap_or(TaskRunRestarts { count: 0, at: None }))
+}
+
 /// A Task handed off to finish on its own: since when, the process that
-/// approved it, this Machine's run carrying it there, and how many times in a
-/// row that run was started again after it failed.
+/// approved it, this Machine's run carrying it there, and how many times its
+/// run was carried again since it last finished a step (`task_graphs.restarts`,
+/// the one count for shipping and moving runs).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TaskShipping {
     pub shipped_at: i64,
@@ -314,7 +341,6 @@ pub(super) fn ship_stop_in(
 enum ShipEvent {
     Approved,
     Carried,
-    Restarted,
     Stopped,
     Withdrawn,
 }
@@ -324,7 +350,6 @@ impl ShipEvent {
         match self {
             Self::Approved => "approved",
             Self::Carried => "carried",
-            Self::Restarted => "restarted",
             Self::Stopped => "stopped",
             Self::Withdrawn => "withdrawn",
         }
@@ -345,20 +370,16 @@ pub struct ShipApproval {
 struct ShipLog {
     approval: Option<ShipApproval>,
     carrier: Option<Execution>,
-    restarts: u32,
     stop: Option<ShipStop>,
 }
-
-/// Restarts counted in a row. The repair backoff a restart waits
-/// (`ops::pr_landing::repair_backoff`) stops growing after this many, so
-/// later ones add no row; the migration's backfill keeps the same cap.
-pub const SHIP_RESTARTS_COUNTED: u32 = 6;
 
 /// Read from the latest approval or stop: each starts the log over.
 fn ship_log_in(conn: &rusqlite::Connection, task: &TaskId) -> StoreResult<ShipLog> {
     let mut query = conn.prepare_cached(
+        // `restarted` rows are released builds' restart counts;
+        // `task_graphs.restarts` counts them now.
         "SELECT kind,at,lf_process_id,person,pid,os_started_at,ended_at,exit_code,error,caller_session_id
-         FROM task_ship_events WHERE task_id=?1
+         FROM task_ship_events WHERE task_id=?1 AND kind<>'restarted'
          AND id>=IFNULL((SELECT max(id) FROM task_ship_events
              WHERE task_id=?1 AND kind IN ('approved','stopped')),0)
          ORDER BY id",
@@ -392,7 +413,6 @@ fn ship_log_in(conn: &rusqlite::Connection, task: &TaskId) -> StoreResult<ShipLo
                 }
             }
             ShipEvent::Carried => log.carrier = process.as_ref().map(run).transpose()?,
-            ShipEvent::Restarted => log.restarts += 1,
             ShipEvent::Stopped => {
                 log = ShipLog {
                     stop: Some(ShipStop {
@@ -464,6 +484,7 @@ pub(super) fn shipping_in(
         return Ok(None);
     };
     let log = ship_log_in(conn, task)?;
+    let restarts = run_restarts_in(conn, task)?.count;
     Ok(Some(TaskShipping {
         shipped_at,
         approving_session: log
@@ -472,7 +493,7 @@ pub(super) fn shipping_in(
             .and_then(|approval| approval.session.clone()),
         approved_by: log.approval.and_then(|approval| approval.by),
         carrier: log.carrier,
-        restarts: log.restarts,
+        restarts,
     }))
 }
 
@@ -492,7 +513,7 @@ pub(super) fn unship_in(
         )?;
     }
     let log = ship_log_in(conn, task)?;
-    if log.approval.is_some() || log.carrier.is_some() || log.restarts > 0 {
+    if log.approval.is_some() || log.carrier.is_some() {
         let now = crate::rows::now_unix();
         append_ship_event_in(
             conn,
@@ -592,7 +613,9 @@ fn arrive_in(
         )
         .optional()?;
     let arrived = tx.execute(
-        "UPDATE task_graphs SET step=?2,run_start=NULL,lf_process_id=NULL,run_pid=NULL,run_os_started_at=NULL,updated_at=?3
+        "UPDATE task_graphs SET step=?2,run_start=NULL,lf_process_id=NULL,run_pid=NULL,run_os_started_at=NULL,
+             run_died_at=NULL,
+             updated_at=?3,restarts=0,restarted_at=NULL
          WHERE task_id=?1 AND lf_process_id=?4",
         rusqlite::params![
             task.as_str(),
@@ -622,7 +645,9 @@ fn arrive_in(
 
 fn set_step_in(tx: &rusqlite::Transaction<'_>, task: &TaskId, step: &str) -> StoreResult<bool> {
     Ok(tx.execute(
-        "UPDATE task_graphs SET step=?2,run_start=NULL,lf_process_id=NULL,run_pid=NULL,run_os_started_at=NULL,updated_at=?3 WHERE task_id=?1",
+        "UPDATE task_graphs SET step=?2,run_start=NULL,lf_process_id=NULL,run_pid=NULL,run_os_started_at=NULL,
+             run_died_at=NULL,
+             updated_at=?3,restarts=0,restarted_at=NULL WHERE task_id=?1",
         rusqlite::params![task.as_str(), step, crate::rows::now_unix()],
     )? > 0)
 }
@@ -1004,8 +1029,9 @@ impl SqliteStore {
     }
 
     /// The run `carrier` carries finished a step: its next attempt, or the
-    /// next `lf task run`, sets out from `cursor`. A run that no longer
-    /// carries the Task writes nothing.
+    /// next `lf task run`, sets out from `cursor`, and a later death of its
+    /// carrier is carried again at once. A run that no longer carries the
+    /// Task writes nothing.
     pub fn advance_task_graph_run(
         &self,
         task: &TaskId,
@@ -1014,7 +1040,7 @@ impl SqliteStore {
     ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
-            "UPDATE task_graphs SET run_start=?3,updated_at=?4
+            "UPDATE task_graphs SET run_start=?3,updated_at=?4,restarts=0,restarted_at=NULL
              WHERE task_id=?1 AND lf_process_id=?2 AND run_start IS NOT ?3",
             rusqlite::params![
                 task.as_str(),
@@ -1161,29 +1187,55 @@ impl SqliteStore {
         Ok(shipping)
     }
 
-    /// Count one more restart after a failed ship process, up to
-    /// [`SHIP_RESTARTS_COUNTED`].
-    pub fn count_ship_restart(&self, task: &TaskId) -> StoreResult<()> {
+    /// Tasks checked out here whose run's carrier has not cleared its OS
+    /// process, or was found dead, shipping or not.
+    pub fn local_task_runs(&self) -> StoreResult<Vec<TaskId>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        if ship_log_in(&conn, task)?.restarts >= SHIP_RESTARTS_COUNTED {
-            return Ok(());
-        }
-        let now = crate::rows::now_unix();
-        append_ship_event_in(
-            &conn,
-            task,
-            ShipEvent::Restarted,
-            now,
-            (None, None),
-            (None, None),
-        )
+        let mut query = conn.prepare(
+            "SELECT task_id FROM task_graphs WHERE (run_pid IS NOT NULL OR run_died_at IS NOT NULL)
+             AND task_id IN (SELECT task_id FROM task_checkouts)",
+        )?;
+        let rows = query.query_map([], |row| row.get::<_, String>(0))?;
+        rows.map(|id| {
+            TaskId::parse(&id?).map_err(|error| crate::StoreError::InvalidData(error.to_string()))
+        })
+        .collect()
     }
 
-    /// A ship step completed: the next failure restarts without waiting long.
-    pub fn reset_ship_restarts(&self, task: &TaskId) -> StoreResult<()> {
+    /// How many times the Task's run was carried again since it last finished
+    /// a step, and when it last was.
+    pub fn task_run_restarts(&self, task: &TaskId) -> StoreResult<TaskRunRestarts> {
+        run_restarts_in(&self.conn.lock().expect("store mutex poisoned"), task)
+    }
+
+    /// Count one more start of the Task's run, if it still stands at the
+    /// `seen` count the caller read. A moving run names the `carrier` that died; a shipping
+    /// one is carried by its ship process instead (`None`). Returns false,
+    /// writing nothing, when another start or a new carrier came first.
+    pub fn count_task_run_restart(
+        &self,
+        task: &TaskId,
+        carrier: Option<&LfProcessId>,
+        seen: u32,
+    ) -> StoreResult<bool> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn.execute(
+            "UPDATE task_graphs SET restarts=restarts+1,restarted_at=?4
+             WHERE task_id=?1 AND (?2 IS NULL OR lf_process_id=?2) AND restarts=?3",
+            rusqlite::params![
+                task.as_str(),
+                carrier.map(LfProcessId::as_str),
+                seen,
+                crate::rows::now_unix()
+            ],
+        )? > 0)
+    }
+
+    /// A ship step completed: the next death or failure is carried again at once.
+    pub fn reset_task_run_restarts(&self, task: &TaskId) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
-            "DELETE FROM task_ship_events WHERE task_id=?1 AND kind='restarted'",
+            "UPDATE task_graphs SET restarts=0,restarted_at=NULL WHERE task_id=?1 AND restarts>0",
             [task.as_str()],
         )?;
         Ok(())
@@ -1579,64 +1631,6 @@ mod tests {
     }
 
     #[test]
-    fn a_ship_process_failing_all_day_keeps_its_log_short() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = crate::test_fixture::open(&dir.path().join("db")).unwrap();
-        let id = TaskId::new();
-        store
-            .create_task(&crate::work::task::NewTask {
-                id: id.clone(),
-                repository_id: crate::test_fixture::repository(&store, "/shipping"),
-                project_id: None,
-                title: "Ship".into(),
-                description: String::new(),
-                due_date: None,
-            })
-            .unwrap();
-        store
-            .ship_task(
-                &id,
-                (
-                    &LfProcessId::new(),
-                    &crate::graph_process::ExecutionStart::reserved(1),
-                ),
-                "ship",
-            )
-            .unwrap();
-        // A day of restarts at the longest backoff, each carried by a new process.
-        let mut carrier = LfProcessId::new();
-        for _ in 0..48 {
-            store.count_ship_restart(&id).unwrap();
-            carrier = LfProcessId::new();
-            store
-                .ship_task(
-                    &id,
-                    (&carrier, &crate::graph_process::ExecutionStart::reserved(1)),
-                    "ship",
-                )
-                .unwrap();
-        }
-        let shipping = store.task_shipping(&id).unwrap().unwrap();
-        assert_eq!(shipping.restarts, super::SHIP_RESTARTS_COUNTED);
-        assert_eq!(shipping.carrier.map(|run| run.id), Some(carrier));
-        let rows = || -> i64 {
-            let conn = store.conn.lock().unwrap();
-            conn.query_row(
-                "SELECT count(*) FROM task_ship_events WHERE task_id=?1",
-                [id.as_str()],
-                |row| row.get(0),
-            )
-            .unwrap()
-        };
-        // The approval, its carrier and the counted restarts.
-        assert_eq!(rows(), 2 + i64::from(super::SHIP_RESTARTS_COUNTED));
-
-        store.reset_ship_restarts(&id).unwrap();
-        assert_eq!(store.task_shipping(&id).unwrap().unwrap().restarts, 0);
-        assert_eq!(rows(), 2);
-    }
-
-    #[test]
     fn a_released_tasks_shipping_columns_become_its_auto_ship_log() {
         use crate::migration_runner::{apply_before_migration, upgrade_from_migration};
 
@@ -1669,17 +1663,18 @@ mod tests {
             &conn,
             "task_machine_local",
         );
+        // Restarts are counted on `task_graphs` since; the log keeps the rest.
         let handoff = super::shipping_in(&conn, &shipping).unwrap().unwrap();
         assert_eq!(
-            (handoff.shipped_at, handoff.approved_by, handoff.restarts),
-            (10, Some(approver), 2)
+            (handoff.shipped_at, handoff.approved_by),
+            (10, Some(approver))
         );
         let run = handoff.carrier.unwrap();
         assert_eq!(run.id, carrier);
         assert_eq!(run.result(), crate::graph_process::ExecutionResult::Failed);
         assert_eq!(run.error.as_deref(), Some("provider unavailable"));
         assert_eq!(super::ship_stop_in(&conn, &shipping).unwrap(), None);
-        assert_eq!(super::shipping_in(&conn, &stopped).unwrap(), None);
+        assert_eq!(super::ship_log_in(&conn, &stopped).unwrap().approval, None);
         assert_eq!(
             super::ship_stop_in(&conn, &stopped).unwrap(),
             Some(super::ShipStop {

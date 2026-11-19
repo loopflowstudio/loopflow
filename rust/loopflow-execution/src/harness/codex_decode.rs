@@ -358,6 +358,19 @@ impl CodexDecoder {
         self.display.current_turn = turn;
     }
 
+    /// Mark the open turn when this driver is interrupted before Codex replies.
+    pub(super) fn interrupt_pending(&mut self, thread: AgentSessionId) -> Option<Decoded> {
+        let turn = self.display.current_turn.take()?;
+        Some(
+            ProviderFact::TurnCompleted {
+                turn: Some(ProviderTurn { thread, turn }),
+                status: Lifecycle::Interrupted,
+                detail: json!({"status": "interrupted"}),
+            }
+            .into(),
+        )
+    }
+
     /// A server message. `thread` is the conversation the caller already
     /// knows; messages naming another conversation enter no history.
     pub fn decode(&mut self, rpc: &Value, thread: Option<&AgentSessionId>) -> Vec<Decoded> {
@@ -752,7 +765,7 @@ fn process_notification(
                     .filter(|message| state.reported_error.as_deref() != Some(*message))
                 {
                     out.push(Decoded::from(ConversationEvent::Error {
-                        code: "codex_error".into(),
+                        code: error_code(params.pointer("/turn/error")).into(),
                         message: message.to_owned(),
                         evidence: None,
                     }));
@@ -898,7 +911,7 @@ fn process_notification(
             } else {
                 state.reported_error = Some(message.clone());
                 out.push(Decoded::from(ConversationEvent::Error {
-                    code: "codex_error".to_string(),
+                    code: error_code(params.get("error")).to_string(),
                     message,
                     evidence: None,
                 }));
@@ -945,6 +958,21 @@ fn retain_higher_context_pressure(latest: &mut TurnUsage, previous: &TurnUsage) 
     if !latest_is_higher {
         latest.peak_input_tokens = Some(previous_peak);
         latest.context_window_tokens = Some(previous_window);
+    }
+}
+
+/// The event code for a terminal `TurnError`, from the cause Codex states in
+/// `codexErrorInfo`. `codex_error` when it states none or one not listed here.
+fn error_code(error: Option<&Value>) -> &'static str {
+    match error
+        .and_then(|error| error.get("codexErrorInfo"))
+        .and_then(Value::as_str)
+    {
+        Some("usageLimitExceeded") => "provider_rate_limited",
+        Some("modelNotFound") => "provider_model_unavailable",
+        Some("unauthorized") => "provider_credential_invalidated",
+        Some("serverOverloaded") => "provider_capacity",
+        _ => "codex_error",
     }
 }
 
@@ -1055,6 +1083,57 @@ mod tests {
                 at("TurnCompleted", turn, " Failed"),
             ]
         );
+    }
+
+    fn error_codes(rpcs: &[Value]) -> Vec<String> {
+        let mut decoder = CodexDecoder::default();
+        rpcs.iter()
+            .flat_map(|rpc| decoder.decode(rpc, None))
+            .filter_map(|decoded| match decoded {
+                Decoded::Display(ConversationEvent::Error { code, .. }) => Some(code),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The error and the failed turn both carry the cause; it is told once.
+    #[test]
+    fn a_spent_usage_limit_is_typed_from_the_cause_codex_states() {
+        assert_eq!(
+            error_codes(&fact::trace("codex_usage_limit.jsonl")),
+            ["provider_rate_limited"]
+        );
+        assert_eq!(
+            error_codes(&fact::trace("codex_error.jsonl")),
+            ["codex_error"]
+        );
+    }
+
+    #[test]
+    fn each_stated_cause_has_its_code_on_the_error_and_on_the_failed_turn() {
+        for (info, code) in [
+            (json!("usageLimitExceeded"), "provider_rate_limited"),
+            (json!("modelNotFound"), "provider_model_unavailable"),
+            (json!("unauthorized"), "provider_credential_invalidated"),
+            (json!("serverOverloaded"), "provider_capacity"),
+            (json!("rateLimitExceeded"), "codex_error"),
+            (
+                json!({"responseStreamDisconnected": {"httpStatusCode": null}}),
+                "codex_error",
+            ),
+            (Value::Null, "codex_error"),
+        ] {
+            let error = json!({"message": "refused", "codexErrorInfo": info});
+            let notified = json!({"method": "error", "params": {
+                "threadId": "thread", "turnId": "turn", "error": error, "willRetry": false,
+            }});
+            let completed = json!({"method": "turn/completed", "params": {
+                "threadId": "thread",
+                "turn": {"id": "turn", "status": "failed", "error": error},
+            }});
+            assert_eq!(error_codes(&[notified]), [code], "{info}");
+            assert_eq!(error_codes(&[completed]), [code], "{info}");
+        }
     }
 
     /// A retried error is no fact; the turn recovers and completes.

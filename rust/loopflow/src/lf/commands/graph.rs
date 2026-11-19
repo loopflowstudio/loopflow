@@ -151,9 +151,27 @@ enum TaskRunStopped {
     #[error("the run of {run} failed {TASK_RUN_ATTEMPTS} times with the same error; this Task run stops here: {cause}")]
     Repeated { run: String, cause: String },
     #[error(
+        "the run of {run} stopped before any agent started, and `lf task run {issue}` starts it again there: {cause}"
+    )]
+    Unlaunched {
+        issue: String,
+        run: String,
+        cause: String,
+    },
+    #[error(
         "the run of {run} stopped after a provider refusal at {step}: {cause}; `lf task run {issue}` starts the run again at it"
     )]
     Limit {
+        issue: String,
+        run: String,
+        step: String,
+        cause: String,
+    },
+    #[error(
+        "the run of {run} stopped at {step}: {cause}; {}",
+        loopflow_execution::ops::task_execution::question_advice(.issue)
+    )]
+    Question {
         issue: String,
         run: String,
         step: String,
@@ -166,7 +184,10 @@ impl TaskRunStopped {
         // Render before the detached run's log closes when its process exits.
         eprintln!("{self}");
         let cause = match &self {
-            Self::Repeated { cause, .. } | Self::Limit { cause, .. } => cause,
+            Self::Repeated { cause, .. }
+            | Self::Unlaunched { cause, .. }
+            | Self::Limit { cause, .. }
+            | Self::Question { cause, .. } => cause,
         };
         // Both `task run` and `ship` end the approval at a terminal stop.
         // With no approval, ship_halt does nothing and records no person's stop.
@@ -176,7 +197,9 @@ impl TaskRunStopped {
 }
 
 /// Carry one Task run: start the Task's Graph as a child Graph process, and
-/// retry failed Graphs unless a provider refusal stopped them. Each attempt records
+/// retry failed Graphs unless a provider refusal stopped them, a skill step
+/// failed before its agent started, or its agent asked a question nobody was
+/// there to answer. Each attempt records
 /// its own GraphExecution beneath this process and sets out at the step the last
 /// one failed at. A Graph held for a person or a
 /// watcher, an interrupted one, and a launch refused before any Graph started
@@ -244,8 +267,11 @@ pub fn run_task_graph_for(
             eprintln!("Task run interrupted; not starting it again.");
             return Err(loopflow_execution::process::CommandExit(130).into());
         }
-        // Only a Graph process that failed is started again.
-        let failed = status.code() == Some(1) && store.graph_run_recorded(&graph_run)?;
+        // Only a Graph process that failed, or that a signal nobody sends to
+        // stop it killed, is started again.
+        let failed = (status.code() == Some(1)
+            || (status.code().is_none() && !interrupted(status)))
+            && store.graph_run_recorded(&graph_run)?;
         if failed {
             if let Some(stash) = loopflow_execution::ops::checkout::retained_edits(checkout)? {
                 eprintln!(
@@ -256,6 +282,26 @@ pub fn run_task_graph_for(
             let cause = store
                 .graph_failure_cause(&graph_run)?
                 .map(|(_, cause)| cause);
+            // A launch lf refused would be refused again: the next attempt
+            // has nothing to retry.
+            if store.graph_failed_before_its_agent(&graph_run)? {
+                let stop = TaskRunStopped::Unlaunched {
+                    issue: task.identifier.clone(),
+                    run: run.to_string(),
+                    cause: cause.unwrap_or_else(|| "it failed".into()),
+                };
+                return stop.stop(task, status);
+            }
+            // A question nobody answered would only be asked again.
+            if let Some(question) = store.graph_unanswered_question(&graph_run)? {
+                let stop = TaskRunStopped::Question {
+                    issue: task.identifier.clone(),
+                    run: run.to_string(),
+                    step: stopped_step(store, task)?.unwrap_or_else(|| "its step".into()),
+                    cause: question,
+                };
+                return stop.stop(task, status);
+            }
             repeated = cause.filter(|cause| attempt == 1 || repeated.as_ref() == Some(cause));
             if let Some((step, recovery)) =
                 loopflow_execution::ops::task::limit_recovery::ended_step_recovery(store, &task.id)?
@@ -296,15 +342,22 @@ pub fn run_task_graph_for(
             }
             return Err(exit_of(status).into());
         }
-        // The failed Graph checkpointed after each step it finished.
-        let again = loopflow_execution::store::task_work::task_graph_row(store, &task.id)?
-            .and_then(|row| row.graph.step_name_of(&row.run?.0))
-            .map_or_else(String::new, |step| format!(" at {step}"));
+        let again =
+            stopped_step(store, task)?.map_or_else(String::new, |step| format!(" at {step}"));
         eprintln!(
             "The run of {run} failed (attempt {attempt} of {TASK_RUN_ATTEMPTS}); starting it again{again}."
         );
         attempt += 1;
     }
+}
+
+/// The step the Task's Graph stopped at: a failed Graph checkpointed after
+/// each step it finished.
+fn stopped_step(store: &SqliteStore, task: &Task) -> Result<Option<String>> {
+    Ok(
+        loopflow_execution::store::task_work::task_graph_row(store, &task.id)?
+            .and_then(|row| row.graph.step_name_of(&row.run?.0)),
+    )
 }
 
 /// `lf task run`: place the Task and carry its run in this process. What the
@@ -334,7 +387,7 @@ pub fn carry_task_run(
         crate::lf::navigation::command_merges,
     )?;
     if !cli.interactive {
-        loopflow_execution::ops::task::start_conversation_beside(&task);
+        loopflow_execution::ops::task::prepare_conversation_beside(&task);
     }
     let issue = task.identifier.clone();
     let announce = |run: &TaskRun| -> Result<()> {
@@ -365,9 +418,24 @@ pub fn carry_task_run(
     Ok(loopflow_execution::ops::task::task_run_finished(&task)?)
 }
 
+/// Whether a Graph process ended on a signal people and lf send to stop one:
+/// ctrl-C, `lf task interrupt`, or its terminal closing. Any other signal,
+/// such as a SIGKILL, killed it.
+fn interrupted(status: std::process::ExitStatus) -> bool {
+    use std::os::unix::process::ExitStatusExt;
+    matches!(
+        status.signal(),
+        Some(libc::SIGINT | libc::SIGTERM | libc::SIGHUP)
+    )
+}
+
 fn exit_of(status: std::process::ExitStatus) -> loopflow_execution::process::CommandExit {
-    let code = status.code().and_then(|code| u8::try_from(code).ok());
-    loopflow_execution::process::CommandExit(code.unwrap_or(130))
+    let code = match status.code().and_then(|code| u8::try_from(code).ok()) {
+        Some(code) => code,
+        None if interrupted(status) => 130,
+        None => 1,
+    };
+    loopflow_execution::process::CommandExit(code)
 }
 
 /// What a spawner saw of a run that may have died before writing its end.

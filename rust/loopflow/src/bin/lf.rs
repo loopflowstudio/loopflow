@@ -1233,6 +1233,11 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
                             loopflow_execution::ops::task_ownership::render(ownership)
                         );
                     }
+                    if let Some(line) =
+                        loopflow::lf::commands::waves::task_conversation_line(&task.id)?
+                    {
+                        println!("Conversation: {line}");
+                    }
                     for session in loopflow_execution::ops::task::task_copied_sessions(&task.id)? {
                         println!(
                             "Session {} from {}: {}",
@@ -2755,27 +2760,6 @@ fn dispatch_here(
             },
         );
     }
-    // Reading this Machine's Tasks or processes recovers them first.
-    if matches!(
-        &cli.command,
-        Some(Commands::Task {
-            cmd: TaskCommand::Status { .. } | TaskCommand::List { .. } | TaskCommand::Show { .. }
-        }) | Some(Commands::Wave {
-            cmd: WaveCommand::Status { .. }
-                | WaveCommand::Sync { .. }
-                | WaveCommand::List { .. }
-                | WaveCommand::Show { .. }
-                | WaveCommand::Plan { cmd: None, .. }
-        }) | Some(Commands::Plan {
-            cmd: loopflow::lf::PlanCommand::List { .. }
-        }) | Some(Commands::Session {
-            cmd: loopflow::lf::SessionCommand::History { cmd: None, .. },
-        }) | Some(Commands::Session {
-            cmd: loopflow::lf::SessionCommand::List(_)
-        })
-    ) {
-        loopflow_execution::ops::recovery::recover();
-    }
     // Placement chooses or rents the Machine and hands the Task to it, from
     // the flags or the scope's default capacity; the ordinary dispatch below
     // then forwards the run to its new owner.
@@ -2853,7 +2837,7 @@ fn dispatch_here(
                     recover_from: recover_from.clone(),
                 },
             )?;
-            loopflow_execution::ops::task::start_conversation_beside(&task);
+            loopflow_execution::ops::task::prepare_conversation_beside(&task);
             print_task(&task, *json)
         });
     }

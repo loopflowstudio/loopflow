@@ -901,11 +901,13 @@ import sys
 if '--version' in sys.argv:
     print('fixture')
     sys.exit(0)
-stores = glob.glob(os.path.join(os.path.dirname(shutil.which('security')), 'keychain', '*'))
-stores.append(os.path.join(os.environ['CLAUDE_CONFIG_DIR'], '.credentials.json'))
+security = shutil.which('security')
+stores = glob.glob(os.path.join(os.path.dirname(security), 'keychain', '*')) if security else []
+claude_home = os.environ.get('CLAUDE_CONFIG_DIR') or os.path.join(os.environ['HOME'], '.claude')
+stores.append(os.path.join(claude_home, '.credentials.json'))
 login = next((text for text in (open(path).read() for path in stores if os.path.isfile(path)) if 'claudeAiOauth' in text), None)
 with open(os.path.join(os.environ['LF_HOME'], 'launches.jsonl'), 'a') as launches:
-    launches.write(json.dumps({'args': sys.argv[1:], 'claude_home': os.environ.get('CLAUDE_CONFIG_DIR'), 'claude_login': login}) + '\n')
+    launches.write(json.dumps({'args': sys.argv[1:], 'claude_home': claude_home, 'claude_login': login}) + '\n')
 if '--input-format' not in sys.argv:
     sys.exit(0)
 message = json.loads(sys.stdin.readline())
@@ -923,7 +925,6 @@ fn a_task_run_takes_its_waves_agent_without_flags() {
     support::bind_task_planning(&repo);
     repo.create_branch("wave-setup");
     let home = tempfile::tempdir().unwrap();
-    let _server = MachineServer::start(loopflow_test_support::lf_binary(), home.path());
     let _env = support::EnvGuard::with_home(
         &[
             ("open", "#!/bin/sh\nexit 0\n"),
@@ -931,6 +932,11 @@ fn a_task_run_takes_its_waves_agent_without_flags() {
             ("claude", CLAUDE_RECORDER),
         ],
         Some(home.path()),
+    );
+    let _server = MachineServer::start_with_path(
+        loopflow_test_support::lf_binary(),
+        home.path(),
+        &std::env::var("PATH").unwrap(),
     );
     let registered = support::register_task_without_pr(
         home.path(),
@@ -941,7 +947,10 @@ fn a_task_run_takes_its_waves_agent_without_flags() {
 
     for (path, content) in [
         (".lf/skills/probe.md", "Probe."),
-        (".lf/graphs/proof.yaml", "- step: {name: probe}\n"),
+        (
+            ".lf/graphs/proof.yaml",
+            "- step: {name: probe}\n- interactive: {name: demo}\n",
+        ),
     ] {
         repo.create_file(path, content);
     }
@@ -955,8 +964,11 @@ fn a_task_run_takes_its_waves_agent_without_flags() {
     repo.stage_all();
     repo.commit("Set up the Wave once");
     {
-        let args = &["-b", "task", "run", "INF-123", "proof"];
-        let output = command(repo.path(), home.path(), args).output().unwrap();
+        let args = &["task", "run", "INF-123", "proof"];
+        let output = command(repo.path(), home.path(), args)
+            .env("CLAUDE_CONFIG_DIR", home.path().join(".claude"))
+            .output()
+            .unwrap();
         assert!(
             output.status.success(),
             "{args:?}: {}",
@@ -993,9 +1005,7 @@ fn a_task_run_takes_its_waves_agent_without_flags() {
         // The native home is inherited, without installing a saved login.
         assert_eq!(
             launch["claude_home"].as_str().map(Path::new),
-            std::env::var_os("CLAUDE_CONFIG_DIR")
-                .as_deref()
-                .map(Path::new)
+            Some(home.path().join(".claude").as_path())
         );
         assert!(launch["claude_login"].is_null());
     }
@@ -1004,7 +1014,7 @@ fn a_task_run_takes_its_waves_agent_without_flags() {
 /// A registered Task whose repository defines the Graphs below.
 struct GraphTask {
     /// Agent steps start only once the Task's Machine server answers.
-    _server: MachineServer,
+    server: MachineServer,
     repo: TestRepo,
     home: tempfile::TempDir,
     registered: support::RegisteredTask,
@@ -1151,7 +1161,12 @@ os.execv({binary}, [{binary}, *sys.argv[1:]])
             &repo.head_sha(),
         );
         let fixture = Self {
-            _server: MachineServer::start(loopflow_test_support::lf_binary(), home.path()),
+            // The server restarts what died, with this fixture's tools.
+            server: MachineServer::start_with_path(
+                loopflow_test_support::lf_binary(),
+                home.path(),
+                &std::env::var("PATH").unwrap(),
+            ),
             repo,
             home,
             registered,
@@ -1710,9 +1725,10 @@ fn attempts(home: &Path, mark: i64) -> Vec<String> {
 
 #[test]
 fn a_run_that_ended_waiting_on_a_limit_starts_again_at_that_step_without_replaying_the_done_ones() {
-    let task = GraphTask::new();
+    let mut task = GraphTask::new();
     let failed = task.task_run(&["task", "run", "INF-123", "held"]);
     assert!(!failed.success(), "{}", failed.text);
+    drop(task.server);
     let db = rusqlite::Connection::open(task.home.path().join("loopflow.db")).unwrap();
     let steps_of_latest_graph = || -> Vec<String> {
         db.prepare(
@@ -1746,16 +1762,20 @@ fn a_run_that_ended_waiting_on_a_limit_starts_again_at_that_step_without_replayi
         [&waiting],
     )
     .unwrap();
-    // Reading the Task starts the restart by itself. Record that one in place
-    // of running it, so the run below is the only Graph that starts.
+    // Record the server's restart without running it, so the explicit run
+    // below is the only Graph that starts.
     let bin = tempfile::tempdir().unwrap();
     let (lf, _) = restart_recorder(bin.path());
+    task.server = MachineServer::start_with_path(
+        lf.to_str().unwrap(),
+        task.home.path(),
+        &std::env::var("PATH").unwrap(),
+    );
     let read = command(
         task.repo.path(),
         task.home.path(),
         &["task", "status", "INF-123"],
     )
-    .env("LF_BIN", &lf)
     .output()
     .unwrap();
     assert!(
@@ -1769,7 +1789,7 @@ fn a_run_that_ended_waiting_on_a_limit_starts_again_at_that_step_without_replayi
     assert!(steps[0].contains("late"), "{steps:?}");
 }
 
-/// An `lf` that records the restart a read of the Task would start, with the
+/// An `lf` that records the restart the server would start, with the
 /// agent settings it saw, in place of running it. Returns it and its record.
 fn restart_recorder(bin: &Path) -> (PathBuf, PathBuf) {
     let restarts = bin.join("restarts");
@@ -1777,7 +1797,9 @@ fn restart_recorder(bin: &Path) -> (PathBuf, PathBuf) {
     fs::write(
         &lf,
         format!(
-            "#!/bin/sh\ncase \"$*\" in *'task run INF-123'|*'--task INF-123 ship')\n  echo \"$*|$LF_AGENT_OVERRIDE|$LF_SETTINGS\" >> '{}'; exit 0;;\nesac\nexec '{}' \"$@\"\n",
+            "#!/bin/sh\ncase \"$*\" in *'task run INF-123'|*'--task INF-123 ship')\n  printf '%s\\n' \"$*|$LF_AGENT_OVERRIDE|$LF_SETTINGS\" > '{}'.$$; mv '{}'.$$ '{}'; exit 0;;\nesac\nexec '{}' \"$@\"\n",
+            restarts.display(),
+            restarts.display(),
             restarts.display(),
             loopflow_test_support::lf_binary()
         ),
@@ -1787,13 +1809,14 @@ fn restart_recorder(bin: &Path) -> (PathBuf, PathBuf) {
     (lf, restarts)
 }
 
-/// What a read of the Task starts for a run of `graph` that ended waiting on a
+/// What the server starts for a run of `graph` that ended waiting on a
 /// limit with `recorded` as its explicit agent, when that reader exported its
 /// own choice: the restart's arguments and the agent settings it saw.
 fn restart_of_a_finished_wait(graph: &str, recorded: Option<&str>) -> String {
     let task = GraphTask::new();
     let failed = task.task_run(&["task", "run", "INF-123", graph]);
     assert!(!failed.success(), "{}", failed.text);
+    drop(task.server);
     let db = rusqlite::Connection::open(task.home.path().join("loopflow.db")).unwrap();
     let waiting: String = db
         .query_row(
@@ -1839,6 +1862,12 @@ fn restart_of_a_finished_wait(graph: &str, recorded: Option<&str>) -> String {
         "{}",
         String::from_utf8_lossy(&read.stderr)
     );
+    assert!(!restarts.exists());
+    let _server = MachineServer::start_with_path(
+        lf.to_str().unwrap(),
+        task.home.path(),
+        &std::env::var("PATH").unwrap(),
+    );
     wait_for("the restart", || restarts.exists());
     fs::read_to_string(restarts).unwrap().trim().to_string()
 }
@@ -1875,7 +1904,7 @@ fn a_run_stopped_by_a_usage_limit_is_not_started_again() {
     let task = GraphTask::new();
     // The failing step ends having recorded that a limit left it nowhere to go.
     let reason = format!(
-        "codex_error: You've hit your usage limit{}there is no `agents` list",
+        "codex_error: You’ve hit your usage limit{}there is no `agents` list",
         loopflow_execution::ops::task_execution::STOPPED
     );
     let lf = task.home.path().join("lf-limit-fixture");
@@ -1917,7 +1946,7 @@ sys.exit(code)
     assert!(!ran.success(), "{}", ran.text);
     assert!(
         ran.text.contains(
-            "stopped after a provider refusal at graph show late: codex_error: You've hit your usage limit. there is no `agents` list; `lf task run INF-123` starts the run again at it"
+            "stopped after a provider refusal at graph show late: codex_error: You’ve hit your usage limit. there is no `agents` list; `lf task run INF-123` starts the run again at it"
         ),
         "{}",
         ran.text
@@ -1967,8 +1996,360 @@ sys.exit(code)
     assert_eq!(task.graph()["position"], at("review"));
 }
 
+/// `worker`: one `implement` step, then a person's review.
+fn define_worker_graph(task: &GraphTask) {
+    task.repo.create_file(
+        ".lf/graphs/worker.yaml",
+        "- implement\n- interactive: {name: demo, id: review}\n",
+    );
+    task.repo.stage_all();
+    task.repo.commit("Define a worker followed by a review");
+}
+
+fn opencode_stand_in() -> String {
+    include_str!("../../../loopflow-execution/tests/support/opencode_cli.py")
+        .replace("__WAIT__", "False")
+        .replace(
+            "Path(__file__).resolve().parent.parent",
+            "Path(os.environ['LF_HOME'])",
+        )
+}
+
+fn pi_stand_in() -> String {
+    format!(
+        "#!/usr/bin/python3 -I\n{}",
+        include_str!("../../../loopflow-execution/src/harness/testdata/pi_rpc.py").replace(
+            "Path.cwd() / \"pi-conversation.jsonl\"",
+            "Path(os.environ['LF_HOME']) / (os.environ['LF_CAPTURE_KEY'] + '.jsonl')"
+        )
+    )
+}
+
+/// One `implement` step on each stand-in: it settles and the Graph moves on,
+/// with its answer, native thread and usage recorded. While its one tool
+/// runs, `lf steer` saves a steer; the hooks lf gave the harness return the
+/// step's context before the tool and the steer after it.
 #[test]
-fn a_failed_run_starts_again_at_the_step_that_failed() {
+fn a_task_step_runs_as_a_worker_on_every_harness() {
+    let opencode = opencode_stand_in();
+    let pi = pi_stand_in();
+    for (provider, agent, script, answer) in [
+        (
+            "opencode",
+            "opencode:opencode/fixture",
+            opencode,
+            "Fixture completed.",
+        ),
+        ("pi", "pi:fixture/model", pi, "answer 1:"),
+        ("claude", "claude", holding_claude(), "Held."),
+        (
+            "codex",
+            "codex",
+            support::codex_app_server_script("Worker finished.", ""),
+            "Worker finished.",
+        ),
+    ] {
+        let task = GraphTask::with_tools(&[(provider, &script)]);
+        define_worker_graph(&task);
+        let home = task.home.path();
+        fs::write(home.join("release"), "").unwrap();
+        // Each stand-in runs the hooks lf gave its harness around one tool.
+        fs::write(
+            home.join("tool_turn.py"),
+            include_str!("../../../loopflow-execution/tests/support/tool_turn.py"),
+        )
+        .unwrap();
+
+        let started = task.run(&["task", "run", "INF-123", "worker", "-a", agent]);
+        wait_for("the worker's tool", || home.join("holding").exists());
+        task.ok(&["steer", "INF-123", "WORKER_DIRECTION"]);
+        fs::write(home.join("tool-done"), "").unwrap();
+        let ran = task.ran(started);
+        assert!(ran.success(), "{provider}: {}", ran.text);
+        assert_eq!(task.graph()["position"], at("review"), "{provider}");
+        let graphs = support::recorded_graphs(task.home.path());
+        assert_eq!(graphs.len(), 1, "{provider}");
+        assert_eq!(graphs[0].1.len(), 1, "{provider}");
+
+        let db = rusqlite::Connection::open(task.home.path().join("loopflow.db")).unwrap();
+        let (session, thread): (String, String) = db
+            .query_row(
+                "SELECT id, provider_thread FROM agent_sessions
+                 WHERE task_id=?1 AND provider=?2 AND skill='implement'
+                   AND interactive=0 AND completed_at IS NOT NULL",
+                rusqlite::params![task.registered.task.id.as_str(), provider],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert!(!thread.is_empty(), "{provider}");
+        let history = task.run(&["history", "show", &session, "--final"]);
+        assert!(
+            history.status.success(),
+            "{provider}: {}",
+            String::from_utf8_lossy(&history.stderr)
+        );
+        assert!(
+            String::from_utf8_lossy(&history.stdout).contains(answer),
+            "{provider}: {history:?}"
+        );
+
+        // The start hook named this worker's Session and Task, and the hook
+        // after the tool brought the steer saved while the tool ran.
+        let context = fs::read_to_string(home.join("hook-context")).unwrap();
+        assert!(
+            context.contains(&format!("This Session: {session}\n")),
+            "{provider}: {context}"
+        );
+        assert!(
+            context.contains("This Session's Task: INF-123"),
+            "{provider}: {context}"
+        );
+        let steer = fs::read_to_string(home.join("hook-steer")).unwrap();
+        assert!(steer.contains("WORKER_DIRECTION"), "{provider}: {steer}");
+
+        let runs = task.run(&[
+            "history", "usage", "--days", "0", "--task", "INF-123", "--json",
+        ]);
+        let runs: serde_json::Value = serde_json::from_slice(&runs.stdout).unwrap();
+        let usage = runs
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|run| run["session_id"] == session.as_str())
+            .map(|run| &run["usage"])
+            .unwrap();
+        // Pi's stand-in counts its one model call its own way.
+        let (input, output) = if provider == "pi" { (10, 3) } else { (20, 5) };
+        assert_eq!(usage["input_tokens"], input, "{provider}: {usage}");
+        assert_eq!(usage["output_tokens"], output, "{provider}: {usage}");
+    }
+}
+
+/// OpenCode cancels a headless question and lets the model assume an answer;
+/// Pi waits on its dialog. Either way the worker's turn fails with what was
+/// asked and the run stops there: a second attempt would only ask again. The
+/// answer is a steer, which the next run's conversation hears.
+#[test]
+fn a_question_with_nobody_there_ends_the_step() {
+    for (provider, agent, script) in [
+        ("opencode", "opencode:opencode/fixture", opencode_stand_in()),
+        ("pi", "pi:fixture/model", pi_stand_in()),
+    ] {
+        let task = GraphTask::with_tools(&[(provider, &script)]);
+        define_worker_graph(&task);
+        let home = task.home.path();
+        fs::write(home.join("ask-question"), "").unwrap();
+
+        let asked = task.task_run(&["task", "run", "INF-123", "worker", "-a", agent]);
+        assert!(!asked.success(), "{provider}: {}", asked.text);
+        let reason = "asked a question with nobody there to answer it: Use the fixture?";
+        assert!(asked.text.contains(reason), "{provider}: {}", asked.text);
+        assert!(
+            asked
+                .text
+                .contains("answer with `lf steer INF-123 \"…\"`, then `lf task run INF-123`"),
+            "{provider}: {}",
+            asked.text
+        );
+        assert!(
+            !asked.text.contains("starting it again"),
+            "{provider}: {}",
+            asked.text
+        );
+        assert_eq!(support::recorded_graphs(home).len(), 1, "{provider}");
+        assert_eq!(task.graph()["position"]["running"], false, "{provider}");
+        assert!(!asked.text.contains("?."), "{provider}: {}", asked.text);
+        let status = task.text_status();
+        assert!(status.contains(reason), "{provider}: {status}");
+        assert!(
+            status.contains("answer with `lf steer INF-123 \"…\"`, then `lf task run INF-123`"),
+            "{provider}: {status}"
+        );
+        assert!(
+            !status.contains("launch fresh work"),
+            "{provider}: {status}"
+        );
+        assert!(
+            !status.contains("Fixture completed."),
+            "{provider}: {status}"
+        );
+
+        // The answer reaches the conversation the next run starts.
+        task.ok(&["steer", "INF-123", "USE_THE_FIXTURE"]);
+        fs::remove_file(home.join("ask-question")).unwrap();
+        fs::write(
+            home.join("tool_turn.py"),
+            include_str!("../../../loopflow-execution/tests/support/tool_turn.py"),
+        )
+        .unwrap();
+        fs::write(home.join("tool-done"), "").unwrap();
+        task.task_run_ok(&["task", "run", "INF-123", "-a", agent]);
+        assert_eq!(task.graph()["position"], at("review"), "{provider}");
+        let heard = ["hook-context", "hook-steer"]
+            .map(|hook| fs::read_to_string(home.join(hook)).unwrap())
+            .join("\n");
+        assert!(heard.contains("USE_THE_FIXTURE"), "{provider}: {heard}");
+    }
+}
+
+/// `lf task interrupt` ends a worker's turn while it runs: the turn is recorded
+/// interrupted, nothing starts the run again, and the next `lf task run` takes
+/// the step up and moves the Graph on.
+#[test]
+fn a_worker_stops_on_interrupt_and_the_next_run_starts_its_step_again_on_claude_and_codex() {
+    interrupt_a_worker("claude", "claude", &holding_claude(), "Held.");
+    interrupt_a_worker(
+        "codex",
+        "codex",
+        &support::codex_app_server_script("Worker finished.", ""),
+        "Worker finished.",
+    );
+}
+
+#[test]
+fn a_worker_stops_on_interrupt_and_the_next_run_starts_its_step_again_on_opencode_and_pi() {
+    interrupt_a_worker(
+        "opencode",
+        "opencode:opencode/fixture",
+        &opencode_stand_in(),
+        "Fixture completed.",
+    );
+    interrupt_a_worker("pi", "pi:fixture/model", &pi_stand_in(), "answer 1:");
+}
+
+fn interrupt_a_worker(provider: &str, agent: &str, script: &str, answer: &str) {
+    {
+        let task = GraphTask::with_tools(&[(provider, script)]);
+        define_worker_graph(&task);
+        let home = task.home.path();
+        fs::write(home.join("hold-turn"), "").unwrap();
+        fs::write(home.join("release"), "").unwrap();
+
+        let mark = last_graph(home);
+        let started = task.run(&["task", "run", "INF-123", "worker", "-a", agent]);
+        // The stand-in says when the worker's own turn is under way.
+        wait_for("the worker's turn", || home.join("holding").exists());
+        task.ok(&["task", "interrupt", "INF-123"]);
+        let stopped = task.ran(started);
+        assert_eq!(stopped.code, Some(130), "{provider}: {}", stopped.text);
+        assert_eq!(attempts(home, mark), ["interrupted"], "{provider}");
+        assert_eq!(task.graph()["position"]["running"], false, "{provider}");
+
+        let db = rusqlite::Connection::open(home.join("loopflow.db")).unwrap();
+        let worker = |ended: &str| -> (String, Option<String>, Option<String>) {
+            db.query_row(
+                &format!(
+                    "SELECT s.id, s.provider_thread,
+                        (SELECT turn_status FROM session_events
+                          WHERE session_id=s.id AND kind='captured'
+                          ORDER BY rowid DESC LIMIT 1)
+                     FROM agent_sessions s
+                     WHERE s.task_id=?1 AND s.provider=?2 AND s.skill='implement'
+                       AND s.interactive=0 {ended}
+                     ORDER BY s.rowid DESC LIMIT 1"
+                ),
+                rusqlite::params![task.registered.task.id.as_str(), provider],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap_or_else(|error| panic!("{provider}: no worker Session: {error}"))
+        };
+        let (interrupted, thread, turn) = worker("");
+        assert_eq!(turn.as_deref(), Some("interrupted"), "{provider}");
+        assert!(
+            thread.is_some_and(|thread| !thread.is_empty()),
+            "{provider}"
+        );
+        // The stand-in is gone with its turn: nothing answers after the stop.
+        let history = task.run(&["history", "show", &interrupted, "--final"]);
+        assert!(
+            !String::from_utf8_lossy(&history.stdout).contains(answer),
+            "{provider}: {history:?}"
+        );
+
+        // Nobody continues a Run: the step starts again in a conversation of its own.
+        fs::remove_file(home.join("hold-turn")).unwrap();
+        task.task_run_ok(&["task", "run", "INF-123", "-a", agent]);
+        assert_eq!(task.graph()["position"], at("review"), "{provider}");
+        let (resumed, _, turn) = worker("AND s.completed_at IS NOT NULL");
+        assert_ne!(resumed, interrupted, "{provider}");
+        assert_eq!(turn.as_deref(), Some("completed"), "{provider}");
+        let history = task.run(&["history", "show", &resumed, "--final"]);
+        assert!(
+            String::from_utf8_lossy(&history.stdout).contains(answer),
+            "{provider}: {history:?}"
+        );
+    }
+}
+
+/// A harness that is not installed fails the same way on every attempt, so the
+/// run is not started again; with another agent in the order the step runs there.
+#[test]
+fn a_step_that_cannot_launch_is_not_started_again() {
+    let codex = support::codex_app_server_script("Worker finished.", "");
+    let task = GraphTask::with_tools(&[("codex", &codex)]);
+    define_worker_graph(&task);
+
+    let pinned = task.task_run(&[
+        "task",
+        "run",
+        "INF-123",
+        "worker",
+        "-a",
+        "opencode:opencode/fixture",
+    ]);
+    assert!(!pinned.success(), "{}", pinned.text);
+    let hint = "'opencode' is not installed. Install OpenCode 2 or later";
+    assert!(pinned.text.contains(hint), "{}", pinned.text);
+    assert!(
+        pinned.text.contains("stopped before any agent started"),
+        "{}",
+        pinned.text
+    );
+    assert!(
+        !pinned.text.contains("starting it again"),
+        "{}",
+        pinned.text
+    );
+    assert_eq!(support::recorded_graphs(task.home.path()).len(), 1);
+    let status = task.text_status();
+    assert!(status.contains("'opencode' is not installed"), "{status}");
+
+    task.ok(&[
+        "set",
+        "--global",
+        "agents",
+        "opencode:opencode/fixture,codex",
+    ]);
+    let moved = task.task_run(&["task", "run", "INF-123"]);
+    assert!(moved.success(), "{}", moved.text);
+    assert_eq!(task.graph()["position"], at("review"));
+    assert_eq!(support::recorded_graphs(task.home.path()).len(), 2);
+    let db = rusqlite::Connection::open(task.home.path().join("loopflow.db")).unwrap();
+    let ran_on_codex: bool = db
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM agent_sessions WHERE task_id=?1 AND provider='codex'
+                 AND skill='implement' AND interactive=0 AND completed_at IS NOT NULL)",
+            [task.registered.task.id.as_str()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(ran_on_codex, "{}", moved.text);
+    let recorded: String = db
+        .query_row("SELECT reason FROM agent_limit_recoveries", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert!(
+        recorded.starts_with(&format!(
+            "'opencode' is not installed{}codex",
+            loopflow_execution::ops::task_execution::MOVED_TO
+        )),
+        "{recorded}"
+    );
+}
+
+#[test]
+fn a_failed_command_step_is_started_again() {
     let task = GraphTask::new();
     let failed = task.task_run(&["task", "run", "INF-123", "held-review"]);
     assert!(!failed.success(), "{}", failed.text);
@@ -2028,7 +2409,7 @@ fn a_run_that_failed_after_moving_agents_starts_again_at_the_step_that_failed() 
              (SELECT lf_process_id FROM graph_processes ORDER BY rowid DESC LIMIT 1)
          ORDER BY s.seq DESC LIMIT 1",
         [format!(
-            "codex_error: You've hit your usage limit{}claude",
+            "codex_error: You’ve hit your usage limit{}claude",
             loopflow_execution::ops::task_execution::MOVED_TO
         )],
     )
@@ -2909,7 +3290,7 @@ fn task_ship_takes_a_merged_pr_on_to_its_check_step_instead_of_building() {
 }
 
 #[test]
-fn task_ship_restarts_on_the_next_read_after_its_process_dies() {
+fn task_ship_restarts_after_its_process_dies() {
     let task = shipping_task();
     fs::write(task.home.path().join("hold"), "").unwrap();
     let mut first = command(
@@ -2926,13 +3307,153 @@ fn task_ship_restarts_on_the_next_read_after_its_process_dies() {
     first.kill().unwrap();
     first.wait().unwrap();
     fs::remove_file(task.home.path().join("hold")).unwrap();
-    // Any read of this Machine's Tasks finds the dead ship and starts it again.
-    task.ok(&["task", "list"]);
+    // The server's recovery pass finds the dead ship and starts it again.
     wait_for("the restarted ship to reach end", || {
         task.graph()["position"] == at("end")
     });
     // The restart carries the same handoff; it is not shipped a second time.
     assert_eq!(handoffs(&task).len(), 1);
+}
+
+fn debug_run(task: &GraphTask) -> String {
+    let db = rusqlite::Connection::open(task.home.path().join("loopflow.db")).unwrap();
+    let mut out = String::new();
+    for sql in [
+        "SELECT json_array(step,run_start,lf_process_id,run_pid,restarts,restarted_at) FROM task_graphs",
+        "SELECT json_array(lf_process_id,graph,started_at,ended_at,pid,exit_code) FROM graph_processes",
+        "SELECT json_array(id,shipped_at) FROM tasks",
+    ] {
+        let mut query = db.prepare(sql).unwrap();
+        for row in query.query_map([], |row| row.get::<_, String>(0)).unwrap() {
+            out.push_str(&row.unwrap());
+            out.push('\n');
+        }
+    }
+    out
+}
+
+/// Start `lf task run INF-123 <args>` in its own process group, holding at its
+/// stand-in, and once `before` ran, SIGKILL its Graph and steps the way a
+/// crash would, with its carrier too when `carrier`.
+fn kill_a_carried_run(task: &GraphTask, args: &[&str], carrier: bool, before: impl FnOnce()) {
+    use std::os::unix::process::CommandExt;
+    let turns = stand_ins(task).len();
+    fs::write(task.home.path().join("hold"), "").unwrap();
+    let mut launcher = command(
+        task.repo.path(),
+        task.home.path(),
+        &[&["task", "run", "INF-123"], args].concat(),
+    )
+    .process_group(0)
+    .stdin(std::process::Stdio::null())
+    .stdout(std::process::Stdio::null())
+    .stderr(std::process::Stdio::null())
+    .spawn()
+    .unwrap();
+    wait_for("the stand-in", || stand_ins(task).len() > turns);
+    before();
+    // The run's carrier is the detached `lf task run` the launcher let go;
+    // the Graph and its steps run in groups of their own. A crash takes them
+    // all, the carrier first so it cannot start its Graph again.
+    let db = rusqlite::Connection::open(task.home.path().join("loopflow.db")).unwrap();
+    let pids: Vec<i32> = db
+        .prepare(
+            "SELECT run_pid FROM task_graphs WHERE run_pid IS NOT NULL AND ?1
+             UNION ALL SELECT pid FROM graph_processes WHERE ended_at IS NULL AND pid IS NOT NULL
+             UNION ALL SELECT pid FROM graph_process_steps WHERE ended_at IS NULL AND pid IS NOT NULL",
+        )
+        .unwrap()
+        .query_map([carrier], |row| row.get(0))
+        .unwrap()
+        .collect::<rusqlite::Result<_>>()
+        .unwrap();
+    assert!(pids.len() > usize::from(carrier), "{pids:?}");
+    for pid in pids {
+        // SAFETY: kill and killpg only send signals to processes this test started.
+        unsafe {
+            libc::kill(pid, libc::SIGKILL);
+            libc::killpg(pid, libc::SIGKILL);
+        }
+    }
+    launcher.wait().unwrap();
+}
+
+#[test]
+fn a_killed_graph_is_started_again_by_its_carrier() {
+    let task = shipping_task();
+    task.repo.create_file(
+        ".lf/graphs/carried.yaml",
+        "- demo\n- interactive: {name: demo, id: review}\n",
+    );
+    task.repo.stage_all();
+    task.repo.commit("Define a Graph with a step before review");
+    // A SIGKILL is no person's stop: the carrier starts the Graph again.
+    kill_a_carried_run(&task, &["carried"], false, || {});
+    fs::remove_file(task.home.path().join("hold")).unwrap();
+    wait_for("the run to stop at review", || {
+        task.graph()["position"] == at("review")
+    });
+    let graphs = support::recorded_graphs(task.home.path());
+    assert_eq!(graphs.len(), 2, "{}", debug_run(&task));
+    assert_eq!(task.status()["execution"]["state"], "idle");
+}
+
+#[test]
+fn a_task_run_whose_carrier_died_is_carried_again_and_gives_up_after_five() {
+    let task = shipping_task();
+    task.repo.create_file(
+        ".lf/graphs/carried.yaml",
+        "- demo\n- interactive: {name: demo, id: review}\n",
+    );
+    task.repo.stage_all();
+    task.repo.commit("Define a Graph with a step before review");
+    kill_a_carried_run(&task, &["carried"], true, || {});
+    fs::remove_file(task.home.path().join("hold")).unwrap();
+    // The recovery pass runs `lf task run` again, which stops at review as
+    // the first one would have; nothing approved Auto-Ship.
+    wait_for("the carried run to stop at review", || {
+        task.graph()["position"] == at("review")
+    });
+    assert_ne!(task.state(), "shipping");
+    let graphs = support::recorded_graphs(task.home.path()).len();
+    assert_eq!(graphs, 2, "one Graph killed, one carried again");
+    std::thread::sleep(Duration::from_secs(2));
+    assert_eq!(support::recorded_graphs(task.home.path()).len(), graphs);
+
+    // A run carried again five times in a row waits for a person.
+    kill_a_carried_run(&task, &["--from", "demo"], true, || {
+        let db = rusqlite::Connection::open(task.home.path().join("loopflow.db")).unwrap();
+        db.execute(
+            "UPDATE task_graphs SET restarts=5,restarted_at=unixepoch() WHERE task_id=?1",
+            [task.registered.task.id.as_str()],
+        )
+        .unwrap();
+    });
+    fs::remove_file(task.home.path().join("hold")).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let execution = loop {
+        let execution = task.status()["execution"].clone();
+        if execution["reason"]
+            .as_str()
+            .is_some_and(|reason| reason.starts_with("Run died 5 times at"))
+            || Instant::now() > deadline
+        {
+            break execution;
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    };
+    assert_eq!(
+        execution["reason"],
+        "Run died 5 times at demo; `lf task run INF-123` starts it again",
+        "{execution} {}",
+        debug_run(&task)
+    );
+    std::thread::sleep(Duration::from_secs(2));
+    assert_eq!(
+        support::recorded_graphs(task.home.path()).len(),
+        graphs + 1,
+        "nothing carried it again"
+    );
 }
 
 #[test]
@@ -2953,8 +3474,7 @@ fn task_ship_unassigned_mid_ship_waits_and_lets_its_running_step_finish() {
     task.ok(&["task", "unassign", "INF-123"]);
     first.kill().unwrap();
     first.wait().unwrap();
-    // Nobody owns it, so no read of this Machine's Tasks starts its ship again.
-    task.ok(&["task", "list"]);
+    // Nobody owns it, so the server does not start its ship again.
     let shown = task.run(&["wave", "show", "--json"]);
     let shown = String::from_utf8_lossy(&shown.stdout);
     assert!(
@@ -2984,7 +3504,7 @@ sys.exit(3)
 "#;
 
 #[test]
-fn task_ship_restarts_after_a_failure_wait_instead_of_on_every_read() {
+fn task_ship_restarts_after_a_failure_wait_instead_of_at_once() {
     let task = GraphTask::with_tools(&[("claude", FAILING_CLAUDE)]);
 
     loopflow_execution::config::files::update(&task.home.path().join("config.yaml"), |value| {
@@ -2999,7 +3519,8 @@ fn task_ship_restarts_after_a_failure_wait_instead_of_on_every_read() {
     assert_eq!(attempts, 3);
     // Approved with its ship process exited, it is idle until the restart.
     assert_eq!(task.state(), "idle");
-    // Reads right after the failure leave the restart waiting its minute.
+    // The server's passes right after the failure leave the restart waiting
+    // its minute; reads change nothing.
     for _ in 0..3 {
         task.ok(&["task", "list"]);
     }
@@ -3078,12 +3599,9 @@ fn task_ship_blocked_at_verification_waits_there_without_building_again() {
     );
     task.repo.stage_all();
     task.repo.commit("Define the verifying Graph");
+    let held = Some(i32::from(loopflow_execution::process::GraphHeld::EXIT));
     let first = task.run(&["-b", "--task", "INF-123", "ship", "--graph", "verifying"]);
-    assert!(
-        !first.status.success(),
-        "{}",
-        String::from_utf8_lossy(&first.stderr)
-    );
+    assert_eq!(first.status.code(), held, "{first:?}");
     // The stand-in at check reported a dependency: the Task waits at check.
     assert_eq!(
         task.graph()["position"],
@@ -3094,7 +3612,7 @@ fn task_ship_blocked_at_verification_waits_there_without_building_again() {
     assert_eq!(stand_ins(&task).len(), 1);
     let again = task.run(&["-b", "--task", "INF-123", "ship"]);
     let stderr = String::from_utf8_lossy(&again.stderr);
-    assert!(!again.status.success(), "{stderr}");
+    assert_eq!(again.status.code(), held, "{again:?}");
     assert!(stderr.contains("INF-123: standing in at check"), "{stderr}");
     assert_eq!(task.graph()["position"], at("check"));
     assert_eq!(stand_ins(&task).len(), 2);

@@ -298,6 +298,15 @@ fn end_dead_owners(conn: &Connection, dead: &[(RunningOwner, i64)]) -> StoreResu
         let unchanged = running_owners_in(&tx)?.contains(observed);
         if unchanged {
             match &observed.owner {
+                // A carrier's own end clears its OS process and says nothing
+                // more; a death is told apart by when it was found.
+                Owner::Run(RunOwner::TaskCarrier) => {
+                    tx.execute(
+                        "UPDATE task_graphs SET run_pid=NULL,run_os_started_at=NULL,run_died_at=?2
+                         WHERE lf_process_id=?1 AND run_pid IS NOT NULL",
+                        params![observed.id, at],
+                    )?;
+                }
                 Owner::Run(owner) => super::graph_inventory::finish_run_in(
                     &tx,
                     *owner,

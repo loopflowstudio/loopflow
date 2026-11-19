@@ -5,6 +5,7 @@ pub mod connect;
 mod maintenance;
 pub mod mobile;
 mod outbox;
+mod recovery;
 mod remote;
 pub mod schema;
 mod service;

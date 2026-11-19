@@ -344,6 +344,16 @@ fn task_detail_says_each_fact_once() {
         detail.task.graph.as_ref().unwrap().step.as_deref(),
         Some("demo")
     );
+    let conversation = detail
+        .sessions
+        .iter()
+        .find(|session| Some(&session.id) == detail.conversation.as_ref())
+        .unwrap();
+    assert_eq!(
+        conversation.status_line.as_deref(),
+        Some("died 12:01 (exit 137) · starts again 12:02"),
+        "the server's sentence, printed as given"
+    );
     assert_eq!(
         serde_json::to_value(&detail).unwrap(),
         serde_json::from_str::<serde_json::Value>(json).unwrap()

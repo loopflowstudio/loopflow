@@ -908,6 +908,15 @@ impl SqliteStore {
         Ok(())
     }
 
+    /// The provider's own exit code, as the launcher that became it saw it.
+    pub fn record_agent_exit_code(&self, agent: &AgentProcessId, code: i32) -> StoreResult<()> {
+        self.conn.lock().expect("store mutex poisoned").execute(
+            "UPDATE agent_sessions SET agent_exit_code=?2 WHERE agent_process_id=?1",
+            params![agent, code],
+        )?;
+        Ok(())
+    }
+
     pub fn record_agent_process_identity(
         &self,
         session: &str,
@@ -980,6 +989,27 @@ impl SqliteStore {
         tx.execute(
             "UPDATE agent_sessions SET agent_endpoint=?2 WHERE agent_process_id=?1",
             params![expected.agent_process_id, endpoint],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// The agent the Session's current AgentProcess runs on; a retry may move
+    /// the conversation to another provider or model. Closing the process and
+    /// routing a steer both go by the recorded provider.
+    pub fn record_session_agent(
+        &self,
+        session: &str,
+        expected: &SessionAttachment,
+        provider: &str,
+        model: Option<&str>,
+    ) -> StoreResult<()> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        require_attachment_in(&tx, session, expected)?;
+        tx.execute(
+            "UPDATE agent_sessions SET provider=?2,model=?3 WHERE agent_process_id=?1",
+            params![expected.agent_process_id, provider, model],
         )?;
         tx.commit()?;
         Ok(())

@@ -548,7 +548,7 @@ mod tests {
                     "ship",
                 )
                 .unwrap();
-            store.count_ship_restart(&task).unwrap();
+            store.count_task_run_restart(&task, None, 0).unwrap();
             store
                 .ship_task(
                     &task,
@@ -560,7 +560,7 @@ mod tests {
                 )
                 .unwrap();
             store.task_shipping(&task).unwrap();
-            store.reset_ship_restarts(&task).unwrap();
+            store.reset_task_run_restarts(&task).unwrap();
         });
         let scans = growing_scans(&store, &traced);
         assert!(scans.is_empty(), "{}", scans.join("\n"));

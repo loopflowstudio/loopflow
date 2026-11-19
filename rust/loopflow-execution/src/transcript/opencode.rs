@@ -54,6 +54,19 @@ pub fn messages(store: &Path, id: &str) -> Result<Vec<Value>> {
     Ok(messages)
 }
 
+/// The newest user message of conversation `id`: the request a run answers.
+pub(crate) fn last_request(store: &Path, id: &str) -> Option<String> {
+    open(store)
+        .ok()?
+        .query_row(
+            "SELECT id FROM session_message WHERE session_id=?1 AND type='user'
+             ORDER BY seq DESC LIMIT 1",
+            params![id],
+            |row| row.get(0),
+        )
+        .ok()
+}
+
 /// Unix seconds of conversation `id`'s last write.
 pub(super) fn last_written(store: &Path, id: &str) -> Option<i64> {
     let at: Option<i64> = open(store)

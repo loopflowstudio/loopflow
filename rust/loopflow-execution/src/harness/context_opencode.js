@@ -11,6 +11,9 @@ export default {
     let refresh = "start";
     let block;
     let owner;
+    // OpenCode keeps no system text between requests, so a steer heard once is
+    // sent with every later request of this conversation, as a transcript would.
+    let heard = "";
     // Context lf cannot serve is a recording gap, never a notice in the
     // conversation: like Claude's hooks, one line per changed failure in this
     // plugin's log (OpenCode's stderr, kept beside the capture), then quiet
@@ -55,8 +58,8 @@ export default {
           recordingGap(error);
         }
       }
-      const news = ownNews(callback, (line) => console.error(line), ["--delivery", delivery], lf);
-      const text = `${news}${block ?? ""}`;
+      heard += ownNews(callback, (line) => console.error(line), ["--delivery", delivery], lf);
+      const text = `${heard}${block ?? ""}`;
       if (text) input.system.push({ type: "text", text });
     });
     if (!server) return async () => {};

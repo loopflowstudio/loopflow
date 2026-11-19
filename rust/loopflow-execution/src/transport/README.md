@@ -104,7 +104,9 @@ runs no async runtime and knows nothing about Sessions.
   running when the server's service stops or is replaced.
 - **Lifetime.** It exits 60 seconds after its last child, if no start
   arrives. Logout and reboot end it. Nothing restarts a holder, and a holder
-  that dies takes its agents with it.
+  that dies takes its agents with it; the server's
+  [recovery pass](../../../loopflow/src/server/README.md#recovery-pass)
+  starts the Task work sessions among them again, in the current holder.
 - **Ring.** The newest 2 MiB of raw output per PTY, addressed by absolute
   byte count since the child started. The holder drains every PTY whether or
   not a server is connected, so a stopped server never blocks an agent.
@@ -166,8 +168,8 @@ beside it; the server records the provider's exit, settles its capture and
 reports where the conversation moved. A Codex launcher does the same into its client, which talks to its app-server directly. The
 server's lifetime worker checks that client's attachment every two seconds
 and stops it when the conversation moves; a failed store read leaves it
-running, and the byte-handling loop never waits for that read. OpenCode keeps
-its launcher beside its private server. The server strips `LF_SERVER` and
+running, and the byte-handling loop never waits for that read. An OpenCode
+launcher becomes `opencode --standalone` the same way. The server strips `LF_SERVER` and
 `LF_SERVER_STATUS` from what the holder starts, so an agent in a Desktop pane
 runs like one opened from a CLI.
 

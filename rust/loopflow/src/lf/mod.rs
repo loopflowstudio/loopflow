@@ -247,7 +247,9 @@ impl Cli {
             | Some(Commands::External(_) | Commands::Inline { .. })
             | Some(Commands::Discord { .. }) => true,
             Some(Commands::Skill { cmd }) => matches!(cmd, SkillCommand::External(_)),
-            Some(Commands::Graph { cmd }) => matches!(cmd, GraphCommand::External(_)),
+            Some(Commands::Graph { cmd }) => {
+                matches!(cmd, GraphCommand::Run | GraphCommand::External(_))
+            }
             Some(Commands::Task { cmd }) => matches!(cmd, TaskCommand::Run { .. }),
             Some(Commands::Ship { .. }) => true,
             Some(Commands::Session { cmd }) => matches!(
@@ -1797,7 +1799,8 @@ pub enum SessionCommand {
         /// Leave the other client running; continue in a new conversation forked from it
         #[arg(long, conflicts_with = "message")]
         fork: bool,
-        /// Time a new Task's setup steps under the creation request that started it
+        /// The request this start answers: a new Task's setup steps are timed
+        /// under it, and the server's recovery pass names its own starts
         #[arg(long)]
         request_id: Option<String>,
     },
@@ -4171,12 +4174,17 @@ mod tests {
                 }
             }
         }
-        // A restarted ship carries its run's agent to the steps it starts.
+        // A restarted ship, and the Graph run `lf task run -a` starts, carry
+        // the run's agent to the steps they start.
         let checked = |argv: &[&str]| Cli::try_parse_from(argv).unwrap().checked().unwrap();
-        assert!(
-            checked(&["lf", "--agent", "claude:opus", "--task", "LOO-1", "ship"])
-                .may_launch_agent()
-        );
+        for tail in [&["ship"][..], &["graph", "run"]] {
+            let argv = [
+                &["lf", "--agent", "claude:opus", "--task", "LOO-1"][..],
+                tail,
+            ]
+            .concat();
+            assert!(checked(&argv).may_launch_agent(), "{argv:?}");
+        }
         assert!(!checked(&["lf", "--task", "LOO-1", "task", "hold"]).may_launch_agent());
         // A Session id beside its Work selects the Session; Task and Wave
         // together stay one selection too many.

@@ -38,47 +38,6 @@ pub fn remote(repo: &Path) -> Option<String> {
         .map(|name| (*name).to_owned())
 }
 
-/// One Git exchange for `repo`, when it has no Linear or Asana.
-pub async fn sync(store: &crate::store::Store, repo: &str) -> Result<()> {
-    if crate::ops::tracker::connected(repo) {
-        return Ok(());
-    }
-    let (sqlite, repo) = (store.sqlite.clone(), repo.to_owned());
-    crate::journal::request::spawn_blocking(move || exchange(&sqlite, &repo)).await?
-}
-
-/// One exchange for `repo` by each carrier it has: the hub, then Git, which
-/// runs whether or not the hub answered. The first failure is returned.
-pub async fn sync_carriers(store: &crate::store::Store, repo: &str) -> Result<()> {
-    let by_hub = super::plan_hub::sync(store, repo, false).await;
-    sync(store, repo).await.and(by_hub)
-}
-
-/// How long a claim waits to see the claims other Machines have made.
-const BEFORE_CLAIM: std::time::Duration = std::time::Duration::from_secs(5);
-
-/// Before this Machine claims `task`, which nobody owns as far as it has
-/// seen: one exchange by each carrier, so a claim already made elsewhere is
-/// read first. A carrier that fails or outlasts [`BEFORE_CLAIM`] leaves the
-/// claim to go ahead; whichever claim was first holds once they meet.
-pub(crate) async fn before_claim(
-    store: &crate::store::Store,
-    repo: &Path,
-    task: &loopflow_model::durable::TaskId,
-) {
-    if !matches!(store.sqlite.task_owned(task), Ok(false)) {
-        return;
-    }
-    let repo = repo.to_string_lossy();
-    match tokio::time::timeout(BEFORE_CLAIM, sync_carriers(store, &repo)).await {
-        Ok(Ok(())) => {}
-        Ok(Err(error)) => {
-            tracing::debug!(%task, error = %format!("{error:#}"), "claiming without the plan exchange");
-        }
-        Err(_) => tracing::debug!(%task, "claiming before the plan exchange finished"),
-    }
-}
-
 /// One Git exchange for every repository this Machine plans without Linear
 /// or Asana. The Machine server runs this on its timer.
 pub fn exchange_all(store: &SqliteStore) -> Result<()> {
@@ -106,7 +65,7 @@ pub fn exchange(store: &SqliteStore, repo: &str) -> Result<()> {
     // A clone that has saved nothing still reads the plan its remote carries.
     let repository = crate::repository::location::ensure_repository(store, repo)?;
     // One Git exchange per repository at a time; the next reads what this one wrote.
-    let _turn = super::plan_hub::lock(store, "plan-git", &repository)?;
+    let _turn = super::plan_carriers::lock(store, "plan-git", &repository)?;
     let sent_seq = store.select_carrier(repo, Carrier::Git, &remote)?.sent_seq;
     let result = exchange_with(store, repo, &remote, repository, sent_seq);
     let error = result.as_ref().err().map(|error| format!("{error:#}"));
@@ -143,7 +102,7 @@ fn exchange_with(
     // A ref that cannot be read does not stop the others or this Machine's push.
     let mut failed = None;
     let taken = store.plan_ref_tips(repo)?;
-    let names = super::plan_hub::machine_names(store)?;
+    let names = crate::store::ownership::machine_names(store)?;
     let mut lowest = repository.clone();
     for (machine, tip) in &seen {
         if machine == me.as_str() || taken.get(machine) == Some(tip) {

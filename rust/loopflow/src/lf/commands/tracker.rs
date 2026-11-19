@@ -52,7 +52,7 @@ pub fn refresh(checkout: &Path) -> Result<()> {
     let repo = loopflow_execution::git::worktrees::main_repo_root(checkout)?;
     tokio::runtime::Runtime::new()?.block_on(async {
         let store = open_store().await?;
-        loopflow_execution::ops::plan_git::sync_carriers(&store, &repo.to_string_lossy()).await
+        loopflow_execution::ops::plan_carriers::sync(&store, &repo.to_string_lossy()).await
     })
 }
 

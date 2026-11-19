@@ -401,7 +401,7 @@ Run these Linux fixtures when changing Linear fetches, even if macOS checks pass
 `planning_setup_tests` proves tracker selection and that the released `provider: git`
 reads as no tracker. `machine_commands::the_later_change_shows_on_both_machines_through_the_hub`
 runs a laptop and its hub over the real `ssh … lf server connect` carrier, through
-an offline edit and a lost `plan.apply` answer; `sqlite::plan_hub` covers the
+an offline edit and a lost `plan.apply` answer; `sqlite::plan_carriers` covers the
 exchange's store half. `task_remote_tests` exercises actual target CLI dispatch
 with simulated SSH/providers; it does not establish configured remote installation.
 

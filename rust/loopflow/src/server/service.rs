@@ -1316,7 +1316,7 @@ async fn request(
         }
     };
     if let Some(directory) = planned {
-        loopflow_execution::ops::plan_hub::after_command(directory);
+        loopflow_execution::ops::plan_carriers::after_command(directory);
     }
     // A closed connection drops the answer; the effect stands.
     if let Err(failure) = outgoing.deliver(message, reservation).await {

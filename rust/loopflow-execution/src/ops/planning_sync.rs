@@ -36,7 +36,7 @@ pub(crate) async fn find_task(
     if let Some(task) = read().map_err(message)? {
         return Ok(Some(task));
     }
-    if let Err(error) = super::plan_git::sync_carriers(store, repo).await {
+    if let Err(error) = super::plan_carriers::sync(store, repo).await {
         tracing::warn!(error = %format!("{error:#}"), "plan read pending; resolving retained Task");
     }
     read().map_err(message)
@@ -177,7 +177,7 @@ fn sync_directory(directory: &Path, refresh: bool) -> OpsResult<()> {
             if !super::tracker::connected(&repo) {
                 // A provider exit reads the hub; an asked-for refresh fetches too.
                 let synced = if refresh {
-                    super::plan_git::sync_carriers(&store, &repo).await
+                    super::plan_carriers::sync(&store, &repo).await
                 } else {
                     super::plan_hub::sync(&store, &repo, false).await
                 };

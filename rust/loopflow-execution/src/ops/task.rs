@@ -1846,7 +1846,7 @@ async fn place_prepared_task(
     // Placing an unowned Task claims it: read what other Machines claimed first.
     if let Some(task) = store.get_task(task_id).await.map_err(task_error)? {
         if let Ok(repository) = repository_for_task(store, &task) {
-            super::plan_git::before_claim(store, &repository, task_id).await;
+            super::plan_carriers::before_claim(store, &repository, task_id).await;
         }
     }
     let (mut task, acquisition) = loop {
@@ -2681,7 +2681,7 @@ pub fn task_sync(repo: &Path, issue: &str, answer: Option<LostAnswer>) -> OpsRes
                 .map_err(task_error)?;
         }
         let Some(tracker) = super::tracker::queued_tracker(&repository) else {
-            super::plan_git::sync_carriers(&store, &repo)
+            super::plan_carriers::sync(&store, &repo)
                 .await
                 .map_err(|error| task_error(format!("{error:#}")))?;
             return carriers_synced(&store, &repo, &task);
@@ -2731,7 +2731,11 @@ async fn synced(store: &Store, task: &loopflow_storage::work::task::TaskId) -> O
         .map_err(task_error)?
         .ok_or_else(|| task_error("Task is missing"))?;
     let open = store.task_tracker_sync(task).map_err(task_error)?.lines();
-    Ok(open_lines(&saved.identifier, &open))
+    Ok(if open.is_empty() {
+        format!("{}: nothing open", saved.identifier)
+    } else {
+        format!("{}: {}", saved.identifier, open.join("\n"))
+    })
 }
 
 /// What `lf task sync` prints without a tracker: what each carrier has yet
@@ -2764,14 +2768,6 @@ fn carriers_synced(store: &Store, repo: &str, task: &Task) -> OpsResult<String> 
     } else {
         format!("{}: {}", task.identifier, unsent.join("; "))
     })
-}
-
-fn open_lines(identifier: &str, open: &[String]) -> String {
-    if open.is_empty() {
-        format!("{identifier}: nothing open")
-    } else {
-        format!("{identifier}: {}", open.join("\n"))
-    }
 }
 
 pub fn completion_pending(store: &SharedStore, task: &Task) -> OpsResult<Option<String>> {

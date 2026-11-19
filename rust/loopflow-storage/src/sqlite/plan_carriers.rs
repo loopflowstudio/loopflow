@@ -122,35 +122,23 @@ fn unsent_count(conn: &Connection, repo: &str, sent_seq: i64) -> StoreResult<usi
 
 /// What a record cannot be written without: a comment's Task, a Task's
 /// Project, a Project's Wave, a Wave's parent and the Project it selects.
-fn needs(conn: &Connection, table: &str, id: &str) -> StoreResult<Vec<(&'static str, String)>> {
-    let (sql, tables): (_, [&'static str; 2]) = match table {
-        "waves" => (
-            "SELECT parent_wave_id,current_project_id FROM waves WHERE id=?1",
-            ["waves", "projects"],
-        ),
-        "projects" => (
-            "SELECT wave_id,NULL FROM projects WHERE id=?1",
-            ["waves", "waves"],
-        ),
-        "tasks" => (
-            "SELECT project_id,NULL FROM tasks WHERE id=?1",
-            ["projects", "projects"],
-        ),
-        _ => (
-            "SELECT task_id,NULL FROM task_comments WHERE id=?1",
-            ["tasks", "tasks"],
-        ),
+fn needs(conn: &Connection, table: &str, id: &str) -> StoreResult<Vec<(String, String)>> {
+    let sql = match table {
+        "waves" => {
+            "SELECT 'waves',parent_wave_id FROM waves WHERE id=?1
+             UNION ALL SELECT 'projects',current_project_id FROM waves WHERE id=?1"
+        }
+        "projects" => "SELECT 'waves',wave_id FROM projects WHERE id=?1",
+        "tasks" => "SELECT 'projects',project_id FROM tasks WHERE id=?1",
+        _ => "SELECT 'tasks',task_id FROM task_comments WHERE id=?1",
     };
-    let ids: Option<(Option<String>, Option<String>)> = conn
-        .prepare_cached(sql)?
-        .query_row([id], |row| Ok((row.get(0)?, row.get(1)?)))
-        .optional()?;
-    let (first, second) = ids.unwrap_or_default();
-    Ok(tables
-        .into_iter()
-        .zip([first, second])
-        .filter_map(|(table, id)| Some((table, id?)))
-        .collect())
+    let mut query = conn.prepare_cached(sql)?;
+    let mut needed = Vec::new();
+    for row in query.query_map([id], |row| Ok((row.get(0)?, row.get(1)?)))? {
+        let (table, id): (String, Option<String>) = row?;
+        needed.extend(id.map(|id| (table, id)));
+    }
+    Ok(needed)
 }
 
 /// Add `table`/`id` to `page` after everything it needs, each record once,
@@ -167,7 +155,7 @@ fn push_record(
     }
     let mut bytes = 0;
     for (table, id) in needs(conn, table, id)? {
-        bytes += push_record(conn, page, held, table, &id)?;
+        bytes += push_record(conn, page, held, &table, &id)?;
     }
     // A record removed since its change has nothing to send.
     let record = match planning_write::stamped(conn, table, id) {

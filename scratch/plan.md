@@ -161,7 +161,7 @@ finds its checkout. Checked in slice 2: binding keeps rows saved under the
 clone's first id, so this stands.
 
 **When they run.** The Machine server owns both. After a command it answers,
-the existing coalesced exchange (`after_command`, quiet 5 s) does the hub and
+the existing coalesced exchange (`ops/plan_carriers.rs` `after_command`, quiet 5 s) does the hub and
 the Git push. One server task runs the Git exchange for every repository
 without Linear or Asana that has a remote, every 60 s. `lf task sync` does
 both in the foreground. A command run with no server sends to the hub as now
@@ -379,7 +379,7 @@ etude checkout and `lf` version are unknown.
      `lf wave status --sync`, a Task lookup that misses, a served command and
      the server's minute do Git too.
 3. **Claims are first-wins.** *Built*, without Linear or Asana
-   (`sqlite/task_ownership.rs`, `ops/plan_git.rs` `before_claim`). An entry
+   (`sqlite/task_ownership.rs`, `ops/plan_carriers.rs` `before_claim`). An entry
    carries `order` and `seen`; every Machine sorts the log by `order`, then
    the writing Machine's id; a claim whose `seen` is not the entry in effect
    just before it loses to the claim holding the Task and names no owner
@@ -467,5 +467,14 @@ etude checkout and `lf` version are unknown.
 - Left on the Machine, not started by this pass as far as it can tell: five
   `target/debug/lf server run` processes of this checkout, one to five hours
   old.
+- Compress, passed 2026-11-18 after moving the both-carrier code to
+  `ops/plan_carriers.rs`:
+  `cargo nextest run -p loopflow-storage -p loopflow-execution -p loopflow --lib -E 'test(sqlite::plan_carriers::) | test(sqlite::planning_write::) | test(ops::plan_git::) | test(moving_saves_membership_offline_and_retains_inbound_changes) | test(store::children_tests::)'`
+  (17 tests) and clippy on the three crates.
+  `local_planning::moving_saves_membership_offline_…` injected its failure on
+  `git_tracker_changes`, which nothing writes any more; it now injects on
+  `plan_changes`. It took 200 s of nextest's 300 on this Machine, for gate to
+  watch. The server-side `after_command` path has no focused test and was only
+  compiled.
 - Next: nothing in this Task's slices; gate runs the list above. Open choices
   are in `scratch/questions.md`.

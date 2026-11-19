@@ -432,80 +432,40 @@ pub(crate) fn ensure_record(
         return Ok(false);
     }
     let missing = || StoreError::InvalidData("required planning identity is missing".into());
+    // The value the edits leave a field with.
+    macro_rules! last {
+        ($field:ident) => {
+            edits.iter().rev().find_map(|edit| match &edit.change {
+                WorkValue::$field(value) => Some(value),
+                _ => None,
+            })
+        };
+    }
     match table {
         "waves" => {
             loopflow_model::id::WaveId::parse(id)
                 .map_err(|e| StoreError::InvalidData(e.to_string()))?;
             registered_repository_in(conn, repo)?;
-            let name = edits
-                .iter()
-                .rev()
-                .find_map(|edit| match &edit.change {
-                    WorkValue::WaveName(name) => Some(name),
-                    _ => None,
-                })
-                .ok_or_else(missing)?;
-            let parent = edits
-                .iter()
-                .rev()
-                .find_map(|edit| match &edit.change {
-                    WorkValue::WaveParent(parent) => Some(parent),
-                    _ => None,
-                })
-                .and_then(Option::as_deref);
+            let name = last!(WaveName).ok_or_else(missing)?;
+            let parent = last!(WaveParent).and_then(Option::as_deref);
             conn.execute("INSERT INTO waves(id,name,repo,created_at,parent_wave_id) VALUES(?1,?2,?3,unixepoch(),?4)",params![id,name,repo,parent])?;
         }
         "projects" => {
-            let wave = edits
-                .iter()
-                .rev()
-                .find_map(|edit| match &edit.change {
-                    WorkValue::ProjectWave(wave) => Some(wave),
-                    _ => None,
-                })
-                .ok_or_else(missing)?;
+            let wave = last!(ProjectWave).ok_or_else(missing)?;
             conn.execute(
                 "INSERT INTO projects(id,wave_id,created_at,updated_at,description) VALUES(?1,?2,unixepoch(),unixepoch(),'')",
                 params![id, wave],
             )?;
         }
         "tasks" => {
-            let project = edits
-                .iter()
-                .rev()
-                .find_map(|edit| match &edit.change {
-                    WorkValue::TaskProject(project) => Some(project),
-                    _ => None,
-                })
-                .ok_or_else(missing)?;
-            let identifier = edits
-                .iter()
-                .rev()
-                .find_map(|edit| match &edit.change {
-                    WorkValue::TaskIdentifier(identifier) => Some(identifier),
-                    _ => None,
-                })
-                .ok_or_else(missing)?;
+            let project = last!(TaskProject).ok_or_else(missing)?;
+            let identifier = last!(TaskIdentifier).ok_or_else(missing)?;
             let repository = registered_repository_in(conn, repo)?;
             conn.execute("INSERT INTO tasks(id,project_id,issue_identifier,created_at,updated_at,workspace_slug,repository_id) VALUES(?1,?2,?3,unixepoch(),unixepoch(),'',?4)",params![id,project,identifier,repository.as_str()])?;
         }
         "task_comments" => {
-            let task = edits
-                .iter()
-                .rev()
-                .find_map(|edit| match &edit.change {
-                    WorkValue::CommentTask(task) => Some(task),
-                    _ => None,
-                })
-                .ok_or_else(missing)?;
-            let content = edits
-                .iter()
-                .rev()
-                .find_map(|edit| match &edit.change {
-                    WorkValue::CommentContent(content) => Some(content),
-                    _ => None,
-                })
-                .ok_or_else(missing)?;
+            let task = last!(CommentTask).ok_or_else(missing)?;
+            let content = last!(CommentContent).ok_or_else(missing)?;
             conn.execute("INSERT INTO task_comments(id,task_id,body,author,created_at) VALUES(?1,?2,?3,?4,?5)",params![id,task,content.body,serde_json::to_string(&content.author)?,content.created_at])?;
         }
         _ => return Err(StoreError::InvalidData("unknown Work table".into())),

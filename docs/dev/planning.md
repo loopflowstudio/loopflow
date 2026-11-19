@@ -106,9 +106,10 @@ from `.lf/config.yaml`; `linear/` and `asana/` own tracker requests, responses a
 incoming events. The store never builds tracker input, and no `Linear*` type leaves
 `linear/`: trackers fail with `tracker::TrackerError`.
 `ops/planning_sync.rs` owns save delivery, store access and Wave locks;
-`ops/plan_hub.rs` owns the exchange with a hub. Ordinary Task lookup and
-comments belong to `ops/task.rs`. A lookup miss without a tracker reads the hub
-once, when one is named; it cannot fall through to Linear.
+`ops/plan_hub.rs` owns the exchange with a hub, `ops/plan_git.rs` the one with
+a remote, and `ops/plan_carriers.rs` when the two run together. Ordinary Task
+lookup and comments belong to `ops/task.rs`. A lookup miss without a tracker
+exchanges once by each carrier; it cannot fall through to Linear.
 Unmapped local Projects remain local during Linear refresh until their export links them.
 
 `loopflow_model::comment::TaskComment` owns shared discussion. `TaskComments` joins

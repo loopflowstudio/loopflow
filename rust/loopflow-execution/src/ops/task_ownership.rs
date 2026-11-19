@@ -49,7 +49,7 @@ pub fn change(repo: &Path, issue: &str, change: OwnershipChange) -> OpsResult<Ta
         let repository = super::task::repository_for_task(&store, &task)?;
         match &change {
             OwnershipChange::Claim => {
-                super::plan_git::before_claim(&store, &repository, &task.id).await;
+                super::plan_carriers::before_claim(&store, &repository, &task.id).await;
                 crate::store::ownership::claim_task(&store.sqlite, &task.id).map_err(message)?;
             }
             OwnershipChange::Move(target) => {

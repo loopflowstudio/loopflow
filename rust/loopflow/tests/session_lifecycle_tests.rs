@@ -1330,7 +1330,7 @@ fn a_task_primary_is_one_of_its_own_conversations() {
     support::register_sibling_task(&task, "INF-124", "task-several", &several_path);
     let empty_path = fixture.repo.create_named_worktree("task-empty");
     support::register_sibling_task(&task, "INF-125", "task-empty", &empty_path);
-    let converse = |checkout: &Path| -> String {
+    let converse = |checkout: &Path, opened_at: i64| -> String {
         let before = fixture.launches().len();
         let output = fixture
             .command(&LAUNCH)
@@ -1338,7 +1338,15 @@ fn a_task_primary_is_one_of_its_own_conversations() {
             .output()
             .unwrap();
         assert!(output.status.success(), "{output:?}");
-        fixture.session_row(&fixture.launches()[before]).0
+        let session = fixture.session_row(&fixture.launches()[before]).0;
+        fixture
+            .db()
+            .execute(
+                "UPDATE agent_sessions SET opened_at=?2 WHERE id=?1",
+                rusqlite::params![session, opened_at],
+            )
+            .unwrap();
+        session
     };
     let primary = |args: &[&str]| -> Value {
         fixture.json(
@@ -1368,7 +1376,7 @@ fn a_task_primary_is_one_of_its_own_conversations() {
     assert!(members("INF-125").is_empty());
 
     // The Task's only unfinished interactive conversation is its primary.
-    let sole = converse(&sole_path);
+    let sole = converse(&sole_path, 1_000);
     let chosen = primary(&["inf-123"]);
     assert_eq!(chosen["id"], sole.as_str());
     // It stays an ordinary member of its Task.
@@ -1383,15 +1391,8 @@ fn a_task_primary_is_one_of_its_own_conversations() {
     }
 
     // Among several, the most recently used one; the others stay open.
-    let earlier = converse(&several_path);
-    let later = converse(&several_path);
-    fixture
-        .db()
-        .execute(
-            "UPDATE agent_sessions SET created_at=created_at-60 WHERE id=?1",
-            [&earlier],
-        )
-        .unwrap();
+    let earlier = converse(&several_path, 1_000);
+    let later = converse(&several_path, 2_000);
     assert_eq!(primary(&["INF-124"])["id"], later.as_str());
     assert_eq!(members("INF-124").len(), 2);
 
@@ -1402,7 +1403,7 @@ fn a_task_primary_is_one_of_its_own_conversations() {
     );
     let explained = fixture.json(&["resume", "--task", "inf-124", "--explain", "--json"]);
     assert_eq!(explained["resolution"]["session"]["value"], later.as_str());
-    let newest = converse(&several_path);
+    let newest = converse(&several_path, 3_000);
     assert_eq!(primary(&["INF-124"])["id"], later.as_str());
     assert_eq!(members("INF-124").len(), 3);
     // The listing marks it, so a reader finds it without choosing one.

@@ -750,6 +750,15 @@ async fn restart_ship(
     if ship_carrier_evidence(shipping) != ProcessIdentityEvidence::Dead {
         return Ok(None);
     }
+    // The carrier can record its exit after the sweep reads it, before the OS
+    // reports it dead. Read its final result before deciding whether to back off.
+    let carrier = shipping.carrier.as_ref().map(|run| &run.id);
+    let Some(shipping) = store.sqlite.task_shipping(id).map_err(task_error)? else {
+        return Ok(None);
+    };
+    if shipping.carrier.as_ref().map(|run| &run.id) != carrier {
+        return Ok(None);
+    }
     // A run another `lf task run` carries, such as one a move continued
     // on this Machine, ships once it stops.
     if crate::store::task_work::task_graph(&store.sqlite, id)
@@ -758,10 +767,10 @@ async fn restart_ship(
     {
         return Ok(None);
     }
-    let failure = carrier_failure(&store.sqlite, id, shipping).map_err(task_error)?;
+    let failure = carrier_failure(&store.sqlite, id, &shipping).map_err(task_error)?;
     if let Some(due) = failure
         .as_ref()
-        .map(|(failed_at, _)| restart_due(shipping, *failed_at))
+        .map(|(failed_at, _)| restart_due(&shipping, *failed_at))
         .filter(|due| *due > now)
     {
         return Ok(Some(due));
@@ -870,6 +879,63 @@ mod tests {
         );
         // A process that ended without failing restarts on the next read.
         assert!(read(None).reason.starts_with("Ship process exited"));
+    }
+
+    #[tokio::test]
+    async fn a_ship_that_records_failure_after_the_sweep_reads_it_waits_to_restart() {
+        use crate::store::{open_ephemeral_store, StorageConfig};
+        use loopflow_model::durable::TaskId;
+        use loopflow_storage::graph_process::{ExecutionStart, RunOwner};
+        use loopflow_storage::work::task::NewTask;
+        use std::sync::Arc;
+
+        let home = tempfile::tempdir().unwrap();
+        let store = Arc::new(
+            open_ephemeral_store(&StorageConfig::sqlite(home.path().join("db")))
+                .await
+                .unwrap(),
+        );
+        let task = TaskId::new();
+        store
+            .sqlite
+            .create_task(&NewTask {
+                repository_id: loopflow_storage::test_fixture::repository(&store.sqlite, "/repo"),
+                id: task.clone(),
+                project_id: None,
+                title: "Verify the release".into(),
+                description: String::new(),
+                due_date: None,
+            })
+            .unwrap();
+        let carrier = LfProcessId::new();
+        let start = ExecutionStart {
+            // The old carrier's PID now belongs to this test process.
+            pid: Some(std::process::id()),
+            os_started_at: Some(1),
+            ..ExecutionStart::reserved(1)
+        };
+        let before_exit = store
+            .sqlite
+            .ship_task(&task, (&carrier, &start), "verify")
+            .unwrap();
+        let now = 100;
+        store
+            .sqlite
+            .finish_run(
+                RunOwner::ShipCarrier,
+                &carrier,
+                now,
+                Some(i32::from(crate::process::GraphHeld::EXIT)),
+                Some("verification blocked"),
+            )
+            .unwrap();
+
+        assert_eq!(
+            super::restart_ship(&store, &task, &before_exit, now)
+                .await
+                .unwrap(),
+            Some(now + 60),
+        );
     }
 
     #[test]

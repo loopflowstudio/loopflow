@@ -3247,12 +3247,9 @@ fn task_ship_blocked_at_verification_waits_there_without_building_again() {
     );
     task.repo.stage_all();
     task.repo.commit("Define the verifying Graph");
+    let held = Some(i32::from(loopflow_execution::process::GraphHeld::EXIT));
     let first = task.run(&["-b", "--task", "INF-123", "ship", "--graph", "verifying"]);
-    assert!(
-        !first.status.success(),
-        "{}",
-        String::from_utf8_lossy(&first.stderr)
-    );
+    assert_eq!(first.status.code(), held, "{first:?}");
     // The stand-in at check reported a dependency: the Task waits at check.
     assert_eq!(
         task.graph()["position"],
@@ -3263,7 +3260,7 @@ fn task_ship_blocked_at_verification_waits_there_without_building_again() {
     assert_eq!(stand_ins(&task).len(), 1);
     let again = task.run(&["-b", "--task", "INF-123", "ship"]);
     let stderr = String::from_utf8_lossy(&again.stderr);
-    assert!(!again.status.success(), "{stderr}");
+    assert_eq!(again.status.code(), held, "{again:?}");
     assert!(stderr.contains("INF-123: standing in at check"), "{stderr}");
     assert_eq!(task.graph()["position"], at("check"));
     assert_eq!(stand_ins(&task).len(), 2);

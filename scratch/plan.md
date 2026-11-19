@@ -572,10 +572,9 @@ existing update a conversation gets about its own Task; Waves and
    Graph finishes; `lf task abandon <parent>` settling children, which needs
    a result on `task.abandon` and its DTO.
    What it left open is in `scratch/questions.md` under "Slice 7".
-   For compress: `Finished::of` is worked out twice for one row, in
-   `snapshot_task_detail` and again in `task_row::next_command` from
-   `lifecycle`, `pr` and `step`; `RoadmapTask` carrying the `Finished`
-   beside `conducting` would leave one.
+   Compressed: `RoadmapTask` carries the `Finished` beside `conducting`, so
+   `snapshot_task_detail` works it out once and `task_row::next_command`
+   reads it.
 
 Next: gate; no slice remains. QA walked the acceptance check by hand
 on a private Machine, 2026-11-18, before slice 6: every line of it held,

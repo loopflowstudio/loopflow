@@ -506,6 +506,9 @@ pub struct RoadmapTask {
     /// Carried to `lf task status`'s `TaskRow`, not on the wire.
     #[serde(skip)]
     pub(crate) step: Option<String>,
+    /// How the Task's own work ended, while it is open. Not on the wire.
+    #[serde(skip)]
+    pub(crate) finished: Option<loopflow_execution::ops::task_actions::Finished>,
     /// Why a finished Task stays open: it has open children to conduct.
     /// Stands for the reason in `TaskRow` and the lists, not on the wire.
     #[serde(skip)]
@@ -2435,6 +2438,7 @@ async fn snapshot_task_detail(
         }),
         section,
         step: facts.steps.get(&task.id).cloned(),
+        finished,
         conducting,
     })
 }

@@ -614,25 +614,36 @@ for line in sys.stdin:
     std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
 }
 
+/// What `lf` prints when run in `repo`, by the conversation `caller` when one is named.
+fn lf_in(
+    home: &std::path::Path,
+    repo: &std::path::Path,
+    args: &[&str],
+    caller: Option<&str>,
+) -> String {
+    let mut command = command(home, args);
+    command.current_dir(repo).env("HOME", home);
+    if let Some(caller) = caller {
+        command.env("LF_AGENT_CALLER", caller);
+    }
+    let output = command.output().unwrap();
+    assert!(
+        output.status.success(),
+        "{args:?}: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout).unwrap()
+}
+
+fn json(text: String) -> serde_json::Value {
+    serde_json::from_str(&text).unwrap()
+}
+
 #[test]
 fn a_task_filed_from_a_tasks_conversation_shows_under_it() {
     let home = tempfile::tempdir().unwrap();
     let repo = loopflow_test_support::TestRepo::new();
-    let lf = |args: &[&str], caller: Option<&str>| {
-        let mut command = command(home.path(), args);
-        command.current_dir(repo.path()).env("HOME", home.path());
-        if let Some(caller) = caller {
-            command.env("LF_AGENT_CALLER", caller);
-        }
-        let output = command.output().unwrap();
-        assert!(
-            output.status.success(),
-            "{args:?}: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        String::from_utf8(output.stdout).unwrap()
-    };
-    let json = |text: String| serde_json::from_str::<serde_json::Value>(&text).unwrap();
+    let lf = |args: &[&str], caller: Option<&str>| lf_in(home.path(), repo.path(), args, caller);
     let parent = json(lf(
         &["task", "create", "--title", "Retry requests", "--json"],
         None,
@@ -738,18 +749,7 @@ fn a_task_filed_from_a_tasks_conversation_shows_under_it() {
 fn a_merged_parent_stays_open_until_it_is_completed_with_its_children() {
     let home = tempfile::tempdir().unwrap();
     let repo = loopflow_test_support::TestRepo::new();
-    let lf = |args: &[&str]| {
-        let mut command = command(home.path(), args);
-        command.current_dir(repo.path()).env("HOME", home.path());
-        let output = command.output().unwrap();
-        assert!(
-            output.status.success(),
-            "{args:?}: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        String::from_utf8(output.stdout).unwrap()
-    };
-    let json = |text: String| serde_json::from_str::<serde_json::Value>(&text).unwrap();
+    let lf = |args: &[&str]| lf_in(home.path(), repo.path(), args, None);
     let file = |title: &str, parent: Option<&str>| {
         let mut args = vec!["task", "create", "--title", title, "--json"];
         args.extend(parent.into_iter().flat_map(|parent| ["--parent", parent]));

@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>d92894 concept review: showing an agent a change</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #fbfaf7; --fg: #1d1c1a; --muted: #6a665f; --line: #dcd8cf;
+    --card: #ffffff; --yes: #1f7a45; --no: #b3341f; --new: #8a5a00;
+    --newbg: #fff6dc; --code: #f1eee7;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #17171a; --fg: #e9e6df; --muted: #9c978c; --line: #34343a;
+      --card: #1f1f24; --yes: #6fcf97; --no: #ff8a73; --new: #f0c060;
+      --newbg: #33290f; --code: #26262c;
+    }
+  }
+  body { background: var(--bg); color: var(--fg); font: 16px/1.55 -apple-system, "Segoe UI", sans-serif;
+         max-width: 980px; margin: 0 auto; padding: 40px 24px 80px; }
+  h1 { font-size: 28px; line-height: 1.2; margin: 0 0 8px; }
+  h2 { font-size: 21px; margin: 44px 0 10px; }
+  h3 { font-size: 17px; margin: 24px 0 6px; }
+  p, li { max-width: 74ch; }
+  .lede { color: var(--muted); margin-top: 0; }
+  code, pre { font: 13.5px/1.5 ui-monospace, "SF Mono", Menlo, monospace; background: var(--code); border-radius: 4px; }
+  code { padding: 1px 5px; }
+  pre { padding: 14px 16px; overflow-x: auto; margin: 10px 0; }
+  table { border-collapse: collapse; width: 100%; margin: 12px 0; background: var(--card); }
+  th, td { text-align: left; vertical-align: top; padding: 9px 12px; border: 1px solid var(--line); }
+  th { font-weight: 600; }
+  .yes { color: var(--yes); font-weight: 700; }
+  .no { color: var(--no); font-weight: 700; }
+  .proposed { background: var(--newbg); border-left: 4px solid var(--new); }
+  td.proposed { border-left: 4px solid var(--new); }
+  .tag { color: var(--new); font-weight: 600; }
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 760px) { .cols { grid-template-columns: 1fr; } }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 14px 18px; }
+  .card.proposed { border-left: 4px solid var(--new); }
+  .card h3 { margin-top: 0; }
+  ol.q > li { margin-bottom: 14px; }
+  ol.q ol { list-style: lower-alpha; margin-top: 4px; }
+</style>
+</head>
+<body>
+
+<h1>Showing an agent a change</h1>
+<p class="lede">Concept review for Task d92894, written before any code, 2026-11-18. Nothing here is built.
+Anything on a <span class="tag">gold edge</span> is proposed; everything else exists today.</p>
+
+<p><strong>The area taken.</strong> The Task is about two writers, the ones behind <code>lf commit</code> and
+PR descriptions. Both are instances of something wider: lf putting a change in front of an agent. The
+review covers every place lf does that, because the plan as written would have added a new way to do it
+beside the ones already there.</p>
+
+<h2>One interaction, walked</h2>
+
+<p>A Graph step finishes on a branch that touched 44 files, 1.8&nbsp;MB of patch. lf stages everything and asks
+the <code>commit-message</code> Skill for a message.</p>
+
+<div class="cols">
+  <div class="card">
+    <h3>Today</h3>
+    <p>The writer receives the first 20,000 characters of <code>git diff --cached</code>, in path order, then
+    <code>[diff truncated]</code>. It describes <code>rust/</code> and half a scratch note. The Swift that is
+    the change never reaches it, and nothing tells it which files it missed.</p>
+    <p><strong>Failure:</strong> none visible. The message is confidently about the wrong files.</p>
+    <p><strong>Recovery:</strong> someone notices in <code>git log</code> and amends by hand.</p>
+  </div>
+  <div class="card proposed">
+    <h3>Planned</h3>
+    <p>The writer receives every changed file with its line counts, and the exact command that prints one
+    file's patch. The patch itself is there whole when it is small, and absent when it is not. The writer
+    picks what to read.</p>
+    <p><strong>Failure:</strong> the writer reads nothing, or runs out its 300 seconds. It still wrote from
+    a complete list, or the commit falls back to <code>lf implement: checkpoint</code> as it does today.</p>
+    <p><strong>Recovery:</strong> nothing to recover; no state was added.</p>
+  </div>
+</div>
+
+<p>That interaction is right, and it is the one the Task comment asks for. The review found no reason to
+change it. What it found is in the code underneath.</p>
+
+<h2>Do the product's concepts and the code's concepts line up?</h2>
+
+<table>
+  <tr><th style="width:27%">What a person knows</th><th style="width:33%">What the code has</th><th style="width:7%">Match</th><th>What is wrong</th></tr>
+  <tr>
+    <td>The <code>commit-message</code> and <code>pr-message</code> Skills write messages, on an agent you can choose</td>
+    <td><code>generate_commit_message</code>, <code>generate_pr_copy</code>, shared <code>message_launch</code></td>
+    <td class="yes">yes</td>
+    <td>One launch path, Skill settings respected.</td>
+  </tr>
+  <tr>
+    <td>The message is about the change: what is staged, or the branch against its base</td>
+    <td>The first 20,000 characters of a diff, cut twice by two copies of <code>truncate_chars</code></td>
+    <td class="no">no</td>
+    <td>The code has a concept the person never sees: a prefix. This is the Task.</td>
+  </tr>
+  <tr>
+    <td>A Skill can be given the branch diff: <code>context: {diff: true}</code>, <code>--diff patch</code></td>
+    <td><code>gather_diff_tiered</code> in <code>prompt/mod.rs</code>: whole patch under 15,000 tokens, 20 files and 800 lines, otherwise <code>git diff --stat</code></td>
+    <td class="no">no</td>
+    <td>Same idea as the writers, separate code, separate rule. Its stat abbreviates long paths and gives no way to read a file.</td>
+  </tr>
+  <tr>
+    <td>An agent working a Task is told what the checkout has changed</td>
+    <td><code>task_workspace_context</code> in <code>ops/task/snapshot.rs</code>: file list, whole patch under 15,000 tokens, otherwise "Read the named worktree paths"</td>
+    <td class="no">no</td>
+    <td>Same idea a third time. No line counts; a different sentence for the same situation.</td>
+  </tr>
+  <tr>
+    <td>Notes under <code>scratch/</code> are working notes, cleared when the change lands</td>
+    <td><code>git::scratch::added</code>, used by <code>lf scratch clear</code></td>
+    <td class="yes">yes</td>
+    <td>One owner. The writers ignore it today; the plan marks those files.</td>
+  </tr>
+  <tr>
+    <td>A Skill's text is yours to copy and change</td>
+    <td>Builtins say "Read the diff"; lf appends the diff after the text</td>
+    <td class="yes">yes</td>
+    <td>Stays true only if the reading instructions travel with what lf appends, not with the builtin text.</td>
+  </tr>
+  <tr>
+    <td>Both writers do the same job</td>
+    <td>The commit writer always skips permission prompts; the PR writer follows <code>yolo</code></td>
+    <td class="no">no</td>
+    <td>One job, two stances. It matters more once both must run a command. Left alone; see question 4.</td>
+  </tr>
+</table>
+
+<h2>The biggest mismatch</h2>
+
+<p>A person has one idea: <em>the agent can see the change</em>. The code has that idea three times, with three
+size rules, and the plan from kickoff would have made it four.</p>
+
+<table>
+  <tr><th>Where</th><th>Always shown</th><th>Patch shown whole when</th><th>Otherwise</th></tr>
+  <tr><td>Commit and PR writers</td><td>nothing (PR: <code>--stat</code>)</td><td>never whole past 20,000 characters</td><td>a prefix and <code>[diff truncated]</code></td></tr>
+  <tr><td><code>context: {diff: true}</code></td><td>nothing</td><td>under 15,000 tokens, 20 files, 800 lines</td><td><code>git diff --stat</code>, paths abbreviated</td></tr>
+  <tr><td>Task workspace block</td><td>paths and states</td><td>under 15,000 tokens</td><td>"Read the named worktree paths"</td></tr>
+  <tr class="proposed"><td>Kickoff's <code>Change</code> <span class="tag">(passed over)</span></td><td>paths and line counts</td><td>at most 100,000 bytes</td><td>the read command</td></tr>
+</table>
+
+<p>AGENTS.md says it directly: "If three building blocks exist for one job and none works, the change
+removes all three. It does not add a fourth."</p>
+
+<div class="cols">
+  <div class="card">
+    <h3>Before</h3>
+<pre>ops/commit.rs   truncate_chars(diff, 20_000)
+ops/pr.rs       truncate_chars(diff, 20_000)
+                + git diff --stat
+prompt/mod.rs   gather_diff_tiered
+                15k tokens, 20 files, 800 lines
+ops/task/       task_workspace_context
+  snapshot.rs   MAX_PATCH_TOKENS = 15_000</pre>
+  </div>
+  <div class="card proposed">
+    <h3>After <span class="tag">(proposed)</span></h3>
+<pre>prompt/change.rs
+  PATCH_INLINE_TOKENS = 15_000     // the one rule
+  enum ChangeRange { Staged, Since(base), Uncommitted }
+  Change::read(repo, range)
+  Change::prompt_section()
+
+ops/commit.rs   Change::read(Staged)
+ops/pr.rs       Change::read(Since)
+prompt/mod.rs   Change::read(Since | Uncommitted)
+ops/task/       reads PATCH_INLINE_TOKENS;
+  snapshot.rs   its own comparison stays</pre>
+  </div>
+</div>
+
+<h3>What the recommendation changes in the plan</h3>
+<ol>
+  <li><strong><code>Change</code> lives in <code>prompt/</code>, not <code>ops/</code>,</strong> so the Skill
+  context path can use it. It is "a change as shown to an agent", which is what <code>prompt/</code> is for.</li>
+  <li><strong>No new number.</strong> The patch goes in whole under 15,000 tokens, the rule lf already applies
+  twice, instead of a new 100,000-byte rule. More mid-sized PRs take the reading path; that path is the
+  design, so this costs a tool turn, never a wrong message.</li>
+  <li><strong><code>context: {diff: true}</code> moves onto <code>Change</code> in the same Task.</strong> Its
+  20-file and 800-line limits, its <code>--stat</code> and its shortstat parsing go. A Skill handed a large
+  branch now gets full paths, line counts and the read command.</li>
+  <li><strong>The builtin Skill texts are not edited.</strong> "Read the diff" is true in both shapes and when
+  the Skill is run by hand with no section at all. The section lf builds carries the instructions.</li>
+  <li><strong>The working-note mark belongs to the range.</strong> Any branch-against-base change has added
+  scratch notes that leave when it lands, so <code>Change::read</code> marks them for <code>Since</code>, and
+  the Skill context path gets the mark too. Wording follows the code: scratch is cleared at land
+  (<code>ops/land.rs:171</code>), not at publish.</li>
+</ol>
+
+<h3>Tested against three paths</h3>
+<table>
+  <tr><th style="width:18%">Path</th><th>What happens</th></tr>
+  <tr><td>Normal</td><td>A two-file step commit: stat plus whole patch, one turn, as today. A 44-file branch: stat and read command; the writer reads the Swift.</td></tr>
+  <tr><td>Failure</td><td>The writer runs <code>git diff --cached</code> with no path on a 4.6&nbsp;MB change and overflows. The commit gets <code>checkpoint</code>; the PR writer errors as it does today for any failed reply. The section names the per-file command and the patch size to steer away from this. A fixture cannot show whether a cheap model obeys; the demo run does.</td></tr>
+  <tr><td>Recovery</td><td>Nothing is stored, so there is nothing to repair. Run again.</td></tr>
+  <tr><td>Counterexample kept</td><td>One generated file is itself 200&nbsp;KB. Its line count is in the stat, so the writer can leave it. lf does not cut it and does not hide it.</td></tr>
+  <tr><td>Counterexample kept</td><td>A vendor configuration denies <code>git diff</code> to the PR writer (it does not skip prompts). It writes from the stat. Worse than a read, better than a prefix.</td></tr>
+</table>
+
+<h2>Larger than this work</h2>
+<ul>
+  <li><strong>The Task workspace block could become a <code>Change</code> too.</strong> It compares base, index,
+  worktree and untracked files at once and reports a state per file; <code>Change</code> would need a fourth
+  range and those states, and untracked files have no numstat. In this Task it only shares the number.</li>
+  <li><strong><code>lf task diff</code> caps a whole comparison at 1&nbsp;MB</strong>
+  (<code>ops/task/snapshot.rs:584</code>), a per-file limit reused for the patch. That is a person-facing read
+  with a DTO behind it and Desktop working around it in LOO-515. Its fix is a per-file read, the same shape
+  as here, in the served API.</li>
+  <li><strong>Release notes</strong> (<code>ops/release.rs</code>) bound a different thing, a list of PRs and
+  commits, and already report what they left out. Not the same concept; no action.</li>
+</ul>
+
+<h2>Questions</h2>
+<ol class="q">
+  <li>The size rule for putting the patch in whole.
+    <ol>
+      <li>15,000 tokens, the rule lf already has. <span class="tag">Chosen.</span></li>
+      <li>100,000 bytes for everyone, as kickoff measured for PRs (24 of the last 40 fit); doubles what <code>--diff patch</code> Skills can receive.</li>
+      <li>Never whole: always the list and the command, one shape, an extra turn on every step commit.</li>
+    </ol>
+  </li>
+  <li><code>context: {diff: true}</code> in this Task.
+    <ol>
+      <li>Moved onto <code>Change</code> now, as the last slice. <span class="tag">Chosen.</span></li>
+      <li>Left as is, with its own Task. The writers ship sooner; three rules stay.</li>
+    </ol>
+  </li>
+  <li>Scratch notes in a branch change.
+    <ol>
+      <li>Listed and marked as leaving at land. <span class="tag">Chosen.</span></li>
+      <li>Left out of the list entirely.</li>
+    </ol>
+  </li>
+  <li>The PR writer follows <code>yolo</code> while the commit writer always skips permission prompts.
+    <ol>
+      <li>Leave both as they are. <span class="tag">Chosen;</span> not this Task's to change.</li>
+      <li>Give the PR writer the same floor, now that it has to run a command. <code>lf land</code> already refuses if the writer changed the worktree.</li>
+    </ol>
+  </li>
+  <li>The importance-ordered fallback for a writer that cannot run commands.
+    <ol>
+      <li>Not built; no launch lf makes fits it. <span class="tag">Chosen.</span></li>
+      <li>Built anyway.</li>
+    </ol>
+  </li>
+</ol>
+
+</body>
+</html>

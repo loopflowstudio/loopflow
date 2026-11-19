@@ -184,3 +184,10 @@ uncovered, and slice 2's error names the replaced server. Chosen for review:
 slice 2 stays a named failure; making the holder executable belong to its build
 (`Place` carries the executable the server spawns) is passed over here as
 larger than a flaky-test Task.
+
+## Docs (write-docs, 2026-11-19)
+
+Changed: `rust/loopflow/tests/README.md` (the `LOOPFLOW_TEST_LF` paragraph:
+integration binaries set it from their own `lf`; lib binaries and bare nextest
+still need it set). Slices 2–4 change no user-facing docs; slice 2's error text
+is its own documentation.

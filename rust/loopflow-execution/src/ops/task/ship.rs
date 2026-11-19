@@ -525,7 +525,7 @@ pub fn ship_settle_merge(issue: &str) -> OpsResult<ShipMerge> {
             .stop_shipping(&task.id, "its PR merged with children open", None)
             .map_err(task_error)?;
         Ok(ShipMerge::Conducting(
-            crate::ops::task_actions::merged_children_reason(children),
+            crate::ops::task_actions::Finished::Merged.reason(children),
         ))
     })
 }

@@ -300,3 +300,18 @@ Answers two of the second QA pass's items above; the rest stay as listed.
 
 `scratch/explore.html` round six (the whole window as sequences) has not been
 looked at rendered, and predates the one-type direction.
+
+## Slice 7 (made for review)
+
+- "No PR" is no PR record at all, the same test `lf task complete` uses
+  (`ops::task::completion_refusal`). A Task at `end` with an unpublished PR
+  record (phase `working`) still reads "run the next work with `lf task
+  run`", because completing it is refused. Should that one read "Finished"
+  too, and complete?
+- A finished Task nobody owns still reads "Unassigned; nothing moves it until
+  `lf task claim` or `lf task run`" once its children are closed, while
+  `next` is `lf task complete <ID>`. Merged Tasks did this before this work.
+  With children open the "Finished · N children open" line wins. Should
+  finished outrank unassigned?
+- A never-started child with a started child of its own: the first is
+  abandoned, the second stays open and is listed top-level by the flat rule.

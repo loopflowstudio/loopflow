@@ -284,8 +284,10 @@ until you complete it. Publishing, landing and CI repair are covered in
 
 A Task with open children stays open after its PR merges. It reads
 `Merged · 3 children open`, nothing asks you to complete it, and Auto-Ship
-leaves it open, so its conversation is still there to conduct them. Complete it
-when the follow-ups are settled:
+leaves it open, so its conversation is still there to conduct them. A Task
+with no PR whose graph reached `end` stands the same way and reads
+`Finished · 1 child open`; once nothing under it is open it reads
+`Finished; complete the Task`. Complete it when the follow-ups are settled:
 
 ```text
 $ lf task complete LOO-12
@@ -299,7 +301,7 @@ LOO-12 done
 Completing a parent finishes each child whose PR merged and abandons each
 child that never started. A child with anything unmerged (an open PR, a
 running Graph, a checkout with commits) stays open and is named;
-finish it or `lf task abandon` it yourself. A child finished this way settles
+finish it or `lf task abandon` it yourself. A child closed this way settles
 its own children by the same rule, printed under it. The command never stops
 to ask.
 
@@ -687,7 +689,8 @@ and keeps the Session, checkout, PR and graph.
 
 **Completion.** `lf task complete` changes status only, independent of graph
 position; retry it alone if it fails. On a parent it also finishes merged
-children and abandons never-started ones. `lf task complete --json` carries
+children and abandons never-started ones, and does the same under each child
+it closes. `lf task complete --json` carries
 `children`: each child's row, its `outcome` (`done`, `abandoned` or `open`)
 and its own `children`; `[]` when there were none. `lf task reopen` keeps the
 same PR.

@@ -104,6 +104,12 @@ pub(super) async fn read_task_snapshot(store: &SharedStore, task: Task) -> OpsRe
                 .as_ref()
                 .filter(|pr| pr.phase() == PrPhase::Open)
                 .map(|pr| pr.presentation().is_some()),
+            at_end: work_set.graph.as_ref().is_some_and(|graph| {
+                matches!(
+                    &graph.position,
+                    crate::task_graph::TaskGraphPosition::At { step } if step == crate::task_graph::END
+                )
+            }),
             open_children: store
                 .sqlite
                 .open_task_child_count(&task.id)

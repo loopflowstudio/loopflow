@@ -38,6 +38,8 @@ pub struct TaskActionEvidence<'a> {
     pub latest_pr_phase: Option<PrPhase>,
     pub latest_pr_merge_request: Option<&'a PrMergeRequest>,
     pub latest_pr_presentation_current: Option<bool>,
+    /// The Task's Graph stands at `end`.
+    pub at_end: bool,
     pub open_children: u32,
     pub completion_refusal: Option<&'a str>,
     pub run_refusal: Option<&'a str>,
@@ -50,7 +52,8 @@ pub fn derive_task_actions(evidence: &TaskActionEvidence) -> TaskActionModel {
     if matches!(evidence.status, WorkStatus::Done | WorkStatus::Abandoned) {
         return action(TaskAction::NoAction, "Task is terminal");
     }
-    if evidence.latest_pr_phase != Some(PrPhase::Merged) {
+    let finished = Finished::of(&evidence.status, evidence.latest_pr_phase, evidence.at_end);
+    if finished.is_none() {
         if let Some(execution) = evidence
             .execution
             .filter(|execution| execution.state != TaskExecutionState::Idle)
@@ -61,7 +64,10 @@ pub fn derive_task_actions(evidence: &TaskActionEvidence) -> TaskActionModel {
             return action(TaskAction::NoAction, refusal);
         }
     }
-    let model = phase_action(evidence);
+    let model = match finished {
+        Some(finished) => finished_action(finished, evidence),
+        None => phase_action(evidence),
+    };
     let model = apply_predecessor(model, evidence.predecessor_phase);
     apply_run_refusal(model, evidence.run_refusal)
 }
@@ -102,7 +108,6 @@ fn phase_action(evidence: &TaskActionEvidence) -> TaskActionModel {
             ),
         },
         Some(PrPhase::Publishing) => action(TaskAction::Run, "retry publication"),
-        Some(PrPhase::Merged) => merged_action(evidence),
         Some(PrPhase::Abandoned) => {
             action(TaskAction::NoAction, "PR closed without merge; reopen the same PR or abandon the Task")
         }
@@ -114,36 +119,53 @@ fn phase_action(evidence: &TaskActionEvidence) -> TaskActionModel {
     }
 }
 
-pub(crate) fn merged_children_reason(count: u32) -> String {
-    let children = if count == 1 { "child" } else { "children" };
-    format!("Merged · {count} {children} open")
+/// How an open Task's own work ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Finished {
+    /// Its PR merged.
+    Merged,
+    /// It has no PR and its Graph stands at `end`.
+    AtEnd,
 }
 
-/// A merged Task with open children stays open to conduct them. Its reason
-/// stands where "complete the Task" would; `None` for every other Task.
-pub fn conducting_reason(
-    status: &WorkStatus,
-    pr: Option<PrPhase>,
-    open_children: u32,
-) -> Option<String> {
-    (open_children > 0
-        && pr == Some(PrPhase::Merged)
-        && !matches!(status, WorkStatus::Done | WorkStatus::Abandoned))
-    .then(|| merged_children_reason(open_children))
+impl Finished {
+    /// `None` while the Task still has work of its own, or is closed.
+    pub fn of(status: &WorkStatus, pr: Option<PrPhase>, at_end: bool) -> Option<Self> {
+        if matches!(status, WorkStatus::Done | WorkStatus::Abandoned) {
+            return None;
+        }
+        match pr {
+            Some(PrPhase::Merged) => Some(Self::Merged),
+            None if at_end => Some(Self::AtEnd),
+            _ => None,
+        }
+    }
+
+    /// With children open the Task stays open to conduct them; with none it
+    /// waits only to be completed.
+    pub fn reason(self, open_children: u32) -> String {
+        let word = match self {
+            Self::Merged => "Merged",
+            Self::AtEnd => "Finished",
+        };
+        match open_children {
+            0 => format!("{word}; complete the Task"),
+            1 => format!("{word} · 1 child open"),
+            count => format!("{word} · {count} children open"),
+        }
+    }
 }
 
-fn merged_action(evidence: &TaskActionEvidence) -> TaskActionModel {
-    if let Some(reason) = conducting_reason(
-        &evidence.status,
-        evidence.latest_pr_phase,
-        evidence.open_children,
-    ) {
-        return action(TaskAction::NoAction, reason);
+fn finished_action(finished: Finished, evidence: &TaskActionEvidence) -> TaskActionModel {
+    if evidence.open_children == 0 {
+        if let Some(refusal) = evidence.completion_refusal {
+            return action(TaskAction::NoAction, refusal);
+        }
     }
-    if let Some(refusal) = evidence.completion_refusal {
-        return action(TaskAction::NoAction, refusal);
-    }
-    action(TaskAction::NoAction, "Merged; complete the Task")
+    action(
+        TaskAction::NoAction,
+        finished.reason(evidence.open_children),
+    )
 }
 
 fn apply_predecessor(model: TaskActionModel, predecessor: Option<PrPhase>) -> TaskActionModel {
@@ -204,6 +226,7 @@ mod tests {
             latest_pr_phase: Some(phase),
             latest_pr_merge_request: None,
             latest_pr_presentation_current: Some(true),
+            at_end: false,
             open_children: 0,
             completion_refusal: None,
             run_refusal: None,
@@ -311,6 +334,29 @@ mod tests {
             derive_task_actions(&evidence).reason,
             "Merged · 1 child open"
         );
+    }
+
+    #[test]
+    fn a_task_with_no_pr_at_the_end_of_its_graph_is_finished() {
+        let mut evidence = evidence(PrPhase::Working, None);
+        evidence.latest_pr_phase = None;
+        assert_eq!(
+            derive_task_actions(&evidence).recommended,
+            Some(TaskAction::Run)
+        );
+        evidence.at_end = true;
+        evidence.open_children = 2;
+        let model = derive_task_actions(&evidence);
+        assert_eq!(model.recommended, Some(TaskAction::NoAction));
+        assert_eq!(model.reason, "Finished · 2 children open");
+        evidence.open_children = 0;
+        let model = derive_task_actions(&evidence);
+        assert_eq!(model.recommended, Some(TaskAction::NoAction));
+        assert_eq!(model.reason, "Finished; complete the Task");
+
+        // At `end` with a PR still open, the PR is what is left.
+        evidence.latest_pr_phase = Some(PrPhase::Open);
+        assert!(derive_task_actions(&evidence).reason.contains("`lf land`"));
     }
 
     #[test]

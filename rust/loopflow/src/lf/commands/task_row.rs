@@ -12,8 +12,10 @@ use time::OffsetDateTime;
 use super::session::SessionFacts;
 use super::waves::RoadmapTask;
 use loopflow_execution::durable::{GraphProcessDetail, TaskState};
+use loopflow_execution::ops::task_actions::Finished;
 use loopflow_execution::session::GraphProcessSummaryState;
 use loopflow_execution::store::SharedStore;
+use loopflow_execution::task_graph::END;
 use loopflow_model::comment::{TaskComment, TaskComments};
 use loopflow_storage::rows::unix_to_datetime;
 use loopflow_storage::work::task::PrPhase;
@@ -217,10 +219,12 @@ fn next_command(task: &RoadmapTask) -> Option<String> {
     let id = &task.task.identifier;
     match task.lifecycle {
         TaskState::Done | TaskState::Abandoned | TaskState::Moving | TaskState::Shipping => None,
-        _ if task
-            .pr
-            .as_ref()
-            .is_some_and(|pr| pr.phase == PrPhase::Merged) =>
+        _ if Finished::of(
+            &task.lifecycle.work_status(),
+            task.pr.as_ref().map(|pr| pr.phase),
+            task.step.as_deref() == Some(END),
+        )
+        .is_some() =>
         {
             task.conducting
                 .is_none()

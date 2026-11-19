@@ -763,6 +763,7 @@ fn a_merged_parent_stays_open_until_it_is_completed_with_its_children() {
     let (landed_id, landed) = file("Retry budget per host", Some(&parent));
     let (reviewing_id, reviewing) = file("Log each retry", Some(&parent));
     let (_, unstarted) = file("Document the budget", Some(&parent));
+    let (_, unstarted_child) = file("Translate the budget docs", Some(&unstarted));
     // The landed child has follow-ups of its own.
     let (_, grandchild) = file("Tune the budget", Some(&landed));
     let (kept_id, kept) = file("Budget dashboards", Some(&landed));
@@ -851,12 +852,21 @@ fn a_merged_parent_stays_open_until_it_is_completed_with_its_children() {
         (&grandchildren[1].0, grandchildren[1].1.as_str()),
         (&kept, "open")
     );
-    assert_eq!(completed["children"][1]["children"], serde_json::json!([]));
+    // So does a child that is abandoned.
+    assert_eq!(
+        outcomes(&completed["children"][1]["children"]),
+        [(
+            unstarted_child.clone(),
+            "abandoned".into(),
+            "abandoned".into()
+        )]
+    );
     let state = |task: &str| json(lf(&["task", "status", task, "--json"]))["task"]["state"].clone();
     assert_eq!(state(&parent), "done");
     assert_eq!(state(&landed), "done");
     assert_eq!(state(&unstarted), "abandoned");
     assert_eq!(state(&grandchild), "abandoned");
+    assert_eq!(state(&unstarted_child), "abandoned");
 
     // The child left open keeps its link and is listed on its own.
     let left = json(lf(&["task", "status", &reviewing, "--json"]));
@@ -868,6 +878,32 @@ fn a_merged_parent_stays_open_until_it_is_completed_with_its_children() {
     );
     let listed = lf(&["task", "list"]);
     assert!(line(&listed, format!("{reviewing} ·")), "{listed}");
+
+    // A Task with no PR whose Graph reached `end` stands the same way.
+    let (planned_id, planned) = file("Plan the cache", None);
+    let (_, follow_up) = file("Cache responses per host", Some(&planned));
+    database
+        .execute(
+            "INSERT INTO task_graphs(task_id,graph,step,updated_at) VALUES(?1,?2,'end',1)",
+            rusqlite::params![
+                planned_id,
+                serde_json::json!({"name": "code", "steps": []}).to_string()
+            ],
+        )
+        .unwrap();
+    lf(&["task", "claim", &planned]);
+    let status = json(lf(&["task", "status", &planned, "--json"]));
+    assert_eq!(status["task"]["reason"], "Finished · 1 child open");
+    assert!(status["task"]["next"].is_null(), "{}", status["task"]);
+    lf(&["task", "abandon", &follow_up]);
+    let status = json(lf(&["task", "status", &planned, "--json"]));
+    assert_eq!(status["task"]["reason"], "Finished; complete the Task");
+    assert_eq!(
+        status["task"]["next"],
+        format!("lf task complete {planned}")
+    );
+    lf(&["task", "complete", &planned]);
+    assert_eq!(state(&planned), "done");
 
     // In text, each child's own children are indented under it.
     let (second_id, second) = file("Cache responses", None);

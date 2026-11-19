@@ -61,8 +61,8 @@ pub struct ChildCompletion {
     pub outcome: ChildOutcome,
     pub pr: Option<TaskPr>,
     pub step: Option<String>,
-    /// What completing this child did with its own children; empty unless
-    /// it became done.
+    /// What completing this child did with its own children; empty when it
+    /// stays open.
     pub children: Vec<ChildCompletion>,
 }
 
@@ -2689,23 +2689,25 @@ fn children_where(conn: &Connection, parent: &TaskId, filter: &str) -> StoreResu
     Ok(children)
 }
 
-/// Completing a Task means one thing by any path: a child that becomes done
-/// here settles its own children by the same rule.
+/// Completing a Task means one thing by any path: a child closed here, done
+/// or abandoned, settles its own children by the same rule.
 fn complete_children(conn: &Connection, parent: &TaskId) -> StoreResult<Vec<ChildCompletion>> {
     let children = children_where(conn, parent, &open_task_children_where())?;
     let mut completions = Vec::with_capacity(children.len());
     for task in children {
         let pr = active_task_pr_on(conn, &task.id)?;
-        let mut children = Vec::new();
         let outcome = if pr.as_ref().is_some_and(|pr| pr.phase() == PrPhase::Merged) {
             record_task_completion(conn, &task.id)?;
-            children = complete_children(conn, &task.id)?;
             ChildOutcome::Done
         } else if pr.is_none() && never_started(conn, &task.id)? {
             super::durable::abandon_task_in(conn, &task.id, "parent Task completed", now_unix())?;
             ChildOutcome::Abandoned
         } else {
             ChildOutcome::Open
+        };
+        let children = match outcome {
+            ChildOutcome::Done | ChildOutcome::Abandoned => complete_children(conn, &task.id)?,
+            ChildOutcome::Open => Vec::new(),
         };
         let step = conn
             .query_row(

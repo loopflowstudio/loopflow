@@ -506,7 +506,7 @@ pub struct RoadmapTask {
     /// Carried to `lf task status`'s `TaskRow`, not on the wire.
     #[serde(skip)]
     pub(crate) step: Option<String>,
-    /// Why a merged Task stays open: it has open children to conduct.
+    /// Why a finished Task stays open: it has open children to conduct.
     /// Stands for the reason in `TaskRow` and the lists, not on the wire.
     #[serde(skip)]
     pub(crate) conducting: Option<String>,
@@ -2261,11 +2261,18 @@ async fn snapshot_task_detail(
         None
     };
     let open_children = facts.open_children.get(&task.id).copied().unwrap_or(0);
-    let conducting = loopflow_execution::ops::task_actions::conducting_reason(
+    let at_end = facts
+        .steps
+        .get(&task.id)
+        .is_some_and(|step| step == loopflow_execution::task_graph::END);
+    let finished = loopflow_execution::ops::task_actions::Finished::of(
         &status.work_status(),
         pr.as_ref().map(TaskPr::phase),
-        open_children,
+        at_end,
     );
+    let conducting = finished
+        .filter(|_| open_children > 0)
+        .map(|finished| finished.reason(open_children));
     let next_move = if let Some(reason) = conducting.clone() {
         NextMove {
             owner: NextMoveOwner::Task,
@@ -2284,12 +2291,10 @@ async fn snapshot_task_detail(
             },
             reason: execution.reason.clone(),
         }
-    } else if pr.as_ref().is_some_and(|pr| pr.phase() == PrPhase::Merged)
-        && !runtime.status.is_terminal()
-    {
+    } else if let Some(finished) = finished {
         NextMove {
             owner: NextMoveOwner::Wave,
-            reason: "Merged; complete the Task".into(),
+            reason: finished.reason(open_children),
         }
     } else {
         next_move_for_task(
@@ -2331,6 +2336,7 @@ async fn snapshot_task_detail(
             .as_ref()
             .filter(|pr| pr.phase() == PrPhase::Open)
             .map(|pr| pr.presentation().is_some()),
+        at_end,
         open_children,
         completion_refusal: completion_refusal.as_deref(),
         run_refusal: run_refusal.as_deref(),
@@ -2367,11 +2373,7 @@ async fn snapshot_task_detail(
         unavailable: run_control.unavailable.clone().or_else(|| {
             if shipping.is_some() {
                 Some("Task is already shipping".to_string())
-            } else if facts
-                .steps
-                .get(&task.id)
-                .is_some_and(|step| step == loopflow_execution::task_graph::END)
-            {
+            } else if at_end {
                 Some("Task is at the end of its graph".to_string())
             } else {
                 None
@@ -4729,6 +4731,7 @@ mod tests {
                 latest_pr_phase: None,
                 latest_pr_merge_request: None,
                 latest_pr_presentation_current: None,
+                at_end: false,
                 open_children: 0,
                 completion_refusal: None,
                 run_refusal: None,
@@ -4850,6 +4853,7 @@ mod tests {
                     latest_pr_phase: None,
                     latest_pr_merge_request: None,
                     latest_pr_presentation_current: None,
+                    at_end: false,
                     open_children: 0,
                     completion_refusal: None,
                     run_refusal: None,
@@ -4881,6 +4885,7 @@ mod tests {
             latest_pr_phase: Some(PrPhase::Open),
             latest_pr_merge_request: None,
             latest_pr_presentation_current: Some(true),
+            at_end: false,
             open_children: 0,
             completion_refusal: None,
             run_refusal: None,

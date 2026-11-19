@@ -546,7 +546,16 @@ existing update a conversation gets about its own Task; Waves and
    person never sees, kept for the reason in its doc comment.
 
 7. **A finished parent says why it is open; a completion reaches every
-   child it closes.** Not built. The third concept review
+   child it closes.** Built: `task_actions::Finished` is the one definition
+   (`of` and `reason`), read by `derive_task_actions`, `waves.rs` `next_move`
+   and `conducting`, `task_row::next_command` and Auto-Ship's merge;
+   `conducting_reason` and `merged_children_reason` are gone.
+   `complete_children` recurses under every child it closes. Shown by
+   `task_actions::tests::a_task_with_no_pr_at_the_end_of_its_graph_is_finished`
+   and the CLI case
+   `session_cli_tests::a_merged_parent_stays_open_until_it_is_completed_with_its_children`
+   (both pass, clippy clean on the three crates). What it taught is in
+   `scratch/questions.md` under "Slice 7". The third concept review
    (`scratch/concept-review.html`, 2026-11-18, e3f0806302) compared slice 6's
    five intentions with QA's second pass: all five held. Two places are left
    where one idea has two behaviours. Choices are **made for review**.
@@ -586,7 +595,7 @@ existing update a conversation gets about its own Task; Waves and
      finished this way" becomes "closed this way") and the Completion
      reference line.
 
-Next: slice 7, then gate. QA walked the acceptance check by hand
+Next: gate. QA walked the acceptance check by hand
 on a private Machine, 2026-11-18, before slice 6: every line of it held,
 and a real Claude conversation was woken two seconds after its child stopped.
 A second pass on 26683764f9 (`scratch/qa.html`) walked it again with slice 6

@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8">
-<title>LOO-968 concept review: auto as built, fourth pass</title>
+<title>LOO-968 concept review: auto as built, fifth pass</title>
 <style>
 :root{--bg:#fff;--fg:#1d1d1f;--mute:#6e6e73;--line:#d2d2d7;--yes:#1a7f37;--no:#b42318;--part:#9a6700;--prop:#f3efe2;--propline:#c9a227;--card:#f6f6f8}
 @media (prefers-color-scheme:dark){:root{--bg:#161618;--fg:#e8e8ea;--mute:#9a9aa0;--line:#3a3a3f;--yes:#4ac26b;--no:#ff7b72;--part:#d4a72c;--prop:#2c2818;--propline:#c9a227;--card:#1f1f22}}
@@ -121,6 +121,10 @@ A Task at `end` that is not yet done:
 `lf ship LOO-12` lands it.</pre></div>
 </div>
 <p>Written into <code>scratch/plan.md</code> under "Remaining" as the next build, then gate. <code>outlook</code> unread and the 30 s wait in <code>auto::running_graph</code> stay as shaped (third pass).</p>
+
+<h2>Fifth pass (2026-11-19, at <code>bff5dc68ee</code>)</h2>
+<p>The fourth pass's one <span class="no">no</span> is built and then cut smaller: <code>TaskGraph::waiting_to_land</code> is the one predicate, <code>auto::landing_wait</code> the one sentence, printed by the run as it stops and by <code>lf task status</code> after. <code>TaskGraph::guidance</code> turned out to reach no provider and is deleted, so there is no second sentence left to disagree. Every pairing reads <span class="yes">yes</span>.</p>
+<p>What still carries the word <em>ship</em> in code is staged storage leaving for LOO-971 (<code>task_ship_events</code>, <code>tasks.shipped_at</code>, <code>task_summaries.ship_events</code>) and <code>lf ship</code> / <code>task.ship</code> themselves, which are the command people type (question 4 above). Nothing to change in this work; gate is next. The open items under "Larger than this work" and the questions above stand as written.</p>
 
 <h2>Questions</h2>
 <ol>

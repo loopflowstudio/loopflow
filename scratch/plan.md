@@ -141,6 +141,8 @@ reaches no provider), so it and its append in `bind_selected_work` are
 deleted. A run's landing stop no longer also prints "the Task waits there for
 its conversation".
 
+Concept review, fifth pass (at `bff5dc68ee`): nothing to change; every pairing lines up.
+
 Then gate. The checks under "Checks nobody has run" below are gate's and CI's.
 
 ## Built: the last ship words on the wire

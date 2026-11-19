@@ -69,6 +69,6 @@ Checks, each run once on this tree:
 - OpenCode 2.0.32 was not run end to end here (the probe covered its
   `session.synthetic`).
 - PR #1985 merged on 2026-11-19 at 18:46 UTC, before the idle-wake commits.
-  The branch is three commits ahead of `origin/main` with no open PR, so
-  gate publishes them as a new one.
+  It was a squash, and the branch has no open PR: gate publishes the
+  idle-wake diff (`git diff 2a3b6d11d8 HEAD`) as a new one.
 - Complete LOO-1002 when this merges.

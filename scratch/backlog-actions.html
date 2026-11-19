@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LOO-903 · Action layouts</title>
+<style>
+:root{color-scheme:light dark;--paper:#f3f1eb;--surface:#fffefa;--ink:#282b28;--muted:#656b64;--faint:#8d938b;--line:#d4d7ce;--accent:#783e48;--wash:#f0e6e7;--sel:#e7ebf3;--soft:#eeeee7;--shadow:rgba(0,0,0,.16)}
+@media(prefers-color-scheme:dark){:root{--paper:#1c2022;--surface:#252a2c;--ink:#eeeee8;--muted:#aeb8b0;--faint:#7f8984;--line:#454f4c;--accent:#e1b3bc;--wash:#3d3037;--sel:#2c3442;--soft:#2d3435;--shadow:rgba(0,0,0,.5)}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+main{max-width:980px;margin:auto;padding:48px 20px 90px}
+.col{max-width:720px}
+h1{font-size:clamp(28px,5vw,40px);line-height:1.1;letter-spacing:-.03em;margin:0 0 14px}
+h2{font-size:23px;letter-spacing:-.02em;margin:52px 0 6px}
+h3{font-size:16px;margin:20px 0 6px}
+p{margin:8px 0}.lead{font-size:18px}
+.note{font-size:13px;color:var(--muted)}
+a{color:var(--accent)}
+figure{margin:14px 0 26px}
+figure img{width:100%;border-radius:8px;border:1px solid var(--line);display:block}
+figcaption{font-size:13px;color:var(--muted);margin-top:6px}
+.refs{display:grid;grid-template-columns:1fr 1fr;gap:0 18px}
+.refs figure.wide{grid-column:1/-1}
+/* mock */
+.mock{border:1px solid var(--line);border-radius:10px;background:var(--surface);overflow:hidden;font-size:13.5px;position:relative}
+.mhead{display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--line);min-height:44px;flex-wrap:wrap}
+.mhead b{font-size:15px}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden;font-size:12px}
+.seg span{padding:2px 9px}.seg span.on{background:var(--ink);color:var(--surface)}
+.search{margin-left:auto;background:var(--soft);border-radius:6px;padding:3px 10px;color:var(--faint);font-size:12px;min-width:140px}
+.row{display:flex;align-items:baseline;gap:10px;padding:8px 14px;border-bottom:1px solid var(--line)}
+.row .id{font:11px ui-monospace,SFMono-Regular,monospace;color:var(--muted);width:58px;flex:none}
+.row .t{flex:1;min-width:0}
+.row .meta{font-size:11.5px;color:var(--muted);white-space:nowrap}
+.row.open{background:var(--soft)}.row.open .t{font-weight:600}
+.row.sel{background:var(--sel)}
+.row.hover{background:color-mix(in srgb,var(--soft) 60%,transparent)}
+.brief{background:var(--soft);padding:2px 14px 14px 82px;border-bottom:1px solid var(--line);color:var(--ink)}
+.brief p{margin:6px 0;max-width:560px;color:var(--muted)}
+.btn{display:inline-flex;align-items:center;gap:5px;border:1px solid var(--line);background:var(--surface);border-radius:6px;padding:2px 9px;font-size:12.5px;white-space:nowrap;color:var(--ink)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--surface)}
+.btn.ghost{border-color:transparent;background:transparent;color:var(--muted)}
+.btn.icon{padding:2px 6px}
+.kbd{font:11px ui-monospace,monospace;color:var(--faint)}
+.pill{display:inline-flex;align-items:center;gap:4px;border-radius:5px;padding:1px 7px;font-size:12px;background:var(--surface);border:1px solid var(--line);white-space:nowrap}
+.pill.empty{color:var(--muted);border-style:dashed}
+.avatar{display:inline-grid;place-items:center;width:18px;height:18px;border-radius:50%;background:var(--accent);color:var(--surface);font-size:10px;font-weight:700}
+.avatar.other{background:var(--faint)}
+.avatar.none{background:transparent;border:1px dashed var(--faint)}
+.bar{position:absolute;left:50%;transform:translateX(-50%);bottom:12px;display:flex;align-items:center;gap:8px;background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:6px 8px 6px 14px;box-shadow:0 6px 18px var(--shadow);white-space:nowrap}
+.bar.square{border-radius:8px}
+.props{display:grid;grid-template-columns:90px 1fr;gap:5px 10px;font-size:12.5px;margin:8px 0 10px;max-width:420px}
+.props dt{color:var(--muted)}.props dd{margin:0}
+.menu{position:absolute;background:var(--surface);border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 22px var(--shadow);padding:4px;font-size:12.5px;min-width:190px;z-index:2}
+.menu div{display:flex;justify-content:space-between;gap:16px;padding:4px 9px;border-radius:5px}
+.menu div.hi{background:var(--sel)}
+.menu hr{border:0;border-top:1px solid var(--line);margin:4px 0}
+.menu .danger{color:#b4413c}
+.composer{margin-top:10px;border:1px solid var(--line);border-radius:8px;background:var(--surface);padding:8px 10px;max-width:560px}
+.composer .ph{color:var(--faint);min-height:22px}
+.composer .foot{display:flex;gap:8px;align-items:center;margin-top:6px}
+.toolbar{display:flex;gap:6px;align-items:center;padding:6px 14px;border-bottom:1px solid var(--line);background:var(--soft);flex-wrap:wrap}
+.toolbar .sp{flex:1}
+.dim{opacity:.4}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:12px}
+.two .mock{min-height:250px}
+.cap{font-size:12.5px;color:var(--muted);margin:6px 2px 0}
+.verdict{display:grid;grid-template-columns:1fr 1fr;gap:4px 18px;font-size:14px;margin-top:12px}
+.verdict b{display:block}
+ol.q{padding-left:22px}ol.q li{margin:10px 0}
+@media(max-width:720px){.refs,.two,.verdict{grid-template-columns:1fr}.brief{padding-left:14px}.search{min-width:0}}
+</style>
+</head>
+<body>
+<main>
+<div class="col">
+<h1>Where the actions go</h1>
+<p class="lead">Five layouts for Start, Claim, Move and Abandon, for one opened Task and for several selected. Each differs in what an action <i>is</i>: a button, a property, a hover control, a prompt, or a toolbar.</p>
+<p class="note">Today's preview: a button row under the opened brief (Edit, Start…, Claim, “…”, position, ↑↓), a floating capsule for several, the same set on right-click, and “360 words” or an owner's name at the row's right edge. References below are images published by Linear, Notion and Conductor, collected November 19, 2026. I did not use the apps.</p>
+</div>
+
+<h2>What the references do</h2>
+<div class="refs">
+<figure class="wide"><img src="backlog-actions-ref/linear-bulk-bar.jpg" alt="Linear board with three issues selected and a bar at the bottom: 3 selected, Add to cycle, Add to project, Command"><figcaption><b>Linear, several selected.</b> A bar at the bottom of the screen with the count, two common actions and “Command” for everything else. Every card also keeps its own “···”. <a href="https://linear.app/changelog/issue-selection">Linear changelog</a></figcaption></figure>
+<figure><img src="backlog-actions-ref/linear-context-menu.jpg" alt="Linear issue list with a context menu: Status S, Assignee A, Priority P, Labels L, Estimate, Cycle, Project, Relations, Add sub-issue, Move to team, Duplicate, Copy git branch name, Copy ID, Copy link, Archive"><figcaption><b>Linear, one issue.</b> The row's “···” and right-click open the same menu. Properties come first, each with a one-key shortcut; Archive comes last. <a href="https://linear.app/changelog/2020-08-26-better-menus-and-view-options">changelog, 2020</a></figcaption></figure>
+<figure><img src="backlog-actions-ref/linear-status-menu.jpg" alt="Linear contextual command menu titled Change status to…, listing Backlog, Todo, In Progress, In Review, Done, Testing, Canceled"><figcaption><b>Linear, one key.</b> Pressing S opens “Change status to…” beside the row. Starting work is a status change like any other. <a href="https://linear.app/changelog/2019-10-07-contextual-command-menu">changelog, 2019</a></figcaption></figure>
+<figure><img src="backlog-actions-ref/notion-page-properties.jpg" alt="A Notion database page showing Priority, Product Manager and Timeline as properties above comments and backlinks"><figcaption><b>Notion, one opened.</b> No action buttons. State sits as properties at the top of the page, and changing a property is the action. <a href="https://www.notion.com/help/intro-to-databases">Notion help</a></figcaption></figure>
+<figure><img src="backlog-actions-ref/notion-open-in.jpg" alt="Notion database view with layout settings showing Open pages in: Side peek"><figcaption><b>Notion, how a row opens</b> is a setting on the view: side peek, center peek or full page. Its bulk-edit bar is described in guides, but I found no image of it to show. <a href="https://www.notion.com/help/views-filters-and-sorts">Notion help</a></figcaption></figure>
+<figure class="wide"><img src="backlog-actions-ref/conductor-create-from-issue.jpg" alt="Conductor new-workspace composer with a Create from… dropdown open on the Issues tab listing Linear issues"><figcaption><b>Conductor, the ADE.</b> It has no backlog of its own. Starting is a composer: pick the repo, open “Create from…” (⌘I), choose a Linear or GitHub issue, then set the prompt, model and Create ⏎. The issue tracker is where work waits, and the ADE is only where it starts. <a href="https://www.conductor.build/changelog/0.66.0-create-workspace-from-issue">Conductor 0.66.0</a> (frame from the release video)</figcaption></figure>
+</div>
+
+<h2>A · Linear: a menu per row, a bar for several</h2>
+<div class="col"><p>A “···” on every row opens the full action menu, and right-click opens the same menu. The opened brief has no button row. The trailing column becomes an owner avatar, a dashed circle meaning unclaimed. Several selected get Linear's bar: count, Start, Claim, Command.</p></div>
+<div class="two">
+<div class="mock">
+ <div class="mhead"><b>Product</b><span class="seg"><span class="on">All 46</span><span>Mine 0</span><span>Available 43</span></span><span class="search">Find work</span></div>
+ <div class="row"><span class="btn ghost icon">···</span><span class="id">LOO-903</span><span class="t">Redesign backlog management</span><span class="avatar none"></span></div>
+ <div class="row open"><span class="btn ghost icon">···</span><span class="id">LOO-515</span><span class="t">Make Task PR, file-browser and brief views useful</span><span class="avatar none"></span></div>
+ <div class="brief"><p>Task workspace views beside the conversation: the PR, files and brief stay useful without leaving the Session…</p></div>
+ <div class="row"><span class="btn ghost icon">···</span><span class="id">LOO-423</span><span class="t">Graph steps keep their history</span><span class="avatar other">S</span></div>
+ <div class="menu" style="left:22px;top:118px">
+  <div class="hi"><span>Start…</span><span class="kbd">⌘↩</span></div><div><span>Claim</span><span class="kbd">C</span></div><div><span>Edit brief</span><span class="kbd">E</span></div><div><span>Move to Wave ›</span><span class="kbd">M</span></div><div><span>Move to top</span><span class="kbd">⌘⇧↑</span></div><hr><div><span>Copy ID</span><span class="kbd">⌘.</span></div><hr><div class="danger"><span>Abandon…</span><span class="kbd">⌘⌫</span></div>
+ </div>
+</div>
+<div class="mock">
+ <div class="mhead"><b>Product</b><span class="seg"><span class="on">All 46</span><span>Mine 0</span><span>Available 43</span></span></div>
+ <div class="row sel"><span class="btn ghost icon">···</span><span class="id">LOO-903</span><span class="t">Redesign backlog management</span><span class="avatar none"></span></div>
+ <div class="row sel"><span class="btn ghost icon">···</span><span class="id">LOO-515</span><span class="t">Make Task PR views useful</span><span class="avatar none"></span></div>
+ <div class="row sel"><span class="btn ghost icon">···</span><span class="id">LOO-434</span><span class="t">Repeatable delivery from the workspace</span><span class="avatar none"></span></div>
+ <div class="row"><span class="btn ghost icon">···</span><span class="id">LOO-423</span><span class="t">Graph steps keep their history</span><span class="avatar other">S</span></div>
+ <div class="bar square"><span>3 selected</span><span class="btn">▶ Start 3…</span><span class="btn">Claim</span><span class="btn">⌘K Command</span></div>
+</div>
+</div>
+<p class="cap">Cost: two menus to keep in sync with the bar. Its weakness: Start sits at the same weight as Copy ID.</p>
+
+<h2>B · Notion: actions are properties</h2>
+<div class="col"><p>The opened brief starts with three properties: Owner, Wave and Position. Claiming means setting Owner. Moving means setting Wave or Position. Start is the only button, because it does something a property can't. Abandon lives under Owner ▾ as “Nobody, abandon…”. Several selected turn the header into a property editor.</p></div>
+<div class="two">
+<div class="mock">
+ <div class="mhead"><b>Product</b><span class="seg"><span class="on">All 46</span><span>Mine 0</span><span>Available 43</span></span><span class="search">Find work</span></div>
+ <div class="row open"><span class="id">LOO-515</span><span class="t">Make Task PR, file-browser and brief views useful</span><span class="meta">unclaimed</span></div>
+ <div class="brief">
+  <dl class="props"><dt>Owner</dt><dd><span class="pill empty">Claim ▾</span></dd><dt>Wave</dt><dd><span class="pill">Product ▾</span></dd><dt>Position</dt><dd><span class="pill">4 of 46 ▾</span></dd></dl>
+  <p>Task workspace views beside the conversation: the PR, files and brief stay useful without leaving the Session…</p>
+  <span class="btn primary">▶ Start…</span>
+ </div>
+ <div class="row"><span class="id">LOO-423</span><span class="t">Graph steps keep their history</span><span class="meta">someone else</span></div>
+</div>
+<div class="mock">
+ <div class="mhead" style="background:var(--sel)"><b>3 selected</b><span class="pill">Owner ▾</span><span class="pill">Wave ▾</span><span class="pill">Position ▾</span><span class="btn primary" style="margin-left:auto">▶ Start 3…</span><span class="btn ghost">✕</span></div>
+ <div class="row sel"><span class="id">LOO-903</span><span class="t">Redesign backlog management</span><span class="meta">unclaimed</span></div>
+ <div class="row sel"><span class="id">LOO-515</span><span class="t">Make Task PR views useful</span><span class="meta">unclaimed</span></div>
+ <div class="row sel"><span class="id">LOO-434</span><span class="t">Repeatable delivery from the workspace</span><span class="meta">unclaimed</span></div>
+ <div class="row"><span class="id">LOO-423</span><span class="t">Graph steps keep their history</span><span class="meta">someone else</span></div>
+</div>
+</div>
+<p class="cap">This maps onto the model directly: owner, Wave and rank are real fields. It also gives the later regrouping work a place to go, as a fourth property, Group ▾. Risk: Abandon hidden under Owner is hard to find.</p>
+
+<h2>C · Hover controls at the row's edge</h2>
+<div class="col"><p>The trailing column is the action column. At rest it shows the owner. On hover it shows Claim, ▶ and “···”, like Mail's swipe buttons. Rows act without opening, and the opened brief carries only Edit. Several selected show the same three controls in the header.</p></div>
+<div class="two">
+<div class="mock">
+ <div class="mhead"><b>Product</b><span class="seg"><span class="on">All 46</span><span>Mine 0</span><span>Available 43</span></span><span class="search">Find work</span></div>
+ <div class="row"><span class="id">LOO-903</span><span class="t">Redesign backlog management</span><span class="meta">360 words</span></div>
+ <div class="row hover"><span class="id">LOO-515</span><span class="t">Make Task PR, file-browser and brief views useful</span><span class="btn">Claim</span><span class="btn icon">▶</span><span class="btn ghost icon">···</span></div>
+ <div class="row open"><span class="id">LOO-434</span><span class="t">Repeatable delivery from the workspace</span><span class="btn">Claim</span><span class="btn icon">▶</span><span class="btn ghost icon">···</span></div>
+ <div class="brief"><p>Make repeatable delivery approachable from the Task workspace…</p><span class="btn ghost">Edit brief</span></div>
+ <div class="row"><span class="id">LOO-423</span><span class="t">Graph steps keep their history</span><span class="meta">someone else</span></div>
+</div>
+<div class="mock">
+ <div class="mhead"><b>3 selected</b><span style="margin-left:auto" class="btn">Claim 3</span><span class="btn icon">▶ 3</span><span class="btn ghost icon">···</span><span class="btn ghost">✕</span></div>
+ <div class="row sel"><span class="id">LOO-903</span><span class="t">Redesign backlog management</span><span class="meta">360 words</span></div>
+ <div class="row sel"><span class="id">LOO-515</span><span class="t">Make Task PR views useful</span><span class="meta">1,100 words</span></div>
+ <div class="row sel"><span class="id">LOO-434</span><span class="t">Repeatable delivery from the workspace</span><span class="meta">820 words</span></div>
+ <div class="row"><span class="id">LOO-423</span><span class="t">Graph steps keep their history</span><span class="meta">someone else</span></div>
+</div>
+</div>
+<p class="cap">Fastest for triage. Risk: a ▶ under the pointer while you scan makes starting feel cheap, against the brief's “selecting never starts”.</p>
+
+<h2>D · Conductor: Start is a composer</h2>
+<div class="col"><p>Starting an agent is a prompt, not a button. The opened brief ends in a composer: an optional note to the agent, the Graph and the model, then ⌘↩. Claim and the rest go in “···”. For several, the bar's Start opens one composer that lists the selected Tasks, with one shared note.</p></div>
+<div class="two">
+<div class="mock">
+ <div class="mhead"><b>Product</b><span class="seg"><span class="on">All 46</span><span>Mine 0</span><span>Available 43</span></span><span class="search">Find work</span></div>
+ <div class="row open"><span class="id">LOO-515</span><span class="t">Make Task PR, file-browser and brief views useful</span><span class="btn ghost icon">···</span></div>
+ <div class="brief">
+  <p>Task workspace views beside the conversation: the PR, files and brief stay useful without leaving the Session…</p>
+  <div class="composer"><div class="ph">Anything the agent should know? (optional)</div><div class="foot"><span class="pill">feature ▾</span><span class="pill">Claude ▾</span><span class="btn ghost">Claim only</span><span class="btn primary" style="margin-left:auto">Start ⌘↩</span></div></div>
+ </div>
+ <div class="row"><span class="id">LOO-423</span><span class="t">Graph steps keep their history</span><span class="meta">someone else</span></div>
+</div>
+<div class="mock">
+ <div class="mhead"><b>Product</b></div>
+ <div class="row sel"><span class="id">LOO-903</span><span class="t">Redesign backlog management</span></div>
+ <div class="row sel"><span class="id">LOO-515</span><span class="t">Make Task PR views useful</span></div>
+ <div class="row sel"><span class="id">LOO-434</span><span class="t">Repeatable delivery…</span></div>
+ <div class="composer" style="position:absolute;left:14px;right:14px;bottom:12px;max-width:none;box-shadow:0 6px 18px var(--shadow)"><div style="font-size:12px;color:var(--muted)">Start LOO-903, LOO-515, LOO-434</div><div class="ph">One note for all three (optional)</div><div class="foot"><span class="pill">feature ▾</span><span class="pill">Claude ▾</span><span class="btn ghost">Claim 3 only</span><span class="btn primary" style="margin-left:auto">Start 3 ⌘↩</span></div></div>
+</div>
+</div>
+<p class="cap">This is closest to what Start really does in Loopflow: launching an agent with context. The multi-select composer is also where “consider these together” could grow later. Cost: a third input surface beside the brief editor and the Wave conversation.</p>
+
+<h2>E · One toolbar for the selection</h2>
+<div class="col"><p>Rows carry no controls. A fixed toolbar under the header always shows the actions and applies them to the selection, whether one Task or many, disabled when nothing is selected. It works like Finder's or Mail's toolbar. The opened brief is only text.</p></div>
+<div class="two">
+<div class="mock">
+ <div class="mhead"><b>Product</b><span class="seg"><span class="on">All 46</span><span>Mine 0</span><span>Available 43</span></span><span class="search">Find work</span></div>
+ <div class="toolbar"><span class="btn primary">▶ Start…</span><span class="btn">Claim</span><span class="btn">Edit</span><span class="btn">Move ▾</span><span class="sp"></span><span class="btn ghost icon">↑</span><span class="btn ghost icon">↓</span><span class="btn ghost">Abandon…</span></div>
+ <div class="row open"><span class="id">LOO-515</span><span class="t">Make Task PR, file-browser and brief views useful</span><span class="meta">unclaimed</span></div>
+ <div class="brief"><p>Task workspace views beside the conversation: the PR, files and brief stay useful without leaving the Session…</p></div>
+ <div class="row"><span class="id">LOO-423</span><span class="t">Graph steps keep their history</span><span class="meta">someone else</span></div>
+</div>
+<div class="mock">
+ <div class="mhead"><b>Product</b><span class="seg"><span class="on">All 46</span><span>Mine 0</span><span>Available 43</span></span></div>
+ <div class="toolbar"><span class="btn primary">▶ Start 3…</span><span class="btn">Claim 3</span><span class="btn dim">Edit</span><span class="btn">Move ▾</span><span class="sp"></span><span class="btn ghost icon">↑</span><span class="btn ghost icon">↓</span><span class="btn ghost">Abandon…</span></div>
+ <div class="row sel"><span class="id">LOO-903</span><span class="t">Redesign backlog management</span><span class="meta">unclaimed</span></div>
+ <div class="row sel"><span class="id">LOO-515</span><span class="t">Make Task PR views useful</span><span class="meta">unclaimed</span></div>
+ <div class="row sel"><span class="id">LOO-434</span><span class="t">Repeatable delivery…</span><span class="meta">unclaimed</span></div>
+</div>
+</div>
+<p class="cap">One place, and it never moves: the simplest to learn and to build. Cost: one more always-on band of chrome, and actions sit far from the row they act on.</p>
+
+<div class="col">
+<h2>Side by side</h2>
+<div class="verdict">
+<div><b>A · Linear menus</b>Dense and familiar. Start ranks no higher than Copy ID.</div>
+<div><b>B · Notion properties</b>Maps to real fields. Abandon is hard to find.</div>
+<div><b>C · Hover controls</b>Fastest triage. Starting is one stray click away.</div>
+<div><b>D · Conductor composer</b>Matches what Start does, and grows into grouping. One more input box.</div>
+<div><b>E · One toolbar</b>Simplest. Far from the row.</div>
+</div>
+<p class="note">These combine. B's properties with D's composer is one coherent pair, and A's right-click menu can sit under any of them.</p>
+
+<h2>Questions</h2>
+<ol class="q">
+<li>Which carries the actions for one opened Task? a · A, b · B, c · C, d · D, e · E</li>
+<li>Which carries them for several selected? a · A's bottom bar, b · B's header editor, c · D's composer, d · E's toolbar</li>
+<li>What does the row's right edge show at rest? a · owner avatar, b · owner name, c · word count, d · nothing</li>
+</ol>
+</div>
+</main>
+</body>
+</html>

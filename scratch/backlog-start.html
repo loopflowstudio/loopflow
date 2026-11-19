@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LOO-903 · Starting with a flow</title>
+<style>
+:root{color-scheme:light dark;--paper:#f3f1eb;--surface:#fffefa;--ink:#282b28;--muted:#656b64;--faint:#8d938b;--line:#d4d7ce;--accent:#783e48;--wash:#f0e6e7;--sel:#e7ebf3;--soft:#eeeee7;--shadow:rgba(0,0,0,.16);--warn:#8a5a12;--warnwash:#f4ead6;--stop:#356949;--stopwash:#e3eee5}
+@media(prefers-color-scheme:dark){:root{--paper:#1c2022;--surface:#252a2c;--ink:#eeeee8;--muted:#aeb8b0;--faint:#7f8984;--line:#454f4c;--accent:#e1b3bc;--wash:#3d3037;--sel:#2c3442;--soft:#2d3435;--shadow:rgba(0,0,0,.5);--warn:#e6c98a;--warnwash:#3a3222;--stop:#b1d5b8;--stopwash:#26362c}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+main{max-width:980px;margin:auto;padding:48px 20px 90px}
+.col{max-width:720px}
+h1{font-size:clamp(28px,5vw,40px);line-height:1.1;letter-spacing:-.03em;margin:0 0 14px}
+h2{font-size:23px;letter-spacing:-.02em;margin:52px 0 6px}
+p{margin:8px 0}.lead{font-size:18px}
+.note{font-size:13px;color:var(--muted)}
+a{color:var(--accent)}
+code{font:12.5px ui-monospace,SFMono-Regular,monospace}
+figure{margin:14px 0 22px}
+figure img{width:100%;border-radius:8px;border:1px solid var(--line);display:block}
+figcaption{font-size:13px;color:var(--muted);margin-top:6px}
+.refs{display:grid;grid-template-columns:1fr 1fr;gap:0 18px}
+.refs .wide{grid-column:1/-1}
+table.flows{border-collapse:collapse;width:100%;font-size:13.5px;background:var(--surface);border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.flows th,.flows td{text-align:left;padding:7px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+.flows tr:last-child td{border-bottom:0}
+.steps{font:11.5px ui-monospace,SFMono-Regular,monospace;color:var(--muted)}
+.stop{background:var(--stopwash);color:var(--stop);border-radius:4px;padding:0 4px;font-weight:600}
+.tag{display:inline-block;border-radius:4px;padding:0 6px;font-size:12px;font-weight:600;white-space:nowrap}
+.tag.warn{background:var(--warnwash);color:var(--warn)}
+.tag.ok{background:var(--stopwash);color:var(--stop)}
+/* mock */
+.mock{border:1px solid var(--line);border-radius:10px;background:var(--surface);overflow:visible;font-size:13.5px;position:relative}
+.mhead{display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--line)}
+.toolbar{display:flex;gap:6px;align-items:center;padding:6px 14px;border-bottom:1px solid var(--line);background:var(--soft);flex-wrap:wrap}
+.toolbar .sp{flex:1}
+.row{display:flex;align-items:baseline;gap:10px;padding:8px 14px;border-bottom:1px solid var(--line)}
+.row .id{font:11px ui-monospace,monospace;color:var(--muted);width:58px;flex:none}
+.row .t{flex:1;min-width:0}
+.row.sel{background:var(--sel)}
+.row .dots{color:var(--faint)}
+.ring{display:inline-block;width:14px;height:14px;border-radius:50%;border:1px dashed var(--faint)}
+.btn{display:inline-flex;align-items:center;gap:5px;border:1px solid var(--line);background:var(--surface);border-radius:6px;padding:2px 9px;font-size:12.5px;white-space:nowrap;color:var(--ink)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--surface)}
+.btn.ghost{border-color:transparent;background:transparent;color:var(--muted)}
+.split{display:inline-flex}.split .btn:first-child{border-radius:6px 0 0 6px}.split .btn:last-child{border-radius:0 6px 6px 0;border-left:1px solid color-mix(in srgb,var(--surface) 40%,transparent);padding:2px 6px}
+.pill{display:inline-flex;align-items:center;gap:4px;border-radius:5px;padding:1px 7px;font-size:12px;background:var(--surface);border:1px solid var(--line);white-space:nowrap}
+.menu{position:absolute;background:var(--surface);border:1px solid var(--line);border-radius:8px;box-shadow:0 10px 26px var(--shadow);padding:5px;font-size:12.5px;z-index:3}
+.menu .it{display:grid;grid-template-columns:1fr auto;gap:2px 14px;padding:5px 9px;border-radius:5px}
+.menu .it.hi{background:var(--sel)}
+.menu .it small{grid-column:1/-1;color:var(--muted);font-size:11.5px}
+.menu .hd{padding:6px 9px 2px;color:var(--muted);font-size:11.5px}
+.menu hr{border:0;border-top:1px solid var(--line);margin:4px 0}
+.sheet{position:absolute;left:50%;top:46px;transform:translateX(-50%);width:min(560px,94%);background:var(--surface);border:1px solid var(--line);border-radius:10px;box-shadow:0 14px 34px var(--shadow);padding:14px 16px;z-index:3}
+.sheet h4{margin:0 0 4px;font-size:15px}
+.fields{display:grid;grid-template-columns:auto auto auto;gap:4px 10px;margin:10px 0;font-size:12px;color:var(--muted);justify-content:start}
+.fields .pill{color:var(--ink);font-size:12.5px}
+.ta{border:1px solid var(--line);border-radius:6px;padding:7px 9px;color:var(--faint);min-height:48px;font-size:12.5px}
+.foot{display:flex;gap:8px;align-items:center;margin-top:10px;font-size:12px;color:var(--muted)}
+.brief{background:var(--soft);padding:6px 14px 12px 96px;border-bottom:1px solid var(--line);color:var(--muted)}
+.props{display:grid;grid-template-columns:70px 1fr;gap:4px 10px;font-size:12.5px;margin:4px 0 8px;max-width:520px}
+.props dt{color:var(--muted)}.props dd{margin:0;color:var(--ink)}
+.route{display:flex;flex-wrap:wrap;gap:4px;align-items:center;font:11.5px ui-monospace,monospace;margin:10px 0}
+.route span{padding:2px 6px;border-radius:4px;border:1px solid var(--line);background:var(--surface)}
+.route span.on{border-color:var(--accent)}
+.route span.off{opacity:.38}
+.route span.stop{background:var(--stopwash);color:var(--stop);border-color:transparent}
+.route .flag{border:0;background:transparent;color:var(--accent);font-weight:700}
+.space{height:270px}
+.cap{font-size:12.5px;color:var(--muted);margin:8px 2px 0}
+ol.q{padding-left:22px}ol.q li{margin:10px 0}
+@media(max-width:720px){.refs{grid-template-columns:1fr}.brief{padding-left:14px}.fields{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<main>
+<div class="col">
+<h1>Choosing a flow when you start</h1>
+<p class="lead">Start runs a Task's Graph. Today the Graph is resolved silently: the Task's own, else the Wave's default (<code>feature</code> for Product), else the repository's, else <code>code</code>. These options show five ways to make that choice visible and changeable at the moment of starting.</p>
+<p class="note">The flows listed are this repository's real Graphs from <code>lf graph list</code> on November 19, 2026. Graphs carry no descriptions, so each option shows steps and stops. Reference images come from the vendors' changelogs, docs and release videos; I did not use the apps. LOO-434 (open PR #1851) prototypes how a Task moves through delivery once started. The mock rows are real backlog Tasks. These options stop at the moment of starting, and option E is the one that reaches into LOO-434's territory.</p>
+</div>
+
+<h2>What there is to choose</h2>
+<table class="flows">
+<tr><th>Flow</th><th>Steps (<span class="stop">green</span> waits for a person)</th><th>Ends</th></tr>
+<tr><td><b>feature</b><br><span class="note">Product's default</span></td><td class="steps"><span class="stop">explore</span> kickoff concept-review write-docs implement sync realign compress qa concept-review pr-publish <span class="stop">human-review</span> reflect gate</td><td>Gate passed, not merged</td></tr>
+<tr><td><b>code</b><br><span class="note">repository fallback</span></td><td class="steps">kickoff concept-review write-docs implement sync realign compress qa concept-review pr-publish <span class="stop">human-review</span> reflect gate land</td><td><span class="tag ok">lands after your review</span></td></tr>
+<tr><td><b>redesign</b></td><td class="steps"><span class="stop">design</span> kickoff concept-review write-docs implement … pr-publish</td><td>Published PR</td></tr>
+<tr><td><b>plan</b></td><td class="steps">kickoff concept-review write-docs</td><td>A plan, no PR</td></tr>
+<tr><td><b>research</b></td><td class="steps">research <span class="stop">research</span></td><td>Findings, in conversation</td></tr>
+<tr><td><b>build</b></td><td class="steps">implement sync realign compress qa concept-review pr-publish</td><td><span class="tag warn">never stops for you</span></td></tr>
+<tr><td><b>deep-clean</b></td><td class="steps">sync deep-clean qa pr-publish</td><td><span class="tag warn">never stops for you</span></td></tr>
+<tr><td><b>auto</b> · <b>autonomous</b></td><td class="steps">kickoff … pr-publish reflect gate land</td><td><span class="tag warn">merges without asking</span></td></tr>
+</table>
+<p class="note">Also in the list but not for starting backlog work: incident, task-design, deliver, kickoff-demo, optimize, pursue, queue, finish-queue, refresh, release-run, telemetry-daily, vsm-operate. Four more (local-build-auto, macos-ci-auto, pursue-auto, recover-transient-faults) are listed as unavailable because their files use the retired <code>loop: &lt;step&gt;</code>. A run with no step left that waits for a person approves Auto-Ship, which is why the last three rows are flagged.</p>
+
+<h2>How others pick what runs</h2>
+<div class="refs">
+<figure class="wide"><img src="backlog-start-ref/github-assign-custom-agent.jpg" alt="GitHub Assign Copilot to issue dialog with Target repository, Base branch and Custom agent dropdown open: Rails API developer, UI engineer, Debugger, Kubernetes architect, Create an agent"><figcaption><b>GitHub, Assign Copilot to issue.</b> A dialog with repository, base branch and a <b>Custom agent</b> dropdown. The agents are named by role, and “None” is the default. An optional prompt sits below, and Assign ⌘↩ is the commit. <a href="https://github.blog/changelog/2025-10-28-custom-agents-for-github-copilot/">changelog, Oct 2025</a></figcaption></figure>
+<figure><img src="backlog-start-ref/github-assign-prompt.jpg" alt="Assign Copilot to issue dialog with Optional prompt filled in and Assign button"><figcaption><b>GitHub, same dialog.</b> Every field has a default, so one click from the sidebar's “Assign to Copilot” then ⌘↩ starts it. <a href="https://github.blog/changelog/2025-09-23-pick-the-repository-and-base-branch-when-assigning-issues-to-copilot">changelog, Sep 2025</a> (frame from its video)</figcaption></figure>
+<figure><img src="backlog-start-ref/github-run-workflow.jpg" alt="GitHub Actions workflow page with a Run workflow split button"><figcaption><b>GitHub Actions.</b> You pick the workflow first, on its own page. “Run workflow ▾” then opens the branch and the inputs. <a href="https://docs.github.com/en/actions/how-tos/manage-workflow-runs/manually-run-a-workflow">GitHub docs</a></figcaption></figure>
+<figure><img src="backlog-start-ref/linear-agent-defaults.jpg" alt="Linear settings: Cloud coding agent enabled, Agent Claude Code, Model Auto"><figcaption><b>Linear, workspace defaults.</b> Which agent and model run is a setting, not a per-issue choice. Delegating an issue just uses it. <a href="https://linear.app/docs/linear-cloud-coding-agent">Linear docs</a></figcaption></figure>
+<figure><img src="backlog-start-ref/linear-triage-rule.jpg" alt="Linear triage rule: When labels include Bug, Then investigate new bugs deeply"><figcaption><b>Linear, rules.</b> “When Labels include Bug, Then …” chooses what an agent does from the issue's properties, so nobody picks at start. <a href="https://linear.app/changelog/2025-08-21-cursor-agent">Linear changelog</a></figcaption></figure>
+<figure><img src="backlog-start-ref/linear-mention-agent.jpg" alt="Linear comment box with @co typed and a picker listing Codex (Agent) and Collin"><figcaption><b>Linear, delegation.</b> Agents appear in the same picker as people. Which agent you pick is the choice. <a href="https://linear.app/changelog/2025-12-04-openai-codex-agent">changelog, Dec 2025</a></figcaption></figure>
+<figure class="wide"><img src="backlog-start-ref/conductor-composer.jpg" alt="Conductor composer with repository, Create from… dropdown, model GPT-5.5 and Create button"><figcaption><b>Conductor.</b> The composer row carries the model choice as a chip beside the prompt, and Create ⏎ starts it. There is no flow to pick: every workspace runs the same way. <a href="https://www.conductor.build/changelog/0.66.0-create-workspace-from-issue">Conductor 0.66.0</a></figcaption></figure>
+</div>
+<div class="col"><p><b>Pattern:</b> three of the four put the choice in a dropdown with a default, and Linear moves it out of starting altogether, into settings or rules. Only GitHub's custom agents name the choice by role. None shows what will happen after starting: where it will stop, or whether it will merge.</p></div>
+
+<h2>A · Split button: the default is visible, the rest one click away</h2>
+<div class="col"><p>The toolbar's Start names its flow: <b>Start · feature</b>. The ▾ lists the flows with their stops and whether they merge. Picking one starts it. With several selected, one flow applies to all of them. The row's “···” menu gets a “Start with ›” submenu.</p></div>
+<div class="mock">
+ <div class="toolbar"><span class="split"><span class="btn primary">Start · feature</span><span class="btn primary">▾</span></span><span class="btn">Claim</span><span class="btn">Edit</span><span class="btn">Move ▾</span><span class="sp"></span><span class="btn ghost">Abandon…</span></div>
+ <div class="row sel"><span class="dots">···</span><span class="id">LOO-458</span><span class="t">lf account shows each login with a bar and how much is left</span><span class="ring"></span></div>
+ <div class="row"><span class="dots">···</span><span class="id">LOO-456</span><span class="t">lf monitor opens with one line saying how many sessions are…</span><span class="ring"></span></div>
+ <div class="space"></div>
+ <div class="menu" style="left:14px;top:38px;width:330px">
+  <div class="it hi"><b>feature</b><span class="note">Product default</span><small>Stops for you at explore and human-review</small></div>
+  <div class="it"><b>code</b><span></span><small>Stops at human-review, then lands</small></div>
+  <div class="it"><b>redesign</b><span></span><small>Stops at design, ends at a published PR</small></div>
+  <div class="it"><b>plan</b><span></span><small>Writes the plan; no PR</small></div>
+  <div class="it"><b>research</b><span></span><small>Findings in conversation</small></div>
+  <hr><div class="hd">Run without stopping</div>
+  <div class="it"><b>build</b><span class="tag warn">no stop</span></div>
+  <div class="it"><b>auto</b><span class="tag warn">merges</span></div>
+  <hr><div class="it"><span>Make code the default for Product…</span></div>
+ </div>
+</div>
+<p class="cap">Smallest change: one click when the default is right, two when it isn't. Cost: a note or agent choice has nowhere to go.</p>
+
+<h2>B · A start sheet, like Assign to Copilot</h2>
+<div class="col"><p>Start… opens a small sheet: Flow ▾, Agent ▾ and Start at ▾, then an optional note to the agent and Start ⌘↩. Everything has a default, so Start… then ⌘↩ is still two keys. With several selected, the sheet lists them and one choice applies to all.</p></div>
+<div class="mock">
+ <div class="toolbar"><span class="btn primary">Start 2…</span><span class="btn">Claim 2</span><span class="btn">Edit</span><span class="btn">Move ▾</span></div>
+ <div class="row sel"><span class="dots">···</span><span class="id">LOO-458</span><span class="t">lf account shows each login with a bar and how much is left</span><span class="ring"></span></div>
+ <div class="row sel"><span class="dots">···</span><span class="id">LOO-456</span><span class="t">lf monitor opens with one line saying how many sessions are…</span><span class="ring"></span></div>
+ <div class="space"></div>
+ <div class="sheet">
+  <h4>Start LOO-458 and LOO-456</h4>
+  <div class="note">Each is claimed for you and runs in its own worktree.</div>
+  <div class="fields"><span>Flow</span><span>Agent</span><span>Start at</span><span class="pill">feature ▾</span><span class="pill">claude · default ▾</span><span class="pill">explore ▾</span></div>
+  <div class="note">Stops for you at explore and human-review. Doesn't merge.</div>
+  <div style="height:8px"></div>
+  <div class="ta">Anything the agents should know? (optional)</div>
+  <div class="foot"><span>Product default: feature</span><span class="btn ghost" style="margin-left:auto">Cancel</span><span class="btn primary">Start 2 ⌘↩</span></div>
+ </div>
+</div>
+<p class="cap">The most complete option, and it maps one to one onto <code>lf task run &lt;id&gt; &lt;graph&gt; --from &lt;step&gt; -a &lt;agent&gt;</code>. Cost: a sheet between you and every start.</p>
+
+<h2>C · The flow belongs to the Task</h2>
+<div class="col"><p>A flow is chosen while shaping, not while starting. The opened brief shows <b>Flow: feature</b> (inherited from Product) and can be changed. The toolbar's Move ▾ gains Flow ›, so several can be set at once. Start runs each Task's own flow, so a mixed selection starts mixed flows, and the toolbar says so.</p></div>
+<div class="mock">
+ <div class="toolbar"><span class="btn primary">Start 3…</span><span class="btn">Claim 3</span><span class="btn">Edit</span><span class="btn">Move ▾</span><span class="sp"></span><span class="note">2 feature · 1 research</span></div>
+ <div class="row sel"><span class="dots">···</span><span class="id">LOO-458</span><span class="t">lf account shows each login with a bar and how much is left</span><span class="pill">feature</span><span class="ring"></span></div>
+ <div class="row sel"><span class="dots">···</span><span class="id">LOO-456</span><span class="t">lf monitor opens with one line saying how many sessions are…</span><span class="pill">feature</span><span class="ring"></span></div>
+ <div class="row sel"><span class="dots">···</span><span class="id">LOO-753</span><span class="t">Reach a headless Machine's Work from Desktop over the client…</span><span class="pill">research</span><span class="ring"></span></div>
+ <div class="row"><span class="dots">···</span><span class="id">LOO-423</span><span class="t">Fix what the herdr and cmux trial finds</span><span class="pill" style="opacity:.6">feature</span><span class="ring"></span></div>
+ <div class="brief" style="padding-top:10px">
+  <dl class="props"><dt>Flow</dt><dd><span class="pill">feature ▾</span> <span class="note">from Product · stops at explore, human-review</span></dd></dl>
+  The brief…
+ </div>
+</div>
+<p class="cap">The model already has this: a Task's own Graph wins over the Wave's. This option only shows it and lets you set it. It is also the natural target for Linear-style rules later (“bug label → research”). Cost: one more thing on every row; hiding the tag when it equals the default keeps rows quiet.</p>
+
+<h2>D · Named for where it stops</h2>
+<div class="col"><p>The Start menu offers outcomes instead of Graph names, like GitHub's role-named agents. Each entry is a Graph underneath, and its name is shown small. The person picks how involved they want to be.</p></div>
+<div class="mock">
+ <div class="toolbar"><span class="split"><span class="btn primary">Start</span><span class="btn primary">▾</span></span><span class="btn">Claim</span><span class="btn">Edit</span><span class="btn">Move ▾</span></div>
+ <div class="row sel"><span class="dots">···</span><span class="id">LOO-458</span><span class="t">lf account shows each login with a bar and how much is left</span><span class="ring"></span></div>
+ <div class="space" style="height:250px"></div>
+ <div class="menu" style="left:14px;top:38px;width:360px">
+  <div class="it hi"><b>Explore with me first</b><span class="steps">feature</span><small>Asks you to pick a direction, builds it, then waits for your review</small></div>
+  <div class="it"><b>Build, then show me</b><span class="steps">code</span><small>Plans and builds; waits for your review; lands after</small></div>
+  <div class="it"><b>Just plan it</b><span class="steps">plan</span><small>A written plan in the Task's notes; nothing built</small></div>
+  <div class="it"><b>Find out</b><span class="steps">research</span><small>Investigates and reports back here</small></div>
+  <hr>
+  <div class="it"><b>Build and merge</b><span class="tag warn">auto</span><small>Doesn't stop for you</small></div>
+ </div>
+</div>
+<p class="cap">Reads best for someone who doesn't know the Graph names. Cost: the outcome names have to be written per repository, because a customized Graph can change what “Build, then show me” means. The names drift unless they live in the Graph file.</p>
+
+<h2>E · Pick where it stops</h2>
+<div class="col"><p>Start shows the chosen flow as a strip of steps. You choose where it starts and where it hands back to you, defaulting to the flow's own stops. The flow picker sits at the left of the strip. This option reaches into LOO-434, which owns how a running Task moves through its steps.</p></div>
+<div class="mock">
+ <div class="toolbar"><span class="btn primary">Start…</span><span class="btn">Claim</span><span class="btn">Edit</span><span class="btn">Move ▾</span></div>
+ <div class="row sel"><span class="dots">···</span><span class="id">LOO-458</span><span class="t">lf account shows each login with a bar and how much is left</span><span class="ring"></span></div>
+ <div style="padding:12px 14px 16px">
+  <div style="display:flex;gap:8px;align-items:center"><span class="pill">feature ▾</span><span class="note">Starts at explore · hands back at human-review</span><span class="btn primary" style="margin-left:auto">Start ⌘↩</span></div>
+  <div class="route"><span class="stop on">explore ✋</span><span class="on">kickoff</span><span class="on">concept-review</span><span class="on">write-docs</span><span class="on">implement</span><span class="on">sync</span><span class="on">…</span><span class="on">pr-publish</span><span class="stop on">human-review ✋</span><span class="flag">◀ stop</span><span class="off">reflect</span><span class="off">gate</span></div>
+  <div class="note">Drag “stop” to run further. Past human-review, nothing waits for you.</div>
+ </div>
+</div>
+<p class="cap">The most honest about what Start commits to. Cost: a route editor in the backlog, and an overlap with LOO-434's prototype, which should settle this first.</p>
+
+<div class="col">
+<h2>Questions</h2>
+<ol class="q">
+<li>Where is the flow chosen? a · at Start, from a menu (A or D), b · in a start sheet (B), c · on the Task, before starting (C), d · C, with A's menu as an override at Start</li>
+<li>What names the choices? a · Graph names with their stops, b · outcome names (D), c · both</li>
+<li>Does Start also take a note and an agent? a · no, b · yes, in a sheet (B), c · only behind ⌥-Start</li>
+</ol>
+</div>
+</main>
+</body>
+</html>

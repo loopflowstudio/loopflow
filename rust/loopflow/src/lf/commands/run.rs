@@ -54,7 +54,7 @@ pub fn run(
     });
 
     print_context_header(&built, cli);
-    run_prompt(&built, cli, kind).map(|_| ())
+    run_prompt(built, cli, kind).map(|_| ())
 }
 
 pub(crate) fn preview_prompt(
@@ -188,7 +188,7 @@ pub fn resume(id: &str, message: &str, cli: &Cli, kind: LaunchKind) -> Result<()
         ..resolved
     };
     print_context_header(&built, &turn);
-    run_prompt(&built, &turn, kind).map(|_| ())
+    run_prompt(built, &turn, kind).map(|_| ())
 }
 
 #[doc(hidden)]
@@ -234,7 +234,7 @@ fn run_bound_prompt(
     };
     let built = build_bound_prompt(kind.mode(), skill, message, cli, binding)?;
     print_context_header(&built, cli);
-    run_prompt(&built, cli, kind)
+    run_prompt(built, cli, kind)
 }
 
 /// Preview and launch enrich the same selected Work; only launch prepares a checkout.
@@ -319,7 +319,6 @@ pub(crate) fn bound_message(
     context
 }
 
-#[derive(Clone)]
 struct PromptBuild {
     repo_root: PathBuf,
     agent_config: AgentConfig,
@@ -679,13 +678,13 @@ fn print_context_header(built: &PromptBuild, cli: &Cli) {
 
 /// Run the prompt; a headless run returns where its input was recorded.
 fn run_prompt(
-    built: &PromptBuild,
+    mut built: PromptBuild,
     cli: &Cli,
     kind: LaunchKind,
 ) -> Result<Option<std::path::PathBuf>> {
     if kind.mode() == Mode::Interactive {
         info!("launching interactive vendor session");
-        let runtime = begin_process_runtime(built, "tui", None, cli.prepared_capture.as_deref())?;
+        let runtime = begin_process_runtime(&built, "tui", None, cli.prepared_capture.as_deref())?;
         let mut environment = built.agent_config.env.clone();
         environment.extend(runtime.environment());
         let result = (|| {
@@ -725,18 +724,16 @@ fn run_prompt(
         None,
     );
     let cli_check_start = Instant::now();
-    let mut built = built.clone();
     loopflow_execution::agent::start_on_installed_agent(&mut built.agent_config, &built.process)
         .map_err(|missing| anyhow!(missing))?;
-    let built = &built;
     debug!(
         elapsed_ms = cli_check_start.elapsed().as_millis(),
         "checked cli availability"
     );
 
-    let runtime = begin_process_runtime(built, "headless", cli.resume.as_deref(), None)?;
+    let runtime = begin_process_runtime(&built, "headless", cli.resume.as_deref(), None)?;
 
-    let result = run_headless_prompt(built, &runtime, kind);
+    let result = run_headless_prompt(&built, &runtime, kind);
     // Explicit native resume can retire this provider while its executor waits.
     // Settle our capture as interrupted; a failed Graph step would replay it.
     if runtime.attachment_replaced()? {
@@ -1399,7 +1396,7 @@ for line in sys.stdin:
         // Each run is its own recorded lf invocation, as from the CLI.
         let command = vec!["lf".to_string(), "research".to_string()];
         let ledger = loopflow_execution::store::database_path_from_env().unwrap();
-        let admitted = |built: &PromptBuild| {
+        let admitted = |built: PromptBuild| {
             loopflow_execution::journal::with_test_ledger(ledger.clone(), || {
                 loopflow_execution::journal::with_runtime(repo.path(), &command, || {
                     run_prompt(built, &cli, LaunchKind::Batch)
@@ -1407,8 +1404,8 @@ for line in sys.stdin:
             })
         };
         std::thread::scope(|scope| {
-            let first = scope.spawn(|| admitted(&first));
-            let second = scope.spawn(|| admitted(&second));
+            let first = scope.spawn(|| admitted(first));
+            let second = scope.spawn(|| admitted(second));
             first.join().unwrap().unwrap();
             second.join().unwrap().unwrap();
         });

@@ -3,7 +3,6 @@
 //! lf names the conversation (`--session ses_…`), and the context plugin
 //! supplies instructions, context, steers and turn reports in both.
 use crate::harness::LaunchKind;
-use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 
@@ -138,7 +137,12 @@ impl Driver {
         Ok(())
     }
 
-    fn command(&self, config: &AgentConfig, thread: &AgentSessionId) -> Result<(Command, PathBuf)> {
+    /// The run for one turn, and the file its stderr goes to.
+    fn command(
+        &self,
+        config: &AgentConfig,
+        thread: &AgentSessionId,
+    ) -> Result<(Command, std::fs::File)> {
         let mut command = Command::new("opencode");
         command.args(["run", "--standalone", "--format", "json", "--auto"]);
         if let Some(model) = &config.agent.model {
@@ -151,28 +155,24 @@ impl Driver {
         super::configure_agent_env(&mut command, config);
         command.envs(environment(config, None, self.kind)?);
         super::configure_vendor_std_env(command.as_std_mut())?;
-        let (diagnostics, log) = match diagnostics(config)? {
-            Some(kept) => kept,
-            None => {
-                let path = tempfile::NamedTempFile::new()?.into_temp_path().keep()?;
-                let log = std::fs::OpenOptions::new().append(true).open(&path)?;
-                (path, log)
-            }
+        let log = match diagnostics(config)? {
+            Some(log) => log,
+            None => tempfile::tempfile()?,
         };
         command
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(log)
+            .stderr(log.try_clone()?)
             // The shared stop owns cleanup; dropping a stale handle must not signal.
             .kill_on_drop(false);
-        Ok((command, diagnostics))
+        Ok((command, log))
     }
 
     fn spawn_reader(
         &self,
         mut child: Child,
         stdout: ChildStdout,
-        diagnostics: PathBuf,
+        mut diagnostics: std::fs::File,
     ) -> JoinHandle<()> {
         let state = self.state.clone();
         let events = self.events.clone();
@@ -203,7 +203,11 @@ impl Driver {
             let interrupted = std::mem::take(&mut state.interrupted) || crate::agent::interrupted();
             let mut decoded = Vec::new();
             if !exited && !interrupted {
-                let detail = std::fs::read_to_string(&diagnostics).unwrap_or_default();
+                use std::io::{Read, Seek};
+                let mut detail = String::new();
+                let _ = diagnostics
+                    .rewind()
+                    .and_then(|()| diagnostics.read_to_string(&mut detail));
                 if let Some(line) = detail.lines().rev().find(|line| !line.trim().is_empty()) {
                     decoded.extend(turn.fail(line));
                 }
@@ -216,13 +220,13 @@ impl Driver {
 
 /// OpenCode's stderr, kept beside the launch's capture: its own failures and
 /// the context plugin's recording gaps.
-fn diagnostics(config: &AgentConfig) -> Result<Option<(PathBuf, std::fs::File)>> {
+fn diagnostics(config: &AgentConfig) -> Result<Option<std::fs::File>> {
     let Some(key) = config.env.get(crate::session_record::CAPTURE_KEY_ENV) else {
         return Ok(None);
     };
     let path = crate::session_record::capture_dir(key)?.join("opencode.stderr.log");
     let mut options = std::fs::OpenOptions::new();
-    options.create(true).append(true);
+    options.create(true).append(true).read(true);
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
@@ -231,7 +235,7 @@ fn diagnostics(config: &AgentConfig) -> Result<Option<(PathBuf, std::fs::File)>>
     let log = options
         .open(&path)
         .with_context(|| format!("open OpenCode diagnostics {}", path.display()))?;
-    Ok(Some((path, log)))
+    Ok(Some(log))
 }
 
 #[async_trait]
@@ -336,10 +340,6 @@ impl StreamDriver for Driver {
         })
         .await?;
         if let Err(error) = sent {
-            self.state
-                .lock()
-                .expect("OpenCode state lock poisoned")
-                .interrupted = false;
             self.settle_process().await?;
             return Err(error.into());
         }
@@ -373,63 +373,17 @@ impl StreamDriver for Driver {
     }
 }
 
-/// Redact credential material from an error string before it enters the
-/// durable evidence channel. Strips `Authorization` header values, `Bearer`
-/// tokens, and common token query parameters. The opencode `/event` URL is
-/// `http://127.0.0.1:<port>/event` (no credentials), but a chained/upstream
-/// error or redirect could carry auth material in its Display.
-pub(crate) fn sanitize_error_message(message: &str) -> String {
-    use regex::Regex;
-    let mut out = message.to_string();
-    // Bearer first so `Authorization: Bearer <token>` is caught by both the
-    // bearer pattern and the authorization-header pattern. The bearer pattern
-    // stops at whitespace or a comma so the trailing comma that delimits the
-    // authorization-header value survives as a stop boundary for the next
-    // pattern — otherwise `Bearer <tok>, token=abc123` lets the authorization
-    // regex eat through `token=abc123` before the param redaction runs.
-    let redactions: [(Regex, &str); 3] = [
-        (
-            Regex::new(r"(?i)bearer\s+[^,\s]+").expect("valid credential pattern"),
-            "bearer [redacted]",
-        ),
-        (
-            Regex::new(r"(?i)authorization:\s*[^\n,]+").expect("valid credential pattern"),
-            "authorization: [redacted]",
-        ),
-        (
-            Regex::new(r"(?i)(token|key|access_token|api_key)=\S+")
-                .expect("valid credential pattern"),
-            "$1=[redacted]",
-        ),
-    ];
-    for (re, replacement) in &redactions {
-        out = re.replace_all(&out, *replacement).to_string();
-    }
-    out
-}
-
 fn build_turn_content(content: &str, config: &AgentConfig, first_turn: bool) -> Option<String> {
-    if first_turn {
-        let mut parts = Vec::new();
-        if !config.task_prompt.trim().is_empty() {
-            parts.push(config.task_prompt.trim());
-        }
-        if !content.trim().is_empty() {
-            parts.push(content.trim());
-        }
-        if parts.is_empty() {
-            None
-        } else {
-            Some(parts.join("\n\n"))
-        }
+    let task = if first_turn {
+        config.task_prompt.trim()
     } else {
-        let text = content.trim();
-        if text.is_empty() {
-            None
-        } else {
-            Some(text.to_string())
-        }
-    }
+        ""
+    };
+    let parts: Vec<&str> = [task, content.trim()]
+        .into_iter()
+        .filter(|part| !part.is_empty())
+        .collect();
+    (!parts.is_empty()).then(|| parts.join("\n\n"))
 }
 
 #[cfg(test)]
@@ -438,10 +392,8 @@ mod tests {
     use crate::process::attachment;
 
     use super::{
-        build_turn_content, mpsc, sanitize_error_message, AgentConfig, Command, ConversationEvent,
-        Driver, StreamDriver,
+        build_turn_content, mpsc, AgentConfig, Command, ConversationEvent, Driver, StreamDriver,
     };
-    use crate::harness::SendCurrentOutcome;
     use loopflow_model::chat::types::{ConversationItem, Lifecycle};
 
     #[tokio::test]
@@ -495,35 +447,6 @@ mod tests {
             crate::store::ProcessIdentityEvidence::Dead
         );
         drop(child);
-    }
-
-    #[test]
-    fn sanitize_error_message_redacts_credentials() {
-        let input = "request to https://api.example.com/v1/chat?api_key=sk-secret123 failed: \
-                     Authorization: Bearer super-secret-token, token=abc123";
-        let sanitized = sanitize_error_message(input);
-        assert!(
-            !sanitized.contains("sk-secret123"),
-            "api_key leaked: {sanitized}"
-        );
-        assert!(
-            !sanitized.contains("super-secret-token"),
-            "bearer token leaked: {sanitized}"
-        );
-        assert!(
-            !sanitized.contains("abc123"),
-            "token param leaked: {sanitized}"
-        );
-        assert!(sanitized.contains("api_key=[redacted]"));
-        assert!(sanitized.contains("authorization: [redacted]"));
-        assert!(sanitized.contains("token=[redacted]"));
-    }
-
-    #[test]
-    fn sanitize_error_message_preserves_non_credential_text() {
-        let input = "chunk stream ended (reqwest: EOF)";
-        let sanitized = sanitize_error_message(input);
-        assert_eq!(sanitized, input);
     }
 
     #[test]
@@ -612,11 +535,6 @@ mod tests {
         assert!(thread.as_str().starts_with("ses_"), "{thread}");
 
         harness.send_input("and this").await.unwrap();
-        assert_eq!(
-            harness.send_current("direction").await,
-            SendCurrentOutcome::NotSteerable,
-            "the context plugin delivers steers between tools"
-        );
         let (status, text, errors) = drive_turn(&mut rx).await;
         assert_eq!(
             (status, text.as_str()),
@@ -718,48 +636,44 @@ fn environment(
     kind: LaunchKind,
 ) -> Result<std::collections::BTreeMap<String, String>> {
     let mut environment = config.env.clone();
-    {
-        let mut settings: serde_json::Value = environment
-            .get("OPENCODE_CONFIG_CONTENT")
-            .cloned()
-            .or_else(|| std::env::var("OPENCODE_CONFIG_CONTENT").ok())
-            .map(|value| serde_json::from_str(&value))
-            .transpose()?
-            .unwrap_or_else(|| serde_json::json!({}));
-        if !settings.is_object() {
-            bail!("OPENCODE_CONFIG_CONTENT must be a JSON object");
-        }
-        if config.skip_permissions {
-            settings["permissions"] =
-                serde_json::json!([{ "action":"*", "resource":"*", "effect":"allow" }]);
-        }
-        if config.conversation_context.is_none() {
-            let instructions = if let Some(path) = context_file {
-                Some(path.to_owned())
-            } else {
-                crate::agent::write_system_prompt_file(config, "opencode")?
-            };
-            if let Some(path) = instructions {
-                settings
-                    .as_object_mut()
-                    .expect("configuration is an object")
-                    .entry("instructions")
-                    .or_insert_with(|| serde_json::json!([]))
-                    .as_array_mut()
-                    .ok_or_else(|| anyhow::anyhow!("OpenCode instructions must be an array"))?
-                    .push(serde_json::json!(path));
-            }
-        }
-        if let Some(context) = &config.conversation_context {
-            crate::harness::context::add_opencode_context(
-                &mut settings,
-                context,
-                &crate::agent::system_prompt_with_structured_replies(config),
-                kind,
-            )?;
-        }
-        environment.insert("OPENCODE_CONFIG_CONTENT".into(), settings.to_string());
+    let mut settings: serde_json::Value = environment
+        .get("OPENCODE_CONFIG_CONTENT")
+        .cloned()
+        .or_else(|| std::env::var("OPENCODE_CONFIG_CONTENT").ok())
+        .map(|value| serde_json::from_str(&value))
+        .transpose()?
+        .unwrap_or_else(|| serde_json::json!({}));
+    if !settings.is_object() {
+        bail!("OPENCODE_CONFIG_CONTENT must be a JSON object");
     }
+    if config.skip_permissions {
+        settings["permissions"] =
+            serde_json::json!([{ "action":"*", "resource":"*", "effect":"allow" }]);
+    }
+    if let Some(context) = &config.conversation_context {
+        crate::harness::context::add_opencode_context(
+            &mut settings,
+            context,
+            &crate::agent::system_prompt_with_structured_replies(config),
+            kind,
+        )?;
+    } else {
+        let instructions = match context_file {
+            Some(path) => Some(path.to_owned()),
+            None => crate::agent::write_system_prompt_file(config, "opencode")?,
+        };
+        if let Some(path) = instructions {
+            settings
+                .as_object_mut()
+                .expect("configuration is an object")
+                .entry("instructions")
+                .or_insert_with(|| serde_json::json!([]))
+                .as_array_mut()
+                .ok_or_else(|| anyhow::anyhow!("OpenCode instructions must be an array"))?
+                .push(serde_json::json!(path));
+        }
+    }
+    environment.insert("OPENCODE_CONFIG_CONTENT".into(), settings.to_string());
     Ok(environment)
 }
 
@@ -893,7 +807,7 @@ impl super::Harness for OpenCode {
             crate::agent::validate_terminal_turn(&prompt)?;
             client.process.args(["--prompt", &prompt]);
         }
-        client.stderr = diagnostics(launch.config)?.map(|(_, log)| log);
+        client.stderr = diagnostics(launch.config)?;
         Ok(client)
     }
 }

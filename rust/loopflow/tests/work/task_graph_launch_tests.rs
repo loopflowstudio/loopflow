@@ -1967,6 +1967,16 @@ sys.exit(code)
     assert_eq!(task.graph()["position"], at("review"));
 }
 
+/// `worker`: one `implement` step, then a person's review.
+fn define_worker_graph(task: &GraphTask) {
+    task.repo.create_file(
+        ".lf/graphs/worker.yaml",
+        "- implement\n- interactive: {name: demo, id: review}\n",
+    );
+    task.repo.stage_all();
+    task.repo.commit("Define a worker followed by a review");
+}
+
 fn opencode_stand_in() -> String {
     include_str!("../../../loopflow-execution/tests/support/opencode_cli.py")
         .replace("__WAIT__", "False")
@@ -2011,12 +2021,7 @@ fn a_task_step_runs_as_a_worker_on_every_harness() {
         ),
     ] {
         let task = GraphTask::with_tools(&[(provider, &script)]);
-        task.repo.create_file(
-            ".lf/graphs/worker.yaml",
-            "- implement\n- interactive: {name: demo, id: review}\n",
-        );
-        task.repo.stage_all();
-        task.repo.commit("Define a worker followed by a review");
+        define_worker_graph(&task);
         let home = task.home.path();
         fs::write(home.join("release"), "").unwrap();
         // Each stand-in runs the hooks lf gave its harness around one tool.
@@ -2102,12 +2107,7 @@ fn a_question_with_nobody_there_ends_the_step() {
         ("pi", "pi:fixture/model", pi_stand_in()),
     ] {
         let task = GraphTask::with_tools(&[(provider, &script)]);
-        task.repo.create_file(
-            ".lf/graphs/worker.yaml",
-            "- implement\n- interactive: {name: demo, id: review}\n",
-        );
-        task.repo.stage_all();
-        task.repo.commit("Define a worker followed by a review");
+        define_worker_graph(&task);
         fs::write(task.home.path().join("ask-question"), "").unwrap();
 
         let asked = task.task_run(&["task", "run", "INF-123", "worker", "-a", agent]);
@@ -2139,12 +2139,7 @@ fn a_worker_stops_on_interrupt_and_its_session_resumes() {
         ("pi", "pi:fixture/model", pi_stand_in(), "answer 1:"),
     ] {
         let task = GraphTask::with_tools(&[(provider, &script)]);
-        task.repo.create_file(
-            ".lf/graphs/worker.yaml",
-            "- implement\n- interactive: {name: demo, id: review}\n",
-        );
-        task.repo.stage_all();
-        task.repo.commit("Define a worker followed by a review");
+        define_worker_graph(&task);
         let home = task.home.path();
         fs::write(home.join("hold-turn"), "").unwrap();
 
@@ -2210,12 +2205,7 @@ fn a_worker_stops_on_interrupt_and_its_session_resumes() {
 fn a_step_that_cannot_launch_is_not_started_again() {
     let codex = support::codex_app_server_script("Worker finished.", "");
     let task = GraphTask::with_tools(&[("codex", &codex)]);
-    task.repo.create_file(
-        ".lf/graphs/worker.yaml",
-        "- implement\n- interactive: {name: demo, id: review}\n",
-    );
-    task.repo.stage_all();
-    task.repo.commit("Define a worker followed by a review");
+    define_worker_graph(&task);
 
     let pinned = task.task_run(&[
         "task",

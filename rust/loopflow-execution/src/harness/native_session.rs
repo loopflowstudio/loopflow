@@ -557,6 +557,18 @@ fn run_client(
     if launch.kind.is_managed() {
         crate::harness::agent_process::require_server()?;
     }
+    // A provider whose CLI is not on `PATH` never starts either; Claude
+    // answers `--resume` of a conversation it never wrote with "No
+    // conversation found", and the Session could not be opened again.
+    if crate::os_process::which_command(process).is_none() {
+        if let Some(owner) = owned {
+            crate::harness::agent_process::record_missing_provider(process, owner)?;
+        }
+        bail!(missing_agent_message(launch.harness.kind()));
+    }
+    // The receipt names this opening; the provider's own `lf` commands are
+    // not openings, and a failing one must not log as one.
+    process.env_remove(crate::transport::OPEN_RECEIPT_ENV);
     if let (Some(capture_dir), Some(agent_session)) = (capture_dir.as_deref(), agent_session) {
         crate::session_record::write_provider_session(capture_dir, agent_session, None)?;
     }

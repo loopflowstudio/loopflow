@@ -292,11 +292,24 @@ pub fn execution_context() -> Result<loopflow_storage::child::ChildExecutionCont
 }
 
 pub fn which_on_path(name: &Path) -> Option<PathBuf> {
+    which_in(name, &std::env::var_os("PATH")?)
+}
+
+/// The executable `command` would start, resolved on the `PATH` it will run
+/// with, as spawning it resolves it.
+pub(crate) fn which_command(command: &std::process::Command) -> Option<PathBuf> {
+    let path = match command.get_envs().find(|(name, _)| *name == "PATH") {
+        Some((_, path)) => path.map(std::ffi::OsStr::to_os_string),
+        None => std::env::var_os("PATH"),
+    };
+    which_in(Path::new(command.get_program()), &path?)
+}
+
+fn which_in(name: &Path, path: &std::ffi::OsStr) -> Option<PathBuf> {
     if name.components().count() > 1 {
         return executable_file(name).then(|| name.to_path_buf());
     }
-    let path = std::env::var_os("PATH")?;
-    std::env::split_paths(&path)
+    std::env::split_paths(path)
         .map(|dir| dir.join(name))
         .find(|candidate| executable_file(candidate))
 }

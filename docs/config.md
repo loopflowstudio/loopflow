@@ -643,7 +643,8 @@ in a provider request. The harness loads its repo guide natively.
 | Skill and request | First turn | Selected skill and launch message |
 | Scratch and checkout Wave/ancestor documents | Refreshed conversation block; whole files, marked start excerpts and a complete listing | Current checkout and selected Wave |
 | Explicit docs | Complete reference bodies in the submitted turn | `context.docs` in config or Loopflow skill frontmatter, or `--docs` |
-| Branch changes | Git inspection commands and changed paths | `--diff patch`, `context: {diff_files: true}` |
+| Branch changes | Tagged block after the request in the first turn: every changed file with its line counts and the command that reads its patch; the whole patch under 15,000 tokens | `--diff patch`, `context: {diff: true}` |
+| Branch files | A listed `changes` file naming the changed paths | `--diff files`, `context: {diff_files: true}` |
 | Captured references | Complete private reference files | Work direction supplied by the caller |
 | Clipboard | Tagged block after the request in the first turn | `-c` |
 
@@ -780,7 +781,28 @@ Use `-c` when debugging: copy an error, then `lf debug -c`.
 
 ### Raw Diff
 
-Point to Git inspection commands rather than inlining a frozen patch.
+Show the agent what this branch changed: every file, and the patch when it
+fits.
+
+```bash
+lf review --diff patch
+```
+
+The section goes in its own tagged block after the request in the first turn,
+where `-c` and `--docs` go. It is read once at launch, and it counts toward the
+terminal argument cap.
+
+```
+Changed since origin/main, 3 files. Read one file's patch with:
+  git diff origin/main...HEAD -- '<path>'
+
+  +4812  -0   aaa_generated.txt
+  binary      assets/logo.png
+    +10  -2   src/zzz_retry.rs
+
+The patch is 214,300 bytes, too large to include. Start with the files that
+carry the change.
+```
 
 | | |
 |---|---|
@@ -788,7 +810,22 @@ Point to Git inspection commands rather than inlining a frozen patch.
 | **Config** | `context: {diff: true}` |
 | **Default** | `false` (not included) |
 
-Use when the agent needs to inspect exact changes. `--diff both` also lists changed paths.
+Use when the agent needs to inspect exact changes. The list is always complete:
+full paths, added and deleted lines, a rename with the path it came from, and
+a mark on notes the branch added under `scratch/`, which are cleared when it
+lands. Under 15,000 tokens the whole patch follows it. Over that, none of it
+does, and the agent reads the files it picks; no file is cut short. When a
+file was renamed, a second command takes both paths (`git diff <range> --
+'<path>' '<old path>'`): with the new path alone, Git returns the whole file
+as added.
+
+With nothing committed on the branch yet, the change is the uncommitted work
+and the command is `git diff HEAD -- '<path>'`; a file Git doesn't track yet
+is listed as untracked, with no patch to read. On the default branch there is
+nothing to show.
+
+The commit and PR message writers get the same section for the change they
+describe. `--diff both` also lists changed paths.
 
 ### Exclude Patterns
 

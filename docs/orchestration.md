@@ -61,6 +61,19 @@ claude:haiku` in its frontmatter. To keep [`agents`](config.md#keep-going-when-a
 behind it for when Haiku is refused, set `default_agent:` instead, or
 `lf set --global skill.commit-message.default_agent claude:haiku`. PR titles
 and bodies take the same settings under `pr-message`.
+
+Both writers describe the whole change, whatever its size. Each gets every
+changed file with its line counts and the command that reads one file's patch.
+A small patch comes along whole; past 15,000 tokens the writer reads the files
+that carry the change itself, so a 200 KB generated file sorted first doesn't
+hide the ten-line retry behind it:
+
+```
+lf implement: Retry the export once after a timeout
+
+zzz_retry.rs wraps the request; aaa_generated.txt is the regenerated schema.
+```
+
 Without an answer the title is `lf implement: checkpoint`. `lf commit --step
 implement` runs the same thing by hand; plain `lf commit` has no prefix.
 The commit is no step of the Graph: its recorded steps stay the ones it

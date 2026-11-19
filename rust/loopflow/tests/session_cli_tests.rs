@@ -311,7 +311,7 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
         let provider = bin.join("opencode");
         std::fs::write(
             &provider,
-            include_str!("../../loopflow-execution/tests/support/opencode_server.py")
+            include_str!("../../loopflow-execution/tests/support/opencode_cli.py")
                 .replace("__WAIT__", "True"),
         )
         .unwrap();
@@ -1108,7 +1108,7 @@ fn session_names_survive_capture_replacement() {
     let provider = bin.join("opencode");
     std::fs::write(
         &provider,
-        include_str!("../../loopflow-execution/tests/support/opencode_server.py")
+        include_str!("../../loopflow-execution/tests/support/opencode_cli.py")
             .replace("__WAIT__", "True"),
     )
     .unwrap();
@@ -1336,14 +1336,13 @@ fn terminal_first_launch_and_failed_startup_reopen_the_same_conversation() {
         std::fs::write(&provider, body).unwrap();
         std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
     };
-    // The private server exits before reporting readiness. OpenCode reports
-    // that failure; retry must still reach the provider in the same Session.
-    write_provider("#!/bin/sh\nexit 0\n");
+    // OpenCode fails at startup. Retry must still reach the provider in the
+    // same Session.
+    write_provider("#!/bin/sh\nexit 3\n");
     let first = open(&["session", "resume", &id]);
     assert!(!first.status.success());
-    assert!(String::from_utf8_lossy(&first.stderr).contains("private server failed to start"));
     write_provider(
-        &include_str!("../../loopflow-execution/tests/support/opencode_server.py")
+        &include_str!("../../loopflow-execution/tests/support/opencode_cli.py")
             .replace("__WAIT__", "False"),
     );
     let retry = open(&["session", "resume", &id]);
@@ -1357,7 +1356,7 @@ fn terminal_first_launch_and_failed_startup_reopen_the_same_conversation() {
     let failed = open(&["session", "resume", &id]);
     assert!(!failed.status.success());
     write_provider(
-        &include_str!("../../loopflow-execution/tests/support/opencode_server.py")
+        &include_str!("../../loopflow-execution/tests/support/opencode_cli.py")
             .replace("__WAIT__", "False"),
     );
     for _ in 0..2 {
@@ -1380,17 +1379,15 @@ fn terminal_first_launch_and_failed_startup_reopen_the_same_conversation() {
             .unwrap();
         assert!(recorded >= minimum, "{state}: {recorded}");
     }
-    // Each start is an input of the one conversation, and one resumes the
-    // native conversation the provider published.
-    let (inputs, native): (i64, Option<String>) = db
+    // Every start continues the one native conversation lf named.
+    let native: Option<String> = db
         .query_row(
-            "SELECT count(*),max(provider_thread) FROM session_events
+            "SELECT max(provider_thread) FROM session_events
              WHERE session_id=?1 AND kind='captured'",
             [id.as_str()],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            |row| row.get(0),
         )
         .unwrap();
-    assert!(inputs >= 2, "{inputs}");
     let count: i64 = db
         .query_row("SELECT count(*) FROM agent_sessions", [], |row| row.get(0))
         .unwrap();

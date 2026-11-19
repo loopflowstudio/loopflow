@@ -144,7 +144,7 @@ impl Fixture {
         for harness in ["claude", "codex", "opencode"] {
             let script = fixture.home.path().join("bin").join(harness);
             let source = if harness == "opencode" {
-                include_str!("../../loopflow-execution/tests/support/opencode_server.py")
+                include_str!("../../loopflow-execution/tests/support/opencode_cli.py")
                     .replace("__WAIT__", "False")
             } else {
                 r#"#!/usr/bin/python3
@@ -373,7 +373,7 @@ fn opencode_diagnostics_stay_off_the_terminal_on_launch_and_resume() {
     let fixture = Fixture::new("opencode");
     fs::write(
         fixture.home.path().join("bin/opencode"),
-        include_str!("../../loopflow-execution/tests/support/opencode_server.py").replace("__WAIT__", "False")
+        include_str!("../../loopflow-execution/tests/support/opencode_cli.py").replace("__WAIT__", "False")
             .replace("    _record_launch()\n    if False:", r#"    _record_launch()
     mode = 'resume' if (HOME / 'opened').exists() else 'launch'
     (HOME / 'opened').touch()
@@ -427,7 +427,7 @@ fn opencode_diagnostics_stay_off_the_terminal_on_launch_and_resume() {
 }
 
 #[test]
-fn opencode_failure_before_session_creation_keeps_diagnostics() {
+fn opencode_startup_failure_reports_its_exit_and_keeps_diagnostics() {
     let fixture = Fixture::new("opencode");
     fs::write(
         fixture.home.path().join("bin/opencode"),
@@ -442,7 +442,7 @@ fn opencode_failure_before_session_creation_keeps_diagnostics() {
     assert!(!output.status.success());
     let stderr = String::from_utf8(output.stderr).unwrap();
     assert!(
-        stderr.contains("startup failure without a session"),
+        stderr.contains("opencode exited with exit status: 23"),
         "{stderr}"
     );
     let logs = files_named(fixture.home.path(), "opencode.stderr.log");
@@ -451,49 +451,6 @@ fn opencode_failure_before_session_creation_keeps_diagnostics() {
         fs::read(&logs[0]).unwrap(),
         b"startup failure without a session\n"
     );
-}
-
-#[test]
-fn opencode_terminal_setup_failure_stops_the_private_server() {
-    let fixture = Fixture::new("opencode");
-    let source = include_str!("../../loopflow-execution/tests/support/opencode_server.py")
-        .replace("__WAIT__", "False")
-        .replace(
-            "        if self.path == \"/api/event\":",
-            r#"        if self.path == "/api/event":
-            (HOME / 'server-port').write_text(str(self.server.server_port))
-            for path in Path(os.environ['LF_HOME']).glob('runs/*/*/opencode.stderr.log'):
-                path.unlink()
-                path.mkdir()"#,
-        );
-    fs::write(fixture.home.path().join("bin/opencode"), source).unwrap();
-    let mut child = fixture
-        .command()
-        .args(["-i", ":", "launch"])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
-    while child.try_wait().unwrap().is_none() {
-        if std::time::Instant::now() >= deadline {
-            child.kill().unwrap();
-            child.wait().unwrap();
-            panic!("terminal setup failure left the server worker waiting");
-        }
-        std::thread::sleep(std::time::Duration::from_millis(10));
-    }
-    let output = child.wait_with_output().unwrap();
-    assert!(!output.status.success());
-    assert!(
-        String::from_utf8_lossy(&output.stderr).contains("open OpenCode diagnostics"),
-        "{output:?}"
-    );
-    let port: u16 = fs::read_to_string(fixture.home.path().join("server-port"))
-        .unwrap()
-        .parse()
-        .unwrap();
-    assert!(std::net::TcpStream::connect((std::net::Ipv4Addr::LOCALHOST, port)).is_err());
 }
 
 #[test]
@@ -1309,7 +1266,7 @@ fn opencode_headless_start_selects_the_model_and_permissions() {
         if managed {
             fixture.create_wave();
         }
-        let script = include_str!("../../loopflow-execution/tests/support/opencode_server.py")
+        let script = include_str!("../../loopflow-execution/tests/support/opencode_cli.py")
             .replace("__WAIT__", "False");
         fs::write(fixture.home.path().join("bin/opencode"), script).unwrap();
         fixture.settings("opencode:opencode/first-model", true, false);

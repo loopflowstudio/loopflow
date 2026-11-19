@@ -53,7 +53,6 @@ use loopflow_model::comment::TaskComments;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use crate::agent::checkout_execution_boundary;
 use crate::durable::TaskState;
 use crate::git::worktree_name::WorktreeName;
 use crate::git::worktrees::{
@@ -2294,21 +2293,13 @@ fn task_configuration_refusal(
     task: &Task,
     repository: &Path,
     wave: Option<&str>,
-    skill: Option<&crate::graph::Skill>,
 ) -> Option<String> {
     let worktree = task.worktree.as_deref()?;
-    // A Graph's steps may choose different agents; no general preference is
-    // required to inspect or start the Graph. Each launch resolves its own choice.
-    let agent = match resolve_task_agent(worktree, repository, wave, skill) {
-        Ok(agent) => agent,
-        Err(OpsError::Load(crate::error::LoadError::AgentSelection)) if skill.is_none() => {
-            return None
-        }
-        Err(error) => return Some(error.to_string()),
-    };
-    checkout_execution_boundary(worktree, &agent)
-        .err()
-        .map(|error| error.to_string())
+    // Each Graph step can select its own agent.
+    match resolve_task_agent(worktree, repository, wave, None) {
+        Ok(_) | Err(OpsError::Load(crate::error::LoadError::AgentSelection)) => None,
+        Err(error) => Some(error.to_string()),
+    }
 }
 
 /// Why the Task cannot start a process: its configuration, else a
@@ -2319,7 +2310,7 @@ pub fn task_process_refusal_after(
     wave: Option<&str>,
     latest: Option<&loopflow_storage::work::task::TaskEvent>,
 ) -> Option<String> {
-    task_configuration_refusal(task, repository, wave, None)
+    task_configuration_refusal(task, repository, wave)
         .or_else(|| task_event_process_refusal(latest).map(str::to_string))
 }
 

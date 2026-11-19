@@ -168,8 +168,8 @@ beside it; the server records the provider's exit, settles its capture and
 reports where the conversation moved. A Codex launcher does the same into its client, which talks to its app-server directly. The
 server's lifetime worker checks that client's attachment every two seconds
 and stops it when the conversation moves; a failed store read leaves it
-running, and the byte-handling loop never waits for that read. OpenCode keeps
-its launcher beside its private server. The server strips `LF_SERVER` and
+running, and the byte-handling loop never waits for that read. An OpenCode
+launcher becomes `opencode --standalone` the same way. The server strips `LF_SERVER` and
 `LF_SERVER_STATUS` from what the holder starts, so an agent in a Desktop pane
 runs like one opened from a CLI.
 

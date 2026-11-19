@@ -358,6 +358,19 @@ impl CodexDecoder {
         self.display.current_turn = turn;
     }
 
+    /// Mark the open turn when this driver is interrupted before Codex replies.
+    pub(super) fn interrupt_pending(&mut self, thread: AgentSessionId) -> Option<Decoded> {
+        let turn = self.display.current_turn.take()?;
+        Some(
+            ProviderFact::TurnCompleted {
+                turn: Some(ProviderTurn { thread, turn }),
+                status: Lifecycle::Interrupted,
+                detail: json!({"status": "interrupted"}),
+            }
+            .into(),
+        )
+    }
+
     /// A server message. `thread` is the conversation the caller already
     /// knows; messages naming another conversation enter no history.
     pub fn decode(&mut self, rpc: &Value, thread: Option<&AgentSessionId>) -> Vec<Decoded> {

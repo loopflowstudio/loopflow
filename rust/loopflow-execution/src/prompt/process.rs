@@ -209,8 +209,6 @@ fn prepare_prompt(
         max_turns: None,
         resume_token: None,
         cwd: Some(repo_root),
-        write_scope: crate::agent::AgentWriteScope::Configured,
-        execution_boundary: None,
         skip_permissions: config.yolo,
         structured_replies: structured_replies_for_context(&client_context, action_style),
         directive_relay: None,

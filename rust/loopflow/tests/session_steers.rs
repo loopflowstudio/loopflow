@@ -593,8 +593,7 @@ while not (home / 'finish').exists() and time.monotonic() < deadline:
     assert!(!rejected.contains("NEXT_DIRECTION") && !rejected.contains("HANDOFF_DIRECTION"));
     assert_eq!(store.session_steers(session, 0, 32).unwrap().pending, 1);
     // Exercise the shipped OpenCode plugin against the real Machine server.
-    // Internal stream retries reuse one transformed value; a later callback has
-    // another adapter invocation and must replace that ephemeral context copy.
+    // Later requests retain the steer in the model context without claiming it again.
     let plugin = home.path().join("transform.mjs");
     let delivery_path = declaration["delivery"].as_str().unwrap();
     let delivery: serde_json::Value =
@@ -629,9 +628,9 @@ await hooks.context(output);
 const first = JSON.stringify(output);
 assert(first.includes('NEXT_DIRECTION'));
 assert.equal(JSON.stringify(structuredClone(output)), first);
-const afterLostTransform = {sessionID:'handoff-native',system:[],messages:[]};
-await hooks.context(afterLostTransform);
-assert(!JSON.stringify(afterLostTransform).includes('NEXT_DIRECTION'));
+const later = {sessionID:'handoff-native',system:[],messages:[]};
+await hooks.context(later);
+assert.equal(JSON.stringify(later).match(/NEXT_DIRECTION/g)?.length, 1);
 assert.equal(output.messages.length,0); // stored/native conversation remains untouched
 clearInterval(alive);
 

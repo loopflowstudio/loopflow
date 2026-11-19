@@ -105,9 +105,17 @@ stream's store is read-only); run it in the background into a file and
 Two Machines making a Wave of one name is the import's hardest case:
 `lf wave create design` on both homes (or `lf task create --wave design` on
 one, which makes the Wave), a Task in each, then `lf task sync <id>` on both.
-Each keeps its own `design` and its Tasks; everything else still crosses. The
-skipped records are `WARN loopflow_storage::sqlite::plan_carriers` lines in
-each home's `logs/lf.log`.
+Do it offline (`git remote set-url origin /nonexistent.git` around each
+create): online, the second create reads the plan first and joins the first
+Wave. Each keeps its own `design` and its Tasks; everything else still
+crosses. `lf task sync` exits 1 and `lf repo tracker` reads
+`Plan: Git origin, 3 not taken.` with the rename under it (the other Machine
+by id unless it was added with `lf machine add`). `lf wave rename design
+<new>` on one home, then `lf task sync <id>` on both (the renamed home twice
+if it went first): both lists hold all the Tasks and both lines read
+`Plan: Git origin.` The skipped records are also
+`WARN loopflow_storage::sqlite::plan_carriers` lines in each home's
+`logs/lf.log`.
 
 The hub home's server comes back after `pkill`: a command reaching it
 through the stand-in `ssh` registers a launchd job for that home

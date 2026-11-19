@@ -78,9 +78,14 @@ pub fn exchange(local: &SqliteStore, local_repo: &str, hub: &SqliteStore, hub_re
     let page = local
         .plan_records_since(local_repo, held.sent_seq, usize::MAX)
         .unwrap();
-    hub.apply_plan_records(hub_repo, &page.records, None, &Default::default())
-        .unwrap();
-    local.plan_sent(local_repo, Carrier::Hub, page.seq).unwrap();
+    // What the hub could not write stays unsent and goes again.
+    if hub
+        .apply_plan_records(hub_repo, &page.records, None, &Default::default())
+        .unwrap()
+        .is_empty()
+    {
+        local.plan_sent(local_repo, Carrier::Hub, page.seq).unwrap();
+    }
     let page = hub
         .plan_records_since(hub_repo, held.seen_seq.unwrap_or(0), usize::MAX)
         .unwrap();
@@ -118,7 +123,9 @@ pub fn arrive(
                 .collect(),
         })
         .collect();
-    store.apply_plan_records(repo, &records, None, &Default::default())
+    store
+        .apply_plan_records(repo, &records, None, &Default::default())
+        .map(drop)
 }
 
 pub fn wave(store: &SqliteStore, wave: &crate::work::wave::Wave) {

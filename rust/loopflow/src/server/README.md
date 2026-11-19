@@ -331,7 +331,7 @@ case names one operation, including distinct claim/unassign and pin/unpin writes
 | `session.rename`, `.bind`, `.resume`, `.new` | `lf session <verb>`, `lf resume` | write |
 | `session.steer` | `lf [--wave <wave>] steer [<id>] <message>` | write; `engine::session::steer` |
 | `session.boundary` | none; provider hooks through `lf __context-block` ([Turn and tool boundaries](#turn-and-tool-boundaries)) | server |
-| `plan.changes`, `plan.apply` | none; another Machine whose hub this is (`lf machine hub`), over `lf server connect` | server; stamped records in both directions, `ops::plan_hub::changes_here`, `apply_here` (revision 9) |
+| `plan.changes`, `plan.apply` | none; another Machine whose hub this is (`lf machine hub`), over `lf server connect` | server; stamped records in both directions, `ops::plan_hub::changes_here`, `apply_here` (revision 9); `plan.apply` answers how many records the hub could not write, which the sender keeps unsent |
 | `session.status` | `lf session observe-status <id> --terminal <terminal> --stream <stream> --sequence <n>`, the snapshot on stdin | write; one Program Status reading from the terminal showing a Session. A stream's first reading replaces any earlier stream; a late reading never replaces a newer one |
 | `wave.list`, `wave.graph` | `lf wave list`, `lf wave graph show` | read |
 | `wave.plan` | `lf wave plan <wave>` | read |

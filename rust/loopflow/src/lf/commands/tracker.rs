@@ -173,6 +173,19 @@ pub(crate) struct CarrierStanding {
     error: Option<String>,
     /// When the carrier stopped working (Unix seconds), while it still does not.
     failing_since: Option<i64>,
+    /// What the carrier's last read brought that this Machine could not
+    /// write, and reads again at each exchange. `null` when it took
+    /// everything.
+    not_taken: Option<NotTaken>,
+}
+
+#[derive(Debug, serde::Serialize, schemars::JsonSchema)]
+pub(crate) struct NotTaken {
+    /// How many records.
+    count: usize,
+    /// Why the first was not, and what to do about it when something can be
+    /// done: `wave design from mini has the name of a Wave here; …`.
+    reason: String,
 }
 
 /// How many unsent records a line names.
@@ -243,6 +256,13 @@ fn plan_carriers(store: &Store, repo: &str) -> Result<PlanCarriers> {
         let held = store.sqlite.plan_carrier(repo, carrier)?;
         let unsent = store.sqlite.plan_unsent(repo, carrier, NAMED)?;
         let failing_since = held.as_ref().and_then(|held| held.failing_since);
+        let not_taken = held
+            .as_ref()
+            .and_then(|held| held.not_taken.clone())
+            .map(|not_taken| NotTaken {
+                count: not_taken.count,
+                reason: not_taken.reason,
+            });
         Ok(CarrierStanding {
             unsent: unsent.count,
             records: unsent
@@ -252,6 +272,7 @@ fn plan_carriers(store: &Store, repo: &str) -> Result<PlanCarriers> {
                 .collect::<Result<_>>()?,
             error: failing_since.and(held.and_then(|held| held.error)),
             failing_since,
+            not_taken,
         })
     };
     Ok(PlanCarriers {
@@ -306,8 +327,9 @@ async fn print_status(store: &Store, repo: &str, json: bool) -> Result<()> {
 }
 
 /// One line per carrier, `Plan: Git origin.` and `Hub mini.`, each with its
-/// unsent records by name and why it did not take them; `Plan: this Machine.`
-/// for a repository with no remote.
+/// unsent records by name, why it did not take them, and what it brought
+/// that could not be written here; `Plan: this Machine.` for a repository
+/// with no remote.
 fn print_plan(plan: &PlanCarriers) {
     match &plan.git {
         Some(git) => print_carrier(format!("Plan: Git {}", git.remote), &git.standing),
@@ -328,6 +350,9 @@ fn print_carrier(mut line: String, standing: &CarrierStanding) {
     if standing.unsent > 0 {
         line.push_str(&format!(", {} unsent", standing.unsent));
     }
+    if let Some(not_taken) = &standing.not_taken {
+        line.push_str(&format!(", {} not taken", not_taken.count));
+    }
     println!("{line}.");
     for record in &standing.records {
         println!("  {record}");
@@ -337,6 +362,9 @@ fn print_carrier(mut line: String, standing: &CarrierStanding) {
     }
     if let Some(error) = &standing.error {
         println!("  {error}");
+    }
+    if let Some(not_taken) = &standing.not_taken {
+        println!("  {}", not_taken.reason);
     }
 }
 

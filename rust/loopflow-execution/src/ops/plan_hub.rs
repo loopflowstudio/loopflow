@@ -8,9 +8,9 @@ use anyhow::{anyhow, Context, Result};
 
 use crate::engine::{Error, ErrorCode};
 use crate::machine::client::Connection;
-use crate::machine::wire::{PlanChanges, Secrets, Selection, Sender, ServerOperation};
+use crate::machine::wire::{PlanApplied, PlanChanges, Secrets, Selection, Sender, ServerOperation};
 use loopflow_model::durable::{Machine, RepositoryId};
-use loopflow_storage::sqlite::plan_carriers::Carrier;
+use loopflow_storage::sqlite::plan_carriers::{Carrier, NotTaken};
 use loopflow_storage::sqlite::SqliteStore;
 use loopflow_storage::work::edit::StampedRecord;
 
@@ -75,6 +75,8 @@ pub(super) enum Why {
 /// taken, then take in what changed there. Either order gives the same plan.
 /// One with an end waits for an exchange already running and for the hub's
 /// answers only until then. The outcome is recorded for `lf repo tracker`.
+/// What the hub gave and this Machine could not write is the error, and the
+/// next exchange reads the hub from the same place.
 pub(super) fn exchange(store: &SqliteStore, repo: &str, why: Why) -> Result<()> {
     let Some(hub) = hub(store)? else {
         return Ok(());
@@ -113,15 +115,15 @@ pub(super) fn exchange(store: &SqliteStore, repo: &str, why: Why) -> Result<()> 
                 break;
             }
         }
-        store.apply_plan_records(
+        let skipped = store.apply_plan_records(
             repo,
             &records,
             Some((Carrier::Hub, since.unwrap_or(0))),
             &crate::store::ownership::machine_names(store)?,
         )?;
-        Ok(())
+        NotTaken::of(&skipped).map_or(Ok(()), |not_taken| Err(not_taken.into()))
     })();
-    let error = result.as_ref().err().map(|error| format!("{error:#}"));
+    let error = super::plan_carriers::carrier_error(&result);
     store.record_carrier_exchange(repo, Carrier::Hub, error.as_deref())?;
     result
 }
@@ -162,7 +164,9 @@ fn request<T: serde::de::DeserializeOwned>(
 
 /// Every record changed here past `sent_seq`, a page a request. The cursor
 /// moves once the hub has answered a page; a page whose answer is lost goes
-/// again, and the hub taking the same records twice changes nothing.
+/// again, and the hub taking the same records twice changes nothing. From
+/// the first page the hub could not write whole, the cursor stays: the later
+/// pages still go, and all of them go again at the next exchange.
 fn send(
     store: &SqliteStore,
     connection: &mut Connection,
@@ -170,18 +174,22 @@ fn send(
     repository: &RepositoryId,
     mut sent_seq: i64,
 ) -> Result<()> {
+    let mut taken = true;
     loop {
         let page = store.plan_records_since(repo, sent_seq, BUDGET)?;
         if !page.records.is_empty() {
-            let _: serde_json::Value = request(
+            let applied: PlanApplied = request(
                 connection,
                 ServerOperation::PlanApply {
                     repository: repository.clone(),
                     records: page.records,
                 },
             )?;
+            taken &= applied.not_taken == 0;
         }
-        store.plan_sent(repo, Carrier::Hub, page.seq)?;
+        if taken {
+            store.plan_sent(repo, Carrier::Hub, page.seq)?;
+        }
         sent_seq = page.seq;
         if !page.more {
             return Ok(());
@@ -196,14 +204,16 @@ pub fn apply_here(
     store: &SqliteStore,
     repository: &RepositoryId,
     records: &[StampedRecord],
-) -> Result<serde_json::Value> {
-    store.apply_plan_records(
+) -> Result<PlanApplied> {
+    let skipped = store.apply_plan_records(
         &checkout(store, repository)?,
         records,
         None,
         &crate::store::ownership::machine_names(store)?,
     )?;
-    Ok(serde_json::json!({}))
+    Ok(PlanApplied {
+        not_taken: skipped.len(),
+    })
 }
 
 /// `plan.changes`: what changed here after `since`.

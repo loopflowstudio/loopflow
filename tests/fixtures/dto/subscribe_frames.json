@@ -313,7 +313,11 @@
             "unsent": 0,
             "records": [],
             "error": null,
-            "failing_since": null
+            "failing_since": null,
+            "not_taken": {
+              "count": 3,
+              "reason": "wave design from mini has the name of a Wave here; `lf wave rename design <new name>` on either Machine lets both arrive"
+            }
           },
           "hub": {
             "machine": "mini",
@@ -322,7 +326,8 @@
               "3e1c9a07"
             ],
             "error": "ssh: mini: Operation timed out",
-            "failing_since": 1763474520
+            "failing_since": 1763474520,
+            "not_taken": null
           }
         },
         "actions": []

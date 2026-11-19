@@ -343,3 +343,38 @@ Slice 5 (implement):
 - On a Machine that upgrades to this, the first pass starts every Task
   conversation that died earlier on an open Task checked out here, however
   long ago (seven on this Machine on 2026-11-17, one dead since 2026-10-22).
+
+## Slice 8: concept-review answers (implement, 2026-11-18, headless)
+
+Jack: "Answers to scratch/concept-review.html: 1a 2b 3a 4a 5a 6a." and "don't
+stop at human-review. This run ships: continue through reflect, gate and land."
+
+- 1a is not built in this Task: LOO-968 is unmerged (at human-review). To
+  file or fold into LOO-968: the Task run's `died {at_step, at}` and the
+  conversation's outlook type, replacing `DiedRun::reason` in
+  `waiting`/`blocked`; "no server runs" for the run; the three sentences in
+  the conversation's words.
+- Chosen: the sentence is `SessionRecord.status_line`, on every interactive
+  Session, not only a Task's conversation. Passed over: a field inside
+  `outlook` (a running conversation the pass started has a sentence and no
+  outlook).
+- Chosen: clock times in the sentence are the Machine's local time, as the
+  CLI printed them. A phone in another timezone reads the Machine's clock;
+  `outlook.at` and `ended.at` stay RFC 3339 for a client that wants its own.
+- Chosen: the sentence says "starting again" or "starts again 12:05" as of
+  the read. A cached record keeps the wording until the Session next
+  changes; the start itself writes the Session, so it refreshes then.
+- Chosen: Desktop shows the line only when the conversation has an outlook
+  or the pass started it, as before; it now reads `Conversation: died 12:01
+  (exit 137) · starting again`, with the time, where it read `Died (exit
+  137) · starting again`.
+- Chosen: a never-started Task conversation the server leaves (no server,
+  Task not claimed here) is `waiting_for_you`, "not started · <why>", with
+  its command. It read `unknown` with no outlook before.
+- `SessionSummary.in_task_checkout` is now false for a done or abandoned
+  Task's conversation and for a completed Session; the fold read it only
+  after checking the Task is open, so only the completed case changes what
+  prints: "its Task is not checked out here" never shows for it, it reads as
+  any other Session that died.
+- Not changed: "started again …, attempt 3" on a conversation that never ran
+  before its failed starts (the review's wording item; no question asked it).

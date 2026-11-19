@@ -286,9 +286,10 @@ The facts go on the records they describe, not into a new Task-level state.
 - **Session.** `SessionState` (`unknown · active · detached · closed`) stays
   the one answer to "is it running". A Session that is not running says once
   whether it comes back: `outlook {kind, at, reason, command}` with kinds
-  `coming_back`, `waiting_for_you`, `quit` and `could_not_start` (slice 7).
-  `ended {at, by, exit_code}` is how the last agent ended; `start {attempts,
-  last_started_at}` is what the pass has done since the last finished turn.
+  `starting`, `coming_back`, `waiting_for_you`, `quit` and `could_not_start`
+  (slices 7 and 8). `ended {at, exit_code}` is how the last agent ended;
+  `start {attempts, last_started_at}` is what the pass has done since the
+  last finished turn; `status_line` is the server's sentence for all of it.
 - **Task run.** The Task's run line, already derived by
   `execution_of_latest_graph`, shows a dead carrier as `died at <step> {at}`
   with `restarts` and `next_at`, or the `lf task run` command after giving up.
@@ -296,8 +297,8 @@ The facts go on the records they describe, not into a new Task-level state.
   `overview.sessions`, so the conversation line is that Session's state, read
   the same way `lf session list` reads it.
 
-`lf task status` prints "conversation: died 12:01 (exit 137) · starting
-again" from those fields; "conversation" is the product's word for the Task's
+`lf task status` prints the Session's `status_line`, "died 12:01 (exit 137)
+· starting again", as the server wrote it; "conversation" is the product's word for the Task's
 primary Session, and the code keeps calling it a Session. Wire fields go into
 `tests/fixtures/dto/session.json`, `task_status.json` and each language's
 fixture test, with no defaults. Desktop decodes them and shows the line. No
@@ -333,7 +334,7 @@ A headless fixture with a `MachineServer` and a stand-in provider:
    `start.attempts` 1 (the earlier end is not on the Session while the new
    agent runs; see slice 4).
 2. The stand-in exits 0. After a pass, no new terminal starts; the Session is
-   `closed` with `outlook.kind` `quit`, `ended.by` `person` and `start` null.
+   `closed` with `outlook.kind` `quit`, exit 0 and `start` null.
 3. Stop the server, kill the holder, then start the server. The conversation
    starts once; repeating the pass starts nothing.
 4. Record a moving Task whose `task_graphs` carrier pid is dead, at step
@@ -664,6 +665,49 @@ Must survive:
      holder pid). The exit assertion went (coming back is the proof); the
      holder is found through the provider's ancestry (`holder_of`).
 
+8. **The concept review's answers** (Jack, 2026-11-18, on
+   `scratch/concept-review.html`: "1a 2b 3a 4a 5a 6a"). Built:
+   - 6a, one predicate: `ops::recovery::server_start(DownConversation,
+     claimed_here, server_runs) -> At(next) | Left(Quit | OutOfStarts |
+     Elsewhere | NotClaimedHere | NoServer)`. The pass
+     (`due_task_conversations`) and the fold (`session_ending`) both call it.
+     The pass's read is now `task_conversations_here` (every open Task's
+     conversation in its checkout here; quit and the give-up moved out of its
+     SQL into the rule), and the summary's `in_task_checkout` is built from
+     the same SQL (`task_conversation_here_sql`), so it now also requires an
+     open Task and an uncompleted, interactive Session. A completed
+     conversation no longer reads `coming_back`.
+   - 3a: `SessionOutlookKind::Starting` for a Task conversation with no agent
+     recorded and no failed start, when the rule says the server starts it;
+     the line is `starting`. A recorded agent this Machine cannot check still
+     reads `unknown`. With the server leaving it (no server, not claimed) a
+     never-started one reads `not started · <why>; \`lf resume --task X\`
+     opens it` (`waiting_for_you`).
+   - 5a: `SessionRecord.status_line` (and `SessionFacts.status_line` in `lf
+     task status --json`), written in `session_ending` in the Machine's local
+     time. `SessionFacts::conversation_line`, its tests and Swift's
+     `conversationLine(now:)` are deleted. Desktop prints `Conversation:
+     <line>` for the Task's conversation when it has an outlook or the pass
+     started it.
+   - 4a: `ended` is `{at, exit_code}`; `SessionEndedBy` and Swift's
+     `SessionEnd.By` are gone. `AgentEnd::by_person` became
+     `session::quit_by_person(exit_code)`, the rule's one reading of a quit.
+   - 2b: nothing; only a finished step resets a run's count.
+   - 1a, not built here: the Task run takes the conversation's outlook type
+     with or after LOO-968 (at human-review on 2026-11-18, unmerged). Until
+     then the run's line stays `DiedRun::reason` prose.
+   - Tests: `ops::human_session::tests::the_pass_starts_what_the_outlook_says_the_server_starts`
+     (one store; each row state read by both callers),
+     `…::a_task_conversation_says_how_it_ended_and_what_happens_next` (every
+     sentence, `starting`, the two Machine answers), the fixture tests in
+     Rust and Swift (`session_memberships.json` gained a starting
+     conversation), `server::recovery::tests::` unchanged and passing.
+
+   Taught: the exit code is written just before the agent's end
+   (`native_exit::settle`), so the rule reads it without waiting for
+   `agent_ended_at`; folding the two into one `AgentEnd` in the pass's read
+   would have started a quit conversation in that window.
+
 ## Concept review after slice 6
 
 `scratch/concept-review.html` (HEAD `4040a941`). Nothing to change before
@@ -733,8 +777,9 @@ Seen, left as it is:
 
 ## Remaining
 
-Every slice is built and the code backs each one; nothing is left for
-implement. Left for later steps:
+Every slice is built, slice 8 included; nothing is left for implement. The
+run then goes on through reflect, gate and land (Jack, 2026-11-18: "don't
+stop at human-review. This run ships"). Left for later steps:
 
 - gate: the named checks under Checks, and CI's full matrix. No test ran
   after the conflict-free merge of main `a0548bfe28` (`df387d1d95`), which
@@ -745,16 +790,8 @@ implement. Left for later steps:
 - a person: whether real Claude exits 0 on SIGTERM (decides `holder_stopping`),
   and the real reboot with three Tasks.
 
-Shape, from one reviewer's read (not built; each is a wire or behavior change
-for someone to choose):
+Shape still open:
 
-- `ended.by` is read only by the fold that produces `outlook.kind`
-  (`human_session::session_ending`); no printer reads it. With `outlook`
-  on the wire, `ended` could be `{at, exit_code}`.
-- The conversation sentence is assembled twice, in
-  `SessionFacts::conversation_line` (`lf/commands/session.rs`) and Swift's
-  `conversationLine(now:)`, from the same three objects. `outlook.reason` is
-  already printable text; the rest of the line is not.
 - `task_graphs.restarts` carries two rules (a run waits after 5, a ship keeps
   restarting). LOO-968 ("Ship is shorthand for auto mode on the Task's
   Graph") removes the ship rule.
@@ -858,6 +895,17 @@ behavior choice, asked on the page as questions 1–6:
   storage `sessions`/`session_recovery`/`query_plans`, `dto_fixtures::`
   (`task_create_receipt.json` gained `ended`/`start`), clippy clean.
 
+- Slice 8 (implement): `ops::human_session::tests::` (33); storage `query_plans::`,
+  `sqlite::sessions::`, `session_recovery` (17); `server::recovery::tests::`,
+  `server::schema::tests::` (fixture regenerated), `lf::commands::session::` (17);
+  `dto_fixtures::`, `documented_commands::`, `context_launch_tests::a_killed_task_conversation`,
+  `…a_task_conversation_whose_agent`, `…a_task_checkout_starts` (57); clippy `--all-targets`
+  and fmt clean; `scripts/test_desktop.sh --filter 'DTOFixtureTests'` (55). Both changed
+  reads planned against this Machine's store: `task_conversations_here` drives from
+  `session_inventory` (55 rows), the summary's subquery is three key lookups.
+  Gate: every Swift suite with an inline Session fixture (key `status_line` added to 8
+  files), `binary(session_lifecycle_tests)`, `test(performance_tests::)`,
+  `test(session_cli_tests::)`, `binary(golden_prompt)` if a prompt prints a Session.
 - Slice 7 (implement): `ops::human_session::tests::` (33), `transport::tests::a_pty_failure…`,
   storage `changes::` (3) and `query_plans`/`session_recovery`; `server::recovery::tests::`,
   `lf::commands::session::tests::`, `doctor::tests::`, `lf::tests::` (54); `server::schema::tests::` (8,

@@ -127,7 +127,17 @@ this case is rare.
    `new_thread`; delete `lost_thread`.**
    Rerun slice 1's tests and the session_launch_contract and session_cli tests
    named above.
-3. **Real Claude quit-before-typing check** through `lf`, using a PTY like the
+Slices 1 and 2 are built. Slice 1 showed `lost_thread` already recovered a
+provider that started and exited 1; slice 2 moved that decision into
+`saved_thread`. Passing: the three transport tests,
+`provider_rejected_resume_keeps_the_selected_conversation`,
+`provider_switch_without_transcript_seeds_from_the_original_request`,
+`a_killed_task_conversation_comes_back_once_and_a_quit_one_stays_quit` (the
+recovery watcher's lost-transcript case, now through `append_input`) and
+`transcript::`. `new_thread` on a lost thread prints both the "no saved copy"
+line and its own "seeded with its original request" line.
+
+3. **Real Claude quit-before-typing check** (next; not run in this step) through `lf`, using a PTY like the
    probe; result in the PR body.
 
 ## Docs (written first)

@@ -37,8 +37,7 @@ with the server down registers it before the agent starts: check
 answers with no login (its free `opencode/big-pickle` model), so
 `lf -i --task <id> -a opencode : '<message>'` in a PTY drives the real plugin;
 its turns land in `$HOME/.local/share/opencode/opencode.db` (`session_message`).
-The model runs tools in the checkout, so keep it disposable and stop the
-`opencode serve` child afterwards. Pi needs the nvm `bin` on `PATH` and a model;
+The model runs tools in the checkout, so keep it disposable. Pi needs the nvm `bin` on `PATH` and a model;
 a private home has no key. Both reach a scripted local model instead: a small
 OpenAI-compatible HTTP server (streamed `chat/completions`, scripted `bash`
 calls for Pi, `shell` for OpenCode 2.x, then a reply naming what it saw) named

@@ -501,11 +501,12 @@ fn build_prompt_at(
     let subject = cli.task.as_deref().unwrap_or_default();
     loopflow_execution::agent_input_timing::record("prompt_begin", subject);
     let task_input = prepare_task_input(cli)?;
-    let checkout_yolo = loopflow_execution::agent::headless_task_checkout(
-        !is_interactive && !cli.context,
-        task_input.as_ref().map(|(_, seed)| &seed.task),
-        &repo_root,
-    )?;
+    let checkout_yolo = match &task_input {
+        Some((_, seed)) if !is_interactive && !cli.context => {
+            loopflow_execution::agent::is_task_checkout(&seed.task, &repo_root)?
+        }
+        _ => false,
+    };
     let task_message = task_input.as_ref().map(|(_, seed)| seed.message.clone());
     let wave = cli.wave.clone().or_else(|| {
         cli.resume

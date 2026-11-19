@@ -94,16 +94,10 @@ pub struct AgentProcessResult {
     pub failure: Option<AgentFailure>,
 }
 
-/// A headless run in its own Task checkout uses the harness's yolo settings.
-pub fn headless_task_checkout(
-    headless: bool,
-    task: Option<&crate::work::task::Task>,
-    cwd: &Path,
-) -> anyhow::Result<bool> {
-    match task {
-        Some(task) if headless => Ok(task.worktree()?.canonicalize()? == cwd.canonicalize()?),
-        _ => Ok(false),
-    }
+/// Whether `cwd` is `task`'s own checkout. A headless run there uses the
+/// harness's yolo settings.
+pub fn is_task_checkout(task: &crate::work::task::Task, cwd: &Path) -> anyhow::Result<bool> {
+    Ok(task.worktree()?.canonicalize()? == cwd.canonicalize()?)
 }
 
 /// What a conversation sets in its own shells, lf's markers and its
@@ -1485,10 +1479,7 @@ mod tests {
         let first = _pass_over_missing_agents(&mut moved, &step, installed).unwrap();
         assert_eq!(first, launch.agent);
         assert_eq!(moved.agent, agent("codex"));
-        assert_eq!(
-            _agent_order(&moved),
-            [agent("codex"), agent("claude")]
-        );
+        assert_eq!(_agent_order(&moved), [agent("codex"), agent("claude")]);
 
         // Nothing installed in the order: the first choice is the one named.
         let mut pinned = launch.clone();

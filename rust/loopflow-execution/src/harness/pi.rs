@@ -138,7 +138,7 @@ pub(crate) fn conversation_file(token: &AgentSessionId) -> PathBuf {
         .unwrap_or_else(|| path.to_owned())
 }
 
-pub fn options(config: &AgentConfig, context_file: Option<&Path>) -> Result<Vec<String>> {
+pub fn options(config: &AgentConfig, context_file: Option<&Path>) -> Vec<String> {
     let mut args = Vec::new();
     if let Some(model) = config.agent.model.clone() {
         args.extend(["--model".into(), model]);
@@ -147,7 +147,7 @@ pub fn options(config: &AgentConfig, context_file: Option<&Path>) -> Result<Vec<
         args.extend(["--append-system-prompt".into(), path.display().to_string()]);
     }
     // Project trust is separate from tool permissions; retain the user's policy.
-    Ok(args)
+    args
 }
 
 impl Driver {
@@ -237,7 +237,7 @@ impl Driver {
         let mut command = Command::new("pi");
         command
             .args(["--mode", "rpc"])
-            .args(options(config, context.as_deref())?);
+            .args(options(config, context.as_deref()));
         if let Some(file) = &resumed {
             command.arg("--session").arg(file);
         }
@@ -761,7 +761,7 @@ impl super::Harness for Pi {
     fn open(&self, launch: &super::Launch<'_>) -> Result<super::native_session::NativeClient> {
         let mut client = super::native_session::NativeClient::new(launch)?;
         let (mut args, input) = launch.terminal_input()?;
-        args.extend(options(launch.config, launch.context_file)?);
+        args.extend(options(launch.config, launch.context_file));
         match launch.start {
             super::Start::Resume { thread } => args.extend(resume_args(thread)?),
             super::Start::New => {

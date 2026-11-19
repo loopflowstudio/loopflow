@@ -113,14 +113,15 @@ pub fn resolve_session_config(
         config.conversation_context = request.conversation_context;
     }
     if batch {
-        let task = session
+        if let Some(task) = session
             .task_id
             .as_ref()
             .map(|id| store.task_by_issue(id.as_str()))
             .transpose()?
-            .flatten();
-        config.skip_permissions |=
-            super::headless_task_checkout(true, task.as_ref(), &session.cwd)?;
+            .flatten()
+        {
+            config.skip_permissions |= super::is_task_checkout(&task, &session.cwd)?;
+        }
     }
     if resumes_native {
         if let Some(native) = session

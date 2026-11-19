@@ -426,6 +426,12 @@ The docs commit the implementation to three things the plan had left open:
      the first run after a build: 254s, 254s, 257s, 268s. Nextest kills a test
      at 300s; question 24. Clippy and `documented_commands::` clean.
 
+Compress (2026-11-18): `tests/e2e/capture_history.py` read the deleted
+`opencode_server.py`; v0.13.3 now gets its release's stand-in via
+`git show v0.13.3:…` and the candidate gets `opencode_cli.py`. Not run here
+(needs the v0.13.3 archive); gate or a person with the archive runs it.
+Clippy clean; `harness::pi` and `agent::session` tests pass.
+
 Next: demo. Recheck Pi usage on a real Task and keep the existing OpenCode
 and Pi QA results. Claude and Codex question handling, the uncalled
 `Driver::send_current`, and idle wake for OpenCode and Pi stay out of scope.

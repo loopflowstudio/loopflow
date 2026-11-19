@@ -44,6 +44,8 @@ pub enum IdleReach {
     Claude(std::path::PathBuf),
     /// The Session's private app-server.
     Codex(std::path::PathBuf),
+    /// The Unix socket an OpenCode plugin or Pi extension listens on.
+    Extension(std::path::PathBuf),
 }
 
 impl std::fmt::Debug for SteerAdapter {

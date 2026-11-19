@@ -71,6 +71,15 @@ What to read afterwards:
   (claude, codex, opencode, pi) as its child; `pgrep -P <holder>`, then kill
   those and the holder.
 
+- Idle wake: `tests/e2e/idle_wake.py` (see `tests/e2e/README.md`) steers an
+  idle OpenCode or Pi work session on a scripted model. A held terminal reads
+  the account's provider files, not the launching shell's
+  `OPENCODE_CONFIG_CONTENT`: name the model in
+  `$HOME/.config/opencode/opencode.json` or `$HOME/.pi/agent/`. `lf checkout
+  <task>` starts the work session in its holder; `lf resume --task <task>` in
+  a PTY views it. The plugin's socket is under `/tmp/lf-wake-*/` and is
+  recorded in `agent_sessions.agent_inbox`.
+
 Run from an agent shell, lf inherits that shell's caller markers
 (`OPENCODE_SESSION_ID`, `OPENCODE_CONFIG_CONTENT`, `CLAUDECODE`); keep them, as
 they are the case a person meets. Stop the server, and any `opencode` or `pi`

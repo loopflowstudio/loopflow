@@ -88,7 +88,7 @@ row names the test that shows it; "no" is a gap with its owner.
 | fails the turn, with the question as its reason, when it asks one and nobody is there; the run stops after that one attempt | no: not read (Task 48edb9) | no: not read (Task 48edb9) | yes | yes | `task_graph_launch_tests::a_question_with_nobody_there_ends_the_step` |
 | stops on `lf task interrupt` with its turn recorded interrupted; the next `lf task run` starts the step again | yes | yes | yes | yes | `a_worker_stops_on_interrupt_and_the_next_run_starts_its_step_again_on_claude_and_codex`, `a_worker_stops_on_interrupt_and_the_next_run_starts_its_step_again_on_opencode_and_pi` |
 | moves to the next agent on a usage limit | yes | yes | no: failures unclassified (LOO-518) | no: failures unclassified (Task 98edc6) | `agent::tests::` fallthrough tests |
-| as an idle work session, hears a steer | yes | yes | no: next turn only (Task 540073) | no: next turn only (Task 540073) | `server::wake::tests::` |
+| as an idle work session, hears a steer | yes | yes | yes | yes | `server::wake::tests::`; `harness::context::tests::` |
 
 Context and steers reach every harness the same way: it runs
 `lf __context-block` when the conversation starts and after each tool. Claude
@@ -117,8 +117,15 @@ On all four harnesses, `lf task interrupt` ends the worker with exit 130,
 records its turn as interrupted, and leaves the Graph at that step. The next
 `lf task run` starts the step in a new conversation.
 
-A "no" for OpenCode or Pi means the step stops with the provider's error (limits)
-or the steer waits for the next turn (idle wake); neither loses work.
+A "no" for OpenCode or Pi means the step stops with the provider's error
+(limits); it loses no work.
+
+An idle work session is woken through the provider's own way in
+([Waking an idle conversation](../../../loopflow/src/server/README.md#waking-an-idle-conversation)):
+Claude's inbox, Codex's app-server, and for OpenCode and Pi a socket their
+plugin or extension listens on, which asks the provider to start the turn.
+An OpenCode work session reports each turn's first request and its end, so the
+server knows when it is idle; Pi reports every event.
 
 A skill keeps one `LfProcess` across successive provider `AgentProcess` instances.
 Its shared `LfProcessRuntime` in [`process/runtime.rs`](../process/runtime.rs)

@@ -30,8 +30,18 @@ export default {
       console.error(`recording gap closed (context ${gap}); lf serves context from here`);
       gap = undefined;
     };
+    // A work session takes the server's steers while idle, as a turn OpenCode
+    // starts; one already running queues the message as a steer. The answer
+    // shows in the TUI; the message is the model's, not something typed.
+    const wake = spec.wake ? wakeSocket(async (thread, text) => {
+      if (thread !== owner) throw new Error(`this OpenCode runs ${owner}, not ${thread}`);
+      await session.synthetic({ sessionID: owner, text });
+    }, (line) => console.error(line)) : null;
     // A launch that reports no turns opens no connection and reports no turn end.
-    const server = spec.turns ? machineServer(delivery, (line) => console.error(line)) : undefined;
+    const server = spec.turns ? machineServer(delivery, (line) => console.error(line), wake) : undefined;
+    // A work session's turn is recorded from its first request to its end, so
+    // the server knows when it is idle.
+    let turn = false;
     const lf = { env: { ...process.env, LF_HOME: spec.delivery.home }, cwd: spec.delivery.repo };
     // The block comes from checkout files, rendered without the launch's
     // capability; the Session's news is read apart from it.
@@ -49,6 +59,11 @@ export default {
       const callback = { session_id: input.sessionID, hook_event_name: "OpenCodeMessagesTransform",
         adapter_invocation_id: randomUUID() };
       await server?.boundary(refresh ?? "tool", callback);
+      if (wake && !turn) {
+        turn = true;
+        await server.boundary("tool", { session_id: owner, hook_event_name: "UserPromptSubmit" },
+          { skippable: true });
+      }
       if (refresh) {
         try {
           block = render(refresh, callback);
@@ -68,7 +83,9 @@ export default {
       for await (const item of event.subscribe({ signal: controller.signal })) {
         if (item.type !== "session.execution.succeeded" || item.data.sessionID !== owner) continue;
         // An unanswered turn end leaves planning pending until a later boundary.
-        await server.boundary("stop", {});
+        // A work session names its conversation, which records it as idle.
+        turn = false;
+        await server.boundary("stop", wake ? { session_id: owner, hook_event_name: "Stop" } : {});
       }
     })().catch((error) => { if (!controller.signal.aborted) throw error; });
     return async () => { controller.abort(); await watching; };

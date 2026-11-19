@@ -221,8 +221,10 @@ impl SqliteStore {
         })
     }
 
-    /// Save where an idle Claude conversation takes messages: the inbox key
-    /// file its hook found. Written only when it changes.
+    /// Save where an idle conversation takes messages: the inbox key file a
+    /// Claude hook found, or the socket an OpenCode plugin or Pi extension
+    /// listens on. The Session's provider says which. Written only when it
+    /// changes.
     pub fn record_agent_inbox(&self, adapter: &SteerAdapter, key: &Path) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
@@ -250,7 +252,7 @@ impl SqliteStore {
         let mut statement = conn.prepare(
             "SELECT s.id,s.agent_process_id,a.capability,s.provider_thread,s.cwd,
                 CASE WHEN s.provider='codex' THEN s.agent_endpoint END,s.agent_inbox,
-                s.agent_pid,s.agent_os_started_at
+                s.agent_pid,s.agent_os_started_at,s.provider
              FROM agent_sessions s INDEXED BY agent_sessions_unended_agent
              JOIN steer_adapters a ON a.agent_process_id=s.agent_process_id
              JOIN session_activity act ON act.session_id=s.id AND act.agent_process_id=s.agent_process_id
@@ -260,9 +262,13 @@ impl SqliteStore {
                AND (?1 IS NULL OR s.id=?1)",
         )?;
         let rows = statement.query_map([session], |row| {
+            let inbox = || row.get::<_, String>(6).map(std::path::PathBuf::from);
             let reach = match row.get::<_, Option<String>>(5)? {
                 Some(endpoint) => IdleReach::Codex(endpoint.into()),
-                None => IdleReach::Claude(row.get::<_, String>(6)?.into()),
+                None => match row.get::<_, Option<String>>(9)?.as_deref() {
+                    Some("opencode" | "pi") => IdleReach::Extension(inbox()?),
+                    _ => IdleReach::Claude(inbox()?),
+                },
             };
             let identity = row
                 .get::<_, Option<u32>>(7)?

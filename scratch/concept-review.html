@@ -33,13 +33,12 @@
   th { font-weight: 600; }
   .yes { color: var(--yes); font-weight: 700; }
   .no { color: var(--no); font-weight: 700; }
-  .proposed { background: var(--newbg); border-left: 4px solid var(--new); }
-  td.proposed { border-left: 4px solid var(--new); }
+  tr.proposed td:first-child { border-left: 4px solid var(--new); }
   .tag { color: var(--new); font-weight: 600; }
   .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
   @media (max-width: 760px) { .cols { grid-template-columns: 1fr; } }
   .card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 14px 18px; }
-  .card.proposed { border-left: 4px solid var(--new); }
+  .card.proposed { border-left: 4px solid var(--new); background: var(--newbg); }
   .card h3 { margin-top: 0; }
   ol.q > li { margin-bottom: 14px; }
   ol.q ol { list-style: lower-alpha; margin-top: 4px; }
@@ -48,205 +47,190 @@
 <body>
 
 <h1>Showing an agent a change</h1>
-<p class="lede">Concept review for Task d92894, written before any code, 2026-11-18. Nothing here is built.
-Anything on a <span class="tag">gold edge</span> is proposed; everything else exists today.</p>
+<p class="lede">Concept review for Task d92894 after the change was built and run, 2026-11-18, against
+base <code>3496a8761d</code> at <code>9f5f1fd770</code>. Anything on a <span class="tag">gold edge</span>
+is proposed; everything else is in the branch. It replaces the page written before any code.</p>
 
-<p><strong>The area taken.</strong> The Task is about two writers, the ones behind <code>lf commit</code> and
-PR descriptions. Both are instances of something wider: lf putting a change in front of an agent. The
-review covers every place lf does that, because the plan as written would have added a new way to do it
-beside the ones already there.</p>
+<p><strong>The area taken.</strong> Every place lf puts a change in front of an agent: the commit writer,
+the PR writer, <code>--diff patch</code> / <code>context: {diff: true}</code>, and the Task workspace block.
+The Task names the two writers; the branch moved the third onto the same type, so the review covers what
+that type is and how it reaches each agent.</p>
 
-<h2>One interaction, walked</h2>
-
-<p>A Graph step finishes on a branch that touched 44 files, 1.8&nbsp;MB of patch. lf stages everything and asks
-the <code>commit-message</code> Skill for a message.</p>
+<h2>Two interactions, walked</h2>
 
 <div class="cols">
   <div class="card">
-    <h3>Today</h3>
-    <p>The writer receives the first 20,000 characters of <code>git diff --cached</code>, in path order, then
-    <code>[diff truncated]</code>. It describes <code>rust/</code> and half a scratch note. The Swift that is
-    the change never reaches it, and nothing tells it which files it missed.</p>
-    <p><strong>Failure:</strong> none visible. The message is confidently about the wrong files.</p>
-    <p><strong>Recovery:</strong> someone notices in <code>git log</code> and amends by hand.</p>
+    <h3><code>lf commit</code> on 354 KB</h3>
+    <p>The writer is sent every file with its line counts and
+    <code>git diff --cached -- '&lt;path&gt;'</code>. It reads <code>src/zzz_retry.rs</code> and titles the
+    commit "Retry export once when the upstream times out". Codex, a step commit, 801 files and the PR
+    writer did the same (<code>scratch/qa.html</code>).</p>
+    <p><strong>Failure:</strong> the writer reads nothing. It still has the whole list.</p>
+    <p><strong>Recovery:</strong> none needed; nothing is stored.</p>
+    <p>This is right. No change.</p>
   </div>
-  <div class="card proposed">
-    <h3>Planned</h3>
-    <p>The writer receives every changed file with its line counts, and the exact command that prints one
-    file's patch. The patch itself is there whole when it is small, and absent when it is not. The writer
-    picks what to read.</p>
-    <p><strong>Failure:</strong> the writer reads nothing, or runs out its 300 seconds. It still wrote from
-    a complete list, or the commit falls back to <code>lf implement: checkpoint</code> as it does today.</p>
-    <p><strong>Recovery:</strong> nothing to recover; no state was added.</p>
+  <div class="card">
+    <h3><code>lf -b sayit --diff patch</code></h3>
+    <p>lf builds the same section, writes it to <code>.lf/prompts/…-changes.md</code>, and lists that path
+    in the context block among the other references.</p>
+    <p><strong>Failure, observed three runs of three:</strong> the agent never opened the file. On a branch
+    with one edited and one new file, both uncommitted, it ran its own <code>git diff main...HEAD</code> and
+    answered "The small2 branch adds nothing beyond main". The unread file listed the changed files.</p>
+    <p><strong>Recovery:</strong> the person notices and pastes the diff in.</p>
   </div>
 </div>
-
-<p>That interaction is right, and it is the one the Task comment asks for. The review found no reason to
-change it. What it found is in the code underneath.</p>
 
 <h2>Do the product's concepts and the code's concepts line up?</h2>
 
 <table>
   <tr><th style="width:27%">What a person knows</th><th style="width:33%">What the code has</th><th style="width:7%">Match</th><th>What is wrong</th></tr>
   <tr>
-    <td>The <code>commit-message</code> and <code>pr-message</code> Skills write messages, on an agent you can choose</td>
-    <td><code>generate_commit_message</code>, <code>generate_pr_copy</code>, shared <code>message_launch</code></td>
-    <td class="yes">yes</td>
-    <td>One launch path, Skill settings respected.</td>
-  </tr>
-  <tr>
     <td>The message is about the change: what is staged, or the branch against its base</td>
-    <td>The first 20,000 characters of a diff, cut twice by two copies of <code>truncate_chars</code></td>
-    <td class="no">no</td>
-    <td>The code has a concept the person never sees: a prefix. This is the Task.</td>
-  </tr>
-  <tr>
-    <td>A Skill can be given the branch diff: <code>context: {diff: true}</code>, <code>--diff patch</code></td>
-    <td><code>gather_diff_tiered</code> in <code>prompt/mod.rs</code>: whole patch under 15,000 tokens, 20 files and 800 lines, otherwise <code>git diff --stat</code></td>
-    <td class="no">no</td>
-    <td>Same idea as the writers, separate code, separate rule. Its stat abbreviates long paths and gives no way to read a file.</td>
-  </tr>
-  <tr>
-    <td>An agent working a Task is told what the checkout has changed</td>
-    <td><code>task_workspace_context</code> in <code>ops/task/snapshot.rs</code>: file list, whole patch under 15,000 tokens, otherwise "Read the named worktree paths"</td>
-    <td class="no">no</td>
-    <td>Same idea a third time. No line counts; a different sentence for the same situation.</td>
-  </tr>
-  <tr>
-    <td>Notes under <code>scratch/</code> are working notes, cleared when the change lands</td>
-    <td><code>git::scratch::added</code>, used by <code>lf scratch clear</code></td>
+    <td><code>Change::read(Staged | Since)</code>, <code>prompt_section()</code> in the writer's prompt</td>
     <td class="yes">yes</td>
-    <td>One owner. The writers ignore it today; the plan marks those files.</td>
+    <td>Was a 20,000-character prefix. Fixed, and shown on real writers.</td>
   </tr>
   <tr>
-    <td>A Skill's text is yours to copy and change</td>
-    <td>Builtins say "Read the diff"; lf appends the diff after the text</td>
+    <td>One idea of "the change as the agent sees it": every file, how to read one, the patch when small</td>
+    <td><code>prompt/change.rs</code>, one type, one size rule (<code>PATCH_INLINE_TOKENS</code>)</td>
     <td class="yes">yes</td>
-    <td>Stays true only if the reading instructions travel with what lf appends, not with the builtin text.</td>
+    <td>Three implementations and four limits became one. <code>DiffTier</code> and both <code>truncate_chars</code> are gone.</td>
+  </tr>
+  <tr>
+    <td><code>--diff patch</code>: "give the agent the diff"</td>
+    <td>A <code>changes</code> file, listed by path; the agent opens it if it thinks to</td>
+    <td class="no">no</td>
+    <td>One concept, two deliveries. The writers are shown the section; a Skill is shown a filename. Measured: the filename is not followed. The docs now say "it is not put in front of the agent", which describes a flag that does less than its name.</td>
+  </tr>
+  <tr>
+    <td>"What did this run's context hold?" (attribution)</td>
+    <td><code>attributed_context</code> pushes the section as <code>Kind::Diff</code> only if the task text contains it, and records a <code>StatOnly</code> decision regardless</td>
+    <td class="no">no</td>
+    <td>The section is never in the task text, so the diff is absent from attribution while the decision about it is recorded. Follows from the row above and is fixed with it.</td>
+  </tr>
+  <tr>
+    <td>Things you ask for by flag arrive with the request: <code>--docs</code>, <code>-c</code></td>
+    <td><code>format_task_prompt</code> appends clipboard and explicit docs to the first turn</td>
+    <td class="yes">yes</td>
+    <td><code>--diff</code> is the one explicit flag that does not go this way.</td>
+  </tr>
+  <tr>
+    <td>An agent working a Task is told what the checkout changed</td>
+    <td><code>task_workspace_context</code>: its own comparison, list and sentence; shares only the number</td>
+    <td class="no">no</td>
+    <td>The same idea a second time. Larger than this work; below.</td>
+  </tr>
+  <tr>
+    <td>Notes under <code>scratch/</code> leave when the change lands</td>
+    <td><code>ChangedFile.working_note</code> from <code>git::scratch::added</code></td>
+    <td class="yes">yes</td>
+    <td>The PR writer used the marked note's "3 of 40" in its body.</td>
   </tr>
   <tr>
     <td>Both writers do the same job</td>
     <td>The commit writer always skips permission prompts; the PR writer follows <code>yolo</code></td>
     <td class="no">no</td>
-    <td>One job, two stances. It matters more once both must run a command. Left alone; see question 4.</td>
+    <td>Unchanged. The PR writer ran <code>git diff</code> without the flag, so nothing broke. Question 3.</td>
   </tr>
 </table>
 
 <h2>The biggest mismatch</h2>
 
-<p>A person has one idea: <em>the agent can see the change</em>. The code has that idea three times, with three
-size rules, and the plan from kickoff would have made it four.</p>
-
-<table>
-  <tr><th>Where</th><th>Always shown</th><th>Patch shown whole when</th><th>Otherwise</th></tr>
-  <tr><td>Commit and PR writers</td><td>nothing (PR: <code>--stat</code>)</td><td>never whole past 20,000 characters</td><td>a prefix and <code>[diff truncated]</code></td></tr>
-  <tr><td><code>context: {diff: true}</code></td><td>nothing</td><td>under 15,000 tokens, 20 files, 800 lines</td><td><code>git diff --stat</code>, paths abbreviated</td></tr>
-  <tr><td>Task workspace block</td><td>paths and states</td><td>under 15,000 tokens</td><td>"Read the named worktree paths"</td></tr>
-  <tr class="proposed"><td>Kickoff's <code>Change</code> <span class="tag">(passed over)</span></td><td>paths and line counts</td><td>at most 100,000 bytes</td><td>the read command</td></tr>
-</table>
-
-<p>AGENTS.md says it directly: "If three building blocks exist for one job and none works, the change
-removes all three. It does not add a fourth."</p>
+<p>The branch made one type for showing an agent a change, then delivered it two ways. Where it is put in
+the prompt, a cheap model read the right file every time. Where it is put in a file, the model never
+opened it. Same section, same model; the only variable is whether lf showed it.</p>
 
 <div class="cols">
   <div class="card">
-    <h3>Before</h3>
-<pre>ops/commit.rs   truncate_chars(diff, 20_000)
-ops/pr.rs       truncate_chars(diff, 20_000)
-                + git diff --stat
-prompt/mod.rs   gather_diff_tiered
-                15k tokens, 20 files, 800 lines
-ops/task/       task_workspace_context
-  snapshot.rs   MAX_PATCH_TOKENS = 15_000</pre>
+    <h3>Before (in the branch)</h3>
+<pre>lf commit            prompt: "## Change" + section
+lf pr submit         prompt: "## Change" + section
+--diff patch         .lf/prompts/…-changes.md
+                     context block: its path
+attribution          Diff asset: absent
+                     StatOnly decision: recorded</pre>
   </div>
   <div class="card proposed">
     <h3>After <span class="tag">(proposed)</span></h3>
-<pre>prompt/change.rs
-  PATCH_INLINE_TOKENS = 15_000     // the one rule
-  enum ChangeRange { Staged, Since(base), Uncommitted }
-  Change::read(repo, range)
-  Change::prompt_section()
-
-ops/commit.rs   Change::read(Staged)
-ops/pr.rs       Change::read(Since)
-prompt/mod.rs   Change::read(Since | Uncommitted)
-ops/task/       reads PATCH_INLINE_TOKENS;
-  snapshot.rs   its own comparison stays</pre>
+<pre>lf commit            prompt: "## Change" + section
+lf pr submit         prompt: "## Change" + section
+--diff patch         first turn: section, after the
+                     request, beside -c and --docs
+attribution          Diff asset: Task channel
+--diff files         changes file as on main: paths</pre>
   </div>
 </div>
 
-<h3>What the recommendation changes in the plan</h3>
-<ol>
-  <li><strong><code>Change</code> lives in <code>prompt/</code>, not <code>ops/</code>,</strong> so the Skill
-  context path can use it. It is "a change as shown to an agent", which is what <code>prompt/</code> is for.</li>
-  <li><strong>No new number.</strong> The patch goes in whole under 15,000 tokens, the rule lf already applies
-  twice, instead of a new 100,000-byte rule. More mid-sized PRs take the reading path; that path is the
-  design, so this costs a tool turn, never a wrong message.</li>
-  <li><strong><code>context: {diff: true}</code> moves onto <code>Change</code> in the same Task.</strong> Its
-  20-file and 800-line limits, its <code>--stat</code> and its shortstat parsing go. A Skill handed a large
-  branch now gets full paths, line counts and the read command.</li>
-  <li><strong>The builtin Skill texts are not edited.</strong> "Read the diff" is true in both shapes and when
-  the Skill is run by hand with no section at all. The section lf builds carries the instructions.</li>
-  <li><strong>The working-note mark belongs to the range.</strong> Any branch-against-base change has added
-  scratch notes that leave when it lands, so <code>Change::read</code> marks them for <code>Since</code>, and
-  the Skill context path gets the mark too. Wording follows the code: scratch is cleared at land
-  (<code>ops/land.rs:171</code>), not at publish.</li>
-</ol>
+<h3>Why this and not the alternatives</h3>
+<ul>
+  <li><strong>The size is already bounded.</strong> The section is the file list plus at most 15,000 tokens of
+  patch. <code>--docs</code> bodies go in the first turn with no bound at all.</li>
+  <li><strong>It is asked for.</strong> <code>--diff patch</code> and <code>context: {diff: true}</code> are off
+  by default and no builtin Skill sets them. Someone who turns one on wants the agent to have it.</li>
+  <li><strong>It is no more frozen than today.</strong> The file is written once at launch; so is a first
+  turn. The read command in the section is how the agent gets the current state either way.</li>
+  <li><strong>The code gets smaller.</strong> <code>ContextDelivery::prepare</code> loses its three-way match
+  and goes back to what it does on <code>main</code> for <code>diff_files</code>; attribution starts telling
+  the truth with no edit; the docs lose the caveat.</li>
+</ul>
 
 <h3>Tested against three paths</h3>
 <table>
-  <tr><th style="width:18%">Path</th><th>What happens</th></tr>
-  <tr><td>Normal</td><td>A two-file step commit: stat plus whole patch, one turn, as today. A 44-file branch: stat and read command; the writer reads the Swift.</td></tr>
-  <tr><td>Failure</td><td>The writer runs <code>git diff --cached</code> with no path on a 4.6&nbsp;MB change and overflows. The commit gets <code>checkpoint</code>; the PR writer errors as it does today for any failed reply. The section names the per-file command and the patch size to steer away from this. A fixture cannot show whether a cheap model obeys; the demo run does.</td></tr>
-  <tr><td>Recovery</td><td>Nothing is stored, so there is nothing to repair. Run again.</td></tr>
-  <tr><td>Counterexample kept</td><td>One generated file is itself 200&nbsp;KB. Its line count is in the stat, so the writer can leave it. lf does not cut it and does not hide it.</td></tr>
-  <tr><td>Counterexample kept</td><td>A vendor configuration denies <code>git diff</code> to the PR writer (it does not skip prompts). It writes from the stat. Worse than a read, better than a prefix.</td></tr>
+  <tr><th style="width:20%">Path</th><th>What happens</th></tr>
+  <tr><td>Normal</td><td><code>lf review --diff patch</code> on a small branch: the patch is in the first turn; the agent answers without a tool call. On a large one: the list and the command are in the first turn; it reads what it picks.</td></tr>
+  <tr><td>Failure</td><td>Compaction drops the first turn. The agent has lost the list, as it loses <code>--docs</code> bodies; <code>git diff</code> still works. The listed file would have survived, unread.</td></tr>
+  <tr><td>Recovery</td><td>Resume replays the transcript, which holds the section. Nothing new is stored.</td></tr>
+  <tr><td>Counterexample kept</td><td>A Task worker running a Skill with <code>diff: true</code> now sees a change twice: the workspace block (base, index, worktree) and this section (branch against <code>origin/&lt;base&gt;</code>). Two readings of one idea, each up to 15,000 tokens of patch. That is the workspace-block item below, and it exists today in weaker form.</td></tr>
+  <tr><td>Counterexample kept</td><td>A native-skill launch (<code>format_task_prompt</code> with arguments) appends docs after the message; the section goes the same way.</td></tr>
 </table>
 
 <h2>Larger than this work</h2>
 <ul>
-  <li><strong>The Task workspace block could become a <code>Change</code> too.</strong> It compares base, index,
-  worktree and untracked files at once and reports a state per file; <code>Change</code> would need a fourth
-  range and those states, and untracked files have no numstat. In this Task it only shares the number.</li>
-  <li><strong><code>lf task diff</code> caps a whole comparison at 1&nbsp;MB</strong>
-  (<code>ops/task/snapshot.rs:584</code>), a per-file limit reused for the patch. That is a person-facing read
-  with a DTO behind it and Desktop working around it in LOO-515. Its fix is a per-file read, the same shape
-  as here, in the served API.</li>
-  <li><strong>Release notes</strong> (<code>ops/release.rs</code>) bound a different thing, a list of PRs and
-  commits, and already report what they left out. Not the same concept; no action.</li>
+  <li><strong>The Task workspace block is a second "change as shown to an agent".</strong> It would take a
+  fourth <code>ChangeRange</code> (base against worktree, untracked included, which <code>Uncommitted</code>
+  now half does) and a per-file state. Then a worker with <code>diff: true</code> would get one section.</li>
+  <li><strong><code>gather_branch_change</code> treats only a branch named <code>main</code> as the default
+  branch</strong> while asking Git for the default branch two lines later. On a repository whose default is
+  <code>trunk</code>, <code>--diff patch</code> there reads <code>origin/trunk...HEAD</code> and finds nothing,
+  so no harm, but <code>main</code> on such a repository is skipped as a feature branch. Unchanged by this
+  branch.</li>
+  <li><strong><code>--diff patch</code> on a branch with commits shows committed work only.</strong>
+  Uncommitted edits on top are absent. Documented. The fourth range above would close it.</li>
+  <li><strong><code>lf task diff</code>'s 1&nbsp;MB whole-comparison cap</strong>
+  (<code>ops/task/snapshot.rs</code>): a person-facing read; its fix is a per-file read in the served API.</li>
 </ul>
 
 <h2>Questions</h2>
 <ol class="q">
-  <li>The size rule for putting the patch in whole.
+  <li>Where <code>--diff patch</code> puts the section.
     <ol>
-      <li>15,000 tokens, the rule lf already has. <span class="tag">Chosen.</span></li>
-      <li>100,000 bytes for everyone, as kickoff measured for PRs (24 of the last 40 fit); doubles what <code>--diff patch</code> Skills can receive.</li>
-      <li>Never whole: always the list and the command, one shape, an extra turn on every step commit.</li>
+      <li>In the first turn, after the request, as <code>--docs</code> and <code>-c</code> are. <span class="tag">Chosen for review.</span></li>
+      <li>A listed file, as built. The flag stays cheap and does little.</li>
+      <li>Take <code>context: {diff: true}</code> back off <code>Change</code> and leave the old stat; ship only the writers.</li>
     </ol>
   </li>
-  <li><code>context: {diff: true}</code> in this Task.
+  <li><code>docs/config.md</code> used to say "Point to Git inspection commands rather than inlining a frozen patch". Did that sentence mean:
     <ol>
-      <li>Moved onto <code>Change</code> now, as the last slice. <span class="tag">Chosen.</span></li>
-      <li>Left as is, with its own Task. The writers ship sooner; three rules stay.</li>
+      <li>never put patch text in a prompt, in which case 1a is wrong and the section should carry only the list and the command for Skills;</li>
+      <li>don't rely on it staying current, which the read command covers.</li>
     </ol>
   </li>
-  <li>Scratch notes in a branch change.
+  <li>The PR writer follows <code>yolo</code>; the commit writer always skips permission prompts.
     <ol>
-      <li>Listed and marked as leaving at land. <span class="tag">Chosen.</span></li>
-      <li>Left out of the list entirely.</li>
+      <li>Leave both. <span class="tag">Chosen.</span></li>
+      <li>Give the PR writer the same floor.</li>
     </ol>
   </li>
-  <li>The PR writer follows <code>yolo</code> while the commit writer always skips permission prompts.
+  <li>The size rule: 15,000 tokens for every caller. <span class="tag">Chosen</span> before code; the runs gave no reason to move it.
     <ol>
-      <li>Leave both as they are. <span class="tag">Chosen;</span> not this Task's to change.</li>
-      <li>Give the PR writer the same floor, now that it has to run a command. <code>lf land</code> already refuses if the writer changed the worktree.</li>
+      <li>Keep.</li>
+      <li>100,000 bytes for the writers only.</li>
     </ol>
   </li>
-  <li>The importance-ordered fallback for a writer that cannot run commands.
+  <li>Untracked files in an uncommitted change are listed with "no patch: read the file".
     <ol>
-      <li>Not built; no launch lf makes fits it. <span class="tag">Chosen.</span></li>
-      <li>Built anyway.</li>
+      <li>Keep. <span class="tag">Chosen.</span></li>
+      <li>Inline small ones as added-file patches.</li>
     </ol>
   </li>
 </ol>

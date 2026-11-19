@@ -17,18 +17,16 @@ Made headless at kickoff and concept review; each is reversible. Detail in
   the PR writer the same floor?
 - AGENTS.md says `lf pr submit` runs `lf scratch clear`; in code only
   `ops/land.rs:171` and `lf scratch clear` itself do. Which is meant?
+- `--diff patch` moves the section into the first turn, after the request
+  (plan, choice 5). qa, 2026-11-18: as a listed `changes` file a haiku agent
+  never opened it in three runs, and on a branch with only uncommitted work it
+  answered "adds nothing beyond `main`". Keep it a listed file instead?
 - `docs/config.md` "Raw Diff" said "Point to Git inspection commands rather
-  than inlining a frozen patch", and that is what ran: the gathered diff was
-  counted but never delivered. The section now goes in the `changes`
-  reference file the context block lists, read on demand and written once at
-  launch. Was a launch-time copy what the old sentence meant to avoid?
+  than inlining a frozen patch". On `main` the gathered diff was counted and
+  never delivered. Did that sentence mean never put patch text in a Skill's
+  prompt, or only not to rely on it staying current? If the first, the section
+  should carry the list and the command without the patch for Skills.
 - With `diff_files` and no `diff`, the `changes` file still says `git diff
   main...HEAD`, whatever the default branch is. Left alone.
-- qa, 2026-11-18: with `--diff patch` a haiku agent never opened the `changes`
-  file in three runs; it ran its own `git diff`, and on a branch with only
-  uncommitted work it answered "adds nothing beyond `main`". The file is in
-  the context listing by path only. Put the section in the first turn, as
-  `--docs` bodies are, or keep it a listed file? Left as a listed file; the
-  docs now say so.
 - An uncommitted change now lists untracked files, marked "no patch: read the
   file". Their contents are not inlined. Inline small ones?

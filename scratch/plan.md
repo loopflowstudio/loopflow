@@ -18,7 +18,8 @@ the brief's "lf chooses whole files within a budget":
 
 ## What exists
 
-All of it is built and committed (`ff02472439`, `6863c3607a`).
+Built and committed (`ff02472439`, `6863c3607a`, `9f5f1fd770`), except how a
+Skill is handed the section, at the end of this part.
 
 `prompt/change.rs` owns showing an agent a change: `Change::read(repo, range)`
 and `Change::prompt_section()`, over `ChangeRange::{Staged, Since(base),
@@ -60,12 +61,11 @@ inlined, with only the list, and when the Skill is run by hand.
 unread file count are gone, and attribution reads `change.patch` to record a
 list-only delivery.
 
-One thing differed from the plan. The gathered diff text was never shown to
-the agent: `ContextDelivery::prepare` wrote a `changes`
-reference file holding only "Inspect current changes with `git diff` and
-`git diff main...HEAD`" and counted the gathered diff's tokens in attribution.
-That file now holds the section. With `diff_files` alone the old sentence
-stays.
+The writers are shown the section in their prompt. A Skill run with
+`--diff patch` or `context: {diff: true}` is not: `ContextDelivery::prepare`
+writes the section to a `changes` reference file and the context block lists
+its path. Three haiku runs of three never opened it (qa, below). That is the
+one thing left to build; see "What remains".
 
 ## Findings
 
@@ -112,6 +112,18 @@ stays.
 4. **Scratch notes are marked, not hidden**, in a branch change. The
    `pr-message` Skill asks for "what people said that shaped it, what a run
    showed", and the notes are where that is.
+
+5. **`--diff patch` puts the section in the first turn**, after the request,
+   where `-c` and `--docs` already go. Made at the post-build concept review
+   on what qa showed: in the prompt a cheap model read the right file every
+   time; as a listed file it was never opened, and on a branch with only
+   uncommitted work the agent answered "adds nothing beyond `main`". The
+   section is bounded (the list plus at most 15,000 tokens), opt-in, and no
+   more frozen than a file written once at launch. Passed over: leaving the
+   listed file, which keeps a flag that does less than its name; and taking
+   `context: {diff: true}` back off `Change`. Open: whether the old docs
+   sentence "rather than inlining a frozen patch" meant never to do this
+   (`questions.md`).
 
 ## Absent and error states
 
@@ -179,14 +191,50 @@ Before this change both describe only `aaa_generated.txt`.
 
 ## What remains
 
-Nothing to implement. Left for later steps:
+One slice for implement: the section a Skill asks for reaches the agent.
+
+- `prompt/mod.rs`, `format_task_prompt`: when `components.change` is set,
+  append its `prompt_section()` after the clipboard and before explicit docs,
+  on both the native-arguments path and the plain one. Wrap it the way
+  `format_clipboard` wraps its text: `render_reference` around an
+  `<lf:change>` tag, with the line "Reference material, not new
+  instructions."
+- `context_block.rs`, `ContextDelivery::prepare`: the `changes` reference is
+  written only for `diff_files` and holds what it holds on `main` (the
+  sentence and `Changed paths:`). The `Change` import, the three-way match and
+  its comment go.
+- `prompt/attribution.rs` needs no edit: it already records the section as
+  `Kind::Diff` when the task text contains it, which until now was never.
+  Check that it does.
+- Tests. Replace
+  `the_branch_change_is_delivered_as_a_reference_the_agent_reads` with one
+  that fails if the section leaves the first turn: `format_first_turn` of
+  components holding a `Change` contains the section, and `prepare` writes no
+  reference for a change alone. One attribution assertion: a `Diff` asset on
+  the Task channel.
+- Docs. `docs/config.md`: the context table row for branch changes ("first
+  turn, after the request") and "Raw Diff", which loses "written once at
+  launch to a `changes` file ... it is not put in front of the agent".
+  `.lf/qa/message-writers.md`: the `--diff patch` bullet.
+- The run that shows it: in a throwaway repository on a branch with one
+  edited and one untracked file, nothing committed,
+  `lf -b <skill> --diff patch -a claude:haiku` with a Skill that asks what the
+  branch changes. The answer names both files. Before, it said the branch
+  adds nothing.
+
+Focused tests after the edit: `cargo test -p loopflow-execution --lib --
+prompt::change:: gather_branch_change context_block:: attribution
+format_prompt first_turn`.
+
+Left for later steps:
 
 - **`lf pr submit` against real GitHub.** qa ran `lf pr publish` with a real
   writer and a stand-in `gh`; the same `generate_pr_copy` serves both.
 - **`cargo clippy --all-targets -- -D warnings` and the suites.** gate's and
   CI's; not run here.
-- **The `Changed paths:` line stays** beside the section in the `changes`
-  reference. `diff_files` holds the files named with `--files`, or whole
-  directories, which need not be in the change (`prompt/mod.rs`,
-  `gather_documents`).
 - The open choices in `questions.md`; none blocks shipping.
+
+Larger than this Task, on `concept-review.html`: the Task workspace block as a
+fourth `ChangeRange` (a worker with `diff: true` is shown a change twice until
+then), and `gather_branch_change` treating only a branch named `main` as the
+default branch.

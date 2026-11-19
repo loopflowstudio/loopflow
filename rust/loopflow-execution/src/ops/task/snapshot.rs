@@ -52,11 +52,20 @@ pub(super) async fn read_task_snapshot(store: &SharedStore, task: Task) -> OpsRe
         .work_status(&work)
         .await
         .map_err(|error| task_error(format!("failed to derive Task Work status: {error}")))?;
-    let execution = crate::ops::task_execution::task_execution(store, &task)
+    let mut execution = crate::ops::task_execution::task_execution(store, &task)
         .await
         .map_err(task_error)?;
     let work_set =
         crate::store::task_work::task_work(&store.sqlite, &task.id).map_err(task_error)?;
+    let auto = store.sqlite.task_auto(&task.id).map_err(task_error)?;
+    if execution.state == crate::ops::task_execution::TaskExecutionState::Idle {
+        if let Some(wait) =
+            super::auto::waiting_to_land(work_set.graph.as_ref(), auto.as_ref(), &task.identifier)
+        {
+            execution.state = crate::ops::task_execution::TaskExecutionState::Waiting;
+            execution.reason = wait;
+        }
+    }
     let status = store.task_state(&task.id).await.map_err(task_error)?;
     let parent_pr = match task.parent_pr_id.as_ref() {
         Some(parent_id) => store
@@ -139,7 +148,6 @@ pub(super) async fn read_task_snapshot(store: &SharedStore, task: Task) -> OpsRe
         .get(&task.id)
         .map(|graph| starter(graph.caller_session.as_ref()))
         .transpose()?;
-    let auto = store.sqlite.task_auto(&task.id).map_err(task_error)?;
     Ok(TaskSnapshot {
         machine_id,
         issue_id: task.tracker_id.as_ref().map(|id| id.as_str().to_string()),

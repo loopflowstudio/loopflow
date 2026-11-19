@@ -97,6 +97,16 @@ Questions 1 and 2 got no written answer in scratch.
   using the store-only write.
 
 ## Open
+- QA 2026-11-19 (second pass): `lf task auto off --reason` reaches the next
+  step's agent as a steer ("I want to read the diff first" was pending for the
+  ship-review Session that a later ship started). Same root as the recorded
+  comment-shape choice; reverse with the store-only write.
+- QA 2026-11-19: a served `task.ship` on an unknown issue answers
+  `outcome_unknown` ("…; inspect the affected work before retrying"), as
+  `task.run` does through the shared launch path. `task.auto.off` now answers
+  `not_found`.
+- A Task conversation at a landing wait still gets `guidance`'s
+  "`lf task run X` starts it" (no auto in `TaskGraph`); status says `lf ship`.
 - QA 2026-11-19: a released hold on a never-run Task does not survive the
   upgrade; same root as the last item below.
 - QA 2026-11-19: Task checkout waits 10 s for the worktree lease instead of

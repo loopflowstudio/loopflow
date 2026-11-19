@@ -3268,6 +3268,14 @@ fn auto_off_sticks_through_a_headless_relaunch() {
     let status = task.status();
     assert_eq!(status["auto"]["state"], "off", "{status}");
     assert_eq!(status["auto"]["by"]["kind"], "person");
+    // Status says why it waits and what lands it, not "finished" and a run.
+    let text = task.text_status();
+    assert!(
+        text.contains("latest Graph: Waiting at pr land: auto is off (")
+            && text.contains("`lf ship INF-123` lands it."),
+        "{text}"
+    );
+    assert!(text.contains("action: no_action"), "{text}");
     // Standing at the landing step, a plain relaunch waits there again.
     let waiting = task.task_run(&["task", "run", "INF-123"]);
     assert!(waiting.success(), "{}", waiting.text);

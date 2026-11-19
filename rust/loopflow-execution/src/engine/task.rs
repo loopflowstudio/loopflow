@@ -131,7 +131,9 @@ pub fn ship(directory: &Path, issue: &str, environment: &[(String, String)]) -> 
 /// <issue>` does. Nothing is killed: the run waits at its next interactive or
 /// merging step until `task.ship` turns auto on again.
 pub fn auto_off(issue: &str, reason: Option<&str>) -> Result<AutoOff> {
-    let was_on = crate::ops::task::auto::off(issue, reason).map_err(written)?;
+    let was_on = crate::ops::task::auto::off(issue, reason)
+        .map_err(written)?
+        .ok_or_else(|| missing(issue))?;
     Ok(AutoOff {
         issue: issue.to_owned(),
         was_on,

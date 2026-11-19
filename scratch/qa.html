@@ -16,6 +16,64 @@ private lf-world Machine (<code>lf-world build task-review /tmp/lfq975/r</code>)
 The world's <code>gh</code> answers reads only, so <code>land</code> succeeds only on a PR merged by hand; a failure there
 still shows the run got past the auto check.</p>
 
+<h2>Second pass, 2026-11-19 at <code>e3104cd354</code></h2>
+<p>A fresh <code>lf-world build task-review</code> Machine, the same <code>qaship</code> graph plus <code>qaland</code>
+(<code>implement → cmd: land</code>), a stand-in that logs each headless step's whole stdin.</p>
+
+<h3>A. Auto off at a landing step <span class="fixed">broken, fixed</span></h3>
+<p><code>lf ship fd0014 --graph qaland</code>, <code>lf task auto off</code> during implement, then release the step.
+The run log was right; status was not, and its advice looped:</p>
+<pre>run log:   Waiting at land: auto is off (Demo). `lf ship` lands it.
+status:    fd0014  active · auto: off by Demo, Nov 19 12:15
+             Graph qaland: at land
+             latest Graph: Graph qaland finished; nothing further is launched
+             action: run  (run the next work with `lf task run`; …)
+lf task run fd0014   → runs from land, waits there again at once</pre>
+<p><b>Fix.</b> One sentence, <code>auto::landing_wait</code>, printed by the runner and used by the status snapshot when the
+Graph stands at a step that is not start, end or interactive while auto is off:</p>
+<pre>  latest Graph: Waiting at land: auto is off (Demo). `lf ship fd0014` lands it. · started by Demo
+  action: no_action  (Waiting at land: auto is off (Demo). `lf ship fd0014` lands it.)
+task show --json: execution.state = waiting</pre>
+<p><code>lf ship fd0014</code> then ran from land (and failed there on the world's read-only <code>gh</code>, as expected).
+<code>auto_off_sticks_through_a_headless_relaunch</code> now asserts the status lines.</p>
+
+<h3>B. Auto off on an unknown ID <span class="fixed">fixed</span></h3>
+<pre>before: Error: no Task exists for "nosuch"; inspect the affected work before retrying   (served: outcome_unknown)
+after:  Error: no Task exists for "nosuch"                                              (served: not_found, data {task})</pre>
+<p>A served <code>task.ship nosuch</code> still answers <code>outcome_unknown</code>; that is the launch path
+<code>task.run</code> shares, left as it is.</p>
+
+<h3>C. Where the reasons go <span class="ok">as designed</span></h3>
+<p><code>lf ship --reason</code> (never-run and live) and <code>lf task auto off --reason</code> are person comments on the Task.
+None was in a step's stdin; all four were queued for the later ship-review Session (<code>lf session steers</code>,
+<code>pending</code>, because the stand-in runs no hooks). So the off reason ("I want to read the diff first") reaches the next
+agent as direction. This matches the recorded comment-shape choice; noted in questions.</p>
+
+<h3>D. Main paths <span class="ok">work</span></h3>
+<table>
+<tr><th>Scenario</th><th>Seen</th></tr>
+<tr><td>Ship a never-run Task</td><td>one Graph run from start, <code>moving · auto: on by Demo</code>, exit 0</td></tr>
+<tr><td>Ship / <code>auto on --json</code> onto a live run</td><td>names the same run, <code>merges: true</code>, exit 0; bare <code>lf task run</code> refuses "is running graph qaship"</td></tr>
+<tr><td>Auto off mid-implement</td><td>nothing killed; run stops at ship-review, reads <code>active · auto: off</code>; second off answers <code>was_on: false</code></td></tr>
+<tr><td>Ship at ship-review</td><td>"standing in at ship-review" on stderr; runs to land; land fails 3× the same way, stops, auto stays on</td></tr>
+<tr><td>Bare <code>lf task auto on</code> in a hand-merged Task's checkout</td><td>implement → ship-review → "Pull request already merged" → verify → <code>done</code></td></tr>
+<tr><td>Ship a done Task; reopen</td><td>"is done; `lf task reopen` …" exit 1; reopen → <code>idle</code>, no auto</td></tr>
+<tr><td>Served <code>task.ship</code> racing CLI <code>auto on</code></td><td>both name run bc4f47e9, both exit 0, one Graph run</td></tr>
+<tr><td>Carrier killed, no server</td><td>"Run died at implement · no server runs here to start it; `lf task run 34cbc2` starts it again"</td></tr>
+<tr><td>Server back</td><td>carried as <code>lf task run 34cbc2</code> after 3 s</td></tr>
+<tr><td>Removed spellings</td><td><code>lf task hold</code>, <code>lf ship --stop</code> are parse errors</td></tr>
+</table>
+
+<h3>Still wrong, worst first</h3>
+<ul>
+<li>Status still says "Graph … finished; nothing further is launched" at an interactive wait (base behavior), and the Task conversation's
+guidance at a landing wait still says "`lf task run X` starts it".</li>
+<li>A dead carrier reads <code>moving</code> with "action: no_action" until prune, though the sentence names <code>lf task run</code>.</li>
+<li><code>done · auto: on by Demo</code>: status prints the mark on a done Task; rows do not.</li>
+<li>Not reached: Desktop window, iOS.</li>
+</ul>
+
+<h2>First pass</h2>
 <h2>1. Two ships at the same moment on a never-run Task <span class="fixed">broke twice, fixed</span></h2>
 <p>The case no fixture holds. First try, <code>lf ship 338631</code> and <code>lf task auto on 338631</code> started together:</p>
 <pre>== a (lf ship)

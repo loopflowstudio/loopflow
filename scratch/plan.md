@@ -114,6 +114,22 @@ when the PR merges.
   step finish their steps into `end` and completion settles; no merge check
   between steps.
 
+## QA, second pass (2026-11-19, at `e3104cd354` plus two fixes)
+
+`scratch/qa.html`. Fixed: `lf task status` at a landing wait with auto off
+read "Graph … finished; nothing further is launched" and `action: run`, and
+that run waited again at once; it now reads the runner's sentence
+(`auto::landing_wait`, "Waiting at land: auto is off (Demo). `lf ship X` lands
+it.") as `execution.state: waiting`, `action: no_action`, asserted in
+`auto_off_sticks_through_a_headless_relaunch`. `lf task auto off` on an
+unknown ID answered "…; inspect the affected work before retrying"
+(`outcome_unknown`); it now answers `not_found`. Driven and working: ship with
+`--reason` on never-run, live and ship-review-waiting Tasks; bare
+`lf task auto on` from a hand-merged Task's checkout to `done`; served
+`task.ship` racing CLI `auto on` (one run, both exit 0); died run with and
+without a server (carried in 3 s); reopen clears auto. Auto tests 4 passed;
+clippy clean.
+
 ## Remaining
 
 Gate. Nothing is left to build. The checks under "Checks nobody has run"

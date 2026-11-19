@@ -19,7 +19,10 @@ conversations, so killing PIDs alone never ends. To stop a world: collect every
 PID whose environment holds its `LF_HOME` (`ps eww -o command= -p <pid>`),
 `kill -STOP` them, `launchctl bootout gui/$(id -u)/<label>`, `kill -9` them,
 then check `launchctl list | grep <hash>` is empty 15 s later. In zsh a PID
-list in a variable needs `${=P}`.
+list in a variable needs `${=P}`. Collect the PIDs in one command and kill
+them in the next: a sweep that greps every process's environment or command
+for the home path also matches its own shell, and `kill -STOP` hangs it. The
+server shows as plain `lf server run`; find it by `LF_HOME`, not by path.
 
 Graph: `.lf/graphs/qaship.yaml` with `- implement`, `- interactive:
 ship-review`, `- cmd: land`, `- interactive: verify`; commit, push, then
@@ -54,8 +57,16 @@ holding `implement`, then `wait`; every exit is 0, every output names the same
 Graph run, and `graph_processes` holds one row for the Task. Two bare
 `lf task run` at once leave one run and one "is running graph …" refusal.
 
-`--reason` goes to `task_events` as a `progress` row ("auto off: Demo: <words>");
-no `lf` read prints it, so check it with `sqlite3`.
+Both `--reason`s are Task comments (`lf task show <id> --json` at
+`comments.comments`), and a person's comment is a steer: every later step's
+Session lists it in `lf session steers <session> --json`, the off reason too.
+The stand-in runs no hooks, so they stay `pending` there; a real Claude claims
+them in its start hook. They are not in the step's stdin or `.lf/prompts`.
+
+With auto off at a landing step, `lf task status` reads `latest Graph: Waiting
+at land: auto is off (Demo). \`lf ship <id>\` lands it.` and `action: no_action`;
+`execution.state` is `waiting`. An unknown ID answers `no Task exists for …`
+(served: `not_found`) for `auto off`; `task.ship` still answers `outcome_unknown`.
 
 Selection state `auto` is a Dashboard expression (`lf desktop dashboard query
 'Auto' 'state:auto'` prints JSON), not a `lf task list` filter. Never run

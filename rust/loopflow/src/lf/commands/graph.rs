@@ -909,8 +909,8 @@ impl RunningGraph<'_> {
             return Ok(None);
         };
         eprintln!(
-            "Waiting at {step}: auto is off ({}). `lf ship` lands it.",
-            stop.by
+            "{}",
+            loopflow_execution::ops::task::auto::landing_wait(&step, &stop, None)
         );
         Ok(Some(step))
     }

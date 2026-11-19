@@ -24,6 +24,36 @@ pub fn starter(
     sqlite.starter(session, person.as_deref())
 }
 
+/// Why a Task run waits at its merging `step` while auto is off, and what
+/// lands it. The run prints it as it stops; `lf task status` reads it after.
+pub fn landing_wait(step: &str, off: &Auto, issue: Option<&str>) -> String {
+    let ship = match issue {
+        Some(issue) => format!("lf ship {issue}"),
+        None => "lf ship".to_owned(),
+    };
+    format!(
+        "Waiting at {step}: auto is off ({}). `{ship}` lands it.",
+        off.by
+    )
+}
+
+/// A Task whose Graph stands at a step that is neither `start`, `end` nor
+/// interactive stopped there before merging, which only an off does.
+pub fn waiting_to_land(
+    graph: Option<&crate::task_graph::TaskGraph>,
+    auto: Option<&Auto>,
+    issue: &str,
+) -> Option<String> {
+    let off = auto.filter(|mark| mark.state == AutoState::Off)?;
+    let graph = graph?;
+    let crate::task_graph::TaskGraphPosition::At { step } = &graph.position else {
+        return None;
+    };
+    let ends = step == crate::task_graph::START || step == crate::task_graph::END;
+    let interactive = graph.interactive_steps.iter().any(|s| &s.name == step);
+    (!ends && !interactive).then(|| landing_wait(step, off, Some(issue)))
+}
+
 /// Save `state` as this caller's mark, naming who is asking as it is written;
 /// with `keeps_off`, a standing off stays. Returns whether auto was on before.
 fn set(store: &SharedStore, task: &Task, state: AutoState, keeps_off: bool) -> OpsResult<bool> {
@@ -102,27 +132,29 @@ pub(super) async fn running_graph(
 /// `lf task auto off`: turn auto off and take back any merge request
 /// Loopflow armed on GitHub. Nothing is killed: the run carries on to its next
 /// interactive step or merging step and waits there, until auto is on again.
-/// `reason` is saved as a comment on the Task. Returns whether auto was on.
-pub fn off(issue: &str, reason: Option<&str>) -> OpsResult<bool> {
-    let (task, was_on) = block_on_task(async {
+/// `reason` is saved as a comment on the Task. Returns whether auto was on, or
+/// `None` when no Task has that issue.
+pub fn off(issue: &str, reason: Option<&str>) -> OpsResult<Option<bool>> {
+    let turned = block_on_task(async {
         let store = task_store().await?;
-        let task = store
-            .get_task_by_issue(issue)
-            .await
-            .map_err(task_error)?
-            .ok_or_else(|| task_error(format!("no Task exists for {issue:?}")))?;
+        let Some(task) = store.get_task_by_issue(issue).await.map_err(task_error)? else {
+            return Ok(None);
+        };
         let was_on = set(&store, &task, AutoState::Off, false)?;
         if let Some(reason) = reason.map(str::trim).filter(|reason| !reason.is_empty()) {
             super::append_task_comment_async(&store, &task, reason, false).await?;
         }
-        Ok((task, was_on))
+        Ok(Some((task, was_on)))
     })?;
+    let Some((task, was_on)) = turned else {
+        return Ok(None);
+    };
     if was_on {
         if let Ok(worktree) = task.worktree() {
             super::clear_task_pr_merge_before_head_mutation(worktree, true, &|_| {})?;
         }
     }
-    Ok(was_on)
+    Ok(Some(was_on))
 }
 
 /// Create a Task for the checkout's branch so it can ship: it takes the branch,

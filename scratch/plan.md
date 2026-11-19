@@ -223,3 +223,14 @@ Before this change both describe only `aaa_generated.txt`.
 - `cargo test -p loopflow --lib pr_tests::` (the `tests/work` module) — implement runs the touched test.
 - `cargo test -p loopflow-execution --lib ops::task::tests::task_workspace_context` — implement runs it after slice 3.
 - The demo with a real agent, both writers — qa or gate runs it; no fixture stands in for a writer choosing what to read.
+
+## Docs written first
+
+`docs/orchestration.md` (after the `commit-message` agent paragraph) and
+`docs/config.md` ("Raw Diff", and the "Branch changes" row of the delivery
+table). They describe the intended behavior; implement builds to them.
+
+The Raw Diff example settles a rendering the model left open: a first line
+naming the range and file count, the read command with a quoted `'<path>'`,
+right-aligned `+N  -N` columns, `binary` in place of counts, and a closing
+sentence with the patch size in bytes. The exact wording is implement's.

@@ -17,3 +17,7 @@ Made headless at kickoff and concept review; each is reversible. Detail in
   the PR writer the same floor?
 - AGENTS.md says `lf pr submit` runs `lf scratch clear`; in code only
   `ops/land.rs:171` and `lf scratch clear` itself do. Which is meant?
+- `docs/config.md` "Raw Diff" said "Point to Git inspection commands rather
+  than inlining a frozen patch", but `gather_diff_tiered` inlines under its
+  limits today. The section now says the patch is included under 15,000
+  tokens. Was never-inline the intent for Skill context?

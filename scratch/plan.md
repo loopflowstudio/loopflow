@@ -37,10 +37,10 @@ history).
    read again, and making a Wave looks first.** A person knows a Wave by its
    name; each Machine gives it an id of its own, and one active Wave may hold
    a name. Two Machines that each make `design` hold two Waves that cannot
-   meet. As built through slice 5 the import skips the other one with its
-   Projects and Tasks, logs it, moves the read cursor past it and
-   `lf repo tracker` reads `Plan: Git origin.`: two plans, and a line saying
-   one. Slice 6. *Passed over:* joining the two Waves at import (the higher id
+   meet. Through slice 5 the import skipped the other one with its Projects
+   and Tasks, logged it, moved the read cursor past it and `lf repo tracker`
+   read `Plan: Git origin.`: two plans, and a line saying one. Slice 6,
+   built, shows it and reads it again. *Passed over:* joining the two Waves at import (the higher id
    retired, its Projects and child Waves moved to the other through stamped
    fields). It is the truer answer and it is a decision about Waves and
    Projects, not carriers: what a Wave with two first Projects looks like,
@@ -116,7 +116,7 @@ after the cutover below the Machines agree on every value anyway.
   failing_since)`, primary key `(repo, carrier)`, `carrier` is `git` or `hub`.
   `sent_seq`: how far into this Machine's `plan_changes` the carrier has
   taken. `seen_seq`: the hub's `plan_changes` watermark (NULL for Git).
-  `peer`: the remote name or the hub's machine id. Slice 6 adds
+  `peer`: the remote name or the hub's machine id.
   `not_taken`: what the carrier's last read could not write here, as the
   text the line shows, NULL when it took everything. A read sets and clears
   it; a send leaves it alone. It replaces `hub_plans`,
@@ -229,7 +229,7 @@ review:* 60 s, one `git fetch` per repository per minute, no setting.
 - `lf repo tracker` text and `--json`: `plan: {git: {remote, unsent,
   error, failing_since} | null, hub: {machine, unsent, error,
   failing_since} | null}`, with the unsent records listed under each line by
-  identifier. Slice 6 adds `not_taken: string | null` to each carrier beside
+  identifier. Each carrier has `not_taken: string | null` beside
   `error`. The per-field `queued` lines go. DTO fixture
   `tests/fixtures/dto/tracker_sync.json`, Rust and Swift fixture tests.
 - Desktop `RepositoryPlanView` / `RepositoryPlan.swift`: the same two lines.
@@ -268,7 +268,7 @@ review:* 60 s, one `git fetch` per repository per minute, no setting.
 - A file that does not parse, or a field this build does not know: that field
   is skipped and logged; the rest of the ref applies. A record either carrier
   brings that cannot be written (a Wave named like one held here): that record
-  and what hangs from it are skipped; the rest applies. After slice 6 the
+  and what hangs from it are skipped; the rest applies. The
   carrier's line reads `N not taken` with the reason, `lf task sync` exits 1
   with it, and the carrier reads the same records again at each exchange
   until they can be written.
@@ -436,11 +436,9 @@ etude checkout and `lf` version are unknown.
      exist for, is in the acceptance test: a home whose push is refused
      retitles through the hub; a fourth Git-only home reads that title from
      the laptop's ref.
-   - A record skipped because it could not be written (questions, slice 2)
-     is not retried: the ref's tip is recorded once read, and later diffs
-     start from it. It arrives again only when its file next changes.
-     Slice 6 replaces this: the tip is not recorded while anything from that
-     ref is not taken.
+   - A record skipped because it could not be written was not retried: the
+     ref's tip was recorded once read. Since slice 6 the tip is not recorded
+     while anything from that ref is not taken.
    - Reads that are not asked for do not fetch: `lf repo tracker --subscribe`
      and a provider exit exchange with the hub only; `lf task sync`,
      `lf wave status --sync`, a Task lookup that misses, a served command and
@@ -756,6 +754,14 @@ etude checkout and `lf` version are unknown.
   Gate runs the rest: `binary(transport_tests)`, `test(transport::)`,
   `test(performance_tests::)`, `binary(session_lifecycle_tests)`,
   `of_two_claims_made_apart_…`.
-- Slice 6 is built; nothing in the plan is unbuilt. Gate runs the
-  lists above. Open choices are in `scratch/questions.md`; the review's four
+- Slice 6 is built and differences 1 to 5 at the top hold in the code;
+  nothing in the plan is unbuilt. Gate runs the lists above. One thing for
+  compress, found reading slice 6 as a reviewer: `not_taken` is one string,
+  `3 not taken: <why>`, that `print_carrier` (`lf/commands/tracker.rs`) and
+  `CarrierStanding.notTakenParts` (`RepositoryPlan.swift`) each split on
+  `": "` to put the count on the line and the reason under it. Two parsers
+  of a sentence; a reason holding `": "` earlier than expected cannot break
+  it (the count comes first), but the wire could carry the count and the
+  reason as two values and neither client would parse. Costs the column
+  (two, or the count derived), the DTO fixture and both fixture tests. Open choices are in `scratch/questions.md`; the review's four
   questions are at the end of `scratch/concept-review.html`.

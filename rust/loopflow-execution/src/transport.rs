@@ -511,14 +511,20 @@ pub struct PtyUsage {
 
 #[cfg(target_os = "macos")]
 pub fn pty_usage() -> Option<PtyUsage> {
-    let output = std::process::Command::new("/usr/sbin/sysctl")
-        .args(["-n", "kern.tty.ptmx_max"])
-        .output()
-        .ok()?;
-    let max = String::from_utf8_lossy(&output.stdout)
-        .trim()
-        .parse()
-        .ok()?;
+    let mut max: libc::c_int = 0;
+    let mut size = std::mem::size_of::<libc::c_int>();
+    // SAFETY: the name is NUL-terminated, and `max` and `size` are live
+    // locals describing one writable `c_int`.
+    let read = unsafe {
+        libc::sysctlbyname(
+            c"kern.tty.ptmx_max".as_ptr(),
+            std::ptr::from_mut(&mut max).cast(),
+            &mut size,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    let max = u64::try_from(max).ok().filter(|_| read == 0)?;
     // devfs lists a `ttysNNN` node for each PTY while it is allocated.
     let in_use = std::fs::read_dir("/dev")
         .ok()?

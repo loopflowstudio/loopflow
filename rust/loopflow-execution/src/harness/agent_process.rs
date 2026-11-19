@@ -1407,13 +1407,15 @@ mod tests {
             .spawn()
             .unwrap();
         let pid = child.id();
-        let start = crate::journal::process_started_at(pid).unwrap().unwrap();
+        let start = crate::process::os_process::process_started_at(pid)
+            .unwrap()
+            .unwrap();
         let session = store.test_session("orphan", &crate::session_record::new_artifact_key());
         rusqlite::Connection::open(home.path().join("db"))
             .unwrap()
             .execute(
                 "UPDATE agent_sessions SET provider='codex',interactive=0 WHERE id=?1",
-                [&session.id],
+                [session.id.as_str()],
             )
             .unwrap();
         let attached = attachment::claim_session_attachment(
@@ -1421,7 +1423,6 @@ mod tests {
             &session.id,
             None,
             &store.test_lf_process(),
-            true,
         )
         .unwrap();
         store
@@ -1458,7 +1459,7 @@ mod tests {
                     .any(|error| error.contains("fixture sampling unavailable")),
                 "{report:?}"
             );
-            assert_eq!(report.reaped, 0);
+            assert!(report.reaped.is_empty(), "{report:?}");
             assert!(child.try_wait().unwrap().is_none());
             assert_eq!(
                 store.agent_process(&attached.agent_process_id).unwrap(),

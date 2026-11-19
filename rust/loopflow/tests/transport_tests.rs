@@ -3338,7 +3338,8 @@ fn a_held_pane_reads_reconnecting_until_the_next_server_answers() {
 /// A managed launch refused for a stopped server started no provider, so the
 /// next launch starts that conversation fresh instead of resuming one that
 /// never ran (real Claude answers `--resume` with "No conversation found").
-/// The refused launch is piped, so it runs unheld and its owner checks the server.
+/// The refused launch is piped, so it runs unheld and checks the server
+/// before its provider starts.
 #[test]
 fn a_launch_refused_for_a_stopped_server_leaves_nothing_to_resume() {
     let fixture = Fixture::new();
@@ -3417,6 +3418,51 @@ fn a_launch_that_found_no_provider_leaves_nothing_to_resume() {
         "{launched}"
     );
     let held = fixture.terminal_of(&session_of(&fixture.sql(), &launched));
+    view.stop();
+    // SAFETY: the pid the fixture's provider recorded for itself.
+    unsafe { libc::kill(provider, libc::SIGKILL) };
+    fixture.held_ends(&held);
+}
+
+/// A provider that started and exited before saving anything (a failed
+/// login, a trust prompt refused, a crash, Ctrl+C before typing) leaves a
+/// recorded thread with no transcript. The next launch starts it fresh with
+/// `--session-id`; `--resume` would answer "No conversation found".
+#[test]
+fn a_provider_that_exits_before_saving_starts_fresh_next_time() {
+    let fixture = Fixture::new();
+    let _service = ServerProof::start(&fixture, false);
+    let path = fixture.provider(
+        r#"#!/bin/sh
+if [ "$1" = --version ]; then echo '2.1.302'; exit; fi
+printf '%s:%s:%s\n' "$$" "$LF_CAPTURE_KEY" "$*" >> "$HOME/launches"
+if [ ! -e "$HOME/exited" ]; then : > "$HOME/exited"; exit 1; fi
+stty -echo < /dev/tty
+printf 'ready for %s\r\n' "$*"
+read -r answer < /dev/tty
+"#,
+    );
+    let exited = fixture
+        .command(&["-a", "claude", "resume"])
+        .env("PATH", &path)
+        .output()
+        .unwrap();
+    let first = fixture.launches(1).pop().unwrap();
+    assert!(first.contains("--session-id "), "{first} {exited:?}");
+
+    let mut launch = fixture.command(&["-a", "claude", "resume"]);
+    launch.env("PATH", &path);
+    let view = Terminal::spawn(launch);
+    let launched = fixture.launches(2).pop().unwrap();
+    let provider: libc::pid_t = launched.split(':').next().unwrap().parse().unwrap();
+    let _provider = KillOnDrop(provider);
+    assert!(
+        launched.contains("--session-id ") && !launched.contains("--resume "),
+        "{launched}"
+    );
+    let session = session_of(&fixture.sql(), &launched);
+    assert_eq!(session, session_of(&fixture.sql(), &first));
+    let held = fixture.terminal_of(&session);
     view.stop();
     // SAFETY: the pid the fixture's provider recorded for itself.
     unsafe { libc::kill(provider, libc::SIGKILL) };

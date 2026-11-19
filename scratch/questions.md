@@ -124,3 +124,17 @@ Still open from before:
   - Left as built and asked on the page: `lf task run` taking over a Task a
     teammate holds; `lf task sync` needing a Task id without a tracker; a
     teammate's Machine reading as its id; an id per clone.
+
+- Slice 4 (implement, 2026-11-18), each reversible before release:
+  - Every CLI save in a repository with a remote and no tracker now waits on
+    a `git push`, five seconds at most. Against GitHub over SSH that is a
+    second or two a save, not measured here.
+  - A push still running at five seconds is stopped (`git push` is killed),
+    and the record stays unsent.
+  - A push the remote refuses is not retried with a fetch by the save; it
+    waits for the server's minute or `lf task sync`. With no server, saves
+    after a refusal stay unsent until `lf task sync`.
+  - A served read of a clone the Machine has saved nothing in answers empty
+    once and is right on the next read. Left as is.
+  - The hub's send has no deadline of its own; only the wait for it is five
+    seconds.

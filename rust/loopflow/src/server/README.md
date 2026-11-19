@@ -40,7 +40,7 @@ plan. A save, here or in the CLI, sends its own records at once
 most). The service reads and sends (`plan_carriers::sync`) after each command
 it answers that names a directory, and fetches every such repository's plan
 refs every 60 s, which is when another Machine's change arrives with no hub.
-[Without a tracker](../../../../docs/dev/planning.md) has the carriers.
+[Without a tracker](../../../../docs/dev/planning.md#without-a-tracker-stamps-and-carriers) has the carriers.
 
 ## Local protocol, revision 9
 

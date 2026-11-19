@@ -480,7 +480,8 @@ fn git_until(
     input: Option<&[u8]>,
     until: Option<Instant>,
 ) -> Result<Vec<u8>> {
-    let mut child = Command::new("git")
+    let mut command = Command::new("git");
+    command
         .arg("-C")
         .arg(repo)
         .args(args)
@@ -491,12 +492,13 @@ fn git_until(
             Stdio::null()
         })
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .context("start git")?;
+        .stderr(Stdio::piped());
+    if until.is_some() {
+        // Its own group, so stopping it stops its transport helpers too.
+        std::os::unix::process::CommandExt::process_group(&mut command, 0);
+    }
+    let mut child = command.spawn().context("start git")?;
     let stdin = child.stdin.take();
-    // A transport helper can outlive a stopped Git and keep the pipes open,
-    // so the readers are never joined.
     let stdout = read_in_background(child.stdout.take().expect("stdout is piped"));
     let stderr = read_in_background(child.stderr.take().expect("stderr is piped"));
     let answered = |pipe: &Receiver<Vec<u8>>| match until {
@@ -514,7 +516,9 @@ fn git_until(
         }
         let output = (answered(&stdout), answered(&stderr));
         if output.0.is_none() || output.1.is_none() {
-            let _ = child.kill();
+            // SAFETY: the child is unreaped, so its id still names the
+            // group it leads; signalling a group has no memory effects.
+            unsafe { libc::kill(-(child.id() as libc::pid_t), libc::SIGKILL) };
         }
         output
     });

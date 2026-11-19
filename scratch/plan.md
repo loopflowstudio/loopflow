@@ -439,34 +439,41 @@ etude checkout and `lf` version are unknown.
    - Not built: showing a lost claim as lost in `lf task status`; `lf ship`
      and checkout adoption exchanging first.
 
-4. **One door for a save.** *Next.* Add `plan_carriers::send` as described
-   under "When they run" and call it where a save sends to the hub alone
-   today: `ops/planning_sync.rs` `sync_saved` and `machine/task.rs`
-   (`plan_hub::sync(.., true)`). `plan_git` gains the push without a fetch;
-   `publish` already takes the own ref's tip as an argument. After it, no
-   caller outside `ops/plan_*` passes `send_only`.
+4. **One door for a save.** *Built.* `plan_carriers::send` follows every
+   save (`planning_sync::sync_saved`, `machine/task.rs`): the hub's
+   `send_only` exchange and `plan_git::send` at once, five seconds at most.
+   `plan_hub::sync` lost its `send_only` argument; nothing outside
+   `ops/plan_*` names it.
 
-   Shows it worked: two homes and a bare remote, a server running in neither;
-   `lf task create 'x'` on L, then `git ls-remote <remote>
-   'refs/loopflow/plan/*'` lists L's ref at once and `lf repo tracker` reads
-   `Plan: Git origin.`; with the remote moved away it reads `unreachable
-   since …, 1 unsent` and the command still returns within `WAIT`. Then
-   `docs/work.md` "Share the plan" says seconds to the remote and a minute to
-   the other Machine again, and `rust/loopflow/src/server/README.md` and
-   `docs/dev/planning.md` name the two verbs.
-
-   Check before it lands: every save in a fixture with a remote now pushes a
-   plan ref there. Fixtures with a local bare remote gain a hidden ref; grep
-   `rust/loopflow/tests/` for assertions on a remote's ref list
-   (`ls-remote`, `for-each-ref`, `show-ref`) and for an `origin` that is a
-   real URL, which would reach for the network on each save. If one exists,
-   the fixture's remote changes, not the product.
-
-   Also in this slice, since it is the same sentence in the docs: confirm
-   QA's "a served read of a clone the Machine has saved nothing in shows an
-   empty plan". `after_command` runs for served reads that name a directory
-   and `plan_git::exchange` registers the clone, so it may already heal
-   within the quiet period; read it from a server socket and record which.
+   What it taught:
+   - The five seconds had to be made true in three places, or a slow carrier
+     held the command: the push is stopped at the deadline (`git_until`), a
+     send waits for an exchange already holding the turn only until then
+     (`plan_carriers::lock`), and the two carriers run at once. The hub's
+     connection has no deadline of its own beyond SSH's; a hub that accepts
+     and never answers still holds the command.
+   - `publish` reads `plan-seen/<me>` itself, so a send builds on the ref as
+     last pushed or fetched with no fetch.
+   - A refused push (the remote's copy of the ref is ahead of `plan-seen/<me>`:
+     the local ref was deleted, or an earlier push landed after it was
+     stopped) reads `unreachable since` with Git's reason until the next
+     `sync`. With a server that is within the minute; with none it is
+     `lf task sync`.
+   - By hand, 2026-11-18, one home, a bare remote in `/tmp`, no server:
+     `lf task create` put the ref on the remote and `lf repo tracker` read
+     `Plan: Git origin.`; with the remote moved away the create returned in
+     2.2 s and the line read `unreachable since Nov 18 17:23, 1 unsent` with
+     the identifier and Git's reason; with it back the next create sent both.
+   - QA's "a served read of a clone the Machine has saved nothing in shows an
+     empty plan" is true once: `plan.list` for a fresh clone over
+     `lf server connect` answered `tasks.items: []`, and the same request
+     11 s later listed the remote's Tasks (`after_command` exchanged after the
+     reply). Not changed; `docs/dev/planning.md` says so.
+   - Fixture sweep: no test asserts on a remote's whole ref list, and every
+     GitHub-URL `origin` that sees a save is rewritten to a local bare
+     repository by `insteadOf` or belongs to a Linear fixture. The acceptance
+     test asserted `unsent` right after a create; it now asserts the ref is on
+     the remote, and the unsent list by identifier on the refused push.
 
 ## Checks
 
@@ -544,6 +551,18 @@ etude checkout and `lf` version are unknown.
   116 passed. Not rerun after the last edit: `of_two_claims_made_apart_…`,
   `query_plans::`, `store::repository_lifecycle_tests::` (passed one edit
   earlier). What is still wrong is listed at the end of `scratch/qa.html`.
-- Next: slice 4. Then gate runs the list above. Open choices are in
+- Slice 4, run by implement, 2026-11-18:
+  `cargo test -p loopflow-execution --lib ops::plan_git::` (5 passed, with
+  `a_save_is_pushed_at_once_without_a_fetch`); the acceptance test
+  `test(the_later_change_shows_on_both_machines_through_the_hub)` (226 s of
+  nextest's 300, for gate to watch) and `test(documented_commands::)`,
+  passed; clippy on `loopflow-execution` and `loopflow`, clean. The
+  acceptance test ran before the last edit (a stopped push now stops its
+  whole process group); `ops::plan_git::` and clippy ran after it.
+- For gate after slice 4, not run here: `local_planning::`,
+  `task_create_tests::`, `ops::task::tests::` and the Task launch fixtures
+  (every save in a fixture with a local remote now pushes a plan ref, four
+  Git processes a save).
+- Next: gate runs the lists above. Open choices are in
   `scratch/questions.md`; the review's five questions are at the end of
   `scratch/concept-review.html`.

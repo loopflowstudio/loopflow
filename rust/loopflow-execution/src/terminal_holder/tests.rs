@@ -377,3 +377,35 @@ fn an_unreadable_request_is_answered_and_the_connection_stays() {
     assert!(matches!(answer.unwrap(), Answer::Error { .. }));
     assert!(client.list().unwrap().is_empty());
 }
+
+#[test]
+fn a_holder_started_from_a_replaced_executable_fails_at_once_naming_both_builds() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let directory = tempfile::Builder::new()
+        .prefix("lfh")
+        .tempdir_in("/tmp")
+        .unwrap();
+    let place = Place {
+        socket: directory.path().join("holder.sock"),
+        lock: directory.path().join("holder.lock"),
+        state: directory.path().join("state"),
+    };
+    let replaced = "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210";
+    let executable = directory.path().join("lf");
+    std::fs::write(&executable, format!("#!/bin/sh\necho \"$$ {replaced}\"\n")).unwrap();
+    std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o755)).unwrap();
+    super::client::HOLDER_EXECUTABLE.with(|holder| *holder.borrow_mut() = Some(executable.clone()));
+
+    let started = Instant::now();
+    let error = Client::ensure(&place, BUILD).unwrap_err().to_string();
+
+    assert!(
+        started.elapsed() < Duration::from_secs(5),
+        "{:?}",
+        started.elapsed()
+    );
+    assert!(error.contains(replaced), "{error}");
+    assert!(error.contains(BUILD), "{error}");
+    assert!(error.contains(&executable.display().to_string()), "{error}");
+}

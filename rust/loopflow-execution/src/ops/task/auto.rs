@@ -20,8 +20,8 @@ pub enum AutoAsk {
     Nobody,
     /// `lf -b task run`: on, unless someone turned it off.
     Batch,
-    /// `lf ship`: on, lifting an off, with the person's note.
-    Person { note: Option<String> },
+    /// `lf ship`: on, lifting an off.
+    Person,
 }
 
 /// Who started a run: the Session whose agent started it, with the person
@@ -37,13 +37,7 @@ pub fn starter(
 
 /// Save `state` as this caller's mark, naming who is asking as it is written;
 /// with `keeps_off`, a standing off stays. Returns whether auto was on before.
-fn set(
-    store: &SharedStore,
-    task: &Task,
-    state: AutoState,
-    keeps_off: bool,
-    note: Option<&str>,
-) -> OpsResult<bool> {
+fn set(store: &SharedStore, task: &Task, state: AutoState, keeps_off: bool) -> OpsResult<bool> {
     let repo = super::repository_for_task(store, task)?;
     let mark = Auto {
         state,
@@ -57,7 +51,7 @@ fn set(
     };
     let before = store
         .sqlite
-        .set_task_auto(&task.id, &mark, keeps_off, note)
+        .set_task_auto(&task.id, &mark, keeps_off)
         .map_err(task_error)?;
     Ok(before.is_some_and(|before| before.state == AutoState::On))
 }
@@ -66,10 +60,8 @@ fn set(
 pub(super) fn ask(store: &SharedStore, task: &Task, ask: &AutoAsk) -> OpsResult<()> {
     match ask {
         AutoAsk::Nobody => Ok(()),
-        AutoAsk::Batch => set(store, task, AutoState::On, true, None).map(drop),
-        AutoAsk::Person { note } => {
-            set(store, task, AutoState::On, false, note.as_deref()).map(drop)
-        }
+        AutoAsk::Batch => set(store, task, AutoState::On, true).map(drop),
+        AutoAsk::Person => set(store, task, AutoState::On, false).map(drop),
     }
 }
 
@@ -116,8 +108,8 @@ pub(super) async fn running_graph(
 /// `lf task auto off`: turn auto off and take back any merge request
 /// Loopflow armed on GitHub. Nothing is killed: the run carries on to its next
 /// interactive step or merging step and waits there, until auto is on again.
-/// Returns whether auto was on.
-pub fn off(issue: &str, note: Option<&str>) -> OpsResult<bool> {
+/// `reason` is saved as a comment on the Task. Returns whether auto was on.
+pub fn off(issue: &str, reason: Option<&str>) -> OpsResult<bool> {
     let (task, was_on) = block_on_task(async {
         let store = task_store().await?;
         let task = store
@@ -125,7 +117,10 @@ pub fn off(issue: &str, note: Option<&str>) -> OpsResult<bool> {
             .await
             .map_err(task_error)?
             .ok_or_else(|| task_error(format!("no Task exists for {issue:?}")))?;
-        let was_on = set(&store, &task, AutoState::Off, false, note)?;
+        let was_on = set(&store, &task, AutoState::Off, false)?;
+        if let Some(reason) = reason.map(str::trim).filter(|reason| !reason.is_empty()) {
+            super::append_task_comment_async(&store, &task, reason, false).await?;
+        }
         Ok((task, was_on))
     })?;
     if was_on {

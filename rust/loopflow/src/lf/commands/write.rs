@@ -224,7 +224,7 @@ writes! {
     TaskAutoOff {
         directory: PathBuf,
         issue: String,
-        /// Why, as `--reason` records it.
+        /// Why, saved as a comment on the Task.
         #[serde(deserialize_with = "Option::deserialize")]
         reason: Option<String>,
     } => task::AutoOff;
@@ -1432,7 +1432,7 @@ mod tests {
         use serde_json::json;
 
         let shipping: serde_json::Value = serde_json::from_str(include_str!(
-            "../../../../loopflow-execution/tests/fixtures/dto/server/task_shipping.json"
+            "../../../../loopflow-execution/tests/fixtures/dto/server/task_ship_answer.json"
         ))
         .unwrap();
         // `task.ship` answers as `task.run` does.

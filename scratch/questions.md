@@ -91,6 +91,10 @@ Questions 1 and 2 got no written answer in scratch.
   is a Task comment** (same pass); the mark's write takes no note. Reverse by
   a note column on the mark that `lf task status` prints, or by deleting both
   flags.
+- **The off reason is written as a person's comment, not a steer, and is
+  published to the tracker.** From a terminal `append_task_comment` gives it
+  the same body shape as a steer. Reverse by passing `steer: true` or by
+  using the store-only write.
 
 ## Open
 - QA 2026-11-19: a released hold on a never-run Task does not survive the

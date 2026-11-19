@@ -171,9 +171,6 @@
       "run_control": {
         "unavailable": null
       },
-      "ship_control": {
-        "unavailable": null
-      },
       "pr": null,
       "section": "working"
     }
@@ -296,9 +293,6 @@
         "outlook": null
       },
       "run_control": {
-        "unavailable": null
-      },
-      "ship_control": {
         "unavailable": null
       },
       "pr": null,

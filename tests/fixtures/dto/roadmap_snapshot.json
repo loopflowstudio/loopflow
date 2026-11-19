@@ -397,9 +397,6 @@
         "run_control": {
           "unavailable": null
         },
-        "ship_control": {
-          "unavailable": "auto is already on"
-        },
         "pr": null,
         "graph_source": null,
         "lifecycle": "moving",
@@ -664,9 +661,6 @@
         "run_control": {
           "unavailable": null
         },
-        "ship_control": {
-          "unavailable": null
-        },
         "pr": {
           "id": "pr-review",
           "sequence": 1,
@@ -769,9 +763,6 @@
         "run_control": {
           "unavailable": null
         },
-        "ship_control": {
-          "unavailable": null
-        },
         "pr": null,
         "graph_source": null,
         "lifecycle": "unstarted",
@@ -868,9 +859,6 @@
           "outlook": null
         },
         "run_control": {
-          "unavailable": null
-        },
-        "ship_control": {
           "unavailable": null
         },
         "pr": null,

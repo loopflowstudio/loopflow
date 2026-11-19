@@ -515,7 +515,7 @@ pub enum Commands {
         /// Take up this graph in place of the Task's remaining steps
         #[arg(long)]
         graph: Option<String>,
-        /// Why, kept in the Task's history
+        /// Direction for this run, published to the Task
         #[arg(long)]
         reason: Option<String>,
         /// Print what it set going as JSON, as `task.ship` answers
@@ -2500,7 +2500,7 @@ no ISSUE, sets the checkout's Task."
     Auto {
         state: AutoSetting,
         issue: Option<String>,
-        /// Why, kept in the Task's history
+        /// On: direction for the run, published to the Task. Off: why, saved as a Task comment
         #[arg(long)]
         reason: Option<String>,
         /// Print the run `on` started, as `lf ship --json` does, or the Task and whether `off` found auto on

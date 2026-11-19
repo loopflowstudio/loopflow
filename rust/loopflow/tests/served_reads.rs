@@ -1584,6 +1584,29 @@ fn server_operations_match_their_lf_commands() {
     };
     compare(stop.clone(), &|| stop.clone(), &stopped);
     assert!(stopped().is_null(), "a Task with no Graph saved a stop");
+    // Why auto went off is a comment on the Task.
+    server_write(Write::TaskAutoOff {
+        directory: directory.clone(),
+        issue: "INF-123".into(),
+        reason: Some("waiting on the design".into()),
+    });
+    let pane = Read::TaskGet {
+        directory: directory.clone(),
+        issue: "INF-123".into(),
+    }
+    .read()
+    .unwrap();
+    assert!(
+        pane["comments"]["comments"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|comment| comment["body"]
+                .as_str()
+                .is_some_and(|body| body.starts_with("waiting on the design"))),
+        "{}",
+        pane["comments"]
+    );
 
     // Which repositories the app shows, as the app reads them.
     let portfolio = || without_clock(Read::DesktopPortfolio.read().unwrap());

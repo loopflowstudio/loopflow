@@ -308,7 +308,7 @@ struct ServerProtocolTests {
         }
         #expect(running["state"] == .string("running"))
         #expect(running["graph_process"] == .string("85c31c1e-850c-4821-878d-55527b6dba46"))
-        guard case .response(_, _, .object(let ship)) = try answer("task_shipping") else {
+        guard case .response(_, _, .object(let ship)) = try answer("task_ship_answer") else {
             Issue.record("Missing task.ship result"); return
         }
         // `task.ship` returns the run, as `task.run` does.

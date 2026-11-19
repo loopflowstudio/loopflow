@@ -259,7 +259,7 @@ struct TaskAutoControl: View {
                             .disabled(readingUnavailable != nil)
                             .accessibilityIdentifier("task-abandon")
                     }
-                    toggle(refusal: readingUnavailable ?? task.shipControl.unavailable)
+                    toggle(refusal: readingUnavailable ?? task.runControl.unavailable)
                 }
                 .onHover { inside in withAnimation(.easeOut(duration: 0.12)) { hovered = inside } }
             }

@@ -8314,9 +8314,6 @@
           "type": "array",
           "uniqueItems": true
         },
-        "ship_control": {
-          "$ref": "#/$defs/TaskRunControl"
-        },
         "task": {
           "$ref": "#/$defs/TaskSummary"
         }
@@ -8335,7 +8332,6 @@
         "latest_graph_process",
         "execution",
         "run_control",
-        "ship_control",
         "pr",
         "section"
       ],
@@ -15871,7 +15867,7 @@
               "type": "string"
             },
             "reason": {
-              "description": "Why, as `--reason` records it.",
+              "description": "Why, saved as a comment on the Task.",
               "type": [
                 "string",
                 "null"

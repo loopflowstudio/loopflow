@@ -357,9 +357,6 @@
           "unstarted",
           "backlog"
         ],
-        "ship_control": {
-          "unavailable": null
-        },
         "task": {
           "tracker_state": {
             "synced_at": null,
@@ -470,9 +467,6 @@
           "active",
           "working"
         ],
-        "ship_control": {
-          "unavailable": "Task FIX-2 worktree /repo/fix-2 is missing; restore that exact path on branch \"fix-2\" before `lf task run FIX-2`; Task identity and PR history are unchanged"
-        },
         "task": {
           "tracker_state": {
             "synced_at": null,
@@ -554,9 +548,6 @@
         "selection_states": [
           "done"
         ],
-        "ship_control": {
-          "unavailable": "Linear Task is canceled"
-        },
         "task": {
           "tracker_state": {
             "synced_at": null,
@@ -646,9 +637,6 @@
         "selection_states": [
           "done"
         ],
-        "ship_control": {
-          "unavailable": "Task is complete"
-        },
         "task": {
           "tracker_state": {
             "synced_at": null,
@@ -1075,9 +1063,6 @@
           "active",
           "working"
         ],
-        "ship_control": {
-          "unavailable": "Task FIX-2 worktree /repo/fix-2 is missing; restore that exact path on branch \"fix-2\" before `lf task run FIX-2`; Task identity and PR history are unchanged"
-        },
         "task": {
           "tracker_state": {
             "synced_at": null,
@@ -1177,9 +1162,6 @@
           "idle",
           "working"
         ],
-        "ship_control": {
-          "unavailable": "Task FIX-1 worktree /repo/fix-1 is missing; restore that exact path on branch \"\" before `lf task run FIX-1`; Task identity and PR history are unchanged"
-        },
         "task": {
           "tracker_state": {
             "synced_at": null,
@@ -1261,9 +1243,6 @@
         "selection_states": [
           "done"
         ],
-        "ship_control": {
-          "unavailable": "Linear Task is canceled"
-        },
         "task": {
           "tracker_state": {
             "synced_at": null,
@@ -1353,9 +1332,6 @@
         "selection_states": [
           "done"
         ],
-        "ship_control": {
-          "unavailable": "Task is complete"
-        },
         "task": {
           "tracker_state": {
             "synced_at": null,
@@ -1773,9 +1749,6 @@
           "active",
           "backlog"
         ],
-        "ship_control": {
-          "unavailable": "Task FIX-2 worktree /repo/fix-2 is missing; restore that exact path on branch \"fix-2\" before `lf task run FIX-2`; Task identity and PR history are unchanged"
-        },
         "task": {
           "tracker_state": {
             "synced_at": null,
@@ -1875,9 +1848,6 @@
           "idle",
           "working"
         ],
-        "ship_control": {
-          "unavailable": "Task FIX-1 worktree /repo/fix-1 is missing; restore that exact path on branch \"\" before `lf task run FIX-1`; Task identity and PR history are unchanged"
-        },
         "task": {
           "tracker_state": {
             "synced_at": null,
@@ -1959,9 +1929,6 @@
         "selection_states": [
           "done"
         ],
-        "ship_control": {
-          "unavailable": "Linear Task is canceled"
-        },
         "task": {
           "tracker_state": {
             "synced_at": null,
@@ -2051,9 +2018,6 @@
         "selection_states": [
           "done"
         ],
-        "ship_control": {
-          "unavailable": "Task is complete"
-        },
         "task": {
           "tracker_state": {
             "synced_at": null,
@@ -2482,9 +2446,6 @@
           "active",
           "working"
         ],
-        "ship_control": {
-          "unavailable": "Task FIX-2 worktree /repo/fix-2 is missing; restore that exact path on branch \"fix-2\" before `lf task run FIX-2`; Task identity and PR history are unchanged"
-        },
         "task": {
           "tracker_state": {
             "synced_at": null,
@@ -2584,9 +2545,6 @@
           "idle",
           "working"
         ],
-        "ship_control": {
-          "unavailable": "Task FIX-1 worktree /repo/fix-1 is missing; restore that exact path on branch \"\" before `lf task run FIX-1`; Task identity and PR history are unchanged"
-        },
         "task": {
           "tracker_state": {
             "synced_at": null,
@@ -2668,9 +2626,6 @@
         "selection_states": [
           "done"
         ],
-        "ship_control": {
-          "unavailable": "Linear Task is canceled"
-        },
         "task": {
           "tracker_state": {
             "synced_at": null,
@@ -2760,9 +2715,6 @@
         "selection_states": [
           "done"
         ],
-        "ship_control": {
-          "unavailable": "Task is complete"
-        },
         "task": {
           "tracker_state": {
             "synced_at": null,
@@ -3191,9 +3143,6 @@
           "active",
           "working"
         ],
-        "ship_control": {
-          "unavailable": "Task FIX-2 worktree /repo/fix-2 is missing; restore that exact path on branch \"fix-2\" before `lf task run FIX-2`; Task identity and PR history are unchanged"
-        },
         "task": {
           "tracker_state": {
             "synced_at": null,
@@ -3293,9 +3242,6 @@
           "idle",
           "working"
         ],
-        "ship_control": {
-          "unavailable": "Task FIX-1 worktree /repo/fix-1 is missing; restore that exact path on branch \"\" before `lf task run FIX-1`; Task identity and PR history are unchanged"
-        },
         "task": {
           "tracker_state": {
             "synced_at": null,
@@ -3377,9 +3323,6 @@
         "selection_states": [
           "done"
         ],
-        "ship_control": {
-          "unavailable": "Linear Task is canceled"
-        },
         "task": {
           "tracker_state": {
             "synced_at": null,
@@ -3469,9 +3412,6 @@
         "selection_states": [
           "done"
         ],
-        "ship_control": {
-          "unavailable": "Task is complete"
-        },
         "task": {
           "tracker_state": {
             "synced_at": null,

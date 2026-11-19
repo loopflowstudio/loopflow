@@ -495,7 +495,6 @@ pub struct RoadmapTask {
     pub latest_graph_process: Option<GraphProcessDetail>,
     pub execution: Option<TaskExecutionSnapshot>,
     pub run_control: TaskRunControl,
-    pub ship_control: TaskRunControl,
     pub pr: Option<PrSnapshot>,
     pub section: TaskSection,
     /// The graph step the Task stands at; `None` while a run carries it.
@@ -2193,21 +2192,6 @@ async fn snapshot_task_detail(
             launch_refusal: launch_refusal.as_deref(),
         },
     );
-    let ship_control = TaskRunControl {
-        unavailable: run_control.unavailable.clone().or_else(|| {
-            if facts.auto_on.contains(&task.id) {
-                Some("auto is already on".to_string())
-            } else if facts
-                .steps
-                .get(&task.id)
-                .is_some_and(|step| step == loopflow_execution::task_graph::END)
-            {
-                Some("Task is at the end of its graph".to_string())
-            } else {
-                None
-            }
-        }),
-    };
     let (graph_name, graph_source) = reads
         .selections
         .get(&task.id)
@@ -2254,7 +2238,6 @@ async fn snapshot_task_detail(
         latest_graph_process: graph_record,
         execution: Some(execution),
         run_control,
-        ship_control,
         pr: pr.as_ref().map(|pr| {
             let empty = (probe_pr_empty && pr.is_active())
                 .then(|| task_pr_empty(task, pr))

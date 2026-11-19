@@ -166,9 +166,6 @@
         "work_id": "task_9d1de6a17408459aa2db78181c5fb02a"
       },
       "section": "done",
-      "ship_control": {
-        "unavailable": "Task is complete"
-      },
       "task": {
         "tracker_state": {
           "synced_at": 1793156337,
@@ -770,9 +767,6 @@
           "work_id": "task_9d1de6a17408459aa2db78181c5fb02a"
         },
         "section": "done",
-        "ship_control": {
-          "unavailable": "Task is complete"
-        },
         "task": {
           "tracker_state": {
             "synced_at": 1793156337,
@@ -1134,9 +1128,6 @@
         "work_id": "task_9d1de6a17408459aa2db78181c5fb02a"
       },
       "section": "done",
-      "ship_control": {
-        "unavailable": "Task is complete"
-      },
       "task": {
         "tracker_state": {
           "synced_at": 1793156337,
@@ -1712,9 +1703,6 @@
           "work_id": "task_9d1de6a17408459aa2db78181c5fb02a"
         },
         "section": "done",
-        "ship_control": {
-          "unavailable": "Task is complete"
-        },
         "task": {
           "tracker_state": {
             "synced_at": 1793156337,
@@ -2076,9 +2064,6 @@
         "work_id": "task_9d1de6a17408459aa2db78181c5fb02a"
       },
       "section": "working",
-      "ship_control": {
-        "unavailable": null
-      },
       "task": {
         "tracker_state": {
           "synced_at": 1793156337,
@@ -2612,9 +2597,6 @@
           "work_id": "task_9d1de6a17408459aa2db78181c5fb02a"
         },
         "section": "working",
-        "ship_control": {
-          "unavailable": null
-        },
         "task": {
           "tracker_state": {
             "synced_at": 1793156337,

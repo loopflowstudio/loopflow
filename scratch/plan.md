@@ -117,53 +117,32 @@ when the PR merges.
 1. The last ship words on the wire (below).
 2. Gate.
 
-### Next: the last ship words on the wire
+### Built: the last ship words on the wire
 
 Concept review, third pass, 2026-11-19 at `cb20b422a6`
-(`scratch/concept-review.html`). Ship is the run asked for auto, so what
-makes it unavailable is what makes the run unavailable, and a reason goes
-where reasons are read. Choices made for review; each is reversible.
+(`scratch/concept-review.html`). Choices made for review; reversals are in
+`scratch/questions.md`.
 
-Start with `ship_control`: it shows soonest whether Desktop holds with one
-control.
+- `ship_control` is gone from `RoadmapTask`, Swift, the fixtures and
+  `server_schema.json`; the Auto toggle reads `task.runControl.unavailable`.
+  `facts.steps` stays: the row's `step` reads it. A Task at `end` whose
+  completion is pending shows an enabled toggle that answers `ended`.
+- `lf ship --reason` is the run's `TaskProcessOptions.reason` (the steer
+  `task_place` appends, written before a live run is found, so a ship onto a
+  running Task steers it too). `AutoAsk::Person` is a unit variant.
+  `lf task auto off --reason` is a Task comment
+  (`append_task_comment_async`, so it reaches the tracker); `set_task_auto`
+  takes no note. `task.ship` has no `reason` field on the wire, so only
+  `task.auto.off`'s doc changed.
+- `docs/dev/reference-models.md` no longer names a ship event or `lf ship`
+  as a spawner. `task_shipping.json` is `task_ship_answer.json`.
 
-1. **Delete `ship_control`.** It sits on every Task row beside `run_control`
-   (`RoadmapTask` in `rust/loopflow/src/lf/commands/waves.rs`, built near
-   line 2196), with one reader, the Auto toggle
-   (`swift/LoopflowMac/Views/TaskWorkView.swift`, `toggle(refusal:)`). Its
-   reasons: `run_control.unavailable`; "auto is already on", which the toggle
-   never reads; "Task is at the end of its graph", which `lf ship` does not
-   refuse (it answers `ended`). The toggle takes `task.runControl.unavailable`.
-   Goes with it: `shipControl` in `swift/Loopflow/Models/WaveWorkMap.swift`,
-   the key in `swift/LoopflowMac/WorkCache.swift` and
-   `MockWaveFixture.swift`, the `steps` fact in `waves.rs` if
-   nothing else reads them, the key in the 12 fixtures under
-   `tests/fixtures/dto/` (`grep -rl ship_control tests/fixtures`), and
-   `server_schema.json` regenerated. Kept on purpose: a Task at `end` whose
-   completion is pending shows an enabled toggle; turning it on answers
-   `ended` and leaves auto unset. Passed over: renaming it `auto_control`.
-   Check: `dto_fixtures::`, `server::schema::tests::`, and
-   `scripts/test_desktop.sh --filter 'DTOFixtureTests|WorkCacheTests|DesktopHeadlessTests|TaskStatusTests'`.
-2. **`--reason` goes where reasons are read.** Today `set_task_auto` folds it
-   into a `progress` Task event no read prints, under help that says "kept in
-   the Task's history". `lf ship --reason` becomes the run's own
-   (`TaskProcessOptions.reason`, the steer `task_place` already appends), in
-   `bin/lf.rs`; `AutoAsk::Person` becomes a unit variant. `lf task auto off
-   --reason` is saved as a Task comment (`append_task_comment`, not a steer)
-   in `auto::off`. `set_task_auto` and `auto::set` lose `note`; the progress
-   row says "auto on: Maya". Help for `lf ship`, `lf task auto` and the
-   served `task.ship` / `task.auto.off` `reason` fields say what happens
-   (`rust/loopflow/src/lf/mod.rs`, `server/wire.rs`). A test: after
-   `lf task auto off X --reason why`, the Task's comments hold "why". Passed
-   over: a note on the mark printed by `lf task status` (a column and a wire
-   field), and deleting both flags.
-3. **`docs/dev/reference-models.md`** still names "ship event" among the
-   records that own a process (LfProcess row) and "`lf ship`" among the
-   spawners. Both go.
-4. **`task_shipping.json`** (the `task.ship` answer, under
-   `rust/loopflow-execution/tests/fixtures/dto/server/`) becomes
-   `task_ship_answer.json`; readers are `server/schema.rs` and
-   `lf/commands/write.rs`.
+Checks, 2026-11-19, run here; gate and CI run the suites:
+
+- `cargo nextest run … -E 'test(dto_fixtures::) | test(server::schema::tests::) | test(lf::tests::) | test(typed_answers_keep_the_wire_shape) | test(sqlite::task_work::) | test(machine::wire::)'`: 106 passed.
+- `test(server_operations_match_their_lf_commands) | test(documented_commands::)` with a resolved `TMPDIR`: 5 passed; the served test holds the new "why auto went off is a comment" assertion and took 208 s.
+- `scripts/test_desktop.sh --filter 'DTOFixtureTests|WorkCacheTests|DesktopHeadlessTests|TaskStatusTests|TaskConceptTests|RegistryQueryTests|WaveLensTests|ServerProtocolTests'`: 163 passed.
+- Not run here: `cargo clippy`, the iOS suite (shared Swift models changed).
 
 Larger than this work, on the page and not filed: the "Graph … finished;
 nothing further is launched" sentence on a Task waiting at an interactive

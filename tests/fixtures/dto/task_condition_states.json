@@ -65,9 +65,6 @@
     "run_control": {
       "unavailable": null
     },
-    "ship_control": {
-      "unavailable": null
-    },
     "pr": null,
     "graph_source": null,
     "lifecycle": "unstarted",
@@ -362,9 +359,6 @@
     "run_control": {
       "unavailable": "Task is complete"
     },
-    "ship_control": {
-      "unavailable": "Task is complete"
-    },
     "pr": null,
     "graph_source": null,
     "lifecycle": "done",
@@ -626,9 +620,6 @@
     "run_control": {
       "unavailable": null
     },
-    "ship_control": {
-      "unavailable": null
-    },
     "pr": null,
     "graph_source": null,
     "lifecycle": "moving",
@@ -726,9 +717,6 @@
       "outlook": null
     },
     "run_control": {
-      "unavailable": null
-    },
-    "ship_control": {
       "unavailable": null
     },
     "pr": null,
@@ -995,9 +983,6 @@
     "run_control": {
       "unavailable": null
     },
-    "ship_control": {
-      "unavailable": null
-    },
     "pr": null,
     "graph_source": null,
     "lifecycle": "unstarted",
@@ -1095,9 +1080,6 @@
       "outlook": null
     },
     "run_control": {
-      "unavailable": null
-    },
-    "ship_control": {
       "unavailable": null
     },
     "pr": null,
@@ -1360,9 +1342,6 @@
       "outlook": null
     },
     "run_control": {
-      "unavailable": null
-    },
-    "ship_control": {
       "unavailable": null
     },
     "pr": {

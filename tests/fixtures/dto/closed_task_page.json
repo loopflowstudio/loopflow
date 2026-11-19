@@ -367,9 +367,6 @@
       },
       "graph_source": null,
       "section": "done",
-      "ship_control": {
-        "unavailable": null
-      },
       "lifecycle": "done",
       "selection_states": [
         "done"

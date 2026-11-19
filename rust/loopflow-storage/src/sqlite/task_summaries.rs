@@ -202,7 +202,7 @@ mod tests {
             at: 4,
             by: crate::process::Starter::Person { name: None },
         };
-        store.set_task_auto(&task, &stopped, false, None).unwrap();
+        store.set_task_auto(&task, &stopped, false).unwrap();
         assert_eq!(store.task_summary(&task).unwrap(), None);
 
         let statements = crate::query_plans::statements(&store, || {

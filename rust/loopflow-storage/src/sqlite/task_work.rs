@@ -852,7 +852,6 @@ impl SqliteStore {
         task: &TaskId,
         mark: &Auto,
         keeps_off: bool,
-        note: Option<&str>,
     ) -> StoreResult<Option<Auto>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction()?;
@@ -877,11 +876,7 @@ impl SqliteStore {
             return Ok(None);
         }
         if before.as_ref().map(|before| before.state) != Some(mark.state) {
-            let what = mark.state.as_str();
-            let summary = match note {
-                Some(note) => format!("auto {what}: {}: {note}", mark.by),
-                None => format!("auto {what}: {}", mark.by),
-            };
+            let summary = format!("auto {}: {}", mark.state.as_str(), mark.by);
             super::children::insert_task_event_in(
                 &tx,
                 task,
@@ -1071,21 +1066,16 @@ mod tests {
         let on = mark(super::AutoState::On, 10);
         let stopped = mark(super::AutoState::Off, 20);
         // No Graph, nothing to carry the mark.
-        store.set_task_auto(&task.id, &on, false, None).unwrap();
+        store.set_task_auto(&task.id, &on, false).unwrap();
         assert_eq!(store.task_auto(&task.id).unwrap(), None);
         store
             .take_up_task_graph(&task.id, r#"{"name":"code","steps":[]}"#)
             .unwrap();
-        assert_eq!(
-            store.set_task_auto(&task.id, &on, false, None).unwrap(),
-            None
-        );
-        store
-            .set_task_auto(&task.id, &stopped, false, Some("hold"))
-            .unwrap();
+        assert_eq!(store.set_task_auto(&task.id, &on, false).unwrap(), None);
+        store.set_task_auto(&task.id, &stopped, false).unwrap();
         // `lf -b task run` keeps a stop; taking up another graph keeps it too.
         store
-            .set_task_auto(&task.id, &mark(super::AutoState::On, 30), true, None)
+            .set_task_auto(&task.id, &mark(super::AutoState::On, 30), true)
             .unwrap();
         store
             .take_up_task_graph(&task.id, r#"{"name":"feature","steps":[]}"#)
@@ -1095,7 +1085,7 @@ mod tests {
         assert_eq!(store.task_auto(&task.id).unwrap(), Some(stopped));
         // `lf ship` lifts it.
         store
-            .set_task_auto(&task.id, &mark(super::AutoState::On, 40), false, None)
+            .set_task_auto(&task.id, &mark(super::AutoState::On, 40), false)
             .unwrap();
         assert_eq!(
             store.task_auto(&task.id).unwrap(),
@@ -1281,7 +1271,7 @@ mod tests {
                 name: Some("Casey".into()),
             },
         };
-        laptop.set_task_auto(&id, &on, false, None).unwrap();
+        laptop.set_task_auto(&id, &on, false).unwrap();
         let record = laptop.task_graph_record(&id).unwrap().unwrap();
         // Delivered twice, as a retried move is.
         mini.place_moved_task_graph(&id, &record, None).unwrap();

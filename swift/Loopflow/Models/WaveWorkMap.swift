@@ -263,7 +263,6 @@ public struct RoadmapTask: Decodable, Sendable, Identifiable, Hashable {
     public let latestGraphProcess: GraphProcessDetail?
     public let execution: TaskExecutionSnapshot?
     public let runControl: TaskRunControl
-    public let shipControl: TaskRunControl
     public let pr: PrSnapshot?
     public internal(set) var section: TaskSection
 
@@ -274,7 +273,6 @@ public struct RoadmapTask: Decodable, Sendable, Identifiable, Hashable {
         case graphSource = "graph_source"
         case latestGraphProcess = "latest_graph_process"
         case runControl = "run_control"
-        case shipControl = "ship_control"
         case nextMove = "next_move"
     }
 

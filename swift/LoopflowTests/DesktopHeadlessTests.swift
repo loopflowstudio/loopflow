@@ -498,7 +498,6 @@ struct DesktopHeadlessTests {
         let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self,
             from: Data(contentsOf: fixtures.appendingPathComponent("roadmap_snapshot.json")))
         let task = try #require(snapshot.waves.first?.tasks.items.first { $0.selectionStates.contains(.auto) })
-        #expect(task.shipControl.unavailable == "auto is already on")
         let sent = Recorder()
         let model = WorkModel(query: RegistryQuery(run: { args, _ in
             if args.prefix(2) == ["task", "auto"] { await sent.add(args) }

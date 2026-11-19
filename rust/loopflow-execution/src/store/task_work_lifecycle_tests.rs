@@ -136,9 +136,7 @@ fn defer_holds_the_lifecycle_and_a_run_is_moving_whatever_its_auto_setting() {
         loopflow_storage::sqlite::AutoState::Off,
         loopflow_storage::sqlite::AutoState::On,
     ] {
-        store
-            .set_task_auto(&task, &mark(setting), false, None)
-            .unwrap();
+        store.set_task_auto(&task, &mark(setting), false).unwrap();
         assert_eq!(state(), crate::durable::TaskState::Moving);
     }
     // The carrier exits and nothing runs.

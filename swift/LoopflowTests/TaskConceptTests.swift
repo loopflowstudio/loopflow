@@ -195,7 +195,6 @@ struct TaskConceptTests {
         let restored = try JSONDecoder().decode(RoadmapTask.self, from: Data(quiet.utf8))
         #expect(restored.selectionStates == [.active, .working])
         #expect(restored.runControl.unavailable != nil)
-        #expect(restored.shipControl.unavailable != nil)
     }
 }
 #endif

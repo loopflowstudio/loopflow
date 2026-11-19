@@ -2883,9 +2883,8 @@ fn dispatch_here(
             loopflow_execution::ops::task::TaskProcessOptions {
                 wave: cli.wave.clone(),
                 graph: graph.clone(),
-                auto: AutoAsk::Person {
-                    note: reason.clone(),
-                },
+                reason: reason.clone(),
+                auto: AutoAsk::Person,
                 ..Default::default()
             },
             *json,

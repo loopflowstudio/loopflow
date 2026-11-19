@@ -916,7 +916,7 @@ async fn try_start_task_run(
     ask: &auto::AutoAsk,
     merges: fn(&[String]) -> bool,
 ) -> OpsResult<Option<TaskRunStart>> {
-    let person = matches!(ask, auto::AutoAsk::Person { .. });
+    let person = matches!(ask, auto::AutoAsk::Person);
     let standing = crate::store::task_work::task_graph_row(&store.sqlite, &task.id)
         .map_err(task_error)?
         .filter(|row| person && requested.is_none_or(|name| name == row.graph.name));

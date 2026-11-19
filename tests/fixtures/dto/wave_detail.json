@@ -439,9 +439,6 @@
         "run_control": {
           "unavailable": null
         },
-        "ship_control": {
-          "unavailable": null
-        },
         "pr": {
           "id": "pr_33333333333333333333333333333333",
           "sequence": 1,
@@ -625,9 +622,6 @@
           "outlook": null
         },
         "run_control": {
-          "unavailable": null
-        },
-        "ship_control": {
           "unavailable": null
         },
         "pr": null,

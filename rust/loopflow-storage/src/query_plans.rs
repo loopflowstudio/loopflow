@@ -546,7 +546,7 @@ mod tests {
             by: crate::process::Starter::Person { name: None },
         };
         let traced = statements(&store, || {
-            store.set_task_auto(&task, &mark, true, None).unwrap();
+            store.set_task_auto(&task, &mark, true).unwrap();
             store.task_auto(&task).unwrap();
             store.task_state(&task).unwrap();
         });

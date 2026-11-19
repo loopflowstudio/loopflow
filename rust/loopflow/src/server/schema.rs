@@ -261,9 +261,9 @@ const RESPONSES: &[(&str, &str, &str)] = &[
         include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_running.json"),
     ),
     (
-        "task_shipping",
+        "task_ship_answer",
         "task.ship",
-        include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_shipping.json"),
+        include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_ship_answer.json"),
     ),
     (
         "wave_plan_connected",

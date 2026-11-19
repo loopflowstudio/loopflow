@@ -643,7 +643,8 @@ in a provider request. The harness loads its repo guide natively.
 | Skill and request | First turn | Selected skill and launch message |
 | Scratch and checkout Wave/ancestor documents | Refreshed conversation block; whole files, marked start excerpts and a complete listing | Current checkout and selected Wave |
 | Explicit docs | Complete reference bodies in the submitted turn | `context.docs` in config or Loopflow skill frontmatter, or `--docs` |
-| Branch changes | A listed `changes` file: every changed file with its line counts and the command that reads its patch; the whole patch under 15,000 tokens | `--diff patch`, `context: {diff_files: true}` |
+| Branch changes | Tagged block after the request in the first turn: every changed file with its line counts and the command that reads its patch; the whole patch under 15,000 tokens | `--diff patch`, `context: {diff: true}` |
+| Branch files | A listed `changes` file naming the changed paths | `--diff files`, `context: {diff_files: true}` |
 | Captured references | Complete private reference files | Work direction supplied by the caller |
 | Clipboard | Tagged block after the request in the first turn | `-c` |
 
@@ -780,16 +781,16 @@ Use `-c` when debugging: copy an error, then `lf debug -c`.
 
 ### Raw Diff
 
-Save what this branch changed where the agent can read it: every file, and the
-patch when it fits.
+Show the agent what this branch changed: every file, and the patch when it
+fits.
 
 ```bash
 lf review --diff patch
 ```
 
-The section is written once at launch to a `changes` file under `.lf/prompts/`,
-which the conversation block lists. The agent opens it when it wants it; it is
-not put in front of the agent.
+The section goes in its own tagged block after the request in the first turn,
+where `-c` and `--docs` go. It is read once at launch, and it counts toward the
+terminal argument cap.
 
 ```
 Changed since origin/main, 3 files. Read one file's patch with:

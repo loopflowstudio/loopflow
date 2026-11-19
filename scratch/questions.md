@@ -30,3 +30,7 @@ Made headless at kickoff and concept review; each is reversible. Detail in
   main...HEAD`, whatever the default branch is. Left alone.
 - An uncommitted change now lists untracked files, marked "no patch: read the
   file". Their contents are not inlined. Inline small ones?
+- The change block counts toward the 122,880-byte terminal argument cap
+  (`agent::validate_terminal_turn`), as the clipboard does. A list of several
+  thousand files, or a patch near 15,000 tokens beside a large clipboard,
+  could refuse an interactive launch. Not bounded here.

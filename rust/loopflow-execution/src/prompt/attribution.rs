@@ -304,6 +304,7 @@ fn tagged_block<'a>(text: &'a str, open: &str, close: &str) -> Option<&'a str> {
 #[cfg(test)]
 mod tests {
     use super::attributed_context;
+    use crate::prompt::change::{Change, ChangeRange};
     use crate::prompt::{Document, DocumentSource, PromptComponents};
     use crate::trace::{ContextAssetKind, ContextScope};
     #[test]
@@ -384,5 +385,28 @@ mod tests {
             .assets
             .iter()
             .all(|asset| asset.kind != ContextAssetKind::Assembly));
+    }
+
+    #[test]
+    fn the_branch_change_in_the_first_turn_is_a_diff_asset() {
+        let components = PromptComponents {
+            message: Some("What does this branch change?".into()),
+            change: Some(Change {
+                range: ChangeRange::Uncommitted,
+                files: Vec::new(),
+                patch: Some("+let cost = \"$5\";\n".into()),
+                patch_bytes: 20,
+            }),
+            ..Default::default()
+        };
+        let turn = crate::prompt::format_first_turn(&components);
+        let prepared = attributed_context(&components, "", &turn, &[], None);
+        let diff = prepared
+            .task
+            .assets
+            .iter()
+            .find(|asset| asset.kind == ContextAssetKind::Diff)
+            .expect("the change section is attributed");
+        assert!(turn[diff.byte_start as usize..diff.byte_end as usize].contains("&#36;5"));
     }
 }

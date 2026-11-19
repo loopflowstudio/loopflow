@@ -30,8 +30,9 @@ instead, so test both sizes.
   and body into `$GH_QA_STATE`. The PR writer runs without
   `--dangerously-skip-permissions` unless `yolo` is set and can still run
   `git diff`.
-- **`--diff patch`:** `lf -b <skill> --diff patch` writes
-  `.lf/prompts/*-changes.md`. The agent is not shown it, only its path in the
-  context listing, so check the transcript before concluding it was read.
-  On the default branch no file is written; on a branch with no commits the
-  range is the uncommitted work.
+- **`--diff patch`:** `lf -b <skill> --diff patch` puts the section in the
+  first turn, in an `<lf:change>` block after the request; grep the Skill
+  run's transcript for it (a step commit's writer leaves a second, newer
+  transcript). No `*-changes.md` is written (that is `--diff files`). On the default branch there is no block; on
+  a branch with no commits the range is the uncommitted work, untracked files
+  included.

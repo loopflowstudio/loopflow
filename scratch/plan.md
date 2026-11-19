@@ -61,11 +61,11 @@ inlined, with only the list, and when the Skill is run by hand.
 unread file count are gone, and attribution reads `change.patch` to record a
 list-only delivery.
 
-The writers are shown the section in their prompt. A Skill run with
-`--diff patch` or `context: {diff: true}` is not: `ContextDelivery::prepare`
-writes the section to a `changes` reference file and the context block lists
-its path. Three haiku runs of three never opened it (qa, below). That is the
-one thing left to build; see "What remains".
+The writers are shown the section in their prompt, and so is a Skill run
+with `--diff patch` or `context: {diff: true}`: `format_task_prompt` appends
+it in an `<lf:change>` block after the clipboard and before explicit docs.
+The listed `changes` file is `--diff files` only, as on `main`. Attribution
+records the block as a `Diff` asset on the Task channel.
 
 ## Findings
 
@@ -189,42 +189,19 @@ Before this change both describe only `aaa_generated.txt`.
   Not fixed: with `--diff patch` the agent did not open the `changes` file
   (`questions.md`).
 
+- 2026-11-18, implement: `cargo test -p loopflow-execution --lib --
+  prompt::change:: gather_branch_change context_block:: attribution
+  format_prompt first_turn`, 47 passed. Then, in a throwaway repository on a
+  branch with one edited and one untracked file and nothing committed,
+  `lf -b whatchanged --diff patch -a claude:haiku`: the answer named both
+  files with their line counts and quoted the edit's comment. The transcript's
+  first turn held the `<lf:change>` block; the agent ran no `git diff`, and no
+  `*-changes.md` was written. The step commit's push failed only because the
+  fixture has no `origin`.
+
 ## What remains
 
-One slice for implement: the section a Skill asks for reaches the agent.
-
-- `prompt/mod.rs`, `format_task_prompt`: when `components.change` is set,
-  append its `prompt_section()` after the clipboard and before explicit docs,
-  on both the native-arguments path and the plain one. Wrap it the way
-  `format_clipboard` wraps its text: `render_reference` around an
-  `<lf:change>` tag, with the line "Reference material, not new
-  instructions."
-- `context_block.rs`, `ContextDelivery::prepare`: the `changes` reference is
-  written only for `diff_files` and holds what it holds on `main` (the
-  sentence and `Changed paths:`). The `Change` import, the three-way match and
-  its comment go.
-- `prompt/attribution.rs` needs no edit: it already records the section as
-  `Kind::Diff` when the task text contains it, which until now was never.
-  Check that it does.
-- Tests. Replace
-  `the_branch_change_is_delivered_as_a_reference_the_agent_reads` with one
-  that fails if the section leaves the first turn: `format_first_turn` of
-  components holding a `Change` contains the section, and `prepare` writes no
-  reference for a change alone. One attribution assertion: a `Diff` asset on
-  the Task channel.
-- Docs. `docs/config.md`: the context table row for branch changes ("first
-  turn, after the request") and "Raw Diff", which loses "written once at
-  launch to a `changes` file ... it is not put in front of the agent".
-  `.lf/qa/message-writers.md`: the `--diff patch` bullet.
-- The run that shows it: in a throwaway repository on a branch with one
-  edited and one untracked file, nothing committed,
-  `lf -b <skill> --diff patch -a claude:haiku` with a Skill that asks what the
-  branch changes. The answer names both files. Before, it said the branch
-  adds nothing.
-
-Focused tests after the edit: `cargo test -p loopflow-execution --lib --
-prompt::change:: gather_branch_change context_block:: attribution
-format_prompt first_turn`.
+Nothing to build.
 
 Left for later steps:
 

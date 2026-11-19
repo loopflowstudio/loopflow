@@ -9,7 +9,7 @@ pub fn attributed_context(
     deduplication_decisions: &[crate::trace::ContextDecision],
     request: Option<&str>,
 ) -> crate::trace::PreparedTurnContext {
-    use crate::prompt::{DiffTier, DocumentSource};
+    use crate::prompt::DocumentSource;
     use crate::trace::{
         ContextAssetKind as Kind, ContextAssetSpec, ContextChannel, ContextDecision,
         ContextDecisionKind, ContextScope as Scope,
@@ -145,9 +145,9 @@ pub fn attributed_context(
             "diff_files",
         );
     }
-    if let Some(diff) = &components.diff {
+    if let Some(change) = &components.change {
         push(
-            diff,
+            &change.prompt_section(),
             Kind::Diff,
             Scope::Repo,
             "branch diff".to_string(),
@@ -230,7 +230,7 @@ pub fn attributed_context(
     }
 
     let mut decisions = deduplication_decisions.to_vec();
-    if components.diff_tier == DiffTier::StatOnly {
+    if matches!(&components.change, Some(change) if change.patch.is_none()) {
         decisions.push(ContextDecision {
             position: decisions.len() as u32,
             kind: Kind::Diff,

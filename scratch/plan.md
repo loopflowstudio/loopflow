@@ -56,8 +56,12 @@ notes, cleared when the change lands (`ops/land.rs:171`). `Staged` and
 The builtin Skill texts are not edited: "Read the diff" is true with the patch
 inlined, with only the list, and when the Skill is run by hand.
 
-One thing differed from the plan. The text `gather_diff_tiered` returned was
-never shown to the agent: `ContextDelivery::prepare` wrote a `changes`
+`PromptComponents.change` is an `Option<Change>`; the `DiffTier` enum and the
+unread file count are gone, and attribution reads `change.patch` to record a
+list-only delivery.
+
+One thing differed from the plan. The gathered diff text was never shown to
+the agent: `ContextDelivery::prepare` wrote a `changes`
 reference file holding only "Inspect current changes with `git diff` and
 `git diff main...HEAD`" and counted the gathered diff's tokens in attribution.
 That file now holds the section. With `diff_files` alone the old sentence
@@ -157,6 +161,12 @@ Before this change both describe only `aaa_generated.txt`.
   prompt::change:: gather_diff_tiered the_branch_change_is_delivered
   task_workspace_context`, 11 passed. `cargo test -p loopflow --lib --
   pr_copy_moves_to_the_next_agent_when_codex_is_out_of_quota`, passed.
+- 2026-11-18, compress (`gather_diff_tiered` is now `gather_branch_change`):
+  `cargo test -p loopflow-execution --lib -- prompt::change::
+  gather_branch_change the_branch_change_is_delivered
+  reference_rendering_preserves files_only attribution`, 20 passed.
+  `cargo test -p loopflow --lib --
+  context_choices_override_config_and_omission_inherits`, passed.
 
 ## What remains
 
@@ -167,9 +177,8 @@ Nothing to implement. Left for later steps:
   run.
 - **`cargo clippy --all-targets -- -D warnings` and the suites.** gate's and
   CI's; not run here.
-- **One shape to look at in compress or gate.** With both `diff` and
-  `diff_files`, the `changes` reference holds the section and then a JSON
-  `Changed paths:` line (`context_block.rs:74`). The section already lists
-  every file of its range; the second list may be a duplicate. Check what
-  `diff_files` holds that the section does not before removing it.
+- **The `Changed paths:` line stays** beside the section in the `changes`
+  reference. `diff_files` holds the files named with `--files`, or whole
+  directories, which need not be in the change (`prompt/mod.rs`,
+  `gather_documents`).
 - The open choices in `questions.md`; none blocks shipping.

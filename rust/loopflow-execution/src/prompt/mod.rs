@@ -54,18 +54,6 @@ pub struct Document {
     pub source: DocumentSource,
 }
 
-/// How diff context is represented after tiering.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub enum DiffTier {
-    /// Every changed file and the whole patch (under 15,000 tokens)
-    UnifiedDiff,
-    /// Every changed file and the command that reads one file's patch
-    StatOnly,
-    /// No diff context
-    #[default]
-    None,
-}
-
 const MAX_EXPLICIT_DOC_FILES: usize = 100;
 static BPE: Lazy<Option<CoreBPE>> = Lazy::new(|| tiktoken_rs::cl100k_base().ok());
 static CL100K_PIECES: Lazy<Option<fancy_regex::Regex>> = Lazy::new(|| {
@@ -188,7 +176,8 @@ pub struct PromptComponents {
     pub surface: Surface,
     pub user_name: Option<String>,
     pub docs: Vec<Document>,
-    pub diff: Option<String>,
+    /// What the branch changed, when `context.diff` asks for it.
+    pub change: Option<Change>,
     pub diff_files: Vec<Document>,
     pub skill: Option<Skill>,
     pub repo_root: String,
@@ -202,10 +191,6 @@ pub struct PromptComponents {
     /// Semantic attribution for generated intent carried in `message`.
     /// Ordinary CLI speech leaves this absent and is attributed to the user.
     pub message_context: Option<(crate::trace::ContextAssetKind, crate::trace::ContextScope)>,
-    /// How diff context was tiered
-    pub diff_tier: DiffTier,
-    /// Number of files changed on branch (for display)
-    pub diff_file_count: usize,
 }
 
 /// Count tokens using tiktoken (cl100k_base encoding).
@@ -365,17 +350,15 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<PromptComponents, Core
             DocumentSource::Skill | DocumentSource::Clipboard => {}
         }
     }
-    // Gather diff context (tiered: unified diff or stat)
     let diff_start = Instant::now();
-    let (diff, diff_tier, diff_file_count) = if opts.include_diff {
-        gather_diff_tiered(repo_root)?
+    let change = if opts.include_diff {
+        gather_branch_change(repo_root)?
     } else {
-        (None, DiffTier::None, 0)
+        None
     };
     debug!(
         elapsed_ms = diff_start.elapsed().as_millis(),
-        ?diff_tier,
-        has_diff = diff.is_some(),
+        has_change = change.is_some(),
         "gathered diff"
     );
 
@@ -400,7 +383,7 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<PromptComponents, Core
         surface: opts.surface,
         user_name: crate::config::participant_name()?,
         docs,
-        diff,
+        change,
         diff_files,
         skill,
         repo_root: repo_root.to_string_lossy().to_string(),
@@ -410,8 +393,6 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<PromptComponents, Core
         operate: opts.operate,
         message: opts.message.clone(),
         message_context: None,
-        diff_tier,
-        diff_file_count,
     })
 }
 
@@ -1166,12 +1147,10 @@ fn gather_all_text_files(repo_root: &Path) -> Result<Vec<Document>, CoreError> {
     Ok(docs)
 }
 
-/// The branch's change as one prompt section: what it committed since the
-/// default branch, or its uncommitted work when it has committed nothing.
-/// Nothing on the default branch or a detached HEAD. A failed read is no diff.
-///
-/// Returns (section, tier, file_count).
-fn gather_diff_tiered(repo_root: &Path) -> Result<(Option<String>, DiffTier, usize), CoreError> {
+/// What the branch changed: what it committed since the default branch, or
+/// its uncommitted work when it has committed nothing. Nothing on the default
+/// branch or a detached HEAD. A failed read is no change.
+fn gather_branch_change(repo_root: &Path) -> Result<Option<Change>, CoreError> {
     let branch_output = Command::new("git")
         .args(["branch", "--show-current"])
         .current_dir(repo_root)
@@ -1181,7 +1160,7 @@ fn gather_diff_tiered(repo_root: &Path) -> Result<(Option<String>, DiffTier, usi
         .trim()
         .to_string();
     if branch.is_empty() || branch == "main" {
-        return Ok((None, DiffTier::None, 0));
+        return Ok(None);
     }
 
     let base_branch = crate::git::get_default_branch(repo_root).unwrap_or("main".to_string());
@@ -1190,17 +1169,8 @@ fn gather_diff_tiered(repo_root: &Path) -> Result<(Option<String>, DiffTier, usi
             .ok()
             .filter(|change| !change.files.is_empty())
     };
-    let Some(change) = read(ChangeRange::Since(format!("origin/{base_branch}")))
-        .or_else(|| read(ChangeRange::Uncommitted))
-    else {
-        return Ok((None, DiffTier::None, 0));
-    };
-    let tier = if change.patch.is_some() {
-        DiffTier::UnifiedDiff
-    } else {
-        DiffTier::StatOnly
-    };
-    Ok((Some(change.prompt_section()), tier, change.files.len()))
+    Ok(read(ChangeRange::Since(format!("origin/{base_branch}")))
+        .or_else(|| read(ChangeRange::Uncommitted)))
 }
 
 fn build_gitignore(repo_root: &Path) -> ignore::gitignore::Gitignore {
@@ -1674,7 +1644,6 @@ mod tests {
                 doc(DocumentSource::Docs),
                 doc(DocumentSource::Wave),
             ],
-            diff: Some(source.into()),
             diff_files: vec![doc(DocumentSource::Diff)],
             summaries: vec![doc(DocumentSource::Summary)],
             clipboard: Some(source.into()),
@@ -2338,7 +2307,7 @@ mod tests {
             ..Default::default()
         };
         let ctx = gather_context(&opts).expect("gather context");
-        let has_diff = ctx.diff.is_some();
+        let has_diff = ctx.change.is_some();
         let prompt = format_prompt(&ctx);
 
         assert!(
@@ -2659,7 +2628,7 @@ mod tests {
     }
 
     // ==========================================================================
-    // gather_diff_tiered tests
+    // gather_branch_change tests
     // ==========================================================================
 
     fn init_git_repo() -> tempfile::TempDir {
@@ -2694,15 +2663,13 @@ mod tests {
     }
 
     #[test]
-    fn gather_diff_tiered_on_main_returns_none() {
+    fn gather_branch_change_on_main_returns_none() {
         let repo = init_git_repo();
-        let (diff, tier, _) = gather_diff_tiered(repo.path()).unwrap();
-        assert!(diff.is_none());
-        assert_eq!(tier, DiffTier::None);
+        assert_eq!(gather_branch_change(repo.path()).unwrap(), None);
     }
 
     #[test]
-    fn gather_diff_tiered_uncommitted_changes_on_branch() {
+    fn gather_branch_change_uncommitted_changes_on_branch() {
         let repo = init_git_repo();
         // Create a branch with no commits ahead of main, just dirty working tree
         Command::new("git")
@@ -2717,16 +2684,17 @@ mod tests {
             .output()
             .expect("git add");
 
-        let (diff, tier, count) = gather_diff_tiered(repo.path()).unwrap();
-        // Should fall back to working tree diff (HEAD) and find the staged change
-        assert!(diff.is_some(), "should find uncommitted changes");
-        assert_eq!(tier, DiffTier::UnifiedDiff);
-        assert_eq!(count, 1);
-        assert!(diff.unwrap().contains("fn hello()"));
+        // Falls back to the working tree against HEAD and finds the staged change.
+        let change = gather_branch_change(repo.path())
+            .unwrap()
+            .expect("should find uncommitted changes");
+        assert_eq!(change.range, ChangeRange::Uncommitted);
+        assert_eq!(change.files.len(), 1);
+        assert!(change.patch.unwrap().contains("fn hello()"));
     }
 
     #[test]
-    fn gather_diff_tiered_committed_changes_on_branch() {
+    fn gather_branch_change_committed_changes_on_branch() {
         let repo = init_git_repo();
         // Set up a bare origin inside the repo's own temp dir to avoid collisions
         let origin_dir = tempfile::tempdir().expect("origin tempdir");
@@ -2768,34 +2736,12 @@ mod tests {
             .output()
             .expect("git commit");
 
-        let (diff, tier, count) = gather_diff_tiered(repo.path()).unwrap();
-        assert!(diff.is_some(), "should find committed changes");
-        assert_eq!(tier, DiffTier::UnifiedDiff);
-        assert_eq!(count, 1);
-        assert!(diff.unwrap().contains("fn committed()"));
-    }
-
-    #[test]
-    fn gather_diff_tiered_large_branch_lists_files_and_the_read_command() {
-        let repo = loopflow_test_support::TestRepo::new();
-        repo.create_branch("feature");
-        let generated: String = (0..20_000).map(|n| format!("row {n} of data\n")).collect();
-        repo.create_file("aaa_generated.txt", &generated);
-        repo.create_file("src/zzz_retry.rs", "fn retry() {}\n");
-        repo.stage_all();
-        repo.commit("add a retry and regenerate");
-
-        let (diff, tier, count) = gather_diff_tiered(repo.path()).unwrap();
-        let diff = diff.expect("a large branch still has a change section");
-        assert_eq!(tier, DiffTier::StatOnly);
-        assert_eq!(count, 2);
-        assert!(
-            diff.contains("git diff origin/main...HEAD -- '<path>'"),
-            "{diff}"
-        );
-        assert!(diff.contains("aaa_generated.txt\n"));
-        assert!(diff.contains("src/zzz_retry.rs\n"));
-        assert!(!diff.contains("row 1 of data"));
+        let change = gather_branch_change(repo.path())
+            .unwrap()
+            .expect("should find committed changes");
+        assert_eq!(change.range, ChangeRange::Since("origin/main".to_owned()));
+        assert_eq!(change.files.len(), 1);
+        assert!(change.patch.unwrap().contains("fn committed()"));
     }
 
     // ── Cross-repo context loading ──────────────────────────────────────

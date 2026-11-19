@@ -12,6 +12,7 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 
 use crate::error::CoreError;
+use crate::prompt::change::Change;
 use crate::prompt::{
     gather_documents, render_reference, write_prompt_log, Document, DocumentSource, GatherSpec,
 };
@@ -65,7 +66,7 @@ impl ContextDelivery {
         for doc in &components.summaries {
             references.push(write_prompt_log(&repo, &doc.content, "summary", None)?);
         }
-        if components.diff.is_some() || !components.diff_files.is_empty() {
+        if components.change.is_some() || !components.diff_files.is_empty() {
             let paths = components
                 .diff_files
                 .iter()
@@ -75,9 +76,11 @@ impl ContextDelivery {
                 "Changed paths: {}\n",
                 serde_json::to_string(&paths).expect("paths serialize")
             );
-            let changes = match &components.diff {
-                Some(change) if components.diff_files.is_empty() => change.clone(),
-                Some(change) => format!("{change}\n{paths}"),
+            // `diff_files` can name files outside the change, so its paths
+            // stay beside the section.
+            let changes = match components.change.as_ref().map(Change::prompt_section) {
+                Some(section) if components.diff_files.is_empty() => section,
+                Some(section) => format!("{section}\n{paths}"),
                 None => format!(
                     "Inspect current changes with `git diff` and `git diff main...HEAD`.\n{paths}"
                 ),
@@ -576,6 +579,7 @@ mod tests {
     use super::{
         order_documents, render_block, ContextDelivery, ContextMoment, HOOK_CONTEXT_BYTES,
     };
+    use crate::prompt::change::{Change, ChangeRange};
     use crate::prompt::{render_reference, Document, DocumentSource};
 
     fn delivery(repo: &Path) -> ContextDelivery {
@@ -640,10 +644,16 @@ mod tests {
     #[test]
     fn the_branch_change_is_delivered_as_a_reference_the_agent_reads() {
         let repo = tempdir().unwrap();
-        let section = "Changed since origin/main, 1 file. Read one file's patch with:\n";
+        let change = Change {
+            range: ChangeRange::Since("origin/main".into()),
+            files: Vec::new(),
+            patch: Some("+fn retry() {}\n".into()),
+            patch_bytes: 15,
+        };
+        let section = change.prompt_section();
         let delivery = ContextDelivery::prepare(&crate::prompt::PromptComponents {
             repo_root: repo.path().display().to_string(),
-            diff: Some(section.into()),
+            change: Some(change),
             ..Default::default()
         })
         .unwrap();

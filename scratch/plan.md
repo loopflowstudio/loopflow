@@ -168,13 +168,21 @@ Before this change both describe only `aaa_generated.txt`.
   `cargo test -p loopflow --lib --
   context_choices_override_config_and_omission_inherits`, passed.
 
+- 2026-11-18, qa, real writers in a throwaway repository (`scratch/qa.html`):
+  `lf commit -a claude:haiku` on 354 KB and on 801 files, `lf commit -a codex`,
+  a step commit, and `lf pr publish` against the stand-in GitHub all named the
+  short file's change. The PR writer ran `git diff` without
+  `--dangerously-skip-permissions`, on a path holding a space and an
+  apostrophe. Fixed: an uncommitted change left out untracked files.
+  Not fixed: with `--diff patch` the agent did not open the `changes` file
+  (`questions.md`).
+
 ## What remains
 
 Nothing to implement. Left for later steps:
 
-- **The PR half of the demo with a real agent.** `lf pr submit` on a branch
-  with a GitHub remote whose important file sorts last. qa's or gate's; not
-  run.
+- **`lf pr submit` against real GitHub.** qa ran `lf pr publish` with a real
+  writer and a stand-in `gh`; the same `generate_pr_copy` serves both.
 - **`cargo clippy --all-targets -- -D warnings` and the suites.** gate's and
   CI's; not run here.
 - **The `Changed paths:` line stays** beside the section in the `changes`

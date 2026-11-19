@@ -53,6 +53,8 @@ pub struct ChangedFile {
     pub lines: Option<(u64, u64)>,
     /// A note added under `scratch/` on this branch, cleared when it lands.
     pub working_note: bool,
+    /// Not in Git yet, so it has no patch: the file itself is the change.
+    pub untracked: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -81,6 +83,9 @@ impl Change {
             for file in &mut files {
                 file.working_note = notes.contains(&file.path);
             }
+        }
+        if range == ChangeRange::Uncommitted {
+            files.extend(untracked_files(repo)?);
         }
         let patch = git_stdout(repo, &["diff", &range_arg])?;
         let patch_bytes = patch.len();
@@ -123,6 +128,9 @@ impl Change {
             if let Some(old) = &file.renamed_from {
                 section.push_str(&format!(" (from {old})"));
             }
+            if file.untracked {
+                section.push_str(" (untracked, no patch: read the file)");
+            }
             if file.working_note {
                 section.push_str(" (working note, cleared when this lands)");
             }
@@ -156,6 +164,25 @@ impl Change {
     }
 }
 
+/// Files Git does not track or ignore. `git diff` leaves them out, and an
+/// uncommitted change that adds a file is not complete without them.
+fn untracked_files(repo: &Path) -> Result<Vec<ChangedFile>, GitError> {
+    let listing = git_stdout(repo, &["ls-files", "--others", "--exclude-standard", "-z"])?;
+    Ok(listing
+        .split('\0')
+        .filter(|path| !path.is_empty())
+        .map(|path| ChangedFile {
+            path: path.to_owned(),
+            renamed_from: None,
+            lines: std::fs::read_to_string(repo.join(path))
+                .ok()
+                .map(|text| (text.lines().count() as u64, 0)),
+            working_note: false,
+            untracked: true,
+        })
+        .collect())
+}
+
 /// `--numstat -z` writes `added\tdeleted\tpath\0`, and for a rename an empty
 /// path followed by the old and new paths as their own fields.
 fn parse_numstat(numstat: &str) -> Vec<ChangedFile> {
@@ -179,6 +206,7 @@ fn parse_numstat(numstat: &str) -> Vec<ChangedFile> {
             renamed_from,
             lines: added.parse().ok().zip(deleted.parse().ok()),
             working_note: false,
+            untracked: false,
         });
     }
     files
@@ -320,6 +348,30 @@ mod tests {
         assert!(uncommitted
             .prompt_section()
             .contains("  git diff HEAD -- '<path>'\n"));
+    }
+
+    #[test]
+    fn uncommitted_work_lists_the_files_git_does_not_track_yet() {
+        let repo = TestRepo::new();
+        repo.create_file("src/retry.rs", "fn retry() {}\n");
+        repo.stage_all();
+        repo.commit("add a retry");
+        repo.create_file("src/retry.rs", "fn retry() { send() }\n");
+        repo.create_file(
+            "src/backoff.rs",
+            "const DELAY_MS: u64 = 250;\nconst TRIES: u8 = 2;\n",
+        );
+
+        let section = Change::read(repo.path(), ChangeRange::Uncommitted)
+            .unwrap()
+            .prompt_section();
+
+        assert!(section.starts_with("Uncommitted, 2 files."), "{section}");
+        assert!(section.contains("  +1  -1   src/retry.rs\n"), "{section}");
+        assert!(
+            section.contains("  +2  -0   src/backoff.rs (untracked, no patch: read the file)\n"),
+            "{section}"
+        );
     }
 
     #[test]

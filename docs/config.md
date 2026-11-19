@@ -643,7 +643,7 @@ in a provider request. The harness loads its repo guide natively.
 | Skill and request | First turn | Selected skill and launch message |
 | Scratch and checkout Wave/ancestor documents | Refreshed conversation block; whole files, marked start excerpts and a complete listing | Current checkout and selected Wave |
 | Explicit docs | Complete reference bodies in the submitted turn | `context.docs` in config or Loopflow skill frontmatter, or `--docs` |
-| Branch changes | Every changed file with its line counts and the command that reads its patch; the whole patch under 15,000 tokens | `--diff patch`, `context: {diff_files: true}` |
+| Branch changes | A listed `changes` file: every changed file with its line counts and the command that reads its patch; the whole patch under 15,000 tokens | `--diff patch`, `context: {diff_files: true}` |
 | Captured references | Complete private reference files | Work direction supplied by the caller |
 | Clipboard | Tagged block after the request in the first turn | `-c` |
 
@@ -780,19 +780,24 @@ Use `-c` when debugging: copy an error, then `lf debug -c`.
 
 ### Raw Diff
 
-Show the agent what this branch changed: every file, and the patch when it fits.
+Save what this branch changed where the agent can read it: every file, and the
+patch when it fits.
 
 ```bash
 lf review --diff patch
 ```
+
+The section is written once at launch to a `changes` file under `.lf/prompts/`,
+which the conversation block lists. The agent opens it when it wants it; it is
+not put in front of the agent.
 
 ```
 Changed since origin/main, 3 files. Read one file's patch with:
   git diff origin/main...HEAD -- '<path>'
 
   +4812  -0   aaa_generated.txt
-    +10  -2   src/zzz_retry.rs
   binary      assets/logo.png
+    +10  -2   src/zzz_retry.rs
 
 The patch is 214,300 bytes, too large to include. Start with the files that
 carry the change.
@@ -811,7 +816,8 @@ lands. Under
 15,000 tokens the whole patch follows it. Over that, none of it does, and the
 agent reads the files it picks; no file is cut short. With nothing committed on
 the branch yet, the change is the uncommitted work and the command is
-`git diff HEAD -- '<path>'`. On the default branch there is nothing to show.
+`git diff HEAD -- '<path>'`; a file Git doesn't track yet is listed as untracked,
+with no patch to read. On the default branch there is nothing to show.
 
 The commit and PR message writers get the same section for the change they
 describe. `--diff both` also lists changed paths.

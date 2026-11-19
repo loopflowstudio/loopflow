@@ -1,0 +1,118 @@
+<!doctype html><meta charset="utf-8"><title>QA d92894: message writers read the whole change</title>
+<style>body{font:15px/1.5 -apple-system,sans-serif;max-width:860px;margin:2em auto;padding:0 1em;color:#222}
+pre{background:#f5f5f3;padding:.8em;overflow:auto;font-size:12.5px;line-height:1.4}h2{margin-top:2em}
+table{border-collapse:collapse}td,th{border:1px solid #ccc;padding:.3em .6em;text-align:left;vertical-align:top}
+.ok{color:#176b2c}.bad{color:#a8201a}</style>
+<h1>QA: message writers read the whole change</h1>
+<p>2026-11-18. Branch <code>lf</code> (debug build) in throwaway repositories under
+<code>/tmp/lf-qa-d92894</code>, private <code>LF_HOME</code>, the account's real
+<code>claude</code> and <code>codex</code> logins. A <code>tee</code> script ahead of
+<code>claude</code> on <code>PATH</code> recorded what each writer was sent; the writers'
+own transcripts show what they ran. GitHub was <code>.lf/qa/gh-standin.py</code>.</p>
+
+<h2>Scenarios</h2>
+<table>
+<tr><th>What</th><th>Change</th><th>Result</th></tr>
+<tr><td><code>lf commit -a claude:haiku</code></td><td>354,185-byte patch: 6,000-line <code>aaa_generated.txt</code>, 7-line <code>src/zzz_retry.rs</code></td><td class=ok>"Retry export once when the upstream times out". 12 s.</td></tr>
+<tr><td><code>lf commit</code>, small</td><td>rename, binary, deletion, new <code>docs/user guide/it's retry.md</code> holding nested code fences</td><td class=ok>Patch inlined inside a five-backtick fence; message names all four. 6.5 s.</td></tr>
+<tr><td><code>lf commit</code>, nothing changed</td><td></td><td class=ok>"Nothing to commit", no writer launched.</td></tr>
+<tr><td><code>lf commit -a claude:haiku</code></td><td>800 generated CSVs and a 2-line <code>src/日本語/limit.rs</code>; 489 KB, 25 KB prompt</td><td class=ok>"Add 4 MB export size limit and 800 generated table fixtures". 13 s.</td></tr>
+<tr><td><code>lf commit -a codex</code></td><td>7,000-line fixture and a new 2-line <code>src/backoff.rs</code></td><td class=ok>"Define a 250 ms delay for the export retry". 12 s.</td></tr>
+<tr><td>Step commit, <code>lf -b regen -a claude:haiku</code></td><td>the skill rewrote the fixture (13,000 changed lines) and added one comment</td><td class=ok>"lf regen: Document why the export retries only once on timeout".</td></tr>
+<tr><td><code>lf pr publish -a claude:haiku</code></td><td>branch of 354 KB; the real change in <code>src/zzz it's retry.rs</code>; a note added under <code>scratch/</code></td><td class=ok>PR #100 "Retry a timed-out export once so idle exporters stop failing"; the body used the note's "3 of 40". 13 s, no permission flag.</td></tr>
+<tr><td><code>lf -b sayit --diff patch</code>, large branch</td><td>same branch</td><td class=bad><code>changes</code> file correct; the agent never opened it.</td></tr>
+<tr><td><code>--diff patch</code>, default branch</td><td></td><td class=ok>No <code>changes</code> file.</td></tr>
+<tr><td><code>--diff patch</code>, branch with only uncommitted work</td><td>one edited file, one new file</td><td class=bad>"Uncommitted, 1 file": the new file was missing. Fixed.</td></tr>
+</table>
+
+<h2>What the commit writer was sent (large)</h2>
+<pre>## Change
+Staged, 2 files. Read one file's patch with:
+  git diff --cached -- '&lt;path&gt;'
+
+  +6000  -100   aaa_generated.txt
+     +6  -1     src/zzz_retry.rs
+
+The patch is 354,185 bytes, too large to include. Start with the files that
+carry the change.</pre>
+<p>It ran <code>git diff --cached --stat &amp;&amp; git diff --cached -- src/zzz_retry.rs …</code>, then
+<code>git diff --cached -- aaa_generated.txt | head -c 3000</code>. The commit:</p>
+<pre>Retry export once when the upstream times out
+
+The exporter's upstream drops the first request after an idle period, which surfaced as a
+spurious Timeout. export() now retries the send once on Timeout and passes any other result
+through unchanged, so a single dropped request no longer fails the export. Only one retry is
+attempted, so a upstream that is actually down still fails. aaa_generated.txt is a regenerated
+schema fixture (100 'old' rows replaced by 6000 'regenerated value' rows), so most of this diff
+is generated output; regenerate it rather than editing it by hand.</pre>
+
+<h2>What the PR writer was sent</h2>
+<pre>## Commits
+```
+8a243e9 wip
+be5bae6 Regenerate fixture
+```
+
+## Change
+Changed since origin/main, 3 files. Read one file's patch with:
+  git diff origin/main...HEAD -- '&lt;path&gt;'
+
+  +6000  -100   aaa_generated.txt
+     +3  -0     scratch/plan.md (working note, cleared when this lands)
+     +6  -1     src/zzz it's retry.rs
+
+The patch is 354,448 bytes, too large to include. Start with the files that
+carry the change.</pre>
+<p>Launched as <code>claude -p … --model haiku</code> with no
+<code>--dangerously-skip-permissions</code>. Its one command:</p>
+<pre>git diff origin/main...HEAD -- 'src/zzz it'"'"'s retry.rs' &amp;&amp; echo '---PLAN---' &amp;&amp;
+git diff origin/main...HEAD -- scratch/plan.md &amp;&amp; echo '---GEN---' &amp;&amp;
+git diff origin/main...HEAD --stat -- aaa_generated.txt &amp;&amp; git log origin/main..HEAD …</pre>
+<p>The published body opens: "Exports failed whenever the exporter's first request after an
+idle period timed out, even though the next request would have succeeded. In one run, 3 of 40
+exports failed this way. This PR makes <code>export()</code> retry once after a timeout…"</p>
+
+<h2>Fixed</h2>
+<p><b>An uncommitted change left out files Git doesn't track yet.</b> On a branch with no
+commits, <code>--diff patch</code> wrote "Uncommitted, 1 file" for an edit plus a new file:
+<code>git diff HEAD</code> never shows untracked files. <code>Change::read</code> now adds them
+for the <code>Uncommitted</code> range:</p>
+<pre>Uncommitted, 3 files. Read one file's patch with:
+  git diff HEAD -- '&lt;path&gt;'
+
+  +1  -0   aaa_generated.txt
+  binary   icon.bin (untracked, no patch: read the file)
+  +1  -0   src/back off.rs (untracked, no patch: read the file)</pre>
+<p>Test: <code>prompt::change::tests::uncommitted_work_lists_the_files_git_does_not_track_yet</code>;
+the ten focused tests pass. The commit writer was never affected: <code>lf commit</code> stages first.</p>
+<p><b>Docs.</b> <code>docs/config.md</code> "Raw Diff" said the section is shown to the agent.
+It is written to a listed file; the page now says that, and its example lists files in Git's order.</p>
+
+<h2>Works now</h2>
+<p>Commit messages (Claude and Codex), step commits and PR descriptions name the change that
+matters at 350–490 KB and 801 files, with renames, binaries, deletions, and paths holding
+spaces, an apostrophe or non-ASCII. Small changes still answer in one turn.</p>
+
+<h2>Not reached</h2>
+<ul>
+<li><code>lf pr submit</code> and <code>lf land</code> against real GitHub: no disposable
+GitHub repository. <code>lf pr publish</code> calls the same <code>generate_pr_copy</code>.</li>
+<li>OpenCode and Pi writers: not installed here.</li>
+<li>A patch between 15,000 tokens and 200,000 bytes (the counted band): covered by the rule, not by its own run.</li>
+<li><code>cargo clippy</code> and the suites: gate's and CI's.</li>
+</ul>
+
+<h2>Still wrong, worst first</h2>
+<ol>
+<li><b><code>--diff patch</code> does not put the change in front of the agent.</b> The section
+goes to <code>.lf/prompts/…-changes.md</code>, which appears in the context listing as a path.
+In three haiku runs the agent never opened it and ran its own <code>git diff</code>. On the
+branch with only uncommitted work it answered "The <code>small2</code> branch adds nothing
+beyond <code>main</code>" while the unread file listed three changed files. Before this branch
+the file held one sentence, so nothing regressed, but the flag does less than it reads. Putting
+the section in the first turn is a delivery decision, recorded in <code>scratch/questions.md</code>.</li>
+<li><code>--diff patch</code> on a branch with commits shows only what is committed; uncommitted
+work on top is absent. Documented behavior, unchanged.</li>
+<li><code>gather_branch_change</code> treats only a branch named <code>main</code> as the default
+branch. Unchanged by this branch.</li>
+</ol>

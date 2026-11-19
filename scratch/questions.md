@@ -24,3 +24,11 @@ Made headless at kickoff and concept review; each is reversible. Detail in
   launch. Was a launch-time copy what the old sentence meant to avoid?
 - With `diff_files` and no `diff`, the `changes` file still says `git diff
   main...HEAD`, whatever the default branch is. Left alone.
+- qa, 2026-11-18: with `--diff patch` a haiku agent never opened the `changes`
+  file in three runs; it ran its own `git diff`, and on a branch with only
+  uncommitted work it answered "adds nothing beyond `main`". The file is in
+  the context listing by path only. Put the section in the first turn, as
+  `--docs` bodies are, or keep it a listed file? Left as a listed file; the
+  docs now say so.
+- An uncommitted change now lists untracked files, marked "no patch: read the
+  file". Their contents are not inlined. Inline small ones?

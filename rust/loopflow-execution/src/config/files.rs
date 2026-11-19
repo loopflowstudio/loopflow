@@ -13,7 +13,8 @@ use super::{settings::SettingScope, ConfigSource};
 
 /// Your own settings for a clone, beside the committed `.lf/config.yaml`.
 pub const PRIVATE_FILE: &str = ".lf/config.local.yaml";
-/// Where that file lived through 0.16, loose in the checkout root.
+/// Where that file lived through 0.16, loose in the checkout root. Task b108f6
+/// removes this path and the move in `private_path`.
 const FORMER_PRIVATE_FILE: &str = "lf.config.local.yaml";
 
 /// The main checkout's private settings file. One left at the former path

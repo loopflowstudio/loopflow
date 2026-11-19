@@ -46,7 +46,7 @@ One PR, Swift plus Rust for a served read, a setting and the private settings fi
   - **File bar** above the stream holds the header of the file under the top
     edge (`ReviewFileTitle`, the same view as the in-stream header).
   - `ReviewStepper` (`]`/`[`, arrows) crosses files; Focus shows one file with
-    a strip naming how many are hidden; Unified / Side by side (≥ 640 pt,
+    a strip reading "Only X · N more files"; Unified / Side by side (≥ 640 pt,
     disabled with its reason below); word emphasis; within-file moves collapsed
     with expand; landing flash; `End of changes`.
   - **Skipped lines**: the row between hunks opens the unchanged lines
@@ -143,14 +143,6 @@ Stays different on purpose:
   ("always filter tests/") and is revealed by one toggle. Neither writes into
   the other; both stay in the count ("4 of 9 files").
 
-Wording repairs for the next implement or compress pass (no behaviour):
-
-- Focus's strip says "· 8 other files hidden", a third meaning of "hidden"
-  beside the two lists. Say what Focus does: "Only X · 8 more files".
-- `["scratch/"]` is written twice, as `diff_hidden`'s catalog default and as
-  `TaskFilesStore.hiddenPaths`' starting value. The Swift copy is what the Diff
-  hides before the setting is read and when the read fails.
-
 Open, for the person at the demo (not answered by any recorded decision):
 
 1. What is the pane called? It has four names: **Toggle Browser** (View menu
@@ -179,8 +171,9 @@ Open, for the person at the demo (not answered by any recorded decision):
 - The released `lf` reads private settings at `lf.config.local.yaml`; once a
   branch build moves the file, the released one stops seeing them until it
   ships. Not checked: what the released `lf` prints on the unknown
-  `diff_hidden` key. The former-path move in `config/files.rs` names no Task
-  that removes it.
+  `diff_hidden` key. Task b108f6 removes the former-path move in
+  `config/files.rs` (filed locally; its Linear export was queued behind a rate
+  limit).
 - `global_commands::open_delivers_exact_task_to_desktop_without_preparing_its_execution`
   failed on this Machine in an isolated home ("No agent selected ... exactly
   one supported harness must be installed"); not run on unmodified code. CI
@@ -245,4 +238,4 @@ files:
   page and Task switches.
 - No GitHub patch renderer remains.
 
-Check (compress, November 19): `scripts/test_desktop.sh --filter 'TaskFilesTests|ReviewDiffTests|TaskBriefTests|PullRequestTests'` → 52 passed; `cargo test -p loopflow-execution --lib config::files::` → 13 passed. Gate/CI: clippy, `documented_commands::`, golden, the full swift suite, `global_commands`. Demo: the pane on screen.
+Check (implement, November 19, after the merge of main `932702681e`): `scripts/test_desktop.sh --filter 'TaskFilesTests|ReviewDiffTests|TaskBriefTests|PullRequestTests'` → 52 passed; `cargo test -p loopflow-execution --lib config::` → 104 passed. Gate/CI: clippy, `documented_commands::`, golden, the full swift suite, `global_commands`. Demo: the pane on screen.

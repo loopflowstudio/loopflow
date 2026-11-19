@@ -899,7 +899,9 @@ final class TaskFilesStore {
     // MARK: Hidden paths and order
 
     /// Paths the Diff leaves out: a changed file is hidden when its path contains
-    /// one of these, ignoring case. The `diff_hidden` setting; this is its default.
+    /// one of these, ignoring case. The `diff_hidden` setting once the Diff has read
+    /// it; until then and when that read fails, this copy of its catalog default
+    /// (`diff_hidden` in `rust/loopflow-execution/src/config/catalog.rs`).
     var hiddenPaths = ["scratch/"] { didSet { arrange() } }
     /// Read the hidden files too, without forgetting what is hidden.
     var showsHidden = false { didSet { arrange() } }

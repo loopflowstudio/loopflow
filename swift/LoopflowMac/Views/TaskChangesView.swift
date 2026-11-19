@@ -305,7 +305,7 @@ struct TaskChangesView: View {
         if let focused = store.focusedPath, let review = store.shownReview {
             HStack(spacing: 6) {
                 Text("Only \((focused as NSString).lastPathComponent)").font(Typography.strong(11))
-                Text(review.files.count == 2 ? "· 1 other file hidden" : "· \(review.files.count - 1) other files hidden")
+                Text(review.files.count == 2 ? "· 1 more file" : "· \(review.files.count - 1) more files")
                     .font(Typography.caption(11)).foregroundStyle(palette.textSecondary)
                 Spacer(minLength: 4)
                 Button { toggleFocus() } label: { Image(systemName: "xmark").font(.system(size: 9, weight: .semibold)) }

@@ -162,3 +162,12 @@ Made for review:
 - The migration file is renamed `task_auto.sql`. A dev store that applied the `task_graph_auto` draft is rebuilt, not upgraded.
 - A moved Task's mark replaces whatever the receiver held, including with nothing (`place_moved_task_auto`), and writes no "auto on:" history line there; `set_task_auto` would have kept a stale mark from an earlier stay.
 - `served_reads` asserted "a Task with no Graph saved a stop" as wrong; it now asserts the off is kept.
+
+## Human review (2026-11-19, nobody there)
+
+Page: `scratch/human-review.html`, at `2d4708c391`. Nobody replied; nothing here is a reaction.
+- Run on a fresh world (`/tmp/lfhr968`, stopped) with the branch `lf` built at this head: `lf ship` names nothing, `auto off` before a run reads `idle · auto: off by Demo`, `auto on` reads `moving · auto: on by Demo`.
+- The debug `LoopflowMac` in `live` mode on that world showed the Auto badge on the sidebar row with auto on and none on the off row. It needs `lf` beside `swift/.build/debug/LoopflowMac`, and serves no `lf desktop` socket, so the Task page's toggle is still unseen.
+- Filed backlog Task 014b7b "Auto off means one thing: you take the interactive steps" for the concept review's leftovers, in one Task. Reverse by abandoning it.
+- PR #1976's suites all read SKIPPED at this head; gate.
+- Open Tasks that name what this deletes: LOO-674, LOO-653, LOO-893. Left alone.

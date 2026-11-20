@@ -1,4 +1,5 @@
 pub mod agent_process;
+pub mod antigravity;
 pub mod claude;
 pub(crate) mod claude_trust;
 #[cfg(unix)]
@@ -320,6 +321,7 @@ pub fn launcher(kind: HarnessKind) -> &'static dyn Launcher {
         HarnessKind::Codex => &loopflow_harness::Codex,
         HarnessKind::OpenCode => &loopflow_harness::OpenCode,
         HarnessKind::Pi => &loopflow_harness::Pi,
+        HarnessKind::Antigravity => &loopflow_harness::Antigravity,
     }
 }
 
@@ -349,7 +351,6 @@ impl ThreadNaming {
 pub struct Capabilities {
     pub thread: ThreadNaming,
     pub initial_prompt_on_resume: bool,
-    pub classifies_failures: bool,
     pub native_skills: Option<crate::skills::catalog::SkillDialect>,
     pub turn_limit: bool,
     pub output_schema: bool,
@@ -419,10 +420,61 @@ impl Launch<'_> {
     }
 }
 
+/// A provider hook's callback, read by the harness whose provider sent it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct HookCallback {
+    /// Where in the conversation the hook ran.
+    pub moment: crate::context_block::ContextMoment,
+    /// The callback in the shape Claude sends: `session_id`,
+    /// `hook_event_name` and, at a start, `source`.
+    pub payload: serde_json::Value,
+    /// A start that is also the prompt opening a turn, for a provider with
+    /// no hook of its own at a prompt.
+    pub prompt: bool,
+}
+
 /// Launching and driving a harness, and joining what it wrote to Loopflow's
 /// store and the process table.
 pub trait Launcher: Harness {
     fn capabilities(&self) -> Capabilities;
+    /// What an error this harness's decoder reported says went wrong, for the
+    /// failures the provider leaves to lf: a spent quota, a revoked login or
+    /// an unserved model moves the run to the next agent in its order, and a
+    /// transient failure is retried. `None` for an error that names no cause,
+    /// and for a failure the provider retries itself.
+    fn classify_failure(&self, code: &str, message: &str) -> Option<crate::agent::AgentFailure>;
+    /// What a hook callback from this harness's provider means: the moment
+    /// it ran at and the conversation it names. `declared` is the moment its
+    /// hook declared; `thread_file` is where the launch keeps the
+    /// conversation the person is in (`context_block::reported_thread_path`),
+    /// and an implementation whose provider names the conversation only here
+    /// writes it there whenever a person's input reaches another one. `None`
+    /// when the callback is not a conversation a person's input reached: lf answers
+    /// nothing, records no boundary and claims no steers. The default reads
+    /// a callback that has Claude's shape and ran at the moment its hook
+    /// declared; one with an `agent_id` is a subagent's.
+    fn hook_callback(
+        &self,
+        payload: serde_json::Value,
+        declared: crate::context_block::ContextMoment,
+        _thread_file: Option<&std::path::Path>,
+    ) -> Option<HookCallback> {
+        payload
+            .get("agent_id")
+            .is_none_or(serde_json::Value::is_null)
+            .then_some(HookCallback {
+                moment: declared,
+                payload,
+                prompt: false,
+            })
+    }
+    /// The reply to the hook named `event` that puts `text` in front of the
+    /// model; Claude's shape by default.
+    fn hook_reply(&self, event: &str, text: &str) -> serde_json::Value {
+        serde_json::json!({"hookSpecificOutput": {
+            "hookEventName": event, "additionalContext": text,
+        }})
+    }
     fn open(&self, launch: &Launch<'_>) -> Result<native_session::NativeClient>;
     fn driver(
         &self,
@@ -455,9 +507,13 @@ pub trait Launcher: Harness {
     fn provider(&self) -> Option<crate::provider_auth::Provider> {
         None
     }
+    /// Whether this harness's CLI is on `PATH`.
+    fn installed(&self) -> bool {
+        crate::os_process::which_on_path(std::path::Path::new(self.program())).is_some()
+    }
     /// Whether a running process is this client's terminal program.
     fn recognizes(&self, process: &crate::process::OsProcess) -> bool {
-        process.command == self.kind().as_str()
+        process.command == self.program()
     }
     fn locate_transcript(
         &self,

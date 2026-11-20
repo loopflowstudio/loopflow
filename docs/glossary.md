@@ -28,7 +28,7 @@ Every term the docs use, in one plain sentence.
 | **Holder** | The process beside the server that keeps held work-session terminals and Desktop shells alive across `lf install`. |
 | **Data directory** | Local Loopflow state (`~/.lf` by default; `LF_HOME` overrides it). |
 | **Steer** | A message sent to running or idle work to redirect it at its next turn or step. |
-| **Harness** / **provider** | The coding agent Loopflow drives: Claude Code, Codex, OpenCode, or Pi. |
+| **Harness** / **provider** | The coding agent Loopflow drives: Claude Code, Codex, OpenCode, Pi, or Antigravity. |
 | **Scratch** | The `scratch/` directory for temporary working notes; `lf scratch clear` removes added files on submit/land. |
 
 Work session, worker, chat, and batch are launch kinds; a Session can change

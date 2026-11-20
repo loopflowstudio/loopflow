@@ -155,7 +155,9 @@ This works for raw conversations too. Loopflow reads the tail of each provider's
 own transcript read-only (`~/.claude/projects`, `~/.codex/sessions`,
 `~/.pi/agent/sessions`, `~/.local/share/opencode/opencode.db`), so even plain
 `claude`, `codex`, `pi`, or `opencode` sessions you started outside `lf` appear
-marked `raw` with live turn status. Pass `--no-raw` to hide them.
+marked `raw` with live turn status. Antigravity conversations lf launched are
+read from `~/.gemini/antigravity-cli/brain`; a plain `agy` is not listed,
+because its transcript does not say which directory it ran in. Pass `--no-raw` to hide them.
 
 To adopt a raw conversation into Loopflow, pass its provider ID to `lf resume`:
 
@@ -198,8 +200,8 @@ lf session steers <session>                          # pending vs. delivered
   tool call or turn).
 - **Idle work sessions** (Claude or Codex held by the server) wake
   automatically when a steer, Task comment, or Graph step update arrives, with no
-  per-conversation watcher process required. Pi and OpenCode hear updates at
-  their next boundary.
+  per-conversation watcher process required. Pi, OpenCode and Antigravity hear
+  updates at their next boundary.
 - **Chats** are never woken while idle; in a Task checkout they receive updates
   on their next turn.
 

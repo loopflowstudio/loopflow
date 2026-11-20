@@ -414,3 +414,78 @@ fn opencode_run_preserves_output_and_tools_and_leaves_usage_to_the_transcript() 
         .usage;
     assert_eq!(usage.input_tokens, None);
 }
+
+/// Each harness reads its own provider's refusal, as the provider worded it.
+#[test]
+fn each_harness_classifies_its_own_refusals() {
+    use super::HarnessKind::{Antigravity, Claude, Codex, OpenCode, Pi};
+    use crate::agent::AgentFailure::{CredentialInvalidated, ModelUnavailable, UsageLimit};
+    for (harness, code, message, failure) in [
+        // `~/.lf/runs/6c/6c7c…/opencode.stderr.log`.
+        (
+            OpenCode,
+            "opencode_error",
+            "Insufficient balance. This request is pay-as-you-go, billed to OpenCode Models credits. Top up at https://opencode.ai/console/billing?credits=1.",
+            UsageLimit,
+        ),
+        // `opencode run -m opencode/no-such-model-xyz`, 2.0.32.
+        (
+            OpenCode,
+            "opencode_error",
+            "Model unavailable: opencode/no-such-model-xyz",
+            ModelUnavailable,
+        ),
+        (Pi, "pi_error", "Your refresh token was revoked", CredentialInvalidated),
+        // `agy` 1.5.13, signed out and with an unknown `--model`.
+        (
+            Antigravity,
+            "antigravity_error",
+            "authentication failed or timed out",
+            CredentialInvalidated,
+        ),
+        (
+            Antigravity,
+            "antigravity_error",
+            "Error: authentication required. Run 'agy' to log in, then retry.",
+            CredentialInvalidated,
+        ),
+        (
+            Antigravity,
+            "antigravity_error",
+            "invalid model selection (--model \"no-such-model-xyz\" --effort \"\"): model no-such-model-xyz is not recognized as a known model or custom model in settings",
+            ModelUnavailable,
+        ),
+        // From the binary's strings; no quota refusal has been seen live.
+        (
+            Antigravity,
+            "antigravity_error",
+            "You have exhausted your quota on this model.",
+            UsageLimit,
+        ),
+        (Antigravity, "antigravity_error", "RESOURCE_EXHAUSTED", UsageLimit),
+        (Claude, "provider_rate_limited", "rejected: seven_day", UsageLimit),
+        (Codex, "provider_model_unavailable", "", ModelUnavailable),
+    ] {
+        assert_eq!(
+            super::launcher(harness).classify_failure(code, message),
+            Some(failure),
+            "{harness:?}: {message}"
+        );
+    }
+}
+
+/// Claude and Codex leave a transient failure to lf; the others retry their own.
+#[test]
+fn a_transient_failure_is_lfs_to_retry_only_where_the_provider_does_not() {
+    use loopflow_harness::HarnessKind;
+    for harness in HarnessKind::ALL {
+        let retried = super::launcher(harness)
+            .classify_failure("fixture_error", "connection reset")
+            .is_some();
+        assert_eq!(
+            retried,
+            matches!(harness, HarnessKind::Claude | HarnessKind::Codex),
+            "{harness:?}"
+        );
+    }
+}

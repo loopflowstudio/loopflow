@@ -44,11 +44,11 @@ work legible; they do not contain hostile code, skills, hooks, or MCP servers.
   config and approval prompts apply.
 - **Headless launches** apply an automation floor so unattended runs don't
   hang: Codex gets `workspace-write` and `approval_policy = "never"`, Claude
-  skips permission prompts, OpenCode runs with `--auto`, and Pi uses its own
-  unsandboxed tools. More-permissive vendor configs are never downgraded.
+  skips permission prompts, OpenCode runs with `--auto`, Antigravity skips
+  permission prompts, and Pi uses its own unsandboxed tools. More-permissive vendor configs are never downgraded.
 - **Headless Task runs** (`lf task run`, `lf task auto on`, and `lf -b <skill>` in a
-  Task checkout) run as `yolo` on all four harnesses and can write anywhere the
-  OS user can. See [Configuration](config.md#permissions-yolo-and-worktree-sandboxes).
+  Task checkout) run as `yolo` on all five harnesses and can write anywhere the
+  OS user can. See [Configuration](config.md#permissions-yolo-and-worktree-access).
 
 ## Credentials over SSH
 

@@ -8,7 +8,7 @@ streams), and every agent Loopflow launches receives the operating contract
 
 ## Teach an external coding agent to drive `lf`
 
-If you run Claude Code, Codex, OpenCode, or Pi directly outside `lf`, install
+If you run Claude Code, Codex, OpenCode, Pi, or Antigravity directly outside `lf`, install
 the Loopflow skill once:
 
 ```bash

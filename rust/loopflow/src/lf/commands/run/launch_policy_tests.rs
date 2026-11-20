@@ -256,7 +256,7 @@ fn launch_bypass_and_chrome_take_the_command_line_then_personal_then_repository(
     }
     // Every harness reads the same setting; its argv mapping is a row in
     // `agent::session::tests`.
-    for harness in ["codex", "opencode", "pi"] {
+    for harness in ["codex", "opencode", "pi", "antigravity"] {
         for (repository_yolo, flags, expected) in [
             (false, &[][..], false),
             (true, &[], true),

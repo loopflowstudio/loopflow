@@ -3,6 +3,7 @@
 //! transcript is and how long its provider keeps it are derived here when
 //! read; which Session a conversation belongs to is execution's to say.
 
+pub mod antigravity;
 pub(crate) mod claude;
 pub(crate) mod codex;
 pub mod live;
@@ -128,7 +129,10 @@ impl Source {
     pub fn last_written(&self) -> Option<i64> {
         match self {
             Self::File(path) => json_lines(path)
-                .filter_map(|row| unix_seconds(&row["timestamp"]))
+                .filter_map(|row| {
+                    // Antigravity dates a row `created_at`.
+                    unix_seconds(&row["timestamp"]).or_else(|| unix_seconds(&row["created_at"]))
+                })
                 .last(),
             Self::OpenCode { store, id } => opencode::last_written(store, id),
         }

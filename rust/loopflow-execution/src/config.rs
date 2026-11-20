@@ -11,9 +11,8 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
-#[cfg(not(test))]
-use crate::agent::check_cli_available;
 use crate::error::LoadError;
+use loopflow_harness::HarnessKind;
 
 pub mod catalog;
 mod definitions;
@@ -165,17 +164,17 @@ pub(crate) fn resume_choice(provider: &str, model: Option<&str>, selected: Optio
 /// Select automatically only when exactly one supported harness is installed.
 pub fn default_agent() -> Option<&'static str> {
     #[cfg(test)]
-    let is_installed = |agent: &str| agent == loopflow_harness::HarnessKind::Codex.as_str();
+    let is_installed = |agent: HarnessKind| agent == HarnessKind::Codex;
     #[cfg(not(test))]
-    let is_installed = check_cli_available;
+    let is_installed = |kind: HarnessKind| crate::harness::launcher(kind).installed();
     installed_agent(is_installed)
 }
 
-fn installed_agent(is_installed: impl Fn(&str) -> bool) -> Option<&'static str> {
-    let mut installed = loopflow_harness::HarnessKind::ALL
+fn installed_agent(is_installed: impl Fn(HarnessKind) -> bool) -> Option<&'static str> {
+    let mut installed = HarnessKind::ALL
         .into_iter()
-        .map(loopflow_harness::HarnessKind::as_str)
-        .filter(|agent| is_installed(agent));
+        .filter(|agent| is_installed(*agent))
+        .map(HarnessKind::as_str);
     let only = installed.next()?;
     installed.next().is_none().then_some(only)
 }
@@ -498,20 +497,20 @@ pub(crate) fn agent_list(value: &str) -> impl Iterator<Item = &str> {
 /// A selected harness and its provider model.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Agent {
-    pub harness: loopflow_harness::HarnessKind,
+    pub harness: HarnessKind,
     pub model: Option<String>,
 }
 
 impl Agent {
     pub fn parse(value: &str) -> Result<Self, LoadError> {
         let (name, model) = parse_agent(value);
-        let harness = loopflow_harness::HarnessKind::parse(&name)
-            .ok_or_else(|| LoadError::InvalidAgent(value.to_owned()))?;
+        let harness =
+            HarnessKind::parse(&name).ok_or_else(|| LoadError::InvalidAgent(value.to_owned()))?;
         Ok(Self { harness, model })
     }
 
     pub fn with_configured_model(mut self, config: &Config) -> Self {
-        if self.harness == loopflow_harness::HarnessKind::Claude && self.model.is_none() {
+        if self.harness == HarnessKind::Claude && self.model.is_none() {
             self.model = config.claude.model.clone();
         }
         self
@@ -960,7 +959,10 @@ mod tests {
 
     #[test]
     fn default_agent_is_the_one_installed() {
-        assert_eq!(installed_agent(|agent| agent == "claude"), Some("claude"));
+        assert_eq!(
+            installed_agent(|agent| agent == HarnessKind::Claude),
+            Some("claude")
+        );
         assert_eq!(installed_agent(|_| true), None);
         assert_eq!(installed_agent(|_| false), None);
     }
@@ -1015,7 +1017,7 @@ mod tests {
 
     #[test]
     fn bare_harnesses_defer_model_selection_to_the_provider() {
-        for harness in ["claude", "codex", "opencode", "pi"] {
+        for harness in HarnessKind::ALL.map(HarnessKind::as_str) {
             assert_eq!(parse_agent(harness), (harness.to_string(), None));
         }
     }

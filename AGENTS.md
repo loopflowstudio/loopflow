@@ -292,6 +292,10 @@ Session history as a `store-gap` observation when the store answers again.
 Codex clients reach their private app-server directly; lf only observes beside
 them.
 
+A harness's permission and sandbox choices are settled in this order: the
+agent is not handcuffed, then the simplest, then what the other harnesses do.
+Make the choice; don't leave it as a question.
+
 **`*.rs`:**
 - Delete dead code; don't comment it out. Intentionally unused code (FFI, PyO3) gets `#[allow(dead_code)]` with a comment saying why.
 - Explicit imports in submodules, not `use super::*`.

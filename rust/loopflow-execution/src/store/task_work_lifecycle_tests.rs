@@ -144,6 +144,8 @@ fn defer_holds_the_lifecycle_and_a_run_is_moving_whatever_its_auto_setting() {
         .finish_run(RunOwner::TaskCarrier, &by, 2, Some(0), None)
         .unwrap();
     assert_eq!(state(), crate::durable::TaskState::Idle);
+    // Recovery can hold an observation from before the carrier cleared its pid.
+    assert!(!store.count_task_run_restart(&task, &by, 0).unwrap());
 }
 
 #[test]

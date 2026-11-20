@@ -1079,7 +1079,9 @@ impl SqliteStore {
 
     /// Show the Task's pull request in its tracker: `state` is what the PR
     /// line says (Open, Merged, Abandoned). Returns the action id, or `None`
-    /// when no tracker carries the Task. A later state replaces an unsent one.
+    /// when no tracker carries the Task. A later state replaces an unsent one;
+    /// the same state again is the action that already carries it, sent or
+    /// not, so a push or refresh with nothing new to say queues nothing.
     pub fn enqueue_pr_link(
         &self,
         task: &TaskId,
@@ -1090,6 +1092,23 @@ impl SqliteStore {
     ) -> StoreResult<Option<String>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let subject = format!("{PR}{url}");
+        let latest: Option<(String, String)> = tx
+            .query_row(
+                "SELECT id, value_json FROM tracker_actions
+                 WHERE task_id=?1 AND subject=?2 AND kind='link'
+                   AND phase IN ('queued','sent','confirmed')
+                 ORDER BY seq DESC LIMIT 1",
+                params![task.as_str(), subject],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
+        if let Some((id, carried)) = latest {
+            let carried: Value = serde_json::from_str(&carried)?;
+            if carried["number"] == number && carried["state"] == state {
+                return Ok(Some(id));
+            }
+        }
         let value = serde_json::json!({
             "number": number,
             "state": state,
@@ -1099,7 +1118,7 @@ impl SqliteStore {
             &tx,
             &ActionOwner::Task(task.clone()),
             ActionKind::Link,
-            Some(&format!("{PR}{url}")),
+            Some(&subject),
             &value,
             None,
         )?;
@@ -1525,6 +1544,43 @@ mod tests {
         let action = &store.tracker_actions_for(&ActionOwner::Task(task)).unwrap()[0];
         assert_eq!(action.phase, ActionPhase::Conflicted);
         assert_eq!(action.conflict, Some(json!("theirs")));
+    }
+
+    #[test]
+    fn a_pr_link_is_queued_once_per_state() {
+        const URL: &str = "https://github.com/acme/repo/pull/7";
+        let (_dir, store) = store();
+        let task = task(&store, true);
+        let link = |state: &str| {
+            store
+                .enqueue_pr_link(&task, URL, 7, state, None)
+                .unwrap()
+                .unwrap()
+        };
+
+        // Waiting to be sent, then shown: each refresh is the same action.
+        let open = link("Open");
+        assert_eq!(link("Open"), open);
+        store
+            .resolve_tracker_action(
+                &open,
+                &Resolution::Confirmed {
+                    revision: None,
+                    remote_id: Some("att-1".into()),
+                },
+            )
+            .unwrap();
+        assert_eq!(link("Open"), open);
+        assert!(store
+            .unconfirmed_tracker_actions("/repo")
+            .unwrap()
+            .is_empty());
+
+        let merged = link("Merged");
+        assert_ne!(merged, open);
+        assert_eq!(link("Merged"), merged);
+        let actions = store.tracker_actions_for(&ActionOwner::Task(task)).unwrap();
+        assert_eq!(actions.len(), 2);
     }
 }
 

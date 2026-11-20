@@ -511,7 +511,7 @@ extension TaskSection {
     func color(in palette: LoopflowPalette) -> Color {
         switch self {
         case .working: palette.accent
-        case .backlog, .autonomous, .done, .abandoned: palette.textTertiary
+        case .backlog, .done, .abandoned: palette.textTertiary
         }
     }
 }

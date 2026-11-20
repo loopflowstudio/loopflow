@@ -250,6 +250,7 @@ def _record_rollout(home: Path, args: list[str], thread: str) -> None:
     """A bare first prompt leaves a rollout an app-server can resume."""
     if "resume" in args or "--" not in args or args[-1] == "--":
         return
+    _write_rollout(thread, os.getcwd())
     prompt = args[args.index("--") + 1]
     (home / "native-thread").write_text(thread)
     turn = {
@@ -259,6 +260,15 @@ def _record_rollout(home: Path, args: list[str], thread: str) -> None:
                    "content": [{"type": "text", "text": prompt}]}],
     }
     (home / "native-turns.json").write_text(json.dumps([turn]))
+
+
+def _write_rollout(thread: str, cwd: "str | None") -> None:
+    native_home = Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex")
+    sessions = native_home / "sessions" / "2026" / "01" / "01"
+    sessions.mkdir(parents=True, exist_ok=True)
+    (sessions / f"rollout-{thread}.jsonl").write_text(json.dumps({
+        "type": "session_meta", "payload": {"id": thread, "cwd": cwd},
+    }) + "\n")
 
 
 def _server(endpoint: str, home: Path) -> None:
@@ -338,9 +348,10 @@ def _server(endpoint: str, home: Path) -> None:
                     result = {}
                     if method in ("thread/start", "thread/resume", "thread/fork"):
                         if method in ("thread/start", "thread/fork"):
-                            thread = "thread-" + uuid.uuid4().hex
+                            thread = str(uuid.uuid4())
                             turns = []
                             thread_file.write_text(thread)
+                            _write_rollout(thread, params.get("cwd"))
                             service_tier = server_config.get(
                                 "service_tier", _inherited(home)["config"]["service_tier"]
                             )
@@ -417,8 +428,14 @@ def _server(endpoint: str, home: Path) -> None:
     with socket.socket(socket.AF_UNIX) as listener:
         listener.bind(endpoint)
         listener.listen()
-        while True:
-            client, _ = listener.accept()
+        release = home / "release-child-tier-server"
+        if (home / "check-child-tiers").exists():
+            listener.settimeout(0.1)
+        while home.is_dir() and not release.exists():
+            try:
+                client, _ = listener.accept()
+            except socket.timeout:
+                continue
             threading.Thread(target=serve, args=(client,), daemon=True).start()
 
 

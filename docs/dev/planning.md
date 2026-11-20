@@ -587,7 +587,7 @@ it left the Task: before the interactive step it stopped at, or `end`. With no
 run, `lf task run` continues after the step the Task waits at; `--from STEP` (a
 step id, skill or composed graph name) starts anywhere, and starting from an
 interactive step only puts the Task there. `-b task run` runs
-straight through headless, and `lf ship` repeats it until `end`. Other Graphs in
+straight through headless, and `lf task auto on` turns auto on and runs it. Other Graphs in
 the checkout never move the Task. Graph processes and Task events keep the
 history; there is no move log.
 
@@ -599,10 +599,10 @@ attempts settlement. Failed settlement retains end and its reason; retry only
 Accepted Linear completion or reopening updates status without moving the graph
 or terminating Processes. Reopening supersedes old requests. Ordinary reads do
 not execute completion. Task state is derived: `active` at an interactive step
-with nothing running, `moving` while a run carries it with an interactive step
-ahead, `shipping` once Auto-Ship is approved and running; abandonment is its own mark.
-An unfinished Graph or step in the Task's work also makes it `moving` (or
-`shipping` when approved), including a Graph started before checkout adoption.
+with nothing running, `moving` while a run carries it, whatever its auto
+setting; abandonment is its own mark.
+An unfinished Graph or step in the Task's work also makes it `moving`,
+including a Graph started before checkout adoption.
 That execution does not add the Graph to the Task's history.
 
 On-demand team checks acquire issue membership/state independently of

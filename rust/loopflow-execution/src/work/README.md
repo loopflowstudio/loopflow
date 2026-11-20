@@ -17,9 +17,10 @@ ordinary focus leaves the primary Session as its face.
 
 Repository scope comes from the current repository or `--repo`/`--repository`.
 The bounded syntax supports `wave:`, `task:`, `query:`, `kind:task|wave`, and
-`state:open|available|busy|blocked|unstarted|idle|active|moving|shipping|backlog|working|autonomous|done`
-(`available`, `busy`, `blocked` read Task Sessions; the rest the Task). `working`,
-`backlog`, `autonomous` and `done` are the board's sections; `open` is any owned
+`state:open|available|busy|blocked|unstarted|idle|active|moving|backlog|working|done|auto`
+(`available`, `busy`, `blocked` read Task Sessions; the rest the Task; `auto` is
+an open Task whose auto setting is on). `working`,
+`backlog` and `done` are the board's sections; `open` is any owned
 or published Task not yet finished, including owned Tasks still in Backlog. Whitespace means
 AND; OR and parentheses compose expressions. Quote values containing spaces.
 Repository is never a predicate. Task IDs, issue identifiers and unambiguous
@@ -131,5 +132,5 @@ Select `--session` to keep the chat and linked checkout, or `--worktree` for
 the checkout alone. Plain `lf task create` files new work; `--run` starts it
 without implicitly adopting anything. `lf session list --json` supplies
 conversation IDs. See
-[Work](../../../../docs/work.md#keep-work-already-in-progress) for shared checkouts,
+[Work](../../../../docs/work.md#adopt-work-already-in-progress) for shared checkouts,
 existing-Task continuation and recovery.

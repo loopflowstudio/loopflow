@@ -9,7 +9,7 @@ import ViewInspector
 @Suite("Sessions store")
 @MainActor
 struct SessionsStoreTests {
-    @Test("Provider switching keeps the Session and prepares an explicit provider launch", arguments: ["claude", "codex", "opencode", "pi"])
+    @Test("Provider switching keeps the Session and prepares an explicit provider launch", arguments: ["claude", "codex", "opencode", "pi", "antigravity"])
     func switchingProviderKeepsSession(agent: String) async throws {
         let store = SessionsStore(repoPath: "/tmp/repo", query: RegistryQuery { _, _ in
             session(id: "main", state: "closed")
@@ -658,7 +658,7 @@ private func session(id: String, state: String, primary: Bool = false) -> String
       "state": "\(wire)", "availability": \(state == "available" ? "\"available\"" : "null"),
       "work_path": "product / Desktop / LOO-291",
       "action": \(sessionActionFixtureJSON(state: wire)),
-      "blocked": false, "title_source": "generated", "task_primary": \(primary), "graph_membership": {"kind": "independent"}, "task_ids": ["task-\(id)"], "agent_process_id": "44444444-4444-4444-8444-444444444444", "turn":null,"raw":false,"terminal_ids": [],
+      "blocked": false, "title_source": "generated", "ended": null, "start": null, "outlook": null, "status_line": null, "task_primary": \(primary), "graph_membership": {"kind": "independent"}, "task_ids": ["task-\(id)"], "agent_process_id": "44444444-4444-4444-8444-444444444444", "turn":null,"raw":false,"terminal_ids": [],
       "open_argv": ["lf", "session", "resume", "\(id)"]
     }
     """

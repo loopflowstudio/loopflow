@@ -35,6 +35,22 @@ impl Operation {
             Self::Server(_) | Self::Measured(_) => None,
         }
     }
+
+    /// Whether this can change the Machine or what runs on it: a write, a
+    /// Session start, a hook's recording, an upload or mobile setup.
+    pub(super) fn changes(&self) -> bool {
+        self.is_write()
+            || matches!(
+                self,
+                Self::Server(
+                    ServerOperation::SessionStart { .. }
+                        | ServerOperation::SessionContinue { .. }
+                        | ServerOperation::SessionBoundary(_)
+                        | ServerOperation::RequestUpload { .. }
+                        | ServerOperation::MobileConfigure { .. }
+                )
+            )
+    }
 }
 
 /// The ordinary operation and its per-request work receipt in one response.
@@ -125,8 +141,10 @@ mod tests {
             include_str!("../../../loopflow-execution/tests/fixtures/dto/server/upload.json"),
             include_str!("../../../loopflow-execution/tests/fixtures/dto/server/ticket.json"),
             include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_run.json"),
-            include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_ship.json"),
-            include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_hold.json"),
+            include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_auto_on.json"),
+            include_str!(
+                "../../../loopflow-execution/tests/fixtures/dto/server/task_auto_off.json"
+            ),
             include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_steer.json"),
             include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_report.json"),
             include_str!(

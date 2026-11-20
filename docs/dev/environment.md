@@ -48,7 +48,7 @@ drops it too, so sessions a person opens by hand inherit none of it.
 ## The caller's session
 
 A conversation sets markers in its own shells: lf's process context above and
-its provider's own. Every provider lf starts (Claude, Codex, OpenCode, Pi, in
+its provider's own. Every provider lf starts (Claude, Codex, OpenCode, Pi, Antigravity, in
 chats, batches, work sessions and workers) drops the caller's, by name, from
 one list (`CALLER_SESSION_ENV`), before applying the new conversation's.
 

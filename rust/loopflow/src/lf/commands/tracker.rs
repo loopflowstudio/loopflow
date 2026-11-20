@@ -143,7 +143,7 @@ pub(crate) struct PlanCarriers {
     hub: Option<HubCarrier>,
 }
 
-/// Git's line: `Plan: Git origin, unreachable since Nov 18 14:02, 3 unsent.`
+/// Git's line: `Plan: Git origin, failing since Nov 18 14:02, 3 unsent.`
 #[derive(Debug, serde::Serialize, schemars::JsonSchema)]
 pub(crate) struct GitCarrier {
     /// The remote's name.
@@ -152,7 +152,7 @@ pub(crate) struct GitCarrier {
     standing: CarrierStanding,
 }
 
-/// The hub's line: `Hub mini, unreachable since Nov 18 14:02, 2 unsent.`
+/// The hub's line: `Hub mini, failing since Nov 18 14:02, 2 unsent.`
 #[derive(Debug, serde::Serialize, schemars::JsonSchema)]
 pub(crate) struct HubCarrier {
     /// The hub's name.
@@ -343,7 +343,7 @@ fn print_plan(plan: &PlanCarriers) {
 fn print_carrier(mut line: String, standing: &CarrierStanding) {
     if let Some(since) = standing.failing_since {
         line.push_str(&format!(
-            ", unreachable since {}",
+            ", failing since {}",
             loopflow_execution::output::format_time(since)
         ));
     }

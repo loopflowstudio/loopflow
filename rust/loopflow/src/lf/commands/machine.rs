@@ -10,7 +10,7 @@ use loopflow_execution::machine::connection::{
     find_machine, install_command, local_machine, probe, report_version, update_command,
     ConnectionFailure, FailureKind, INSTALL_COMMAND,
 };
-use loopflow_execution::machine::ssh::REMOTE_PATH;
+use loopflow_execution::machine::ssh::remote_path;
 use loopflow_execution::store::Store;
 use loopflow_model::durable::{DefaultScope, Machine, MachineDefault, MachineSetting};
 
@@ -415,8 +415,10 @@ fn confirm_install(target: &str) -> anyhow::Result<bool> {
 
 async fn install_remote(target: &str) -> anyhow::Result<()> {
     // Recheck on the target: another add may have installed it while we asked.
-    let command =
-        format!("{REMOTE_PATH}; if ! command -v lf >/dev/null 2>&1; then {INSTALL_COMMAND}; fi");
+    let command = format!(
+        "{}; if ! command -v lf >/dev/null 2>&1; then {INSTALL_COMMAND}; fi",
+        remote_path()
+    );
     let status = tokio::process::Command::new("ssh")
         .args(loopflow_execution::machine_route::bounded_ssh_args(
             target, false,

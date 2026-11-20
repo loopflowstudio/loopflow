@@ -11,6 +11,9 @@
 //! without an account or network; a `gh` answers pull-request reads from files
 //! under `github/pulls/` and refuses everything else, so nothing run inside a
 //! World reaches GitHub; a `launchctl` records launchd jobs instead of loading them.
+//!
+//! [`copy`] makes a World with no recipe: its store is a read-only copy of the
+//! Machine's, which its server serves and refuses to change.
 
 pub mod recipes;
 
@@ -37,21 +40,11 @@ use loopflow_storage::work::task::{Task, TaskEventKind};
 const DAY: i64 = 24 * 60 * 60;
 const GITHUB_REPO: &str = "https://github.com/demo/project";
 
+/// Loopflow Dev's socket under a World's home, the longest path Desktop binds there.
+const DESKTOP_SOCKET: &str = "run/desktop/com.loopflow.mac.dev.sock";
+
 /// The person whose Machine a World is: their config and their commits.
 const PERSON: &str = "Demo";
-
-/// Directories Desktop prepends to a child's `PATH` when absent
-/// (`GUIProcessEnvironment.enrichedPath` in
-/// `swift/LoopflowMac/Services/ProcessEnvironment.swift`). Listing them after
-/// the World's `bin` leaves Desktop nothing to prepend ahead of its `gh`.
-pub(crate) const DESKTOP_PATH: [&str; 6] = [
-    "~/.local/bin",
-    "/opt/homebrew/bin",
-    "/opt/homebrew/sbin",
-    "/usr/local/bin",
-    "/usr/local/sbin",
-    "~/.cargo/bin",
-];
 
 const GH: &str = r#"#!/bin/sh
 # lf-world's GitHub. Answers the pull-request reads Loopflow makes from files
@@ -220,10 +213,9 @@ pub struct WorldEnv {
 impl WorldEnv {
     fn new(dir: &Path) -> Self {
         let home = dirs::home_dir().unwrap_or_default();
-        let desktop = DESKTOP_PATH.map(|entry| match entry.strip_prefix("~/") {
-            Some(rest) => home.join(rest).to_string_lossy().into_owned(),
-            None => entry.to_string(),
-        });
+        // Listing the tool directories after the World's `bin` leaves Desktop
+        // and lf nothing to add ahead of its `gh`.
+        let desktop = loopflow_execution::os_process::tool_dirs(&home);
         let path = std::iter::once(dir.join("bin").to_string_lossy().into_owned())
             .chain(desktop)
             .chain(["/usr/bin", "/bin", "/usr/sbin", "/sbin"].map(String::from))
@@ -235,6 +227,35 @@ impl WorldEnv {
             codex_home: dir.join("codex"),
             path,
         }
+    }
+
+    /// Point this process at the World. A builder launched from an lf
+    /// Session inherits that Session's identity; the world's writes must not
+    /// attribute to it.
+    fn enter(&self) {
+        for (name, _) in std::env::vars_os() {
+            let name = name.to_string_lossy();
+            if name.starts_with("LF_") && name != "LF_BIN" {
+                std::env::remove_var(&*name);
+            }
+        }
+        for (name, value) in self.vars() {
+            std::env::set_var(name, value);
+        }
+    }
+
+    /// What Loopflow Dev cannot do in this World because its directory is too
+    /// long: Desktop serves `lf desktop` from a socket inside the home, and
+    /// past the OS limit it opens without one. `None` when the socket fits.
+    pub fn desktop_socket_notice(&self) -> Option<String> {
+        let socket = self.lf_home.join(DESKTOP_SOCKET);
+        let (length, limit) = (socket.as_os_str().len(), socket_limit());
+        (length > limit).then(|| {
+            format!(
+                "Loopflow Dev opens this world without `lf desktop`: {} is {length} bytes and a socket path holds {limit}. Use a shorter directory.",
+                socket.display()
+            )
+        })
     }
 
     fn vars(&self) -> [(&'static str, &std::ffi::OsStr); 4] {
@@ -267,26 +288,8 @@ impl World {
         if dir.exists() {
             bail!("{} already exists; worlds are built fresh", dir.display());
         }
-        std::fs::create_dir_all(dir)?;
-        let dir = dir.canonicalize()?;
-        let env = WorldEnv::new(&dir);
-        for path in [&env.lf_home, &env.claude_config_dir, &env.codex_home] {
-            std::fs::create_dir_all(path)?;
-        }
-        // A builder launched from an lf Session inherits that Session's
-        // identity; the world's writes must not attribute to it.
-        for (name, _) in std::env::vars_os() {
-            let name = name.to_string_lossy();
-            if name.starts_with("LF_") && name != "LF_BIN" {
-                std::env::remove_var(&*name);
-            }
-        }
-        for (name, value) in env.vars() {
-            std::env::set_var(name, value);
-        }
-        write_executable(&dir, "claude", STUB_CLAUDE)?;
-        write_executable(&dir, "gh", GH)?;
-        write_executable(&dir, "launchctl", LAUNCHCTL)?;
+        let (dir, env) = prepare(dir)?;
+        env.enter();
         std::fs::write(
             env.lf_home.join("config.yaml"),
             format!("user:\n  name: {PERSON}\n"),
@@ -478,6 +481,7 @@ impl World {
             &checkout,
             graph,
             from,
+            false,
             crate::lf::navigation::command_merges,
         )?;
         let Some(start) = start else {
@@ -521,7 +525,6 @@ impl World {
                 &run.id,
                 &loopflow_storage::graph_process::ExecutionStart::reserved(run.started_at),
             ),
-            stops_at == END,
         )? {
             bail!("Task {issue} moved while starting {requested}");
         }
@@ -1041,6 +1044,106 @@ impl World {
     }
 }
 
+/// Replace `dir` with a world holding a read-only copy of this Machine's
+/// store, migrated to this build's schema, and return its environment. The
+/// Machine is the one this process is on: `LF_HOME`, else `~/.lf`. Its store
+/// is read under one read transaction and never written.
+///
+/// # Errors
+/// When the Machine has no store, `dir` holds something other than a world,
+/// or this build cannot migrate the copy.
+pub fn copy(dir: &Path) -> Result<WorldEnv> {
+    let machine = loopflow_execution::store::lf_home_dir();
+    let source = machine.join("loopflow.db");
+    if !source.exists() {
+        bail!(
+            "there is no Machine to copy: {} is absent; `lf-world build <recipe> <dir>` makes a fake world",
+            source.display()
+        );
+    }
+    if dir.exists() {
+        if !dir.join("env.json").exists() {
+            bail!(
+                "{} exists and is not a world; a copy replaces only a world",
+                dir.display()
+            );
+        }
+        if let Ok(home) = dir.join("home").canonicalize() {
+            if home == machine.canonicalize()? {
+                bail!("{} is the Machine being copied", dir.display());
+            }
+            loopflow_execution::installation::server::stop(&home)?;
+        }
+        std::fs::remove_dir_all(dir)?;
+    }
+    let (dir, env) = prepare(dir)?;
+    // Written first, so a copy that was interrupted is still a world the next
+    // one replaces.
+    std::fs::write(
+        dir.join("env.json"),
+        serde_json::to_string_pretty(&env)? + "\n",
+    )?;
+    if let Err(error) = fill(&machine, &env) {
+        // A store that was copied and never sealed is not left behind.
+        let _ = std::fs::remove_dir_all(&dir);
+        return Err(error);
+    }
+    Ok(env)
+}
+
+/// Copy the Machine's stores and configuration into the world at `env`,
+/// migrate them to this build's schema and seal them.
+fn fill(machine: &Path, env: &WorldEnv) -> Result<()> {
+    // The person's name and which repositories the Machine shows.
+    if machine.join("config.yaml").exists() {
+        std::fs::copy(machine.join("config.yaml"), env.lf_home.join("config.yaml"))?;
+    }
+    let stores = ["loopflow.db", "history.db"]
+        .map(|name| (machine.join(name), env.lf_home.join(name)))
+        .into_iter()
+        .filter(|(source, _)| source.exists())
+        .collect::<Vec<_>>();
+    for (source, destination) in &stores {
+        loopflow_storage::copy::snapshot(source, destination)?;
+    }
+    // A private home migrates itself: this open applies the branch's schema.
+    env.enter();
+    drop(loopflow_execution::store::open_sqlite(
+        &env.lf_home.join("loopflow.db"),
+    )?);
+    for (_, destination) in &stores {
+        loopflow_storage::copy::seal(destination)?;
+    }
+    Ok(())
+}
+
+/// Create `dir`, which must not exist, with what every World has: its home,
+/// empty provider homes and the stand-ins in `bin/`. Returns the canonical
+/// directory and its environment. The directory is private to the account: a
+/// copy holds the whole store.
+fn prepare(dir: &Path) -> Result<(PathBuf, WorldEnv)> {
+    use std::os::unix::fs::DirBuilderExt;
+    std::fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(dir)?;
+    let dir = dir.canonicalize()?;
+    let env = WorldEnv::new(&dir);
+    for path in [&env.lf_home, &env.claude_config_dir, &env.codex_home] {
+        std::fs::create_dir_all(path)?;
+    }
+    write_executable(&dir, "claude", STUB_CLAUDE)?;
+    write_executable(&dir, "gh", GH)?;
+    write_executable(&dir, "launchctl", LAUNCHCTL)?;
+    Ok((dir, env))
+}
+
+fn socket_limit() -> usize {
+    // SAFETY: zero is a valid sockaddr_un; only the size of its path is read.
+    let address: libc::sockaddr_un = unsafe { std::mem::zeroed() };
+    address.sun_path.len() - 1
+}
+
 fn create_repo(repo: &Path, origin: &Path) -> Result<()> {
     git(
         None,
@@ -1151,4 +1254,28 @@ fn git(cwd: Option<&Path>, args: &[&str]) -> Result<String> {
         );
     }
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_world_says_when_its_directory_is_too_long_for_desktops_socket() {
+        let limit = socket_limit();
+        let room = limit - Path::new("/w/home").join(DESKTOP_SOCKET).as_os_str().len();
+        let fits = WorldEnv::new(Path::new(&format!("/w{}", "x".repeat(room))));
+        assert_eq!(fits.desktop_socket_notice(), None);
+
+        let dir = format!("/w{}", "x".repeat(room + 1));
+        let notice = WorldEnv::new(Path::new(&dir)).desktop_socket_notice();
+
+        assert_eq!(
+            notice.unwrap(),
+            format!(
+                "Loopflow Dev opens this world without `lf desktop`: {dir}/home/{DESKTOP_SOCKET} is {} bytes and a socket path holds {limit}. Use a shorter directory.",
+                limit + 1
+            )
+        );
+    }
 }

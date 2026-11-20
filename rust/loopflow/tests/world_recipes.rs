@@ -3,7 +3,7 @@ use std::process::{Command, Output, Stdio};
 
 use serde_json::Value;
 
-fn clean(binary: &str, home: &Path) -> Command {
+pub(crate) fn clean(binary: &str, home: &Path) -> Command {
     let mut command = Command::new(binary);
     command
         .env_clear()
@@ -14,7 +14,7 @@ fn clean(binary: &str, home: &Path) -> Command {
     command
 }
 
-fn success(output: Output) -> String {
+pub(crate) fn success(output: Output) -> String {
     assert!(
         output.status.success(),
         "{}",
@@ -372,14 +372,14 @@ fn world_sessions_resume_live_through_the_stub_provider() {
 }
 
 #[test]
-fn one_task_waits_at_human_review_after_planning_and_building() {
+fn one_task_waits_at_ship_review_after_planning_and_building() {
     let built = Built::new("one-task");
     let issue = built.issue_named("Search Session transcripts");
     let graph = built.task_graph(&issue);
     assert_eq!(graph["name"], "feature");
     assert_eq!(
         graph["position"],
-        serde_json::json!({"kind": "at", "step": "human-review"})
+        serde_json::json!({"kind": "at", "step": "ship-review"})
     );
     // `lf task status` says each fact once: the row, then what belongs to it.
     let status = built.lf(&["task", "status", &issue, "--json"]);
@@ -388,7 +388,9 @@ fn one_task_waits_at_human_review_after_planning_and_building() {
     assert_eq!(
         keys,
         [
+            "auto",
             "comments",
+            "conversation",
             "graph_processes",
             "sessions",
             "stack_parent",
@@ -400,7 +402,7 @@ fn one_task_waits_at_human_review_after_planning_and_building() {
     assert_eq!(status["task"]["state"], "active");
     assert_eq!(
         status["task"]["graph"],
-        serde_json::json!({"name": "feature", "step": "human-review"})
+        serde_json::json!({"name": "feature", "step": "ship-review"})
     );
     assert_eq!(status["task"]["next"], format!("lf task run {issue}"));
 
@@ -432,7 +434,7 @@ fn one_task_waits_at_human_review_after_planning_and_building() {
 }
 
 #[test]
-fn portfolio_has_a_stopped_run_and_a_task_waiting_at_human_review() {
+fn portfolio_has_a_stopped_run_and_a_task_waiting_at_ship_review() {
     let built = Built::new("portfolio");
 
     let stopped = built.issue_named("Record a reader floor per migration");
@@ -453,6 +455,6 @@ fn portfolio_has_a_stopped_run_and_a_task_waiting_at_human_review() {
     let graph = built.task_graph(&built.issue_named("Open conversations faster"));
     assert_eq!(
         graph["position"],
-        serde_json::json!({"kind": "at", "step": "human-review"})
+        serde_json::json!({"kind": "at", "step": "ship-review"})
     );
 }

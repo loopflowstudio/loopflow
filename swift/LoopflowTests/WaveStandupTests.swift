@@ -63,19 +63,26 @@ struct WaveStandupTests {
             try task("IDLE", rank: 2, status: "idle", owner: "Jack Heart", selectionStates: ["available"]),
             try task("MOVING", rank: 1, status: "moving", owner: "Jack Heart", reason: "Waiting on CI"),
             try task("MERGED", rank: 3, status: "active", owner: "Jack Heart", pr: "merged"),
-            try task("SHIP", section: "autonomous", rank: 4, status: "shipping", owner: "Jack Heart", selectionStates: ["busy"]),
+            // Auto on is a setting: the Task stays in Working and its row says Auto.
+            try task("AUTO", rank: 4, status: "moving", owner: "Jack Heart", selectionStates: ["busy", "auto"]),
             try task("FRESH", section: "backlog", rank: 5),
             // Started, then unassigned: Rust files it under Backlog, whatever its state.
             try task("HELD", section: "backlog", rank: 0, status: "idle"),
         ]
         let standup = standup(tasks)
         #expect(standup.done.map(\.id) == ["DONE-1"])
-        #expect(standup.working.map(\.id) == ["IDLE", "MOVING", "MERGED"])
+        #expect(standup.working.map(\.id) == ["IDLE", "MOVING", "MERGED", "AUTO"])
         #expect(standup.working[1].note == "Waiting on CI")
         #expect(standup.working[2].note == "merged")
         #expect(standup.working[0].session == .available)
-        #expect(standup.autonomous.map(\.id) == ["SHIP"])
-        #expect(standup.autonomous[0].session == .busy)
+        #expect(standup.working[3].session == .busy)
+        #expect(standup.working.map(\.auto) == [false, false, false, true])
+        #expect(standup.text(heading: [], section: .working).contains("AUTO Task AUTO · Busy · Auto"))
+        _ = try WaveStandupRow(row: standup.working[3], people: false).inspect()
+            .find(viewWithAccessibilityIdentifier: "wave-auto-AUTO")
+        #expect(throws: (any Error).self) {
+            try WaveStandupRow(row: standup.working[0], people: false).inspect().find(text: "Auto")
+        }
         #expect(standup.backlog.map(\.id) == ["FRESH", "HELD"])
         // One person owns everything: a solo Wave shows no pictures.
         #expect(!standup.showsPeople)
@@ -118,7 +125,7 @@ struct WaveStandupTests {
         #expect(standup.showsPeople)
         #expect(standup.working.compactMap(\.person?.initials) == ["JH", "AL"])
         let text = standup.text(heading: WaveStandup.heading(try roadmap()), section: .working)
-        #expect(text.contains("Backlog 0 · [Working 2] · Autonomous 0 · Done 0"))
+        #expect(text.contains("Backlog 0 · [Working 2] · Done 0"))
         #expect(text.contains("A Task A · Jack Heart · Busy"))
         #expect(standup.text(heading: [], section: .done).hasSuffix("Done 0]\n  last 7 days\n  None"))
     }
@@ -234,8 +241,8 @@ struct WaveStandupTests {
         #expect(abs(parts()[0].ratio - 0.7) < 0.0001 && abs(parts()[1].ratio - 0.3) < 0.0001)
         #expect(throws: (any Error).self) { try perform("resize", ["part": "board", "toward": "board", "ratio": "0.5"]) }
         #expect(parts()[0].section == "backlog")
-        try perform("section", ["section": "autonomous"])
-        #expect(parts()[0].section == "autonomous")
+        try perform("section", ["section": "working"])
+        #expect(parts()[0].section == "working")
         #expect(throws: (any Error).self) { try perform("section", ["section": "active"]) }
     }
 

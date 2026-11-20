@@ -4,7 +4,8 @@
 // doesn't include Homebrew, ~/.local/bin, or ~/.cargo/bin. Anything Loopflow
 // shells out to — git and the bundled lf — inherits that, so execvp can't
 // find user-installed binaries. Pipe child envs through `enrichedPath` so they
-// resolve the same binaries the user's shell would.
+// resolve the same binaries the user's shell would. This covers only what Swift
+// starts: lf repairs its own PATH from `os_process::TOOL_DIRS`.
 
 import Foundation
 

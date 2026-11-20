@@ -1568,15 +1568,16 @@ async fn inventory_refresh_retains_unmapped_local_projects() {
 }
 
 #[tokio::test]
-async fn missing_git_task_never_falls_through_to_linear() {
+async fn missing_task_with_an_unavailable_git_carrier_does_not_query_linear() {
     let _lock = crate::journal::test_env_lock();
     let _restore = PlanningEnvironment::isolate();
     let fixture = Fixture::new().await;
+    std::env::set_var("LF_HOME", fixture.directory.path());
     let (repo, _) = fixture.planning_repo().await;
-    // An unavailable synthetic destination cannot select another transport.
-    std::fs::write(
-        repo.join(".lf/config.yaml"),
-        "planning:\n  provider: git\n  remote: missing-fixture\n",
+    std::fs::remove_file(repo.join(".lf/config.yaml")).unwrap();
+    crate::git::git_stdout(
+        &repo,
+        &["remote", "set-url", "origin", "./missing-fixture.git"],
     )
     .unwrap();
     LINEAR_TEST_CONTEXT
@@ -1585,10 +1586,17 @@ async fn missing_git_task_never_falls_through_to_linear() {
                 .await
                 .err()
                 .unwrap();
-            assert!(
-                error.to_string().contains("not found in the Git tracker"),
-                "{error}"
-            );
+            assert_eq!(error.to_string(), "Task \"FIX-404\" not found");
+            let carrier = fixture
+                .store
+                .sqlite
+                .plan_carrier(
+                    repo.to_str().unwrap(),
+                    loopflow_storage::sqlite::plan_carriers::Carrier::Git,
+                )
+                .unwrap()
+                .unwrap();
+            assert!(carrier.error.is_some());
             assert!(fixture.store.list_tasks(None).await.unwrap().is_empty());
         })
         .await;

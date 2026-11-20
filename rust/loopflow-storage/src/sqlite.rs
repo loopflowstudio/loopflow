@@ -50,6 +50,7 @@ mod revisions;
 pub mod scope_defaults;
 pub mod selections;
 mod session_events;
+pub mod session_recovery;
 pub mod sessions;
 mod turns;
 pub use sessions::SessionCaller;
@@ -74,9 +75,9 @@ mod wave_lifecycle;
 pub use children::ClosedTaskPage;
 pub use graph_inventory::{entry_of, AgentLimitRecovery, GraphExecutionFacts, UnrunGraph};
 pub use revisions::{Revisions, StoreRevisions};
-pub use session_events::{AnsweredTurn, CurrentConversation};
+pub use session_events::{AnsweredTurn, CurrentConversation, TurnSpan};
 pub use task_details::TaskDetailFacts;
-pub use task_work::{OpenWork, TaskShipping};
+pub use task_work::{Auto, AutoState, OpenWork};
 
 /// A fleet can legitimately queue longer than SQLite's common five-second
 /// default while every process opens and records its first receipt. Durable

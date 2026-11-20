@@ -27,19 +27,21 @@ impl Machines {
         let home = root.path().join("local");
         let remote = root.path().join("remote");
         fs::create_dir_all(&home).unwrap();
+        fs::create_dir_all(remote.join("bin")).unwrap();
         fs::create_dir_all(remote.join(".local/bin")).unwrap();
         fs::create_dir_all(remote.join("project's checkout")).unwrap();
         fs::create_dir_all(root.path().join("bin")).unwrap();
+        // Put transport doubles on the incoming PATH. The remote preamble
+        // appends .local/bin to find lf, after the system tools.
         executable(
             &root.path().join("bin/ssh"),
             &format!(
                 r#"#!/bin/sh
 for arg in "$@"; do remote_command="$arg"; done
-cd '{}' || exit 1
-exec env -i HOME='{}' PATH=/usr/bin:/bin bash -c "$remote_command"
+cd '{remote}' || exit 1
+exec env -i HOME='{remote}' PATH='{remote}/bin:/usr/bin:/bin' bash -c "$remote_command"
 "#,
-                remote.display(),
-                remote.display()
+                remote = remote.display(),
             ),
         );
         // Credential side effects stay inside the fixture even on macOS.
@@ -135,7 +137,7 @@ esac
         fs::rename(bin.join("lf"), bin.join("lf-published")).unwrap();
         // The download side effect is replaced, not the add/install/probe workflow.
         executable(
-            &bin.join("curl"),
+            &self.root.path().join("remote/bin/curl"),
             &format!(
                 r#"#!/bin/sh
 cat <<'INSTALLER'
@@ -551,11 +553,19 @@ fn broken_existing_lf_and_failed_installer_do_not_register_a_machine() {
         .success());
     assert!(!fixture.root.path().join("installed").exists());
     fs::remove_file(bin.join("lf")).unwrap();
-    executable(&bin.join("curl"), "#!/bin/sh\necho 'exit 1'\n");
+    let attempted = fixture.root.path().join("installer-attempted");
+    executable(
+        &fixture.root.path().join("remote/bin/curl"),
+        &format!(
+            "#!/bin/sh\nprintf '%s\\n' \"touch '{}'\" 'exit 1'\n",
+            attempted.display()
+        ),
+    );
     assert!(!fixture
         .terminal(&["machine", "add", "mini"], "y\n")
         .status
         .success());
+    assert!(attempted.exists());
     assert_eq!(
         fixture.json(&["machine", "list", "--json"]),
         serde_json::json!([])
@@ -635,7 +645,7 @@ fn machine_add_on_the_remote_updates_only_its_registry() {
         ),
     );
     executable(
-        &remote.join(".local/bin/ssh"),
+        &remote.join("bin/ssh"),
         &format!(
             "#!/bin/sh\nprintf 'lf {}\\nhome_33333333333333333333333333333333\\n'\n",
             loopflow::build_info::BUILD_VERSION
@@ -1563,6 +1573,10 @@ fn the_later_change_shows_on_both_machines_through_the_hub() {
     );
 
     // With a hub, a save is on mini when the command returns.
+    let _mini = loopflow_test_support::MachineServer::start(
+        env!("CARGO_BIN_EXE_lf"),
+        &fixture.root.path().join("remote/store"),
+    );
     assert_success(&fixture.run(&["machine", "hub", "mini"]));
     let hub_line = |status: &str| status[status.find("Hub ").expect(status)..].to_owned();
     ok(&["task", "update", &identifier, "--title", "hub smoke"]);
@@ -1585,10 +1599,7 @@ fn the_later_change_shows_on_both_machines_through_the_hub() {
     fs::write(flags.join("down"), "").unwrap();
     ok(&["task", "update", &identifier, "--title", "two"]);
     let offline = hub_line(&ok(&["repo", "tracker"]));
-    assert!(
-        offline.starts_with("Hub mini, unreachable since "),
-        "{offline}"
-    );
+    assert!(offline.starts_with("Hub mini, failing since "), "{offline}");
     assert!(offline.contains(", 1 unsent.\n"), "{offline}");
     assert!(offline.contains(&format!("  {identifier}\n")), "{offline}");
     // The hub is off and Git still carries the change to the teammate.
@@ -1647,7 +1658,7 @@ fn the_later_change_shows_on_both_machines_through_the_hub() {
     assert!(!third.run(&["task", "sync", &identifier]).status.success());
     let refused = teammate(&["repo", "tracker"]);
     assert!(
-        refused.starts_with("Plan: Git origin, unreachable since "),
+        refused.starts_with("Plan: Git origin, failing since "),
         "{refused}"
     );
     assert!(refused.contains(" unsent.\n"), "{refused}");
@@ -3393,8 +3404,8 @@ fn task_move_to_a_mini_without_the_repository_takes_it_in_from_planning() {
     );
 }
 
-/// The laptop's run approved Auto-Ship, and the approval travels in planning.
-/// Once the Task moved back, mini's recovery must not start shipping it.
+/// The laptop's run turned auto on, and it travels with the Task's Graph.
+/// Once the Task moved back, mini's recovery must not start it again.
 #[test]
 fn mini_starts_nothing_for_a_task_that_moved_back() {
     let fixture = preview_machines();
@@ -3434,6 +3445,8 @@ fn mini_starts_nothing_for_a_task_that_moved_back() {
             .output()
             .unwrap();
         assert_success(&output);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(!stderr.contains("did not continue"), "{stderr}");
     };
     move_to("mini");
     assert!(
@@ -3444,33 +3457,32 @@ fn mini_starts_nothing_for_a_task_that_moved_back() {
         wait_step_live(&remote_home.join("loopflow.db")),
         "mini's step never started"
     );
+    let remote_db = remote_home.join("loopflow.db");
+    assert_eq!(
+        first_steps_run(&remote_db, &task),
+        0,
+        "shipping replayed the first step"
+    );
     let laptop = gethostname::gethostname().to_string_lossy().into_owned();
     move_to(laptop.split('.').next().unwrap());
+    assert!(
+        wait_step_live(&local_home.join("loopflow.db")),
+        "the laptop did not resume shipping"
+    );
 
-    // Each Session read on mini runs its recovery, which restarts ship processes.
-    for _ in 0..5 {
-        let read = fixture
-            .command(&["session", "list", "--json"])
-            .env("HOME", fixture.root.path().join("remote"))
-            .env("LF_HOME", &remote_home)
-            .current_dir(fixture.root.path().join("remote"))
-            .stdin(Stdio::null())
-            .output()
-            .unwrap();
-        assert_success(&read);
-        std::thread::sleep(std::time::Duration::from_millis(500));
-    }
-    let remote_db = remote_home.join("loopflow.db");
     assert_eq!(live_graph(&remote_db, &task), None, "a Graph runs on mini");
     let ships: i64 = rusqlite::Connection::open(&remote_db)
         .unwrap()
         .query_row(
-            "SELECT count(*) FROM task_ship_events WHERE pid IS NOT NULL OR ended_at IS NOT NULL",
-            [],
+            "SELECT count(*) FROM graph_processes WHERE task_id=?1",
+            [task.as_str()],
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(ships, 0, "mini started shipping a Task it no longer owns");
+    assert_eq!(
+        ships, 1,
+        "mini should run the Task only once, while it owns the Task"
+    );
 }
 
 /// A Task move that continues a run starts it for real on mini: each home
@@ -3520,8 +3532,10 @@ fn task_move_leaves_a_live_graph_running_on_mini() {
     );
 
     // The Graph was running on mini when the move returned.
-    let graph =
-        live_graph(&remote_db, &task).expect("no live Graph on mini when the move returned");
+    assert!(
+        live_graph(&remote_db, &task).is_some(),
+        "no live Graph on mini when the move returned"
+    );
     // Mini's Graph stands at the step the laptop stopped, not the route's start.
     let stopped_at = stderr
         .lines()
@@ -3550,15 +3564,11 @@ fn task_move_leaves_a_live_graph_running_on_mini() {
     // Once mini's `task wait` runs, a restarted route would already have
     // recorded its `task status` step.
     assert!(wait_step_live(&remote_db), "mini's step never started");
-    let first_steps: i64 = rusqlite::Connection::open(&remote_db)
-        .unwrap()
-        .query_row(
-            "SELECT count(*) FROM graph_process_steps WHERE graph_lf_process_id=?1 AND node=0",
-            [&graph],
-            |row| row.get(0),
-        )
-        .unwrap();
-    assert_eq!(first_steps, 0, "mini ran the route's first step again");
+    assert_eq!(
+        first_steps_run(&remote_db, &task),
+        0,
+        "mini ran the route's first step again"
+    );
 }
 
 /// A move killed after it stopped the Graph, before it pushed: the laptop's
@@ -3800,7 +3810,7 @@ fn start_hold_run(
     )
     .unwrap();
     let mut run = fixture
-        .command(&["-b", "task", "run", task.as_str(), "hold"])
+        .command(&["task", "run", task.as_str(), "hold"])
         .current_dir(worktree)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -3831,7 +3841,7 @@ fn exits_within_ten_seconds(run: &mut std::process::Child) -> bool {
     exited
 }
 
-/// The process id of `task`'s running Graph in `db`.
+/// The carrier id of `task`'s running Graph in `db`.
 fn live_graph(db: &Path, task: &loopflow_execution::durable::TaskId) -> Option<String> {
     use rusqlite::OptionalExtension;
     rusqlite::Connection::open(db)
@@ -3842,6 +3852,19 @@ fn live_graph(db: &Path, task: &loopflow_execution::durable::TaskId) -> Option<S
             |row| row.get(0),
         )
         .optional()
+        .unwrap()
+}
+
+fn first_steps_run(db: &Path, task: &loopflow_execution::durable::TaskId) -> i64 {
+    rusqlite::Connection::open(db)
+        .unwrap()
+        .query_row(
+            "SELECT count(*) FROM graph_process_steps s
+             JOIN graph_processes g ON g.lf_process_id=s.graph_lf_process_id
+             WHERE g.task_id=?1 AND s.node=0",
+            [task.as_str()],
+            |row| row.get(0),
+        )
         .unwrap()
 }
 
@@ -4348,10 +4371,10 @@ tee -a '{record}/input' | env -i HOME='{remote}' PATH=/usr/bin:/bin bash -c "$re
             remote = remote.display(),
         ),
     );
-    let held = fixture.json(&["task", "hold", task.as_str(), "--json"]);
+    let held = fixture.json(&["task", "auto", "off", task.as_str(), "--json"]);
     assert_eq!(
         held,
-        serde_json::json!({"issue": task.as_str(), "stopped": false})
+        serde_json::json!({"issue": task.as_str(), "was_on": false})
     );
 
     let commands = fs::read_to_string(record.join("commands")).unwrap();
@@ -4361,11 +4384,11 @@ tee -a '{record}/input' | env -i HOME='{remote}' PATH=/usr/bin:/bin bash -c "$re
             .any(|line| line == "exec 'lf' 'server' 'connect'"),
         "{commands}"
     );
-    assert!(!commands.contains("hold"), "{commands}");
+    assert!(!commands.contains("auto"), "{commands}");
     let (hello, request) = entry_input(&record);
     assert_eq!(hello["client"]["kind"], "machine");
     assert_eq!(request["sender"]["repository"], plan.repository.as_str());
-    assert_eq!(request["operation"]["kind"], "task.hold");
+    assert_eq!(request["operation"]["kind"], "task.auto.off");
     assert_eq!(request["operation"]["issue"], task.as_str());
 }
 
@@ -4625,7 +4648,7 @@ esac
             ran.display()
         ),
     );
-    let output = fixture.run(&["task", "hold", task.as_str(), "--json"]);
+    let output = fixture.run(&["task", "auto", "off", task.as_str(), "--json"]);
     assert!(!output.status.success());
     let error = String::from_utf8_lossy(&output.stderr);
     assert!(
@@ -4649,7 +4672,7 @@ fn an_lf_that_dies_before_answering_says_so_and_what_it_printed() {
             1,
         ),
     );
-    let output = fixture.run(&["task", "hold", task.as_str(), "--json"]);
+    let output = fixture.run(&["task", "auto", "off", task.as_str(), "--json"]);
     assert_eq!(output.status.code(), Some(1));
     let error = String::from_utf8_lossy(&output.stderr);
     assert!(
@@ -4674,7 +4697,7 @@ fn an_unreachable_destination_names_the_ssh_check_not_its_server() {
             1,
         ),
     );
-    let output = fixture.run(&["task", "hold", task.as_str(), "--json"]);
+    let output = fixture.run(&["task", "auto", "off", task.as_str(), "--json"]);
     assert_eq!(output.status.code(), Some(1));
     let error = String::from_utf8_lossy(&output.stderr);
     assert!(

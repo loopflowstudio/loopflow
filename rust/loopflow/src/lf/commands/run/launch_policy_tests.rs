@@ -1,5 +1,5 @@
 //! Launch and resume policy as table rows.
-//! Native argv comes from the harness; companions run in the launch matrix.
+//! Native argv comes from the harness; real launches run in the launch matrix.
 //! Owners, PTYs, provider processes, native conversation identity and the
 //! handler's own refusals stay with the full-Machine tests in `tests/README.md`.
 
@@ -148,14 +148,21 @@ impl Table {
     ) -> anyhow::Result<Vec<String>> {
         use loopflow_execution::harness::{Launch, Mode};
         let kind = config.agent.harness;
-        if kind.harness().capabilities().turn_limit && mode == Mode::Headless {
+        if loopflow_execution::harness::launcher(kind)
+            .capabilities()
+            .turn_limit
+            && mode == Mode::Headless
+        {
             return loopflow_execution::harness::claude::stream_args(
                 config,
                 start.thread().as_ref(),
                 None,
             );
         }
-        if !kind.harness().capabilities().turn_limit {
+        if !loopflow_execution::harness::launcher(kind)
+            .capabilities()
+            .turn_limit
+        {
             return Ok(Vec::new());
         }
         let admitted =
@@ -164,8 +171,7 @@ impl Table {
             start,
             ..loopflow_execution::harness::launch_for_test(kind, config, &admitted)
         };
-        Ok(kind
-            .harness()
+        Ok(loopflow_execution::harness::launcher(kind)
             .open(&launch)?
             .process
             .get_args()
@@ -250,7 +256,7 @@ fn launch_bypass_and_chrome_take_the_command_line_then_personal_then_repository(
     }
     // Every harness reads the same setting; its argv mapping is a row in
     // `agent::session::tests`.
-    for harness in ["codex", "opencode", "pi"] {
+    for harness in ["codex", "opencode", "pi", "antigravity"] {
         for (repository_yolo, flags, expected) in [
             (false, &[][..], false),
             (true, &[], true),

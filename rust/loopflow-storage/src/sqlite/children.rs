@@ -562,8 +562,8 @@ impl SqliteStore {
                 [id.as_str()],
             )?;
             super::task_state::decide_in(&tx, id, "unstarted")?;
-            // Reopening withdraws Auto-Ship: the approval ended with the Task.
-            super::task_work::unship_in(&tx, id)?;
+            // Reopening clears auto: it ended with the Task.
+            tx.execute("DELETE FROM task_auto WHERE task_id=?1", [id.as_str()])?;
             insert_task_event_in(
                 &tx,
                 id,
@@ -795,14 +795,18 @@ impl SqliteStore {
         &self,
         task_id: &TaskId,
         new_base: &str,
-        clear_parent: bool,
+        parent_pr_id: Option<&TaskPrId>,
         updated_at: OffsetDateTime,
     ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let changed = tx.execute(
-            "UPDATE task_checkouts SET base_commit=?2, parent_pr_id=CASE WHEN ?3 THEN NULL ELSE parent_pr_id END WHERE task_id=?1",
-            params![task_id.as_str(), new_base, clear_parent],
+            "UPDATE task_checkouts SET base_commit=?2, parent_pr_id=?3 WHERE task_id=?1",
+            params![
+                task_id.as_str(),
+                new_base,
+                parent_pr_id.map(TaskPrId::as_str)
+            ],
         )?;
         if changed == 0 {
             return Err(StoreError::NotFound);

@@ -2,11 +2,11 @@ use std::path::PathBuf;
 
 use anyhow::{anyhow, Result};
 use clap::{Parser, Subcommand};
-use loopflow::world::{recipes, World};
+use loopflow::world::{recipes, World, WorldEnv};
 
 #[derive(Parser, Debug)]
 #[command(name = "lf-world")]
-#[command(about = "Build fake Loopflow worlds for demos and tests")]
+#[command(about = "Build fake Loopflow worlds for demos and tests, or copy the Machine read-only")]
 struct Args {
     #[command(subcommand)]
     command: Command,
@@ -16,6 +16,8 @@ struct Args {
 enum Command {
     /// Build a recipe into a new directory and print its environment
     Build { recipe: String, dir: PathBuf },
+    /// Replace a world with a read-only copy of this Machine's store and print its environment
+    Copy { dir: PathBuf },
     /// List recipes with their rung and what each demos
     List,
 }
@@ -28,9 +30,9 @@ fn main() -> Result<()> {
                 .ok_or_else(|| anyhow!("unknown recipe {recipe}; see `lf-world list`"))?;
             let world = World::create(&dir)?;
             (recipe.build)(&world)?;
-            let env = world.finish()?;
-            println!("{}", serde_json::to_string_pretty(&env)?);
+            describe(&world.finish()?)?;
         }
+        Command::Copy { dir } => describe(&loopflow::world::copy(&dir)?)?,
         Command::List => {
             for recipe in recipes::RECIPES {
                 println!(
@@ -42,6 +44,15 @@ fn main() -> Result<()> {
             }
         }
     }
+    Ok(())
+}
+
+/// Print the environment and, on stderr, what its directory's length costs.
+fn describe(env: &WorldEnv) -> Result<()> {
+    if let Some(notice) = env.desktop_socket_notice() {
+        eprintln!("{notice}");
+    }
+    println!("{}", serde_json::to_string_pretty(env)?);
     Ok(())
 }
 

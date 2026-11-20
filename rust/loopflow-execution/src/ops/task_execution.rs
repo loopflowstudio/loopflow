@@ -28,7 +28,8 @@ pub enum TaskExecutionState {
     Starting,
     Running,
     Stalled,
-    /// Its step is waiting out a usage limit until an account frees up.
+    /// Its step is waiting out a usage limit until an account frees up, or
+    /// its run waits to be carried again after its carrier died.
     Waiting,
     Blocked,
     Unknown,
@@ -42,6 +43,25 @@ pub struct TaskExecutionSnapshot {
     pub step: Option<String>,
     /// The Session input that step captured, when it opened one.
     pub captured: Option<i64>,
+    /// Where the run's carrier (`lf task run`) died before the run stopped;
+    /// `null` for a run that runs, stopped on its own, or never started.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub died: Option<RunDied>,
+    /// What happens next to a run that died, as this Machine reads it: the
+    /// server here starts it again at `at`, or leaves it to `command` for
+    /// `reason`. `null` unless `died` says it did.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub outlook: Option<crate::ops::human_session::SessionOutlook>,
+}
+
+/// A Task run's carrier died while the run was at a step.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct RunDied {
+    /// The step the run reached, where it starts again.
+    pub at_step: String,
+    /// RFC 3339; `null` when nobody recorded the death.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub at: Option<String>,
 }
 
 pub async fn task_execution(
@@ -84,6 +104,15 @@ pub async fn execution_of_latest_graph(
         }),
     );
     snapshot.captured = input.map(|(_, _, captured)| *captured);
+    if snapshot.state == TaskExecutionState::Blocked {
+        if let Some(question) = step.and_then(|step| facts.unanswered_questions.get(&step.id)) {
+            let label = snapshot.step.as_deref().unwrap_or("Step");
+            snapshot.reason = format!(
+                "{label} stopped: {question}; {}",
+                question_advice(&task.identifier)
+            );
+        }
+    }
     if let Some(recovery) = step.and_then(|step| facts.limit_recoveries.get(&step.id)) {
         apply_limit_recovery(&mut snapshot, recovery, &task.identifier, || {
             crate::ops::task::limit_recovery::restarts_by_itself(sqlite, &task.id).unwrap_or_else(
@@ -117,6 +146,33 @@ pub async fn execution_of_latest_graph(
             snapshot = open;
         }
     }
+    if matches!(
+        snapshot.state,
+        TaskExecutionState::Idle | TaskExecutionState::Blocked
+    ) && facts.tasks_with_carrier_records.contains(&task.id)
+    {
+        if let Some(died) = crate::ops::task::run_recovery::died_run(sqlite, &task.id)? {
+            let start = died.server_start(
+                task.worktree
+                    .as_deref()
+                    .is_some_and(std::path::Path::is_dir),
+                || crate::ops::recovery::claimed_here(sqlite, &task.id),
+                crate::ops::recovery::server_runs,
+            );
+            let (outlook, line) =
+                died.outlook(&task.identifier, loopflow_storage::rows::now_unix(), start);
+            snapshot.state = match start {
+                crate::ops::recovery::ServerStart::At(_) => TaskExecutionState::Waiting,
+                crate::ops::recovery::ServerStart::Left(_) => TaskExecutionState::Blocked,
+            };
+            snapshot.reason = line;
+            snapshot.died = Some(RunDied {
+                at_step: died.at_step,
+                at: died.at.and_then(loopflow_harness::transcript::rfc3339),
+            });
+            snapshot.outlook = Some(outlook);
+        }
+    }
     Ok((snapshot, Some(graph.detail(entry))))
 }
 
@@ -147,6 +203,8 @@ fn unrun_execution(identifier: &str, unrun: Option<&UnrunGraph>) -> TaskExecutio
         reason,
         step: None,
         captured: None,
+        died: None,
+        outlook: None,
     }
 }
 
@@ -176,6 +234,8 @@ fn open_graph_execution_from_facts(
             reason: format!("Graph {graph} has live or unresolved execution in the Task's work; inspect `lf history show {graph}` before launching further work"),
             step: None,
             captured: None,
+            died: None,
+            outlook: None,
         });
     }
     None
@@ -188,6 +248,11 @@ pub const MOVED_TO: &str = "; continuing on ";
 /// Ends a recorded limit reason when a provider refused the step and no
 /// agent it may use was left; what would let it move follows.
 pub const STOPPED: &str = "; stopped: ";
+
+/// How a person answers the question that stopped Task `issue`'s step.
+pub fn question_advice(issue: &str) -> String {
+    format!("answer with `lf steer {issue} \"…\"`, then `lf task run {issue}`")
+}
 
 /// The limit that stopped a step and what would let it move, as one sentence.
 /// The current `lf task run` does not retry such a run automatically.
@@ -214,8 +279,9 @@ fn apply_limit_recovery(
         (TaskExecutionState::Running, Some(retry_at)) => {
             snapshot.state = TaskExecutionState::Waiting;
             snapshot.reason = format!(
-                "{label} is waiting for {provider} capacity until {}: {reason}. It goes on by itself.",
-                crate::output::format_time(retry_at)
+                "{label} is waiting for {provider} capacity until {}: {}. It goes on by itself.",
+                crate::output::format_time(retry_at),
+                reason.trim_end_matches('.')
             );
         }
         (TaskExecutionState::Running, None) => {
@@ -256,6 +322,8 @@ fn project_execution(
             reason: format!("Graph {} finished; nothing further is launched", graph.name),
             step: None,
             captured: None,
+            died: None,
+            outlook: None,
         };
     }
     // A Graph that has started no step is its only run so far.
@@ -285,7 +353,7 @@ fn project_execution(
                 )
             } else {
                 let ended = match (&process.error, process.exit_code) {
-                    (Some(error), _) => error.clone(),
+                    (Some(error), _) => error.trim_end_matches('.').to_string(),
                     (None, Some(code)) => format!("process exited with status {code}"),
                     (None, None) => "process left no exit record".to_string(),
                 };
@@ -301,6 +369,8 @@ fn project_execution(
         reason,
         step: Some(label.clone()),
         captured: None,
+        died: None,
+        outlook: None,
     }
 }
 
@@ -422,6 +492,8 @@ mod tests {
             reason: "implement: provider_rate_limited".into(),
             step: Some("implement".into()),
             captured: None,
+            died: None,
+            outlook: None,
         }
     }
 

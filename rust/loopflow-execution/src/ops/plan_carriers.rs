@@ -1,9 +1,9 @@
 //! A plan without Linear or Asana travels by a hub ([`super::plan_hub`]), a
 //! Git remote ([`super::plan_git`]) or both. This is when the two run
-//! together. [`send`] follows a save and reads only what was not taken. [`sync`] reads and
-//! sends: when asked, before a claim or a new Wave, and after a command the
-//! Machine server
-//! answers. [`read`] asks the hub alone, for a read nobody asked for.
+//! together. [`send`] follows a save and reads only what was not taken.
+//! [`sync`] reads and sends: when asked, before a claim or a new Wave, and
+//! after a command the Machine server answers. [`read`] asks the hub alone,
+//! for a read nobody asked for.
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;

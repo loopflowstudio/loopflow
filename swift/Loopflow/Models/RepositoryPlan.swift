@@ -40,7 +40,7 @@ public struct PlanCarriers: Decodable, Sendable, Equatable {
     }
 }
 
-/// Git's line: `Plan: Git origin, unreachable since 14:02, 3 unsent.`
+/// Git's line: `Plan: Git origin, failing since 14:02, 3 unsent.`
 public struct GitCarrier: Decodable, Sendable, Equatable {
     public let remote: String
     public let standing: CarrierStanding
@@ -53,7 +53,7 @@ public struct GitCarrier: Decodable, Sendable, Equatable {
     }
 }
 
-/// The hub's line: `Hub mini, unreachable since 14:02, 2 unsent.`
+/// The hub's line: `Hub mini, failing since 14:02, 2 unsent.`
 public struct HubCarrier: Decodable, Sendable, Equatable {
     public let machine: String
     public let standing: CarrierStanding
@@ -108,7 +108,7 @@ public struct CarrierStanding: Decodable, Sendable, Equatable {
     public func line(_ name: String) -> String {
         var line = name
         if let failingSince {
-            line += ", unreachable since \(Date(timeIntervalSince1970: TimeInterval(failingSince)).formatted(date: .omitted, time: .shortened))"
+            line += ", failing since \(Date(timeIntervalSince1970: TimeInterval(failingSince)).formatted(date: .omitted, time: .shortened))"
         }
         if unsent > 0 { line += ", \(unsent) unsent" }
         if let notTaken { line += ", \(notTaken.count) not taken" }

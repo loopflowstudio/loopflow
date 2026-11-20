@@ -50,9 +50,9 @@ pub enum SkillOutcome {
     Decided(GraphVerdict),
     Routed(String),
     Blocked(String),
-    /// The step merges, and someone stopped shipping the Task: the Graph
-    /// stops before it, at this name, until `lf ship` approves it again.
-    Unapproved(String),
+    /// The Graph stops before this step, at this name: a person takes part
+    /// there, or it merges and someone turned auto off.
+    StopsAt(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -86,22 +86,11 @@ pub trait SkillExecutor: Send + Sync {
 #[derive(Debug, Clone)]
 pub struct GraphRunner<E> {
     executor: E,
-    stop_at_interactive: bool,
 }
 
 impl<E> GraphRunner<E> {
     pub fn new(executor: E) -> Self {
-        Self {
-            executor,
-            stop_at_interactive: false,
-        }
-    }
-
-    /// Stop before each interactive step instead of running it: a Task run
-    /// leaves that step to a person in the Task conversation.
-    pub fn stopping_at_interactive(mut self) -> Self {
-        self.stop_at_interactive = true;
-        self
+        Self { executor }
     }
 }
 
@@ -143,14 +132,6 @@ impl<E: SkillExecutor> GraphRunner<E> {
         if leaf.progress.verdict.is_some() || leaf.route.is_some() {
             return settle_step(items, cursor);
         }
-        if let ConcreteStep::Skill(skill) = item {
-            if let Some(step) = skill
-                .interactive_step()
-                .filter(|_| self.stop_at_interactive)
-            {
-                return Ok(Some(GraphOutcome::StoppedAt(step.to_string())));
-            }
-        }
         let ctx = ExecutionContext {
             progress: cursor.child.is_none().then_some(StepProgress {
                 index: cursor.index,
@@ -170,7 +151,7 @@ impl<E: SkillExecutor> GraphRunner<E> {
             SkillOutcome::Waiting => Ok(Some(GraphOutcome::Waiting)),
             SkillOutcome::Interrupted => Ok(Some(GraphOutcome::Interrupted)),
             SkillOutcome::Blocked(reason) => Ok(Some(GraphOutcome::Blocked(reason))),
-            SkillOutcome::Unapproved(step) => Ok(Some(GraphOutcome::StoppedAt(step))),
+            SkillOutcome::StopsAt(step) => Ok(Some(GraphOutcome::StoppedAt(step))),
             SkillOutcome::Decided(verdict) => {
                 cursor.leaf_mut().progress.verdict = Some(verdict);
                 Ok(None)
@@ -621,7 +602,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn interactive_steps_run_in_place_unless_a_task_run_stops_there() {
+    async fn a_step_that_stops_leaves_everything_before_it_done() {
         let repo = fixture_repo().unwrap();
         let mut design = skill("design");
         design.interactive = true;
@@ -638,16 +619,15 @@ mod tests {
             .unwrap();
         assert_eq!(outcome, GraphOutcome::Completed);
         assert_eq!(executor.calls(), ["plan", "design", "build"]);
-        // `lf task run`: stop before it, with everything earlier done.
-        let executor = RecordingExecutor::new(repo.path().to_owned());
+        // A Task run whose step stops there: the cursor stays on it.
+        let executor = RecordingExecutor::new(repo.path().to_owned())
+            .with_outcomes("design", vec![SkillOutcome::StopsAt("design".into())]);
         let mut cursor = ExecutionCursor::default();
         let outcome = GraphRunner::new(executor.clone())
-            .stopping_at_interactive()
             .run_with_cursor(&items, &mut cursor)
             .await
             .unwrap();
         assert_eq!(outcome, GraphOutcome::StoppedAt("design".to_owned()));
-        assert_eq!(executor.calls(), ["plan"]);
         assert_eq!(cursor.index, 1);
     }
 

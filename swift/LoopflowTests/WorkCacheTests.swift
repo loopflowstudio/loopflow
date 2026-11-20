@@ -769,15 +769,15 @@ private extension SessionsStore {
     var preparedTaskConversations: [SessionItem] { sessions.filter { $0.state == .prepared && $0.record.taskPrimary } }
 }
 
-/// `populateWorkingTasks` rows: `owned` working Tasks, oldest first, then shipping,
-/// done, abandoned and unstarted Tasks, then a started Task nobody owns.
+/// `populateWorkingTasks` rows: `owned` working Tasks, oldest first, then done,
+/// abandoned and unstarted Tasks, then a started Task nobody owns.
 @MainActor
 private enum Prefetch {
     /// Five more working Tasks than the warm bound.
     static let owned = SessionsWorkspaceRegistry.warmConversationLimit + 4
     static let newestOwned = "prefetch-\(owned - 1)"
-    static let unstarted = "prefetch-\(owned + 3)"
-    static let unowned = "prefetch-\(owned + 4)"
+    static let unstarted = "prefetch-\(owned + 2)"
+    static let unowned = "prefetch-\(owned + 3)"
     static let working = (0..<owned).map { "prefetch-\($0)" } + [unowned]
 }
 
@@ -833,7 +833,7 @@ private actor Source {
         var inventory = wire["tasks"] as! [String: Any]
         let template = (inventory["items"] as! [[String: Any]])[0]
         // The newest row is a started Task nobody owns; it opens like any working Task.
-        let states = (0..<owned).map { ["idle", "active", "moving"][$0 % 3] } + ["shipping", "done", "abandoned", "unstarted", "idle"]
+        let states = (0..<owned).map { ["idle", "active", "moving"][$0 % 3] } + ["done", "abandoned", "unstarted", "idle"]
         inventory["items"] = states.enumerated().map { index, state in
             var row = template
             var task = row["task"] as! [String: Any]

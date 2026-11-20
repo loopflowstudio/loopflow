@@ -5,10 +5,14 @@ uv run python scripts/benchmarks/crate-rebuild/root_probe.py --sccache /path/to/
 uv run python scripts/benchmarks/crate-rebuild/probe.py --sccache /path/to/sccache --output /tmp/lf-cache-proof
 uv run python scripts/benchmarks/crate-rebuild/cochange.py --revision HEAD --count 80
 uv run python scripts/benchmarks/crate-rebuild/run.py --base 3fbf3d2ca3 --candidate HEAD --sccache /path/to/sccache --output /tmp/lf-build-comparison
-uv run python scripts/benchmarks/crate-rebuild/report.py --input /tmp/lf-build-comparison --cache-validation /tmp/lf-root-proof --output scripts/benchmarks/crate-rebuild/results
+uv run python scripts/benchmarks/crate-rebuild/report.py --input /tmp/lf-build-comparison --name loo-923 --output scripts/benchmarks/crate-rebuild/results
 ```
 
-[LOO-650 results](results/loo-650.html) include all five pairs and their raw receipts.
+[LOO-650 results](results/loo-650.html) compare one application crate with the
+storage and execution split. [LOO-923 results](results/loo-923.html) compare
+that split with `loopflow-harness` beside storage. The report takes its cohort
+count and cases from the run; `--cache-validation /tmp/lf-root-proof` adds the
+root probe's receipts when it was run.
 
 The probe builds the actual model, definition-content, terminal and storage crates in two separate
 source/target roots in linked Git worktrees, with a shared `origin/main` ref.
@@ -25,14 +29,21 @@ The full comparison clones committed baseline and candidate revisions into
 independent source/target roots. Each label has its own cold-seeded private
 cache. Five paired cohorts alternate candidate/base and base/candidate order.
 Each starts with a fresh-target warm-cache build, then a command-help edit,
-a shipping-message edit, and a Task-record error-message edit. Each edit is
-unique to its cohort; it cannot retrieve an earlier edited artifact. Receipts
+a shipping-message edit, a Task-record error-message edit and a Claude decoder
+message edit, each timed through the `lf` link. The last case builds the unit-test
+binary of the crate that owns the decoder (`--no-run`): that binary and its
+dev-dependencies are built once outside the timing, a second decoder message is
+edited, and the rebuild is timed. Each edit is
+unique to its cohort; it cannot retrieve an earlier edited artifact. Each
+revision's own workspace libraries decide what an edit must recompile, so the
+two revisions may lay their crates out differently. Receipts
 name edited files and actual workspace compiler hit/miss results, alongside
 Cargo artifact freshness, aggregate cache statistics and executable link cost.
 One serial Cargo job keeps per-invocation cache attribution unambiguous.
 
 `summary.json` reports median/range elapsed seconds, client CPU and largest
-process RSS over five samples per case and revision. Cold seeds are calibration,
+process RSS over one sample per cohort (`--cohorts`, five by default) for each
+case and revision. Cold seeds are calibration,
 not cohort samples. The wrapper adds two cache-stat RPCs per workspace compiler;
 that overhead is included. Runtime root/revision is checked in every source copy
 outside timing. After the candidate seed, catalogue checks exercise origin/main

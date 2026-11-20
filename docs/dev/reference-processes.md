@@ -83,8 +83,8 @@ Normal completion, abort and provider death close the writer. Custom extension
 tools retain their own execution ownership; there is no tool PID registry or
 postmortem discovery of signal targets.
 
-One exception to local-handle control exists. Lazy recovery, which a read of this
-Machine's Tasks or Sessions runs first, terminates an AgentProcess that outlived its attachment: the recorded PID and
+One exception to local-handle control exists. The server's recovery pass
+terminates an AgentProcess that outlived its attachment: the recorded PID and
 start time still name a live provider server leading its own process group, and
 every Session naming it is headless with an attached LfProcess that is provably dead.
 Unknown evidence, a live attachment, an interactive Session or a reused PID leaves it

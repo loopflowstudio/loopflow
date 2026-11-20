@@ -145,20 +145,25 @@ pub fn settle(exit: &NativeExit, status: ExitStatus) -> Settled {
         store, attachment, ..
     }) = &owner
     {
-        // The launcher became the provider, so its end is written here: as
-        // a Graph's step, its step ends with the provider's exit.
+        // The launcher became the provider, so its end is written here: on
+        // the Session, whose exit code tells a person's quit from a death,
+        // and, as a Graph's step, on its step.
         // A plain interrupt is no error: it reads as interrupted.
         let error = settled
             .lines
             .first()
             .filter(|_| !matches!(settled.code, 0 | 130));
-        let recorded = store.finish_run(
-            loopflow_storage::graph_process::RunOwner::GraphStep,
-            &attachment.launcher_lf_process_id,
-            time::OffsetDateTime::now_utc().unix_timestamp(),
-            Some(i32::from(settled.code)),
-            error.map(String::as_str),
-        );
+        let recorded = store
+            .record_agent_exit_code(&attachment.agent_process_id, i32::from(settled.code))
+            .and_then(|()| {
+                store.finish_run(
+                    loopflow_storage::graph_process::RunOwner::GraphStep,
+                    &attachment.launcher_lf_process_id,
+                    time::OffsetDateTime::now_utc().unix_timestamp(),
+                    Some(i32::from(settled.code)),
+                    error.map(String::as_str),
+                )
+            });
         if let Err(error) = recorded {
             tracing::warn!(%error, session = %exit.session, "cannot record the launcher's exit");
         }

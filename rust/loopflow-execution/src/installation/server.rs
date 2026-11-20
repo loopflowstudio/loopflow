@@ -18,8 +18,19 @@ pub fn ensure() -> Result<crate::machine::client::Status> {
         .mode(0o600)
         .open(crate::machine::socket_path()?.with_extension("install-lock"))?;
     lock.lock_exclusive()?;
+    // A server that answers is ready for every client; only this command
+    // also asks that it be the selected installation, replacing one left
+    // running by the build before a promotion.
+    let selected = crate::installation::ArtifactIdentity::capture(
+        crate::installation::ArtifactRole::Cli,
+        &std::env::current_exe()?,
+    )?
+    .sha256;
+    let installed = |status: &crate::machine::client::Status| {
+        status.ready && status.executable_sha256.as_ref() == Some(&selected)
+    };
     let before = crate::machine::client::status()?;
-    if before.ready {
+    if installed(&before) {
         return Ok(before);
     }
     let home = crate::store::lf_home_dir().canonicalize()?;
@@ -28,10 +39,15 @@ pub fn ensure() -> Result<crate::machine::client::Status> {
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
         let status = crate::machine::client::status()?;
-        if status.ready {
+        if installed(&status) {
             return Ok(status);
         }
         if Instant::now() >= deadline {
+            if status.ready {
+                anyhow::bail!(
+                    "Loopflow server did not start within 10s: another executable still answers"
+                );
+            }
             // A socket that never listened has no reason beyond the wait.
             match status.error.filter(|_| status.listening) {
                 Some(error) => anyhow::bail!("Loopflow server did not start within 10s: {error}"),
@@ -105,7 +121,7 @@ fn register(home: &Path, executable: &Path, replace: bool) -> Result<()> {
 <plist version="1.0"><dict>
 <key>Label</key><string>{label}</string>
 <key>ProgramArguments</key><array><string>{executable}</string><string>server</string><string>run</string></array>
-<key>EnvironmentVariables</key><dict><key>LF_HOME</key><string>{home}</string><key>LF_BIN</key><string>{executable}</string><key>LF_SUPERVISED</key><string>1</string></dict>
+<key>EnvironmentVariables</key><dict><key>LF_HOME</key><string>{home}</string><key>LF_BIN</key><string>{executable}</string></dict>
 <key>RunAtLoad</key><true/><key>KeepAlive</key><true/>
 <key>AbandonProcessGroup</key><true/>
 <key>StandardOutPath</key><string>{log}</string><key>StandardErrorPath</key><string>{log}</string>
@@ -211,11 +227,44 @@ fn register(home: &Path, executable: &Path, replace: bool) -> Result<()> {
     let executable_argument = quote(&executable.display().to_string().replace('$', "$$"));
     let home_environment = quote(&format!("LF_HOME={}", home.display()));
     let binary_environment = quote(&format!("LF_BIN={}", executable.display()));
-    fs::write(directory.join(&unit), format!("[Unit]\nDescription=Loopflow server\n[Service]\nExecStart={executable_argument} server run\nEnvironment={home_environment}\nEnvironment={binary_environment}\nEnvironment=LF_SUPERVISED=1\nRestart=on-failure\nKillMode=process\n[Install]\nWantedBy=default.target\n"))?;
+    fs::write(directory.join(&unit), format!("[Unit]\nDescription=Loopflow server\n[Service]\nExecStart={executable_argument} server run\nEnvironment={home_environment}\nEnvironment={binary_environment}\nRestart=on-failure\nKillMode=process\n[Install]\nWantedBy=default.target\n"))?;
     checked(Command::new("systemctl").args(["--user", "daemon-reload"]))?;
     checked(Command::new("systemctl").args(["--user", "enable", "--now", &unit]))?;
     if replace {
         checked(Command::new("systemctl").args(["--user", "restart", &unit]))?;
+    }
+    Ok(())
+}
+
+/// Stop the server a supervisor keeps for the private Machine at `home`, so
+/// the home can be replaced. A home no supervisor serves is left alone.
+#[cfg(target_os = "macos")]
+pub fn stop(home: &Path) -> Result<()> {
+    // SAFETY: geteuid has no preconditions.
+    let target = format!(
+        "gui/{}/{}",
+        unsafe { libc::geteuid() },
+        label(home, "server")
+    );
+    let loaded = Command::new("/bin/launchctl")
+        .args(["print", &target])
+        .output()?
+        .status
+        .success();
+    if loaded {
+        checked(Command::new("/bin/launchctl").args(["bootout", &target]))?;
+    }
+    Ok(())
+}
+
+/// Stop the server a supervisor keeps for the private Machine at `home`, so
+/// the home can be replaced. A home no supervisor serves is left alone.
+#[cfg(target_os = "linux")]
+pub fn stop(home: &Path) -> Result<()> {
+    let unit = format!("{}.service", label(home, "server"));
+    let directory = crate::installation::account_home()?.join(".config/systemd/user");
+    if directory.join(&unit).exists() {
+        checked(Command::new("systemctl").args(["--user", "stop", &unit]))?;
     }
     Ok(())
 }

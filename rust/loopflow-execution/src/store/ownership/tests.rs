@@ -435,7 +435,7 @@ fn promotion_refuses_a_replaced_caller_for_either_title_source() {
 }
 
 #[test]
-fn a_failed_save_into_an_empty_wave_makes_no_project() {
+fn a_task_filed_or_moved_into_a_wave_with_no_project_has_none() {
     let (_home, store) = store();
     let repo = TestRepo::new();
     let wave =
@@ -470,9 +470,9 @@ fn a_failed_save_into_an_empty_wave_makes_no_project() {
     assert!(filed.is_err());
     assert!(store.list_projects(Some(&wave)).unwrap().is_empty());
     fail("DROP TRIGGER reject;
-          CREATE TRIGGER reject BEFORE UPDATE OF project_id ON tasks BEGIN SELECT RAISE(ABORT,'injected'); END;");
+          CREATE TRIGGER reject BEFORE UPDATE OF wave_id ON tasks BEGIN SELECT RAISE(ABORT,'injected'); END;");
     assert!(store.move_task(&standalone.id, None, Some(&wave)).is_err());
-    assert!(store.list_projects(Some(&wave)).unwrap().is_empty());
+    assert_eq!(store.task(&standalone.id).unwrap().unwrap().wave_id, None);
     fail("DROP TRIGGER reject;");
 
     let filed = super::promote_task(
@@ -487,12 +487,13 @@ fn a_failed_save_into_an_empty_wave_makes_no_project() {
     )
     .unwrap();
     store.move_task(&standalone.id, None, Some(&wave)).unwrap();
-    let projects = store.list_projects(Some(&wave)).unwrap();
-    assert_eq!(projects.len(), 1);
-    assert_eq!(projects[0].name, "product");
-    assert_eq!(filed.project_id.as_ref(), Some(&projects[0].id));
-    assert_eq!(
-        store.task(&standalone.id).unwrap().unwrap().project_id,
-        Some(projects[0].id.clone())
-    );
+    assert!(store.list_projects(Some(&wave)).unwrap().is_empty());
+    for task in [filed, store.task(&standalone.id).unwrap().unwrap()] {
+        assert_eq!(
+            (task.wave_id.as_ref(), task.project_id),
+            (Some(&wave), None)
+        );
+    }
+    let listed = store.list_tasks(Some(&wave)).unwrap();
+    assert_eq!(listed.len(), 2);
 }

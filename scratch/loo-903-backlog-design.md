@@ -481,3 +481,11 @@ Production Rust/Swift are unchanged. Prototype controls operate only on in-memor
 - Move up/down uses the same local reorder operation as native drag/drop. A native Move up changed the order while retaining LOO-452 in the brief reader.
 - Pointer drag remains unverified: automated attempts showed no order change. The final preview uses standard SwiftUI drag/drop; it is open for hands-on review. Details and process identities are in native preview notes.
 - No production Work changed and no Graph was launched.
+
+## Demo, November 20
+
+Jack Heart, on the backlog Start bar in the native preview: "still looks a little understyled, but lets build the real thing"
+
+Loopflow Dev on this branch could not reach the installed server ("Loopflow server uses another executable"); an `lf-world` attempt failed with "Server supervisor: Bootstrap failed: 5: Input/output error". After LOO-1012 (#1996) landed and the branch was synced, `loopflow-dev.py run` opened a read-only copy of the Machine from 09:05, since the branch changes GraphCatalogEntry, GraphSubject, RoadmapTask and Write. Writes (Start, Claim, Move, drag) were not exercised in Dev.
+
+Jack Heart, after using the copy: "ok this is good enough for now. lets proceed,"

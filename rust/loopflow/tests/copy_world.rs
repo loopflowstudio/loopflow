@@ -48,9 +48,49 @@ struct Copied {
     /// A `claude` that records that it ran, ahead of everything else.
     path: String,
     provider_ran: PathBuf,
+    /// The provider of a Task conversation running on the Machine.
+    running: String,
+}
+
+/// Write `script` as the `claude` in a new `name` under `root`, and return
+/// the `PATH` that finds it first.
+fn provider(root: &Path, name: &str, script: &str) -> String {
+    let bin = root.join(name);
+    std::fs::create_dir(&bin).unwrap();
+    std::fs::write(
+        bin.join("claude"),
+        format!(
+            "#!/bin/sh\n[ \"$1\" = --version ] && echo '2.1.0 (Claude Code)' && exit 0\n{script}\n"
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(
+        bin.join("claude"),
+        std::os::unix::fs::PermissionsExt::from_mode(0o755),
+    )
+    .unwrap();
+    format!("{}:/usr/bin:/bin", bin.display())
+}
+
+fn alive(pid: &str) -> bool {
+    Command::new("/bin/kill")
+        .args(["-0", pid])
+        .output()
+        .unwrap()
+        .status
+        .success()
+}
+
+impl Drop for Copied {
+    fn drop(&mut self) {
+        let _ = std::fs::write(self.root.path().join("stop"), "");
+    }
 }
 
 impl Copied {
+    /// A Machine with one Task conversation running and one that was
+    /// prepared and never started, which a server on a writable store starts
+    /// at its first reading.
     fn new() -> Self {
         let root = tempfile::tempdir().unwrap();
         std::fs::write(
@@ -66,29 +106,72 @@ impl Copied {
                 .unwrap(),
         );
         let provider_ran = root.path().join("provider-ran");
-        let bin = root.path().join("bin");
-        std::fs::create_dir(&bin).unwrap();
-        std::fs::write(
-            bin.join("claude"),
-            format!(
-                "#!/bin/sh\necho \"$@\" >> '{}'\n[ \"$1\" = --version ] && echo '2.1.0 (Claude Code)'\nexit 0\n",
-                provider_ran.display()
-            ),
-        )
-        .unwrap();
-        std::fs::set_permissions(
-            bin.join("claude"),
-            std::os::unix::fs::PermissionsExt::from_mode(0o755),
-        )
-        .unwrap();
-        let copy = root.path().join("copy");
-        Self {
-            path: format!("{}:/usr/bin:/bin", bin.display()),
+        let path = provider(
+            root.path(),
+            "recording",
+            &format!("echo \"$@\" >> '{}'", provider_ran.display()),
+        );
+        let mut copied = Self {
+            path,
+            copy: root.path().join("copy"),
             root,
             machine,
-            copy,
             provider_ran,
+            running: String::new(),
+        };
+        let root = copied.root.path().to_path_buf();
+
+        // The provider holds until the fixture ends, as a real one does.
+        let pid = root.join("running-pid");
+        let holding = provider(
+            &root,
+            "holding",
+            &format!(
+                "echo $$ > '{}'\nwhile [ -d '{root}' ] && [ ! -e '{root}/stop' ]; do sleep 0.1; done",
+                pid.display(),
+                root = root.display()
+            ),
+        );
+        let server = loopflow_test_support::MachineServer::start_with_path(
+            env!("CARGO_BIN_EXE_lf"),
+            &copied.machine.join("home"),
+            &holding,
+        );
+        copied.check_out("Running conversation");
+        let deadline = std::time::Instant::now() + Duration::from_secs(60);
+        while !pid.exists() || std::fs::read_to_string(&pid).unwrap().is_empty() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the Machine's server did not start the Task conversation"
+            );
+            std::thread::sleep(Duration::from_millis(100));
         }
+        copied.running = std::fs::read_to_string(&pid).unwrap().trim().to_string();
+        // Its terminal outlives the server; with no server, the next one waits.
+        drop(server);
+        assert!(alive(&copied.running));
+        copied.check_out("Never started");
+        copied
+    }
+
+    /// Create a Task on the Machine and place it in a checkout, which
+    /// prepares its conversation.
+    fn check_out(&self, title: &str) {
+        let created: Value = serde_json::from_str(&success(
+            self.lf_in(
+                &self.machine,
+                &["task", "create", "--title", title, "--json"],
+            )
+            .output()
+            .unwrap(),
+        ))
+        .unwrap();
+        let issue = created["task"]["identifier"].as_str().unwrap();
+        success(
+            self.lf_in(&self.machine, &["checkout", issue, "--json"])
+                .output()
+                .unwrap(),
+        );
     }
 
     /// `lf-world copy` of the Machine, and the environment it printed.
@@ -105,11 +188,17 @@ impl Copied {
 
     /// The copy's `lf`, with the recording provider on `PATH`.
     fn lf(&self, args: &[&str]) -> Command {
+        self.lf_in(&self.copy, args)
+    }
+
+    /// `lf` in `world`, run from the Machine's repository, with the
+    /// recording provider on `PATH`.
+    fn lf_in(&self, world: &Path, args: &[&str]) -> Command {
         let mut command = clean(env!("CARGO_BIN_EXE_lf"), self.root.path());
         command
-            .env("LF_HOME", self.copy.join("home"))
-            .env("CLAUDE_CONFIG_DIR", self.copy.join("claude"))
-            .env("CODEX_HOME", self.copy.join("codex"))
+            .env("LF_HOME", world.join("home"))
+            .env("CLAUDE_CONFIG_DIR", world.join("claude"))
+            .env("CODEX_HOME", world.join("codex"))
             .env("PATH", &self.path)
             .current_dir(self.machine.join("repo"))
             .args(args);
@@ -195,10 +284,19 @@ fn a_copy_serves_the_machines_tasks_and_changes_nothing_outside_itself() {
         );
     }
 
+    // The Machine has a conversation prepared and never started. A server
+    // that started its writers here would start no provider either, since
+    // the store stops each one first, and would log those failed writes from
+    // boot on.
+    let log = std::fs::read_to_string(copied.copy.join("home/logs/lf.log")).unwrap();
+    assert!(log.contains("ready on a copy of the Machine"), "{log}");
+    assert!(!log.contains("readonly database"), "{log}");
+
     // A pane's `lf` reaches the store before any provider.
     let resumed = copied.lf(&["session", "resume", session]).output().unwrap();
     assert!(!resumed.status.success());
     assert!(!copied.provider_ran.exists());
+    assert!(alive(&copied.running));
     assert_eq!(digest(&store), copy_before);
     assert_eq!(digest(&source), source_before);
     assert_eq!(checkouts(&repo), checkouts_before);

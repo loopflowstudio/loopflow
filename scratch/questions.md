@@ -10,3 +10,10 @@
 - `lf task status --json` gives `task.wave` as the leaf name (`refunds`),
   `lf task show` gives `execution.wave` as the path (`billing/refunds`).
   The installed build does the same; not changed here.
+- Open (QA 2026-11-20): a Linear-connected repository has no Git or hub plan
+  exchange (`plan_git::exchange_all` skips `tracker::connected`), and the
+  Linear import reads issues per Project only (`ListProjectIssues`). So on
+  another Machine a Task in an ancestor's Project lists under that Project's
+  Wave, and a Task with no Project never shows up. On main every Wave Task had
+  a Project, so connected Wave Tasks crossed Machines. Candidates: LOO-980's
+  marker, or reading the team's no-Project issues. `docs/work.md` now says this.

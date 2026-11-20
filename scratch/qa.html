@@ -108,3 +108,48 @@ $ lf task sync e74e32                         →  Error: … remains pending: c
 <li><code>lf task status --json</code> gives <code>wave</code> as the leaf name. The base build does the same.</li>
 </ol>
 </html>
+
+<h2>Slice 2: every Task goes to the tracker (2026-11-20)</h2>
+<p>Branch <code>lf</code> at 983ccec, debug, on homes under <code>/tmp/lf-qa-995b</code>, <code>LF_*</code> unset, stdin closed. Linear team <code>QA</code> in the shared <code>.lf/config.yaml</code>, no login.</p>
+<table><tr><th>Scenario</th><th>Result</th></tr>
+<tr><td>7. First visit, Linear configured, no origin</td><td class="ok">works</td></tr>
+<tr><td>8. Same home with an origin</td><td class="ok">works</td></tr>
+<tr><td>9. Returning home from the installed lf</td><td class="ok">works</td></tr>
+<tr><td>10. JSON reads drop <code>unavailable_tasks</code></td><td class="ok">works</td></tr>
+<tr><td>11. Second Machine on a Linear repository</td><td class="bad">nothing arrives; recorded, docs fixed</td></tr></table>
+<h3>7. First visit</h3>
+<pre>$ lf task create --wave billing/refunds 'x in child'
+Saved locally; pending Linear sync. Retry with `lf task sync facbc7`.
+$ lf task create --wave billing 'w in parent'     → same line, 079046
+$ lf task create 'standalone'                     → same line, 28a623
+$ lf repo tracker
+Tracker: linear. 3 open · 0 lost.
+  facbc7  create · queued · cannot establish repository Linear identity from Git origin …
+  079046  create · queued · …
+  28a623  create · queued · …
+$ lf task sync facbc7   → Error: Task publication to Linear remains pending: … (exit 1)
+$ lf wave status billing/refunds
+  facbc7  unstarted   —   x in child  ready
+    create · queued · cannot establish …</pre>
+<p>This is the reverse of scenario 5, as slice 2 intends: Wave Tasks with no Project go to Linear like standalone ones. The store has no Projects. Reading the code, the create carries <code>teamId</code> and no <code>projectId</code> (<code>linear/actions.rs::create_task</code>).</p>
+<h3>8. With an origin</h3>
+<pre>$ git remote add origin …/origin.git &amp;&amp; git push origin main
+$ lf task sync facbc7
+Error: Task publication to Linear remains pending: No Linear credential found. Run `doppler run -- lf account connect linear`.</pre>
+<h3>9. Returning home</h3>
+<p>The installed <code>lf</code> 0.16.0+7127b9d0d made <code>billing</code> with a Project (Project create queued) and two Tasks. The branch then made <code>billing/refunds</code> and <code>y child</code>: <code>y</code> joins billing's Project, prints the pending line, queues its create and lists under <code>billing/refunds</code>. The installed build's queued Project create still holds <code>krs</code> and <code>metric_targets</code>. <code>known_values</code> skips them, so the send is unaffected.</p>
+<h3>10. Wire</h3>
+<pre>lf wave status billing/refunds --json → keys history, projects, setup, tasks, wave
+lf wave plan billing --json           → no unavailable_tasks
+lf wave status billing --json         → no unavailable_tasks</pre>
+<h3>11. Second Machine</h3>
+<pre>$ git -C origin.git for-each-ref refs/loopflow        (empty)
+$ (fresh clone, new home) lf task list                 (empty)
+$ lf wave status billing/refunds → Error: wave 'billing/refunds' is not registered</pre>
+<p>A connected repository has no Git or hub exchange (<code>plan_git::exchange_all</code> skips it), and the Linear import reads issues one Project at a time. So the claim in the plan and the docs that the child Wave "lives in Loopflow's plan, carried by Git and the hub" is wrong for connected repositories. Reading the code: another Machine lists a Task in an ancestor's Project under that ancestor, and never sees a Task with no Project. On main every Wave Task had a Project, so this is new. It is a product choice (LOO-980's marker, or importing the team's no-Project issues), so it is recorded in <code>scratch/questions.md</code> and not built.</p>
+<p class="fix">Fixed in <code>docs/work.md</code>: "A Wave not yet linked to a Linear Initiative keeps its Tasks local" now applies only to Tasks in a local Project. A Task with no Project goes right away. The Projects paragraph now says what another Machine sees.</p>
+<h3>Not reached</h3>
+<p>A real Linear workspace: whether the team issue lands, and the second-Machine view through Linear. Desktop: not launched. The change there only deletes a notice that could never show, and the DTO and view tests cover it (193 passed, earlier run).</p>
+<h3>Still wrong, worst first</h3>
+<ol><li>On a connected repository, Wave Tasks with no Project are invisible to other Machines and teammates' lf, and child Waves fall back to the Project's Wave (scenario 11).</li>
+<li>The origin error tells you to configure an origin "before running <code>lf wave plan connect</code>" even when you ran <code>lf task create</code>. This was already true before this change.</li></ol>

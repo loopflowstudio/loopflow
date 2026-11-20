@@ -168,3 +168,9 @@ before `task_wave` existed carry no such field, and every later home
 republishes the value it derived at stamp 0, so a home that took a record in
 wrongly passes the mistake on: delete that home's ref
 (`git update-ref -d`) before repeating the run.
+
+A repository with a Linear or Asana tracker has no Git plan exchange: after
+`git push`, `git -C <bare> for-each-ref refs/loopflow` is empty and a fresh
+clone on a second home lists nothing. Cross-Machine checks there need a real
+tracker login. With a team configured and an `origin`, every create waits on
+"No Linear credential found"; without `origin`, on the origin error.

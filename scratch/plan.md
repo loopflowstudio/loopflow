@@ -32,8 +32,8 @@ that reaches a Wave through `tasks.project_id → projects.wave_id` moves to
 
 Linear and Asana hold an issue in a Project, never in a Wave. A Task in an
 ancestor's Project is that Project's issue in the tracker; which child Wave
-it is in lives only in Loopflow's plan, carried by Git and the hub like any
-other field. A Task with no Project still goes to the repository's tracker, as
+it is in lives only in Loopflow's plan; a connected repository has no Git or
+hub exchange, so another Machine lists it under the Project's Wave. A Task with no Project still goes to the repository's tracker, as
 an issue in no Project (a Linear team issue; in Asana, the repository's team
 project), the path a Task in no Wave already takes. A Task created in the
 tracker joins the Wave linked to its Project. Marking the child Wave on
@@ -124,6 +124,11 @@ clippy on loopflow, storage, execution: clean; `scripts/test_desktop.sh
 `binary(golden_prompt)`, the full suites.
 
 Compress after slice 2: one `started_project` test helper in `local_planning`; `with_task_waves` reads its Project's Wave in one step. Checks, run locally: storage `sqlite::plan` (14), nextest `local_planning::a_task_makes_no_project…` and `canonical_status_retains…`.
+
+QA after slice 2 (`scratch/qa.html`): Wave Tasks with no Project queue a
+Linear create and print "pending Linear sync"; `unavailable_tasks` is off
+every JSON read. Docs fixed for two claims that no longer held. Open: what a
+second Machine sees on a connected repository (`scratch/questions.md`).
 
 Next: gate publishes the branch so CI runs the suites.
 

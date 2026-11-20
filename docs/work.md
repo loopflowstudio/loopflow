@@ -324,8 +324,9 @@ Answer a lost line: lf repo tracker answer <id> --keep-theirs, or --use-mine.
   `lf repo tracker answer 9f2c41d0 --keep-theirs` or `--use-mine` (or click
   **Keep** / **Use mine** in Desktop, or run `lf task sync LOO-377 --keep-theirs`).
 
-A Wave not yet linked to a Linear Initiative keeps its Tasks local until you
-run `lf wave plan connect <wave>`.
+A Project whose Wave is not yet linked to a Linear Initiative stays local, and
+its Tasks wait in the queue until you run `lf wave plan connect <wave>`. A Task
+with no Project goes to Linear right away, as a team issue.
 
 ## Waves
 
@@ -434,10 +435,10 @@ Meter usage events · LOO-12 in Project Invoicing
 ```
 
 A tracker holds an issue in a Project, never a Wave. A Task in a parent's
-Project is that Project's issue there; which child Wave it sits in lives in
-Loopflow's plan. A Task with no Project still goes to the tracker, as an
-issue in no Project, and an issue made in the tracker joins the Wave linked to
-its Project.
+Project is that Project's issue there, and another Machine reading the tracker
+lists it under the parent. A Task with no Project still goes to the tracker, as
+an issue in no Project, which other Machines do not read back. An issue made
+in the tracker joins the Wave linked to its Project.
 
 `lf task move` keeps a Task's Project when the new Wave is that Project's
 Wave or below it, and otherwise places it again. A started Task keeps its

@@ -111,9 +111,7 @@ What is in the tree:
   `harness/testdata/`.
 - `sanitize_error_message` and the `<harness>.stderr.log` opener moved to
   `harness/common.rs`; OpenCode and Antigravity share them.
-- The launch matrix has an Antigravity Batch cell; its other three cells are
-  skipped by an `if` in `every_harness_runs_all_four_launch_kinds` that
-  slices 2 and 4 delete.
+- The launch matrix has an Antigravity Batch cell.
 - `harness/README.md`: the limits row is "yes" for OpenCode and Pi and
   `classify_failure` has its own row. Its tables still have four columns.
 

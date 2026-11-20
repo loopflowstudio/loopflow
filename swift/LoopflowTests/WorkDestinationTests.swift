@@ -190,6 +190,9 @@ struct WorkDestinationTests {
             throw RegistryQueryError("A created Task reads and prepares nothing after its answer: \(args)")
         }
         let (model, registry) = destinationModel(query: query, repoPath: task.task.repo)
+        // The Wave and repository primaries open warm on load, outside the
+        // created Task, and their resumes land whenever the executor runs them.
+        registry.canPrepare = { false }
         model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [], fixed: true)
         model.navigation.palette = .newTask
         let deadline = ContinuousClock.now + .seconds(3)
@@ -267,6 +270,7 @@ struct WorkDestinationTests {
             throw RegistryQueryError("A created Task reads nothing after its answer: \(args)")
         }
         let (model, registry) = destinationModel(query: query, repoPath: task.task.repo)
+        registry.canPrepare = { false } // Warm primaries are not this Task's reads.
         model.applyFixture(roadmap: .available(without), waves: .available([]), workActivity: .loading, repos: [], fixed: true)
         try await model.createTask(request: "fix the flaky retry test", wave: nil, graph: nil, requestID: UUID().uuidString)
         #expect(model.navigation.startingTask == nil)

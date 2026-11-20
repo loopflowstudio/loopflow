@@ -86,9 +86,10 @@ Changes to Task/Graph membership or execution reads also include
 `test(performance_tests::)` in the gate's Rust filter. Its planning and status
 checks catch per-Task and per-Graph SQL growth beyond focused store tests.
 
-Store-wide schema or trigger changes also run `binary(two_people)`,
-`test(transport::)` and `binary(transport_tests)`: shared planning exchanges,
-viewer holds and held-terminal lifetimes exercise writers beyond the changed store module.
+Store-wide schema or trigger changes also run
+`test(machine_commands::the_later_change_shows_on_both_machines_through_the_hub)`,
+`test(transport::)` and `binary(transport_tests)`: hub exchanges, viewer holds and
+held-terminal lifetimes exercise writers beyond the changed store module.
 Task storage changes also run `binary(session_lifecycle_tests)`: creation and
 promotion cover absent checkouts and primary Sessions. When moving nullable
 columns into separate tables, update fixture reads to handle absent rows and
@@ -113,9 +114,8 @@ Include `test(lf::commands::waves::tests::planning_failure_keeps_the_stored_work
 for Task schema or trigger changes: its missing-column fixture checks that a
 planning read failure still leaves the Wave and stored Workflow readable.
 
-Configuration file loading or filtering changes also run `binary(two_people)`:
-it checks that a shared Wave graph choice reaches another person's Task launch.
-Include `test(configuration_changes_reach_an_existing_subscription)`,
+Configuration file loading or filtering changes also run
+`test(configuration_changes_reach_an_existing_subscription)`,
 `test(graph_defaults_follow_task_wave_and_repository)` and
 `test(wave_setup_tests::)` to cover live reload, invalid defaults and Wave scope.
 

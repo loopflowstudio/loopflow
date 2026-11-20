@@ -1190,15 +1190,13 @@ pub(crate) async fn fetch_from_tracker(
         .unwrap_or_default()
         .planning_transport()
     {
-        crate::config::TrackerConfig::Linear { .. } => {
+        Some(crate::config::TrackerConfig::Linear { .. }) => {
             super::linear::fetch_task(repo, issue, refresh).await
         }
-        crate::config::TrackerConfig::Git { .. } => Err(task_error(format!(
-            "Task {issue:?} not found in the Git tracker"
-        ))),
-        crate::config::TrackerConfig::Asana { .. } => Err(task_error(format!(
+        Some(crate::config::TrackerConfig::Asana { .. }) => Err(task_error(format!(
             "Task {issue:?} not saved on this Machine; Asana Tasks are not fetched yet"
         ))),
+        _ => Err(task_error(format!("Task {issue:?} not found"))),
     }
 }
 
@@ -2016,6 +2014,12 @@ async fn place_prepared_task(
     prepared: TaskPlacement,
     options: &TaskProcessOptions,
 ) -> OpsResult<Task> {
+    // Placing an unowned Task claims it: read what other Machines claimed first.
+    if let Some(task) = store.get_task(task_id).await.map_err(task_error)? {
+        if let Ok(repository) = repository_for_task(store, &task) {
+            super::plan_carriers::before_claim(store, &repository, task_id).await;
+        }
+    }
     let (mut task, acquisition) = loop {
         let task = store
             .get_task(task_id)
@@ -2111,11 +2115,6 @@ pub fn task_create(
     let main = crate::git::worktrees::main_repo_root(repo).map_err(task_error)?;
     block_on_task(async {
         let store = Arc::new(super::planning_sync::planning_store().await?);
-        if let Err(error) =
-            super::planning_sync::fetch_repository(&store, &main.to_string_lossy()).await
-        {
-            tracing::debug!(%error,"tracker refresh pending; creating from retained planning");
-        }
         let receipt = receipt.map(|identity| Receipt {
             identity,
             admit: None,
@@ -2179,9 +2178,6 @@ pub(crate) fn sync_admitted(main: &Path, task: &loopflow_model::durable::TaskId)
     let synced = block_on_task(async {
         let store = Arc::new(super::planning_sync::planning_store().await?);
         let repo = main.to_string_lossy();
-        if let Err(error) = super::planning_sync::fetch_repository(&store, &repo).await {
-            tracing::warn!(%error, "tracker fetch after creation failed");
-        }
         super::planning_sync::sync_after_save(
             &store,
             &repo,
@@ -2819,9 +2815,9 @@ pub fn prepare_conversation_beside(task: &Task) {
 }
 
 /// `lf task sync`: exchange the Task with its tracker now. Linear and Asana
-/// look for every sent action and resend what the tracker lacks; Git
-/// exchanges the repository's planning ref, so a peer's Task this Machine
-/// has not fetched yet is found in `repo`'s planning. An `answer` first
+/// look for every sent action and resend what the tracker lacks; without a
+/// tracker, the repository's plan is exchanged with its hub and its remote, so
+/// a Task another Machine made is found there. An `answer` first
 /// settles every value the Task lost; `lf repo tracker answer` settles one.
 pub fn task_sync(repo: &Path, issue: &str, answer: Option<LostAnswer>) -> OpsResult<String> {
     block_on_task(async {
@@ -2850,10 +2846,10 @@ pub fn task_sync(repo: &Path, issue: &str, answer: Option<LostAnswer>) -> OpsRes
                 .map_err(task_error)?;
         }
         let Some(tracker) = super::tracker::queued_tracker(&repository) else {
-            let fetched = super::planning_sync::fetch_repository(&store, &repo).await;
-            super::planning_sync::publish_repository_now(&store, &repo).await?;
-            fetched?;
-            return synced(&store, &task.id).await;
+            super::plan_carriers::sync(&store, &repo)
+                .await
+                .map_err(|error| task_error(format!("{error:#}")))?;
+            return carriers_synced(&store, &repo, &task);
         };
         let project = task
             .project_id
@@ -2901,9 +2897,41 @@ async fn synced(store: &Store, task: &loopflow_storage::work::task::TaskId) -> O
         .ok_or_else(|| task_error("Task is missing"))?;
     let open = store.task_tracker_sync(task).map_err(task_error)?.lines();
     Ok(if open.is_empty() {
-        format!("{}: synchronized", saved.identifier)
+        format!("{}: nothing open", saved.identifier)
     } else {
         format!("{}: {}", saved.identifier, open.join("\n"))
+    })
+}
+
+/// What `lf task sync` prints without a tracker: what each carrier has yet
+/// to take of the repository's plan.
+fn carriers_synced(store: &Store, repo: &str, task: &Task) -> OpsResult<String> {
+    use loopflow_storage::sqlite::plan_carriers::Carrier;
+    let mut unsent = Vec::new();
+    for carrier in [Carrier::Git, Carrier::Hub] {
+        let Some(held) = store
+            .sqlite
+            .plan_carrier(repo, carrier)
+            .map_err(task_error)?
+        else {
+            continue;
+        };
+        let count = store
+            .sqlite
+            .plan_unsent(repo, carrier, 0)
+            .map_err(task_error)?
+            .count;
+        if count > 0 {
+            unsent.push(match carrier {
+                Carrier::Git => format!("Git {}, {count} unsent", held.peer),
+                Carrier::Hub => format!("hub, {count} unsent"),
+            });
+        }
+    }
+    Ok(if unsent.is_empty() {
+        format!("{}: nothing unsent", task.identifier)
+    } else {
+        format!("{}: {}", task.identifier, unsent.join("; "))
     })
 }
 

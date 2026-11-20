@@ -1400,7 +1400,7 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
             println!("{identifier}: removed locally; execution history retained");
             if let Some(provider) = loopflow_execution::config::load_config_or_default(Some(repo))
                 .planning_transport()
-                .remote_name()
+                .map(|tracker| tracker.name())
                 .filter(|_| pending)
             {
                 println!("Pending {provider} sync");

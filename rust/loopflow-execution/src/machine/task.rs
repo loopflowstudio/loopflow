@@ -90,10 +90,8 @@ pub async fn resolve_task_source(
             }
             return Ok(source);
         }
-        if let Err(error) =
-            crate::ops::planning_sync::publish_repository(&store, &repo.to_string_lossy()).await
-        {
-            tracing::warn!(%error,"Git planning publication pending; remote resolution uses retained planning");
+        if let Err(error) = crate::ops::plan_carriers::send(&store, &repo.to_string_lossy()).await {
+            tracing::warn!(error = %format!("{error:#}"), "plan send pending; remote resolution uses this Machine's plan");
         }
     }
 

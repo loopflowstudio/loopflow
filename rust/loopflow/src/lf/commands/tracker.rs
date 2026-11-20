@@ -1,4 +1,4 @@
-//! Inspect configured planning and recover personal Git identity.
+//! How the repository's plan travels and what is still unsent.
 
 use std::path::Path;
 
@@ -11,7 +11,7 @@ use loopflow_execution::store::planning_sync::{
 use loopflow_execution::store::sqlite::tracker_actions::ActionPhase;
 use loopflow_execution::store::Store;
 
-/// `lf repo tracker [key|journal]`; bare, the planning status.
+/// `lf repo tracker [answer]`; bare, the planning status.
 pub fn run(cmd: Option<&RepoTrackerCommand>, json: bool, subscribe: bool) -> Result<()> {
     let directory = std::env::current_dir()?;
     if let Some(RepoTrackerCommand::Answer {
@@ -46,41 +46,13 @@ pub(crate) fn status_repository(directory: &Path) -> Result<std::path::PathBuf> 
     )
 }
 
-/// Whether the repository containing `checkout` plans through a Git ref.
-pub fn plans_through_git(checkout: &Path) -> Result<bool> {
-    let repo = loopflow_execution::git::worktrees::main_repo_root(checkout)?;
-    let config = loopflow_execution::config::load_config(Some(&repo))?.unwrap_or_default();
-    Ok(matches!(
-        config.planning_transport(),
-        loopflow_execution::config::TrackerConfig::Git { .. }
-    ))
-}
-
-/// Exchange the repository's Git planning ref now. The exchange is per
-/// repository, so a Wave selection has no effect.
+/// `lf wave status --sync` in a repository without Linear or Asana: one
+/// exchange by each carrier its plan has.
 pub fn refresh(checkout: &Path) -> Result<()> {
     let repo = loopflow_execution::git::worktrees::main_repo_root(checkout)?;
     tokio::runtime::Runtime::new()?.block_on(async {
         let store = open_store().await?;
-        let repo_key = repo.to_string_lossy();
-        // Refresh records its own failure and never waits on publication.
-        // A refresh waits out another process's publication, then sends this
-        // Machine's pending changes out.
-        let fetched =
-            loopflow_execution::ops::planning_sync::fetch_repository(&store, &repo_key).await;
-        loopflow_execution::ops::planning_sync::publish_repository_now(&store, &repo_key).await?;
-        fetched?;
-        let destinations =
-            loopflow_execution::ops::planning_sync::git_destinations(&store, &repo_key).await?;
-        let Some(active) = destinations.into_iter().find(|d| d.active) else {
-            return Err(anyhow!(
-                "no Git planning destination is configured; see `lf repo tracker`"
-            ));
-        };
-        if let Some(error) = active.fetch_error {
-            return Err(anyhow!("planning refresh failed: {error}"));
-        }
-        Ok(())
+        loopflow_execution::ops::plan_carriers::sync(&store, &repo.to_string_lossy()).await
     })
 }
 
@@ -97,28 +69,13 @@ async fn open_store() -> Result<Store> {
 }
 
 async fn run_async(repo: &Path, cmd: Option<&RepoTrackerCommand>, status_json: bool) -> Result<()> {
+    if cmd.is_none() {
+        loopflow_execution::ops::plan_carriers::before_first_read(repo).await;
+    }
     let store = open_store().await?;
     let repo_key = repo.to_string_lossy();
     match cmd {
-        Some(RepoTrackerCommand::Key { new, recover }) => {
-            let saved = store.planning_user_key().await?;
-            let key = match (recover, saved, new) {
-                (Some(key), _, _) => key.clone(),
-                (None, Some(key), _) => key,
-                (None, None, true) => uuid::Uuid::new_v4().to_string(),
-                _ => return Err(anyhow!(
-                    "No planning user key. Use `lf repo tracker key --new` once, then recover that key on other machines with `--recover <UUID>`."
-                )),
-            };
-            if *new || recover.is_some() {
-                store.provision_planning_user_key(&key).await?;
-            }
-            println!("{key}");
-        }
         None => print_status(&store, &repo_key, status_json).await?,
-        Some(RepoTrackerCommand::Journal { json }) => {
-            print_journal(&store, &repo_key, *json).await?
-        }
         Some(RepoTrackerCommand::Answer { .. }) => {
             unreachable!("answering runs before the status read")
         }
@@ -145,8 +102,7 @@ fn answer(directory: &Path, id: &str, keep_theirs: bool, json: bool) -> Result<(
 }
 
 /// `lf repo tracker --subscribe`: `lf repo tracker --json` now and each time
-/// it changes. The subscription reads stored status; `lf wave status --sync` and
-/// foreground providers exchange planning.
+/// it changes. It reads the store only; the store is opened read-only.
 pub(crate) fn subscribe_status(
     repo: &Path,
     transport: loopflow_execution::read_stream::Transport,
@@ -157,54 +113,83 @@ pub(crate) fn subscribe_status(
         (),
         move |store, ()| {
             let repo_key = repo_key.clone();
-            async move { Ok(status(store.as_deref(), &repo_key).await?.report()) }
+            async move { status(store.as_deref(), &repo_key) }
         },
         transport,
     )
 }
 
-/// What `repo.tracker` answers: the tracker, for Git its destinations with
-/// their import and publication evidence, and every open and lost tracker
-/// action.
+/// What `repo.tracker` answers: the tracker, or for a repository without
+/// one how its plan travels, and every open and lost tracker action.
 #[derive(Debug, serde::Serialize, schemars::JsonSchema)]
 pub(crate) struct TrackerStatus {
-    /// `git`, `linear` or `asana`.
-    tracker: String,
-    destinations: Vec<loopflow_execution::store::GitDestination>,
+    /// `linear` or `asana`; `null` when the plan is in Loopflow's store.
+    tracker: Option<String>,
+    /// How a plan without a tracker travels; `null` with a tracker.
+    plan: Option<PlanCarriers>,
     /// What the tracker has yet to confirm (open: `queued`, `sent`), in send
     /// order, and each value it kept over a local one (lost: `conflicted`)
-    /// until it is answered. On Git, only lost values: Git keeps no queue.
+    /// until it is answered.
     actions: Vec<TrackerActionStatus>,
 }
 
-/// Where a repository's planning is exchanged.
-enum Status {
-    /// The tracker its config names, and its open and lost actions.
-    Remote(TrackerKind, Vec<TrackerActionStatus>),
-    /// Git's destinations, and each value its journal lost.
-    Git(
-        Vec<loopflow_execution::store::GitDestination>,
-        Vec<TrackerActionStatus>,
-    ),
+/// The ways a plan without a tracker reaches other Machines. Every Machine
+/// holds the whole plan; with none of these it stays on this one.
+#[derive(Debug, serde::Serialize, schemars::JsonSchema)]
+pub(crate) struct PlanCarriers {
+    /// The repository's remote; `null` without one.
+    git: Option<GitCarrier>,
+    /// The Machine `lf machine hub` names; `null` without one.
+    hub: Option<HubCarrier>,
 }
 
-impl Status {
-    /// What `lf repo tracker --json` prints.
-    fn report(self) -> TrackerStatus {
-        match self {
-            Self::Remote(tracker, actions) => TrackerStatus {
-                tracker: tracker.as_str().to_owned(),
-                destinations: Vec::new(),
-                actions,
-            },
-            Self::Git(destinations, actions) => TrackerStatus {
-                tracker: TrackerKind::Git.as_str().to_owned(),
-                destinations,
-                actions,
-            },
-        }
-    }
+/// Git's line: `Plan: Git origin, failing since Nov 18 14:02, 3 unsent.`
+#[derive(Debug, serde::Serialize, schemars::JsonSchema)]
+pub(crate) struct GitCarrier {
+    /// The remote's name.
+    remote: String,
+    #[serde(flatten)]
+    standing: CarrierStanding,
 }
+
+/// The hub's line: `Hub mini, failing since Nov 18 14:02, 2 unsent.`
+#[derive(Debug, serde::Serialize, schemars::JsonSchema)]
+pub(crate) struct HubCarrier {
+    /// The hub's name.
+    machine: String,
+    #[serde(flatten)]
+    standing: CarrierStanding,
+}
+
+/// What a carrier has yet to take, and why when it cannot.
+#[derive(Debug, serde::Serialize, schemars::JsonSchema)]
+pub(crate) struct CarrierStanding {
+    /// How many records changed here the carrier has not taken.
+    unsent: usize,
+    /// The first of them in change order: a Task's identifier, `wave <name>`,
+    /// `project <name>` or `comment <id>`.
+    records: Vec<String>,
+    /// Why the last exchange failed, while it still fails.
+    error: Option<String>,
+    /// When the carrier stopped working (Unix seconds), while it still does not.
+    failing_since: Option<i64>,
+    /// What the carrier's last read brought that this Machine could not
+    /// write, and reads again at each exchange. `null` when it took
+    /// everything.
+    not_taken: Option<NotTaken>,
+}
+
+#[derive(Debug, serde::Serialize, schemars::JsonSchema)]
+pub(crate) struct NotTaken {
+    /// How many records.
+    count: usize,
+    /// Why the first was not, and what to do about it when something can be
+    /// done: `wave design from mini has the name of a Wave here; …`.
+    reason: String,
+}
+
+/// How many unsent records a line names.
+const NAMED: usize = 20;
 
 /// The name a person reads for an action's owner: a Task's identifier, a
 /// Project's name.
@@ -228,8 +213,7 @@ fn remote_transport(repo: &str) -> Result<Option<TrackerKind>> {
         loopflow_execution::config::load_config(Some(Path::new(repo)))?.unwrap_or_default();
     Ok(config
         .planning_transport()
-        .remote_name()
-        .map(|name| TrackerKind::parse(&name.to_ascii_lowercase()))
+        .map(|tracker| TrackerKind::parse(&tracker.name().to_ascii_lowercase()))
         .transpose()?)
 }
 
@@ -238,126 +222,175 @@ pub(crate) fn read_status(directory: &Path) -> Result<TrackerStatus> {
     let repo = status_repository(directory)?;
     tokio::runtime::Runtime::new()?.block_on(async {
         let store = open_store().await?;
-        Ok(status(Some(&store), &repo.to_string_lossy())
-            .await?
-            .report())
+        status(Some(&store), &repo.to_string_lossy())
     })
 }
 
-/// Stored status only: an exchange binds the configured destination.
-async fn status(store: Option<&Store>, repo: &str) -> Result<Status> {
+/// Stored status only; exchanges happen around commands.
+fn status(store: Option<&Store>, repo: &str) -> Result<TrackerStatus> {
     let tracker = remote_transport(repo)?;
-    let actions = match store {
-        Some(store) => store
-            .sqlite
-            .repository_tracker_actions(repo, tracker.unwrap_or(TrackerKind::Git))?,
-        None => Vec::new(),
+    let Some(store) = store else {
+        return Ok(TrackerStatus {
+            tracker: tracker.map(|tracker| tracker.as_str().to_owned()),
+            plan: None,
+            actions: Vec::new(),
+        });
     };
     if let Some(tracker) = tracker {
-        return Ok(Status::Remote(tracker, actions));
+        return Ok(TrackerStatus {
+            tracker: Some(tracker.as_str().to_owned()),
+            plan: None,
+            actions: store.sqlite.repository_tracker_actions(repo)?,
+        });
     }
-    Ok(Status::Git(
-        match store {
-            Some(store) => {
-                loopflow_execution::ops::planning_sync::git_destinations(store, repo).await?
-            }
-            None => Vec::new(),
-        },
-        actions,
-    ))
+    Ok(TrackerStatus {
+        tracker: None,
+        plan: Some(plan_carriers(store, repo)?),
+        actions: Vec::new(),
+    })
 }
 
-/// The command binds the configured destination first, so a changed
-/// selection shows at once; the in-app read and the subscription show stored status.
+fn plan_carriers(store: &Store, repo: &str) -> Result<PlanCarriers> {
+    use loopflow_execution::store::sqlite::plan_carriers::Carrier;
+    let standing = |carrier| -> Result<CarrierStanding> {
+        let held = store.sqlite.plan_carrier(repo, carrier)?;
+        let unsent = store.sqlite.plan_unsent(repo, carrier, NAMED)?;
+        let failing_since = held.as_ref().and_then(|held| held.failing_since);
+        let not_taken = held
+            .as_ref()
+            .and_then(|held| held.not_taken.clone())
+            .map(|not_taken| NotTaken {
+                count: not_taken.count,
+                reason: not_taken.reason,
+            });
+        Ok(CarrierStanding {
+            unsent: unsent.count,
+            records: unsent
+                .first
+                .iter()
+                .map(|(table, id)| record_name(store, table, id))
+                .collect::<Result<_>>()?,
+            error: failing_since.and(held.and_then(|held| held.error)),
+            failing_since,
+            not_taken,
+        })
+    };
+    Ok(PlanCarriers {
+        git: loopflow_execution::ops::plan_git::remote(Path::new(repo))
+            .map(|remote| {
+                Ok::<_, anyhow::Error>(GitCarrier {
+                    remote,
+                    standing: standing(Carrier::Git)?,
+                })
+            })
+            .transpose()?,
+        hub: loopflow_execution::ops::plan_hub::hub(&store.sqlite)?
+            .map(|hub| {
+                Ok::<_, anyhow::Error>(HubCarrier {
+                    machine: hub.name().to_owned(),
+                    standing: standing(Carrier::Hub)?,
+                })
+            })
+            .transpose()?,
+    })
+}
+
 async fn print_status(store: &Store, repo: &str, json: bool) -> Result<()> {
-    loopflow_execution::ops::planning_sync::configured_destination(store, repo).await?;
-    let status = status(Some(store), repo).await?;
+    let status = status(Some(store), repo)?;
     if json {
         println!(
             "{}",
-            serde_json::to_string(&loopflow_execution::read_stream::selected_answer(
-                &status.report()
-            )?)?
+            serde_json::to_string(&loopflow_execution::read_stream::selected_answer(&status)?)?
         );
         return Ok(());
     }
-    let (destinations, lost) = match status {
-        Status::Remote(tracker, actions) => {
-            let open = actions
-                .iter()
-                .filter(|action| action.phase != ActionPhase::Conflicted)
-                .count();
-            let lost = actions.len() - open;
-            if actions.is_empty() {
-                println!("Tracker: {}. Nothing open.", tracker.as_str());
-                return Ok(());
-            }
-            println!("Tracker: {}. {open} open · {lost} lost.", tracker.as_str());
-            // Open lines in send order, then lost ones.
-            let mut actions = actions;
-            actions.sort_by_key(|action| action.phase == ActionPhase::Conflicted);
-            print_actions(store, &actions)?;
-            return Ok(());
-        }
-        Status::Git(destinations, lost) => (destinations, lost),
-    };
-    if !destinations.iter().any(|d| d.active) {
-        println!("Tracker: git. Saves stay on this Machine until its remote takes them.");
+    if let Some(plan) = status.plan {
+        print_plan(&plan);
+        return Ok(());
     }
-    for destination in destinations {
-        println!(
-            "{}  {}{}  {} records",
-            destination.id,
-            destination.reference,
-            if destination.active {
-                " (configured)"
-            } else {
-                ""
-            },
-            destination.selected_records
-        );
-        println!(
-            "  Retained import: {}",
-            destination.imported_revision.as_deref().unwrap_or("none")
-        );
-        println!(
-            "  Fetched: {}",
-            destination.fetched_revision.as_deref().unwrap_or("none")
-        );
-        println!(
-            "  Publication: {} ({}){}",
-            destination
-                .publication_state
-                .as_deref()
-                .unwrap_or("not attempted"),
-            destination
-                .publication_revision
-                .as_deref()
-                .unwrap_or("none"),
-            if destination.pending_local {
-                "; local changes pending"
-            } else {
-                ""
-            }
-        );
-        for error in [destination.fetch_error, destination.publication_error]
-            .into_iter()
-            .flatten()
-        {
-            println!("  {error}");
-        }
-        for conflict in destination.conflicts {
-            println!("  Held {}: {}", conflict.target, conflict.reason);
-        }
+    let tracker = status.tracker.unwrap_or_default();
+    let actions = status.actions;
+    let open = actions
+        .iter()
+        .filter(|action| action.phase != ActionPhase::Conflicted)
+        .count();
+    let lost = actions.len() - open;
+    if actions.is_empty() {
+        println!("Tracker: {tracker}. Nothing open.");
+        return Ok(());
     }
-    println!(
-        "Import retention is not publication; `lf repo tracker journal` lists retained values."
-    );
-    if !lost.is_empty() {
-        println!("Tracker: git. {} lost.", lost.len());
-        print_actions(store, &lost)?;
+    println!("Tracker: {tracker}. {open} open · {lost} lost.");
+    // Open lines in send order, then lost ones.
+    let mut actions = actions;
+    actions.sort_by_key(|action| action.phase == ActionPhase::Conflicted);
+    print_actions(store, &actions)
+}
+
+/// One line per carrier, `Plan: Git origin.` and `Hub mini.`, each with its
+/// unsent records by name, why it did not take them, and what it brought
+/// that could not be written here; `Plan: this Machine.` for a repository
+/// with no remote.
+fn print_plan(plan: &PlanCarriers) {
+    match &plan.git {
+        Some(git) => print_carrier(format!("Plan: Git {}", git.remote), &git.standing),
+        None => println!("Plan: this Machine."),
     }
-    Ok(())
+    if let Some(hub) = &plan.hub {
+        print_carrier(format!("Hub {}", hub.machine), &hub.standing);
+    }
+}
+
+fn print_carrier(mut line: String, standing: &CarrierStanding) {
+    if let Some(since) = standing.failing_since {
+        line.push_str(&format!(
+            ", failing since {}",
+            loopflow_execution::output::format_time(since)
+        ));
+    }
+    if standing.unsent > 0 {
+        line.push_str(&format!(", {} unsent", standing.unsent));
+    }
+    if let Some(not_taken) = &standing.not_taken {
+        line.push_str(&format!(", {} not taken", not_taken.count));
+    }
+    println!("{line}.");
+    for record in &standing.records {
+        println!("  {record}");
+    }
+    if standing.unsent > standing.records.len() {
+        println!("  and {} more", standing.unsent - standing.records.len());
+    }
+    if let Some(error) = &standing.error {
+        println!("  {error}");
+    }
+    if let Some(not_taken) = &standing.not_taken {
+        println!("  {}", not_taken.reason);
+    }
+}
+
+/// A Task's identifier, `wave <name>`, `project <name>` or `comment <id>`.
+fn record_name(store: &Store, table: &str, id: &str) -> Result<String> {
+    Ok(match table {
+        "tasks" => store
+            .sqlite
+            .task(&loopflow_model::durable::TaskId::from_raw(id))?
+            .map_or_else(|| id.to_owned(), |task| task.identifier),
+        "waves" => format!(
+            "wave {}",
+            store
+                .sqlite
+                .get_wave(&loopflow_model::id::WaveId::parse(id)?)?
+                .map_or_else(|| id.to_owned(), |wave| wave.name().to_owned())
+        ),
+        "projects" => format!(
+            "project {}",
+            store
+                .sqlite
+                .project(&loopflow_model::durable::ProjectId::from_raw(id))?
+                .map_or_else(|| id.to_owned(), |project| project.name)
+        ),
+        _ => format!("comment {}", short_id(id)),
+    })
 }
 
 /// One line per action under its owner's name, and how to answer a lost one.
@@ -386,31 +419,4 @@ fn print_actions(store: &Store, actions: &[TrackerActionStatus]) -> Result<()> {
 /// The prefix `lf repo tracker answer` accepts for a line.
 fn short_id(id: &str) -> &str {
     id.get(..8).unwrap_or(id)
-}
-
-async fn print_journal(store: &Store, repo: &str, json: bool) -> Result<()> {
-    let journals = loopflow_execution::ops::planning_sync::git_journal(store, repo).await?;
-    if json {
-        println!("{}", serde_json::to_string(&journals)?);
-        return Ok(());
-    }
-    for journal in journals {
-        println!("{}", journal.destination);
-        for (id, change) in journal.changes {
-            println!(
-                "  {} {} [{}; {}]: {}",
-                change.edit.target,
-                change.edit.change.field(),
-                id,
-                if journal.candidates.contains(&id) {
-                    "candidate, not confirmed"
-                } else {
-                    "retained alternative"
-                },
-                change.edit.change.value()?
-            );
-        }
-    }
-    println!("Copy a retained value into an ordinary edit to save it again.");
-    Ok(())
 }

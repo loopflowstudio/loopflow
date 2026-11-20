@@ -1303,7 +1303,7 @@ private actor ReadingSource {
         case "session" where args.dropFirst().first == "list": return #"{"entries":\#(sessions),"next":null}"#
         case "wave" where args.dropFirst().first == "list": return "[]"
         case "session" where args.dropFirst().first == "history": return #"{"truncated":false,"items":[]}"#
-        case "repo" where args.dropFirst().first == "tracker": return #"{"destinations":[]}"#
+        case "repo" where args.dropFirst().first == "tracker": return #"{"tracker":null,"plan":{"git":null,"hub":null},"actions":[]}"#
         case "desktop" where args.dropFirst().prefix(2) == ["view", "show"]:
             return String(decoding: try JSONEncoder().encode(fixtureViewPlan(
                 owner: .init(repository: "repo", kind: .repository, id: "repo"), members: [])), as: UTF8.self)

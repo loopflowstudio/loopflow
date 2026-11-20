@@ -323,7 +323,6 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
             issue: Some(issue),
             repository: Some(repository),
             origin,
-            planning_key,
             from,
             ..
         } => {
@@ -334,10 +333,6 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
                 origin.as_deref(),
             )?;
             let main = loopflow_execution::git::worktrees::main_repo_root(&path)?;
-            if let Some(key) = planning_key {
-                loopflow_execution::ops::planning_sync::adopt_personal_key(&store, &main, key)
-                    .await?;
-            }
             let id = loopflow_model::durable::TaskId::parse(task)?;
             loopflow_execution::ops::human_session::moves::arriving_task(&store, &main, &id, issue)
                 .await?;

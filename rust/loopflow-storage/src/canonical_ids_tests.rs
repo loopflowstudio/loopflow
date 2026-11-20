@@ -346,18 +346,6 @@ fn canonical_ids_released_work_upgrades_without_replacing_history() {
         [SESSION],
     )
     .unwrap();
-    let mutations: std::collections::BTreeMap<String, crate::planning_exchange::PlanningMutation> =
-        conn.prepare("SELECT id,mutation FROM planning_peer_changes ORDER BY id")
-            .unwrap()
-            .query_map([], |r| {
-                Ok((
-                    r.get(0)?,
-                    serde_json::from_str(&r.get::<_, String>(1)?).unwrap(),
-                ))
-            })
-            .unwrap()
-            .collect::<Result<_, _>>()
-            .unwrap();
     apply_sqlite(&conn).unwrap();
     apply_pending_migrations(&observers(), &build(), &conn);
     assert_eq!(
@@ -404,22 +392,6 @@ fn canonical_ids_released_work_upgrades_without_replacing_history() {
         serde_json::from_str::<serde_json::Value>(&event).unwrap()["steer_id"],
         "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
     );
-    let migrated: std::collections::BTreeMap<String, crate::planning_exchange::PlanningMutation> =
-        conn.prepare("SELECT id,mutation FROM planning_peer_changes ORDER BY id")
-            .unwrap()
-            .query_map([], |r| {
-                Ok((
-                    r.get(0)?,
-                    serde_json::from_str(&r.get::<_, String>(1)?).unwrap(),
-                ))
-            })
-            .unwrap()
-            .collect::<Result<_, _>>()
-            .unwrap();
-    let saved = crate::planning_exchange::PlanningSnapshot { changes: migrated };
-    let original = crate::planning_exchange::PlanningSnapshot { changes: mutations };
-    assert_eq!(saved.merge(&original).unwrap(), saved);
-    assert_eq!(saved.merge(&original).unwrap().changes.len(), 2);
     let store =
         SqliteStore::open_read_only(&home.path().join("loopflow.db"), crate::test_fixture::key)
             .unwrap();

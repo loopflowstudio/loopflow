@@ -809,30 +809,6 @@ pub(crate) fn convert_released_data(conn: &rusqlite::Connection, sql: &str) -> S
             }
         }
     }
-    if sql.contains("CREATE TABLE planning_peer_changes (")
-        || sql.contains("CREATE TABLE delegated_placements (")
-        || sql.contains("ALTER TABLE waves ADD COLUMN workflow TEXT;")
-    {
-        // Released migrations seed before tracker_tables exists. Give the seed
-        // writer its two journal names for the lifetime of this conversion.
-        conn.execute_batch(
-            "CREATE TEMP VIEW git_tracker_changes AS
-                 SELECT id,record_table,mutation,object_id,field,clock FROM planning_peer_changes;
-             CREATE TEMP TRIGGER seed_change INSTEAD OF INSERT ON git_tracker_changes BEGIN
-                 INSERT INTO planning_peer_changes(id,record_table,mutation)
-                 VALUES(NEW.id,NEW.record_table,NEW.mutation);
-             END;
-             CREATE TEMP VIEW git_tracker_seen AS SELECT id FROM planning_peer_observed;
-             CREATE TEMP TRIGGER seed_seen INSTEAD OF INSERT ON git_tracker_seen BEGIN
-                 INSERT INTO planning_peer_observed(id) VALUES(NEW.id);
-             END;
-             CREATE TEMP TRIGGER seed_forget INSTEAD OF DELETE ON git_tracker_seen BEGIN
-                 DELETE FROM planning_peer_observed WHERE id=OLD.id;
-             END;",
-        )?;
-        super::sqlite::planning_write::seed(conn)?;
-        conn.execute_batch("DROP VIEW temp.git_tracker_seen; DROP VIEW temp.git_tracker_changes;")?;
-    }
     Ok(())
 }
 
@@ -2534,70 +2510,6 @@ mod tests {
     }
 
     #[test]
-    fn typed_journal_seeding_preserves_released_relationships_authors_and_receipts() {
-        let conn = open();
-        apply_before_migration(&observers(), &build(), &conn, "planning_peers");
-        conn.execute_batch(include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/tests/fixtures/migrations/planning_relationships.sql"
-        )))
-        .unwrap();
-        let receipt = |conn: &rusqlite::Connection| {
-            conn.query_row(
-                "SELECT json_array(comment_id,comment_json,acknowledged,error,conflicting_comment_json)
-                 FROM task_comment_deliveries WHERE comment_id='comment-proof'",
-                [], |row| row.get::<_, String>(0),
-            ).unwrap()
-        };
-        let before = receipt(&conn);
-        let sql = migration_section_sql("planning_peers");
-        conn.execute_batch(&sql).unwrap();
-        super::convert_released_data(&conn, &sql).unwrap();
-        for (id, field, expected) in [
-            (
-                "project-proof",
-                "project_teams",
-                serde_json::json!(["team-a", "team-b"]),
-            ),
-            (
-                "project-proof",
-                "project_initiatives",
-                serde_json::json!(["initiative-a"]),
-            ),
-            (
-                "comment-proof",
-                "comment_content",
-                serde_json::json!({
-                    "body":"Keep attribution", "author":{"kind":"person","name":"Maya"}, "created_at":null
-                }),
-            ),
-        ] {
-            let value: String = conn
-                .query_row(
-                    "SELECT mutation -> '$.edit.change.value' FROM planning_peer_changes WHERE object_id=?1 AND field=?2",
-                    [id, field],
-                    |row| row.get(0),
-                )
-                .unwrap();
-            assert_eq!(
-                serde_json::from_str::<serde_json::Value>(&value).unwrap(),
-                expected
-            );
-        }
-        assert_eq!(receipt(&conn), before);
-        assert_eq!(
-            conn.query_row(
-                "SELECT provider_revision FROM task_comments WHERE id='comment-proof'",
-                [],
-                |row| row.get::<_, String>(0),
-            )
-            .unwrap(),
-            "revision-before"
-        );
-        validate_foreign_keys(&conn).unwrap();
-    }
-
-    #[test]
     fn structured_project_content_preserves_released_work_and_pending_delivery() {
         let conn = open();
         apply_before_migration(&observers(), &build(), &conn, "planning_peers");
@@ -2676,11 +2588,6 @@ mod tests {
         assert!(conn
             .prepare("SELECT project_prompt_context FROM projects")
             .is_err());
-        let captured: String = conn.query_row("SELECT mutation -> '$.edit.change.value' FROM planning_peer_changes WHERE object_id='retained-project' AND field='krs'", [], |r| r.get(0)).unwrap();
-        assert_eq!(
-            serde_json::from_str::<serde_json::Value>(&captured).unwrap(),
-            serde_json::from_str::<serde_json::Value>(&krs).unwrap()
-        );
     }
 
     #[test]

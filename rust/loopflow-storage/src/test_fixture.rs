@@ -68,6 +68,66 @@ pub fn repository(store: &SqliteStore, path: &str) -> RepositoryId {
 }
 
 /// Register saved Wave facts without authored configuration or discovery.
+/// One exchange as a hub carries it: `local` sends what its hub has not
+/// taken, then takes in what changed there.
+pub fn exchange(local: &SqliteStore, local_repo: &str, hub: &SqliteStore, hub_repo: &str) {
+    use crate::sqlite::plan_carriers::Carrier;
+    let held = local
+        .select_carrier(local_repo, Carrier::Hub, "hub")
+        .unwrap();
+    let page = local
+        .plan_records_since(local_repo, held.sent_seq, usize::MAX)
+        .unwrap();
+    // What the hub could not write stays unsent and goes again.
+    if hub
+        .apply_plan_records(hub_repo, &page.records, None, &Default::default())
+        .unwrap()
+        .is_empty()
+    {
+        local.plan_sent(local_repo, Carrier::Hub, page.seq).unwrap();
+    }
+    let page = hub
+        .plan_records_since(hub_repo, held.seen_seq.unwrap_or(0), usize::MAX)
+        .unwrap();
+    local
+        .apply_plan_records(
+            local_repo,
+            &page.records,
+            Some((Carrier::Hub, page.seq)),
+            &Default::default(),
+        )
+        .unwrap();
+}
+
+/// Take `edits` in as another Machine's values, newer than anything here.
+pub fn arrive(
+    store: &SqliteStore,
+    repo: &str,
+    edits: &[crate::work::edit::WorkEdit],
+) -> StoreResult<()> {
+    use crate::sqlite::planning_write;
+    use crate::work::edit::{StampedRecord, StampedValue};
+    let at = planning_write::next_at(&store.conn.lock().unwrap())?;
+    let records: Vec<StampedRecord> = planning_write::grouped(edits)
+        .into_iter()
+        .map(|((table, id), edits)| StampedRecord {
+            table: table.to_owned(),
+            id: id.to_owned(),
+            fields: edits
+                .into_iter()
+                .map(|edit| StampedValue {
+                    value: edit.change,
+                    at,
+                    machine: "home_elsewhere".into(),
+                })
+                .collect(),
+        })
+        .collect();
+    store
+        .apply_plan_records(repo, &records, None, &Default::default())
+        .map(drop)
+}
+
 pub fn wave(store: &SqliteStore, wave: &crate::work::wave::Wave) {
     repository(store, wave.repo());
     assert!(store.upsert_wave_prepared(wave, None).unwrap());
@@ -396,36 +456,6 @@ pub fn process(store: &SqliteStore, number: u32, started_at: i64) -> LfProcessId
         )
         .unwrap();
     id
-}
-
-/// Apply a validated peer snapshot against explicit disconnected fixture facts.
-pub fn import_saved(
-    store: &SqliteStore,
-    repo: &str,
-    destination: &str,
-    revision: &str,
-    incoming: &crate::planning_exchange::PlanningSnapshot,
-) -> StoreResult<()> {
-    repository(store, repo);
-    let inputs = store.repository_registration(repo)?;
-    let incoming = incoming
-        .canonicalized()
-        .map_err(|error| super::StoreError::InvalidData(error.to_string()))?;
-    incoming
-        .validate()
-        .map_err(|error| super::StoreError::InvalidData(error.to_string()))?;
-    assert!(
-        store.import_prepared_git_plan(&super::sqlite::GitPlanImport {
-            inputs: &inputs,
-            repo,
-            destination,
-            revision,
-            incoming: &incoming,
-            planning_connected: false,
-            machine_names: Default::default(),
-        })?
-    );
-    Ok(())
 }
 
 pub fn record_captured_start(store: &SqliteStore, session: &str, turn: &str) {

@@ -19,6 +19,7 @@ use std::time::{Duration, SystemTime};
 use crate::config::parse_agent;
 use crate::config::Agent;
 use crate::error::CoreError;
+use crate::harness::Mode;
 use crate::process::LfProcessRuntime;
 use crate::prompt::structured_reply::{render_structured_reply_guidance, StructuredReply};
 
@@ -220,8 +221,8 @@ impl AgentConfig {
 
     /// Whether the provider runs without asking permission: `yolo`, or nobody
     /// is attending to answer a prompt.
-    pub fn skips_permissions(&self, mode: crate::harness::Mode) -> bool {
-        self.yolo || mode == crate::harness::Mode::Headless
+    pub fn skips_permissions(&self, mode: Mode) -> bool {
+        self.yolo || mode == Mode::Headless
     }
 
     pub fn apply_agent_override(&mut self) -> Result<(), crate::error::LoadError> {
@@ -425,7 +426,7 @@ pub(crate) fn claude_options(
     config: &AgentConfig,
     model: Option<&str>,
     context_file: Option<&Path>,
-    mode: crate::harness::Mode,
+    mode: Mode,
 ) -> Vec<String> {
     // Driver preferences (Chrome, model) pass through only when a Loopflow
     // setting names them; Claude's own configuration decides the rest.
@@ -455,7 +456,7 @@ pub(crate) fn claude_options(
     if config.skips_permissions(mode) {
         args.push("--dangerously-skip-permissions".into());
     }
-    if mode == crate::harness::Mode::Headless {
+    if mode == Mode::Headless {
         if let Some(max_turns) = config.max_turns {
             args.extend(["--max-turns".into(), max_turns.to_string()]);
         }
@@ -548,7 +549,7 @@ impl AgentFailure {
 /// configuration decides.
 pub fn build_codex_thread_start_params(
     launch: &AgentConfig,
-    mode: crate::harness::Mode,
+    mode: Mode,
 ) -> serde_json::Map<String, serde_json::Value> {
     let mut params = serde_json::Map::new();
     if let Some(tier) = launch.codex_service_tier {
@@ -1359,7 +1360,6 @@ mod tests {
 
     #[test]
     fn permissions_are_skipped_unless_yolo_is_off_and_someone_attends() {
-        use crate::harness::Mode;
         for (yolo, mode, skips) in [
             (true, Mode::Interactive, true),
             (true, Mode::Headless, true),
@@ -1419,8 +1419,7 @@ mod tests {
             match provider {
                 "claude" => assert_arg_pair(&args, "--append-system-prompt", "Fixed additions."),
                 "codex" => {
-                    let params =
-                        build_codex_thread_start_params(&launch, crate::harness::Mode::Headless);
+                    let params = build_codex_thread_start_params(&launch, Mode::Headless);
                     assert_eq!(params["developerInstructions"], "Fixed additions.");
                 }
                 _ => {}
@@ -1436,7 +1435,7 @@ mod tests {
             ..default_launch()
         };
 
-        let params = build_codex_thread_start_params(&launch, crate::harness::Mode::Headless);
+        let params = build_codex_thread_start_params(&launch, Mode::Headless);
         assert_eq!(
             params.get("model"),
             Some(&serde_json::Value::String("o3".to_string()))
@@ -1456,7 +1455,7 @@ mod tests {
             ..default_launch()
         };
 
-        let params = build_codex_thread_start_params(&launch, crate::harness::Mode::Headless);
+        let params = build_codex_thread_start_params(&launch, Mode::Headless);
         assert!(!params.contains_key("model"));
         assert_eq!(
             params.get("cwd"),

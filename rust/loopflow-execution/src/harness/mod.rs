@@ -491,32 +491,6 @@ pub struct HookCallback {
     pub prompt: bool,
 }
 
-impl HookCallback {
-    /// A callback that already has Claude's shape and ran at the moment its
-    /// hook declared. `None` for a subagent's, which is not the launch's
-    /// conversation.
-    pub fn plain(
-        payload: serde_json::Value,
-        moment: crate::context_block::ContextMoment,
-    ) -> Option<Self> {
-        payload
-            .get("agent_id")
-            .is_none_or(serde_json::Value::is_null)
-            .then_some(Self {
-                moment,
-                payload,
-                prompt: false,
-            })
-    }
-
-    /// The reply that puts `text` in front of the model, in Claude's shape.
-    pub fn plain_reply(event: &str, text: &str) -> serde_json::Value {
-        serde_json::json!({"hookSpecificOutput": {
-            "hookEventName": event, "additionalContext": text,
-        }})
-    }
-}
-
 pub(crate) fn command_program(command: &str, program: &str) -> bool {
     command.split_whitespace().any(|part| {
         std::path::Path::new(part)
@@ -543,18 +517,30 @@ pub trait Harness: Sync + std::fmt::Debug {
     /// hook declared; `thread_file` is where the launch keeps the
     /// conversation it owns (`context_block::reported_thread_path`). `None`
     /// when the callback is not the launch's conversation: lf answers
-    /// nothing, records no boundary and claims no steers.
+    /// nothing, records no boundary and claims no steers. The default reads
+    /// a callback that has Claude's shape and ran at the moment its hook
+    /// declared; one with an `agent_id` is a subagent's.
     fn hook_callback(
         &self,
         payload: serde_json::Value,
         declared: crate::context_block::ContextMoment,
         _thread_file: Option<&std::path::Path>,
     ) -> Option<HookCallback> {
-        HookCallback::plain(payload, declared)
+        payload
+            .get("agent_id")
+            .is_none_or(serde_json::Value::is_null)
+            .then_some(HookCallback {
+                moment: declared,
+                payload,
+                prompt: false,
+            })
     }
-    /// The reply to the hook named `event` that puts `text` in front of the model.
+    /// The reply to the hook named `event` that puts `text` in front of the
+    /// model; Claude's shape by default.
     fn hook_reply(&self, event: &str, text: &str) -> serde_json::Value {
-        HookCallback::plain_reply(event, text)
+        serde_json::json!({"hookSpecificOutput": {
+            "hookEventName": event, "additionalContext": text,
+        }})
     }
     fn open(&self, launch: &Launch<'_>) -> Result<native_session::NativeClient>;
     fn driver(

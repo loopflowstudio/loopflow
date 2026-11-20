@@ -258,8 +258,8 @@ pub fn explain_task_checkout(
 /// server, which records it. Every launch then reads its own news from the
 /// store, in this process: the Session's unread steers and what changed on its
 /// Tasks. The context block comes from checkout files.
-/// `harness` names the provider whose hook this is when its callbacks are
-/// not Claude's shape; it reads the callback and shapes the reply.
+/// `harness` names the provider whose hook this is; it reads the callback and
+/// shapes the reply. A hook that names none sends Claude's shape.
 pub fn emit_block(
     delivery: Option<&std::path::Path>,
     moment: loopflow_execution::context_block::ContextMoment,
@@ -267,19 +267,13 @@ pub fn emit_block(
 ) -> Result<()> {
     use crate::server::wire::BoundaryMoment;
     use loopflow_execution::context_block::{reported_thread_path, ContextMoment};
-    use loopflow_execution::harness::HookCallback;
+    use loopflow_execution::harness::{HarnessKind, HookCallback};
+    let harness = harness.unwrap_or(HarnessKind::Claude).harness();
     let raw = read_callback()?;
-    let callback = match harness {
-        Some(harness) => {
-            let thread_file = delivery_path(delivery, &raw)
-                .ok()
-                .map(|path| reported_thread_path(&path));
-            harness
-                .harness()
-                .hook_callback(raw, moment, thread_file.as_deref())
-        }
-        None => HookCallback::plain(raw, moment),
-    };
+    let thread_file = delivery_path(delivery, &raw)
+        .ok()
+        .map(|path| reported_thread_path(&path));
+    let callback = harness.hook_callback(raw, moment, thread_file.as_deref());
     let Some(HookCallback {
         moment,
         payload: input,
@@ -385,10 +379,7 @@ pub fn emit_block(
         _ => prefix,
     };
     let event = input["hook_event_name"].as_str().unwrap_or("SessionStart");
-    let output = match harness {
-        Some(harness) => harness.harness().hook_reply(event, &text),
-        None => HookCallback::plain_reply(event, &text),
-    };
+    let output = harness.hook_reply(event, &text);
     write_output(format!("{output}\n").as_bytes())?;
     // Printed first: a hook that dies between the two leaves a claim that
     // lapses, and a steer that arrives twice beats one that never arrives.

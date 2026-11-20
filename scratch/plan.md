@@ -145,9 +145,14 @@ Slice 2, a worker hears lf (2026-11-20):
 What is in the tree for it:
 
 - `HookCallback` and `Harness::hook_callback` / `hook_reply`
-  (`harness/mod.rs`); `HookCallback::plain` holds the `agent_id` check that
-  was in `emit_block`. `lf __context-block --harness <name>` picks the
-  harness; without the flag the callback is read as Claude's shape.
+  (`harness/mod.rs`); the trait's default `hook_callback` holds the
+  `agent_id` check that was in `emit_block`. `lf __context-block --harness
+  <name>` picks the harness; without the flag it is Claude, so `emit_block`
+  asks one harness both questions (`HookCallback::plain` and `plain_reply`
+  are gone). Run after that change, ok: `cargo test -p loopflow --test
+  integration -- session_steers::public_context_capability_rejects_children_and_replacement
+  context_block_tests::`, the worker test again, and `cargo clippy -p
+  loopflow -p loopflow-execution --all-targets -- -D warnings`.
 - `antigravity.rs`: `launch_folder` (made for instructions or a conversation
   context), `hooks`, `hook_script`, `claim_thread`, and the two trait methods.
   The script is `<launch folder>/hook.sh`, outside `.agents`; `hooks.json`
@@ -250,13 +255,6 @@ Next is slice 4.
    Swift (`WorkspacePanesView.swift`, `SessionProgramStatus.swift`), docs,
    `skills/loopflow`. `harness/README.md`: the launch table and the Task-step
    table with five columns.
-3. **One path through `emit_block` (from reading slice 2).**
-   `emit_block(…, harness: Option<HarnessKind>)` branches twice on `None` to
-   call `HookCallback::plain` and `plain_reply`, which are also the trait's
-   defaults. With an absent `--harness` read as `HarnessKind::Claude`,
-   `emit_block` asks one harness both questions, the two `match harness`
-   blocks go, and `plain` / `plain_reply` fold into the trait defaults. No
-   hook declaration changes.
 
 ## Design
 
@@ -622,7 +620,7 @@ is unchanged line for line.
 4. **The terminal.** `open` (`-i`, trust setting, resume), bare thread report
    through `reported_thread_path`, `recognizes` (`agy` or `antigravity`),
    launch matrix chat and work-session cells.
-5. **Names.** Every list in "Left to build" 2, and item 3 there.
+5. **Names.** Every list in "Left to build" 2.
 
 ## Not checked
 

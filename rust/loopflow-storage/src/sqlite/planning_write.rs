@@ -51,7 +51,7 @@ pub(crate) fn table(value: &WorkValue) -> &'static str {
         | WorkValue::TaskRank(_)
         | WorkValue::TaskAssignee(_)
         | WorkValue::HistoricalTaskPaused(_)
-        | WorkValue::TaskShippedAt(_)
+        | WorkValue::HistoricalTaskShippedAt(_)
         | WorkValue::TaskDueDate(_)
         | WorkValue::TaskDeletedAt(_)
         | WorkValue::TaskUrl(_)
@@ -88,7 +88,7 @@ fn column(value: &WorkValue) -> &'static str {
         WorkValue::TaskRank(_) => "planning_rank",
         WorkValue::TaskAssignee(_) => "planning_assignee",
         WorkValue::HistoricalTaskPaused(_) => "paused",
-        WorkValue::TaskShippedAt(_) => "shipped_at",
+        WorkValue::HistoricalTaskShippedAt(_) => "shipped_at",
         WorkValue::TaskDueDate(_) => "planning_due_date",
         WorkValue::TaskDeletedAt(_) => "planning_deleted_at",
         WorkValue::TaskUrl(_) => "planning_url",
@@ -179,7 +179,7 @@ pub(crate) fn read(conn: &Connection, table: &str, id: &str) -> StoreResult<Vec<
             values.push(WorkValue::HistoricalTaskPaused(paused));
         }
         if let Some(shipped_at) = optional_task_column(conn, id, "shipped_at")? {
-            values.push(WorkValue::TaskShippedAt(shipped_at));
+            values.push(WorkValue::HistoricalTaskShippedAt(shipped_at));
         }
         if let Some(regressed_in) = optional_task_column(conn, id, "regressed_in")? {
             values.push(WorkValue::HistoricalTaskRegressedIn(regressed_in));

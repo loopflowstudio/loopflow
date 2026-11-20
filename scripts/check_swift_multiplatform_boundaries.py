@@ -26,7 +26,6 @@ PLATFORM_PREFIXES = (
     "swift/LoopflowMac/",
     "swift/LoopflowiOS/",
     "swift/LoopflowiOSTests/",
-    "swift/LoopflowiOSUITests/",
 )
 
 

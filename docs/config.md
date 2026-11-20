@@ -267,7 +267,7 @@ supported_harnesses: [claude, codex, opencode, pi]
   `workspace-write` + `approval_policy = "never"`, Claude skips permission
   prompts, OpenCode runs with `--auto` (existing more-permissive vendor configs
   are never downgraded).
-- **Headless Task runs** (`lf task run`, `lf ship`, and `lf -b <skill>` inside
+- **Headless Task runs** (`lf task run`, `lf task auto on`, and `lf -b <skill>` inside
   a Task worktree) run as `yolo` on every harness so they can build, test, and
   commit freely. To isolate untrusted work, run it on a dedicated Machine, VM,
   or container ([Security](security.md#choose-the-execution-boundary-first)).

@@ -115,18 +115,17 @@ installed build's `lf holder run` has no QA path in its argv; find it with
 
 The world stand-in writes no transcript, so every thread it starts reads as
 lost: the next start (the pass's or `lf resume`'s) opens a fresh thread
-(`--session-id <new>`) and prints "The claude transcript of this conversation
-is gone; continuing on a fresh thread." To check a plain resume (`--resume
+(`--session-id <new>`) and prints "This conversation has no saved claude
+transcript; starting it again from its first request." To check a plain resume (`--resume
 <id>`), write a line to `$CLAUDE_CONFIG_DIR/projects/<cwd with / and . as
 ->/<id>.jsonl` first, taking `<id>` from the provider's argv; to simulate a
 crash that lost one, move that file away. Read which thread a start used from
 `pgrep -fl w/bin/claude | grep -o -- '--\(resume\|session-id\) [0-9a-f-]*'`;
-`creation_receipts` holds one `fresh-thread:<session>:<lost thread>` per
-fresh start. The notice prints on the starting terminal: a person's `lf
+each fresh start adds one input to the Session. The notice prints on the starting terminal: a person's `lf
 resume` shows it, a viewer attaching to the pass's terminal later does not.
 
 A Task run: add `.lf/graphs/qarun.yaml` (`- implement` then `- interactive:
-human-review`), commit it, and `lf task run <task> qarun`. Its headless step
+ship-review`), commit it, and `lf task run <task> qarun`. Its headless step
 needs a `claude` ahead of the world's on both the server's and the CLI's
 `PATH` that, for `-p`, reads one line, waits for a marker file, prints a
 stream-json `result` line, and otherwise execs the world's. Kill the carrier's

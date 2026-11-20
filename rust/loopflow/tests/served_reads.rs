@@ -1247,12 +1247,12 @@ fn server_operations_match_their_lf_commands() {
         | Write::TaskUpdate { .. }
         | Write::TaskClaim { .. }
         | Write::TaskUnassign { .. }
-        | Write::TaskHold { .. }
+        | Write::TaskAutoOff { .. }
         | Write::TaskMove { .. }
         // Starting a run or a ship starts Processes; task_run_waits_at_an_interactive_step
         // compares the run, and comments differ by their saved IDs.
         | Write::TaskRun { .. }
-        | Write::TaskShip { .. }
+        | Write::TaskAutoOn { .. }
         | Write::TaskSteer { .. }
         | Write::TaskReport { .. }
         | Write::TaskInterrupt { .. }
@@ -1508,10 +1508,6 @@ fn server_operations_match_their_lf_commands() {
         assert_eq!(written["owner"], printed["owner"], "{args:?}");
         assert_eq!(written["owner"].is_null(), !claimed, "{written}");
     }
-    // Stopping a Task that is not shipping saves the stop, which keeps a run
-    // from approving it until `lf ship`, retaining who requested the stop. The
-    // ship process it kills and the merge request it takes back are the ship
-    // tests'.
     // No run is live, so an interrupt reaches nothing, in the app as through `lf`.
     let interrupt = Write::TaskInterrupt {
         directory: directory.clone(),
@@ -1570,7 +1566,7 @@ fn server_operations_match_their_lf_commands() {
         assert_eq!(last(&written), last(&printed), "{args:?}");
         assert_eq!(last(&written).0, format!("served {steer}"));
     }
-    let stop = Write::TaskHold {
+    let stop = Write::TaskAutoOff {
         directory: directory.clone(),
         issue: "INF-123".into(),
         reason: None,
@@ -1581,11 +1577,36 @@ fn server_operations_match_their_lf_commands() {
             issue: "INF-123".into(),
         }
         .read()
-        .unwrap()["execution"]["ship_stop"]["by"]
+        .unwrap()["execution"]["auto"]["by"]
             .clone()
     };
+    // Auto is the Task's setting: this Task has taken up no Graph and keeps
+    // the off, served or through `lf`.
     compare(stop.clone(), &|| stop.clone(), &stopped);
-    assert_eq!(stopped()["kind"], "person", "no stop saved");
+    assert!(!stopped().is_null(), "a Task with no Graph lost its off");
+    // Why auto went off is a comment on the Task.
+    server_write(Write::TaskAutoOff {
+        directory: directory.clone(),
+        issue: "INF-123".into(),
+        reason: Some("waiting on the design".into()),
+    });
+    let pane = Read::TaskGet {
+        directory: directory.clone(),
+        issue: "INF-123".into(),
+    }
+    .read()
+    .unwrap();
+    assert!(
+        pane["comments"]["comments"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|comment| comment["body"]
+                .as_str()
+                .is_some_and(|body| body.starts_with("waiting on the design"))),
+        "{}",
+        pane["comments"]
+    );
 
     // Which repositories the app shows, as the app reads them.
     let portfolio = || without_clock(Read::DesktopPortfolio.read().unwrap());
@@ -2043,12 +2064,12 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             path(directory),
             words(&["task", "unassign", issue, "--json"]),
         ),
-        Write::TaskHold {
+        Write::TaskAutoOff {
             directory,
             issue,
             reason,
         } => {
-            let mut spelled = words(&["task", "hold", issue, "--json"]);
+            let mut spelled = words(&["task", "auto", "off", issue, "--json"]);
             if let Some(reason) = reason {
                 spelled.extend(words(&["--reason", reason]));
             }
@@ -2108,9 +2129,10 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             spelled.push("--json".into());
             (path(directory), spelled)
         }
-        Write::TaskShip { directory, issue } => {
-            (path(directory), words(&["--task", issue, "ship", "--json"]))
-        }
+        Write::TaskAutoOn { directory, issue } => (
+            path(directory),
+            words(&["--task", issue, "task", "auto", "on", "--json"]),
+        ),
         Write::TaskSteer {
             directory,
             issue,

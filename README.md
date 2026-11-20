@@ -24,9 +24,9 @@ ref by default or two-way with Linear or Asana.
 **1. A Task is a conversation with a workflow behind it.**
 
 ```bash
-lf task create "fix the flaky retry test" --run                    # files it, starts its workflow, opens its conversation
-lf -b task create "fix the flaky retry test" --run --graph auto    # straight to a merged PR, no stops
-lf resume --task <ID>                                              # pick up its conversation from any terminal
+lf task create "fix the flaky retry test" --run       # files it, starts its workflow, opens its conversation
+lf -b task create "fix the flaky retry test" --run    # straight to a merged PR, no stops
+lf resume --task <ID>                                 # pick up its conversation from any terminal
 ```
 
 Each Task carries:
@@ -35,10 +35,10 @@ Each Task carries:
   about the Task goes: you talk in it, reviews happen in it, results come back to
   it. Open it in several terminals or Desktop at once; it outlives closed
   windows, `lf install` updates, crashes and reboots.
-- **A workflow (Graph).** Steps like `design`, `implement`, `qa`, `human-review`,
+- **A workflow (Graph).** Steps like `design`, `implement`, `qa`, `ship-review`,
   and `deliver`, each running in the Task's own worktree and branch. `lf task run`
   pauses at `interactive:` steps for your input and runs the rest headless;
-  `lf -b task run` or `lf ship` runs every step autonomously.
+  `lf -b task run` or `lf task auto on` runs every step autonomously.
 - **Its own pull request, branch and tracker issue,** kept together, through
   stacked Tasks (`lf sync <parent-ID>`) and CI repair (`lf land --wait-and-fix`).
 - **Its history.** Every conversation, Graph run and step, and what each cost.
@@ -89,7 +89,8 @@ Wave for Tasks without one.
 
 ```yaml
 # .lf/wave/infrastructure/config.yaml (committed)
-graph: auto           # infrastructure Tasks go from request to merged PR
+graph: code
+auto: on              # infrastructure Tasks go from request to merged PR
 agent: claude:opus
 ```
 

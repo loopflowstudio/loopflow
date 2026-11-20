@@ -616,8 +616,6 @@ impl SqliteStore {
                  WHERE project_activation_ended_at IS NULL AND project_activation_pid IS NOT NULL
              UNION ALL SELECT 'Task run',lf_process_id,run_pid,run_os_started_at,NULL
                  FROM task_graphs WHERE run_pid IS NOT NULL
-             UNION ALL SELECT 'Auto-Ship',lf_process_id,pid,os_started_at,at FROM task_ship_events
-                 WHERE kind IN ('approved','carried') AND ended_at IS NULL AND pid IS NOT NULL
              UNION ALL SELECT 'CI repair',repair_lf_process_id,repair_pid,repair_os_started_at,
                  repair_started_at FROM ci_incidents
                  WHERE repair_finished_at IS NULL AND repair_pid IS NOT NULL

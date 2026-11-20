@@ -55,7 +55,8 @@ The native macOS app reads the same local store as `lf`; it keeps no copy of its
   (at the Task's worktree), and `browser` (Files, Graph log, local dev URLs).
 - **Dashboards:** saved side-by-side grids of Tasks selected by query.
 - **Wave and repository views:** the scope's conversation beside a standup
-  board (`Backlog`, `Working`, `Autonomous`, `Done`) and Task tiles below.
+  board (`Backlog`, `Working`, `Done`) and Task tiles below; a Task with auto
+  on carries an Auto badge.
   Every pane zooms and hides on hover; the header's `Show…` menu restores
   hidden parts.
 - **⌘K:** jump to any Wave, Task, Session, or Graph.
@@ -68,15 +69,16 @@ lf desktop dashboard query attention 'state:available or state:blocked'
 ```
 
 Queries support `wave:`, `task:`, `kind:task|wave`, and
-`state:open|available|busy|blocked|unstarted|idle|active|moving|shipping|backlog|working|autonomous|done`,
-combined with whitespace (AND), `or`, and parentheses.
+`state:open|available|busy|blocked|unstarted|idle|active|moving|backlog|working|done|auto`
+(`auto`: an open Task with auto on), combined with whitespace (AND), `or`, and parentheses.
 
 ### Changes show at once
 
 Actions in Desktop (Complete, Abandon, Reopen, Claim, Unassign, Move, Rename)
 update the UI on the click, including for remote Machines and the phone. If the
 Machine refuses, the row returns and a single bottom Notice explains why
-(auto-dismissing after 6 seconds, with **Undo** on Auto-Ship).
+(auto-dismissing after 6 seconds; the **Auto** toggle's Notice carries **Undo**,
+which turns auto off).
 
 If the Machine pauses briefly, edits still show immediately and flush once it
 reconnects. After ~10 seconds offline, mutation controls disable until the

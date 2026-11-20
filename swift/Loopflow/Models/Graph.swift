@@ -175,6 +175,42 @@ public struct TaskExecutionSnapshot: Decodable, Sendable, Hashable {
     public let reason: String
     public let step: String?
     public let captured: Int64?
+    /// Where the run's `lf task run` died before the run stopped.
+    public let died: RunDied?
+    /// What happens next to a run that died; `reason` already says it.
+    public let outlook: SessionOutlook?
+
+    enum CodingKeys: String, CodingKey {
+        case state, reason, step, captured, died, outlook
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        state = try values.decode(TaskExecutionState.self, forKey: .state)
+        reason = try values.decode(String.self, forKey: .reason)
+        step = try values.decodeIfPresent(String.self, forKey: .step)
+        captured = try values.decodeIfPresent(Int64.self, forKey: .captured)
+        died = try values.decode(RunDied?.self, forKey: .died)
+        outlook = try values.decode(SessionOutlook?.self, forKey: .outlook)
+    }
+}
+
+/// A Task run's carrier died while the run was at a step.
+public struct RunDied: Decodable, Sendable, Hashable {
+    public let atStep: String
+    /// RFC 3339; nil when nobody recorded the death.
+    public let at: String?
+
+    enum CodingKeys: String, CodingKey {
+        case atStep = "at_step"
+        case at
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        atStep = try values.decode(String.self, forKey: .atStep)
+        at = try values.decode(String?.self, forKey: .at)
+    }
 }
 
 /// One autonomous definition, including an invalid local source.

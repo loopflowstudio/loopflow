@@ -46,7 +46,7 @@ work legible; they do not contain hostile code, skills, hooks, or MCP servers.
   hang: Codex gets `workspace-write` and `approval_policy = "never"`, Claude
   skips permission prompts, OpenCode runs with `--auto`, and Pi uses its own
   unsandboxed tools. More-permissive vendor configs are never downgraded.
-- **Headless Task runs** (`lf task run`, `lf ship`, and `lf -b <skill>` in a
+- **Headless Task runs** (`lf task run`, `lf task auto on`, and `lf -b <skill>` in a
   Task checkout) run as `yolo` on all four harnesses and can write anywhere the
   OS user can. See [Configuration](config.md#permissions-yolo-and-worktree-sandboxes).
 

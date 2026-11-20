@@ -26,7 +26,7 @@ See [Workspaces](workspaces.md) for host support (`desktop`, `rex`, `cmux`,
 |---|---|
 | Missing for this scope | Starts a new one |
 | Running in a held terminal (shown or hidden) | Attaches another view here; existing views stay open |
-| Ended or crashed | Continues the same provider thread from saved history (paints last screen while reopening) |
+| Ended or crashed | Continues the provider thread it saved (paints last screen while reopening), or starts again from its first request |
 | Running in an unshared terminal (`lf <skill>` elsewhere) | Takes it over: ends the other client and continues here |
 
 Need a parallel branch of the same conversation, or a fresh context window?
@@ -50,7 +50,7 @@ managed by the local server vs. bare:
 | Kind | Started by | Terminal & lifetime | Server involvement |
 |---|---|---|---|
 | **Work session** | `lf resume --task`, interactive Graph steps, Wave/repo sessions, Desktop panes | Runs in a **holder** process; outlives windows and `lf install` | Records turns, wakes idle conversations on steers/updates |
-| **Worker** | Headless steps of `lf task run` / `lf ship`, Discord Wave replies | Headless; runs in its own process | Records turns; keeps running if server stops |
+| **Worker** | Headless steps of `lf task run` / `lf task auto on`, Discord Wave replies | Headless; runs in its own process | Records turns; keeps running if server stops |
 | **Chat** | `lf`, `lf <skill>`, `lf -i`, interactive `lf graph` | Runs directly in your terminal (`Ctrl+C`/`Ctrl+Z` go straight to the agent); ends with the terminal | None; reads transcript at exit |
 | **Batch** | `lf -b <skill>` | Headless child of its caller; prints output and exits | None; reads transcript at exit |
 
@@ -101,18 +101,26 @@ lf task status LOO-12
   logout, reboot) are restarted automatically by the server from their saved
   thread on the same provider and login. Cut-off turns are never replayed;
   pending steers arrive at the first boundary.
-- **Task runs** (`lf task run`, `lf ship`, and their workers) are carried again
-  from the step they reached. Interactive stops stay stops, and recovery never
-  grants Auto-Ship you hadn't approved.
+- **Task runs** (`lf task run`, `lf task auto on`, and their workers) are carried
+  again as `lf task run` from the step they reached. Interactive stops stay
+  stops, and recovery never turns auto on.
 - **Work sessions you quit** (`/exit`, `Ctrl+D`, `Ctrl+C` at the prompt) stay
   quit until you run `lf resume --task <ID>`.
 - **Backoff.** After a reboot, the server brings Tasks back one at a time, most
   recently active first. Repeated deaths back off from 1 minute up to 30
   minutes and stop after 5 attempts without a finished turn or step, printing
   the command to restart manually (which resets the counter).
-- **Missing transcripts.** If a crash happened before the provider saved its
-  first turn, the conversation restarts on a fresh thread with its original
-  request; the old thread stays in `lf session history`.
+- **Missing transcripts.** A launch can end before the provider saves anything
+  (`claude` missing from `PATH`, a failed login or trust prompt, a crash, Ctrl+C
+  before you typed), or the transcript can be deleted. Opening it again, from
+  the server, `lf resume` or a pane, starts a fresh thread with its original
+  request; the old thread stays in `lf session history`. A saved conversation
+  always resumes its thread; if the provider refuses, the Session stays as it was.
+
+  ```bash
+  lf resume 7f3a2c
+  # This conversation has no saved claude transcript; starting it again from its first request.
+  ```
 
 `lf machine doctor` reports remaining PTYs (each held work session uses one).
 In `--json`, each Session carries its `outlook` (`starting`, `coming_back`,
@@ -174,8 +182,8 @@ lf session new -a claude           # continue this scope on Claude
 
 The Session keeps its title, Task, and history. The new harness starts from a
 plain log of the conversation so far (requests, answers, and one line per tool
-call) rather than a lossy summary. The switch sticks: future `lf resume` calls
-and Desktop reopen on the new provider until you switch again.
+call) rather than a lossy summary. The switch sticks: future `lf resume` and
+`lf open` calls and Desktop reopen on the new provider until you switch again.
 
 ## Steer and wake idle conversations
 

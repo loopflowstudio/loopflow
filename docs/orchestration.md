@@ -198,7 +198,7 @@ moments:
 - loop:
     - loop:
         - graph: build      # implement, compress, qa, publish PR
-        - interactive: human-review # read one summary page; iterate sends feedback back to build
+        - interactive: ship-review  # read one summary page; iterate sends feedback back to build
     - graph: deliver        # reflect, gate, land --wait-and-fix
     - interactive: verify   # check it on main; finish or fix forward
 ```
@@ -208,21 +208,23 @@ lf task run LOO-12 feature          # stops at explore; opens in the Task conver
 lf task run LOO-12                  # continues from where it stopped
 lf task run LOO-12 --from explore   # jump back to any step (by id, Skill, or sub-Graph)
 lf -b task run LOO-12               # run headless through all remaining steps
-lf ship LOO-12                      # same, returning once shipping is underway
+lf task auto on LOO-12              # auto on: an agent stands in for you at every remaining step
 ```
 
-At **`human-review`**, Loopflow builds one HTML page (`scratch/human-review.html`)
-combining the plan, concept review, QA findings, per-step commits, open
-questions, and PR checks. Ask for changes in the Task conversation to loop back
-to `build`, or move on to `deliver`.
+At **`ship-review`**, Loopflow builds one HTML page (`scratch/ship-review.html`):
+what ships, in your terms, and everything the run left outside the PR, each
+with a proposal to fix it here, give it its own Task, or drop it. It is not a
+code review; concept review and gate already answered whether the change is
+right. Ask for changes in the Task conversation to loop back to `build`, or
+move on to `deliver`.
 
 ### Built-in Graphs
 
 | Graph | What it does |
 |---|---|
-| `feature` | `explore` (interactive) → `plan` → `build` ↔ `human-review` (interactive) → `deliver` → `verify` (interactive) |
+| `feature` | `explore` (interactive) → `plan` → `build` ↔ `ship-review` (interactive) → `deliver` → `verify` (interactive) |
 | `code` | Same as `feature`, starting at `plan` (default when no Graph is configured) |
-| `auto` | `pursue` then `deliver` with no interactive stops: request to merged PR without you |
+| `pursue` | `plan` then `build` with no interactive stops: request to published PR |
 | `research` | Investigate and report findings without opening a PR |
 | `optimize` | Iterative measure → change → keep/revert loop |
 
@@ -233,23 +235,47 @@ lf graph customize feature                # writes .lf/graphs/feature.yaml
 lf --wave product set wave.graph feature  # personal override without committing
 ```
 
-### Failure, retries, and holding Auto-Ship
+### Auto
+
+Auto is a setting on the Task: on, off, or never set. While it is on, the
+Task's runs stand in for you at each interactive step they reach and may merge
+the PR. Turning it on runs the Task: `lf task auto on` and Desktop's **Auto**
+toggle are one operation.
+
+```bash
+lf task auto on LOO-12              # LOO-12 · code from ship-review running as Graph run …
+lf task status LOO-12               # LOO-12  moving · auto: on by Maya, Nov 18 09:04
+lf task auto off LOO-12             # LOO-12: auto off
+```
+
+- The run reads auto at each interactive step, not at launch: turn it on while
+  `build` runs and that run stands in at `ship-review` when it gets there.
+- `lf task auto off` kills nothing. The run waits at its next interactive step,
+  or before a merging step (`lf land`, `lf pr arm`, `pr-land`): "Waiting at pr
+  land: auto is off (Maya). `lf task auto on INF-1` lands it." Auto-merge that
+  Loopflow armed is disarmed.
+- Off stands: only `lf task auto on` turns it back on; an `auto: on` in
+  configuration never does. `lf -b task run` stands in for its own run and
+  writes no auto, so with auto off it still waits at the landing step.
+- Never set, a run that reaches a merging step lands; `lf task run` says so on
+  its `merges:` line. A failing run leaves auto alone.
+- `auto: on` beside `graph:` in a Wave's config turns auto on for every Task
+  that takes the Graph up. Reopening a Task clears it.
+
+### Failure and retries
 
 - A failed step is tried again, up to three attempts, starting at that step (earlier steps stay done).
   Pre-launch failures (such as a missing harness CLI) fail immediately so you
   can fix them and run `lf task run`.
 - If a headless OpenCode or Pi agent asks a question, the run stops and prints
   it; answer with `lf steer LOO-12 "…"` and continue with `lf task run LOO-12`.
-- `lf task hold LOO-12` pauses Auto-Ship so runs stop before any merging step
-  (`lf land`, `lf pr arm`, `pr-land`) until you explicitly run `lf ship LOO-12`.
 
 | Task state | Meaning |
 |---|---|
 | `unstarted` | No worktree yet |
 | `idle` | Checked out, nothing running, not at an interactive step |
 | `active` | Waiting at an interactive step in its Task conversation |
-| `moving` | Graph running with an interactive step ahead |
-| `shipping` | Graph running with no interactive stops ahead |
+| `moving` | Graph running, whatever the auto setting |
 | `done` / `abandoned` | Completed / dropped |
 
 ## Run Tasks on pools or rented machines

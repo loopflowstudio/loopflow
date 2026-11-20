@@ -96,8 +96,9 @@ calls continue from where it stopped.
 
 - Set `graph: code` in `.lf/config.yaml` to make it the repo default.
 - Run `lf -b task run <ID>` to run straight through interactive stops headless.
-- Use `graph: auto` (no stops) to take a Task from request to merged PR
-  autonomously.
+- Put `auto: on` beside `graph:` in `.lf/wave/<wave>/config.yaml` to take that
+  Wave's Tasks from request to merged PR autonomously; `lf task auto off <ID>`
+  takes one back.
 
 Check progress anytime:
 
@@ -108,10 +109,10 @@ lf session list                  # live conversations, OS-confirmed
 
 ## 4. Pick up the conversation
 
-When the PR is ready, the Task pauses at `human-review` in its own conversation.
-It prepares one summary page (`scratch/human-review.html`) covering what
-changed, how to try it, what `qa` verified, choices made for you, and open
-questions.
+When the PR is ready, the Task pauses at `ship-review` in its own conversation.
+It prepares one summary page (`scratch/ship-review.html`) covering what ships,
+how to try it, the choices made for you, and everything left outside the PR,
+each with a proposal to fix it here, give it its own Task or drop it.
 
 ```bash
 lf resume --task <ID>            # open from any terminal, on whichever harness it ran
@@ -124,14 +125,15 @@ reboots.
 ## 5. Land it
 
 ```bash
-lf ship <ID>                     # runs remaining steps, then merges; repairs failing CI until it lands
-lf task hold <ID>                # pause auto-ship and disarm auto-merge
+lf task auto on <ID>             # runs remaining steps, then merges; repairs failing CI until it lands
+lf task auto off <ID>            # wait at the next interactive step and disarm auto-merge
 ```
 
-`lf ship` runs any remaining steps and then `deliver`: `reflect` (folds your
-feedback into skill improvements), `gate` (publishes the PR so CI starts, then
-reviews while CI runs), and `lf land --wait-and-fix`. It returns once the Task
-is shipping (`-b` waits until merge). The Task completes when its PR merges, and
+`lf task auto on` turns auto on and runs the Task: an agent stands in at each
+remaining interactive step, then `deliver` runs `reflect` (folds your feedback
+into skill improvements), `gate` (publishes the PR so CI starts, then reviews
+while CI runs), and `lf land --wait-and-fix`. It returns once the run starts,
+like `lf task run` (`-b` waits until merge). The Task completes when its PR merges, and
 `lf wt prune` cleans up finished worktrees later.
 
 The same landing commands work on any branch outside a Task:

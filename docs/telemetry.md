@@ -41,7 +41,7 @@ lf task status LOO-12 --json | jq .summary
 
 Once a Task completes or is abandoned, its `summary` records how and when it
 ended, the Graph it ran, how many times each loop iterated (`loop_passes`),
-Auto-Ship events (`ship_events`), wall time from its first Graph run, and the
+whether auto was on or off at the end (`auto`, `null` if never set), wall time from its first Graph run, and the
 headline from its last `reflect` step. Every run in `lf session usage --json`
 also carries `skill_version` (SHA-256 of the skill text) so you can compare
 runs across skill edits.

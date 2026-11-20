@@ -16,7 +16,7 @@ code host today; you need [`gh`](https://cli.github.com) signed in.
 ```bash
 lf land --wait-and-fix                 # sync, mark ready, enable auto-merge, repair CI until merged
 lf --task LOO-12 land --wait-and-fix   # same, from any directory
-lf ship LOO-12                         # run remaining Graph steps, then reflect → gate → land --wait-and-fix
+lf task auto on LOO-12                 # auto on, then remaining Graph steps: reflect → gate → land --wait-and-fix
 ```
 
 `lf land --wait-and-fix` polls the PR every 15 seconds and launches a `ci-fix`
@@ -26,8 +26,8 @@ until the PR merges, closes, hits a blocker `ci-fix` cannot clear, or you press
 picks it up). Bare `lf land` requests auto-merge and returns immediately with
 no repair watcher.
 
-If a shipping Task's ship process dies, the Machine server restarts it within a
-minute. Repeated failed repairs back off from 1 to 30 minutes; cap startup
+If a Task's run dies, auto on or not, the Machine server starts it again as
+`lf task run` within a minute, up to five times before it waits for you. Repeated failed repairs back off from 1 to 30 minutes; cap startup
 retries per repair with `automation: {retries: 1}` in `.lf/config.yaml`, or
 stop repair on one Task with `lf task unassign LOO-12`. Inspect past repairs
 with `lf repo ci --since 7d`.
@@ -265,7 +265,7 @@ OpenCode. See [Native authentication](subscriptions.md).
 | `lf land [--wait-and-fix]` | Enable auto-merge; with `--wait-and-fix`, watch and repair CI until merged |
 | `lf pr publish` / `open` / `submit` / `arm` / `abandon` | PR lifecycle at each commitment level |
 | `lf pr reconcile` | Settle recorded landings once; recover a Task's missing PR |
-| `lf ship [ISSUE]` / `lf task hold ISSUE` | Run remaining steps to merge with CI repair / withdraw auto-ship |
+| `lf task auto on\|off [ISSUE]` | Turn [auto](orchestration.md#auto) on and run the Task to merge / off: wait at the next interactive or merging step |
 | `lf repo ci [--since 7d]` | Report CI failures and automated repairs |
 | `lf repo release run\|check\|status\|regress\|promote` | End-to-end releases and stable promotion |
 | `lf commit`, `lf sync [TASK\|BRANCH]`, `lf wt …` | Git operations with Task and stack awareness |

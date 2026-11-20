@@ -31,7 +31,7 @@ run `lf sync LOO-12` inside an existing Task's worktree to stack it on `LOO-12`.
 `lf sync` carries the child through the parent's updates and squash merge;
 `lf sync main` detaches it back onto the default branch.
 
-`lf task run`, `lf ship`, and `lf task checkout`
+`lf task run`, `lf task auto on`, and `lf task checkout`
 prepare the Task's primary conversation and the local server starts it in the
 background within seconds (with no background conversation cap). An in-place
 `lf -i task run` uses your current terminal instead. Pass `--open` to attach
@@ -54,7 +54,7 @@ context without changing its Graph position or completion state.
 lf steer LOO-12 "keep the retry budget at 3"   # delivered at the next step or turn
 lf task status LOO-12 --json                   # thread: your steers, teammates' comments, agent reports
 lf task interrupt LOO-12                       # stop its running Graph
-lf task unassign LOO-12                        # release ownership; stops ship and CI repair
+lf task unassign LOO-12                        # release ownership; stops CI repair
 ```
 
 Steers save locally first, then reach every Session working on the Task at its

@@ -24,9 +24,9 @@ ref by default or two-way with Linear or Asana.
 **1. A Task is a conversation with a workflow behind it.**
 
 ```bash
-lf task create "fix the flaky retry test" --run                    # files it, starts its workflow, opens its conversation
-lf -b task create "fix the flaky retry test" --run --graph auto    # straight to a merged PR, no stops
-lf resume --task <ID>                                              # pick up its conversation from any terminal
+lf task create "fix the flaky retry test" --run       # files it, starts its workflow, opens its conversation
+lf -b task create "fix the flaky retry test" --run    # straight to a merged PR, no stops
+lf resume --task <ID>                                 # pick up its conversation from any terminal
 ```
 
 Each Task carries:
@@ -35,10 +35,10 @@ Each Task carries:
   about the Task goes: you talk in it, reviews happen in it, results come back to
   it. Open it in several terminals or Desktop at once; it outlives closed
   windows, `lf install` updates, crashes and reboots.
-- **A workflow (Graph).** Steps like `design`, `implement`, `qa`, `human-review`,
+- **A workflow (Graph).** Steps like `design`, `implement`, `qa`, `ship-review`,
   and `deliver`, each running in the Task's own worktree and branch. `lf task run`
   pauses at `interactive:` steps for your input and runs the rest headless;
-  `lf -b task run` or `lf ship` runs every step autonomously.
+  `lf -b task run` or `lf task auto on` runs every step autonomously.
 - **Its own pull request, branch and tracker issue,** kept together, through
   stacked Tasks (`lf sync <parent-ID>`) and CI repair (`lf land --wait-and-fix`).
 - **Its history.** Every conversation, Graph run and step, and what each cost.
@@ -89,7 +89,8 @@ Wave for Tasks without one.
 
 ```yaml
 # .lf/wave/infrastructure/config.yaml (committed)
-graph: auto           # infrastructure Tasks go from request to merged PR
+graph: code
+auto: on              # infrastructure Tasks go from request to merged PR
 agent: claude:opus
 ```
 
@@ -120,7 +121,7 @@ lf resume                                  # return to this checkout's conversat
   are YAML under `.lf/`, reviewed like code. A Graph can loop
   (`implement → sync → realign`), branch (`xor`), write the docs before the
   code (`write-docs`), keep QA playbooks (`.lf/qa/`), and stop for you with
-  one summary page (`human-review`).
+  one summary page (`ship-review`).
 - **Your team keeps its tools.** Teammates review PRs on GitHub and comment in
   Linear or Asana without installing `lf`; their comments reach running agents
   as steers. With no tracker, the plan syncs through a Git ref on `origin`.
@@ -136,7 +137,7 @@ lf resume                                  # return to this checkout's conversat
 | Parallel Tasks, steering, stacking PRs, and team sync (Git, Linear, Asana) | [Work](work.md) |
 | Persistent conversations, multi-terminal views, and crash/reboot recovery | [Sessions](sessions.md) |
 | Mixing Claude, Codex, OpenCode, and Pi + automatic usage-limit failover | [Configuration](config.md#keep-going-when-a-provider-runs-out) · [Native authentication](subscriptions.md) |
-| Custom Skills (`extends: builtin`), Graphs, loops, `human-review`, and `qa` | [Orchestration](orchestration.md) |
+| Custom Skills (`extends: builtin`), Graphs, loops, `ship-review`, and `qa` | [Orchestration](orchestration.md) |
 | Auto-merge, CI repair (`lf land --wait-and-fix`), stacked PRs, and releases | [Ops](ops.md) |
 | Running on SSH machines, pools, or rented Daytona/Modal/RunPod/AWS boxes | [Machines](ops.md#machines) · [Remote forwarding](subscriptions.md#remote-machines-and-rentals) |
 | Loopflow Desktop, Rex, cmux, Herdr, tmux, or building a custom UI | [Surfaces](surfaces.md) · [Workspaces](workspaces.md) |
@@ -157,7 +158,7 @@ Each page picks up where the previous one leaves off:
 | Surfaces | [Surfaces](surfaces.md) · [Workspaces](workspaces.md) | Desktop, Rex, cmux, Herdr, tmux, `lf open`, `--subscribe --json` |
 | Client server | [Connect clients](server.md) | Local server lifecycle, Desktop reconnect, phone access over Tailscale |
 | Telemetry | [Telemetry](telemetry.md) | Cost, context budgets, transcripts, live runs, `lf doctor` |
-| Orchestration | [Orchestration](orchestration.md) | Custom Skills, Graphs, loops, `xor`, `optimize`, `human-review`, Goals |
+| Orchestration | [Orchestration](orchestration.md) | Custom Skills, Graphs, loops, `xor`, `optimize`, `ship-review`, Goals |
 | Agent API | [The Agent API](agent-api.md) | Driving `lf` from another agent: delegate, steer, ship, observe |
 | Reference | [Configuration](config.md) · [Native authentication](subscriptions.md) · [Security](security.md) · [Glossary](glossary.md) · [`lf` reference](lf-reference.md) · [Troubleshooting](troubleshooting.md) | Exact settings, auth, trust boundaries, terms, CLI flags, fixes |
 

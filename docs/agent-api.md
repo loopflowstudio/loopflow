@@ -125,7 +125,7 @@ Tracked Work follows Wave → Task in navigation. A Wave owns its objective and
 memory; its planning holds Tasks, KRs and targets.
 A Task owns its checkout and its PR history, with one current PR. Every
 conversation and Graph attributed to it is part of its work. The Task has one
-captured graph and position, advanced by `lf task run` and `lf ship`; independent
+captured graph and position, advanced by `lf task run` and `lf task auto on`; independent
 Graph runs do not move that position.
 
 LfSession keeps a continuable conversation, whether interactive or headless,

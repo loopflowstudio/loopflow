@@ -282,6 +282,7 @@ definitions! {
     summary_tokens: usize = "5000", Launch, Replace, Portable, Inactive, Agents, "Parsed summary budget; no runtime consumer";
     #[serde(alias = "workflow")]
     graph: Option<String> = "null", General, Replace, Portable, NextLaunch, Agents, "Graph new Tasks take up";
+    auto: Option<super::AutoDefault> = "null", General, Replace, Portable, NextLaunch, Agents, "on: a Task turns auto on as it takes up its Graph, unless someone set it first";
     supported_harnesses: Vec<String> = "[]", General, AppendReset, Portable, NextRead, Agents, "Harnesses offered by model selection";
     automation: AutomationConfig = "{retries: 1}", General, Merge, Portable, NextRead, Agents, "Automatic retry count";
     pools: BTreeMap<String, placement::PoolDeclaration> = "{}", Personal, Merge, HostLocal, NextLaunch, Machines, "Local pools accepting new work; held work stays";

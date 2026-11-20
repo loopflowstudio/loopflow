@@ -64,11 +64,27 @@ tab, splits follow that shell's current `cd` directory. After detaching with
 
 ## Failure and worktree cleanup
 
-- **Attachment errors.** Success means the Session actually attached. If a host
-  or attachment fails, fix the reported error and retry (for a lost reply where
-  attachment may have succeeded, use `--focus` first).
+- **Attachment errors.** Success means the Session attached and its provider
+  started. If not, the command fails with lf's own error, and the pane shows the
+  same text and waits for Enter. Fix it and retry (for a lost reply where
+  attachment may have succeeded, use `--focus` first):
+
+  ```bash
+  lf open --task ENG-123 --tab --host rex --json
+  # {"receipts": [{"host": "rex", "status": "failed",
+  #   "reason": "'claude' is not installed. Install it with `npm install -g @anthropic-ai/claude-code`, then open `claude` to sign in; retry the same command", ...}]}
+  ```
 - **Choosing a harness.** If multiple harnesses are installed with no default,
-  pass `-a claude` or save `lf set --global default_agent claude`.
+  pass `-a claude` or save `lf set --global default_agent claude`. Without `-a`,
+  a pane continues on the harness the conversation last ran on;
+  `lf -a codex open --task ENG-123` moves it
+  ([switching agents](sessions.md#switch-agents-mid-conversation)).
+- **Finding the harness.** A pane looks for the harness after the host's own
+  `PATH` in `~/.local/bin`, `~/.opencode/bin`, `/opt/homebrew/bin`,
+  `/opt/homebrew/sbin`, `/usr/local/bin`, `/usr/local/sbin` and `~/.cargo/bin`.
+  It does not inherit your terminal's `PATH`, so a tool reachable only through
+  shell startup files (nvm, mise, asdf or pyenv shims) is missing there unless
+  it is also in one of those directories.
 - **Completed Task worktrees.** Keeping a Conversation pane open preserves a
   completed Task's worktree. Once the Task is done and no Conversation pane is
   open, Loopflow deletes the merged worktree (and any uncommitted files in it)

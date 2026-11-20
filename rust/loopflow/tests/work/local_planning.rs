@@ -440,7 +440,7 @@ fn stored_fields_preserve_order_and_assignment() {
 }
 
 #[test]
-fn nested_waves_create_files_and_store_project_identity() {
+fn nested_waves_create_files_and_their_tasks_follow_renames_and_moves() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
     let created = lf(
@@ -481,7 +481,8 @@ fn nested_waves_create_files_and_store_project_identity() {
         home.path(),
         &["desktop", "task", again["id"].as_str().unwrap(), "--json"],
     );
-    assert_eq!(status["project"]["id"], other["project"]["id"]);
+    // No Project anywhere above: neither Task makes one.
+    assert!(status["project"].is_null() && other["project"].is_null());
     lf(
         repo.path(),
         home.path(),
@@ -509,12 +510,12 @@ fn nested_waves_create_files_and_store_project_identity() {
             "instruments/lexer",
         ],
     );
-    let moved = lf(
+    let lexer = lf(
         repo.path(),
         home.path(),
-        &["desktop", "task", created["id"].as_str().unwrap(), "--json"],
+        &["wave", "status", "instruments/lexer", "--json"],
     );
-    assert_ne!(moved["project"]["id"], status["project"]["id"]);
+    assert_eq!(lexer["tasks"]["items"][0]["task"]["id"], created["id"]);
     let wave = lf(
         repo.path(),
         home.path(),
@@ -693,7 +694,7 @@ fn public_local_planning_survives_restart_with_generated_identity() {
         &["wave", "status", "inbox", "--json"],
     );
     assert_eq!(wave["tasks"]["items"].as_array().unwrap().len(), 2);
-    assert_eq!(wave["projects"]["items"][0]["status"], "started");
+    assert_eq!(wave["projects"]["items"], serde_json::json!([]));
     let goal = repo.path().join(".lf/wave/inbox/GOAL.md");
     let memory = repo.path().join(".lf/wave/inbox/MEMORY.md");
     std::fs::write(&goal, "## Objective\n\nKeep private parser work local.\n").unwrap();
@@ -845,8 +846,6 @@ fn public_local_task_places_and_runs_without_a_planning_provider() {
     )["task"]
         .clone();
     let id = created["id"].as_str().unwrap();
-    let status = lf(repo.path(), home.path(), &["desktop", "task", id, "--json"]);
-    let project_id = status["project"]["id"].as_str().unwrap();
     lf(
         repo.path(),
         home.path(),
@@ -933,7 +932,8 @@ fn public_local_task_places_and_runs_without_a_planning_provider() {
         home.path(),
         &["desktop", "task", backlog["id"].as_str().unwrap(), "--json"],
     );
-    assert_eq!(retained["project"]["id"], project_id);
+    assert_eq!(retained["execution"]["wave"], "inbox");
+    assert!(retained["project"].is_null());
     let retry = lf(
         repo.path(),
         home.path(),
@@ -962,7 +962,7 @@ fn public_local_task_places_and_runs_without_a_planning_provider() {
 }
 
 #[test]
-fn a_wave_has_no_project_until_its_first_task_and_a_task_joins_the_newest_started_one() {
+fn a_task_makes_no_project_and_joins_the_newest_started_one() {
     for connected in [false, true] {
         let repo = TestRepo::new();
         let home = tempfile::tempdir().unwrap();
@@ -991,7 +991,6 @@ fn a_wave_has_no_project_until_its_first_task_and_a_task_joins_the_newest_starte
         assert_eq!(plan["projects"]["items"], serde_json::json!([]));
         assert!(plan.get("project_readiness").is_none());
 
-        // The first Task makes the Wave's Project, named for the Wave.
         let create = |title: &str| {
             let output = command(
                 repo.path(),
@@ -1006,46 +1005,48 @@ fn a_wave_has_no_project_until_its_first_task_and_a_task_joins_the_newest_starte
                 "{}",
                 String::from_utf8_lossy(&output.stderr)
             );
-            String::from_utf8(output.stdout).unwrap()
+            (
+                String::from_utf8(output.stdout).unwrap(),
+                String::from_utf8(output.stderr).unwrap(),
+            )
         };
-        let first = create("First");
+        // The first Task stays in its Wave with no Project, and a tracker
+        // hears of neither.
+        let (first, warning) = create("First");
         assert!(!first.contains("in Project"), "{first}");
-        let projects = store.list_projects(Some(&wave)).unwrap();
-        assert_eq!(projects.len(), 1);
-        assert_eq!(projects[0].name, "product");
-        assert_eq!(projects[0].status, ProjectStatus::Started);
+        assert!(!warning.contains("pending"), "{warning}");
+        assert!(store.list_projects(None).unwrap().is_empty());
         let tasks = store.list_tasks(Some(&wave)).unwrap();
         assert_eq!(tasks.len(), 1);
-        assert_eq!(tasks[0].project_id.as_ref(), Some(&projects[0].id));
-        // A tracker learns the Project from a `create`, queued once connected.
-        assert_eq!(
-            unconfirmed(
-                &store,
-                loopflow_storage::sqlite::tracker_actions::ActionOwner::Project(
-                    projects[0].id.clone()
-                ),
-                loopflow_storage::sqlite::tracker_actions::ActionKind::Create,
-            )
-            .is_some(),
-            connected
-        );
-        let listed = lf(
-            repo.path(),
-            home.path(),
-            &["wave", "plan", "product", "--json"],
-        );
-        assert_eq!(listed["projects"]["items"][0]["status"], "started");
-        assert!(listed["projects"]["items"][0].get("current").is_none());
+        assert_eq!(tasks[0].project_id, None);
+        assert!(unconfirmed(
+            &store,
+            loopflow_storage::sqlite::tracker_actions::ActionOwner::Task(tasks[0].id.clone()),
+            loopflow_storage::sqlite::tracker_actions::ActionKind::Create,
+        )
+        .is_none());
 
-        // A second started Project, as the tracker would report one: new
-        // Tasks join the newer and the command says which.
-        let mut newer = projects[0].clone();
-        newer.id = loopflow_model::durable::ProjectId::new();
-        newer.name = "Invoicing".into();
-        newer.slug = "invoicing".into();
-        newer.created_at += time::Duration::days(1);
+        // Two started Projects, as the tracker would report them: new Tasks
+        // join the newer and the command says which.
+        let now = time::OffsetDateTime::now_utc();
+        let project = |name: &str, created_at| loopflow_execution::work::project::Project {
+            id: loopflow_model::durable::ProjectId::new(),
+            summary: String::new(),
+            slug: name.to_lowercase(),
+            name: name.into(),
+            description: String::new(),
+            status: ProjectStatus::Started,
+            tracker_id: None,
+            tracker_synced_at: None,
+            wave_id: wave.clone(),
+            created_at,
+            updated_at: created_at,
+        };
+        let older = project("Product", now);
+        let newer = project("Invoicing", now + time::Duration::days(1));
+        store.insert_project(&older).unwrap();
         store.insert_project(&newer).unwrap();
-        let second = create("Second");
+        let (second, _) = create("Second");
         assert!(
             second.trim_end().ends_with("in Project Invoicing"),
             "{second}"
@@ -1059,7 +1060,7 @@ fn a_wave_has_no_project_until_its_first_task_and_a_task_joins_the_newest_starte
                 [newer.id.as_str()],
             )
             .unwrap();
-        let third = create("Third");
+        let (third, _) = create("Third");
         assert!(!third.contains("in Project"), "{third}");
         let by_title = |title: &str| {
             store
@@ -1069,10 +1070,10 @@ fn a_wave_has_no_project_until_its_first_task_and_a_task_joins_the_newest_starte
                 .find(|task| task.title == title)
                 .unwrap()
                 .project_id
-                .unwrap()
         };
-        assert_eq!(by_title("Second"), newer.id);
-        assert_eq!(by_title("Third"), projects[0].id);
+        assert_eq!(by_title("First"), None);
+        assert_eq!(by_title("Second"), Some(newer.id.clone()));
+        assert_eq!(by_title("Third"), Some(older.id.clone()));
         let status = String::from_utf8(
             command(repo.path(), home.path(), &["wave", "status", "product"])
                 .output()
@@ -2397,13 +2398,31 @@ fn canonical_status_retains_content_and_execution_across_acquisition_states() {
     let path = home.path().join("loopflow.db");
     let store = loopflow_execution::store::open_sqlite(&path).unwrap();
     let task = store.task(&id).unwrap().unwrap();
-    let mut project = store
-        .project(task.project_id.as_ref().unwrap())
-        .unwrap()
-        .unwrap();
-    project.tracker_id =
-        Some(loopflow_execution::linear::LinearProjectId::new("provider-project").unwrap());
+    // The tracker's Project, which the Task belongs to.
+    let now = time::OffsetDateTime::now_utc();
+    let project = loopflow_execution::work::project::Project {
+        id: loopflow_model::durable::ProjectId::new(),
+        summary: String::new(),
+        slug: "inbox".into(),
+        name: "inbox".into(),
+        description: String::new(),
+        status: loopflow_execution::work::project::ProjectStatus::Started,
+        tracker_id: Some(
+            loopflow_execution::linear::LinearProjectId::new("provider-project").unwrap(),
+        ),
+        tracker_synced_at: None,
+        wave_id: task.wave_id.clone().unwrap(),
+        created_at: now,
+        updated_at: now,
+    };
     store.insert_project(&project).unwrap();
+    rusqlite::Connection::open(&path)
+        .unwrap()
+        .execute(
+            "UPDATE tasks SET project_id=?1 WHERE id=?2",
+            [project.id.as_str(), id.as_str()],
+        )
+        .unwrap();
     let observed: loopflow_storage::planning::TrackerProject = serde_json::from_value(json!({
         "id":"provider-project", "slug":project.slug, "name":project.name,
         "summary":"", "description":"Saved Project prose", "status":"started",

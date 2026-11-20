@@ -90,6 +90,15 @@ Raw-SQL `INSERT INTO tasks` without `wave_id`: only
 `rust/loopflow/tests/build_cleanup.rs:487` copies a `project_id`, and it reads
 no Wave; the rest set no Project. Nothing left to implement in this slice.
 
+QA (2026-11-20, branch `lf` on isolated homes; `scratch/qa.html`): first
+visit, a home from the installed base `lf` opened by the branch, a second
+Machine over Git, moves, and a Linear queue with no login. Fixed: a Task in
+an ancestor's Project showed as "unavailable" under its own Wave; a first Git
+import left a Task without a Wave when its Project came in the same batch;
+`lf task create` printed "pending Linear sync" and `lf task sync` failed for
+a Task that never goes to the tracker (`Task::goes_to_tracker`); five
+`local_planning` tests still expected the old rule.
+
 Next: gate publishes the branch so CI runs the suites on these commits (PR
 #1997 shows no run since they landed).
 

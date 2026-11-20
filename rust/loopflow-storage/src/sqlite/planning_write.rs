@@ -478,10 +478,18 @@ fn with_task_waves(conn: &Connection, mut edits: Vec<WorkEdit>) -> StoreResult<V
         if names_wave {
             continue;
         }
-        // A Project made in the same batch is not written yet; its Task's
-        // Wave comes from the batch or stays as it is.
-        let Some(project_wave) = super::children::project_wave_in(conn, project)? else {
-            continue;
+        // A first import carries the Project in the same batch as its Tasks,
+        // before either is written.
+        let batch_wave = edits.iter().find_map(|other| match &other.change {
+            WorkValue::ProjectWave(wave) if other.target == *project => WaveId::parse(wave).ok(),
+            _ => None,
+        });
+        let project_wave = match batch_wave {
+            Some(wave) => wave,
+            None => match super::children::project_wave_in(conn, project)? {
+                Some(wave) => wave,
+                None => continue,
+            },
         };
         let current: Option<WaveId> = conn
             .prepare_cached("SELECT wave_id FROM tasks WHERE id=?1")?

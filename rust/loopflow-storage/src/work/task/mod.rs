@@ -534,6 +534,13 @@ impl Task {
             .ok_or(LinearBindingError::NoLinearMapping)
     }
 
+    /// A tracker holds an issue in a Project, never a Wave: a Task in a Wave
+    /// with no Project stays in the plan only. `tracker_actions::uncreated`
+    /// asks the same in SQL.
+    pub fn goes_to_tracker(&self) -> bool {
+        self.project_id.is_some() || self.wave_id.is_none()
+    }
+
     pub fn worktree(&self) -> Result<&PathBuf, TaskDataError> {
         self.worktree.as_ref().ok_or_else(|| {
             TaskDataError::InvalidInvariant(format!(

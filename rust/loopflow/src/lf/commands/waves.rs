@@ -31,7 +31,6 @@ use loopflow_execution::store::{open_existing_store, SharedStore};
 use loopflow_execution::work::wave::Wave;
 use loopflow_model::durable::{Machine, WorkRef, WorkStatus};
 use loopflow_storage::sqlite::selections::{task_selection_states, TaskSelectionReading};
-use loopflow_storage::work::project::Project;
 use loopflow_storage::work::task::{
     CiObservation, CiState, PrMergeMode, PrMergeRequest, PrPhase, Task, TaskPr,
 };
@@ -620,7 +619,7 @@ pub(crate) async fn wave_detail(store: &SharedStore, wave: &Wave) -> Result<Wave
     let checkout = wave_repository(wave, &mut checkouts)?;
     let snapshot = snapshot_wave(store, wave, &checkout).await?;
     let shared = SharedTaskReads::read(store).await?;
-    let task_snapshots = wave_tasks(store, wave, true, None, &shared).await?;
+    let tasks = wave_tasks(store, wave, true, &shared).await?;
     Ok(WaveDetailSnapshot {
         history: Evidence::from_result(
             crate::lf::commands::session_history::collect_recent_history(
@@ -634,8 +633,8 @@ pub(crate) async fn wave_detail(store: &SharedStore, wave: &Wave) -> Result<Wave
         ),
         wave: snapshot,
         projects: project_planning(store, wave).await,
-        tasks: task_snapshots.tasks,
-        unavailable_tasks: task_snapshots.unavailable_tasks,
+        tasks,
+        unavailable_tasks: Vec::new(),
         setup: loopflow_execution::work::wave::setup::read_wave_setup(store, wave, &checkout)
             .await?,
     })
@@ -1267,15 +1266,7 @@ async fn open_tasks(
         query.project.as_deref(),
     )?;
     let shared = SharedTaskReads::read(store).await?;
-    let (details, _) = snapshot_tasks(
-        store,
-        store.list_projects(None).await?,
-        tasks,
-        false,
-        false,
-        &shared,
-    )
-    .await?;
+    let details = snapshot_tasks(store, tasks, false, &shared)?;
     Ok(details
         .into_iter()
         .filter(|task| {
@@ -1470,17 +1461,8 @@ async fn roadmap_snapshot(
         }
         tasks.retain(|task| selected.contains(&task.id));
     }
-    let inventory = snapshot_tasks(
-        store,
-        store.list_projects(None).await?,
-        tasks,
-        false,
-        true,
-        &shared,
-    )
-    .await;
-    let tasks: Evidence<RoadmapTask> =
-        Evidence::from_result(inventory.map(|(tasks, _)| (tasks, false)));
+    let inventory = snapshot_tasks(store, tasks, false, &shared);
+    let tasks: Evidence<RoadmapTask> = Evidence::from_result(inventory.map(|tasks| (tasks, false)));
     let mut roadmaps = Vec::with_capacity(waves.len());
     for wave in &waves {
         // Repository scoping can repair an alias in the registry. Use that
@@ -1553,47 +1535,20 @@ impl SharedTaskReads {
     }
 }
 
-#[derive(Debug)]
-struct WaveTasks {
-    tasks: Evidence<RoadmapTask>,
-    unavailable_tasks: Vec<UnavailableTaskEvidence>,
-}
-
-/// Both views retain durable Tasks when the current plan cannot be read.
+/// A Wave's open Tasks, in plan order.
 async fn wave_tasks(
     store: &SharedStore,
     wave: &Wave,
     probe_pr_empty: bool,
-    identifier: Option<&str>,
     shared: &SharedTaskReads,
-) -> Result<WaveTasks> {
-    let projects = store.list_projects(Some(wave.id())).await?;
-    let mut tasks = match identifier {
-        Some(_) => store.list_tasks(Some(wave.id())).await?,
-        None => store.list_open_tasks(Some(wave.id())).await?,
-    };
-    // Selection does not discard other Projects' backlog or ongoing work.
-    if let Some(identifier) = identifier {
-        let selected = loopflow_execution::store::children::resolve_task_id(
-            &store.sqlite,
-            identifier,
-            Some(wave.repo()),
-        )?;
-        tasks.retain(|task| selected.as_ref() == Some(&task.id));
-    }
-    let (details, unavailable_tasks) = snapshot_tasks(
+) -> Result<Evidence<RoadmapTask>> {
+    let tasks = store.list_open_tasks(Some(wave.id())).await?;
+    Ok(Evidence::complete(snapshot_tasks(
         store,
-        projects,
         tasks,
         probe_pr_empty,
-        identifier.is_some(),
         shared,
-    )
-    .await?;
-    Ok(WaveTasks {
-        tasks: Evidence::complete(details),
-        unavailable_tasks,
-    })
+    )?))
 }
 
 /// The wave `lf wave status` is about: the name the caller typed, else the wave this
@@ -1745,31 +1700,13 @@ async fn validate_linear_ownership(
     Ok(())
 }
 
-async fn snapshot_tasks(
+fn snapshot_tasks(
     store: &SharedStore,
-    projects: Vec<Project>,
     tasks: Vec<Task>,
     probe_pr_empty: bool,
-    include_retained: bool,
     shared: &SharedTaskReads,
-) -> Result<(Vec<RoadmapTask>, Vec<UnavailableTaskEvidence>)> {
-    let mut requests = Vec::new();
-    let mut unavailable_tasks = Vec::new();
-    for task in &tasks {
-        if task
-            .project_id
-            .as_ref()
-            .is_some_and(|id| !projects.iter().any(|p| &p.id == id))
-        {
-            let status = store.task_state(&task.id).await?;
-            if include_retained || !status.is_terminal() {
-                unavailable_tasks.push(unavailable_task(task, status));
-            }
-            continue;
-        }
-        requests.push(task);
-    }
-    let mut details = snapshot_task_details(store, requests, probe_pr_empty, shared)?;
+) -> Result<Vec<RoadmapTask>> {
+    let mut details = snapshot_task_details(store, tasks.iter().collect(), probe_pr_empty, shared)?;
     let mut orders = HashMap::new();
     for repository in tasks
         .iter()
@@ -1785,12 +1722,7 @@ async fn snapshot_tasks(
             &task.selection_states,
         )
     });
-    unavailable_tasks.sort_by(|left, right| {
-        left.task_identifier
-            .cmp(&right.task_identifier)
-            .then(left.work_id.cmp(&right.work_id))
-    });
-    Ok((details, unavailable_tasks))
+    Ok(details)
 }
 
 /// The details of one reading's Tasks. A bare command reads them as one
@@ -1967,19 +1899,6 @@ impl<'a> DetailReads<'a> {
             graphs,
             execution,
         })
-    }
-}
-
-fn unavailable_task(task: &Task, status: TaskState) -> UnavailableTaskEvidence {
-    const REASON: &str = "Task's owning Project is unavailable";
-    UnavailableTaskEvidence {
-        work_id: task.id.to_string(),
-        task_id: task.id.to_string(),
-        task_identifier: task.identifier.clone(),
-        status,
-        owner: NextMoveOwner::Wave,
-        reason: REASON.to_string(),
-        recovery: format!("lf task status {} --json", task.id),
     }
 }
 
@@ -3082,17 +3001,9 @@ mod tests {
             name: &str,
         ) -> serde_json::Value {
             let shared = super::SharedTaskReads::read(store).await.unwrap();
-            let (tasks, missing) = super::snapshot_tasks(
-                store,
-                store.list_projects(None).await.unwrap(),
-                store.list_tasks(None).await.unwrap(),
-                false,
-                true,
-                &shared,
-            )
-            .await
-            .unwrap();
-            assert!(missing.is_empty());
+            let tasks =
+                super::snapshot_tasks(store, store.list_tasks(None).await.unwrap(), false, &shared)
+                    .unwrap();
             let sessions = loopflow_execution::ops::human_session::list(
                 store,
                 &loopflow_execution::session::SessionFilter {
@@ -3407,17 +3318,13 @@ mod tests {
             )
             .await
             .unwrap();
-        let (details, gaps) = super::snapshot_tasks(
+        let details = super::snapshot_tasks(
             &store,
-            store.list_projects(Some(wave.id())).await.unwrap(),
             store.list_tasks(Some(wave.id())).await.unwrap(),
-            false,
             false,
             &super::SharedTaskReads::read(&store).await.unwrap(),
         )
-        .await
         .unwrap();
-        assert!(gaps.is_empty());
         assert_eq!(details.len(), planning.items.len());
         for detail in &details {
             let item = planning
@@ -3604,10 +3511,10 @@ mod tests {
         store.seed_inventory(snapshot.clone(), None).await.unwrap();
         // Old applied abandonment receipts do not imply native deletion.
         let shared = super::SharedTaskReads::read(&store).await.unwrap();
-        let before = super::wave_tasks(&store, &wave, false, None, &shared)
+        let before = super::wave_tasks(&store, &wave, false, &shared)
             .await
             .unwrap();
-        assert!(matches!(before.tasks, super::Evidence::Ok { items, .. } if items.len() == 2));
+        assert!(matches!(before, super::Evidence::Ok { items, .. } if items.len() == 2));
         let removed = store.get_task_by_issue("FIX-1").await.unwrap().unwrap();
         store.sqlite.delete_task(&removed.id).unwrap();
         for project_id in ["current", "next"] {
@@ -3634,14 +3541,13 @@ mod tests {
                 .await
                 .unwrap(),
             );
-            let detail = super::wave_tasks(&reopened, &wave, false, None, &shared)
+            let detail = super::wave_tasks(&reopened, &wave, false, &shared)
                 .await
                 .unwrap();
-            let super::Evidence::Ok { items, .. } = detail.tasks else {
+            let super::Evidence::Ok { items, .. } = detail else {
                 panic!("planning unavailable");
             };
             assert_eq!(items.len(), 1);
-            assert!(detail.unavailable_tasks.is_empty());
             assert_eq!(items[0].task.tracker_id.as_deref(), Some("started"));
         }
     }

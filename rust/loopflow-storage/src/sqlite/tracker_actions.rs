@@ -966,8 +966,7 @@ pub(crate) fn attach_in(
 
 /// Unbound Projects, then Tasks, made on this Machine in `repo` with no live
 /// `create`. A Project is made here unless another Machine stamped its Wave.
-/// A tracker holds an issue in a Project, never a Wave, so a Task in a Wave
-/// that reaches no Project stays in the plan only.
+/// A Task goes only when `Task::goes_to_tracker`.
 fn uncreated(conn: &Connection, repo: &str) -> StoreResult<Vec<ActionOwner>> {
     let mut query = conn.prepare_cached(
         "SELECT 'project',p.id FROM projects p JOIN waves w ON w.id=p.wave_id

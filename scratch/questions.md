@@ -83,3 +83,9 @@
   rule; the tool directories now make it apply under every `PATH`. Not changed.
 - The entry gate was not exercised: it needs a published build of this branch.
   The check to run after publishing is in `scratch/plan.md` "Remaining".
+
+## Concept review, third pass (headless)
+
+- Nothing changed in the design. The launcher's late "failed before attaching"
+  log line is left as found rather than sending the change back to implement:
+  it is log-only and the base had it. See `scratch/plan.md` "Remaining".

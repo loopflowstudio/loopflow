@@ -22,12 +22,16 @@
 </style>
 
 <h1>The command <code>lf open</code> puts in a host pane, as built</h1>
-<p class="muted">LOO-986, second concept review, 2026-11-19, of the branch at <code>1785859962</code> against its base
-<code>2750c9e0fb</code>. Text in <span class="prop">blue</span> is proposed; the rest exists on the branch.</p>
+<p class="muted">LOO-986, third concept review, 2026-11-19, of the branch at <code>aa8b883529</code> against its base
+<code>2750c9e0fb</code>. Everything on this page exists on the branch unless it is in <span class="prop">blue</span>; blue is
+not built and not in this change.</p>
+<p><b>Outcome of this pass: nothing to change.</b> The second review's two proposals (the receipt handed on by name, the
+relayed tail deleted) are built at <code>c8779a386c</code>, and QA reran the failed and usable openings on tmux and Rex at
+<code>815013de83</code>.</p>
 
 <p><b>Area taken:</b> one opening, end to end: the command <code>lf open</code> writes into a pane, what that command
 inherits, which harness it names, and the answer the caller gets back. The whole change sits there, and so do the three
-things QA found still wrong.</p>
+things QA found still wrong, which are larger than this change.</p>
 
 <h2>One opening, walked</h2>
 <pre>/bin/sh -c '&lt;wrapper&gt;' lf-open /tmp/…/receipt env -u LF_AGENT_CALLER -u LF_AGENT_OVERRIDE \
@@ -50,9 +54,7 @@ things QA found still wrong.</p>
   <tr><td>"lf can find its tools"</td><td><code>os_process::TOOL_DIRS</code>, appended in <code>main</code></td>
       <td class="yes">yes</td><td>One list, one place. Swift and the SSH snippet keep copies because they run before lf.</td></tr>
   <tr><td>"Why didn't it open?"</td><td>the receipt file; <code>answer_open</code>, <code>end_open</code>; <code>OpenReceipt.reason</code></td>
-      <td class="no">no</td><td>The answer has no owner: <b>any</b> <code>lf</code> process that inherits <code>LF_OPEN_RECEIPT</code> may write it. The biggest mismatch, below.</td></tr>
-  <tr><td>(nothing)</td><td><code>OPEN_TAIL</code>, <code>keep_open_tail</code>, <code>open_failure</code>, the wider ANSI regex</td>
-      <td class="no">no</td><td>A concept the code has and nobody meets: the relayed tail can't answer for a provider that exits early, because the opening is already acknowledged.</td></tr>
+      <td class="yes">yes</td><td>One opening, two lf processes that may answer (the viewer, and the launcher it starts), first answer stands. <code>transport::initialize</code> takes <code>LF_OPEN_RECEIPT</code> out of the environment; <code>start_held</code>, the viewer's two re-execs and <code>carry_across_exec</code> put it back by name. The relayed tail is gone.</td></tr>
   <tr><td>"It's open, I can type"</td><td><code>OpenStatus::Usable</code>, written on <code>Event::Return</code></td>
       <td class="no">no</td><td><code>usable</code> means the provider process was spawned. A provider that prints "No conversation found" and exits 1 is <code>usable</code>. Larger than this change.</td></tr>
   <tr><td>"Not installed"</td><td><code>which_command</code> over <code>PATH</code> + seven directories</td>
@@ -61,49 +63,44 @@ things QA found still wrong.</p>
       <td class="no">no</td><td>A failed <code>lf open -a codex</code> leaves the conversation on Codex. Larger than this change.</td></tr>
 </table>
 
-<h2>Biggest mismatch: who answers an opening</h2>
-<p>A person thinks of one opening with one answer. The code has a variable in the environment, and
-<code>main</code> lets every failing <code>lf</code> that holds it write the answer. First answer stands, so the
-earliest failure wins, whoever it was.</p>
-<p><b>Counterexample.</b> <code>agent_process::require_server</code> runs <code>lf install server</code> and carries on if the
-server answers afterwards. That child inherits the variable. If it exits with an error and the server is up anyway,
-its error is the first answer: the conversation attaches and <code>lf open</code> reports <code>failed</code>. When the
-launch really fails, the reason is the install child's, not the launcher's "Loopflow server is not running". lf starts
-itself from about fifty places; the branch already strips the variable at one of them (<code>native_session.rs:571</code>, the provider).</p>
-
+<h2>Biggest mismatch left: <code>usable</code></h2>
+<p>A person reads <code>status: usable</code> as "it's open, I can type". The code writes it when the provider process is
+spawned. QA saw it: a provider that starts and exits at once is <code>usable</code>, and its pane shows the error.
+Everything this change built answers for failures <i>before</i> that point; after it, the caller is back to reading the pane.</p>
 <div class="cols">
   <div class="card">
-    <h3>Before (built)</h3>
-<pre>LF_OPEN_RECEIPT in the environment
-  viewer        may answer
-  launcher      may answer   (inherited)
-  lf install…   may answer   (inherited)
-  any lf child  may answer   (inherited)
-  provider      stripped by hand
-+ viewer keeps a 4 KiB tail of relayed output</pre>
-    <p>Four rungs: launcher's error, viewer's error, tail, wrapper's status line. The third is unreachable for its stated purpose.</p>
+    <h3>Built</h3>
+<pre>launcher spawns provider   -> viewer answers "attached"
+provider exits 1 at once   -> usable; pane shows why
+launcher fails first       -> failed, launcher's error
+viewer fails first         -> failed, viewer's error
+neither answers            -> failed, "(status N)"</pre>
   </div>
   <div class="card propbox">
-    <h3 class="prop">After (proposed, in the plan)</h3>
-<pre class="prop">main takes LF_OPEN_RECEIPT out of the environment
-  viewer        answers
-  launcher      answers   (handed on by start_held)
-  everything else never sees it
-no tail</pre>
-    <p class="prop">Three rungs: launcher's error, viewer's error, wrapper's status line. Nothing to strip, so the strip at the provider is deleted too.</p>
+    <h3 class="prop">Not built, its own Task</h3>
+<pre class="prop">provider takes input       -> "attached"
+provider exits before that -> failed, its last words
+                              (this is where a relayed
+                               tail belongs)</pre>
+    <p class="prop">Needs a readiness signal from each of four harnesses and an answer for one that never gives it.</p>
   </div>
 </div>
 
-<h2>Choices made for review</h2>
-<ul>
-  <li><b>The tail is deleted</b>, not kept as a net. It could only answer for a launcher that crashed without returning from
-  <code>main</code>; the pane still shows that. Passed over: keeping it. It comes back if <code>usable</code> is ever made to
-  wait until the provider takes input, because then a provider's early exit is a failed opening and its last words are the reason.</li>
-  <li><b>The receipt is handed on by name.</b> Passed over: stripping it at each place lf starts lf, or leaving it ambient.</li>
-  <li><b>The bare-<code>PATH</code> fixture returns early</b> on a Machine with <code>claude</code> in a system tool directory.
-  Passed over: a variable that makes lf skip a directory (a knob only tests would set), or a test that fails on such a Machine.</li>
-  <li><b>Docs:</b> <code>docs/workspaces.md</code> stops promising "the provider's last words".</li>
-</ul>
+<h2>Checked on this pass</h2>
+<table>
+  <tr><th>Case</th><th>What happens</th></tr>
+  <tr><td>Normal</td><td>The viewer answers <code>attached</code> and gives up its receipt; the launcher's later answers find the receipt written and fail at <code>hard_link</code>.</td></tr>
+  <tr><td>Failure</td><td>No <code>claude</code>: the launcher's error is the receipt (<code>a_launch_that_found_no_provider_leaves_nothing_to_resume</code>; QA on tmux, Rex, Herdr).</td></tr>
+  <tr><td>Recovery</td><td>The same <code>lf open</code>: a new receipt, no <code>--agent</code>, so the retry cannot move the conversation.</td></tr>
+  <tr><td><code>lf install server</code> fails while the server answers anyway (last review's counterexample)</td><td>The child never sees the variable; the opening attaches and reads <code>usable</code>.</td></tr>
+  <tr><td>Caller timed out and dropped the directory</td><td>The write fails; nothing is left behind.</td></tr>
+  <tr><td>The pane's lf is the entry gate</td><td><code>carry_across_exec</code> hands the receipt to the installed lf. Unit-tested only: an end-to-end run needs a published build (in the plan's "Remaining").</td></tr>
+</table>
+<p><b>One thing left as found.</b> The launcher keeps its receipt for as long as the conversation runs. When the provider
+later exits non-zero, <code>end_open</code> writes "conversation opened by lf open failed before attaching" to
+<code>logs/lf.log</code>, an hour after it attached. The receipt is unaffected (it is already written, or its directory is
+gone). The base did the same through the inherited variable. A fix would log only while the receipt's directory exists and
+the receipt does not, the test the pane's shell wrapper already uses.</p>
 
 <h2>Larger than this change</h2>
 <ul>
@@ -118,13 +115,13 @@ no tail</pre>
 
 <h2>Questions</h2>
 <ol>
-  <li>The relayed tail:
-    <ol type="a"><li>delete it now (in the plan);</li><li>keep it for a crashed launcher;</li><li>keep it and move <code>usable</code> to "takes input" in this Task.</li></ol></li>
-  <li>Who may answer an opening:
-    <ol type="a"><li>the viewer and its launcher, handed on by name (in the plan);</li><li>any <code>lf</code> that inherits the variable (built).</li></ol></li>
+  <li><code>usable</code>:
+    <ol type="a"><li>stays "the provider was started" (built);</li><li>becomes "the provider takes input", with the provider's last words as the reason, as its own Task.</li></ol></li>
   <li>Tools behind shell rc (Pi under nvm reads "not installed"):
     <ol type="a"><li>accept, add directories as they are missed (built);</li><li>carry the caller's <code>PATH</code> when the caller is a person;</li><li>run the pane command through the login shell;</li><li>keep (a) but say "lf did not find 'pi' on its PATH" instead of "not installed".</li></ol></li>
   <li>A failed <code>lf open -a &lt;harness&gt;</code>:
     <ol type="a"><li>leaves the conversation moved (built);</li><li>records the move only once the harness starts, as its own Task.</li></ol></li>
+  <li>The launcher's late "failed before attaching" log line:
+    <ol type="a"><li>leave it (built, and as on the base);</li><li>log only while the opening is unanswered.</li></ol></li>
 </ol>
 </html>

@@ -191,6 +191,14 @@ and added `~/.opencode/bin` to the tool directories.
   --host tmux --json -a pi` must answer `failed` with Pi's reason and a plain
   open `usable`. The unit test covers `carry_across_exec` until then.
 
+- **A late launcher exit logs as a failed opening.** The launcher keeps its
+  receipt for the conversation's life, so a provider that exits non-zero long
+  after attaching writes "conversation opened by lf open failed before
+  attaching" to `logs/lf.log` (`transport::end_open`). Log only; the receipt is
+  already written or its directory gone. The base did the same. Left as found
+  by the third concept review; the fix is to log only while the receipt's
+  directory exists and the receipt does not.
+
 ## Larger than this change (on `scratch/concept-review.html`)
 
 - `usable` means "the provider process was started", not "it takes input".

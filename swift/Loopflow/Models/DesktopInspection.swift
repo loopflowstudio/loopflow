@@ -91,11 +91,7 @@ public struct DesktopViewPart: Codable, Sendable, Equatable {
     public let kind: Kind
     /// The Work a session part converses with.
     public let work: WorkWorkspaceKey?
-    /// A board's shown section: `backlog`, `working`, `autonomous` or `done`.
-    public let section: String?
-    /// A board's Done window in days; 0 includes all ages.
-    public let doneDays: Int?
-    /// A board as rendered text, what `lf desktop capture -p board` prints.
+    /// A backlog as text, what `lf desktop capture -p board` prints: its filter counts, then its rows.
     public let text: String?
     /// A strip's page, from 1, and its page count.
     public let page: Int?
@@ -111,16 +107,15 @@ public struct DesktopViewPart: Codable, Sendable, Equatable {
     public let zoomed: Bool
     public let actions: [String]
 
-    public init(name: String, kind: Kind, work: WorkWorkspaceKey?, section: String?, doneDays: Int?, text: String?,
+    public init(name: String, kind: Kind, work: WorkWorkspaceKey?, text: String?,
                 page: Int?, pages: Int?, visible: [WorkWorkspaceKey], hidden: Bool, ratio: Double, zoomed: Bool,
                 actions: [String]) {
-        self.name = name; self.kind = kind; self.work = work; self.section = section; self.doneDays = doneDays
+        self.name = name; self.kind = kind; self.work = work
         self.text = text; self.page = page; self.pages = pages; self.visible = visible; self.hidden = hidden
         self.ratio = ratio; self.zoomed = zoomed; self.actions = actions
     }
     enum CodingKeys: String, CodingKey {
-        case name, kind, work, section, text, page, pages, visible, hidden, ratio, zoomed, actions
-        case doneDays = "done_days"
+        case name, kind, work, text, page, pages, visible, hidden, ratio, zoomed, actions
     }
 }
 

@@ -1255,15 +1255,15 @@ fn desktop_verbs_take_pane_paths_without_public_lifetime_tokens() {
         "lf",
         "desktop",
         "do",
-        "section",
+        "page",
         "-p",
-        "board",
-        "section=done",
+        "tiles",
+        "page=2",
     ])
     .unwrap();
     assert!(matches!(cli.command, Some(Commands::Desktop {
         cmd: DesktopCommand::Do { action, args, target }
-    }) if action == "section" && args == ["section=done"] && target.pane.as_deref() == Some("board")));
+    }) if action == "page" && args == ["page=2"] && target.pane.as_deref() == Some("tiles")));
     for removed in [
         &["desktop", "text", "hello"][..],
         &["desktop", "read", "--region", "screen"],

@@ -204,24 +204,18 @@ enum WaveViewPart: String, CaseIterable, Hashable {
     /// How the view's `Show…` menu names it.
     var title: String {
         switch self {
-        case .board: "Board"
+        case .board: "Backlog"
         case .session: "Session"
         case .tiles: "Tasks"
         }
     }
 }
 
-/// The section a Wave board shows, one at a time; Backlog by default.
-enum WaveBoardSection: String, CaseIterable, Hashable {
-    case backlog, working, autonomous, done
-
-    var title: String { rawValue.capitalized }
-}
-
 /// A Wave view's dividers: the conversation's share of the top band's width, and
-/// the top band's share of the view's height, golden by default.
+/// the top band's share of the view's height. The backlog takes the golden share
+/// of the band and the conversation the golden share of what remains.
 struct WaveViewRatios: Equatable {
-    var session = 1 - FocusSizing.golden
+    var session = (1 - FocusSizing.golden) * FocusSizing.golden
     var band = FocusSizing.golden
 }
 
@@ -254,7 +248,8 @@ final class WorkNavigation {
     /// Each Wave view's zoomed board or strip; its conversation zooms as its session pane.
     var zoomedViewParts: [Board: WaveViewPart] = [:]
     var waveRatios: [Board: WaveViewRatios] = [:]
-    var boardSections: [Board: WaveBoardSection] = [:]
+    /// Each Wave view's backlog selection, filter, search and draft; it outlives entering a Task.
+    var backlogs: [Board: BacklogState] = [:]
     var showsSlotHints = false
     var sidebarFilter: SidebarFilter = .working {
         willSet {

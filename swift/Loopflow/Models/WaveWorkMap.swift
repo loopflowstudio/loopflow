@@ -466,6 +466,12 @@ public enum WorkEvidence<Item: Decodable & Sendable & Hashable>: Decodable, Send
         return nil
     }
 
+    /// Whether more items exist than were read.
+    public var truncated: Bool {
+        if case let .available(_, truncated) = self { return truncated }
+        return false
+    }
+
     /// The items that pass `isIncluded`; unavailable evidence stays unavailable.
     public func filter(_ isIncluded: (Item) -> Bool) -> WorkEvidence<Item> {
         guard case let .available(items, truncated) = self else { return self }

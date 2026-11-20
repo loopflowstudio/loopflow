@@ -58,11 +58,8 @@ pub struct DesktopViewPart {
     pub kind: DesktopViewPartKind,
     /// The Work a session part converses with.
     pub work: Option<WorkWorkspaceKey>,
-    /// A board's shown section: `backlog`, `working`, `autonomous` or `done`.
-    pub section: Option<String>,
-    /// A board's Done window in days; 0 includes all ages.
-    pub done_days: Option<u32>,
-    /// A board as rendered text, what `lf desktop capture -p board` prints.
+    /// A backlog as text, what `lf desktop capture -p board` prints: its
+    /// filter counts, then its rows in order with their owners.
     pub text: Option<String>,
     /// A strip's page, from 1, and its page count.
     pub page: Option<u32>,

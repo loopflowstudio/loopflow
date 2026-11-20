@@ -715,7 +715,7 @@ struct WorkNavigationTests {
     }
 
 
-    @Test("Task briefs and the Wave standup board share the current snapshot")
+    @Test("Task briefs and the Wave backlog share the current snapshot")
     func inspectorShowsPlanning() async throws {
         let model = try model()
         await model.refresh()
@@ -727,14 +727,11 @@ struct WorkNavigationTests {
         #expect(throws: Never.self) { try view.inspect().find(button: "New session") }
         model.select(.wave(id: task.wave!.wave.id))
         let board = WorkNavigation.Board.wave(task.wave!.wave.id)
-        let standup = model.standup(task.wave!.tasks.items, doneDays: WaveStandupDefaults.doneDays)
-        for section in WaveBoardSection.allCases {
-            model.navigation.boardSections[board] = section
-            for row in standup.rows(section) {
-                _ = try view.inspect().find(viewWithAccessibilityIdentifier: "wave-row-\(row.id)")
-            }
+        let backlog = model.backlog(board)
+        for row in backlog.rows {
+            _ = try view.inspect().find(viewWithAccessibilityIdentifier: "wave-row-\(row.id)")
         }
-        // Completed work without a date is outside Done's window; Project history keeps it.
+        // The backlog lists unstarted Tasks only; Project history keeps finished ones.
         #expect(throws: (any Error).self) { try view.inspect().find(viewWithAccessibilityIdentifier: "wave-row-issue-later") }
         #expect(throws: (any Error).self) { try view.inspect().find(TaskHistoryControls.self) }
     }

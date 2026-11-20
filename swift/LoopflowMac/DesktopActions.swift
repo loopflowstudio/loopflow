@@ -307,29 +307,6 @@ struct DesktopAction {
             model.turnPage(wave, to: page - 1)
             return nil
         },
-        DesktopAction("section", "Show Wave Board Section", arguments: [.init(name: "section", kind: .string, required: true)],
-                      available: { $0.model.navigation.waveView != nil }) { context in
-            guard let view = context.model.navigation.waveView else {
-                throw DesktopTargetError("This window shows no Wave board. Nothing changed.")
-            }
-            let value = try context.string("section")
-            guard let section = WaveBoardSection(rawValue: value) else {
-                throw DesktopArgumentError("section=\(value) is not backlog, working, autonomous or done; nothing changed.")
-            }
-            context.model.navigation.boardSections[view] = section
-            return nil
-        },
-        DesktopAction("filter", "Set Wave Board Done Days", arguments: [.init(name: "days", kind: .integer, required: true)],
-                      available: { $0.model.navigation.waveView != nil }) { context in
-            guard context.model.navigation.waveView != nil else {
-                throw DesktopTargetError("This window shows no Wave board. Nothing changed.")
-            }
-            var filter = TaskHistoryFilter()
-            filter.editDays(try context.string("days"))
-            if let message = filter.validationMessage { throw DesktopArgumentError(message) }
-            UserDefaults.standard.set(filter.days, forKey: WaveStandupDefaults.doneDaysKey)
-            return nil
-        },
     ]
 
     /// `lf desktop hide|show -p board|tiles` names a Wave view part in place of a pane.

@@ -659,7 +659,7 @@ struct DesktopHeadlessTests {
         // The clicked row darkens before the selection moves it.
         for _ in 0..<50 where model.selection != .wave(id: wave.id) { try await Task.sleep(for: .milliseconds(20)) }
         #expect(model.selection == .wave(id: wave.id))
-        _ = try view.inspect().find(viewWithAccessibilityIdentifier: "wave-standup-board")
+        _ = try view.inspect().find(viewWithAccessibilityIdentifier: "wave-backlog")
         let title = try view.inspect().find(viewWithAccessibilityIdentifier: "wave-title").text().string()
         #expect(title == "Product")
         let task = try #require(roadmap.waves.first?.tasks.items.first)

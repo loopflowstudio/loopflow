@@ -958,23 +958,21 @@ final class WorkModel {
     /// A Wave view's board, conversation and strip; other views have no named parts yet.
     func desktopViewParts(repository: String) -> [DesktopViewPart] {
         guard let view = navigation.waveView else { return [] }
-        let doneDays = WaveStandupDefaults.doneDays
         let tiles = boardTiles(view)
         let pages = boardPlan(view)?.slots.pages(tiles) ?? [tiles]
         let page = pageIndex(view, of: pages)
         let ratios = navigation.waveRatios[view] ?? WaveViewRatios()
         let zoomed = zoomedPart(in: view)
         return [
-            DesktopViewPart(name: "board", kind: .board, work: nil, section: boardSection(view).rawValue,
-                            doneDays: doneDays, text: standupText(view, doneDays: doneDays),
+            DesktopViewPart(name: "board", kind: .board, work: nil, text: backlogText(view),
                             page: nil, pages: nil, visible: [], hidden: isHidden(.board, in: view),
                             ratio: 1 - ratios.session, zoomed: zoomed == .board,
-                            actions: ["section", "filter", "hide", "show", "zoom", "resize"]),
+                            actions: ["hide", "show", "zoom", "resize"]),
             DesktopViewPart(name: "session", kind: .session, work: viewWork(view, repository: workspaceRepository ?? repository),
-                            section: nil, doneDays: nil, text: nil, page: nil, pages: nil, visible: [],
+                            text: nil, page: nil, pages: nil, visible: [],
                             hidden: isHidden(.session, in: view), ratio: ratios.session, zoomed: zoomed == .session,
                             actions: []),
-            DesktopViewPart(name: "tiles", kind: .strip, work: nil, section: nil, doneDays: nil, text: nil,
+            DesktopViewPart(name: "tiles", kind: .strip, work: nil, text: nil,
                             page: page + 1, pages: pages.count, visible: pages[page].map(\.work),
                             hidden: isHidden(.tiles, in: view), ratio: 1 - ratios.band, zoomed: zoomed == .tiles,
                             actions: ["page", "hide", "show", "zoom", "resize"]),
@@ -1038,37 +1036,32 @@ final class WorkModel {
         }
     }
 
-    /// A Wave view's Tasks bucketed for its board, with owners' GitHub users and Sessions.
-    func standup(_ tasks: [RoadmapTask], doneDays: Int) -> WaveStandup {
-        var sessions: [String: WaveStandup.SessionAttention] = [:]
-        for task in tasks {
-            let open = taskSessions(task.id).filter { $0.state != .closed }
-            if open.contains(where: { $0.availability == .available }) { sessions[task.id] = .available }
-            else if !open.isEmpty { sessions[task.id] = .busy }
-        }
-        return WaveStandup(tasks: tasks, closed: tasks, doneDays: doneDays, now: .now, github: githubPeople,
-                           sessions: sessions)
-    }
-
-    func boardSection(_ view: WorkNavigation.Board) -> WaveBoardSection {
-        navigation.boardSections[view] ?? .backlog
-    }
-
-    /// The board as `lf desktop capture -p board` reads it.
-    private func standupText(_ view: WorkNavigation.Board, doneDays: Int) -> String? {
+    /// A Wave view's backlog as `lf desktop capture -p board` reads it.
+    private func backlogText(_ view: WorkNavigation.Board) -> String? {
         let scope = view == .repository ? "Repository" : "Wave"
-        switch standupTasks(view) {
-        case .available(let tasks, _):
-            let heading = if case .wave(let id) = view, let roadmap = wave(id: id) { WaveStandup.heading(roadmap) }
+        switch viewTasks(view) {
+        case .available:
+            let heading = if case .wave(let id) = view, let roadmap = wave(id: id) { BacklogList.heading(roadmap) }
                 else { [repositoryName] }
-            return standup(tasks, doneDays: doneDays).text(heading: heading, section: boardSection(view))
+            return backlog(view).text(heading: heading)
         case .unavailable(let reason): return "\(scope) planning unavailable · \(reason)"
         case nil: return nil
         }
     }
 
-    /// The Tasks a Wave view's board buckets: the Wave's, or every Task in the repository.
-    func standupTasks(_ view: WorkNavigation.Board) -> WorkEvidence<RoadmapTask>? {
+    /// A Wave view's backlog: its unstarted Tasks in rank order, filtered and selected as the view left them.
+    func backlog(_ view: WorkNavigation.Board) -> BacklogList {
+        let waveNames = Dictionary(visibleRoadmaps.map { ($0.wave.id, $0.wave.displayName) }, uniquingKeysWith: { first, _ in first })
+        let scope: String? = if case .wave(let id) = view { id } else { nil }
+        let defaultFlow = scope.flatMap { wave(id: $0)?.graph }
+        let tasks = viewTasks(view)
+        return BacklogList(tasks: tasks?.items ?? [], truncated: tasks?.truncated ?? false,
+                           wave: scope, defaultFlow: defaultFlow, waveNames: waveNames,
+                           state: navigation.backlogs[view] ?? BacklogState())
+    }
+
+    /// A Wave view's Tasks: the Wave's, or every Task in the repository.
+    func viewTasks(_ view: WorkNavigation.Board) -> WorkEvidence<RoadmapTask>? {
         if case .wave(let id) = view { return wave(id: id)?.tasks }
         guard view == .repository, let tasks = roadmap.value?.tasks else { return nil }
         guard case .available(_, let truncated) = tasks else { return tasks }
@@ -1894,19 +1887,6 @@ final class WorkModel {
         await refreshWorkActivity()
     }
 
-    /// Task owners' GitHub users by lowercase email, read once per repository.
-    private(set) var githubPeople: [String: GitHubPerson] = [:]
-    private var githubPeopleRepo: String?
-
-    /// Without GitHub the board keeps owners' names and initials.
-    func loadGitHubPeople() async {
-        guard !usesFixedFixture, let repo = repoPath, repo != githubPeopleRepo else { return }
-        githubPeopleRepo = repo
-        guard let people = try? await query.repoPeople(cwd: repo), repo == repoPath else { return }
-        githubPeople = Dictionary(people.compactMap { person in person.github.map { (person.email.lowercased(), $0) } },
-                                  uniquingKeysWith: { first, _ in first })
-    }
-
     private var portfolioGeneration = 0
 
     /// Consume the shared membership.
@@ -2125,7 +2105,7 @@ final class WorkModel {
 
     /// A Wave or repository row's count: its board's Working and Autonomous columns.
     func startedTaskCount(_ board: WorkNavigation.Board) -> Int {
-        (standupTasks(board)?.items ?? []).count { $0.section == .working || $0.section == .autonomous }
+        (viewTasks(board)?.items ?? []).count { $0.section == .working || $0.section == .autonomous }
     }
 
     /// Below the Working Tasks: the started list's Autonomous Tasks (shipping, no
@@ -2397,7 +2377,8 @@ final class WorkModel {
     /// after the step the Task waits at, taking up its Wave's or repository's default first.
     /// The outcome settles only the Task and repository that started it; a
     /// refusal is kept on that Task's draft and changes nothing else.
-    func startTask(_ graph: String?, from: String? = nil, task: RoadmapTask) async {
+    @discardableResult
+    func startTask(_ graph: String?, from: String? = nil, task: RoadmapTask) async -> Bool {
         await performTaskAction(task.id) {
             try await query.runTask(issue: task.task.identifier, graph: graph, from: from,
                                     cwd: WaveOrigin.resolve(task.task.repo))
@@ -2509,16 +2490,26 @@ final class WorkModel {
         return repoPath
     }
 
-    func assignTask(_ task: RoadmapTask, claimed: Bool) async {
+    @discardableResult
+    func assignTask(_ task: RoadmapTask, claimed: Bool) async -> Bool {
         await performTaskAction(task.id) {
             try await query.assignTask(issue: task.task.identifier, claimed: claimed, cwd: WaveOrigin.resolve(task.task.repo))
         }
     }
 
-    func moveTask(_ task: RoadmapTask, toWave wave: String?) async {
+    @discardableResult
+    func moveTask(_ task: RoadmapTask, toWave wave: String?) async -> Bool {
         await performTaskAction(task.id) {
             try await query.moveTask(issue: task.task.identifier, wave: wave,
                                     cwd: WaveOrigin.resolve(task.task.repo))
+        }
+    }
+
+    /// Put the Task at `rank` in its Project, from 0; Rust renumbers the rest and moves it in Linear.
+    @discardableResult
+    func rankTask(_ task: RoadmapTask, rank: Int) async -> Bool {
+        await performTaskAction(task.id) {
+            try await query.rankTask(issue: task.task.identifier, rank: rank, cwd: WaveOrigin.resolve(task.task.repo))
         }
     }
 

@@ -274,16 +274,38 @@ What slice 4 taught:
 - Go-style flags: `-i` takes the next argument whatever it starts with (a
   prompt beginning with `-` is under test as argv, not seen live).
 
+Slice 5, names (2026-11-20):
+
+- `antigravity` is in every list of harness names: the "No agent selected"
+  and "unsupported agent" messages (`error.rs`, `config/settings.rs`), the
+  `yolo` and `chrome` help (`config/catalog.rs`), the Desktop picker and pane
+  heading, `loopflow-test-support`'s installed-harness filter (`agy`), and
+  the docs that named four. Tests that listed four names read
+  `HarnessKind::ALL` where they can.
+- `harness/README.md`: the launch table has an Antigravity row and the
+  Task-step table a fifth column.
+- `a_worker_stops_on_interrupt_and_the_next_run_starts_its_step_again_on_antigravity`:
+  the stand-in holds a turn on `hold-turn`, so the README's interrupt cell is
+  "yes" with a test behind it.
+- Run, ok: that test; `cargo test -p loopflow-execution --lib --
+  config::tests::bare_harnesses prompt::process::tests::preferred_name
+  harness::launch_matrix::every`; `cargo test -p loopflow --lib --
+  launch_policy_tests::`; `cargo test -p loopflow --test integration --
+  documented_commands::`; `cargo clippy -p loopflow -p loopflow-execution -p
+  loopflow-test-support --all-targets -- -D warnings`.
+- Not run here, CI runs them:
+  `settings_launch_tests::automatic_agent_selection_requires_exactly_one_installed_harness`
+  (this Machine has `opencode` and `agy` in `/opt/homebrew/bin`, which lf adds
+  to every PATH, so no fixture here ever has exactly one harness; it fails the
+  same way without this change) and the Swift suite
+  (`scripts/test_desktop.sh --filter SessionsStoreTests`).
+
 ## Left to build
 
-Next is slice 5.
-
-1. **Names (slice 5).** Every list of harness names: `error.rs`, `config.rs`
-   tests, `prompt/process.rs`, `loopflow-test-support/src/lib.rs`,
-   `config/catalog.rs` (`yolo`, `chrome` help), `launch_policy_tests.rs`,
-   Swift (`WorkspacePanesView.swift`, `SessionProgramStatus.swift`), docs,
-   `skills/loopflow`. `harness/README.md`: the launch table and the Task-step
-   table with five columns.
+Nothing in the plan's slices. What is left is the demo on real `agy`, for qa
+or demo: `lf task run <Task> -a antigravity` with a steer mid-step and
+`lf history usage --task`; a Task's work session in the TUI; a step whose
+first agent is `opencode` with no credits moving to the next agent.
 
 ## Design
 
@@ -546,8 +568,6 @@ user-facing contract.
 - Names only: `README.md`, `docs/index.md`, `docs/getting-started.md`,
   `docs/glossary.md`, `skills/loopflow/README.md`, builtin `init.md`
   (`command -v … pi agy`).
-- Left for slice 5: `harness/README.md`'s five-column tables (its rows name
-  tests that do not exist yet), `swift/README.md`, `docs/dev/*`.
 
 Details the docs settled, for the build to match or correct:
 
@@ -649,7 +669,7 @@ is unchanged line for line.
 4. **Built (see "Built").** The terminal: `open` (`-i`, trust setting,
    resume), the thread reported through `reported_thread_path`, launch
    matrix chat and work-session cells.
-5. **Names.** Every list in "Left to build" 2.
+5. **Built (see "Built").** Names.
 
 ## Not checked
 

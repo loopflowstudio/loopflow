@@ -2210,9 +2210,22 @@ fn a_worker_stops_on_interrupt_and_the_next_run_starts_its_step_again_on_opencod
     interrupt_a_worker("pi", "pi:fixture/model", &pi_stand_in(), "answer 1:");
 }
 
+#[test]
+fn a_worker_stops_on_interrupt_and_the_next_run_starts_its_step_again_on_antigravity() {
+    interrupt_a_worker(
+        "antigravity",
+        "antigravity",
+        &antigravity_stand_in(),
+        "answer to:",
+    );
+}
+
 fn interrupt_a_worker(provider: &str, agent: &str, script: &str, answer: &str) {
     {
-        let task = GraphTask::with_tools(&[(provider, script)]);
+        let program = loopflow_execution::harness::HarnessKind::parse(provider)
+            .unwrap()
+            .program();
+        let task = GraphTask::with_tools(&[(program, script)]);
         define_worker_graph(&task);
         let home = task.home.path();
         fs::write(home.join("hold-turn"), "").unwrap();

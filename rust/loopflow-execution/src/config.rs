@@ -1083,7 +1083,8 @@ mod tests {
 
     #[test]
     fn bare_harnesses_defer_model_selection_to_the_provider() {
-        for harness in ["claude", "codex", "opencode", "pi"] {
+        for harness in crate::harness::HarnessKind::ALL {
+            let harness = harness.as_str();
             assert_eq!(parse_agent(harness), (harness.to_string(), None));
         }
     }

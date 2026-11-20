@@ -9,6 +9,9 @@ every run with its text, for a spent quota or a signed-out login. Each turn
 is appended to the conversation's `transcript_full.jsonl` under the home, where
 lf reads final answers and usage.
 
+A file `hold-turn` beside `bin/` keeps a headless turn running, with `holding`
+written once it is under way, until the file is removed.
+
 A fixture that leaves `tool_turn.py` beside `bin/` gets a turn that runs one
 tool and a subagent, and reads, in order: `hook-context` (what the first
 model call's hook put in front of the model), `holding` (the tool is running)
@@ -172,6 +175,14 @@ def main():
     kept = [(step, "USER_INPUT", {"source": "USER_EXPLICIT", "content": request})]
     tokens = (20, 5)
     context = _hook("PreInvocation", conversation, invocationNum=0, initialNumSteps=step + 1)
+    # A fixture's `hold-turn` keeps the model call running until it is removed.
+    if (HOME / "hold-turn").exists():
+        (HOME / "holding").write_text(conversation)
+    held = time.monotonic() + 120
+    while (HOME / "hold-turn").exists():
+        if time.monotonic() >= held:
+            raise TimeoutError("the fixture's turn was not released")
+        time.sleep(0.02)
     if (HOME / "tool_turn.py").exists():
         (HOME / "hook-context").write_text(context)
         tool = {"name": "run_command", "parameters": {"CommandLine": "echo hi"}}

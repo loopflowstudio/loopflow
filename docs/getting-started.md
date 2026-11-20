@@ -13,7 +13,7 @@ npx skills add loopflowstudio/loopflow --skill loopflow -g   # optional: teach y
 
 `lf` installs into `~/.local/bin` (override with `LF_INSTALL_DIR=/path`).
 You need `git`, a Git repository, and at least one signed-in coding agent:
-Claude Code, Codex, OpenCode, or Pi (1.3+). Pull requests also need `gh` signed
+Claude Code, Codex, OpenCode, Pi (1.3+), or Antigravity. Pull requests also need `gh` signed
 in.
 
 Prefer Cargo? `cargo install --git https://github.com/loopflowstudio/loopflow --bin lf`.
@@ -165,7 +165,7 @@ with `lf server status`, or see [Connect clients](server.md).
 | `--docs PATH,…` | Include files, globs, or directories |
 | `--diff files` / `--diff patch` | Reference changed file paths / raw diff |
 | `--context` | Preview assembled input without launching |
-| `-a HARNESS[:MODEL]` | Run on `claude`, `codex`, `opencode`, or `pi` |
+| `-a HARNESS[:MODEL]` | Run on `claude`, `codex`, `opencode`, `pi`, or `antigravity` |
 | `-i` / `-b` | Interactive / headless (waits until finished) |
 
 Next: [Work](work.md): parallel Tasks, steering, stacked PRs, team trackers,

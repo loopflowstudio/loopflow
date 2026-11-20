@@ -28,14 +28,13 @@ pub struct NativeClient {
 
 impl NativeClient {
     pub(crate) fn new(launch: &Launch<'_>) -> Result<Self> {
-        let program = launch.harness.kind().as_str();
         let cwd = launch
             .config
             .cwd
             .clone()
             .map(Ok)
             .unwrap_or_else(std::env::current_dir)?;
-        let mut process = Command::new(program);
+        let mut process = Command::new(launch.harness.program());
         crate::agent::remove_caller_session_env(&mut process);
         process
             .current_dir(&cwd)
@@ -698,7 +697,7 @@ fn run_client(
     });
     if let (Some(path), Some(capture_dir)) = (&reported_thread, capture_dir.as_deref()) {
         if let Err(error) = record_reported_thread(path, capture_dir) {
-            tracing::warn!(%error, "Codex reported no conversation; it cannot be resumed");
+            tracing::warn!(%error, "{program} reported no conversation; it cannot be resumed");
         }
     }
     let moved = lost.then(|| departure(&attachment)).flatten();

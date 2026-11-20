@@ -9,7 +9,7 @@ npx skills add loopflowstudio/loopflow --skill loopflow -g   # teach your coding
 `lf` is how your agent orchestra conducts itself. It's a task system for coding
 agents: you say what you want, and each Task gets its own conversation, its own
 workflow and its own pull request. Organize Tasks into Waves to give each area of
-work its own defaults. It works with Claude Code, Codex, OpenCode and Pi, on your
+work its own defaults. It works with Claude Code, Codex, OpenCode, Pi and Antigravity, on your
 existing subscriptions, inside whatever terminal, multiplexer and tracker you
 already use.
 
@@ -112,7 +112,7 @@ lf resume                                  # return to this checkout's conversat
 
 - **It runs on your machine.** Agents run on your laptop, your own SSH hosts,
   or a machine you rent for one Task. Loopflow hosts nothing and bills nothing:
-  each agent uses its own Claude Code, Codex, OpenCode or Pi login, and talks
+  each agent uses its own Claude Code, Codex, OpenCode, Pi or Antigravity login, and talks
   to its provider directly.
 - **Any agent, per step.** Send design to Claude, implementation to Codex and
   commit messages to Haiku. When a provider hits its usage limit, headless
@@ -136,7 +136,7 @@ lf resume                                  # return to this checkout's conversat
 | Running your first Task from prompt to merged PR | [Get started](getting-started.md) |
 | Parallel Tasks, steering, stacking PRs, and team sync (Git, Linear, Asana) | [Work](work.md) |
 | Persistent conversations, multi-terminal views, and crash/reboot recovery | [Sessions](sessions.md) |
-| Mixing Claude, Codex, OpenCode, and Pi + automatic usage-limit failover | [Configuration](config.md#keep-going-when-a-provider-runs-out) · [Native authentication](subscriptions.md) |
+| Mixing Claude, Codex, OpenCode, Pi, and Antigravity + automatic usage-limit failover | [Configuration](config.md#keep-going-when-a-provider-runs-out) · [Native authentication](subscriptions.md) |
 | Custom Skills (`extends: builtin`), Graphs, loops, `ship-review`, and `qa` | [Orchestration](orchestration.md) |
 | Auto-merge, CI repair (`lf land --wait-and-fix`), stacked PRs, and releases | [Ops](ops.md) |
 | Running on SSH machines, pools, or rented Daytona/Modal/RunPod/AWS boxes | [Machines](ops.md#machines) · [Remote forwarding](subscriptions.md#remote-machines-and-rentals) |

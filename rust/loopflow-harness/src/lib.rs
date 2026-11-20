@@ -1,8 +1,11 @@
-//! What each native client (Claude Code, Codex, OpenCode, Pi) writes.
+//! What each native client (Claude Code, Codex, OpenCode, Pi, Antigravity)
+//! writes.
 //!
 //! Nothing here opens Loopflow's store, starts a process or reads the process
 //! table; `loopflow-execution` does that with what these modules decode.
 
+mod antigravity;
+pub mod antigravity_decode;
 mod claude;
 pub mod claude_decode;
 mod codex;
@@ -13,6 +16,7 @@ mod opencode;
 pub mod opencode_decode;
 mod pi;
 pub mod pi_decode;
+mod redact;
 pub mod transcript;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -27,6 +31,7 @@ pub enum HarnessKind {
     Claude,
     OpenCode,
     Pi,
+    Antigravity,
 }
 
 impl HarnessKind {
@@ -36,6 +41,7 @@ impl HarnessKind {
             "claude" => Some(Self::Claude),
             "opencode" => Some(Self::OpenCode),
             "pi" => Some(Self::Pi),
+            "antigravity" => Some(Self::Antigravity),
             _ => None,
         }
     }
@@ -46,10 +52,22 @@ impl HarnessKind {
             Self::Claude => "claude",
             Self::OpenCode => "opencode",
             Self::Pi => "pi",
+            Self::Antigravity => "antigravity",
         }
     }
 
-    pub const ALL: [Self; 4] = [Self::Claude, Self::Codex, Self::OpenCode, Self::Pi];
+    /// The command that starts this harness's CLI.
+    pub fn program(self) -> &'static str {
+        self.harness().program()
+    }
+
+    pub const ALL: [Self; 5] = [
+        Self::Claude,
+        Self::Codex,
+        Self::OpenCode,
+        Self::Pi,
+        Self::Antigravity,
+    ];
 
     /// What this client writes and where; launching it is execution's
     /// `harness::launcher`.
@@ -59,6 +77,7 @@ impl HarnessKind {
             Self::Codex => &Codex,
             Self::OpenCode => &OpenCode,
             Self::Pi => &Pi,
+            Self::Antigravity => &Antigravity,
         }
     }
 }
@@ -75,6 +94,9 @@ pub struct OpenCode;
 #[derive(Debug)]
 pub struct Pi;
 
+#[derive(Debug)]
+pub struct Antigravity;
+
 /// Whether `command` runs the program named `program`, at any path.
 fn command_program(command: &str, program: &str) -> bool {
     command.split_whitespace().any(|part| {
@@ -88,10 +110,14 @@ fn command_program(command: &str, program: &str) -> bool {
 /// where it keeps transcripts and for how long, its model names and sign-in.
 pub trait Harness: Sync + std::fmt::Debug {
     fn kind(&self) -> HarnessKind;
+    /// The command that starts the client.
+    fn program(&self) -> &'static str {
+        self.kind().as_str()
+    }
 
     /// Whether `command` is this client serving a headless conversation.
     fn recognizes_driver(&self, command: &str) -> bool {
-        command_program(command, self.kind().as_str())
+        command_program(command, self.program())
     }
     fn title_args(&self, _name: &str) -> Vec<String> {
         Vec::new()
@@ -173,6 +199,10 @@ mod tests {
         assert_eq!(
             HarnessKind::parse("OpenCode").map(HarnessKind::as_str),
             Some("opencode")
+        );
+        assert_eq!(
+            HarnessKind::parse("Antigravity").map(HarnessKind::program),
+            Some("agy")
         );
         assert_eq!(
             HarnessKind::parse("lfharness").map(HarnessKind::as_str),

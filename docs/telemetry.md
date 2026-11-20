@@ -19,8 +19,9 @@ lf session usage --weekly                 # weekly trend by step, harness, Task,
 ```
 
 Each row reports input, output, and cache-read tokens, cost (where the provider
-reports it: Pi and OpenCode report per-turn cost; Claude and Codex report
-tokens, plus Claude's running `total_cost_usd`), finished streams (`FINAL`),
+reports it: Pi and OpenCode report per-turn cost; Claude, Codex and Antigravity
+report tokens, plus Claude's running `total_cost_usd`; an Antigravity row
+counts the conversation lf started, not its subagents'), finished streams (`FINAL`),
 and any recording gaps (`GAPS`).
 
 For work sessions and workers, turn-end hooks ask the server to record each
@@ -59,7 +60,7 @@ lf session retention                                          # what providers s
 ```
 
 Conversation text stays in each provider's native store (Claude, Codex, Pi
-files, or OpenCode's SQLite DB); Loopflow reads it on demand rather than
+or Antigravity files, or OpenCode's SQLite DB); Loopflow reads it on demand rather than
 duplicating it. Claude removes conversations idle longer than
 `cleanupPeriodDays` (30 days by default in Claude's `settings.json`); Codex,
 OpenCode, and Pi keep everything.

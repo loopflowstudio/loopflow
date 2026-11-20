@@ -65,8 +65,9 @@ pub fn record_start(
 /// agent's CLI is not on this Machine's `PATH`. `None` when it can start.
 pub fn launch_failure(conversation: &TaskConversation) -> Option<String> {
     let provider = conversation.provider.as_deref()?;
-    (!crate::agent::check_cli_available(provider))
-        .then(|| format!("{provider} is not installed on this Machine's PATH"))
+    let installed = loopflow_harness::HarnessKind::parse(provider)
+        .is_some_and(|kind| crate::harness::launcher(kind).installed());
+    (!installed).then(|| format!("{provider} is not installed on this Machine's PATH"))
 }
 
 /// What decides whether this Machine's server starts a conversation that is

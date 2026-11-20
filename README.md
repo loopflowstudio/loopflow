@@ -9,7 +9,7 @@ npx skills add loopflowstudio/loopflow --skill loopflow -g   # teach your coding
 `lf` is how your agent orchestra conducts itself. It's a task system for coding
 agents: you say what you want, and each Task gets its own conversation, its own
 workflow and its own pull request. Organize Tasks into Waves to give each area of
-work its own defaults. It works with Claude Code, Codex, OpenCode and Pi, on your
+work its own defaults. It works with Claude Code, Codex, OpenCode, Pi and Antigravity, on your
 existing subscriptions, inside whatever terminal, multiplexer and tracker you
 already use.
 
@@ -113,7 +113,7 @@ lf resume                                  # return to this checkout's conversat
 | You want to… | Command |
 |---|---|
 | Run Tasks in parallel, each in its own worktree and branch | `lf task create "…" --run` |
-| Mix Claude Code, Codex, OpenCode, and Pi, or fail over on rate limits | `lf set --global agents claude,codex` |
+| Mix Claude Code, Codex, OpenCode, Pi, and Antigravity, or fail over on rate limits | `lf set --global agents claude,codex` |
 | Stack a dependent Task on an open Task's branch | `lf sync <parent-ID>` |
 | Adopt a dirty checkout or existing conversation as a Task | `lf task create --worktree . --title "…"` |
 | Open a Task conversation here, or in a sibling tab | `lf open --task <ID>` |
@@ -130,7 +130,7 @@ lf resume                                  # return to this checkout's conversat
 | Need | For |
 |---|---|
 | macOS or Linux, `git` | Everything |
-| [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Codex](https://github.com/openai/codex), [OpenCode](https://github.com/anomalyco/opencode), or [Pi](https://github.com/earendil-works/pi) 1.3+, signed in | Running agents (uses your own subscriptions/keys) |
+| [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Codex](https://github.com/openai/codex), [OpenCode](https://github.com/anomalyco/opencode), [Pi](https://github.com/earendil-works/pi) 1.3+, or [Antigravity](https://antigravity.google/docs/cli/reference), signed in | Running agents (uses your own subscriptions/keys) |
 | [`gh`](https://cli.github.com), signed in | Pull requests (GitHub today) |
 | [Linear](https://linear.app) or Asana | Optional; plans sync via a Git ref on `origin` by default |
 

@@ -517,8 +517,8 @@ Test skill body.
         let _name =
             crate::config::environment::EnvVarGuard::set(crate::config::USER_NAME_ENV, "  Jack  ");
         let tmp = create_repo_fixture();
-        for agent in ["claude", "codex", "opencode", "pi"] {
-            let _selection = select_agent(agent);
+        for agent in loopflow_harness::HarnessKind::ALL {
+            let _selection = select_agent(agent.as_str());
             for surface in [
                 Surface::Cli,
                 Surface::Mac,

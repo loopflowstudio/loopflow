@@ -49,7 +49,6 @@ with a plain log of the work so far. See
 | Graph step's order exhausted on a usage limit | Wait 5, 15, 30, then 60 minutes, retrying from the first entry after each; then stop with the error |
 | Revoked login | Skips that provider's remaining models; tries the next provider or stops with sign-in instructions |
 | Graph step's agent is not installed | Skips to the next entry and logs why; if none left, fails with the install command |
-| Pi or OpenCode | Stops with the provider error (neither reports structured limit reasons) |
 
 Each retry after a wait restarts at the first entry of `agents` using whatever
 native login is active on the Machine, so renewing usage or signing in picks up

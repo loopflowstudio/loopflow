@@ -32,6 +32,19 @@ most); a PTY driver that answers only `ESC[6n` sees that pause. After a build
 swap, `lf monitor rollover --dry-run` should list the old holder and its views
 as staying; `lf ps` BINARIES names each build with its version.
 
+To see a server whose executable was replaced under it: copy the build to
+three paths (`lf`, `client`, `lf-b` with appended bytes), start the server
+from `lf` with `LF_BIN` naming that path (`lf install server`, or
+`lf server run`), then `rm lf && cp lf-b lf`. Drive the old server with
+`client`, the unreplaced copy of its build: the replaced path is another
+build, and the server answers it "uses another executable". A live holder
+keeps serving new terminals; stop it (the `lf holder run` under your `bin/`
+path) and the next `lf desktop shell <task> --checkout <path> --id <id>
+--create` fails naming both builds. `lf install server` from the replaced
+path restarts a launchd-run server; nothing restarts a foreground one. A
+failed `--create` keeps its `--id`: retry with a new one. The holder the
+server started from the new build exits within a minute on its own.
+
 For final bridge reasons, attach through `session.attach` and consume the viewer
 frames described in `transport/README.md`. Check one final `0x07` Close before
 EOF: `replaced` after `session new --prepare`, `finished` after provider exit,

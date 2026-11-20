@@ -61,10 +61,14 @@ impl Client {
         // The executable was replaced since this process started: its holder
         // binds another build's place, and nobody will bind this one.
         if let Some(started) = spawn(&executable)?.filter(|started| started != build) {
+            // Twelve digits, as the socket and state directory are named.
+            let short = |build: &str| build.get(..12).unwrap_or(build).to_owned();
             bail!(
-                "The executable at {} is now build {started}; this server is build {build} \
-                 and has been replaced since it started. Restart it with lf server restart",
-                executable.display()
+                "The executable at {} is now build {}; this server is build {} and has been \
+                 replaced since it started. Run `lf install server` to restart it",
+                executable.display(),
+                short(&started),
+                short(build)
             );
         }
         let deadline = Instant::now() + STARTUP;

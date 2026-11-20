@@ -9,7 +9,15 @@
   lock but refuses connections (stopped, starved, or full backlog). Waiting on
   the lock instead would remove the deadline, but a SIGSTOPped holder would then
   hang `lf` with nothing in the log. Kept the deadline (made for review).
-- In production, does `lf install` ever replace the running server's executable
-  in place? If it does, the server spawns a holder of the new build and waits on
-  the old place, the same failure as 1b. Slice 2's build check turns that into a
-  named error, but it isn't verified against the install layout.
+- A replaced server under launchd: QA ran it on a private Machine. `lf server
+  status` from the new build reports `ready: false` ("uses another executable"),
+  so `lf install server` restarts it (pid changed, next shell held). The error
+  now names that command; `lf server restart`, which it named before, is not a
+  command. Not run against a real `lf install` promotion.
+- `rust/loopflow/src/server/service.rs:955` ("this server hosts no held
+  terminals; … restart it with lf server restart") names the same missing
+  command. `lf install server` leaves a ready server alone, so no existing
+  command restarts that one. Left as is.
+- A failed `lf desktop shell --create` keeps its `--id`: after the restart the
+  same id answers "Shell startup was not acknowledged; execution is unknown".
+  Desktop's retry path for that id was not checked.

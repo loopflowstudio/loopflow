@@ -158,7 +158,7 @@ shasum -a 256 target/debug/lf    # still A; 27/27 pass
    sha 3e727fd7… before and after.
 2. **Built.** Ready line is `<pid> <build>`; `Client::ensure(place, build)`
    fails at once on a mismatch, naming the executable path, both builds and
-   `lf server restart`. The test's holder executable is a `#[cfg(test)]`
+   `lf install server`. The test's holder executable is a `#[cfg(test)]`
    thread-local override; the test spawns a script that prints another build.
    The test asserts the error's text, not how long it took: the 20s wait ends
    in "is not answering", so the text already tells the two paths apart.

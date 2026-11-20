@@ -1,0 +1,93 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>LOO-988 QA</title>
+<style>
+  body { font: 15px/1.5 -apple-system, sans-serif; max-width: 860px; margin: 40px auto; padding: 0 20px; color: #1c1c1c; }
+  h1 { font-size: 24px; } h2 { font-size: 18px; margin-top: 36px; }
+  pre { background: #f5f4f0; padding: 12px 14px; overflow-x: auto; font-size: 12.5px; line-height: 1.45; border-radius: 4px; }
+  code { font-size: 13px; }
+  table { border-collapse: collapse; width: 100%; } td, th { text-align: left; padding: 6px 10px; border-bottom: 1px solid #ddd; vertical-align: top; }
+  .fix { border-left: 3px solid #b3541e; padding-left: 12px; }
+</style>
+
+<h1>LOO-988 QA, 2026-11-19</h1>
+<p>Two audiences: someone whose server's <code>lf</code> was replaced under it (the one
+product change, the holder build check), and developers running the four tests.
+Machine load was 85–93 throughout.</p>
+
+<h2>1. A server whose executable was replaced</h2>
+<p>Private Machine under <code>/tmp/lf-qa-988</code>: the branch build copied to
+<code>bin/lf</code> (what the server runs), <code>bin/client</code> (same build, never
+replaced) and <code>bin/lf-b</code> (appended bytes, a distinct build). A Task adopted a
+worktree; shells were held with <code>lf desktop shell … --create</code> on a PTY.</p>
+<table>
+<tr><th>Did</th><th>Saw</th></tr>
+<tr><td>Server A running, asked for a shell</td><td>Holder started from the new <code>&lt;pid&gt; &lt;build&gt;</code> ready line; shell answered <code>held-42</code>.</td></tr>
+<tr><td>Replaced <code>bin/lf</code> with B, holder A still alive, asked for a second shell</td><td>Held as before (<code>second-2</code>). A live holder is connected to, nothing is started.</td></tr>
+<tr><td>Stopped holder A, asked for a third shell</td><td>The named error, 1.9s after the command started (before this branch: 20s, "is not answering").</td></tr>
+<tr><td>Same, with the server run by launchd (<code>lf install server</code>)</td><td>Same error in 2.3s. Then <code>lf install server</code> from the replaced path: server pid 27695 → 29565 in 5.7s, a new shell answered <code>after-restart-7</code>.</td></tr>
+<tr><td>Left behind</td><td>The holder the old server started from build B exited by itself within a minute. Private launchd job booted out, no processes left.</td></tr>
+</table>
+<pre>Error: The executable at /tmp/lf-qa-988/bin/lf is now build 43850d261ef5; this server is build 7db1716ee77a and has been replaced since it started. Run `lf install server` to restart it</pre>
+
+<div class="fix">
+<p><b>Fixed here.</b> The error said "Restart it with lf server restart".
+<code>lf server restart</code> answers <code>error: unknown command</code>. A replaced
+server reads as not ready to the new build ("Loopflow server uses another
+executable"), so <code>lf install server</code> restarts it; the error names that now,
+and the launchd run above followed it end to end.</p>
+<p><b>Fixed here.</b> The two builds printed as 64 hex digits each. They print as
+twelve, the same digits as <code>holder-&lt;build&gt;.sock</code> and
+<code>holders/&lt;build&gt;/</code>.</p>
+</div>
+
+<h2>2. The session-launch test on its first run after a link</h2>
+<pre>touch rust/loopflow/src/bin/lf.rs
+cargo test -p loopflow --test session_launch_contract --no-run
+shasum target/debug/lf            405a35a6b8f1e0ec
+env -u LOOPFLOW_TEST_LF cargo test -p loopflow --test session_launch_contract
+test result: ok. 27 passed; 0 failed; finished in 102.95s
+shasum target/debug/lf            405a35a6b8f1e0ec</pre>
+<p>Then with the ctor's <code>set_var</code> line removed, same steps, one test:</p>
+<pre>test task_conversation_preparation_is_passive_and_connect_uses_shared_launch_settings ... FAILED
+Error: The executable at …/target/debug/lf is now build 7db1716ee77a; this server is build 405a35a6b8f1 and has been replaced since it started. Run `lf install server` to restart it
+shasum target/debug/lf            7db1716ee77ac9dc   (changed under the test)</pre>
+<p>The ctor is what keeps the path still, and without it the failure now says what
+happened. Line restored.</p>
+
+<h2>3. Holder test</h2>
+<p><code>cargo test -p loopflow-execution --lib terminal_holder::</code>: 13 passed.
+With the build comparison disabled the new test fails after 20.32s with "Holder at
+… is not answering". Restored.</p>
+
+<h2>4. human_session</h2>
+<p>51/51 plain, and 51/51 under <code>--shuffle-seed</code> 22 and 23 (seed 21's result
+line was cut by my filter; no failure printed). Shuffling on stable needs
+<code>RUSTC_BOOTSTRAP=1</code>.</p>
+
+<h2>5. Swift New Task tests</h2>
+<p><code>scripts/test_desktop.sh --skip-build --filter WorkDestinationTests</code>, three
+runs: 70 tests passed each time (3.8s, 3.9s, 3.4s).</p>
+
+<h2>Works now</h2>
+<ul>
+<li>A replaced server fails a new held terminal in about two seconds, names both builds and a command that exists and works.</li>
+<li>All four named tests pass; the two with branch fixes fail when their fix is removed.</li>
+<li><code>cargo fmt</code>, <code>cargo clippy -p loopflow-execution --all-targets -- -D warnings</code> clean.</li>
+</ul>
+
+<h2>Not reached</h2>
+<ul>
+<li>A real <code>lf install</code> promotion replacing a running default-Machine server: it would swap the account's installed <code>lf</code>. The private launchd run stands in for it.</li>
+<li>Desktop showing this error in a pane: only the CLI was driven.</li>
+<li>Workspace-wide clippy and the full suites: gate and CI.</li>
+<li>The Swift tests' old failure can't be forced (executor order), so no break run for slice 3.</li>
+</ul>
+
+<h2>Still wrong, worst first</h2>
+<ol>
+<li>A foreground <code>lf server run</code> (no supervisor) gets the same advice, and <code>lf install server</code> there would register a launchd job beside it. Only development Machines run that way.</li>
+<li>After the failed start, the same <code>--id</code> answers "Shell startup was not acknowledged; execution is unknown. No replacement was started" even once the server is restarted; a new id works. Existing create-once behavior, not from this branch; what Desktop does with that id is unchecked.</li>
+<li><code>rust/loopflow/src/server/service.rs:955</code> still tells people to run <code>lf server restart</code>. Nothing restarts a ready server today, so there was no true command to put there. In <code>scratch/questions.md</code>.</li>
+<li>In a test run the error's "Run `lf install server`" is advice for a server, not for a developer whose test binary was relinked. The first sentence carries it.</li>
+</ol>

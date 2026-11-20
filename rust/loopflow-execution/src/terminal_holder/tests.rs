@@ -400,7 +400,7 @@ fn a_holder_started_from_a_replaced_executable_fails_at_once_naming_both_builds(
     let error = Client::ensure(&place, BUILD).unwrap_err().to_string();
 
     // The 20s wait for the socket ends in "is not answering" instead.
-    assert!(error.contains(replaced), "{error}");
-    assert!(error.contains(BUILD), "{error}");
+    assert!(error.contains(&replaced[..12]), "{error}");
+    assert!(error.contains(&BUILD[..12]), "{error}");
     assert!(error.contains(&executable.display().to_string()), "{error}");
 }

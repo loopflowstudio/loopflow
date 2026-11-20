@@ -224,7 +224,8 @@ and added `~/.opencode/bin` to the tool directories.
 ## Gate checks
 
 - `cargo test -p loopflow --lib open::` and `server::` — implementer.
-- `cargo test -p loopflow --test transport_tests a_launch_that_found_no_provider` — implementer.
+- `cargo test -p loopflow --test transport_tests a_launch_that_found_no_provider` — passed at c8779a386c (ran in full, not the early return).
+- `cargo test -p loopflow-execution --lib open_receipt_tests` — passed at c8779a386c (2 tests).
 - `env -i … lf session resume <throwaway>` — passed in qa, by hand.
 - The Rust suites on macOS and Linux — CI; watch fixtures with a bare `PATH`.
 - `lf open --task <ID> --json` with the provider missing, on tmux, Rex (`-a pi`) and Herdr — passed in qa. cmux and Desktop not run: gate or a person.

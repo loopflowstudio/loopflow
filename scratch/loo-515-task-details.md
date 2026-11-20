@@ -35,22 +35,25 @@ file and a builtin skill.
     unavailable/merged/abandoned, "Task still open"); click shows the card with
     every reading and its age.
   - **Sidebar** (`ChangedFilesSidebar`, left): filter, files under the order's
-    headings, comment counts, "Hidden by the worker for this change" with
+    headings, comment counts, "Hidden by the tour for this change" with
     reasons and Show, "Always hidden" with its add field. Under 620 pt it opens
     over the stream from a toolbar button.
-  - **Order** (`DiffOrder`, `ReviewGroup.arrange`): the tour's `first:` files,
+  - **Order** (`DiffTour`, `ReviewGroup.arrange`): the tour's `first:` files,
     then the rest under the `diff_groups` headings. The menu reads Tour / By
     group / By path; Tour is the default when `first` has entries. `ReviewKind`
     is deleted.
-  - **Tour**: `scratch/diff-order.yaml` with `at:`, `first:` (files, optional
+  - **Tour**: `scratch/tour.yaml` with `at:`, `first:` (files, optional
     why) and `hide:`, written by the builtin `tour` skill
     (`builtins/task/skill/tour.md`). `implement`, `compress` and `human-review`
     point at `lf help tour`; `LOOPFLOW.md` does not, so a plain chat's change
     gets its tour from the button. Behind means a commit after `at` changed a
-    file outside `scratch/`; the stream says "The tour was written at <sha> ·
-    N files changed since" (`task.changes --base <at> --head <head>`). **Write
-    tour** / **Update tour** sends the served `skill.run` write with the Task's
-    checkout.
+    file outside `scratch/`, said once in `tour.md` and followed by
+    `human-review`; the stream says "The tour was written at <sha> · N files
+    changed since" (`task.changes --base <at> --head <head>`). **Write tour** /
+    **Update tour** sends the served `skill.run` write with the Task's
+    checkout. "Writing the tour…" ends when the file's content changes; once
+    the launch has answered, the button is offered again beside the log path
+    (`TourWriting`: idle, launching, launched, failed).
   - **Groups**: `diff_groups`, `Repository` applicability, `Replace`: the
     nearest layer that sets it wins whole, first match wins within it. A group
     is `{title, paths}` or `{rest: <title or null>}`, the slot for files no
@@ -178,53 +181,32 @@ Chosen while building, not by Jack, reversible before release:
 - Moves are found only between a pure removal and a pure addition in one file.
 - The file menu and sidebar carry no per-file +/−; file headers do.
 - `lf pr submit` and `lf pr land` clear added `scratch/` files in every
-  repository, so `scratch/diff-order.yaml` ends at publish; after that the Diff
+  repository, so `scratch/tour.yaml` ends at publish; after that the Diff
   offers Write tour again. Jack: "Tour doesnt need to survive".
 - A remote Task offers neither Write tour nor Update tour (the `skill.run`
   write would run outside its checkout), and its files sit under one "Changed
   files" heading: there is no Swift copy of the default groups. The same
   heading shows until the settings read answers.
-- A tour run that fails after launching keeps "Writing the tour…" with its log
-  path until the file changes or the app restarts; the button is back beside
-  it. No served read reports a launched Process ending. A rewrite that parses
-  to the same tour also leaves the notice up.
+- No served read reports a launched Process ending, so a tour run that fails
+  after launching keeps "Writing the tour…" with its log path until the file
+  changes, the button is clicked again or the app restarts. A rewrite that
+  parses to the same tour also leaves the notice up. A second click during a
+  healthy run starts a second run that rewrites the same file.
 - The released `lf` 0.16.0 prints "skipping diff_groups: unknown setting" on
   every command in a checkout whose `.lf/config.yaml` has the list (seen on
   `lf task status` here).
 
 ## Concept review, November 19 (sixth pass)
 
-Page: `scratch/concept-review.html`. Reviewed through `21fc32c91f`, the tour
-skill and `diff_groups` included. The model holds: one comparison read three
+Page: `scratch/concept-review.html`. The model holds: one comparison read three
 ways (order, hidden, filter); the settings give the default order, the tour
-stacks on top for one change.
-
-Settled by what is already decided, and built (`TourWriting` is idle, launching, launched or failed):
-
-1. **The tour has one name.** It is "tour" on the skill, the button, the menu
-   and the status line, `scratch/diff-order.yaml` and `DiffOrder` in the file
-   and the type, and "the worker's order" / "Hidden by the worker for this
-   change" in the pane and README. Jack's words give the file to the tour ("the
-   tour could live as some sort of simple yaml") and "diff_Order" to the
-   default groups. The file becomes `scratch/tour.yaml`, the type `DiffTour`
-   (`ReviewOrdering` keeps "order" for the menu), and the heading reads
-   "Hidden by the tour for this change": since Write tour, the writer is
-   whoever ran the skill, a plain chat's button included, not only the worker.
-   Nothing reads the old path; no tour file has shipped.
-2. **Behind has one rule.** Desktop: a commit after `at` changed a file outside
-   `scratch/`. `human-review.md`: "its `at:` is not the head commit". Every
-   `lf` step commits `scratch/`, so the commit that carries the tour already
-   moves the head past `at`, and human-review rewrites a current tour every
-   time. The skill takes Desktop's rule, said once in `tour.md`.
-3. **A tour run that dies gives the button back.** Today "Writing the tour…"
-   holds until a file with a different `at` lands; the store lives as long as
-   the app, so a run that fails after launch (no harness, a spent limit) leaves
-   no button until restart, and so does a rewrite that lands with the same or
-   no `at`. Nothing reports the run ending, so the pane stops modelling it:
-   the wait ends when the file's content changes, and once the launch has
-   answered the button is offered again beside the log path. Cost accepted: a
-   second click during a healthy run starts a second run that rewrites the
-   same file.
+stacks on top for one change. Its three repairs are built (`6fb8943d03`) and
+described above: one name for the tour, one behind rule, a button that returns.
+Chosen by the review, not by Jack, reversible: the file name
+`scratch/tour.yaml` (Jack: "the tour could live as some sort of simple yaml";
+"diff_Order" was his word for the default groups), the heading "Hidden by the
+tour for this change" (the writer is whoever ran the skill, not only the
+worker), and accepting a second run from a second click.
 
 Stays different on purpose: two hide lists. The tour's `hide:` is per change,
 matches a path or folder prefix, carries a reason and is revealed entry by
@@ -234,11 +216,10 @@ files"). The tour skill's "docs, data model, logic, tests, generated" repeats
 the default `diff_groups` in prose, as asked ("roughly suggest similar overall
 guidance in our default skill").
 
-Seen while reviewing: the `lf` installed on this Machine is
-`0.16.0+f5ff6a6c7`, a build of main past the release, and prints the
-`diff_groups` warning twice per command. Here the warning ends at the first
-`lf install` after this merges; question 5 below is about Machines on the
-tagged release.
+The `lf` installed on this Machine is `0.16.0+f5ff6a6c7`, a build of main past
+the release, and prints the `diff_groups` warning twice per command until the
+first `lf install` after this merges; question 5 below is about Machines on
+the tagged release.
 
 ## Remaining
 
@@ -289,7 +270,7 @@ files:
 1. ⌥⌘1, **Brief**: state line, outline, related Task chips that open in-app.
    Scroll halfway.
 2. ⌥⌘2, **Diff**: with no tour, Write tour; then it starts on the files
-   `scratch/diff-order.yaml` names, the rest under Docs, Data model, Everything
+   `scratch/tour.yaml` names, the rest under Docs, Data model, Everything
    else, Tests, Generated, with `scratch/` hidden. Commit a source change:
    Update tour. Click a file in the sidebar; it comes to the top with its
    header in the bar. `]` steps across files; open the skipped lines above a
@@ -338,4 +319,4 @@ files:
   page and Task switches.
 - No GitHub patch renderer remains.
 
-Check (November 19): `cargo test -p loopflow-execution --lib config::` → 105 passed (before the conflict-free merge of main `2750c9e0fb`); after the sixth-pass repairs `scripts/test_desktop.sh --filter 'TaskFilesTests|ReviewDiffTests'` → 51 passed and `cargo test -p loopflow --test golden_prompt` → passed with regenerated goldens; branch `lf config explain diff_groups` selects the repository's list. Gate/CI: clippy, `documented_commands::`, the full swift suite, `global_commands` (PR #1949's suites are skipped at `2b27c7eaef`). Demo: the pane on screen.
+Check (November 19): `cargo test -p loopflow-execution --lib config::` → 105 passed (before the conflict-free merge of main `2750c9e0fb`); after the sixth-pass repairs and their compress `scripts/test_desktop.sh --filter 'TaskFilesTests|ReviewDiffTests'` → 51 passed and `cargo test -p loopflow --test golden_prompt` → passed with regenerated goldens; branch `lf config explain diff_groups` selects the repository's list. Gate/CI: clippy, `documented_commands::`, the full swift suite, `global_commands` (PR #1949's suites are skipped at `2b27c7eaef`). Demo: the pane on screen.

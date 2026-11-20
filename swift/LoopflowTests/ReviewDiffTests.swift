@@ -200,8 +200,8 @@ struct ReviewDiffTests {
         #expect(ReviewComment.message([moved], revision: "abc") == "`a.swift:L11-12` (after): why Spanish? say so (abc) ")
     }
 
-    @Test func aWorkersOrderPutsItsFilesFirstAndTheRestByGroup() throws {
-        let order = DiffTour.parse("""
+    @Test func aTourPutsItsFilesFirstAndTheRestByGroup() throws {
+        let tour = DiffTour.parse("""
         # written when the change is handed over
         at: 81d3fa5973e63a4394a25357502e635a3baf5d5b
         first:
@@ -216,11 +216,11 @@ struct ReviewDiffTests {
         other:
           - path: ignored
         """)
-        #expect(order.at == "81d3fa5973e63a4394a25357502e635a3baf5d5b")
+        #expect(tour.at == "81d3fa5973e63a4394a25357502e635a3baf5d5b")
         #expect(DiffTour.parse("first:\n  - a.swift\n").at == nil)
-        #expect(order.first.map(\.path) == ["swift/Store.swift", "swift/StoreTests.swift", "gone.swift"])
-        #expect(order.hide == [DiffTour.Entry(path: "docs/", why: "Path literal renamed, nothing else")])
-        #expect(order.hide[0].matches("docs/config.md") && !order.hide[0].matches("src/docs.rs"))
+        #expect(tour.first.map(\.path) == ["swift/Store.swift", "swift/StoreTests.swift", "gone.swift"])
+        #expect(tour.hide == [DiffTour.Entry(path: "docs/", why: "Path literal renamed, nothing else")])
+        #expect(tour.hide[0].matches("docs/config.md") && !tour.hide[0].matches("src/docs.rs"))
 
         func file(_ path: String, lines: Int) -> ReviewFile {
             let added = (1...lines).map { ReviewLine(kind: .added, text: "x", old: nil, new: $0) }
@@ -238,7 +238,7 @@ struct ReviewDiffTests {
         ])))
         #expect(groups[1] == DiffGroupSetting(title: "Everything else", paths: nil))
         #expect(DiffGroupSetting.parse(.array([.object(["title": .string("No paths")])])) == nil)
-        let byGroup = ReviewGroup.arrange(files, ordering: .groups, tour: order, groups: groups)
+        let byGroup = ReviewGroup.arrange(files, ordering: .groups, tour: tour, groups: groups)
         #expect(byGroup.map(\.title) == ["Docs", "Everything else", "Tests", "Generated"])
         // Largest change first within a group.
         #expect(byGroup.flatMap(\.files).map(\.path) == ["README.md", "rust/b.rs", "rust/a.rs", "swift/Store.swift",
@@ -246,13 +246,13 @@ struct ReviewDiffTests {
         // A list without a rest puts unmatched files last.
         #expect(ReviewGroup.arrange(files, ordering: .groups, tour: nil, groups: [groups[3]]).map(\.title)
                 == ["Generated", "Everything else"])
-        let tour = ReviewGroup.arrange(files, ordering: .tour, tour: order, groups: groups)
+        let toured = ReviewGroup.arrange(files, ordering: .tour, tour: tour, groups: groups)
         // An entry without a reason reads on under the one above; unnamed files follow by group.
-        #expect(tour.map(\.title) == ["A change over 1 MB no longer loses its last files", "Docs", "Everything else",
+        #expect(toured.map(\.title) == ["A change over 1 MB no longer loses its last files", "Docs", "Everything else",
                                        "Tests", "Generated"])
-        #expect(tour[0].isTour && tour[0].files.map(\.path) == ["swift/Store.swift", "swift/StoreTests.swift"])
-        #expect(Set(tour.flatMap(\.files).map(\.path)) == Set(files.map(\.path)))
-        let paths = ReviewGroup.arrange(files, ordering: .path, tour: order, groups: groups)
+        #expect(toured[0].isTour && toured[0].files.map(\.path) == ["swift/Store.swift", "swift/StoreTests.swift"])
+        #expect(Set(toured.flatMap(\.files).map(\.path)) == Set(files.map(\.path)))
+        let paths = ReviewGroup.arrange(files, ordering: .path, tour: tour, groups: groups)
         #expect(paths.map(\.title) == ["Top level", "rust/", "swift/"])
         // No tour: the tour order is the group order.
         #expect(ReviewGroup.arrange(files, ordering: .tour, tour: nil, groups: groups) == byGroup)

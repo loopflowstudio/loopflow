@@ -850,16 +850,16 @@ final class TaskFilesStore {
             var parsed = await Task.detached(priority: .userInitiated) { ReviewDiff.parse(next.patch) }.value
             var cut = false
             if next.truncated { (parsed, cut) = await completed(parsed, base: base, head: target.head) }
-            let order = await readTour()
-            let age = await readTourAge(order)
+            let tour = await readTour()
+            let age = await readTourAge(tour)
             guard !Task.isCancelled, generation == reviewGeneration, comparison == target else { return }
             for path in openedGaps.keys where review?.file(path) != parsed.file(path) { openedGaps[path] = nil }
             comments = comments.map { $0.anchored(in: parsed.file($0.selection.path).map(opened)) }
-            if tourWriting.isUnderway, order != diffTour {
+            if tourWriting.isUnderway, tour != diffTour {
                 tourWriting = .idle
                 orderingChoice = .tour
             }
-            diffTour = order
+            diffTour = tour
             tourAge = age
             review = parsed
             reviewTruncated = cut
@@ -1043,9 +1043,9 @@ final class TaskFilesStore {
     /// A tour is stale when it names no commit, or when a commit after the one
     /// it names changed a file outside `scratch/`. Committing the tour itself
     /// leaves it current.
-    private func readTourAge(_ order: DiffTour?) async -> TourAge? {
-        guard let order, let head = changes?.headCommit else { return nil }
-        guard let at = order.at else { return TourAge(at: nil, changedFiles: nil) }
+    private func readTourAge(_ tour: DiffTour?) async -> TourAge? {
+        guard let tour, let head = changes?.headCommit else { return nil }
+        guard let at = tour.at else { return TourAge(at: nil, changedFiles: nil) }
         if head.hasPrefix(at) || at.hasPrefix(head) { return nil }
         guard let since = try? await query.taskChanges(issue: issue, base: at, head: head) else {
             return TourAge(at: at, changedFiles: nil)
@@ -1062,7 +1062,7 @@ final class TaskFilesStore {
         case .failed(let reason): return reason
         case .idle: break
         }
-        guard diffTour != nil, let age = tourAge else { return nil }
+        guard let age = tourAge else { return nil }
         guard let at = age.at else { return "The tour names no commit, so it may be behind the change" }
         guard let changed = age.changedFiles else { return "The tour was written at \(at.prefix(7)), before the latest commits" }
         return "The tour was written at \(at.prefix(7)) · \(changed == 1 ? "1 file" : "\(changed) files") changed since"

@@ -938,18 +938,15 @@ struct TaskFilesTests {
         #expect(store.comments.map(\.detached) == [false])
     }
 
-    /// A tour names the commit it was written at. Once a later commit changes a
-    /// file outside `scratch/`, the Diff says how far behind it is and offers
-    /// Update tour, which runs the `tour` skill headless in the Task's checkout;
-    /// the order switches to Tour when the new file lands.
-    @Test func aTourWrittenAtAnOlderCommitReadsAsStaleAndUpdateTourRewritesIt() async throws {
+    /// A store over `a.swift` and `z.swift` whose checkout holds `tour`.
+    /// `sinceTour` is what changed after the commit of forty `c`s; `launches`
+    /// collects each `skill.run` with its checkout.
+    private func tourStore(tour: OSAllocatedUnfairLock<String>, sinceTour: OSAllocatedUnfairLock<[String]>,
+                           launches: OSAllocatedUnfairLock<[[String]]>) throws -> TaskFilesStore {
         let fixture = try Data(contentsOf: URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
             .appendingPathComponent("tests/fixtures/dto/task_files.json"))
-        let old = String(repeating: "c", count: 40), head = String(repeating: "b", count: 40)
-        let tour = OSAllocatedUnfairLock(initialState: "at: \(old)\nfirst:\n  - path: a.swift\n    why: Start here\n")
-        let sinceTour = OSAllocatedUnfairLock(initialState: ["a.swift", "scratch/tour.yaml"])
-        let launches = OSAllocatedUnfairLock<[[String]]>(initialState: [])
+        let old = Self.tourCommit
         let store = TaskFilesStore(issue: "TEST-1", cwd: "/fixture", query: RegistryQuery { args, cwd in
             if args.first == "--batch" {
                 launches.withLock { $0.append(args + [cwd ?? ""]) }
@@ -973,6 +970,20 @@ struct TaskFilesTests {
             return String(decoding: try JSONSerialization.data(withJSONObject: value), as: UTF8.self)
         })
         store.autosave = false
+        return store
+    }
+    private static let tourCommit = String(repeating: "c", count: 40)
+    private static let tourAtOlderCommit = "at: \(tourCommit)\nfirst:\n  - path: a.swift\n    why: Start here\n"
+
+    /// A tour names the commit it was written at. Once a later commit changes a
+    /// file outside `scratch/`, the Diff says how far behind it is and offers
+    /// Update tour, which runs the `tour` skill headless in the Task's checkout;
+    /// the order switches to Tour when the new file lands.
+    @Test func aTourWrittenAtAnOlderCommitReadsAsStaleAndUpdateTourRewritesIt() async throws {
+        let tour = OSAllocatedUnfairLock(initialState: Self.tourAtOlderCommit)
+        let sinceTour = OSAllocatedUnfairLock(initialState: ["a.swift", "scratch/tour.yaml"])
+        let launches = OSAllocatedUnfairLock<[[String]]>(initialState: [])
+        let store = try tourStore(tour: tour, sinceTour: sinceTour, launches: launches)
         await store.loadReview()
         #expect(store.tourStatus == "The tour was written at ccccccc · 1 file changed since")
         #expect(store.tourAction == "Update tour")
@@ -989,7 +1000,7 @@ struct TaskFilesTests {
         #expect(launches.withLock { $0 } == [["--batch", "skill", "tour", "/fixture"]])
         #expect(store.tourStatus == "Writing the tour… · its output: /logs/tour.log")
 
-        tour.withLock { $0 = "at: \(head)\nfirst:\n  - path: z.swift\n    why: Now here\n" }
+        tour.withLock { $0 = "at: \(String(repeating: "b", count: 40))\nfirst:\n  - path: z.swift\n    why: Now here\n" }
         await store.loadReview()
         #expect(store.ordering == .tour)
         #expect(store.shownGroups.first?.title == "Now here")
@@ -1000,32 +1011,9 @@ struct TaskFilesTests {
     /// button is back beside the log path, so a run that died can be started
     /// again; the wait ends when the file changes, whatever commit it names.
     @Test func aTourRunThatWritesNothingLeavesTheButtonBesideItsLog() async throws {
-        let fixture = try Data(contentsOf: URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("tests/fixtures/dto/task_files.json"))
-        let old = String(repeating: "c", count: 40)
-        let tour = OSAllocatedUnfairLock(initialState: "at: \(old)\nfirst:\n  - path: a.swift\n    why: Start here\n")
-        let launches = OSAllocatedUnfairLock(initialState: 0)
-        let store = TaskFilesStore(issue: "TEST-1", cwd: "/fixture", query: RegistryQuery { args, _ in
-            if args.first == "--batch" {
-                launches.withLock { $0 += 1 }
-                return #"{"operation":"skill.run","lf_process_id":"p1","run":"skill tour","log":"/logs/tour.log"}"#
-            }
-            let root = try JSONSerialization.jsonObject(with: fixture) as! [String: Any]
-            var value = root[args[1]] as! [String: Any]
-            switch args[1] {
-            case "changes":
-                let file = (value["files"] as! [[String: Any]])[0]
-                value["files"] = [file.merging(["path": "a.swift", "old_path": NSNull()]) { $1 }]
-            case "file":
-                value["path"] = args[3]
-                value["content"] = args[3] == DiffTour.path ? tour.withLock({ $0 }) : "one\n"
-            default:
-                value["patch"] = "diff --git a/a.swift b/a.swift\n--- a/a.swift\n+++ b/a.swift\n@@ -1 +1 @@\n-uno\n+one\n"
-            }
-            return String(decoding: try JSONSerialization.data(withJSONObject: value), as: UTF8.self)
-        })
-        store.autosave = false
+        let tour = OSAllocatedUnfairLock(initialState: Self.tourAtOlderCommit)
+        let launches = OSAllocatedUnfairLock<[[String]]>(initialState: [])
+        let store = try tourStore(tour: tour, sinceTour: OSAllocatedUnfairLock(initialState: ["a.swift"]), launches: launches)
         await store.loadReview()
         await store.writeTour()
 
@@ -1034,10 +1022,11 @@ struct TaskFilesTests {
         #expect(store.tourStatus == "Writing the tour… · its output: /logs/tour.log")
         #expect(store.tourAction == "Update tour")
         await store.writeTour()
-        #expect(launches.withLock { $0 } == 2)
+        #expect(launches.withLock { $0.count } == 2)
 
         // A rewrite at the same commit is still the run's file landing.
-        tour.withLock { $0 = "at: \(old)\nfirst:\n  - path: a.swift\n    why: Read this first\n" }
+        let rewritten = Self.tourAtOlderCommit.replacingOccurrences(of: "Start here", with: "Read this first")
+        tour.withLock { $0 = rewritten }
         await store.loadReview()
         #expect(store.shownGroups.first?.title == "Read this first")
         #expect(store.tourStatus == "The tour was written at ccccccc · 1 file changed since")

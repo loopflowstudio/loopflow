@@ -391,8 +391,8 @@ offers **Write tour**. Either runs the `tour` skill headless in the Task's
 checkout and reads in Tour when the new file lands. Until then the stream
 shows "Writing the tour…" with the run's log path, and the button stays beside
 it: nothing reports the run ending, so a run that died is started again with a
-click. Files changed since `at` still follow the named ones. Nothing rewrites the tour on its own, and a Task
-on another Machine offers neither button.
+click. Files changed since `at` still follow the named ones. Nothing rewrites
+the tour on its own, and a Task on another Machine offers neither button.
 
 The sidebar lists the files in that order: type to narrow the stream, click a
 file to bring it to the top. Under them, **Always hidden** is the `diff_hidden`

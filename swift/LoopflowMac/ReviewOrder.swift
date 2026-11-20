@@ -34,7 +34,7 @@ struct DiffTour: Equatable, Sendable {
 
     /// `at:` and the two lists of this one shape; anything else in the file is ignored.
     static func parse(_ yaml: String) -> DiffTour {
-        var order = DiffTour()
+        var tour = DiffTour()
         var section: WritableKeyPath<DiffTour, [Entry]>?
         func value(_ text: Substring) -> String {
             var text = text.trimmingCharacters(in: .whitespaces)
@@ -49,7 +49,7 @@ struct DiffTour: Equatable, Sendable {
             if raw.first?.isWhitespace == false, !line.hasPrefix("-") {
                 if line.hasPrefix("at:") {
                     let commit = value(line.dropFirst("at:".count))
-                    order.at = commit.isEmpty ? nil : commit
+                    tour.at = commit.isEmpty ? nil : commit
                 }
                 section = line == "first:" ? \.first : line == "hide:" ? \.hide : nil
                 continue
@@ -57,17 +57,17 @@ struct DiffTour: Equatable, Sendable {
             guard let section else { continue }
             var field = line[...]
             if field.hasPrefix("-") {
-                order[keyPath: section].append(Entry(path: "", why: ""))
+                tour[keyPath: section].append(Entry(path: "", why: ""))
                 field = field.dropFirst()
             }
-            guard let last = order[keyPath: section].indices.last else { continue }
+            guard let last = tour[keyPath: section].indices.last else { continue }
             let text = field.trimmingCharacters(in: .whitespaces)
             if text.hasPrefix("path:") {
-                order[keyPath: section][last].path = value(text.dropFirst("path:".count))
+                tour[keyPath: section][last].path = value(text.dropFirst("path:".count))
             } else if text.hasPrefix("why:") {
-                order[keyPath: section][last].why = value(text.dropFirst("why:".count))
-            } else if !text.isEmpty, order[keyPath: section][last].path.isEmpty {
-                order[keyPath: section][last].path = value(text[...])
+                tour[keyPath: section][last].why = value(text.dropFirst("why:".count))
+            } else if !text.isEmpty, tour[keyPath: section][last].path.isEmpty {
+                tour[keyPath: section][last].path = value(text[...])
             }
         }
         func named(_ entries: [Entry]) -> [Entry] {
@@ -76,7 +76,7 @@ struct DiffTour: Equatable, Sendable {
                 return path.isEmpty ? nil : Entry(path: path, why: entry.why)
             }
         }
-        return DiffTour(at: order.at, first: named(order.first), hide: named(order.hide))
+        return DiffTour(at: tour.at, first: named(tour.first), hide: named(tour.hide))
     }
 }
 

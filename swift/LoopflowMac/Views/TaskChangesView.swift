@@ -5,7 +5,7 @@ import SwiftUI
 
 /// The Diff page: what is compared and how much changed, then the changed
 /// files beside the whole comparison as one review stream. The files are in
-/// the tour's order when there is one, else by kind; the file you are in
+/// the tour's order when there is one, else by group; the file you are in
 /// stays named in a bar above the stream. Comments wait under their lines
 /// until you send them to the conversation's unsent input as one message.
 struct TaskChangesView: View {

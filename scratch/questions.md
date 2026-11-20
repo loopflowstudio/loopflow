@@ -75,3 +75,11 @@
   (`transport::carry_across_exec`) and the viewer's revision-skew exec. The
   plan named two hand-offs; these two are the same process becoming another lf
   before it answers.
+
+## QA, second run (headless)
+
+- With no agent preference and Claude missing, `lf open` started OpenCode from
+  `/opt/homebrew/bin` and answered `usable`. That is the sole-installed-harness
+  rule; the tool directories now make it apply under every `PATH`. Not changed.
+- The entry gate was not exercised: it needs a published build of this branch.
+  The check to run after publishing is in `scratch/plan.md` "Remaining".

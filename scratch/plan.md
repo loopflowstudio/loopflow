@@ -183,10 +183,13 @@ and added `~/.opencode/bin` to the tool directories.
   never hid `gh` this way, so the exposure is a macOS Machine: a fixture that
   counted on `gh` being absent now reaches an unauthenticated real one. Gate
   reads the first CI run for this, macOS job included.
-- **The entry-gate hand-off has no end-to-end check.** The fixtures run
-  `target/debug/lf` directly, never through an installation's gate. The unit
-  test covers `carry_across_exec`; an installed `lf open --json` with the
-  provider missing is the real check (qa).
+- **The entry-gate hand-off has no end-to-end check.** With the default home
+  a pane's command names the gate, so every ordinary `lf open` crosses it. The
+  gate is found from the OS account and `lf install` takes only published
+  builds, so qa could not put this branch behind one. After the first published
+  build: `lf install --dev`, then from a tmux pane `lf open --task <ID> --tab
+  --host tmux --json -a pi` must answer `failed` with Pi's reason and a plain
+  open `usable`. The unit test covers `carry_across_exec` until then.
 
 ## Larger than this change (on `scratch/concept-review.html`)
 
@@ -228,7 +231,7 @@ and added `~/.opencode/bin` to the tool directories.
 - `cargo test -p loopflow-execution --lib open_receipt_tests` — passed at c8779a386c (2 tests).
 - `env -i … lf session resume <throwaway>` — passed in qa, by hand.
 - The Rust suites on macOS and Linux — CI; watch fixtures with a bare `PATH`.
-- `lf open --task <ID> --json` with the provider missing, on tmux, Rex (`-a pi`) and Herdr — passed in qa. cmux and Desktop not run: gate or a person.
+- `lf open --task <ID> --json` with the provider missing, on tmux, Rex (`-a pi`) and Herdr — passed in qa; tmux and Rex again at 815013de83. cmux and Desktop not run: gate or a person.
 
 Open PRs on the same files: #1978, #1976, #1967 (`native_session.rs`,
 `claude.rs`), #1972 (`server/mod.rs`). Rebase before slice 1 lands.

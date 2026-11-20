@@ -3,9 +3,67 @@
 pre{background:#f5f5f4;padding:.8rem;border-radius:6px;overflow-x:auto;font:12px/1.4 ui-monospace,Menlo,monospace;white-space:pre-wrap}
 code{font:13px ui-monospace,Menlo,monospace;background:#f5f5f4;padding:0 .2em;border-radius:3px}
 h2{margin-top:2.2rem;font-size:1.15rem} .ok{font-size:.8rem;font-weight:500;color:#0a6b2d;margin-left:.5rem}
-section{border-top:1px solid #e5e5e5}</style>
+section{border-top:1px solid #e5e5e5}h3{font-size:1rem;margin:1.2em 0 .3em}</style>
 <h1>LOO-986: QA run, 2026-11-19</h1>
 <p>Branch <code>lf</code> (debug build), two private Machines under <code>/tmp/lf-qa-986</code>: one with the account's real provider logins, one with an empty <code>HOME</code> so no provider is installed. Hosts were private tmux 3.7c, Rex and Herdr 0.9.3 servers. Everything started was stopped and the launchd job removed.</p>
+<section><h2>Second run, same day, at 815013de83 <span class="ok">works; nothing fixed</span></h2>
+<p>After the first run the receipt stopped being an ambient variable (it is handed on by name), the relayed tail was deleted and the tmux window lookup moved inline. Fresh private Machines under <code>/tmp/lf-qa-986/r2</code>, branch <code>lf</code> rebuilt at HEAD, private tmux 3.7c and Rex servers.</p>
+<h3>Provider missing, tmux</h3>
+<p>Empty <code>HOME</code>, repository set to <code>agent: claude</code>, server started by hand from that environment. <code>lf open --task 28a51a --tab --host tmux --json</code>, exit 1:</p>
+<pre>{
+  &quot;receipts&quot;: [
+    {
+      &quot;label&quot;: &quot;Fix the typo · 28a51a&quot;,
+      &quot;url&quot;: &quot;loopflow://repo/task/28a51a&quot;,
+      &quot;host&quot;: &quot;tmux&quot;,
+      &quot;destination&quot;: &quot;%3&quot;,
+      &quot;container&quot;: null,
+      &quot;status&quot;: &quot;failed&quot;,
+      &quot;reason&quot;: &quot;&#x27;claude&#x27; is not installed. Install it with `npm install -g @anthropic-ai/claude-code`, then open `claude` to sign in; retry the same command&quot;,
+      &quot;fallback_argv&quot;: [
+        &quot;lf&quot;,
+        &quot;open&quot;,
+        &quot;loopflow://repo/task/28a51a&quot;
+      ]
+    }
+  ],
+  &quot;unknown&quot;: []
+}</pre>
+<p>The pane kept the error and waited:</p>
+<pre>Error: 'claude' is not installed. Install it with `npm install -g @anthropic-ai/claude-code`, then open `claude` to sign in.
+
+Conversation ended with an error. Correct the error above and retry lf open. Press Enter to close.</pre>
+<p>Without <code>--json</code>:</p><pre>Fix the typo · 28a51a: &#x27;claude&#x27; is not installed. Install it with `npm install -g @anthropic-ai/claude-code`, then open `claude` to sign in; retry the same command
+  Destination: %4</pre>
+<p><code>-a codex</code>: <code>Codex config/read failed: codex CLI not found: codex; retry the same command</code>. <code>-a pi</code>: <code>'pi' is not installed. …; retry the same command</code>. <code>-a opencode</code> (installed in <code>/opt/homebrew/bin</code>): <code>usable</code>, real OpenCode in the pane. Its process had no <code>LF_OPEN_RECEIPT</code> in its environment (<code>ps eww</code>); only the pane's wrapper and viewer did.</p>
+<p>A Task whose checkout directory had been moved away opened the same way: the checkout came back and the reason was Claude's.</p>
+<h3>Provider missing, Rex</h3>
+<p><code>lf open --task 28a51a --tab --host rex --server unix://… --json -a pi</code>, exit 1:</p>
+<pre>      &quot;host&quot;: &quot;rex&quot;,
+      &quot;destination&quot;: &quot;window:01a1f667-16f2-77f3-b9ad-73e09bad1ea6&quot;,
+      &quot;status&quot;: &quot;failed&quot;,
+      &quot;reason&quot;: &quot;&#x27;pi&#x27; is not installed. Install Pi 1.3 or later with `npm install -g --ignore-scripts @earendil-works/pi-coding-agent`. Configure its model and credentials in Pi; retry the same command&quot;,</pre>
+<h3>The viewer's own error</h3>
+<p>A pane command replayed for a conversation that does not exist: <code>LF_OPEN_RECEIPT=…/receipt lf session resume 0000…</code> printed <code>Error: Session 0000… was not found</code> and the receipt held <code>Session 00000000000000000000000000000000 was not found</code>. With the receipt's directory gone the command failed the same way and wrote nothing. A command that succeeded (<code>lf task list</code>) wrote nothing.</p>
+<h3>Launchd's PATH</h3>
+<p><code>env -i HOME=$HOME TERM=xterm-256color PATH=/usr/bin:/bin:/usr/sbin:/sbin LF_HOME=… /abs/lf session resume &lt;id&gt;</code> in a tmux pane started real Claude Code (trust dialog). Its <code>PATH</code>: <code>/usr/bin:/bin:/usr/sbin:/sbin:/Users/jack/.local/bin:/Users/jack/.opencode/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/local/sbin:/Users/jack/.cargo/bin</code>. After the dialog Claude answered <code>Login expired · Please run /login</code>: <code>env -i</code> drops <code>USER</code>, which Claude needs to find its Keychain login. With <code>USER</code> set the same conversation answered <code>QA_CLAUDE</code>. Launchd sets <code>USER</code>, so this belongs to the acceptance command, not to a launchd-started pane.</p>
+<h3>Replaying a pane's command</h3>
+<p><code>lf open --session &lt;id&gt; --tab --host tmux --json</code> on the Claude conversation: <code>usable</code>. The pane's command:</p>
+<pre>env -u LF_AGENT_CALLER -u LF_AGENT_OVERRIDE &#x27;LF_HOME=/private/tmp/lf-qa-986/r2/a/lfhome&#x27; &#x27;LF_OPEN_RECEIPT=/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpMz45t6/receipt&#x27; /tmp/lf-qa-986/r2/a/bin/lf session resume d3e48d8605534fd8abaa478d23f5de4f</pre>
+<p><code>lf resume -a codex &lt;id&gt;</code> in a second pane moved it (the first pane closed, Codex showed the carried-over turns). The command above, typed again in a third pane, attached to the Codex conversation: the store read <code>codex</code>, one <code>codex</code> process, no <code>claude</code>. Then <code>lf open … -a claude</code> wrote <code>lf session resume &lt;id&gt; --agent claude</code> and the store read <code>claude</code>.</p>
+<h3>Seen on the way</h3><ul>
+<li><b>With no agent preference and Claude missing, the open started OpenCode.</b> <code>/opt/homebrew/bin/opencode</code> was the only installed harness, so the Task's conversation began there and answered <code>usable</code>. It is the documented rule ("exactly one supported harness must be installed"); since lf now adds Homebrew to every <code>PATH</code>, a harness there counts everywhere.</li>
+<li><b>A launchd-started private server has the account's real <code>HOME</code>.</b> The first open here registered <code>com.loopflow.server.&lt;hash&gt;</code>; Claude then ran with <code>HOME=/Users/jack</code> and the holder's <code>PATH</code> although the pane had an empty <code>HOME</code>. Only a QA setup has two homes; noted in <code>.lf/qa/native-conversations.md</code>.</li>
+<li><b>Every failed open leaves its pane waiting for Enter.</b> Four retries left four windows named <code>bash</code>. As designed for a person; an agent retrying piles them up.</li>
+<li><code>lf config set agent …</code> leaves an untracked <code>lf.config.local.yaml.lock</code> in the repository. Not from this change.</li>
+<li><code>~/.cargo/bin/lf</code> on this Machine is 0.11.3 and answers <code>lf open</code> with "skill or flow not found: open". The tool directories put <code>~/.cargo/bin</code> last, so it is reached only when nothing else holds an <code>lf</code>.</li>
+</ul>
+<h3>Not reached in this run</h3><ul>
+<li><b>The entry gate's hand-off.</b> With the default home a pane's command names the gate (<code>~/.lf-machine/install/gates/1/lf</code>), so every ordinary <code>lf open</code> crosses it. The gate is found from the OS account's home and <code>lf install</code> takes only published builds, so this branch's code cannot run behind a gate on this Mac or in a container before it is published. Read instead: <code>main</code> calls <code>transport::initialize</code> (the take) before <code>dispatch_entry_gate</code>, whose <code>reexec</code> calls <code>carry_across_exec</code>. After the first published build: <code>lf install --dev</code>, then <code>lf open --task &lt;id&gt; --tab --host tmux --json -a pi</code> from a tmux pane with the default home must answer <code>failed</code> with Pi's reason, and a plain open must answer <code>usable</code>. A dropped receipt shows as "Conversation exited before attachment" or a timeout on every open.</li>
+<li>Herdr and the launchd-registered server were not repeated; cmux, Desktop, systemd and SSH as in the first run.</li>
+</ul>
+<p>Everything started was stopped: both private servers, holders, tmux and Rex servers, the launchd job <code>com.loopflow.server.8a94849dbe303f29</code> (booted out), and Docker Desktop, which was started for a Linux build and quit.</p>
+</section>
 <section><h2>1. A provider starts under launchd&#x27;s PATH <span class="ok">works</span></h2><p>Private <code>LF_HOME</code>, real logins, branch <code>lf</code>. In a private tmux pane: <code>env -i HOME=$HOME TERM=xterm-256color PATH=/usr/bin:/bin:/usr/sbin:/sbin LF_HOME=… /abs/lf session resume &lt;session&gt;</code>. Run twice: once against a foreground server, once (final binary) against a server registered under launchd with <code>lf install server</code>.</p><p>Real Claude Code started (its trust dialog for the throwaway directory):</p><pre> This session hasn&#x27;t worked here before. Is this a directory you created or one you trust?
  Claude Code&#x27;ll be able to read, edit, and execute files here. Its skills, commands, and agents load and can run commands, and so can the
  git settings of its repository. Your answer holds for this session. Starting Claude Code in this directory and trusting it there lasts,

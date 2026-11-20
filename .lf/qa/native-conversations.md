@@ -41,13 +41,23 @@ For tmux, start a private server from the cleaned environment
 panes inherit the server's environment, so one started from an agent shell
 leaks its `LF_*` and `REX_*` into every conversation. `lf open --host tmux`
 reads `TMUX` and `TMUX_PANE`, so the caller is a pane: `send-keys` the command
-with its output redirected to files and wait for a `.rc` file. Read the new
+with its output redirected to files and wait for a `.rc` file. Address the
+caller by pane ID (`-t %0`): `-t caller` is the session's current window, which
+is the conversation once a tab opens. With the real `HOME`, `zsh -f` still puts
+`~/.cargo/bin` first, where an old `lf` may sit; name the branch `lf` by path.
+Claude needs `USER` to find its Keychain login: under a bare `env -i` it starts
+and says "Not logged in". Read the new
 window with `capture-pane -p -t <destination>` and its command with
 `list-panes -a -F '#{pane_id} #{pane_start_command}'`.
 
 To open with a provider missing, give the Machine an empty `HOME` (plus
 `CLAUDE_CONFIG_DIR` and `CODEX_HOME` inside it): lf adds `~/.local/bin` and the
 other tool directories to every `PATH`, so a bare `PATH` alone hides nothing.
+Start `lf server run` yourself from that environment before the first open:
+otherwise the open registers the private server under launchd, whose `HOME`
+is the account's real one, and the holder finds the real providers. Set
+`lf config set agent claude` too: with no preference the only installed
+harness is taken, and `/opt/homebrew/bin/opencode` is one.
 That works in tmux and Herdr. A Rex terminal runs through `login`, which puts
 the account's real `HOME` back, so there the real providers are found; open
 with a harness no tool directory holds (`-a pi` when Pi is installed under nvm)
@@ -64,7 +74,11 @@ attached LfProcess"); move an attached conversation with `lf resume -a
 registers `com.loopflow.server.<hash>` (the hash is in the socket path);
 `launchctl print gui/$UID/<label>` shows its environment, `ps eww` of the
 holder and provider shows the `PATH` they were given, and `launchctl bootout`
-removes it.
+removes it. A killed provider is restarted by the server's recovery, which
+registers that job again: stop the conversation's processes, then boot out.
+The installation entry gate is found from the OS account, not `HOME` or
+`LF_HOME`, and `lf install` takes only published builds: a branch's code
+cannot run behind the gate before it is published.
 
 For Herdr, isolate `XDG_CONFIG_HOME` and `XDG_STATE_HOME`, start
 `herdr --session qa server`, and set `HERDR_SOCKET_PATH` to

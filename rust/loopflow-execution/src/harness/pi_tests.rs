@@ -5,11 +5,11 @@ use std::time::Duration;
 use serde_json::json;
 use tokio::sync::mpsc;
 
-use super::fact::{Decoded, ProviderFact, ProviderTurn};
 use super::pi::Driver as PiDriver;
-use super::pi_decode::Turn;
 use super::Driver;
 use crate::agent::AgentConfig;
+use loopflow_harness::fact::{Decoded, ProviderFact, ProviderTurn};
+use loopflow_harness::pi_decode::Turn;
 use loopflow_model::chat::types::{ConversationEvent, ConversationItem, Lifecycle};
 
 async fn completed(rx: &mut mpsc::UnboundedReceiver<ConversationEvent>) -> Vec<ConversationEvent> {
@@ -62,7 +62,7 @@ async fn pi_turns_resume_the_exact_conversation_and_capture_tools_usage() {
     let (tx, mut rx) = mpsc::unbounded_channel();
 
     let mut pi = PiDriver::new(
-        &crate::harness::launch_for_test(crate::harness::HarnessKind::Pi, &config, &recording),
+        &crate::harness::launch_for_test(loopflow_harness::HarnessKind::Pi, &config, &recording),
         tx,
     );
     pi.start().await.unwrap();
@@ -105,7 +105,7 @@ async fn pi_turns_resume_the_exact_conversation_and_capture_tools_usage() {
     let (tx, mut rx) = mpsc::unbounded_channel();
 
     let mut pi = PiDriver::new(
-        &crate::harness::launch_for_test(crate::harness::HarnessKind::Pi, &config, &recording),
+        &crate::harness::launch_for_test(loopflow_harness::HarnessKind::Pi, &config, &recording),
         tx,
     );
     pi.start().await.unwrap();
@@ -133,7 +133,7 @@ async fn pi_headless_resumes_a_conversation_recorded_by_its_id() {
     let (tx, mut rx) = mpsc::unbounded_channel();
 
     let mut pi = PiDriver::new(
-        &crate::harness::launch_for_test(crate::harness::HarnessKind::Pi, &config, &recording),
+        &crate::harness::launch_for_test(loopflow_harness::HarnessKind::Pi, &config, &recording),
         tx,
     );
     pi.start().await.unwrap();
@@ -151,7 +151,7 @@ async fn pi_interrupt_keeps_the_conversation_alive_and_auth_failure_is_not_succe
     let (tx, mut rx) = mpsc::unbounded_channel();
 
     let mut pi = PiDriver::new(
-        &crate::harness::launch_for_test(crate::harness::HarnessKind::Pi, &config, &recording),
+        &crate::harness::launch_for_test(loopflow_harness::HarnessKind::Pi, &config, &recording),
         tx,
     );
     pi.start().await.unwrap();
@@ -197,7 +197,7 @@ async fn pi_crash_closes_open_tools_and_fails_the_turn() {
     let (tx, mut rx) = mpsc::unbounded_channel();
 
     let mut pi = PiDriver::new(
-        &crate::harness::launch_for_test(crate::harness::HarnessKind::Pi, &config, &recording),
+        &crate::harness::launch_for_test(loopflow_harness::HarnessKind::Pi, &config, &recording),
         tx,
     );
     pi.start().await.unwrap();
@@ -286,7 +286,7 @@ async fn pi_rejected_prompt_and_malformed_stream_remain_failures() {
     let (tx, mut rx) = mpsc::unbounded_channel();
 
     let mut pi = PiDriver::new(
-        &crate::harness::launch_for_test(crate::harness::HarnessKind::Pi, &config, &recording),
+        &crate::harness::launch_for_test(loopflow_harness::HarnessKind::Pi, &config, &recording),
         tx,
     );
     pi.start().await.unwrap();
@@ -334,7 +334,11 @@ async fn pi_headless_dialogs_and_extension_failures_do_not_hang_or_succeed() {
         let (tx, mut rx) = mpsc::unbounded_channel();
 
         let mut pi = PiDriver::new(
-            &crate::harness::launch_for_test(crate::harness::HarnessKind::Pi, &config, &recording),
+            &crate::harness::launch_for_test(
+                loopflow_harness::HarnessKind::Pi,
+                &config,
+                &recording,
+            ),
             tx,
         );
         pi.start().await.unwrap();
@@ -361,7 +365,7 @@ async fn pi_missing_binary_records_a_failed_launch_without_a_live_process() {
     let (tx, _rx) = mpsc::unbounded_channel();
 
     let mut pi = PiDriver::new(
-        &crate::harness::launch_for_test(crate::harness::HarnessKind::Pi, &config, &recording),
+        &crate::harness::launch_for_test(loopflow_harness::HarnessKind::Pi, &config, &recording),
         tx,
     );
     let error = pi.start().await.unwrap_err().to_string();
@@ -393,10 +397,9 @@ fn pi_model_selection_native_resume_and_credentials_keep_their_owners() {
         cwd: Some(directory.path().into()),
         ..crate::agent::AgentConfig::default()
     };
-    let cmd = crate::harness::HarnessKind::Pi
-        .harness()
+    let cmd = crate::harness::launcher(loopflow_harness::HarnessKind::Pi)
         .open(&crate::harness::Launch {
-            harness: crate::harness::HarnessKind::Pi.harness(),
+            harness: crate::harness::launcher(loopflow_harness::HarnessKind::Pi),
             config: &config,
             recording: &crate::harness::admit_for_test(tempfile::tempdir().unwrap().path()),
             kind: crate::harness::LaunchKind::Batch,
@@ -426,11 +429,11 @@ fn pi_model_selection_native_resume_and_credentials_keep_their_owners() {
         "MOONSHOT_API_KEY",
     ] {
         assert!(crate::provider_auth::api_key_env_allowed(
-            crate::harness::HarnessKind::Pi,
+            loopflow_harness::HarnessKind::Pi,
             name
         ));
         assert!(!crate::provider_auth::provider_env_allowed(
-            crate::harness::HarnessKind::Pi,
+            loopflow_harness::HarnessKind::Pi,
             name
         ));
     }
@@ -537,10 +540,9 @@ fn bare_pi_names_its_thread_and_resumes_it_by_that_id() {
     // A bare Pi's thread is the one its admission assigned.
     let recording = crate::harness::admit_for_test(tempfile::tempdir().unwrap().path());
     let id = recording.assigned_thread().unwrap();
-    let start = crate::harness::HarnessKind::Pi
-        .harness()
+    let start = crate::harness::launcher(loopflow_harness::HarnessKind::Pi)
         .open(&crate::harness::Launch {
-            harness: crate::harness::HarnessKind::Pi.harness(),
+            harness: crate::harness::launcher(loopflow_harness::HarnessKind::Pi),
             config: &config,
             recording: &recording,
             kind: crate::harness::LaunchKind::Batch,
@@ -558,10 +560,9 @@ fn bare_pi_names_its_thread_and_resumes_it_by_that_id() {
 
     // Before Pi wrote the conversation (no reply yet), a resume starts it
     // fresh under the same id.
-    let fresh = crate::harness::HarnessKind::Pi
-        .harness()
+    let fresh = crate::harness::launcher(loopflow_harness::HarnessKind::Pi)
         .open(&crate::harness::Launch {
-            harness: crate::harness::HarnessKind::Pi.harness(),
+            harness: crate::harness::launcher(loopflow_harness::HarnessKind::Pi),
             config: &config,
             recording: &crate::harness::admit_for_test(tempfile::tempdir().unwrap().path()),
             kind: crate::harness::LaunchKind::Batch,
@@ -580,10 +581,9 @@ fn bare_pi_names_its_thread_and_resumes_it_by_that_id() {
     std::fs::create_dir_all(&project).unwrap();
     let file = project.join(format!("2026-11-11T11-22-55-913Z_{id}.jsonl"));
     std::fs::write(&file, format!("{{\"type\":\"session\",\"id\":\"{id}\"}}\n")).unwrap();
-    let resume = crate::harness::HarnessKind::Pi
-        .harness()
+    let resume = crate::harness::launcher(loopflow_harness::HarnessKind::Pi)
         .open(&crate::harness::Launch {
-            harness: crate::harness::HarnessKind::Pi.harness(),
+            harness: crate::harness::launcher(loopflow_harness::HarnessKind::Pi),
             config: &config,
             recording: &crate::harness::admit_for_test(tempfile::tempdir().unwrap().path()),
             kind: crate::harness::LaunchKind::Batch,

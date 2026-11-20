@@ -2819,7 +2819,12 @@ mod tests {
         // A parent update moves the child's durable fork without changing its
         // ownership or parent link.
         store
-            .sync_task_placement(&child.id, "parent-tip-2", false, OffsetDateTime::now_utc())
+            .sync_task_placement(
+                &child.id,
+                "parent-tip-2",
+                Some(&parent.id),
+                OffsetDateTime::now_utc(),
+            )
             .await
             .unwrap();
         let synced = store.get_task_pr(&child_pr.id).await.unwrap().unwrap();
@@ -2831,7 +2836,7 @@ mod tests {
         parent.updated_at = OffsetDateTime::now_utc();
         store.update_task_pr(&parent).await.unwrap();
         store
-            .sync_task_placement(&child.id, "main-after-200", true, OffsetDateTime::now_utc())
+            .sync_task_placement(&child.id, "main-after-200", None, OffsetDateTime::now_utc())
             .await
             .unwrap();
 

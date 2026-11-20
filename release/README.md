@@ -23,6 +23,9 @@ LF_HOME="$(mktemp -d)" local-bin/lf wave list --json # explicit disposable exper
 cat release/SCHEDULE.md      # hosted-build and cron-host release boundaries
 ```
 
+`lf install` names each package as it downloads. In a terminal, release downloads
+show a progress bar and dev downloads show GitHub CLI's activity indicator.
+
 `scripts/install.py local` builds this worktree's `lf` into `<worktree>/local-bin/`
 and `Loopflow.app` into `local-bin/app.noindex/`, which Spotlight never indexes.
 Local builds never change the installed CLI and never migrate the main Machine.
@@ -140,7 +143,7 @@ A flag switches it; `lf install` with no flag, `lf schedule` and a rerun of
 which on a Mac installs that run's signed, notarized Loopflow.app with its `lf`.
 Every install of a build schedules `lf install` daily (launchd, or cron on Linux)
 unless a cadence is already installed, so a Machine stays on its stream unasked.
-[Turning it off](../docs/ops.md#updates) is a launchd step; on Linux the next
+[Turning it off](../docs/ops.md#updates-and-scheduling) is a launchd step; on Linux the next
 install adds the line back.
 
 Installation also provisions a separate minute-based cleanup job: `lf task retire`

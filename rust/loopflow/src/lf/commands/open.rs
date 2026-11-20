@@ -160,7 +160,6 @@ struct Resolved {
     session: Option<String>,
     /// The cwd an exact Session reconnects from.
     session_cwd: Option<PathBuf>,
-    agent: Option<String>,
     /// The Work's current primary conversation, read without admitting one.
     primary: Option<String>,
     /// The other Machine of yours whose store holds this Work's primary; the
@@ -197,8 +196,10 @@ impl Resolved {
             (None, WorkTarget::Wave(name)) => argv.extend(["--wave".into(), name.clone()]),
             (None, WorkTarget::Repository) => {}
         }
-        if let Some(agent) = &self.agent {
-            argv.extend(["--agent".into(), agent.clone()]);
+        // Only the invocation's own choice: a recorded harness named here
+        // would move the conversation back each time this command replays.
+        if let Some(agent) = loopflow_execution::config::agent_override() {
+            argv.extend(["--agent".into(), agent]);
         }
         argv
     }
@@ -547,7 +548,6 @@ fn describe(
         wave,
         session,
         session_cwd,
-        agent: None,
         primary,
         primary_machine,
         execution_machine,
@@ -1473,8 +1473,46 @@ fn print_unknown(unknown: &[String]) {
 
 #[cfg(test)]
 mod tests {
-    use super::{named_bundle, DesktopApp, DESKTOP_BUNDLE};
+    use super::{named_bundle, DesktopApp, Resolved, DESKTOP_BUNDLE};
+    use loopflow_execution::work::link::{WorkTarget, WorkUrl};
     use std::path::PathBuf;
+
+    #[test]
+    fn a_pane_command_names_only_the_invocations_harness() {
+        let _lock = loopflow_test_support::env_lock().lock().unwrap();
+        let resolved = Resolved {
+            url: WorkUrl::new("loopflow", WorkTarget::Task("LOO-1".into())),
+            label: "LOO-1".into(),
+            repository_path: PathBuf::from("/repo"),
+            repository_id: None,
+            task: None,
+            wave: None,
+            session: Some("session_1".into()),
+            session_cwd: None,
+            primary: None,
+            primary_machine: None,
+            execution_machine: None,
+            execution_unavailable: None,
+            overview: false,
+        };
+        let env = loopflow_execution::config::AGENT_OVERRIDE_ENV;
+        let saved = std::env::var_os(env);
+        std::env::remove_var(env);
+        assert_eq!(
+            resolved.resume_argv("lf"),
+            ["lf", "session", "resume", "session_1"]
+        );
+        std::env::set_var(env, "codex");
+        let moved = resolved.resume_argv("lf");
+        match saved {
+            Some(saved) => std::env::set_var(env, saved),
+            None => std::env::remove_var(env),
+        }
+        assert_eq!(
+            moved,
+            ["lf", "session", "resume", "session_1", "--agent", "codex"]
+        );
+    }
 
     #[test]
     fn desktop_workspace_urls_select_working_tasks_in_repository_and_wave() {

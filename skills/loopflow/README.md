@@ -8,7 +8,7 @@ The installer shows its security assessments and asks before installing.
 PromptScript reads skills only per project: inside a PromptScript project, run
 the same command without `-g`.
 
-Teaches the coding agent you already use (Claude Code, Codex, OpenCode, Pi) to
+Teaches the coding agent you already use (Claude Code, Codex, OpenCode, Pi, Antigravity) to
 work through `lf`. You keep talking to your agent; it hands work off, keeps track
 of it and brings back pull requests.
 

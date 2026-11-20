@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use anyhow::Result;
 use serde_json::{json, Value};
 
-use super::fact::{Decoded, ProviderFact, ProviderTurn, Signal};
+use crate::fact::{Decoded, ProviderFact, ProviderTurn, Signal};
 use loopflow_model::chat::types::{ConversationEvent, ConversationItem, Lifecycle, TurnUsage};
 use loopflow_model::id::AgentSessionId;
 
@@ -266,7 +266,7 @@ impl Turn {
 
     /// Record why the turn failed and say it.
     fn fail(&mut self, code: &str, message: &str) -> ConversationEvent {
-        self.error = Some(loopflow_storage::session::turn_error(code, message));
+        self.error = Some(loopflow_model::chat::types::turn_error(code, message));
         ConversationEvent::Error {
             code: code.into(),
             message: message.into(),

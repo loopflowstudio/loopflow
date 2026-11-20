@@ -190,6 +190,9 @@ struct WorkDestinationTests {
             throw RegistryQueryError("A created Task reads and prepares nothing after its answer: \(args)")
         }
         let (model, registry) = destinationModel(query: query, repoPath: task.task.repo)
+        // The Wave and repository primaries open warm on load, outside the
+        // created Task, and their resumes land whenever the executor runs them.
+        registry.canPrepare = { false }
         model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [], fixed: true)
         model.navigation.palette = .newTask
         let deadline = ContinuousClock.now + .seconds(3)
@@ -267,6 +270,7 @@ struct WorkDestinationTests {
             throw RegistryQueryError("A created Task reads nothing after its answer: \(args)")
         }
         let (model, registry) = destinationModel(query: query, repoPath: task.task.repo)
+        registry.canPrepare = { false } // Warm primaries are not this Task's reads.
         model.applyFixture(roadmap: .available(without), waves: .available([]), workActivity: .loading, repos: [], fixed: true)
         try await model.createTask(request: "fix the flaky retry test", wave: nil, graph: nil, requestID: UUID().uuidString)
         #expect(model.navigation.startingTask == nil)
@@ -407,7 +411,8 @@ struct WorkDestinationTests {
     func dashboardTileOpensConversationInPlace() async throws {
         let planning = try fixture()
         let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(planning.utf8))
-        let task = try #require(snapshot.tasks.items.first)
+        // A finished Task opens its conversation only when asked.
+        let task = try #require(snapshot.tasks.items.last)
         let location = WorkspaceIdentity(machineId: "machine-local", worktree: "/src/task")
         let record = try tileRecord(task, at: location)
         let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
@@ -448,7 +453,8 @@ struct WorkDestinationTests {
     func repositoryPageTileRetriesInPlace() async throws {
         let planning = try fixture()
         let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(planning.utf8))
-        let task = try #require(snapshot.tasks.items.first)
+        // A finished Task opens its conversation only when asked.
+        let task = try #require(snapshot.tasks.items.last)
         let location = WorkspaceIdentity(machineId: "machine-local", worktree: "/src/task")
         let record = try tileRecord(task, at: location)
         let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
@@ -2197,6 +2203,21 @@ struct WorkDestinationTests {
         while first.count < 2 { await Task.yield() }
         #expect(first == [a, a2])
         #expect(second == [b])
+    }
+
+    @Test func aWindowRestoredFromAnotherMachineIsNotShown() throws {
+        let machine = "/Users/demo/.lf"
+        let saved = try JSONEncoder().encode(RepositoryWorkspace(id: "plan", path: "/src/repo", machine: machine))
+        let restored = try JSONDecoder().decode(RepositoryWorkspace.self, from: saved)
+        #expect(restored.opened(on: machine) == restored)
+        // A world or a copy launched from the same bundle gets none of the Machine's windows.
+        #expect(restored.opened(on: "/tmp/w1/home") == nil)
+        // A copy holds the Machine's plans; its window is still another window.
+        #expect(restored != RepositoryWorkspace(id: "plan", path: "/src/repo", machine: "/Users/demo/.lf-copy/home"))
+        // Windows saved before they named their Machine belong to none.
+        let unnamed = try JSONDecoder().decode(RepositoryWorkspace.self, from: Data(#"{"id":"plan","path":"/src/repo"}"#.utf8))
+        #expect(unnamed.opened(on: machine) == nil)
+        #expect(RepositoryWorkspace(id: "plan", path: "/src/repo").opened() != nil)
     }
 
     @Test func samePlanReusesItsRetainedWorkspaceRegardlessOfFocusOrLocator() async throws {

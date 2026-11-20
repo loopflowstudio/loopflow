@@ -169,7 +169,7 @@ Desktop pane  ─ view ─┼─► Machine server ─► holder ─► PTY ─�
 phone         ─ view ─┘         │
                                 └─ store, hooks, steers, Work reads and writes
 
-lf task run / lf ship ──────────► Graph process ─► step lf ─► agent          worker
+lf task run / lf task auto on ──────────► Graph process ─► step lf ─► agent          worker
         │                                │
         └─ one startup line, then gone   └─ logs/graph-<id>.log
 ```
@@ -183,7 +183,7 @@ require it at startup.
 | Chat | No | In the caller's terminal, which owns its lifetime | `lf <skill>` at a terminal, including `lf research --task LOO-12` |
 | Batch | No | Headless under the caller, returning output to it | `lf -b <skill>` |
 | Work session | Yes | On a PTY in a holder, independent of its viewers | Task, Wave and repository conversations, or a conversation opened in a held terminal through Desktop or a framed `lf --machine` view |
-| Worker | Yes | Headless, with its lifetime set by the step or caller | Headless steps of `lf task run` or `lf ship`, landing's `ci-fix`, or a Discord Wave answer |
+| Worker | Yes | Headless, with its lifetime set by the step or caller | Headless steps of `lf task run` or `lf task auto on`, landing's `ci-fix`, or a Discord Wave answer |
 
 The checkout, `--task` and `LF_AS` supply Task attribution. Usage counts toward
 that Task, and hooks on every launch read the Session's steers from the store,
@@ -322,7 +322,7 @@ A delayed command from a replaced provider retains historical provenance; old
 Process parents are never rewritten. Causal ancestry grants no control authority.
 
 Every Graph started for a Task, by naming it or in its checkout, is part of its work.
-Only `lf task run` and `lf ship` advance the Task's captured graph position;
+Only `lf task run` and `lf task auto on` advance the Task's captured graph position;
 independent Graphs leave that position unchanged. Each launch starts a fresh
 Graph process.
 Taskless and Task-owned Graphs use the same Graph runner. The Graph process holds the compiled graph
@@ -394,7 +394,7 @@ lf wave status product
 `task run` places the Task and starts a fresh Graph process from its saved
 position, returning once the process registers. It stops at the next interactive
 step for review in the Task conversation. `-b` waits and runs those steps headless;
-`lf ship` approves continuation through delivery. A stopped process stays history.
+`lf task auto on` approves continuation through delivery. A stopped process stays history.
 A direct `lf --task ISSUE graph GRAPH` uses the same runner without moving the
 Task's graph position. Replanning keeps existing Task identity and execution.
 See [Task workflows](../orchestration.md#where-a-person-takes-part).

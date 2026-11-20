@@ -7,13 +7,13 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 use crate::lf::commands::WorkFilter;
-use loopflow_execution::harness::HarnessKind;
 use loopflow_execution::store::ProviderAccountId;
 use loopflow_execution::transcript::summary::{summarize, RetentionSummary};
 use loopflow_execution::transcript::{
-    self, Conversation, Located, Request, RequestSource, RetentionState, SessionTranscript, Source,
-    Turn, TurnItem,
+    session_transcript, threads, Conversation, Located, RetentionState, SessionTranscript,
 };
+use loopflow_harness::transcript::{self, Request, RequestSource, Source, Turn, TurnItem};
+use loopflow_harness::HarnessKind;
 use loopflow_model::chat::types::{ConversationItem, Lifecycle};
 use loopflow_storage::sqlite::SqliteStore;
 
@@ -53,7 +53,7 @@ fn clip(text: &str, chars: usize) -> String {
 
 /// The Session's conversation, read from its providers.
 pub(crate) fn session(store: &SqliteStore, session: &str) -> Result<SessionTranscript> {
-    transcript::session_transcript(store, session, now())
+    session_transcript(store, session, now())
 }
 
 pub(crate) fn render(transcript: &SessionTranscript) -> String {
@@ -368,7 +368,7 @@ pub(crate) fn search(
             .case_insensitive(true)
             .build()?;
         'sessions: for session in sessions {
-            for thread in transcript::threads(&store, &session)? {
+            for thread in threads(&store, &session)? {
                 let Ok((harness, Located::Found { source, .. })) = thread.located else {
                     continue;
                 };
@@ -487,7 +487,7 @@ mod tests {
             harness: harness.as_str().into(),
             agent_session: "thread-1".into(),
             account: None,
-            retention: transcript::Retention {
+            retention: loopflow_execution::transcript::Retention {
                 state: RetentionState::Facts,
                 path: None,
                 policy: transcript::ExpiryPolicy::read(harness, None),

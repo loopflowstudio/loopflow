@@ -20,7 +20,7 @@ pub fn path_without_installed_harnesses(path: &str) -> String {
             entry
                 .canonicalize()
                 .is_ok_and(|entry| entry.starts_with(&stand_ins))
-                || !["claude", "codex", "opencode", "pi"]
+                || !["claude", "codex", "opencode", "pi", "agy"]
                     .iter()
                     .any(|harness| entry.join(harness).exists())
         })
@@ -65,7 +65,7 @@ impl RunningParent {
 const RUNNING_OWNERS: &str = "SELECT pid,1 FROM (
     SELECT agent_pid pid FROM agent_sessions UNION SELECT attached_pid FROM agent_sessions
     UNION SELECT pid FROM graph_processes UNION SELECT pid FROM graph_process_steps
-    UNION SELECT run_pid FROM task_graphs UNION SELECT pid FROM task_ship_events
+    UNION SELECT run_pid FROM task_graphs
     UNION SELECT project_activation_pid FROM waves UNION SELECT repair_pid FROM ci_incidents
 ) WHERE pid IS NOT NULL";
 /// Rows a released lf or a fixture wrote, finished ones included.

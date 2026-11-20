@@ -200,7 +200,7 @@ pub struct TaskGraphRow {
 }
 
 /// A Task's Graph as another Machine takes it up: the graph it took up, the
-/// step it stands at, and the cursor its run sets out from again, if it is on
+/// step it stands at and the cursor its run sets out from again, if it is on
 /// one. The run's Process stays behind.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct TaskGraphRecord {
@@ -275,7 +275,6 @@ pub fn start_task_graph_run(
     row: &TaskGraphRow,
     cursor: &ExecutionCursor,
     carrier: (&LfProcessId, &ExecutionStart),
-    ships: bool,
 ) -> StoreResult<bool> {
     store.start_task_graph_run(
         task,
@@ -283,7 +282,6 @@ pub fn start_task_graph_run(
         row.run.as_ref().map(|(_, carrier)| &carrier.id),
         &serde_json::to_string(cursor)?,
         carrier,
-        ships,
     )
 }
 pub fn advance_task_graph_run(

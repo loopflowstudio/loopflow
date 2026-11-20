@@ -109,24 +109,6 @@ pub(crate) fn spawn_native(
     Ok(child)
 }
 
-/// A launch whose provider CLI is not installed is recorded as any spawn that
-/// failed, without the attempt.
-pub(crate) fn record_missing_provider(
-    command: &std::process::Command,
-    owner: &Recording,
-) -> Result<()> {
-    let Recording {
-        store,
-        session,
-        attachment,
-    } = owner;
-    store.with_session_attachment(session, attachment, || {
-        store.record_agent_process_launch(session, attachment, command, true)?;
-        store.record_agent_process_exit(session, attachment, false)
-    })?;
-    Ok(())
-}
-
 /// A managed launch reports turns to the Machine server, so its agent starts
 /// once the server welcomes a connection. The selected installation starts
 /// a stopped server, as it does when opening a work session.
@@ -450,10 +432,9 @@ pub(crate) fn close_session_agent_process(store: &SqliteStore, session: &str) ->
     if let Some(kind) = agent
         .provider
         .as_deref()
-        .and_then(super::HarnessKind::parse)
+        .and_then(loopflow_harness::HarnessKind::parse)
     {
-        kind.harness()
-            .validate_agent_process_close(store, session, &agent.id)?;
+        crate::harness::launcher(kind).validate_agent_process_close(store, session, &agent.id)?;
     }
     close_agent_process(pid, started)
         .map_err(|error| StoreError::InvalidAuthority(error.to_string()))?;
@@ -654,7 +635,7 @@ fn is_agent_process(process: &OsProcess, started_at: i64, provider: Option<&str>
         return false;
     }
     provider
-        .and_then(super::HarnessKind::parse)
+        .and_then(loopflow_harness::HarnessKind::parse)
         .is_some_and(|kind| kind.harness().recognizes_driver(&process.command))
 }
 

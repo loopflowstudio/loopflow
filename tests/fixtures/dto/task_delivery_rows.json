@@ -245,15 +245,13 @@
       "state": "running",
       "reason": "Worker is running realign",
       "step": null,
-      "captured": null
+      "captured": null,
+      "died": null,
+      "outlook": null
     },
     "run_control": {
       "unavailable": null
     },
-    "ship_control": {
-      "unavailable": null
-    },
-    "shipping": null,
     "pr": {
       "id": "pr_commits",
       "sequence": 1,
@@ -536,15 +534,13 @@
       "state": "running",
       "reason": "Worker is running realign",
       "step": null,
-      "captured": null
+      "captured": null,
+      "died": null,
+      "outlook": null
     },
     "run_control": {
       "unavailable": null
     },
-    "ship_control": {
-      "unavailable": null
-    },
-    "shipping": null,
     "pr": {
       "id": "pr_commits",
       "sequence": 1,
@@ -825,15 +821,13 @@
       "state": "running",
       "reason": "Worker is running realign",
       "step": null,
-      "captured": null
+      "captured": null,
+      "died": null,
+      "outlook": null
     },
     "run_control": {
       "unavailable": null
     },
-    "ship_control": {
-      "unavailable": null
-    },
-    "shipping": null,
     "pr": {
       "id": "pr_commits",
       "sequence": 1,
@@ -927,15 +921,13 @@
       "state": "idle",
       "reason": "No active execution",
       "step": null,
-      "captured": null
+      "captured": null,
+      "died": null,
+      "outlook": null
     },
     "run_control": {
       "unavailable": null
     },
-    "ship_control": {
-      "unavailable": null
-    },
-    "shipping": null,
     "pr": null,
     "graph_source": null,
     "lifecycle": "unstarted",
@@ -1003,15 +995,13 @@
       "state": "idle",
       "reason": "No active execution",
       "step": null,
-      "captured": null
+      "captured": null,
+      "died": null,
+      "outlook": null
     },
     "run_control": {
       "unavailable": null
     },
-    "ship_control": {
-      "unavailable": null
-    },
-    "shipping": null,
     "pr": null,
     "graph_source": null,
     "lifecycle": "unstarted",
@@ -1266,15 +1256,13 @@
       "state": "running",
       "reason": "Worker is running realign",
       "step": null,
-      "captured": null
+      "captured": null,
+      "died": null,
+      "outlook": null
     },
     "run_control": {
       "unavailable": null
     },
-    "ship_control": {
-      "unavailable": null
-    },
-    "shipping": null,
     "pr": {
       "id": "pr_commits",
       "sequence": 1,
@@ -1557,15 +1545,13 @@
       "state": "running",
       "reason": "Worker is running realign",
       "step": null,
-      "captured": null
+      "captured": null,
+      "died": null,
+      "outlook": null
     },
     "run_control": {
       "unavailable": null
     },
-    "ship_control": {
-      "unavailable": null
-    },
-    "shipping": null,
     "pr": {
       "id": "pr_commits",
       "sequence": 1,

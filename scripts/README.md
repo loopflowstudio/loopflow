@@ -73,7 +73,7 @@ uv run python scripts/due_removals.py uninstall
 ```
 
 It is a LaunchAgent, not cron, so `lf task run` can reach the Keychain
-([scheduling](../docs/work.md#run-a-pass-or-keep-a-conversation)). Its output goes to
+([scheduling](../docs/work.md#operate-a-wave)). Its output goes to
 `~/Library/Logs/loopflow-due-removals.log`. lf itself schedules nothing.
 
 ## Changed-aware runner

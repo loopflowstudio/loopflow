@@ -456,7 +456,7 @@ impl Registry {
         };
         meta.write(&self.place, &terminal)?;
         crate::journal::process_ledger()?.create_terminal(&terminal, &self.build)?;
-        let mut client = Client::ensure(&self.place)?;
+        let mut client = Client::ensure(&self.place, &self.build)?;
         let holder = client.hello()?;
         let (rows, cols) = dimensions(start.rows, start.cols);
         let mut env: Vec<(String, String)> = start

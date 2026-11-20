@@ -181,6 +181,16 @@ pub(super) async fn run() -> Result<()> {
     // redeems what a control connection on the same carrier requested.
     let tickets = Arc::new(Tickets::default());
     let subscriptions = Arc::new(Subscriptions::default());
+    let (remote_control, remote_requests) = mpsc::channel(8);
+    if super::copy::taken().is_some() {
+        // No mobile listener: a status request hears that at once.
+        drop(remote_requests);
+        tracing::info!(%instance, socket = %path.display(), "Loopflow server ready on a copy of the Machine");
+        return tokio::select! {
+            _ = tickets.expiring() => unreachable!("ticket expiry runs until shutdown"),
+            result = local(listener, instance, executable_sha256, slots, clients, remote_control, tickets.clone(), subscriptions, None) => result,
+        };
+    }
     super::wake::start();
     super::maintenance::start();
     // Held terminals keep running in their holders whether or not this server
@@ -195,7 +205,6 @@ pub(super) async fn run() -> Result<()> {
             None
         }
     };
-    let (remote_control, remote_requests) = mpsc::channel(8);
     let remote = super::remote::manage(
         super::mobile::configured(),
         remote_requests,
@@ -720,6 +729,13 @@ pub(super) async fn session<C: Carrier>(
             send(lines, &busy(&id, "open", MAX_OPEN)).await?;
             continue;
         };
+        if let Some(refusal) = match &start {
+            Start::Request(operation, ..) if operation.changes() => super::copy::refusal(),
+            _ => None,
+        } {
+            send(lines, &ServerMessage::error(Some(id), refusal)).await?;
+            continue;
+        }
         let entry = match start {
             Start::Request(ref operation, Some(_), _)
                 if !matches!(operation, Operation::Read(_)) =>
@@ -1633,7 +1649,7 @@ mod tests {
     use std::sync::{Arc, LazyLock, Mutex};
     use std::time::Duration;
 
-    use super::{connection, deliver_or_spill, Clients};
+    use super::{connection, deliver_or_spill, local, Clients};
     use crate::lf::commands::read::Read;
     use crate::server::subscriptions::Subscriptions;
     use crate::server::ticket::{Admission, Purpose, Tickets};
@@ -1644,8 +1660,8 @@ mod tests {
     };
     use loopflow_execution::engine::ErrorCode;
     use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
-    use tokio::net::UnixStream;
-    use tokio::sync::Semaphore;
+    use tokio::net::{UnixListener, UnixStream};
+    use tokio::sync::{mpsc, Semaphore};
     use tokio_util::codec::{Framed, LinesCodec};
 
     /// A subscription that needs no directory and reads an empty home.
@@ -1887,6 +1903,42 @@ mod tests {
             .block_on(body);
     }
 
+    #[tokio::test]
+    async fn a_client_that_closes_before_accept_leaves_the_server_listening() {
+        let directory = tempfile::tempdir_in("/tmp").unwrap();
+        let path = directory.path().join("server.sock");
+        let listener = UnixListener::bind(&path).unwrap();
+        // Queue and close the first client before the accept loop can run.
+        drop(UnixStream::connect(&path).await.unwrap());
+        let mut probe = UnixStream::connect(&path).await.unwrap();
+        let (remote_control, _remote_requests) = mpsc::channel(1);
+        let serving = local(
+            listener,
+            "incarnation".into(),
+            Arc::new("fixture".into()),
+            Arc::new(Semaphore::new(MAX_CONNECTIONS)),
+            Clients::default(),
+            remote_control,
+            Arc::new(Tickets::default()),
+            Arc::new(Subscriptions::default()),
+            None,
+        );
+        // A status probe checks that the listener answers without opening a
+        // Machine registry as a hello would.
+        let status = async {
+            probe.write_all(b"{\"type\":\"status\"}\n").await.unwrap();
+            let mut line = String::new();
+            BufReader::new(probe).read_line(&mut line).await.unwrap();
+            serde_json::from_str::<ServerMessage>(&line).unwrap()
+        };
+        tokio::select! {
+            result = serving => panic!("server stopped listening: {result:?}"),
+            result = tokio::time::timeout(Duration::from_secs(5), status) => {
+                assert!(matches!(result.unwrap(), ServerMessage::Status(_)));
+            }
+        }
+    }
+
     #[test]
     fn a_machine_request_without_its_sender_is_invalid() {
         with_empty_home(async {
@@ -1957,12 +2009,12 @@ mod tests {
                 // The fixture's repository has no checkout here, so the hold fails and is logged.
                 let answer = client.receive().await.unwrap();
                 assert!(
-                    matches!(&answer, ServerMessage::Error { id: Some(id), .. } if id == "hold-1"),
+                    matches!(&answer, ServerMessage::Error { id: Some(id), .. } if id == "auto-1"),
                     "{answer:?}"
                 );
             });
         let log = std::fs::read_to_string(loopflow_execution::diagnostic_log::log_path()).unwrap();
-        assert!(log.contains("request=hold-1"), "{log}");
+        assert!(log.contains("request=auto-1"), "{log}");
         assert!(!log.contains("sk-fixture"), "{log}");
     }
 

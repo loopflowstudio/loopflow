@@ -247,7 +247,7 @@ mod tests {
             "reduce",
             "polish",
             "concept-review",
-            "human-review",
+            "ship-review",
             "explore",
             "research",
             "qa",

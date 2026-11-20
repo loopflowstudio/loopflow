@@ -812,10 +812,6 @@ pub(super) fn finish_run_in(
                 project_activation_os_started_at=NULL
              WHERE project_activation_lf_process_id=?1 AND project_activation_ended_at IS NULL"
         }
-        RunOwner::ShipCarrier => {
-            "UPDATE task_ship_events SET ended_at=?2,exit_code=?3,error=?4,pid=NULL,os_started_at=NULL
-             WHERE lf_process_id=?1 AND kind IN ('approved','carried') AND ended_at IS NULL"
-        }
     };
     conn.execute(sql, params![id, ended_at, exit_code, error])?;
     Ok(())

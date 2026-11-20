@@ -5,12 +5,12 @@
 
 use serde_json::{json, Value};
 
-use super::fact::{Decoded, ProviderFact, ProviderTurn, Signal};
+use crate::fact::{Decoded, ProviderFact, ProviderTurn, Signal};
 use loopflow_model::chat::types::{ConversationEvent, ConversationItem, FileEdit, Lifecycle};
 
 /// One Loopflow turn in an OpenCode conversation.
 #[derive(Debug)]
-pub(super) struct Turn {
+pub struct Turn {
     turn: ProviderTurn,
     final_text: String,
     /// The turn's first failure, kept on its completion.
@@ -116,8 +116,8 @@ impl Turn {
                         .collect();
                     self.asked = true;
                     out.extend(self.fail_as(
-                        loopflow_storage::session::UNANSWERED_QUESTION,
-                        &super::common::unanswered_question("OpenCode", &asked.join(" ")),
+                        loopflow_model::chat::types::UNANSWERED_QUESTION,
+                        &crate::fact::unanswered_question("OpenCode", &asked.join(" ")),
                     ));
                 }
             }
@@ -147,8 +147,8 @@ impl Turn {
         if self.error.is_some() {
             return Vec::new();
         }
-        let message = sanitize_error_message(reason);
-        self.error = Some(loopflow_storage::session::turn_error(code, &message));
+        let message = crate::redact::sanitize_error_message(reason);
+        self.error = Some(loopflow_model::chat::types::turn_error(code, &message));
         vec![ConversationEvent::Error {
             code: code.into(),
             message,
@@ -208,39 +208,6 @@ impl Turn {
         );
         out
     }
-}
-
-/// Redact credential material from an error OpenCode printed before it is
-/// recorded: `Authorization` header values, `Bearer` tokens and common token
-/// query parameters an upstream error can carry.
-fn sanitize_error_message(message: &str) -> String {
-    use regex::Regex;
-    let mut out = message.to_string();
-    // Bearer first so `Authorization: Bearer <token>` is caught by both the
-    // bearer pattern and the authorization-header pattern. The bearer pattern
-    // stops at whitespace or a comma so the trailing comma that delimits the
-    // authorization-header value survives as a stop boundary for the next
-    // pattern — otherwise `Bearer <tok>, token=abc123` lets the authorization
-    // regex eat through `token=abc123` before the param redaction runs.
-    let redactions: [(Regex, &str); 3] = [
-        (
-            Regex::new(r"(?i)bearer\s+[^,\s]+").expect("valid credential pattern"),
-            "bearer [redacted]",
-        ),
-        (
-            Regex::new(r"(?i)authorization:\s*[^\n,]+").expect("valid credential pattern"),
-            "authorization: [redacted]",
-        ),
-        (
-            Regex::new(r"(?i)(token|key|access_token|api_key)=\S+")
-                .expect("valid credential pattern"),
-            "$1=[redacted]",
-        ),
-    ];
-    for (re, replacement) in &redactions {
-        out = re.replace_all(&out, *replacement).to_string();
-    }
-    out
 }
 
 fn tool_item(part: &Value, id: &str, status: Lifecycle) -> ConversationItem {
@@ -306,7 +273,7 @@ fn tool_item(part: &Value, id: &str, status: Lifecycle) -> ConversationItem {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::harness::fact::{fact_lines, trace};
+    use crate::fact::{fact_lines, trace};
 
     fn turn() -> Turn {
         Turn::new(ProviderTurn {
@@ -436,34 +403,5 @@ mod tests {
             fact_lines(&turn.finish(false, true)).last().unwrap(),
             "TurnCompleted ses_trace/turn Interrupted"
         );
-    }
-
-    #[test]
-    fn sanitize_error_message_redacts_credentials() {
-        let input = "request to https://api.example.com/v1/chat?api_key=sk-secret123 failed: \
-                     Authorization: Bearer super-secret-token, token=abc123";
-        let sanitized = sanitize_error_message(input);
-        assert!(
-            !sanitized.contains("sk-secret123"),
-            "api_key leaked: {sanitized}"
-        );
-        assert!(
-            !sanitized.contains("super-secret-token"),
-            "bearer token leaked: {sanitized}"
-        );
-        assert!(
-            !sanitized.contains("abc123"),
-            "token param leaked: {sanitized}"
-        );
-        assert!(sanitized.contains("api_key=[redacted]"));
-        assert!(sanitized.contains("authorization: [redacted]"));
-        assert!(sanitized.contains("token=[redacted]"));
-    }
-
-    #[test]
-    fn sanitize_error_message_preserves_non_credential_text() {
-        let input = "chunk stream ended (reqwest: EOF)";
-        let sanitized = sanitize_error_message(input);
-        assert_eq!(sanitized, input);
     }
 }

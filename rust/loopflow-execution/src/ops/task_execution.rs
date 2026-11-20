@@ -43,6 +43,25 @@ pub struct TaskExecutionSnapshot {
     pub step: Option<String>,
     /// The Session input that step captured, when it opened one.
     pub captured: Option<i64>,
+    /// Where the run's carrier (`lf task run`) died before the run stopped;
+    /// `null` for a run that runs, stopped on its own, or never started.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub died: Option<RunDied>,
+    /// What happens next to a run that died, as this Machine reads it: the
+    /// server here starts it again at `at`, or leaves it to `command` for
+    /// `reason`. `null` unless `died` says it did.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub outlook: Option<crate::ops::human_session::SessionOutlook>,
+}
+
+/// A Task run's carrier died while the run was at a step.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct RunDied {
+    /// The step the run reached, where it starts again.
+    pub at_step: String,
+    /// RFC 3339; `null` when nobody recorded the death.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub at: Option<String>,
 }
 
 pub async fn task_execution(
@@ -132,13 +151,26 @@ pub async fn execution_of_latest_graph(
         TaskExecutionState::Idle | TaskExecutionState::Blocked
     ) && facts.tasks_with_carrier_records.contains(&task.id)
     {
-        if let Some(died) = crate::ops::task::ship::died_run(sqlite, &task.id)? {
-            let now = loopflow_storage::rows::now_unix();
-            snapshot.state = match died.next_at() {
-                Some(_) => TaskExecutionState::Waiting,
-                None => TaskExecutionState::Blocked,
+        if let Some(died) = crate::ops::task::run_recovery::died_run(sqlite, &task.id)? {
+            let start = died.server_start(
+                task.worktree
+                    .as_deref()
+                    .is_some_and(std::path::Path::is_dir),
+                || crate::ops::recovery::claimed_here(sqlite, &task.id),
+                crate::ops::recovery::server_runs,
+            );
+            let (outlook, line) =
+                died.outlook(&task.identifier, loopflow_storage::rows::now_unix(), start);
+            snapshot.state = match start {
+                crate::ops::recovery::ServerStart::At(_) => TaskExecutionState::Waiting,
+                crate::ops::recovery::ServerStart::Left(_) => TaskExecutionState::Blocked,
             };
-            snapshot.reason = died.reason(&task.identifier, now);
+            snapshot.reason = line;
+            snapshot.died = Some(RunDied {
+                at_step: died.at_step,
+                at: died.at.and_then(loopflow_harness::transcript::rfc3339),
+            });
+            snapshot.outlook = Some(outlook);
         }
     }
     Ok((snapshot, Some(graph.detail(entry))))
@@ -171,6 +203,8 @@ fn unrun_execution(identifier: &str, unrun: Option<&UnrunGraph>) -> TaskExecutio
         reason,
         step: None,
         captured: None,
+        died: None,
+        outlook: None,
     }
 }
 
@@ -200,6 +234,8 @@ fn open_graph_execution_from_facts(
             reason: format!("Graph {graph} has live or unresolved execution in the Task's work; inspect `lf history show {graph}` before launching further work"),
             step: None,
             captured: None,
+            died: None,
+            outlook: None,
         });
     }
     None
@@ -286,6 +322,8 @@ fn project_execution(
             reason: format!("Graph {} finished; nothing further is launched", graph.name),
             step: None,
             captured: None,
+            died: None,
+            outlook: None,
         };
     }
     // A Graph that has started no step is its only run so far.
@@ -331,6 +369,8 @@ fn project_execution(
         reason,
         step: Some(label.clone()),
         captured: None,
+        died: None,
+        outlook: None,
     }
 }
 
@@ -452,6 +492,8 @@ mod tests {
             reason: "implement: provider_rate_limited".into(),
             step: Some("implement".into()),
             captured: None,
+            died: None,
+            outlook: None,
         }
     }
 

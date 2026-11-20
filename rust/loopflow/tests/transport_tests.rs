@@ -12,6 +12,7 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::os::fd::{AsRawFd, FromRawFd};
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
 use std::time::{Duration, Instant};
@@ -159,6 +160,27 @@ printf 'ready for %s\r\n' "$*"
 read -r answer < /dev/tty
 "#,
         )
+    }
+    /// `lf -a claude resume` in a view, whose provider launch (the `count`th
+    /// logged) must start a new thread, not resume one. Returns that launch's
+    /// line after ending its held terminal.
+    fn resume_starts_a_new_thread(&self, path: &str, count: usize) -> String {
+        let mut launch = self.command(&["-a", "claude", "resume"]);
+        launch.env("PATH", path);
+        let view = Terminal::spawn(launch);
+        let launched = self.launches(count).pop().unwrap();
+        let provider: libc::pid_t = launched.split(':').next().unwrap().parse().unwrap();
+        let _provider = KillOnDrop(provider);
+        assert!(
+            launched.contains("--session-id ") && !launched.contains("--resume "),
+            "{launched}"
+        );
+        let held = self.terminal_of(&session_of(&self.sql(), &launched));
+        view.stop();
+        // SAFETY: the pid the fixture's provider recorded for itself.
+        unsafe { libc::kill(provider, libc::SIGKILL) };
+        self.held_ends(&held);
+        launched
     }
     /// The first `count` lines `waiting_provider` logged, once they exist.
     fn launches(&self, count: usize) -> Vec<String> {
@@ -630,7 +652,9 @@ fn first_native_launch_keeps_only_valid_desktop_terminal_placement() {
         // A bare launch runs directly, from a Desktop pane too.
         let mut command = fixture.command(&["-i", "-a", "claude", ":", "terminal placement"]);
         command.env("PATH", path).env("LF_SERVER", "1");
-        let terminal = Terminal::spawn_with_placement(command, Some(valid));
+        // The stand-in waits on /dev/tty while we read the active attachment.
+        take_controlling_terminal(&mut command);
+        let mut terminal = Terminal::spawn_with_placement(command, Some(valid));
         let launch = fixture.launches(1).pop().unwrap();
         let session = session_of(&fixture.sql(), &launch);
         // The launching lf's placement, recorded on the attachment it holds.
@@ -642,6 +666,7 @@ fn first_native_launch_keeps_only_valid_desktop_terminal_placement() {
                 |row| row.get(0),
             )
             .unwrap();
+        terminal.assert_viewing("bare Desktop conversation");
         terminal.stop();
         assert_eq!(placement.as_deref(), valid.then_some("desktop-shell"));
     }
@@ -652,7 +677,6 @@ fn first_native_launch_keeps_only_valid_desktop_terminal_placement() {
 /// closing the terminal ends it.
 #[test]
 fn bare_lf_runs_its_provider_in_the_foreground_and_ends_with_its_terminal() {
-    use std::os::unix::process::CommandExt;
     let fixture = Fixture::new();
     let path = fixture.provider(
         r#"#!/bin/sh
@@ -691,16 +715,7 @@ read -r answer < /dev/tty
         .stdin(slave.try_clone().unwrap())
         .stdout(slave.try_clone().unwrap())
         .stderr(slave);
-    // SAFETY: setsid and ioctl are async-signal-safe. The PTY becomes lf's
-    // controlling terminal, as a shell's is.
-    unsafe {
-        command.pre_exec(|| {
-            if libc::setsid() < 0 || libc::ioctl(0, libc::TIOCSCTTY as _, 0) < 0 {
-                return Err(std::io::Error::last_os_error());
-            }
-            Ok(())
-        });
-    }
+    take_controlling_terminal(&mut command);
     let mut lf = command.spawn().unwrap();
     drop(command);
     // The reader holds the only master descriptor; closing the terminal is
@@ -1075,6 +1090,20 @@ fn session_new_json_launches_once_and_keeps_the_session() {
 #[test]
 fn provider_changing_resume_json_launches_once_and_keeps_the_session() {
     prepared_thread_json("resume", false, "codex");
+}
+
+/// Give the child its own session with the PTY on stdin as its terminal.
+fn take_controlling_terminal(command: &mut Command) {
+    // SAFETY: setsid and ioctl are async-signal-safe. Stdin is installed
+    // before the hook runs.
+    unsafe {
+        command.pre_exec(|| {
+            if libc::setsid() < 0 || libc::ioctl(0, libc::TIOCSCTTY as _, 0) < 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
 }
 
 /// An `lf resume` typed at a terminal: its screen is a pseudo-terminal, read
@@ -3338,7 +3367,8 @@ fn a_held_pane_reads_reconnecting_until_the_next_server_answers() {
 /// A managed launch refused for a stopped server started no provider, so the
 /// next launch starts that conversation fresh instead of resuming one that
 /// never ran (real Claude answers `--resume` with "No conversation found").
-/// The refused launch is piped, so it runs unheld and its owner checks the server.
+/// The refused launch is piped, so it runs unheld and checks the server
+/// before its provider starts.
 #[test]
 fn a_launch_refused_for_a_stopped_server_leaves_nothing_to_resume() {
     let fixture = Fixture::new();
@@ -3367,35 +3397,33 @@ fn a_launch_refused_for_a_stopped_server_leaves_nothing_to_resume() {
     );
 
     let _service = ServerProof::start(&fixture, false);
-    let mut launch = fixture.command(&["-a", "claude", "resume"]);
-    launch.env("PATH", &path);
-    let view = Terminal::spawn(launch);
-    let launched = fixture.launches(1).pop().unwrap();
-    let provider: libc::pid_t = launched.split(':').next().unwrap().parse().unwrap();
-    let _provider = KillOnDrop(provider);
-    assert!(
-        launched.contains("--session-id ") && !launched.contains("--resume "),
-        "{launched}"
-    );
-    let held = fixture.terminal_of(&session_of(&fixture.sql(), &launched));
-    view.stop();
-    // SAFETY: the pid the fixture's provider recorded for itself.
-    unsafe { libc::kill(provider, libc::SIGKILL) };
-    fixture.held_ends(&held);
+    fixture.resume_starts_a_new_thread(&path, 1);
 }
 
 /// A launch that could not find the provider's CLI named a Claude conversation
 /// that Claude never wrote. The next launch starts it fresh; `--resume` on that
 /// name answers "No conversation found" and the conversation never opens.
-/// Started by `lf open`, the failure is in a pane that closes, so the log keeps it.
+/// Started by `lf open`, the launcher's error answers the opening and the log keeps it.
 #[test]
 fn a_launch_that_found_no_provider_leaves_nothing_to_resume() {
     let fixture = Fixture::new();
+    // lf appends its tool directories to any PATH, so a Claude Code installed
+    // in one of the system's is found and nothing here is missing.
+    let bare = "/usr/bin:/bin:/usr/sbin:/sbin";
+    let searched = loopflow_execution::os_process::tool_path(bare, fixture.home.path());
+    if let Some(found) = searched
+        .split(':')
+        .map(|dir| Path::new(dir).join("claude"))
+        .find(|claude| claude.exists())
+    {
+        eprintln!("skipped: this Machine has {}", found.display());
+        return;
+    }
     let _service = ServerProof::start(&fixture, false);
     let path = fixture.waiting_provider();
     let missing = fixture
         .command(&["-a", "claude", "resume"])
-        .env("PATH", "/usr/bin:/bin:/usr/sbin:/sbin")
+        .env("PATH", bare)
         .env("LF_OPEN_RECEIPT", fixture.home.path().join("receipt"))
         .env_remove("RUST_LOG")
         .output()
@@ -3405,22 +3433,43 @@ fn a_launch_that_found_no_provider_leaves_nothing_to_resume() {
     assert!(shown.contains("'claude' is not installed"), "{missing:?}");
     let log = std::fs::read_to_string(fixture.home.path().join("logs/lf.log")).unwrap();
     assert!(log.contains("'claude' is not installed"), "{log}");
+    // The launcher answered the opening with its own error, before the pane's status line.
+    let reason = std::fs::read_to_string(fixture.home.path().join("receipt")).unwrap();
+    assert!(reason.starts_with("'claude' is not installed"), "{reason}");
+    assert!(!reason.contains("status"), "{reason}");
 
-    let mut launch = fixture.command(&["-a", "claude", "resume"]);
-    launch.env("PATH", &path);
-    let view = Terminal::spawn(launch);
-    let launched = fixture.launches(1).pop().unwrap();
-    let provider: libc::pid_t = launched.split(':').next().unwrap().parse().unwrap();
-    let _provider = KillOnDrop(provider);
-    assert!(
-        launched.contains("--session-id ") && !launched.contains("--resume "),
-        "{launched}"
+    fixture.resume_starts_a_new_thread(&path, 1);
+}
+
+/// A provider that started and exited before saving anything (a failed
+/// login, a trust prompt refused, a crash, Ctrl+C before typing) leaves a
+/// recorded thread with no transcript. The next launch starts it fresh with
+/// `--session-id`; `--resume` would answer "No conversation found".
+#[test]
+fn a_provider_that_exits_before_saving_starts_fresh_next_time() {
+    let fixture = Fixture::new();
+    let _service = ServerProof::start(&fixture, false);
+    let path = fixture.provider(
+        r#"#!/bin/sh
+if [ "$1" = --version ]; then echo '2.1.302'; exit; fi
+printf '%s:%s:%s\n' "$$" "$LF_CAPTURE_KEY" "$*" >> "$HOME/launches"
+if [ ! -e "$HOME/exited" ]; then : > "$HOME/exited"; exit 1; fi
+stty -echo < /dev/tty
+printf 'ready for %s\r\n' "$*"
+read -r answer < /dev/tty
+"#,
     );
-    let held = fixture.terminal_of(&session_of(&fixture.sql(), &launched));
-    view.stop();
-    // SAFETY: the pid the fixture's provider recorded for itself.
-    unsafe { libc::kill(provider, libc::SIGKILL) };
-    fixture.held_ends(&held);
+    let exited = fixture
+        .command(&["-a", "claude", "resume"])
+        .env("PATH", &path)
+        .output()
+        .unwrap();
+    let first = fixture.launches(1).pop().unwrap();
+    assert!(first.contains("--session-id "), "{first} {exited:?}");
+
+    let launched = fixture.resume_starts_a_new_thread(&path, 2);
+    let sql = fixture.sql();
+    assert_eq!(session_of(&sql, &launched), session_of(&sql, &first));
 }
 
 /// The server reads every held terminal's Program Status, viewed or not:

@@ -253,7 +253,7 @@ fn copy_up(sqlite: &SqliteStore, rental: &Rental, machine: &Machine) -> anyhow::
         .format(&time::format_description::well_known::Rfc3339)?;
     let script = format!(
         "{}; lf history export --since {}",
-        crate::machine::ssh::REMOTE_PATH,
+        crate::machine::ssh::remote_path(),
         crate::machine::ssh::sh_quote(&since)
     );
     let output = Command::new("ssh")

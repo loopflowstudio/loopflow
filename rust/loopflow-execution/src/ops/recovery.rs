@@ -1,7 +1,7 @@
 //! Recovery of this Machine's work, run by the Machine server's recovery pass.
 //! [`settle`] closes AgentProcesses whose lf died, releases AgentProcess
 //! ancestry that was never recorded, carries a Task's run again
-//! when its ship process exited or its `lf task run` died, starts a run that ended waiting on
+//! when its `lf task run` died, starts a run that ended waiting on
 //! a usage limit, and gives back rented Machines whose work drained or whose
 //! soft deadline came.
 //! [`due_task_conversations`] names the Task conversations to start, and
@@ -27,7 +27,7 @@ pub fn settle() -> Option<i64> {
         }
         Err(error) => tracing::warn!("AgentProcess settlement: {error}"),
     }
-    let runs_due = crate::ops::task::ship::restart_runs()
+    let runs_due = crate::ops::task::run_recovery::restart_runs()
         .inspect_err(|error| tracing::warn!("run restart: {error}"))
         .ok()
         .flatten();
@@ -65,8 +65,9 @@ pub fn record_start(
 /// agent's CLI is not on this Machine's `PATH`. `None` when it can start.
 pub fn launch_failure(conversation: &TaskConversation) -> Option<String> {
     let provider = conversation.provider.as_deref()?;
-    (!crate::agent::check_cli_available(provider))
-        .then(|| format!("{provider} is not installed on this Machine's PATH"))
+    let installed = loopflow_harness::HarnessKind::parse(provider)
+        .is_some_and(|kind| crate::harness::launcher(kind).installed());
+    (!installed).then(|| format!("{provider} is not installed on this Machine's PATH"))
 }
 
 /// What decides whether this Machine's server starts a conversation that is

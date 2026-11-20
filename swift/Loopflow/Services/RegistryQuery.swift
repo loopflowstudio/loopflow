@@ -293,10 +293,11 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
     case taskClaim(directory: String, issue: String)
     case taskUnassign(directory: String, issue: String)
     /// Start the Task's run detached; `approve` runs every step headless to
-    /// `end` and approves Auto-Ship, as `-b` does.
+    /// `end`, turning auto on, as `-b` does.
     case taskRun(directory: String, issue: String, graph: String?, from: String?, agent: String?, approve: Bool)
-    case taskShip(directory: String, issue: String)
-    case taskHold(directory: String, issue: String)
+    case taskAutoOn(directory: String, issue: String)
+    /// `lf task auto off <issue>`: turns the Task's auto setting off. `taskAutoOn` turns it on.
+    case taskAutoOff(directory: String, issue: String)
     /// Answer one lost line of the directory's repository, whoever owns it.
     case repoTrackerAnswer(directory: String, action: String, answer: LostAnswer)
     case taskSteer(directory: String, issue: String, message: String)
@@ -399,8 +400,8 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
         case .taskRun(_, let issue, let graph, let from, let agent, let approve):
             return (approve ? ["--batch"] : []) + argument("--agent", agent) + ["task", "run", issue]
                 + [graph].compactMap { $0 } + argument("--from", from) + ["--json"]
-        case .taskShip(_, let issue): return ["--task", issue, "ship", "--json"]
-        case .taskHold(_, let issue): return ["task", "hold", issue, "--json"]
+        case .taskAutoOn(_, let issue): return ["--task", issue, "task", "auto", "on", "--json"]
+        case .taskAutoOff(_, let issue): return ["task", "auto", "off", issue, "--json"]
         case .repoTrackerAnswer(_, let action, let answer):
             return ["repo", "tracker", "answer", action, answer == .keepTheirs ? "--keep-theirs" : "--use-mine", "--json"]
         case .taskSteer(_, let issue, let message): return ["steer", issue, message, "--json"]
@@ -581,12 +582,12 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
         case .taskRun(let directory, let issue, let graph, let from, let agent, let approve):
             TaggedFields("task.run", ["directory": directory, "issue": issue, "graph": graph, "from": from, "agent": agent,
                                       "approve": approve])
-        case .taskShip(let directory, let issue):
-            TaggedFields("task.ship", ["directory": directory, "issue": issue])
+        case .taskAutoOn(let directory, let issue):
+            TaggedFields("task.auto.on", ["directory": directory, "issue": issue])
         case .repoTrackerAnswer(let directory, let action, let answer):
             TaggedFields("repo.tracker.answer", ["directory": directory, "action": action, "answer": answer])
-        case .taskHold(let directory, let issue):
-            TaggedFields("task.hold", ["directory": directory, "issue": issue, "reason": String?.none])
+        case .taskAutoOff(let directory, let issue):
+            TaggedFields("task.auto.off", ["directory": directory, "issue": issue, "reason": String?.none])
         case .taskSteer(let directory, let issue, let message):
             TaggedFields("task.steer", ["directory": directory, "issue": issue, "message": message])
         case .taskReport(let directory, let issue, let message):
@@ -917,7 +918,8 @@ public struct RegistryQuery: Sendable {
                     }
                     continuation.onTermination = { _ in reader.cancel() }
                 }
-                return LineSubscription(lines: lines, send: subscription.send, cancel: subscription.cancel)
+                return LineSubscription(lines: lines, send: subscription.send, cancel: subscription.cancel,
+                                        unreadable: subscription.unreadable)
             }
         }
         return query

@@ -31,8 +31,8 @@ pub struct TaskDetailFacts {
     pub graph_names: HashMap<TaskId, String>,
     /// The step each Task stands at on its graph; absent while a run carries it.
     pub steps: HashMap<TaskId, String>,
-    /// Tasks handed off to Auto-Ship.
-    pub shipped: HashSet<TaskId>,
+    /// Tasks with auto on.
+    pub auto_on: HashSet<TaskId>,
     pub tracker_actions: HashMap<TaskId, TrackerActions>,
     pub repository_paths: HashMap<RepositoryId, String>,
 }
@@ -112,12 +112,7 @@ impl SqliteStore {
                 &json,
                 |row| Ok((TaskId::from_raw(row.get::<_, String>(0)?), row.get::<_, String>(1)?)),
             )?,
-            shipped: task_set(
-                &snapshot,
-                "SELECT id FROM tasks
-                 WHERE id IN (SELECT value FROM json_each(?1)) AND shipped_at IS NOT NULL",
-                &json,
-            )?,
+            auto_on: auto_on_in(&snapshot, &json)?,
             tracker_actions: super::planning_sync::task_tracker_actions_in(&snapshot, &ids)?,
             repository_paths: repository_paths_in(&snapshot)?,
         };
@@ -125,6 +120,16 @@ impl SqliteStore {
         snapshot.commit()?;
         Ok((local, facts))
     }
+}
+
+/// The Tasks among `ids` whose auto setting is on.
+pub(super) fn auto_on_in(conn: &Connection, ids: &str) -> StoreResult<HashSet<TaskId>> {
+    task_set(
+        conn,
+        "SELECT task_id FROM task_auto
+         WHERE task_id IN (SELECT value FROM json_each(?1)) AND state='on'",
+        ids,
+    )
 }
 
 fn keyed<K: std::hash::Hash + Eq, V>(

@@ -179,7 +179,7 @@ writes! {
 
     /// `lf [-b] [-a <agent>] task run <issue> [--from <step>] --json`, started
     /// detached: the Graph process it started, or where the Task now waits.
-    /// `approve` is `-b`: every step headless to `end`, approving Auto-Ship.
+    /// `approve` is `-b`: every step headless to `end`; it writes no auto.
     #[serde(rename = "task.run")]
     TaskRun {
         directory: PathBuf,
@@ -209,26 +209,27 @@ writes! {
         )?,
     },
 
-    /// `lf --task <issue> ship --json`, started detached: approves Auto-Ship.
-    #[serde(rename = "task.ship")]
-    TaskShip { directory: PathBuf, issue: String } => task::TaskShip;
+    /// `lf task auto on <issue> --json`, started detached: turns auto on and returns the run, as
+    /// `task.run` does. Nothing else turns auto on.
+    #[serde(rename = "task.auto.on")]
+    TaskAutoOn { directory: PathBuf, issue: String } => task::TaskRun;
     { issue, .. } => match remote {
         Some(remote) => remote.call()?,
-        None => task::ship(directory, issue, environment)?,
+        None => task::auto_on(directory, issue, environment)?,
     },
 
-    /// `lf task hold <issue> --json`: withdraws the Task's Auto-Ship approval.
-    #[serde(rename = "task.hold")]
-    TaskHold {
+    /// `lf task auto off <issue> --json`: turns the Task's auto setting off.
+    #[serde(rename = "task.auto.off")]
+    TaskAutoOff {
         directory: PathBuf,
         issue: String,
-        /// Why, as `--reason` records it.
+        /// Why, saved as a comment on the Task.
         #[serde(deserialize_with = "Option::deserialize")]
         reason: Option<String>,
-    } => task::Hold;
+    } => task::AutoOff;
     { issue, reason, .. } => match remote {
         Some(remote) => remote.call()?,
-        None => task::hold(issue, reason.as_deref())?,
+        None => task::auto_off(issue, reason.as_deref())?,
     },
 
     /// `lf task sync <issue> [--keep-theirs | --use-mine]`: exchange the
@@ -1086,8 +1087,8 @@ macro_rules! directory_of {
             | Write::TaskClaim { directory, .. }
             | Write::TaskUnassign { directory, .. }
             | Write::TaskRun { directory, .. }
-            | Write::TaskShip { directory, .. }
-            | Write::TaskHold { directory, .. }
+            | Write::TaskAutoOn { directory, .. }
+            | Write::TaskAutoOff { directory, .. }
             | Write::TaskSync { directory, .. }
             | Write::TrackerAnswer { directory, .. }
             | Write::TaskSteer { directory, .. }
@@ -1148,13 +1149,13 @@ impl Write {
     /// elsewhere, with the write naming that Work exactly. `None` runs it here.
     fn remote(&self) -> anyhow::Result<Option<Remote>> {
         use loopflow_execution::machine::task::{remote_ownership_writer, remote_task};
-        // A run or ship starts agents there, which carry what `forward` names.
+        // A run starts agents there, which carry what `forward` names.
         let (route, launching) = match self {
             Self::SessionResume { .. } => return self.remote_session(),
-            Self::TaskRun { issue, .. } | Self::TaskShip { issue, .. } => {
+            Self::TaskRun { issue, .. } | Self::TaskAutoOn { issue, .. } => {
                 (remote_task(issue)?, true)
             }
-            Self::TaskHold { issue, .. } => (remote_task(issue)?, false),
+            Self::TaskAutoOff { issue, .. } => (remote_task(issue)?, false),
             Self::TaskClaim { issue, .. } | Self::TaskUnassign { issue, .. } => {
                 (remote_ownership_writer(issue)?, false)
             }
@@ -1163,10 +1164,10 @@ impl Write {
         let Some(route) = route else {
             return Ok(None);
         };
-        // A shipped Task's Linear mapping resolves on the destination, whose
-        // own Task ID may differ.
+        // The Task's Linear mapping resolves on the destination, whose own
+        // Task ID may differ.
         let source = match self {
-            Self::TaskShip { .. } => tokio::runtime::Runtime::new()?.block_on(
+            Self::TaskAutoOn { .. } => tokio::runtime::Runtime::new()?.block_on(
                 loopflow_execution::machine::task::resolve_task_source(
                     Some(route.task_id.as_str()),
                     self.directory(),
@@ -1176,8 +1177,8 @@ impl Write {
         };
         let mut write = self.clone();
         if let Self::TaskRun { issue, .. }
-        | Self::TaskShip { issue, .. }
-        | Self::TaskHold { issue, .. }
+        | Self::TaskAutoOn { issue, .. }
+        | Self::TaskAutoOff { issue, .. }
         | Self::TaskClaim { issue, .. }
         | Self::TaskUnassign { issue, .. } = &mut write
         {
@@ -1427,22 +1428,22 @@ mod tests {
     #[test]
     fn typed_answers_keep_the_wire_shape() {
         use super::WriteResult;
-        use loopflow_execution::engine::task::TaskShip;
+        use loopflow_execution::engine::task::TaskRun;
         use serde_json::json;
 
-        let shipping: serde_json::Value = serde_json::from_str(include_str!(
-            "../../../../loopflow-execution/tests/fixtures/dto/server/task_shipping.json"
+        let running: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../loopflow-execution/tests/fixtures/dto/server/task_auto_on_answer.json"
         ))
         .unwrap();
+        // `task.auto.on` answers as `task.run` does.
         for expected in [
-            shipping["result"].clone(),
-            json!({"state": "already_shipping", "issue": "LOO-1", "lf_process_id": shipping["result"]["lf_process_id"]}),
-            json!({"state": "at_end", "issue": "LOO-1"}),
+            running["result"].clone(),
+            json!({"state": "ended", "issue": "LOO-1"}),
         ] {
-            let result: TaskShip = serde_json::from_value(expected.clone()).unwrap();
-            let actual = serde_json::to_value(WriteResult::TaskShip(Box::new(result))).unwrap();
+            let result: TaskRun = serde_json::from_value(expected.clone()).unwrap();
+            let actual = serde_json::to_value(WriteResult::TaskAutoOn(Box::new(result))).unwrap();
             assert_eq!(actual, expected);
-            assert_result_schema("task.ship", &actual);
+            assert_result_schema("task.auto.on", &actual);
         }
         for (kind, answer, expected) in [
             (
@@ -1503,13 +1504,13 @@ mod tests {
             r#"{"kind":"task.move","directory":"/r","issue":"FIX-1","wave":null,"machine":null}"#,
             r#"{"kind":"desktop.dashboard.unpin","directory":"/r","id":"picked","revision":3}"#,
             r#"{"kind":"desktop.dashboard.query","directory":"/r","id":"picked","expression":"-state:done","revision":null}"#,
-            r#"{"kind":"task.hold","directory":"/r","issue":"FIX-1","reason":null}"#,
+            r#"{"kind":"task.auto.off","directory":"/r","issue":"FIX-1","reason":null}"#,
             r#"{"kind":"desktop.portfolio.set","change":{"action":"remove","path":"/r"}}"#,
             r#"{"kind":"session.resume","directory":"/r","id":null,"task":null,"wave":null,"agent":null}"#,
             r#"{"kind":"session.new","directory":"/r","request_id":"new-thread","id":"session_1","agent":"codex"}"#,
             r#"{"kind":"task.save","directory":"/","issue":"FIX-1","path":"a.txt","revision":"r","content":"text"}"#,
             r#"{"kind":"task.run","directory":"/r","issue":"FIX-1","graph":null,"from":"implement","agent":"claude","approve":false}"#,
-            r#"{"kind":"task.ship","directory":"/r","issue":"FIX-1"}"#,
+            r#"{"kind":"task.auto.on","directory":"/r","issue":"FIX-1"}"#,
             r#"{"kind":"task.steer","directory":"/r","issue":"FIX-1","message":"keep the API"}"#,
             r#"{"kind":"task.report","directory":"/r","issue":"FIX-1","message":"landed"}"#,
             r#"{"kind":"task.interrupt","directory":"/r","issue":"FIX-1"}"#,

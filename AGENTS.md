@@ -152,12 +152,12 @@ and optionally a Project.
 
 A Task takes up one Graph on its first `lf task run` (its own, else the Wave's
 default, else repository `graph:`, else `code`) and stands at a step of it.
-Only `lf task run` and `lf ship` move that position. `interactive:` steps are
+Only `lf task run` and `lf task auto on` move that position. `interactive:` steps are
 where a person takes part. Task state (`unstarted · idle · active · moving ·
-shipping · done · abandoned`) is derived, not stored. `TaskSection` is the
+done · abandoned`) is derived, not stored; the auto setting (`lf task auto
+on|off`) says who takes the interactive steps and never changes it. `TaskSection` is the
 one board bucketing every surface reads: Backlog (unstarted or unassigned),
-Working (owned idle, active or moving), Autonomous (owned shipping), Done,
-Abandoned. A stopped Graph is history; nothing resumes it. Started Tasks keep their identity, worktree and PR
+Working (owned idle, active or moving), Done, Abandoned. A stopped Graph is history; nothing resumes it. Started Tasks keep their identity, worktree and PR
 across replanning, and unreviewed backlog stays until someone decides.
 
 The full model, including LfProcess, AgentProcess, LfSession and GraphProcess,
@@ -237,6 +237,10 @@ Round-trip fixtures under `tests/fixtures/dto/` cover the wire shape; a new
 field goes into the fixture and each language's fixture test. UI state types
 that carry DTO values are not DTOs.
 
+A sentence about state that both the CLI and Desktop show is written once, in
+Rust, and carried on the wire; each surface prints it. The same goes for the
+answer behind it (is it coming back, who starts it): one value, one predicate.
+
 # File-Type Guidelines
 
 **`*.py`:** imports at the top, type hints on public functions, one-line
@@ -275,7 +279,7 @@ recorded Tasks and every steer, turn and event they wrote. Every agent shares
 one SQLite write lock. Check new queries with `EXPLAIN QUERY PLAN` against a
 store that size.
 
-**Harness, transport and hook code (`rust/loopflow-execution/src/harness/**`, `transport*`):**
+**Harness, transport and hook code (`rust/loopflow-execution/src/harness/**`, `rust/loopflow-harness/**`, `transport*`):**
 lf is a session manager, context adder and hook interjector on top of a
 harness, never a middleman that can break the conversation. It is never in the
 byte path between a person and their provider except as a pass-through that
@@ -333,7 +337,7 @@ them.
   unification cannot change the CLI runtime. Execution fixtures live under
   `loopflow_execution::test_support`; parser and presentation assertions stay in
   the application. Do not include library source again in application fixtures.
-- Bare `task run` returns once the Graph registers; `lf -b task run` waits but runs interactive steps headless. A test reading state a stopping run writes waits for that run. `lf ship` and `-b` share one path. Changing when a command returns means updating its test callers (`grep -rn '"task", "run"' rust/loopflow/tests/`).
+- Bare `task run` returns once the Graph registers; `lf -b task run` waits but runs interactive steps headless. A test reading state a stopping run writes waits for that run. `lf task auto on` and `-b` share one path. Changing when a command returns means updating its test callers (`grep -rn '"task", "run"' rust/loopflow/tests/`).
 - Pin fixture `LF_BIN` inside the network boundary; the runner clears inherited `LF_*`. Never let an installed provider outrank a stand-in.
 - From an lf-launched shell, run `cargo test` with `LF_*` unset and `< /dev/null`: fixtures follow `LF_HOME`, and `lf task create` reads open stdin. In zsh: `env $(env | grep '^LF_' | cut -d= -f1 | sed 's/^/-u /') cargo test …`. A leftover `LF_CAPTURE_KEY` fails store writes with CannotOpen or "capture does not belong to a recorded Session".
 - Account routing fixtures read personal preferences scoped to this checkout's repository, so on a Machine with its own routes they fail with "has no resident login". Run the built test binary from an empty directory with `HOME` pointed at another, keeping `CARGO_HOME` for fixtures that build `lf`.

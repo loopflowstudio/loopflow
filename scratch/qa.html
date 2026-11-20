@@ -82,7 +82,7 @@ Saved locally; planning synchronization pending. See `lf repo tracker`.
 Mini design Task · 103675
 (exit 0, 0.6s)
 [L] $ lf repo tracker
-Plan: Git origin, unreachable since Nov 18 21:39, 3 unsent.
+Plan: Git origin, failing since Nov 18 21:39, 3 unsent.
   project design
   wave design
   bf2ca9
@@ -325,7 +325,7 @@ Mini ops Task · 458745
 Error: fatal: &#x27;/nonexistent.git&#x27; does not appear to be a git repository
 (exit 1, 1.4s)
 [L] $ lf repo tracker
-Plan: Git origin, unreachable since Nov 18 21:49, 4 unsent.
+Plan: Git origin, failing since Nov 18 21:49, 4 unsent.
   733809
   project ops
   wave ops
@@ -338,7 +338,7 @@ Hub mini, 3 unsent, 3 not taken.
   wave ops from mini has the name of a Wave here; `lf wave rename ops &lt;new name&gt;` on either Machine lets both arrive
 (exit 0, 0.3s)
 [M] $ lf repo tracker
-Plan: Git origin, unreachable since Nov 18 21:49, 4 unsent.
+Plan: Git origin, failing since Nov 18 21:49, 4 unsent.
   f24c13
   project ops
   wave ops
@@ -350,7 +350,7 @@ Saved locally; planning synchronization pending. See `lf repo tracker`.
 A save while ops is split, hub up · 3bdc36
 (exit 0, 1.1s)
 [L] $ lf repo tracker
-Plan: Git origin, unreachable since Nov 18 21:49, 5 unsent.
+Plan: Git origin, failing since Nov 18 21:49, 5 unsent.
   733809
   project ops
   wave ops
@@ -369,7 +369,7 @@ Saved locally; planning synchronization pending. See `lf repo tracker`.
 Renamed Wave ops → ops-laptop
 (exit 0, 2.3s)
 [L] $ lf repo tracker
-Plan: Git origin, unreachable since Nov 18 21:49, 8 unsent.
+Plan: Git origin, failing since Nov 18 21:49, 8 unsent.
   733809
   project ops
   2fa23e
@@ -433,7 +433,7 @@ Hub mini.
 (exit 0, 0.4s)
 [M] $ lf repo tracker
 Plan: Git origin.
-(exit 0, 0.3s)</pre><p><b>Works.</b> Naming the hub lists the whole plan as unsent and the next save sends it (1.6 s, on the mini when the command returns). Split: <code>Hub mini, 3 unsent, 3 not taken.</code> with the records and the reason, beside Git's own <code>unreachable since</code>. The rename clears the hub line at once and the mini holds both Waves, with Git still away.</p></section><section><h3>6. The server's minute, nothing typed on the laptop</h3><p>The laptop's <code>lf server run</code> in the background, no hub.</p><pre>## the laptop&#x27;s server is running; nothing is typed on the laptop
+(exit 0, 0.3s)</pre><p><b>Works.</b> Naming the hub lists the whole plan as unsent and the next save sends it (1.6 s, on the mini when the command returns). Split: <code>Hub mini, 3 unsent, 3 not taken.</code> with the records and the reason, beside Git's own <code>failing since</code>. The rename clears the hub line at once and the mini holds both Waves, with Git still away.</p></section><section><h3>6. The server's minute, nothing typed on the laptop</h3><p>The laptop's <code>lf server run</code> in the background, no hub.</p><pre>## the laptop&#x27;s server is running; nothing is typed on the laptop
 [M] $ lf task create &#x27;Made on the mini, laptop only has its server&#x27;
 Made on the mini, laptop only has its server · ab713c
 (exit 0, 0.7s)
@@ -481,7 +481,7 @@ Saved locally; planning synchronization pending. See `lf repo tracker`.
 Into a new Wave, remote hanging · 6504de
 (exit 0, 16.2s)
 [L] $ lf repo tracker
-Plan: Git origin, unreachable since Nov 18 21:53, 5 unsent.
+Plan: Git origin, failing since Nov 18 21:53, 5 unsent.
   project slowwave
   wave slowwave
   project slowwave2

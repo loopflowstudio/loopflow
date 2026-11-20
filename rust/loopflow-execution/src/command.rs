@@ -134,7 +134,10 @@ mod tests {
         for (saved, label) in [
             (None, "lf"),
             (Some("not JSON"), "lf"),
-            (Some(r#"["lf","--task","private-selector","ship"]"#), "lf"),
+            (
+                Some(r#"["lf","--task","private-selector","task","auto","on"]"#),
+                "lf",
+            ),
             (
                 Some(r#"["lf","task","run","private-selector"]"#),
                 "lf task run",

@@ -795,7 +795,7 @@ fn checkout_script(
         .collect();
     let script = format!(
         "{} && {identity}mkdir -p ~/src && cd ~/src && {{ [ -d {dir} ] || {clone} {dir}; }} && cd {dir} && lf config repo --bind {repository}",
-        loopflow_execution::machine::ssh::REMOTE_PATH,
+        loopflow_execution::machine::ssh::remote_path(),
         dir = q(directory),
     );
     Ok((origin, script))

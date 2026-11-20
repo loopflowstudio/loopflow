@@ -48,7 +48,7 @@ or on its server's minute (53 s measured). With a hub, the save is on the hub
 when the command returns. To time it, poll `git -C <bare> for-each-ref refs/loopflow/plan`.
 
 To make the remote fail, `git remote set-url origin /nonexistent.git`, save
-and `lf task sync <id>`: `lf repo tracker` reads `unreachable since …` with
+and `lf task sync <id>`: `lf repo tracker` reads `failing since …` with
 Git's reason, and `--json` fills `plan.git.error` and `failing_since`.
 Restore the URL afterwards. A missing path fails at once; to see whether a
 command keeps to its five seconds, make the remote hang instead: an

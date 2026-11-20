@@ -261,6 +261,16 @@ echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"'"$thread"'"}}}'
 read -r turn_start
 echo '{"jsonrpc":"2.0","id":3,"result":{"turn":{"id":"'"$turn"'"}}}'
 echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"'"$thread"'","turn":{"id":"'"$turn"'","status":"inProgress"}}}'
+# A fixture that left `tool_turn.py` gets the hooks lf declared, run around a tool.
+if [ -f "$LF_HOME/tool_turn.py" ]; then
+    hooks=$(printf '%s' "$thread_start" | python3 -c 'import json, sys; print(json.dumps(json.load(sys.stdin)["params"]["config"]["hooks"]))')
+    python3 "$LF_HOME/tool_turn.py" "$thread" "$hooks" || exit 1
+fi
+# A fixture that left `hold-turn` holds the turn open until it is removed.
+if [ -f "$LF_HOME/hold-turn" ]; then
+    printf '%s' "$thread" > "$LF_HOME/holding"
+    while [ -f "$LF_HOME/hold-turn" ]; do sleep 0.05; done
+fi
 printf '%s\n' '{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"threadId":"'"$thread"'","turnId":"'"$turn"'","itemId":"message-test","delta":__OUTPUT__}}'
 printf '%s\n' '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"'"$thread"'","turnId":"'"$turn"'","item":{"type":"agentMessage","id":"message-test","text":__OUTPUT__,"phase":"final_answer"}}}'
 python3 '__ROLLOUT__' "$thread" "$turn" '__OUTPUT__' || exit 1
@@ -519,25 +529,40 @@ pub fn select_wave_graph(
     wave: &WaveId,
     name: &str,
 ) {
+    set_wave_setting(repo, store, wave, "graph", name);
+}
+
+/// Set `key` in a Wave's committed `config.yaml` in `repo`.
+#[allow(dead_code)] // Shared helper compiled into integration tests without Wave settings.
+pub fn set_wave_setting(
+    repo: &Path,
+    store: &loopflow::store::sqlite::SqliteStore,
+    wave: &WaveId,
+    key: &str,
+    value: &str,
+) {
     let wave = store.get_wave(wave).unwrap().unwrap();
     let path = repo.join(".lf/wave").join(wave.slug()).join("config.yaml");
     let mut config: serde_yaml_ng::Mapping = fs::read_to_string(&path)
         .ok()
         .and_then(|content| serde_yaml_ng::from_str(&content).ok())
         .unwrap_or_default();
-    config.insert("graph".into(), name.into());
+    config.insert(key.into(), value.into());
     fs::create_dir_all(path.parent().unwrap()).unwrap();
     fs::write(&path, serde_yaml_ng::to_string(&config).unwrap()).unwrap();
     for args in [
         vec!["add", "--", path.to_str().unwrap()],
-        vec!["commit", "--quiet", "-m", "Select the Wave's graph"],
+        vec!["commit", "--quiet", "-m", "Set the Wave's configuration"],
     ] {
         let status = std::process::Command::new("git")
             .current_dir(repo)
             .args(args)
             .status()
             .unwrap();
-        assert!(status.success(), "git could not commit the Wave's graph");
+        assert!(
+            status.success(),
+            "git could not commit the Wave's configuration"
+        );
     }
 }
 

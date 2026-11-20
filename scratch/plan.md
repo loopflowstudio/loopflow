@@ -59,10 +59,10 @@ your claimed tasks is NOT the proejct order, ut your order of hte backlog IS".
 - One Machine: nothing changes. `lf repo tracker` reads `Plan: this Machine.`
 - Two Machines sharing a remote: a Task made on the laptop is on the remote
   in seconds and on the mini within a minute, with no setting. Offline,
-  `lf repo tracker` on the laptop reads `Plan: Git origin, unreachable since
+  `lf repo tracker` on the laptop reads `Plan: Git origin, failing since
   …, 1 unsent.` and later `Plan: Git origin.`
 - With `lf machine hub mini`: the same change arrives in seconds, and a second
-  line reads `Hub mini.` or `Hub mini, unreachable since …, 2 unsent.` Stop the
+  line reads `Hub mini.` or `Hub mini, failing since …, 2 unsent.` Stop the
   mini's server and Git still carries it.
 - A teammate who clones the repository sees the plan and their Tasks appear
   on yours. No account, no hub.
@@ -262,7 +262,7 @@ review:* 60 s, one `git fetch` per repository per minute, no setting.
 ## Absent and error states
 
 - No remote, no hub: `Plan: this Machine.` Nothing runs.
-- Fetch or push fails: `Plan: Git origin, unreachable since …, N unsent.` with
+- Fetch or push fails: `Plan: Git origin, failing since …, N unsent.` with
   Git's reason; the hub line is independent. Saves never wait on either.
 - Push rejected because the remote's own-Machine ref moved (a second store
   using this Machine's id): shown as the error; never forced.
@@ -500,13 +500,13 @@ etude checkout and `lf` version are unknown.
      last pushed or fetched with no fetch.
    - A refused push (the remote's copy of the ref is ahead of `plan-seen/<me>`:
      the local ref was deleted, or an earlier push landed after it was
-     stopped) reads `unreachable since` with Git's reason until the next
+     stopped) reads `failing since` with Git's reason until the next
      `sync`. With a server that is within the minute; with none it is
      `lf task sync`.
    - By hand, 2026-11-18, one home, a bare remote in `/tmp`, no server:
      `lf task create` put the ref on the remote and `lf repo tracker` read
      `Plan: Git origin.`; with the remote moved away the create returned in
-     2.2 s and the line read `unreachable since Nov 18 17:23, 1 unsent` with
+     2.2 s and the line read `failing since Nov 18 17:23, 1 unsent` with
      the identifier and Git's reason; with it back the next create sent both.
    - QA's "a served read of a clone the Machine has saved nothing in shows an
      empty plan" is true once: `plan.list` for a fresh clone over
@@ -541,7 +541,7 @@ etude checkout and `lf` version are unknown.
    What it showed, 2026-11-18: `ops::task::tests::` (33) and the acceptance
    test passed (34 tests). By hand in `/tmp/lfq3`, no server, hub stand-in
    hanging: `lf task create` returned in 5.4 s, `lf repo tracker` read
-   `Hub mini, unreachable since …, 1 unsent.` with "mini did not answer
+   `Hub mini, failing since …, 1 unsent.` with "mini did not answer
    within 5s"; with the hub back, `lf task sync` sent it and the line read
    `Hub mini.`
 
@@ -575,7 +575,7 @@ etude checkout and `lf` version are unknown.
       prints its usual "planning synchronization pending". It is not a
       carrier failure: `error` / `failing_since` stay for the remote and the
       hub themselves, and the line reads `Plan: Git origin, 3 not taken.`,
-      never `unreachable since`. Surfaces: `CarrierStanding.not_taken` in
+      never `failing since`. Surfaces: `CarrierStanding.not_taken` in
       `lf repo tracker` text and `--json`, `tests/fixtures/dto/tracker_sync.json`
       and `subscribe_frames.json` with their Rust and Swift fixture tests,
       `RepositoryPlan.swift` line, `server_schema.json` if the standing is in

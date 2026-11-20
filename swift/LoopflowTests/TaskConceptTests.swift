@@ -125,7 +125,7 @@ struct TaskConceptTests {
             let siblings = try #require(projection.breadcrumb(selection: nil, sessionId: "checkout")?.siblings)
             #expect(Set(siblings.map(\.id)) == ["bound", "checkout", "unknown"])
             let board = model.standup(phase.tasks, doneDays: 0)
-            for section in [WaveBoardSection.backlog, .working, .autonomous] {
+            for section in [WaveBoardSection.backlog, .working] {
                 #expect(board.rows(section).map(\.id) == phase.tasks.filter { $0.section.rawValue == section.rawValue }.map(\.id))
             }
             let row = (board.working + board.backlog).first { $0.id == active.id }
@@ -180,18 +180,6 @@ struct TaskConceptTests {
         #expect(!task.isCompleted)
     }
 
-    @Test(arguments: ["restarting", "unassigned"])
-    func handoffsRemainStoppableBetweenRuns(state: String) throws {
-        var row = try activeTaskWire()
-        row["lifecycle"] = "idle"
-        row["shipping"] = ["shipped_at": 1, "state": state, "reason": "Handoff remains active"]
-        let task = try JSONDecoder().decode(RoadmapTask.self, from: JSONSerialization.data(withJSONObject: row))
-        let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Passive rendering") }, repoPath: "/repo")
-        let control = TaskShipControl(model: model, task: task)
-        _ = try control.inspect().find(viewWithAccessibilityIdentifier: "task-ship-stop")
-        #expect(throws: (any Error).self) { try control.inspect().find(viewWithAccessibilityIdentifier: "task-ship") }
-    }
-
     @Test func missingKeysFailAndSavedActivityCannotReturn() throws {
         var row = try activeTaskWire()
         for key in ["lifecycle", "selection_states"] {
@@ -207,7 +195,6 @@ struct TaskConceptTests {
         let restored = try JSONDecoder().decode(RoadmapTask.self, from: Data(quiet.utf8))
         #expect(restored.selectionStates == [.active, .working])
         #expect(restored.runControl.unavailable != nil)
-        #expect(restored.shipControl.unavailable != nil)
     }
 }
 #endif

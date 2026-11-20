@@ -34,11 +34,11 @@ behavior or recoverable data for a deletion count; a clearer interaction is
 worth it even when the code grows.
 
 A finding earns its place by making the design smaller, more direct or more
-true to the experience. What this work should do differently goes in the
-plan, when the review is updating one. What is larger than this work goes on
-the page, stated plainly with
-what it would take. Deciding what to do about it is not this review's job.
-More behavior is scope, not review.
+true to the experience. A model that is wrong in the area this work touches
+is this work, however large the fix: take another big pass to get it right.
+What this work should do differently goes in the plan, when the review is
+updating one. Only a separate outcome goes on the page as outside this work,
+stated plainly with what it would take. More behavior is scope, not review.
 
 Show it. Write `scratch/concept-review.html`, built around one question: do
 the product's concepts and the code's concepts line up?
@@ -90,6 +90,8 @@ between old and new sections.
 After the change is built, review the area with the whole change in it,
 against its base and not only the last pass, as someone seeing it for the
 first time.
+A model that is still wrong then means another full pass through the plan
+and the build, not a follow-up.
 
 When the review turns on a product choice, make the bold one and write it into
 the plan and the page as a choice made for review: what you chose, what you

@@ -4,9 +4,10 @@ use std::path::Path;
 
 use crate::agent::{AgentConfig, ProcessConfig};
 use crate::harness::LaunchKind;
-use crate::harness::{HarnessKind, Launch, Mode, Recording, Start};
+use crate::harness::{Launch, Mode, Recording, Start};
 use crate::process::LfProcessRuntime;
 use crate::session_record::{SessionCaptureSpec, SessionGraphMembership, SessionRecorder};
+use loopflow_harness::HarnessKind;
 
 fn executable(path: &Path, source: &str) {
     std::fs::write(path, source).unwrap();
@@ -62,7 +63,7 @@ for line in sys.stdin:
         &bin.join("opencode"),
         &format!(
             "#!/usr/bin/python3\n{record}\n{}",
-            include_str!("../../tests/support/opencode_server.py").replace("__WAIT__", "False").replace("if \"serve\" not in sys.argv:\n    _record_launch()", "if \"serve\" not in sys.argv:\n    print('native diagnostic', file=sys.stderr)\n    _record_launch()")
+            include_str!("../../tests/support/opencode_cli.py").replace("__WAIT__", "False").replace("if \"run\" not in sys.argv:\n    _record_launch()", "if \"run\" not in sys.argv:\n    print('native diagnostic', file=sys.stderr)\n    _record_launch()")
         ),
     );
     // Bare Pi's extension uses the launch snapshot; only managed Pi reports
@@ -156,11 +157,6 @@ fn every_harness_runs_all_four_launch_kinds() {
                     system_prompt: "fixed instructions".into(),
                     chrome: Some(true),
                     skip_permissions: true,
-                    write_scope: if harness == HarnessKind::Pi {
-                        crate::agent::AgentWriteScope::Configured
-                    } else {
-                        crate::agent::AgentWriteScope::Worktree
-                    },
                     task_prompt: "say hi".into(),
                     conversation_context: Some(crate::context_block::ContextDelivery {
                         identity: None,
@@ -178,7 +174,7 @@ fn every_harness_runs_all_four_launch_kinds() {
                 config.env.insert("LF_BIN".into(), binary.into());
                 let launch = Launch {
                     config: &config,
-                    harness: harness.harness(),
+                    harness: crate::harness::launcher(harness),
                     kind,
                     recording: &recording,
                     start: Start::New,
@@ -237,9 +233,8 @@ fn every_harness_runs_all_four_launch_kinds() {
                     "{row}: Chrome flag ownership"
                 );
                 anyhow::ensure!(
-                    !flag("--dangerously-skip-permissions")
-                        && !flag("--dangerously-bypass-approvals-and-sandbox"),
-                    "{row}: yolo escaped worktree policy"
+                    flag("--dangerously-skip-permissions") == (harness == HarnessKind::Claude),
+                    "{row}: Claude yolo setting"
                 );
                 if harness == HarnessKind::OpenCode {
                     let settings = commands
@@ -248,9 +243,22 @@ fn every_harness_runs_all_four_launch_kinds() {
                         .ok_or_else(|| anyhow::anyhow!("{row}: no server settings"))?;
                     let settings: serde_json::Value = serde_json::from_str(settings)?;
                     anyhow::ensure!(
-                        settings["permissions"][1]["action"] == "external_directory"
-                            && settings["permissions"][1]["effect"] == "deny",
-                        "{row}: worktree permissions lost"
+                        settings["permissions"] == serde_json::json!([{"action":"*", "resource":"*", "effect":"allow"}]),
+                        "{row}: OpenCode yolo setting"
+                    );
+                    // A conversation is OpenCode itself; a headless turn is one run.
+                    anyhow::ensure!(
+                        commands.len() == 1 && flag("--standalone") && flag("--session"),
+                        "{row}: one private OpenCode on the named conversation"
+                    );
+                    anyhow::ensure!(
+                        !flag("serve") && !flag("--server"),
+                        "{row}: OpenCode started a server"
+                    );
+                    anyhow::ensure!(
+                        flag("run") == (mode == Mode::Headless)
+                            && flag("--auto") == (mode == Mode::Headless),
+                        "{row}: OpenCode run ownership"
                     );
                 }
                 for command in &commands {
@@ -331,7 +339,7 @@ fn held_codex_with_a_saved_empty_thread_sends_its_first_prompt() {
             };
             // Native launch recovers the stored thread even when the entry has no explicit resume token.
             let launch = Launch {
-                harness: HarnessKind::Codex.harness(),
+                harness: crate::harness::launcher(HarnessKind::Codex),
                 config: &config,
                 kind: LaunchKind::WorkSession,
                 recording: &recording,
@@ -374,13 +382,13 @@ fn native_limits_and_schemas_require_a_headless_run() {
             };
             let launch = Launch {
                 config: &config,
-                harness: harness.harness(),
+                harness: crate::harness::launcher(harness),
                 kind: LaunchKind::Batch,
                 recording: &recording,
                 start: Start::New,
                 context_file: None,
             };
-            let error = harness.harness().open(&launch).unwrap_err();
+            let error = crate::harness::launcher(harness).open(&launch).unwrap_err();
             assert!(
                 error.to_string().contains("require a headless Run"),
                 "{harness:?}: {error}"

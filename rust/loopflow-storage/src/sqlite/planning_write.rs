@@ -50,7 +50,6 @@ pub(crate) fn table(value: &WorkValue) -> &'static str {
         | WorkValue::TaskDescription(_)
         | WorkValue::TaskRank(_)
         | WorkValue::TaskAssignee(_)
-        | WorkValue::TaskShippedAt(_)
         | WorkValue::TaskDueDate(_)
         | WorkValue::TaskDeletedAt(_)
         | WorkValue::TaskUrl(_)
@@ -84,7 +83,6 @@ fn column(value: &WorkValue) -> &'static str {
         WorkValue::TaskDescription(_) => "issue_description",
         WorkValue::TaskRank(_) => "planning_rank",
         WorkValue::TaskAssignee(_) => "planning_assignee",
-        WorkValue::TaskShippedAt(_) => "shipped_at",
         WorkValue::TaskDueDate(_) => "planning_due_date",
         WorkValue::TaskDeletedAt(_) => "planning_deleted_at",
         WorkValue::TaskUrl(_) => "planning_url",
@@ -134,7 +132,7 @@ pub(crate) fn read(conn: &Connection, table: &str, id: &str) -> StoreResult<Vec<
                         WorkValue::MetricTargets(serde_json::from_str(&row.get::<_, String>(11)?)?),
                     ])
         }),
-        "tasks" => read_record(conn, "SELECT project_id,external_issue_id,issue_identifier,issue_title,issue_description,planning_rank,planning_assignee,planning_due_date,planning_deleted_at,planning_url,planning_branch_name,planning_team_id,planning_state,planning_completed,planning_completed_at,shipped_at FROM tasks WHERE id=?1", id, |row| {
+        "tasks" => read_record(conn, "SELECT project_id,external_issue_id,issue_identifier,issue_title,issue_description,planning_rank,planning_assignee,planning_due_date,planning_deleted_at,planning_url,planning_branch_name,planning_team_id,planning_state,planning_completed,planning_completed_at FROM tasks WHERE id=?1", id, |row| {
                     Ok(vec![
                         WorkValue::TaskProject(row.get(0)?),
                         WorkValue::TaskLinearId(row.get(1)?),
@@ -153,7 +151,6 @@ pub(crate) fn read(conn: &Connection, table: &str, id: &str) -> StoreResult<Vec<
                             planning_completed: row.get(13)?,
                             planning_completed_at: row.get(14)?,
                         }),
-                        WorkValue::TaskShippedAt(row.get(15)?),
                     ])
         }),
         "task_comments" => read_record(conn, "SELECT task_id,body,author,created_at FROM task_comments WHERE id=?1", id, |row| {

@@ -48,9 +48,18 @@ pub fn register_interrupt_cleanup(f: impl Fn() + Send + 'static) {
         .push(Box::new(f));
 }
 
+static INTERRUPTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Whether a signal is ending this process. A provider that exits from here on
+/// was stopped with it: its turn was interrupted, it did not fail.
+pub fn interrupted() -> bool {
+    INTERRUPTED.load(std::sync::atomic::Ordering::SeqCst)
+}
+
 /// Finish interruption while excluding the command's ordinary return path.
 /// Killing a child can wake that path before the remaining hooks finish.
 pub fn exit_on_interrupt() -> ! {
+    INTERRUPTED.store(true, std::sync::atomic::Ordering::SeqCst);
     // Before taking the hooks lock: the command's own return waits on it.
     crate::os_process::foreground::end_leader();
     let hooks = INTERRUPT_HOOKS.get().and_then(|hooks| hooks.lock().ok());
@@ -85,48 +94,10 @@ pub struct AgentProcessResult {
     pub failure: Option<AgentFailure>,
 }
 
-/// Filesystem write boundary for a provider launch.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum AgentWriteScope {
-    /// Respect the provider's configured permissions and Loopflow's ordinary floor.
-    #[default]
-    Configured,
-    /// Permit writes only inside the assigned working directory.
-    Worktree,
-}
-
-/// Additional writable roots required by a confined agent command.
-#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct AgentExecutionBoundary {
-    pub writable_roots: Vec<PathBuf>,
-}
-
-pub fn checkout_execution_boundary(
-    repo: &Path,
-    agent: &Agent,
-) -> anyhow::Result<AgentExecutionBoundary> {
-    let harness = agent.harness;
-    if !harness.harness().capabilities().supports_execution_boundary {
-        return Err(anyhow::anyhow!(format!(
-            "Agent execution unavailable: agent {agent:?} uses harness {harness:?}, which does not support a managed execution boundary; select codex, claude, or pi"
-        )));
-    }
-    let common_dir = crate::git::worktrees::git_common_dir(repo).map_err(|error| {
-        anyhow::anyhow!(format!(
-            "Agent execution unavailable: failed to resolve linked Git metadata from {}: {error}",
-            repo.display()
-        ))
-    })?;
-    let control = crate::os_process::execution_context().map_err(|error| {
-        anyhow::anyhow!(format!(
-            "Agent execution unavailable: Loopflow control-plane authority is unavailable: {error}"
-        ))
-    })?;
-    let mut writable_roots = vec![common_dir, control.lf_home];
-    writable_roots.sort();
-    writable_roots.dedup();
-    Ok(AgentExecutionBoundary { writable_roots })
+/// Whether `cwd` is `task`'s own checkout. A headless run there uses the
+/// harness's yolo settings.
+pub fn is_task_checkout(task: &crate::work::task::Task, cwd: &Path) -> anyhow::Result<bool> {
+    Ok(task.worktree()?.canonicalize()? == cwd.canonicalize()?)
 }
 
 /// What a conversation sets in its own shells, lf's markers and its
@@ -171,6 +142,11 @@ pub(crate) const CALLER_SESSION_ENV: &[&str] = &[
     "CODEX_TOOL_CALL_ID",
     "CODEX_VERSION",
     "CODEX_APPLY_PATCH_PRESERVE_LINE_ENDINGS",
+    // OpenCode
+    "OPENCODE",
+    "OPENCODE_SESSION_ID",
+    "OPENCODE_TERMINAL",
+    "OPENCODE_CONFIG_CONTENT",
 ];
 
 /// Start `command` as a new conversation rather than the caller's child. Run
@@ -211,10 +187,6 @@ pub struct AgentConfig {
     pub resume_token: Option<AgentSessionId>,
     /// Working directory.
     pub cwd: Option<std::path::PathBuf>,
-    /// Maximum filesystem write scope granted to the provider.
-    pub write_scope: AgentWriteScope,
-    /// Exact roots and network access needed beyond `cwd`.
-    pub execution_boundary: Option<AgentExecutionBoundary>,
     /// Skip permission prompts
     pub skip_permissions: bool,
     /// Graph-runner-injected structured replies (rendered via harness prompt guidance).
@@ -246,8 +218,6 @@ impl AgentConfig {
             max_turns: None,
             resume_token: None,
             cwd: None,
-            write_scope: AgentWriteScope::Configured,
-            execution_boundary: None,
             skip_permissions: false,
             structured_replies: Vec::new(),
             directive_relay: None,
@@ -269,7 +239,7 @@ impl AgentConfig {
 impl Default for AgentConfig {
     fn default() -> Self {
         Self::new(Agent {
-            harness: crate::harness::HarnessKind::Codex,
+            harness: loopflow_harness::HarnessKind::Codex,
             model: None,
         })
     }
@@ -291,8 +261,6 @@ impl std::fmt::Debug for AgentConfig {
             .field("fallback_agents", &self.fallback_agents)
             .field("max_turns", &self.max_turns)
             .field("resume_token", &self.resume_token)
-            .field("write_scope", &self.write_scope)
-            .field("execution_boundary", &self.execution_boundary)
             .field("cwd", &self.cwd)
             .field("skip_permissions", &self.skip_permissions)
             .field("structured_replies", &self.structured_replies)
@@ -348,7 +316,7 @@ fn _record_limit_wait(provider: &str, reason: &str, delay: Duration) {
 
 /// The step left `agent` for the next agent in its order. The terminal gets
 /// one line; the recorded recovery keeps the provider's whole `reason`.
-fn _record_agent_move(agent: &Agent, failure: AgentFailure, reason: &str, next: &Agent) {
+fn _record_agent_move(agent: &Agent, failure: impl std::fmt::Display, reason: &str, next: &Agent) {
     eprintln!("{agent}: {failure}; continuing on {next}");
     let provider = agent.harness.as_str();
     _record_limit_recovery(
@@ -371,7 +339,7 @@ fn _record_stop(provider: &str, reason: &str, advice: &str) {
 
 /// The provider revoked the login: no model of it can go on until someone
 /// signs in again.
-fn _sign_in_advice(kind: crate::harness::HarnessKind) -> String {
+fn _sign_in_advice(kind: loopflow_harness::HarnessKind) -> String {
     let provider = kind.as_str();
     let sign_in = kind.harness().sign_in_advice();
     format!("The {provider} login was revoked; sign in again on this Machine: {sign_in}")
@@ -389,7 +357,7 @@ fn _limit_stop_advice(provider: &str, launch: &AgentConfig, rungs: &[Agent]) -> 
                 .join(", ")
         );
     }
-    let another = crate::harness::HarnessKind::ALL
+    let another = loopflow_harness::HarnessKind::ALL
         .into_iter()
         .find(|kind| kind.as_str() != provider)
         .expect("more than one harness")
@@ -603,19 +571,13 @@ fn merge_codex_permission_config(
 /// App-server overrides. `None` preserves vendor policy. A headless run must
 /// write to the workspace and has nobody to answer an approval, so it gets at
 /// least `workspace-write` and `never`; an attended Session keeps Codex's own
-/// sandbox and approval configuration unless `yolo` or a managed boundary applies.
+/// sandbox and approval configuration unless `yolo` applies.
 fn codex_permission_policy(
     config: CodexPermissionConfig,
     launch: &AgentConfig,
     headless: bool,
 ) -> CodexPermissionConfig {
-    if launch.write_scope == AgentWriteScope::Worktree && launch.execution_boundary.is_none() {
-        return CodexPermissionConfig {
-            sandbox: Some(CodexSandboxMode::WorkspaceWrite),
-            approval: Some(CodexApprovalPolicy::Never),
-        };
-    }
-    if launch.skip_permissions || launch.execution_boundary.is_some() {
+    if launch.skip_permissions {
         return CodexPermissionConfig {
             sandbox: Some(CodexSandboxMode::DangerFullAccess),
             approval: Some(CodexApprovalPolicy::Never),
@@ -727,28 +689,8 @@ pub(crate) fn claude_options(
         args.push("--add-dir".into());
         args.extend(add_dirs.iter().map(|dir| dir.display().to_string()));
     }
-    if config.execution_boundary.is_some()
-        || (config.write_scope == AgentWriteScope::Configured
-            && claude_skip_permissions(config.cwd.as_deref(), stream, config.skip_permissions))
-    {
+    if claude_skip_permissions(config.cwd.as_deref(), stream, config.skip_permissions) {
         args.push("--dangerously-skip-permissions".into());
-    }
-    if config.write_scope == AgentWriteScope::Worktree && config.execution_boundary.is_none() {
-        args.extend([
-            "--permission-mode".into(),
-            "acceptEdits".into(),
-            "--setting-sources".into(),
-            String::new(),
-            "--settings".into(),
-            serde_json::json!({
-                "sandbox": {
-                    "enabled": true,
-                    "failIfUnavailable": true,
-                    "allowUnsandboxedCommands": false
-                }
-            })
-            .to_string(),
-        ]);
     }
     if stream {
         if let Some(max_turns) = config.max_turns {
@@ -921,9 +863,6 @@ pub fn workspace_add_dirs(cwd: &Path) -> Vec<PathBuf> {
 }
 
 fn provider_writable_roots(launch: &AgentConfig) -> Vec<PathBuf> {
-    if launch.execution_boundary.is_some() || launch.write_scope != AgentWriteScope::Configured {
-        return Vec::new();
-    }
     launch
         .cwd
         .as_deref()
@@ -987,7 +926,7 @@ fn run_admitted_agent(
     kind: crate::harness::LaunchKind,
 ) -> Result<AgentProcessResult, CoreError> {
     let mut launch = launch.clone();
-    let capabilities = launch.agent.harness.harness().capabilities();
+    let capabilities = crate::harness::launcher(launch.agent.harness).capabilities();
     if launch.max_turns.is_some() && !capabilities.turn_limit {
         eprintln!("warning: Loopflow turn limits are supported only by Claude; this provider will run without a turn limit");
     }
@@ -1060,14 +999,7 @@ fn _run_with_retries(
     mut run: impl FnMut(&AgentConfig, bool) -> Result<AgentProcessResult, CoreError>,
     mut wait: impl FnMut(Duration),
 ) -> Result<AgentProcessResult, CoreError> {
-    // The order to move through when a provider refuses: the launch's agent,
-    // then its fallbacks.
-    let mut rungs: Vec<Agent> = Vec::new();
-    for agent in std::iter::once(&launch.agent).chain(&launch.fallback_agents) {
-        if !rungs.contains(agent) {
-            rungs.push(agent.clone());
-        }
-    }
+    let rungs = _agent_order(launch);
     let mut rung = 0;
     let mut attempt = launch.clone();
     let mut launched = false;
@@ -1077,10 +1009,7 @@ fn _run_with_retries(
         let provider = attempt.agent.harness.as_str();
         let mut result = run(&attempt, launched)?;
         launched = true;
-        if !attempt
-            .agent
-            .harness
-            .harness()
+        if !crate::harness::launcher(attempt.agent.harness)
             .capabilities()
             .classifies_failures
         {
@@ -1179,6 +1108,18 @@ fn _sleep_wall_clock(delay: Duration) {
 
 fn _with_original_task(prompt: &str, launch: &AgentConfig) -> String {
     format!("{prompt}\n\nOriginal task:\n\n{}", launch.task_prompt)
+}
+
+/// The order to move through when a provider refuses: the launch's agent,
+/// then its fallbacks.
+fn _agent_order(launch: &AgentConfig) -> Vec<Agent> {
+    let mut order: Vec<Agent> = Vec::new();
+    for agent in std::iter::once(&launch.agent).chain(&launch.fallback_agents) {
+        if !order.contains(agent) {
+            order.push(agent.clone());
+        }
+    }
+    order
 }
 
 /// Put the current attempt on `agent`. The thread moves within its provider;
@@ -1434,7 +1375,7 @@ fn _run_harness_once(
     .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
     let value = crate::harness::Launch {
         config: &config,
-        harness: launch.agent.harness.harness(),
+        harness: crate::harness::launcher(launch.agent.harness),
         kind,
         recording: &recording,
         start: crate::harness::Start::from_thread(launch.resume_token.as_ref()),
@@ -1444,10 +1385,62 @@ fn _run_harness_once(
 }
 
 /// What to tell someone whose agent CLI is missing.
-pub fn missing_agent_message(kind: crate::harness::HarnessKind) -> String {
-    let cli = kind.as_str();
-    let hint = kind.harness().capabilities().install_hint;
-    format!("'{cli}' is not installed. {hint}")
+pub fn missing_agent_message(kind: loopflow_harness::HarnessKind) -> String {
+    let hint = crate::harness::launcher(kind).capabilities().install_hint;
+    format!("{}. {hint}", _not_installed(kind))
+}
+
+fn _not_installed(kind: loopflow_harness::HarnessKind) -> String {
+    format!("'{}' is not installed", kind.as_str())
+}
+
+/// Put a headless launch on the first agent of its order whose CLI is
+/// installed, and take the missing ones out of the order. A Graph step passes
+/// over a missing first choice and records the move where a limit move is
+/// recorded; a chat or batch has no order to move through. With none
+/// installed, the error is the first choice's install hint. Call it before the
+/// launch opens its conversation, so a refused launch leaves no agent behind.
+///
+/// # Errors
+///
+/// [`missing_agent_message`] for the first choice when no agent the launch may
+/// use is installed.
+pub fn start_on_installed_agent(
+    launch: &mut AgentConfig,
+    process: &ProcessConfig,
+) -> Result<(), String> {
+    let is_installed = |kind: loopflow_harness::HarnessKind| check_cli_available(kind.as_str());
+    let first =
+        _pass_over_missing_agents(launch, process, is_installed).map_err(missing_agent_message)?;
+    if first != launch.agent {
+        let reason = _not_installed(first.harness);
+        _record_agent_move(&first, "not installed", &reason, &launch.agent);
+    }
+    Ok(())
+}
+
+/// Returns the agent the launch asked for first; `launch.agent` is where it starts.
+fn _pass_over_missing_agents(
+    launch: &mut AgentConfig,
+    process: &ProcessConfig,
+    is_installed: impl Fn(loopflow_harness::HarnessKind) -> bool,
+) -> Result<Agent, loopflow_harness::HarnessKind> {
+    let first = launch.agent.clone();
+    let order = if process.wait_for_capacity {
+        _agent_order(launch)
+    } else {
+        vec![first.clone()]
+    };
+    let start = order
+        .into_iter()
+        .find(|rung| is_installed(rung.harness))
+        .ok_or(first.harness)?;
+    launch.agent = start;
+    // The order stays as written: a list keeps being a list, minus what is missing.
+    launch
+        .fallback_agents
+        .retain(|agent| is_installed(agent.harness));
+    Ok(first)
 }
 
 /// Check if a CLI is available.
@@ -1458,6 +1451,43 @@ pub fn check_cli_available(cli: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_a_graph_step_passes_over_an_agent_that_is_not_installed() {
+        use loopflow_harness::HarnessKind;
+        let agent = |text: &str| Agent::parse(text).unwrap();
+        let launch = AgentConfig {
+            agent: agent("opencode:opencode/fixture"),
+            fallback_agents: vec![agent("pi:fixture/model"), agent("codex"), agent("claude")],
+            ..Default::default()
+        };
+        let step = ProcessConfig {
+            wait_for_capacity: true,
+            ..Default::default()
+        };
+        let installed =
+            |kind: HarnessKind| matches!(kind, HarnessKind::Codex | HarnessKind::Claude);
+
+        let mut moved = launch.clone();
+        let first = _pass_over_missing_agents(&mut moved, &step, installed).unwrap();
+        assert_eq!(first, launch.agent);
+        assert_eq!(moved.agent, agent("codex"));
+        assert_eq!(_agent_order(&moved), [agent("codex"), agent("claude")]);
+
+        // Nothing installed in the order: the first choice is the one named.
+        let mut pinned = launch.clone();
+        assert_eq!(
+            _pass_over_missing_agents(&mut pinned, &step, |_| false),
+            Err(HarnessKind::OpenCode)
+        );
+
+        // A chat or batch stays on its choice.
+        let mut batch = launch.clone();
+        assert_eq!(
+            _pass_over_missing_agents(&mut batch, &ProcessConfig::default(), installed),
+            Err(HarnessKind::OpenCode)
+        );
+    }
 
     #[test]
     #[cfg(unix)]
@@ -1657,34 +1687,6 @@ trust_level = "trusted"
     }
 
     #[test]
-    fn managed_task_scope_carries_exact_delivery_capabilities() {
-        let (_tmp, main, worktree) = git_worktree_fixture();
-        let git_control = main.join(".git");
-        let control_store = worktree.parent().unwrap().join("control-store");
-        let launch = AgentConfig {
-            agent: crate::config::Agent::parse("codex").unwrap(),
-            cwd: Some(worktree),
-            write_scope: AgentWriteScope::Worktree,
-            execution_boundary: Some(AgentExecutionBoundary {
-                writable_roots: vec![git_control.clone(), control_store.clone()],
-            }),
-            skip_permissions: true,
-            ..default_launch()
-        };
-        let thread = build_codex_thread_start_params(&launch, false);
-        assert_eq!(thread["sandbox"], "danger-full-access");
-        assert_eq!(thread["approvalPolicy"], "never");
-        assert!(thread.get("config").is_none());
-
-        let claude = terminal_args(&AgentConfig {
-            agent: crate::config::Agent::parse("claude").unwrap(),
-            ..launch
-        });
-        assert!(claude.contains(&"--dangerously-skip-permissions".to_string()));
-        assert!(!claude.contains(&"--add-dir".to_string()));
-    }
-
-    #[test]
     fn terminal_commands_keep_native_context_and_main_repo_scope() {
         let (_tmp, main, _) = git_worktree_fixture();
         for provider in ["claude", "codex"] {
@@ -1784,7 +1786,6 @@ trust_level = "trusted"
 
     #[test]
     fn bare_claude_command_does_not_select_a_model() {
-        // OpenCode opens a private server instead of an argv; opencode.rs covers its bare model.
         let launch = AgentConfig {
             agent: crate::config::Agent::parse("claude").unwrap(),
             ..default_launch()
@@ -2145,7 +2146,7 @@ trust_level = "trusted"
                 thread: launch.resume_token.as_ref().unwrap(),
             },
             ..crate::harness::launch_for_test(
-                crate::harness::HarnessKind::Claude,
+                loopflow_harness::HarnessKind::Claude,
                 &launch,
                 &admitted,
             )

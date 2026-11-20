@@ -43,8 +43,9 @@ use snapshot::{
     validate_task_relative_path,
 };
 pub use snapshot::{task_changes, task_diff, task_file, task_snapshot, MAX_FILE_BYTES};
+pub mod auto;
 mod file_save;
-pub mod ship;
+pub mod run_recovery;
 pub use directory::{task_files, TaskDirectory, TaskFileEntry, TaskFileKind};
 pub use file_save::{task_save, TaskFileRecovery, TaskFileSave};
 
@@ -53,7 +54,6 @@ use loopflow_model::comment::TaskComments;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use crate::agent::checkout_execution_boundary;
 use crate::durable::TaskState;
 use crate::git::worktree_name::WorktreeName;
 use crate::git::worktrees::{
@@ -104,6 +104,9 @@ pub struct TaskProcessOptions {
     /// Place a new branch from the refs the last fetch left, without the
     /// network: the caller exchanges planning and the assignee afterwards.
     pub from_last_fetch: bool,
+    /// `lf task auto on`: the run turns auto on, lifting an off, and stands in at
+    /// the interactive step the Task waits at.
+    pub auto_on: bool,
 }
 
 impl TaskProcessOptions {
@@ -203,10 +206,10 @@ pub struct TaskSnapshot {
     pub actions: TaskActionModel,
     /// Who started the Task's latest Graph.
     pub started_by: Option<crate::process::Starter>,
-    /// Who approved Auto-Ship and when, while the Task is approved.
-    pub ship_approval: Option<ShipMark>,
-    /// The stop that keeps a run from approving Auto-Ship, until `lf ship`.
-    pub ship_stop: Option<ShipMark>,
+    /// The Task's auto setting: on, off, and who set it when;
+    /// `null` when nobody has.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub auto: Option<loopflow_storage::sqlite::Auto>,
     /// The Task this one is stacked on.
     #[serde(deserialize_with = "Option::deserialize")]
     pub stack_parent: Option<TaskStackParent>,
@@ -222,15 +225,6 @@ pub struct TaskStackParent {
     /// `None` until the parent opens its PR.
     #[serde(deserialize_with = "Option::deserialize")]
     pub pr_number: Option<u64>,
-}
-
-/// When someone approved or stopped Auto-Ship, and who.
-#[derive(
-    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
-)]
-pub struct ShipMark {
-    pub at: i64,
-    pub by: crate::process::Starter,
 }
 
 #[derive(
@@ -613,9 +607,21 @@ pub(crate) async fn task_work_status(store: &Store, task: &Task) -> OpsResult<Wo
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TaskRunStart {
     /// A run of the Task's Graph from this step; the caller starts it as
-    /// `lf --task ISSUE graph run`. With `ships`, Auto-Ship is approved: no
-    /// interactive step is left ahead, and the run may merge the PR.
-    Run { step: String, ships: bool },
+    /// `lf --task ISSUE graph run`. With `merges`, the run may merge the PR:
+    /// Auto is on, or no interactive step is left ahead, and nobody turned auto off.
+    /// With `stands_in`, a person asked for auto and the run sets out at that
+    /// interactive step.
+    Run {
+        step: String,
+        merges: bool,
+        stands_in: Option<String>,
+    },
+    /// A person asked for auto while the Task's run was live: auto is on, and
+    /// that run carries on.
+    Live {
+        run: String,
+        graph_process: loopflow_model::id::LfProcessId,
+    },
     /// The Task now waits at this interactive step; nothing runs.
     Waiting(String),
     /// Nothing remained: the Task reached `end`.
@@ -637,6 +643,7 @@ pub fn task_place(
         graph,
         from,
         reason,
+        auto_on,
         ..
     } = options.clone();
     let source = remote::source_for_task(issue)?;
@@ -657,6 +664,7 @@ pub fn task_place(
             graph.as_deref(),
             from.as_deref(),
             mode,
+            auto_on,
             merges,
         )
         .await?;
@@ -675,7 +683,7 @@ pub enum TaskRunMode {
     Stop,
     /// Run each with a person in this terminal (`-i`).
     InPlace,
-    /// Run each headless, standing in for the person (`-b`, `lf ship`).
+    /// Run each headless, standing in for the person (`-b`).
     Headless,
 }
 
@@ -726,12 +734,18 @@ impl TaskRunSelection {
 /// The graph a Task takes up when it names none: your `lf set wave.graph`, then its
 /// Wave's and the repository's `graph:`, then the builtin `code`.
 pub fn task_graph_default(store: &Store, task: &Task) -> OpsResult<(String, ConfigSource)> {
+    let (repo, wave) = task_scope(store, task)?;
+    scope_graph_default(&repo, wave.as_deref())
+}
+
+/// The repository and Wave whose configuration the Task reads.
+fn task_scope(store: &Store, task: &Task) -> OpsResult<(PathBuf, Option<String>)> {
     let repo = repository_for_task(store, task)?;
     let wave = match &task.wave_id {
         Some(id) => store.sqlite.get_wave(id).map_err(task_error)?,
         None => None,
     };
-    scope_graph_default(&repo, wave.as_ref().map(|w| w.slug()))
+    Ok((repo, wave.map(|wave| wave.slug().to_owned())))
 }
 
 /// The graph a new Task in this Wave, or the repository when `wave` is `None`,
@@ -784,6 +798,7 @@ pub fn select_task_run(
     checkout: &Path,
     requested: Option<&str>,
     from: Option<&str>,
+    stands_in: bool,
     merges: fn(&[String]) -> bool,
 ) -> OpsResult<TaskRunSelection> {
     use crate::task_graph::{END, START};
@@ -858,7 +873,13 @@ pub fn select_task_run(
                         graph.describe_steps()
                     ))
                 })?;
-                graph.after(&place).map(RunStart::from)
+                // A bare run means the person finished this step; a run asked
+                // for auto stands in at it.
+                if stands_in {
+                    Some(place.into())
+                } else {
+                    graph.after(&place).map(RunStart::from)
+                }
             }
         },
     };
@@ -871,18 +892,74 @@ pub fn select_task_run(
 
 /// Put the Task where `lf task run` sets out: on a run carried by this
 /// process, at the interactive step `--from` names, or at `end` when nothing
-/// remains.
+/// remains. What the run asks of auto is written once the Task has its Graph.
+/// Two runs setting out together leave one: the other reads the Task again.
 async fn start_task_run(
     store: &SharedStore,
     task: &mut Task,
     requested: Option<&str>,
     from: Option<&str>,
     mode: TaskRunMode,
+    auto_on: bool,
     merges: fn(&[String]) -> bool,
 ) -> OpsResult<TaskRunStart> {
-    let through = mode.runs_through();
-    let selection = select_task_run(store, task, task.worktree()?, requested, from, merges)?;
-    let ships = selection.reaches_end(mode);
+    loop {
+        if let Some(start) =
+            try_start_task_run(store, task, requested, from, mode, auto_on, merges).await?
+        {
+            return Ok(start);
+        }
+    }
+}
+
+/// `None` when another run moved the Task while this one was setting out.
+async fn try_start_task_run(
+    store: &SharedStore,
+    task: &mut Task,
+    requested: Option<&str>,
+    from: Option<&str>,
+    mode: TaskRunMode,
+    auto_on: bool,
+    merges: fn(&[String]) -> bool,
+) -> OpsResult<Option<TaskRunStart>> {
+    let standing = crate::store::task_work::task_graph_row(&store.sqlite, &task.id)
+        .map_err(task_error)?
+        .filter(|row| auto_on && requested.is_none_or(|name| name == row.graph.name));
+    match standing.as_ref().map(|row| (row, &row.run)) {
+        // A live run reads auto at each interactive step, so it stands in
+        // from here without being started again. The mark is written before
+        // the wait for its Graph, so a slow registration cannot lose it.
+        Some((row, Some((cursor, carrier))))
+            if crate::store::task_work::carrier_may_run(carrier) =>
+        {
+            auto::turn_on(store, task)?;
+            if let Some(graph_process) = auto::running_graph(store, task, &carrier.id).await? {
+                let at = row.graph.step_name_of(cursor);
+                return Ok(Some(TaskRunStart::Live {
+                    run: format!(
+                        "{} at {}",
+                        row.graph.name,
+                        at.as_deref().unwrap_or(&row.step)
+                    ),
+                    graph_process,
+                }));
+            }
+        }
+        Some((row, None)) if row.step == crate::task_graph::END && from.is_none() => {
+            return Ok(Some(TaskRunStart::Ended));
+        }
+        _ => {}
+    }
+    let selection = select_task_run(
+        store,
+        task,
+        task.worktree()?,
+        requested,
+        from,
+        auto_on,
+        merges,
+    )?;
+    let reaches_end = selection.reaches_end(mode);
     let TaskRunSelection {
         graph,
         take_up,
@@ -892,34 +969,68 @@ async fn start_task_run(
     let (process, carrier) = crate::journal::current_lf_process_id()
         .zip(crate::journal::current_execution_start())
         .ok_or_else(|| task_error("a Task run requires a registered Process"))?;
-    // This lf carries the run, and the Task's shipping when the run hands it
-    // off at `end`; each ends with this lf.
+    // This lf carries the run; it ends with this lf.
     crate::journal::mark_run_owner(loopflow_storage::graph_process::RunOwner::TaskCarrier);
-    crate::journal::mark_run_owner(loopflow_storage::graph_process::RunOwner::ShipCarrier);
     if take_up {
-        crate::store::task_work::take_up_task_graph(&store.sqlite, &task.id, &graph)
-            .map_err(task_error)?;
+        let graph = serde_json::to_string(&graph).map_err(task_error)?;
+        // A Task with no Graph takes its first one up once; naming another
+        // replaces the one it has.
+        if requested.is_some() {
+            store
+                .sqlite
+                .take_up_task_graph(&task.id, &graph)
+                .map_err(task_error)?;
+        } else if !store
+            .sqlite
+            .take_up_first_task_graph(&task.id, &graph)
+            .map_err(task_error)?
+        {
+            return Ok(None);
+        }
+        auto::configured(store, task)?;
     }
+    if auto_on {
+        auto::turn_on(store, task)?;
+    }
+    // Auto on runs through the interactive steps, standing in at each;
+    // off, no run merges.
+    let (on, merges) = match store
+        .sqlite
+        .task_auto(&task.id)
+        .map_err(task_error)?
+        .map(|mark| mark.state)
+    {
+        Some(loopflow_storage::sqlite::AutoState::On) => (true, true),
+        Some(loopflow_storage::sqlite::AutoState::Off) => (false, false),
+        None => (false, reaches_end),
+    };
+    let through = mode.runs_through() || on;
     let row = crate::store::task_work::task_graph_row(&store.sqlite, &task.id)
         .map_err(task_error)?
         .ok_or_else(|| task_error(format!("Task {issue} lost its graph while starting")))?;
+    // The start below replaces the carrier this row names. One that set out
+    // since the selection was read is live, not stopped: read the Task again.
+    if row
+        .run
+        .as_ref()
+        .is_some_and(|(_, carrier)| crate::store::task_work::carrier_may_run(carrier))
+    {
+        return Ok(None);
+    }
     let Some(start) = start else {
-        if store
-            .sqlite
-            .end_task_graph(&task.id, (&process, &carrier))
-            .map_err(task_error)?
-        {
+        if store.sqlite.end_task_graph(&task.id).map_err(task_error)? {
             settle_pending_completion(store, task).await?;
         }
-        return Ok(TaskRunStart::Ended);
+        return Ok(Some(TaskRunStart::Ended));
     };
     // Starting at an interactive step without running past it puts the Task there.
-    if let Some(step) = graph.interactive_at(&start.place).filter(|_| !through) {
+    let interactive = graph.interactive_at(&start.place);
+    if let Some(step) = interactive.filter(|_| !through) {
         store
             .sqlite
             .set_task_graph_step(&task.id, step)
             .map_err(task_error)?;
-        return Ok(TaskRunStart::Waiting(step.to_owned()));
+        return Ok(Some(TaskRunStart::Waiting(step.to_owned())));
     }
     let label = if start.place == crate::task_graph::Place::default() {
         format!("{} from start", graph.name)
@@ -932,16 +1043,16 @@ async fn start_task_run(
         &row,
         &start.cursor,
         (&process, &carrier),
-        ships,
     )
     .map_err(task_error)?
     {
-        return Err(task_error(format!(
-            "Task {issue} moved on graph {} while this run was starting; read `lf task status {issue}` and run again",
-            graph.name
-        )));
+        return Ok(None);
     }
-    Ok(TaskRunStart::Run { step: label, ships })
+    Ok(Some(TaskRunStart::Run {
+        step: label,
+        merges,
+        stands_in: interactive.filter(|_| auto_on).map(str::to_owned),
+    }))
 }
 
 /// The run this process carried ended; settle a completion its arrival at
@@ -1166,6 +1277,8 @@ fn validate_preparation_status(task: &Task, status: WorkStatus) -> OpsResult<()>
     }
 }
 
+const CHECKOUT_LEASE_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
+
 async fn restore_task_checkout(
     store: &SharedStore,
     task: &Task,
@@ -1173,7 +1286,14 @@ async fn restore_task_checkout(
 ) -> OpsResult<()> {
     let repo = crate::git::worktrees::main_repo_root(&repository_for_task(store, task)?)?;
     let worktree = task.worktree()?;
-    let _lease = crate::git::acquire_worktree_lease(&repo, worktree, "Task checkout")?;
+    // Two starts of one Task at the same moment both restore its checkout;
+    // the second waits out the first's short hold instead of failing.
+    let _lease = crate::git::acquire_worktree_lease_wait(
+        &repo,
+        worktree,
+        "Task checkout",
+        CHECKOUT_LEASE_WAIT,
+    )?;
     let recovered = recover_from
         .map(|commit| {
             let output = git_output_bytes(
@@ -2290,21 +2410,13 @@ fn task_configuration_refusal(
     task: &Task,
     repository: &Path,
     wave: Option<&str>,
-    skill: Option<&crate::graph::Skill>,
 ) -> Option<String> {
     let worktree = task.worktree.as_deref()?;
-    // A Graph's steps may choose different agents; no general preference is
-    // required to inspect or start the Graph. Each launch resolves its own choice.
-    let agent = match resolve_task_agent(worktree, repository, wave, skill) {
-        Ok(agent) => agent,
-        Err(OpsError::Load(crate::error::LoadError::AgentSelection)) if skill.is_none() => {
-            return None
-        }
-        Err(error) => return Some(error.to_string()),
-    };
-    checkout_execution_boundary(worktree, &agent)
-        .err()
-        .map(|error| error.to_string())
+    // Each Graph step can select its own agent.
+    match resolve_task_agent(worktree, repository, wave, None) {
+        Ok(_) | Err(OpsError::Load(crate::error::LoadError::AgentSelection)) => None,
+        Err(error) => Some(error.to_string()),
+    }
 }
 
 /// Why the Task cannot start a process: its configuration, else a
@@ -2315,7 +2427,7 @@ pub fn task_process_refusal_after(
     wave: Option<&str>,
     latest: Option<&loopflow_storage::work::task::TaskEvent>,
 ) -> Option<String> {
-    task_configuration_refusal(task, repository, wave, None)
+    task_configuration_refusal(task, repository, wave)
         .or_else(|| task_event_process_refusal(latest).map(str::to_string))
 }
 
@@ -2637,16 +2749,20 @@ pub fn task_reopen(issue: &str, note: Option<&str>) -> OpsResult<Task> {
     })
 }
 
-/// Start the Task's conversation beside work that does not open it here:
-/// `lf task run`, `lf ship` and `lf task checkout`. Best-effort.
-pub fn start_conversation_beside(task: &Task) {
-    let started = block_on_task(async {
+/// Prepare the Task's conversation beside work that does not open it here:
+/// `lf task run`, `lf task auto on` and `lf task checkout`. The Machine server's
+/// recovery pass starts a prepared conversation that never ran. Best-effort.
+pub fn prepare_conversation_beside(task: &Task) {
+    let prepared = block_on_task(async {
         let store = task_store().await?;
-        crate::ops::human_session::primary::start_task_conversation(&store, task).await;
+        let worktree = task.worktree().map_err(task_error)?.clone();
+        crate::ops::human_session::primary::ensure_task(&store, &worktree, task.id.as_str(), None)
+            .await
+            .map_err(task_error)?;
         Ok(())
     });
-    if let Err(error) = started {
-        tracing::warn!(task = %task.identifier, %error, "background Task conversation did not start");
+    if let Err(error) = prepared {
+        tracing::warn!(task = %task.identifier, %error, "Task conversation was not prepared");
     }
 }
 

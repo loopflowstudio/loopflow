@@ -214,6 +214,8 @@ mod tests {
                 reason: "Inspect the existing worker".into(),
                 step: None,
                 captured: None,
+                died: None,
+                outlook: None,
             };
             let mut evidence = evidence(PrPhase::Open, None);
             evidence.execution = Some(&execution);

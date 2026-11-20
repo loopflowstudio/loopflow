@@ -110,7 +110,7 @@ L$ lf task create 'y' --wave new
 <ol class="q">
 <li><code>N unsent</code> counts records another Machine wrote that this Machine's ref has not repeated yet.<ol><li>Leave it.</li><li>A save sends to the hub, then pushes.</li><li>Count only this Machine's own changes on the line.</li></ol></li>
 <li>With a carrier hanging, <code>lf task create --wave &lt;new&gt;</code> takes 16 s, <code>lf wave create</code> 11 s, a claim 10 s, and the pending line prints twice.<ol><li>Leave it: only a hang costs this; offline fails at once.</li><li>One deadline per command, in its own Task.</li></ol></li>
-<li>The line says <code>unreachable since</code> for a push the remote refused.<ol><li>Leave it.</li><li><code>failing since</code>, matching the <code>--json</code> field.</li></ol></li>
+<li>The line says <code>failing since</code> for a push the remote refused.<ol><li>Leave it.</li><li><code>failing since</code>, matching the <code>--json</code> field.</li></ol></li>
 <li>Two Machines made a Wave of one name apart: shown, and a rename fixes it.<ol><li>That is enough.</li><li>Join them at import, in its own Task.</li></ol></li>
 <li>From the earlier passes, as built: <code>lf task run</code> takes over a Task a teammate holds; <code>lf task sync</code> needs a Task id without a tracker; a teammate's Machine reads as its id; a repository has an id per clone.<ol><li>Leave all four.</li><li>Name the ones to file.</li></ol></li>
 </ol>

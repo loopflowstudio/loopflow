@@ -49,10 +49,11 @@ started Tasks outside any Wave with `lf task-operate <issue>`. Sending someone
 to another conversation is not operating. Follow each intervention to its
 result. Never start a competing Graph run.
 
-`lf task run <issue>` continues a Task to its next interactive step. `lf -b
-task run`, `lf ship`, and any run with no interactive step left ahead approve
-Auto-Ship and may merge the PR: only when asked to ship or land, and never to
-re-ship a Task someone stopped. When a Task of yours is heading the wrong way,
+`lf task run <issue>` continues a Task to its next interactive step. `lf task
+auto on` turns auto on, so the run stands in at interactive steps and may
+merge the PR; `lf -b task run` stands in for its own run, and a run with no
+interactive step left ahead may merge it too. Use them only when asked to ship or land, and never turn auto back on
+for a Task someone turned it off for. When a Task of yours is heading the wrong way,
 `lf task interrupt <issue>` stops it; discuss the new direction in its
 conversation.
 

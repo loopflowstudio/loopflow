@@ -28,7 +28,7 @@ fn open(store: &Path) -> Result<Connection> {
 }
 
 /// Conversation `id`'s messages, oldest first.
-pub fn messages(store: &Path, id: &str) -> Result<Vec<Value>> {
+pub(crate) fn messages(store: &Path, id: &str) -> Result<Vec<Value>> {
     let connection = open(store)?;
     let mut statement = connection
         .prepare("SELECT id, type, data FROM session_message WHERE session_id=?1 ORDER BY seq")?;
@@ -54,6 +54,19 @@ pub fn messages(store: &Path, id: &str) -> Result<Vec<Value>> {
     Ok(messages)
 }
 
+/// The newest user message of conversation `id`: the request a run answers.
+pub fn last_request(store: &Path, id: &str) -> Option<String> {
+    open(store)
+        .ok()?
+        .query_row(
+            "SELECT id FROM session_message WHERE session_id=?1 AND type='user'
+             ORDER BY seq DESC LIMIT 1",
+            params![id],
+            |row| row.get(0),
+        )
+        .ok()
+}
+
 /// Unix seconds of conversation `id`'s last write.
 pub(super) fn last_written(store: &Path, id: &str) -> Option<i64> {
     let at: Option<i64> = open(store)
@@ -69,7 +82,7 @@ pub(super) fn last_written(store: &Path, id: &str) -> Option<i64> {
 
 /// The conversations last written in `cwd` since `since`, in Unix seconds,
 /// newest first, with when.
-pub(crate) fn written_in(store: &Path, cwd: &Path, since: i64) -> Vec<(String, i64)> {
+pub fn written_in(store: &Path, cwd: &Path, since: i64) -> Vec<(String, i64)> {
     let read = || -> Result<Vec<(String, i64)>> {
         let connection = open(store)?;
         let mut statement = connection.prepare(

@@ -168,9 +168,7 @@ fn prepare_prompt(
         .skill
         .as_ref()
         .filter(|skill| {
-            agent
-                .harness
-                .harness()
+            crate::harness::launcher(agent.harness)
                 .capabilities()
                 .native_skills
                 .is_some()
@@ -209,8 +207,6 @@ fn prepare_prompt(
         max_turns: None,
         resume_token: None,
         cwd: Some(repo_root),
-        write_scope: crate::agent::AgentWriteScope::Configured,
-        execution_boundary: None,
         skip_permissions: config.yolo,
         structured_replies: structured_replies_for_context(&client_context, action_style),
         directive_relay: None,

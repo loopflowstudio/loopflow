@@ -105,7 +105,7 @@ fn register(home: &Path, executable: &Path, replace: bool) -> Result<()> {
 <plist version="1.0"><dict>
 <key>Label</key><string>{label}</string>
 <key>ProgramArguments</key><array><string>{executable}</string><string>server</string><string>run</string></array>
-<key>EnvironmentVariables</key><dict><key>LF_HOME</key><string>{home}</string><key>LF_BIN</key><string>{executable}</string><key>LF_SUPERVISED</key><string>1</string></dict>
+<key>EnvironmentVariables</key><dict><key>LF_HOME</key><string>{home}</string><key>LF_BIN</key><string>{executable}</string></dict>
 <key>RunAtLoad</key><true/><key>KeepAlive</key><true/>
 <key>AbandonProcessGroup</key><true/>
 <key>StandardOutPath</key><string>{log}</string><key>StandardErrorPath</key><string>{log}</string>
@@ -211,7 +211,7 @@ fn register(home: &Path, executable: &Path, replace: bool) -> Result<()> {
     let executable_argument = quote(&executable.display().to_string().replace('$', "$$"));
     let home_environment = quote(&format!("LF_HOME={}", home.display()));
     let binary_environment = quote(&format!("LF_BIN={}", executable.display()));
-    fs::write(directory.join(&unit), format!("[Unit]\nDescription=Loopflow server\n[Service]\nExecStart={executable_argument} server run\nEnvironment={home_environment}\nEnvironment={binary_environment}\nEnvironment=LF_SUPERVISED=1\nRestart=on-failure\nKillMode=process\n[Install]\nWantedBy=default.target\n"))?;
+    fs::write(directory.join(&unit), format!("[Unit]\nDescription=Loopflow server\n[Service]\nExecStart={executable_argument} server run\nEnvironment={home_environment}\nEnvironment={binary_environment}\nRestart=on-failure\nKillMode=process\n[Install]\nWantedBy=default.target\n"))?;
     checked(Command::new("systemctl").args(["--user", "daemon-reload"]))?;
     checked(Command::new("systemctl").args(["--user", "enable", "--now", &unit]))?;
     if replace {

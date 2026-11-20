@@ -86,8 +86,12 @@ mod operation_spellings {
                 .unwrap_or_else(|error| panic!("{args:?}: {error}"))
         };
         assert!(matches!(
-            parse(task::spell_ship("LOO-1")).command,
-            Some(Commands::Ship { json: true, .. })
+            parse(task::spell_auto_on("LOO-1")).command,
+            Some(Commands::Task {
+                cmd: crate::lf::TaskCommand::Auto {
+                    cmd: crate::lf::AutoCommand::On { json: true, .. }
+                }
+            })
         ));
         for populated in [false, true] {
             let optional = |value| populated.then_some(value);
@@ -341,7 +345,7 @@ fn the_card_for_a_raw_conversation_carries_its_turn() {
     assert_eq!(card.session.id.as_str(), "provider-id");
     assert_eq!(
         card.session.turn.unwrap().state,
-        loopflow_execution::transcript::live::TurnState::Running
+        loopflow_harness::transcript::live::TurnState::Running
     );
     assert_eq!(card.liveness, SessionLiveness::Live);
     assert_eq!(card.control_holder, None);

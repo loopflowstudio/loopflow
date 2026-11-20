@@ -1640,6 +1640,7 @@ dependencies = [
  "libc",
  "loopflow-definitions",
  "loopflow-execution",
+ "loopflow-harness",
  "loopflow-model",
  "loopflow-storage",
  "loopflow-terminal",
@@ -1698,6 +1699,7 @@ dependencies = [
  "jsonschema",
  "libc",
  "loopflow-definitions",
+ "loopflow-harness",
  "loopflow-model",
  "loopflow-storage",
  "loopflow-terminal",
@@ -1726,6 +1728,24 @@ dependencies = [
  "tracing-subscriber",
  "uuid",
  "yaml-edit",
+]
+
+[[package]]
+name = "loopflow-harness"
+version = "0.16.0"
+dependencies = [
+ "anyhow",
+ "dirs",
+ "loopflow-model",
+ "regex",
+ "rusqlite",
+ "schemars",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "time",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]

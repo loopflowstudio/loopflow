@@ -17,7 +17,6 @@ use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 
 use super::{provider_conversation, session_by_id, session_not_found};
-use crate::harness::HarnessKind;
 use crate::process::Departure;
 use crate::provider_auth::Provider;
 use crate::repository::CanonicalRepo;
@@ -25,12 +24,13 @@ use crate::session::{LfSession, PrimaryScope, TitleSource, WorkSource};
 use crate::store::task_work::TaskGraphRecord;
 use crate::store::ProcessIdentityEvidence;
 use crate::store::SharedStore;
-use crate::transcript::{Located, Source};
+use crate::transcript::Located;
+use loopflow_harness::transcript::Source;
+use loopflow_harness::HarnessKind;
 use loopflow_model::durable::{MachineId, RepositoryId, TaskId, TaskOwnershipEntry, WorkRef};
 use loopflow_model::id::{AgentSessionId, LfSessionId, WaveId};
 use loopflow_storage::graph_process::Execution;
 use loopflow_storage::sqlite::task_moves::{MoveInFlight, MoveStage};
-use loopflow_storage::sqlite::task_work::ShipApproval;
 use loopflow_storage::sqlite::SqliteStore;
 use loopflow_storage::work::task::Task;
 
@@ -57,11 +57,23 @@ pub struct MovedTask {
     pub ownership_marker: String,
     /// Absent before the Task takes up a Graph.
     pub graph: Option<TaskGraphRecord>,
+    /// The Task's auto mark. Absent when nobody set one, and from a released
+    /// sender, whose Task arrives with none.
+    pub auto: Option<loopflow_storage::sqlite::Auto>,
     /// Absent unless the move stopped a running Graph, which continues where
     /// the Task arrives.
     pub stopped: Option<StoppedGraph>,
-    /// The standing Auto-Ship approval; absent when the Task was not shipping.
-    pub approval: Option<ShipApproval>,
+    /// Auto on, as a released receiver reads it: its Task ships there.
+    /// Receivers read `auto`; LOO-971 deletes the key.
+    pub approval: Option<ReleasedShipApproval>,
+}
+
+/// The approval a released receiver takes in; it names no Process here.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReleasedShipApproval {
+    pub at: i64,
+    pub by: Option<loopflow_model::id::LfProcessId>,
+    pub session: Option<LfSessionId>,
 }
 
 /// A Graph the move stopped.
@@ -207,8 +219,8 @@ pub async fn send_task(
     if let Some(root) = &worktree {
         refuse_mid_operation(root, name)?;
     }
-    // Owned by `to` from here, so nothing on this Machine (recovery restarting
-    // a ship process, a run waiting out a limit) starts the Task again while
+    // Owned by `to` from here, so nothing on this Machine (recovery carrying
+    // a dead run again, a run waiting out a limit) starts the Task again while
     // the move stops it. If it cannot leave, it is handed back.
     let (claim, stopped) = match moving {
         Some(MoveInFlight {
@@ -248,6 +260,7 @@ pub async fn send_task(
         };
     let (session, history) =
         taken.map_or((None, None), |(session, history)| (Some(session), history));
+    let auto = store.sqlite.task_auto(&task.id)?;
     let moved = Move {
         from_machine_id: crate::store::machines::local_machine(&store.sqlite)?.id,
         session,
@@ -258,8 +271,18 @@ pub async fn send_task(
             identifier: task.identifier.clone(),
             ownership_marker: loopflow_storage::sqlite::task_ownership::marker(&claim)?,
             graph: crate::store::task_work::task_graph_record(&store.sqlite, &task.id)?,
+            auto: auto.clone(),
             stopped,
-            approval: store.sqlite.task_ship_approval(&task.id)?,
+            approval: auto
+                .filter(|mark| mark.state == loopflow_storage::sqlite::AutoState::On)
+                .map(|mark| ReleasedShipApproval {
+                    at: mark.at,
+                    by: None,
+                    session: match mark.by {
+                        crate::process::Starter::Session { id, .. } => Some(id),
+                        _ => None,
+                    },
+                }),
         }),
     };
     store
@@ -677,7 +700,7 @@ async fn receive_move(store: &SharedStore, moved: Move) -> Result<Option<LfSessi
         crate::transcript::conversation_home(&store.sqlite, provider, &history.agent_session_id)?
             .unwrap_or_else(|| crate::transcript::native_home(provider));
     let base = match provider {
-        Provider::Claude => crate::transcript::live::claude_project(&home, &cwd),
+        Provider::Claude => loopflow_harness::transcript::live::claude_project(&home, &cwd),
         _ => home,
     };
     for file in &history.files {
@@ -767,7 +790,7 @@ pub fn checkout_of(
 }
 
 /// This Machine owns the Task from here: the move's claim, then its checkout of
-/// the carried branch, then its Graph where it stood and its Auto-Ship approval.
+/// the carried branch, then its auto mark and its Graph where it stood.
 async fn take_in_task(
     store: &SharedStore,
     main: &Path,
@@ -776,6 +799,19 @@ async fn take_in_task(
 ) -> Result<Task> {
     let name = &moved.identifier;
     arriving_task(store, main, &moved.task_id, name).await?;
+    // Publish the new claim only after replacing the old carrier. Recovery
+    // could otherwise restart the graph this Machine owned before the move.
+    store
+        .sqlite
+        .place_moved_task_auto(&moved.task_id, moved.auto.as_ref())?;
+    if let Some(graph) = &moved.graph {
+        crate::store::task_work::place_moved_task_graph(
+            &store.sqlite,
+            &moved.task_id,
+            graph,
+            crate::journal::current_lf_process_id().as_ref(),
+        )?;
+    }
     crate::store::ownership::ingest_ownership_marker(
         &store.sqlite,
         &moved.task_id,
@@ -798,19 +834,6 @@ async fn take_in_task(
                 .expect("Task checkout thread panicked")
         })?;
     }
-    if let Some(graph) = &moved.graph {
-        crate::store::task_work::place_moved_task_graph(
-            &store.sqlite,
-            &moved.task_id,
-            graph,
-            crate::journal::current_lf_process_id().as_ref(),
-        )?;
-    }
-    if let Some(approval) = &moved.approval {
-        store
-            .sqlite
-            .take_in_ship_approval(&moved.task_id, approval)?;
-    }
     store
         .get_task(&moved.task_id)
         .await?
@@ -821,7 +844,7 @@ async fn take_in_task(
 /// Machine's reader does not know yields none.
 fn readable(harness: HarnessKind, base: &Path, files: &[MovedFile]) -> bool {
     files.first().is_some_and(|file| {
-        crate::transcript::read(harness, &Source::File(base.join(&file.path)))
+        loopflow_harness::transcript::read(harness, &Source::File(base.join(&file.path)))
             .is_ok_and(|turns| !turns.is_empty())
     })
 }

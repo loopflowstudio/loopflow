@@ -12,7 +12,7 @@ fn exited_pid() -> u32 {
 
 /// A Graph runner and a Task carrier killed without writing their ends: the
 /// next pass ends the run with no exit, so it reads `unknown`, and clears
-/// the carrier, so its Task stops reading moving. Live and pre-boot work is
+/// the carrier, so its Task stops reading moving and its run reads died. Live and pre-boot work is
 /// told apart by its own record.
 #[test]
 fn a_killed_runner_ends_unknown_and_its_task_stops_moving() {
@@ -90,4 +90,10 @@ fn a_killed_runner_ends_unknown_and_its_task_stops_moving() {
     conn.execute("DELETE FROM graph_processes WHERE lf_process_id=?1", [live])
         .unwrap();
     assert_eq!(store.task_state(&task).unwrap(), TaskState::Idle);
+    // Clearing the carrier kept that it died, so the recovery pass still
+    // carries the run again.
+    let died = crate::ops::task::run_recovery::died_run(&store, &task)
+        .unwrap()
+        .expect("a carrier retention ended died");
+    assert_eq!(died.carrier.as_str(), carrier);
 }

@@ -176,7 +176,7 @@ Still open from before:
   - Making a Wave (`lf wave create`, `--wave` naming a Wave not here) looks
     first by each carrier, five seconds at most.
   - `not_taken` is its own field beside `error`; the line still says
-    `unreachable since` for a push the remote refused (question 3).
+    `failing since` for a push the remote refused (question 3).
 
 - Implement, slice 6 (2026-11-18), each reversible before release:
   - `plan.apply` answers `{not_taken: N}` and the sender keeps those records

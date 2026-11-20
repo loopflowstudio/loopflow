@@ -6,9 +6,9 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use super::Source;
-use crate::harness::HarnessKind;
 use crate::process::OsProcess;
+use loopflow_harness::transcript::Source;
+use loopflow_harness::HarnessKind;
 
 /// A transcript or owner file this far from its process start still counts:
 /// clocks and first writes are coarse.
@@ -103,14 +103,14 @@ pub fn discover() -> Vec<RawDirectory> {
         .map(|kind| {
             (
                 kind,
-                kind.harness()
-                    .conversation_owners(&super::home(kind), &by_pid),
+                crate::harness::launcher(kind)
+                    .conversation_owners(&kind.harness().transcript_home(), &by_pid),
             )
         })
         .collect::<BTreeMap<_, _>>();
     let mut found = Vec::new();
     for ((harness, cwd), open) in open(&processes, &by_pid) {
-        let home = super::home(harness);
+        let home = harness.harness().transcript_home();
         let owners = &owners[&harness];
         let owned = owners.values().map(String::as_str).collect::<HashSet<_>>();
         let mut named = Vec::new();
@@ -174,7 +174,7 @@ fn open(
 fn provider(process: &OsProcess) -> Option<HarnessKind> {
     HarnessKind::ALL
         .into_iter()
-        .find(|kind| kind.harness().recognizes(process))
+        .find(|kind| crate::harness::launcher(*kind).recognizes(process))
 }
 
 /// Loopflow's own launches run under `lf` or a staged copy (`lf-<digest>`,
@@ -213,8 +213,7 @@ fn written(
     since: i64,
     owned: &HashSet<&str>,
 ) -> Vec<Written> {
-    harness
-        .harness()
+    crate::harness::launcher(harness)
         .recent_transcripts(home, cwd, since, owned)
         .into_iter()
         .map(|(id, source, at)| Written { id, source, at })
@@ -245,7 +244,7 @@ pub(crate) fn in_directory(
             if path.extension()? != "jsonl" {
                 return None;
             }
-            let modified = super::modified(&path)?;
+            let modified = loopflow_harness::transcript::modified(&path)?;
             Some((id(&path)?, path, modified))
         })
         .collect()
@@ -463,9 +462,7 @@ mod tests {
         reused.started_at = 1_794_393_000;
         let by_pid = HashMap::from([(7, &live), (8, &reused)]);
         assert_eq!(
-            HarnessKind::Claude
-                .harness()
-                .conversation_owners(home.path(), &by_pid),
+            crate::harness::launcher(HarnessKind::Claude).conversation_owners(home.path(), &by_pid),
             HashMap::from([(7, "b307f698".to_owned())])
         );
     }

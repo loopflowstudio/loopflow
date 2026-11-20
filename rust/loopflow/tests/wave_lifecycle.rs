@@ -223,7 +223,7 @@ fn removing_a_child_wave_moves_tasks_to_its_parent_and_folds_memory() {
     std::fs::write(
         child.join("config.yaml"),
         format!(
-            "{}graph: auto\n",
+            "{}graph: feature\n",
             std::fs::read_to_string(child.join("config.yaml")).unwrap()
         ),
     )
@@ -245,7 +245,7 @@ fn removing_a_child_wave_moves_tasks_to_its_parent_and_folds_memory() {
     );
     assert!(memory.contains("Keep sidebars narrow."), "{memory}");
     let config = std::fs::read_to_string(lab.path().join(".lf/wave/product/config.yaml")).unwrap();
-    assert!(config.contains("graph: auto"), "{config}");
+    assert!(config.contains("graph: feature"), "{config}");
     assert!(!child.exists());
     assert_eq!(lab.live_waves(), ["product", "product/cli"]);
     assert_eq!(

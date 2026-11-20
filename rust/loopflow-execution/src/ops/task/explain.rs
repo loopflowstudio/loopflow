@@ -162,6 +162,7 @@ async fn read_task_run(
         checkout,
         options.graph.as_deref(),
         options.from.as_deref(),
+        false,
         merges,
     ) {
         Ok(choice) => choice,

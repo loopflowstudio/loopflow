@@ -1,7 +1,7 @@
 import Foundation
 
 /// A durable control plane for one repository. Projects and Tasks carry the
-/// shipping state; a Wave itself has no worktree, branch, diff, or PR.
+/// delivery state; a Wave itself has no worktree, branch, diff, or PR.
 ///
 /// The app reads identity, placement and active Task counts from `WaveSnapshot`
 /// (`lf wave list --json`). This is an app model, so defaults serve local call sites.

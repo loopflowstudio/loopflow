@@ -608,6 +608,7 @@ impl World {
             &checkout,
             graph,
             from,
+            false,
             crate::lf::navigation::command_merges,
         )?;
         let Some(start) = start else {
@@ -651,7 +652,6 @@ impl World {
                 &run.id,
                 &loopflow_storage::graph_process::ExecutionStart::reserved(run.started_at),
             ),
-            stops_at == END,
         )? {
             bail!("Task {issue} moved while starting {requested}");
         }

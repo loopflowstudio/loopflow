@@ -588,19 +588,20 @@ struct DTOFixtureTests {
         }
     }
 
-    @Test("Task execution names who started its Graph, who stopped Auto-Ship and its stack parent, requiring every mark")
+    @Test("Task execution names who started its Graph, who set auto and its stack parent, requiring every mark")
     func taskExecutionAttributionFixture() throws {
         let data = try loadFixtureData("task_checkout.json")
         let execution = try JSONDecoder().decode(TaskExecution.self, from: data)
         #expect(execution.startedBy?.label == "Session \"LOO-291 task\" for Maya")
-        #expect(execution.shipApproval == nil)
-        #expect(execution.shipStop == ShipMark(at: 1793266380, by: .person(name: "Maya")))
+        #expect(execution.auto == Auto(state: .off, at: 1793266380, by: .person(name: "Maya")))
         #expect(execution.stackParent?.identifier == "LOO-290")
         #expect(execution.stackParent?.branch == "maya/loo-290-parent")
         #expect(execution.stackParent != nil && execution.stackParent?.prNumber == nil)
         #expect(Starter.person(name: nil).label == "attribution unresolved")
+        let configured = try JSONDecoder().decode(Starter.self, from: Data(#"{"kind":"config","layer":"wave"}"#.utf8))
+        #expect(configured.label == "wave config")
         var root = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
-        root.removeValue(forKey: "ship_approval")
+        root.removeValue(forKey: "auto")
         #expect(throws: DecodingError.self) {
             try JSONDecoder().decode(TaskExecution.self, from: JSONSerialization.data(withJSONObject: root))
         }
@@ -620,7 +621,7 @@ struct DTOFixtureTests {
             let status = try #require(capture["status"] as? [String: Any], "\(phase)")
             let recorded = try JSONDecoder().decode(
                 TaskExecution.self, from: JSONSerialization.data(withJSONObject: try #require(status["execution"])))
-            #expect(recorded.startedBy == nil && recorded.shipStop == nil && recorded.stackParent == nil, "\(phase)")
+            #expect(recorded.startedBy == nil && recorded.auto == nil && recorded.stackParent == nil, "\(phase)")
         }
     }
 

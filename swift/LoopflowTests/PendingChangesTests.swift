@@ -255,10 +255,10 @@ struct PendingChangesTests {
 
     @Test func requestedShowsInTheClickAndARefusalPostsOverIt() async throws {
         let changes = changes()
-        changes.request("Auto-Ship", subject: "LOO-5", write: .taskShip(directory: "/repo", issue: "LOO-5"), notices: notices)
-        #expect(notices.current?.text == "LOO-5 Auto-Ship requested")
+        changes.request("Auto on", subject: "LOO-5", write: .taskAutoOn(directory: "/repo", issue: "LOO-5"), notices: notices)
+        #expect(notices.current?.text == "LOO-5 Auto on requested")
         await machine.fail(ServerError(code: "conflict", message: "it has no checkout", data: .null))
-        #expect(notices.current?.text == "LOO-5 Auto-Ship couldn't be requested: it has no checkout")
+        #expect(notices.current?.text == "LOO-5 Auto on couldn't be requested: it has no checkout")
     }
 
     @Test func revisionsCoverOnlyWhenEveryDomainIsReached() {
@@ -277,7 +277,7 @@ struct PendingChangesTests {
 
     @Test func aNewEventReplacesTheLastAndARefreshedOneRestarts() {
         let center = NoticeCenter()
-        center.post(Notice("LOO-5 Auto-Ship requested"))
+        center.post(Notice("LOO-5 Auto on requested"))
         center.post(Notice("Tasks couldn't be read: offline", key: "task_list"))
         #expect(center.current?.text == "Tasks couldn't be read: offline")
         let posted = center.posted

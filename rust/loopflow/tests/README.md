@@ -111,12 +111,12 @@ The rest of `session_launch_contract` covers native authentication, provider swi
 OpenCode diagnostics and Machine dispatch.
 
 Task Graph run and its previews (`task_graph_launch_tests` in the library,
-`global_commands`), one Graph run to an interactive step and one to Auto-Ship:
+`global_commands`), one Graph run to an interactive step and one with auto on:
 
 | Test | Wiring it proves |
 |---|---|
 | `a_task_takes_up_its_waves_graph_and_keeps_the_one_it_named` | `task run` captures the Wave's Graph and stops the Task at its interactive step; a later bare run keeps the Graph a Task named |
-| `task_ship_runs_every_remaining_step_standing_in_at_each_interactive_step` | `-b --task … ship --reason` stands in at each interactive step, reaches `end` and completes the Task |
+| `auto_on_runs_every_remaining_step_standing_in_at_each_interactive_step` | `-b --task … task auto on --reason` stands in at each interactive step, reaches `end` and completes the Task |
 | `task_run_explain_explicit_and_checkout_inferred_actions_preserve_all_state` | `task run --explain` flags reach the preview; named, checkout and `--task` selections agree, conflicting ones refuse; the store's bytes don't change; launch refuses with the preview's reason |
 | `task_run_explain_reads_unstarted_work_without_preparing_it` | `LF_AS` reaches context resolution; previewing an unstarted Task leaves it without a checkout |
 | `task_checkout_explain_reuses_explicit_and_inferred_work_without_effects` | `task checkout --explain` flags reach the preview; selections agree; Git and store stay unchanged; `task checkout` acts on the same inferred Task |
@@ -160,7 +160,7 @@ Transport cleanup checks wait for both the recorded exit and socket removal:
 the interruption hook records completion before later cleanup hooks run.
 Relay exec changes also run `task_graph_launch_tests` and `land_tests`: a
 viewer's OS exit and its original command's recorded result must agree, including
-failed placement, failed shipping and a Graph held at landing.
+failed placement, failed shipping and a Graph waiting at landing with auto off.
 
 `session_activity` fixtures that stand for a provider's own facts (open tools,
 pending input, yielded) carry the AgentProcess's `attachment_token`; a row

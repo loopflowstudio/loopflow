@@ -164,11 +164,11 @@ inside one IMMEDIATE transaction:
 | Someone else's | Your own Wave Machine; your later claim wins |
 
 A write for a Task another Machine runs travels as the operation itself, not
-as a command line. Running, shipping, holding, claiming or unassigning the Task,
-and opening or resuming its Session, reach the writer the same way:
+as a command line. Running, claiming or unassigning the Task, setting
+its auto, and opening or resuming its Session, reach the writer the same way:
 
 ```bash
-lf task hold LOO-123 --json             # LOO-123 runs on mini; mini's server answers
+lf task auto off LOO-123 --json         # LOO-123 runs on mini; mini's server answers
 ssh mini lf server status               # while it runs, the laptop is a connected client
 ```
 
@@ -393,7 +393,7 @@ label; then the refusal prints the same check and retry. Addressed to mini from 
 runs on the laptop, which holds the move. A leaving move carries on: it
 commits, pushes and takes the conversation, which are safe to repeat. A sent
 move is delivered as it was sent, conversation included, without committing or
-pushing again. For a Task outside Auto-Ship, the move continues a Graph it
+pushing again. For a Task with auto not on, the move continues a Graph it
 stopped, starting it on mini at the saved step. If the Graph does not start,
 the move still stands and prints `lf task run MTG-321 --from 'implement'` to
 start it on the Task's owner.
@@ -403,11 +403,12 @@ If it did, its answer lost, the Task runs on mini and the claim is written
 there. If it did not, or mini is gone, the laptop takes the Task back and the
 move ends.
 
-Auto-Ship approval travels with the move, as the Graph position does. Mini's
-server starts the ship process from the saved Graph position. Each Machine
-keeps approvals and stops as a log (who, when, which process).
-`lf task hold MTG-321` withdraws the approval on either Machine. A Machine
-ships only Tasks it owns. Once a Task has left, its old checkout starts nothing.
+Auto travels with the move, as the Graph position does: it is one setting
+on the Task (on or off, who, when), carried whether or not the Task has run. The continued run is a plain
+`lf task run`; with auto on it stands in at interactive steps on mini, as
+it would have on the laptop. `lf task auto off MTG-321` turns it off on either
+Machine. A Machine ships only Tasks it owns: once a Task has
+left, its old checkout starts nothing.
 
 ## Own and rent Machines
 
@@ -512,7 +513,7 @@ lf machine doctor
 ```
 
 Each owner record (a Session's agent and attachment, a Graph run or step, a
-Task or ship carrier) carries the pid and OS start time of the process it runs
+Task's carrier) carries the pid and OS start time of the process it runs
 as; liveness is one OS lookup against them. The Machine server's liveness pass
 records the end of an owner whose process died without writing it.
 

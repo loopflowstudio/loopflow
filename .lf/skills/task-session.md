@@ -15,7 +15,7 @@ Task nobody asked to ship.
 
 ## Review answers that ask for building
 
-**Answers that change the code go back to `implement`.** From `human-review`,
+**Answers that change the code go back to `implement`.** From `ship-review`,
 a plain `lf task run <issue>` continues to `reflect`, gate and land. When the
 answers name work to build, steer them to the Task and run
 `lf task run <issue> --from implement`.

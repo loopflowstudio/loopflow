@@ -1,8 +1,8 @@
 import Foundation
 
 /// Which Tasks a list shows, as a view expression the server resolves. Desktop's
-/// sidebar and the phone ask for the same `started` list: Working Tasks, then
-/// Autonomous ones, each carrying its states.
+/// sidebar and the phone ask for the same `started` list: Working Tasks, each
+/// carrying its states.
 public enum TaskList: String, CaseIterable, Identifiable, Sendable {
     case started, available, busy, backlog, done
 
@@ -10,7 +10,7 @@ public enum TaskList: String, CaseIterable, Identifiable, Sendable {
 
     private var states: [String] {
         switch self {
-        case .started: ["working", "autonomous"]
+        case .started: ["working"]
         case .available: ["available"]
         case .busy: ["busy"]
         case .backlog: ["backlog"]

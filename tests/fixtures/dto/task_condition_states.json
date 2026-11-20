@@ -58,15 +58,13 @@
       "state": "idle",
       "reason": "No active execution",
       "step": null,
-      "captured": null
+      "captured": null,
+      "died": null,
+      "outlook": null
     },
     "run_control": {
       "unavailable": null
     },
-    "ship_control": {
-      "unavailable": null
-    },
-    "shipping": null,
     "pr": null,
     "graph_source": null,
     "lifecycle": "unstarted",
@@ -354,15 +352,13 @@
       "state": "idle",
       "reason": "No active execution",
       "step": null,
-      "captured": null
+      "captured": null,
+      "died": null,
+      "outlook": null
     },
     "run_control": {
       "unavailable": "Task is complete"
     },
-    "ship_control": {
-      "unavailable": "Task is complete"
-    },
-    "shipping": null,
     "pr": null,
     "graph_source": null,
     "lifecycle": "done",
@@ -617,15 +613,13 @@
       "state": "blocked",
       "reason": "Release target is unavailable",
       "step": null,
-      "captured": null
+      "captured": null,
+      "died": null,
+      "outlook": null
     },
     "run_control": {
       "unavailable": null
     },
-    "ship_control": {
-      "unavailable": null
-    },
-    "shipping": null,
     "pr": null,
     "graph_source": null,
     "lifecycle": "moving",
@@ -718,15 +712,13 @@
       "state": "idle",
       "reason": "No active execution",
       "step": null,
-      "captured": null
+      "captured": null,
+      "died": null,
+      "outlook": null
     },
     "run_control": {
       "unavailable": null
     },
-    "ship_control": {
-      "unavailable": null
-    },
-    "shipping": null,
     "pr": null,
     "graph_source": null,
     "lifecycle": "unstarted",
@@ -984,15 +976,13 @@
       "state": "idle",
       "reason": "Waiting for your review at demo",
       "step": null,
-      "captured": null
+      "captured": null,
+      "died": null,
+      "outlook": null
     },
     "run_control": {
       "unavailable": null
     },
-    "ship_control": {
-      "unavailable": null
-    },
-    "shipping": null,
     "pr": null,
     "graph_source": null,
     "lifecycle": "unstarted",
@@ -1085,15 +1075,13 @@
       "state": "idle",
       "reason": "No active execution",
       "step": null,
-      "captured": null
+      "captured": null,
+      "died": null,
+      "outlook": null
     },
     "run_control": {
       "unavailable": null
     },
-    "ship_control": {
-      "unavailable": null
-    },
-    "shipping": null,
     "pr": null,
     "graph_source": null,
     "lifecycle": "unstarted",
@@ -1349,15 +1337,13 @@
       "state": "running",
       "reason": "Worker is running realign",
       "step": null,
-      "captured": null
+      "captured": null,
+      "died": null,
+      "outlook": null
     },
     "run_control": {
       "unavailable": null
     },
-    "ship_control": {
-      "unavailable": null
-    },
-    "shipping": null,
     "pr": {
       "id": "pr_commits",
       "sequence": 1,

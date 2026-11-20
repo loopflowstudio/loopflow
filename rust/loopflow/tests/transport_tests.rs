@@ -616,7 +616,7 @@ printf '%s' "$answer" > '{home}/answer'
     assert_eq!(fixture.launches(1), [checkout.to_str().unwrap()]);
     assert!(rex
         .pwd(container, &block)
-        .is_some_and(|url| url.ends_with(&format!("{}/", checkout.display()))));
+        .is_some_and(|url| url.ends_with(&format!("{}/", worktree.display()))));
     rex.write(container, &block, "typed-here\n");
     assert_eq!(fixture.wait_file("answer"), "typed-here");
 }

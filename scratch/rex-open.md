@@ -1,0 +1,5 @@
+MTG-409 was already moving. The originating session reported “cannot run Rex: No such file or directory” for both the Task and its URL. The login shell finds rex inside ~/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS. Neither ~/.local/bin nor the system bin directories contained rex.
+
+With PATH=/usr/bin:/bin, the installed lf reproduced the same error for MTG-409 against an unused socket. After linking the installed rex into ~/.local/bin, the identical command reached Rex, which reported that no server was running at the test socket. The checkout now appends the Rex install directory in lf's existing macOS PATH repair.
+
+The agent-to-Task open passed with a system-only PATH and a Rex peer installed under the fixture account. An isolated installed Rex server also opened a Task conversation in its checkout and delivered typed input. Its directory report used the requested /var/folders path while pwd -P used /private/var/folders; the native check now compares each with its corresponding path.

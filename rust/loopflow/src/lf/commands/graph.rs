@@ -516,7 +516,6 @@ fn execute(
             task_run: task_run.cloned(),
             interrupt,
         };
-        // A project rotation moving this checkout's Task excludes new work in it.
         let admission = loopflow_execution::store::admission::lock_task_checkouts(
             &running.store.sqlite,
             &[running.cwd],

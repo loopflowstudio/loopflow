@@ -1400,37 +1400,6 @@ impl LinearClient {
         self.project_node(project_id).await?.into_tracker_project()
     }
 
-    pub(crate) async fn fetch_project_content(
-        &self,
-        id: &str,
-    ) -> LinearResult<(TrackerProject, String)> {
-        let node = self.project_node(id).await?;
-        let content = node.content.clone().unwrap_or_default();
-        Ok((node.into_tracker_project()?, content))
-    }
-
-    pub(crate) async fn project_field_input(
-        &self,
-        value: &loopflow_storage::work::edit::WorkValue,
-        content: &str,
-    ) -> LinearResult<Value> {
-        use loopflow_storage::work::edit::WorkValue;
-        match value {
-            WorkValue::ProjectName(value) => Ok(json!({"name": value})),
-            WorkValue::ProjectSummary(value) => Ok(json!({"description": value})),
-            WorkValue::ProjectStatus(value) => {
-                Ok(json!({"statusId": self.project_status_id(*value).await?}))
-            }
-            WorkValue::ProjectDescription(Some(description)) => Ok(json!({
-                "content": parse_project_document(content)?.replace_description(description)?
-            })),
-            _ => Err(LinearError::Message(format!(
-                "unsupported Project field {}",
-                value.field()
-            ))),
-        }
-    }
-
     pub(crate) async fn find_export_issue(
         &self,
         id: &str,
@@ -2477,47 +2446,6 @@ fn first_meaningful_paragraph(description: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use loopflow_storage::work::edit::WorkValue;
-    #[tokio::test]
-    async fn project_markdown_prose_replacement_preserves_managed_fields() {
-        let client =
-            super::LinearClient::with_base_url("fixture".into(), None, "http://127.0.0.1:1".into());
-        let source = "Old introduction.\nworkflow: code\n## Metric targets\nTarget rationale.\n```json\n[{\"metric_id\":\"proof\",\"target\":{\"kind\":\"at_least\",\"value\":1.0}}]\n```\n## KRs\nPreamble.\n- [ ] Keep this criterion\n  across lines.\n\nOld closing.\n";
-        let before = super::parse_project_document(source).unwrap();
-        for description in ["", "New authored prose.", "## Examples\n````markdown\n```yaml\nworkflow: example\n```\n## KRs\n- [x] Example only\n````\nClosing prose.\n"] {
-            let input = client.project_field_input(&WorkValue::ProjectDescription(Some(description.into())), source).await.unwrap();
-            let after = input["content"].as_str().unwrap();
-            let parsed = super::parse_project_document(after).unwrap();
-            assert_eq!(parsed.description().trim(), description.trim());
-            assert!(after.contains("workflow: code\n"));
-            assert_eq!(parsed.released_krs, before.released_krs);
-            assert_eq!(parsed.released_targets, before.released_targets);
-            assert!(!after.contains("Old introduction"));
-            assert!(!after.contains("Target rationale"));
-            assert!(!after.contains("Old closing"));
-        }
-        for description in [
-            "workflow: replacement",
-            "## KRs\n- [x] Replacement",
-            "```markdown\nUnclosed example",
-        ] {
-            assert!(
-                client
-                    .project_field_input(
-                        &WorkValue::ProjectDescription(Some(description.into())),
-                        source
-                    )
-                    .await
-                    .is_err(),
-                "{description}"
-            );
-        }
-        assert!(client
-            .project_field_input(&WorkValue::ProjectDescription(None), source)
-            .await
-            .is_err());
-    }
-
     use super::*;
     use crate::linear::test_server::{self, json_response};
     use axum::http::StatusCode;
@@ -3391,11 +3319,15 @@ mod model_tests {
     }
 
     #[test]
-    fn project_snapshot_requires_flow_and_status() {
+    fn project_snapshot_requires_status() {
         let value = serde_json::json!({
-            "id":"project-1", "slug":"plan", "name":"Plan", "summary":"",
+            "id":"718867bb-ee14-40cc-82a0-090c3118d78e", "slug":"plan", "name":"Plan", "summary":"",
             "initiative_ids":[], "team_ids":[]
         });
-        assert!(serde_json::from_value::<TrackerProject>(value).is_err());
+        let error = serde_json::from_value::<TrackerProject>(value).unwrap_err();
+        assert!(
+            error.to_string().contains("missing field `status`"),
+            "{error}"
+        );
     }
 }

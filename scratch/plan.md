@@ -1,6 +1,6 @@
 # LOO-995 — Remove chapters, KRs and metrics
 
-Stacked on LOO-938 (PR #1971); LOO-938's plan and notes live on its own branch.
+Stacked on LOO-938 (PR #1983); LOO-938's plan and notes live on its own branch.
 
 ## Direction
 
@@ -147,9 +147,11 @@ hangs KRs and metrics on a Project or a Wave.
 No implementation slices remain. For `gate`: the Task title still says "a
 Project is a Wave's optional tracker link"; the PR title and body describe what
 was built (Projects stay real records; chapters, KRs, metrics and the Project
-run journal go), stacked on LOO-938 (PR #1971).
+run journal go), stacked on LOO-938 (PR #1983).
 
 ### Checks
+
+- Compress pass 2: 11 focused tests passed for released Project Markdown, store upgrades and health checks, Linear edits and Project status. Strict all-target Clippy, formatting and diff checks passed.
 
 - `cargo check --all-targets`, `cargo clippy --all-targets -- -D warnings`, `cargo fmt --check`, `git diff --check`: passed (slice 5).
 - Focused Rust tests (slice 5): Task placement, Wave status, interrupt delivery, stopping Graphs, all 16 storage steer tests (`loopflow-storage --lib steers`), 4 documented-command tests, and 47/47 `dto_fixtures` passed.

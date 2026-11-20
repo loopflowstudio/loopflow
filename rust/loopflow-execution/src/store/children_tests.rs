@@ -440,7 +440,7 @@ fn canonical_task_fields_survive_restart_and_reach_another_machine_through_the_h
 }
 
 #[test]
-fn project_edits_preserve_retired_iteration() {
+fn project_edits_and_health_checks_leave_retired_fields_untouched() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("loopflow.db");
     let store = crate::store::opening::open_ephemeral(&path).unwrap();
@@ -449,7 +449,10 @@ fn project_edits_preserve_retired_iteration() {
         .conn
         .lock()
         .unwrap()
-        .execute("UPDATE projects SET iteration=7 WHERE id=?1", [id.as_str()])
+        .execute(
+            "UPDATE projects SET iteration=7, krs='[{}]' WHERE id=?1",
+            [id.as_str()],
+        )
         .unwrap();
     store
         .edit_project_fields(
@@ -465,17 +468,18 @@ fn project_edits_preserve_retired_iteration() {
     let project = store.project(&id).unwrap().unwrap();
     assert_eq!(project.name, "Renamed body of work");
     assert_eq!(project.summary, "New summary");
-    let iteration: u32 = store
+    store.health_check().unwrap();
+    let retired: (u32, String) = store
         .conn
         .lock()
         .unwrap()
         .query_row(
-            "SELECT iteration FROM projects WHERE id=?1",
+            "SELECT iteration,krs FROM projects WHERE id=?1",
             [id.as_str()],
-            |row| row.get(0),
+            |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .unwrap();
-    assert_eq!(iteration, 7);
+    assert_eq!(retired, (7, "[{}]".into()));
     let json = serde_json::to_value(project).unwrap();
     assert!(json.get("iteration").is_none());
     assert!(json.get("plan").is_none());

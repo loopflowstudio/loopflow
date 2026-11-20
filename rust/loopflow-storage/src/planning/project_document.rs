@@ -4,7 +4,7 @@
 //! when the description changes. Released stores convert them once, on upgrade.
 
 use super::ProjectDocumentError;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 type ProjectDocumentResult<T> = Result<T, ProjectDocumentError>;
 
@@ -15,51 +15,48 @@ enum Section {
 }
 
 /// A KR as released `lf` stored it in `projects.krs`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ReleasedKr {
-    pub text: String,
-    pub holds: bool,
+#[derive(Debug, PartialEq, Eq, Serialize)]
+pub(crate) struct ReleasedKr {
+    text: String,
+    holds: bool,
 }
 
 /// A Linear Markdown boundary, not a stored Project or another planning owner.
 #[derive(Debug)]
 pub struct ProjectDocument<'a> {
     /// The `## Metric targets` JSON array, unread except by released conversion.
-    pub released_targets: Vec<serde_json::Value>,
-    pub released_krs: Vec<ReleasedKr>,
+    pub(crate) released_targets: Vec<serde_json::Value>,
+    pub(crate) released_krs: Vec<ReleasedKr>,
     source: &'a str,
     fields: Vec<std::ops::Range<usize>>,
 }
 
 impl ProjectDocument<'_> {
-    pub fn description(&self) -> String {
-        let mut prose = String::new();
+    fn prose_parts(&self) -> impl Iterator<Item = &str> {
+        let end = self.source.len();
         let mut start = 0;
-        for range in &self.fields {
-            prose.push_str(&self.source[start..range.start]);
-            start = range.end;
-        }
-        prose.push_str(&self.source[start..]);
-        prose
+        self.fields
+            .iter()
+            .cloned()
+            .chain(std::iter::once(end..end))
+            .map(move |field| {
+                let prose = &self.source[start..field.start];
+                start = field.end;
+                prose
+            })
     }
 
-    /// Managed spans own their separating whitespace, not the prose value.
-    /// Released-content conversion deliberately keeps using the lossless reader.
+    /// Released-store conversion retains the whitespace between prose spans.
+    pub(crate) fn description(&self) -> String {
+        self.prose_parts().collect()
+    }
+
     pub fn observed_description(&self) -> String {
-        let mut parts = Vec::new();
-        let mut start = 0;
-        for range in &self.fields {
-            let part = self.source[start..range.start].trim();
-            if !part.is_empty() {
-                parts.push(part);
-            }
-            start = range.end;
-        }
-        let part = self.source[start..].trim();
-        if !part.is_empty() {
-            parts.push(part);
-        }
-        parts.join("\n\n")
+        self.prose_parts()
+            .map(str::trim)
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>()
+            .join("\n\n")
     }
 
     pub fn replace_description(&self, description: &str) -> ProjectDocumentResult<String> {
@@ -94,7 +91,7 @@ pub fn parse_project_document(source: &str) -> ProjectDocumentResult<ProjectDocu
     let mut targets = Vec::new();
     let mut raw_targets = Vec::new();
     let mut krs = Vec::new();
-    let mut current_kr: Option<ReleasedKr> = None;
+    let mut current_kr: Option<&mut ReleasedKr> = None;
     let mut offset = 0;
     for line in source.split_inclusive('\n') {
         let range = offset..offset + line.len();
@@ -123,9 +120,7 @@ pub fn parse_project_document(source: &str) -> ProjectDocumentResult<ProjectDocu
                     fenced_targets = true;
                     fields.push(range);
                 }
-                if let Some(kr) = current_kr.take() {
-                    krs.push(kr);
-                }
+                current_kr = None;
                 fence = Some((marker, length, managed));
                 continue;
             }
@@ -137,9 +132,7 @@ pub fn parse_project_document(source: &str) -> ProjectDocumentResult<ProjectDocu
             continue;
         }
         if trimmed.starts_with('#') {
-            if let Some(kr) = current_kr.take() {
-                krs.push(kr);
-            }
+            current_kr = None;
             section = match trimmed {
                 "## Metric targets" => Some(Targets),
                 "## KRs" => Some(Krs),
@@ -163,21 +156,15 @@ pub fn parse_project_document(source: &str) -> ProjectDocumentResult<ProjectDocu
                     trimmed.strip_prefix("- ").map(|text| (false, text))
                 };
                 if let Some((holds, text)) = item {
-                    if let Some(kr) = current_kr.take() {
-                        krs.push(kr);
-                    }
-                    if !text.trim().is_empty() {
-                        current_kr = Some(ReleasedKr {
-                            text: text.trim().into(),
-                            holds,
-                        });
-                        fields.push(range);
-                    }
+                    krs.push(ReleasedKr {
+                        text: text.trim().into(),
+                        holds,
+                    });
+                    current_kr = krs.last_mut();
+                    fields.push(range);
                 } else if trimmed.is_empty() {
                     // A new paragraph is prose, not a continuation of the last KR.
-                    if let Some(kr) = current_kr.take() {
-                        krs.push(kr);
-                    }
+                    current_kr = None;
                 } else if let Some(kr) = current_kr.as_mut() {
                     kr.text.push(' ');
                     kr.text.push_str(trimmed);
@@ -186,9 +173,6 @@ pub fn parse_project_document(source: &str) -> ProjectDocumentResult<ProjectDocu
             }
             _ => {}
         }
-    }
-    if let Some(kr) = current_kr {
-        krs.push(kr);
     }
     if fence.is_some_and(|(_, _, managed)| managed) {
         return Err(ProjectDocumentError(
@@ -225,7 +209,7 @@ mod tests {
     use super::{parse_project_document, ReleasedKr};
 
     #[test]
-    fn released_sections_stay_out_of_the_description_and_survive_its_edit() {
+    fn released_sections_are_read_separately_from_prose() {
         let source = "flow: research\nworkflow: code\n\nA measured bet.\n\n## Metric targets\n```json\n[{\"metric_id\":\"rate\"}]\n```\n\n## KRs\n\n- [x] One proof holds\n- Another\n  across wrapped lines.\n";
         let document = parse_project_document(source).unwrap();
         assert_eq!(document.observed_description(), "A measured bet.");
@@ -243,21 +227,39 @@ mod tests {
             ]
         );
         assert_eq!(document.released_targets[0]["metric_id"], "rate");
-        let edited = document.replace_description("New prose").unwrap();
-        assert!(edited.starts_with("New prose\n\n"));
-        for kept in [
-            "workflow: code\n",
-            "## KRs\n",
-            "- [x] One proof holds",
-            "\"rate\"",
-        ] {
-            assert!(edited.contains(kept), "{edited}");
-        }
     }
 
     #[test]
     fn unreadable_targets_are_refused() {
         assert!(parse_project_document("## Metric targets\nnot JSON").is_err());
         assert!(parse_project_document("## Metric targets\n```json\n[1\n").is_err());
+    }
+
+    #[test]
+    fn prose_edits_preserve_released_sections_and_reject_live_declarations() {
+        let source = "Old introduction.\nworkflow: code\n## Metric targets\nTarget rationale.\n```json\n[{\"metric_id\":\"proof\",\"target\":{\"kind\":\"at_least\",\"value\":1.0}}]\n```\n## KRs\nPreamble.\n- [ ] Keep this criterion\n  across lines.\n\nOld closing.\n";
+        let before = parse_project_document(source).unwrap();
+        for description in ["", "New authored prose.", "## Examples\n````markdown\n```yaml\nworkflow: example\n```\n## KRs\n- [x] Example only\n````\nClosing prose.\n"] {
+            let after = before.replace_description(description).unwrap();
+            let parsed = parse_project_document(&after).unwrap();
+            assert_eq!(parsed.description().trim(), description.trim());
+            assert!(after.contains("workflow: code\n"));
+            assert!(after.contains("- [ ] Keep this criterion\n  across lines.\n"));
+            assert_eq!(parsed.released_krs, before.released_krs);
+            assert_eq!(parsed.released_targets, before.released_targets);
+            assert!(!after.contains("Old introduction"));
+            assert!(!after.contains("Target rationale"));
+            assert!(!after.contains("Old closing"));
+        }
+        for description in [
+            "workflow: replacement",
+            "## KRs\n- [x] Replacement",
+            "```markdown\nUnclosed example",
+        ] {
+            assert!(
+                before.replace_description(description).is_err(),
+                "{description}"
+            );
+        }
     }
 }

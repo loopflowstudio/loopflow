@@ -397,21 +397,6 @@ pub(crate) fn validate_persisted_json(conn: &rusqlite::Connection) -> StoreResul
             "task_ids_json",
         )?);
     }
-    if conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('projects') WHERE name='krs')",
-        [],
-        |row| row.get::<_, bool>(0),
-    )? {
-        failures.extend(validate_json_column::<
-            Vec<crate::planning::project_document::ReleasedKr>,
-        >(conn, "projects", "id", "krs")?);
-        failures.extend(validate_json_column::<Vec<serde_json::Value>>(
-            conn,
-            "projects",
-            "id",
-            "metric_targets",
-        )?);
-    }
     failures.extend(validate_json_column::<crate::work::task::CiObservation>(
         conn,
         "task_prs",

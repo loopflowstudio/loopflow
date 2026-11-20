@@ -1,6 +1,6 @@
 # Open choices and run observations (LOO-995)
 
-Stacked on LOO-938 (PR #1971); LOO-938's working notes live on its own branch.
+Stacked on LOO-938 (PR #1983); LOO-938's working notes live on its own branch.
 Each choice below was made headless and is reversible before release.
 
 ## Open product choices
@@ -37,6 +37,8 @@ Each choice below was made headless and is reversible before release.
 - **Lock directory:** keep `~/.lf/chapter-locks` so running released clients and branch builds lock the same file.
 
 - **Released Project selection:** the staged schema keeps `selected_project_owner_update`. On an upgraded store, a non-null `waves.current_project_id` can still prevent that Project from moving to a different Wave until the contract removes the trigger. It does not prevent moving Tasks or ending a Project.
+
+- **Retired Project columns:** treat saved KR and metric-target JSON as opaque during store health checks. The upgrade from released Markdown still parses and converts it.
 
 ## Run observations
 

@@ -844,10 +844,12 @@ pub async fn wave_graph(
     in_wave: bool,
 ) -> OpsResult<WaveGraph> {
     let wave = if in_wave {
-        let store = crate::store::read_existing_registry().map_err(task_error)?;
+        let store = crate::store::read_existing_registry()
+            .map_err(task_error)?
+            .ok_or_else(|| task_error("Planning unavailable: local registry is absent"))?;
         Some(
             crate::work::wave::context::resolve_managed_wave(
-                store.as_ref(),
+                Some(&store),
                 Some(repo),
                 selector,
                 std::env::var("LF_WAVE_ID").ok().as_deref(),

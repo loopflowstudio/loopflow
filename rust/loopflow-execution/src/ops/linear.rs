@@ -2154,7 +2154,6 @@ mod tests {
                     // Adding the Wave checks its tracker before the Initiative lookup.
                     json_response(StatusCode::OK, team.clone()),
                     json_response(StatusCode::OK, team.clone()),
-                    json_response(StatusCode::OK, team),
                     json_response(
                         StatusCode::OK,
                         json!({"data": {"initiatives": {"nodes": [], "pageInfo": {"hasNextPage": false, "endCursor": null}}}}),
@@ -2163,6 +2162,7 @@ mod tests {
                         StatusCode::OK,
                         json!({"data": {"initiativeCreate": {"initiative": {"id": "6f1d2c3b-4a5e-4f60-8a71-9b2c3d4e5f60"}}}}),
                     ),
+                    json_response(StatusCode::OK, team.clone()),
                     projects_response(json!([])),
                 ])
                 .await;

@@ -16083,7 +16083,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "`lf wave add <wave> [--objective <objective>] --json`: the Wave, its\nauthored files and first Project; an existing Wave is unchanged.",
+          "description": "`lf wave create <wave> [--objective <objective>] --json`: the Wave and\nits authored files; an existing Wave is unchanged.",
           "properties": {
             "directory": {
               "type": "string"

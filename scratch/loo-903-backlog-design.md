@@ -169,7 +169,7 @@ Status, November 19: slices 1–6 are built (6 at `fc22206d35`). A third concept
 3. **Actions — built.** Toolbar, row menu, keys, drag, rank reorder, Claim, Edit, Move, Abandon, undo, a footer line per action and the window Notice for refusals.
 4. **Capture text and docs — built.** `lf desktop capture -p backlog` prints counts then rows.
 5. **Concept review's seven changes — built** (the review's findings are in git at `0fe4d9afef`):
-   - A started Task nobody holds says where it stands ("at demo · PR #12", from `execution.step`, else the last Graph step, else `next_move.reason`) in the row and the capture text. Its button reads Continue and has no workflow menu; a mixed selection reads "Start 2 · feature · Continue 1" and a chosen workflow reaches only the unstarted. Start is off, with Rust's reason, when `run_control` refuses every selected Task. Copy says "open work nobody is running".
+   - A started Task nobody holds says where it stands ("at demo · PR #12", from `execution.step`, else the last Graph step, else `next_move.reason`) in the row and the capture text, and has no workflow menu. Start is off, with Rust's reason, when `run_control` refuses every selected unstarted Task. Slice 6 replaced its Continue button.
    - `BacklogList.selection` is the stored selection cut to the shown rows, and every action reads it; a changed filter or search also drops the hidden rows from the stored selection (`BacklogState.keep`). The Abandon dialog lists identifiers (five, then "and N more") and names the Tasks with a PR.
    - `NewTaskSheet` has File: `WorkModel.fileTask` runs `lf task create` without `--run`, waits for the answer (a refusal stays in the sheet with the words), clears that backlog's filter and search and selects the new row.
    - `GraphCatalogEntry` carries `included_by: [String]` and `runs: task | wave` (builtin category; repository Graphs are `task`). `StartFlow`/`StartFlows` is the one layout: stopping, More (pieces and undescribed), "Run without stopping"; Wave Graphs are left out. Start's menu, `WorkflowChooser` and the Task view's "Choose workflow" all read it (`StartFlowItems`).
@@ -438,13 +438,13 @@ Prototype: choose a planning question, compare linked real Task excerpts, change
 - Search/pagination must be shared and bounded, not filtering the first loaded page while presenting a complete result. Query against realistic ~10,000-Task stores; retain reading freshness and revision rules. Do not add transcript-triggered backlog refreshes.
 - Delete replaced board/brief/capture paths in the chosen cut. Do not add a permanent parallel planner. This exploration adds no production paths.
 
-## Review threads · current
+## Review threads · as of the exploration rounds (November 14)
 
 The latest correction removes reader history entirely. The current direction has one direct reader and retains drafts by Task. No layout question remains pending from these rounds.
 
 Capture's Save idea versus Start distinction remains. Ordering, batch organization, failure recovery and realistic native use remain required; the focused navigation sketch does not establish them as complete.
 
-## Validation and remaining work
+## Exploration checks (November 14; production code was unchanged then)
 
 Production Rust/Swift are unchanged. Prototype controls operate only on in-memory sample data; reload resets them. Native backlog editing, large-store search, provider handoff, failures across real writes and retention during running work remain implementation/demo checks. Browser preview tools reported no connected browsers and “Browser is not available: iab”; rendered interaction validation remains unverified unless a later check records it here.
 

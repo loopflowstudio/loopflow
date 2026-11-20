@@ -28,7 +28,6 @@
 
 ## From building the concept review's changes, November 19
 
-- Superseded by the second review below: a started row's primary action reads "Continue" whatever its position; `run_control` carries only a refusal, and "Run again" needs the Task's Graph position, which the list row doesn't have.
 - File keeps the sheet open until Rust answers, unlike Start, so a refusal can't lose the words. It then clears that backlog's filter and search so the new row shows. It does not navigate to the Wave.
 - `runs: task | wave` was added to the catalog entry: nothing else on the wire says vsm-operate is a Wave's Graph. It comes from the builtin's directory, so a repository Graph is always `task`.
 - `queue` shows under "Run without stopping" in a repository with no `finish-queue`, since nothing there includes it.

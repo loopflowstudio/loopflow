@@ -68,7 +68,7 @@ use crate::work::wave::Wave;
 use loopflow_model::durable::WorkStatus;
 use loopflow_storage::child::ChildRef;
 use loopflow_storage::planning_sync::LostAnswer;
-use loopflow_storage::sqlite::tracker_actions::ActionPhase;
+use loopflow_storage::sqlite::tracker_actions::{ActionOwner, ActionPhase, TrackerAction};
 use loopflow_storage::sqlite::{SqliteStore, TaskCheckout};
 use loopflow_storage::work::task::{
     GithubPr, Observation, PrMergeMode, PrPhase, PrPublication, Task, TaskEventKind, TaskPr,
@@ -2967,24 +2967,29 @@ pub(super) async fn link_pr_to_planning(store: &SharedStore, task: &Task, pr: &m
         else {
             return Ok(None);
         };
-        let owner = loopflow_storage::sqlite::tracker_actions::ActionOwner::Task(task.id.clone());
-        super::tracker::drain::drain_repository(
-            store,
-            &repo.to_string_lossy(),
-            super::tracker::drain::Scope::First(&owner),
-            super::tracker::drain::Bound::PASS,
-        )
-        .await?;
-        let action = store.sqlite.tracker_action(&id).map_err(task_error)?;
-        Ok::<_, OpsError>(match action {
-            Some(action)
-                if matches!(
+        let shown = |action: &Option<TrackerAction>| {
+            action.as_ref().is_some_and(|action| {
+                matches!(
                     action.phase,
                     ActionPhase::Confirmed | ActionPhase::Conflicted
-                ) =>
-            {
-                None
-            }
+                )
+            })
+        };
+        let mut action = store.sqlite.tracker_action(&id).map_err(task_error)?;
+        // The tracker already shows this state: nothing to send.
+        if !shown(&action) {
+            let owner = ActionOwner::Task(task.id.clone());
+            super::tracker::drain::drain_repository(
+                store,
+                &repo.to_string_lossy(),
+                super::tracker::drain::Scope::First(&owner),
+                super::tracker::drain::Bound::PASS,
+            )
+            .await?;
+            action = store.sqlite.tracker_action(&id).map_err(task_error)?;
+        }
+        Ok::<_, OpsError>(match action {
+            action if shown(&action) => None,
             Some(action) => Some(action.error.unwrap_or_else(|| {
                 "PR link is waiting to be sent; `lf repo tracker` lists it".into()
             })),

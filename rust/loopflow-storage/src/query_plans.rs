@@ -143,6 +143,7 @@ const MEASURED: &str = "DELETE FROM sqlite_stat1 WHERE tbl IN (
          ('task_primary_sessions','sqlite_autoindex_task_primary_sessions_2','319 1'),
          ('tasks','idx_tasks_issue_identifier','1219 1'),
          ('tasks','idx_tasks_project','1219 20 1'),
+         ('tasks','tasks_wave','1219 20'),
          ('tasks','idx_tasks_repository','1219 134 22 2'),
          ('tasks','idx_tasks_updated','1219 2'),
          ('tasks','idx_tasks_worktree','1219 10'),
@@ -510,6 +511,18 @@ mod tests {
                     .unwrap();
                 store.unconfirmed_tracker_actions("/elsewhere").unwrap();
             })
+        });
+        let scans = growing_scans(&store, &traced);
+        assert!(scans.is_empty(), "{}", scans.join("\n"));
+    }
+
+    #[test]
+    fn a_wave_lists_its_own_tasks_by_index() {
+        let (_home, store, _task, _viewer) = fixture();
+        let wave = loopflow_model::id::WaveId::new();
+        let traced = statements(&store, || {
+            store.open_task_count(&wave).unwrap();
+            store.task_ids_in_wave(&wave).unwrap();
         });
         let scans = growing_scans(&store, &traced);
         assert!(scans.is_empty(), "{}", scans.join("\n"));

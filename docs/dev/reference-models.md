@@ -516,8 +516,9 @@ not imported. Runtime readers use only the final schema and current encodings.
 ### Planning
 
 A Wave holds any number of Projects and selects none; their statuses mirror
-the tracker's. A new Task joins the newest started Project, and makes one when
-the Wave has none open. A Task without
+the tracker's. A Task records its own Wave (`tasks.wave_id`); its Project is
+optional: the Wave's newest started one, else the nearest ancestor Wave's,
+else none. Nothing makes a Project for a Task. A Task without
 a graph takes up an explicitly named one, its Wave default, repository `graph:`, then builtin `code`.
 There is no packet or local switch. Started Tasks keep their identity, worktree,
 PR and execution whatever happens to their Project.

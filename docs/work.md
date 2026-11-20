@@ -407,35 +407,40 @@ LaunchAgent under `~/Library/LaunchAgents` rather than cron.
 ### Projects
 
 ```text
-$ lf wave create billing
-$ lf task create --wave billing --title "Meter usage events"
-Meter usage events · LOO-12
-$ lf wave status billing
+$ lf wave create billing ; lf wave create billing/refunds
+$ lf task create --wave billing/refunds --title "Refund a mischarged invoice"
+Refund a mischarged invoice · LOO-14
+$ lf wave status billing/refunds
 …
-  Project   billing (4f1c…) · started
+  Refund a mischarged invoice   LOO-14   unstarted
 ```
 
-A new Wave has no Project and sends nothing to the tracker. Its first Task
-makes one, named for the Wave. A Wave can hold several Projects, each with a
-name, a summary and a status; `lf wave status` and `lf wave plan billing --json`
-list them in the Wave's order, ended ones included.
+A Task belongs to the Wave it was filed in. A Project is optional: a Wave's
+link to a tracker Project. A new Task joins its Wave's Project, else the
+nearest parent Wave's, else none. Either way it lists under its own Wave, and
+nothing makes a Project for it.
 
-Projects start and end in the tracker: rename one, start another or mark one
-completed in Linear, and `lf wave sync` shows the same here. Without a
-tracker, a Wave keeps the one Project its first Task made.
-
-A new Task joins the Wave's newest started Project, or its newest Project
-that has not ended when none is started. When every Project has ended, the
-Task makes a new one. With more than one open, the command says which it
-chose:
+A Wave can hold several Projects, each with a name, a summary and a status;
+`lf wave status` and `lf wave plan billing --json` list them in the Wave's
+order, ended ones included. Projects start and end in the tracker: rename
+one, start another or mark one completed in Linear, and `lf wave sync` shows
+the same here. Within a Wave, a new Task joins the newest started Project, or
+the newest one that has not ended. With more than one open, the command says
+which it chose:
 
 ```text
-$ lf task create --wave billing --title "Refund a mischarged invoice"
-Refund a mischarged invoice · LOO-14 in Project Invoicing
+$ lf task create --wave billing --title "Meter usage events"
+Meter usage events · LOO-12 in Project Invoicing
 ```
 
-Move a Task to another Project in the tracker. A Task in any Project of its
-Wave runs, and a started Task keeps its worktree and PR wherever it is.
+A tracker holds an issue in a Project, never a Wave. A Task in a parent's
+Project is that Project's issue there; which child Wave it sits in lives in
+Loopflow's plan. A Task in a Wave with no Project stays out of the tracker,
+and an issue made in the tracker joins the Wave linked to its Project.
+
+`lf task move` keeps a Task's Project when the new Wave is that Project's
+Wave or below it, and otherwise places it again. A started Task keeps its
+worktree and PR wherever it is.
 
 ### Nested Waves
 

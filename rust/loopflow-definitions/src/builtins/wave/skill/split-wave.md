@@ -34,7 +34,7 @@ Each child gets a fresh goal, not a slice of the parent's prose:
    lf task create --wave <wave>/<child> --title "…" --notes "…"
    ```
    Write each child's `GOAL.md` and `MEMORY.md` in its directory. A child's
-   first Task makes its Project.
+   Tasks join its Project, else the parent's, and list under the child.
 
 5. **Move only unstarted work,** with
    `lf task move <issue> --wave <wave>/<child>`. A started Task keeps its

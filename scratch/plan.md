@@ -56,6 +56,25 @@ listing's query with `EXPLAIN QUERY PLAN` at about 10,000 Tasks.
   that Project's Wave or a descendant of it; otherwise the rule above
   places it again.
 
+## Built (slice 1)
+
+- `tasks.wave_id` (migration, index `tasks_wave`, trigger) and plan field
+  `task_wave`; `create_task_in` takes the filing Wave and applies the rule
+  (`task_project_in`, recursive over `parent_wave_id`). `join_project_in` is gone.
+- The planning writer sets `task_wave` whenever a `task_project` lands without
+  one and the Task is not already in that Project's Wave or below it. Tracker
+  imports and records from builds without `task_wave` go through it.
+- `move_task` writes both fields; the move preview uses `task_move_project`.
+- Storage readers (listing, counts, steers, CI incidents, Session completion,
+  `task_wave_in`) read `t.wave_id`.
+- A Task in a Wave with no Project gets no tracker `create`; a standalone Task
+  (no Wave) still goes to the tracker as before.
+- Test: `local_planning_tests::a_task_joins_its_wave_project_else_its_nearest_ancestors…`;
+  plan test `query_plans::a_wave_lists_its_own_tasks_by_index`.
+
+Next: fixtures that insert `tasks` rows by SQL with only `project_id` now have
+no Wave; the suites decide which need `wave_id`. Run the `lf` demo below.
+
 ## Shows it worked
 
 ```bash

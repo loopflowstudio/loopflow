@@ -437,9 +437,9 @@ mod tests {
             let config: Config = serde_yaml_ng::from_value(document).unwrap();
             assert_eq!(
                 config.planning_transport(),
-                TrackerConfig::Linear {
+                Some(TrackerConfig::Linear {
                     team: Some("team-id".into())
-                },
+                }),
                 "{spelling}"
             );
         }

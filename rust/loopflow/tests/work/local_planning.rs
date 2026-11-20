@@ -2133,7 +2133,7 @@ fn moving_saves_membership_offline_and_retains_inbound_changes() {
             .unwrap()
         };
         let before = revision();
-        db.execute_batch("CREATE TRIGGER fail_refile BEFORE INSERT ON git_tracker_changes BEGIN SELECT RAISE(ABORT,'injected receipt failure'); END;").unwrap();
+        db.execute_batch("CREATE TRIGGER fail_refile BEFORE INSERT ON plan_changes BEGIN SELECT RAISE(ABORT,'injected receipt failure'); END;").unwrap();
         assert!(!command(repo.path(), home.path(), &args)
             .output()
             .unwrap()

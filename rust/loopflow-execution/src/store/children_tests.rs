@@ -2,7 +2,6 @@ use crate::process::attachment;
 use loopflow_model::durable::{ProjectId, RepositoryId, TaskId};
 use loopflow_model::id::WaveId;
 use loopflow_storage::migration_runner::migration_section_sql;
-use loopflow_storage::planning_exchange::PlanningMutation;
 use loopflow_storage::sqlite::SqliteStore;
 use loopflow_storage::work::task::{NewTask, TaskUpdate};
 use rusqlite::params;
@@ -12,6 +11,17 @@ fn local_repository(store: &SqliteStore) -> RepositoryId {
     // Fence Git discovery before registering the fixture repository.
     std::fs::create_dir_all(repo.join(".git")).unwrap();
     crate::repository::location::ensure_repository(store, repo.to_str().unwrap()).unwrap()
+}
+
+fn local_repository_path(store: &SqliteStore) -> String {
+    local_repository(store);
+    store
+        .home_dir()
+        .unwrap()
+        .canonicalize()
+        .unwrap()
+        .to_string_lossy()
+        .into_owned()
 }
 
 fn local_project(store: &SqliteStore) -> ProjectId {
@@ -25,42 +35,13 @@ fn local_project(store: &SqliteStore) -> ProjectId {
     .id
 }
 
+/// Take `edits` in as another Machine's values, the way a carrier brings them.
 fn import_edits(
     store: &SqliteStore,
     edits: &[loopflow_storage::work::edit::WorkEdit],
 ) -> crate::store::StoreResult<()> {
     let repo = store.home_dir()?.canonicalize().unwrap();
-    let repo = repo.to_str().unwrap();
-    let destination = crate::planning_git::PlanningDestination::new(
-        "/fixture.git",
-        "refs/loopflow/planning/shared/title-fixture",
-    )
-    .unwrap();
-    let route = store.bind_git_destination(repo, &destination)?;
-    let mut snapshot = store.export_git_plan(repo, &route)?;
-    let clock = snapshot
-        .changes
-        .values()
-        .map(|change| change.clock)
-        .max()
-        .unwrap_or(0)
-        + 1;
-    for edit in edits {
-        let parents = snapshot
-            .heads()
-            .filter(|(_, change)| change.edit.key() == edit.key())
-            .map(|(id, _)| id.to_string())
-            .collect();
-        snapshot.changes.insert(
-            uuid::Uuid::new_v4().to_string(),
-            PlanningMutation {
-                edit: edit.clone(),
-                clock,
-                parents,
-            },
-        );
-    }
-    crate::store::git_tracker::import_git_plan(store, repo, &route, "edited", &snapshot)
+    loopflow_storage::test_fixture::arrive(store, repo.to_str().unwrap(), edits)
 }
 
 #[test]
@@ -384,8 +365,7 @@ fn task_checkout_reads_this_machines_checkout() {
 }
 
 #[test]
-fn canonical_task_fields_survive_restart_and_peer_import() {
-    use crate::planning_git::PlanningDestination;
+fn canonical_task_fields_survive_restart_and_reach_another_machine_through_the_hub() {
     use loopflow_storage::work::edit::{Disposition, WorkValue};
 
     let source = tempfile::tempdir().unwrap();
@@ -433,28 +413,16 @@ fn canonical_task_fields_survive_restart_and_peer_import() {
     assert_eq!(saved.branch, task.branch);
     assert_eq!(saved.parent_pr_id, task.parent_pr_id);
     let peer = crate::store::opening::open_ephemeral(&target.path().join("loopflow.db")).unwrap();
-    let destination =
-        PlanningDestination::new("/fixture.git", "refs/loopflow/planning/shared/test").unwrap();
     let wave = store
         .get_wave(saved.wave_id.as_ref().unwrap())
         .unwrap()
         .unwrap();
-    let repo = wave.repo();
-    let target_path = target.path().canonicalize().unwrap();
-    let target_repo = target_path.to_str().unwrap();
-    let destination_id = store.bind_git_destination(repo, &destination).unwrap();
-    peer.bind_git_destination(target_repo, &destination)
-        .unwrap();
-    let snapshot = store.export_git_plan(repo, &destination_id).unwrap();
+    let page = store.plan_records_since(wave.repo(), 0, 1 << 20).unwrap();
+    assert!(!page.more);
+    let target_repo = local_repository_path(&peer);
     for _ in 0..2 {
-        crate::store::git_tracker::import_git_plan(
-            &peer,
-            target_repo,
-            &destination_id,
-            "fixture",
-            &snapshot,
-        )
-        .unwrap();
+        peer.apply_plan_records(&target_repo, &page.records, None, &Default::default())
+            .unwrap();
         let imported = peer.task(&task.id).unwrap().unwrap();
         assert_eq!(imported.id, saved.id);
         assert_eq!(imported.project_id, saved.project_id);

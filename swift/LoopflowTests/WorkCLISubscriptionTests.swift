@@ -281,12 +281,12 @@ struct WorkCLISubscriptionTests {
         let before = try #require(model.task(id: id)?.task)
         model.moveTask(before, toWave: "product")
         #expect(model.navigation.notices.current == nil,
-                "\(model.gitDestinations.failure ?? "") · \(model.workActivity.failure ?? "")")
+                "\(model.repositoryPlan.failure ?? "") · \(model.workActivity.failure ?? "")")
         try await eventually { model.task(id: id)?.task.task.waveId != nil }
         #expect(model.visibleWork.standaloneTasks.isEmpty)
         model.moveTask(try #require(model.task(id: id)?.task), toWave: nil)
         #expect(model.navigation.notices.current == nil,
-                "\(model.gitDestinations.failure ?? "") · \(model.workActivity.failure ?? "")")
+                "\(model.repositoryPlan.failure ?? "") · \(model.workActivity.failure ?? "")")
         try await eventually { model.visibleWork.standaloneTasks.count == 1 }
         #expect(model.selection == .task(id: id))
         #expect(registry.selectedWork == key)

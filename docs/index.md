@@ -124,7 +124,7 @@ lf resume                                  # return to this checkout's conversat
   one summary page (`ship-review`).
 - **Your team keeps its tools.** Teammates review PRs on GitHub and comment in
   Linear or Asana without installing `lf`; their comments reach running agents
-  as steers. With no tracker, the plan syncs through a Git ref on `origin`.
+  as steers. With no tracker, the plan travels with the repository through Git.
 - **Any window.** Use Loopflow Desktop on macOS (and your phone, over
   Tailscale), or stay in Rex, cmux, Herdr, tmux or a plain terminal. They all
   read the same local store and the same `--subscribe --json` streams.

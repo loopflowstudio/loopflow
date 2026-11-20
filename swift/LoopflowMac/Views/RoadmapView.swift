@@ -83,7 +83,7 @@ struct RoadmapView: View {
         VStack(spacing: 0) {
             header
             if repoPath != nil {
-                GitDestinationsView(reading: model.gitDestinations)
+                RepositoryPlanView(reading: model.repositoryPlan)
                     .padding(.horizontal, Spacing.xl)
                     .padding(.bottom, Spacing.sm)
             }

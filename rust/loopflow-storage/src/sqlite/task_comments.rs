@@ -276,7 +276,7 @@ impl SqliteStore {
 
 /// A person's direction comment steers the Task's Sessions at their next
 /// boundary, wherever the Task runs. Local comments and comments arriving
-/// through Git planning render identically, so every Machine agrees on the
+/// from the hub render identically, so every Machine agrees on the
 /// steer's `(source, revision)` and text.
 pub(super) fn comment_steer_in(
     tx: &rusqlite::Transaction<'_>,

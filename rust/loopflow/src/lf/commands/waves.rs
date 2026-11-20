@@ -884,6 +884,7 @@ pub struct TaskListArgs {
 pub fn list_tasks(repo: &Path, query: &TaskListArgs, json: bool) -> Result<()> {
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(async {
+        loopflow_execution::ops::plan_carriers::before_first_read(repo).await;
         let store = loopflow_execution::store::read_existing_registry()?.map(std::sync::Arc::new);
         let tasks = match &store {
             Some(store) => open_tasks(store, repo, query).await?,
@@ -964,7 +965,8 @@ fn task_machine(repo: &Path, issue: &str) -> Result<Option<TaskMachine>> {
         selection: Selection::capture(repo, None)?,
         secrets: Secrets::default(),
     };
-    let connection = loopflow_execution::machine::client::Connection::open_on(&machine, sender)?;
+    let connection =
+        loopflow_execution::machine::client::Connection::open_on(&machine, sender, None)?;
     let read = super::read::Read::TaskStatus {
         directory: repo.to_owned(),
         issue: route.task_id.to_string(),

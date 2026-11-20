@@ -668,11 +668,6 @@ pub(crate) fn resolve_with(
         &["graph"],
         crate::ops::task::DEFAULT_TASK_GRAPH.into(),
     );
-    insert(
-        &mut defaults,
-        &["planning"],
-        serde_yaml_ng::to_value(super::TrackerConfig::default()).expect("planning serializes"),
-    );
     for key in crate::prompt::context_budget::BudgetKey::ALL {
         insert(
             &mut defaults,

@@ -31,7 +31,7 @@ Retired history stores and intermediate branch schemas have no runtime readers.
 | Fact | Owner |
 | --- | --- |
 | Authored goals, memory, Skills, Graphs and code | Repository files and Git |
-| Saved planning | Local Task and Project rows, exchanged through a Git planning ref or a connected Linear or Asana tracker |
+| Saved planning | Each Machine's Wave, Project and Task rows, one stamp per field; carried between Machines by Git plan refs and a hub, or mirrored to a connected Linear or Asana tracker |
 | Commits, PR heads, checks and merge | Git and GitHub |
 | Actual lf command process, causal parent and observed command outcome | `processes` while it runs or a current record names it; history and turns name it for 30 days after it finished |
 | The provider's OS process, its served Session, original parent and current attachment | AgentProcess rows in `processes` |

@@ -138,8 +138,7 @@ the Rust suites. Schema construction can pass even when a released migration
 was edited; this check also verifies immutable history against main and tags.
 Include `store::sqlite::revisions::tests::store_revisions_cover_every_table`
 when adding a table: give displayed rows revision triggers and classify operation-only
-receipts as never displayed. Wave lifecycle changes also run `--test two_people`;
-its shared repository publishes authored files that lifecycle operations may already commit.
+receipts as never displayed.
 When settings leave SQLite, search fixture SQL in `src/`, `tests/`, and
 `tests/e2e/` for removed columns and tables. Seed preferences through `lf set`;
 keep runtime observations in SQLite. Run account, Machine, Wave lifecycle, and
@@ -405,27 +404,12 @@ independent acquisition during failed delivery, local buffering and retained exe
 The peer implements team deltas with current revision timestamps. Graph acquisition
 waits for a turn/step boundary; only watchers retry on the 30–240-second clock.
 Run these Linux fixtures when changing Linear fetches, even if macOS checks pass.
-Linear and Git planning run separately; no provider receipt crosses Git.
-`planning_setup_tests` proves configuration selection and personal-key recovery.
-`planning_foreground_tests` exercises disposable custom refs through public CLI and
-Session connections, including offline independent edits, comments, completion and
-unchanged execution. `planning_write` covers atomic local journal capture and import
-through the same typed writer. `task_remote_tests` exercises actual target CLI dispatch
+`planning_setup_tests` proves tracker selection and that the released `provider: git`
+reads as no tracker. `machine_commands::the_later_change_shows_on_both_machines_through_the_hub`
+runs a laptop and its hub over the real `ssh … lf server connect` carrier, through
+an offline edit and a lost `plan.apply` answer; `sqlite::plan_carriers` covers the
+exchange's store half. `task_remote_tests` exercises actual target CLI dispatch
 with simulated SSH/providers; it does not establish configured remote installation.
-
-`tests/e2e/codex_connect.py --codex "$(command -v codex)" --lf target/debug/lf
---planning-peers --output <dir>` composes a real Codex engine with a synthetic
-Responses endpoint and disposable Git planning. It launches with `--task`, then
-imports edits, comments and completion for that same Task during live connect and
-explicit resume, including after killing the fixture's driver. Its historical
-Workflow is seeded; its Session, drivers and checkout are created by public commands.
-Exchange preserves Workflow/placement, live driver, Session/native identity and
-append-only history without starting an engine or provider turn. After imported
-completion, the current client explicitly starts and completes another turn on the
-same engine. The controlled protocol client is headless, not a rendered TUI or
-running Workflow-edge proof. It needs re-authoring before it runs again: it seeds the
-renamed `task_workflows` table and resumes a Run, which `lf resume` refuses. Prepare the script's uv dependencies before
-running it through `scripts/test_network.py`.
 
 Only attempted effects acknowledge; equal-desired provider readback can instead
 retire an unattempted intention without another write. The portable `watch` offline-completion test requires a foreground delivery error

@@ -193,7 +193,7 @@ high as `agents`.
 | Setting | CLI flag | Config key |
 |---|---|---|
 | Harness / model | `-a claude:opus` | `agent: claude:opus` · `default_agent` · `agents` |
-| Tracker | — | `tracker: {linear: {team: "<id>"}}`, `{asana: {team: "<gid>"}}`, or `{git: {shared: team}}` |
+| Tracker | — | `tracker: {linear: {team: "<id>"}}` or `{asana: {team: "<gid>"}}`; without one, the plan [travels with the repository](work.md#share-the-plan-with-your-team) |
 | Run mode | `-i` (interactive) / `-b` (headless) | Interactive on direct TTY; headless in Graphs |
 | Include docs | `--docs README.md,docs/` | `context: {docs: [README.md, docs/]}` |
 | Changed file paths | `--diff files` | `context: {diff_files: true}` |

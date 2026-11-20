@@ -133,8 +133,9 @@ the sandbox: the copy is never writable.
 **Desktop already has "this window cannot change the Machine right now".**
 `PendingChanges.Link.away` disables change controls and shows a standing
 notice, "The Machine is away; showing what was last read". The Dev app showed
-that sentence when its reads failed to decode, though the link was up. Why is
-not established; `ServerLink.lostLink` only names disconnects.
+that sentence when its reads failed to decode, though the link was up: one
+undecodable frame failed the whole observation and every reopening failed on
+the same frame (slice 4).
 
 **`welcome` and `status` reject unknown fields** (`#[serde(deny_unknown_fields)]`
 in `rust/loopflow-execution/src/machine/wire.rs`). A field added to either
@@ -254,18 +255,18 @@ a world under macOS's temporary directory is past the limit (118 bytes in
 `ready` means the server answers at a revision this build speaks. A different
 executable is not an error: status reports the server's executable hash, and
 `installation::server::ensure`, the one caller that needs "the same executable"
-to decide re-registration, compares it. A branch build then reports the
-installed server ready without exec'ing another lf. Every other caller of
-`status()` is read before the change; one that relied on the old meaning asks
-for the comparison by name.
+to decide re-registration, compares it. A branch build reports the installed
+server ready without exec'ing another lf.
 
 ### A read that cannot be decoded is not "the Machine is away"
 
-Establish first why a decode failure reached `awayText`. Then a decode failure
-shows its own sentence, naming both builds from `welcome.build` and the app's
-own: "This Loopflow (0.16.0+3500440e9) can't read what the server
-(0.16.0+21d541a87) sent." The launcher's comparison keeps Dev from getting
-here; the installed app meets it whenever the app and server builds part.
+A reading whose body this build can't decode fails its part alone; the other
+parts stay current and the link stays up. The part's Notice names both builds,
+from `welcome.build` and the app's own, and where decoding stopped: "The plan
+couldn't be read: This Loopflow (0.16.0+3500440e9) can't read what the server
+(0.16.0+21d541a87) sent. (missing owned_by_you at body.tasks.0)". The
+launcher's comparison keeps Dev from getting here; the installed app meets it
+whenever the app and server builds part.
 
 ## Choices made for review
 
@@ -370,7 +371,10 @@ Checks, November 20 at 0715825870:
 - The copy reads the live store under one read transaction and never writes it.
 - `~/.lf-copy` is private to the account (0700): it holds the full store.
 
-## What goes
+## What went
+
+All of these are gone from the branch (`grep` on November 20 finds none
+outside `scratch/`).
 
 - `scripts/loopflow-dev.py`: the inherited-`LF_HOME` pass-through in
   `_app_environment`; the "ordinary app commands never migrate the shared
@@ -518,8 +522,11 @@ server`, fake-world recipes, `welcome` and `status` as they are.
    4 passed. Not run: clippy, the iOS build, `lf install server` replacing a
    server left by another executable (`transport_tests`), and the Notice in a
    Dev window against a server of another wire. Gate and CI.
-5. **Docs.** Written ahead of the code, describing the behavior above; each
-   slice checks its part against them and corrects whichever is wrong.
+5. **Docs: read against the code after slice 4, no difference found.**
+   Written ahead of the code; each slice corrected its part. Read, not run:
+   `docs/server.md`, `docs/troubleshooting.md` and the server README give
+   `ready` the meaning `client::status()` has; swift/README.md's Notice is the
+   string `aReadingThisBuildCannotDecodeNamesBothBuilds` asserts.
    - `swift/README.md`: the opening section (the three things Dev opens, the
      copy's sentence, windows per Machine, the socket-length notice), the
      decode Notice after "Last known", "Build system" and its command table.
@@ -533,3 +540,12 @@ server`, fake-world recipes, `welcome` and `status` as they are.
    - `scripts/testing.md`: `run` and `copy_world`.
    - `.lf/qa/desktop.md` and `.lf/qa/held-terminals.md` no longer quote
      "uses another executable" (slice 4). Neither scenario was run again.
+
+## Remaining
+
+No slice remains. Gate and CI run what the slices list under "Not run".
+
+For compress: the sentence for an undecodable reading travels from the link
+to `WorkSubscriptions` as an `unreadable` closure on three types
+(`ServerSubscription`, `ServerWatch`, `LineSubscription`), and two of the five
+`LineSubscription` constructions pass `{ nil }`. One carrier may do.

@@ -117,3 +117,9 @@ Seen and left alone:
   `target/debug/lf server run`. Nothing removes a custom home's server job.
 - `/private/tmp/…/world-backlog/home/server.plist` now points at the installed
   app's lf.
+- `lf server connect` and enabling the mobile listener call
+  `installation::server::ensure` without `delegate_selected`
+  (`rust/loopflow/src/server/connect.rs:11`, `mobile.rs:125`). Run from a
+  branch build on the default home, either registers that build's server in
+  place of the installed one. It did so before this work too, when `status()`
+  called another executable not ready. Desktop calls neither.

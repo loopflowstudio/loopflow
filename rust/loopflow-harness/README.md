@@ -38,6 +38,13 @@ recording it and joining a transcript to a Session are
 [execution](../loopflow-execution/src/harness/README.md)'s, which implements
 `Launcher` on the same four structs.
 
+One thing here is Loopflow's own writing, not a client's: `transcript::Launch`
+and `lf_tag` parse the `<lf:skill:NAME>`, `<lf:message>` and
+`<lf:suggest_actions>` tags that execution's `prompt` writes into a
+conversation or asks the agent to emit, so a reader can tell injected text
+from typed text. The tag strings are literals on both sides; change them
+together.
+
 A function that needs a `SqliteStore` stays in execution and calls down. This
 crate gains no workspace dependency to keep a file whole:
 

@@ -734,3 +734,18 @@ How Linear projects are used in practice (web search and summarising fetches, 20
 - hilton.org.uk: "Like Jira projects, Linear teams have members and no end date."
 
 > i agree with linear that best practices are to have proejcts end; this is basically the chapters idea
+
+## 2026-11-20
+
+Jack Heart: "how are we doing"
+Jack Heart: "what exaclty have we ecied to do"
+
+Observed: PR #1986 open for LOO-996 at human-review, base is LOO-938's branch, CI suites skipped (17 checks: 2 success, 15 skipped). LOO-995 stopped at sync: "stack parent jack/loo-938-send-every-planning-change-through-one-queue closed without merging" — LOO-938's PR #1971 is closed and #1983 is open on the same branch.
+Jack Heart: "a" (to: LOO-995 stop — a. relaunch as is and see whether sync finds #1983)
+
+Jack Heart: "ok lets lf sync and group. What has landed now and what is left in this iff"
+Jack Heart, on "1. Subtasks, not subwaves. A Task can have child Tasks, and the conversation you are using never changes; you don't have to open the children.": "This doesnt really feel right to me.  I think what I imagine is that we just have one data type that is infinitely nestable. Right now we don't need to have KRs but we can have KRs. Waiter, it does. You're allowed to have children with KR. You're allowed to have a container that doesn't have KR that has children that do have KR.
+
+These are called waves. Each wave can publish its own PRs and can publish as many PRs as it wants. It always has at most one current PR but it also has previous KPRs.  This should be relatively cheap to create, to close, and to open. It always has at most one runner on it
+
+My question becomes: how does linear just not have this kind of notion of an infinitely nested or nestable hierarchy?"

@@ -40,7 +40,7 @@ Passed over:
 
 **The one list.** `loopflow_execution::os_process::TOOL_DIRS` (name for
 implementer): `~/.local/bin`, `/opt/homebrew/bin`, `/opt/homebrew/sbin`,
-`/usr/local/bin`, `/usr/local/sbin`, `~/.cargo/bin`, with
+`/usr/local/bin`, `/usr/local/sbin`, `~/.cargo/bin` (qa added `~/.opencode/bin`), with
 `fn tool_path(path: &str, home: &Path) -> String` beside it. Everything below
 derives from it.
 
@@ -188,9 +188,11 @@ All four built (commits 54c70a2345 and the one after).
    reads `agent_override()`.
 4. **Plists, systemd, SSH, Swift** — done. `REMOTE_PATH` is `remote_path()`.
 
-Not run here: the `env -i … lf session resume <throwaway>` acceptance (needs a
-PTY, a server and a real provider; a branch build against the real store) and
-Rex `lf open --json` with `claude` off `PATH`. Both go to qa.
+QA ran both by hand on 2026-11-19 (`scratch/qa.html`): the `env -i` resume
+started real Claude against a launchd-run private server, and `lf open --json`
+with the provider missing returned its reason on tmux, Rex and Herdr. QA also
+made `lf open --host tmux` work on tmux 3.7 (window lookup before `new-window`)
+and added `~/.opencode/bin` to the tool directories.
 
 ## Remaining
 
@@ -242,9 +244,9 @@ Rex `lf open --json` with `claude` off `PATH`. Both go to qa.
 
 - `cargo test -p loopflow --lib open::` and `server::` — implementer.
 - `cargo test -p loopflow --test transport_tests a_launch_that_found_no_provider` — implementer.
-- `env -i … lf session resume <throwaway>` — qa, by hand.
+- `env -i … lf session resume <throwaway>` — passed in qa, by hand.
 - The Rust suites on macOS and Linux — CI; watch fixtures with a bare `PATH`.
-- Rex `lf open --task <ID> --json` with `claude` off `PATH` — qa.
+- `lf open --task <ID> --json` with the provider missing, on tmux, Rex (`-a pi`) and Herdr — passed in qa. cmux and Desktop not run: gate or a person.
 
 Open PRs on the same files: #1978, #1976, #1967 (`native_session.rs`,
 `claude.rs`), #1972 (`server/mod.rs`). Rebase before slice 1 lands.

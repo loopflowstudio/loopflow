@@ -39,3 +39,21 @@
 - How the bare-PATH provider fixture should hide `claude` on a Machine that
   has it in a tool directory is left open; the three options are in
   `scratch/plan.md` "Remaining".
+
+## QA (headless)
+
+- `lf open --host tmux` failed on tmux 3.7c before any pane opened ("can't
+  specify pane here": `new-window -a -t` no longer takes a pane). Fixed here by
+  asking tmux for the caller's window first; it is not part of the three
+  outcomes but blocked checking them on tmux.
+- `~/.opencode/bin` joined the tool directories: OpenCode's installer uses only
+  that directory. Reversible in one line.
+- A provider that starts and exits at once is reported `usable`: the receipt is
+  acknowledged when the provider process is spawned (`NativeStarted`), not when
+  it takes input. The tail rung of part 2 was not reachable in the real product.
+  Whether `usable` should wait for more is a product question, not changed.
+- A failed `lf open -a <harness>` still records the move: the next `lf open`
+  without `-a` tries that harness again. Not changed.
+- Pi installed under nvm is "not installed" in a Rex pane on this Machine. This
+  is the recorded cost of dropping the caller's `PATH`; before this change a
+  terminal caller's `PATH` reached the pane.

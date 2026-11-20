@@ -158,8 +158,8 @@ it. `lf -a codex open --task ENG-123` moves it, as
 
 A pane finds the harness and its tools wherever the host was started, including
 a Rex or tmux server started at login: lf looks in `~/.local/bin`,
-`/opt/homebrew/bin`, `/opt/homebrew/sbin`, `/usr/local/bin`, `/usr/local/sbin`
-and `~/.cargo/bin` after the host's own `PATH`. The pane does not inherit the
+`~/.opencode/bin`, `/opt/homebrew/bin`, `/opt/homebrew/sbin`, `/usr/local/bin`,
+`/usr/local/sbin` and `~/.cargo/bin` after the host's own `PATH`. The pane does not inherit the
 `PATH` of the terminal you ran `lf open` from, so a tool reachable only through
 your shell startup files (nvm, mise, asdf or pyenv shims) is missing there
 unless it is also in one of those directories.

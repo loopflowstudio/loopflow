@@ -294,8 +294,10 @@ pub fn execution_context() -> Result<loopflow_storage::child::ChildExecutionCont
 /// Where the tools lf starts live (providers, `gh`, `git`, `node`). launchd,
 /// systemd and an SSH command give lf a `PATH` holding none of them; a
 /// terminal's usually holds all of them.
-const TOOL_DIRS: [&str; 6] = [
+const TOOL_DIRS: [&str; 7] = [
     "~/.local/bin",
+    // OpenCode's installer puts it here and nowhere else.
+    "~/.opencode/bin",
     "/opt/homebrew/bin",
     "/opt/homebrew/sbin",
     "/usr/local/bin",
@@ -304,7 +306,7 @@ const TOOL_DIRS: [&str; 6] = [
 ];
 
 /// `TOOL_DIRS` with `~/` under `home`.
-pub fn tool_dirs(home: &Path) -> [String; 6] {
+pub fn tool_dirs(home: &Path) -> [String; 7] {
     TOOL_DIRS.map(|entry| match entry.strip_prefix("~/") {
         Some(rest) => home.join(rest).to_string_lossy().into_owned(),
         None => entry.to_owned(),
@@ -409,6 +411,7 @@ mod tests {
         let entries: Vec<_> = path.split(':').collect();
         assert_eq!(entries[..3], ["/usr/bin", "/bin", "/opt/homebrew/bin"]);
         assert_eq!(entries[3], "/Users/maya/.local/bin");
+        assert!(entries.contains(&"/Users/maya/.opencode/bin"));
         assert!(entries.contains(&"/Users/maya/.cargo/bin"));
         assert_eq!(
             entries

@@ -25,32 +25,47 @@ pub(super) fn open(target: &Resolved, focus: bool, argv: &[String]) -> Result<St
         ),
         _ => TmuxLocation::current(),
     };
-    let window = |after: Option<&str>| {
-        let mut command = caller
+    let tmux = || {
+        caller
             .as_ref()
             .map(host_command)
-            .unwrap_or_else(|| Command::new("tmux"));
-        command.arg("new-window");
-        if let Some(pane) = after {
-            command.args(["-a", "-t", pane]);
-        }
-        if !focus {
-            command.arg("-d");
-        }
-        command
-            .args([
-                "-P",
-                "-F",
-                "#{pane_id}",
-                "-n",
-                &target.destination_name(),
-                "-c",
-            ])
-            .arg(target.cwd())
-            .arg(&shell);
-        run_host(command, "tmux")
+            .unwrap_or_else(|| Command::new("tmux"))
     };
-    let output = window(caller.as_ref().map(|location| location.pane.as_str()))?;
+    // `new-window -t` names a window: tmux 3.7 refuses a pane there.
+    let after = match &caller {
+        Some(location) => {
+            let mut command = tmux();
+            command.args([
+                "display-message",
+                "-p",
+                "-t",
+                &location.pane,
+                "#{window_id}",
+            ]);
+            Some(run_host(command, "tmux")?.trim().to_owned())
+        }
+        None => None,
+    };
+    let mut command = tmux();
+    command.arg("new-window");
+    if let Some(window) = &after {
+        command.args(["-a", "-t", window]);
+    }
+    if !focus {
+        command.arg("-d");
+    }
+    command
+        .args([
+            "-P",
+            "-F",
+            "#{pane_id}",
+            "-n",
+            &target.destination_name(),
+            "-c",
+        ])
+        .arg(target.cwd())
+        .arg(&shell);
+    let output = run_host(command, "tmux")?;
     let pane = output.trim();
     anyhow::ensure!(!pane.is_empty(), "tmux reply named no pane");
     Ok(pane.to_owned())

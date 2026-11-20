@@ -1,0 +1,78 @@
+<!doctype html><meta charset="utf-8"><title>LOO-986 QA</title>
+<style>body{font:15px/1.5 -apple-system,sans-serif;max-width:960px;margin:2rem auto;padding:0 1rem;color:#1d1d1f}
+pre{background:#f5f5f4;padding:.8rem;border-radius:6px;overflow-x:auto;font:12px/1.4 ui-monospace,Menlo,monospace;white-space:pre-wrap}
+code{font:13px ui-monospace,Menlo,monospace;background:#f5f5f4;padding:0 .2em;border-radius:3px}
+h2{margin-top:2.2rem;font-size:1.15rem} .ok{font-size:.8rem;font-weight:500;color:#0a6b2d;margin-left:.5rem}
+section{border-top:1px solid #e5e5e5}</style>
+<h1>LOO-986: QA run, 2026-11-19</h1>
+<p>Branch <code>lf</code> (debug build), two private Machines under <code>/tmp/lf-qa-986</code>: one with the account's real provider logins, one with an empty <code>HOME</code> so no provider is installed. Hosts were private tmux 3.7c, Rex and Herdr 0.9.3 servers. Everything started was stopped and the launchd job removed.</p>
+<section><h2>1. A provider starts under launchd&#x27;s PATH <span class="ok">works</span></h2><p>Private <code>LF_HOME</code>, real logins, branch <code>lf</code>. In a private tmux pane: <code>env -i HOME=$HOME TERM=xterm-256color PATH=/usr/bin:/bin:/usr/sbin:/sbin LF_HOME=… /abs/lf session resume &lt;session&gt;</code>. Run twice: once against a foreground server, once (final binary) against a server registered under launchd with <code>lf install server</code>.</p><p>Real Claude Code started (its trust dialog for the throwaway directory):</p><pre> This session hasn&#x27;t worked here before. Is this a directory you created or one you trust?
+ Claude Code&#x27;ll be able to read, edit, and execute files here. Its skills, commands, and agents load and can run commands, and so can the
+ git settings of its repository. Your answer holds for this session. Starting Claude Code in this directory and trusting it there lasts,
+ and covers its whole repository or everything below it.
+ Security guide
+ ❯ No, exit
+   Yes, add it
+ Enter to confirm · Esc to cancel</pre><p>The <code>PATH</code> the provider was given (<code>ps eww</code>):</p><pre>PATH=/usr/bin:/bin:/usr/sbin:/sbin:/Users/jack/.local/bin:/Users/jack/.opencode/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/local/sbin:/Users/jack/.cargo/bin</pre><p>The launchd job carried only <code>LF_BIN</code> and <code>LF_HOME</code>, no <code>LF_SUPERVISED</code>; the server itself started with <code>PATH=/usr/bin:/bin:/usr/sbin:/sbin</code>, and the holder it started had the tool directories appended. A Task started through that server (<code>lf task create … --run</code>) launched its Claude conversation.</p></section><section><h2>2a. tmux, Claude missing <span class="ok">works after a fix</span></h2><p>Second private Machine with an empty <code>HOME</code>, so no tool directory holds a provider. From a tmux pane: <code>lf open --task c217c2 --tab --host tmux --json</code>.</p><pre>{
+  &quot;host&quot;: &quot;tmux&quot;,
+  &quot;destination&quot;: &quot;%7&quot;,
+  &quot;status&quot;: &quot;failed&quot;,
+  &quot;reason&quot;: &quot;&#x27;claude&#x27; is not installed. Install it with `npm install -g @anthropic-ai/claude-code`, then open `claude` to sign in; retry the same command&quot;
+}</pre><p>The pane, still open and waiting:</p><pre>Error: &#x27;claude&#x27; is not installed. Install it with `npm install -g @anthropic-ai/claude-code`, then open `claude` to sign in.
+Conversation ended with an error. Correct the error above and retry lf open. Press Enter to close.</pre><p>Plain text for a person: <code>Say hello in the README · c217c2: &#x27;claude&#x27; is not installed. Install it with `npm install -g @anthropic-ai/claude-code`, then open `claude` to sign in; retry the same command</code></p><p>The pane's command held no <code>PATH=</code> and no <code>--agent</code>: <code>… env -u LF_AGENT_CALLER -u LF_AGENT_OVERRIDE LF_HOME=… LF_OPEN_RECEIPT=… lf session resume &lt;id&gt;</code>.</p></section><section><h2>2b. tmux, Codex missing <span class="ok">works</span></h2><p><code>lf open --task c217c2 --tab --host tmux --json -a codex</code>.</p><pre>{
+  &quot;host&quot;: &quot;tmux&quot;,
+  &quot;destination&quot;: &quot;%9&quot;,
+  &quot;status&quot;: &quot;failed&quot;,
+  &quot;reason&quot;: &quot;Codex config/read failed: codex CLI not found: codex; retry the same command&quot;
+}</pre></section><section><h2>2c. Rex <span class="ok">works; see what is still wrong</span></h2><p>Private Rex server (<code>rex server run --listen unix://…</code>). Rex runs its terminals through <code>login</code>, which restores the real <code>HOME</code>, so Claude and OpenCode were found and started there from a <code>PATH</code> without <code>~/.local/bin</code> (status <code>usable</code>). To see a failure: <code>lf open --task c217c2 --tab --host rex --server … --json -a pi</code>; Pi is installed only under nvm on this Machine.</p><pre>{
+  &quot;host&quot;: &quot;rex&quot;,
+  &quot;destination&quot;: &quot;window:01a1f64a-6365-780e-9589-8ff61ea03fa0&quot;,
+  &quot;status&quot;: &quot;failed&quot;,
+  &quot;reason&quot;: &quot;&#x27;pi&#x27; is not installed. Install Pi 1.3 or later with `npm install -g --ignore-scripts @earendil-works/pi-coding-agent`. Configure its model and credentials in Pi; retry the same command&quot;
+}</pre><p><code>rex block capture</code>, taken afterwards only to confirm the pane still shows it:</p><pre> opencode thread knew.
+Error: &#x27;pi&#x27; is not installed. Install Pi 1.3 or later with `npm install -g --ign
+ore-scripts @earendil-works/pi-coding-agent`. Configure its model and credential
+s in Pi.
+Conversation ended with an error. Correct the error above and retry lf open. Pre
+ss Enter to close.</pre></section><section><h2>2d. Herdr, as an agent tool call <span class="ok">works</span></h2><p>Private Herdr server; the caller set <code>HERDR_*</code>, <code>LF_AGENT_CALLER</code>, a shim directory first on <code>PATH</code> and <code>VIRTUAL_ENV</code>. <code>lf open --task c217c2 --json</code> (sibling-tab path).</p><pre>{
+  &quot;host&quot;: &quot;herdr&quot;,
+  &quot;destination&quot;: &quot;w1:t3&quot;,
+  &quot;status&quot;: &quot;failed&quot;,
+  &quot;reason&quot;: &quot;&#x27;claude&#x27; is not installed. Install it with `npm install -g @anthropic-ai/claude-code`, then open `claude` to sign in; retry the same command&quot;
+}</pre><pre>Error: &#x27;claude&#x27; is not installed. Install it with `npm install -g @anthropic-ai/claude-code`, then open `claude` to sign
+ in.
+Conversation ended with an error. Correct the error above and retry lf open. Press Enter to close.</pre><p>Then with a stand-in <code>claude</code> that writes down its environment (the only stand-in in this run): the conversation got Herdr's <code>PATH</code> plus the tool directories, no shim directory, no <code>VIRTUAL_ENV</code>.</p><pre>PATH=/tmp/lf-qa-986/b/bin:/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/tmp/lf-qa-986/b/home/.local/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/local/sbin:/tmp/lf-qa-986/b/home/.cargo/bin
+VIRTUAL_ENV=unset
+LF_AGENT_CALLER={&quot;session_id&quot;:&quot;c8bedc8aa0e249288e30d71c13d6cc5b&quot;,&quot;agent_process_id&quot;:&quot;6c596877-1db7-4ac4-8376-57744723fd9c&quot;,&quot;origin_exec_id&quot;:&quot;74086b26-fd05-41a5-94d1-154556af8548&quot;,&quot;trace_id&quot;:&quot;7b58db5d-473b-437f-9a</pre></section><section><h2>3. Rerunning a pane&#x27;s command leaves the harness alone <span class="ok">works</span></h2><p>Real Claude and Codex. <code>lf open --tab --host tmux --json --session &lt;id&gt;</code> opened Claude; the pane command was <code>lf session resume &lt;id&gt;</code> with no <code>--agent</code>. In another pane <code>lf resume -a codex &lt;id&gt;</code> moved it. Then the first pane's exact command was run again.</p><p>The replay attached to the Codex conversation; the store still read <code>codex</code> and no Claude process was started:</p><pre>  QA_CLAUDE
+  &lt;/lf:message&gt;
+• QA_CLAUDE
+  Worked for 6s • 4:07 PM
+                                                                                                         ⚠ 5h limit: only 3% left · resets at 5:22 PM · /status
+› Ask Codex to do anything
+  GPT-6.2-Astra medium · /private/tmp/lf-qa-986/a/repo.repo · repo
+  ← for agents · ? for shortcuts                                                                                                      ⚠ 2 warnings · f2 to view</pre><p><code>lf open … -a claude</code> then wrote <code>lf session resume &lt;id&gt; --agent claude</code> and the store read <code>claude</code>:</p><pre>{
+  &quot;host&quot;: &quot;tmux&quot;,
+  &quot;destination&quot;: &quot;%4&quot;,
+  &quot;status&quot;: &quot;usable&quot;,
+  &quot;reason&quot;: null
+}</pre></section>
+<section><h2>Fixed during the run</h2><ul>
+<li><b><code>lf open --host tmux</code> opened nothing on tmux 3.7c.</b> Every open answered <code>tmux refused: can't specify pane here</code>: <code>new-window -a -t</code> no longer accepts a pane ID. lf now asks tmux for the caller's window (<code>display-message -p -t &lt;pane&gt; '#{window_id}'</code>) and targets that. Same on <code>main</code>; fixed here because it blocked the tmux acceptance. Fixture <code>tmux_opens_a_named_window_after_the_callers</code> updated and passing.</li>
+<li><b><code>~/.opencode/bin</code> added to the tool directories</b> (and to <code>docs/workspaces.md</code>). OpenCode's installer uses only that directory, so a Machine without the Homebrew copy would lose OpenCode in every launchd-started pane.</li>
+</ul></section>
+<section><h2>What works now</h2><p>All three "done when" lines of the plan, on tmux, Rex and Herdr: a provider starts from launchd's <code>PATH</code> with no <code>PATH=</code> in the pane command; a failed open returns <code>status: failed</code> with lf's own reason in <code>--json</code> and in text while the pane keeps the error and waits for Enter; a pane command names a harness only when the caller passed <code>-a</code>, and replaying it does not move the conversation.</p></section>
+<section><h2>Not reached</h2><ul>
+<li>cmux: not installed on this Machine.</li>
+<li>Loopflow Desktop opening a conversation with the branch's bundled <code>lf</code>, and the Swift <code>enrichedPath</code> copy: no app build was made.</li>
+<li>systemd unit, the SSH <code>remote_path()</code> snippet on a remote Machine, and the published cleanup/update plists: need Linux or a release install.</li>
+<li>The real Rex app started by launchd: only a private Rex server was run, as the QA notes require. Its terminals did start Claude and OpenCode from a <code>PATH</code> without <code>~/.local/bin</code>.</li>
+<li>The full Rust suites (bare-<code>PATH</code> fixtures on macOS): left to CI, as the plan says. Run here: <code>cargo test -p loopflow-execution --lib os_process::</code> (44 passed), <code>cargo test -p loopflow --test integration tmux_</code> (1 passed), <code>cargo clippy -p loopflow -p loopflow-execution --all-targets -- -D warnings</code> (clean).</li>
+</ul></section>
+<section><h2>Still wrong, worst first</h2><ol>
+<li><b>Pi under nvm is "not installed" in a Rex pane.</b> <code>'pi' is not installed. Install Pi 1.3 or later…</code> while <code>pi</code> is on the terminal's <code>PATH</code>. This is the recorded cost of dropping the caller's <code>PATH</code> (plan "Exclusions"); before this change a terminal caller's <code>PATH</code> reached the pane. The message tells the person to install something they have.</li>
+<li><b>A provider that starts and exits at once is reported <code>usable</code>.</b> The receipt is acknowledged when the provider process is spawned, not when it takes input; a stand-in that printed "No conversation found" and exited 1 gave <code>status: usable</code>, with the error only in the pane. So the "what the provider said before exiting" answer was never reached through the real product; only lf's own errors were.</li>
+<li><b>A failed <code>lf open -a codex</code> still moves the conversation.</b> Codex was missing, the open failed, and the next <code>lf open</code> without <code>-a</code> tried Codex again. "Retry the same command" holds; getting back needs <code>-a claude</code>.</li>
+<li><b>A declined Claude trust dialog leaves a thread the next headless turn can't find</b> (<code>No conversation found with session ID …</code>); <code>lf session new --prepare</code> cleared it. Not from this change.</li>
+<li>tmux window names: after a failed open the window was renamed <code>bash</code> instead of keeping the Task's name. Cosmetic, not from this change.</li>
+<li><code>lf open --here --json</code> prints the conversation's terminal bytes before the JSON. Not from this change.</li>
+</ol></section>

@@ -85,35 +85,25 @@ part of this one.
 - Settings are `NextLaunch`: a running conversation keeps what it started
   with; a resumed one picks up the new default.
 
-## What goes
+## Built
 
-- `agent/mod.rs`: `CodexSandboxMode`, `CodexApprovalPolicy`,
-  `CodexPermissionConfig`, `read_codex_permission_config`,
-  `parse_codex_permission_config`, `parse_toml_string_assignment` (if no other
-  caller), `merge_codex_permission_config`, `codex_permission_policy`,
-  `ClaudePermissionMode`, `read_claude_permission_mode`,
-  `claude_settings_paths`, `parse_claude_permission_mode`,
-  `claude_skip_permissions` and its "less permissive than Loopflow's
-  non-interactive default" warning, `is_task_checkout`. Roughly
-  `agent/mod.rs:420-660`, and their tests at `:1600-1680`
-  (`parse_codex_permission_config_reads_top_level_policy`,
-  `codex_policy_preserves_vendor_grants_and_raises_restrictive_defaults`,
-  `parse_claude_permission_mode_reads_default_mode`;
-  `attended_codex_keeps_its_own_policy_unless_yolo_or_a_boundary_applies`
-  becomes the four-cell table above).
-- `run.rs:504-509,621` (`checkout_yolo`) and the `if batch` block in
-  `agent/session.rs:112-122`.
-- `ops/commit.rs:283` `skip_permissions: true`: the launch is a Batch, so the
-  predicate already answers.
-- Docs and README text: "raise the floor", "more-permissive vendor configs are
-  never downgraded", the separate "Headless Task runs … run as `yolo`" bullets
-  in `docs/config.md` and `docs/security.md`. The harness README row "runs as
-  `yolo` in its Task's checkout" becomes "never asks permission, whatever
-  `yolo` says".
-- Test rows that pin "unset is off": `config.rs:1153`, `config_tests.rs:68`,
-  `config/settings.rs:1321-1331` (`yolo: perhaps` / `yolo: null` now resolve
-  on), `launch_policy_tests.rs`, `session_launch_contract.rs`,
-  `settings_launch_tests.rs:50-110`.
+All three slices are on this branch, stacked on LOO-1013 (#1998, open on
+2026-11-20) with `lf sync LOO-1013`; `lf sync main` once it merges.
+
+- `AgentConfig::skips_permissions(Mode)` in `agent/mod.rs` is the one rule.
+  Claude terminal and Antigravity terminal pass `launch.kind.mode()`, Claude
+  stream `Headless`, Codex app-server `Interactive` only with a native client
+  attached, Codex terminal and OpenCode `kind.mode()`. Antigravity's headless
+  run passes the flag unconditionally (headless by construction).
+- Deleted: the Codex/Claude vendor-config readers and floors,
+  `is_task_checkout`, `checkout_yolo`, the `batch` parameter of
+  `resolve_session_config`, the forced bypass in `ops/commit.rs`. The grep
+  below finds nothing.
+- Default flipped in `catalog.rs:276` with the new description; `--yolo`
+  help in `lf/mod.rs:95`; docs in `docs/config.md`, `docs/security.md`,
+  `docs/troubleshooting.md`, `harness/README.md`.
+- The launch-policy fixture opened its "attended" terminal as a `Batch`; it
+  now says `Chat`, which is what `lf -i` launches.
 
 Must survive: `yolo: false` at every layer and scope (personal, repository,
 Wave, skill, Graph step) for attended launches; `LF_YOLO_OVERRIDE`; layer
@@ -122,6 +112,21 @@ attended Claude and Codex (`provider_writable_roots`), which matter exactly
 when `yolo: false`; Codex auto-approval of app-server requests on headless
 drivers (`ApprovalPolicy::AutoApprove`, a different thing: how lf answers a
 request, not what it asks the vendor for); Pi untouched.
+
+Checks run in implement: `cargo test -p loopflow --lib launch_policy` pass;
+`cargo test -p loopflow-execution --lib -- config:: harness::launch_matrix
+agent:: harness::` pass; integration `config_tests:: documented_commands::
+settings_launch_tests::` one failure,
+`automatic_agent_selection_requires_exactly_one_installed_harness` (agent
+discovery, untouched here; likely the macOS PATH trap).
+
+## Remaining
+
+- Gate: rerun that failure from an empty directory; run
+  `session_launch_contract`; CI runs the suites.
+- `lf sync main` after #1998 merges, then recheck the Antigravity rows.
+- Not probed: the Claude root-refusal wording in `docs/troubleshooting.md`
+  is from memory (needs a root shell).
 
 ## Decisions
 
@@ -166,57 +171,6 @@ valid and applies the moment someone opens that step attended.
 - Desktop: no yolo control or wire field. Nothing changes.
 - Release notes: one line when the release is cut; no migration.
 
-## Antigravity (PR #1998, LOO-1013)
-
-Open on 2026-11-20. It edits the same catalog row, docs paragraphs and launch
-matrix. Implement starts from it: `lf sync main` if it has merged, else
-`lf sync LOO-1013`. Its terminal launch follows `config.skip_permissions` and
-its headless run always passes `--dangerously-skip-permissions`; both move
-onto the predicate.
-
-## Slices
-
-1. **The predicate and the default, shown by the matrix.** Flip the literal,
-   add the predicate, route Claude, Codex and OpenCode (and Antigravity when
-   under the branch) through it. Extend `harness::launch_matrix` and
-   `launch_policy_tests.rs:259` to the four cells on every harness: unset
-   attended skips; `yolo: false` attended sends no permission flag or param;
-   `yolo: false` headless skips, including a Codex Task step
-   (`danger-full-access`) and a Codex `-b` outside a Task checkout. Run
-   `cargo test -p loopflow --lib launch_policy` and
-   `cargo test -p loopflow-execution --lib config:: harness::launch_matrix`.
-   This shows whether one predicate reaches every launch path; a path that
-   still asks under headless is a second rule to find.
-2. **Delete what the predicate replaced**: the list under "What goes" in
-   `agent/mod.rs`, `run.rs`, `agent/session.rs`, `ops/commit.rs`, and the
-   tests that pinned the floors.
-3. **Docs and help**: the doc files, catalog description, `--yolo` help.
-
-## Status (implement)
-
-All three slices are built on this branch, stacked on LOO-1013 (#1998) with
-`lf sync LOO-1013`; `lf sync main` once it merges.
-
-- One predicate, `AgentConfig::skips_permissions(Mode)`, in
-  `agent/mod.rs`. Callers pass the attended fact each harness has: Claude
-  terminal and Antigravity terminal `launch.kind.mode()`, Claude stream
-  `Headless`, Codex app-server `Interactive` only with a native client
-  attached, Codex terminal `kind.mode()`, OpenCode `kind.mode()`.
-  Antigravity's headless run still passes the flag unconditionally (headless
-  by construction).
-- Deleted: the Codex/Claude vendor-config readers and floors,
-  `is_task_checkout`, `checkout_yolo`, the `batch` parameter of
-  `resolve_session_config`, the forced bypass in `ops/commit.rs`.
-- Taught: the launch-policy fixture opened its "attended" terminal as a
-  `Batch`; it now says `Chat`, which is what `lf -i` launches.
-- Checks run: `cargo test -p loopflow --lib launch_policy` (pass);
-  `cargo test -p loopflow-execution --lib -- config:: harness::launch_matrix
-  agent:: harness::` (pass); integration `config_tests::
-  documented_commands:: settings_launch_tests::`: one failure,
-  `automatic_agent_selection_requires_exactly_one_installed_harness`
-  (agent discovery, untouched here; gate reruns it from an empty
-  directory per the macOS PATH trap). `session_launch_contract` left to gate.
-
 ## Demo
 
 In a repository with no `yolo` setting: `lf -a claude` opens Claude showing
@@ -241,13 +195,3 @@ Antigravity once #1998 is under the branch). `grep -n
 finds nothing.
 
 Review page: `scratch/concept-review.html`.
-
-## Docs written (write-docs)
-
-Intended behavior, in place: `docs/config.md` (permissions section rewritten
-around the attended/unattended table, flag table row), `docs/security.md`
-(effective action policy), `docs/troubleshooting.md` (new "Claude refuses to
-skip permissions" entry), `rust/loopflow-execution/src/harness/README.md`
-(matrix row). They name Antigravity, which lands with #1998. Left to slice 3
-because they are code strings: the catalog description and the `--yolo` help.
-The Claude root refusal text in troubleshooting is from memory, not probed.

@@ -303,10 +303,9 @@ here; the installed app meets it whenever the app and server builds part.
 
 ## Acceptance check at gate
 
-One Rust integration test, `copy_world`: seed a home with a Task, a repository
-checkout, and a Session whose recorded pid is a live `sleep` and whose
-attachment looks live, with a stand-in provider on `PATH`; run `lf-world copy`;
-start `lf server run` on the copy.
+One Rust integration test, `copy_world`: seed a home through the CLI with a
+Task conversation whose stand-in provider is running and a second checked out
+and never started; run `lf-world copy`; start `lf server run` on the copy.
 
 - A served Task read returns the seeded Task. *(in the test)*
 - `task.run`, a Session start and a Session stop each return the sentence.
@@ -320,12 +319,21 @@ start `lf server run` on the copy.
   unchanged after the commands, and the seeded checkout has no new or changed
   file. *(in the test)*
 
-`cargo test -p loopflow --test integration copy_world` passes. A new Python
-test beside `scripts/loopflow-dev.py` covers the choice (same documents and an
+`python/tests/test_loopflow_dev.py` covers the choice (same documents and an
 opening store: the Machine; a differing `$defs` entry: a copy, naming it; a
 refusing store: a copy; `--copy`; `--world`) and the environment each passes.
-A Swift test covers a restored window from another Machine and a decode
-failure's notice.
+*(built)* A Swift test covers a restored window from another Machine and a
+decode failure's notice. *(slices 3 and 4)*
+
+Checks, November 20 at 0715825870:
+
+- `cargo test -p loopflow --test integration copy_world`: 2 passed. Against an
+  `lf` built with `wake`, `maintenance` and `recovery` started on a copy, the
+  first test failed at the log assertion: that server logged "store retention
+  failed", "terminal exit not recorded" and "recovery pass failed" within
+  80 ms of ready. CI runs the suite.
+- `uv run pytest python/tests/test_loopflow_dev.py`: 14 passed.
+- Not run: clippy on the branch, the Swift suites. Gate and CI.
 
 ## Surfaces
 

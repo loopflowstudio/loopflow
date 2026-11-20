@@ -481,12 +481,20 @@ server`, fake-world recipes, `welcome` and `status` as they are.
      a shorter directory." and built the world.
    - `LoopflowState.selectedRepoPath` is one file per account, not per
      Machine. An app launched on another home without `--repo` asks that
-     Machine for the last repository the account opened anywhere.
-4. **`lf server status`, and the decode sentence.**
+     Machine for the last repository the account opened anywhere. The
+     launcher always passes `--repo`, so Dev does not meet it.
+4. **Next: `lf server status`, and the decode sentence.** `status()` in
+   `rust/loopflow-execution/src/machine/client.rs:83` stops erroring on
+   another executable and `installation::server::ensure` compares the hash
+   itself, after every other caller of `status()` is read. Establish why a
+   decode failure showed "The Machine is away" before giving it its own
+   sentence, with a Swift test of that notice. Then the Dev bundle's
+   `lf server status` against the installed server reports ready, and
+   `.lf/qa/desktop.md:111` and `.lf/qa/held-terminals.md:40` are corrected.
 5. **Docs.** Written ahead of the code, describing the behavior above; each
    slice checks its part against them and corrects whichever is wrong.
    - `swift/README.md`: the opening section (the three things Dev opens, the
-     copy's sentence, windows per Machine, the socket-length refusal), the
+     copy's sentence, windows per Machine, the socket-length notice), the
      decode Notice after "Last known", "Build system" and its command table.
    - `docs/dev/machines.md`: `lf-world copy` and the read-only server under
      "One main Machine"; one boundary contract.

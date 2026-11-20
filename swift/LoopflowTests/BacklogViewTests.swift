@@ -95,34 +95,49 @@ struct BacklogViewTests {
         #expect(list.text(heading: ["Product"]).contains("  A-5 Task A-5 · at demo · PR #12 ◌"))
     }
 
-    @Test func aStartedRowNobodyHoldsContinuesOnItsOwnGraph() async throws {
+    @Test func aStartedRowNobodyHoldsOpensAndStartReachesOnlyTheUnstarted() async throws {
         let tasks = try tasks()
         let started = list(tasks) { $0.select("A-5") }
-        #expect(started.startLabel == "Continue")
+        #expect(started.startLabel == "Open" && BacklogList.startUnavailable(started.selected) == nil)
         let runs = Recorder()
         let model = WorkModel(query: RegistryQuery { args, _ in
             if args.starts(with: ["task", "run"]) { await runs.add(args); return "{}" }
             throw RegistryQueryError("passive")
         }, repoPath: "/repo")
         let view = WorkNavigation.Board.wave("wave-a")
-        // No workflow menu: a started Task keeps its Graph.
+        // Open, with no workflow menu.
         let bar = BacklogStartButton(model: model, list: started, perform: { _ in })
-        _ = try bar.inspect().find(text: "Continue")
+        _ = try bar.inspect().find(text: "Open")
         #expect(throws: (any Error).self) { try bar.inspect().find(viewWithAccessibilityIdentifier: "backlog-start-menu") }
         _ = try BacklogStartButton(model: model, list: list(tasks) { $0.select("A-3") }, perform: { _ in })
             .inspect().find(viewWithAccessibilityIdentifier: "backlog-start-menu")
-        // A selection of both counts them apart, and a chosen workflow reaches only the unstarted.
+        // Open goes to the Task and runs nothing.
+        model.openBacklog(started.selected[0])
+        #expect(model.selection == .task(id: "A-5"))
+        // A selection of both counts the unstarted, says why the other is left, and starts only those.
         let mixed = list(tasks) { $0.selection = ["A-3", "A-4", "A-5"] }
-        #expect(mixed.startLabel == "Start 2 · feature · Continue 1")
-        model.startBacklog(mixed.selected, graph: "auto", in: view)
-        for _ in 0..<200 where await runs.calls.count < 3 { try await Task.sleep(for: .milliseconds(5)) }
-        #expect(await runs.calls.map { $0.joined(separator: " ") }.sorted() == [
-            "task run A-3 auto --json", "task run A-4 auto --json", "task run A-5 --json"])
-        #expect(model.navigation.backlogs[view]?.notice == "Started 2 · Continued 1")
-        // Rust's refusal for every selected Task turns Start off and says why.
-        let stuck = list([try task("A-9", rank: 0, step: "demo", unavailable: "Task checkout is on another Machine")]) { $0.select("A-9") }
-        #expect(BacklogList.startUnavailable(stuck.selected) == "Task checkout is on another Machine")
+        #expect(mixed.startLabel == "Start 2 · feature")
+        #expect(BacklogList.startedNote(mixed.selected) == "1 started Task: open it to continue")
         #expect(BacklogList.startUnavailable(mixed.selected) == nil)
+        model.navigation.backlogs[view] = mixed.state
+        model.startBacklog(mixed.selected, graph: "auto", in: view)
+        // Started Tasks alone start nothing.
+        model.startBacklog(started.selected, graph: nil, in: view)
+        for _ in 0..<200 where await runs.calls.count < 2 { try await Task.sleep(for: .milliseconds(5)) }
+        #expect(await runs.calls.map { $0.joined(separator: " ") }.sorted() == [
+            "task run A-3 auto --json", "task run A-4 auto --json"])
+        #expect(model.navigation.backlogs[view]?.notice == "Started 2")
+        #expect(model.navigation.backlogs[view]?.selection == ["A-5"])
+        // Several started Tasks leave Start off and say why.
+        let both = [try task("A-6", rank: 5, step: "demo"), try task("A-7", rank: 6, step: "gate")]
+        #expect(BacklogList.startLabel(both) == "Start")
+        #expect(BacklogList.startUnavailable(both) == "2 started Tasks: open each to continue")
+        // Rust's refusal for every unstarted Task turns Start off and says why.
+        let stuck = [try task("A-9", rank: 0, unavailable: "Task checkout is on another Machine"), tasks[5]]
+        #expect(BacklogList.startUnavailable(stuck) == "Task checkout is on another Machine")
+        // Claiming a started Task says where it went.
+        model.claimBacklog(started.selected, in: view)
+        #expect(model.navigation.backlogs[view]?.notice == "Claimed A-5 · now in Working")
     }
 
     @Test func filterAndSearchDropHiddenRowsAndAbandonNamesWhatItRemoves() throws {
@@ -197,7 +212,7 @@ struct BacklogViewTests {
         let mine = list(unclaimed) { $0.filter = .mine }
         #expect(mine.rows.isEmpty && mine.empty.step == .showAvailable)
         #expect(list(tasks) { $0.query = "nothing like this" }.empty.step == .clearSearch)
-        #expect(list([]).empty.step == .new && list([]).empty.title == "This Wave has no open work nobody is running")
+        #expect(list([]).empty.step == .new && list([]).empty.title == "Nothing is waiting in this Wave")
     }
 
     @Test func startFlowsReadStopsMergesAndPiecesFromTheCatalog() throws {

@@ -177,27 +177,13 @@ Status, November 19: slices 1–5 are built; slice 6 is planned and not built. T
    - "Each Task's own workflow"; `?? "code"` and `defaultFlow` are gone, and a Task with no `graph_name` is started without a name; Start with nothing selected reads "Start", disabled.
    - The view part is `backlog` (`WaveViewPart.backlog`, `DesktopViewPartKind::Backlog`, `-p backlog`, `BacklogView`, `BacklogViewTests`). `WorkNavigation.Board` stays.
 
-6. **Second concept review, November 19 — next implement direction. Not built.** Read against `BacklogView.swift` at `34caec4de3`; rechecked at `09c29fd429`: `startLabel`'s Continue branch, "Continued N", ⌘↩ calling `perform(.start(nil))` without `startUnavailable`, the empty title and the `docs/surfaces.md` paragraph are all still there.
-
-   **A started row opens; it does not Continue.** The biggest mismatch. Three things disagree with the rest of the product:
-   - `lf task run` from a Task's last stop has no interactive step ahead, so it reaches `end` and approves Auto-Ship (`lf/mod.rs:2188`). The fixture's own row, "at demo · PR #12", is that case: Continue in the backlog ships a PR someone else left, from a row that shows a brief and no demo. Start's menu warns "merges without asking" for an unstarted Task; Continue says nothing.
-   - The Task view names the same action from the Graph position (`TaskWorkView.runAction`): Continue, "Run again" after a stopped run, nothing at `end`. The backlog says Continue for all three, so one Task reads two ways.
-   - "What was observed" above already says Backlog Start "must not reproduce Continue/Ship semantics here" and hands off to the shared delivery experience (LOO-434).
-
-   So, for a started Task nobody holds:
-   - Its primary action is **Open**, which goes to the Task (`openTaskDestination`), where its position, PR and run action already live. Open is also added to every row's menu; today the backlog has no way to reach a Task's own view, and the sidebar lists only Working and Autonomous.
-   - Start and ⌘↩ reach unstarted Tasks only. With both kinds selected the button counts the unstarted ("Start 2 · feature") and its tooltip says "1 started Task: open it to continue". With only started rows selected, one reads "Open"; several leave Start off with that reason.
-   - Claim stays, and is how dropped work is picked up without running it: the row leaves for Working, and the footer says so ("Claimed LOO-781 · now in Working").
-   - Deleted: the `Continue` branch of `startLabel`, "Start 2 · feature · Continue 1", `startBacklog`'s `nil`-graph path for started Tasks, "Continued N", and the docs paragraph "A started Task keeps its Graph…". ⌘↩ goes through the same predicate as the button, so it does nothing when `startUnavailable` is set (today the key bypasses it).
-   - Kept: the row's standing ("at demo · PR #12"), the Abandon dialog naming PRs, no workflow menu for started rows.
-
-   **Smaller, same pass:**
-   - The empty title "This Wave has no open work nobody is running" reads as a double negative. "Nothing is waiting in this Wave" / "…this repository", with New.
-   - `docs/surfaces.md` backlog section follows: Open in the action list, the started-row paragraph rewritten.
-
-   **Checked and left:** selection cut to shown rows, File, `included_by`, the More › split, "workflow" wording, the `backlog` view part. `runs` from the builtin directory still offers a repository's Wave Graph for a Task; nothing on the wire says otherwise (in `scratch/questions.md`).
-
-   Result expected: `BacklogViewTests.aStartedRowNobodyHoldsContinuesOnItsOwnGraph` becomes "opens": the started row's button reads Open and navigates, a mixed selection starts only the unstarted, and nothing in the backlog calls `startTask` for a started Task.
+6. **Second concept review, November 19 — built.** A started row opens; it does not Continue. `lf task run` from a Task's last stop reaches `end` and approves Auto-Ship (`lf/mod.rs:2188`), so Continue on the fixture's "at demo · PR #12" row would ship a PR someone else left; "What was observed" already says Backlog Start "must not reproduce Continue/Ship semantics here" (LOO-434 owns that).
+   - One started Task selected alone: the button reads **Open** and goes to the Task (`BacklogList.opens`, `WorkModel.openBacklog` → `openTaskDestination`). Open is the first item of every row's menu, off for several rows.
+   - Start, ⌘↩ and "Start with" reach unstarted Tasks only: `startBacklog` filters to `awaitsStart`, and `perform(.start)` returns when `startUnavailable` is set, so the key and the button share one predicate. Both kinds selected: "Start 2 · feature", tooltip "1 started Task: open it to continue". Several started and nothing else: Start off, "2 started Tasks: open each to continue".
+   - Claim's footer: "Claimed LOO-781 · now in Working" for a started Task; "Claimed 3 · 1 now in Working" for several.
+   - Empty title: "Nothing is waiting in this Wave" / "…this repository".
+   - Gone: `startLabel`'s Continue branch, "Start 2 · feature · Continue 1", "Continued N", the docs paragraph "A started Task keeps its Graph…".
+   - Kept: the row's standing, the Abandon dialog naming PRs, no workflow menu on a started row. `runs` from the builtin directory still offers a repository's Wave Graph for a Task (in `scratch/questions.md`).
 
 Remaining:
 - The demo and the hands-on run in the Dev app: drag feel, key focus, the split Start's menu rendering, toolbar collapse at narrow widths, the File button beside Start, the chooser's new rows. The seed is a scratch Wave with eight Tasks in a private Machine, built the way `.lf/skills/demo.md` and `.lf/qa/desktop.md` describe. Backlog rows have no `lf desktop` socket route: `lf desktop capture -p backlog` reads the list, and selecting, dragging and the menus need a person or headless view tests.
@@ -207,7 +193,7 @@ Remaining:
 Left as built: the "merges without asking" tag comes from a Swift match on step labels beginning `land`/`pr land`; incident has no such step and reads "never stops", though reaching the end approves Auto-Ship there too. The tags were shown in the Start bar page and answered "2a".
 
 Checks (headless, this Machine):
-- Run at `34caec4de3`, before the #1991 merge and not since. `scripts/test_desktop.sh --skip-build --filter 'BacklogViewTests|NewTaskTests|DTOFixtureTests|TaskHistoryFilterTests|DesktopHeadlessTests|WorkModelTests|TaskGraphProofTests|SessionChromeProofTests|TaskConceptTests|WorkDestinationTests'`: 225 tests passed. `cargo test` for `graph::compiled::`, `dto_fixtures`, `graph_discovery_tests`, `documented_commands::`, `lf::tests::`, `server::schema::tests::` (fixture regenerated) and the Desktop view-part test: passed. `cargo fmt` applied.
+- After the #1991 merge, with item 6: `scripts/test_desktop.sh --filter 'BacklogViewTests|NewTaskTests|DTOFixtureTests|TaskHistoryFilterTests|DesktopHeadlessTests|WorkModelTests|TaskGraphProofTests|SessionChromeProofTests|TaskConceptTests|WorkDestinationTests'`: passed (display-session suites skip). `cargo nextest run -p loopflow -p loopflow-execution -p loopflow-definitions -E 'test(graph::compiled::) | test(dto_fixtures) | test(graph_discovery_tests::) | test(documented_commands::) | test(lf::tests::) | test(server::schema::tests::) | test(view_part)'`: 116 passed.
 - Not run since the sync: `cargo clippy --all-targets -- -D warnings`; `served_reads::screen_reads_are_compact_passive_and_match_cli`, which failed identically on base 0a31dd3c98; the iOS suite, which shared Swift models reach. Gate and CI run them.
 - Seen in the sync's full `loopflow-execution store::` run: `task_labels_and_generated_names_follow_local_identity_and_linear_mapping` failed and passed alone. Not diagnosed and nothing filed.
 

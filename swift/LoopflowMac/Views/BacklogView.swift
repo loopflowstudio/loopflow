@@ -268,28 +268,38 @@ struct BacklogList {
             .joined(separator: " · ")
     }
 
+    /// The started Task that Start's place opens: one, selected alone. The
+    /// backlog runs unstarted Tasks only; a started one continues from its own view.
+    static func opens(_ tasks: [RoadmapTask]) -> RoadmapTask? {
+        tasks.count == 1 && !tasks[0].awaitsStart ? tasks[0] : nil
+    }
+
     /// What Start says it will do: "Start · feature", "Start 3 · feature 2 · code 1",
-    /// "Continue" for a started Task, and "Start 2 · feature · Continue 1" for both.
+    /// and "Open" for one started Task. Started Tasks among others are not counted.
     static func startLabel(_ tasks: [RoadmapTask]) -> String {
+        if opens(tasks) != nil { return "Open" }
         let fresh = tasks.filter(\.awaitsStart)
-        let going = tasks.count - fresh.count
-        guard !tasks.isEmpty else { return "Start" }
-        let mixed = !fresh.isEmpty && going > 0
-        var parts: [String] = []
-        if !fresh.isEmpty {
-            let names = sharedWorkflow(fresh) ?? breakdown(fresh)
-            parts.append("Start" + (fresh.count > 1 || mixed ? " \(fresh.count)" : "") + (names.isEmpty ? "" : " · \(names)"))
-        }
-        if going > 0 { parts.append("Continue" + (going > 1 || mixed ? " \(going)" : "")) }
-        return parts.joined(separator: " · ")
+        guard !fresh.isEmpty else { return "Start" }
+        let names = sharedWorkflow(fresh) ?? breakdown(fresh)
+        return "Start" + (tasks.count > 1 ? " \(fresh.count)" : "") + (names.isEmpty ? "" : " · \(names)")
     }
 
     var startLabel: String { Self.startLabel(selected) }
 
-    /// Rust's reason when it would refuse to run every one of these Tasks.
+    /// "1 started Task: open it to continue", for the started Tasks Start leaves alone.
+    static func startedNote(_ tasks: [RoadmapTask]) -> String? {
+        let started = tasks.count { !$0.awaitsStart }
+        guard started > 0, opens(tasks) == nil else { return nil }
+        return started == 1 ? "1 started Task: open it to continue" : "\(started) started Tasks: open each to continue"
+    }
+
+    /// Why Start is off: only started Tasks are selected, or Rust would refuse
+    /// to run every unstarted one.
     static func startUnavailable(_ tasks: [RoadmapTask]) -> String? {
-        let reasons = tasks.compactMap(\.runControl.unavailable)
-        return reasons.count == tasks.count ? reasons.first : nil
+        let fresh = tasks.filter(\.awaitsStart)
+        guard !fresh.isEmpty else { return startedNote(tasks) }
+        let reasons = fresh.compactMap(\.runControl.unavailable)
+        return reasons.count == fresh.count ? reasons.first : nil
     }
 
     // MARK: Abandon
@@ -426,7 +436,7 @@ struct BacklogList {
         switch state.filter {
         case .mine: return ("You haven't claimed anything. \(count(.available)) are available.", .showAvailable)
         case .available where !all.isEmpty: return ("Everything here is claimed by someone else", .showAll)
-        default: return ("This \(wave == nil ? "repository" : "Wave") has no open work nobody is running", .new)
+        default: return ("Nothing is waiting in this \(wave == nil ? "repository" : "Wave")", .new)
         }
     }
 }
@@ -467,24 +477,34 @@ extension WorkModel {
     // Claim, Start, Move and Abandon show in the click; a refusal posts its own
     // Notice and puts that Task's row back.
 
-    /// Claim each unclaimed Task without starting it; returns the inverse.
+    /// Claim each unclaimed Task without running it; returns the inverse. A
+    /// started Task you claim is yours to continue, so it leaves for Working.
     @discardableResult
     func claimBacklog(_ tasks: [RoadmapTask], in view: WorkNavigation.Board) -> BacklogChange? {
         let claimed = tasks.filter { BacklogOwner($0) == .nobody }
         for task in claimed { assignTask(task, claimed: true) }
         let skipped = tasks.count - claimed.count
-        backlogNotice(view, "Claimed \(claimed.count)" + (skipped > 0 ? " · \(skipped) already claimed" : ""))
+        let started = claimed.count { !$0.awaitsStart }
+        backlogNotice(view, [
+            "Claimed \(claimed.count == 1 ? claimed[0].task.identifier : String(claimed.count))",
+            started == 0 ? nil : started == claimed.count ? "now in Working" : "\(started) now in Working",
+            skipped > 0 ? "\(skipped) already claimed" : nil,
+        ].compactMap { $0 }.joined(separator: " · "))
         return claimed.isEmpty ? nil : .claims(claimed)
     }
 
-    /// Start each unstarted Task, on `graph` or its own workflow, and continue
-    /// each started one on the Graph it has.
+    /// Start each unstarted Task, on `graph` or its own workflow. Started Tasks stay as they are.
     func startBacklog(_ tasks: [RoadmapTask], graph: String?, in view: WorkNavigation.Board) {
-        for task in tasks { startTask(task.awaitsStart ? graph : nil, task: task) }
-        navigation.backlogs[view, default: BacklogState()].selection.subtract(tasks.map(\.id))
-        let fresh = tasks.count(where: \.awaitsStart)
-        backlogNotice(view, [fresh > 0 ? "Started \(fresh)" : nil,
-                             fresh < tasks.count ? "Continued \(tasks.count - fresh)" : nil].compactMap { $0 }.joined(separator: " · "))
+        let fresh = tasks.filter(\.awaitsStart)
+        guard !fresh.isEmpty else { return }
+        for task in fresh { startTask(graph, task: task) }
+        navigation.backlogs[view, default: BacklogState()].selection.subtract(fresh.map(\.id))
+        backlogNotice(view, "Started \(fresh.count)")
+    }
+
+    /// Go to a Task's own view, where its position, PR and run action live.
+    func openBacklog(_ task: RoadmapTask) {
+        openTaskDestination(wave: self.task(id: task.id)?.wave, task: task)
     }
 
     func moveBacklog(_ tasks: [RoadmapTask], toWave wave: String?, in view: WorkNavigation.Board) {
@@ -872,7 +892,10 @@ struct BacklogView: View {
         let list = list
         let tasks = list.selected
         switch action {
-        case .start(let graph): model.startBacklog(tasks, graph: graph, in: view)
+        case .start(let graph):
+            guard BacklogList.startUnavailable(tasks) == nil else { return }
+            if let task = BacklogList.opens(tasks) { model.openBacklog(task) }
+            else { model.startBacklog(tasks, graph: graph, in: view) }
         case .claim: register(model.claimBacklog(tasks, in: view), "Claim")
         case .edit:
             guard let task = list.opened else { return }
@@ -1065,8 +1088,8 @@ struct BacklogQuietButtonStyle: ButtonStyle {
     }
 }
 
-/// Start, a split control: the main part runs each Task's own workflow, or
-/// continues a started one; the chevron lists the others for unstarted Tasks.
+/// Start, a split control: the main part runs each unstarted Task's own
+/// workflow and the chevron lists the others. One started Task alone makes it Open.
 struct BacklogStartButton: View {
     let model: WorkModel
     let list: BacklogList
@@ -1088,10 +1111,11 @@ struct BacklogStartButton: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(WorkPlainButtonStyle())
-            .help(unavailable ?? (fresh.count > 1 && BacklogList.sharedWorkflow(fresh) == nil
-                                  ? "Each Task on its own workflow (⌘↩)" : "⌘↩"))
+            .help(unavailable ?? BacklogList.startedNote(tasks) ?? (BacklogList.opens(tasks) != nil
+                ? "Open the Task to continue it (⌘↩)"
+                : fresh.count > 1 && BacklogList.sharedWorkflow(fresh) == nil ? "Each Task on its own workflow (⌘↩)" : "⌘↩"))
             .accessibilityIdentifier("backlog-start")
-            // A started Task keeps its Graph, so only unstarted ones get the menu.
+            // Only unstarted Tasks choose a workflow here.
             if tasks.isEmpty || !fresh.isEmpty {
                 Rectangle().fill(ink.opacity(0.35)).frame(width: 1).padding(.vertical, 4)
                 Menu {
@@ -1200,8 +1224,9 @@ struct BacklogActions: View {
             }
             perform(action)
         }
-        Button(BacklogList.startLabel(tasks)) { run(.start(nil)) }.disabled(BacklogList.startUnavailable(tasks) != nil)
+        Button("Open") { if let task = tasks.first { model.openBacklog(task) } }.disabled(tasks.count != 1)
         if tasks.contains(where: \.awaitsStart) {
+            Button(BacklogList.startLabel(tasks)) { run(.start(nil)) }.disabled(BacklogList.startUnavailable(tasks) != nil)
             Menu("Start with") { BacklogStartItems(model: model, tasks: tasks, perform: run) }
         }
         Button("Claim") { run(.claim) }.disabled(!tasks.contains { BacklogOwner($0) == .nobody })

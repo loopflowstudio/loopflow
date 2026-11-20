@@ -38,5 +38,7 @@
 
 ## From the second concept review, November 19 (settled the safer way; say so if wrong)
 
+- Built this way: with a started Task selected alone, ⌘↩ opens it, as the button does. A started Task Rust would refuse to run still opens. Row-menu Open is off for several rows rather than opening the first.
+
 - A started Task nobody holds gets Open, not Continue, in the backlog. Continue from a last stop such as demo reaches `end` and approves Auto-Ship, and the design already says the backlog must not reproduce Continue/Ship. The other reading: keep a one-click Continue in the backlog and warn when it will merge, which needs the run action and its consequence on the wire (`TaskRunControl` carries only a refusal).
 - "Run without stopping" still lists six Graphs (auto, deep-clean, incident, optimize, queue, task-design). Whether the first menu should hold only auto and incident is for the demo to show.

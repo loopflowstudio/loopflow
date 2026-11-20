@@ -173,7 +173,8 @@ All 46 · Mine 1 · Available 43                                    Search…
 The mark at a row's right edge is its owner: filled for you, muted for someone
 else, a dashed ring for nobody. A row shows its Wave when it isn't the one
 you're looking at. Most rows have never run. A Task someone started and nobody
-holds now is here too, and says where it stands: its step, and its PR.
+holds now is here too, and says where it stands: its step, and its PR. The
+backlog doesn't run it: its button reads **Open**.
 
 - **Find.** Search matches titles and briefs. **Mine** is what you've claimed;
   **Available** is everything not claimed by someone else. Changing the filter
@@ -183,7 +184,7 @@ holds now is here too, and says where it stands: its step, and its PR.
   shows its brief, cut at nine lines past 900 characters; several selected show
   none. ⌘A selects all and Esc clears.
 - **Act.** The toolbar acts on the selection, with a count when there are
-  several. `···` on a row and right-click open the same actions: Start, Claim,
+  several. `···` on a row and right-click open the same actions: Open, Start, Claim,
   Edit brief, Move to another Wave or to the top, Move up/down, Copy ID and
   Abandon…. Abandon lists the Tasks it will remove and names the ones with a
   PR before it writes. The narrowest window drops the position and ↑↓ first.
@@ -192,14 +193,15 @@ holds now is here too, and says where it stands: its step, and its PR.
   Linear shows. Over a whole repository, order belongs to each Wave, so
   reordering is off there.
 - **Claim without starting.** Claim makes a Task yours so nobody else takes it;
-  it runs nothing.
+  it runs nothing. Claiming a started Task picks it up where it stopped: it
+  leaves the backlog for Working.
 - **Undo.** ⌘Z undoes a reorder, a claim or a brief edit. If someone changed
   the brief since your edit, undo leaves it and says so. Start and Abandon
   aren't undone; an abandoned Task keeps its ID and history.
 
 | Key | Does |
 |---|---|
-| ⌘↩ | Start |
+| ⌘↩ | Start, or open a started Task |
 | C | Claim |
 | E | Edit the brief |
 | ⌘⌫ | Abandon… |
@@ -243,10 +245,13 @@ Graphs include, such as `build` and `deliver`, and Graphs with no
 Graph that runs for a Wave is not offered for a Task. The New Task sheet lists
 the same workflows the same way.
 
-A started Task keeps its Graph: its button reads `Continue` and has no ▾. A
-selection of both says `Start 2 · feature · Continue 1`, and a workflow you
-pick applies to the unstarted ones only. When the Machine would refuse every
-selected Task, Start is off and its tooltip says why.
+Start reaches unstarted Tasks only. Select a started Task and the button reads
+`Open`, with no ▾: it goes to the Task, where its step, its PR and what running
+it would do are shown. A selection of both counts the unstarted,
+`Start 2 · feature`, and the tooltip says "1 started Task: open it to
+continue". Several started Tasks and nothing else leave Start off. When the
+Machine would refuse every unstarted Task selected, Start is off and its
+tooltip says why.
 
 Starting several starts each one in the click. A Task the Machine refuses comes
 back with its own Notice, and the others stay started. Started Tasks leave the

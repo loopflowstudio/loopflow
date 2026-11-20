@@ -72,8 +72,22 @@ listing's query with `EXPLAIN QUERY PLAN` at about 10,000 Tasks.
 - Test: `local_planning_tests::a_task_joins_its_wave_project_else_its_nearest_ancestors…`;
   plan test `query_plans::a_wave_lists_its_own_tasks_by_index`.
 
-Next: fixtures that insert `tasks` rows by SQL with only `project_id` now have
-no Wave; the suites decide which need `wave_id`. Run the `lf` demo below.
+Demo run with this build on an isolated home: `x` in `billing/refunds` has no
+Project, lists under `billing/refunds` and not `billing`; the store has 0 Projects.
+The Linear half of the demo is not run here.
+
+Checks:
+- `cargo test -p loopflow-storage --lib`: 365/367 passed, then both fixture
+  failures fixed and rerun (steers, task_work). Run locally.
+- `cargo test -p loopflow-execution --lib` for `store::membership_lifecycle_tests`,
+  `store::ownership::tests`, `store::admission_lifecycle_tests`, `ops::task::explain::tests`:
+  pass. Run locally.
+- clippy on storage and execution: clean. Run locally.
+- `documented_commands::`, `binary(golden_prompt)` (the `split-wave` builtin
+  changed), Swift DTO fixtures and the full suites: for gate and CI.
+
+Next: raw-SQL fixtures elsewhere that insert `tasks` with only `project_id`
+have no Wave now; CI shows which ones need `wave_id`.
 
 ## Shows it worked
 

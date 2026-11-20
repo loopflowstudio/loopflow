@@ -4,7 +4,6 @@
 //! line, and the next turn continues it with `--conversation`. A terminal is
 //! `agy -i <prompt>`, whose first hook callback names the conversation.
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
@@ -14,6 +13,8 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, ChildStdout, Command};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
+
+use super::common::{Run, Stderr};
 
 use crate::agent::{AgentConfig, AgentFailure};
 use crate::context_block::ContextMoment;
@@ -44,9 +45,7 @@ pub struct Driver {
     runtime: Option<crate::process::LfProcessRuntime>,
     kind: LaunchKind,
     first_turn: bool,
-    /// The current turn's process, until its exit is recorded.
-    pid: Option<u32>,
-    reader: Option<JoinHandle<()>>,
+    run: Run,
 }
 
 impl Driver {
@@ -65,25 +64,12 @@ impl Driver {
             runtime: None,
             kind: launch.kind,
             first_turn: true,
-            pid: None,
-            reader: None,
+            run: Run::default(),
         }
     }
 
-    /// Record the last process's exit and stop whatever of it is left.
-    async fn settle_process(&mut self) -> Result<()> {
-        if self.pid.take().is_some() {
-            super::agent_process::stop(&self.owner.clone())?;
-        }
-        if let Some(reader) = self.reader.take() {
-            // The process is gone, so its output ends and the reader settles the turn.
-            let _ = reader.await;
-        }
-        Ok(())
-    }
-
-    /// The run for one turn, and the file its stderr goes to.
-    fn command(&self, thread: Option<&AgentSessionId>) -> Result<(Command, std::fs::File)> {
+    /// The run for one turn, and where its stderr goes.
+    fn command(&self, thread: Option<&AgentSessionId>) -> Result<(Command, Stderr)> {
         let config = &self.config;
         let mut command = Command::new(loopflow_harness::HarnessKind::Antigravity.program());
         command.args([
@@ -100,26 +86,15 @@ impl Driver {
             context.configure_hooks(command.as_std_mut())?;
         }
         super::configure_vendor_std_env(command.as_std_mut())?;
-        let log = match super::common::diagnostics(config, "antigravity")? {
-            Some(log) => log,
-            None => tempfile::tempfile()?,
-        };
-        command
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(log.try_clone()?)
-            // The shared stop owns cleanup; dropping a stale handle must not signal.
-            .kill_on_drop(false);
-        Ok((command, log))
+        let stderr = Stderr::pipe(&mut command, config, "antigravity")?;
+        Ok((command, stderr))
     }
 
     fn spawn_reader(
         &self,
         mut child: Child,
         stdout: ChildStdout,
-        mut diagnostics: std::fs::File,
-        // Where this run's stderr begins in a file earlier runs appended to.
-        diagnostics_start: u64,
+        stderr: Stderr,
     ) -> JoinHandle<()> {
         let state = self.state.clone();
         let events = self.events.clone();
@@ -146,12 +121,7 @@ impl Driver {
             };
             // Stopped by this driver, or with the lf process a signal is ending.
             let interrupted = std::mem::take(&mut state.interrupted) || crate::agent::interrupted();
-            use std::io::{Read, Seek, SeekFrom};
-            let mut stderr = String::new();
-            let _ = diagnostics
-                .seek(SeekFrom::Start(diagnostics_start))
-                .and_then(|_| diagnostics.read_to_string(&mut stderr));
-            let decoded = turn.finish(interrupted, &stderr);
+            let decoded = turn.finish(interrupted, &stderr.read());
             super::common::publish(state.writer.as_mut(), decoded, &events);
         })
     }
@@ -228,13 +198,12 @@ fn hooks(script: &Path, kind: LaunchKind) -> Value {
             crate::os_process::shell_escape(&script.to_string_lossy()),
         )}])
     };
-    let mut hooks = serde_json::json!({});
-    if kind.is_managed() {
-        // A managed prompt is a boundary the server records.
-        hooks["PreInvocation"] = run("tool");
+    // A managed prompt is a boundary the server records.
+    let managed = kind.is_managed();
+    let mut hooks =
+        serde_json::json!({"PreInvocation": run(if managed { "tool" } else { "steer" })});
+    if managed {
         hooks["Stop"] = run("stop");
-    } else {
-        hooks["PreInvocation"] = run("steer");
     }
     serde_json::json!({"loopflow": hooks})
 }
@@ -286,12 +255,11 @@ impl StreamDriver for Driver {
     }
 
     fn pid(&self) -> Option<u32> {
-        self.pid
+        self.run.pid
     }
 
     fn process_group_id(&self) -> Option<u32> {
-        // Admission makes this child the leader of its own group.
-        self.pid.filter(|pid| *pid > 1)
+        self.run.group()
     }
 
     async fn start(&mut self) -> Result<()> {
@@ -311,37 +279,26 @@ impl StreamDriver for Driver {
             }
             state.thread.clone()
         };
-        self.settle_process().await?;
+        self.run.settle(&self.owner).await?;
         super::common::next_agent_process(
             &mut self.owner,
             self.runtime.as_ref(),
             &mut self.config,
         )?;
         let owner = self.owner.clone();
-        let (command, diagnostics) = self.command(thread.as_ref())?;
-        let diagnostics_start = diagnostics.metadata()?.len();
+        let (command, stderr) = self.command(thread.as_ref())?;
         let mut child = super::agent_process::spawn(command, None, &owner, self.kind)?;
-        self.pid = child.id();
+        self.run.pid = child.id();
         let stdin = child.stdin.take().expect("Antigravity stdin was piped");
         let stdout = child.stdout.take().expect("Antigravity stdout was piped");
 
         {
-            let Recording {
-                store,
-                session,
-                attachment,
-            } = owner.clone();
             let mut state = self.state.lock().expect("Antigravity state lock poisoned");
             state.interrupted = false;
-            state.writer = Some(FactWriter::new(
-                store,
-                session,
-                Some(attachment),
-                Default::default(),
-            ));
+            state.writer = Some(super::common::writer(&owner));
             state.turn = Some(Turn::new(thread));
         }
-        self.reader = Some(self.spawn_reader(child, stdout, diagnostics, diagnostics_start));
+        self.run.reader = Some(self.spawn_reader(child, stdout, stderr));
 
         // `agy` runs one turn per line of input and exits at end of input.
         let line = format!(
@@ -349,7 +306,7 @@ impl StreamDriver for Driver {
             serde_json::json!({"event": "user", "message": {"content": message}})
         );
         if let Err(error) = super::common::send(owner, stdin, line.into_bytes()).await {
-            self.settle_process().await?;
+            self.run.settle(&self.owner).await?;
             return Err(error);
         }
         self.first_turn = false;
@@ -366,7 +323,7 @@ impl StreamDriver for Driver {
             }
             state.interrupted = true;
         }
-        self.settle_process().await
+        self.run.settle(&self.owner).await
     }
 
     async fn stop(&mut self) -> Result<()> {
@@ -374,7 +331,7 @@ impl StreamDriver for Driver {
             .lock()
             .expect("Antigravity state lock poisoned")
             .interrupted = true;
-        self.settle_process().await
+        self.run.settle(&self.owner).await
     }
 
     fn agent_session(&self) -> Option<AgentSessionId> {
@@ -560,9 +517,10 @@ fn trust(cwd: &Path) -> Option<String> {
 
 #[cfg(all(test, unix))]
 mod tests {
-    use super::{mpsc, AgentConfig, ContextMoment, ConversationEvent, Driver, StreamDriver};
+    use super::super::common::drive_turn;
+    use super::{mpsc, AgentConfig, ContextMoment, Driver, StreamDriver};
     use loopflow_harness::HarnessKind;
-    use loopflow_model::chat::types::{ConversationItem, Lifecycle};
+    use loopflow_model::chat::types::Lifecycle;
 
     /// Put the stand-in `agy` first on PATH; it keeps what it was sent in `home`.
     fn stand_in(home: &std::path::Path) -> crate::test_ambient::EnvGuard {
@@ -584,27 +542,6 @@ mod tests {
         std::env::set_var("PATH", std::env::join_paths(paths).unwrap());
         std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
         guard
-    }
-
-    async fn drive_turn(
-        rx: &mut mpsc::UnboundedReceiver<ConversationEvent>,
-    ) -> (Lifecycle, String, Vec<String>) {
-        let (mut text, mut errors) = (String::new(), Vec::new());
-        loop {
-            let event = tokio::time::timeout(std::time::Duration::from_secs(180), rx.recv())
-                .await
-                .expect("a turn settles")
-                .expect("the driver is alive");
-            match event {
-                ConversationEvent::ItemCompleted {
-                    item: ConversationItem::Message { text: t, phase, .. },
-                    ..
-                } if phase.as_deref() == Some("final") => text = t,
-                ConversationEvent::Error { message, .. } => errors.push(message),
-                ConversationEvent::TurnCompleted { status, .. } => return (status, text, errors),
-                _ => {}
-            }
-        }
     }
 
     fn received(home: &std::path::Path) -> serde_json::Value {

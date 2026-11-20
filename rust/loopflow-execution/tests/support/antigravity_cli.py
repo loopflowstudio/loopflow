@@ -112,12 +112,24 @@ def _refuse(error):
     sys.exit(1)
 
 
-def _terminal():
-    """The TUI: the `-i` prompt is one turn, then the person leaves."""
-    prompt = _option("-i") or ""
+def _receive(prompt):
     (HOME / "received.json").write_text(
         json.dumps({"args": sys.argv[1:], "input": prompt, "cwd": str(Path.cwd())})
     )
+
+
+def _wait(released, what):
+    deadline = time.monotonic() + 120
+    while not released():
+        if time.monotonic() >= deadline:
+            raise TimeoutError(f"the fixture's {what} was not released")
+        time.sleep(0.02)
+
+
+def _terminal():
+    """The TUI: the `-i` prompt is one turn, then the person leaves."""
+    prompt = _option("-i") or ""
+    _receive(prompt)
     conversation = _option("--conversation") or str(uuid.uuid4())
     _hook("PreInvocation", conversation, invocationNum=0, initialNumSteps=1)
     request = f"<USER_REQUEST>\n{prompt}\n</USER_REQUEST>"
@@ -134,9 +146,7 @@ def main():
         return _terminal()
     line = sys.stdin.readline()
     prompt = json.loads(line)["message"]["content"] if line.strip() else ""
-    (HOME / "received.json").write_text(
-        json.dumps({"args": sys.argv[1:], "input": prompt, "cwd": str(Path.cwd())})
-    )
+    _receive(prompt)
     refusal = HOME / "agy-refusal"
     if refusal.exists():
         _refuse(refusal.read_text().strip())
@@ -178,11 +188,7 @@ def main():
     # A fixture's `hold-turn` keeps the model call running until it is removed.
     if (HOME / "hold-turn").exists():
         (HOME / "holding").write_text(conversation)
-    held = time.monotonic() + 120
-    while (HOME / "hold-turn").exists():
-        if time.monotonic() >= held:
-            raise TimeoutError("the fixture's turn was not released")
-        time.sleep(0.02)
+    _wait(lambda: not (HOME / "hold-turn").exists(), "turn")
     if (HOME / "tool_turn.py").exists():
         (HOME / "hook-context").write_text(context)
         tool = {"name": "run_command", "parameters": {"CommandLine": "echo hi"}}
@@ -193,11 +199,7 @@ def main():
         step += 1
         update(step + 1, "ACTIVE", "tool", tool_name="run_command", tool_info=tool)
         (HOME / "holding").write_text(conversation)
-        deadline = time.monotonic() + 120
-        while not (HOME / "tool-done").exists():
-            if time.monotonic() >= deadline:
-                raise TimeoutError("the fixture's tool was not released")
-            time.sleep(0.02)
+        _wait((HOME / "tool-done").exists, "tool")
         update(step + 1, "DONE", "tool", tool_name="run_command", tool_info=tool)
         kept.append((step + 1, "GENERIC", {"source": "MODEL", "content": "hi\n"}))
         tokens = (8, 3)

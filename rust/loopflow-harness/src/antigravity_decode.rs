@@ -66,13 +66,7 @@ impl Turn {
                 } else {
                     // A refused run exits 0 when its stdin was not a pipe: the
                     // status fails the turn, never the exit code.
-                    out.extend(
-                        self.fail(
-                            result["error"]
-                                .as_str()
-                                .unwrap_or("Antigravity reported an error"),
-                        ),
-                    );
+                    out.extend(self.fail(result["error"].as_str().unwrap_or_default()));
                 }
                 out
             }

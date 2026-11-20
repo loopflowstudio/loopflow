@@ -349,6 +349,18 @@ QA on real `agy` 1.5.13 (2026-11-20), a private Machine with its server;
   `gemini-4-carbon` answered), a spent Antigravity quota, a signed-out `agy`,
   a Machine without `agy` (lf's own PATH finds it here).
 
+Compress (2026-11-20): the per-turn process handling OpenCode and Antigravity
+each carried is one copy in `harness/common.rs` (`Run`, `Stderr`, `writer`,
+the tests' `drive_turn`). One behavior changed with it: an OpenCode run that
+fails having written nothing to stderr no longer reports the last line an
+earlier run of the same launch left in `opencode.stderr.log`; `Stderr::read`
+starts where this run began, as Antigravity's already did. Run, ok: `cargo
+test -p loopflow-execution --lib -- harness::antigravity harness::opencode
+harness::launch_matrix` (14 passed), `cargo test -p loopflow-harness
+antigravity` (8), the two Antigravity worker tests in
+`task_graph_launch_tests`, and `cargo clippy -p loopflow-execution -p
+loopflow-harness --all-targets -- -D warnings`.
+
 ## Left to build
 
 The review's doc pass is in (`docs/config.md` "Antigravity",

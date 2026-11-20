@@ -3,7 +3,6 @@
 //! lf names the conversation (`--session ses_…`), and the context plugin
 //! supplies instructions, context, steers and turn reports in both.
 use crate::harness::LaunchKind;
-use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 
 use anyhow::{anyhow, bail, Result};
@@ -13,6 +12,8 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, ChildStdout, Command};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
+
+use super::common::{Run, Stderr};
 
 use crate::agent::AgentConfig;
 use crate::harness::fact_writer::FactWriter;
@@ -84,9 +85,7 @@ pub struct Driver {
     kind: LaunchKind,
     thread: Option<AgentSessionId>,
     first_turn: bool,
-    /// The current turn's process, until its exit is recorded.
-    pid: Option<u32>,
-    reader: Option<JoinHandle<()>>,
+    run: Run,
 }
 
 impl Driver {
@@ -103,29 +102,12 @@ impl Driver {
             kind: launch.kind,
             thread: launch.start.thread(),
             first_turn: true,
-            pid: None,
-            reader: None,
+            run: Run::default(),
         }
     }
 
-    /// Record the last process's exit and stop whatever of it is left.
-    async fn settle_process(&mut self) -> Result<()> {
-        if self.pid.take().is_some() {
-            super::agent_process::stop(&self.owner.clone())?;
-        }
-        if let Some(reader) = self.reader.take() {
-            // The process is gone, so its output ends and the reader settles the turn.
-            let _ = reader.await;
-        }
-        Ok(())
-    }
-
-    /// The run for one turn, and the file its stderr goes to.
-    fn command(
-        &self,
-        config: &AgentConfig,
-        thread: &AgentSessionId,
-    ) -> Result<(Command, std::fs::File)> {
+    /// The run for one turn, and where its stderr goes.
+    fn command(&self, config: &AgentConfig, thread: &AgentSessionId) -> Result<(Command, Stderr)> {
         let mut command = Command::new("opencode");
         command.args(["run", "--standalone", "--format", "json", "--auto"]);
         if let Some(model) = &config.agent.model {
@@ -135,24 +117,15 @@ impl Driver {
         super::configure_agent_env(&mut command, config);
         command.envs(environment(config, None, self.kind)?);
         super::configure_vendor_std_env(command.as_std_mut())?;
-        let log = match super::common::diagnostics(config, "opencode")? {
-            Some(log) => log,
-            None => tempfile::tempfile()?,
-        };
-        command
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(log.try_clone()?)
-            // The shared stop owns cleanup; dropping a stale handle must not signal.
-            .kill_on_drop(false);
-        Ok((command, log))
+        let stderr = Stderr::pipe(&mut command, config, "opencode")?;
+        Ok((command, stderr))
     }
 
     fn spawn_reader(
         &self,
         mut child: Child,
         stdout: ChildStdout,
-        mut diagnostics: std::fs::File,
+        stderr: Stderr,
     ) -> JoinHandle<()> {
         let state = self.state.clone();
         let events = self.events.clone();
@@ -183,11 +156,7 @@ impl Driver {
             let interrupted = std::mem::take(&mut state.interrupted) || crate::agent::interrupted();
             let mut decoded = Vec::new();
             if !exited && !interrupted {
-                use std::io::{Read, Seek};
-                let mut detail = String::new();
-                let _ = diagnostics
-                    .rewind()
-                    .and_then(|()| diagnostics.read_to_string(&mut detail));
+                let detail = stderr.read();
                 if let Some(line) = detail.lines().rev().find(|line| !line.trim().is_empty()) {
                     decoded.extend(turn.fail(line));
                 }
@@ -205,12 +174,11 @@ impl StreamDriver for Driver {
     }
 
     fn pid(&self) -> Option<u32> {
-        self.pid
+        self.run.pid
     }
 
     fn process_group_id(&self) -> Option<u32> {
-        // Admission makes this child the leader of its own group.
-        self.pid.filter(|pid| *pid > 1)
+        self.run.group()
     }
 
     async fn start(&mut self) -> Result<()> {
@@ -238,7 +206,7 @@ impl StreamDriver for Driver {
             .thread
             .clone()
             .ok_or_else(|| anyhow!("OpenCode has not started"))?;
-        self.settle_process().await?;
+        self.run.settle(&self.owner).await?;
         super::common::next_agent_process(
             &mut self.owner,
             self.runtime.as_ref(),
@@ -249,33 +217,23 @@ impl StreamDriver for Driver {
         if let Some(context) = &mut config.conversation_context {
             context.identify(&owner.store, &owner.session)?;
         }
-        let (command, diagnostics) = self.command(&config, &thread)?;
+        let (command, stderr) = self.command(&config, &thread)?;
         let mut child = super::agent_process::spawn(command, None, &owner, self.kind)?;
-        self.pid = child.id();
+        self.run.pid = child.id();
         let stdin = child.stdin.take().expect("OpenCode stdin was piped");
         let stdout = child.stdout.take().expect("OpenCode stdout was piped");
 
         {
-            let Recording {
-                store,
-                session,
-                attachment,
-            } = owner.clone();
             let mut state = self.state.lock().expect("OpenCode state lock poisoned");
             state.interrupted = false;
-            state.writer = Some(FactWriter::new(
-                store,
-                session,
-                Some(attachment),
-                Default::default(),
-            ));
+            state.writer = Some(super::common::writer(&owner));
             state.sent = Some(thread);
         }
-        self.reader = Some(self.spawn_reader(child, stdout, diagnostics));
+        self.run.reader = Some(self.spawn_reader(child, stdout, stderr));
 
         // `opencode run` reads its message from stdin and starts at end of input.
         if let Err(error) = super::common::send(owner, stdin, message.into_bytes()).await {
-            self.settle_process().await?;
+            self.run.settle(&self.owner).await?;
             return Err(error);
         }
         self.first_turn = false;
@@ -292,7 +250,7 @@ impl StreamDriver for Driver {
             }
             state.interrupted = true;
         }
-        self.settle_process().await
+        self.run.settle(&self.owner).await
     }
 
     async fn stop(&mut self) -> Result<()> {
@@ -300,7 +258,7 @@ impl StreamDriver for Driver {
             .lock()
             .expect("OpenCode state lock poisoned")
             .interrupted = true;
-        self.settle_process().await
+        self.run.settle(&self.owner).await
     }
 
     fn agent_session(&self) -> Option<AgentSessionId> {
@@ -467,8 +425,9 @@ mod tests {
     use crate::harness::LaunchKind;
     use crate::process::attachment;
 
-    use super::{mpsc, AgentConfig, Command, ConversationEvent, Driver, StreamDriver};
-    use loopflow_model::chat::types::{ConversationItem, Lifecycle};
+    use super::super::common::drive_turn;
+    use super::{mpsc, AgentConfig, Command, Driver, StreamDriver};
+    use loopflow_model::chat::types::Lifecycle;
 
     #[tokio::test]
     async fn stop_clears_the_child_and_its_group() {
@@ -511,7 +470,7 @@ mod tests {
             ),
             tx,
         );
-        harness.pid = Some(pid);
+        harness.run.pid = Some(pid);
         assert_eq!(harness.process_group_id(), Some(pid));
         harness.stop().await.unwrap();
         assert_eq!(harness.pid(), None);
@@ -556,27 +515,6 @@ mod tests {
         std::env::set_var("PATH", format!("{}:/usr/bin:/bin", bin.display()));
         std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
         guard
-    }
-
-    async fn drive_turn(
-        rx: &mut mpsc::UnboundedReceiver<ConversationEvent>,
-    ) -> (Lifecycle, String, Vec<String>) {
-        let (mut text, mut errors) = (String::new(), Vec::new());
-        loop {
-            let event = tokio::time::timeout(std::time::Duration::from_secs(180), rx.recv())
-                .await
-                .expect("a turn settles")
-                .expect("the driver is alive");
-            match event {
-                ConversationEvent::ItemCompleted {
-                    item: ConversationItem::Message { text: t, phase, .. },
-                    ..
-                } if phase.as_deref() == Some("final") => text = t,
-                ConversationEvent::Error { message, .. } => errors.push(message),
-                ConversationEvent::TurnCompleted { status, .. } => return (status, text, errors),
-                _ => {}
-            }
-        }
     }
 
     #[tokio::test]

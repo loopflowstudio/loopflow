@@ -84,6 +84,83 @@ pub(super) fn diagnostics(
 
 // A harness that runs one process per turn (OpenCode, Antigravity)
 
+/// The process running the current turn, until its exit is recorded.
+#[derive(Debug, Default)]
+pub(super) struct Run {
+    pub pid: Option<u32>,
+    pub reader: Option<JoinHandle<()>>,
+}
+
+impl Run {
+    /// Admission makes the child the leader of its own group.
+    pub fn group(&self) -> Option<u32> {
+        self.pid.filter(|pid| *pid > 1)
+    }
+
+    /// Record the process's exit and stop whatever of it is left.
+    pub async fn settle(&mut self, owner: &Recording) -> anyhow::Result<()> {
+        if self.pid.take().is_some() {
+            super::agent_process::stop(owner)?;
+        }
+        if let Some(reader) = self.reader.take() {
+            // The process is gone, so its output ends and the reader settles the turn.
+            let _ = reader.await;
+        }
+        Ok(())
+    }
+}
+
+/// Where a run's stderr goes: the launch's `<harness>.stderr.log`, which
+/// earlier runs appended to, or a file nobody keeps.
+#[derive(Debug)]
+pub(super) struct Stderr {
+    file: std::fs::File,
+    start: u64,
+}
+
+impl Stderr {
+    /// Pipe `command`'s stdin and stdout to lf and send its stderr here.
+    pub fn pipe(
+        command: &mut tokio::process::Command,
+        config: &AgentConfig,
+        harness: &str,
+    ) -> anyhow::Result<Self> {
+        let file = match diagnostics(config, harness)? {
+            Some(log) => log,
+            None => tempfile::tempfile()?,
+        };
+        command
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(file.try_clone()?)
+            // The shared stop owns cleanup; dropping a stale handle must not signal.
+            .kill_on_drop(false);
+        let start = file.metadata()?.len();
+        Ok(Self { file, start })
+    }
+
+    /// What this run wrote, once it has exited.
+    pub fn read(mut self) -> String {
+        use std::io::{Read, Seek, SeekFrom};
+        let mut text = String::new();
+        let _ = self
+            .file
+            .seek(SeekFrom::Start(self.start))
+            .and_then(|_| self.file.read_to_string(&mut text));
+        text
+    }
+}
+
+/// Writes what one run's turn establishes.
+pub(super) fn writer(owner: &Recording) -> FactWriter {
+    FactWriter::new(
+        owner.store.clone(),
+        owner.session.clone(),
+        Some(owner.attachment.clone()),
+        Default::default(),
+    )
+}
+
 /// What a turn sends: the task opens the first turn, ahead of the input.
 /// `None` when there is nothing to send.
 pub(super) fn turn_content(
@@ -167,4 +244,28 @@ pub(super) async fn send(
     })
     .await??;
     Ok(())
+}
+
+/// A turn's status, final answer and reported errors, once it settles.
+#[cfg(test)]
+pub(super) async fn drive_turn(
+    rx: &mut mpsc::UnboundedReceiver<ConversationEvent>,
+) -> (loopflow_model::chat::types::Lifecycle, String, Vec<String>) {
+    use loopflow_model::chat::types::ConversationItem;
+    let (mut text, mut errors) = (String::new(), Vec::new());
+    loop {
+        let event = tokio::time::timeout(std::time::Duration::from_secs(180), rx.recv())
+            .await
+            .expect("a turn settles")
+            .expect("the driver is alive");
+        match event {
+            ConversationEvent::ItemCompleted {
+                item: ConversationItem::Message { text: t, phase, .. },
+                ..
+            } if phase.as_deref() == Some("final") => text = t,
+            ConversationEvent::Error { message, .. } => errors.push(message),
+            ConversationEvent::TurnCompleted { status, .. } => return (status, text, errors),
+            _ => {}
+        }
+    }
 }

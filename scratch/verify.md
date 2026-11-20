@@ -49,3 +49,23 @@ Push `CI`: success. `macOS on main` and `Packages (main)`: in progress when read
 ## Not run
 
 Rex, Herdr, cmux and Desktop opens; a harness move replayed after the conversation ended.
+
+## Fix forward, built 2026-11-19
+
+`open/tmux.rs` resolves `tmux` on lf's `PATH`, then runs the `new-window`
+client with no `PATH`. tmux takes a window's `PATH` from an unattached client
+only when the client has one; with none the window keeps the server's.
+
+Seen on a private tmux 3.7c server started with `PATH=/usr/bin:/bin`:
+`PATH=/tmp/agentshim:$PATH tmux new-window 'echo $PATH'` printed the client's
+whole `PATH`; `env -u PATH /opt/homebrew/bin/tmux new-window 'echo $PATH'`
+printed `~/.cargo/bin:/usr/bin:/bin` (the server's, plus what zsh startup adds).
+
+Test: `cargo test -p loopflow --test integration work_open_tests::tmux` (2 passed, implement).
+
+Other hosts, read from the requests lf sends, not driven: Herdr gets a socket
+message with `"env":{}`; Rex gets `rex api call` with a JSON block holding
+`cwd` and `command` only; cmux gets a CLI call naming a command. None carries
+lf's environment in the request. Whether the `rex` and `cmux` clients add
+their own is not shown by this; a live open on each (ps -Eww of the provider
+after `export PATH=/tmp/shim:$PATH`) goes to verify.

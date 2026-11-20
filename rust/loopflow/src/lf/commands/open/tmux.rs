@@ -1,11 +1,13 @@
 //! tmux adapter: open and focus conversation windows in the caller's session.
 //! Task split layouts are handled only by Rex, Herdr and cmux.
+use std::path::Path;
 use std::process::Command;
 
 use anyhow::{Context, Result};
 
 use super::{run_host, viewed_placement, OpenHost, Resolved};
 
+use loopflow_execution::os_process::which_on_path;
 use loopflow_execution::terminal_host::TmuxLocation;
 
 fn host_command(location: &TmuxLocation) -> Command {
@@ -25,10 +27,15 @@ pub(super) fn open(target: &Resolved, focus: bool, argv: &[String]) -> Result<St
         ),
         _ => TmuxLocation::current(),
     };
-    let mut command = caller
-        .as_ref()
-        .map(host_command)
-        .unwrap_or_else(|| Command::new("tmux"));
+    // tmux starts a window on the PATH of the client that asked for it. This
+    // client has none, so the window starts on the server's, as a pane does
+    // in every other host; `tmux` is found on ours first.
+    let tmux = which_on_path(Path::new("tmux")).unwrap_or_else(|| "tmux".into());
+    let mut command = Command::new(tmux);
+    command.env_remove("PATH");
+    if let Some(location) = &caller {
+        command.args(["-S", &location.socket]);
+    }
     command.arg("new-window");
     if let Some(location) = &caller {
         // `new-window -t` names a window: tmux 3.7 refuses a pane there.

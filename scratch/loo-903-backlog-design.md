@@ -74,7 +74,7 @@ Open a Wave in the Loopflow Dev app; the demo seeds a scratch Wave with eight Ta
 | `scripts/test_desktop.sh --filter BacklogViewTests` | passes. |
 
 `BacklogViewTests` loads a fixture roadmap with six backlog Tasks: one owned by you, one by someone else, four unclaimed, one of those started and stopped at demo with a PR; two Waves whose defaults are feature and code.
-- Filter counts read "All 5 · Mine 1 · Available 4".
+- Filter counts read "All 6 · Mine 1 · Available 5"; the started row counts.
 - Search "brief-word" leaves the one matching row.
 - Selecting rows 1–3 shows no brief and "Start 3 · feature 2 · code 1".
 - ⌘↓ on row 1 issues `task update <id> --rank 1` through a stub query.
@@ -95,13 +95,13 @@ CI runs the full suites.
 - **Graph files are bare YAML lists.** `parse_graph_items` (`rust/loopflow-execution/src/graph/mod.rs`) already accepts a mapping with a `steps:` key, and ignores any other key. A Graph with a description is therefore `description: …` plus `steps: [...]`. Released `lf` reads such a repository file and skips the description, so there is no shared-file break. Custom Graphs stay valid as bare lists. Builtins (`rust/loopflow-definitions/src/builtins/`) move their header comment into the key and delete the comment, so the text lives in one place. A description containing `: ` is not valid YAML unquoted; two were reworded for that.
 - **Desktop has no "me".** No Swift identity exists, and `TaskOwner` carries keys only. `owned_by_you` costs one `OwnershipFacts` read per repository per roadmap read, which spawns `git config`. It must be read once per read, never per Task.
 - **The served `task.update` carries only `notes`** (`lf/commands/write.rs:131`; Swift `ServedWrite.taskUpdate`). Add `rank: Option<u32>` to both. The CLI already has `--rank`. Rank is set-position-N, clamped. A multi-row move is a sequence of rank sets in final order, which avoids a new batch op. Each set is one write transaction and one Linear move.
-- **The catalog lists builtin, repository and Wave Graphs together,** including pieces other Graphs include. As built, the menu shows every Graph that has a description, and undescribed custom Graphs go under "More ›". Concept review item 4 replaces that membership.
+- **The catalog lists builtin, repository and Wave Graphs together,** including pieces other Graphs include. `included_by` and `runs` on the catalog entry sort them: pieces and undescribed Graphs go under "More ›", and a Wave's Graph is not offered for a Task (slice 5).
 - **Compiled Graphs are expanded.** A catalog entry's `compiled.steps` holds the steps of every Graph it includes, each node's `sources` naming the Graphs it came through (`tests/fixtures/dto/graph_catalog.json`). Stop counts and the merge tag therefore see through `graph:` includes.
 - **Stops and the merge warning are derived in Swift** from `compiled.steps`.
   - Stops: the count of `interactive` nodes.
   - "Merges without asking": an `op` node whose label starts with `land` comes before the first interactive node. deliver ends in `cmd: land --wait-and-fix`, so that is true of auto (pursue + deliver) and deliver.
   - Builtin Task Graphs after main's restructuring, read from the files on November 19: feature 3 stops, code 2, research 1, redesign 1; no stop in auto, incident, deep-clean, optimize, queue, task-design, and in the pieces plan, build, deliver, pursue and refresh.
-  - The other zero-stop flows read "never stops". Reaching `end` approves Auto-Ship (`lf/mod.rs:2240`), so the "Run without stopping" header says so.
+  - The other zero-stop flows read "never stops". Reaching `end` approves Auto-Ship (`task run`'s help, `lf/mod.rs:2188`), so the "Run without stopping" header says so.
 - **Search is client-side over the loaded roadmap.** The selection-view read has no text search (`work/selection/query.rs:363`). A Wave's backlog is tens of Tasks, and the roadmap holds every one unless `truncated`. When truncated, the list says "Partial: searching the N loaded" rather than presenting a complete result.
 - **Several selected Tasks starting is N `startTask` calls.** Since main's #1960 (`2593c489d7`), Claim, Start, Move and Abandon show in the click and a refusal puts that Task's row back with its own window Notice. The backlog's batch actions loop over those writers, so there is no "Started 2 of 3 · reason" tally; the footer says "Started 3". "Each Task's own workflow" passes no graph. Any named flow passes it as the positional `graph`.
 - **Undo** uses SwiftUI's `@Environment(\.undoManager)` and registers inverse operations:
@@ -162,7 +162,7 @@ CI runs the full suites.
 
 ### Slices
 
-Status, November 19: slices 1–5 are built on top of main at `2750c9e0fb` (merge `d02f4c3a58`). Nothing has been seen in the real app.
+Status, November 19: slices 1–5 are built; slice 6 is planned and not built. The branch holds main through `f76129f677` (merge `09c29fd429`, #1991), which touched no backlog, Graph or Desktop file. Nothing has been seen in the real app.
 
 1. **Rust — built.** `description:` on Graph files, `lf graph list` prints it, catalog DTO in both languages, `RoadmapTask.owned_by_you`, served `task.update` takes `notes` and `rank`.
 2. **Swift list — built.** `BacklogView.swift`; `BacklogState` lives in `WorkNavigation.backlogs`; `BacklogList` is the projection. Default conversation share is 0.236.
@@ -177,7 +177,7 @@ Status, November 19: slices 1–5 are built on top of main at `2750c9e0fb` (merg
    - "Each Task's own workflow"; `?? "code"` and `defaultFlow` are gone, and a Task with no `graph_name` is started without a name; Start with nothing selected reads "Start", disabled.
    - The view part is `backlog` (`WaveViewPart.backlog`, `DesktopViewPartKind::Backlog`, `-p backlog`, `BacklogView`, `BacklogViewTests`). `WorkNavigation.Board` stays.
 
-6. **Second concept review, November 19 — next implement direction. Not built.** Read against `BacklogView.swift` at `34caec4de3`.
+6. **Second concept review, November 19 — next implement direction. Not built.** Read against `BacklogView.swift` at `34caec4de3`; rechecked at `09c29fd429`: `startLabel`'s Continue branch, "Continued N", ⌘↩ calling `perform(.start(nil))` without `startUnavailable`, the empty title and the `docs/surfaces.md` paragraph are all still there.
 
    **A started row opens; it does not Continue.** The biggest mismatch. Three things disagree with the rest of the product:
    - `lf task run` from a Task's last stop has no interactive step ahead, so it reaches `end` and approves Auto-Ship (`lf/mod.rs:2188`). The fixture's own row, "at demo · PR #12", is that case: Continue in the backlog ships a PR someone else left, from a row that shows a brief and no demo. Start's menu warns "merges without asking" for an unstarted Task; Continue says nothing.
@@ -207,7 +207,7 @@ Remaining:
 Left as built: the "merges without asking" tag comes from a Swift match on step labels beginning `land`/`pr land`; incident has no such step and reads "never stops", though reaching the end approves Auto-Ship there too. The tags were shown in the Start bar page and answered "2a".
 
 Checks (headless, this Machine):
-- `scripts/test_desktop.sh --skip-build --filter 'BacklogViewTests|NewTaskTests|DTOFixtureTests|TaskHistoryFilterTests|DesktopHeadlessTests|WorkModelTests|TaskGraphProofTests|SessionChromeProofTests|TaskConceptTests|WorkDestinationTests'`: 225 tests passed. `cargo test` for `graph::compiled::`, `dto_fixtures`, `graph_discovery_tests`, `documented_commands::`, `lf::tests::`, `server::schema::tests::` (fixture regenerated) and the Desktop view-part test: passed. `cargo fmt` applied.
+- Run at `34caec4de3`, before the #1991 merge and not since. `scripts/test_desktop.sh --skip-build --filter 'BacklogViewTests|NewTaskTests|DTOFixtureTests|TaskHistoryFilterTests|DesktopHeadlessTests|WorkModelTests|TaskGraphProofTests|SessionChromeProofTests|TaskConceptTests|WorkDestinationTests'`: 225 tests passed. `cargo test` for `graph::compiled::`, `dto_fixtures`, `graph_discovery_tests`, `documented_commands::`, `lf::tests::`, `server::schema::tests::` (fixture regenerated) and the Desktop view-part test: passed. `cargo fmt` applied.
 - Not run since the sync: `cargo clippy --all-targets -- -D warnings`; `served_reads::screen_reads_are_compact_passive_and_match_cli`, which failed identically on base 0a31dd3c98; the iOS suite, which shared Swift models reach. Gate and CI run them.
 - Seen in the sync's full `loopflow-execution store::` run: `task_labels_and_generated_names_follow_local_identity_and_linear_mapping` failed and passed alone. Not diagnosed and nothing filed.
 

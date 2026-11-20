@@ -57,7 +57,7 @@ instead of appending.
 ## Launching
 
 `lf task run <issue>` runs the Task's graph to its next interactive step and
-returns; `lf task status <issue>` follows it. `lf ship` turns auto
+returns; `lf task status <issue>` follows it. `lf task auto on` turns auto
 on, so the run stands in at interactive steps and may merge the PR;
 `lf -b task run` stands in for its own run, and a run with no interactive
 step left ahead may merge it too. Use them only when shipping was asked for.

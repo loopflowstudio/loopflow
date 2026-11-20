@@ -3060,7 +3060,16 @@ fn a_batch_task_run_runs_straight_through_its_interactive_steps_to_the_end() {
 #[test]
 fn task_ship_runs_every_remaining_step_standing_in_at_each_interactive_step() {
     let task = shipping_task();
-    let output = task.run(&["-b", "--task", "INF-123", "ship", "--reason", "good to go"]);
+    let output = task.run(&[
+        "-b",
+        "--task",
+        "INF-123",
+        "task",
+        "auto",
+        "on",
+        "--reason",
+        "good to go",
+    ]);
     assert!(
         output.status.success(),
         "{}",
@@ -3077,7 +3086,7 @@ fn task_ship_runs_every_remaining_step_standing_in_at_each_interactive_step() {
     assert!(turns[0].contains("at review"), "{}", turns[0]);
     // Reaching the end completed the Task; nothing remains to ship.
     assert_eq!(task.state(), "done");
-    let error = refusal(task.run(&["-b", "--task", "INF-123", "ship"]));
+    let error = refusal(task.run(&["-b", "--task", "INF-123", "task", "auto", "on"]));
     assert!(error.contains("INF-123 is done"), "{error}");
 }
 
@@ -3086,7 +3095,7 @@ fn task_ship_stands_in_at_the_step_the_task_waits_at() {
     let task = shipping_task();
     task.task_run_ok(&["task", "run", "INF-123"]);
     assert_eq!(task.graph()["position"], at("review"));
-    let output = task.run(&["-b", "--task", "INF-123", "ship"]);
+    let output = task.run(&["-b", "--task", "INF-123", "task", "auto", "on"]);
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(output.status.success(), "{stderr}");
     assert!(
@@ -3106,7 +3115,7 @@ fn a_bare_ship_stands_in_because_auto_is_on() {
     task.task_run_ok(&["task", "run", "INF-123"]);
     assert_eq!(task.graph()["position"], at("review"));
     // Bare, not `-b`: the run stands in at review because auto is on.
-    let shipped = task.task_run(&["--task", "INF-123", "ship"]);
+    let shipped = task.task_run(&["--task", "INF-123", "task", "auto", "on"]);
     assert!(shipped.success(), "{}", shipped.text);
     assert!(
         shipped.text.contains("INF-123: standing in at review"),
@@ -3126,7 +3135,7 @@ fn auto_on_at_a_waiting_step_stands_in_there_with_one_graph_run() {
     task.task_run_ok(&["task", "run", "INF-123"]);
     assert_eq!(task.graph()["position"], at("review"));
     let graphs = support::recorded_graphs(task.home.path()).len();
-    // Turning auto on is `lf ship`: nobody is waited for, so the Task runs.
+    // Turning auto on is `lf task auto on`: nobody is waited for, so the Task runs.
     let on = task.task_run(&["task", "auto", "on", "INF-123", "--reason", "good to go"]);
     assert!(on.success(), "{}", on.text);
     assert!(
@@ -3204,7 +3213,7 @@ fn a_ship_on_a_running_task_reports_its_run_and_starts_nothing() {
         "{}",
         task.text_status()
     );
-    let shipped = task.run(&["--task", "INF-123", "ship"]);
+    let shipped = task.run(&["--task", "INF-123", "task", "auto", "on"]);
     let text = String::from_utf8_lossy(&shipped.stdout);
     assert!(
         shipped.status.success(),
@@ -3232,7 +3241,7 @@ fn a_stopped_ship_kills_nothing_and_its_run_carries_on() {
     let mut first = command(
         task.repo.path(),
         task.home.path(),
-        &["-b", "--task", "INF-123", "ship"],
+        &["-b", "--task", "INF-123", "task", "auto", "on"],
     )
     .stdin(std::process::Stdio::null())
     .stdout(std::process::Stdio::null())
@@ -3284,7 +3293,7 @@ fn auto_off_sticks_through_a_headless_relaunch() {
     assert!(ran.success(), "{}", ran.text);
     assert!(
         ran.text.contains("Waiting at pr land: auto is off (")
-            && ran.text.contains("`lf ship INF-123` lands it."),
+            && ran.text.contains("`lf task auto on INF-123` lands it."),
         "{}",
         ran.text
     );
@@ -3305,7 +3314,7 @@ fn auto_off_sticks_through_a_headless_relaunch() {
     let text = task.text_status();
     assert!(
         text.contains("latest Graph: Waiting at pr land: auto is off (")
-            && text.contains("`lf ship INF-123` lands it."),
+            && text.contains("`lf task auto on INF-123` lands it."),
         "{text}"
     );
     assert!(text.contains("action: no_action"), "{text}");
@@ -3324,7 +3333,9 @@ fn auto_off_sticks_through_a_headless_relaunch() {
 fn a_ship_whose_run_fails_the_same_way_stops_and_keeps_auto_on() {
     let task = shipping_task();
     // `gate` refuses identically until the repository defines `late`.
-    let output = task.run(&["-b", "--task", "INF-123", "ship", "--graph", "gate"]);
+    let output = task.run(&[
+        "-b", "--task", "INF-123", "task", "auto", "on", "--graph", "gate",
+    ]);
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(!output.status.success());
     assert!(
@@ -3350,7 +3361,7 @@ fn task_ship_completes_when_its_pr_merges_mid_ship() {
     let first = command(
         task.repo.path(),
         task.home.path(),
-        &["-b", "--task", "INF-123", "ship"],
+        &["-b", "--task", "INF-123", "task", "auto", "on"],
     )
     .stdin(std::process::Stdio::null())
     .stdout(std::process::Stdio::piped())
@@ -3376,7 +3387,7 @@ fn a_ship_meets_a_hand_merged_pr_at_its_landing_step() {
     assert_eq!(task.graph()["position"], at("review"));
     // Someone merged the PR by hand while the Task waited at review.
     task.publish(true);
-    let output = task.run(&["-b", "--task", "INF-123", "ship"]);
+    let output = task.run(&["-b", "--task", "INF-123", "task", "auto", "on"]);
     assert!(
         output.status.success(),
         "{}{}",
@@ -3399,7 +3410,7 @@ fn a_ship_whose_carrier_dies_still_reaches_its_end() {
     let mut first = command(
         task.repo.path(),
         task.home.path(),
-        &["-b", "--task", "INF-123", "ship"],
+        &["-b", "--task", "INF-123", "task", "auto", "on"],
     )
     .stdin(std::process::Stdio::null())
     .stdout(std::process::Stdio::null())
@@ -3568,7 +3579,7 @@ fn task_ship_unassigned_mid_ship_waits_and_lets_its_running_step_finish() {
     let mut first = command(
         task.repo.path(),
         task.home.path(),
-        &["-b", "--task", "INF-123", "ship"],
+        &["-b", "--task", "INF-123", "task", "auto", "on"],
     )
     .stdin(std::process::Stdio::null())
     .stdout(std::process::Stdio::null())
@@ -3596,7 +3607,9 @@ fn task_ship_runs_new_work_on_a_reopened_task_despite_its_old_merged_pr() {
     assert_eq!(task.state(), "done");
     task.ok(&["task", "reopen", "INF-123", "--reason", "new repair"]);
     assert_ne!(task.state(), "done");
-    let output = task.run(&["-b", "--task", "INF-123", "ship", "--graph", "feature"]);
+    let output = task.run(&[
+        "-b", "--task", "INF-123", "task", "auto", "on", "--graph", "feature",
+    ]);
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
         output.status.success(),
@@ -3648,7 +3661,16 @@ fn task_ship_blocked_at_verification_waits_there_without_building_again() {
     task.repo.stage_all();
     task.repo.commit("Define the verifying Graph");
     let held = Some(i32::from(loopflow_execution::process::GraphHeld::EXIT));
-    let first = task.run(&["-b", "--task", "INF-123", "ship", "--graph", "verifying"]);
+    let first = task.run(&[
+        "-b",
+        "--task",
+        "INF-123",
+        "task",
+        "auto",
+        "on",
+        "--graph",
+        "verifying",
+    ]);
     assert_eq!(first.status.code(), held, "{first:?}");
     // The stand-in at check reported a dependency: the Task waits at check.
     assert_eq!(
@@ -3658,7 +3680,7 @@ fn task_ship_blocked_at_verification_waits_there_without_building_again() {
         String::from_utf8_lossy(&first.stderr)
     );
     assert_eq!(stand_ins(&task).len(), 1);
-    let again = task.run(&["-b", "--task", "INF-123", "ship"]);
+    let again = task.run(&["-b", "--task", "INF-123", "task", "auto", "on"]);
     let stderr = String::from_utf8_lossy(&again.stderr);
     assert_eq!(again.status.code(), held, "{again:?}");
     assert!(stderr.contains("INF-123: standing in at check"), "{stderr}");

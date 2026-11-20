@@ -209,14 +209,13 @@ writes! {
         )?,
     },
 
-    /// `lf --task <issue> ship --json`, spelled `lf task auto on <issue>
-    /// --json` too, started detached: turns auto on and returns the run, as
+    /// `lf task auto on <issue> --json`, started detached: turns auto on and returns the run, as
     /// `task.run` does. Nothing else turns auto on.
-    #[serde(rename = "task.ship")]
-    TaskShip { directory: PathBuf, issue: String } => task::TaskRun;
+    #[serde(rename = "task.auto.on")]
+    TaskAutoOn { directory: PathBuf, issue: String } => task::TaskRun;
     { issue, .. } => match remote {
         Some(remote) => remote.call()?,
-        None => task::ship(directory, issue, environment)?,
+        None => task::auto_on(directory, issue, environment)?,
     },
 
     /// `lf task auto off <issue> --json`: turns the Task's auto setting off.
@@ -1088,7 +1087,7 @@ macro_rules! directory_of {
             | Write::TaskClaim { directory, .. }
             | Write::TaskUnassign { directory, .. }
             | Write::TaskRun { directory, .. }
-            | Write::TaskShip { directory, .. }
+            | Write::TaskAutoOn { directory, .. }
             | Write::TaskAutoOff { directory, .. }
             | Write::TaskSync { directory, .. }
             | Write::TrackerAnswer { directory, .. }
@@ -1153,7 +1152,7 @@ impl Write {
         // A run or ship starts agents there, which carry what `forward` names.
         let (route, launching) = match self {
             Self::SessionResume { .. } => return self.remote_session(),
-            Self::TaskRun { issue, .. } | Self::TaskShip { issue, .. } => {
+            Self::TaskRun { issue, .. } | Self::TaskAutoOn { issue, .. } => {
                 (remote_task(issue)?, true)
             }
             Self::TaskAutoOff { issue, .. } => (remote_task(issue)?, false),
@@ -1168,7 +1167,7 @@ impl Write {
         // A shipped Task's Linear mapping resolves on the destination, whose
         // own Task ID may differ.
         let source = match self {
-            Self::TaskShip { .. } => tokio::runtime::Runtime::new()?.block_on(
+            Self::TaskAutoOn { .. } => tokio::runtime::Runtime::new()?.block_on(
                 loopflow_execution::machine::task::resolve_task_source(
                     Some(route.task_id.as_str()),
                     self.directory(),
@@ -1178,7 +1177,7 @@ impl Write {
         };
         let mut write = self.clone();
         if let Self::TaskRun { issue, .. }
-        | Self::TaskShip { issue, .. }
+        | Self::TaskAutoOn { issue, .. }
         | Self::TaskAutoOff { issue, .. }
         | Self::TaskClaim { issue, .. }
         | Self::TaskUnassign { issue, .. } = &mut write
@@ -1432,18 +1431,18 @@ mod tests {
         use serde_json::json;
 
         let shipping: serde_json::Value = serde_json::from_str(include_str!(
-            "../../../../loopflow-execution/tests/fixtures/dto/server/task_ship_answer.json"
+            "../../../../loopflow-execution/tests/fixtures/dto/server/task_auto_on_answer.json"
         ))
         .unwrap();
-        // `task.ship` answers as `task.run` does.
+        // `task.auto.on` answers as `task.run` does.
         for expected in [
             shipping["result"].clone(),
             json!({"state": "ended", "issue": "LOO-1"}),
         ] {
             let result: TaskRun = serde_json::from_value(expected.clone()).unwrap();
-            let actual = serde_json::to_value(WriteResult::TaskShip(Box::new(result))).unwrap();
+            let actual = serde_json::to_value(WriteResult::TaskAutoOn(Box::new(result))).unwrap();
             assert_eq!(actual, expected);
-            assert_result_schema("task.ship", &actual);
+            assert_result_schema("task.auto.on", &actual);
         }
         for (kind, answer, expected) in [
             (
@@ -1510,7 +1509,7 @@ mod tests {
             r#"{"kind":"session.new","directory":"/r","request_id":"new-thread","id":"session_1","agent":"codex"}"#,
             r#"{"kind":"task.save","directory":"/","issue":"FIX-1","path":"a.txt","revision":"r","content":"text"}"#,
             r#"{"kind":"task.run","directory":"/r","issue":"FIX-1","graph":null,"from":"implement","agent":"claude","approve":false}"#,
-            r#"{"kind":"task.ship","directory":"/r","issue":"FIX-1"}"#,
+            r#"{"kind":"task.auto.on","directory":"/r","issue":"FIX-1"}"#,
             r#"{"kind":"task.steer","directory":"/r","issue":"FIX-1","message":"keep the API"}"#,
             r#"{"kind":"task.report","directory":"/r","issue":"FIX-1","message":"landed"}"#,
             r#"{"kind":"task.interrupt","directory":"/r","issue":"FIX-1"}"#,

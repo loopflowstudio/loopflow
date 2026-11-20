@@ -112,7 +112,7 @@ const REQUESTS: &[&str] = &[
     include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_interrupt.json"),
     include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_report.json"),
     include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_run.json"),
-    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_ship.json"),
+    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_auto_on.json"),
     include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_steer.json"),
     include_str!("../../../loopflow-execution/tests/fixtures/dto/server/view_plan.json"),
     include_str!("../../../loopflow-execution/tests/fixtures/dto/server/wave_plan_bind.json"),
@@ -262,8 +262,10 @@ const RESPONSES: &[(&str, &str, &str)] = &[
     ),
     (
         "task_ship_answer",
-        "task.ship",
-        include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_ship_answer.json"),
+        "task.auto.on",
+        include_str!(
+            "../../../loopflow-execution/tests/fixtures/dto/server/task_auto_on_answer.json"
+        ),
     ),
     (
         "wave_plan_connected",

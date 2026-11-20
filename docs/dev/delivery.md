@@ -128,7 +128,7 @@ and push the exact head. Branch commits and merge resolutions retain their ident
 GitHub applies the repository’s allowed merge method or merge queue policy. `arm` and `land` request
 GitHub auto-merge, record the landing, and return. Success means handoff;
 `lf pr reconcile` checks recorded repository landings once and repairs nothing;
-the waiting landing (`--wait-and-fix`, `lf ship`) does. `submit` performs the
+the waiting landing (`--wait-and-fix`, `lf task auto on`) does. `submit` performs the
 same preparation but leaves the exact-head merge to a person. These delivery
 commands inspect Task delivery state when present; they do not require a running
 Task Graph or certify that a particular Graph ran.

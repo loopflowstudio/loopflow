@@ -356,7 +356,7 @@
       "oneOf": [
         {
           "const": "on",
-          "description": "`lf task auto on`, `lf ship` or `lf -b task run` turned it on.",
+          "description": "`lf task auto on` or an `auto: on` configuration turned it on.",
           "type": "string"
         },
         {
@@ -1476,6 +1476,26 @@
         "steps"
       ],
       "type": "object"
+    },
+    "ConfigLayer": {
+      "description": "The configuration a default came from, as `lf task status` names it.",
+      "oneOf": [
+        {
+          "const": "wave",
+          "description": "The Task's Wave's `config.yaml`, or a personal setting for that Wave.",
+          "type": "string"
+        },
+        {
+          "const": "repository",
+          "description": "The repository's `.lf/config.yaml`.",
+          "type": "string"
+        },
+        {
+          "const": "personal",
+          "description": "Personal configuration.",
+          "type": "string"
+        }
+      ]
     },
     "ConfigSource": {
       "description": "Authority is independent of the declaration's scope and target.",
@@ -10919,6 +10939,23 @@
             "requester"
           ],
           "type": "object"
+        },
+        {
+          "description": "A configured default set it: `auto: on`. Only an auto mark names one.",
+          "properties": {
+            "kind": {
+              "const": "config",
+              "type": "string"
+            },
+            "layer": {
+              "$ref": "#/$defs/ConfigLayer"
+            }
+          },
+          "required": [
+            "kind",
+            "layer"
+          ],
+          "type": "object"
         }
       ]
     },
@@ -15731,7 +15768,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "`lf [-b] [-a <agent>] task run <issue> [--from <step>] --json`, started\ndetached: the Graph process it started, or where the Task now waits.\n`approve` is `-b`: every step headless to `end`, turning auto on.",
+          "description": "`lf [-b] [-a <agent>] task run <issue> [--from <step>] --json`, started\ndetached: the Graph process it started, or where the Task now waits.\n`approve` is `-b`: every step headless to `end`; it writes no auto.",
           "examples": [
             {
               "agent": "claude",
@@ -15800,12 +15837,12 @@
         },
         {
           "additionalProperties": false,
-          "description": "`lf --task <issue> ship --json`, spelled `lf task auto on <issue>\n--json` too, started detached: turns auto on and returns the run, as\n`task.run` does. Nothing else turns auto on.",
+          "description": "`lf task auto on <issue> --json`, started detached: turns auto on and returns the run, as\n`task.run` does. Nothing else turns auto on.",
           "examples": [
             {
               "directory": "/repo",
               "issue": "LOO-1",
-              "kind": "task.ship"
+              "kind": "task.auto.on"
             }
           ],
           "properties": {
@@ -15816,7 +15853,7 @@
               "type": "string"
             },
             "kind": {
-              "const": "task.ship",
+              "const": "task.auto.on",
               "type": "string"
             }
           },

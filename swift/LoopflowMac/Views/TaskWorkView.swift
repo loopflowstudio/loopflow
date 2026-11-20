@@ -215,7 +215,7 @@ struct TaskWorkflowHeader: View {
 }
 
 /// The Auto toggle at the right end of the Workflow bar. On: the Task's run
-/// takes its interactive steps and lands it. Turning it on is `lf ship`, which
+/// takes its interactive steps and lands it. Turning it on is `lf task auto on`, which
 /// also runs the Task; Rust decides whether that can start. Sidebar rows and
 /// menus carry no auto control.
 struct TaskAutoControl: View {
@@ -277,14 +277,14 @@ struct TaskAutoControl: View {
     private func toggle(refusal: String?) -> some View {
         let issue = task.task.identifier
         return Toggle("Auto", isOn: Binding(get: { on }, set: { turnOn in
-            if turnOn { model.shipTask(task) } else { model.turnAutoOff(task) }
+            if turnOn { model.turnAutoOn(task) } else { model.turnAutoOff(task) }
         }))
         .toggleStyle(.switch).controlSize(.small)
         .font(Typography.body(12.5))
         .disabled(refusal != nil)
         .help(refusal ?? (on
             ? "lf task auto off \(issue): the run waits at its next interactive step for you, and auto-merge is disarmed"
-            : "lf ship \(issue): lf task auto on \(issue), then run every remaining step and land it"))
+            : "lf task auto on \(issue): run every remaining step and land it"))
         .accessibilityIdentifier("task-auto")
     }
 }

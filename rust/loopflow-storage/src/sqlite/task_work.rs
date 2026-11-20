@@ -287,7 +287,7 @@ fn run_restarts_in(conn: &rusqlite::Connection, task: &TaskId) -> StoreResult<Ta
 )]
 #[serde(rename_all = "snake_case")]
 pub enum AutoState {
-    /// `lf task auto on`, `lf ship` or `lf -b task run` turned it on.
+    /// `lf task auto on` or an `auto: on` configuration turned it on.
     On,
     /// `lf task auto off` turned it off; `-b` leaves it off.
     Off,
@@ -1079,7 +1079,7 @@ mod tests {
         drop(store);
         let store = crate::test_fixture::open(&path).unwrap();
         assert_eq!(store.task_auto(&task.id).unwrap(), Some(stopped));
-        // `lf ship` lifts it.
+        // `lf task auto on` lifts it.
         store
             .set_task_auto(&task.id, &mark(super::AutoState::On, 40), false)
             .unwrap();

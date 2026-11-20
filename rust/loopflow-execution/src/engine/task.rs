@@ -1,9 +1,9 @@
-//! The `task` namespace's core loop: run, ship, auto, steer, report, wait and
+//! The `task` namespace's core loop: run, auto, steer, report, wait and
 //! interrupt a Task, and claim or unassign it.
 //!
-//! A run and a ship outlive the request that starts them. From a terminal the
+//! A run and an auto on outlive the request that starts them. From a terminal the
 //! `lf` process is their carrier; a served request has none, so [`run`] and
-//! [`ship`] start the same command detached ([`super::launch`]) and return the
+//! [`auto_on`] start the same command detached ([`super::launch`]) and return the
 //! result it reports, the value its CLI spelling prints with `--json`. Each
 //! runs here: the caller sends a Task another Machine runs to that Machine,
 //! whose server starts it with the `environment` the sender carried.
@@ -119,17 +119,17 @@ pub fn run(
     )
 }
 
-/// `task.ship`: turn auto on and start the Task's run detached, as
-/// `lf --task <issue> ship` and `lf task auto on <issue>` do: it returns what
-/// `task.run` returns, and the run stands in at each interactive step until
-/// the PR lands. It is the one way to turn auto on.
-pub fn ship(directory: &Path, issue: &str, environment: &[(String, String)]) -> Result<TaskRun> {
-    launch::start_with(directory, &spell_ship(issue), environment)
+/// `task.auto.on`: turn auto on and start the Task's run detached, as
+/// `lf task auto on <issue>` does: it returns what `task.run` returns, and the
+/// run stands in at each interactive step until the PR lands. It is the one
+/// way to turn auto on.
+pub fn auto_on(directory: &Path, issue: &str, environment: &[(String, String)]) -> Result<TaskRun> {
+    launch::start_with(directory, &spell_auto_on(issue), environment)
 }
 
 /// `task.auto.off`: turn the Task's auto setting off, as `lf task auto off
 /// <issue>` does. Nothing is killed: the run waits at its next interactive or
-/// merging step until `task.ship` turns auto on again.
+/// merging step until `task.auto.on` turns auto on again.
 pub fn auto_off(issue: &str, reason: Option<&str>) -> Result<AutoOff> {
     let was_on = crate::ops::task::auto::off(issue, reason)
         .map_err(written)?
@@ -275,8 +275,8 @@ pub fn spell_run(
     args
 }
 
-pub fn spell_ship(issue: &str) -> Vec<String> {
-    ["--task", issue, "ship", "--json"]
+pub fn spell_auto_on(issue: &str) -> Vec<String> {
+    ["--task", issue, "task", "auto", "on", "--json"]
         .map(str::to_owned)
         .to_vec()
 }

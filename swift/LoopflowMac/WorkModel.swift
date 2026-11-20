@@ -2681,11 +2681,11 @@ final class WorkModel {
         }
     }
 
-    /// Turn auto on and run the Task, as `lf ship` does: the Notice says auto on
+    /// Turn auto on and run the Task, as `lf task auto on` does: the Notice says auto on
     /// was requested and its Undo turns auto off. The Task moves when the
     /// Machine's reading says so.
-    func shipTask(_ task: RoadmapTask) {
-        request(task, "Auto on", .taskShip(directory: directory(task), issue: task.task.identifier),
+    func turnAutoOn(_ task: RoadmapTask) {
+        request(task, "Auto on", .taskAutoOn(directory: directory(task), issue: task.task.identifier),
                       undo: Notice.Action("Undo", help: "Auto off") { [weak self] in
                           self?.turnAutoOff(task)
                       })

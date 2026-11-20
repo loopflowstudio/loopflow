@@ -29,10 +29,10 @@ Nothing repairs its PR until a waited landing does.
 To go from review-ready to merged in one step, ship the Task:
 
 ```bash
-lf ship LOO-12               # auto on, then the remaining steps: reflect, gate, land --wait-and-fix
+lf task auto on LOO-12               # auto on, then the remaining steps: reflect, gate, land --wait-and-fix
 ```
 
-`lf ship` turns [auto](orchestration.md#auto) on and runs the Task, so
+`lf task auto on` turns [auto](orchestration.md#auto) on and runs the Task, so
 its run stands in for you at `ship-review` and `verify`. A PR someone merges
 by hand meanwhile is met by the landing step, which sees the merge and goes on
 to `verify`.
@@ -109,7 +109,7 @@ a risk no suite covers.
 The report is by commit. Passing, failing, pending, skipped and unavailable
 stay separate, and a pass on an earlier head doesn't carry to a later one.
 Gate doesn't wait for a pending run or request auto-merge: `lf land
---wait-and-fix` does both, and `lf ship` runs it next.
+--wait-and-fix` does both, and `lf task auto on` runs it next.
 
 Without a remote, publishing access, `gh` or any CI, gate says which is missing
 and runs its named tests here. It reports "no CI ran" when that is known;
@@ -122,7 +122,7 @@ directory), name that step in your agent guide. Gate does it before publishing.
 ### When CI fails
 
 ```bash
-lf ship                        # a Task: auto on, the remaining steps, land and repair until merge
+lf task auto on                        # a Task: auto on, the remaining steps, land and repair until merge
 lf land --wait-and-fix         # this PR: land and repair in the foreground
 lf repo ci --since 7d    # how each failure was detected, repaired and landed
 ```
@@ -441,7 +441,7 @@ retain service authentication through `lf account`. See
 | `lf pr publish` / `lf pr open` | Ready PR, printed / draft PR, opened |
 | `lf pr abandon [BRANCH]` | Close the PR, remove the worktree, delete the branch |
 | `lf pr reconcile` | Check recorded landings once; recover a Task's missing PR |
-| `lf ship [ISSUE]` / `lf task auto on [ISSUE]` | Turn auto on and run the Task |
+| `lf task auto on [ISSUE]` | Turn auto on and run the Task |
 | `lf task auto off [ISSUE]` | Turn auto off: the run waits at its next interactive or merging step |
 | `lf repo ci [--since 7d]` | Report CI incidents and their repairs |
 | `lf repo release run\|check\|status\|notes\|bump\|tag\|publish` | Release stages, together or one at a time |

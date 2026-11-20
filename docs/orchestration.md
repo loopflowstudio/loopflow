@@ -245,7 +245,7 @@ lf task run LOO-12 feature          # runs up to explore and stops; the Task wai
 lf task run LOO-12                  # after you're done there: on to ship-review
 lf task run LOO-12 --from explore   # back to choosing what to build
 lf -b task run LOO-12               # the rest, straight through to a merged PR
-lf ship LOO-12                      # auto on: the rest runs with an agent standing in for you
+lf task auto on LOO-12                      # auto on: the rest runs with an agent standing in for you
 ```
 
 At `ship-review` you read one page, `scratch/ship-review.html`: what ships, in
@@ -283,14 +283,14 @@ Auto is one setting on the Task's Graph: on, off, or never set. Status says
 what is happening; auto says who takes the interactive steps. While it is on,
 the Task's runs stand in for you at each interactive step they reach and may
 merge the PR. Turning it on means nobody is waited for, so it runs the Task:
-`lf ship`, `lf task auto on` and Desktop's **Auto** toggle are one operation.
+`lf task auto on` and Desktop's **Auto** toggle are one operation.
 It prints what `lf task run` prints and leaves one Graph process:
 
 ```bash
-lf ship LOO-12                      # LOO-12 · code from ship-review running as Graph run …
+lf task auto on LOO-12                      # LOO-12 · code from ship-review running as Graph run …
 lf task status LOO-12               # LOO-12  moving · auto: on by Maya, Nov 18 09:04
 lf task auto off LOO-12             # LOO-12: auto off
-lf task auto on LOO-12              # the same command as `lf ship LOO-12`
+lf task auto on LOO-12              # on again: the run goes on from where it waits
 ```
 
 A Task waiting at an interactive step is stood in for there, and one that
@@ -299,8 +299,8 @@ step, not at launch: turn it on while `build` runs and that run carries on,
 standing in at `ship-review` when it gets there.
 `lf task auto off`, or Desktop's **Auto** toggle, kills nothing. The run carries on to its next interactive step and
 waits there, or reaches a merging step (`lf land`, `lf pr arm`, `pr-land`) and
-waits before it: "Waiting at pr land: auto is off (Maya). `lf ship INF-1` lands it."
-Auto-merge that Loopflow armed is disarmed. Off stands: only `lf ship` turns
+waits before it: "Waiting at pr land: auto is off (Maya). `lf task auto on INF-1` lands it."
+Auto-merge that Loopflow armed is disarmed. Off stands: only `lf task auto on` turns
 it back on. `lf -b task run` stands in at every step for its own run and
 writes no auto, so with auto off it still waits at the landing step. Other Graphs in the Task's worktree never move it. There is no
 approve command: give feedback in the Task's conversation, which knows its step

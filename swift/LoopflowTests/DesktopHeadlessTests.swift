@@ -366,7 +366,7 @@ struct DesktopHeadlessTests {
             run: { args, _ in
                 if args.prefix(2) == ["plan", "list"] { return String(decoding: planning, as: UTF8.self) }
                 if args.prefix(2) == ["task", "run"] || args.prefix(2) == ["task", "complete"]
-                    || args.contains("ship") || args.prefix(2) == ["task", "auto"] {
+                    || args.contains("auto") {
                     await started.add(args)
                 }
                 return "{}"
@@ -416,12 +416,12 @@ struct DesktopHeadlessTests {
         #expect(throws: (any Error).self) {
             try waiting.inspect().find(viewWithAccessibilityIdentifier: "task-auto")
         }
-        // Off until someone turns it on; turning it on is `lf ship`.
+        // Off until someone turns it on with `lf task auto on`.
         let control = TaskAutoControl(model: model, task: task)
         let toggle = try control.inspect().find(viewWithAccessibilityIdentifier: "task-auto").toggle()
         #expect(try !toggle.isOn())
         try toggle.tap()
-        #expect(try await tapped(2) == ["--task", task.task.identifier, "ship", "--json"])
+        #expect(try await tapped(2) == ["--task", task.task.identifier, "task", "auto", "on", "--json"])
 
         // At its end nothing remains to run.
         let ended = try view(position: ["kind": "at", "step": "end"])
@@ -447,7 +447,7 @@ struct DesktopHeadlessTests {
         #expect(await started.calls.last == ["task", "complete", task.task.identifier, "--json"])
 
         // Auto on says it was requested, never that it shipped; its Undo is auto off.
-        model.shipTask(task)
+        model.turnAutoOn(task)
         let notice = try #require(model.navigation.notices.current)
         #expect(notice.text == "\(task.task.identifier) Auto on requested")
         let view = NoticeView(center: model.navigation.notices)

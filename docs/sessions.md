@@ -164,7 +164,7 @@ lf task run LOO-12 --json          # the same, answering {state, graph_process, 
 ```
 
 A batch runs its agent as a child and waits for it. Work commands (a Graph,
-`lf task run` or `lf ship`, a landing watcher) run in a process of their own that outlives the command that
+`lf task run` or `lf task auto on`, a landing watcher) run in a process of their own that outlives the command that
 started it, writing the log the command names; `lf -b task run` prints that log as it grows and exits with the
 Graph. Nothing hosts either: no server, no holder.
 
@@ -209,7 +209,7 @@ ten conversations, not the holder.
 
 | Opened with | Runs in |
 |---|---|
-| a person's interactive step of `lf task run` or `lf ship`, `lf resume --task`, a Wave session command | the holder |
+| a person's interactive step of `lf task run` or `lf task auto on`, `lf resume --task`, a Wave session command | the holder |
 | a Desktop pane or framed `lf --machine` view opening a held conversation | the holder |
 | `lf resume <session>` of a conversation one of those opened | the holder |
 | a Desktop Task shell | the holder |
@@ -331,7 +331,7 @@ lf task status LOO-12
 # Conversation: quit 12:03; `lf resume --task LOO-12` opens it
 ```
 
-A Task run whose `lf task run` or `lf ship` died is carried again the same
+A Task run whose `lf task run` or `lf task auto on` died is carried again the same
 way, as `lf task run`, from the step it reached, and its workers with it. A
 run that was waiting for you at an interactive step stops there again; being
 carried again never turns auto on.

@@ -61,7 +61,7 @@ first reading after start is the restart and reboot case. Each reading:
    counts the start (`agent_sessions.starts_since_turn`, `last_started_at`)
    before it goes through `session.continue`'s path with request
    `recover:<session>:<ended agent, or new>:<attempt>`, so one death starts one
-   provider across server restarts. `lf task run`, `lf ship` and
+   provider across server restarts. `lf task run`, `lf task auto on` and
    `lf task checkout` only prepare the Session; this pass starts it. That
    first start counts only if it fails, so the first death after it comes
    back at once; its terminal holds later passes off. The pass's
@@ -150,7 +150,7 @@ Machine's null `sender` is `invalid`, and a client on this Machine sends null:
 
 The server runs the operation in its own checkout of `repository` (the
 operation's `directory` is the sender's), and starts any launch (`task.run`,
-`task.ship`) with `selection` and `secrets`: the values `forward.env` names,
+`task.auto.on`) with `selection` and `secrets`: the values `forward.env` names,
 which nothing prints (`Debug` shows names). Files `forward.files` names are
 delivered over SSH first. The sender waits 120 s for an answer; past that the
 request fails, naming the Machine and `ssh <route> lf server status`.
@@ -170,9 +170,9 @@ rather than the connection. The root accepts any message either side sends;
 `x-min-revision` are this build's range. Each operation's kind is a `const` as
 on the wire, and `x-result` beside it names what `response.result` carries.
 For a write, that schema derives from the Rust type the operation returns.
-For example, `task.ship` returns `TaskRun`: its `state` is `running`,
+For example, `task.auto.on` returns `TaskRun`: its `state` is `running`,
 `waiting` or `ended`, with the fields described by that variant.
-`lf --task <issue> ship --json` prints the same result. Use the operation's
+`lf task auto on <issue> --json` prints the same result. Use the operation's
 `x-result` to decode it; `response.result` adds no extra result-type tag.
 
 Where a recorded exchange exists, `examples` holds the request's operation and
@@ -380,7 +380,7 @@ case names one operation, including distinct claim/unassign and pin/unpin writes
 | `task.create` | `lf task create [--session <id>] [--run] --request-id <id>` | write |
 | `creation.get` | `lf server receipt <request-id> --json` | read; no creation or launch |
 | `task.run` | `lf task run <issue>` | `engine::task` |
-| `task.ship` | `lf ship`, `lf task auto on <issue>` | `engine::task` |
+| `task.auto.on` | `lf task auto on <issue>` | `engine::task` |
 | `task.auto.off` | `lf task auto off <issue>` | `engine::task` |
 | `task.steer` | `lf steer <issue> <message>` | `engine::task`; the thread entry the store saves as the Task's steer |
 | `task.report` | `lf task report <issue> <message>` | `engine::task` |
@@ -505,19 +505,19 @@ the phone's `view.select` Task list and its creation destinations all read it.
   sends `ended {id}` and nothing more for it. Requested once, it is that reading now, as
   `lf task wait --timeout 0s --json` prints it.
 - The core loop is `engine::task`, which the CLI handlers call too.
-  `task.run {directory, issue, graph, from, agent, approve}` and `task.ship
+  `task.run {directory, issue, graph, from, agent, approve}` and `task.auto.on
   {directory, issue}` outlive the request, so the server starts their
-  command (`lf [-b] [-a <agent>] task run …`, `lf --task <issue> ship`)
+  command (`lf [-b] [-a <agent>] task run …`, `lf task auto on <issue>`)
   as a detached process and answers what that process reports once it
   knows: `{state: running, merges, graph_process, log}` when the
   Graph registers, `waiting {step}` or `ended` when nothing ran, or the
-  refusal it printed; `task.ship` answers the same after turning auto
+  refusal it printed; `task.auto.on` answers the same after turning auto
   on. The connection never waits on the run. `approve` is `-b`: every step
   headless to `end`, writing no auto; without it
   the run stands in at interactive steps only while auto is on, and
   otherwise stops before the next one. A null `agent` uses each step's
-  configured harness. `lf task run <issue> --json` and `lf ship --json`
-  print the same value. `task.auto.off {directory, issue, reason}` turns auto off (`{issue, was_on}`); only `task.ship` turns it on, `task.steer` and `task.report {message}` save to the
+  configured harness. `lf task run <issue> --json` and `lf task auto on --json`
+  print the same value. `task.auto.off {directory, issue, reason}` turns auto off (`{issue, was_on}`); only `task.auto.on` turns it on, `task.steer` and `task.report {message}` save to the
   thread and return it, and `task.interrupt` returns its receipt.
 - A write uses the shared `Write` shape. `Write::run` calls the shared Rust
   function its CLI handler calls and returns the typed value; the CLI prints
@@ -527,7 +527,7 @@ the phone's `view.select` Task list and its creation destinations all read it.
   which makes the checkout and starts the Graph after the answer.
   A null `wave` selects the repository. Both paths return the same creation
   receipt, described below. A write whose Work
-  lives on another Machine (`task.run`, `task.ship`, `task.auto.off`,
+  lives on another Machine (`task.run`, `task.auto.on`, `task.auto.off`,
   `task.claim`, `task.unassign`, `session.resume`) goes to that Machine's
   server over SSH and returns its answer; it never falls back to
   local execution. Requests create no Process rows; diagnostics the shared

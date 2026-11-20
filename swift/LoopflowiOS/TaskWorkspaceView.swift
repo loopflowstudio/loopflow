@@ -40,7 +40,7 @@ struct TaskWorkspaceView: View {
                 }
             } else if row.states.contains(.working) {
                 Button("Auto on", systemImage: "paperplane") {
-                    feed.request("Auto on", row) { .taskShip(directory: $0, issue: $1) }
+                    feed.request("Auto on", row) { .taskAutoOn(directory: $0, issue: $1) }
                 }
             }
         }

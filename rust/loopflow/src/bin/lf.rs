@@ -1111,7 +1111,9 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
             }
         }
         TaskCommand::Run { .. } => unreachable!("task run dispatches as an ordinary run"),
-        TaskCommand::Auto { .. } => unreachable!("shared mutation dispatch precedes this command"),
+        TaskCommand::Auto { .. } => {
+            unreachable!("auto on and shared mutation dispatch precede this command")
+        }
         TaskCommand::Detail { issue, .. } => {
             loopflow::lf::commands::screens::print(loopflow::lf::commands::read::Read::TaskDetail {
                 directory: repo.to_owned(),
@@ -1940,7 +1942,6 @@ fn run() -> anyhow::Result<()> {
             cli.command,
             Some(
                 Commands::Task { .. }
-                    | Commands::Ship { .. }
                     | Commands::Wave { .. }
                     | Commands::Repo {
                         cmd: Some(
@@ -2236,7 +2237,7 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
                 directive: directive.clone(),
                 branch: None,
                 from_last_fetch: false,
-                ship: false,
+                auto_on: false,
             },
             cli.batch || cli.interactive,
         )?;
@@ -2597,12 +2598,13 @@ fn dispatch(cli: Cli, args: &[String]) -> anyhow::Result<()> {
                 },
             })
     );
-    if matches!(
+    if (matches!(
         cli.command,
         Some(Commands::Task {
             cmd: TaskCommand::Run { .. }
-        }) | Some(Commands::Ship { .. })
-    ) && loopflow_execution::transport::detach_current()?
+        })
+    ) || cli.turns_auto_on())
+        && loopflow_execution::transport::detach_current()?
     {
         return Ok(());
     }
@@ -2629,28 +2631,29 @@ fn dispatch_here(
 ) -> anyhow::Result<()> {
     // Only the operation a launcher started reports; a held terminal in
     // between passes the handoff on untouched.
-    if matches!(
-        cli.command,
-        Some(Commands::Task {
-            cmd: TaskCommand::Run { .. }
-        }) | Some(Commands::Ship { .. })
-            | Some(Commands::Sync(_))
-            | Some(Commands::Pr {
-                cmd: Some(loopflow::lf::PrCommand::Land { .. })
-            })
-            | Some(Commands::Repo {
-                cmd: Some(loopflow::lf::RepoCommand::Release {
-                    cmd: loopflow::lf::ReleaseCommand::Run { .. }
-                }),
-                ..
-            })
-            | Some(Commands::Skill {
-                cmd: SkillCommand::External(_)
-            })
-            | Some(Commands::Graph {
-                cmd: GraphCommand::External(_)
-            })
-    ) {
+    if cli.turns_auto_on()
+        || matches!(
+            cli.command,
+            Some(Commands::Task {
+                cmd: TaskCommand::Run { .. }
+            }) | Some(Commands::Sync(_))
+                | Some(Commands::Pr {
+                    cmd: Some(loopflow::lf::PrCommand::Land { .. })
+                })
+                | Some(Commands::Repo {
+                    cmd: Some(loopflow::lf::RepoCommand::Release {
+                        cmd: loopflow::lf::ReleaseCommand::Run { .. }
+                    }),
+                    ..
+                })
+                | Some(Commands::Skill {
+                    cmd: SkillCommand::External(_)
+                })
+                | Some(Commands::Graph {
+                    cmd: GraphCommand::External(_)
+                })
+        )
+    {
         loopflow_execution::engine::launch::expect();
     }
     if loopflow::lf::commands::mutation::accepts(&cli) {
@@ -2720,15 +2723,20 @@ fn dispatch_here(
     if matches!(
         &cli.command,
         Some(Commands::Task {
-            cmd: TaskCommand::Run { issue: None, .. } | TaskCommand::Checkout { issue: None, .. }
-        }) | Some(Commands::Ship { .. })
+            cmd: TaskCommand::Run { issue: None, .. }
+                | TaskCommand::Checkout { issue: None, .. }
+                | TaskCommand::Auto {
+                    state: loopflow::lf::AutoSetting::On,
+                    ..
+                }
+        })
     ) && cli.task.is_none()
     {
         cli.task = Some(
             match checkout_task(&std::env::current_dir()?, cli.wave.as_deref())? {
                 Some(task) => task,
                 // Shipping a branch with no Task first gives it one.
-                None if matches!(&cli.command, Some(Commands::Ship { .. })) => {
+                None if cli.turns_auto_on() => {
                     let task = loopflow_execution::ops::task::auto::ship_branch_task(
                         &loopflow_execution::repo::working_directory()?,
                         cli.wave.as_deref(),
@@ -2861,24 +2869,28 @@ fn dispatch_here(
                 directive: directive.clone(),
                 branch: None,
                 from_last_fetch: false,
-                ship: false,
+                auto_on: false,
             },
             *json || cli.json,
         );
     }
-    if let Some(Commands::Ship {
-        graph,
-        reason,
-        json,
-        ..
+    if let Some(Commands::Task {
+        cmd:
+            TaskCommand::Auto {
+                state: loopflow::lf::AutoSetting::On,
+                graph,
+                reason,
+                json,
+                ..
+            },
     }) = &cli.command
     {
         journal::admit_process(&std::env::current_dir()?, args);
         let issue = cli.task.clone().context("No Task selected")?;
         let directory = loopflow_execution::repo::working_directory()?;
         let repo = selected_task_repository(&cli, &directory, Some(&issue))?;
-        // `lf ship`, spelled `lf task auto on` too: the Task's run, asked for
-        // auto. It stands in at each interactive step because auto is on, not
+        // `lf task auto on`: the Task's run, asked for auto. It stands in at
+        // each interactive step because auto is on, not
         // because of how it was launched.
         return loopflow::lf::commands::graph::carry_task_run(
             &cli,
@@ -2888,7 +2900,7 @@ fn dispatch_here(
                 wave: cli.wave.clone(),
                 graph: graph.clone(),
                 reason: reason.clone(),
-                ship: true,
+                auto_on: true,
                 ..Default::default()
             },
             *json,
@@ -3145,7 +3157,6 @@ fn execute_command(
         Some(Commands::Session { .. } | Commands::Steer { .. }) => {
             unreachable!("Session dispatch precedes Work binding")
         }
-        Some(Commands::Ship { .. }) => unreachable!("ship dispatch precedes Work binding"),
         Some(Commands::Machine {
             cmd: loopflow::lf::MachineCommand::Doctor { json, planning },
         }) => {

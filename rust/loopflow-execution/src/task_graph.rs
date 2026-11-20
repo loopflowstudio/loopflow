@@ -518,7 +518,7 @@ mod tests {
         let off = mark(AutoState::Off);
         assert_eq!(
             at("land").waiting_to_land(Some(&off), "INF-1").as_deref(),
-            Some("Waiting at land: auto is off (Maya). `lf ship INF-1` lands it.")
+            Some("Waiting at land: auto is off (Maya). `lf task auto on INF-1` lands it.")
         );
         assert_eq!(at("land").waiting_to_land(None, "INF-1"), None);
         assert_eq!(

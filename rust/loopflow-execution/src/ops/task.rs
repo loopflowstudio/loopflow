@@ -104,9 +104,9 @@ pub struct TaskProcessOptions {
     /// Place a new branch from the refs the last fetch left, without the
     /// network: the caller exchanges planning and the assignee afterwards.
     pub from_last_fetch: bool,
-    /// `lf ship`: the run turns auto on, lifting an off, and stands in at
+    /// `lf task auto on`: the run turns auto on, lifting an off, and stands in at
     /// the interactive step the Task waits at.
-    pub ship: bool,
+    pub auto_on: bool,
 }
 
 impl TaskProcessOptions {
@@ -643,7 +643,7 @@ pub fn task_place(
         graph,
         from,
         reason,
-        ship,
+        auto_on,
         ..
     } = options.clone();
     let source = remote::source_for_task(issue)?;
@@ -664,7 +664,7 @@ pub fn task_place(
             graph.as_deref(),
             from.as_deref(),
             mode,
-            ship,
+            auto_on,
             merges,
         )
         .await?;
@@ -900,12 +900,12 @@ async fn start_task_run(
     requested: Option<&str>,
     from: Option<&str>,
     mode: TaskRunMode,
-    ship: bool,
+    auto_on: bool,
     merges: fn(&[String]) -> bool,
 ) -> OpsResult<TaskRunStart> {
     loop {
         if let Some(start) =
-            try_start_task_run(store, task, requested, from, mode, ship, merges).await?
+            try_start_task_run(store, task, requested, from, mode, auto_on, merges).await?
         {
             return Ok(start);
         }
@@ -919,12 +919,12 @@ async fn try_start_task_run(
     requested: Option<&str>,
     from: Option<&str>,
     mode: TaskRunMode,
-    ship: bool,
+    auto_on: bool,
     merges: fn(&[String]) -> bool,
 ) -> OpsResult<Option<TaskRunStart>> {
     let standing = crate::store::task_work::task_graph_row(&store.sqlite, &task.id)
         .map_err(task_error)?
-        .filter(|row| ship && requested.is_none_or(|name| name == row.graph.name));
+        .filter(|row| auto_on && requested.is_none_or(|name| name == row.graph.name));
     match standing.as_ref().map(|row| (row, &row.run)) {
         // A live run reads auto at each interactive step, so it stands in
         // from here without being started again.
@@ -932,7 +932,7 @@ async fn try_start_task_run(
             if crate::store::task_work::carrier_may_run(carrier) =>
         {
             if let Some(graph_process) = auto::running_graph(store, task, &carrier.id).await? {
-                auto::ask(store, task, ship)?;
+                auto::ask(store, task, auto_on)?;
                 let at = row.graph.step_name_of(cursor);
                 return Ok(Some(TaskRunStart::Live {
                     run: format!(
@@ -949,7 +949,15 @@ async fn try_start_task_run(
         }
         _ => {}
     }
-    let selection = select_task_run(store, task, task.worktree()?, requested, from, ship, merges)?;
+    let selection = select_task_run(
+        store,
+        task,
+        task.worktree()?,
+        requested,
+        from,
+        auto_on,
+        merges,
+    )?;
     let reaches_end = selection.reaches_end(mode);
     let TaskRunSelection {
         graph,
@@ -980,7 +988,7 @@ async fn try_start_task_run(
         }
         auto::configured(store, task)?;
     }
-    auto::ask(store, task, ship)?;
+    auto::ask(store, task, auto_on)?;
     // Auto on runs through the interactive steps, standing in at each;
     // off, no run merges.
     let (on, merges) = match store
@@ -1040,7 +1048,7 @@ async fn try_start_task_run(
     Ok(Some(TaskRunStart::Run {
         step: label,
         merges,
-        stands_in: interactive.filter(|_| ship).map(str::to_owned),
+        stands_in: interactive.filter(|_| auto_on).map(str::to_owned),
     }))
 }
 
@@ -2743,7 +2751,7 @@ pub fn task_reopen(issue: &str, note: Option<&str>) -> OpsResult<Task> {
 }
 
 /// Prepare the Task's conversation beside work that does not open it here:
-/// `lf task run`, `lf ship` and `lf task checkout`. The Machine server's
+/// `lf task run`, `lf task auto on` and `lf task checkout`. The Machine server's
 /// recovery pass starts a prepared conversation that never ran. Best-effort.
 pub fn prepare_conversation_beside(task: &Task) {
     let prepared = block_on_task(async {

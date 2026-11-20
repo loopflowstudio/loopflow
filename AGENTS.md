@@ -151,7 +151,7 @@ and optionally a Project.
 
 A Task takes up one Graph on its first `lf task run` (its own, else the Wave's
 default, else repository `graph:`, else `code`) and stands at a step of it.
-Only `lf task run` and `lf ship` move that position. `interactive:` steps are
+Only `lf task run` and `lf task auto on` move that position. `interactive:` steps are
 where a person takes part. Task state (`unstarted · idle · active · moving ·
 done · abandoned`) is derived, not stored; the auto setting (`lf task auto
 on|off`) says who takes the interactive steps and never changes it. `TaskSection` is the
@@ -336,7 +336,7 @@ them.
   unification cannot change the CLI runtime. Execution fixtures live under
   `loopflow_execution::test_support`; parser and presentation assertions stay in
   the application. Do not include library source again in application fixtures.
-- Bare `task run` returns once the Graph registers; `lf -b task run` waits but runs interactive steps headless. A test reading state a stopping run writes waits for that run. `lf ship` and `-b` share one path. Changing when a command returns means updating its test callers (`grep -rn '"task", "run"' rust/loopflow/tests/`).
+- Bare `task run` returns once the Graph registers; `lf -b task run` waits but runs interactive steps headless. A test reading state a stopping run writes waits for that run. `lf task auto on` and `-b` share one path. Changing when a command returns means updating its test callers (`grep -rn '"task", "run"' rust/loopflow/tests/`).
 - Pin fixture `LF_BIN` inside the network boundary; the runner clears inherited `LF_*`. Never let an installed provider outrank a stand-in.
 - From an lf-launched shell, run `cargo test` with `LF_*` unset and `< /dev/null`: fixtures follow `LF_HOME`, and `lf task create` reads open stdin. In zsh: `env $(env | grep '^LF_' | cut -d= -f1 | sed 's/^/-u /') cargo test …`. A leftover `LF_CAPTURE_KEY` fails store writes with CannotOpen or "capture does not belong to a recorded Session".
 - Account routing fixtures read personal preferences scoped to this checkout's repository, so on a Machine with its own routes they fail with "has no resident login". Run the built test binary from an empty directory with `HOME` pointed at another, keeping `CARGO_HOME` for fixtures that build `lf`.

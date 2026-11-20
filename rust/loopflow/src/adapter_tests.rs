@@ -86,8 +86,14 @@ mod operation_spellings {
                 .unwrap_or_else(|error| panic!("{args:?}: {error}"))
         };
         assert!(matches!(
-            parse(task::spell_ship("LOO-1")).command,
-            Some(Commands::Ship { json: true, .. })
+            parse(task::spell_auto_on("LOO-1")).command,
+            Some(Commands::Task {
+                cmd: crate::lf::TaskCommand::Auto {
+                    state: crate::lf::AutoSetting::On,
+                    json: true,
+                    ..
+                }
+            })
         ));
         for populated in [false, true] {
             let optional = |value| populated.then_some(value);

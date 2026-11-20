@@ -549,7 +549,7 @@ it left the Task: before the interactive step it stopped at, or `end`. With no
 run, `lf task run` continues after the step the Task waits at; `--from STEP` (a
 step id, skill or composed graph name) starts anywhere, and starting from an
 interactive step only puts the Task there. `-b task run` runs
-straight through headless, and `lf ship` turns auto on and runs it. Other Graphs in
+straight through headless, and `lf task auto on` turns auto on and runs it. Other Graphs in
 the checkout never move the Task. Graph processes and Task events keep the
 history; there is no move log.
 

@@ -255,7 +255,7 @@ struct PendingChangesTests {
 
     @Test func requestedShowsInTheClickAndARefusalPostsOverIt() async throws {
         let changes = changes()
-        changes.request("Auto on", subject: "LOO-5", write: .taskShip(directory: "/repo", issue: "LOO-5"), notices: notices)
+        changes.request("Auto on", subject: "LOO-5", write: .taskAutoOn(directory: "/repo", issue: "LOO-5"), notices: notices)
         #expect(notices.current?.text == "LOO-5 Auto on requested")
         await machine.fail(ServerError(code: "conflict", message: "it has no checkout", data: .null))
         #expect(notices.current?.text == "LOO-5 Auto on couldn't be requested: it has no checkout")

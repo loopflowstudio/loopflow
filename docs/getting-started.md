@@ -108,15 +108,15 @@ week. After a crash or reboot, use the same command to reopen its saved history.
 ## 5. Land it
 
 ```bash
-lf ship <ID>                     # auto on: the remaining steps, then merge; repairs failing CI until it lands
+lf task auto on <ID>                     # auto on: the remaining steps, then merge; repairs failing CI until it lands
 lf task auto off <ID>            # the run waits at its next interactive step; disarms the auto-merge it armed
 ```
 
-`lf ship` turns auto on and runs the Task: the run stands in for you at
+`lf task auto on` turns auto on and runs the Task: the run stands in for you at
 each remaining interactive step and runs `deliver`: `reflect`,
 `gate`, then `lf land --wait-and-fix`. `reflect` turns what you said during the
 Task into edits to your skills. `gate` publishes the PR first, so CI is already
-running while it [reviews the change](ops.md#review-while-ci-runs). `lf ship`
+running while it [reviews the change](ops.md#review-while-ci-runs). `lf task auto on`
 returns once the run starts, like `lf task run` (`-b` waits);
 `lf task status` follows it. The Task completes when the PR merges, and its
 worktree is cleaned up later by `lf wt prune`.

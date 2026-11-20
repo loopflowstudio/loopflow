@@ -1,4 +1,4 @@
-Read when the change touches `lf ship`, `lf task auto`, the auto setting or a Task run's landing step.
+Read when the change touches `lf task auto on`, `lf task auto`, the auto setting or a Task run's landing step.
 
 # Auto on a private Machine
 
@@ -36,23 +36,23 @@ Headless steps: a `claude` ahead of the world's on `PATH` that, for `-p`
 with no terminal, reads one line, waits while a marker file exists, then
 prints `{"type":"result","subtype":"success","result":"done",…}`; otherwise
 it execs the world's. Touch the marker to keep `implement` running while you
-`lf ship`/`lf task auto off` mid-run; remove it to let the run reach the next step.
+`lf task auto on`/`lf task auto off` mid-run; remove it to let the run reach the next step.
 
 Read the setting with `lf task status <id> | grep -E 'auto:|Graph q'` and
 `lf task status <id> --json` (top-level `auto`; `lf task show <id> --json`
 carries it as `execution.auto`). Served: hello from
 `rust/loopflow-execution/tests/fixtures/dto/server/hello.json`, then
-`{"type":"request","id":…,"operation":{"kind":"task.ship","directory":…,
-"issue":…},"select":null,"sender":null,"request_id":"<uuid>"}`; `task.ship`
+`{"type":"request","id":…,"operation":{"kind":"task.auto.on","directory":…,
+"issue":…},"select":null,"sender":null,"request_id":"<uuid>"}`; `task.auto.on`
 takes nothing else (a never-run Task takes up the repository's graph), and
 `task.auto.off` takes `"reason":null` beside them and answers `{issue, was_on}`.
-`lf task auto on` is `lf ship`: check both spellings on a Task waiting at
-`ship-review` (each stands in there) and on a never-run Task (one Graph run).
+Check `lf task auto on` on a Task waiting at `ship-review` (it stands in
+there) and on a never-run Task (one Graph run); `lf ship` no longer parses.
 With `--json` the run is the only thing on stdout; "standing in at …" goes to
-stderr. Both spellings at the same moment on a never-run Task leave one run:
+stderr. Two at the same moment on a never-run Task leave one run:
 both print it and exit 0, and `lf task status` shows one Graph run. The losing
 paths are rare, so repeat it: a dozen fresh `lf task create '<words>' --json`
-Tasks (`.task.identifier`), three `lf ship <id> &` each with the stand-in
+Tasks (`.task.identifier`), three `lf task auto on <id> &` each with the stand-in
 holding `implement`, then `wait`; every exit is 0, every output names the same
 Graph run, and `graph_processes` holds one row for the Task. Two bare
 `lf task run` at once leave one run and one "is running graph …" refusal.
@@ -64,14 +64,14 @@ The stand-in runs no hooks, so they stay `pending` there; a real Claude claims
 them in its start hook. They are not in the step's stdin or `.lf/prompts`.
 
 With auto off at a landing step, `lf task status` reads `latest Graph: Waiting
-at land: auto is off (Demo). \`lf ship <id>\` lands it.` and `action: no_action`;
+at land: auto is off (Demo). \`lf task auto on <id>\` lands it.` and `action: no_action`;
 `execution.state` is `waiting`. The run's own log (`$LF_HOME/logs/graph-<run>.log`) ends in that sentence
 alone; an interactive stop ends in "Stopped at <step>; the Task waits there for
 its conversation." What a Task conversation is handed: `lf --task <id> --context
 <skill>` prints its input (the Task brief, no Graph position), and each held
 conversation's `--append-system-prompt-file` is in `ps` under its `lf holder run`.
 An unknown ID answers `no Task exists for …`
-(served: `not_found`) for `auto off`; `task.ship` still answers `outcome_unknown`.
+(served: `not_found`) for `auto off`; `task.auto.on` still answers `outcome_unknown`.
 
 Selection state `auto` is a Dashboard expression (`lf desktop dashboard query
 'Auto' 'state:auto'` prints JSON), not a `lf task list` filter. Never run
@@ -80,7 +80,7 @@ registers the world's repository in the real `~/.lf` and starts real
 conversations there.
 
 Recovery: a shipped run's carrier is the command as typed, with parent 1:
-`lf ship <id>`, `lf task auto on <id>`, or a bare `lf task auto on` from the
+`lf task auto on <id>`, or a bare `lf task auto on` from the
 checkout (find it with `ps -axo pid,ppid,pgid,command | grep <LF_HOME's bin>`);
 `kill -9 -<its pgid>` and its
 headless `claude`; the server's pass carries it again as `lf task run <id>`
@@ -100,7 +100,7 @@ Copy the installed binary out (`cp $(readlink -f ~/.local/bin/lf) …`), make a
 fresh repo (local Git identity, a bare origin, `graph:` naming a graph with a
 headless step) and `LF_HOME`. Keep the world's `bin` on `PATH`: its `launchctl`
 refuses, so the released lf registers no launchd job; start the released
-`lf server run` detached instead. `lf checkout <id>`, then `lf ship <id>`
+`lf server run` detached instead. `lf checkout <id>`, then `lf task auto on <id>`
 detached with the marker file holding its step (released `lf ship` blocks its
 caller), and `lf task hold <id>` on another. Stop the released server and
 start the branch's on the same home. The branch migrates it in place on the

@@ -1252,7 +1252,7 @@ fn server_operations_match_their_lf_commands() {
         // Starting a run or a ship starts Processes; task_run_waits_at_an_interactive_step
         // compares the run, and comments differ by their saved IDs.
         | Write::TaskRun { .. }
-        | Write::TaskShip { .. }
+        | Write::TaskAutoOn { .. }
         | Write::TaskSteer { .. }
         | Write::TaskReport { .. }
         | Write::TaskInterrupt { .. }
@@ -2129,9 +2129,10 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             spelled.push("--json".into());
             (path(directory), spelled)
         }
-        Write::TaskShip { directory, issue } => {
-            (path(directory), words(&["--task", issue, "ship", "--json"]))
-        }
+        Write::TaskAutoOn { directory, issue } => (
+            path(directory),
+            words(&["--task", issue, "task", "auto", "on", "--json"]),
+        ),
         Write::TaskSteer {
             directory,
             issue,

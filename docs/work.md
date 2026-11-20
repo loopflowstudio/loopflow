@@ -22,7 +22,7 @@ carries the child through the parent's updates and squash merge. To stack a
 Task that already exists, run `lf sync LOO-12` in its worktree; `lf sync main`
 takes it back off.
 
-`lf task run`, `lf ship`, and an explicit `lf task checkout` prepare the Task's
+`lf task run`, `lf task auto on`, and an explicit `lf task checkout` prepare the Task's
 conversation, and the Machine server starts it in the background within
 seconds. When its agent is not installed, the server records why on the
 conversation.

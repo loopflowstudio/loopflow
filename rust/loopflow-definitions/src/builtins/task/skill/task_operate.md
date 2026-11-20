@@ -44,10 +44,10 @@ liveness is not permission. A run listed in status is not a live process: its
    fix the cause if you can, and retry with `--reason "<what changed>"` only
    when something changed. Never relaunch to get past a blocker.
 
-   `lf ship` turns auto on: the run stands in at the interactive steps and
+   `lf task auto on` turns auto on: the run stands in at the interactive steps and
    may merge the PR. `lf -b task run` stands in for its own run, and a run
    with no interactive step left ahead may merge it too. Use them only when asked to ship or land. After
-   someone turns auto off (`lf task auto off`), only a requested `lf ship` turns
+   someone turns auto off (`lf task auto off`), only a requested `lf task auto on` turns
    it on again.
 
 4. **Stay with it.** A launch is progress, not the stopping point. Reread

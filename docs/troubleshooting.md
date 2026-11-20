@@ -22,7 +22,7 @@ lf resume                       # return to this scope’s conversation
 A stopped Graph never resumes. `lf task run` starts a fresh one in the same
 checkout, with the Task's thread and its open PR, at the step the last one
 stopped on; the steps before it stay done. When a run's `lf task run` or
-`lf ship` died rather than stopped, the server runs it again for you, the
+`lf task auto on` died rather than stopped, the server runs it again for you, the
 first time at once; after 5 starts with no finished step `lf task status` names
 the command instead
 ([after a kill or reboot](sessions.md#after-a-kill-a-crash-or-a-reboot)).
@@ -460,7 +460,7 @@ else belongs to a single conversation or view.
 | In `ps` | What it is | Stopping it loses |
 |---|---|---|
 | `lf holder run` | Holds the terminals of every Task, Wave and repository conversation and Desktop shell opened on its build | Every agent and shell it holds; `lf resume` continues each conversation from history |
-| `lf … task run`, `lf … graph run`, `lf … ship` | A Graph or landing watcher running in a process of its own | The step in flight; `lf task status`, then `lf task run` what remains |
+| `lf … task run`, `lf … graph run`, `lf … task auto on` | A Graph or landing watcher running in a process of its own | The step in flight; `lf task status`, then `lf task run` what remains |
 | `lf -b <skill>` | A headless run, a child of whatever started it | That run; its caller sees it fail |
 | `lf session attach` | A terminal showing that conversation | Nothing; the conversation keeps running with no terminal showing it |
 | `lf session serve <ID>` | A conversation an earlier build opened | The running agent and any turn in flight; `lf resume <ID>` ends it and continues from history |

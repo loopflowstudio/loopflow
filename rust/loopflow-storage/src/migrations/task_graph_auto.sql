@@ -1,7 +1,7 @@
 -- A Task's auto setting is one mark on its Graph: 'on' (`lf task auto on`,
--- `lf ship`, `lf -b task run`) or 'off' (`lf task auto off`), with when
+-- or `auto: on` in configuration) or 'off' (`lf task auto off`), with when
 -- and who (`Starter` JSON, resolved when it was set). NULL when nobody has set
--- it. `lf ship` is `lf task auto on`, then `lf task run`; no ship process
+-- it. `lf task auto on` turns it on, then runs the Task; no ship process
 -- carries a Task, so its log and the shared handoff stamp leave.
 ALTER TABLE task_graphs ADD COLUMN auto TEXT CHECK (auto IN ('on','off'));
 ALTER TABLE task_graphs ADD COLUMN auto_at INTEGER;

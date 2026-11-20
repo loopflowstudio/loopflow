@@ -22,7 +22,10 @@ pub fn accepts(cli: &Cli) -> bool {
                 | TaskCommand::Abandon { .. }
                 | TaskCommand::Update { .. }
                 | TaskCommand::Move { .. }
-                | TaskCommand::Auto { .. }
+                | TaskCommand::Auto {
+                    state: crate::lf::AutoSetting::Off,
+                    ..
+                }
         ),
         Some(Commands::Wave { cmd }) => matches!(
             cmd,
@@ -53,14 +56,13 @@ fn execute(cli: &Cli, args: &[String], directory: &Path, io: &mut CommandIo<'_>)
     if let Some(forward) = super::work_route::forward(cli, args, directory)? {
         return forward.run(cli, directory, io);
     }
-    // Session, shipping, auto and arrangement select their own Work. Other
+    // Session, auto and arrangement select their own Work. Other
     // commands retain the CLI's explicit Task placement without changing
     // process cwd.
     let binding = if !matches!(
         cli.command,
         Some(
             Commands::Session { .. }
-                | Commands::Ship { .. }
                 | Commands::Desktop { .. }
                 | Commands::Task {
                     cmd: TaskCommand::Auto { .. }
@@ -110,19 +112,17 @@ fn local(
         Commands::Task {
             cmd:
                 TaskCommand::Auto {
-                    state,
+                    state: crate::lf::AutoSetting::Off,
                     issue,
                     reason,
                     json,
+                    ..
                 },
         } => {
             let issue = issue
                 .as_deref()
                 .or(cli.task.as_deref())
                 .context("No Task selected")?;
-            if matches!(state, crate::lf::AutoSetting::On) {
-                unreachable!("`lf task auto on` parses as `lf ship`")
-            }
             // A Task another Machine runs is set there.
             let super::write::WriteResult::TaskAutoOff(off) = super::write::Write::TaskAutoOff {
                 directory: directory.to_path_buf(),

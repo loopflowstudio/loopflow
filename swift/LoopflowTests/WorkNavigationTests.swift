@@ -1231,7 +1231,7 @@ struct WorkNavigationTests {
     private func roadmap() throws -> RoadmapSnapshot {
         try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(roadmapJSON().utf8))
     }
-    /// The fixture with issue-now, auto on, claimed, as `lf ship` leaves it, and so in Rust's
+    /// The fixture with issue-now, auto on, claimed, as `lf task auto on` leaves it, and so in Rust's
     /// Working section; unowned Tasks are backlog.
     private func claimedRoadmap() throws -> RoadmapSnapshot {
         var planning = try #require(JSONSerialization.jsonObject(with: Data(roadmapJSON().utf8)) as? [String: Any])

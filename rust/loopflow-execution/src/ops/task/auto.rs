@@ -1,9 +1,9 @@
-//! A Task's auto setting. `lf ship` is an `lf task run` whose request asks
+//! A Task's auto setting. `lf task auto on` is an `lf task run` whose request asks
 //! for auto, and `auto: on` in configuration turns it on as a Task takes up
 //! its Graph. Auto is one mark on `task_graphs`; the run reads it at each
 //! interactive step, standing in for the person while it is on, and at each
 //! step that merges, waiting there while it is off. `lf task auto off` turns
-//! it off; `lf ship`, spelled `lf task auto on` too, turns it on again.
+//! it off; `lf task auto on` turns it on again.
 
 use crate::durable::GraphProcessFilter;
 use crate::ops::error::OpsResult;
@@ -30,7 +30,7 @@ pub fn starter(
 /// lands it. The run prints it as it stops; `lf task status` reads it after.
 pub fn landing_wait(step: &str, off: &Auto, issue: &str) -> String {
     format!(
-        "Waiting at {step}: auto is off ({}). `lf ship {issue}` lands it.",
+        "Waiting at {step}: auto is off ({}). `lf task auto on {issue}` lands it.",
         off.by
     )
 }
@@ -68,9 +68,9 @@ fn set(
     Ok(before.is_some_and(|before| before.state == AutoState::On))
 }
 
-/// `lf ship` turns auto on once the Task has its Graph, lifting an off.
-pub(super) fn ask(store: &SharedStore, task: &Task, ship: bool) -> OpsResult<()> {
-    if ship {
+/// `lf task auto on` turns auto on once the Task has its Graph, lifting an off.
+pub(super) fn ask(store: &SharedStore, task: &Task, auto_on: bool) -> OpsResult<()> {
+    if auto_on {
         set(store, task, AutoState::On, caller(store, task)?, false)?;
     }
     Ok(())
@@ -97,7 +97,7 @@ pub(super) fn configured(store: &SharedStore, task: &Task) -> OpsResult<()> {
     Ok(())
 }
 
-/// How long `lf ship` waits for a run that just set out to register its Graph.
+/// How long `lf task auto on` waits for a run that just set out to register its Graph.
 const GRAPH_REGISTERS: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// The Graph process of the run `carrier` carries, waiting for one that just
@@ -170,7 +170,7 @@ pub fn off(issue: &str, reason: Option<&str>) -> OpsResult<Option<bool>> {
 pub fn ship_branch_task(repo: &std::path::Path, wave: Option<&str>) -> OpsResult<Task> {
     let branch = crate::git::current_branch(repo)
         .map_err(task_error)?
-        .ok_or_else(|| task_error("lf ship needs a branch; this checkout is detached"))?;
+        .ok_or_else(|| task_error("lf task auto on needs a branch; this checkout is detached"))?;
     if crate::git::get_default_branch(repo).map_err(task_error)? == branch {
         return Err(task_error(format!(
             "{branch} is the default branch; ship from a Task or a branch of its own"

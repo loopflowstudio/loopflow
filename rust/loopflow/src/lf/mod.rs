@@ -241,6 +241,19 @@ impl Cli {
         )
     }
 
+    /// `lf task auto on`: the Task's run, asked for auto.
+    pub fn turns_auto_on(&self) -> bool {
+        matches!(
+            &self.command,
+            Some(Commands::Task {
+                cmd: TaskCommand::Auto {
+                    state: AutoSetting::On,
+                    ..
+                }
+            })
+        )
+    }
+
     pub fn may_launch_agent(&self) -> bool {
         match &self.command {
             None
@@ -250,8 +263,14 @@ impl Cli {
             Some(Commands::Graph { cmd }) => {
                 matches!(cmd, GraphCommand::Run | GraphCommand::External(_))
             }
-            Some(Commands::Task { cmd }) => matches!(cmd, TaskCommand::Run { .. }),
-            Some(Commands::Ship { .. }) => true,
+            Some(Commands::Task { cmd }) => matches!(
+                cmd,
+                TaskCommand::Run { .. }
+                    | TaskCommand::Auto {
+                        state: AutoSetting::On,
+                        ..
+                    }
+            ),
             Some(Commands::Session { cmd }) => matches!(
                 cmd,
                 SessionCommand::Resume {
@@ -315,26 +334,30 @@ impl Cli {
                 })?;
             }
         }
-        // `lf task auto on` is `lf ship`: one command, two spellings.
+        if let Some(Commands::Task {
+            cmd:
+                TaskCommand::Auto {
+                    state: AutoSetting::Off,
+                    graph: Some(_),
+                    ..
+                },
+        }) = &self.command
+        {
+            return Err(clap::Error::raw(
+                clap::error::ErrorKind::ArgumentConflict,
+                "--graph takes a graph up as auto goes on; `lf task auto off` takes none\n",
+            ));
+        }
+        // `lf task auto on ISSUE` selects its Task as `--task` does: it runs it.
         if let Some(Commands::Task {
             cmd:
                 TaskCommand::Auto {
                     state: AutoSetting::On,
                     issue,
-                    reason,
-                    json,
+                    ..
                 },
         }) = &mut self.command
         {
-            self.command = Some(Commands::Ship {
-                issue: issue.take(),
-                graph: None,
-                reason: reason.take(),
-                json: *json,
-            });
-        }
-        // `lf ship ISSUE` selects its Task as `--task` does.
-        if let Some(Commands::Ship { issue, .. }) = &mut self.command {
             if let Some(issue) = issue.take() {
                 if self.task.as_ref().is_some_and(|task| task != &issue) {
                     return Err(clap::Error::raw(
@@ -501,27 +524,6 @@ pub enum Commands {
         message: String,
         /// Print the saved steer, or for a Task its thread with the entry
         #[arg(long = "json", id = "steer_json")]
-        json: bool,
-    },
-    /// Ship the Task: turn auto on and run it, standing in at each interactive step
-    ///
-    /// `lf task auto on` is this command. Prints what `lf task run` prints and
-    /// returns once the run registers (`-b` waits for it); `lf task status`
-    /// follows it. A Task waiting at an interactive step is stood in for
-    /// there; a Task already running carries on and stands in from its next
-    /// one. With no ISSUE, ships the checkout's Task, or a new one for its
-    /// branch. `lf task auto off` turns auto off: the run waits at its next
-    /// interactive or merging step.
-    Ship {
-        issue: Option<String>,
-        /// Take up this graph in place of the Task's remaining steps
-        #[arg(long)]
-        graph: Option<String>,
-        /// Direction for this run, published to the Task
-        #[arg(long)]
-        reason: Option<String>,
-        /// Print what it set going as JSON, as `task.ship` answers
-        #[arg(long = "json", id = "ship_json")]
         json: bool,
     },
     /// Inspect and continue Sessions
@@ -1177,8 +1179,7 @@ impl Commands {
             Self::Config { cmd } => cmd.changes_work(),
             Self::Self_ { cmd } => cmd.changes_work(),
             Self::List { .. } | Self::Help { .. } | Self::Context { .. } => false,
-            Self::Ship { .. }
-            | Self::Open(_)
+            Self::Open(_)
             | Self::Inline { .. }
             | Self::Scratch { .. }
             | Self::Discord { .. }
@@ -2214,7 +2215,7 @@ pub enum TaskCommand {
 conversation; the next `lf task run` continues after it. A run that fails starts again at the \
 step that failed; the steps before it stay done, and --from reruns them. `-i` runs every step \
 with you in this terminal instead. A run that reaches a merging step, as `-b` does, may merge the PR \
-unless someone turned auto off; then it waits at the landing step until `lf ship`. `-b` turns \
+unless someone turned auto off; then it waits at the landing step until `lf task auto on`. `-b` turns \
 no auto on: a run carried again after it dies stops at its next interactive step. Add --open to open its primary conversation locally when the launch returns, \
 using lf open's ordinary host selection. Preview and --quote open nothing."
     )]
@@ -2494,18 +2495,24 @@ using lf open's ordinary host selection. Preview and --quote open nothing."
     },
     /// Turn the Task's auto setting on or off: who takes its interactive steps
     #[command(
-        after_help = "On is `lf ship`: nobody is waited for, so the Task runs, standing in for you at \
-each interactive step, and may merge the PR. Off, nothing is killed: the run waits at its next \
-interactive step, or before a step that merges, and auto-merge Loopflow armed is disarmed. With \
-no ISSUE, sets the checkout's Task."
+        after_help = "On: nobody is waited for, so the Task runs, standing in for you at each \
+interactive step, and may merge the PR. It prints what `lf task run` prints and returns once the \
+run registers (`-b` waits for it). A Task waiting at an interactive step is stood in for there; a \
+Task already running carries on and stands in from its next one. With no ISSUE, the checkout's \
+Task, or a new one for its branch. Off, nothing is killed: the run waits at its next interactive \
+step, or before a step that merges, and auto-merge Loopflow armed is disarmed; with no ISSUE, the \
+checkout's Task."
     )]
     Auto {
         state: AutoSetting,
         issue: Option<String>,
+        /// On: take up this graph in place of the Task's remaining steps
+        #[arg(long)]
+        graph: Option<String>,
         /// On: direction for the run, published to the Task. Off: why, saved as a Task comment
         #[arg(long)]
         reason: Option<String>,
-        /// Print the run `on` started, as `lf ship --json` does, or the Task and whether `off` found auto on
+        /// Print the run `on` started, as `task.auto.on` answers, or the Task and whether `off` found auto on
         #[arg(long)]
         json: bool,
     },
@@ -4207,10 +4214,10 @@ mod tests {
                 }
             }
         }
-        // A restarted ship, and the Graph run `lf task run -a` starts, carry
-        // the run's agent to the steps they start.
+        // Auto on, and the Graph run `lf task run -a` starts, carry the
+        // run's agent to the steps they start.
         let checked = |argv: &[&str]| Cli::try_parse_from(argv).unwrap().checked().unwrap();
-        for tail in [&["ship"][..], &["graph", "run"]] {
+        for tail in [&["task", "auto", "on"][..], &["graph", "run"]] {
             let argv = [
                 &["lf", "--agent", "claude:opus", "--task", "LOO-1"][..],
                 tail,
@@ -4219,16 +4226,24 @@ mod tests {
             assert!(checked(&argv).may_launch_agent(), "{argv:?}");
         }
         assert!(!checked(&["lf", "--task", "LOO-1", "task", "auto", "off"]).may_launch_agent());
-        // `lf task auto on` is `lf ship`, selection and flags included.
+        // `lf task auto on ISSUE` selects its Task as `--task` does.
         let on = checked(&[
-            "lf", "task", "auto", "on", "LOO-1", "--reason", "go", "--json",
+            "lf", "task", "auto", "on", "LOO-1", "--graph", "code", "--reason", "go", "--json",
         ]);
         assert_eq!(on.task.as_deref(), Some("LOO-1"));
         assert!(matches!(
             &on.command,
-            Some(Commands::Ship { issue: None, graph: None, reason: Some(reason), json: true })
-                if reason == "go"
+            Some(Commands::Task { cmd: TaskCommand::Auto {
+                state: AutoSetting::On, issue: None, graph: Some(graph), reason: Some(reason), json: true
+            } }) if reason == "go" && graph == "code"
         ));
+        assert!(Cli::try_parse_from(["lf", "ship", "LOO-1"]).is_err());
+        assert!(
+            Cli::try_parse_from(["lf", "task", "auto", "off", "--graph", "code"])
+                .unwrap()
+                .checked()
+                .is_err()
+        );
         // A Session id beside its Work selects the Session; Task and Wave
         // together stay one selection too many.
         for argv in [

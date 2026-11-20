@@ -290,7 +290,7 @@ Unreadable app/default/selection/cursor text prevents Apply; ANSI colors keep
 their source values. Personal non-color Ghostty settings still load; its `theme =` is ignored and its file never written.
 Source and license notices ship offline with the catalogue.
 
-The **Auto** toggle turns a Task's auto setting on and runs it, as `lf ship`
+The **Auto** toggle turns a Task's auto setting on and runs it, as `lf task auto on`
 does: its run stands in at each interactive step and lands the PR. It sits at
 the right end of the Workflow bar under the jump bar, beside the Task's stages
 as dots (click them for each stage) and what is running now. Turning it on

@@ -658,6 +658,39 @@ fn tmux_opens_a_named_window_after_the_callers() {
     assert!(call.contains("session resume "), "{call}");
 }
 
+/// tmux starts a window on its client's `PATH`, so an agent's would reach the
+/// conversation it opens. The directory holding this `tmux` is such an entry.
+#[test]
+fn tmux_window_does_not_start_on_the_callers_path() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let bin = tempfile::tempdir().unwrap();
+    let _env = EnvGuard::with_lf_home(&[], home.path());
+    register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
+    host(bin.path(), "tmux", "%7", 0);
+    let seen = bin.path().join("client-path");
+    let script = std::fs::read_to_string(bin.path().join("tmux"))
+        .unwrap()
+        .replacen(
+            '\n',
+            &format!("\nprintf '%s\\n' \"$PATH\" > '{}'\n", seen.display()),
+            1,
+        );
+    std::fs::write(bin.path().join("tmux"), script).unwrap();
+    let url = format!("loopflow://{}/task/INF-123", folder(repo.path()));
+    let report = json(&lf_with(
+        home.path(),
+        repo.path(),
+        Some(bin.path()),
+        &[("TMUX", "/tmp/tmux-1000/default,1,0"), ("TMUX_PANE", "%3")],
+        &["open", "--tab", &url, "--json"],
+    ));
+    assert_eq!(report["receipts"][0]["status"], "usable");
+    let path = std::fs::read_to_string(seen).unwrap();
+    let caller_only = bin.path().to_string_lossy().into_owned();
+    assert!(!path.contains(&caller_only), "{path}");
+}
+
 #[test]
 fn refused_host_reports_its_failure_without_another_host() {
     let repo = TestRepo::new();

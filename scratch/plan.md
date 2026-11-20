@@ -104,13 +104,16 @@ What is in the tree:
 - `classify_failure(code, message)` on every harness, asked in `drive::run` at
   each error event, gravest kept (`AgentFailure::graver`).
   `_classify_agent_failure`, the `from_code` call in `drive::run` and
-  `check_cli_available` are gone; `HarnessKind::installed()` replaces the last.
-- `harness/antigravity.rs` (driver, `classify_failure`, AGENTS.md launch
-  folder, `open` refuses), `harness/antigravity_decode.rs`, the stand-in
-  `tests/support/antigravity_cli.py`, two real traces under
-  `harness/testdata/`.
-- `sanitize_error_message` and the `<harness>.stderr.log` opener moved to
-  `harness/common.rs`; OpenCode and Antigravity share them.
+  `check_cli_available` are gone; `Launcher::installed()` replaces the last.
+- After the sync onto main's `loopflow-harness` split (LOO-923), what `agy`
+  writes is in that crate: `antigravity.rs` (`program`, `transcript_home`,
+  `recognizes_driver`), `antigravity_decode.rs`, `transcript/antigravity.rs`,
+  two real traces under `src/testdata/`, and `sanitize_error_message` in
+  `redact.rs`, shared by the OpenCode and Antigravity decoders. Execution's
+  `harness/antigravity.rs` is the `Launcher`: driver, `classify_failure`,
+  hooks, AGENTS.md launch folder, `open`. The stand-in is
+  `tests/support/antigravity_cli.py`; the `<harness>.stderr.log` opener is in
+  `harness/common.rs`.
 - The launch matrix has an Antigravity Batch cell.
 - `harness/README.md`: the limits row is "yes" for OpenCode and Pi and
   `classify_failure` has its own row. Its tables still have four columns.

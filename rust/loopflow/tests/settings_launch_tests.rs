@@ -1414,7 +1414,7 @@ fn automatic_agent_selection_requires_exactly_one_installed_harness() {
     };
 
     unresolved();
-    for harness in loopflow_execution::harness::HarnessKind::ALL {
+    for harness in loopflow_harness::HarnessKind::ALL {
         let program = harness.harness().program();
         install(program);
         let agent = inspect();

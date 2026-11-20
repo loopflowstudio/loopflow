@@ -52,7 +52,7 @@ fn replay_at(home: &std::path::Path, selector: &str) -> Result<String> {
     config.apply_agent_override()?;
     let selected_harness = config.agent.harness.as_str().to_owned();
     let model = config.agent.model.clone();
-    if !config.agent.harness.installed() {
+    if !loopflow_execution::harness::launcher(config.agent.harness).installed() {
         return Err(anyhow!(
             "'{selected_harness}' CLI is unavailable on this Machine"
         ));

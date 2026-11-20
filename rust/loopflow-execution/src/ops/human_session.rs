@@ -440,7 +440,7 @@ pub struct SessionRecord {
     pub terminal_ids: Vec<String>,
     /// Its current or last turn while it is live; `null` when nothing says.
     #[serde(deserialize_with = "Option::deserialize")]
-    pub turn: Option<crate::transcript::live::SessionTurn>,
+    pub turn: Option<loopflow_harness::transcript::live::SessionTurn>,
     /// A conversation open here that Loopflow never launched; `id` is the
     /// provider's conversation ID and no Session records it.
     pub raw: bool,
@@ -553,7 +553,7 @@ fn session_ending(
     let end = session.agent_end.filter(|_| closed);
     let ended = end.and_then(|end| {
         Some(SessionEnd {
-            at: crate::transcript::rfc3339(end.at)?,
+            at: loopflow_harness::transcript::rfc3339(end.at)?,
             exit_code: end.exit_code,
         })
     });
@@ -563,7 +563,9 @@ fn session_ending(
     let attempts = session.starts_since_turn;
     let start = (conversation && !quit && attempts > 0).then(|| SessionStarts {
         attempts,
-        last_started_at: session.last_started_at.and_then(crate::transcript::rfc3339),
+        last_started_at: session
+            .last_started_at
+            .and_then(loopflow_harness::transcript::rfc3339),
     });
     if is_running(state) {
         let status_line = match session.last_started_at.filter(|_| start.is_some()) {
@@ -704,7 +706,7 @@ fn session_ending(
         start,
         outlook: Some(SessionOutlook {
             kind,
-            at: at.and_then(crate::transcript::rfc3339),
+            at: at.and_then(loopflow_harness::transcript::rfc3339),
             reason,
             command,
         }),
@@ -1984,9 +1986,11 @@ pub(crate) fn resume_native_session(
     let native = NativeSession::of(&session)?;
     let provider_session = saved_thread(store, artifact_key, native.provider)?;
     if provider_session.is_none() {
-        if !crate::harness::HarnessKind::parse(native.provider)
-            .is_some_and(|kind| kind.harness().capabilities().initial_prompt_on_resume)
-        {
+        if !loopflow_harness::HarnessKind::parse(native.provider).is_some_and(|kind| {
+            crate::harness::launcher(kind)
+                .capabilities()
+                .initial_prompt_on_resume
+        }) {
             return Ok(false);
         }
         // A failed Codex bootstrap may have no provider history yet. Reopen its

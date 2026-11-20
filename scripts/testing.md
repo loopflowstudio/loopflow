@@ -145,6 +145,7 @@ so compilation cannot outlast its process-liveness fixtures.
 
 ```bash
 cargo test -p loopflow-execution --lib skills::catalog::          # one library module
+cargo test -p loopflow-harness claude_decode                      # one decoder or transcript reader; builds no storage or execution
 cargo test -p loopflow --test integration context_tests:: # one integration module
 cargo test -p loopflow --test golden_prompt              # one standalone binary
 uv run pytest python/tests/test_gate_bounded.py          # one Python file
@@ -171,6 +172,10 @@ fix, to reproduce a CI failure, or for a risk no suite covers:
 ```bash
 uv run python scripts/test.py --reuse-passing --rust-filter 'test(skills::catalog::) | test(prompt::) | binary(golden_prompt)'
 ```
+
+A decoder or transcript reader change names its crate, since its tests are not
+under a `harness::` module: `--rust-filter 'package(loopflow-harness) | test(harness::)'`
+runs them with execution's launch matrix and conformance suites.
 
 The runner runs architecture, Python, website and Swift suites when their
 paths changed, then Rust: inventory, `cargo fmt --check`, the filtered nextest
@@ -286,8 +291,10 @@ prepared SQL invariants and migration checks stay in the storage crate.
 
 Cargo rebuilds changed libraries and their dependents. Command help or rendering
 rebuilds `loopflow`; execution and Task shipping edits rebuild `loopflow-execution`
-and `loopflow`; saved-record edits rebuild storage and both callers. Unchanged
-lower libraries can be reused. Binaries and test executables still compile and
+and `loopflow`; saved-record edits rebuild storage and both callers. A decoder
+or transcript reader edit rebuilds `loopflow-harness`, execution and `loopflow`,
+never storage, and neither a storage nor an execution edit rebuilds
+`loopflow-harness`. Unchanged lower libraries can be reused. Binaries and test executables still compile and
 link even when library compilations hit the cache. Use debug builds for local
 verification; never build `--release` to test.
 

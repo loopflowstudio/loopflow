@@ -11,11 +11,11 @@ use super::fact::{Decoded, ProviderFact, ProviderTurn, Signal};
 use loopflow_model::chat::types::{ConversationEvent, ConversationItem, Lifecycle};
 use loopflow_model::id::AgentSessionId;
 
-pub(super) const ERROR_CODE: &str = "antigravity_error";
+pub const ERROR_CODE: &str = "antigravity_error";
 
 /// One Loopflow turn in an Antigravity conversation.
 #[derive(Debug)]
-pub(super) struct Turn {
+pub struct Turn {
     /// The conversation, once lf resumed it or `agy` named it.
     thread: Option<AgentSessionId>,
     /// The turn's name, once a step or a failure began it.
@@ -203,8 +203,10 @@ impl Turn {
             .lines()
             .find(|line| !line.trim().is_empty())
             .unwrap_or("Antigravity reported an error");
-        let message = super::common::sanitize_error_message(line.trim());
-        self.error = Some(loopflow_storage::session::turn_error(ERROR_CODE, &message));
+        let message = crate::redact::sanitize_error_message(line.trim());
+        self.error = Some(loopflow_model::chat::types::turn_error(
+            ERROR_CODE, &message,
+        ));
         out.push(
             ConversationEvent::Error {
                 code: ERROR_CODE.into(),
@@ -316,7 +318,7 @@ fn tool_item(step: &Value, id: &str, status: Lifecycle) -> ConversationItem {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::harness::fact::{fact_lines, trace};
+    use crate::fact::{fact_lines, trace};
 
     fn errors(decoded: &[Decoded]) -> Vec<(&str, &str)> {
         decoded

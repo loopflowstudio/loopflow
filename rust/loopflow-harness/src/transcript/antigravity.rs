@@ -101,6 +101,16 @@ mod tests {
     use crate::transcript::live::TurnUsage;
     use loopflow_model::chat::types::{ConversationItem, Lifecycle};
 
+    /// The agent's last message, the answer a turn hands back.
+    fn last_message(turn: &Turn) -> Option<&str> {
+        turn.agent()
+            .filter_map(|item| match item {
+                ConversationItem::Message { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .last()
+    }
+
     fn row(index: u64, kind: &str, at: &str, more: Value) -> Value {
         let mut row = serde_json::json!({"step_index":index,"type":kind,"status":"DONE",
             "created_at":format!("2026-11-20T08:41:{at}Z")});
@@ -199,10 +209,7 @@ mod tests {
         assert!(matches!(said[0],
             ConversationItem::Tool { name, status: Lifecycle::Completed, output: Some(output), .. }
                 if name == "run_command" && output.contains("hi")));
-        assert_eq!(
-            crate::transcript::answer::final_message(turn).as_deref(),
-            Some("`echo hi` printed hi.")
-        );
+        assert_eq!(last_message(turn), Some("`echo hi` printed hi."));
         // The second request is lf's, and nothing has answered it yet.
         assert_eq!(turns[1].id.as_deref(), Some("step-7"));
         assert_eq!(turns[1].state, TurnState::Running);
@@ -256,9 +263,6 @@ mod tests {
         assert_eq!(turns[0].state, TurnState::Ended);
         assert_eq!(turns[0].ended_at.as_deref(), Some("2026-11-20T08:41:31Z"));
         assert_eq!(turns[0].usage.as_ref().unwrap().output_tokens, 487);
-        assert_eq!(
-            crate::transcript::answer::final_message(&turns[0]).as_deref(),
-            Some("All done.")
-        );
+        assert_eq!(last_message(&turns[0]), Some("All done."));
     }
 }

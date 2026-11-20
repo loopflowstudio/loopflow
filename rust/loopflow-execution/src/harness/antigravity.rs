@@ -17,10 +17,11 @@ use tokio::task::JoinHandle;
 
 use crate::agent::{AgentConfig, AgentFailure};
 use crate::context_block::ContextMoment;
-use crate::harness::antigravity_decode::Turn;
-use crate::harness::fact::Decoded;
 use crate::harness::fact_writer::FactWriter;
 use crate::harness::{Driver as StreamDriver, HarnessError, HookCallback, LaunchKind, Recording};
+use loopflow_harness::antigravity_decode::Turn;
+use loopflow_harness::fact::Decoded;
+use loopflow_harness::Harness;
 use loopflow_model::chat::types::ConversationEvent;
 use loopflow_model::id::AgentSessionId;
 
@@ -109,7 +110,7 @@ impl Driver {
         config: &AgentConfig,
         thread: Option<&AgentSessionId>,
     ) -> Result<(Command, std::fs::File)> {
-        let mut command = Command::new(super::Harness::program(&Antigravity));
+        let mut command = Command::new(loopflow_harness::HarnessKind::Antigravity.program());
         command.args([
             "--input-format",
             "stream-json",
@@ -448,16 +449,7 @@ fn build_turn_content(content: &str, config: &AgentConfig, first_turn: bool) -> 
     (!parts.is_empty()).then(|| parts.join("\n\n"))
 }
 
-#[derive(Debug)]
-pub struct Antigravity;
-
-impl super::Harness for Antigravity {
-    fn kind(&self) -> super::HarnessKind {
-        super::HarnessKind::Antigravity
-    }
-    fn program(&self) -> &'static str {
-        "agy"
-    }
+impl super::Launcher for loopflow_harness::Antigravity {
     fn capabilities(&self) -> super::Capabilities {
         super::Capabilities {
             thread: super::ThreadNaming {
@@ -535,26 +527,9 @@ impl super::Harness for Antigravity {
     fn hook_reply(&self, _event: &str, text: &str) -> Value {
         serde_json::json!({"injectSteps": [{"systemMessage": {"systemMessage": text}}]})
     }
-    fn sign_in_advice(&self) -> &'static str {
-        "run `agy` and sign in"
-    }
     fn recognizes(&self, process: &crate::process::OsProcess) -> bool {
         // `agy` execs a process named `antigravity`.
         matches!(process.command.as_str(), "agy" | "antigravity")
-    }
-    fn recognizes_driver(&self, command: &str) -> bool {
-        (super::command_program(command, "agy") || super::command_program(command, "antigravity"))
-            && command
-                .split_whitespace()
-                .any(|arg| arg == "--output-format")
-    }
-    fn transcript_home(&self) -> PathBuf {
-        dirs::home_dir()
-            .unwrap_or_default()
-            .join(".gemini/antigravity-cli")
-    }
-    fn transcript_reader(&self) -> fn(&[Value]) -> Vec<crate::transcript::Turn> {
-        crate::transcript::antigravity::read
     }
     fn locate_transcript(
         &self,
@@ -563,26 +538,15 @@ impl super::Harness for Antigravity {
         _cwd: &std::path::Path,
     ) -> Result<crate::transcript::Located> {
         let home = self.transcript_home();
-        let path = crate::transcript::antigravity::file(&home, id.as_str());
+        let path = loopflow_harness::transcript::antigravity::file(&home, id.as_str());
         Ok(if path.is_file() {
             crate::transcript::Located::Found {
-                source: crate::transcript::Source::File(path),
+                source: loopflow_harness::transcript::Source::File(path),
                 home: None,
             }
         } else {
             crate::transcript::Located::Gone(crate::transcript::Gap::FileMissing { home })
         })
-    }
-    fn direct_transcript(
-        &self,
-        home: &std::path::Path,
-        _cwd: &std::path::Path,
-        id: &str,
-    ) -> Option<PathBuf> {
-        Some(crate::transcript::antigravity::file(home, id))
-    }
-    fn transcript_markers(&self) -> &'static [&'static [u8]] {
-        &[]
     }
     fn recent_transcripts(
         &self,
@@ -590,7 +554,7 @@ impl super::Harness for Antigravity {
         _cwd: &std::path::Path,
         _since: i64,
         _owned: &std::collections::HashSet<&str>,
-    ) -> Vec<(String, crate::transcript::Source, i64)> {
+    ) -> Vec<(String, loopflow_harness::transcript::Source, i64)> {
         // A transcript row carries no directory, so none can be matched to a checkout.
         Vec::new()
     }
@@ -643,7 +607,7 @@ fn trust(cwd: &Path) -> Option<String> {
 #[cfg(all(test, unix))]
 mod tests {
     use super::{mpsc, AgentConfig, ContextMoment, ConversationEvent, Driver, StreamDriver};
-    use crate::harness::HarnessKind;
+    use loopflow_harness::HarnessKind;
     use loopflow_model::chat::types::{ConversationItem, Lifecycle};
 
     /// Put the stand-in `agy` first on PATH; it keeps what it was sent in `home`.
@@ -796,12 +760,12 @@ mod tests {
     }
 
     fn terminal_args(config: &AgentConfig, recording: &crate::harness::Recording) -> Vec<String> {
-        use crate::harness::Harness;
+        use crate::harness::Launcher;
         let launch = crate::harness::Launch {
             kind: crate::harness::LaunchKind::Chat,
             ..crate::harness::launch_for_test(HarnessKind::Antigravity, config, recording)
         };
-        let client = super::Antigravity.open(&launch).unwrap();
+        let client = loopflow_harness::Antigravity.open(&launch).unwrap();
         client
             .process
             .get_args()
@@ -903,8 +867,8 @@ mod tests {
         declared: ContextMoment,
         payload: serde_json::Value,
     ) -> Option<(ContextMoment, String, bool)> {
-        use crate::harness::Harness;
-        super::Antigravity
+        use crate::harness::Launcher;
+        loopflow_harness::Antigravity
             .hook_callback(payload, declared, Some(file))
             .map(|callback| {
                 (

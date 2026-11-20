@@ -15,11 +15,12 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
 use crate::agent::AgentConfig;
-use crate::harness::fact::{Decoded, ProviderFact, ProviderTurn};
 use crate::harness::fact_writer::FactWriter;
-use crate::harness::opencode_decode::Turn;
 use crate::harness::Recording;
 use crate::harness::{Driver as StreamDriver, HarnessError};
+use loopflow_harness::fact::{Decoded, ProviderFact, ProviderTurn};
+use loopflow_harness::opencode_decode::Turn;
+use loopflow_harness::Harness;
 use loopflow_model::chat::types::ConversationEvent;
 use loopflow_model::id::AgentSessionId;
 
@@ -61,9 +62,9 @@ impl State {
     /// a run whose message cannot be found gets a name of lf's own.
     fn begin(&mut self, events: &mpsc::UnboundedSender<ConversationEvent>) -> Option<&mut Turn> {
         if let Some(thread) = self.sent.take() {
-            let home = super::Harness::transcript_home(&OpenCode);
-            let id = crate::transcript::opencode::last_request(
-                &crate::transcript::opencode::store(&home),
+            let home = loopflow_harness::OpenCode.transcript_home();
+            let id = loopflow_harness::transcript::opencode::last_request(
+                &loopflow_harness::transcript::opencode::store(&home),
                 thread.as_str(),
             )
             .filter(|id| self.named.as_ref() != Some(id))
@@ -232,8 +233,8 @@ impl StreamDriver for Driver {
 
     async fn start(&mut self) -> Result<()> {
         if self.thread.is_none() {
-            self.thread = Some(super::Harness::thread_name(
-                &OpenCode,
+            self.thread = Some(super::Launcher::thread_name(
+                &loopflow_harness::OpenCode,
                 self.owner.assigned_thread()?,
             ));
         }
@@ -363,6 +364,160 @@ fn build_turn_content(content: &str, config: &AgentConfig, first_turn: bool) -> 
     (!parts.is_empty()).then(|| parts.join("\n\n"))
 }
 
+fn environment(
+    config: &AgentConfig,
+    context_file: Option<&std::path::Path>,
+    kind: LaunchKind,
+) -> Result<std::collections::BTreeMap<String, String>> {
+    let mut environment = config.env.clone();
+    // An inherited value is the calling OpenCode conversation's, with its plugin.
+    let mut settings: serde_json::Value = environment
+        .get("OPENCODE_CONFIG_CONTENT")
+        .map(|value| serde_json::from_str(value))
+        .transpose()?
+        .unwrap_or_else(|| serde_json::json!({}));
+    if !settings.is_object() {
+        bail!("OPENCODE_CONFIG_CONTENT must be a JSON object");
+    }
+    if config.skip_permissions {
+        settings["permissions"] =
+            serde_json::json!([{ "action":"*", "resource":"*", "effect":"allow" }]);
+    }
+    if let Some(context) = &config.conversation_context {
+        crate::harness::context::add_opencode_context(
+            &mut settings,
+            context,
+            &crate::agent::system_prompt_with_structured_replies(config),
+            kind,
+        )?;
+    } else {
+        let instructions = match context_file {
+            Some(path) => Some(path.to_owned()),
+            None => crate::agent::write_system_prompt_file(config, "opencode")?,
+        };
+        if let Some(path) = instructions {
+            settings
+                .as_object_mut()
+                .expect("configuration is an object")
+                .entry("instructions")
+                .or_insert_with(|| serde_json::json!([]))
+                .as_array_mut()
+                .ok_or_else(|| anyhow::anyhow!("OpenCode instructions must be an array"))?
+                .push(serde_json::json!(path));
+        }
+    }
+    environment.insert("OPENCODE_CONFIG_CONTENT".into(), settings.to_string());
+    Ok(environment)
+}
+
+impl super::Launcher for loopflow_harness::OpenCode {
+    fn locate_transcript(
+        &self,
+        _store: &loopflow_storage::sqlite::SqliteStore,
+        id: &AgentSessionId,
+        _cwd: &std::path::Path,
+    ) -> Result<crate::transcript::Located> {
+        let home = self.transcript_home();
+        let store = loopflow_harness::transcript::opencode::store(&home);
+        Ok(if store.is_file() {
+            crate::transcript::Located::Found {
+                source: loopflow_harness::transcript::Source::OpenCode {
+                    store,
+                    id: id.to_string(),
+                },
+                home: Some(home),
+            }
+        } else {
+            crate::transcript::Located::Gone(crate::transcript::Gap::FileMissing { home })
+        })
+    }
+    fn recent_transcripts(
+        &self,
+        home: &std::path::Path,
+        cwd: &std::path::Path,
+        since: i64,
+        _owned: &std::collections::HashSet<&str>,
+    ) -> Vec<(String, loopflow_harness::transcript::Source, i64)> {
+        let store = loopflow_harness::transcript::opencode::store(home);
+        loopflow_harness::transcript::opencode::written_in(&store, cwd, since)
+            .into_iter()
+            .map(|(id, at)| {
+                (
+                    id.clone(),
+                    loopflow_harness::transcript::Source::OpenCode {
+                        store: store.clone(),
+                        id,
+                    },
+                    at,
+                )
+            })
+            .collect()
+    }
+    fn classify_failure(&self, code: &str, message: &str) -> Option<crate::agent::AgentFailure> {
+        // "Insufficient balance. This request is pay-as-you-go, billed to
+        // OpenCode Models credits." OpenCode retries a transient failure itself.
+        if message
+            .to_ascii_lowercase()
+            .contains("insufficient balance")
+        {
+            return Some(crate::agent::AgentFailure::UsageLimit);
+        }
+        crate::agent::routing_failure(code, message)
+    }
+    fn capabilities(&self) -> super::Capabilities {
+        super::Capabilities {
+            thread: super::ThreadNaming {
+                bare: super::ThreadName::Assigned,
+                managed: super::ThreadName::Assigned,
+            },
+            initial_prompt_on_resume: false,
+            native_skills: None,
+            turn_limit: false,
+            output_schema: false,
+            respawns_after_crash: false,
+            install_hint: concat!(
+                "Install OpenCode 2 or later with `npm install -g @opencode/cli`; ",
+                "the `opencode-ai` package stops at 1.x.",
+            ),
+        }
+    }
+    fn driver(
+        &self,
+        launch: &super::Launch<'_>,
+        events: mpsc::UnboundedSender<ConversationEvent>,
+        _approval: super::ApprovalPolicy,
+    ) -> Box<dyn super::Driver> {
+        Box::new(Driver::new(launch, events))
+    }
+    fn thread_name(&self, assigned: AgentSessionId) -> AgentSessionId {
+        // OpenCode creates the conversation a `--session` names, and accepts
+        // only names that start with `ses`.
+        format!("ses_{}", assigned.as_str().replace('-', "")).into()
+    }
+    fn open(&self, launch: &super::Launch<'_>) -> Result<super::native_session::NativeClient> {
+        let (_, input) = launch.terminal_input()?;
+        let mut client = super::native_session::NativeClient::new(launch)?;
+        let thread = client
+            .thread
+            .clone()
+            .ok_or_else(|| anyhow!("OpenCode conversation has no name"))?;
+        client
+            .process
+            .envs(environment(
+                launch.config,
+                launch.context_file,
+                launch.kind,
+            )?)
+            .args(["--standalone", "--session", thread.as_str()]);
+        if let Some(prompt) = input.filter(|prompt| !prompt.is_empty()) {
+            crate::agent::validate_terminal_turn(&prompt)?;
+            client.process.args(["--prompt", &prompt]);
+        }
+        client.stderr = super::common::diagnostics(launch.config, "opencode")?;
+        Ok(client)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::harness::LaunchKind;
@@ -408,7 +563,7 @@ mod tests {
         let (tx, _rx) = mpsc::unbounded_channel();
         let mut harness = Driver::new(
             &crate::harness::launch_for_test(
-                crate::harness::HarnessKind::OpenCode,
+                loopflow_harness::HarnessKind::OpenCode,
                 &crate::agent::AgentConfig::default(),
                 &owner,
             ),
@@ -501,7 +656,7 @@ mod tests {
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mut harness = Driver::new(
             &crate::harness::launch_for_test(
-                crate::harness::HarnessKind::OpenCode,
+                loopflow_harness::HarnessKind::OpenCode,
                 &config,
                 &recording,
             ),
@@ -560,7 +715,7 @@ mod tests {
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mut harness = Driver::new(
             &crate::harness::launch_for_test(
-                crate::harness::HarnessKind::OpenCode,
+                loopflow_harness::HarnessKind::OpenCode,
                 &config,
                 &recording,
             ),
@@ -589,7 +744,7 @@ mod tests {
         let recording = super::super::admit_for_test(ledger.home());
         let mut harness = Driver::new(
             &crate::harness::launch_for_test(
-                crate::harness::HarnessKind::OpenCode,
+                loopflow_harness::HarnessKind::OpenCode,
                 &config,
                 &recording,
             ),
@@ -604,212 +759,5 @@ mod tests {
         assert_eq!(status, Lifecycle::Completed, "{errors:?}");
         assert!(text.to_uppercase().contains("ALPHA"), "turn text: {text:?}");
         harness.stop().await.expect("stop");
-    }
-}
-
-fn environment(
-    config: &AgentConfig,
-    context_file: Option<&std::path::Path>,
-    kind: LaunchKind,
-) -> Result<std::collections::BTreeMap<String, String>> {
-    let mut environment = config.env.clone();
-    // An inherited value is the calling OpenCode conversation's, with its plugin.
-    let mut settings: serde_json::Value = environment
-        .get("OPENCODE_CONFIG_CONTENT")
-        .map(|value| serde_json::from_str(value))
-        .transpose()?
-        .unwrap_or_else(|| serde_json::json!({}));
-    if !settings.is_object() {
-        bail!("OPENCODE_CONFIG_CONTENT must be a JSON object");
-    }
-    if config.skip_permissions {
-        settings["permissions"] =
-            serde_json::json!([{ "action":"*", "resource":"*", "effect":"allow" }]);
-    }
-    if let Some(context) = &config.conversation_context {
-        crate::harness::context::add_opencode_context(
-            &mut settings,
-            context,
-            &crate::agent::system_prompt_with_structured_replies(config),
-            kind,
-        )?;
-    } else {
-        let instructions = match context_file {
-            Some(path) => Some(path.to_owned()),
-            None => crate::agent::write_system_prompt_file(config, "opencode")?,
-        };
-        if let Some(path) = instructions {
-            settings
-                .as_object_mut()
-                .expect("configuration is an object")
-                .entry("instructions")
-                .or_insert_with(|| serde_json::json!([]))
-                .as_array_mut()
-                .ok_or_else(|| anyhow::anyhow!("OpenCode instructions must be an array"))?
-                .push(serde_json::json!(path));
-        }
-    }
-    environment.insert("OPENCODE_CONFIG_CONTENT".into(), settings.to_string());
-    Ok(environment)
-}
-
-#[derive(Debug)]
-pub struct OpenCode;
-
-impl super::Harness for OpenCode {
-    fn provider_env(&self) -> &'static [&'static str] {
-        &["OPENCODE_API_KEY"]
-    }
-    fn api_key_env(&self) -> &'static [&'static str] {
-        &["OPENCODE_API_KEY", "MOONSHOT_API_KEY"]
-    }
-    fn recognizes_driver(&self, command: &str) -> bool {
-        super::command_program(command, "opencode")
-            && command.split_whitespace().any(|arg| arg == "run")
-    }
-    fn transcript_watch_store(&self, home: &std::path::Path) -> Option<std::path::PathBuf> {
-        Some(crate::transcript::opencode::store(home))
-    }
-    fn transcript_root(&self, home: &std::path::Path) -> (std::path::PathBuf, usize) {
-        (home.to_path_buf(), 0)
-    }
-    fn transcript_reader(&self) -> fn(&[serde_json::Value]) -> Vec<crate::transcript::Turn> {
-        crate::transcript::opencode::read
-    }
-    fn transcript_home(&self) -> std::path::PathBuf {
-        std::env::var_os("XDG_DATA_HOME")
-            .filter(|value| !value.is_empty())
-            .map(std::path::PathBuf::from)
-            .unwrap_or_else(|| dirs::home_dir().unwrap_or_default().join(".local/share"))
-            .join("opencode")
-    }
-    fn locate_transcript(
-        &self,
-        _store: &loopflow_storage::sqlite::SqliteStore,
-        id: &AgentSessionId,
-        _cwd: &std::path::Path,
-    ) -> Result<crate::transcript::Located> {
-        let home = self.transcript_home();
-        let store = crate::transcript::opencode::store(&home);
-        Ok(if store.is_file() {
-            crate::transcript::Located::Found {
-                source: crate::transcript::Source::OpenCode {
-                    store,
-                    id: id.to_string(),
-                },
-                home: Some(home),
-            }
-        } else {
-            crate::transcript::Located::Gone(crate::transcript::Gap::FileMissing { home })
-        })
-    }
-    fn recent_transcripts(
-        &self,
-        home: &std::path::Path,
-        cwd: &std::path::Path,
-        since: i64,
-        _owned: &std::collections::HashSet<&str>,
-    ) -> Vec<(String, crate::transcript::Source, i64)> {
-        let store = crate::transcript::opencode::store(home);
-        crate::transcript::opencode::written_in(&store, cwd, since)
-            .into_iter()
-            .map(|(id, at)| {
-                (
-                    id.clone(),
-                    crate::transcript::Source::OpenCode {
-                        store: store.clone(),
-                        id,
-                    },
-                    at,
-                )
-            })
-            .collect()
-    }
-    fn classify_failure(&self, code: &str, message: &str) -> Option<crate::agent::AgentFailure> {
-        // "Insufficient balance. This request is pay-as-you-go, billed to
-        // OpenCode Models credits." OpenCode retries a transient failure itself.
-        if message
-            .to_ascii_lowercase()
-            .contains("insufficient balance")
-        {
-            return Some(crate::agent::AgentFailure::UsageLimit);
-        }
-        crate::agent::routing_failure(code, message)
-    }
-    fn kind(&self) -> super::HarnessKind {
-        super::HarnessKind::OpenCode
-    }
-    fn capabilities(&self) -> super::Capabilities {
-        super::Capabilities {
-            thread: super::ThreadNaming {
-                bare: super::ThreadName::Assigned,
-                managed: super::ThreadName::Assigned,
-            },
-            initial_prompt_on_resume: false,
-            native_skills: None,
-            turn_limit: false,
-            output_schema: false,
-            respawns_after_crash: false,
-            install_hint: concat!(
-                "Install OpenCode 2 or later with `npm install -g @opencode/cli`; ",
-                "the `opencode-ai` package stops at 1.x.",
-            ),
-        }
-    }
-    fn driver(
-        &self,
-        launch: &super::Launch<'_>,
-        events: mpsc::UnboundedSender<ConversationEvent>,
-        _approval: super::ApprovalPolicy,
-    ) -> Box<dyn super::Driver> {
-        Box::new(Driver::new(launch, events))
-    }
-    fn thread_name(&self, assigned: AgentSessionId) -> AgentSessionId {
-        // OpenCode creates the conversation a `--session` names, and accepts
-        // only names that start with `ses`.
-        format!("ses_{}", assigned.as_str().replace('-', "")).into()
-    }
-    fn validate_model(&self, model: &str) -> Result<()> {
-        anyhow::ensure!(is_supported_opencode_model_variant(model), "unsupported OpenCode model '{}': supported variants are 'opencode/*' (excluding claude/codex families) and 'moonshotai/kimi*'", model);
-        Ok(())
-    }
-
-    fn open(&self, launch: &super::Launch<'_>) -> Result<super::native_session::NativeClient> {
-        let (_, input) = launch.terminal_input()?;
-        let mut client = super::native_session::NativeClient::new(launch)?;
-        let thread = client
-            .thread
-            .clone()
-            .ok_or_else(|| anyhow!("OpenCode conversation has no name"))?;
-        client
-            .process
-            .envs(environment(
-                launch.config,
-                launch.context_file,
-                launch.kind,
-            )?)
-            .args(["--standalone", "--session", thread.as_str()]);
-        if let Some(prompt) = input.filter(|prompt| !prompt.is_empty()) {
-            crate::agent::validate_terminal_turn(&prompt)?;
-            client.process.args(["--prompt", &prompt]);
-        }
-        client.stderr = super::common::diagnostics(launch.config, "opencode")?;
-        Ok(client)
-    }
-}
-
-fn is_supported_opencode_model_variant(variant: &str) -> bool {
-    let variant = variant.trim().to_ascii_lowercase();
-    let Some((provider, model_id)) = variant.split_once('/') else {
-        return false;
-    };
-    if model_id.is_empty() {
-        return false;
-    }
-
-    match provider {
-        "moonshotai" => model_id.starts_with("kimi"),
-        "opencode" => !model_id.contains("claude") && !model_id.contains("codex"),
-        _ => false,
     }
 }

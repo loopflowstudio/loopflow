@@ -674,16 +674,15 @@ pub enum Commands {
         /// The harness whose provider sent the callback, when it is not in
         /// Claude's shape.
         #[arg(long, value_parser = parse_hook_harness)]
-        harness: Option<loopflow_execution::harness::HarnessKind>,
+        harness: Option<loopflow_harness::HarnessKind>,
     },
     /// External: skill/graph name (when no subcommand matches)
     #[command(external_subcommand)]
     External(Vec<String>),
 }
 
-fn parse_hook_harness(name: &str) -> Result<loopflow_execution::harness::HarnessKind, String> {
-    loopflow_execution::harness::HarnessKind::parse(name)
-        .ok_or_else(|| format!("unknown harness {name}"))
+fn parse_hook_harness(name: &str) -> Result<loopflow_harness::HarnessKind, String> {
+    loopflow_harness::HarnessKind::parse(name).ok_or_else(|| format!("unknown harness {name}"))
 }
 
 /// `repository.*`: one repository's planning exchange, releases, CI, people,

@@ -12,7 +12,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 
 use crate::error::LoadError;
-use crate::harness::HarnessKind;
+use loopflow_harness::HarnessKind;
 
 pub mod catalog;
 mod definitions;
@@ -130,10 +130,6 @@ pub const CLAUDE_MODEL_FAMILIES: [&str; 4] = ["fable", "opus", "sonnet", "haiku"
 /// The family Claude Code runs when a launch names no model.
 pub const CLAUDE_DEFAULT_MODEL_FAMILY: &str = "fable";
 
-/// The models a bare `claude` step falls through to when the one it runs
-/// hits a scoped limit, best first.
-pub const CLAUDE_MODEL_RUNGS: [&str; 3] = ["opus", "sonnet", "haiku"];
-
 /// An explicit invocation-wide choice; definitions and defaults never set it.
 pub const YOLO_OVERRIDE_ENV: &str = "LF_YOLO_OVERRIDE";
 pub const CHROME_OVERRIDE_ENV: &str = "LF_CHROME_OVERRIDE";
@@ -170,7 +166,7 @@ pub fn default_agent() -> Option<&'static str> {
     #[cfg(test)]
     let is_installed = |agent: HarnessKind| agent == HarnessKind::Codex;
     #[cfg(not(test))]
-    let is_installed = HarnessKind::installed;
+    let is_installed = |kind: HarnessKind| crate::harness::launcher(kind).installed();
     installed_agent(is_installed)
 }
 
@@ -563,20 +559,20 @@ pub(crate) fn agent_list(value: &str) -> impl Iterator<Item = &str> {
 /// A selected harness and its provider model.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Agent {
-    pub harness: crate::harness::HarnessKind,
+    pub harness: HarnessKind,
     pub model: Option<String>,
 }
 
 impl Agent {
     pub fn parse(value: &str) -> Result<Self, LoadError> {
         let (name, model) = parse_agent(value);
-        let harness = crate::harness::HarnessKind::parse(&name)
-            .ok_or_else(|| LoadError::InvalidAgent(value.to_owned()))?;
+        let harness =
+            HarnessKind::parse(&name).ok_or_else(|| LoadError::InvalidAgent(value.to_owned()))?;
         Ok(Self { harness, model })
     }
 
     pub fn with_configured_model(mut self, config: &Config) -> Self {
-        if self.harness == crate::harness::HarnessKind::Claude && self.model.is_none() {
+        if self.harness == HarnessKind::Claude && self.model.is_none() {
             self.model = config.claude.model.clone();
         }
         self
@@ -1083,7 +1079,7 @@ mod tests {
 
     #[test]
     fn bare_harnesses_defer_model_selection_to_the_provider() {
-        for harness in crate::harness::HarnessKind::ALL {
+        for harness in loopflow_harness::HarnessKind::ALL {
             let harness = harness.as_str();
             assert_eq!(parse_agent(harness), (harness.to_string(), None));
         }

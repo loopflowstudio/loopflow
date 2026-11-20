@@ -5,6 +5,10 @@ Each provider (`claude.rs`, `codex.rs`, `opencode.rs`, `pi.rs`,
 observed and recorded here. The provider owns the conversation; lf adds context
 at turn boundaries, interjects through hooks and records what happened.
 
+What a provider writes is read one crate down: the stream decoders and
+transcript readers are [`loopflow-harness`](../../../loopflow-harness/README.md),
+which knows nothing of the store or of launching.
+
 ## One launch type per harness
 
 ```rust
@@ -18,7 +22,7 @@ let launch = Launch {
 };
 ```
 
-Native and headless launches share `Launch` and the same per-harness `Harness`.
+Native and headless launches share `Launch` and the same per-harness `Launcher`.
 `native_session::run` opens and waits for a native client; `drive::run` drives
 one headless provider turn. Native results retain the provider's OS exit status;
 headless results retain answer text and typed turn failures for retry policy.
@@ -44,9 +48,18 @@ Each harness file answers the rest:
 | `classify_failure(code, message)` | what an error its decoder reported means for the run: next agent, retry, or nothing lf acts on |
 | `open(&Launch)` | native interactive client: argv, hook and title flags |
 | `driver(&Launch, events, approval)` | headless stream `Driver`: start, input, interrupt, stop |
+| `recognizes(&OsProcess)` | whether a running process is this client: Claude checks its executable path, Pi its arguments |
 
-`HarnessKind::harness()` is the only harness dispatch. Core launch and transcript
-code reads capabilities or asks the harness for policy.
+Each harness is one unit struct (`loopflow_harness::Claude`, `Codex`,
+`OpenCode`, `Pi`, `Antigravity`) seen two ways, and those are the only harness dispatch:
+
+```rust
+kind.harness()            // &dyn loopflow_harness::Harness: what the client writes, and where
+harness::launcher(kind)   // &dyn Launcher: the above, plus launching and anything that reads the store or the process table
+```
+
+`Launcher` has `Harness` as its supertrait, so `Launch.harness` answers both.
+Core launch and transcript code reads capabilities or asks the harness for policy.
 That policy includes input recency, live process ownership and saved-turn detail.
 A harness whose server may host other conversations validates it before the
 shared AgentProcess close path signals the recorded process group.

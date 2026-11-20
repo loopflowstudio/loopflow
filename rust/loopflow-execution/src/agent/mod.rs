@@ -239,7 +239,7 @@ impl AgentConfig {
 impl Default for AgentConfig {
     fn default() -> Self {
         Self::new(Agent {
-            harness: crate::harness::HarnessKind::Codex,
+            harness: loopflow_harness::HarnessKind::Codex,
             model: None,
         })
     }
@@ -339,7 +339,7 @@ fn _record_stop(provider: &str, reason: &str, advice: &str) {
 
 /// The provider revoked the login: no model of it can go on until someone
 /// signs in again.
-fn _sign_in_advice(kind: crate::harness::HarnessKind) -> String {
+fn _sign_in_advice(kind: loopflow_harness::HarnessKind) -> String {
     let provider = kind.as_str();
     let sign_in = kind.harness().sign_in_advice();
     format!("The {provider} login was revoked; sign in again on this Machine: {sign_in}")
@@ -357,7 +357,7 @@ fn _limit_stop_advice(provider: &str, launch: &AgentConfig, rungs: &[Agent]) -> 
                 .join(", ")
         );
     }
-    let another = crate::harness::HarnessKind::ALL
+    let another = loopflow_harness::HarnessKind::ALL
         .into_iter()
         .find(|kind| kind.as_str() != provider)
         .expect("more than one harness")
@@ -943,7 +943,7 @@ fn run_admitted_agent(
     kind: crate::harness::LaunchKind,
 ) -> Result<AgentProcessResult, CoreError> {
     let mut launch = launch.clone();
-    let capabilities = launch.agent.harness.harness().capabilities();
+    let capabilities = crate::harness::launcher(launch.agent.harness).capabilities();
     if launch.max_turns.is_some() && !capabilities.turn_limit {
         eprintln!("warning: Loopflow turn limits are supported only by Claude; this provider will run without a turn limit");
     }
@@ -1406,7 +1406,7 @@ fn _run_harness_once(
     .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
     let value = crate::harness::Launch {
         config: &config,
-        harness: launch.agent.harness.harness(),
+        harness: crate::harness::launcher(launch.agent.harness),
         kind,
         recording: &recording,
         start: crate::harness::Start::from_thread(launch.resume_token.as_ref()),
@@ -1416,12 +1416,12 @@ fn _run_harness_once(
 }
 
 /// What to tell someone whose agent CLI is missing.
-pub fn missing_agent_message(kind: crate::harness::HarnessKind) -> String {
-    let hint = kind.harness().capabilities().install_hint;
+pub fn missing_agent_message(kind: loopflow_harness::HarnessKind) -> String {
+    let hint = crate::harness::launcher(kind).capabilities().install_hint;
     format!("{}. {hint}", _not_installed(kind))
 }
 
-fn _not_installed(kind: crate::harness::HarnessKind) -> String {
+fn _not_installed(kind: loopflow_harness::HarnessKind) -> String {
     format!("'{}' is not installed", kind.as_str())
 }
 
@@ -1440,8 +1440,10 @@ pub fn start_on_installed_agent(
     launch: &mut AgentConfig,
     process: &ProcessConfig,
 ) -> Result<(), String> {
-    let first = _pass_over_missing_agents(launch, process, crate::harness::HarnessKind::installed)
-        .map_err(missing_agent_message)?;
+    let first = _pass_over_missing_agents(launch, process, |kind| {
+        crate::harness::launcher(kind).installed()
+    })
+    .map_err(missing_agent_message)?;
     if first != launch.agent {
         let reason = _not_installed(first.harness);
         _record_agent_move(&first, "not installed", &reason, &launch.agent);
@@ -1453,8 +1455,8 @@ pub fn start_on_installed_agent(
 fn _pass_over_missing_agents(
     launch: &mut AgentConfig,
     process: &ProcessConfig,
-    is_installed: impl Fn(crate::harness::HarnessKind) -> bool,
-) -> Result<Agent, crate::harness::HarnessKind> {
+    is_installed: impl Fn(loopflow_harness::HarnessKind) -> bool,
+) -> Result<Agent, loopflow_harness::HarnessKind> {
     let first = launch.agent.clone();
     let order = if process.wait_for_capacity {
         _agent_order(launch)
@@ -1479,7 +1481,7 @@ mod tests {
 
     #[test]
     fn only_a_graph_step_passes_over_an_agent_that_is_not_installed() {
-        use crate::harness::HarnessKind;
+        use loopflow_harness::HarnessKind;
         let agent = |text: &str| Agent::parse(text).unwrap();
         let launch = AgentConfig {
             agent: agent("opencode:opencode/fixture"),
@@ -2162,7 +2164,7 @@ trust_level = "trusted"
                 thread: launch.resume_token.as_ref().unwrap(),
             },
             ..crate::harness::launch_for_test(
-                crate::harness::HarnessKind::Claude,
+                loopflow_harness::HarnessKind::Claude,
                 &launch,
                 &admitted,
             )

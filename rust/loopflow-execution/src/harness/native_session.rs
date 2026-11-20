@@ -68,7 +68,7 @@ pub fn launch_session(
     context_file: Option<&Path>,
     capture: Option<&LfProcessRuntime>,
 ) -> Result<NativeOutcome> {
-    let harness = config.agent.harness.harness();
+    let harness = super::launcher(config.agent.harness);
     let cwd = config
         .cwd
         .clone()
@@ -123,7 +123,7 @@ pub fn resume_session_with_env(
         .ok_or_else(|| anyhow!("Session input {artifact_key} is not recorded"))?;
     let mut config =
         crate::agent::resolve_session_config(&session, serde_yaml_ng::Value::Null, None, false)?;
-    let harness = config.agent.harness.harness();
+    let harness = super::launcher(config.agent.harness);
     anyhow::ensure!(
         session.provider.as_deref() == Some(harness.kind().as_str()),
         "native history cannot resume in {}; continue it with lf resume -a {}",
@@ -255,7 +255,7 @@ impl NativeOutcome {
 
     /// The status a bare launch exits with: the provider's own, as its shell
     /// would see it alone. lf names a failure the person did not cause.
-    pub(crate) fn bare_exit_code(&self, kind: super::HarnessKind) -> u8 {
+    pub(crate) fn bare_exit_code(&self, kind: loopflow_harness::HarnessKind) -> u8 {
         let program = kind.as_str();
         if !self.status.success() && !self.interrupted {
             eprintln!("{program} exited with {}", self.status);
@@ -268,7 +268,7 @@ impl NativeOutcome {
     /// conversation can have another client.
     pub fn result(
         &self,
-        harness: super::HarnessKind,
+        harness: loopflow_harness::HarnessKind,
         resuming: bool,
         kind: LaunchKind,
     ) -> Result<()> {
@@ -540,7 +540,7 @@ fn run_client(
         .get(crate::session_record::CAPTURE_KEY_ENV)
         .map(|key| crate::session_record::capture_dir(key))
         .transpose()?;
-    if let (Some(provider), Some(thread)) = (launch.harness.kind().provider(), agent_session) {
+    if let (Some(provider), Some(thread)) = (launch.harness.provider(), agent_session) {
         crate::transcript::adopt_native(provider, thread)?;
     }
     progress.stage(format!("Opening {program} terminal"));
@@ -897,7 +897,7 @@ mod tests {
             };
             let launch = Launch {
                 config: &config,
-                harness: super::super::HarnessKind::Claude.harness(),
+                harness: crate::harness::launcher(loopflow_harness::HarnessKind::Claude),
                 kind: LaunchKind::Batch,
                 recording: &recording,
                 start: Start::New,
@@ -956,7 +956,7 @@ mod tests {
         )
         .and_then(|outcome| {
             outcome.result(
-                crate::harness::HarnessKind::Claude,
+                loopflow_harness::HarnessKind::Claude,
                 false,
                 LaunchKind::Batch,
             )
@@ -1191,7 +1191,7 @@ mod tests {
         let result = native_fixture("/bin/sleep", vec!["10".into()], home, &BTreeMap::new())
             .and_then(|outcome| {
                 outcome.result(
-                    crate::harness::HarnessKind::Claude,
+                    loopflow_harness::HarnessKind::Claude,
                     false,
                     LaunchKind::Batch,
                 )
@@ -1308,7 +1308,7 @@ mod tests {
             };
             let launch = Launch {
                 config: &config,
-                harness: super::super::HarnessKind::Claude.harness(),
+                harness: crate::harness::launcher(loopflow_harness::HarnessKind::Claude),
                 kind: LaunchKind::Batch,
                 recording: &recording,
                 start: Start::New,
@@ -1394,7 +1394,7 @@ mod tests {
             };
             let launch = Launch {
                 config: &config,
-                harness: super::super::HarnessKind::Claude.harness(),
+                harness: crate::harness::launcher(loopflow_harness::HarnessKind::Claude),
                 kind: LaunchKind::Batch,
                 recording: &recording,
                 start: Start::New,
@@ -1538,7 +1538,7 @@ mod tests {
             .unwrap();
         let mut command = Command::new(&codex);
         crate::provider_auth::apply_provider_env_to_command(
-            crate::harness::HarnessKind::Codex,
+            loopflow_harness::HarnessKind::Codex,
             &mut command,
         );
         assert!(command.status().unwrap().success());

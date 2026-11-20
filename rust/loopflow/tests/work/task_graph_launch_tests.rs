@@ -2039,7 +2039,7 @@ fn a_task_step_runs_as_a_worker_on_every_harness() {
             "Worker finished.",
         ),
     ] {
-        let program = loopflow_execution::harness::HarnessKind::parse(provider)
+        let program = loopflow_harness::HarnessKind::parse(provider)
             .unwrap()
             .program();
         let task = GraphTask::with_tools(&[(program, &script)]);
@@ -2222,7 +2222,7 @@ fn a_worker_stops_on_interrupt_and_the_next_run_starts_its_step_again_on_antigra
 
 fn interrupt_a_worker(provider: &str, agent: &str, script: &str, answer: &str) {
     {
-        let program = loopflow_execution::harness::HarnessKind::parse(provider)
+        let program = loopflow_harness::HarnessKind::parse(provider)
             .unwrap()
             .program();
         let task = GraphTask::with_tools(&[(program, script)]);
@@ -2628,14 +2628,18 @@ fn completion_is_independent_of_graph_position() {
     task.task_run_ok(&["task", "run", "INF-123", "gated"]);
     assert_eq!(task.graph()["position"], at("review"));
     assert_eq!(task.state(), "active");
-    assert!(!task.task_run(&["task", "run", "INF-123"]).success());
-    assert_eq!(task.graph()["position"]["kind"], "run");
-    assert_eq!(task.state(), "idle");
+    // Wait for the carrier to exit before reading the stopped position.
+    let failed = task.task_run(&["-b", "task", "run", "INF-123"]);
+    assert_eq!(failed.code, Some(1), "{}", failed.text);
+    let status = task.status();
+    let stopped = &status["work"]["graph"];
+    assert_eq!(stopped["position"]["kind"], "run");
+    assert_eq!(stopped["position"]["running"], false);
+    assert_eq!(status["status"], "idle");
     // Completing it leaves it where it stood.
-    let stopped = task.graph();
     task.finish_after_provider_observation(&["task", "complete", "INF-123"]);
     assert_eq!(task.state(), "done");
-    assert_eq!(task.graph(), stopped);
+    assert_eq!(&task.graph(), stopped);
     let text = task.text_status();
     assert!(text.contains("\nINF-123  done\n"), "{text}");
     // The retired completion flags do not return with the alias.

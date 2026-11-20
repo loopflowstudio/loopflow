@@ -263,12 +263,14 @@ pub fn explain_task_checkout(
 pub fn emit_block(
     delivery: Option<&std::path::Path>,
     moment: loopflow_execution::context_block::ContextMoment,
-    harness: Option<loopflow_execution::harness::HarnessKind>,
+    harness: Option<loopflow_harness::HarnessKind>,
 ) -> Result<()> {
     use crate::server::wire::BoundaryMoment;
     use loopflow_execution::context_block::{reported_thread_path, ContextMoment};
-    use loopflow_execution::harness::{HarnessKind, HookCallback};
-    let harness = harness.unwrap_or(HarnessKind::Claude).harness();
+    use loopflow_execution::harness::HookCallback;
+    let harness = loopflow_execution::harness::launcher(
+        harness.unwrap_or(loopflow_harness::HarnessKind::Claude),
+    );
     let raw = read_callback()?;
     let thread_file = delivery_path(delivery, &raw)
         .ok()

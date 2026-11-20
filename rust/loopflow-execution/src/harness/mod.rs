@@ -1,14 +1,11 @@
 pub mod agent_process;
 pub mod antigravity;
-mod antigravity_decode;
 pub mod claude;
-mod claude_decode;
 pub(crate) mod claude_trust;
 #[cfg(unix)]
 pub mod codex;
 #[cfg(unix)]
 pub mod codex_connection;
-mod codex_decode;
 mod codex_rpc;
 mod common;
 #[cfg(test)]
@@ -18,26 +15,25 @@ mod dispatch;
 #[cfg(all(test, unix))]
 mod dispatch_tests;
 pub mod drive;
-pub(crate) mod fact;
 mod fact_writer;
 #[cfg(all(test, unix))]
 mod launch_matrix;
-mod lf_tag;
 pub(crate) mod native_exit;
 pub mod native_session;
 pub mod opencode;
-mod opencode_decode;
 pub mod pi;
-mod pi_decode;
 pub mod task_updates;
 
 use anyhow::Result;
 use async_trait::async_trait;
+use loopflow_harness::transcript::{self, Source};
+use loopflow_harness::{Harness, HarnessKind};
+use loopflow_model::chat::types::ConversationEvent;
 use loopflow_model::id::AgentSessionId;
 use tokio::sync::mpsc;
 
 use crate::agent::AgentConfig;
-use loopflow_model::chat::types::ConversationEvent;
+use crate::transcript::{Gap, Located, RetentionState};
 
 pub(crate) fn configure_vendor_std_env(command: &mut std::process::Command) -> Result<()> {
     let context = crate::os_process::execution_context()?;
@@ -308,78 +304,24 @@ impl Recording {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[non_exhaustive]
-pub enum HarnessKind {
-    Codex,
-    Claude,
-    OpenCode,
-    Pi,
-    Antigravity,
+/// Native CLI for a provider; API-only services have no corresponding harness.
+pub fn from_provider(provider: crate::provider_auth::Provider) -> Option<HarnessKind> {
+    match provider {
+        crate::provider_auth::Provider::Claude => Some(HarnessKind::Claude),
+        crate::provider_auth::Provider::Codex => Some(HarnessKind::Codex),
+        _ => None,
+    }
 }
 
-impl HarnessKind {
-    pub fn parse(name: &str) -> Option<Self> {
-        match name.trim().to_ascii_lowercase().as_str() {
-            "codex" => Some(Self::Codex),
-            "claude" => Some(Self::Claude),
-            "opencode" => Some(Self::OpenCode),
-            "pi" => Some(Self::Pi),
-            "antigravity" => Some(Self::Antigravity),
-            _ => None,
-        }
-    }
-
-    /// Native CLI for a provider; API-only services have no corresponding harness.
-    pub fn from_provider(provider: crate::provider_auth::Provider) -> Option<Self> {
-        match provider {
-            crate::provider_auth::Provider::Claude => Some(Self::Claude),
-            crate::provider_auth::Provider::Codex => Some(Self::Codex),
-            _ => None,
-        }
-    }
-
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Codex => "codex",
-            Self::Claude => "claude",
-            Self::OpenCode => "opencode",
-            Self::Pi => "pi",
-            Self::Antigravity => "antigravity",
-        }
-    }
-
-    /// The provider whose home keeps this harness's transcripts and accounts.
-    pub fn provider(self) -> Option<crate::provider_auth::Provider> {
-        self.harness().provider()
-    }
-
-    /// The command that starts this harness's CLI.
-    pub fn program(self) -> &'static str {
-        self.harness().program()
-    }
-
-    /// Whether this harness's CLI is on `PATH`.
-    pub fn installed(self) -> bool {
-        crate::os_process::which_on_path(std::path::Path::new(self.program())).is_some()
-    }
-
-    pub const ALL: [Self; 5] = [
-        Self::Claude,
-        Self::Codex,
-        Self::OpenCode,
-        Self::Pi,
-        Self::Antigravity,
-    ];
-
-    pub fn harness(self) -> &'static dyn Harness {
-        match self {
-            Self::Claude => &claude::Claude,
-            Self::Codex => &codex::Codex,
-            Self::OpenCode => &opencode::OpenCode,
-            Self::Pi => &pi::Pi,
-            Self::Antigravity => &antigravity::Antigravity,
-        }
+/// How Loopflow launches and drives `kind`; what the client writes is
+/// `kind.harness()`.
+pub fn launcher(kind: HarnessKind) -> &'static dyn Launcher {
+    match kind {
+        HarnessKind::Claude => &loopflow_harness::Claude,
+        HarnessKind::Codex => &loopflow_harness::Codex,
+        HarnessKind::OpenCode => &loopflow_harness::OpenCode,
+        HarnessKind::Pi => &loopflow_harness::Pi,
+        HarnessKind::Antigravity => &loopflow_harness::Antigravity,
     }
 }
 
@@ -438,7 +380,7 @@ impl<'a> Start<'a> {
 #[derive(Debug, Clone, Copy)]
 pub struct Launch<'a> {
     pub config: &'a AgentConfig,
-    pub harness: &'static dyn Harness,
+    pub harness: &'static dyn Launcher,
     pub kind: LaunchKind,
     pub recording: &'a Recording,
     pub start: Start<'a>,
@@ -491,20 +433,9 @@ pub struct HookCallback {
     pub prompt: bool,
 }
 
-pub(crate) fn command_program(command: &str, program: &str) -> bool {
-    command.split_whitespace().any(|part| {
-        std::path::Path::new(part)
-            .file_name()
-            .is_some_and(|name| name == program)
-    })
-}
-
-pub trait Harness: Sync + std::fmt::Debug {
-    fn kind(&self) -> HarnessKind;
-    /// The command that starts the provider's CLI.
-    fn program(&self) -> &'static str {
-        self.kind().as_str()
-    }
+/// Launching and driving a harness, and joining what it wrote to Loopflow's
+/// store and the process table.
+pub trait Launcher: Harness {
     fn capabilities(&self) -> Capabilities;
     /// What an error this harness's decoder reported says went wrong, for the
     /// failures the provider leaves to lf: a spent quota, a revoked login or
@@ -563,13 +494,6 @@ pub trait Harness: Sync + std::fmt::Debug {
     ) -> crate::store::StoreResult<()> {
         Ok(())
     }
-    fn human_input_times(
-        &self,
-        _home: &std::path::Path,
-        _wanted: &std::collections::BTreeSet<&str>,
-    ) -> std::collections::BTreeMap<String, i64> {
-        std::collections::BTreeMap::new()
-    }
     fn conversation_owners(
         &self,
         _home: &std::path::Path,
@@ -577,50 +501,24 @@ pub trait Harness: Sync + std::fmt::Debug {
     ) -> std::collections::HashMap<u32, String> {
         std::collections::HashMap::new()
     }
-    fn transcript_completion_detail(
-        &self,
-        _turn: &crate::transcript::Turn,
-        detail: &mut serde_json::Value,
-    ) {
-        detail["error"] = serde_json::Value::Null;
-    }
+    /// The provider whose home keeps this harness's transcripts and accounts.
     fn provider(&self) -> Option<crate::provider_auth::Provider> {
         None
     }
-    fn recognizes_driver(&self, command: &str) -> bool {
-        command_program(command, self.program())
+    /// Whether this harness's CLI is on `PATH`.
+    fn installed(&self) -> bool {
+        crate::os_process::which_on_path(std::path::Path::new(self.program())).is_some()
     }
-    fn title_args(&self, _name: &str) -> Vec<String> {
-        Vec::new()
-    }
-
+    /// Whether a running process is this client's terminal program.
     fn recognizes(&self, process: &crate::process::OsProcess) -> bool {
         process.command == self.program()
-    }
-    fn model_rungs(&self) -> &'static [&'static str] {
-        &[]
-    }
-    fn sign_in_advice(&self) -> &'static str {
-        "sign in with its own client"
-    }
-    fn provider_env(&self) -> &'static [&'static str] {
-        &[]
-    }
-    fn api_key_env(&self) -> &'static [&'static str] {
-        &[]
-    }
-    fn transcript_home(&self) -> std::path::PathBuf {
-        self.provider()
-            .map(crate::transcript::native_home)
-            .unwrap_or_default()
     }
     fn locate_transcript(
         &self,
         store: &loopflow_storage::sqlite::SqliteStore,
         id: &AgentSessionId,
         cwd: &std::path::Path,
-    ) -> Result<crate::transcript::Located> {
-        use crate::transcript::{Gap, Located, Source};
+    ) -> Result<Located> {
         let Some(provider) = self.provider() else {
             return Ok(Located::Gone(Gap::FileMissing {
                 home: self.transcript_home(),
@@ -630,7 +528,7 @@ pub trait Harness: Sync + std::fmt::Debug {
             return Ok(Located::Gone(Gap::AccountHomeRemoved));
         };
         Ok(
-            match crate::transcript::find(self.kind(), &home, id.as_str(), cwd) {
+            match transcript::find(self.kind(), &home, id.as_str(), cwd) {
                 Some(path) => Located::Found {
                     source: Source::File(path),
                     home: Some(home),
@@ -639,38 +537,8 @@ pub trait Harness: Sync + std::fmt::Debug {
             },
         )
     }
-    fn transcript_reader(&self) -> fn(&[serde_json::Value]) -> Vec<crate::transcript::Turn>;
-    fn transcript_id<'a>(&self, _name: &'a str) -> Option<&'a str> {
-        None
-    }
-    fn transcript_root(&self, home: &std::path::Path) -> (std::path::PathBuf, usize) {
-        (home.join("projects"), 1)
-    }
-    fn transcript_watch_store(&self, _home: &std::path::Path) -> Option<std::path::PathBuf> {
-        None
-    }
-    fn direct_transcript(
-        &self,
-        _home: &std::path::Path,
-        _cwd: &std::path::Path,
-        _id: &str,
-    ) -> Option<std::path::PathBuf> {
-        None
-    }
-    fn transcript_siblings(&self) -> bool {
-        false
-    }
-    fn expiry_policy(&self, _home: Option<&std::path::Path>) -> crate::transcript::ExpiryPolicy {
-        crate::transcript::ExpiryPolicy::Kept
-    }
-    fn transcript_markers(&self) -> &'static [&'static [u8]] {
-        &crate::transcript::live::MARKERS
-    }
-    fn transcript_retention(
-        &self,
-        _thread: &AgentSessionId,
-    ) -> (crate::transcript::RetentionState, Option<i64>) {
-        (crate::transcript::RetentionState::Unknown, None)
+    fn transcript_retention(&self, _thread: &AgentSessionId) -> (RetentionState, Option<i64>) {
+        (RetentionState::Unknown, None)
     }
     fn recent_transcripts(
         &self,
@@ -678,21 +546,15 @@ pub trait Harness: Sync + std::fmt::Debug {
         cwd: &std::path::Path,
         since: i64,
         owned: &std::collections::HashSet<&str>,
-    ) -> Vec<(String, crate::transcript::Source, i64)> {
+    ) -> Vec<(String, Source, i64)> {
         crate::transcript::raw::unowned(
-            crate::transcript::scan(self.kind(), home)
+            transcript::scan(self.kind(), home)
                 .into_iter()
                 .filter(|(_, indexed)| {
                     indexed.modified >= since
-                        && crate::transcript::recorded_cwd(&indexed.path).as_deref() == Some(cwd)
+                        && transcript::recorded_cwd(&indexed.path).as_deref() == Some(cwd)
                 })
-                .map(|(id, indexed)| {
-                    (
-                        id,
-                        crate::transcript::Source::File(indexed.path),
-                        indexed.modified,
-                    )
-                })
+                .map(|(id, indexed)| (id, Source::File(indexed.path), indexed.modified))
                 .collect(),
             owned,
         )
@@ -700,9 +562,6 @@ pub trait Harness: Sync + std::fmt::Debug {
     fn terminal_error(&self, code: &str) -> bool {
         !self.capabilities().respawns_after_crash
             && code == format!("{}_disconnected", self.kind().as_str())
-    }
-    fn validate_model(&self, _model: &str) -> Result<()> {
-        Ok(())
     }
 }
 
@@ -715,7 +574,7 @@ pub fn launch_for_test<'a>(
     Launch {
         config,
         recording,
-        harness: kind.harness(),
+        harness: launcher(kind),
         kind: LaunchKind::Batch,
         start: Start::from_thread(config.resume_token.as_ref()),
         context_file: None,
@@ -744,35 +603,6 @@ pub fn admit_for_test(home: &std::path::Path) -> Recording {
         store,
         session: "fixture".into(),
         attachment,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::HarnessKind;
-
-    #[test]
-    fn parsing_normalizes_case_and_whitespace() {
-        assert_eq!(
-            HarnessKind::parse(" claUDe ").map(HarnessKind::as_str),
-            Some("claude")
-        );
-        assert_eq!(
-            HarnessKind::parse(" CODEX").map(HarnessKind::as_str),
-            Some("codex")
-        );
-        assert_eq!(
-            HarnessKind::parse("OpenCode").map(HarnessKind::as_str),
-            Some("opencode")
-        );
-        assert_eq!(
-            HarnessKind::parse("Antigravity").map(HarnessKind::program),
-            Some("agy")
-        );
-        assert_eq!(
-            HarnessKind::parse("lfharness").map(HarnessKind::as_str),
-            None
-        );
     }
 }
 

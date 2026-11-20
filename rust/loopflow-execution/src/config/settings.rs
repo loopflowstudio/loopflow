@@ -284,7 +284,7 @@ pub(crate) fn validate_value(path: &[&str], value: &Value) -> Result<(), LoadErr
 
 fn validate_agent_policy(agent: &str) -> Result<(), LoadError> {
     let (harness, variant) = super::parse_agent(agent);
-    let kind = crate::harness::HarnessKind::parse(&harness).ok_or_else(|| {
+    let kind = loopflow_harness::HarnessKind::parse(&harness).ok_or_else(|| {
         invalid(format!(
             "unsupported agent harness '{harness}': use 'claude', 'codex', 'opencode', 'pi', or 'antigravity'"
         ))

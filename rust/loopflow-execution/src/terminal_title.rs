@@ -231,7 +231,7 @@ pub(crate) struct TerminalTitle {
 impl TerminalTitle {
     pub fn prepare(
         environment: &BTreeMap<String, String>,
-        harness: crate::harness::HarnessKind,
+        harness: loopflow_harness::HarnessKind,
         command: &mut Command,
     ) -> Option<Self> {
         if !std::io::stderr().is_terminal() {

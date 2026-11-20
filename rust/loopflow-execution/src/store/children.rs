@@ -151,13 +151,14 @@ impl Store {
         &self,
         task_id: &TaskId,
         new_base: &str,
-        clear_parent: bool,
+        parent_pr_id: Option<&TaskPrId>,
         updated_at: OffsetDateTime,
     ) -> StoreResult<()> {
         let task_id = task_id.clone();
         let new_base = new_base.to_string();
+        let parent_pr_id = parent_pr_id.cloned();
         run_sqlite(&self.sqlite, move |store| {
-            store.sync_task_placement(&task_id, &new_base, clear_parent, updated_at)
+            store.sync_task_placement(&task_id, &new_base, parent_pr_id.as_ref(), updated_at)
         })
         .await
     }

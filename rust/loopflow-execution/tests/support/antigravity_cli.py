@@ -1,13 +1,23 @@
 #!/usr/bin/env python3
 """Disposable `agy` for fixtures: one headless stream-json turn per process.
 
-It prints what `agy` 1.5.13 prints. The model `no-such-model` is refused as an
-unknown model is; a file `agy-refusal` beside `bin/` refuses every run with its
-text, for a spent quota or a signed-out login.
+It prints what `agy` 1.5.13 prints and runs the hooks in its `--add-dir`
+folder's `.agents/hooks.json` as that version does. The model `no-such-model`
+is refused as an unknown model is; a file `agy-refusal` beside `bin/` refuses
+every run with its text, for a spent quota or a signed-out login.
+
+A fixture that leaves `tool_turn.py` beside `bin/` gets a turn that runs one
+tool and a subagent, and reads, in order: `hook-context` (what the first
+model call's hook put in front of the model), `holding` (the tool is running)
+and, once it writes `tool-done`, `hook-steer` (what the next model call's hook
+put there).
 """
 
 import json
+import os
+import subprocess
 import sys
+import time
 import uuid
 from pathlib import Path
 
@@ -22,6 +32,40 @@ def _emit(event, **body):
 def _option(name):
     args = sys.argv[1:]
     return args[args.index(name) + 1] if name in args else None
+
+
+def _hook(event, conversation, **more):
+    """Run the hooks declared for `event`; the text they put in front of the model."""
+    folder = _option("--add-dir")
+    declared = Path(folder or "", ".agents", "hooks.json")
+    if not folder or not declared.exists():
+        return ""
+    payload = {
+        "conversationId": conversation,
+        "hookEventName": event,
+        "cwd": str(Path.cwd()),
+        "workspacePaths": [str(Path.cwd()), folder],
+        "modelName": _option("--model") or "fixture",
+        "lastUserInput": 'say "invocationNum":3',
+        **more,
+    }
+    texts = []
+    for hooks in json.loads(declared.read_text()).values():
+        for hook in hooks.get(event, []):
+            output = subprocess.run(
+                hook["command"],
+                shell=True,
+                input=json.dumps(payload, separators=(",", ":")),
+                env=os.environ | {"ANTIGRAVITY_CONVERSATION_ID": conversation},
+                cwd=declared.parent,
+                text=True,
+                capture_output=True,
+                timeout=60,
+                check=True,
+            ).stdout
+            for step in json.loads(output).get("injectSteps", []):
+                texts.append(step["systemMessage"]["systemMessage"])
+    return "\n".join(texts)
 
 
 def _refuse(error):
@@ -80,8 +124,28 @@ def main():
         init={"cwd": str(Path.cwd()), "tools": ["run_command"], "model": model},
     )
     update(step, "DONE", "user_input")
+    context = _hook("PreInvocation", conversation, invocationNum=0, initialNumSteps=step + 1)
+    if (HOME / "tool_turn.py").exists():
+        (HOME / "hook-context").write_text(context)
+        tool = {"name": "run_command", "parameters": {"CommandLine": "echo hi"}}
+        update(step + 1, "ACTIVE", "tool", tool_name="run_command", tool_info=tool)
+        (HOME / "holding").write_text(conversation)
+        deadline = time.monotonic() + 120
+        while not (HOME / "tool-done").exists():
+            if time.monotonic() >= deadline:
+                raise TimeoutError("the fixture's tool was not released")
+            time.sleep(0.02)
+        update(step + 1, "DONE", "tool", tool_name="run_command", tool_info=tool)
+        # A subagent runs the same hooks under its own conversation.
+        heard = _hook("PreInvocation", str(uuid.uuid4()), invocationNum=0, initialNumSteps=0)
+        if heard:
+            raise AssertionError(f"a subagent heard the launch's news: {heard}")
+        steer = _hook("PreInvocation", conversation, invocationNum=1, initialNumSteps=step + 3)
+        (HOME / "hook-steer").write_text(steer)
+        step += 1
     update(step + 1, "ACTIVE", "agent_response", text_delta=answer)
     update(step + 1, "DONE", "agent_response", text_delta="\n")
+    _hook("Stop", conversation, executionNum=0, terminationReason="NO_TOOL_CALL")
     _emit(
         "result",
         result={

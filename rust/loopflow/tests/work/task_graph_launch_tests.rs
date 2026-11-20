@@ -1992,6 +1992,13 @@ fn opencode_stand_in() -> String {
         )
 }
 
+fn antigravity_stand_in() -> String {
+    include_str!("../../../loopflow-execution/tests/support/antigravity_cli.py").replace(
+        "Path(__file__).resolve().parent.parent",
+        "Path(os.environ['LF_HOME'])",
+    )
+}
+
 fn pi_stand_in() -> String {
     format!(
         "#!/usr/bin/python3 -I\n{}",
@@ -2018,6 +2025,12 @@ fn a_task_step_runs_as_a_worker_on_every_harness() {
             "Fixture completed.",
         ),
         ("pi", "pi:fixture/model", pi, "answer 1:"),
+        (
+            "antigravity",
+            "antigravity",
+            antigravity_stand_in(),
+            "answer to:",
+        ),
         ("claude", "claude", holding_claude(), "Held."),
         (
             "codex",
@@ -2026,7 +2039,10 @@ fn a_task_step_runs_as_a_worker_on_every_harness() {
             "Worker finished.",
         ),
     ] {
-        let task = GraphTask::with_tools(&[(provider, &script)]);
+        let program = loopflow_execution::harness::HarnessKind::parse(provider)
+            .unwrap()
+            .program();
+        let task = GraphTask::with_tools(&[(program, &script)]);
         define_worker_graph(&task);
         let home = task.home.path();
         fs::write(home.join("release"), "").unwrap();
@@ -2059,16 +2075,21 @@ fn a_task_step_runs_as_a_worker_on_every_harness() {
             )
             .unwrap();
         assert!(!thread.is_empty(), "{provider}");
-        let history = task.run(&["history", "show", &session, "--final"]);
-        assert!(
-            history.status.success(),
-            "{provider}: {}",
-            String::from_utf8_lossy(&history.stderr)
-        );
-        assert!(
-            String::from_utf8_lossy(&history.stdout).contains(answer),
-            "{provider}: {history:?}"
-        );
+        // The final answer and usage come from the provider's transcript,
+        // which lf does not read for Antigravity yet.
+        let transcript = provider != "antigravity";
+        if transcript {
+            let history = task.run(&["history", "show", &session, "--final"]);
+            assert!(
+                history.status.success(),
+                "{provider}: {}",
+                String::from_utf8_lossy(&history.stderr)
+            );
+            assert!(
+                String::from_utf8_lossy(&history.stdout).contains(answer),
+                "{provider}: {history:?}"
+            );
+        }
 
         // The start hook named this worker's Session and Task, and the hook
         // after the tool brought the steer saved while the tool ran.
@@ -2084,6 +2105,9 @@ fn a_task_step_runs_as_a_worker_on_every_harness() {
         let steer = fs::read_to_string(home.join("hook-steer")).unwrap();
         assert!(steer.contains("WORKER_DIRECTION"), "{provider}: {steer}");
 
+        if !transcript {
+            continue;
+        }
         let runs = task.run(&[
             "history", "usage", "--days", "0", "--task", "INF-123", "--json",
         ]);

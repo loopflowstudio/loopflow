@@ -130,8 +130,8 @@ fn every_harness_runs_all_four_launch_kinds() {
             (LaunchKind::Worker, Mode::Headless, true),
         ] {
             assert_eq!(kind.mode(), mode, "{kind:?}");
-            // Antigravity opens no terminal and declares no hooks yet.
-            if harness == HarnessKind::Antigravity && kind != LaunchKind::Batch {
+            // Antigravity opens no terminal yet.
+            if harness == HarnessKind::Antigravity && mode == Mode::Interactive {
                 continue;
             }
             let row = format!("{harness:?} {kind:?}");

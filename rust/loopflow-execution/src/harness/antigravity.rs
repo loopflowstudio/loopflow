@@ -2,7 +2,7 @@
 //! `agy --input-format stream-json --output-format stream-json` process that
 //! reads one message and exits; `agy` names the conversation in its first
 //! line, and the next turn continues it with `--conversation`.
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 
@@ -15,10 +15,11 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
 use crate::agent::{AgentConfig, AgentFailure};
+use crate::context_block::ContextMoment;
 use crate::harness::antigravity_decode::Turn;
 use crate::harness::fact::Decoded;
 use crate::harness::fact_writer::FactWriter;
-use crate::harness::{Driver as StreamDriver, HarnessError, LaunchKind, Recording};
+use crate::harness::{Driver as StreamDriver, HarnessError, HookCallback, LaunchKind, Recording};
 use loopflow_model::chat::types::ConversationEvent;
 use loopflow_model::id::AgentSessionId;
 
@@ -116,8 +117,11 @@ impl Driver {
         ]);
         // Nobody is there to answer a permission prompt.
         command.arg("--dangerously-skip-permissions");
-        command.args(options(config, thread)?);
+        command.args(options(config, thread, self.kind)?);
         super::configure_agent_env(&mut command, config);
+        if let Some(context) = &config.conversation_context {
+            context.configure_hooks(command.as_std_mut())?;
+        }
         super::configure_vendor_std_env(command.as_std_mut())?;
         let log = match super::common::diagnostics(config, "antigravity")? {
             Some(log) => log,
@@ -177,7 +181,11 @@ impl Driver {
 }
 
 /// The options a headless turn and a terminal share.
-fn options(config: &AgentConfig, thread: Option<&AgentSessionId>) -> Result<Vec<String>> {
+fn options(
+    config: &AgentConfig,
+    thread: Option<&AgentSessionId>,
+    kind: LaunchKind,
+) -> Result<Vec<String>> {
     let mut args = Vec::new();
     if let Some(model) = &config.agent.model {
         args.extend(["--model".into(), model.clone()]);
@@ -185,21 +193,24 @@ fn options(config: &AgentConfig, thread: Option<&AgentSessionId>) -> Result<Vec<
     if let Some(thread) = thread {
         args.extend(["--conversation".into(), thread.to_string()]);
     }
-    if let Some(folder) = launch_folder(config)? {
+    if let Some(folder) = launch_folder(config, kind)? {
         args.extend(["--add-dir".into(), folder.display().to_string()]);
     }
     Ok(args)
 }
 
 /// A folder of this launch's own that `--add-dir` hands to `agy`, which reads
-/// `.agents/AGENTS.md` there as instructions. Nothing is written to
-/// `~/.gemini` or to the checkout's own `.agents`. It sits under the launch's
-/// directory because Antigravity runs commands in the first workspace folder
-/// by path order, and a folder under the checkout always sorts after it.
-/// `None` when the launch has no instructions.
-fn launch_folder(config: &AgentConfig) -> Result<Option<PathBuf>> {
+/// `.agents/AGENTS.md` there as instructions and `.agents/hooks.json` as
+/// hooks. Nothing is written to `~/.gemini` or to the checkout's own
+/// `.agents`. It sits under the launch's directory because Antigravity runs
+/// commands in the first workspace folder by path order, and a folder under
+/// the checkout always sorts after it. `None` when the launch has neither
+/// instructions nor a conversation context.
+fn launch_folder(config: &AgentConfig, kind: LaunchKind) -> Result<Option<PathBuf>> {
     let instructions = crate::agent::system_prompt_with_structured_replies(config);
-    if instructions.trim().is_empty() {
+    let instructions = Some(instructions).filter(|text| !text.trim().is_empty());
+    let context = config.conversation_context.as_ref();
+    if instructions.is_none() && context.is_none() {
         return Ok(None);
     }
     let cwd = match &config.cwd {
@@ -217,8 +228,78 @@ fn launch_folder(config: &AgentConfig) -> Result<Option<PathBuf>> {
         .keep();
     let agents = folder.join(".agents");
     std::fs::create_dir(&agents)?;
-    std::fs::write(agents.join("AGENTS.md"), instructions)?;
+    if let Some(instructions) = instructions {
+        std::fs::write(agents.join("AGENTS.md"), instructions)?;
+    }
+    if let Some(context) = context {
+        let script = folder.join("hook.sh");
+        std::fs::write(&script, hook_script(context)?)?;
+        let hooks = hooks(&script, kind);
+        std::fs::write(agents.join("hooks.json"), serde_json::to_vec(&hooks)?)?;
+    }
     Ok(Some(folder))
+}
+
+/// The hooks lf declares. `PreInvocation` runs before every model call, so
+/// it is the start hook, the prompt hook and the after-a-tool hook; a managed
+/// launch also reports its turn ends. Nothing else is declared: a
+/// `PreToolUse` handler that answers `{}` denies every tool.
+fn hooks(script: &Path, kind: LaunchKind) -> Value {
+    let run = |moment: &str| {
+        serde_json::json!([{"type": "command", "command": format!(
+            "/bin/sh {} {moment}",
+            crate::os_process::shell_escape(&script.to_string_lossy()),
+        )}])
+    };
+    let mut hooks = serde_json::json!({});
+    if kind.is_managed() {
+        // A managed prompt is a boundary the server records.
+        hooks["PreInvocation"] = run("tool");
+        hooks["Stop"] = run("stop");
+    } else {
+        hooks["PreInvocation"] = run("steer");
+    }
+    serde_json::json!({"loopflow": hooks})
+}
+
+/// The script every declared hook runs, with the moment it declares. It
+/// decides one thing, whether starting lf is worth it: a model call inside a
+/// turn (`invocationNum` 1 and up) starts lf only when a steer may be
+/// waiting. lf reads the payload. A payload the pattern does not recognize
+/// starts lf, and a quote inside the user's text is escaped in the payload,
+/// so that text cannot match it. The script always exits 0 with a reply:
+/// `{}` when lf printed nothing or could not start.
+fn hook_script(context: &crate::context_block::ContextDelivery) -> Result<String> {
+    Ok(format!(
+        r#"payload=$(cat)
+quiet() ( {gate} exit 1 )
+case "$1:$payload" in
+stop:*) ;;
+*'"invocationNum":'[1-9]*) quiet && {{ echo '{{}}'; exit 0; }} ;;
+esac
+reply=$(printf '%s' "$payload" | {command} "$1" --harness antigravity)
+if [ -n "$reply" ]; then printf '%s\n' "$reply"; else echo '{{}}'; fi
+exit 0
+"#,
+        gate = context.steer_gate(),
+        command = context.hook_command()?,
+    ))
+}
+
+/// Whether the conversation `id` is the one the launch owns, kept in
+/// `thread_file`, and whether this callback is the first to say so. The
+/// launch's own conversation calls first; a subagent runs the same hooks
+/// later under its own id.
+fn claim_thread(thread_file: &Path, id: &str) -> Option<bool> {
+    match std::fs::read_to_string(thread_file) {
+        Ok(owner) if !owner.trim().is_empty() => (owner.trim() == id).then_some(false),
+        _ => {
+            if let Err(error) = std::fs::write(thread_file, id) {
+                tracing::warn!(%error, "cannot keep the Antigravity conversation this launch owns");
+            }
+            Some(true)
+        }
+    }
 }
 
 #[async_trait]
@@ -414,6 +495,45 @@ impl super::Harness for Antigravity {
             crate::agent::routing_failure(code, message)
         }
     }
+    fn hook_callback(
+        &self,
+        payload: Value,
+        declared: ContextMoment,
+        thread_file: Option<&Path>,
+    ) -> Option<HookCallback> {
+        let conversation = payload["conversationId"]
+            .as_str()
+            .filter(|id| !id.is_empty())?;
+        let first = match thread_file {
+            Some(file) => claim_thread(file, conversation)?,
+            None => false,
+        };
+        let stop = payload["hookEventName"] == "Stop" || declared == ContextMoment::Stop;
+        // Each `agy` process counts its model calls from 0, and call 0 of a
+        // later turn in the same process is that turn's prompt.
+        let (moment, event) = if stop {
+            (ContextMoment::Stop, "Stop")
+        } else if first {
+            (ContextMoment::Start, "SessionStart")
+        } else if payload["invocationNum"] == 0 {
+            (declared, "UserPromptSubmit")
+        } else {
+            (ContextMoment::Steer, "PostToolUse")
+        };
+        let resumed = payload["initialNumSteps"].as_i64().is_some_and(|n| n > 1);
+        Some(HookCallback {
+            moment,
+            payload: serde_json::json!({
+                "session_id": conversation,
+                "hook_event_name": event,
+                "source": if resumed { "resume" } else { "startup" },
+            }),
+            prompt: moment == ContextMoment::Start,
+        })
+    }
+    fn hook_reply(&self, _event: &str, text: &str) -> Value {
+        serde_json::json!({"injectSteps": [{"systemMessage": {"systemMessage": text}}]})
+    }
     fn sign_in_advice(&self) -> &'static str {
         "run `agy` and sign in"
     }
@@ -461,7 +581,7 @@ impl super::Harness for Antigravity {
 
 #[cfg(all(test, unix))]
 mod tests {
-    use super::{mpsc, AgentConfig, ConversationEvent, Driver, StreamDriver};
+    use super::{mpsc, AgentConfig, ContextMoment, ConversationEvent, Driver, StreamDriver};
     use crate::harness::HarnessKind;
     use loopflow_model::chat::types::{ConversationItem, Lifecycle};
 
@@ -567,6 +687,10 @@ mod tests {
             std::fs::read_to_string(folder.join(".agents/AGENTS.md")).unwrap(),
             "Answer in French."
         );
+        assert!(
+            !folder.join(".agents/hooks.json").exists(),
+            "a launch with no conversation context declares no hooks"
+        );
 
         harness.send_input("again").await.unwrap();
         let (status, text, _) = drive_turn(&mut rx).await;
@@ -608,6 +732,188 @@ mod tests {
         );
         assert_eq!(harness.agent_session(), None, "nothing to resume");
         harness.stop().await.unwrap();
+    }
+
+    fn callback(
+        file: &std::path::Path,
+        declared: ContextMoment,
+        payload: serde_json::Value,
+    ) -> Option<(ContextMoment, String, bool)> {
+        use crate::harness::Harness;
+        super::Antigravity
+            .hook_callback(payload, declared, Some(file))
+            .map(|callback| {
+                (
+                    callback.moment,
+                    format!(
+                        "{} {} {}",
+                        callback.payload["session_id"].as_str().unwrap(),
+                        callback.payload["hook_event_name"].as_str().unwrap(),
+                        callback.payload["source"].as_str().unwrap()
+                    ),
+                    callback.prompt,
+                )
+            })
+    }
+
+    #[test]
+    fn a_launch_reads_only_its_own_conversations_callbacks() {
+        use ContextMoment::{Start, Steer, Stop, Tool};
+        let directory = tempfile::tempdir().unwrap();
+        let file = directory.path().join("launch.thread");
+        let call = |id: &str, event: &str, number: i64, steps: i64| {
+            serde_json::json!({"conversationId": id, "hookEventName": event,
+                "invocationNum": number, "initialNumSteps": steps, "lastUserInput": "hi"})
+        };
+        // The launch's first model call is its start and its first prompt.
+        assert_eq!(
+            callback(&file, Tool, call("parent", "PreInvocation", 0, 1)),
+            Some((Start, "parent SessionStart startup".into(), true))
+        );
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "parent");
+        // A subagent runs the same hooks under its own conversation.
+        for event in ["PreInvocation", "Stop"] {
+            assert_eq!(callback(&file, Tool, call("child", event, 0, 0)), None);
+        }
+        assert_eq!(
+            callback(&file, Tool, call("parent", "PreInvocation", 1, 3)),
+            Some((Steer, "parent PostToolUse resume".into(), false))
+        );
+        // Call 0 of a later turn is that turn's prompt, as its hook declared it.
+        for declared in [Tool, Steer] {
+            assert_eq!(
+                callback(&file, declared, call("parent", "PreInvocation", 0, 8)),
+                Some((declared, "parent UserPromptSubmit resume".into(), false))
+            );
+        }
+        assert_eq!(
+            callback(&file, Stop, call("parent", "Stop", 0, 0)),
+            Some((Stop, "parent Stop startup".into(), false))
+        );
+        // A resumed conversation's first call in a new launch starts it again.
+        let resumed = directory.path().join("resumed.thread");
+        assert_eq!(
+            callback(&resumed, Steer, call("parent", "PreInvocation", 0, 8)),
+            Some((Start, "parent SessionStart resume".into(), true))
+        );
+        // A payload that names no conversation is nobody's.
+        assert_eq!(
+            callback(&file, Tool, serde_json::json!({"invocationNum": 0})),
+            None
+        );
+    }
+
+    /// The script beside a launch's hooks, with a stand-in `lf` that counts
+    /// its starts and answers `reply`.
+    fn run_hook(home: &std::path::Path, reply: &str, moment: &str, payload: &str) -> String {
+        use std::io::Write;
+        use std::os::unix::fs::PermissionsExt;
+        let lf = home.join("lf");
+        std::fs::write(
+            &lf,
+            format!(
+                "#!/bin/sh\necho \"$*\" >> '{}'\ncat > /dev/null\n{reply}\n",
+                home.join("calls").display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&lf, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::env::set_var("LF_BIN", &lf);
+        let context = crate::context_block::ContextDelivery {
+            identity: None,
+            repository: None,
+            repo: home.to_owned(),
+            home: home.to_owned(),
+            wave: None,
+            skill_file: None,
+            submitted_docs: None,
+            references: Vec::new(),
+        };
+        let script = home.join("hook.sh");
+        std::fs::write(&script, super::hook_script(&context).unwrap()).unwrap();
+        let mut hook = std::process::Command::new("/bin/sh")
+            .arg(&script)
+            .arg(moment)
+            .env(crate::steer::STEER_SEEN_ENV, home.join("seen"))
+            .env_remove(crate::steer::STEER_SESSION_ENV)
+            .env_remove(crate::steer::STEER_TASK_ENV)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        hook.stdin
+            .take()
+            .unwrap()
+            .write_all(payload.as_bytes())
+            .unwrap();
+        let output = hook.wait_with_output().unwrap();
+        assert!(output.status.success(), "the hook always exits 0");
+        String::from_utf8(output.stdout).unwrap().trim().to_owned()
+    }
+
+    #[test]
+    fn the_hook_script_starts_lf_inside_a_turn_only_when_a_steer_may_wait() {
+        let _lock = loopflow_test_support::env_lock().lock().unwrap();
+        let _env = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_BIN"]);
+        let directory = tempfile::tempdir().unwrap();
+        let home = directory.path();
+        std::env::set_var("LF_HOME", home);
+        let calls = || std::fs::read_to_string(home.join("calls")).unwrap_or_default();
+        let inside = r#"{"conversationId":"c","invocationNum":2,"lastUserInput":"x"}"#;
+        // A prompt whose text spells the pattern is still call 0: quotes are escaped.
+        let prompt =
+            r#"{"conversationId":"c","invocationNum":0,"lastUserInput":"\"invocationNum\":3"}"#;
+
+        // Nothing has checked for steers yet, so a call inside a turn asks.
+        let block = "echo '{\"injectSteps\":[]}'";
+        assert_eq!(
+            run_hook(home, block, "tool", inside),
+            r#"{"injectSteps":[]}"#
+        );
+        // A check newer than every steer: lf stays unstarted and the reply is empty.
+        std::fs::write(home.join("seen"), "").unwrap();
+        assert_eq!(run_hook(home, block, "tool", inside), "{}");
+        assert_eq!(calls().lines().count(), 1, "{}", calls());
+        // A prompt and a turn end always start lf.
+        assert_eq!(
+            run_hook(home, block, "tool", prompt),
+            r#"{"injectSteps":[]}"#
+        );
+        // lf answering nothing, or failing, is still a reply `agy` accepts.
+        assert_eq!(run_hook(home, "", "stop", inside), "{}");
+        assert_eq!(run_hook(home, "exit 3", "tool", prompt), "{}");
+        assert_eq!(
+            calls().lines().collect::<Vec<_>>(),
+            [
+                "__context-block --moment tool --harness antigravity",
+                "__context-block --moment tool --harness antigravity",
+                "__context-block --moment stop --harness antigravity",
+                "__context-block --moment tool --harness antigravity",
+            ]
+        );
+    }
+
+    #[test]
+    fn only_a_managed_launch_reports_its_turn_ends() {
+        let script = std::path::Path::new("/launch/hook.sh");
+        let bare = super::hooks(script, crate::harness::LaunchKind::Batch);
+        assert_eq!(
+            bare,
+            serde_json::json!({"loopflow": {"PreInvocation": [
+                {"type": "command", "command": "/bin/sh '/launch/hook.sh' steer"}
+            ]}})
+        );
+        let managed = super::hooks(script, crate::harness::LaunchKind::Worker);
+        assert_eq!(
+            managed["loopflow"]["Stop"][0]["command"],
+            "/bin/sh '/launch/hook.sh' stop"
+        );
+        assert_eq!(
+            managed["loopflow"]["PreInvocation"][0]["command"],
+            "/bin/sh '/launch/hook.sh' tool"
+        );
+        // Any other handler would have to answer, and `{}` denies a tool.
+        assert_eq!(managed["loopflow"].as_object().unwrap().len(), 2);
     }
 
     /// Needs `agy` on PATH, signed in:

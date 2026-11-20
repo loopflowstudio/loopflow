@@ -677,9 +677,15 @@ fn machine_add_on_the_remote_updates_only_its_registry() {
 
 /// Two actual CLIs joined by the fixture's local-only SSH substitute.
 fn preview_machines() -> Machines {
+    use loopflow_execution::store::{machines, open_sqlite};
+
     let fixture = Machines::new();
     let remote = fixture.root.path().join("remote");
     support::seed_store(&remote.join("store"));
+    let remote_store = open_sqlite(&remote.join("store/loopflow.db")).unwrap();
+    let local_store = open_sqlite(&fixture.root.path().join("local/loopflow.db")).unwrap();
+    let mini = machines::local_machine(&remote_store).unwrap();
+    machines::add_machine(&local_store, &mini.id, "mini", "mini").unwrap();
     executable(
         &remote.join(".local/bin/lf"),
         &format!(
@@ -689,8 +695,6 @@ fn preview_machines() -> Machines {
             env!("CARGO_BIN_EXE_lf"),
         ),
     );
-    // Seed identity using the normal operation before taking the read baseline.
-    assert_success(&fixture.run(&["machine", "add", "mini"]));
     assert_success(&fixture.run(&["set", "--global", "default_agent", "codex"]));
     for bin in [fixture.root.path().join("bin"), remote.join(".local/bin")] {
         for program in ["gh", "security", "doppler", "claude", "codex", "opencode"] {

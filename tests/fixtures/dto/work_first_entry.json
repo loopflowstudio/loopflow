@@ -207,6 +207,7 @@
             "owner": "user",
             "reason": "Agent execution unavailable: agent \"opencode:opencode/test-model\" uses harness \"opencode\", which does not support a managed execution boundary; select codex or claude"
           },
+          "owned_by_you": false,
           "pr": null,
           "reference": {
             "issue_url": "https://linear.app/loopflow/issue/INF-123/prove-task-pr-transitions",

@@ -50,6 +50,19 @@ and says "Not logged in". Read the new
 window with `capture-pane -p -t <destination>` and its command with
 `list-panes -a -F '#{pane_id} #{pane_start_command}'`.
 
+tmux gives a window the `PATH` of the client that asked for it, and nothing
+else from that client. Every later `new-window` you run for a caller pane goes
+through the cleaned environment too, or the pane gets your shell's `PATH` and
+its `lf` is the installed one. To check what a conversation was started with:
+`ps -Eww` shows the viewer (`lf session attach`) and the holder, but macOS
+hides the environment of a `/bin/sh` stand-in, so have the stand-in write
+`env > <file>` and read `PATH` and `TMUX_PANE` there. A provider the holder
+already runs is not restarted by an open: type `quit` in its pane first.
+`--tab` always adds a view; `--focus` reveals the last one opened and needs an
+attached client (`tmux attach` in a PTY you drain), else "no current client".
+For `--host tmux` from outside tmux, set `TMUX_TMPDIR` to a private directory
+on both the default server and the caller.
+
 To open with a provider missing, give the Machine an empty `HOME` (plus
 `CLAUDE_CONFIG_DIR` and `CODEX_HOME` inside it): lf adds `~/.local/bin` and the
 other tool directories to every `PATH`, so a bare `PATH` alone hides nothing.

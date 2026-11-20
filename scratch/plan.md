@@ -16,10 +16,8 @@ Run notes: `scratch/verify.md`.
 ## Remains
 
 - Publish this branch as a second PR for LOO-986; CI runs the suites.
-- Verify, on the merged fix, with a real tmux: `export PATH=/tmp/shim:$PATH`,
-  `lf open --task <id> --host tmux --tab`, `ps -Eww` of the provider shows no
-  `/tmp/shim`. The stand-in test shows only what lf hands the client.
-- Verify, same probe, on Rex and cmux: their requests carry no environment, but
-  the `rex` and `cmux` clients were not driven. Herdr's request sends `"env":{}`.
+- Verify on the merged fix: qa ran the real probe on this branch (`scratch/qa.html`):
+  tmux, Rex and Herdr start the conversation without the caller's `PATH` entries.
+  cmux is not installed here; not driven.
 - Still not run from the first verify: Desktop opens; a plain open replayed
   after a moved conversation had ended.

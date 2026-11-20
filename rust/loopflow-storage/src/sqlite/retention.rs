@@ -251,7 +251,7 @@ const RUNNING_OWNERS: &str = "
         project_activation_os_started_at,project_activation_started_at,NULL FROM waves
         WHERE project_activation_lf_process_id IS NOT NULL AND project_activation_ended_at IS NULL
     UNION ALL SELECT 'task_carrier',lf_process_id,run_pid,run_os_started_at,NULL,NULL
-        FROM task_graphs WHERE run_pid IS NOT NULL
+        FROM task_graphs WHERE lf_process_id IS NOT NULL AND run_pid IS NOT NULL
     UNION ALL SELECT 'session_agent',agent_process_id,agent_pid,agent_os_started_at,
         agent_started_at,id FROM agent_sessions
         WHERE agent_process_id IS NOT NULL AND agent_pid IS NOT NULL AND agent_ended_at IS NULL";
@@ -374,6 +374,22 @@ fn is_busy(error: &rusqlite::Error) -> bool {
 #[cfg(test)]
 mod observation_tests {
     use super::{prune, running_owners};
+
+    #[test]
+    fn a_finished_task_with_a_leftover_pid_owns_no_process() {
+        let (_dir, store, task) = crate::test_fixture::store_with_task();
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO task_graphs(task_id,graph,step,updated_at,run_pid,run_os_started_at)
+                 VALUES(?1,'{}','end',1,123,456)",
+                [task.as_str()],
+            )
+            .unwrap();
+            assert!(super::running_owners_in(&conn).unwrap().is_empty());
+        }
+        assert!(store.recorded_lfs().unwrap().is_empty());
+    }
 
     /// A Session agent that died unseen ends at the next pass, unless it
     /// changed between observation and pruning.

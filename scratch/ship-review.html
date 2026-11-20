@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<title>Ship review: yolo is on by default (4bd948)</title>
+<style>
+:root{color-scheme:light dark;--fg:#1d1d1f;--bg:#fff;--mut:#6e6e73;--code:#f3f3f5;--line:#ddd;--acc:#0a66c2}
+@media(prefers-color-scheme:dark){:root{--fg:#e8e8ea;--bg:#16161a;--mut:#9a9aa2;--code:#24242a;--line:#333;--acc:#6cb4ff}}
+body{font:16px/1.55 -apple-system,system-ui,sans-serif;color:var(--fg);background:var(--bg);max-width:52rem;margin:2rem auto;padding:0 1.2rem}
+h1{font-size:1.6rem}h2{margin-top:2.2rem;border-bottom:1px solid var(--line);padding-bottom:.2rem}
+pre,code{font:14px/1.45 ui-monospace,Menlo,monospace;background:var(--code)}
+pre{padding:.8rem 1rem;overflow-x:auto;border-radius:6px}code{padding:0 .2em;border-radius:3px}
+table{border-collapse:collapse;width:100%;font-size:15px}td,th{border:1px solid var(--line);padding:.35rem .6rem;text-align:left;vertical-align:top}
+.mut{color:var(--mut)}a{color:var(--acc)}
+</style></head><body>
+<h1>yolo is on by default</h1>
+<p class="mut">Task 4bd948 · PR <a href="https://github.com/loopflowstudio/loopflow/pull/2006">#2006</a> · branch at 081ec472e0 · reviewed headless on 2026-11-20, nobody attending.</p>
+
+<h2>1. What ships</h2>
+<p>Open a conversation and the agent acts without asking. Before, an attended <code>lf</code> got each vendor's prompts while a headless run skipped them. Now:</p>
+<table>
+<tr><th></th><th>attended (<code>lf</code>, <code>lf &lt;skill&gt;</code>, <code>lf task open</code>, resume)</th><th>unattended (<code>lf -b</code>, Task steps, auto, commit/PR text)</th></tr>
+<tr><td><code>yolo</code> unset or true</td><td>skips</td><td>skips</td></tr>
+<tr><td><code>yolo: false</code></td><td>vendor's own prompts and config; lf sends nothing</td><td>skips</td></tr>
+</table>
+<pre>// rust/loopflow-execution/src/agent/mod.rs
+AgentConfig::skips_permissions(mode) = self.yolo || mode == Mode::Headless</pre>
+<p>What qa saw on the branch build, per harness:</p>
+<table>
+<tr><th>harness</th><th>attended, unset</th><th>attended, yolo=false</th><th>unattended, unset</th><th>unattended, yolo=false</th></tr>
+<tr><td>claude</td><td><code>--dangerously-skip-permissions</code></td><td>none</td><td>skips</td><td>skips</td></tr>
+<tr><td>codex</td><td><code>--sandbox danger-full-access --ask-for-approval never</code></td><td>none</td><td>app-server</td><td>app-server; real Codex reached example.com</td></tr>
+<tr><td>opencode</td><td>allow-all <code>permissions</code></td><td>plugins only</td><td>allow-all + <code>--auto</code></td><td>allow-all + <code>--auto</code></td></tr>
+<tr><td>agy</td><td><code>--dangerously-skip-permissions</code></td><td>none</td><td>skips</td><td>skips</td></tr>
+</table>
+<p>Real Claude, no <code>yolo</code> setting:</p>
+<pre>❯ Run the shell command: touch qa-proof.txt then reply DONE
+⏺ Bash(touch qa-proof.txt)
+  ⎿ Created qa-proof.txt
+⏺ DONE
+⏵⏵ bypass permissions on (shift+tab to cycle)</pre>
+<p>Real agy, unattended under <code>yolo=false</code>: <code>HTTP/2 200</code> and the file written. Attended under <code>yolo=false</code>, agy's own sandbox: <code>Command exited with code 0. No output from command</code>.</p>
+<p>Also in this PR: the Antigravity agent is named by its command, <code>agy</code> (<code>lf -a agy</code>, <code>agents: [agy, claude]</code>). <code>antigravity</code> is refused:</p>
+<pre>unsupported agent harness 'antigravity': use 'claude', 'codex', 'opencode', 'pi', or 'agy'</pre>
+
+<h2>2. Try it</h2>
+<pre>lf -a claude                              # bypass on; asks nothing
+lf -a claude --setting yolo=false         # Claude's own mode decides
+lf -b -a codex --setting yolo=false 'run curl -sI https://example.com'   # still reaches the network
+lf config settings --all | grep yolo      # yolo  true  Built-in</pre>
+
+<h2>3. Likeliest to surprise</h2>
+<ul>
+<li><b><code>yolo: false</code> doesn't make Claude ask if your own Claude config says bypass.</b> qa hit this: <code>~/.claude/settings.json</code> had <code>defaultMode: bypassPermissions</code>, so <code>--setting yolo=false</code> still showed bypass on. lf sends nothing; the vendor decides. Prompts came back only with <code>defaultMode: default</code> in the checkout.</li>
+<li><b>A scoped <code>yolo: false</code> on a Task step does nothing headless.</b> Unattended runs never ask. No warning; the docs say it once.</li>
+<li><b>Headless Codex outside a Task checkout moves from <code>workspace-write</code> to <code>danger-full-access</code>.</b> Nothing in lf gives a sandboxed headless Codex now; docs point to a Machine, VM or container.</li>
+<li><b>lf stopped reading <code>~/.codex/config.toml</code> and <code>.claude/settings.json</code></b> (~240 lines out of <code>agent/mod.rs</code>), along with the Task-checkout rule and the forced bypass on commit text.</li>
+<li><b>Attended Claude now meets the root / managed <code>disableBypassPermissionsMode</code> refusal.</b> Troubleshooting says to use <code>yolo: false</code>. The wording there is from memory; nobody had a root shell to check it.</li>
+<li><b><code>--yolo</code> exists but appears in no help output</b>, release included, so its new help line is never shown.</li>
+</ul>
+
+<h2>4. Findings left outside the PR</h2>
+<table>
+<tr><th>#</th><th>Finding</th><th>Proposal</th></tr>
+<tr><td>A</td><td>Claude's "Adding a new directory" dialog opens on every attended launch in an untrusted directory, bypass on too, because the main checkout goes in as <code>--add-dir</code>. Older than this branch, but the default flip puts more people in the bypass case.</td><td>Drop for now. If it bites, a small Task: drop the roots when the launch skips permissions, after checking that bypass still reaches the main checkout.</td></tr>
+<tr><td>B</td><td>Recorded request key <code>skip_permissions</code> holds the <code>yolo</code> setting, not what was sent. Replay behaves correctly.</td><td>Drop. Renaming changes the capture wire shape.</td></tr>
+<tr><td>C</td><td><code>AgentConfig::new</code> defaults <code>yolo: false</code>, the opposite of the catalog. Every production caller overwrites it.</td><td>Drop, or fix here in one line if you want it.</td></tr>
+<tr><td>D</td><td><code>--yolo</code> hidden from help; <code>lf -a foo</code> wraps one settings error three times.</td><td>Drop; both older than the branch.</td></tr>
+<tr><td>E</td><td>A <code>codex.sandbox</code> setting for sandboxed unattended Codex.</td><td>Not filed. Only worth a Task if someone asks for it.</td></tr>
+</table>
+<p>No finding cleared the bar for its own Task, so none was filed. Nothing was changed in this pass.</p>
+
+<h2>5. Questions (still yours)</h2>
+<ol>
+<li>Your own <code>~/.claude/settings.json</code> bypass beats <code>yolo: false</code>. (a) fine, the vendor decides; (b) have <code>yolo: false</code> send Claude <code>--permission-mode default</code>.</li>
+<li>Finding A, the directory dialog: (a) leave; (b) file the Task; (c) fix in this PR.</li>
+<li>Headless Codex losing <code>workspace-write</code>: (a) fine; (b) file <code>codex.sandbox</code>.</li>
+<li><code>AgentConfig::new</code> default: (a) leave; (b) flip to <code>true</code> here.</li>
+</ol>
+<p class="mut">Nobody answered these during the run. The defaults chosen above went on to delivery.</p>
+</body></html>

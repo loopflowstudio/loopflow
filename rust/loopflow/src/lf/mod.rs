@@ -1224,11 +1224,7 @@ impl WaveCommand {
             }
             Self::Plan { cmd, .. } => cmd.is_some(),
             Self::Remove { preview, .. } => !preview,
-            Self::EditProject { .. }
-            | Self::Create { .. }
-            | Self::Sync { .. }
-            | Self::Rename { .. }
-            | Self::UpdateProject { .. } => true,
+            Self::Create { .. } | Self::Sync { .. } | Self::Rename { .. } => true,
         }
     }
 }
@@ -1540,26 +1536,6 @@ pub enum SkillCommand {
     },
     #[command(external_subcommand)]
     External(Vec<String>),
-}
-
-/// Select a Wave's current Project, or an exact retained historical Project.
-#[derive(Args, Debug)]
-pub struct WaveProjectTarget {
-    /// Wave name or ID (default: the ambient Wave)
-    #[arg(conflicts_with = "project")]
-    pub wave: Option<String>,
-    /// Exact retained Project ID, tracker ID or unique name instead of current selection
-    #[arg(long)]
-    pub project: Option<String>,
-}
-
-impl WaveProjectTarget {
-    pub fn as_project_target(&self) -> loopflow_execution::ops::project::ProjectTarget<'_> {
-        match self.project.as_deref() {
-            Some(project) => loopflow_execution::ops::project::ProjectTarget::Project(project),
-            None => loopflow_execution::ops::project::ProjectTarget::Wave(self.wave.as_deref()),
-        }
-    }
 }
 
 const SETTING_KEYS: &str = "`lf config catalog` lists every preference and where it applies.
@@ -1934,21 +1910,8 @@ pub enum WaveCommand {
         #[command(subcommand)]
         cmd: WaveGraphCommand,
     },
-    /// Edit the selected Project's name or summary
-    EditProject {
-        #[command(flatten)]
-        target: WaveProjectTarget,
-        #[arg(long)]
-        name: Option<String>,
-        #[arg(long)]
-        summary: Option<String>,
-        /// Authored Project prose
-        #[arg(long)]
-        description: Option<String>,
-    },
-
-    /// Create a Wave: register it, seed and commit .lf/wave/<name>/ on the main checkout,
-    /// and start its first Project. Creating an existing Wave changes nothing.
+    /// Create a Wave: register it, then seed and commit .lf/wave/<name>/ on the main
+    /// checkout. Creating an existing Wave changes nothing.
     Create {
         wave: String,
         /// Objective text for the new Wave's GOAL.md
@@ -1971,8 +1934,8 @@ pub enum WaveCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Print one Wave's Projects and Tasks as Desktop shows them; `bind`,
-    /// `connect` and `reteam` change where its planning lives
+    /// Print one Wave's Projects and Tasks as Desktop shows them; `connect`
+    /// and `reteam` change where its planning lives
     #[command(args_conflicts_with_subcommands = true)]
     Plan {
         wave: Option<String>,
@@ -2000,7 +1963,7 @@ pub enum WaveCommand {
         #[arg(long)]
         all: bool,
     },
-    /// Show one Wave's current Project, Task details, and execution evidence.
+    /// Show one Wave's Projects, Tasks and execution evidence.
     Status {
         /// Wave name (default: the ambient wave)
         wave: Option<String>,
@@ -2028,25 +1991,10 @@ pub enum WaveCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Replace the current Project's KRs and targets
-    UpdateProject {
-        #[arg(short = 'w', long)]
-        wave: Option<String>,
-        /// The Project KRs and metric targets as JSON
-        #[arg(long)]
-        file: std::path::PathBuf,
-    },
 }
 
 #[derive(Subcommand, Debug)]
 pub enum WavePlanCommand {
-    /// Bind an existing Project UUID as this Wave's shared current selection
-    Bind {
-        wave: String,
-        project: String,
-        #[arg(long)]
-        json: bool,
-    },
     /// Connect a Wave to its Initiative and the repository's Team (Task prefix); a new name is added first
     Connect {
         /// Wave name (auto-detected if omitted)
@@ -3846,14 +3794,14 @@ mod tests {
             "--wave",
             "product",
             ":",
-            "Which KR matters?",
+            "Which Task matters?",
         ])
         .expect("parse bound inline prompt");
 
         assert_eq!(cli.wave.as_deref(), Some("product"));
         assert!(matches!(
             cli.command,
-            Some(Commands::Inline { prompt }) if prompt == vec!["Which KR matters?"]
+            Some(Commands::Inline { prompt }) if prompt == vec!["Which Task matters?"]
         ));
     }
 

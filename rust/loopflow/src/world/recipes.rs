@@ -3,7 +3,7 @@
 
 use anyhow::Result;
 
-use super::{Outcome, PrSurface, Threshold, World};
+use super::{Outcome, PrSurface, World};
 
 /// Rows: store records through production writers. Artifacts: also files a
 /// reader opens, such as provider transcripts. Providers: also answers from
@@ -45,7 +45,7 @@ pub const RECIPES: &[Recipe] = &[
     Recipe {
         name: "portfolio",
         rung: Rung::Artifacts,
-        demos: "dashboards and Portfolio: several Waves with KRs and Tasks in every state, \
+        demos: "dashboards and Portfolio: several Waves with Tasks in every state, \
                 including a stopped Workflow route and a hand-moved Workflow",
         build: portfolio,
     },
@@ -87,11 +87,6 @@ pub fn find(name: &str) -> Option<&'static Recipe> {
 
 fn one_task(world: &World) -> Result<()> {
     world.wave("search")?;
-    world.plan(
-        "search",
-        &[("Session search finds a phrase from any turn", false)],
-        &[],
-    )?;
     let task = world.task(
         Some("search"),
         "Search Session transcripts",
@@ -118,53 +113,6 @@ fn portfolio(world: &World) -> Result<()> {
     for wave in ["desktop", "systems", "quality"] {
         world.wave(wave)?;
     }
-    world.metric(
-        "desktop",
-        "tasks-opened-fast",
-        "Tasks open in under 200 ms",
-        "graduated",
-        Some(42.0),
-        1.0,
-    )?;
-    world.metric(
-        "desktop",
-        "row-states-distinct",
-        "Task states with a distinct row",
-        "installed",
-        Some(3.0),
-        2.0,
-    )?;
-    world.metric(
-        "desktop",
-        "demo-worlds-used",
-        "Demos run on a built world",
-        "installed",
-        None,
-        0.0,
-    )?;
-    world.plan(
-        "desktop",
-        &[
-            (
-                "Opening a Task shows its conversation in under 200 ms",
-                true,
-            ),
-            ("Every Task state has a distinct row treatment", false),
-        ],
-        &[
-            ("tasks-opened-fast", Threshold::AtLeast { value: 40.0 }),
-            ("row-states-distinct", Threshold::AtLeast { value: 4.0 }),
-        ],
-    )?;
-    world.plan(
-        "systems",
-        &[(
-            "Older lf keeps opening the store after additive releases",
-            false,
-        )],
-        &[],
-    )?;
-
     let shipped = world.task(
         Some("desktop"),
         "Show Task rows by state",
@@ -247,11 +195,6 @@ fn portfolio(world: &World) -> Result<()> {
 fn lifecycle(world: &World) -> Result<()> {
     let wave = Some("release");
     world.wave("release")?;
-    world.plan(
-        "release",
-        &[("Every release ships with its notes the same day", false)],
-        &[],
-    )?;
 
     for (title, days, session, removed) in [
         ("Shipped yesterday", 1.0, true, false),
@@ -468,17 +411,6 @@ fn wave_backlog(world: &World) -> Result<()> {
     for wave in ["desktop", "systems", "research"] {
         world.wave(wave)?;
     }
-    world.plan(
-        "desktop",
-        &[
-            ("A Wave's backlog reads as a ranked list of briefs", false),
-            (
-                "Every open Task shows where its work stands at a glance",
-                true,
-            ),
-        ],
-        &[],
-    )?;
     for (title, brief) in BACKLOG {
         world.task(Some("desktop"), title, brief)?;
     }
@@ -813,11 +745,6 @@ fn wave_lifecycle(world: &World) -> Result<()> {
     for wave in ["research", "desktop", "archive"] {
         world.wave(wave)?;
     }
-    world.plan(
-        "desktop",
-        &[("Waves can be added and removed from Desktop", false)],
-        &[],
-    )?;
     world.task(
         Some("desktop"),
         "Delete an empty Wave",

@@ -387,14 +387,10 @@ struct BacklogList {
 
     // MARK: Text
 
-    /// A Wave's heading lines: name and status, objective, Project and KRs.
+    /// A Wave's heading lines: name, status and objective.
     static func heading(_ roadmap: WaveRoadmap) -> [String] {
         var lines = ["\(roadmap.wave.displayName) · \(roadmap.wave.status.label)"]
         if let objective = roadmap.wave.goal.split(separator: "\n").first { lines.append(String(objective)) }
-        if let project = roadmap.currentProject {
-            lines.append("\(project.name) · \(project.status.rawValue.capitalized)")
-            lines += project.krs.map { "\($0.holds ? "✓" : "✗") \($0.text)" }
-        }
         return lines
     }
 
@@ -615,11 +611,10 @@ struct BacklogView: View {
 
     private func header(_ list: BacklogList) -> some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
-            // The chapter, then the objective's disclosure, give way before the name does.
+            // The objective's disclosure gives way before the name does.
             ViewThatFits(in: .horizontal) {
-                titleLine(list, project: true, objective: true)
-                titleLine(list, project: false, objective: true)
-                titleLine(list, project: false, objective: false)
+                titleLine(list, objective: true)
+                titleLine(list, objective: false)
             }
             if let roadmap, list.state.showsObjective { objective(roadmap) }
             // Side by side, or the search under the filter when the backlog is narrow.
@@ -638,33 +633,24 @@ struct BacklogView: View {
         .padding(.horizontal, Spacing.xl).padding(.vertical, Spacing.md)
     }
 
-    private func titleLine(_ list: BacklogList, project showsProject: Bool, objective showsObjective: Bool) -> some View {
+    private func titleLine(_ list: BacklogList, objective showsObjective: Bool) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: Spacing.md) {
             Text(roadmap?.wave.displayName ?? model.repositoryName).font(Typography.strong(17)).lineLimit(1)
                 .layoutPriority(1).accessibilityIdentifier("wave-title")
-            if let roadmap {
-                if let error = roadmap.projects.unavailableReason {
-                    Text("Project unavailable · \(error)").font(Typography.body(12)).foregroundStyle(palette.warning)
-                        .lineLimit(1)
-                } else if showsProject, let project = roadmap.currentProject {
-                    Text(project.name).font(Typography.body(12)).foregroundStyle(palette.textSecondary)
-                        .lineLimit(1).accessibilityIdentifier("wave-current-project")
-                }
-                if showsObjective {
-                    Button {
-                        state.wrappedValue.showsObjective.toggle()
-                    } label: {
-                        HStack(spacing: Spacing.xs) {
-                            Text("Objective")
-                            Image(systemName: "chevron.right").font(.system(size: 9, weight: .bold))
-                                .rotationEffect(.degrees(list.state.showsObjective ? 90 : 0))
-                        }
-                        .font(Typography.body(12)).foregroundStyle(palette.actionInk)
+            if let roadmap, showsObjective {
+                Button {
+                    state.wrappedValue.showsObjective.toggle()
+                } label: {
+                    HStack(spacing: Spacing.xs) {
+                        Text("Objective")
+                        Image(systemName: "chevron.right").font(.system(size: 9, weight: .bold))
+                            .rotationEffect(.degrees(list.state.showsObjective ? 90 : 0))
                     }
-                    .buttonStyle(WorkPlainButtonStyle()).fixedSize()
-                    .help(roadmap.wave.goal)
-                    .accessibilityIdentifier("wave-objective")
+                    .font(Typography.body(12)).foregroundStyle(palette.actionInk)
                 }
+                .buttonStyle(WorkPlainButtonStyle()).fixedSize()
+                .help(roadmap.wave.goal)
+                .accessibilityIdentifier("wave-objective")
             }
             Spacer(minLength: 0)
             ShowHiddenMenu(model: model, view: view)
@@ -692,10 +678,10 @@ struct BacklogView: View {
 
     private func waveMenu(_ roadmap: WaveRoadmap) -> some View {
         Menu {
-            Button("Project history") {
-                model.historyReference = nil
-                model.historyWave = roadmap.wave
-            }.accessibilityIdentifier("wave-project-history")
+            Button("Projects") {
+                model.projectsReference = nil
+                model.projectsWave = roadmap.wave
+            }.accessibilityIdentifier("wave-projects")
             if let workflow = roadmap.graph {
                 Button("Workflow · \(workflow)") {
                     Task {
@@ -710,24 +696,9 @@ struct BacklogView: View {
     }
 
     private func objective(_ roadmap: WaveRoadmap) -> some View {
-        VStack(alignment: .leading, spacing: Spacing.xs) {
-            Text(roadmap.wave.goal.isEmpty ? "No objective recorded." : roadmap.wave.goal)
-                .font(Typography.body(13)).foregroundStyle(palette.textSecondary).textSelection(.enabled)
-            if let project = roadmap.currentProject {
-                HStack(spacing: Spacing.md) {
-                    Text(WaveMetricPortfolioPresentation(portfolio: roadmap.metricPortfolio).headline)
-                        .font(Typography.body(12)).foregroundStyle(palette.textSecondary).lineLimit(1)
-                        .accessibilityIdentifier("wave-metric-headline")
-                    TrackerSyncView(sync: project.sync, repo: roadmap.wave.repo)
-                }
-                ForEach(project.krs) { kr in
-                    Label(kr.text, systemImage: kr.holds ? "checkmark.circle.fill" : "xmark.circle")
-                        .font(Typography.body(12)).lineLimit(1)
-                        .foregroundStyle(kr.holds ? palette.success : palette.textSecondary)
-                }
-            }
-        }
-        .accessibilityIdentifier("wave-objective-detail")
+        Text(roadmap.wave.goal.isEmpty ? "No objective recorded." : roadmap.wave.goal)
+            .font(Typography.body(13)).foregroundStyle(palette.textSecondary).textSelection(.enabled)
+            .accessibilityIdentifier("wave-objective-detail")
     }
 
     // MARK: Notices

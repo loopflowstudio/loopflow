@@ -1,5 +1,5 @@
-//! The `wave` namespace's planning binding: `wave.plan.bind`, `.connect`
-//! and `.reteam` tie a Wave's plan to the repository's tracker. `wave.sync`
+//! The `wave` namespace's planning binding: `wave.plan.connect` and
+//! `.reteam` tie a Wave's plan to the repository's tracker. `wave.sync`
 //! is the explicit exchange; the planning reads (`wave.plan`,
 //! `plan.list`, `wave.list`) read the stored snapshot and exchange nothing.
 
@@ -8,18 +8,6 @@ use std::path::Path;
 use super::{Error, ErrorCode, Result};
 use crate::ops::linear::{LinearInitResult, LinearReteamResult};
 use crate::ops::Progress;
-use loopflow_storage::work::project::Project;
-
-/// `wave.plan.bind`: bind the existing tracker Project `project` as the
-/// Wave's shared current selection, as `lf wave plan bind <wave>
-/// <project>` does, and return the Project as stored.
-pub fn planning_bind(directory: &Path, wave: &str, project: &str) -> Result<Project> {
-    let repo = repo_root(directory)?;
-    tokio::runtime::Runtime::new()
-        .map_err(written)?
-        .block_on(crate::ops::project::bind_project(&repo, wave, project))
-        .map_err(written)
-}
 
 /// `wave.plan.connect`: connect `wave` (the ambient Wave with none, every
 /// authored Wave with `all`) to its tracker Initiative and the repository's

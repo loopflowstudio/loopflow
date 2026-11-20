@@ -1800,8 +1800,8 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let updated = conn.execute(
             "UPDATE agent_sessions SET completed_at=COALESCE(completed_at,?3),moved_to_machine_id=NULL,
-                wave_id=CASE WHEN task_id IS NULL THEN (SELECT p.wave_id FROM tasks t
-                    LEFT JOIN projects p ON p.id=t.project_id WHERE t.id=?2) ELSE wave_id END,
+                wave_id=CASE WHEN task_id IS NULL THEN (SELECT t.wave_id FROM tasks t WHERE t.id=?2)
+                    ELSE wave_id END,
                 task_id=COALESCE(task_id,?2)
              WHERE id=?1",
             params![id, task.as_str(), crate::rows::now_unix()],

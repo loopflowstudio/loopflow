@@ -397,23 +397,6 @@ pub(crate) fn validate_persisted_json(conn: &rusqlite::Connection) -> StoreResul
             "task_ids_json",
         )?);
     }
-    if conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('projects') WHERE name='krs')",
-        [],
-        |row| row.get::<_, bool>(0),
-    )? {
-        failures.extend(
-            validate_json_column::<Vec<crate::work::project::ProjectKR>>(
-                conn, "projects", "id", "krs",
-            )?,
-        );
-        failures.extend(validate_json_column::<Vec<crate::metric::MetricTarget>>(
-            conn,
-            "projects",
-            "id",
-            "metric_targets",
-        )?);
-    }
     failures.extend(validate_json_column::<crate::work::task::CiObservation>(
         conn,
         "task_prs",
@@ -434,9 +417,6 @@ pub(crate) fn validate_persisted_json(conn: &rusqlite::Connection) -> StoreResul
         "id",
         "kind_json",
     )?);
-    failures.extend(validate_json_column::<
-        crate::work::project::ProjectEventKind,
-    >(conn, "project_events", "id", "kind_json")?);
     failures.extend(validate_json_column::<Vec<String>>(
         conn,
         "ci_incidents",
@@ -785,7 +765,7 @@ pub(crate) fn convert_released_data(conn: &rusqlite::Connection, sql: &str) -> S
             UNION ALL SELECT json_extract(export_json,'$.baseline') FROM task_creation_intents WHERE export_json IS NOT NULL",
         )?;
         for row in query.query_map([], |row| row.get::<_, String>(0))? {
-            for value in serde_json::from_str::<Vec<crate::work::edit::WorkValue>>(&row?)? {
+            for value in crate::work::edit::known_values(serde_json::from_str(&row?)?)? {
                 value.validate()?;
             }
         }
@@ -799,13 +779,15 @@ pub(crate) fn convert_released_data(conn: &rusqlite::Connection, sql: &str) -> S
             ))
         })? {
             let (value, base, conflict) = row?;
-            serde_json::from_str::<crate::work::edit::WorkValue>(&value)?.validate()?;
+            let mut values = vec![serde_json::from_str::<serde_json::Value>(&value)?];
             for retained in [base, conflict].into_iter().flatten() {
-                let baseline: super::planning_sync::PlanningBaseline =
-                    serde_json::from_str(&retained)?;
-                if let Some(value) = baseline.value {
-                    value.validate()?;
+                let baseline = serde_json::from_str::<serde_json::Value>(&retained)?;
+                if !baseline["value"].is_null() {
+                    values.push(baseline["value"].clone());
                 }
+            }
+            for value in crate::work::edit::known_values(serde_json::Value::Array(values))? {
+                value.validate()?;
             }
         }
     }
@@ -828,8 +810,8 @@ fn convert_project_content(conn: &rusqlite::Connection) -> StoreResult<()> {
             rusqlite::params![
                 id,
                 document.description(),
-                serde_json::to_string(&document.krs)?,
-                serde_json::to_string(&document.metric_targets)?
+                serde_json::to_string(&document.released_krs)?,
+                serde_json::to_string(&document.released_targets)?
             ],
         )?;
     }
@@ -6073,7 +6055,9 @@ mod tests {
         )))
         .unwrap();
         let mut project = snapshot["projects"][0].take();
+        // The released Project body carried KRs and targets; current DTOs do not.
         project["krs"] = serde_json::json!([{"text":"Saved planning survives","holds":true}]);
+        project["metric_targets"] = serde_json::json!([]);
         let item = &mut snapshot["items"][0];
         item["state"] = serde_json::Value::Null;
         item["completed"] = serde_json::json!(true);
@@ -6154,9 +6138,12 @@ mod tests {
             )
             .unwrap();
         let content = crate::planning::project_document::parse_project_document(&text).unwrap();
-        assert_eq!(serde_json::to_value(content.krs).unwrap(), project["krs"]);
         assert_eq!(
-            serde_json::to_value(content.metric_targets).unwrap(),
+            serde_json::to_value(content.released_krs).unwrap(),
+            project["krs"]
+        );
+        assert_eq!(
+            serde_json::to_value(content.released_targets).unwrap(),
             project["metric_targets"]
         );
         conn.execute("INSERT INTO task_changes(id,task_id,field,value_json) VALUES('membership','task_fields','project_id','\"project_fields\"')", []).unwrap();

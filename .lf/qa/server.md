@@ -55,6 +55,17 @@ name a real `lf` command (`version` is not one). To keep a Graph live, give it
 a skill step run by a stand-in `claude` that `cat > /dev/null`: `-p` stream-json
 keeps stdin open, so the step runs until you kill the stand-in. macOS has no
 `setsid` command; detach with Python (`os.fork()`, `os.setsid()`, `os.execvp`).
+A skill step is `- step: <skill>` with the skill at `.lf/skills/<skill>.md`.
+Bare `lf task run` on a Graph with no interactive step approves Auto-Ship, so
+after `lf task interrupt` the next read's recovery starts
+`lf --task <id> ship` and a fresh Graph run: run `lf task hold <id>` before
+checking that an interrupt leaves the Task stopped. A home written by an
+earlier draft of this branch's migration is refused ("checksum does not
+match"); build the returning home with the stack base or main instead. Start
+`lf server run` for that home before the base binary's `lf -b task run` too:
+without one it registers a launchd `com.loopflow.server.<hash>` job for the
+temporary home (`launchctl bootout gui/$UID/<label>` after checking its
+`LF_HOME` with `launchctl print`).
 
 Run `lf server run` as a child with closed stdin; get its socket from
 `lf server status`. Use the current revision's newline JSON protocol in

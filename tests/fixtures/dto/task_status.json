@@ -36,13 +36,6 @@
     "slug": "gmail",
     "name": "Gmail",
     "description": "Retained authored prose.",
-    "krs": [
-      {
-        "text": "Mail processing survives restart",
-        "holds": true
-      }
-    ],
-    "metric_targets": [],
     "status": "started",
     "tracker_id": "project-gmail",
     "tracker_synced_at": 1790683200,

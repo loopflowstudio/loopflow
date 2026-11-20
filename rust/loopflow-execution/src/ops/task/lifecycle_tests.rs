@@ -326,8 +326,6 @@ fn fixture(
         name: "Project".into(),
         status: loopflow_storage::work::project::ProjectStatus::Started,
         description: String::new(),
-        krs: Vec::new(),
-        metric_targets: Vec::new(),
         tracker_synced_at: Some(now.unix_timestamp()),
 
         wave_id: wave.id().clone(),
@@ -394,14 +392,6 @@ fn fixture(
     runtime.block_on(async {
         store.create_wave(&wave).await.unwrap();
         store.create_project(&project).await.unwrap();
-        loopflow_storage::sqlite::project_selection::write_project_binding(
-            &store.sqlite,
-            wave.id(),
-            None,
-            project.tracker_id.as_ref().unwrap().as_str(),
-            &crate::store::PlanningLocks::new(tempfile::tempfile().unwrap()),
-        )
-        .unwrap();
         store.seed_task(&task, &pr).await.unwrap();
         store
             .upsert_provider_token(&ProviderToken {

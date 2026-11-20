@@ -18,7 +18,7 @@ lf capture-tasks                             # talk through an idea; the agent f
 Each Task gets its own sibling worktree (`../<repo>.<task>`), its own branch,
 and at most one open pull request. Every agent working on a Task starts from
 the same shared context: the Task's title, notes, thread, checkout, `scratch/`,
-and (when in a Wave) the Wave's goal, memory, and KRs.
+and (when in a Wave) the Wave's goal and memory.
 
 A new Task branches from `origin/<default>` as of the
 last background fetch (its first `lf sync` catches up). Loopflow keeps one
@@ -297,7 +297,7 @@ tracker:
 | Start work on the Task | Issue moves to In Progress |
 | Open, land, or abandon its PR | Linked PR and its state |
 
-In Linear, a Wave maps to an Initiative and its current Project maps to a
+In Linear, a Wave maps to an Initiative and each of its Projects maps to a
 Linear Project. In Asana, it maps to a team project.
 
 ### Offline queue and conflict resolution
@@ -324,14 +324,15 @@ Answer a lost line: lf repo tracker answer <id> --keep-theirs, or --use-mine.
   `lf repo tracker answer 9f2c41d0 --keep-theirs` or `--use-mine` (or click
   **Keep** / **Use mine** in Desktop, or run `lf task sync LOO-377 --keep-theirs`).
 
-A Wave not yet linked to a Linear Initiative keeps its Tasks local until you
-run `lf wave plan connect <wave>`.
+A Project whose Wave is not yet linked to a Linear Initiative stays local, and
+its Tasks wait in the queue until you run `lf wave plan connect <wave>`. A Task
+with no Project goes to Linear right away, as a team issue.
 
 ## Waves
 
 A Wave groups related Tasks under a lasting objective (`GOAL.md`), curated team
-memory (`MEMORY.md`), KRs, and shared defaults. Every Task in the Wave starts
-with that context.
+memory (`MEMORY.md`), its Projects, and shared defaults. Every Task in the Wave
+starts with that context.
 
 ### Goal and memory
 
@@ -389,7 +390,7 @@ See [Configuration](config.md) for the complete precedence rules.
 ```bash
 lf --wave billing wave-operate "invoices first"   # one finite pass over its Tasks
 lf resume --wave billing                          # open the Wave's ongoing conversation
-lf wave status billing                            # plan, Tasks, KRs, and runtime state
+lf wave status billing                            # Projects, Tasks and runtime state
 ```
 
 `wave-operate` reviews every started Task you own (leaving running Graphs alone
@@ -404,22 +405,44 @@ leaves teammates' Tasks untouched. Run it on a schedule with your OS scheduler:
 On macOS, scheduled commands that need Keychain credentials belong in a
 LaunchAgent under `~/Library/LaunchAgents` rather than cron.
 
-### Plan it: KRs and targets
+### Projects
 
-A Wave's current Project holds its Tasks, KRs, and
-targets:
-
-```bash
-lf wave plan billing --json
-lf wave update-project --wave billing --file project.json
+```text
+$ lf wave create billing ; lf wave create billing/refunds
+$ lf task create --wave billing/refunds --title "Refund a mischarged invoice"
+Refund a mischarged invoice · LOO-14
+$ lf wave status billing/refunds
+…
+  Refund a mischarged invoice   LOO-14   unstarted
 ```
 
-```json
-{"metric_targets":[],"krs":[{"text":"A customer's invoice matches metered usage to the cent.","holds":false}]}
+A Task belongs to the Wave it was filed in. A Project is optional: a Wave's
+link to a tracker Project. A new Task joins its Wave's Project, else the
+nearest parent Wave's, else none. Either way it lists under its own Wave, and
+nothing makes a Project for it.
+
+A Wave can hold several Projects, each with a name, a summary and a status;
+`lf wave status` and `lf wave plan billing --json` list them in the Wave's
+order, ended ones included. Projects start and end in the tracker: rename
+one, start another or mark one completed in Linear, and `lf wave sync` shows
+the same here. Within a Wave, a new Task joins the newest started Project, or
+the newest one that has not ended. With more than one open, the command says
+which it chose:
+
+```text
+$ lf task create --wave billing --title "Meter usage events"
+Meter usage events · LOO-12 in Project Invoicing
 ```
 
-Updating a Project replaces its KRs and targets in place; started Tasks keep
-their worktrees and PRs.
+A tracker holds an issue in a Project, never a Wave. A Task in a parent's
+Project is that Project's issue there, and another Machine reading the tracker
+lists it under the parent. A Task with no Project still goes to the tracker, as
+an issue in no Project, which other Machines do not read back. An issue made
+in the tracker joins the Wave linked to its Project.
+
+`lf task move` keeps a Task's Project when the new Wave is that Project's
+Wave or below it, and otherwise places it again. A started Task keeps its
+worktree and PR wherever it is.
 
 ### Nested Waves
 

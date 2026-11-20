@@ -103,7 +103,7 @@ Every read surface returns structured JSON, and works remotely with
 
 ```bash
 lf wave list --json                                   # Waves and runtime status
-lf wave status <wave> --json                          # focused Wave view with KRs and metrics
+lf wave status <wave> --json                          # its Projects, Tasks and execution evidence
 lf wave show --json                                   # every Wave's plan joined to runtime state
 lf task list --json                                   # open Tasks (same records Desktop renders)
 lf task status INF-123 --json                         # one Task, its Sessions, Graph runs, and thread
@@ -127,7 +127,7 @@ schemas.
 ## The owners
 
 Tracked Work follows Wave → Task in navigation. A Wave owns its objective and
-memory; its planning holds Tasks, KRs and targets.
+memory; its Projects group its Tasks.
 A Task owns its checkout and its PR history, with one current PR. Every
 conversation and Graph attributed to it is part of its work. The Task has one
 captured graph and position, advanced by `lf task run` and `lf task auto on`; independent

@@ -1137,8 +1137,8 @@ final class WorkModel {
             reading: state, reason: reason, observedAt: nil, action: state == "current" ? record?.action : nil)
     }
 
-    var historyWave: WaveSnapshot?
-    var historyReference: String?
+    var projectsWave: WaveSnapshot?
+    var projectsReference: String?
     @ObservationIgnored private(set) var historyLookup: Task<Void, Never>?
     var repoPath: String?
     var selection: WorkReference? { navigation.selection }
@@ -1863,8 +1863,8 @@ final class WorkModel {
         endLaunchWhenCurrent()
         selectRequestedWaveIfNeeded()
         if visibleRoadmaps.allSatisfy({ wave in
-            guard case .available(_, false) = wave.tasks else { return false }
-            return wave.unavailableTasks.isEmpty
+            if case .available(_, false) = wave.tasks { return true }
+            return false
         }) {
             clearSelectionIfOutsideScope()
         }
@@ -1968,8 +1968,8 @@ final class WorkModel {
         endLaunchWhenCurrent()
         selectRequestedWaveIfNeeded()
         if visibleRoadmaps.allSatisfy({ wave in
-            guard case .available(_, false) = wave.tasks else { return false }
-            return wave.unavailableTasks.isEmpty
+            if case .available(_, false) = wave.tasks { return true }
+            return false
         }) {
             clearSelectionIfOutsideScope()
         }
@@ -1999,15 +1999,6 @@ final class WorkModel {
         // Planning refresh owns that reconciliation once its evidence is complete.
     }
 
-    // Command ownership survives navigation. These are transport handles and feedback;
-    // selected Project, readiness and execution outcomes arrive in Work frames.
-    private var projectCommands: [String: Task<Void, Never>] = [:]
-    private(set) var projectCommandErrors: [String: String] = [:]
-
-    func isProjectActivationPending(id: String) -> Bool {
-        projectCommands[id] != nil
-    }
-
     /// Add a Wave through `lf wave create`; the planning stream then delivers its row.
     /// The receipt's `summary` names anything left to finish.
     @discardableResult
@@ -2029,20 +2020,6 @@ final class WorkModel {
         let removal = try await query.removeWave(name: name, preview: preview, cwd: repo)
         if !preview { await refreshPlanning() }
         return removal
-    }
-
-    @discardableResult
-    func activateProject(id: String, name: String, repo: String) -> Task<Void, Never>? {
-        guard !usesFixedFixture else { return nil }
-        if let command = projectCommands[id] { return command }
-        projectCommandErrors[id] = nil
-        let command = Task {
-            defer { projectCommands[id] = nil }
-            do { try await query.addWave(name: name, cwd: repo) }
-            catch { projectCommandErrors[id] = error.localizedDescription }
-        }
-        projectCommands[id] = command
-        return command
     }
 
     func setRepoPath(_ path: String?) {
@@ -2310,8 +2287,8 @@ final class WorkModel {
         }
         let selection: WorkReference?
         if let requested, requested.kind == .project {
-            if let current = waveForProject(projectId: requested.id) {
-                selection = .wave(id: current.wave.id)
+            if let wave = waveForProject(projectId: requested.id) {
+                selection = .wave(id: wave.wave.id)
             } else {
                 historyLookup = Task { await openHistoricalReference(requested.id) }
                 return
@@ -2327,7 +2304,6 @@ final class WorkModel {
         }
         if navigation.showsSelection { workspaceRegistry?.clearPresentation() }
         setSelection(selection)
-        reportOutsidePlan()
         if let selection { Perf.acknowledged(Perf.taskWorkspaceReady, id: selection.id, owner: navigation.performanceOwner) }
         if selection == nil { navigation.sidebarWaveID = nil }
         if let selection, selection.kind == .wave {
@@ -2348,10 +2324,10 @@ final class WorkModel {
             let result = try? await query.status(wave: wave.wave.name, cwd: wave.wave.repo)
             guard !Task.isCancelled else { return }
             guard let entries = result?.projects.items else { continue }
-            if entries.contains(where: { $0.id == reference || $0.slug == reference || $0.trackerId == reference }) {
+            if entries.contains(where: { $0.matches(reference: reference) }) {
                 select(.wave(id: wave.wave.id))
-                historyReference = reference
-                historyWave = wave.wave
+                projectsReference = reference
+                projectsWave = wave.wave
                 return
             }
         }
@@ -2828,29 +2804,6 @@ final class WorkModel {
         change(task, .abandon(task: issue), .taskAbandon(directory: directory(task), issue: issue), "abandoned")
     }
 
-    // MARK: Tasks outside the plan
-
-    @ObservationIgnored private var outsidePlanNotice: String?
-
-    /// While the open Wave's reading lists Tasks outside the current plan, one
-    /// condition Notice says so; its action copies every recovery command.
-    private func reportOutsidePlan() {
-        let roadmap = selection.flatMap { $0.kind == .wave ? wave(id: $0.id) : nil }
-        let outside = roadmap?.unavailableTasks ?? []
-        let key = roadmap.map { "outside-plan-\($0.wave.id)" }
-        if let shown = outsidePlanNotice, shown != key || outside.isEmpty { navigation.notices.clear(key: shown) }
-        outsidePlanNotice = outside.isEmpty ? nil : key
-        guard let key, let first = outside.first else { return }
-        let text = outside.count == 1 ? "\(first.taskIdentifier) is outside the current plan"
-            : "\(outside.count) Tasks are outside the current plan"
-        let recovery = outside.map(\.recovery).joined(separator: "\n")
-        let reasons = outside.map { "\($0.taskIdentifier): \($0.reason)" }.joined(separator: "\n")
-        navigation.notices.post(Notice(text, key: key, action: Notice.Action("Copy recovery", help: reasons) {
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(recovery, forType: .string)
-        }, kind: .condition))
-    }
-
     // MARK: Read failures
 
     /// Every reading a window shows arrives through here, for `NoticeCenter.read`'s
@@ -3054,7 +3007,7 @@ final class WorkModel {
     }
 
     func waveForProject(projectId: String) -> WaveRoadmap? {
-        roadmap.value?.waves.first { $0.currentProject?.id == projectId || $0.currentProject?.slug == projectId || $0.currentProject?.trackerId == projectId }
+        roadmap.value?.waves.first { $0.projects.items.contains { $0.matches(reference: projectId) } }
     }
 
     /// Current repository inventory only; retained navigation evidence is display-only.
@@ -3297,7 +3250,6 @@ final class WorkModel {
         if roadmap != next { roadmap = next }
         guard case .success(let (_, text)) = result else { return false }
         showsSavedPlanning = false
-        reportOutsidePlan()
         if let text { cache?.saveRoadmap(text) }
         openWarmConversations()
         return true

@@ -797,7 +797,7 @@ mod tests {
                 due_date: None,
                 id: TaskId::new(),
                 project_id: Some(
-                    crate::work::wave::bootstrap::ensure_wave_project(&store, repo, "inbox")
+                    crate::test_support::seed_wave_project(&store, repo, "inbox")
                         .unwrap()
                         .id,
                 ),

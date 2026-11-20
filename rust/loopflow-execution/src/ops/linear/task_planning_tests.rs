@@ -517,11 +517,7 @@ fn with_export_plan(
     let fixture = runtime.block_on(Fixture::new());
     std::env::set_var("LF_HOME", fixture.directory.path());
     let (repo, wave) = runtime.block_on(fixture.planning_repo());
-    let project = fixture
-        .store
-        .sqlite
-        .ensure_project(wave.id(), "Local project")
-        .unwrap();
+    let project = fixture.store.sqlite.seed_project(wave.id()).unwrap().id;
     let task = fixture
         .store
         .sqlite

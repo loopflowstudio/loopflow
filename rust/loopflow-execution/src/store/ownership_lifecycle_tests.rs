@@ -206,8 +206,7 @@ impl Pair {
         };
         let (laptop, mini) = (side("laptop.db"), side("mini.db"));
         let project =
-            crate::work::wave::bootstrap::ensure_wave_project(&mini.store, &mini.path, "owners")
-                .unwrap();
+            crate::test_support::seed_wave_project(&mini.store, &mini.path, "owners").unwrap();
         let task = mini
             .store
             .create_task(&NewTask {

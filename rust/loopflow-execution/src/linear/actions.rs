@@ -7,7 +7,9 @@ use std::path::Path;
 
 use serde_json::{json, Value};
 
-use super::{LinearClient, OrderedIssue, PlanningResponse};
+use super::{
+    parse_project_document, LinearClient, LinearError, LinearResult, OrderedIssue, PlanningResponse,
+};
 use crate::ops::tracker::{
     creation_id, ingest_task, message, now, observed_project, observed_task, opening_state,
     remote_project, remote_task, repository_scope, target_state, value, values, Sent,
@@ -156,29 +158,23 @@ impl LinearClient {
         let (wave, initiative) = project_scope(store, repo, project).await?;
         let team = repository_scope(repo)?;
         let id = creation_id(project.as_str())?;
-        let mut input = json!({"id": id, "teamIds": [team], "useDefaultTemplate": false});
-        let (mut description, mut krs, mut targets) = (String::new(), Vec::new(), Vec::new());
+        let mut input =
+            json!({"id": id, "teamIds": [team], "useDefaultTemplate": false, "content": ""});
+
         for value in values(action)? {
             match value {
                 WorkValue::ProjectName(name) => input["name"] = json!(name),
                 WorkValue::ProjectSummary(summary) => input["description"] = json!(summary),
-                WorkValue::ProjectDescription(text) => description = text.unwrap_or_default(),
-                WorkValue::ProjectStatus(status) => {
-                    input["statusId"] = self
-                        .project_field_input(&WorkValue::ProjectStatus(status), "")
-                        .await
-                        .map_err(message)?["statusId"]
-                        .clone()
+                WorkValue::ProjectDescription(text) => {
+                    input["content"] = json!(text.unwrap_or_default())
                 }
-                WorkValue::Krs(values) => krs = values,
-                WorkValue::MetricTargets(values) => targets = values,
+                WorkValue::ProjectStatus(status) => {
+                    input["statusId"] =
+                        json!(self.project_status_id(status).await.map_err(message)?)
+                }
                 _ => {}
             }
         }
-        input["content"] = json!(format!(
-            "{description}\n{}",
-            loopflow_storage::planning::render_project_content(&krs, &targets)
-        ));
         let project = match crate::linear::urgent(self.deliver_planning_creation(true, input)).await
         {
             Ok(PlanningResponse::Project { project, .. }) => *project,
@@ -255,13 +251,8 @@ impl LinearClient {
         action: &TrackerAction,
     ) -> OpsResult<Sent> {
         let external = remote_project(store, project).await?;
-        // Prose, KRs and targets share the Project's one content document.
-        let (_, content) = self
-            .fetch_project_content(&external)
-            .await
-            .map_err(message)?;
         let input = self
-            .project_field_input(&value(action)?, &content)
+            .project_update_input(&external, value(action)?)
             .await
             .map_err(message)?;
         let observed = match self.deliver_planning_field(&external, true, input).await {
@@ -276,6 +267,28 @@ impl LinearClient {
         Ok(Sent::Acknowledged {
             revision: observed.revision,
             remote_id: Some(external),
+        })
+    }
+
+    async fn project_update_input(&self, external: &str, value: WorkValue) -> LinearResult<Value> {
+        Ok(match value {
+            WorkValue::ProjectName(name) => json!({"name": name}),
+            WorkValue::ProjectSummary(summary) => json!({"description": summary}),
+            WorkValue::ProjectStatus(status) => {
+                json!({"statusId": self.project_status_id(status).await?})
+            }
+            WorkValue::ProjectDescription(Some(description)) => {
+                // Released sections share Linear's content field with the prose.
+                let node = self.project_node(external).await?;
+                let document = parse_project_document(node.content.as_deref().unwrap_or_default())?;
+                json!({"content": document.replace_description(&description)?})
+            }
+            other => {
+                return Err(LinearError::Message(format!(
+                    "unsupported Project field {}",
+                    other.field()
+                )))
+            }
         })
     }
 
@@ -634,10 +647,7 @@ impl LinearClient {
         project: &ProjectId,
     ) -> OpsResult<Option<Observed>> {
         let external = remote_project(store, project).await?;
-        let (observed, _) = self
-            .fetch_project_content(&external)
-            .await
-            .map_err(message)?;
+        let observed = self.project_ownership(&external).await.map_err(message)?;
         let (wave, initiative) = project_scope(store, repo, project).await?;
         accept_project(store, &wave, &initiative, &observed)?;
         Ok(Some(observed_project(&observed)))
@@ -904,6 +914,38 @@ mod tests {
             .map(|r| r.body.clone())
             .collect();
         (sent, bodies)
+    }
+
+    #[tokio::test]
+    async fn project_updates_read_content_only_to_replace_observed_prose() {
+        use loopflow_storage::work::edit::WorkValue;
+        let id = uuid::Uuid::new_v4().to_string();
+        let (base, _) = test_server::spawn(vec![reply(json!({"project": {
+            "id": id, "name": "Plan", "status": {"type": "started"}, "description": null,
+            "content": "Old prose.\nworkflow: code\n", "initiatives": {"nodes":[]}, "teams": {"nodes":[]}
+        }}))]).await;
+        let client = LinearClient::with_base_url("fixture".into(), None, base);
+        assert!(client
+            .project_update_input(&id, WorkValue::ProjectDescription(None))
+            .await
+            .is_err());
+        assert_eq!(
+            client
+                .project_update_input(&id, WorkValue::ProjectSummary("Summary".into()))
+                .await
+                .unwrap(),
+            json!({"description": "Summary"})
+        );
+        assert_eq!(
+            client
+                .project_update_input(
+                    &id,
+                    WorkValue::ProjectDescription(Some("New prose.".into()))
+                )
+                .await
+                .unwrap(),
+            json!({"content": "New prose.\n\nworkflow: code\n"})
+        );
     }
 
     #[tokio::test]

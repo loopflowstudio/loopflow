@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>LOO-995 QA: a Task can be in a Wave with no Project</title>
+<style>
+  body { font: 15px/1.5 -apple-system, system-ui, sans-serif; max-width: 980px; margin: 2rem auto; padding: 0 1rem; color: #1d1d1f; }
+  h1 { font-size: 1.5rem; } h2 { font-size: 1.15rem; margin-top: 2rem; border-top: 1px solid #ddd; padding-top: 1rem; }
+  pre { background: #f5f5f7; padding: .75rem 1rem; overflow-x: auto; font-size: 12.5px; border-radius: 6px; }
+  .ok { color: #1a7f37; font-weight: 600; } .bad { color: #b42318; font-weight: 600; } .fix { color: #8a5a00; font-weight: 600; }
+  table { border-collapse: collapse; width: 100%; } td, th { border: 1px solid #ddd; padding: .4rem .6rem; text-align: left; vertical-align: top; }
+</style>
+
+<h1>LOO-995 QA: a Task can be in a Wave with no Project</h1>
+<p>A branch-built <code>lf</code> (debug, HEAD f5360c3 plus the fixes below), run on isolated <code>HOME</code>/<code>LF_HOME</code> pairs under <code>/tmp/lf-qa-995</code>, with <code>LF_*</code> unset and stdin closed. The returning home was built with the installed <code>lf 0.16.0+7127b9d0d</code>, which is this branch's base.</p>
+
+<table>
+<tr><th>Scenario</th><th>Result</th></tr>
+<tr><td>1. First visit: <code>billing</code>, <code>billing/refunds</code>, a Task in the child</td><td class="ok">works</td></tr>
+<tr><td>2. Returning home: a Task in the child joins the parent's Project</td><td class="fix">broken, fixed</td></tr>
+<tr><td>3. Second Machine over Git</td><td class="fix">broken, fixed</td></tr>
+<tr><td>4. Moves: up, out, down</td><td class="ok">works</td></tr>
+<tr><td>5. Linear configured with no login and no origin</td><td class="fix">two wrong messages, fixed</td></tr>
+<tr><td>6. Suites the slice skipped</td><td class="fix">5 stale tests, fixed</td></tr>
+</table>
+
+<h2>1. First visit</h2>
+<pre>$ lf wave create billing ; lf wave create billing/refunds
+$ lf task create --wave billing/refunds 'x'
+x · 04c165
+$ lf wave status billing/refunds      →  04c165  unstarted   —   x  ready
+$ lf wave status billing              →  tasks     none
+$ lf wave list
+billing           …  ready   0
+billing/refunds   …  ready   1
+store: projects 0; tasks [('task_04c1653', None, '0fa8e8ee…')]   # wave_id = refunds</pre>
+<p class="ok">As planned. No Project, the Task lists only under its own Wave, and <code>lf task show</code> has <code>execution.wave: "billing/refunds"</code>.</p>
+
+<h2>2. Returning home, Task in an ancestor's Project</h2>
+<p>The installed base made <code>billing</code> with a Project and a Task <code>a</code>. The branch then opened that home, created <code>billing/refunds</code>, and ran <code>lf task create --wave billing/refunds 'y'</code>.</p>
+<pre>Before the fix:
+$ lf wave status billing/refunds
+  tasks     none
+  0c06cf  unavailable: Task's owning Project is unavailable · lf task status task_0c06cf… --json</pre>
+<p><span class="bad">Bug.</span> The Task joined billing's Project as the rule says. But <code>wave_tasks</code> only passed the Wave's own Projects to <code>snapshot_tasks</code>, which read any other Project as missing. The <code>tasks.project_id</code> foreign key (<code>ON DELETE RESTRICT</code>) means a Task's Project always exists, so the check could only misfire. <span class="fix">Fixed</span> by deleting it. <code>snapshot_tasks</code> loses its <code>projects</code> and <code>include_retained</code> parameters, and <code>wave_tasks</code> loses its unused <code>identifier</code> parameter and its wrapper struct (<code>rust/loopflow/src/lf/commands/waves.rs</code>).</p>
+<pre>After:
+$ lf wave status billing/refunds   →  0c06cf  unstarted   —   y  ready
+$ lf wave status billing           →  Project billing (proj_ed9e…) · started
+                                      c37cad  unstarted   —   a  ready
+$ lf wave status billing/refunds --json  →  unavailable [] ; tasks ['0c06cf', …]</pre>
+<p>The migration filled <code>a</code>'s <code>wave_id</code> from its Project (billing). Its Project is unchanged.</p>
+
+<h2>3. Second Machine over Git</h2>
+<p>The returning home synced to a bare origin. A fresh clone on a new home then ran <code>lf task list</code>.</p>
+<pre>Before the fix (second home's store):
+('task_c37cade', 'proj_ed9e…', None)        # a: no Wave
+$ lf wave status billing   →  tasks none     # a is missing from its Wave</pre>
+<p><span class="bad">Bug.</span> <code>a</code>'s record on the ref predates <code>task_wave</code> and carries only <code>task_project</code>. On a first import the Project arrives in the same batch, and <code>with_task_waves</code> looked up the Project's Wave only in the store, where it isn't written yet. <span class="fix">Fixed</span> in <code>rust/loopflow-storage/src/sqlite/planning_write.rs</code>: the batch's <code>project_wave</code> is read first. Test: <code>plan_carriers::tests::a_task_saved_before_it_had_its_own_wave_arrives_in_its_project_s_wave</code>, which fails without the fix and passes with it.</p>
+<pre>After (clean second home):
+('task_c37cade', 'proj_ed9e…', '06566e38…')   # billing
+$ lf wave status billing   →  c37cad  unstarted   —   a  ready</pre>
+<p>The first, pre-fix second home republished <code>task_wave: null</code> at stamp 0 for <code>a</code>. A later home that imports that ref takes the null and skips the fix. I deleted that ref before rerunning. This only affects homes that ran this branch's earlier build. The route is written into <code>.lf/qa/tracker.md</code>.</p>
+<p><code>y</code>'s record carries <code>task_wave</code> = refunds next to billing's <code>task_project</code>, and the second home lists it under <code>billing/refunds</code>.</p>
+
+<h2>4. Moves</h2>
+<pre>$ lf --explain task move dae187 --wave billing
+Intended action: move Task to Wave 06566e38… , Project proj_ed9e…     # up: keeps the ancestor's Project
+$ lf --explain task move 0c06cf --wave ops
+Intended action: move Task to Wave c529057d… , Project none           # out: placed again
+$ lf task move c37cad --wave billing/refunds                          # down: keeps billing's Project
+store: c37cad (proj_ed9e…, refunds) · 0c06cf (None, ops) · dae187 (proj_ed9e…, billing)
+second home after lf task sync: the same three rows
+lf wave show: billing → dae187 · billing/refunds → c37cad · ops → 0c06cf</pre>
+<p class="ok">As planned, on both Machines.</p>
+
+<h2>5. Linear configured, no login, no origin</h2>
+<pre>Before:
+$ lf task create --wave billing 'in a wave'
+Saved locally; pending Linear sync. Retry with `lf task sync 7cccae`.
+$ lf task sync 7cccae
+Error: Task publication to Linear remains pending          (exit 1)
+$ lf repo tracker
+Tracker: linear. 1 open · 0 lost.
+  684f3a  create · queued · …                              # only the standalone Task</pre>
+<p><span class="bad">Bug.</span> The queue was right: only the standalone Task is queued. But both commands told the person a Task with no Project was waiting on Linear, and it never will be. <span class="fix">Fixed</span> with one predicate, <code>Task::goes_to_tracker</code> (a Project, or no Wave), used by <code>lf task create</code>'s line and <code>lf task sync</code>'s check. The SQL in <code>tracker_actions::uncreated</code> points to it.</p>
+<pre>After:
+$ lf task create --wave billing 'in a wave'   →  in a wave · 23f446        (no pending line)
+$ lf task sync 23f446                         →  23f446: nothing open     (exit 0)
+$ lf task create 'standalone'                 →  Saved locally; pending Linear sync. …
+$ lf task sync e74e32                         →  Error: … remains pending: cannot establish … origin   (exit 1, unchanged)</pre>
+<p>Not reached: a real Linear workspace. Checking that <code>y</code> lands in billing's Linear Project, and that a Task created in Linear joins the linked Wave, needs a Linear login and a test team.</p>
+
+<h2>6. Suites</h2>
+<p>Five <code>local_planning</code> tests still expected a Task to make its Wave's Project. I rewrote them for the new rule. <code>a_wave_has_no_project_until_its_first_task…</code> is now <code>a_task_makes_no_project_and_joins_the_newest_started_one</code>, and it also checks that no "pending" line is printed and no tracker <code>create</code> is queued.</p>
+<ul>
+<li><code>cargo test -p loopflow-storage --lib</code>: 369/369 pass, run locally.</li>
+<li><code>cargo test -p loopflow --lib local_planning</code>: 28/28 pass, run locally.</li>
+<li><code>cargo clippy -p loopflow-storage -p loopflow-execution -p loopflow --all-targets -D warnings</code>: clean.</li>
+<li><code>cargo test -p loopflow --lib</code> in full: 483 passed, 52 failed. 39 of those are <code>PoisonError</code> from a shared lock, and the <code>server::</code> ones pass when run alone. Of the 11 that fail alone, 7 say "No agent selected … exactly one supported harness must be installed": this Machine has several harnesses and those graph fixtures expect one. The other 4 are agent launches (<code>task_graph_launch_tests</code>, research Graphs). None touch the code this change touched. For CI.</li>
+</ul>
+
+<h2>What works, what wasn't reached, what's still wrong</h2>
+<p><b>Works:</b> all three placement cases, listing under a Task's own Wave in status, show, list and JSON, moves, a returning home, a second Machine, and a tracker queue that leaves plan-only Tasks out.</p>
+<p><b>Not reached:</b> Linear itself (needs a login) and Desktop (it reads the same <code>wave status</code> JSON, which was checked).</p>
+<p><b>Still open, worst first:</b></p>
+<ol>
+<li>A home that ran this branch before the import fix keeps republishing <code>task_wave: null</code> at stamp 0 for older Tasks. Homes that read its ref take the null. Only branch builds are affected.</li>
+<li><code>unavailable_tasks</code> is always <code>[]</code>, but the wire field, its printer and Swift's decoding remain (<code>scratch/questions.md</code>).</li>
+<li><code>lf task status --json</code> gives <code>wave</code> as the leaf name. The base build does the same.</li>
+</ol>
+</html>
+
+<h2>Slice 2: every Task goes to the tracker (2026-11-20)</h2>
+<p>Branch <code>lf</code> at 983ccec, debug, on homes under <code>/tmp/lf-qa-995b</code>, <code>LF_*</code> unset, stdin closed. Linear team <code>QA</code> in the shared <code>.lf/config.yaml</code>, no login.</p>
+<table><tr><th>Scenario</th><th>Result</th></tr>
+<tr><td>7. First visit, Linear configured, no origin</td><td class="ok">works</td></tr>
+<tr><td>8. Same home with an origin</td><td class="ok">works</td></tr>
+<tr><td>9. Returning home from the installed lf</td><td class="ok">works</td></tr>
+<tr><td>10. JSON reads drop <code>unavailable_tasks</code></td><td class="ok">works</td></tr>
+<tr><td>11. Second Machine on a Linear repository</td><td class="bad">nothing arrives; recorded, docs fixed</td></tr></table>
+<h3>7. First visit</h3>
+<pre>$ lf task create --wave billing/refunds 'x in child'
+Saved locally; pending Linear sync. Retry with `lf task sync facbc7`.
+$ lf task create --wave billing 'w in parent'     → same line, 079046
+$ lf task create 'standalone'                     → same line, 28a623
+$ lf repo tracker
+Tracker: linear. 3 open · 0 lost.
+  facbc7  create · queued · cannot establish repository Linear identity from Git origin …
+  079046  create · queued · …
+  28a623  create · queued · …
+$ lf task sync facbc7   → Error: Task publication to Linear remains pending: … (exit 1)
+$ lf wave status billing/refunds
+  facbc7  unstarted   —   x in child  ready
+    create · queued · cannot establish …</pre>
+<p>This is the reverse of scenario 5, as slice 2 intends: Wave Tasks with no Project go to Linear like standalone ones. The store has no Projects. Reading the code, the create carries <code>teamId</code> and no <code>projectId</code> (<code>linear/actions.rs::create_task</code>).</p>
+<h3>8. With an origin</h3>
+<pre>$ git remote add origin …/origin.git &amp;&amp; git push origin main
+$ lf task sync facbc7
+Error: Task publication to Linear remains pending: No Linear credential found. Run `doppler run -- lf account connect linear`.</pre>
+<h3>9. Returning home</h3>
+<p>The installed <code>lf</code> 0.16.0+7127b9d0d made <code>billing</code> with a Project (Project create queued) and two Tasks. The branch then made <code>billing/refunds</code> and <code>y child</code>: <code>y</code> joins billing's Project, prints the pending line, queues its create and lists under <code>billing/refunds</code>. The installed build's queued Project create still holds <code>krs</code> and <code>metric_targets</code>. <code>known_values</code> skips them, so the send is unaffected.</p>
+<h3>10. Wire</h3>
+<pre>lf wave status billing/refunds --json → keys history, projects, setup, tasks, wave
+lf wave plan billing --json           → no unavailable_tasks
+lf wave status billing --json         → no unavailable_tasks</pre>
+<h3>11. Second Machine</h3>
+<pre>$ git -C origin.git for-each-ref refs/loopflow        (empty)
+$ (fresh clone, new home) lf task list                 (empty)
+$ lf wave status billing/refunds → Error: wave 'billing/refunds' is not registered</pre>
+<p>A connected repository has no Git or hub exchange (<code>plan_git::exchange_all</code> skips it), and the Linear import reads issues one Project at a time. So the claim in the plan and the docs that the child Wave "lives in Loopflow's plan, carried by Git and the hub" is wrong for connected repositories. Reading the code: another Machine lists a Task in an ancestor's Project under that ancestor, and never sees a Task with no Project. On main every Wave Task had a Project, so this is new. It is a product choice (LOO-980's marker, or importing the team's no-Project issues), so it is recorded in <code>scratch/questions.md</code> and not built.</p>
+<p class="fix">Fixed in <code>docs/work.md</code>: "A Wave not yet linked to a Linear Initiative keeps its Tasks local" now applies only to Tasks in a local Project. A Task with no Project goes right away. The Projects paragraph now says what another Machine sees.</p>
+<h3>Not reached</h3>
+<p>A real Linear workspace: whether the team issue lands, and the second-Machine view through Linear. Desktop: not launched. The change there only deletes a notice that could never show, and the DTO and view tests cover it (193 passed, earlier run).</p>
+<h3>Still wrong, worst first</h3>
+<ol><li>On a connected repository, Wave Tasks with no Project are invisible to other Machines and teammates' lf, and child Waves fall back to the Project's Wave (scenario 11).</li>
+<li>The origin error tells you to configure an origin "before running <code>lf wave plan connect</code>" even when you ran <code>lf task create</code>. This was already true before this change.</li></ol>

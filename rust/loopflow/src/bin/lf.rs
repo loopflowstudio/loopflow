@@ -16,7 +16,6 @@ use loopflow_execution::context_block::ContextMoment;
 use loopflow_execution::definition::DefinitionKind;
 use loopflow_execution::journal::{self, with_runtime, LfEventFields, LfEventType, LfNode};
 
-use loopflow_execution::ops::project::update_project;
 use loopflow_execution::store::planning_sync::LostAnswer;
 
 #[derive(Clone, Default)]
@@ -880,25 +879,7 @@ fn dispatch_repository(cmd: &loopflow::lf::RepoCommand, args: &[String]) -> anyh
 }
 
 fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
-    use loopflow_execution::ops::project;
-
     match command {
-        WaveCommand::EditProject {
-            target,
-            name,
-            summary,
-            description,
-        } => {
-            let saved = tokio::runtime::Runtime::new()?.block_on(project::edit(
-                repo,
-                target.as_project_target(),
-                name.as_deref(),
-                summary.as_deref(),
-                description.as_deref(),
-            ))?;
-            print_planning_sync(&saved.1);
-            Ok(())
-        }
         WaveCommand::Graph { cmd } => {
             use loopflow::lf::WaveGraphCommand;
             tokio::runtime::Runtime::new()?.block_on(async {
@@ -908,8 +889,12 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
                         no_wave,
                         json,
                     } => {
-                        let selected =
-                            project::wave_graph(repo, wave.as_deref(), !*no_wave).await?;
+                        let selected = loopflow_execution::ops::task::wave_graph(
+                            repo,
+                            wave.as_deref(),
+                            !*no_wave,
+                        )
+                        .await?;
                         if *json {
                             println!("{}", serde_json::to_string_pretty(&selected)?);
                         } else {
@@ -948,20 +933,6 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
                 ),
                 WavePlanCommand::Reteam { apply, json } => {
                     loopflow::lf::commands::ops::reteam(repo, *apply, *json)
-                }
-                WavePlanCommand::Bind {
-                    wave,
-                    project,
-                    json,
-                } => {
-                    let result =
-                        loopflow_execution::engine::wave::planning_bind(repo, wave, project)?;
-                    if *json {
-                        println!("{}", serde_json::to_string_pretty(&result)?);
-                    } else {
-                        println!("Wave {wave}: bound Project {} ({})", result.name, result.id);
-                    }
-                    Ok(())
                 }
             }
         }
@@ -1020,23 +991,6 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
                     loopflow_execution::ops::wave_lifecycle::render_renamed(&renamed)
                 );
             }
-            Ok(())
-        }
-        WaveCommand::UpdateProject { wave, file } => {
-            #[derive(serde::Deserialize)]
-            #[serde(deny_unknown_fields)]
-            struct Input {
-                krs: Vec<loopflow_execution::work::project::ProjectKR>,
-                metric_targets: Vec<loopflow_execution::work::wave::metrics::MetricTarget>,
-            }
-            let input: Input = serde_json::from_slice(&std::fs::read(file)?)?;
-            let (_, sync) = tokio::runtime::Runtime::new()?.block_on(update_project(
-                repo,
-                wave.as_deref(),
-                &input.krs,
-                &input.metric_targets,
-            ))?;
-            print_planning_sync(&sync);
             Ok(())
         }
     }
@@ -3447,12 +3401,6 @@ fn finish_command(result: anyhow::Result<()>) -> anyhow::Result<()> {
         }
     }
     result
-}
-
-fn print_planning_sync(sync: &loopflow_execution::store::planning_sync::TrackerSync) {
-    for line in sync.lines() {
-        eprintln!("{line}");
-    }
 }
 
 #[cfg(test)]

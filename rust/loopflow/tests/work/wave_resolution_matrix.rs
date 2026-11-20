@@ -122,13 +122,6 @@ const COMMANDS: &[Cmd] = &[
         global_default: true,
     },
     Cmd {
-        id: "wave edit-project",
-        path: &["wave", "edit-project"],
-        base_args: &["wave", "edit-project", "--summary", "Fixture"],
-        wave_form: WaveForm::Positional,
-        global_default: false,
-    },
-    Cmd {
         id: "wave graph show",
         path: &["wave", "graph", "show"],
         base_args: &["wave", "graph", "show", "--json"],
@@ -147,13 +140,6 @@ const COMMANDS: &[Cmd] = &[
         id: "task create",
         path: &["task", "create"],
         base_args: &["task", "create", "--title", "Fixture task"],
-        wave_form: WaveForm::Flag,
-        global_default: false,
-    },
-    Cmd {
-        id: "wave update-project",
-        path: &["wave", "update-project"],
-        base_args: &["wave", "update-project", "--file", "plan.json"],
         wave_form: WaveForm::Flag,
         global_default: false,
     },
@@ -350,7 +336,7 @@ fn seed(home: &Path, repo: &Path) -> Wave {
     git(&["add", "."]);
     std::fs::write(
         repo.join("plan.json"),
-        serde_json::to_vec(&serde_json::json!({"metric_targets":[], "krs":[]})).unwrap(),
+        serde_json::to_vec(&serde_json::json!({})).unwrap(),
     )
     .unwrap();
     git(&["add", "plan.json"]);

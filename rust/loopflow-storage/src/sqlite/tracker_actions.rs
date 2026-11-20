@@ -75,9 +75,7 @@ impl ActionKind {
             | WorkValue::ProjectName(_)
             | WorkValue::ProjectSummary(_)
             | WorkValue::ProjectDescription(_)
-            | WorkValue::ProjectStatus(_)
-            | WorkValue::Krs(_)
-            | WorkValue::MetricTargets(_) => Some(Self::Field),
+            | WorkValue::ProjectStatus(_) => Some(Self::Field),
             WorkValue::Disposition(_) => Some(Self::State),
             WorkValue::CommentContent(_) => Some(Self::Comment),
             WorkValue::TaskDeletedAt(Some(_)) => Some(Self::Delete),
@@ -583,8 +581,6 @@ fn field_baseline(
         WorkValue::ProjectDescription(_) => ("o.description", "o.description_observed_at IS NOT NULL"),
         WorkValue::ProjectSummary(_) => ("o.summary", "o.summary IS NOT NULL"),
         WorkValue::ProjectStatus(_) => ("o.status", "o.status IS NOT NULL"),
-        WorkValue::Krs(_) => ("o.krs", "o.krs IS NOT NULL"),
-        WorkValue::MetricTargets(_) => ("o.metric_targets", "o.metric_targets IS NOT NULL"),
         WorkValue::TaskAssignee(_) => ("o.assignee", "o.assignee_observed"),
         WorkValue::TaskProject(_) => ("COALESCE((SELECT id FROM projects WHERE id=o.claimed_project_id OR external_project_id=o.claimed_project_id),o.claimed_project_id)", "o.project_id_observed"),
         _ => return Ok(None),
@@ -597,15 +593,9 @@ fn field_baseline(
     let mut query = conn.prepare(&format!(
         "SELECT {revision},{column} FROM {source} AND {presence}"
     ))?;
-    // KRs and targets are stored as JSON; every other column is the value's text.
-    let json = matches!(edit, WorkValue::Krs(_) | WorkValue::MetricTargets(_));
     let baseline = query
         .query_and_then([owner.id()], |row| -> StoreResult<PlanningBaseline> {
-            let raw: Option<String> = row.get(1)?;
-            let value = match raw {
-                Some(raw) if json => serde_json::from_str(&raw)?,
-                raw => Value::from(raw),
-            };
+            let value = Value::from(row.get::<_, Option<String>>(1)?);
             Ok(PlanningBaseline {
                 revision: row.get(0)?,
                 value: Some(serde_json::from_value(
@@ -683,8 +673,6 @@ fn creation_baseline(conn: &Connection, owner: &ActionOwner) -> StoreResult<Vec<
                 WorkValue::ProjectSummary(project.summary),
                 WorkValue::ProjectDescription(Some(project.description)),
                 WorkValue::ProjectStatus(project.status),
-                WorkValue::Krs(project.krs),
-                WorkValue::MetricTargets(project.metric_targets),
             ]
         }
         ActionOwner::Wave(_) => {
@@ -941,7 +929,7 @@ pub(crate) fn attach_in(
     )?;
     let column = owner.column();
     let mut bases: Vec<(ActionKind, Option<&str>, WorkValue)> = Vec::new();
-    let baseline: Vec<WorkValue> = serde_json::from_str(&baseline)?;
+    let baseline = crate::work::edit::known_values(serde_json::from_str(&baseline)?)?;
     for value in &baseline {
         bases.push((ActionKind::Field, Some(value.field()), value.clone()));
     }
@@ -976,12 +964,14 @@ pub(crate) fn attach_in(
     Ok(())
 }
 
-/// Unbound local Projects, then Tasks, in `repo` with no live `create`.
+/// Unbound Projects, then Tasks, made on this Machine in `repo` with no live
+/// `create`. A Project is made here unless another Machine stamped its Wave.
 fn uncreated(conn: &Connection, repo: &str) -> StoreResult<Vec<ActionOwner>> {
     let mut query = conn.prepare_cached(
         "SELECT 'project',p.id FROM projects p JOIN waves w ON w.id=p.wave_id
          WHERE w.repo=?1 AND p.external_project_id IS NULL
-         AND EXISTS(SELECT 1 FROM project_transitions c WHERE c.successor_id=p.id AND c.local_plan_json IS NOT NULL)
+         AND NOT EXISTS(SELECT 1 FROM plan_stamps s WHERE s.owner_id=p.id AND s.field='project_wave'
+             AND s.machine_id!=(SELECT id FROM machines WHERE is_local=1))
          AND NOT EXISTS(SELECT 1 FROM tracker_actions e WHERE e.project_id=p.id AND e.kind='create' AND e.phase!='retired')
          UNION ALL
          SELECT 'task',t.id FROM tasks t JOIN repository_plans r ON r.id=t.repository_id
@@ -1416,6 +1406,59 @@ mod tests {
             .tracker_actions_for(&ActionOwner::Task(bound))
             .unwrap()
             .is_empty());
+    }
+
+    #[test]
+    fn a_project_made_here_is_created_in_the_tracker_and_one_from_another_machine_is_not() {
+        let (_dir, store) = store();
+        let wave = crate::work::wave::Wave::new(
+            loopflow_model::id::WaveId::new(),
+            "billing".into(),
+            "/repo".into(),
+        );
+        crate::test_fixture::wave(&store, &wave);
+        let here = store.seed_project(wave.id()).unwrap().id;
+        // The released lf made Projects before fields were stamped.
+        let unstamped = loopflow_model::durable::ProjectId::new();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO projects(id,wave_id,created_at,updated_at,description,project_name,project_slug)
+                 VALUES(?1,?2,1,1,'','Earlier','earlier')",
+                rusqlite::params![unstamped.as_str(), wave.id()],
+            )
+            .unwrap();
+        let elsewhere = loopflow_model::durable::ProjectId::new();
+        crate::test_fixture::arrive(
+            &store,
+            "/repo",
+            &crate::work::edit::WorkEdit::for_target(
+                elsewhere.as_str(),
+                &[
+                    WorkValue::ProjectWave(wave.id().to_string()),
+                    WorkValue::ProjectName(Some("Theirs".into())),
+                ],
+            ),
+        )
+        .unwrap();
+        assert_eq!(
+            store
+                .enqueue_tracker_creations("/repo", TrackerKind::Linear)
+                .unwrap(),
+            2
+        );
+        let mut created: Vec<_> = store
+            .unconfirmed_tracker_actions("/repo")
+            .unwrap()
+            .into_iter()
+            .map(|action| action.owner)
+            .collect();
+        created.sort_by_key(|owner| format!("{owner:?}"));
+        let mut expected = vec![ActionOwner::Project(here), ActionOwner::Project(unstamped)];
+        expected.sort_by_key(|owner| format!("{owner:?}"));
+        assert_eq!(created, expected);
     }
 
     #[test]

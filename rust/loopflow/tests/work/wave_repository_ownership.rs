@@ -73,8 +73,6 @@ fn project(wave: &Wave) -> Project {
         slug: "architecture".to_string(),
         name: "Architecture".to_string(),
         description: "Keep identity boring.".to_string(),
-        krs: Vec::new(),
-        metric_targets: Vec::new(),
         tracker_synced_at: Some(now.unix_timestamp()),
 
         wave_id: wave.id().clone(),
@@ -362,13 +360,6 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
         .unwrap();
     let project = project(&alpha);
     store.create_project(&project).await.unwrap();
-    rusqlite::Connection::open(&database)
-        .unwrap()
-        .execute(
-            "UPDATE waves SET current_project_id=?2 WHERE id=?1",
-            rusqlite::params![project.wave_id, project.id.as_str()],
-        )
-        .unwrap();
     let (task, task_pr) = task(&store, &alpha, &project, &repo_a);
     planning::seed_unplaced_task(&database, &task);
     store

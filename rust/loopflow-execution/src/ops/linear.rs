@@ -556,7 +556,7 @@ pub fn connect(
 
 /// Link a Wave to its Linear Initiative and the repository Team. Connecting
 /// never creates a Wave itself: a name the store does not know is added first,
-/// so its files, first Project and commit land on the main checkout like any
+/// so its files and commit land on the main checkout like any
 /// other add; the binding's own files are committed there too.
 async fn connect_async(
     repo: &Path,
@@ -2154,7 +2154,6 @@ mod tests {
                     // Adding the Wave checks its tracker before the Initiative lookup.
                     json_response(StatusCode::OK, team.clone()),
                     json_response(StatusCode::OK, team.clone()),
-                    json_response(StatusCode::OK, team),
                     json_response(
                         StatusCode::OK,
                         json!({"data": {"initiatives": {"nodes": [], "pageInfo": {"hasNextPage": false, "endCursor": null}}}}),
@@ -2163,6 +2162,7 @@ mod tests {
                         StatusCode::OK,
                         json!({"data": {"initiativeCreate": {"initiative": {"id": "6f1d2c3b-4a5e-4f60-8a71-9b2c3d4e5f60"}}}}),
                     ),
+                    json_response(StatusCode::OK, team.clone()),
                     projects_response(json!([])),
                 ])
                 .await;
@@ -2211,8 +2211,8 @@ mod tests {
                             .expect("ops is registered");
                         assert_eq!(
                             fixture.store.sqlite.list_projects(Some(ops.id())).unwrap().len(),
-                            1,
-                            "add gives the Wave its first Project"
+                            0,
+                            "add gives the Wave no Project"
                         );
                     })
                     .await;
@@ -2791,10 +2791,7 @@ mod tests {
             slug: crate::linear::project_slug(name),
             name: name.to_string(),
             summary: String::new(),
-
-            metric_targets: Vec::new(),
             status: loopflow_storage::work::project::ProjectStatus::Started,
-            krs: Vec::new(),
             initiative_ids: vec!["initiative-1".to_string()],
             team_ids: vec!["team-loo".to_string()],
         };

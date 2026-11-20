@@ -17,18 +17,12 @@ to one. `uv run python scripts/due_removals.py` prints when each may drop.
 ## Wave
 
 - `wave_lifecycle_operations`: id, repo, wave_id, kind, operation_json
-- `waves`: id, name, repo, created_at, parent_wave_id, promoted_at, retired_at, superseded_by_wave_id, retirement_reason, work_state, work_terminal_at, current_project_id, project_activation_lf_process_id, project_activation_started_at, project_activation_pid, project_activation_os_started_at, project_activation_ended_at, project_activation_exit_code, project_activation_error
+- `waves`: id, name, repo, created_at, parent_wave_id, promoted_at, retired_at, superseded_by_wave_id, retirement_reason, work_state, work_terminal_at, ~~current_project_id~~ (leaving → LOO-995, remove_chapters), ~~project_activation_lf_process_id~~ (leaving → LOO-995, remove_chapters), ~~project_activation_started_at~~ (leaving → LOO-995, remove_chapters), ~~project_activation_pid~~ (leaving → LOO-995, remove_chapters), ~~project_activation_os_started_at~~ (leaving → LOO-995, remove_chapters), ~~project_activation_ended_at~~ (leaving → LOO-995, remove_chapters), ~~project_activation_exit_code~~ (leaving → LOO-995, remove_chapters), ~~project_activation_error~~ (leaving → LOO-995, remove_chapters)
 
 ## Wave Project
 
 - `project_changes`: order_effects_json, seq, id, project_id, field, value_json, base_json, conflict_json, attempted, error, acknowledged_revision, acknowledged
-- `project_events`: id, project_id, kind_json, created_at
-- `projects`: id, wave_id, external_project_id, created_at, project_slug, project_name, project_summary, planning_rank, planning_provider_revision, planning_initiatives, planning_teams, description, pm_snapshot_synced_at, updated_at, work_state, work_terminal_at, iteration, status, legacy_current, krs, metric_targets
-
-## Live metric
-
-- `metric_instruments`: wave_id, metric_id, instrument, registered_at
-- `metric_observations`: observation_id, wave_id, metric_id, contract_revision, instrument, source_time_seconds, source_time_nanoseconds, received_at, graduation_qualifying, payload
+- `projects`: id, wave_id, external_project_id, created_at, project_slug, project_name, project_summary, planning_rank, planning_provider_revision, planning_initiatives, planning_teams, description, pm_snapshot_synced_at, updated_at, work_state, work_terminal_at, ~~iteration~~ (leaving → LOO-995, remove_chapters), status, ~~legacy_current~~ (leaving → LOO-995, remove_chapters), ~~krs~~ (leaving → LOO-995, remove_chapters), ~~metric_targets~~ (leaving → LOO-995, remove_chapters)
 
 ## Task
 
@@ -48,7 +42,7 @@ to one. `uv run python scripts/due_removals.py` prints when each may drop.
 - `task_ship_events` — **leaving → LOO-971, task_auto**: id, task_id, kind, at, lf_process_id, person, pid, os_started_at, ended_at, exit_code, error, caller_session_id
 - `task_state_deliveries`: seq, id, task_id, target, base_revision, base_state, attempted, settled, error, conflict_json
 - `task_summaries`: task_id, ended, ended_at, graph, loop_passes, ~~ship_events~~ (leaving → LOO-971, task_auto), wall_seconds, reflect, auto
-- `tasks`: id, repository_id, project_id, external_issue_id, issue_identifier, created_at, issue_title, issue_description, pm_snapshot_synced_at, ~~worktree~~ (leaving → LOO-954, unused_store_members), workspace_slug, abandon_reason, updated_at, abandoned_at, ~~primary_session_id~~ (leaving → LOO-954, unused_store_members), planning_revision, planning_rank, planning_assignee, planning_state, planning_completed_at, planning_provider_revision, planning_url, planning_branch_name, planning_team_id, planning_completed, planning_deleted_at, ~~branch~~ (leaving → LOO-954, unused_store_members), ~~base_commit~~ (leaving → LOO-954, unused_store_members), ~~parent_pr_id~~ (leaving → LOO-954, unused_store_members), completion_request, completion_error, planning_due_date, ~~checkout_machine_id~~ (leaving → LOO-954, unused_store_members), ~~paused~~ (leaving → LOO-938, plan_hub), ~~shipped_at~~ (leaving → LOO-971, task_auto), ~~ship_lf_process_id~~ (leaving → LOO-954, unused_store_members), ~~ship_restarts~~ (leaving → LOO-954, unused_store_members), ~~ship_approved_lf_process_id~~ (leaving → LOO-954, unused_store_members), ~~ship_stopped_at~~ (leaving → LOO-954, unused_store_members), ~~ship_stopped_lf_process_id~~ (leaving → LOO-954, unused_store_members), ~~regressed_in~~ (leaving → LOO-730, unused_store_members), ~~ship_stopped_person~~ (leaving → LOO-954, unused_store_members)
+- `tasks`: id, repository_id, project_id, external_issue_id, issue_identifier, created_at, issue_title, issue_description, pm_snapshot_synced_at, ~~worktree~~ (leaving → LOO-954, unused_store_members), workspace_slug, abandon_reason, updated_at, abandoned_at, ~~primary_session_id~~ (leaving → LOO-954, unused_store_members), planning_revision, planning_rank, planning_assignee, planning_state, planning_completed_at, planning_provider_revision, planning_url, planning_branch_name, planning_team_id, planning_completed, planning_deleted_at, ~~branch~~ (leaving → LOO-954, unused_store_members), ~~base_commit~~ (leaving → LOO-954, unused_store_members), ~~parent_pr_id~~ (leaving → LOO-954, unused_store_members), completion_request, completion_error, planning_due_date, ~~checkout_machine_id~~ (leaving → LOO-954, unused_store_members), ~~paused~~ (leaving → LOO-938, plan_hub), ~~shipped_at~~ (leaving → LOO-971, task_auto), ~~ship_lf_process_id~~ (leaving → LOO-954, unused_store_members), ~~ship_restarts~~ (leaving → LOO-954, unused_store_members), ~~ship_approved_lf_process_id~~ (leaving → LOO-954, unused_store_members), ~~ship_stopped_at~~ (leaving → LOO-954, unused_store_members), ~~ship_stopped_lf_process_id~~ (leaving → LOO-954, unused_store_members), ~~regressed_in~~ (leaving → LOO-730, unused_store_members), ~~ship_stopped_person~~ (leaving → LOO-954, unused_store_members), wave_id
 - `tracker_actions`: seq, id, wave_id, project_id, task_id, subject, kind, value_json, base_json, conflict_json, phase, tracker, remote_id, confirmed_revision, error, sent_at, looked_at
 
 ## PR landing
@@ -62,15 +56,13 @@ to one. `uv run python scripts/due_removals.py` prints when each may drop.
 - `pm_issue_changes`: issue_id, revision_ns, removed
 - `pm_items`: repo, provider, id, identifier, project_id, observed_at, needs_refresh, revision, branch_name, url, name, description, rank, completed, completed_at, due_date, state, team_id, assignee, completed_at_observed, due_date_observed, assignee_observed, claimed_project_id, project_id_observed
 - `pm_project_name_cutover` — **leaving → LOO-954, unused_store_members**: repo, provider, id, body, observed_at, archived, membership_unresolved, converted_at
-- `pm_projects`: repo, provider, id, observed_at, archived, membership_unresolved, task_order_json, revision, slug, name, summary, status, krs, metric_targets, initiative_ids, team_ids, description, description_revision, description_observed_at
+- `pm_projects`: repo, provider, id, observed_at, archived, membership_unresolved, task_order_json, revision, slug, name, summary, status, ~~krs~~ (leaving → LOO-995, remove_chapters), ~~metric_targets~~ (leaving → LOO-995, remove_chapters), initiative_ids, team_ids, description, description_revision, description_observed_at
 - `pm_wave_projects`: wave_id, project_id, position
 - `pm_wave_sync`: wave_id, provider, initiative, synced_at
 - `project_binding_imports` — **leaving → LOO-954, unused_store_members**: wave_id, original_yaml, imported_at
-- `project_transition_items` — **leaving → LOO-954, unused_store_members**: wave_id, successor_id, issue_id
-- `project_transitions`: wave_id, successor_id, predecessor_id, reset_name, create_successor, created_at, settled_at, local_plan_json, export_json, export_attempted, export_link_attempted, export_error, export_observed_at
 - `tracker_events`: issue_id, revision_ns, removed
 - `tracker_items`: repo, tracker, id, identifier, project_id, observed_at, needs_refresh, revision, branch_name, url, name, description, rank, completed, completed_at, due_date, state, team_id, assignee, completed_at_observed, due_date_observed, assignee_observed, claimed_project_id, project_id_observed
-- `tracker_projects`: repo, tracker, id, observed_at, archived, membership_unresolved, task_order_json, revision, slug, name, summary, status, krs, metric_targets, initiative_ids, team_ids, description, description_revision, description_observed_at
+- `tracker_projects`: repo, tracker, id, observed_at, archived, membership_unresolved, task_order_json, revision, slug, name, summary, status, ~~krs~~ (leaving → LOO-995, remove_chapters), ~~metric_targets~~ (leaving → LOO-995, remove_chapters), initiative_ids, team_ids, description, description_revision, description_observed_at
 - `tracker_wave_projects`: wave_id, project_id, position
 - `tracker_wave_sync`: wave_id, tracker, initiative, synced_at
 
@@ -141,6 +133,8 @@ to one. `uv run python scripts/due_removals.py` prints when each may drop.
 - `git_tracker_imports` — **leaving → LOO-938, plan_hub**: repo, destination, revision
 - `git_tracker_routes` — **leaving → LOO-938, plan_hub**: mutation_id, repo, destination
 - `git_tracker_seen` — **leaving → LOO-938, plan_hub**: id
+- `metric_instruments` — **leaving → LOO-995, remove_chapters**: wave_id, metric_id, instrument, registered_at
+- `metric_observations` — **leaving → LOO-995, remove_chapters**: observation_id, wave_id, metric_id, contract_revision, instrument, source_time_seconds, source_time_nanoseconds, received_at, graduation_qualifying, payload
 - `ondemands` — **leaving → LOO-954, unused_store_members**: name, created_at
 - `planning_destinations` — **leaving → LOO-938, plan_hub**: repo, id, endpoint, reference, fetched_revision, acquisition_error, publication_revision, publication_state, publication_digest, publication_error
 - `planning_peer_changes` — **leaving → LOO-938, plan_hub**: id, record_table, mutation, object_id, field, clock
@@ -150,6 +144,9 @@ to one. `uv run python scripts/due_removals.py` prints when each may drop.
 - `planning_peer_routes` — **leaving → LOO-938, plan_hub**: mutation_id, repo, destination
 - `planning_user` — **leaving → LOO-938, plan_hub**: singleton, user_key
 - `pools` — **leaving → LOO-954, unused_store_members**: name, created_at
+- `project_events` — **leaving → LOO-995, remove_chapters**: id, project_id, kind_json, created_at
+- `project_transition_items` — **leaving → LOO-954, unused_store_members**: wave_id, successor_id, issue_id
+- `project_transitions` — **leaving → LOO-995, remove_chapters**: wave_id, successor_id, predecessor_id, reset_name, create_successor, created_at, settled_at, local_plan_json, export_json, export_attempted, export_link_attempted, export_error, export_observed_at
 - `session_steers` — **leaving → LOO-954, unused_store_members**: session_id, steer_id, attempt, applicable
 - `steer_batches` — **leaving → LOO-954, unused_store_members**: id, session_id, agent_process_id, provider_thread, attachment_token, boundary, payload_hash, evidence, created_at
 - `steer_deliveries` — **leaving → LOO-954, unused_store_members**: session_id, steer_id, attempt, batch_id, excerpted

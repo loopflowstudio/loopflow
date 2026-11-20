@@ -1194,16 +1194,14 @@ mod tests {
     fn operator_skills_stay_on_existing_work() {
         for name in ["repo-operate", "wave-operate"] {
             let skill = builtins::get_builtin_skill(name).unwrap();
-            for planning in ["lf task create", "update-project", "lf task claim", "KR"] {
+            for planning in ["lf task create", "lf task claim"] {
                 assert!(!skill.contains(planning), "{name} names {planning:?}");
             }
             assert!(skill.contains("lf config user"), "{name} omits ownership");
         }
         for name in ["s1", "s2", "s3", "s4", "s5"] {
             let skill = builtins::get_builtin_skill(name).unwrap();
-            for planning in ["lf task create", "update-project"] {
-                assert!(!skill.contains(planning), "{name} names {planning:?}");
-            }
+            assert!(!skill.contains("lf task create"), "{name} creates Tasks");
         }
     }
 

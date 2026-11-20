@@ -64,29 +64,43 @@ impl SqliteStore {
         )
     }
 
-    /// Membership and its pending effect commit together without transferring execution.
+    /// Save the Task's Wave and the Project it reaches there in one transaction.
     pub fn move_task(
         &self,
         id: &TaskId,
         expected_project: Option<&ProjectId>,
-        destination: Option<&ProjectId>,
+        wave: Option<&loopflow_model::id::WaveId>,
     ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let current = validate_move(&tx, id, expected_project, destination)?;
-        if current.project_id.as_ref() == destination {
-            return Ok(());
+        let task = super::children::task_on(&tx, id)?.ok_or(StoreError::NotFound)?;
+        let destination = move_project_in(&tx, &task, wave)?;
+        validate_move(&tx, &task, expected_project, destination.as_ref())?;
+        if task.project_id != destination || task.wave_id.as_ref() != wave {
+            planning_write::local(
+                &tx,
+                &crate::work::edit::WorkEdit::for_target(
+                    id.as_str(),
+                    &[
+                        Edit::TaskWave(wave.map(ToString::to_string)),
+                        Edit::TaskProject(destination.map(|id| id.to_string())),
+                    ],
+                ),
+            )?;
         }
-        super::planning_write::local(
-            &tx,
-            &crate::work::edit::WorkEdit::for_target(
-                id.as_str(),
-                &[Edit::TaskProject(destination.map(ToString::to_string))],
-            ),
-        )
-        .map(|_| ())?;
         tx.commit()?;
         Ok(())
+    }
+
+    /// The Project a Task moved to `wave` is in afterwards.
+    pub fn task_move_project(
+        &self,
+        id: &TaskId,
+        wave: Option<&loopflow_model::id::WaveId>,
+    ) -> StoreResult<Option<ProjectId>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let task = super::children::task_on(&conn, id)?.ok_or(StoreError::NotFound)?;
+        move_project_in(&conn, &task, wave)
     }
 
     pub fn validate_task_move(
@@ -97,7 +111,8 @@ impl SqliteStore {
     ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let snapshot = conn.savepoint()?;
-        validate_move(&snapshot, id, expected_project, destination).map(|_| ())
+        let task = super::children::task_on(&snapshot, id)?.ok_or(StoreError::NotFound)?;
+        validate_move(&snapshot, &task, expected_project, destination)
     }
 
     pub fn validate_task_edit(
@@ -172,16 +187,35 @@ fn validate_edit(
     Ok(task)
 }
 
+/// A moved Task keeps its Project when the new Wave is that Project's Wave
+/// or below it; otherwise it joins the Project the new Wave reaches.
+fn move_project_in(
+    conn: &rusqlite::Connection,
+    task: &Task,
+    wave: Option<&loopflow_model::id::WaveId>,
+) -> StoreResult<Option<ProjectId>> {
+    let Some(wave) = wave else {
+        return Ok(None);
+    };
+    if let Some(project) = &task.project_id {
+        if let Some(project_wave) = super::children::project_wave_in(conn, project.as_str())? {
+            if super::children::wave_within_in(conn, wave, &project_wave)? {
+                return Ok(Some(project.clone()));
+            }
+        }
+    }
+    super::children::task_project_in(conn, wave)
+}
+
 fn validate_move(
     conn: &rusqlite::Connection,
-    id: &TaskId,
+    current: &Task,
     expected_project: Option<&ProjectId>,
     destination: Option<&ProjectId>,
-) -> StoreResult<Task> {
-    let current = super::children::task_on(conn, id)?.ok_or(StoreError::NotFound)?;
-    super::children::require_task_not_deleted(conn, &current)?;
+) -> StoreResult<()> {
+    super::children::require_task_not_deleted(conn, current)?;
     if current.project_id.as_ref() == destination {
-        return Ok(current);
+        return Ok(());
     }
     if current.project_id.as_ref() != expected_project {
         return Err(StoreError::InvalidAuthority(
@@ -189,7 +223,6 @@ fn validate_move(
         ));
     }
     if let Some(destination) = destination {
-        super::durable::require_selected_project(conn, destination)?;
         let same_repo: bool = conn.query_row(
             "SELECT EXISTS(SELECT 1 FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo WHERE p.id=?1 AND r.id=?2)",
             rusqlite::params![destination.as_str(), current.repository_id.as_str()], |row| row.get(0),
@@ -200,7 +233,7 @@ fn validate_move(
             ));
         }
     }
-    Ok(current)
+    Ok(())
 }
 
 #[cfg(test)]

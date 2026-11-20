@@ -32,12 +32,9 @@ use loopflow_execution::provider_auth::Provider;
 use loopflow_execution::session::TitleSource;
 use loopflow_execution::store::{SharedStore, StorageConfig};
 use loopflow_execution::task_graph::END;
-use loopflow_execution::work::wave::metrics::MetricTarget;
-pub use loopflow_execution::work::wave::metrics::Threshold;
 use loopflow_model::durable::TaskId;
 use loopflow_model::id::{LfProcessId, TraceId};
 use loopflow_storage::work::edit::Disposition;
-use loopflow_storage::work::project::ProjectKR;
 use loopflow_storage::work::task::{Task, TaskEventKind};
 
 const DAY: i64 = 24 * 60 * 60;
@@ -346,93 +343,12 @@ impl World {
         Ok(())
     }
 
-    /// Add a Wave and its current Project, as `lf wave add` does.
+    /// Add a Wave, as `lf wave add` does.
     pub fn wave(&self, name: &str) -> Result<()> {
         self.runtime
             .block_on(loopflow_execution::ops::wave_lifecycle::add(
                 &self.repo, name, None,
             ))?;
-        Ok(())
-    }
-
-    /// Set the current Project's KRs and metric targets, as `lf wave edit-project`
-    /// does. Targets name metrics already authored with [`Self::metric`].
-    pub fn plan(
-        &self,
-        wave: &str,
-        krs: &[(&str, bool)],
-        targets: &[(&str, Threshold)],
-    ) -> Result<()> {
-        let krs: Vec<ProjectKR> = krs
-            .iter()
-            .map(|(text, holds)| ProjectKR {
-                text: (*text).to_string(),
-                holds: *holds,
-            })
-            .collect();
-        let targets: Vec<MetricTarget> = targets
-            .iter()
-            .map(|(metric_id, target)| MetricTarget {
-                metric_id: (*metric_id).to_string(),
-                target: target.clone(),
-            })
-            .collect();
-        self.runtime
-            .block_on(loopflow_execution::ops::project::update_project(
-                &self.repo,
-                Some(wave),
-                &krs,
-                &targets,
-            ))?;
-        Ok(())
-    }
-
-    /// Author a weekly metric contract for `wave` and, with `value`, publish one
-    /// complete observation for the week ending `ended_days_ago`, the way a
-    /// metric producer does. `None` leaves the metric uninstrumented.
-    pub fn metric(
-        &self,
-        wave: &str,
-        id: &str,
-        title: &str,
-        stage: &str,
-        value: Option<f64>,
-        ended_days_ago: f64,
-    ) -> Result<()> {
-        let instrument = "world";
-        let dir = self.repo.join(".lf/wave").join(wave).join("metrics");
-        std::fs::create_dir_all(&dir)?;
-        std::fs::write(
-            dir.join(format!("{id}.md")),
-            format!(
-                "---\nschema: 1\nid: {id}\nstage: {stage}\ninstrument: {instrument}\n\
-                 unit: count\nwindow: 7d\nfreshness: 8d\n---\n\n# {title}\n\n\
-                 Counted over the latest complete week.\n"
-            ),
-        )?;
-        let Some(value) = value else {
-            return Ok(());
-        };
-        let end = time::OffsetDateTime::from_unix_timestamp(self.days_ago(ended_days_ago))?;
-        let store = self.store()?;
-        self.runtime.block_on(
-            loopflow_execution::ops::metrics::publish_metric_observations(
-                &store,
-                &self.repo,
-                vec![
-                    loopflow_execution::ops::metrics::MetricProducerObservation::Observed {
-                        wave: wave.to_string(),
-                        metric_id: id.to_string(),
-                        instrument: instrument.to_string(),
-                        value,
-                        source_window_start: end - time::Duration::days(7),
-                        source_window_end: end,
-                        complete: true,
-                    },
-                ],
-                time::OffsetDateTime::now_utc(),
-            ),
-        )?;
         Ok(())
     }
 

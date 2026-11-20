@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use loopflow_model::id::WaveId;
-use loopflow_storage::work::project::{Project, ProjectEvent, ProjectEventKind, ProjectId};
+use loopflow_storage::work::project::{Project, ProjectId};
 use loopflow_storage::work::task::{
     Task, TaskEvent, TaskEventKind, TaskId, TaskPr, TaskPrId, TaskTrackerCursor,
     TrackerEventOutcome,
@@ -18,6 +18,7 @@ impl Store {
         &self,
         task_id: &TaskId,
         creation: Option<loopflow_storage::work::task::NewTask>,
+        creation_wave: Option<WaveId>,
         placement: Option<(std::path::PathBuf, TaskPr)>,
         session: Option<crate::session::LfSession>,
         destination: Option<std::path::PathBuf>,
@@ -30,6 +31,7 @@ impl Store {
                 &store,
                 &task_id,
                 creation.as_ref(),
+                creation_wave.as_ref(),
                 placement.as_ref(),
                 session.as_ref(),
                 destination.as_deref(),
@@ -206,39 +208,6 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.latest_task_event(&task_id)).await
     }
 
-    pub async fn latest_project_event_at(
-        &self,
-        project_id: &ProjectId,
-    ) -> StoreResult<Option<OffsetDateTime>> {
-        let project_id = project_id.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.latest_project_event_at(&project_id)
-        })
-        .await
-    }
-
-    pub async fn latest_project_event(
-        &self,
-        project_id: &ProjectId,
-    ) -> StoreResult<Option<ProjectEvent>> {
-        let project_id = project_id.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.latest_project_event(&project_id)
-        })
-        .await
-    }
-
-    pub async fn latest_project_failure(
-        &self,
-        project_id: &ProjectId,
-    ) -> StoreResult<Option<loopflow_storage::work::project::HistoricalFailure>> {
-        let project_id = project_id.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.latest_project_failure(&project_id)
-        })
-        .await
-    }
-
     pub async fn get_task_pr(&self, pr_id: &TaskPrId) -> StoreResult<Option<TaskPr>> {
         let pr_id = pr_id.clone();
         run_sqlite(&self.sqlite, move |store| store.task_pr(&pr_id)).await
@@ -368,31 +337,6 @@ impl Store {
         let wave_id = wave_id.cloned();
         run_sqlite(&self.sqlite, move |store| {
             store.list_projects(wave_id.as_ref())
-        })
-        .await
-    }
-
-    pub async fn append_project_event(
-        &self,
-        project_id: &ProjectId,
-        kind: &ProjectEventKind,
-    ) -> StoreResult<ProjectEvent> {
-        let project_id = project_id.clone();
-        let kind = kind.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.append_project_event(&project_id, &kind)
-        })
-        .await
-    }
-
-    pub async fn project_events_after(
-        &self,
-        project_id: &ProjectId,
-        cursor: i64,
-    ) -> StoreResult<Vec<ProjectEvent>> {
-        let project_id = project_id.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.project_events_after(&project_id, cursor)
         })
         .await
     }

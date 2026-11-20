@@ -4,7 +4,7 @@ Read when the change touches `lf repo tracker`, the `tracker:` config key, Git p
 
 A fresh Git repository with no remote is the first-visit case: `lf repo
 tracker` reads `Plan: this Machine.` and `lf task create`, `lf wave
-edit-project` all run. Then `git init --bare` a sibling, `git remote add origin
+create` both run. Then `git init --bare` a sibling, `git remote add origin
 <it>`, push `main`: `lf repo tracker` reads `Plan: Git origin, N unsent.` with
 the records listed. `lf task sync <id>` (it needs an id) exchanges now, and
 `git ls-remote origin` shows `refs/loopflow/plan/<machine id>`: one JSON file
@@ -132,7 +132,45 @@ both remotes away, make the Wave on both, bring only the hub back and
 clears it and the mini's list holds both. `lf task sync` still exits 1 on
 Git's error while the remotes are away.
 
+No `lf` command adds, renames or ends a Project without a tracker. To give a
+Wave a second Project, or end one, push a Project record as another Machine:
+copy `projects/<id>.json` from this home's ref, give it a new `proj_<32 hex>`
+id, the Wave's id in `project_wave`, a `home_<32 hex>` machine and a later
+`at`, commit it with the `repository` file in a fresh `git init` and
+`git push <bare> HEAD:refs/loopflow/plan/<that machine>`; `lf task sync <id>`
+takes it. Change `project_status` to `completed` with a later `at` and
+force-push to end it. Fields this build doesn't know (`project_krs`,
+`wave_project`) are `WARN loopflow_storage::work::edit: skipped an unknown
+plan field` lines.
+
+For a returning user on a stacked branch, the installed `lf` may be newer than
+the branch base and its store refuses the branch ("migration … is unknown").
+Build the base instead: `git worktree add --detach <dir> <base>` and
+`CARGO_TARGET_DIR=<other dir> cargo build -p loopflow --bin lf` (about four
+minutes), write the home with it, then open it with the branch.
+
 For the minute, run the laptop's `lf server run` in the background (record
 its PID), type nothing on the laptop and poll `lf task list` there after a
 save on the mini: 40 to 60 s. The minute's exchange is silent; a split Wave
 is one `skipped a plan record` WARN per exchange in `logs/lf.log`.
+
+A Task's Wave is `tasks.wave_id`, carried as `task_wave`. To check a Task in
+an ancestor's Project, build the home with an `lf` older than LOO-995
+(`lf wave create` there makes the Wave's Project), then open it with the
+branch, `lf wave create <parent>/<child>` and `lf task create --wave
+<parent>/<child>`: it joins the parent's Project and must list as a Task
+under the child in `lf wave status`, `lf wave show` and `lf wave list`. A
+fresh clone on a second home must show every Task under the same Wave
+(`tasks.wave_id` in its store). Read a record from the right Machine's ref:
+once a second home has synced, `for-each-ref refs/loopflow/plan | head -1`
+may be that home's ref, which republishes what it took in. Records written
+before `task_wave` existed carry no such field, and every later home
+republishes the value it derived at stamp 0, so a home that took a record in
+wrongly passes the mistake on: delete that home's ref
+(`git update-ref -d`) before repeating the run.
+
+A repository with a Linear or Asana tracker has no Git plan exchange: after
+`git push`, `git -C <bare> for-each-ref refs/loopflow` is empty and a fresh
+clone on a second home lists nothing. Cross-Machine checks there need a real
+tracker login. With a team configured and an `origin`, every create waits on
+"No Linear credential found"; without `origin`, on the origin error.

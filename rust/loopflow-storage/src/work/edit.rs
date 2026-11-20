@@ -54,13 +54,40 @@ pub struct StampedValue {
 
 /// A Wave, Project, Task or comment as it travels between Machines: every
 /// field it has, each with its stamp. A hub exchange and a plan ref carry
-/// exactly this.
+/// exactly this. A field this build does not know, from a Machine on another
+/// build, is skipped and logged; the rest of the record still reads.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StampedRecord {
     /// `waves`, `projects`, `tasks` or `task_comments`.
     pub table: String,
     pub id: String,
+    #[serde(deserialize_with = "known_fields")]
     pub fields: Vec<StampedValue>,
+}
+
+fn known_fields<'de, D, T>(deserializer: D) -> Result<Vec<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: serde::de::DeserializeOwned,
+{
+    Vec::<Value>::deserialize(deserializer)?
+        .into_iter()
+        .filter(|entry| {
+            if let Some(name) = entry["field"].as_str() {
+                if !WorkValue::knows_field(name) {
+                    tracing::warn!(field = name, "skipped an unknown plan field");
+                    return false;
+                }
+            }
+            true
+        })
+        .map(|entry| serde_json::from_value(entry).map_err(serde::de::Error::custom))
+        .collect()
+}
+
+/// Read a saved tracker baseline using the same fields as a plan record.
+pub fn known_values(values: Value) -> StoreResult<Vec<WorkValue>> {
+    Ok(known_fields(values)?)
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -84,6 +111,10 @@ macro_rules! work_values {
             $(#[serde(rename = $field)] $variant($value),)*
         }
         impl WorkValue {
+            fn knows_field(name: &str) -> bool {
+                matches!(name, $($field)|*)
+            }
+
             /// The typed variant is also its portable conflict key.
             pub fn field(&self) -> &'static str {
                 match self { $(Self::$variant(_) => $field,)* }
@@ -100,7 +131,6 @@ work_values! {
     (WaveParent, "wave_parent", Option<String>),
     // Captured only once a Wave is removed, so live Waves exchange as before.
     (WaveRetired, "wave_retired", Option<i64>),
-    (WaveProject, "wave_project", Option<String>),
     (ProjectWave, "project_wave", String),
     (ProjectLinearId, "project_linear_id", Option<String>),
     (ProjectSlug, "project_slug", Option<String>),
@@ -112,6 +142,7 @@ work_values! {
     (ProjectInitiatives, "project_initiatives", Vec<String>),
     (ProjectTeams, "project_teams", Vec<String>),
     (TaskProject, "task_project", Option<String>),
+    (TaskWave, "task_wave", Option<String>),
     (TaskLinearId, "task_linear_id", Option<String>),
     (TaskIdentifier, "task_identifier", String),
     (TaskTitle, "task_title", Option<String>),
@@ -124,8 +155,6 @@ work_values! {
     (TaskBranch, "task_branch", Option<String>),
     (TaskTeam, "task_team", Option<String>),
     (CommentTask, "comment_task", String),
-    (Krs, "krs", Vec<crate::work::project::ProjectKR>),
-    (MetricTargets, "metric_targets", Vec<crate::metric::MetricTarget>),
     (Disposition, "disposition", Disposition),
     (CommentContent, "comment_content", CommentContent),
 }
@@ -135,6 +164,7 @@ impl WorkValue {
         use loopflow_model::id::{canonical_prefixed, canonical_task_identifier, canonical_uuid};
         match self {
             Self::WaveParent(v)
+            | Self::TaskWave(v)
             | Self::ProjectLinearId(v)
             | Self::TaskLinearId(v)
             | Self::TaskAssignee(v)
@@ -143,9 +173,7 @@ impl WorkValue {
                     *v = canonical_uuid(v);
                 }
             }
-            Self::WaveProject(Some(v)) | Self::TaskProject(Some(v)) => {
-                *v = canonical_prefixed(v, "proj_")
-            }
+            Self::TaskProject(Some(v)) => *v = canonical_prefixed(v, "proj_"),
             Self::ProjectWave(v) => *v = canonical_uuid(v),
             Self::CommentTask(v) => *v = canonical_prefixed(v, "task_"),
             Self::TaskIdentifier(v) => *v = canonical_task_identifier(v),
@@ -173,11 +201,37 @@ impl WorkValue {
             Self::Disposition(v) if !matches!(v.planning_completed, 0 | 1) => {
                 return Err(StoreError::InvalidData("invalid completion value".into()))
             }
-            Self::MetricTargets(v) => {
-                crate::work::project::validate_metric_targets(v).map_err(StoreError::InvalidData)?
-            }
             _ => {}
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{StampedRecord, WorkValue};
+
+    #[test]
+    fn malformed_known_fields_fail_the_record() {
+        let record = serde_json::json!({"table":"waves","id":"w","fields":[
+            {"field":"wave_name","value":false,"at":3,"machine":"home_a"}
+        ]});
+        assert!(serde_json::from_value::<StampedRecord>(record).is_err());
+    }
+
+    #[test]
+    fn a_record_from_another_build_reads_without_the_fields_this_build_dropped() {
+        let record: StampedRecord = serde_json::from_str(
+            r#"{"table":"waves","id":"w","fields":[
+                {"field":"wave_name","value":"billing","at":3,"machine":"home_a"},
+                {"field":"wave_project","value":"proj_1","at":4,"machine":"home_a"}]}"#,
+        )
+        .unwrap();
+        assert_eq!(record.fields.len(), 1);
+        assert_eq!(
+            record.fields[0].value,
+            WorkValue::WaveName("billing".into())
+        );
+        assert_eq!(record.fields[0].at, 3);
     }
 }

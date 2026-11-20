@@ -12,7 +12,7 @@ are listed separately. The counts are navigation aids, not quality metrics.
 | Territory | Main paths | Approx. LOC | What lives there |
 | --- | --- | ---: | --- |
 | CLI and presentation | `rust/loopflow/src/lf/`, `src/bin/` | 31,700 | Clap grammar, command dispatch, status/read models, terminal output |
-| Operational workflows | `rust/loopflow-execution/src/ops/` | 25,800 | Task control, sessions, PR, Git, release, metrics, planning operations |
+| Operational workflows | `rust/loopflow-execution/src/ops/` | 25,800 | Task control, sessions, PR, Git, release, planning operations |
 | Prompt assembly, Graph runner and provider processes | `rust/loopflow-execution/src/prompt/`, `agent/`, `graph/`, `skills/`, `src/harness/` | 29,300 | Skill/Graph discovery, prompt assembly, provider subprocesses and streams |
 | Tracked Work | `work/`, `pm/` | — | Wave/Task facts, Task delivery identity, tracker models |
 | Storage and command journal | `store/`, `journal/` | 19,700 | SQLite access, migration runner, durable rows, outer command receipts |
@@ -41,7 +41,7 @@ kernel locks                 live local exclusion authority
 
 | Owner | Tables | Purpose |
 | --- | --- | --- |
-| Planning | `waves`, `projects`, `project_events`, `tasks`, `task_creation_intents`, `task_comments`, `task_issue_identities`, `task_deletions`, `task_events`, `tracker_actions` | Stored plans and definitions, optional tracker links, stable Work identity, creation records, comments, deletion recovery and the outbound tracker queue |
+| Planning | `waves`, `projects`, `tasks`, `task_creation_intents`, `task_comments`, `task_issue_identities`, `task_deletions`, `task_events`, `tracker_actions` | Stored plans and definitions, optional tracker links, stable Work identity, creation records, comments, deletion recovery and the outbound tracker queue |
 | Submitted creations | `creation_receipts` | Request IDs, content fingerprints, original resource identities and server-owned outcomes for Task creation and new Session threads |
 | Served command answers | `command_answers` | Request IDs, content fingerprints and first answers retained for one day so a lost reply can be retrieved without repeating the write |
 | Execution | `agent_sessions`, `session_events`, `session_activity` | Conversations, selected captures, observed provider transitions, native completions, turn receipts and the current observations availability is judged from |
@@ -55,7 +55,6 @@ kernel locks                 live local exclusion authority
 | Desktop arrangement | `dashboards`, `dashboard_arrangements`, `task_orders`, `work_pane_layouts` | Saved Dashboard queries and their occurrence order and the repository's Task order; `work_pane_layouts` is leaving, since Desktop keeps pane layouts per Mac |
 | Historical Ask | `ask_exchanges`, `ask_linear_comment_outbox` | Retained exchange/publication facts; former Ask rows are ordinary conversations in `agent_sessions` |
 | Linear refresh | `tracker_projects`, `tracker_items`, `tracker_wave_projects`, `tracker_wave_sync`, `tracker_events`, `linear_team_checks` | Tracker events, shared attempt freshness and successful team watermark |
-| Metrics | `metric_instruments`, `metric_observations` | Registered producers and accepted measurements |
 | PR landing | `pr_landings`, `ci_incidents` | Exact PR-head delivery intent, claims, and repair admission |
 | Rental | `ondemands`, `pools`, `pool_machines`, `rentals`, `machine_records` | Creation receipts, owned machine commitments with their cost and expiry, admitted rentals with caps and deadlines, and records copied back before a machine is given back; templates, availability and admission limits live in personal configuration |
 | Machine and provider authority | `machines`, `access_profiles`, `provider_accounts`, `provider_account_limits`, `provider_account_switches`, `provider_session_accounts`, `provider_tokens` | Machine identity (id, public name, person) and service browser identities and credentials, retained historical limits, account switches and delivery receipts; historical account rows do not select native launch credentials |
@@ -68,19 +67,12 @@ the final Process, Project-status and Session schema. Current Work, links, accou
 routes and resumable conversations survive the cutover. Migration rehearsal uses
 a disposable copy and leaves the installed Machine unchanged.
 
-Metric observations retain their original payload and content hash, including the
-Wave spelling used by the producer. `MetricObservationIdentity` is that hash input;
-`MetricIdentity` is the canonical Work association used by contracts, validation,
-qualification and readings. The relational Wave key can change case without
-rewriting evidence or changing equal-time selection. Reimporting the original
-payload remains idempotent. Metric names and UUID punctuation retain their bytes.
-
 ### Filesystem state
 
 | Location | Contents | Write pattern |
 | --- | --- | --- |
 | `.lf/skills/`, `.lf/graphs/`, `.lf/config.yaml` | Repository-owned execution definitions | Authored and reviewed with code |
-| `.lf/wave/<name>/GOAL.md`, `MEMORY.md`, `metrics/` | Wave intent, curated memory, metric contracts | Authored and reviewed with code |
+| `.lf/wave/<name>/GOAL.md`, `MEMORY.md` | Wave intent and curated memory | Authored and reviewed with code |
 | `.lf/releases/<tag>/<commit>-<run>/` | Prepared release bytes and their candidate receipt | Replace one exact candidate atomically; retain through retry, remove after publication |
 | `$LF_HOME/runs/<prefix>/<artifact-key>/` | Session capture manifest, event streams, terminal receipt | Publish once, append streams, settle once |
 | Machine provider directories | Provider-native login and resume state | Owned by provider adapters |

@@ -88,16 +88,31 @@ struct WorkModelTests {
         #expect(model.selection == nil)
     }
 
-    @Test("Current project source references navigate directly to the Wave")
+    @Test("Source references for every listed Project navigate to its Wave")
     func projectReferencesSelectWave() async throws {
         let fixture = try WorkTestFixture.load()
         let model = WorkModel(query: fixture.query)
-        await model.refresh()
-        let wave = try #require(fixture.roadmap.waves.first)
-        let project = try #require(wave.currentProject)
-        for reference in [project.id, project.slug, project.trackerId].compactMap({ $0 }) {
-            model.select(.project(id: reference))
-            #expect(model.selection == .wave(id: wave.wave.id))
+        var wire = try #require(JSONSerialization.jsonObject(with: Data(fixture.roadmapJSON.utf8)) as? [String: Any])
+        var waves = try #require(wire["waves"] as? [[String: Any]])
+        var projects = try #require(waves[0]["projects"] as? [String: Any])
+        let entries = try #require(projects["items"] as? [[String: Any]])
+        var ended = try #require(entries.first)
+        ended["id"] = "ended-project"
+        ended["slug"] = "ended"
+        ended["tracker_id"] = "tracker-ended"
+        ended["status"] = "completed"
+        projects["items"] = entries + [ended]
+        waves[0]["projects"] = projects
+        wire["waves"] = waves
+        let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self, from: JSONSerialization.data(withJSONObject: wire))
+        model.applyFixture(roadmap: .available(roadmap), waves: .available(fixture.waves),
+            workActivity: .available(fixture.workActivity), repos: [])
+        let wave = try #require(roadmap.waves.first)
+        for project in wave.projects.items {
+            for reference in [project.id, project.slug, project.trackerId].compactMap({ $0 }) {
+                model.select(.project(id: reference))
+                #expect(model.selection == .wave(id: wave.wave.id))
+            }
         }
     }
 
@@ -126,7 +141,6 @@ struct WorkModelTests {
         var successor = plans[0]
         successor["id"] = "next"
         successor["name"] = "Next project"
-        plans[0]["current"] = false
         plans.append(successor)
         projects["items"] = plans
         waves[0]["projects"] = projects
@@ -140,8 +154,8 @@ struct WorkModelTests {
         #expect(model.task(id: "issue-now")?.wave!.projects.items.last?.id == "next")
     }
 
-    @Test("Project history remains reachable when the current plan is unavailable")
-    func historyOpensWithoutCurrentProject() throws {
+    @Test("Projects remain reachable when planning is unavailable")
+    func projectsOpenWhenPlanningIsUnavailable() throws {
         let fixture = try WorkTestFixture.load()
         var wire = try #require(JSONSerialization.jsonObject(with: Data(fixture.roadmapJSON.utf8)) as? [String: Any])
         var waves = try #require(wire["waves"] as? [[String: Any]])
@@ -154,9 +168,9 @@ struct WorkModelTests {
         model.select(.wave(id: "wave-1"))
 
         let view = WorkSurfaceView(model: model)
-        try view.inspect().find(button: "Project history").tap()
+        try view.inspect().find(button: "Projects").tap()
 
-        #expect(model.historyWave?.id == "wave-1")
+        #expect(model.projectsWave?.id == "wave-1")
         #expect(model.selection == .wave(id: "wave-1"))
     }
 
@@ -177,7 +191,7 @@ struct WorkModelTests {
         var historical = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: fixtures.appendingPathComponent("wave_detail.json"))) as? [String: Any])
         historical["projects"] = ["state": "ok", "truncated": false, "items": [[
             "id": "old-plan", "tracker_id": NSNull(), "slug": "old", "name": "Previous",
-            "workflow": "feature", "status": "completed", "current": false, "metric_targets": [], "krs": [],
+            "workflow": "feature", "status": "completed",
             "sync": ["actions": []]
         ]]]
         let reply = try JSONSerialization.data(withJSONObject: historical)
@@ -186,15 +200,15 @@ struct WorkModelTests {
         switch destination {
         case "history":
             #expect(model.selection == .wave(id: "wave-1"))
-            #expect(model.historyWave?.id == "wave-1")
-            #expect(model.historyReference == "old-plan")
+            #expect(model.projectsWave?.id == "wave-1")
+            #expect(model.projectsReference == "old-plan")
         case "task":
             #expect(model.selection == .task(id: "issue-now"))
-            #expect(model.historyWave == nil)
+            #expect(model.projectsWave == nil)
         default:
             #expect(model.repoPath == "/src/context")
             #expect(model.selection == nil)
-            #expect(model.historyWave == nil)
+            #expect(model.projectsWave == nil)
         }
     }
 

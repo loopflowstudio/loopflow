@@ -185,13 +185,10 @@ fn unsent_count(conn: &Connection, repo: &str, sent_seq: i64) -> StoreResult<usi
 }
 
 /// What a record cannot be written without: a comment's Task, a Task's
-/// Project, a Project's Wave, a Wave's parent and the Project it selects.
+/// Project, a Project's Wave, a Wave's parent.
 fn needs(conn: &Connection, table: &str, id: &str) -> StoreResult<Vec<(String, String)>> {
     let sql = match table {
-        "waves" => {
-            "SELECT 'waves',parent_wave_id FROM waves WHERE id=?1
-             UNION ALL SELECT 'projects',current_project_id FROM waves WHERE id=?1"
-        }
+        "waves" => "SELECT 'waves',parent_wave_id FROM waves WHERE id=?1",
         "projects" => "SELECT 'waves',wave_id FROM projects WHERE id=?1",
         "tasks" => "SELECT 'projects',project_id FROM tasks WHERE id=?1",
         _ => "SELECT 'tasks',task_id FROM task_comments WHERE id=?1",
@@ -678,7 +675,7 @@ mod tests {
     fn task(store: &SqliteStore, title: &str) -> (WaveId, TaskId) {
         let wave = Wave::new(WaveId::new(), "plan".into(), REPO.into());
         crate::test_fixture::wave(store, &wave);
-        let project = store.ensure_project(wave.id(), "Plan").unwrap();
+        let project = store.seed_project(wave.id()).unwrap().id;
         let task = TaskId::new();
         store
             .create_task(&NewTask {
@@ -734,6 +731,30 @@ mod tests {
         assert_eq!(title(&hub, &task), "two");
         // What the hub gave is not owed back to it.
         assert_eq!(unsent(&laptop), 0);
+    }
+
+    #[test]
+    fn a_task_saved_before_it_had_its_own_wave_arrives_in_its_project_s_wave() {
+        let dir = tempfile::tempdir().unwrap();
+        let (laptop, hub) = (machine(&dir, "laptop"), machine(&dir, "hub"));
+        let (wave, task) = task(&laptop, "older");
+        // A build before `task_wave` sent the Task with its Project only.
+        let mut records = laptop
+            .plan_records_since(REPO, 0, usize::MAX)
+            .unwrap()
+            .records;
+        for record in &mut records {
+            record
+                .fields
+                .retain(|field| !matches!(field.value, WorkValue::TaskWave(_)));
+        }
+        hub.apply_plan_records(REPO, &records, None, &Default::default())
+            .unwrap();
+        assert_eq!(
+            hub.task(&task).unwrap().unwrap().wave_id,
+            Some(wave.clone())
+        );
+        assert_eq!(hub.list_tasks(Some(&wave)).unwrap().len(), 1);
     }
 
     fn claim(store: &SqliteStore, task: &TaskId) -> loopflow_model::durable::MachineId {

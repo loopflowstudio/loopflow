@@ -158,6 +158,7 @@ pub async fn save(
     main: &Path,
     id: TaskId,
     creation: Option<NewTask>,
+    creation_wave: Option<loopflow_model::id::WaveId>,
     source: Source,
     acquisition: Option<Arc<PlanningLocks>>,
     continue_in_task: bool,
@@ -218,6 +219,7 @@ pub async fn save(
         .promote_task(
             &id,
             creation,
+            creation_wave,
             placement,
             source.session,
             destination.clone(),
@@ -270,6 +272,7 @@ pub async fn bind_session(store: &SharedStore, session: &LfSession, task: &Task)
         store,
         &repo,
         task.id.clone(),
+        None,
         None,
         source,
         acquisition,

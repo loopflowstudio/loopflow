@@ -120,11 +120,11 @@ fn removing_an_empty_wave_retires_it_and_removes_its_files_on_main() {
     assert_eq!(preview["summary"][0], "research has no Tasks or Sessions.");
     assert_eq!(preview["uncommitted"][0], ".lf/wave/research/GOAL.md");
     assert_eq!(
-        preview["summary"][2],
+        preview["summary"][1],
         ".lf/wave/research is deleted on the main checkout; Git history keeps its committed files."
     );
     assert_eq!(
-        preview["summary"][3],
+        preview["summary"][2],
         "Uncommitted edits in .lf/wave/research are deleted with it: .lf/wave/research/GOAL.md."
     );
     assert!(
@@ -141,7 +141,7 @@ fn removing_an_empty_wave_retires_it_and_removes_its_files_on_main() {
     assert!(lab.live_waves().is_empty());
     assert_eq!(
         removed["summary"][1],
-        "1 Project stays readable in history."
+        ".lf/wave/research removed on the main checkout."
     );
     let history = lab.lf(&["wave", "show", "research", "--json"]);
     assert_eq!(

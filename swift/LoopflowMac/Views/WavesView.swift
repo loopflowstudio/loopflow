@@ -100,11 +100,6 @@ struct WavesView: View {
             Task { await refreshRepos() }
         }
         .onChange(of: model.workScope) { _, _ in model.syncWorkScope() }
-        .onChange(of: selectedWave?.id, initial: true) { _, _ in
-            if let wave = selectedWave {
-                model.activateProject(id: wave.id, name: wave.name, repo: waveRepoPath(for: wave))
-            }
-        }
         // Waves arrive with every planning frame.
         .onChange(of: model.planningSequence) { _, _ in
             Task { await syncRepoStates() }
@@ -365,9 +360,6 @@ struct WavesView: View {
                 wave: wave,
                 repoPath: waveRepoPath(for: wave),
                 streamed: model.waveDetail(id: wave.id),
-                isProjectActivationPending: model.isProjectActivationPending(id: wave.id),
-                transportError: model.projectCommandErrors[wave.id],
-                onActivateProject: { model.activateProject(id: wave.id, name: wave.name, repo: waveRepoPath(for: wave)) },
                 onClose: { selectedWaveId = nil },
                 onOpenTask: { id in
                     openTask(waveRepoPath(for: wave), id)

@@ -1259,9 +1259,8 @@ fn server_operations_match_their_lf_commands() {
         | Write::WaveRemove { .. }
         | Write::WaveMachine { .. }
         | Write::WaveSync { .. }
-        // Binding, connecting and reteaming reach Linear; served_planning_binding_matches_cli
+        // Connecting and reteaming reach Linear; served_planning_binding_matches_cli
         // compares their spelling.
-        | Write::WavePlanBind { .. }
         | Write::WavePlanConnect { .. }
         | Write::WavePlanReteam { .. }
         // Syncing and answering exchange with the tracker; their spellings
@@ -2339,14 +2338,6 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
         Write::WaveSync { directory, wave } => {
             (path(directory), words(&["wave", "sync", wave, "--json"]))
         }
-        Write::WavePlanBind {
-            directory,
-            wave,
-            project,
-        } => (
-            path(directory),
-            words(&["wave", "plan", "bind", wave, project, "--json"]),
-        ),
         Write::WavePlanConnect {
             directory,
             wave,

@@ -5,25 +5,22 @@ use time::OffsetDateTime;
 use crate::child::ChildRef;
 use crate::execution::{AbandonReceipt, TaskState};
 use crate::rows::now_unix;
-use crate::work::project::ProjectEventKind;
 use crate::work::task::TaskEventKind;
 use crate::{StoreError, StoreResult};
-use loopflow_model::durable::{Author, MachineId, ProjectId, TaskId, WorkRef, WorkStatus};
+use loopflow_model::durable::{Author, MachineId, TaskId, WorkRef, WorkStatus};
 use loopflow_model::id::WaveId;
 
 use super::SqliteStore;
 
 impl SqliteStore {
-    /// A Task may launch a Graph while it is ready, not being abandoned, and
-    /// planned in its Wave's current project.
+    /// A Task may launch a Graph while it is ready and not being abandoned.
     pub fn require_task_launch(&self, task_id: &TaskId) -> StoreResult<()> {
         let mut connection = self.conn.lock().expect("store mutex poisoned");
         let conn = connection.savepoint()?;
         let task = super::children::task_on(&conn, task_id)?.ok_or(StoreError::NotFound)?;
         super::children::require_task_planning(&conn, &task)?;
         let work = WorkRef::Task(task_id.clone());
-        require_ready_work(&conn, &work)?;
-        require_current_task_project(&conn, &work)
+        require_ready_work(&conn, &work)
     }
 
     pub fn task_issue_identifier(&self, external_issue_id: &str) -> StoreResult<Option<String>> {
@@ -234,60 +231,29 @@ impl SqliteStore {
         Ok(steer)
     }
 
-    /// Record an interrupt request as a durable comment on the Work's event
-    /// stream. A live run observes it (past its launch cursor) and ends the
-    /// current turn; with no live run it is inert history.
-    pub fn append_interrupt(&self, work: &WorkRef) -> StoreResult<i64> {
+    /// Append a Task interrupt. A live run ends its current turn when it sees
+    /// an interrupt newer than its launch cursor.
+    pub fn append_interrupt(&self, task: &TaskId) -> StoreResult<i64> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        require_ready_work(&tx, work)?;
-        let id = match work {
-            WorkRef::Task(task_id) => {
-                super::children::insert_task_event_in(&tx, task_id, &TaskEventKind::Interrupt)?.id
-            }
-            WorkRef::Project(project_id) => {
-                let project = tx.query_row(
-                    super::children::PROJECT_SELECT,
-                    params![project_id.as_str()],
-                    super::children::map_project_row,
-                )?;
-                super::children::insert_project_event_in(
-                    &tx,
-                    &project,
-                    &ProjectEventKind::Interrupt,
-                )?
-                .id
-            }
-            WorkRef::Wave(_) => {
-                return Err(StoreError::InvalidData(
-                    "Waves are not interrupted through the Work event stream".to_string(),
-                ))
-            }
-        };
+        require_ready_work(&tx, &WorkRef::Task(task.clone()))?;
+        let id = super::children::insert_task_event_in(&tx, task, &TaskEventKind::Interrupt)?.id;
         tx.commit()?;
         Ok(id)
     }
 
-    /// The id of the newest interrupt request on the Work, or 0 when there is
+    /// The id of the newest interrupt request on the Task, or 0 when there is
     /// none. A run stamps this at launch and re-reads it; a higher value means a
     /// new interrupt to act on.
-    pub fn latest_interrupt_id(&self, work: &WorkRef) -> StoreResult<i64> {
+    pub fn latest_interrupt_id(&self, task: &TaskId) -> StoreResult<i64> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let (table, column, id) = match work {
-            WorkRef::Task(task_id) => ("task_events", "task_id", task_id.as_str().to_string()),
-            WorkRef::Project(project_id) => (
-                "project_events",
-                "project_id",
-                project_id.as_str().to_string(),
-            ),
-            WorkRef::Wave(_) => return Ok(0),
-        };
-        let sql = format!(
-            "SELECT COALESCE(MAX(id), 0) FROM {table}
-             WHERE {column}=?1 AND json_extract(kind_json, '$.kind')='interrupt'"
-        );
-        conn.query_row(&sql, params![id], |row| row.get(0))
-            .map_err(StoreError::from)
+        conn.query_row(
+            "SELECT COALESCE(MAX(id), 0) FROM task_events
+             WHERE task_id=?1 AND json_extract(kind_json, '$.kind')='interrupt'",
+            [task.as_str()],
+            |row| row.get(0),
+        )
+        .map_err(StoreError::from)
     }
 }
 
@@ -405,44 +371,6 @@ pub(super) fn require_ready_work(conn: &Connection, work: &WorkRef) -> StoreResu
     }
 }
 
-pub(super) fn require_current_task_project(conn: &Connection, work: &WorkRef) -> StoreResult<()> {
-    let WorkRef::Task(task) = work else {
-        return Ok(());
-    };
-    let project: Option<String> = conn.query_row(
-        "SELECT project_id FROM tasks WHERE id=?1",
-        [task.as_str()],
-        |row| row.get(0),
-    )?;
-    if super::task_ownership::owned_in(conn, task)? {
-        return Ok(());
-    }
-    if let Some(project) = project {
-        require_selected_project(conn, &ProjectId::from_raw(project))?;
-    }
-    Ok(())
-}
-
-pub(super) fn require_selected_project(conn: &Connection, project: &ProjectId) -> StoreResult<()> {
-    let (selected, status): (Option<String>, String) = conn.query_row(
-        "SELECT w.current_project_id,p.status FROM projects p JOIN waves w ON w.id=p.wave_id WHERE p.id=?1",
-        [project.as_str()],
-        |row| Ok((row.get(0)?, row.get(1)?)),
-    )?;
-    if selected.as_deref() != Some(project.as_str()) {
-        return Err(StoreError::InvalidAuthority(
-            "Task Project is not the Wave's configured Project; ensure the Wave before starting new work".into(),
-        ));
-    }
-    if status != "started" {
-        return Err(StoreError::InvalidAuthority(
-            "configured Project is not In Progress; ensure the Wave before starting new work"
-                .into(),
-        ));
-    }
-    Ok(())
-}
-
 fn work_table(work: &WorkRef) -> (&'static str, &str) {
     match work {
         WorkRef::Wave(id) => ("waves", id.as_str()),
@@ -454,7 +382,7 @@ fn work_table(work: &WorkRef) -> (&'static str, &str) {
 pub(super) fn task_wave_in(conn: &Connection, task: &TaskId) -> StoreResult<Option<WaveId>> {
     let wave: Option<String> = conn
         .query_row(
-            "SELECT p.wave_id FROM tasks t LEFT JOIN projects p ON p.id=t.project_id WHERE t.id=?1",
+            "SELECT wave_id FROM tasks WHERE id=?1",
             [task.as_str()],
             |row| row.get(0),
         )
@@ -616,16 +544,6 @@ mod durable_store_tests {
                 0
             );
         }
-        // Changing a parent cannot invalidate an already reserved child's ancestry.
-        assert!(conn
-            .execute(
-                "UPDATE projects SET wave_id=?1 WHERE id=?2",
-                rusqlite::params![
-                    other_wave.as_str(),
-                    task.project_id.as_ref().unwrap().as_str()
-                ]
-            )
-            .is_err());
     }
 
     #[test]
@@ -644,7 +562,8 @@ mod durable_store_tests {
             .unwrap();
         let barrier = Arc::new(Barrier::new(2));
         let writer_barrier = barrier.clone();
-        let project_id = task.project_id.clone();
+        let project_id = task.project_id.unwrap();
+        let destination = other_wave.clone();
         let db = dir.path().join("loopflow.db");
         let writer = thread::spawn(move || {
             let conn = rusqlite::Connection::open(db).unwrap();
@@ -654,7 +573,7 @@ mod durable_store_tests {
             writer_barrier.wait();
             conn.execute(
                 "UPDATE projects SET wave_id=?1 WHERE id=?2",
-                rusqlite::params![other_wave.as_str(), project_id.as_ref().unwrap().as_str()],
+                rusqlite::params![destination.as_str(), project_id.as_str()],
             )
         });
         barrier.wait();
@@ -662,10 +581,7 @@ mod durable_store_tests {
         input.work_source = Some(WorkSource::Checkout);
         let saved = reserve_session_in(&tx, input, None).unwrap();
         tx.commit().unwrap();
-        let error = writer.join().unwrap().unwrap_err();
-        assert!(error
-            .to_string()
-            .contains("selected Project cannot change Wave ownership"));
+        assert_eq!(writer.join().unwrap().unwrap(), 1);
         let (run_wave, project_wave): (String, String) = conn
             .query_row(
                 "SELECT r.wave_id,p.wave_id FROM agent_sessions r JOIN tasks t ON t.id=r.task_id
@@ -674,7 +590,8 @@ mod durable_store_tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(run_wave, task.wave_id.as_ref().unwrap().as_str());
+        assert_eq!(saved.wave_id, task.wave_id);
+        assert_eq!(run_wave, other_wave.as_str());
         assert_eq!(run_wave, project_wave);
     }
 

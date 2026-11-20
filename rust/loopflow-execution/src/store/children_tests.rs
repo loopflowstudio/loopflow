@@ -3,6 +3,7 @@ use loopflow_model::durable::{ProjectId, RepositoryId, TaskId};
 use loopflow_model::id::WaveId;
 use loopflow_storage::migration_runner::migration_section_sql;
 use loopflow_storage::sqlite::SqliteStore;
+use loopflow_storage::work::edit::WorkValue::{ProjectName, ProjectSummary};
 use loopflow_storage::work::task::{NewTask, TaskUpdate};
 use rusqlite::params;
 
@@ -26,7 +27,7 @@ fn local_repository_path(store: &SqliteStore) -> String {
 
 fn local_project(store: &SqliteStore) -> ProjectId {
     local_repository(store);
-    crate::work::wave::bootstrap::ensure_wave_project(
+    crate::test_support::seed_wave_project(
         store,
         store.home_dir().unwrap().to_str().unwrap(),
         "inbox",
@@ -439,7 +440,7 @@ fn canonical_task_fields_survive_restart_and_reach_another_machine_through_the_h
 }
 
 #[test]
-fn project_edits_preserve_retired_iteration_and_events() {
+fn project_edits_and_health_checks_leave_retired_fields_untouched() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("loopflow.db");
     let store = crate::store::opening::open_ephemeral(&path).unwrap();
@@ -448,37 +449,37 @@ fn project_edits_preserve_retired_iteration_and_events() {
         .conn
         .lock()
         .unwrap()
-        .execute("UPDATE projects SET iteration=7 WHERE id=?1", [id.as_str()])
-        .unwrap();
-    let event = store
-        .append_project_event(
-            &id,
-            &loopflow_storage::work::project::ProjectEventKind::IterationCompleted {
-                iteration: 7,
-                summary: "Retained historical judgment".into(),
-            },
+        .execute(
+            "UPDATE projects SET iteration=7, krs='[{}]' WHERE id=?1",
+            [id.as_str()],
         )
         .unwrap();
     store
-        .edit_project(&id, Some("Renamed body of work"), Some("New summary"), None)
+        .edit_project_fields(
+            &id,
+            &[
+                ProjectName(Some("Renamed body of work".into())),
+                ProjectSummary("New summary".into()),
+            ],
+        )
         .unwrap();
     drop(store);
     let store = crate::store::opening::open_ephemeral(&path).unwrap();
     let project = store.project(&id).unwrap().unwrap();
     assert_eq!(project.name, "Renamed body of work");
     assert_eq!(project.summary, "New summary");
-    assert_eq!(store.project_events_after(&id, 0).unwrap(), vec![event]);
-    let iteration: u32 = store
+    store.health_check().unwrap();
+    let retired: (u32, String) = store
         .conn
         .lock()
         .unwrap()
         .query_row(
-            "SELECT iteration FROM projects WHERE id=?1",
+            "SELECT iteration,krs FROM projects WHERE id=?1",
             [id.as_str()],
-            |row| row.get(0),
+            |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .unwrap();
-    assert_eq!(iteration, 7);
+    assert_eq!(retired, (7, "[{}]".into()));
     let json = serde_json::to_value(project).unwrap();
     assert!(json.get("iteration").is_none());
     assert!(json.get("plan").is_none());
@@ -916,6 +917,7 @@ fn an_admitted_creation_commits_task_graph_claim_and_conversation_together() {
             &store,
             &creation.id,
             Some(&creation),
+            None,
             None,
             None,
             None,

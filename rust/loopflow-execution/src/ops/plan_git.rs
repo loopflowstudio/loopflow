@@ -15,7 +15,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use loopflow_model::durable::RepositoryId;
 use loopflow_storage::sqlite::plan_carriers::{Carrier, NotTaken};
 use loopflow_storage::sqlite::SqliteStore;
-use loopflow_storage::work::edit::{StampedRecord, StampedValue};
+use loopflow_storage::work::edit::StampedRecord;
 
 /// This Machine's ref, here and on the remote.
 const OWN: &str = "refs/loopflow/plan/";
@@ -316,40 +316,14 @@ fn next_blob<'a>(rest: &mut &'a [u8]) -> Result<&'a [u8]> {
     Ok(content)
 }
 
-/// A plan ref file as a record. A file that does not parse is skipped, and so
-/// is each field this build does not know; both are logged.
+/// A plan ref file as a record. A file that does not parse is skipped and
+/// logged.
 fn parse_record(file: &str, content: &[u8]) -> Option<StampedRecord> {
-    #[derive(serde::Deserialize)]
-    struct File {
-        table: String,
-        id: String,
-        fields: Vec<serde_json::Value>,
-    }
-    let parsed: File = match serde_json::from_slice(content) {
-        Ok(parsed) => parsed,
-        Err(error) => {
+    serde_json::from_slice(content)
+        .inspect_err(|error| {
             tracing::warn!(%file, %error, "skipped a plan ref file that does not parse");
-            return None;
-        }
-    };
-    let fields = parsed
-        .fields
-        .into_iter()
-        .filter_map(
-            |field| match serde_json::from_value::<StampedValue>(field) {
-                Ok(field) => Some(field),
-                Err(error) => {
-                    tracing::warn!(%file, %error, "skipped a plan ref field this build does not know");
-                    None
-                }
-            },
-        )
-        .collect();
-    Some(StampedRecord {
-        table: parsed.table,
-        id: parsed.id,
-        fields,
-    })
+        })
+        .ok()
 }
 
 /// Where a record's file lives in a plan ref; `None` for an id that cannot
@@ -612,8 +586,7 @@ mod tests {
 
         fn task(&self, title: &str) -> loopflow_model::durable::TaskId {
             let project =
-                crate::work::wave::bootstrap::ensure_wave_project(&self.store, &self.repo, "plan")
-                    .unwrap();
+                crate::test_support::seed_wave_project(&self.store, &self.repo, "plan").unwrap();
             self.store
                 .create_task(&NewTask {
                     repository_id: crate::repository::location::ensure_repository(

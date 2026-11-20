@@ -13,7 +13,6 @@ pub mod graph_process;
 pub mod history;
 pub mod instrumentation;
 pub mod machine_records;
-pub mod metric;
 #[cfg(test)]
 pub mod migration_build;
 pub mod migration_catalog;

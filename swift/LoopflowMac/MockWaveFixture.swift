@@ -95,13 +95,6 @@ enum MockWaveFixture {
 
     static let detailJSON = #"""
         {
-          "project_readiness": {
-            "state": "ready",
-            "project_id": "project-1",
-            "observed_at": null,
-            "pending_successor": null,
-            "activation": null
-          },
           "wave": {
             "id": "wave-1",
             "name": "infrastructure",
@@ -121,7 +114,6 @@ enum MockWaveFixture {
               "observed_at": "2026-07-17T00:00:00Z"
             }
           },
-          "metric_portfolio": {"metrics": [], "contract_issues": []},
           "history": {
             "state": "ok",
             "truncated": false,
@@ -176,14 +168,7 @@ enum MockWaveFixture {
                 "slug": "release-feedback",
                 "name": "current",
                 "workflow": "incident",
-                "status": "started", "current": true,
-                "metric_targets": [],
-                "krs": [
-                  {
-                    "text": "Every failed run has an owner",
-                    "holds": false
-                  }
-                ]
+                "status": "started"
               }
             ],
             "truncated": false
@@ -325,8 +310,7 @@ enum MockWaveFixture {
               }
             ],
             "truncated": false
-          },
-          "unavailable_tasks": []
+          }
         }
         """#
 }

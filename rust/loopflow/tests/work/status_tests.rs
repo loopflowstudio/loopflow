@@ -12,13 +12,9 @@ use std::process::Command;
 use loopflow_execution::child::ChildRef;
 use loopflow_execution::linear::{LinearIssueId, LinearProjectId};
 use loopflow_execution::store::migrations;
-use loopflow_execution::store::StorageConfig;
-use loopflow_execution::work::project::{Project, ProjectEventKind, ProjectId};
+use loopflow_execution::work::project::{Project, ProjectId};
 use loopflow_execution::work::task::{
     LinearWritebackState, Observation, PrMergeMode, Task, TaskId, TaskPr, TaskPrId,
-};
-use loopflow_execution::work::wave::metrics::{
-    load_metric_contract, MetricObservation, ObservationAcceptance,
 };
 use loopflow_execution::work::wave::Wave;
 use loopflow_model::id::WaveId;
@@ -55,8 +51,6 @@ fn test_project(wave: &Wave, slug: &str, updated_at: OffsetDateTime) -> Project 
         slug: slug.to_string(),
         name: slug.replace('-', " "),
         description: "Keep status truthful.".to_string(),
-        krs: Vec::new(),
-        metric_targets: Vec::new(),
         tracker_synced_at: Some(updated_at.unix_timestamp()),
 
         wave_id: wave.id().clone(),
@@ -65,12 +59,8 @@ fn test_project(wave: &Wave, slug: &str, updated_at: OffsetDateTime) -> Project 
     }
 }
 
-fn select_project(home: &Path, wave: &Wave, project_id: &str) {
+fn start_only(home: &Path, wave: &Wave, project_id: &str) {
     let connection = rusqlite::Connection::open(home.join("loopflow.db")).unwrap();
-    connection.execute(
-        "UPDATE waves SET current_project_id=(SELECT id FROM projects WHERE wave_id=?1 AND external_project_id=?2) WHERE id=?1",
-        rusqlite::params![wave.id().as_str(), project_id],
-    ).unwrap();
     connection.execute(
         "UPDATE projects SET status=CASE WHEN external_project_id=?2 THEN 'started' ELSE 'completed' END WHERE wave_id=?1",
         rusqlite::params![wave.id().as_str(), project_id],
@@ -84,9 +74,7 @@ fn put_project_snapshot(home: &Path, wave: &Wave, project: &Project) {
             "slug": project.slug,
             "name": project.name,
             "summary": "Keep status truthful.",
-            "metric_targets": [],
             "status": "started",
-            "krs": [{"text": "Current state and history stay distinct", "holds": false}],
             "sync": {"actions": []},
             "initiative_ids": ["initiative-infrastructure"],
             "team_ids": ["team-infrastructure"]
@@ -95,7 +83,7 @@ fn put_project_snapshot(home: &Path, wave: &Wave, project: &Project) {
     });
     let store = loopflow_execution::store::open_sqlite(&home.join("loopflow.db"))
         .expect("open status store");
-    select_project(home, wave, project.tracker_id.as_ref().unwrap().as_str());
+    start_only(home, wave, project.tracker_id.as_ref().unwrap().as_str());
     store
         .seed_inventory(&InventoryFixture {
             wave_id: wave.id().clone(),
@@ -106,29 +94,13 @@ fn put_project_snapshot(home: &Path, wave: &Wave, project: &Project) {
         .expect("seed PM snapshot");
 }
 
-fn seed_credential_history(home: &Path) -> Project {
+fn seed_started_project(home: &Path) -> Project {
     let wave = seed(home, "infrastructure");
     let store = loopflow_execution::store::open_sqlite(&home.join("loopflow.db"))
         .expect("open status store");
     let now = OffsetDateTime::now_utc();
     let project = test_project(&wave, "stability-security", now);
     store.insert_project(&project).expect("seed Project");
-    let failure = store
-        .append_project_event(
-            &project.id,
-            &ProjectEventKind::Failed {
-                error: "project runner failed: credential is missing".to_string(),
-                resumable: true,
-            },
-        )
-        .expect("record failure history");
-    rusqlite::Connection::open(home.join("loopflow.db"))
-        .expect("open status store")
-        .execute(
-            "UPDATE project_events SET created_at=created_at-60 WHERE id=?1",
-            [failure.id],
-        )
-        .expect("age historical failure");
     put_project_snapshot(home, &wave, &project);
     project
 }
@@ -156,21 +128,6 @@ fn status_json(home: &Path, args: &[&str], ambient_wave_id: Option<&str>) -> ser
     );
     let stdout = String::from_utf8(output.stdout).expect("utf8");
     serde_json::from_str(stdout.trim()).unwrap_or_else(|err| panic!("not JSON: {err}\n{stdout}"))
-}
-
-fn status_human(home: &Path, wave: &str) -> String {
-    let output = Command::new(loopflow_test_support::lf_binary())
-        .args(["wave", "status", wave])
-        .env("LF_HOME", home)
-        .current_dir(home.join("repo"))
-        .output()
-        .expect("lf wave status runs");
-    assert!(
-        output.status.success(),
-        "lf wave status failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    String::from_utf8(output.stdout).expect("status is utf8")
 }
 
 /// A roadmap Wave holding its share of the roadmap's Tasks, as `wave status`
@@ -237,8 +194,6 @@ fn seed_stale_project_work(
         slug: "technical-architecture".to_string(),
         name: "Technical Architecture".to_string(),
         description: "Keep the system legible and minimally simple.".to_string(),
-        krs: Vec::new(),
-        metric_targets: Vec::new(),
         tracker_synced_at: Some(now.unix_timestamp() - 1),
 
         wave_id: wave.id().clone(),
@@ -246,7 +201,7 @@ fn seed_stale_project_work(
         updated_at: now,
     };
     store.insert_project(&stale).expect("seed stale Project");
-    select_project(home, &wave, stale.tracker_id.as_ref().unwrap().as_str());
+    start_only(home, &wave, stale.tracker_id.as_ref().unwrap().as_str());
     let stale_task = Task {
         repository_id: loopflow_execution::repository::location::ensure_repository(
             &store,
@@ -338,18 +293,14 @@ fn seed_stale_project_work(
         slug: "auditability".to_string(),
         name: "Auditability".to_string(),
         description: "Every claim points to its receipt.".to_string(),
-        krs: Vec::new(),
-        metric_targets: Vec::new(),
         tracker_synced_at: Some(now.unix_timestamp()),
 
         wave_id: wave.id().clone(),
         created_at: now,
         updated_at: now,
     };
-    store
-        .insert_project(&current)
-        .expect("seed current Project");
-    select_project(home, &wave, current.tracker_id.as_ref().unwrap().as_str());
+    store.insert_project(&current).expect("seed Project");
+    start_only(home, &wave, current.tracker_id.as_ref().unwrap().as_str());
 
     let bin = home.join("bin");
     std::fs::create_dir_all(&bin).expect("test bin");
@@ -365,9 +316,7 @@ fn seed_stale_project_work(
                 "slug": "auditability",
                 "name": "Auditability",
                 "summary": "Every claim points to its receipt.",
-                "metric_targets": [],
                 "status": "started",
-                "krs": [{"text": "Every visible state carries its reason", "holds": false}],
                 "initiative_ids": ["initiative-product"],
                 "team_ids": ["team-product"]
             }
@@ -471,7 +420,7 @@ fn seed_previous_release_task_pr(home: &Path) {
         PrMergeMode::User
     );
     let wave = store.list_waves(None).unwrap().pop().unwrap();
-    select_project(home, &wave, "95159066-9098-4d0b-8903-01459dc7ec14");
+    start_only(home, &wave, "95159066-9098-4d0b-8903-01459dc7ec14");
     drop(store);
 
     let connection = rusqlite::Connection::open(&database).expect("reopen migrated store");
@@ -490,9 +439,9 @@ fn seed_previous_release_task_pr(home: &Path) {
 }
 
 #[test]
-fn project_operator_failures_remain_historical_without_reappearing_on_the_wave() {
+fn wave_status_and_roadmap_list_a_started_project_without_tasks() {
     let home = tempfile::tempdir().expect("tempdir");
-    let project = seed_credential_history(home.path());
+    let project = seed_started_project(home.path());
     let status = status_json(home.path(), &["infrastructure"], None);
     let roadmap = roadmap_json(home.path(), "infrastructure");
     let expected_projects = serde_json::json!({
@@ -503,9 +452,6 @@ fn project_operator_failures_remain_historical_without_reappearing_on_the_wave()
             "slug": project.slug,
             "name": project.name,
             "status": "started",
-            "current": true,
-            "metric_targets": [],
-            "krs": [{"text": "Current state and history stay distinct", "holds": false}],
             "sync": {"actions": []}
         }],
         "truncated": false
@@ -515,20 +461,7 @@ fn project_operator_failures_remain_historical_without_reappearing_on_the_wave()
         assert_eq!(view["wave"]["status"], "ready");
         assert_eq!(view["tasks"]["state"], "ok");
         assert_eq!(view["tasks"]["items"], serde_json::json!([]));
-        assert_eq!(view["unavailable_tasks"], serde_json::json!([]));
-        assert!(!view.to_string().contains("credential"));
     }
-    let human = status_human(home.path(), "infrastructure");
-    assert!(!human.contains("credential"));
-    let store = loopflow_execution::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
-    assert_eq!(
-        store
-            .latest_project_failure(&project.id)
-            .unwrap()
-            .unwrap()
-            .message,
-        "project runner failed: credential is missing"
-    );
 }
 
 /// The reproduced break: inside a Wave agent's environment, `LF_WAVE_ID` is a wave id, and
@@ -617,151 +550,6 @@ fn wave_list_keeps_abandoned_registrations_until_they_are_removed() {
 }
 
 #[test]
-fn accepted_metric_evidence_is_identical_in_status_roadmap_and_text() {
-    let home = tempfile::tempdir().expect("tempdir");
-    let wave = seed(home.path(), "product");
-    let repo = home.path().join("repo");
-    let metrics_dir = repo.join(".lf/wave/product/metrics");
-    std::fs::create_dir_all(&metrics_dir).expect("metrics directory");
-    let contract_path = metrics_dir.join("task-loop-trust.md");
-    std::fs::write(
-        &contract_path,
-        r#"---
-schema: 1
-id: task-loop-trust
-stage: graduated
-instrument: lifecycle-scorecard
-unit: ratio
-window: 7d
-freshness: 6h
----
-
-# Task loops earn trust
-
-Count dispatched Task loops that settle without rescue.
-"#,
-    )
-    .expect("metric contract");
-    let project_payload = serde_json::json!({
-        "projects": [{
-            "id": "d19956b2-9955-437d-aea6-d91766231c77",
-            "slug": "loopflow-api",
-            "name": "Loopflow API",
-            "summary": "One product contract.",
-            "metric_targets": [{"metric_id": "task-loop-trust", "target": {"kind": "at_least", "value": 1.0}}],
-            "status": "started",
-            "krs": [{"text": "Task loops earn trust for one week", "holds": false}],
-            "initiative_ids": ["initiative-product"],
-            "team_ids": ["team-product"]
-        }],
-        "items": []
-    });
-    let sqlite = loopflow_execution::store::open_sqlite(&home.path().join("loopflow.db"))
-        .expect("open store");
-    let now = OffsetDateTime::now_utc();
-    sqlite
-        .seed_inventory(&InventoryFixture {
-            wave_id: wave.id().clone(),
-            initiative: "initiative-product".to_string(),
-            synced_at: now.unix_timestamp(),
-            snapshot: serde_json::from_value(project_payload.clone()).expect("parse PM snapshot"),
-        })
-        .expect("seed PM snapshot");
-    select_project(home.path(), &wave, "d19956b2-9955-437d-aea6-d91766231c77");
-    drop(sqlite);
-
-    let contract = load_metric_contract(&contract_path, wave.id().as_str()).expect("contract");
-    let mut observation = MetricObservation::Observed {
-        identity: contract.identity.clone().into(),
-        contract_revision: contract.contract_revision.clone(),
-        instrument: contract.instrument.clone(),
-        observation_id: String::new(),
-        value: 1.0,
-        source_window_start: now - time::Duration::days(7),
-        source_window_end: now,
-        complete: true,
-    };
-    let id = observation
-        .expected_observation_id()
-        .expect("observation digest");
-    let MetricObservation::Observed { observation_id, .. } = &mut observation else {
-        unreachable!()
-    };
-    *observation_id = id;
-    let runtime = tokio::runtime::Runtime::new().expect("metric runtime");
-    runtime.block_on(async {
-        let store = loopflow_execution::store::open_ephemeral_store(&StorageConfig::sqlite(
-            home.path().join("loopflow.db"),
-        ))
-        .await
-        .expect("open shared store");
-        store
-            .register_metric_instrument(&contract.identity, &contract.instrument, now)
-            .await
-            .expect("register instrument");
-        assert_eq!(
-            store
-                .accept_metric_observation(&contract, observation, now)
-                .await
-                .expect("accept observation"),
-            ObservationAcceptance::Accepted
-        );
-    });
-
-    let status = status_json(home.path(), &["product"], None);
-    let roadmap = roadmap_json(home.path(), "product");
-    let status_metric = &status["metric_portfolio"]["metrics"][0];
-    assert_eq!(status_metric["name"], "Task loops earn trust");
-    assert_eq!(status_metric["identity"]["wave_id"], wave.id().as_str());
-    assert!(status_metric.get("project_id").is_none());
-    assert_eq!(
-        status_metric["target"],
-        serde_json::json!({"kind": "at_least", "value": 1.0})
-    );
-    assert_eq!(status_metric["window"], "7d");
-    assert_eq!(status_metric["freshness"]["kind"], "fresh");
-    assert_eq!(status_metric["evidence"]["kind"], "met");
-    assert_eq!(status_metric["evidence"]["value"], 1.0);
-    assert_eq!(status["projects"]["state"], "ok");
-    let projects = status["projects"]["items"].as_array().unwrap();
-    assert_eq!(projects.len(), 1);
-    let owned = loopflow_execution::store::open_sqlite(&home.path().join("loopflow.db"))
-        .unwrap()
-        .list_projects(Some(wave.id()))
-        .unwrap()
-        .remove(0);
-    assert_eq!(projects[0]["id"], owned.id.as_str());
-    assert_eq!(
-        projects[0]["tracker_id"],
-        project_payload["projects"][0]["id"]
-    );
-    assert_eq!(projects[0]["status"], "started");
-    assert_eq!(projects[0]["krs"], project_payload["projects"][0]["krs"]);
-    assert_eq!(
-        projects[0]["metric_targets"],
-        project_payload["projects"][0]["metric_targets"]
-    );
-    assert_eq!(roadmap["waves"][0]["projects"], status["projects"]);
-    assert_eq!(
-        roadmap["waves"][0]["metric_portfolio"],
-        status["metric_portfolio"]
-    );
-
-    let human = status_human(home.path(), "product");
-    assert!(
-        human.contains("[ ] Task loops earn trust for one week"),
-        "{human}"
-    );
-    assert!(human.contains("Task loops earn trust  [met]"), "{human}");
-    assert!(
-        human.contains("Value 100.00% · Target >= 100.00% over 7d"),
-        "{human}"
-    );
-}
-
-/// A wave that has done nothing reports an empty reading, not a missing one:
-/// "we looked and found nothing" is a claim a client can trust.
-#[test]
 fn a_wave_with_no_runs_reports_an_empty_reading_not_a_missing_one() {
     let home = tempfile::tempdir().expect("tempdir");
     std::fs::create_dir_all(home.path()).expect("home");
@@ -813,10 +601,8 @@ fn orphaned_task_work_preserves_status_and_roadmap_evidence() {
             assert!(tasks
                 .iter()
                 .any(|task| task["task"]["identifier"] == "W2-127"));
-            assert!(view["unavailable_tasks"].as_array().unwrap().is_empty());
         }
         assert_eq!(wave["projects"], status["projects"]);
-        assert_eq!(wave["unavailable_tasks"], status["unavailable_tasks"]);
     }
 }
 
@@ -1036,13 +822,6 @@ fn exact_task_roadmap_retains_history_without_starting_work() {
             assert_eq!(
                 tasks[0]["task"]["name"],
                 "Preserve historical architecture evidence"
-            );
-            assert!(
-                result["waves"][0]["unavailable_tasks"]
-                    .as_array()
-                    .unwrap()
-                    .is_empty(),
-                "the saved Task remains readable without its old provider Project"
             );
         }
     }

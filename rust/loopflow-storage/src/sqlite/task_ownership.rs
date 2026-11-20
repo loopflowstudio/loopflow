@@ -15,8 +15,8 @@ use rusqlite::{params, Connection, TransactionBehavior};
 use crate::{StoreError, StoreResult};
 use loopflow_model::comment::{TaskComment, TaskCommentAuthor};
 use loopflow_model::durable::{
-    MachineId, OwnershipEntryId, OwnershipKind, ProjectId, RepositoryId, TaskId, TaskOwner,
-    TaskOwnership, TaskOwnershipEntry,
+    MachineId, OwnershipEntryId, OwnershipKind, RepositoryId, TaskId, TaskOwner, TaskOwnership,
+    TaskOwnershipEntry,
 };
 
 use super::SqliteStore;
@@ -397,13 +397,13 @@ impl OwnershipFacts {
     pub fn matches_task_in(&self, conn: &Connection, task: &TaskId) -> StoreResult<bool> {
         Ok(super::scope_defaults::task_scope_in(conn, task)? == self.scope)
     }
-    pub fn matches_new_task_in(
+    pub(super) fn matches_promotion_in(
         &self,
         conn: &Connection,
-        repository: &RepositoryId,
-        project: Option<&ProjectId>,
+        task: &crate::work::task::NewTask,
+        wave: Option<&loopflow_model::id::WaveId>,
     ) -> StoreResult<bool> {
-        Ok(super::scope_defaults::new_task_scope_in(conn, repository, project)? == self.scope)
+        Ok(super::scope_defaults::promotion_scope_in(conn, task, wave)? == self.scope)
     }
 }
 

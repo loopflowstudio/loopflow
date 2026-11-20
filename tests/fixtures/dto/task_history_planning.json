@@ -6,9 +6,7 @@
       "slug": "current",
       "name": "Current",
       "summary": "",
-      "metric_targets": [],
       "status": "started",
-      "krs": [],
       "initiative_ids": [
         "initiative"
       ],

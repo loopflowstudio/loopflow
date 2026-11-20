@@ -114,8 +114,6 @@ async fn pm_read_linear_oauth_recovers() {
         slug: "reliability".into(),
         name: "Reliability".into(),
         description: "Retain this planning history.".into(),
-        krs: Vec::new(),
-        metric_targets: Vec::new(),
         tracker_synced_at: Some(1),
 
         wave_id: wave.id().clone(),
@@ -123,21 +121,6 @@ async fn pm_read_linear_oauth_recovers() {
         updated_at: timestamp,
     };
     fixture.store.create_project(&project).await.unwrap();
-    fixture
-        .store
-        .append_project_event(
-            &project.id,
-            &loopflow_storage::work::project::ProjectEventKind::Steer {
-                steer_id: loopflow_model::id::SteerId::new(),
-            },
-        )
-        .await
-        .unwrap();
-    let history = fixture
-        .store
-        .project_events_after(&project.id, 0)
-        .await
-        .unwrap();
     fixture.seed_snapshot(&wave).await;
     fixture.seed(now() - 1).await;
     let (oauth, exchanges) = test_server::spawn(vec![
@@ -173,8 +156,8 @@ async fn pm_read_linear_oauth_recovers() {
         .await
         .unwrap()
         .unwrap();
-    assert!(refreshed.metric_targets.is_empty());
-    assert_eq!(refreshed.krs[0].text, "Fresh proof");
+    // The KR section released lf wrote stays in Linear and out of the description.
+    assert_eq!(refreshed.description, "## Definition\n\nFresh definition.");
     assert_eq!(refreshed.id, project.id);
     assert_eq!(refreshed.wave_id, project.wave_id);
     assert_eq!(refreshed.created_at, project.created_at);
@@ -185,16 +168,7 @@ async fn pm_read_linear_oauth_recovers() {
         loopflow_storage::work::project::ProjectStatus::Started
     );
 
-    assert!(refreshed.krs.iter().any(|kr| kr.text == "Fresh proof"));
     assert!(refreshed.tracker_synced_at > project.tracker_synced_at);
-    assert_eq!(
-        fixture
-            .store
-            .project_events_after(&project.id, 0)
-            .await
-            .unwrap(),
-        history
-    );
     assert_eq!(exchanges.lock().await.len(), 2);
     assert!(exchanges
         .lock()

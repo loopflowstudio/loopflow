@@ -318,7 +318,7 @@ async fn projectless_task_adopts_repository_ownership() {
 }
 
 #[tokio::test]
-async fn missing_and_unavailable_tasks_do_not_create_planning_or_execution() {
+async fn missing_and_unreadable_issues_do_not_create_planning_or_execution() {
     for (response, diagnostic) in [
         (
             json!({"data":{"issue":null}}),
@@ -1452,7 +1452,7 @@ async fn refresh_reads_ownership_without_reconstructing_tracker_content() {
             )
             .unwrap();
             conn.execute(
-                "UPDATE tracker_projects SET name='[]',krs='unrelated bad content' WHERE id='project-1'",
+                "UPDATE tracker_projects SET name='[]',summary='unrelated bad content' WHERE id='project-1'",
                 [],
             )
             .unwrap();
@@ -1526,7 +1526,7 @@ async fn inventory_refresh_retains_unmapped_local_projects() {
     let _restore = PlanningEnvironment::isolate();
     let fixture = Fixture::new().await;
     let (repo, wave) = fixture.planning_repo().await;
-    let local = crate::work::wave::bootstrap::ensure_wave_project(
+    let local = crate::test_support::seed_wave_project(
         &fixture.store.sqlite,
         repo.to_str().unwrap(),
         "product",

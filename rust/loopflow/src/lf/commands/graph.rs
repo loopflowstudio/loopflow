@@ -234,8 +234,7 @@ pub fn run_task_graph_for(
     let store = &store.sqlite;
     let process =
         journal::current_lf_process_id().context("a Task run requires a registered Process")?;
-    let work = WorkRef::Task(task.id.clone());
-    let cursor = store.latest_interrupt_id(&work)?;
+    let cursor = store.latest_interrupt_id(&task.id)?;
     let letting_go = release && lets_launcher_go(cli);
     let mut released = false;
     let mut attempt = 1;
@@ -273,7 +272,7 @@ pub fn run_task_graph_for(
         if status.success() {
             return Ok(());
         }
-        if store.latest_interrupt_id(&work)? > cursor {
+        if store.latest_interrupt_id(&task.id)? > cursor {
             eprintln!("Task run interrupted; not starting it again.");
             return Err(loopflow_execution::process::CommandExit(130).into());
         }
@@ -614,7 +613,6 @@ fn execute(
             task_run: task_run.cloned(),
             interrupt,
         };
-        // A project rotation moving this checkout's Task excludes new work in it.
         let admission = loopflow_execution::store::admission::lock_task_checkouts(
             &running.store.sqlite,
             &[running.cwd],
@@ -686,9 +684,7 @@ async fn interrupt_cursor(
     {
         return Ok(cursor);
     }
-    Ok(store
-        .latest_interrupt_id(&WorkRef::Task(task.clone()))
-        .await?)
+    Ok(store.latest_interrupt_id(task).await?)
 }
 
 /// Run `future` to completion from this synchronous command.
@@ -969,11 +965,7 @@ impl RunningGraph<'_> {
         let (Some(task), Some(cursor)) = (&self.task, self.interrupt) else {
             return false;
         };
-        match self
-            .store
-            .sqlite
-            .latest_interrupt_id(&WorkRef::Task(task.clone()))
-        {
+        match self.store.sqlite.latest_interrupt_id(task) {
             Ok(latest) => latest > cursor,
             Err(error) => {
                 tracing::warn!(%error, "failed to read Task interrupts");
@@ -1578,7 +1570,6 @@ mod tests {
                 sources: Vec::new(),
             });
             let steps = [skill.clone(), skill];
-            let work = loopflow_model::durable::WorkRef::Task(task.id.clone());
             let running = super::RunningGraph {
                 store: fixture.store.clone(),
                 process: loopflow_model::id::LfProcessId::new(),
@@ -1592,7 +1583,7 @@ mod tests {
                 task_run: None,
                 interrupt: Some(
                     runtime
-                        .block_on(fixture.store.latest_interrupt_id(&work))
+                        .block_on(fixture.store.latest_interrupt_id(&task.id))
                         .unwrap(),
                 ),
             };
@@ -1603,7 +1594,7 @@ mod tests {
                     while !started.exists() {
                         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
                     }
-                    fixture.store.append_interrupt(&work).await.unwrap();
+                    fixture.store.append_interrupt(&task.id).await.unwrap();
                 };
                 let runner = GraphRunner::new(&running);
                 let (outcome, ()) = tokio::join!(runner.run(&steps, 0), interrupt);

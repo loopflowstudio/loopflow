@@ -1,7 +1,6 @@
 //! Retained tracker planning records and their pure syntax.
 use super::{StoreError, StoreResult};
-use crate::metric::MetricTarget;
-use crate::work::project::{ProjectKR, ProjectStatus};
+use crate::work::project::ProjectStatus;
 use loopflow_model::comment::{TaskComment, TaskCommentAuthor};
 use serde::{Deserialize, Serialize};
 
@@ -201,9 +200,7 @@ pub struct TrackerProject {
     /// None means historical/unobserved prose, never an observed empty value.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    pub metric_targets: Vec<MetricTarget>,
     pub status: ProjectStatus,
-    pub krs: Vec<ProjectKR>,
     #[serde(deserialize_with = "loopflow_model::id::deserialize_uuid_vec")]
     pub initiative_ids: Vec<String>,
     /// Stable ids of the Linear teams this Project belongs to. A managed Project
@@ -226,30 +223,6 @@ pub fn revision_nanos(revision: Option<&str>) -> StoreResult<Option<i64>> {
         })
         .transpose()
 }
-pub fn render_project_content(krs: &[ProjectKR], metric_targets: &[MetricTarget]) -> String {
-    let mut content = render_metric_targets(metric_targets);
-    content.push_str("\n\n");
-    content.push_str(&render_krs(krs));
-    content.push('\n');
-    content
-}
-
-pub fn render_metric_targets(metric_targets: &[MetricTarget]) -> String {
-    format!(
-        "## Metric targets\n\n```json\n{}\n```",
-        serde_json::to_string_pretty(metric_targets).expect("validated metric targets serialize")
-    )
-}
-
-pub fn render_krs(krs: &[ProjectKR]) -> String {
-    let mut content = String::from("## KRs");
-    for kr in krs {
-        let marker = if kr.holds { "x" } else { " " };
-        content.push_str(&format!("\n\n- [{marker}] {}", kr.text.trim()));
-    }
-    content
-}
-
 pub mod project_document;
 pub mod rules;
 

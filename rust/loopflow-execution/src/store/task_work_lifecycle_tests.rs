@@ -40,15 +40,6 @@ fn defer_holds_the_lifecycle_and_a_run_is_moving_whatever_its_auto_setting() {
         .unwrap();
     }
     store
-        .conn
-        .lock()
-        .unwrap()
-        .execute(
-            "UPDATE waves SET current_project_id=?1 WHERE id=?2",
-            params![project.as_str(), wave],
-        )
-        .unwrap();
-    store
         .create_task(&loopflow_storage::work::task::NewTask {
             repository_id: loopflow_storage::test_fixture::repository(&store, "/repo"),
             id: task.clone(),

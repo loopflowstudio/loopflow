@@ -319,8 +319,6 @@ fn put_project(
     project: &TrackerProject,
     tracker: &str,
 ) -> StoreResult<()> {
-    let krs = serde_json::to_string(&project.krs)?;
-    let metric_targets = serde_json::to_string(&project.metric_targets)?;
     let initiative_ids = serde_json::to_string(&project.initiative_ids)?;
     let team_ids = serde_json::to_string(&project.team_ids)?;
     let status = project.status.as_str();
@@ -331,8 +329,6 @@ fn put_project(
         ":name": &project.name,
         ":summary": &project.summary,
         ":status": &status,
-        ":krs": &krs,
-        ":metric_targets": &metric_targets,
         ":initiative_ids": &initiative_ids,
         ":team_ids": &team_ids,
         ":description": &project.description,
@@ -363,13 +359,13 @@ fn put_project(
         }
     }
     conn.execute(
-        "INSERT INTO tracker_projects(repo,tracker,id,observed_at,slug,name,summary,status,krs,metric_targets,initiative_ids,team_ids,description,revision,description_revision,description_observed_at)
-         VALUES(:repo,:tracker,:id,:observed_at,:slug,:name,:summary,:status,:krs,:metric_targets,:initiative_ids,:team_ids,:description,:revision,
+        "INSERT INTO tracker_projects(repo,tracker,id,observed_at,slug,name,summary,status,initiative_ids,team_ids,description,revision,description_revision,description_observed_at)
+         VALUES(:repo,:tracker,:id,:observed_at,:slug,:name,:summary,:status,:initiative_ids,:team_ids,:description,:revision,
              CASE WHEN :description IS NOT NULL THEN :revision END,
              CASE WHEN :description IS NOT NULL THEN :observed_at END)
          ON CONFLICT(repo,tracker,id) DO UPDATE SET
          observed_at=excluded.observed_at,revision=excluded.revision,membership_unresolved=0,
-         slug=excluded.slug,name=excluded.name,summary=excluded.summary,status=excluded.status,krs=excluded.krs,metric_targets=excluded.metric_targets,initiative_ids=excluded.initiative_ids,team_ids=excluded.team_ids,
+         slug=excluded.slug,name=excluded.name,summary=excluded.summary,status=excluded.status,initiative_ids=excluded.initiative_ids,team_ids=excluded.team_ids,
          description=COALESCE(excluded.description,tracker_projects.description),
          description_revision=CASE WHEN excluded.description IS NOT NULL THEN excluded.revision ELSE description_revision END,
          description_observed_at=COALESCE(excluded.description_observed_at,description_observed_at)", values,
@@ -502,7 +498,7 @@ fn observe_order(
 // Both durable projections require the same confirmed Initiative/Wave association.
 // A partial read supplies that association without advancing full-Wave freshness.
 const ACCEPTED_WAVE_PROJECTS: &str = "
-    SELECT p.repo,p.tracker,p.id,p.observed_at,p.archived,p.membership_unresolved,p.task_order_json,p.revision,p.slug,p.name,p.summary,p.status,p.krs,p.metric_targets,p.initiative_ids,p.team_ids,p.description,p.description_revision,p.description_observed_at,m.wave_id FROM tracker_projects p
+    SELECT p.repo,p.tracker,p.id,p.observed_at,p.archived,p.membership_unresolved,p.task_order_json,p.revision,p.slug,p.name,p.summary,p.status,p.initiative_ids,p.team_ids,p.description,p.description_revision,p.description_observed_at,m.wave_id FROM tracker_projects p
     JOIN tracker_wave_projects m ON m.project_id=p.id
     LEFT JOIN tracker_wave_sync sync ON sync.wave_id=m.wave_id AND sync.tracker=p.tracker
     JOIN waves w ON w.id=m.wave_id AND w.repo=p.repo
@@ -528,9 +524,7 @@ fn project_accepted_planning(
          SELECT id,observed_at,wave_id,revision,
              slug,name,
              summary,json_quote(status),
-             krs,
-             metric_targets,initiative_ids,
-             team_ids,
+             initiative_ids,team_ids,
              CASE WHEN description_revision IS revision THEN description END
          FROM accepted WHERE id IN (SELECT value FROM json_each(?3))"
     ))?;
@@ -553,12 +547,10 @@ fn project_accepted_planning(
                     Edit::ProjectName(Some(row.get(5)?)),
                     Edit::ProjectSummary(row.get(6)?),
                     Edit::ProjectStatus(serde_json::from_str(&row.get::<_, String>(7)?)?),
-                    Edit::Krs(serde_json::from_str(&row.get::<_, String>(8)?)?),
-                    Edit::MetricTargets(serde_json::from_str(&row.get::<_, String>(9)?)?),
-                    Edit::ProjectInitiatives(serde_json::from_str(&row.get::<_, String>(10)?)?),
-                    Edit::ProjectTeams(serde_json::from_str(&row.get::<_, String>(11)?)?),
+                    Edit::ProjectInitiatives(serde_json::from_str(&row.get::<_, String>(8)?)?),
+                    Edit::ProjectTeams(serde_json::from_str(&row.get::<_, String>(9)?)?),
                 ];
-                if let Some(description) = row.get::<_, Option<String>>(12)? {
+                if let Some(description) = row.get::<_, Option<String>>(10)? {
                     edits.push(Edit::ProjectDescription(Some(description)));
                 }
                 Ok((

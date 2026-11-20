@@ -726,8 +726,6 @@ async fn task_fixture_at(identifier: &str, repository: std::path::PathBuf) -> Ta
         slug: "task-recovery".to_string(),
         name: "Task recovery".to_string(),
         description: "Keep automatic Task recovery bounded.".to_string(),
-        krs: Vec::new(),
-        metric_targets: Vec::new(),
         tracker_synced_at: Some(now.unix_timestamp()),
 
         wave_id: wave.id().clone(),
@@ -784,14 +782,6 @@ async fn task_fixture_at(identifier: &str, repository: std::path::PathBuf) -> Ta
     };
     store.create_wave(&wave).await.unwrap();
     store.create_project(&project).await.unwrap();
-    loopflow_storage::sqlite::project_selection::write_project_binding(
-        &store.sqlite,
-        wave.id(),
-        None,
-        project.tracker_id.as_ref().unwrap().as_str(),
-        &crate::store::PlanningLocks::new(tempfile::tempfile().unwrap()),
-    )
-    .unwrap();
     store.seed_task(&task, &pr).await.unwrap();
     let work = store
         .work_for_child(&ChildRef::Task(task.id.clone()))

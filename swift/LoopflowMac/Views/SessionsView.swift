@@ -1649,8 +1649,8 @@ struct SessionsContentView: View {
                 EmptyView()
             }
         }
-        .sheet(item: $model.historyWave) { wave in
-            ProjectHistoryView(wave: wave.name, repo: wave.repo, sourceReference: model.historyReference)
+        .sheet(item: $model.projectsWave) { wave in
+            WaveProjectsView(wave: wave.name, repo: wave.repo, sourceReference: model.projectsReference)
         }
         .sheet(isPresented: Binding(
             get: { navigation.renaming != nil || navigation.binding != nil },

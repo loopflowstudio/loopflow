@@ -223,8 +223,9 @@ open only a Task's conversation and never read Desktop's layouts.
 Repository and Wave
 entry shows their conversation, opened on load or on selection.
 Waves pair that conversation with their objective, status, planning and
-full Task inventory, followed by their metrics. **Project history** and **Workflow**
-open the existing planning inspectors. The sidebar starts at 240 points wide;
+full Task inventory. **Projects** lists the Wave's Projects in order with
+name, status and tracker sync, ended ones included; **Workflow** opens the
+Wave's default Graph in the catalogue inspector. The sidebar starts at 240 points wide;
 drag its edge to resize or use the title-bar button or **⌘\** to toggle it.
 Its scroll position survives Wave and Task navigation. Working order survives
 relaunch; ordinary launch restores the selected Work.
@@ -686,7 +687,7 @@ Add `session` to open an existing Task conversation in its terminal pane. A
 missing or unrelated Session leaves the current workspace intact and offers Retry.
 Opening a conversation does not complete a review or start a Task Graph.
 
-Wave details show the objective, the plan and its KRs, the Wave's Workflow,
+Wave details show the objective, the Wave's Projects and their status, its Workflow,
 current Tasks and plan history. Completed Tasks start hidden.
 **Completed** adds the last 7 days. Click **7 Days** to edit the number inline;
 Enter or clicking away applies it, Escape cancels. Enter **0** for **All Tasks**
@@ -702,7 +703,7 @@ Task previews use the same template view until an invocation exists, including
 Tasks with independent conversations. Captured invocations keep their expanded
 graph. Changing a template resets its disclosure; it does not change a capture.
 A Wave's planning adds no navigation tier. Task
-details include the directive, recorded condition, current KRs, Activity, PR and
+details include the directive, recorded condition, Activity, PR and
 worktree references. Choose **Edit directive**, then
 **Save directive** to write through the shared planning API. Failed saves retain your
 text; an accepted write with unavailable readback retains the draft and explains
@@ -843,7 +844,7 @@ codebase tree, and registry health.
 - `LoopflowMac/WorkModel.swift` — shared readings, stable selection, and local scope
 - `LoopflowMac/Views/WavesView.swift` — Portfolio membership and Wave inspectors
 - `LoopflowMac/Views/RoadmapView.swift` — all-Wave planning list and lifecycle controls
-- `LoopflowMac/Views/WaveDetailPane.swift` — streamed Wave plan, Tasks and metrics
+- `LoopflowMac/Views/WaveDetailPane.swift` — streamed Wave plan and Tasks
 - `LoopflowMac/PortfolioRepoState.swift` — one repository's Wave projection
 - `Loopflow/Services/RegistryQuery.swift` — typed `lf --json` reads
 - `LoopflowMac/Services/RegistryQueryLocal.swift` — shared Work through the local server; terminal launches and remote file streams through the CLI
@@ -1052,14 +1053,10 @@ launching a window. Display/terminal integration is opt-in with
 `LOOPFLOW_NATIVE_TESTS=1`; use it for configured-host diagnostics or demo.
 See [Testing](#testing) for the full commands and CLI prerequisite.
 
-Wave opening and Retry call `WorkModel.activateProject` from both WorkSurface and
-Portfolio. The command outlives the opened view; it never refreshes a view directly.
-Both surfaces show “Preparing Project…” while that Wave's planning command is pending,
-retaining cached planning. Retry appears after failure. An unfinished persisted
-Process without a pending local command remains an unknown outcome.
-The Work stream supplies `project_readiness`: the selected plan, dated accepted
-facts, unresolved transition and the exact activation Process's outcome. Empty default
-Graphs render no template section. Command transport errors remain scoped to the Wave.
+Opening a Wave runs no planning command: it shows the Projects and Tasks the
+Work stream supplies, and a Wave with no Project shows an empty Projects list.
+Empty default Graphs render no template section. Command transport errors remain
+scoped to the Wave.
 
 Work observation and navigation project durable Waves, their planning and Tasks with
 associated Sessions and Processes; they introduce no additional Work kinds.

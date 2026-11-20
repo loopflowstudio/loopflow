@@ -107,7 +107,7 @@ The source tree makes the planning boundary literal:
 ```text
 work/
 wave/{mod,config,context,
-      memory,metrics,relocate}
+      memory,relocate}
 project
 task
 
@@ -278,7 +278,7 @@ ledger.
 Repository
   |-- Task                    repository work, optionally outside a Wave
   `-- Wave                    enduring objective, memory, cadence and default graph
-        `-- Project           plan, Tasks, KRs and targets; optional provider binding
+        `-- Project           a group of Tasks that starts and ends; optional provider binding
               `-- Task        identity, worktree, PR and captured graph position
 
 Process                          one actual lf process; immutable causal parent
@@ -295,8 +295,8 @@ Graph                          one lf process; cursor in its memory, graph in Gr
 | Process | One actual lf process, its caller and command completion | `processes` |
 | LfSession | An interactive or headless conversation across attachments and native reconnection | `agent_sessions`, subordinate history and provider-native conversation |
 | Running Graph | One Graph process and the steps it starts, including taskless execution | The Graph process and its child step processes in `processes` |
-| Wave | Enduring objective, memory, cadence, budget and metric instruments | Wave files, local Wave identity and, with Linear, Initiative membership |
-| Project | A Wave’s Tasks, KRs and targets | `projects` row, shared through the tracker |
+| Wave | Enduring objective, memory, cadence and budget | Wave files, local Wave identity and, with Linear, Initiative membership |
+| Project | A group of a Wave’s Tasks with name, summary and status | `projects` row, shared through the tracker |
 | Task | A concrete change, investigation or document | `tasks`, the tracker, Git and GitHub |
 | Steer | An authored correction to Work | Ordered Work input |
 | Machine | A machine's store, credentials and exact process authority | Machine identity and observed route |

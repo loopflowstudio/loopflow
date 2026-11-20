@@ -16,7 +16,6 @@ use crate::ops::{OpsError, OpsResult};
 use crate::store::Store;
 use crate::work::wave::Wave;
 use loopflow_model::id::WaveId;
-use loopflow_storage::work::project::Project;
 
 fn lifecycle_error(message: impl ToString) -> OpsError {
     OpsError::Message(message.to_string())
@@ -39,14 +38,13 @@ pub struct WaveAdded {
     pub id: WaveId,
     pub name: String,
     pub created: bool,
-    pub project: Project,
     pub main_checkout: PathBuf,
     pub files: AuthoredFiles,
     pub summary: Vec<String>,
 }
 
-/// Register a Wave, seed its authored files on the main checkout, ensure its
-/// first Project and commit the files. Re-adding a live Wave changes nothing.
+/// Register a Wave, seed its authored files on the main checkout and commit
+/// them. Re-adding a live Wave changes nothing.
 pub async fn add(repo: &Path, name: &str, objective: Option<&str>) -> OpsResult<WaveAdded> {
     let main = crate::repository::discover(repo)
         .map_err(lifecycle_error)?
@@ -79,7 +77,6 @@ pub async fn add(repo: &Path, name: &str, objective: Option<&str>) -> OpsResult<
             write_objective(&main, wave.slug(), objective)?;
         }
     }
-    let project = ensure_first_project(&store, &wave).await?;
     let files = commit_authored(
         &main,
         &[authored_path(wave.slug())],
@@ -95,7 +92,6 @@ pub async fn add(repo: &Path, name: &str, objective: Option<&str>) -> OpsResult<
         id: wave.id().clone(),
         name: wave.slug().to_string(),
         created,
-        project,
         main_checkout: main,
         files,
         summary: Vec::new(),
@@ -133,31 +129,6 @@ pub fn render_added(added: &WaveAdded) -> String {
         .chain(added.summary.iter().cloned())
         .collect::<Vec<_>>()
         .join("\n")
-}
-
-async fn ensure_first_project(store: &Store, wave: &crate::work::wave::Wave) -> OpsResult<Project> {
-    if let (Some(process), Some(start)) = (
-        crate::journal::current_lf_process_id(),
-        crate::journal::current_execution_start(),
-    ) {
-        store
-            .sqlite
-            .record_project_activation(wave.id(), &process, &start)
-            .map_err(lifecycle_error)?;
-        crate::journal::mark_run_owner(
-            loopflow_storage::graph_process::RunOwner::ProjectActivation,
-        );
-    }
-    let _acquisition = super::planning_sync::lock_wave_planning(wave).await?;
-    let id = store
-        .sqlite
-        .ensure_project(wave.id(), wave.slug())
-        .map_err(lifecycle_error)?;
-    store
-        .sqlite
-        .project(&id)
-        .map_err(lifecycle_error)?
-        .ok_or_else(|| lifecycle_error("selected Project is missing"))
 }
 
 /// Register the authored Wave directories of `repo`'s main checkout that the

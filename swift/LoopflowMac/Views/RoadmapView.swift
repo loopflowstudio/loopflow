@@ -273,7 +273,7 @@ private struct RoadmapWaveCard: View {
                     .textSelection(.enabled)
             }
 
-            if let project = roadmap.currentProject { WaveProjectView(project: project, repo: roadmap.wave.repo) }
+            ForEach(roadmap.projects.items) { WaveProjectView(project: $0, repo: roadmap.wave.repo) }
             switch roadmap.tasks {
             case .unavailable(let reason):
                 Label(reason, systemImage: "exclamationmark.triangle").foregroundStyle(palette.warning)
@@ -284,9 +284,6 @@ private struct RoadmapWaveCard: View {
                         onAction: { action in onTaskAction(task, action) }, onOpenWorktree: onOpenWorktree)
                 }
                 if truncated { Text("Older Tasks are truncated.").foregroundStyle(palette.warning) }
-            }
-            ForEach(roadmap.unavailableTasks, id: \.taskId) { task in
-                Text("\(task.taskIdentifier): \(task.reason) · \(task.recovery)").foregroundStyle(palette.warning)
             }
         }
         .padding(Spacing.lg)

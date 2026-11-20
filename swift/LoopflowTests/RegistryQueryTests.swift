@@ -336,11 +336,6 @@ struct RegistryQueryTests {
       }
     ]
   },
-  "metric_portfolio": {
-    "metrics": [],
-    "contract_issues": []
-  },
-  "project_readiness": {"state": "ready", "project_id": "project-1", "observed_at": null, "pending_successor": null, "activation": null},
   "projects": {
     "state": "ok",
     "items": [
@@ -351,14 +346,7 @@ struct RegistryQueryTests {
         "slug": "release-feedback",
         "name": "current",
         "workflow": "task-design",
-        "status": "started", "current": true,
-        "metric_targets": [],
-        "krs": [
-          {
-            "text": "Fast loops",
-            "holds": false
-          }
-        ]
+        "status": "started"
       }
     ],
     "truncated": false
@@ -426,8 +414,7 @@ struct RegistryQueryTests {
       }
     ],
     "truncated": false
-  },
-  "unavailable_tasks": []
+  }
 }
 """
         let query = RegistryQuery { args, _ in
@@ -524,11 +511,6 @@ struct RegistryQueryTests {
             "state": "unavailable",
             "reason": "Session history unavailable: disk is gone"
           },
-          "metric_portfolio": {
-            "metrics": [],
-            "contract_issues": []
-          },
-          "project_readiness": {"state": "unavailable", "project_id": null, "observed_at": null, "pending_successor": null, "activation": null},
           "projects": {
             "state": "unavailable",
             "reason": "Project planning unavailable"
@@ -537,8 +519,7 @@ struct RegistryQueryTests {
             "state": "ok",
             "items": [],
             "truncated": false
-          },
-          "unavailable_tasks": []
+          }
         }
         """
         let query = RegistryQuery { _, _ in json }

@@ -6,14 +6,12 @@ lf task status INF-124 --json
 lf checkout INF-124
 lf --task INF-124 research "write scratch/runtime.md"
 lf task run INF-124
-lf wave update-project --wave product --file scratch/product-project.json
 ```
 
 Wave → Task is the navigation hierarchy. A Wave keeps its objective, memory,
-cadence, budget and metric instruments across Projects. Its current Project
-owns Tasks, KRs and targets; connected to Linear, it is one In Progress Linear
-Project. A Wave's Project is edited in place and `lf wave plan bind`
-selects another existing Linear Project.
+cadence and budget across Projects. A Project groups Tasks, has a name, a
+summary and a status, and ends; connected to Linear, it is a Linear Project.
+A Wave holds any number of them and selects none.
 [Cutover status](reference-cutover.md#cutover-status) records
 other implementation and proof gaps.
 
@@ -22,7 +20,7 @@ other implementation and proof gaps.
 | Word | Means | Not |
 |---|---|---|
 | plan | the shared Waves, Projects and Tasks | |
-| Project | a Wave's current Project: its KRs, targets and Tasks | |
+| Project | a group of a Wave's Tasks with a name, summary and status; a Wave holds several | a Wave's current or selected Project: there is none |
 | tracker | where the plan is mirrored: Linear or Asana; `tracker:` in `.lf/config.yaml`, shown by `lf repo tracker` | bridge, planning provider; provider means the agent's provider |
 | stamp | `(at, machine id)` on one planning field; the newest stamp is the plan | a revision, a clock comparison with a tracker |
 | carrier | what moves stamped records between Machines: Git plan refs, a hub | a tracker; a carrier decides nothing |
@@ -80,24 +78,15 @@ retaining the losing action. This grants no execution or cleanup authority.
 Task content is read directly from `Task` (identifier, title and description),
 with its local write revision, optional tracker binding and last refresh time.
 `Project` likewise owns its fields directly; neither has a separate Plan wrapper.
-Project prose, KRs and metric targets are separate stored fields. Local
-reads and the shared typed writer never parse or regenerate Markdown. Conversion
-reads the released Markdown once inside the migration transaction, preserves
-the last refresh time. Only the selected
-current Project supplies the migrated Wave default graph; Project history
-retains no graph authority.
-Prompt assembly and Linear delivery render at their boundaries; malformed legacy
-content refuses the migration rather than discarding criteria. Extraction and Linear
-edits recognize fenced examples as prose and replace only owned field ranges;
-unrecognized paragraphs survive even inside managed sections.
-Project prose saves, Linear delivery and refresh use the same typed writer.
-Partial events retain the prose baseline's own revision and age rather than
-refreshing it with unrelated fields. Summary maps to Linear `description`; authored
-prose belongs to Linear `content`. Managed fields and fenced examples survive replacement.
+Project name, summary, description, status and rank are separate stored
+fields, saved, sent and refreshed through the same typed writer. Summary maps
+to Linear `description`, and `Project.description` maps to Linear `content`;
+`parse_project_document` keeps any `## KRs`, `## Metric targets` or
+`workflow:` sections an earlier release rendered there out of the description
+and in place when the description changes.
+Partial events retain a field baseline's own revision and age rather than
+refreshing it with unrelated fields.
 
-`ProjectKR` is an explicit judgment. `MetricTarget` names a metric and a numeric
-`Threshold`, independently of the Wave's observations. Project iteration is no longer
-live state; its stored values and historical judgment events remain readable evidence.
 The typed field writer—not either complete domain struct—defines portable content;
 flattening records does not make checkout or execution fields synchronizable.
 
@@ -170,8 +159,8 @@ tracker deletion evidence apply regardless of planning mode. Local completion
 records its planning decision and optional tracker action without moving the Task's graph.
 GitHub delivery still requires confirmed merge evidence. Stable
 local IDs select the rows and retry actions; tracker aliases select existing
-Projects through their stored mapping. Membership, Project fields, selection and
-pending effects commit together. Connected commands report a pending planning sync.
+Projects through their stored mapping. Membership, Project fields and pending
+effects commit together. Connected commands report a pending planning sync.
 Inbound events preserve pending membership against an unchanged baseline;
 conflicting Linear membership wins while the losing local intention remains in history.
 Mapped membership and Project fields use foreground delivery below; local settlement
@@ -426,75 +415,41 @@ its action. Retired actions never reenter delivery after a late acknowledgement
 or matching event.
 The documented unconditional-update race remains a protocol limit.
 
-## Plan creation and selection
+## Projects of a Wave
 
-```bash
-lf wave plan bind product <project-uuid> --json
-lf wave create product --json
+```text
+$ lf wave create product --json          # no Project row, no tracker request
+$ lf task create --wave product --title "Fix the parser"
+$ lf wave plan product --json            # projects: one, status started
 ```
 
-Validate one existing Project and select its accepted local record on the Wave's
-SQLite row (`waves.current_project_id`). Repeating the same binding preserves it;
-a different existing binding is left unchanged. Setup preserves tracker status,
-content and identity, including a Backlog Project. It does not
-activate the Project. Operation routing and status select this exact ID; the JSON
-Project summary carries a required `current` boolean for Desktop. Status and
-`plan list` retain predecessor plans and Tasks. Registration and unstarted managed
-work require that exact Project to be In Progress; another In Progress Project
-does not compete with the binding. Already-started Tasks retain continuation in
-predecessor Projects.
+A Wave's Projects are the `projects` rows with its `wave_id`, listed in
+`planning_rank, created_at, id` order. None is selected, and nothing checks a
+Project's status before a Task registers or runs.
+
+Creating a Task in a Wave, or moving one in, asks `new_task_project(wave)`:
+the Wave's newest `started` Project; else its newest `backlog`, `planned` or
+`paused` one; else none. Newest is by `created_at`, then `id`. On none, the
+same transaction makes a `started` Project named for the Wave. The answer is
+computed on each call and stored nowhere. With more than one open Project the
+command prints the one joined (`… in Project <name>`); `--json` carries the
+Task's `project_id` either way. A Project started in Linear under the Wave's
+Initiative becomes the answer once it is the newest started one.
+
+A Project made here has no tracker binding until the drain gives it a
+`create`, including one made before a tracker was connected. A Task's
+`issueCreate` waits for its Project's tracker ID.
+
+A Project's status changes in the tracker, mirrored both ways, or through
+abandonment, which writes `work_state` and `work_terminal_at`. A Task changes
+Project in the tracker; `lf task move` is the one way it changes Wave. Started
+Tasks keep their identity, checkout, PR and captured execution wherever they
+are.
 
 Wave and `plan list` Task summaries read saved Work directly: `id` is the local Task
 identity, `tracker_id` is its optional tracker binding, and `sync` is required
 read-only evidence. Missing tracker inventory does not erase saved prose, due
 dates or assignments. Graph, execution and checkout evidence remain separate.
-
-`ensure` activates the configured Backlog or Planned Project in SQLite and records
-its status change for delivery. Without a binding, creation, original name,
-selection and the local transition action commit together. Retry reuses that
-identity and preserves later edits. Existing tracker creation reservations retain
-their UUID and mappings. No tracker request is needed, including during an outage.
-Terminal, archived, paused or foreign Projects retain their history. Names and content remain intact; the Wave owns its default graph. Binding accepts the durable or mapped ID of
-an already saved Project; it does not fetch a missing Project. Legacy YAML import
-retains the original bytes and requires that exact Project's saved record.
-Project export uses the original transition action on the foreground connection.
-Creation and Initiative attachment retain separate attempted effects and exact
-mutation acknowledgements; a missing response never permits another create or attachment.
-Mapped status actions use foreground delivery;
-a locally active Project alone is not proof of Linear activation. Ensure never searches for candidates; status and `plan list` never call it. Desktop
-ensures on explicit opening or retry while retaining cached planning and independent
-Session reads. Both primary and Portfolio surfaces render the same SQLite-derived
-`project_readiness` through `lf wave show --subscribe --json`. Committed selection,
-accepted facts, transitions and exact activation Process outcomes invalidate that reading.
-A pending transition or unfinished Process is unresolved evidence, not proof of liveness.
-Watchers and status reads never provision or import.
-
-The first explicit ensure or binding setup imports an existing
-`<Machine>/waves/<WaveId>/config.yaml` selection once. Binding and import resolve
-exact durable or mapped IDs in the same SQLite transaction as selection; names and
-slugs never select a Project. SQLite commits the selected Project and original YAML
-bytes together in `project_binding_imports`; absent files are recorded too. Malformed
-files, missing identities or a conflicting selection leave import retryable and
-prohibit creation. After import, the file
-is inert, even if a stale checkout or old writer changes it. Other YAML bytes remain
-untouched. An imported completed Project stays selected history and cannot be reopened.
-Activation records its exact Process on the Wave; that Process remains the sole owner of
-its terminal outcome and error. Swift retains command transport feedback only.
-
-## Replace a Wave's Project, keep the work
-
-```bash
-lf wave edit-project product --name "2026-10 — customer work"
-lf wave update-project --wave product --file scratch/product-project.json
-lf wave plan bind product <Project UUID>     # select another existing Project
-```
-
-`update-project` replaces the current Project's KRs and metric targets with the
-supplied JSON (`{"metric_targets":[],"krs":[]}`); names, summaries and
-unrelated content stay. `bind` moves the Wave's shared selection to an
-existing non-terminal Project. Neither moves a Task: started Tasks keep their
-identity, checkout, PR and captured execution where they are, and `lf task
-move` is the one way a Task changes Wave. There is no rotation operation.
 
 ## Inspect planning before starting execution
 
@@ -574,12 +529,6 @@ Cold detail discovers ownership, locks, then reads ownership again. Null detail
 invalidates only the cached revision and event it queried; it cannot invalidate
 a newer accepted Task. Readback follows the issue UUID across identifier changes.
 
-The `project_readiness` migration preserves original Linear Project bodies and
-refresh evidence before a one-time name/slug correction from fresh tracker
-facts. Only pre-cutover rows receive this exception; all non-name conflict checks
-remain, and later equal-revision name conflicts are rejected. Rejected ingestion
-cannot consume the exception or update durable Project facts first.
-
 List coverage never removes a Project merely because a later response omits it.
 Without removal evidence, refresh fails and retains the previous event.
 Project revisions do not establish ordering for separate Initiative/Team
@@ -587,9 +536,6 @@ relationships. A contradictory relationship set stays unresolved, retains its
 last-good facts, and blocks managed readers. Replaying a list or detail does not
 clear that uncertainty. Explicit reteam reconciles the exact confirmed Team set
 under refresh ownership; it cannot reconcile a changed Initiative.
-
-Historical tracker transitions and archival acknowledgements remain evidence of
-the removed rotation; nothing infers that their uncertain effects settled.
 
 ## Capture a Graph once
 

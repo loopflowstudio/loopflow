@@ -32,7 +32,6 @@ mod task_started;
 
 mod linear_team_checks;
 mod machine_records;
-mod metrics;
 pub mod plan_carriers;
 pub mod planning_order;
 mod planning_sync;
@@ -41,8 +40,8 @@ mod pr_landings;
 mod processes;
 pub use processes::{PreviousAgentDisposition, SessionTransfer};
 mod program_status;
-pub mod project_content;
-pub mod project_selection;
+#[cfg(test)]
+mod project_content_tests;
 pub mod provider_transitions;
 mod rentals;
 pub mod repositories;
@@ -75,7 +74,6 @@ mod wave_lifecycle;
 
 pub use children::ClosedTaskPage;
 pub use graph_inventory::{entry_of, AgentLimitRecovery, GraphExecutionFacts, UnrunGraph};
-pub use project_selection::{ProjectActivation, ProjectReadiness, ProjectReadinessState};
 pub use revisions::{Revisions, StoreRevisions};
 pub use session_events::{AnsweredTurn, CurrentConversation, TurnSpan};
 pub use task_details::TaskDetailFacts;

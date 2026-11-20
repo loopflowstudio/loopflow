@@ -320,7 +320,7 @@ pub(crate) fn value(action: &TrackerAction) -> OpsResult<WorkValue> {
 
 /// The values a `create` action starts its tracker object with.
 pub(crate) fn values(action: &TrackerAction) -> OpsResult<Vec<WorkValue>> {
-    serde_json::from_value(action.value.clone()).map_err(message)
+    loopflow_storage::work::edit::known_values(action.value.clone()).map_err(message)
 }
 
 /// The state a `state` action moves its Task to.
@@ -417,8 +417,6 @@ pub(crate) fn observed_project(project: &TrackerProject) -> Observed {
             WorkValue::ProjectSummary(project.summary.clone()),
             WorkValue::ProjectDescription(project.description.clone()),
             WorkValue::ProjectStatus(project.status),
-            WorkValue::Krs(project.krs.clone()),
-            WorkValue::MetricTargets(project.metric_targets.clone()),
         ],
         initiatives: project.initiative_ids.clone(),
         ..Observed::default()

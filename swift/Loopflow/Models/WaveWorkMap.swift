@@ -3,7 +3,6 @@ import Foundation
 public struct WaveWorkMap: Sendable, Hashable {
     public let objective: String
     public let projects: WorkEvidence<ProjectPlanningSnapshot>
-    public var currentProject: ProjectPlanningSnapshot? { projects.currentProject }
     public let tasks: WorkEvidence<RoadmapTask>
 
     public init(objective: String, projects: WorkEvidence<ProjectPlanningSnapshot>, tasks: WorkEvidence<RoadmapTask>) {
@@ -19,47 +18,30 @@ public enum ProjectStatus: String, Decodable, Sendable, Hashable {
 
 public struct ProjectPlanningSnapshot: Decodable, Sendable, Identifiable, Hashable {
     public let sync: TrackerSync
-    public let current: Bool
     public let id: String
     public let trackerId: String?
     public let slug: String
     public let name: String
     public let status: ProjectStatus
-    public let metricTargets: [MetricTarget]
-    public let krs: [PlanningKeyResult]
+
+    public func matches(reference: String) -> Bool {
+        id == reference || slug == reference || trackerId == reference
+    }
 
     enum CodingKeys: String, CodingKey {
-        case id, slug, name, status, krs, current, sync
+        case id, slug, name, status, sync
         case trackerId = "tracker_id"
-        case metricTargets = "metric_targets"
     }
 
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         sync = try values.decode(TrackerSync.self, forKey: .sync)
-        current = try values.decode(Bool.self, forKey: .current)
         id = try values.decode(String.self, forKey: .id)
         trackerId = try values.decode(String?.self, forKey: .trackerId)
         slug = try values.decode(String.self, forKey: .slug)
         name = try values.decode(String.self, forKey: .name)
         status = try values.decode(ProjectStatus.self, forKey: .status)
-        metricTargets = try values.decode([MetricTarget].self, forKey: .metricTargets)
-        krs = try values.decode([PlanningKeyResult].self, forKey: .krs)
     }
-}
-
-extension WorkEvidence where Item == ProjectPlanningSnapshot {
-    public var currentProject: ProjectPlanningSnapshot? {
-        let current = items.filter { $0.current }
-        return current.count == 1 ? current[0] : nil
-    }
-}
-
-public struct PlanningKeyResult: Decodable, Sendable, Identifiable, Hashable {
-    public var id: String { text }
-
-    public let text: String
-    public let holds: Bool
 }
 
 public struct TrackerState: Decodable, Sendable, Hashable {

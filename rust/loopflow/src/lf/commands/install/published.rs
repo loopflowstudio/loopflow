@@ -68,6 +68,7 @@ pub fn install(switch: Option<Stream>) -> Result<()> {
     super::recover_switch(None)?;
     let directory = install_dir()?;
     let app = app_destination(&directory.join("lf"));
+    eprintln!("Checking the {} stream…", stream.as_str());
     if stream == Stream::Dev {
         main_build(&directory, app.as_deref())?;
     } else {
@@ -403,18 +404,26 @@ fn newest_run(json: &str) -> Result<(u64, String)> {
 }
 
 fn download_artifact(run: u64, name: &str, directory: &Path) -> Result<()> {
-    gh(&[
-        "run",
-        "download",
-        &run.to_string(),
-        "--repo",
-        REPOSITORY,
-        "--name",
-        name,
-        "--dir",
-        &directory.to_string_lossy(),
-    ])
-    .map(drop)
+    eprintln!("Downloading {name}…");
+    // gh draws its progress indicator when it inherits the terminal.
+    let status = Command::new("gh")
+        .args([
+            "run",
+            "download",
+            &run.to_string(),
+            "--repo",
+            REPOSITORY,
+            "--name",
+            name,
+            "--dir",
+        ])
+        .arg(directory)
+        .status()
+        .with_context(|| format!("start gh to download {name}"))?;
+    if !status.success() {
+        bail!("download of {name} failed ({status})");
+    }
+    Ok(())
 }
 
 fn gh(args: &[&str]) -> Result<String> {

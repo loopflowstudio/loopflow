@@ -1397,6 +1397,9 @@ impl super::Harness for Claude {
             owned,
         )
     }
+    fn classify_failure(&self, line: &str) -> Option<crate::agent::AgentFailure> {
+        crate::agent::provider_failure(line)
+    }
     fn kind(&self) -> super::HarnessKind {
         super::HarnessKind::Claude
     }
@@ -1407,7 +1410,6 @@ impl super::Harness for Claude {
                 managed: super::ThreadName::Assigned,
             },
             initial_prompt_on_resume: false,
-            classifies_failures: true,
             native_skills: Some(crate::skills::catalog::SkillDialect::Claude),
             turn_limit: true,
             output_schema: true,

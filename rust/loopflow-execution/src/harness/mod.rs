@@ -1,4 +1,6 @@
 pub mod agent_process;
+pub mod antigravity;
+mod antigravity_decode;
 pub mod claude;
 mod claude_decode;
 pub(crate) mod claude_trust;
@@ -313,6 +315,7 @@ pub enum HarnessKind {
     Claude,
     OpenCode,
     Pi,
+    Antigravity,
 }
 
 impl HarnessKind {
@@ -322,6 +325,7 @@ impl HarnessKind {
             "claude" => Some(Self::Claude),
             "opencode" => Some(Self::OpenCode),
             "pi" => Some(Self::Pi),
+            "antigravity" => Some(Self::Antigravity),
             _ => None,
         }
     }
@@ -341,6 +345,7 @@ impl HarnessKind {
             Self::Claude => "claude",
             Self::OpenCode => "opencode",
             Self::Pi => "pi",
+            Self::Antigravity => "antigravity",
         }
     }
 
@@ -349,7 +354,18 @@ impl HarnessKind {
         self.harness().provider()
     }
 
-    pub const ALL: [Self; 4] = [Self::Claude, Self::Codex, Self::OpenCode, Self::Pi];
+    /// The command that starts this harness's CLI.
+    pub fn program(self) -> &'static str {
+        self.harness().program()
+    }
+
+    pub const ALL: [Self; 5] = [
+        Self::Claude,
+        Self::Codex,
+        Self::OpenCode,
+        Self::Pi,
+        Self::Antigravity,
+    ];
 
     pub fn harness(self) -> &'static dyn Harness {
         match self {
@@ -357,6 +373,7 @@ impl HarnessKind {
             Self::Codex => &codex::Codex,
             Self::OpenCode => &opencode::OpenCode,
             Self::Pi => &pi::Pi,
+            Self::Antigravity => &antigravity::Antigravity,
         }
     }
 }
@@ -387,7 +404,6 @@ impl ThreadNaming {
 pub struct Capabilities {
     pub thread: ThreadNaming,
     pub initial_prompt_on_resume: bool,
-    pub classifies_failures: bool,
     pub native_skills: Option<crate::skills::catalog::SkillDialect>,
     pub turn_limit: bool,
     pub output_schema: bool,
@@ -467,7 +483,17 @@ pub(crate) fn command_program(command: &str, program: &str) -> bool {
 
 pub trait Harness: Sync + std::fmt::Debug {
     fn kind(&self) -> HarnessKind;
+    /// The command that starts the provider's CLI.
+    fn program(&self) -> &'static str {
+        self.kind().as_str()
+    }
     fn capabilities(&self) -> Capabilities;
+    /// What one line of the provider's own error says went wrong, for the
+    /// failures the provider leaves to lf: a spent quota, a revoked login or
+    /// an unserved model moves the run to the next agent in its order, and a
+    /// transient failure is retried. `None` for a line that names no cause,
+    /// and for a failure the provider retries itself.
+    fn classify_failure(&self, line: &str) -> Option<crate::agent::AgentFailure>;
     fn open(&self, launch: &Launch<'_>) -> Result<native_session::NativeClient>;
     fn driver(
         &self,
@@ -514,14 +540,14 @@ pub trait Harness: Sync + std::fmt::Debug {
         None
     }
     fn recognizes_driver(&self, command: &str) -> bool {
-        command_program(command, self.kind().as_str())
+        command_program(command, self.program())
     }
     fn title_args(&self, _name: &str) -> Vec<String> {
         Vec::new()
     }
 
     fn recognizes(&self, process: &crate::process::OsProcess) -> bool {
-        process.command == self.kind().as_str()
+        process.command == self.program()
     }
     fn model_rungs(&self) -> &'static [&'static str] {
         &[]
@@ -690,6 +716,10 @@ mod tests {
         assert_eq!(
             HarnessKind::parse("OpenCode").map(HarnessKind::as_str),
             Some("opencode")
+        );
+        assert_eq!(
+            HarnessKind::parse("Antigravity").map(HarnessKind::program),
+            Some("agy")
         );
         assert_eq!(
             HarnessKind::parse("lfharness").map(HarnessKind::as_str),

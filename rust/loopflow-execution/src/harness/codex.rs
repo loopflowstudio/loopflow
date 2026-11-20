@@ -1359,6 +1359,9 @@ impl super::Harness for Codex {
     fn terminal_error(&self, code: &str) -> bool {
         matches!(code, "codex_disconnected" | "codex_dispatch_rejected")
     }
+    fn classify_failure(&self, line: &str) -> Option<crate::agent::AgentFailure> {
+        crate::agent::provider_failure(line)
+    }
     fn kind(&self) -> super::HarnessKind {
         super::HarnessKind::Codex
     }
@@ -1369,7 +1372,6 @@ impl super::Harness for Codex {
                 managed: super::ThreadName::Reported,
             },
             initial_prompt_on_resume: true,
-            classifies_failures: true,
             native_skills: Some(crate::skills::catalog::SkillDialect::Codex),
             turn_limit: false,
             output_schema: false,

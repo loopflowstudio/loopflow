@@ -1013,16 +1013,9 @@ fn _run_with_retries(
         let provider = attempt.agent.harness.as_str();
         let mut result = run(&attempt, launched)?;
         launched = true;
-        if !attempt
-            .agent
-            .harness
-            .harness()
-            .capabilities()
-            .classifies_failures
-        {
-            return Ok(result);
-        }
-        result.failure = result.failure.or_else(|| _classify_agent_failure(&result));
+        result.failure = result
+            .failure
+            .or_else(|| _classify_agent_failure(attempt.agent.harness, &result));
         let Some(failure) = result.failure else {
             return Ok(result);
         };
@@ -1186,20 +1179,46 @@ fn _failure_reason(result: &AgentProcessResult, failure: AgentFailure) -> String
     }
 }
 
-fn _classify_agent_failure(result: &AgentProcessResult) -> Option<AgentFailure> {
+/// The failure a failed run's provider errors state, as its harness reads
+/// them. Harnesses separate provider errors from answer prose, so only
+/// `stderr` is read: JSON the model printed is never a provider message.
+fn _classify_agent_failure(
+    harness: crate::harness::HarnessKind,
+    result: &AgentProcessResult,
+) -> Option<AgentFailure> {
     if result.exit_code == 0 {
         return None;
     }
-    if _find_provider_error(result, credential_invalidated_failure).is_some() {
-        return Some(AgentFailure::CredentialInvalidated);
+    result
+        .stderr
+        .lines()
+        .filter_map(|line| harness.harness().classify_failure(line))
+        .min_by_key(|failure| match failure {
+            AgentFailure::CredentialInvalidated => 0,
+            AgentFailure::UsageLimit => 1,
+            AgentFailure::ModelUnavailable => 2,
+            _ => 3,
+        })
+}
+
+/// A provider's line that sends the run to another agent: a revoked login, a
+/// spent quota or a model the provider does not serve.
+pub(crate) fn routing_failure(line: &str) -> Option<AgentFailure> {
+    if credential_invalidated_failure(line).is_some() {
+        Some(AgentFailure::CredentialInvalidated)
+    } else if subscription_limit_text(line).is_some() {
+        Some(AgentFailure::UsageLimit)
+    } else if _model_unavailable(line).is_some() {
+        Some(AgentFailure::ModelUnavailable)
+    } else {
+        None
     }
-    if _find_provider_error(result, subscription_limit_text).is_some() {
-        return Some(AgentFailure::UsageLimit);
-    }
-    if _find_provider_error(result, _model_unavailable).is_some() {
-        return Some(AgentFailure::ModelUnavailable);
-    }
-    _find_provider_error(result, classify_retryable_agent_failure)
+}
+
+/// [`routing_failure`], then the transient failures lf retries for a provider
+/// that does not retry them itself.
+pub(crate) fn provider_failure(line: &str) -> Option<AgentFailure> {
+    routing_failure(line).or_else(|| classify_retryable_agent_failure(line))
 }
 
 /// A provider's line as the phrase lists read it: lowercase, with typographic
@@ -1235,15 +1254,6 @@ pub(crate) fn credential_invalidated_failure(text: &str) -> Option<()> {
         || text.contains("access token could not be refreshed")
         || text.contains("your session has ended. please log in again"))
     .then_some(())
-}
-
-fn _find_provider_error<T>(
-    result: &AgentProcessResult,
-    classify: fn(&str) -> Option<T>,
-) -> Option<T> {
-    // Harnesses separate provider errors from answer prose. Never interpret
-    // JSON printed by the model as provider control messages.
-    result.stderr.lines().find_map(classify)
 }
 
 pub(crate) fn classify_retryable_agent_failure(text: &str) -> Option<AgentFailure> {
@@ -1416,7 +1426,7 @@ pub fn start_on_installed_agent(
     launch: &mut AgentConfig,
     process: &ProcessConfig,
 ) -> Result<(), String> {
-    let is_installed = |kind: crate::harness::HarnessKind| check_cli_available(kind.as_str());
+    let is_installed = |kind: crate::harness::HarnessKind| check_cli_available(kind.program());
     let first =
         _pass_over_missing_agents(launch, process, is_installed).map_err(missing_agent_message)?;
     if first != launch.agent {
@@ -1450,9 +1460,11 @@ fn _pass_over_missing_agents(
     Ok(first)
 }
 
-/// Check if a CLI is available.
+/// Whether `cli` is on `PATH`: a harness by its name, or any other program.
 pub fn check_cli_available(cli: &str) -> bool {
-    crate::os_process::which_on_path(Path::new(cli)).is_some()
+    let program = crate::harness::HarnessKind::parse(cli)
+        .map_or(cli, crate::harness::HarnessKind::program);
+    crate::os_process::which_on_path(Path::new(program)).is_some()
 }
 
 #[cfg(test)]
@@ -1886,7 +1898,7 @@ trust_level = "trusted"
             "codex_error: The 'gpt-6.2-sol' model is not supported when using Codex with a ChatGPT account.",
         ] {
             assert_eq!(
-                _classify_agent_failure(&failed_result(message)),
+                _classify_agent_failure(crate::harness::HarnessKind::Claude, &failed_result(message)),
                 Some(AgentFailure::ModelUnavailable)
             );
             assert!(subscription_limit_text(message).is_none());
@@ -1895,14 +1907,14 @@ trust_level = "trusted"
                 stdout: message.into(),
                 ..Default::default()
             };
-            assert_eq!(_classify_agent_failure(&prose), None);
+            assert_eq!(_classify_agent_failure(crate::harness::HarnessKind::Claude, &prose), None);
         }
         for message in [
             "service unavailable",
             "model service temporarily unavailable",
         ] {
             assert_eq!(
-                _classify_agent_failure(&failed_result(message)),
+                _classify_agent_failure(crate::harness::HarnessKind::Claude, &failed_result(message)),
                 Some(AgentFailure::Unavailable)
             );
         }
@@ -2015,7 +2027,7 @@ trust_level = "trusted"
             .into(),
             ..Default::default()
         };
-        assert_eq!(_classify_agent_failure(&result), None);
+        assert_eq!(_classify_agent_failure(crate::harness::HarnessKind::Claude, &result), None);
         result.stderr = "service unavailable".into();
         let mut attempts = 0;
         _run_with_retries(
@@ -2067,7 +2079,7 @@ trust_level = "trusted"
     fn codex_usage_limit_with_a_typographic_apostrophe_is_a_usage_limit() {
         let line = "codex_error: You\u{2019}ve hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/settings/usage to purchase more credits or try again at 3:36 PM.";
         assert_eq!(
-            _classify_agent_failure(&failed_result(line)),
+            _classify_agent_failure(crate::harness::HarnessKind::Claude, &failed_result(line)),
             Some(AgentFailure::UsageLimit)
         );
     }

@@ -745,6 +745,14 @@ impl super::Harness for OpenCode {
             })
             .collect()
     }
+    fn classify_failure(&self, line: &str) -> Option<crate::agent::AgentFailure> {
+        // "Insufficient balance. This request is pay-as-you-go, billed to
+        // OpenCode Models credits." OpenCode retries a transient failure itself.
+        if line.to_ascii_lowercase().contains("insufficient balance") {
+            return Some(crate::agent::AgentFailure::UsageLimit);
+        }
+        crate::agent::routing_failure(line)
+    }
     fn kind(&self) -> super::HarnessKind {
         super::HarnessKind::OpenCode
     }
@@ -755,7 +763,6 @@ impl super::Harness for OpenCode {
                 managed: super::ThreadName::Assigned,
             },
             initial_prompt_on_resume: false,
-            classifies_failures: false,
             native_skills: None,
             turn_limit: false,
             output_schema: false,

@@ -966,6 +966,8 @@ pub(crate) fn attach_in(
 
 /// Unbound Projects, then Tasks, made on this Machine in `repo` with no live
 /// `create`. A Project is made here unless another Machine stamped its Wave.
+/// A tracker holds an issue in a Project, never a Wave, so a Task in a Wave
+/// that reaches no Project stays in the plan only.
 fn uncreated(conn: &Connection, repo: &str) -> StoreResult<Vec<ActionOwner>> {
     let mut query = conn.prepare_cached(
         "SELECT 'project',p.id FROM projects p JOIN waves w ON w.id=p.wave_id
@@ -976,6 +978,7 @@ fn uncreated(conn: &Connection, repo: &str) -> StoreResult<Vec<ActionOwner>> {
          UNION ALL
          SELECT 'task',t.id FROM tasks t JOIN repository_plans r ON r.id=t.repository_id
          WHERE r.repo=?1 AND t.external_issue_id IS NULL AND t.planning_deleted_at IS NULL
+         AND (t.project_id IS NOT NULL OR t.wave_id IS NULL)
          AND EXISTS(SELECT 1 FROM task_creation_intents c WHERE c.task_id=t.id)
          AND NOT EXISTS(SELECT 1 FROM tracker_actions e WHERE e.task_id=t.id AND e.kind='create' AND e.phase!='retired')",
     )?;

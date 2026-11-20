@@ -142,6 +142,7 @@ work_values! {
     (ProjectInitiatives, "project_initiatives", Vec<String>),
     (ProjectTeams, "project_teams", Vec<String>),
     (TaskProject, "task_project", Option<String>),
+    (TaskWave, "task_wave", Option<String>),
     (TaskLinearId, "task_linear_id", Option<String>),
     (TaskIdentifier, "task_identifier", String),
     (TaskTitle, "task_title", Option<String>),
@@ -163,6 +164,7 @@ impl WorkValue {
         use loopflow_model::id::{canonical_prefixed, canonical_task_identifier, canonical_uuid};
         match self {
             Self::WaveParent(v)
+            | Self::TaskWave(v)
             | Self::ProjectLinearId(v)
             | Self::TaskLinearId(v)
             | Self::TaskAssignee(v)

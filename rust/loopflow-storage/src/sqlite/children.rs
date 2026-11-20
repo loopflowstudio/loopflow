@@ -81,7 +81,12 @@ fn task_creation_in(conn: &Connection, task: &TaskId) -> StoreResult<Option<NewT
 }
 
 // Shared writer for new Tasks and durable filing reservations.
-pub(super) fn create_task_in(conn: &Connection, input: &NewTask) -> StoreResult<Task> {
+/// `wave`: the Wave the Task is filed in. Without one, its Project's Wave.
+pub(super) fn create_task_in(
+    conn: &Connection,
+    input: &NewTask,
+    wave: Option<&WaveId>,
+) -> StoreResult<Task> {
     if let Some(intent) = task_creation_in(conn, &input.id)? {
         if intent != *input {
             return Err(StoreError::InvalidData(
@@ -93,14 +98,20 @@ pub(super) fn create_task_in(conn: &Connection, input: &NewTask) -> StoreResult<
     if input.title.trim().is_empty() {
         return Err(StoreError::InvalidData("Task title cannot be empty".into()));
     }
-    let project = input.project_id.as_ref().map(ProjectId::as_str);
-    let wave_id: Option<WaveId> = match project {
-        Some(project) => conn.query_row(
+    let project_id = match (&input.project_id, wave) {
+        (Some(project), _) => Some(project.clone()),
+        (None, Some(wave)) => task_project_in(conn, wave)?,
+        (None, None) => None,
+    };
+    let project = project_id.as_ref().map(ProjectId::as_str);
+    let wave_id: Option<WaveId> = match (wave, project) {
+        (Some(wave), _) => Some(wave.clone()),
+        (None, Some(project)) => conn.query_row(
             "SELECT wave_id FROM projects WHERE id=?1",
             [project],
             |row| row.get(0),
         )?,
-        None => None,
+        (None, None) => None,
     };
     let rank: u32 = conn.query_row(
         "SELECT COALESCE(max(planning_rank)+1,0) FROM tasks WHERE repository_id=?1 AND project_id IS ?2",
@@ -120,7 +131,7 @@ pub(super) fn create_task_in(conn: &Connection, input: &NewTask) -> StoreResult<
         tracker_writeback: LinearWritebackState::Current,
         wave_id,
         repository_id: input.repository_id.clone(),
-        project_id: input.project_id.clone(),
+        project_id,
         worktree: None,
         workspace_slug: String::new(),
         branch: String::new(),
@@ -320,11 +331,7 @@ impl SqliteStore {
             super::sessions::require_current_actor_in(&tx, &session.id, caller)?;
         }
         if let Some(input) = creation {
-            let mut input = input.clone();
-            if let Some(wave) = creation_wave {
-                input.project_id = Some(join_project_in(&tx, wave)?);
-            }
-            create_task_in(&tx, &input)?;
+            create_task_in(&tx, input, creation_wave)?;
         }
         if let Some((path, pr)) = placement {
             let current = task_on(&tx, task_id)?.ok_or(StoreError::NotFound)?;
@@ -422,7 +429,7 @@ impl SqliteStore {
     pub fn create_task(&self, input: &NewTask) -> StoreResult<Task> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let task = create_task_in(&tx, input)?;
+        let task = create_task_in(&tx, input, None)?;
         tx.commit()?;
         Ok(task)
     }
@@ -689,7 +696,7 @@ impl SqliteStore {
         let conn = conn.savepoint()?;
         tasks_where(
             &conn,
-            wave_id.map(|id| ("p.wave_id", id.as_str())),
+            wave_id.map(|id| ("t.wave_id", id.as_str())),
             &super::durable::task_open_sql("t"),
         )
     }
@@ -708,7 +715,7 @@ impl SqliteStore {
         let conn = conn.savepoint()?;
         let open = super::durable::task_open_sql("t");
         let query = format!(
-            "{TASK_COLUMNS} WHERE t.repository_id=?1 AND (?2 IS NULL OR p.wave_id=?2)
+            "{TASK_COLUMNS} WHERE t.repository_id=?1 AND (?2 IS NULL OR t.wave_id=?2)
              AND NOT {open} AND {TASK_VISIBLE}
              AND (?3 IS NULL OR ({TASK_CLOSED_AT},t.id) < (
                 SELECT {TASK_CLOSED_AT},t.id FROM tasks t WHERE t.id=?3))
@@ -757,7 +764,7 @@ impl SqliteStore {
             "{TASK_COLUMNS} WHERE t.repository_id=?1 AND {open} AND {TASK_VISIBLE}
              AND (instr(lower(t.issue_title),?2) OR instr(lower(t.issue_identifier),?2)
                 OR instr(lower(t.id),?2))
-             AND (?3 IS NULL OR p.wave_id=?3)
+             AND (?3 IS NULL OR t.wave_id=?3)
              AND (?4 IS NULL OR ?4 IN (p.id,p.external_project_id,p.project_slug)
                 OR lower(p.project_name)=lower(?4))"
         );
@@ -783,8 +790,7 @@ impl SqliteStore {
         let open = super::durable::task_open_sql("t");
         Ok(conn.query_row(
             &format!(
-                "SELECT count(*) FROM tasks t LEFT JOIN projects p ON p.id=t.project_id
-                 WHERE p.wave_id=?1 AND {open} AND {TASK_VISIBLE}"
+                "SELECT count(*) FROM tasks t WHERE t.wave_id=?1 AND {open} AND {TASK_VISIBLE}"
             ),
             [wave_id.as_str()],
             |row| row.get(0),
@@ -1282,11 +1288,10 @@ impl SqliteStore {
             .map_err(StoreError::from)
     }
 
-    /// The Project a new Task in `wave` joins: its newest `started` Project,
-    /// else its newest other open one. Nobody sets it and nothing gates on it.
+    /// The Project a new Task in `wave` joins; see `task_project_in`.
     pub fn new_task_project(&self, wave: &WaveId) -> StoreResult<Option<ProjectId>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        new_task_project_in(&conn, wave)
+        task_project_in(&conn, wave)
     }
 
     /// Name the Task's Project when its Wave offered several choices.
@@ -1534,6 +1539,7 @@ fn insert_task_row(conn: &Connection, task: &Task) -> StoreResult<()> {
             task.id.as_str(),
             &[
                 Edit::TaskProject(task.project_id.as_ref().map(ToString::to_string)),
+                Edit::TaskWave(task.wave_id.as_ref().map(ToString::to_string)),
                 Edit::TaskLinearId(task.tracker_id.as_ref().map(|id| id.as_str().to_owned())),
                 Edit::TaskIdentifier(task.identifier.clone()),
                 Edit::TaskTitle(Some(task.title.clone())),
@@ -1570,15 +1576,20 @@ fn seed_task_tracker_cursor(conn: &Connection, task: &Task) -> StoreResult<()> {
     Ok(())
 }
 
+/// A Task's Project is in its Wave or an ancestor of it.
 fn validate_task_project(conn: &Connection, task: &Task) -> StoreResult<()> {
-    let wave: Option<WaveId> = match &task.project_id {
-        Some(project) => conn.query_row(
-            "SELECT p.wave_id FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo WHERE p.id=?1 AND r.id=?2",
-            params![project.as_str(), task.repository_id.as_str()], |row| row.get(0),
-        )?,
-        None => None,
+    let consistent = match (&task.project_id, &task.wave_id) {
+        (None, _) => true,
+        (Some(_), None) => false,
+        (Some(project), Some(wave)) => {
+            let project_wave: String = conn.query_row(
+                "SELECT p.wave_id FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo WHERE p.id=?1 AND r.id=?2",
+                params![project.as_str(), task.repository_id.as_str()], |row| row.get(0),
+            )?;
+            wave_within_in(conn, wave.as_str(), &project_wave)?
+        }
     };
-    if wave != task.wave_id {
+    if !consistent {
         return Err(StoreError::InvalidData(format!(
             "Task {} has inconsistent Project/Wave membership",
             task.id
@@ -1727,7 +1738,7 @@ pub(super) fn cached_short_task_id(
 
 const TASK_COLUMNS: &str = "SELECT t.id,t.external_issue_id,
     t.issue_title, t.issue_description,
-    p.wave_id, c.worktree, t.workspace_slug,
+    t.wave_id, c.worktree, t.workspace_slug,
     t.created_at, t.updated_at, t.pm_snapshot_synced_at,
     COALESCE((SELECT json_object('state','pending','operation',
         CASE json_extract(e.value_json,'$.value.planning_state') WHEN 'completed' THEN 'complete_task' WHEN 'canceled' THEN 'cancel_task' ELSE 'reopen_task' END,
@@ -2361,10 +2372,17 @@ pub(super) fn task_events_after_in(
         .map_err(StoreError::from)
 }
 
-fn new_task_project_in(conn: &Connection, wave: &WaveId) -> StoreResult<Option<ProjectId>> {
+/// The Project a new Task in `wave` joins: the Wave's own, else its nearest
+/// ancestor's, else none. Within a Wave, its newest `started` Project, else
+/// its newest other open one.
+pub(crate) fn task_project_in(conn: &Connection, wave: &WaveId) -> StoreResult<Option<ProjectId>> {
     let mut query = conn.prepare_cached(&format!(
-        "SELECT id FROM projects WHERE wave_id=?1 AND {OPEN_PROJECT}
-         ORDER BY status='started' DESC,created_at DESC,id DESC LIMIT 1"
+        "WITH RECURSIVE line(id,depth) AS (
+             SELECT ?1,0
+             UNION ALL SELECT w.parent_wave_id,line.depth+1 FROM waves w JOIN line ON w.id=line.id
+             WHERE w.parent_wave_id IS NOT NULL)
+         SELECT p.id FROM line JOIN projects p ON p.wave_id=line.id WHERE {OPEN_PROJECT}
+         ORDER BY line.depth,p.status='started' DESC,p.created_at DESC,p.id DESC LIMIT 1"
     ))?;
     Ok(query
         .query_row([wave], |row| {
@@ -2373,29 +2391,17 @@ fn new_task_project_in(conn: &Connection, wave: &WaveId) -> StoreResult<Option<P
         .optional()?)
 }
 
-pub(crate) fn join_project_in(conn: &Connection, wave: &WaveId) -> StoreResult<ProjectId> {
-    if let Some(project) = new_task_project_in(conn, wave)? {
-        return Ok(project);
-    }
-    let name: String = conn.query_row("SELECT name FROM waves WHERE id=?1", [wave], |row| {
-        row.get(0)
-    })?;
-    let id = ProjectId::new();
-    planning_write::create(
-        conn,
-        "",
-        &crate::work::edit::WorkEdit::for_target(
-            id.as_str(),
-            &[
-                Edit::ProjectWave(wave.to_string()),
-                Edit::ProjectSlug(Some(name.clone())),
-                Edit::ProjectName(Some(name)),
-                Edit::ProjectStatus(crate::work::project::ProjectStatus::Started),
-            ],
-        ),
-        planning_write::WriteOrigin::Local,
-    )?;
-    Ok(id)
+/// Whether `wave` is `ancestor` or below it.
+pub(crate) fn wave_within_in(conn: &Connection, wave: &str, ancestor: &str) -> StoreResult<bool> {
+    Ok(conn
+        .prepare_cached(
+            "WITH RECURSIVE line(id) AS (
+                 SELECT ?1
+                 UNION SELECT w.parent_wave_id FROM waves w JOIN line ON w.id=line.id
+                 WHERE w.parent_wave_id IS NOT NULL)
+             SELECT EXISTS(SELECT 1 FROM line WHERE id=?2)",
+        )?
+        .query_row([wave, ancestor], |row| row.get(0))?)
 }
 
 const PROJECT_COLUMNS: &str = "SELECT
@@ -2484,7 +2490,7 @@ pub(super) fn request_completion_in(
 }
 
 pub(super) fn tasks_in(conn: &Connection, wave_id: Option<&WaveId>) -> StoreResult<Vec<Task>> {
-    tasks_where(conn, wave_id.map(|id| ("p.wave_id", id.as_str())), "1")
+    tasks_where(conn, wave_id.map(|id| ("t.wave_id", id.as_str())), "1")
 }
 
 pub(super) fn repository_tasks_in(
@@ -2634,6 +2640,122 @@ mod local_planning_tests {
         assert_eq!(made.name, "billing");
         assert_eq!(made.status, ProjectStatus::Started);
         assert_eq!(store.list_projects(Some(wave.id())).unwrap().len(), 6);
+    }
+
+    #[test]
+    fn a_task_joins_its_wave_project_else_its_nearest_ancestors_and_lists_in_its_own_wave() {
+        use crate::work::edit::{WorkEdit, WorkValue};
+        use crate::work::task::NewTask;
+        use crate::work::wave::Wave;
+        let dir = tempfile::tempdir().unwrap();
+        let store = crate::test_fixture::open(&dir.path().join("db")).unwrap();
+        let billing = Wave::new(WaveId::new(), "billing".into(), "/repo".into());
+        let refunds = Wave::new(WaveId::new(), "refunds".into(), "/repo".into())
+            .with_parent(billing.id().clone());
+        let other = Wave::new(WaveId::new(), "other".into(), "/repo".into());
+        for wave in [&billing, &refunds, &other] {
+            crate::test_fixture::wave(&store, wave);
+        }
+        let repository = crate::test_fixture::repository(&store, "/repo");
+        let file = |title: &str, wave: &Wave| {
+            let mut conn = store.conn.lock().unwrap();
+            let tx = conn.transaction().unwrap();
+            let task = super::create_task_in(
+                &tx,
+                &NewTask {
+                    due_date: None,
+                    id: TaskId::new(),
+                    repository_id: repository.clone(),
+                    project_id: None,
+                    title: title.into(),
+                    description: String::new(),
+                },
+                Some(wave.id()),
+            )
+            .unwrap();
+            tx.commit().unwrap();
+            task
+        };
+        let listed = |wave: &Wave| -> Vec<String> {
+            store
+                .list_tasks(Some(wave.id()))
+                .unwrap()
+                .into_iter()
+                .map(|task| task.title)
+                .collect()
+        };
+
+        // No Project anywhere above: the Task is in its Wave with none, and
+        // nothing creates one.
+        let x = file("x", &refunds);
+        assert_eq!(x.project_id, None);
+        assert_eq!(x.wave_id.as_ref(), Some(refunds.id()));
+        assert_eq!(listed(&refunds), ["x"]);
+        assert!(listed(&billing).is_empty());
+        assert!(store.list_projects(None).unwrap().is_empty());
+
+        // The parent's Project takes the child's Tasks; they still list under the child.
+        let billing_project = store.seed_project(billing.id()).unwrap().id;
+        let y = file("y", &refunds);
+        assert_eq!(y.project_id.as_ref(), Some(&billing_project));
+        assert_eq!(y.wave_id.as_ref(), Some(refunds.id()));
+        assert_eq!(
+            store.task(&y.id).unwrap().unwrap().wave_id.as_ref(),
+            Some(refunds.id())
+        );
+        assert!(listed(&refunds).contains(&"y".to_string()));
+        assert!(!listed(&billing).contains(&"y".to_string()));
+
+        // The child's own Project wins over its ancestor's.
+        let refunds_project = store.seed_project(refunds.id()).unwrap().id;
+        assert_eq!(
+            file("z", &refunds).project_id,
+            Some(refunds_project.clone())
+        );
+
+        // A move up keeps the ancestor's Project; a move out places the Task again.
+        store
+            .move_task(&y.id, y.project_id.as_ref(), Some(billing.id()))
+            .unwrap();
+        let moved = store.task(&y.id).unwrap().unwrap();
+        assert_eq!(
+            (moved.wave_id.as_ref(), moved.project_id.as_ref()),
+            (Some(billing.id()), Some(&billing_project))
+        );
+        store
+            .move_task(&y.id, moved.project_id.as_ref(), Some(other.id()))
+            .unwrap();
+        let moved = store.task(&y.id).unwrap().unwrap();
+        assert_eq!(
+            (moved.wave_id.as_ref(), moved.project_id),
+            (Some(other.id()), None)
+        );
+
+        // A Project from elsewhere (a tracker) takes the Task to that Project's
+        // Wave unless the Task is already in it or below it.
+        let apply = |task: &TaskId, project: &ProjectId| {
+            let mut conn = store.conn.lock().unwrap();
+            let tx = conn.transaction().unwrap();
+            crate::sqlite::planning_write::tracker(
+                &tx,
+                &WorkEdit::for_target(
+                    task.as_str(),
+                    &[WorkValue::TaskProject(Some(project.to_string()))],
+                ),
+            )
+            .unwrap();
+            tx.commit().unwrap();
+        };
+        apply(&y.id, &refunds_project);
+        assert_eq!(
+            store.task(&y.id).unwrap().unwrap().wave_id.as_ref(),
+            Some(refunds.id())
+        );
+        apply(&y.id, &billing_project);
+        assert_eq!(
+            store.task(&y.id).unwrap().unwrap().wave_id.as_ref(),
+            Some(refunds.id())
+        );
     }
 
     #[test]

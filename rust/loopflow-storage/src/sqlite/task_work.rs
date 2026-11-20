@@ -568,9 +568,7 @@ impl SqliteStore {
         wave: &loopflow_model::id::WaveId,
     ) -> StoreResult<std::collections::HashSet<TaskId>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut statement = conn.prepare(
-            "SELECT t.id FROM projects p JOIN tasks t ON t.project_id=p.id WHERE p.wave_id=?1",
-        )?;
+        let mut statement = conn.prepare("SELECT id FROM tasks WHERE wave_id=?1")?;
         let rows = statement.query_map([wave], |row| row.get::<_, String>(0))?;
         rows.map(|id| {
             TaskId::parse(&id?).map_err(|error| crate::StoreError::InvalidData(error.to_string()))

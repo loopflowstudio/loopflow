@@ -7,7 +7,7 @@ use crate::work::edit::{
     CommentContent, Disposition, StampedRecord, StampedValue, WorkEdit, WorkValue,
 };
 use crate::{StoreError, StoreResult};
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 /// Who a planning write comes from, which decides what else it records.
@@ -39,6 +39,7 @@ pub(crate) fn table(value: &WorkValue) -> &'static str {
         | WorkValue::ProjectInitiatives(_)
         | WorkValue::ProjectTeams(_) => "projects",
         WorkValue::TaskProject(_)
+        | WorkValue::TaskWave(_)
         | WorkValue::TaskLinearId(_)
         | WorkValue::TaskIdentifier(_)
         | WorkValue::TaskTitle(_)
@@ -71,6 +72,7 @@ fn column(value: &WorkValue) -> &'static str {
         WorkValue::ProjectInitiatives(_) => "planning_initiatives",
         WorkValue::ProjectTeams(_) => "planning_teams",
         WorkValue::TaskProject(_) => "project_id",
+        WorkValue::TaskWave(_) => "wave_id",
         WorkValue::TaskLinearId(_) => "external_issue_id",
         WorkValue::TaskIdentifier(_) => "issue_identifier",
         WorkValue::TaskTitle(_) => "issue_title",
@@ -118,9 +120,10 @@ pub(crate) fn read(conn: &Connection, table: &str, id: &str) -> StoreResult<Vec<
                         WorkValue::ProjectTeams(serde_json::from_str(&row.get::<_, String>(9)?)?),
                     ])
         }),
-        "tasks" => read_record(conn, "SELECT project_id,external_issue_id,issue_identifier,issue_title,issue_description,planning_rank,planning_assignee,planning_due_date,planning_deleted_at,planning_url,planning_branch_name,planning_team_id,planning_state,planning_completed,planning_completed_at FROM tasks WHERE id=?1", id, |row| {
+        "tasks" => read_record(conn, "SELECT project_id,external_issue_id,issue_identifier,issue_title,issue_description,planning_rank,planning_assignee,planning_due_date,planning_deleted_at,planning_url,planning_branch_name,planning_team_id,planning_state,planning_completed,planning_completed_at,wave_id FROM tasks WHERE id=?1", id, |row| {
                     Ok(vec![
                         WorkValue::TaskProject(row.get(0)?),
+                        WorkValue::TaskWave(row.get(15)?),
                         WorkValue::TaskLinearId(row.get(1)?),
                         WorkValue::TaskIdentifier(row.get(2)?),
                         WorkValue::TaskTitle(row.get(3)?),
@@ -455,15 +458,58 @@ pub(crate) fn grouped(edits: &[WorkEdit]) -> BTreeMap<(&str, &str), Vec<WorkEdit
     records
 }
 
+fn canonicalized(edits: &[WorkEdit]) -> StoreResult<Vec<WorkEdit>> {
+    edits.iter().map(WorkEdit::canonicalized).collect()
+}
+
+/// A Task given a Project in another Wave's line moves to that Project's
+/// Wave. One already in the Project's Wave, or below it, stays: a Task may be
+/// in an ancestor Wave's Project. An edit naming the Task's Wave decides it.
+fn with_task_waves(conn: &Connection, mut edits: Vec<WorkEdit>) -> StoreResult<Vec<WorkEdit>> {
+    let mut implied = Vec::new();
+    for edit in &edits {
+        let WorkValue::TaskProject(Some(project)) = &edit.change else {
+            continue;
+        };
+        let names_wave = edits.iter().any(|other| {
+            other.target == edit.target && matches!(other.change, WorkValue::TaskWave(_))
+        });
+        if names_wave {
+            continue;
+        }
+        let Some(project_wave) = conn
+            .prepare_cached("SELECT wave_id FROM projects WHERE id=?1")?
+            .query_row([project], |row| row.get::<_, String>(0))
+            .optional()?
+        else {
+            continue;
+        };
+        let current: Option<String> = conn
+            .prepare_cached("SELECT wave_id FROM tasks WHERE id=?1")?
+            .query_row([&edit.target], |row| row.get(0))
+            .optional()?
+            .flatten();
+        let within = match &current {
+            Some(wave) => super::children::wave_within_in(conn, wave, &project_wave)?,
+            None => false,
+        };
+        if !within {
+            implied.push(WorkEdit {
+                target: edit.target.clone(),
+                change: WorkValue::TaskWave(Some(project_wave)),
+            });
+        }
+    }
+    edits.extend(implied);
+    Ok(edits)
+}
+
 pub(crate) fn write(
     conn: &Connection,
     edits: &[WorkEdit],
     origin: WriteOrigin,
 ) -> StoreResult<bool> {
-    let edits = edits
-        .iter()
-        .map(WorkEdit::canonicalized)
-        .collect::<StoreResult<Vec<_>>>()?;
+    let edits = with_task_waves(conn, canonicalized(edits)?)?;
     let mut changed = false;
     for ((table, id), values) in grouped(&edits) {
         changed |= write_record(conn, table, id, &values, origin, true)?;
@@ -489,10 +535,7 @@ pub(crate) fn create(
     edits: &[WorkEdit],
     origin: WriteOrigin,
 ) -> StoreResult<()> {
-    let edits = edits
-        .iter()
-        .map(WorkEdit::canonicalized)
-        .collect::<StoreResult<Vec<_>>>()?;
+    let edits = with_task_waves(conn, canonicalized(edits)?)?;
     let records = grouped(&edits);
     // Foreign-key parents exist before children even when the caller's edits
     // arrive in a different order. Fields still go through the common writer.

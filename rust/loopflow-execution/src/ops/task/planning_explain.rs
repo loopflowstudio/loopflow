@@ -203,12 +203,9 @@ async fn read_planning(
                 ),
                 None => None,
             };
-            // A Wave with no open Project gets one when the move is saved.
-            let project = destination
-                .as_ref()
-                .map(|wave| store.sqlite.new_task_project(wave.id()))
-                .transpose()?
-                .flatten();
+            let project = store
+                .sqlite
+                .task_move_project(&task.id, destination.as_ref().map(|wave| wave.id()))?;
             report.action = Some(TaskPlanningAction::Move {
                 wave: destination.as_ref().map(|w| w.id().to_string()),
                 project: project.as_ref().map(ToString::to_string),

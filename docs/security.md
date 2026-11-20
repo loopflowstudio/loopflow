@@ -40,15 +40,13 @@ work legible; they do not contain hostile code, skills, hooks, or MCP servers.
 
 ## Effective action policy
 
-- **Interactive launches** send no permission overrides; each vendor's own
-  config and approval prompts apply.
-- **Headless launches** apply an automation floor so unattended runs don't
-  hang: Codex gets `workspace-write` and `approval_policy = "never"`, Claude
-  skips permission prompts, OpenCode runs with `--auto`, Antigravity skips
-  permission prompts, and Pi uses its own unsandboxed tools. More-permissive vendor configs are never downgraded.
-- **Headless Task runs** (`lf task run`, `lf task auto on`, and `lf -b <skill>` in a
-  Task checkout) run as `yolo` on all five harnesses and can write anywhere the
-  OS user can. See [Configuration](config.md#permissions-yolo-and-worktree-access).
+Agents act without asking permission by default: Claude, Codex, OpenCode and
+Antigravity skip every prompt, and Pi uses its own unsandboxed tools.
+`yolo: false` brings back the vendor's own config and prompts in conversations
+you attend. Unattended runs (`lf -b`, Task steps, auto, commit and PR text)
+never ask, whatever `yolo` says. Either way the agent can reach anything the OS
+user can; the execution boundary above is the only containment. See
+[Configuration](config.md#permissions-yolo-and-worktree-access).
 
 ## Credentials over SSH
 

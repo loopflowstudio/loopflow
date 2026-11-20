@@ -912,6 +912,7 @@ pub struct AgentProcessRequest {
     pub agent: String,
     pub account_id: Option<crate::store::ProviderAccountId>,
     pub max_turns: Option<u32>,
+    /// The launch's `yolo` setting, under the key recorded requests already carry.
     pub skip_permissions: bool,
     pub chrome: Option<bool>,
     pub codex_service_tier: Option<crate::config::CodexServiceTier>,
@@ -937,7 +938,7 @@ impl AgentProcessRequest {
             agent: config.agent.to_string(),
             account_id: None,
             max_turns: config.max_turns,
-            skip_permissions: config.skip_permissions,
+            skip_permissions: config.yolo,
             chrome: config.chrome,
             codex_service_tier: config.codex_service_tier,
         })

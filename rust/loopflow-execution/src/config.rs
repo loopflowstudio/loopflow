@@ -1090,7 +1090,7 @@ mod tests {
         assert!(config.agent.is_none());
         assert_eq!(config.agent().unwrap(), "codex");
         assert!(config.supported_harnesses.is_empty());
-        assert!(!config.yolo);
+        assert!(config.yolo);
         assert!(config.context.docs.is_empty());
         assert!(!config.context.diff_files);
         assert!(!config.context.diff);

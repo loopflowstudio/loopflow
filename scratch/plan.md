@@ -129,18 +129,35 @@ the three transport tests, `provider_rejected_resume_keeps_the_selected_conversa
 recovery watcher's lost-transcript case, now through `append_input`) and
 `transcript::`.
 
-Remaining:
+Remaining (from the concept review of the built change, `scratch/concept-review.html`):
 
-- Real Claude check done in qa (`scratch/qa.html`): Esc at Claude's first
-  screen, then `lf -a claude resume`, started a new `--session-id` thread and
-  Claude took the first request; no "No conversation found". A saved thread
-  reopened with `--resume`. Claude 2.1.329.
-- The "no saved copy" line never reaches a terminal view (printed in the held
-  terminal before the view attaches); see `scratch/questions.md`.
-- Small wart, left as is: `new_thread` on a lost thread prints both the
-  "no saved copy" line and its own "seeded with its original request" line.
+- **Docs promise a line nobody sees.** `saved_thread`'s "no saved copy" line
+  is printed by the held terminal's own `lf`, after `delegate_session` and
+  before a view attaches (qa D). The code stays as it is: the line belongs
+  where the decision is. Two doc edits, no code:
+  - `docs/subscriptions.md`, Resume paragraph: drop "and says so". It reads
+    "A conversation the provider never saved starts again from its first
+    request; it never opens empty."
+  - `docs/sessions.md`, the `lf resume` table row "ended or crashed":
+    "continues the provider thread it saved, or starts again from its first
+    request".
+  *Made for review:* passed over printing from the viewing process (a second
+  place deciding, able to disagree with the holder) and deleting the line
+  (the only trace of why, in the held screen).
+- `new_thread` on a lost thread prints "no saved copy" then "seeded with its
+  original request". It runs before the hand-off, both show, and they read
+  as one account. Leave it.
+
+Done in qa (`scratch/qa.html`): real Claude 2.1.329, exit at the first
+screen then `lf -a claude resume` started a new `--session-id` thread with
+the first request; a saved thread reopened with `--resume`.
+
+Larger than this Task, on the page with what each would take: open-time lines
+printed after `delegate_session` have no reader (TakeOver's "Stopped the …
+client" likely among them, not checked in a terminal); `has_provider_history`
+means recorded, not saved.
 
 ## Docs (written first)
 
-- `docs/sessions.md`, the paragraph after the `lf task status` "no server" example: any launch that ended before the provider saved (missing CLI, login/trust exit, crash, Ctrl+C before typing) opens again from its first request on every opener, with the diagnostic line; a saved conversation that the provider refuses to resume stays as it was.
-- `docs/subscriptions.md`, Resume paragraph: "Missing history is reported" replaced by "starts again from its first request and says so; it never opens empty."
+- `docs/sessions.md`, the paragraph after the `lf task status` "no server" example: any launch that ended before the provider saved (missing CLI, login/trust exit, crash, Ctrl+C before typing) opens again from its first request on every opener, a saved conversation that the provider refuses to resume stays as it was.
+- `docs/subscriptions.md`, Resume paragraph: "Missing history is reported" replaced by "starts again from its first request; it never opens empty."

@@ -94,12 +94,14 @@ Questions 1 and 2 got no written answer in scratch.
   the same body shape as a steer. Reverse by passing `steer: true` or by
   using the store-only write.
 
+- **Auto is stored on the Task, in its own `task_auto` row** (concept review,
+  sixth pass, 2026-11-19), so `lf task auto off` before a first run is kept
+  and outlasts a config `auto: on`, and a released hold on a never-run Task
+  survives the upgrade. Passed over: columns on `tasks` (a planning table
+  whose update triggers compare every column), and a personal `auto: off`
+  config value. Reverse by putting the three columns back on `task_graphs`.
+
 ## Open
-- QA 2026-11-19 (fourth pass): nobody can opt out of a committed `auto: on`
-  before a Task's first run. `on` is the key's only value (`lf config set auto
-  off` and `null` are refused), and `lf task auto off` before a first run saves
-  nothing. Storing auto on the Task, or an `off` for your own layer, would
-  close it.
 - QA 2026-11-19 (fourth pass): `WaveSetup` gained `auto` so `lf wave status`
   prints it. Reverse by dropping the field and the README's pointer.
 - QA 2026-11-19 (third pass): a Task conversation's input carries no Graph
@@ -127,8 +129,6 @@ Questions 1 and 2 got no written answer in scratch.
 - A Graph process killed with its carrier stays open until the hourly prune,
   so the Task reads `moving` with nothing running. Base behavior;
   `lf machine prune` settles it.
-- `lf task auto off` before a first run saves nothing, so a later
-  config default or `lf task auto on` turns it on. Storing auto on the Task would close it.
 
 ## Ship review (2026-11-19)
 

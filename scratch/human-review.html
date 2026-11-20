@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="color-scheme" content="light dark">
+<title>LOO-986 fix forward: human review</title>
+<style>
+  :root { color-scheme: light dark; --fg:#1b1b1f; --bg:#fcfcfa; --mute:#62626b; --line:#d9d9de; --code:#f1f1ee; --yes:#1a7f37; --no:#b3261e; }
+  @media (prefers-color-scheme: dark) {
+    :root { --fg:#e8e8ea; --bg:#17171a; --mute:#a0a0aa; --line:#34343a; --code:#222226; --yes:#56d364; --no:#ff7b72; }
+  }
+  body { font: 16px/1.55 -apple-system, system-ui, sans-serif; color: var(--fg); background: var(--bg); max-width: 60rem; margin: 2rem auto; padding: 0 1.25rem 4rem; }
+  h1 { font-size: 1.5rem; margin-bottom: .2rem; }
+  h2 { font-size: 1.15rem; margin-top: 2.4rem; border-top: 1px solid var(--line); padding-top: 1.2rem; }
+  p.sub { color: var(--mute); margin-top: 0; }
+  pre, code { font: 14.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+  pre { background: var(--code); padding: .9rem 1rem; border-radius: 6px; overflow-x: auto; white-space: pre-wrap; word-break: break-word; }
+  code { background: var(--code); padding: .08em .3em; border-radius: 3px; }
+  pre code { background: none; padding: 0; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { text-align: left; vertical-align: top; padding: .5rem .6rem; border-bottom: 1px solid var(--line); }
+  th { font-weight: 600; }
+  .yes { color: var(--yes); font-weight: 600; } .no { color: var(--no); font-weight: 600; }
+  .del { color: var(--no); } .add { color: var(--yes); }
+  ol.q > li { margin-bottom: 1rem; } ol.q ol { list-style: lower-alpha; }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; } @media (max-width: 640px) { .two { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+
+<h1>LOO-986 fix forward: a tmux window starts on the server's PATH</h1>
+<p class="sub">PR <a href="https://github.com/loopflowstudio/loopflow/pull/1994">#1994</a>, branch head <code>f6df3cc94b</code>, 2026-11-19. Written with nobody in the conversation; the questions at the bottom are still open.</p>
+
+<h2>1. What changes for people</h2>
+<p>An agent in a tmux pane that runs <code>lf open --task &lt;id&gt; --tab</code> no longer hands its own <code>PATH</code> to the conversation it opens. The provider starts on the tmux server's <code>PATH</code> plus lf's tool directories, as it already did in Rex and Herdr. An agent's shim directory can't end up in front of the installed <code>claude</code>.</p>
+<p>The cost: a provider that only the caller's <code>PATH</code> could find (an nvm bin, with a tmux server started by launchd or long ago) now fails to start from that open, and the message says "not installed".</p>
+
+<p>The whole code change, <code>rust/loopflow/src/lf/commands/open/tmux.rs</code>:</p>
+<pre><code><span class="del">-fn host_command(location: &amp;TmuxLocation) -&gt; Command {
+-    let mut command = Command::new("tmux");
+-    command.args(["-S", &amp;location.socket]);</span>
+<span class="add">+/// A tmux client for the server at `location`, else the default server.
++/// `tmux` is resolved here because `open` runs its client with no `PATH`.
++fn host_command(location: Option&lt;&amp;TmuxLocation&gt;) -&gt; Command {
++    let tmux = which_on_path(Path::new("tmux")).unwrap_or_else(|| "tmux".into());
++    let mut command = Command::new(tmux);
++    if let Some(location) = location {
++        command.args(["-S", &amp;location.socket]);
++    }</span>
+     command
+ }
+ …
+<span class="del">-    let mut command = caller.as_ref().map(host_command).unwrap_or_else(|| Command::new("tmux"));
+-    command.arg("new-window");</span>
+<span class="add">+    // tmux starts a window on the PATH of the client that asked for it. This
++    // client has none, so the window starts on the server's, as a pane does
++    // in every other host.
++    let mut command = host_command(caller.as_ref());
++    command.env_remove("PATH").arg("new-window");</span></code></pre>
+<p>Also in the diff: one test (<code>work_open_tests::tmux_window_does_not_start_on_the_callers_path</code>) and 13 lines in <code>.lf/qa/native-conversations.md</code> on how to check a conversation's environment in tmux.</p>
+
+<h2>2. Product concepts beside code concepts</h2>
+<p class="sub">From <code>scratch/concept-review.html</code>, written at <code>eb24a5d83c</code>; no code has changed since.</p>
+<table>
+<tr><th>What a person knows</th><th>What the code has</th><th></th></tr>
+<tr><td>My tools are found wherever lf is started from</td><td><code>os_process::TOOL_DIRS</code>, applied once by <code>repair_path</code>. The four earlier lists are gone.</td><td class="yes">yes</td></tr>
+<tr><td>A pane belongs to its terminal, not to whoever asked for it</td><td>The pane command carries no <code>PATH=</code>. Rex, Herdr and cmux requests carry no environment. tmux was the one host whose client hands over a <code>PATH</code>; <code>tmux::open</code> now runs that client without one.</td><td class="yes">yes</td></tr>
+<tr><td>Opening in my own terminal uses my terminal's PATH</td><td><code>Mode::Here</code> runs <code>lf session resume</code> as a child of lf.</td><td class="yes">yes</td></tr>
+<tr><td>It tells me why it did not start</td><td>One reason, three places: the receipt's <code>reason</code>, the pane, <code>logs/lf.log</code>.</td><td class="yes">yes</td></tr>
+<tr><td>"claude is not installed"</td><td><code>agent::missing_agent_message</code>: the binary was not found on this process's <code>PATH</code>.</td><td class="no">no</td></tr>
+<tr><td>A conversation stays on its harness until I move it</td><td>Plain open sends <code>lf session resume &lt;id&gt;</code>; only <code>-a</code> adds <code>--agent</code>.</td><td class="yes">yes</td></tr>
+<tr><td>Go back to the view I have open</td><td><code>--focus</code> reads the last view recorded, which may be closed while an earlier one is attached.</td><td class="no">no (not from this diff)</td></tr>
+</table>
+
+<p><strong>Biggest mismatch: "not installed".</strong> lf knows "not found where I looked" and says "not installed". Before this branch the caller's <code>PATH</code> hid the difference in tmux.</p>
+<div class="two">
+<div><p class="sub">Existing</p><pre>'claude' is not installed. Install it with
+`npm install -g @anthropic-ai/claude-code`,
+then open `claude` to sign in; retry the
+same command</pre></div>
+<div><p class="sub">Proposed in the concept review, not built</p><pre>lf can't find 'claude' from this pane.
+If it is installed, restart tmux from a
+shell where `which claude` answers.
+Otherwise install it with `npm install …`</pre></div>
+</div>
+<p>What it would take: new wording in every harness's hint, plus the tests and Swift strings that match "is not installed". No new state.</p>
+
+<h2>3. How to try it</h2>
+<p>The branch binary is built at <code>target/debug/lf</code> in <code>/Users/jack/src/loopflow.loo-986-a-pane-s</code>. In a tmux pane:</p>
+<pre><code>mkdir -p /tmp/shim &amp;&amp; printf '#!/bin/sh\necho SHIM; sleep 60\n' &gt; /tmp/shim/claude &amp;&amp; chmod +x /tmp/shim/claude
+export PATH=/tmp/shim:$PATH
+/Users/jack/src/loopflow.loo-986-a-pane-s/target/debug/lf open --task &lt;id&gt; --host tmux --tab --json</code></pre>
+<p>The new window should run the installed provider, not print <code>SHIM</code>. The control, from the same pane, shows what tmux does by itself:</p>
+<pre><code>tmux new-window 'echo $PATH; sleep 30'      # /tmp/shim is first</code></pre>
+<p>This uses the Machine's real store; the branch adds no migration. If the conversation's provider is already running, an open adds a view and starts nothing: quit it first.</p>
+
+<h2>4. What was checked and what it showed</h2>
+<p><strong>qa, at <code>b5168c091c</code></strong> (the last code commit), on a private Machine with real tmux 3.7c, Rex and Herdr servers; every caller had <code>/tmp/q986/agentshim</code> first on <code>PATH</code>. Full run: <code>scratch/qa.html</code>.</p>
+<pre>sh-3.2$ echo $PATH; lf open --task ee1206 --host tmux --tab --json
+/tmp/q986/agentshim:/opt/homebrew/bin:/private/tmp/q986/w/bin:/tmp/q986/bin:/usr/bin:/bin:/usr/sbin:/sbin
+      "destination": "%2",
+      "status": "usable",
+
+provider environment (started in pane %2):
+PATH=/private/tmp/q986/w/bin:/tmp/q986/bin:/usr/bin:/bin:/usr/sbin:/sbin:/tmp/q986/home/.local/bin:/tmp/q986/home/.opencode/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/local/sbin:/tmp/q986/home/.cargo/bin
+
+control, raw `tmux new-window` from the same pane:
+/tmp/q986/agentshim:/opt/homebrew/bin:/private/tmp/q986/w/bin:/tmp/q986/bin:/usr/bin:/bin:/usr/sbin:/sbin</pre>
+<table>
+<tr><th>Scenario</th><th>Seen</th></tr>
+<tr><td>Agent pane opens a Task into tmux, nothing running</td><td>provider <code>PATH</code> has no shim</td></tr>
+<tr><td>Open again with <code>--tab</code>, then <code>--focus</code></td><td>second view; focus reveals it (needs an attached client)</td></tr>
+<tr><td>Caller pane whose <code>PATH</code> has no tmux</td><td>opens; lf finds <code>/opt/homebrew/bin/tmux</code> in its tool directories</td></tr>
+<tr><td><code>--host tmux</code> from outside tmux</td><td>opens on the default server, no shim; with no server, "tmux refused: error connecting to …"</td></tr>
+<tr><td>Provider on the caller's <code>PATH</code> only</td><td>exit 1, "'claude' is not installed…" in <code>--json</code>, the pane and <code>logs/lf.log</code></td></tr>
+<tr><td>Rex, private server</td><td>viewer <code>PATH</code> has no shim</td></tr>
+<tr><td>Herdr</td><td>viewer <code>PATH</code> has no shim</td></tr>
+</table>
+
+<p><strong>Focused test, rerun for this page at <code>f6df3cc94b</code>:</strong></p>
+<pre>$ cargo test -p loopflow --test integration work_open_tests::tmux
+test work_open_tests::tmux_window_does_not_start_on_the_callers_path ... ok
+test work_open_tests::tmux_opens_a_named_window_after_the_callers ... ok
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 591 filtered out</pre>
+
+<p><strong>Not checked</strong></p>
+<ul>
+<li><strong>The CI suites on this diff.</strong> The PR's <code>CI</code> run on <code>f6df3cc94b</code> concluded success, but <code>rust-test</code>, <code>rust-lint</code>, <code>rust-build</code>, <code>macos</code> and <code>tests-result</code> are all <em>skipped</em> in it; only <code>macos-inputs</code> and <code>scratch-clear</code> ran. Clippy and the full Rust suite have not run on this change anywhere. Gate or the merge queue runs them.</li>
+<li><strong>cmux:</strong> not installed on this Machine. Its request names a command and no environment; whether its client adds its own is unseen.</li>
+<li><strong>The provider's own environment under Rex and Herdr:</strong> the conversation was left running so real <code>claude</code> would not start under Rex's login <code>HOME</code>; the viewer's <code>PATH</code> was read instead.</li>
+<li><strong>Rex with a display client:</strong> the private server is headless.</li>
+<li><strong>From #1992, untouched by this diff:</strong> Desktop opens; a plain open replayed after a moved conversation had ended.</li>
+</ul>
+
+<h2>5. Choices made on your behalf</h2>
+<table>
+<tr><th>Chosen</th><th>Passed over</th></tr>
+<tr><td>Remove <code>PATH</code> from the <code>new-window</code> client, so the window keeps the server's.</td><td>Filtering shim directories out of the caller's <code>PATH</code>: lf would have to know which entries are shims.</td></tr>
+<tr><td>A provider only the caller can find fails to start.</td><td>Falling back to the caller's <code>PATH</code> when the server's can't find the provider: it brings back what verify failed.</td></tr>
+<tr><td>Message wording left as it is in this PR.</td><td>Rewording "is not installed" here: it touches every harness's hint, tests and Swift strings.</td></tr>
+<tr><td>Every tmux client lf starts (open, lookup, focus) resolves <code>tmux</code> to a full path on lf's <code>PATH</code> (compress).</td><td>Resolving only for the one client that runs without <code>PATH</code>.</td></tr>
+<tr><td>A second PR for LOO-986 (#1994) after #1992 merged.</td><td>A new Task for the repair.</td></tr>
+<tr><td>This review, with nobody there: go on to delivery.</td><td>Going back to build. No promised behavior was found missing or broken.</td></tr>
+</table>
+
+<h2>6. Questions still yours</h2>
+<ol class="q">
+<li>The missing-provider message, now sometimes untrue in tmux:
+  <ol><li>keep "is not installed";</li>
+  <li>say "can't find" and name both repairs, in a follow-up Task;</li>
+  <li>b, and also print the <code>PATH</code> that was searched.</li></ol></li>
+<li><code>lf open --focus</code> names the last view opened; with that pane closed and an earlier view attached it fails "can't find pane":
+  <ol><li>leave it;</li>
+  <li>file a Task to focus any live view.</li></ol></li>
+<li>A provider only the caller's <code>PATH</code> reaches now fails from a tmux open. Is restarting tmux from a shell that sees it the answer you want people to get, or should lf learn more install directories (nvm, others) in <code>TOOL_DIRS</code>?
+  <ol><li>restart tmux; nothing more;</li>
+  <li>add directories to <code>TOOL_DIRS</code> as cases turn up;</li>
+  <li>something else.</li></ol></li>
+<li>cmux was never driven. Install it on this Machine and run the same probe before LOO-986 is called verified?
+  <ol><li>yes;</li>
+  <li>no, the request shape is enough.</li></ol></li>
+</ol>
+
+<p class="sub">Not from this diff, seen by qa: the installed lf 0.16 fails every <code>lf open --host tmux</code> from a tmux 3.7 pane with "can't specify pane here"; main and this branch pass the window ID, so the next install fixes it.</p>
+
+</body>
+</html>

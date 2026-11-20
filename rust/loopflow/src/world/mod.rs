@@ -11,6 +11,9 @@
 //! without an account or network; a `gh` answers pull-request reads from files
 //! under `github/pulls/` and refuses everything else, so nothing run inside a
 //! World reaches GitHub; a `launchctl` records launchd jobs instead of loading them.
+//!
+//! [`copy`] makes a World with no recipe: its store is a read-only copy of the
+//! Machine's, which its server serves and refuses to change.
 
 pub mod recipes;
 
@@ -226,6 +229,21 @@ impl WorldEnv {
         }
     }
 
+    /// Point this process at the World. A builder launched from an lf
+    /// Session inherits that Session's identity; the world's writes must not
+    /// attribute to it.
+    fn enter(&self) {
+        for (name, _) in std::env::vars_os() {
+            let name = name.to_string_lossy();
+            if name.starts_with("LF_") && name != "LF_BIN" {
+                std::env::remove_var(&*name);
+            }
+        }
+        for (name, value) in self.vars() {
+            std::env::set_var(name, value);
+        }
+    }
+
     fn vars(&self) -> [(&'static str, &std::ffi::OsStr); 4] {
         [
             ("LF_HOME", self.lf_home.as_os_str()),
@@ -262,17 +280,7 @@ impl World {
         for path in [&env.lf_home, &env.claude_config_dir, &env.codex_home] {
             std::fs::create_dir_all(path)?;
         }
-        // A builder launched from an lf Session inherits that Session's
-        // identity; the world's writes must not attribute to it.
-        for (name, _) in std::env::vars_os() {
-            let name = name.to_string_lossy();
-            if name.starts_with("LF_") && name != "LF_BIN" {
-                std::env::remove_var(&*name);
-            }
-        }
-        for (name, value) in env.vars() {
-            std::env::set_var(name, value);
-        }
+        env.enter();
         write_executable(&dir, "claude", STUB_CLAUDE)?;
         write_executable(&dir, "gh", GH)?;
         write_executable(&dir, "launchctl", LAUNCHCTL)?;
@@ -1179,6 +1187,79 @@ impl World {
             .block_on(loopflow_execution::store::open_store(&config))?;
         Ok(std::sync::Arc::new(store))
     }
+}
+
+/// Replace `dir` with a world holding a read-only copy of this Machine's
+/// store, migrated to this build's schema, and return its environment. The
+/// Machine is the one this process is on: `LF_HOME`, else `~/.lf`. Its store
+/// is read under one read transaction and never written.
+///
+/// # Errors
+/// When the Machine has no store, `dir` holds something other than a world,
+/// or this build cannot migrate the copy.
+pub fn copy(dir: &Path) -> Result<WorldEnv> {
+    use std::os::unix::fs::DirBuilderExt;
+    let machine = loopflow_execution::store::lf_home_dir();
+    let source = machine.join("loopflow.db");
+    if !source.exists() {
+        bail!(
+            "there is no Machine to copy: {} is absent; `lf-world build <recipe> <dir>` makes a fake world",
+            source.display()
+        );
+    }
+    if dir.exists() {
+        if !dir.join("env.json").exists() {
+            bail!(
+                "{} exists and is not a world; a copy replaces only a world",
+                dir.display()
+            );
+        }
+        if let Ok(home) = dir.join("home").canonicalize() {
+            if home == machine.canonicalize()? {
+                bail!("{} is the Machine being copied", dir.display());
+            }
+            loopflow_execution::installation::server::stop(&home)?;
+        }
+        std::fs::remove_dir_all(dir)?;
+    }
+    // The copy holds the whole store.
+    std::fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(dir)?;
+    let dir = dir.canonicalize()?;
+    let env = WorldEnv::new(&dir);
+    for path in [&env.lf_home, &env.claude_config_dir, &env.codex_home] {
+        std::fs::create_dir_all(path)?;
+    }
+    write_executable(&dir, "claude", STUB_CLAUDE)?;
+    write_executable(&dir, "gh", GH)?;
+    write_executable(&dir, "launchctl", LAUNCHCTL)?;
+    // The person's name and which repositories the Machine shows.
+    if machine.join("config.yaml").exists() {
+        std::fs::copy(machine.join("config.yaml"), env.lf_home.join("config.yaml"))?;
+    }
+    let stores = ["loopflow.db", "history.db"]
+        .map(|name| (machine.join(name), env.lf_home.join(name)))
+        .into_iter()
+        .filter(|(source, _)| source.exists())
+        .collect::<Vec<_>>();
+    for (source, destination) in &stores {
+        loopflow_storage::copy::snapshot(source, destination)?;
+    }
+    // A private home migrates itself: this open applies the branch's schema.
+    env.enter();
+    drop(loopflow_execution::store::open_sqlite(
+        &env.lf_home.join("loopflow.db"),
+    )?);
+    for (_, destination) in &stores {
+        loopflow_storage::copy::seal(destination)?;
+    }
+    std::fs::write(
+        dir.join("env.json"),
+        serde_json::to_string_pretty(&env)? + "\n",
+    )?;
+    Ok(env)
 }
 
 fn create_repo(repo: &Path, origin: &Path) -> Result<()> {

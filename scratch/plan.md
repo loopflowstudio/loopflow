@@ -360,15 +360,41 @@ server`, fake-world recipes, `welcome` and `status` as they are.
 
 ## Slices
 
-1. **A branch server serves a read-only copy, starts nothing and admits no
-   change.** The one that could prove the plan wrong. `lf-world copy`, the
-   server's writable-store check, the admission sentence, and `copy_world`.
-   It shows whether served reads and subscriptions (which stamp observations)
-   work on a store they cannot write, whether WAL mode holds on a 0444 file
-   under a long-lived server, and that recovery and a pane launch reach nothing
-   outside the copy. If served reads need writes, the fallback is a writable
-   copy with the same admission refusal and writers off; decide then, with the
-   failing read in hand, and say so here.
+1. **Built.** A branch server serves a read-only copy, starts nothing and
+   admits no change: `lf-world copy` (`world::copy`), `copy::seal` and
+   `copy::sealed_at` in storage, `server/copy.rs`, `Operation::changes`,
+   `installation::server::stop`, and `copy_world`.
+
+   What it showed, on the real store on November 20: `lf-world copy` of the
+   688 MB store took 2.8 s. The branch's `lf server run` on the copy answered
+   a `plan.list` subscription with the real Tasks, and `task.run`,
+   `task.steer`, `session.continue` and `request.upload` with the sentence.
+   The copy's `lf.log` held no failed write: served reads and subscriptions
+   need none. SQLite created `-shm` and an empty `-wal` beside each 0444 file
+   and read through them. `lf -b default` and `lf resume <session>` through
+   the copy's lf both stopped at "attempt to write a readonly database" before
+   any provider ran. The fallback (a writable copy) is not needed.
+
+   Differences from the design above:
+   - `lf-world copy` copies the Machine its own shell is on (`LF_HOME`, else
+     `~/.lf`), not always the default home; the launcher clears `LF_*`.
+   - It copies `config.yaml` too: the person's name and which repositories
+     the Machine shows.
+   - It replaces `<dir>` only when `<dir>/env.json` exists.
+   - `seal` stamps the file's modification time: an APFS clone keeps the
+     source's, which is the Machine's last checkpoint, not the copy's time.
+   - The server on a copy opens no held-terminal registry and no mobile
+     listener; `session.attach` answers the existing "no running terminal".
+   - The refusal's code is `invalid`. `session.boundary` and
+     `mobile.configure` are refused with the changes.
+   - `copy_world` seeds the `one-task` world. That world has no Session with
+     a live pid and no conversation due for recovery (a writable copy's server
+     started none in 15 s), so the test does not show recovery staying off or
+     a live process left unsignalled; the server never starts the pass, and
+     interrupt and stop are refused at admission. A seed with a due
+     conversation would let the test show it.
+   - Stopping the server that last served `<dir>` (`launchctl bootout`) has
+     not been run against a loaded job; slice 2's `run --copy` twice does.
 2. **The launcher chooses.** The comparison, the printed line, `--copy` and
    `--world` on both commands, `lf-world` built when needed, the `LF_HOME`
    pass-through removed, the Python test. Check by launching Dev three ways:

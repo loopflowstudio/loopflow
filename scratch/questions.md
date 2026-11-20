@@ -38,6 +38,15 @@ Settled while writing the docs, each reversible:
 11. The README says the socket limit is 103 bytes, the number in the world's
     log line.
 
+Settled while building slice 1, each reversible:
+
+12. The refusal's error code is `invalid`: no client retries it. `unavailable`
+    was passed over because clients may retry it.
+13. `lf-world copy` copies the Machine its shell is on (`LF_HOME`, else
+    `~/.lf`) and that Machine's `config.yaml`.
+14. `lf-world copy <dir>` refuses a `<dir>` that exists without `env.json`,
+    since it deletes the directory.
+
 Open, exposed by the docs: when the Machine's store has a migration the branch
 lacks, `run` names `lf sync main`. In a Task checkout `lf sync main` also undoes
 a sync onto another Task. Is that the command to name there, or should it say

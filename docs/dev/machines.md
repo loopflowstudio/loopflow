@@ -584,14 +584,16 @@ target/debug/lf-world copy ~/.lf-copy    # a read-only copy of this Machine's st
 
 `lf-world copy <dir>` replaces `<dir>` with a world whose `loopflow.db` and
 `history.db` are read-only copies of the main Machine's, with the branch's
-migrations applied, and prints its `env.json` as `lf-world build` does. The
-directory is private to the account (0700): it holds the whole store. With no
-`~/.lf/loopflow.db` it says there is no Machine to copy and names
-`lf-world build`.
+migrations applied, and prints its `env.json` as `lf-world build` does. It
+copies the Machine its shell is on (`LF_HOME`, else `~/.lf`) and that
+Machine's `config.yaml`, and replaces `<dir>` only when it is absent or
+already a world. The directory is private to the account (0700): it holds the
+whole store. With no `~/.lf/loopflow.db` it says there is no Machine to copy
+and names `lf-world build`.
 
 A server whose store is read-only serves reads and subscriptions and starts no
-wake, recovery or maintenance pass. It refuses every change, Session start and
-upload before any command code runs: "This is a copy of the Machine from 14:02;
+wake, recovery or maintenance pass, held terminal or mobile listener. It
+refuses every change, Session start and upload before any command code runs: "This is a copy of the Machine from 14:02;
 make changes in Loopflow or with lf." The time is when the copy was taken. The
 copied rows still name real pids, worktrees, Task IDs and PRs; nothing in a copy
 signals, edits or publishes to them. `scripts/loopflow-dev.py run` makes and

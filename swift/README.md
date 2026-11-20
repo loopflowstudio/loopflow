@@ -867,7 +867,7 @@ remote-connection mode.
 The dev app supplies its bundled helper through `LF_BIN` and embedded shell PATH.
 Existing providers keep their environment when reattached. What `run` and
 `run-debug` open (the Machine, a copy of it or a fake world) is chosen after the
-build, as [the opening section](#loopflow-for-macos) describes; a copy or world
+build, as [the opening section](#loopflow-for-macos) describes; a copy
 also needs `lf-world`, which the launcher builds beside `lf`.
 
 The installed app updates itself (`AppUpdater`, Sparkle), including a custom

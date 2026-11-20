@@ -545,7 +545,6 @@ server`, fake-world recipes, `welcome` and `status` as they are.
 
 No slice remains. Gate and CI run what the slices list under "Not run".
 
-For compress: the sentence for an undecodable reading travels from the link
-to `WorkSubscriptions` as an `unreadable` closure on three types
-(`ServerSubscription`, `ServerWatch`, `LineSubscription`), and two of the five
-`LineSubscription` constructions pass `{ nil }`. One carrier may do.
+The sentence for an undecodable reading has one carrier,
+`LineSubscription.unreadable`: `ServerClient.subscribe` takes it from the link
+it connects. The pipe transport and two test transports pass `{ nil }`.

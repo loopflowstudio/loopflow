@@ -2,7 +2,7 @@
 //! The Machine here is a built World.
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Output};
 use std::time::Duration;
 
 use loopflow_execution::machine::client::Connection;
@@ -177,13 +177,18 @@ impl Copied {
     /// `lf-world copy` of the Machine, and the environment it printed.
     fn copy(&self) -> Value {
         serde_json::from_str(&success(
-            clean(env!("CARGO_BIN_EXE_lf-world"), self.root.path())
-                .env("LF_HOME", self.machine.join("home"))
-                .args(["copy", self.copy.to_str().unwrap()])
-                .output()
-                .unwrap(),
+            self.copy_from(&self.machine.join("home"), &self.copy),
         ))
         .unwrap()
+    }
+
+    /// `lf-world copy <dir>` run on the Machine at `home`.
+    fn copy_from(&self, home: &Path, dir: &Path) -> Output {
+        clean(env!("CARGO_BIN_EXE_lf-world"), self.root.path())
+            .env("LF_HOME", home)
+            .args(["copy", dir.to_str().unwrap()])
+            .output()
+            .unwrap()
     }
 
     /// The copy's `lf`, with the recording provider on `PATH`.
@@ -313,19 +318,11 @@ fn a_copy_replaces_the_last_one_and_only_a_world() {
     let other = copied.root.path().join("documents");
     std::fs::create_dir(&other).unwrap();
     std::fs::write(other.join("keep"), "").unwrap();
-    let refused = clean(env!("CARGO_BIN_EXE_lf-world"), copied.root.path())
-        .env("LF_HOME", copied.machine.join("home"))
-        .args(["copy", other.to_str().unwrap()])
-        .output()
-        .unwrap();
+    let refused = copied.copy_from(&copied.machine.join("home"), &other);
     assert!(!refused.status.success());
     assert!(other.join("keep").exists());
 
-    let absent = clean(env!("CARGO_BIN_EXE_lf-world"), copied.root.path())
-        .env("LF_HOME", copied.root.path().join("nowhere"))
-        .args(["copy", copied.copy.to_str().unwrap()])
-        .output()
-        .unwrap();
+    let absent = copied.copy_from(&copied.root.path().join("nowhere"), &copied.copy);
     let said = String::from_utf8_lossy(&absent.stderr).into_owned();
     assert!(said.contains("there is no Machine to copy"), "{said}");
     assert!(said.contains("lf-world build"), "{said}");

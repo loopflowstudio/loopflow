@@ -271,8 +271,7 @@ public actor ServerLink {
             do { try await subscription.start() }
             catch { subscription.finish(throwing: error) }
         }
-        return ServerWatch(updates: updates, checkpoint: subscription.checkpoint, cancel: subscription.cancel,
-                           unreadable: { subscription.unreadable })
+        return ServerWatch(updates: updates, checkpoint: subscription.checkpoint, cancel: subscription.cancel)
     }
 
     fileprivate func register(_ subscription: ServerSubscription, query: ServedRead, resume: String?) async throws {
@@ -463,8 +462,6 @@ public struct ServerWatch<Output: Sendable>: Sendable {
     public let updates: AsyncThrowingStream<Output, any Error>
     public let checkpoint: @Sendable (UInt64) -> Void
     public let cancel: @Sendable () -> Void
-    /// `ServerLink.unreadable` for the server its updates come from; nil before one answers.
-    public let unreadable: @Sendable () -> String?
 }
 
 /// One subscription's updates across links; checkpoints before a link is ready wait.
@@ -479,8 +476,6 @@ final class ServerSubscription: @unchecked Sendable {
     private var resumeToken: String?
     private var eventBaseline = false
     private var recovery: Task<Void, Never>?
-    /// The newest link's sentence for an update its consumer can't decode.
-    private var unreadableText: String?
     private let query: ServedRead
     private let consumesEvents: Bool
     private let connect: @Sendable () async throws -> ServerLink
@@ -517,7 +512,6 @@ final class ServerSubscription: @unchecked Sendable {
         // baseline reading can arrive before `register` returns.
         let (stopped, resume) = lock.withLock {
             eventBaseline = false
-            unreadableText = link.unreadable
             return (self.stopped, consumesEvents ? nil : resumeToken)
         }
         guard !stopped else { return }
@@ -548,8 +542,6 @@ final class ServerSubscription: @unchecked Sendable {
         }
         if !resume { finish(throwing: error) }
     }
-
-    var unreadable: String? { lock.withLock { unreadableText } }
 
     func checkpoint(_ checkpoint: UInt64) {
         let target: ServerLink? = lock.withLock {

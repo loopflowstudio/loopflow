@@ -300,9 +300,9 @@ supported_harnesses: [claude, codex, opencode, pi, antigravity]
   a Task worktree) run as `yolo` on every harness so they can build, test, and
   commit freely. To isolate untrusted work, run it on a dedicated Machine, VM,
   or container ([Security](security.md#choose-the-execution-boundary-first)).
-- **Worktree access:** Interactive Claude and Codex sessions launched from a
-  Git worktree automatically grant write access to the main repo's `.git`
-  metadata so normal Git operations work.
+- **Worktree access:** Interactive Claude, Codex and Antigravity sessions
+  launched from a Git worktree automatically grant write access to the main
+  repo's `.git` metadata so normal Git operations work.
 
 ## Context budgets and assembly
 

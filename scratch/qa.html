@@ -1,0 +1,217 @@
+<!doctype html><meta charset="utf-8"><title>QA: Antigravity as a fifth harness</title>
+<style>
+body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:1040px;margin:40px auto;padding:0 24px;color:#1b1b1f}
+h1{font-size:26px;margin-bottom:4px} h2{font-size:18px;margin-top:36px}
+pre{background:#f5f5f2;border:1px solid #e3e3dd;border-radius:6px;padding:12px;font:12px/1.4 ui-monospace,Menlo,monospace;overflow-x:auto;white-space:pre}
+code{font:13px ui-monospace,Menlo,monospace;background:#f5f5f2;padding:1px 4px;border-radius:3px}
+span.ok,span.fix,span.bad{font-size:12px;font-weight:600;padding:2px 8px;border-radius:10px;vertical-align:middle;margin-left:6px}
+span.ok{background:#e2f3e5;color:#1c6b2c} span.fix{background:#fff0cf;color:#7a5200} span.bad{background:#fde4e1;color:#9c2118}
+section{border-top:1px solid #e3e3dd} li{margin:6px 0}
+</style>
+<h1>QA: Antigravity as a fifth harness</h1>
+<p>2026-11-20. Real <code>agy</code> 1.5.13 (signed in, Gemini 3.8 Flash), the branch's <code>lf</code>, a private Machine (<code>LF_HOME</code> under <code>/tmp/lfq-agy</code>) with its own <code>lf server run</code>. Three Tasks ran; the route is in <code>.lf/qa/antigravity.md</code>.</p>
+<section><h2>1. A Task step on real agy, with a steer mid-step <span class="ok">works</span></h2><p><b>Did.</b> <code>lf task create</code>, <code>lf task run e310fa -a antigravity</code>, then 17 s later <code>lf steer e310fa 'Also give every function in calc.py a one-line docstring, and add a subtract(a, b) function.'</code></p><div><b>Saw.</b> <pre>[1/2] implement
+Added `divide`, `multiply`, and `subtract` functions along with one-line docstrings to calc.py. Verified module import and function outputs using `python3 -c &quot;import calc&quot;`.
+Stopped at ship-review; the Task waits there for its conversation.
+
+$ git log --oneline
+35e62ed Ignore python cache files
+57ced50 Add divide, multiply, subtract functions and docstrings to calc
+
+$ lf history usage --task e310fa
+Nov 20 02:48  repo.e310fa-add-a…  task/e310fa   implement      49,410    7,159    269,531   -   1/1   0  70dc14ad</pre><p>The steer was saved at 02:48:50 and the worker's steer file is stamped 02:48:52. In agy's own transcript it is row 12, a <code>SYSTEM_MESSAGE</code> "injected by a PreInvocation hook" right after a tool result; row 1 is the context block ("This Session … This Session's Task: e310fa"). <code>lf history show --transcript</code> lists the calls, several tools per model call included, and the final answer.</p></div></section>
+<section><h2>2. The Task&#x27;s own conversation: an agy TUI in a held terminal <span class="ok">works</span></h2><p><b>Did.</b> Attached with <code>lf session resume &lt;session&gt;</code> in a PTY; typed a prompt; traced the launch's <code>hook.sh</code>.</p><div><b>Saw.</b> <pre>  &lt;/lf:primary-session&gt;
+  &lt;/lf:message&gt;
+
+○ Thought for 21.4s (Initial hypothesis is renaming the session to better reflect its work. The session ID has been located, prompting...)
+● Ran 6 commands (+2 · ls -la scratch: failed · lf session rename 13... · git status) (ctrl+o to expand)
+
+▸ Thought for 7s, 903 tokens
+
+  Add a divide(a, b) function to calc.py, then a multiply(a, b) function, then run python3 -c &quot;import… · e310fa
+  loopflow://repo/task/e310fa
+
+  Disposition: moving
+
+  • Status: The qa graph is currently running the implement step (session session_5652f68ee9814e488b509cd3a58e2876).
+  • Recorded steer:
+  │ &quot;Also give every function in calc.py a one-line docstring, and add a subtract(a, b) function.&quot; — QA
+
+
+  No work was changed. Let me know when you would like to proceed or redirect.
+
+ How&#x27;s the CLI experience so far? Help us improve:
+ [1] Good  [2] Fine  [3] Bad  [0] Skip
+
+? for shortcuts                                                                                               auto · Gemini 3.8 Flash · high</pre><p>It opened with no trust dialog, got the context block, reported the steer, and later the Task update ("At ship-review · available for review"). The hook trace shows <code>PreInvocation</code> at every model call and <code>Stop</code> once at the turn's end, each answered by lf.</p><pre>&gt; Reply with exactly: pong
+
+○ Thought for 32.4s (Initial analysis suggests the &quot;skill&quot; definition provides context for managing task conversations within a broader...)
+● Ran 7 commands (+4 · cat /private/tmp/lfq-agy/task.json · ps aux | grep lfq: failed · lf task status e310fa --json) (ctrl+o to expand)
+
+▸ Thought for 16s, 2.0k tokens
+
+  pong
+  ──────
+  Task Update
+
+  Add a divide(a, b) function to calc.py, then a multiply(a, b) function, then run python3 -c &quot;import… · e310fa
+  loopflow://repo/task/e310fa
+
+  • Progress: Run 0eb3a366-011a-4976-8ff1-4e51f949c4fc (qa) completed step implement.
+  • Waiting step: The Task is waiting at interactive step ship-review. Here, you review what ships versus what was left outside, and
+  decide each finding. Your decision sends the change back to build or on to delivery; lf task run e310fa continues after review.
+
+  Disposition: available
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+&gt;
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+? for shortcuts                                                                                               auto · Gemini 3.8 Flash · high</pre></div></section>
+<section><h2>3. lf resume --task on a quit Antigravity conversation <span class="fix">fixed</span></h2><p><b>Did.</b> Quit the TUI (ctrl+c twice), then <code>lf resume --task e310fa</code>.</p><div><b>Saw.</b> <p><b>Before the fix</b> the process was <code>agy --add-dir … -i &lt;lf:skill:task-session&gt;…</code> with no <code>--conversation</code>: a new agy conversation, with the opening request sent again.</p><pre>
+  Link the Task with `lf open --task &lt;issue&gt; --link --format markdown`, plus any
+  PR. A printed link opens nothing; run `lf open &#x27;&lt;url&gt;&#x27;` only when asked, and
+  never claim an opening it didn&#x27;t report.
+
+  &lt;/lf:skill:task-session&gt;
+
+  &lt;lf:message&gt;
+  &lt;lf:primary-session&gt;
+  This is the one ongoing primary conversation of its repository, Wave or Task, and nobody has asked for anything yet. Read its current
+  state, report where it stands and change no Work: launch no Graph, claim or start no Task and replay no earlier input, even for a stopped
+  run. Steers delivered with this turn are recorded direction: report them and act when the user asks here. Operate once the user asks.
+  &lt;/lf:primary-session&gt;
+  &lt;/lf:message&gt;
+
+○ Thought for 14.4s (The failure points to a permission issue within the sandbox environment, specifically related to a file outside th...)
+● Ran (lf task status e310fa --json &amp;&amp; lf open --task e310fa --link --format markdown) failed
+● Running (lf task status e310fa --json &amp;&amp; lf open --task e310fa --link --format markdown) (ctrl+o to expand)
+⣽  Running command...
+▸ Reply with exactly the first function name you saw reported in the steer earlier, one word. (alt+m to send immediately)
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+&gt;
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Press up to edit queued messages                                                                            auto · Gemini 3.8 Flash · high</pre><p>The input held no thread (<code>session_events.provider_thread</code> empty) though the Session did. A held terminal's launcher becomes <code>agy</code>, so nothing was left to publish the conversation its first hook named.</p><p><b>Fixed</b> in <code>loopflow-storage</code> (<code>with_provider_context</code>): a provider start publishes the conversation for an input that has none. Re-run from a new Task (d4a97a):</p><pre>agy --conversation c77c852f-c9d8-4f19-9462-e005f3189af1 --add-dir …/.lf/prompts/20261120-031420-J6JKTF-antigravity --add-dir /private/tmp/lfq-agy/repo/.git --settings {&quot;trustedWorkspaces&quot;:[…]}</pre><pre>● Ran 3 commands (lf task status d4a97... ×2 · lf open --task d4a97...) (ctrl+o to expand)
+
+▸ Thought for 6s, 592 tokens
+
+  Add a file hello.txt containing the single word hello, then commit it. · d4a97a loopflow://repo/task/d4a97a
+
+  Status
+
+  • Disposition: moving — graph qa is actively running step implement.
+  • Recorded steer: QA requested: &quot;Make the file say &#x27;hello, world&#x27; instead.&quot;
+
+  Standing by. Let me know when you would like me to take action or redirect the run.
+
+────────────────────────────────────────────────────────────
+&gt; Reply with exactly: pong
+
+▸ Thought for 10s, 1.0k tokens
+
+  pong
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+&gt;
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+? for shortcuts                                                                                               auto · Gemini 3.8 Flash · high</pre></div></section>
+<section><h2>4. Git inside the TUI, in a worktree under the home directory <span class="fix">fixed</span></h2><p><b>Did.</b> A repository under <code>~/lfq-agy-probe</code>, a worktree, and one prompt: run <code>git commit --allow-empty -m probe</code> without leaving the sandbox.</p><div><b>Saw.</b> <p><b>Before the fix</b> (plain <code>agy</code>, same flags lf passed):</p><pre>  ▄▀▀    ▀▀▄
+ ▄▀▀      ▀▀▄
+
+ Welcome to the Antigravity CLI. You are currently not signed in.
+
+
+      ▄▀▀▄        Antigravity CLI 1.5.13
+     ▀▀▀▀▀▀       jackstah@gmail.com (Antigravity Starter Quota)
+    ▀▀▀▀▀▀▀▀      Gemini 3.8 Flash (High)
+   ▄▀▀    ▀▀▄     ~/lfq-agy-probe/repo.wt
+  ▄▀▀      ▀▀▄
+
+────────────────────────────────────────────────────────────
+&gt; Run exactly this one command with BypassSandbox false and report its output verbatim, nothing else, and do not retry: git commit
+  --allow-empty -m probe
+
+● Ran (git commit --allow-empty -m probe) failed (ctrl+o to expand)
+
+  fatal: not a git repository: /Users/jack/lfq-agy-probe/repo/.git/worktrees/repo.wt
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+&gt; Auto mode: edits &amp; safe commands auto-approved (shift+tab to cycle)
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+? for shortcuts                                                                                               auto · Gemini 3.8 Flash · high</pre><p>agy runs a terminal's commands in a sandbox that reaches only workspace folders, <code>/tmp</code> and its own data. A worktree's Git data is in the main repository. A headless run is not sandboxed (the same commit worked there), and a checkout under <code>/tmp</code> hides it.</p><p><b>Fixed</b> in <code>harness/antigravity.rs</code> (<code>main_git_dir</code>): a terminal in a worktree gets <code>--add-dir &lt;main&gt;/.git</code>, left out when that folder would sort before the checkout (agy runs commands in the first workspace folder by path). Through <code>lf default … -a antigravity</code> in a worktree made by <code>lf wt create</code>:</p><pre>
+  Use Tasks and Waves when the request calls for them or continues an existing
+  Task. A big effort, a worktree, a PR or a
+  Graph doesn&#x27;t by itself call for a Task. Use the tools and workflow asked for.
+
+  Don&#x27;t open with a Session inventory, Task check or planning lookup unless the
+  request needs one. With no request yet, briefly invite one and wait.
+
+  &lt;/lf:skill:default&gt;
+
+  &lt;lf:message&gt;
+  Run exactly this one command with BypassSandbox false and report its output verbatim, nothing else, and do not retry: pwd &amp;&amp; git commit
+  --allow-empty -m probe-through-lf
+  &lt;/lf:message&gt;
+
+● Ran (pwd &amp;&amp; git commit --allow-empty -m probe-through-lf) (ctrl+o to expand)
+
+  /Users/jack/lfq-agy-probe/repo.probe-two
+  [qa/probe-two c9cf61d] probe-through-lf
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+&gt; Auto mode: edits &amp; safe commands auto-approved (shift+tab to cycle)
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+? for shortcuts                                                                                               auto · Gemini 3.8 Flash · high</pre></div></section>
+<section><h2>5. Interrupt, then run again <span class="ok">works</span></h2><p><b>Did.</b> <code>lf task interrupt 11cc2b</code> 25 s into a step; later <code>lf task run 11cc2b</code>.</p><div><b>Saw.</b> <pre>11cc2b: stopped Graph qa at implement
+latest Graph: implement: process exited with status 130. Inspect its history and effects, then launch fresh work
+turns: step-0 | implement | interrupted | {&quot;code&quot;:&quot;antigravity_error&quot;,&quot;message&quot;:&quot;interrupted&quot;} | 35042 input tokens</pre><p>No <code>agy --input-format</code> process was left. The next run started the step again and finished it (ten lines in <code>notes.md</code>); usage lists both attempts.</p></div></section>
+<section><h2>6. A model agy does not serve, first in agents <span class="ok">works</span></h2><p><b>Did.</b> <code>lf set --global agents 'antigravity:no-such-model-xyz,antigravity'</code>, then <code>lf task run 11cc2b</code>.</p><div><b>Saw.</b> <pre>latest Graph: implement went on under antigravity after: antigravity_error: invalid model selection (--model &quot;no-such-model-xyz&quot; --effort &quot;&quot;): model no-such-model-xyz is not recognized as a known model or custom model in settings
+graph log: antigravity:no-such-model-xyz: model unavailable; continuing on antigravity</pre></div></section>
+<section><h2>7. Wrong input <span class="ok">works</span></h2><p><b>Did.</b> <code>lf -b default hi -a agy</code></p><div><b>Saw.</b> <pre>Error: invalid data: invalid graph: CLI: invalid graph: unsupported agent harness &#x27;agy&#x27;: use &#x27;claude&#x27;, &#x27;codex&#x27;, &#x27;opencode&#x27;, &#x27;pi&#x27;, or &#x27;antigravity&#x27;</pre><p>The names are right. The "invalid data: invalid graph: CLI: invalid graph:" prefix is the same for any unknown harness.</p></div></section>
+<section><h2>What works now</h2>
+<ul>
+<li>A Task step on Antigravity: it finishes, hears a steer after its next tool, records its answer, conversation and tokens, stops on interrupt and starts again on the next run.</li>
+<li>A step moves past a model agy does not serve, and <code>lf task status</code> says why.</li>
+<li>A Task's conversation in the agy TUI: no trust dialog in an lf worktree, context block, steers and Task updates arrive, Git works inside agy's sandbox, and <code>lf resume --task</code> reopens the same conversation after a quit.</li>
+</ul>
+<h2>Fixed in this run</h2>
+<ul>
+<li><code>lf resume</code> of a held Antigravity conversation started a new one (scenario 3). Test: <code>steers::tests::a_start_names_what_reconnect_resumes_when_the_launch_named_nothing</code>.</li>
+<li>Git failed in the TUI in any worktree outside <code>/tmp</code> (scenario 4). Test: <code>harness::antigravity::tests::a_terminal_in_a_worktree_lf_created_is_trusted_for_that_session</code>; <code>docs/config.md</code> names Antigravity under worktree access.</li>
+</ul>
+<p>Run after the fixes, all ok: <code>cargo test -p loopflow-storage --lib</code> (380), <code>cargo test -p loopflow-execution --lib -- harness::antigravity harness::launch_matrix</code> (10), <code>cargo test -p loopflow --lib -- server::boundary::</code> (10), <code>…task_graph_launch_tests::a_task_step_runs_as_a_worker_on_every_harness</code>, <code>cargo clippy -p loopflow-storage -p loopflow-execution --all-targets -- -D warnings</code>.</p>
+<h2>Not reached</h2>
+<ul>
+<li>An OpenCode step with no credits moving to the next agent: the account has credits now (<code>opencode:opencode/gemini-4-carbon</code> answered). Only the stand-in covers it.</li>
+<li>A spent Antigravity quota and a signed-out <code>agy</code>: both need the account in that state.</li>
+<li>A Machine without <code>agy</code>: lf's own PATH adds <code>~/.local/bin</code> and <code>/opt/homebrew/bin</code>, where it is installed.</li>
+<li>Desktop's picker and pane heading (Swift), and a bare <code>agy</code> launch in a held terminal.</li>
+</ul>
+<h2>Still wrong, worst first</h2>
+<ol>
+<li><b><code>lf</code> does not run inside agy's sandbox.</b> In a TUI without <code>yolo</code>, the first <code>lf task status</code> a Task conversation runs fails with "Operation not permitted" on the Machine's files; the model retries outside the sandbox. agy approved that itself once (11 s) and asked the second time: <pre>
+  No work was changed. Let me know when you would like to proceed or redirect.
+
+────────────────────────────────────────────────────────────
+&gt; Reply with exactly: pong
+
+○ Thought for 32.4s (Initial analysis suggests the &quot;skill&quot; definition provides context for managing task conversations within a broader...)
+● Ran 7 commands (+4 · cat /private/tmp/lfq-agy/task.json · ps aux | grep lfq: failed · lf task status e310fa --json) (ctrl+o to expand)
+
+Command
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+Reason: the auto-run safety check did not complete
+Requesting permission for:
+   lf task status e310fa --json
+
+Run this command?
+&gt; 1. Yes, run command
+  2. Yes, and always allow in this conversation for commands that start with &#x27;lf&#x27;
+  3. Yes, and always allow for commands that start with &#x27;lf&#x27; (Persist to settings.json)
+  4. No, cancel
+
+  ↑/↓ Navigate · tab Amend · ctrl+g edit/expand command
+esc to cancel                                                                                                 auto · Gemini 3.8 Flash · high</pre> Nobody is at a held terminal to answer, so the opening turn can sit there. <code>--add-dir</code> cannot grant <code>~/.lf</code> (it would become where commands run). This is a choice about what the product should do, noted in <code>scratch/questions.md</code>.</li>
+<li><b>A Task update can pull the model off a typed prompt.</b> "Reply with exactly: pong" arriving with the "At ship-review" update got six commands and a status report before "pong". Seen once in three typed prompts.</li>
+<li><b>An open interactive conversation shows no tokens.</b> <code>lf history usage --task</code> prints <code>-</code> and <code>0/0</code> for the task-session row, and <code>lf history show --final</code> finds no answer. The installed <code>lf</code> does the same for Claude; not from this change.</li>
+</ol></section>

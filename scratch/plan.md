@@ -323,6 +323,32 @@ touched on both sides), 2026-11-20:
   files are written whole by rename. `antigravity_cli.py` writes
   `agy-steps.json` the same way. After: 7 of 7 ok.
 
+QA on real `agy` 1.5.13 (2026-11-20), a private Machine with its server;
+`scratch/qa.html` has the transcripts and `.lf/qa/antigravity.md` the route:
+
+- `lf task run <Task> -a antigravity` finished its step; a steer sent 17 s in
+  reached the worker 2 s later, after its next tool, and the step did what it
+  said. `lf history usage --task` listed the step's tokens. `lf task
+  interrupt` left the turn `interrupted` and no `agy` process; the next
+  `lf task run` started the step again. With `agents:
+  [antigravity:no-such-model-xyz, antigravity]`, `lf task status` read
+  "implement went on under antigravity after: antigravity_error: invalid
+  model selection …".
+- The Task's own conversation is an `agy` TUI in a held terminal. It got the
+  context block, the steer and the Task update, and its `Stop` hook ran.
+- Fixed: `lf resume --task` on a quit Antigravity conversation started a new
+  `agy` conversation and sent the opening request again. A held terminal's
+  launcher becomes `agy`, so nothing published the conversation the first
+  hook named. A provider start now publishes it for an input that has none
+  (`with_provider_context`).
+- Fixed: in a worktree outside `/tmp`, every Git command in the TUI answered
+  "fatal: not a git repository": `agy` runs a terminal's commands in a
+  sandbox that reaches only workspace folders. `open` adds the main
+  repository's `.git` with `--add-dir` (`main_git_dir`).
+- Not reached: a real OpenCode balance refusal (the account has credits; its
+  `gemini-4-carbon` answered), a spent Antigravity quota, a signed-out `agy`,
+  a Machine without `agy` (lf's own PATH finds it here).
+
 ## Left to build
 
 Nothing in the plan's slices. What is left is the demo on real `agy`, for qa
@@ -706,11 +732,9 @@ is unchanged line for line.
 - An exhausted-quota refusal, live.
 - Whether `trustedWorkspaces` wants the path as given or canonical: both are
   passed and the dialog did not appear.
-- A terminal whose launcher becomes `agy` (a held terminal:
-  `native_session::run` execs when `transport::current()` is set) has no lf
-  process left to read the thread file at exit. A managed launch's start
-  boundary gives the server the conversation; a bare one in a held terminal
-  is in bare Codex's position. Neither was run.
+- A bare launch in a held terminal (the launcher becomes `agy`, so no lf
+  process reads the thread file at exit) is in bare Codex's position. A
+  managed one was run and fixed (see QA above).
 - A launch from a subdirectory of an lf-created worktree: the trusted folder
   is the launch cwd, not the worktree root.
 

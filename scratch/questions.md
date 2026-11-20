@@ -41,3 +41,12 @@
   request from `injected`.
 - A model call with several tools has its results matched in row order; only
   single-tool calls were seen.
+- In an Antigravity TUI without `yolo`, `lf` itself runs inside `agy`'s
+  command sandbox and fails ("Operation not permitted" on the Machine's own
+  files under the home directory), so the model asks to run it outside:
+  sometimes approved by `agy`'s own check, sometimes a prompt nobody is at
+  the held terminal to answer. `--add-dir` cannot grant `~/.lf`: a folder
+  that sorts before the checkout becomes where commands run. `agy`'s
+  settings have permission grants (`permissions`, `grants` keys in the
+  binary) that were not explored. The other choice is `yolo` for Task
+  conversations on Antigravity.

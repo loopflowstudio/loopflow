@@ -509,7 +509,11 @@ impl super::Launcher for loopflow_harness::Antigravity {
         if launch.config.skip_permissions {
             args.push("--dangerously-skip-permissions".into());
         }
-        if let Some(trust) = client.process.get_current_dir().and_then(trust) {
+        let cwd = client.process.get_current_dir();
+        if let Some(git) = cwd.and_then(main_git_dir) {
+            args.extend(["--add-dir".into(), git.display().to_string()]);
+        }
+        if let Some(trust) = cwd.and_then(trust) {
             args.extend(["--settings".into(), trust]);
         }
         if let Some(input) = input.filter(|input| !input.is_empty()) {
@@ -527,6 +531,20 @@ impl super::Launcher for loopflow_harness::Antigravity {
         client.process.args(args);
         Ok(client)
     }
+}
+
+/// The main repository's Git directory, for a terminal in one of its
+/// worktrees. The TUI runs commands in a sandbox that reaches only workspace
+/// folders, and a worktree keeps its Git data outside its own: without this
+/// every Git command there answers "fatal: not a git repository" (seen live).
+/// Left out when it would sort before the launch directory, because `agy`
+/// would then run commands in it. A worktree lf created never sorts so. Both
+/// are compared as the filesystem resolves them, which is how `agy` names
+/// the directory it starts in.
+fn main_git_dir(cwd: &Path) -> Option<PathBuf> {
+    let main = crate::agent::workspace_add_dirs(cwd).pop()?;
+    let git = main.join(".git").canonicalize().ok()?;
+    (git.as_os_str() > cwd.canonicalize().ok()?.as_os_str()).then_some(git)
 }
 
 /// Settings for one session that let the TUI start in a worktree lf created
@@ -788,14 +806,31 @@ mod tests {
         let folders = [worktree.clone(), worktree.canonicalize().unwrap()];
         let mut expected = vec![folders[0].clone()];
         expected.extend((folders[1] != folders[0]).then(|| folders[1].clone()));
+        // Its Git data lives in the main repository, outside the sandbox.
+        let git = repo.join(".git").canonicalize().unwrap();
         assert_eq!(
             args(&worktree),
             [
+                "--add-dir".to_string(),
+                git.display().to_string(),
                 "--settings".to_string(),
                 serde_json::json!({"trustedWorkspaces": expected}).to_string()
             ]
         );
         assert!(args(&repo).is_empty(), "a main checkout keeps the dialog");
+        // A worktree that sorts after the repository would hand `agy` the
+        // Git directory as the folder its commands run in.
+        let later = root.path().join("z-agent-2");
+        crate::git::worktree_add(
+            &repo,
+            &later,
+            "agent-2",
+            crate::git::WorktreeBranch::New {
+                start_point: "HEAD",
+            },
+        )
+        .unwrap();
+        assert!(!args(&later).contains(&"--add-dir".to_string()));
     }
 
     fn callback(

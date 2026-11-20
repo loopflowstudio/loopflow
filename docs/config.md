@@ -298,7 +298,7 @@ config):
 supported_harnesses: [claude, codex, opencode, pi, antigravity]
 ```
 
-## Permissions (`yolo`) and worktree sandboxes
+## Permissions (`yolo`) and worktree access
 
 - **Interactive sessions** use each vendor's own permission settings and prompts.
 - **Headless runs** raise the floor so unattended work doesn't hang: Codex gets

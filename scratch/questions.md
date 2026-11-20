@@ -18,6 +18,12 @@
   `--dangerously-skip-permissions`, whatever `yolo` says, as OpenCode's
   always passes `--auto`. The other choice is to follow `yolo` and let a
   refused permission fail or stall the step.
+  Jack Heart, 2026-11-20: "we should do whatever, in priority order: (a)
+  gets the right [not handcuffed, permissive] behavior (b) is simplest (c)
+  is consistent with other harnesses". The unconditional flag is all three,
+  so it stays. By the same order, headless Codex outside a Task checkout is
+  the one harness held back (`workspace-write`, not full access); not changed
+  here.
 - An Antigravity failure's reason is the first line of what `agy` said. The
   rest (the list of models it does serve) is in `antigravity.stderr.log`
   beside the run, not in `lf task status`.
@@ -50,6 +56,15 @@
   settings have permission grants (`permissions`, `grants` keys in the
   binary) that were not explored. The other choice is `yolo` for Task
   conversations on Antigravity.
+  Jack Heart, 2026-11-20: "for tasks: Launch Task conversations on
+  Antigravity with yolo should *at least* be true when yolo: true in config".
+  That holds today: `yolo: true` (or `--yolo`) puts
+  `--dangerously-skip-permissions` on the TUI's argv
+  (`launch_bypass_and_chrome_take_the_command_line_then_personal_then_repository`
+  for the setting, `harness::antigravity` terminal argv test for the flag).
+  After hearing that attended sessions keep each vendor's prompts on every
+  harness and headless Task steps always skip them: "ok, that seems right
+  then".
 - A never-signed-in `agy` reads "The antigravity login was revoked; sign in
   again on this Machine: run `agy` and sign in". The sentence is the one
   every harness shares for a credential failure; "revoked" is wrong for a

@@ -153,7 +153,7 @@ mod tests {
         "planning_peer_observed",
         "planning_peer_routes",
         "blob_tokens",
-        // Desktop reads GitHub people once per repository through `lf repo people`.
+        // A lookup cache `lf repo people` fills; no Work projection reads it.
         "github_people",
         // Refresh attempts and watermarks do not change displayed Work.
         "linear_team_checks",

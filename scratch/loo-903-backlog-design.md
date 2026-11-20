@@ -141,6 +141,7 @@ CI runs the full suites.
 - `WaveViewHeader` moved into `BacklogView.swift`; `PaneVisibility.swift` still uses it. `WavePlanningNotice` and the backlog's inline "Planning unavailable / Retry" line are deleted: main sends read failures and the out-of-plan notice to the window Notice.
 - Tests: `WaveStandupTests.swift`'s projection tests go. Its view tests for hide/zoom/resize (`wavePartsHideOnHover…`, `wavePartsZoomResize…`) are rewritten against `BacklogView`, without `section`. `TaskHistoryFilterTests.waveBoardShowsTheWave…` is updated to match.
 - `githubPeople` / `loadGitHubPeople`, Swift `RepoPerson` and the `repo.people` Swift read: deleted, the board was their only reader.
+- Still standing, no reader left in Desktop: Rust's `lf repo people` chain (`lf/commands/people.rs`, `ops/people.rs`, the served `repo.people` read, the `github_people` table, `repo_people.json`, the `docs/dev/reference.md` row). Removing it drops a documented CLI command and stages a table drop; left for a decision (in `scratch/questions.md`).
 - `PlanBoardTask` (`rust/loopflow/src/lf/commands/screens.rs`) stays: `lf plan board` reads it. Swift `PlanBoard` has only fixture readers.
 - The scratch preview `scratch/native-backlog-preview/` is a reference only. Nothing from it is copied as-is. Its NSEvent key monitor, `PreviewSplit` and fake data stay in scratch.
 
@@ -194,6 +195,7 @@ Left as built: the "merges without asking" tag comes from a Swift match on step 
 
 Checks (headless, this Machine):
 - After the #1991 merge, with item 6: `scripts/test_desktop.sh --filter 'BacklogViewTests|NewTaskTests|DTOFixtureTests|TaskHistoryFilterTests|DesktopHeadlessTests|WorkModelTests|TaskGraphProofTests|SessionChromeProofTests|TaskConceptTests|WorkDestinationTests'`: passed (display-session suites skip). `cargo nextest run -p loopflow -p loopflow-execution -p loopflow-definitions -E 'test(graph::compiled::) | test(dto_fixtures) | test(graph_discovery_tests::) | test(documented_commands::) | test(lf::tests::) | test(server::schema::tests::) | test(view_part)'`: 116 passed.
+- Compress, November 19: `scripts/test_desktop.sh --filter 'BacklogViewTests|NewTaskTests'`: 13 passed. The row menu and the accessibility Move up/down now share `BacklogView.perform(_:on:)`; `Action.nudge` reads the selection like every other action.
 - Not run since the sync: `cargo clippy --all-targets -- -D warnings`; `served_reads::screen_reads_are_compact_passive_and_match_cli`, which failed identically on base 0a31dd3c98; the iOS suite, which shared Swift models reach. Gate and CI run them.
 - Seen in the sync's full `loopflow-execution store::` run: `task_labels_and_generated_names_follow_local_identity_and_linear_mapping` failed and passed alone. Not diagnosed and nothing filed.
 

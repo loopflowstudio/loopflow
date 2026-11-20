@@ -236,18 +236,16 @@ struct BacklogList {
 
     // MARK: Start
 
-    /// A Task's workflow: the Graph Rust says its first run takes up.
-    static func workflow(_ task: RoadmapTask) -> String? { task.graphName }
-
-    /// The one workflow every Task would run, or nil when they differ.
+    /// The one workflow every Task would run, the Graph Rust says its first run
+    /// takes up, or nil when they differ.
     static func sharedWorkflow(_ tasks: [RoadmapTask]) -> String? {
-        let names = Set(tasks.map(workflow))
+        let names = Set(tasks.map(\.graphName))
         return names.count == 1 ? names.first ?? nil : nil
     }
 
     /// "feature 2 · code 1": the most common workflow first.
     static func breakdown(_ tasks: [RoadmapTask]) -> String {
-        let counts: [(name: String, count: Int)] = Dictionary(grouping: tasks.compactMap(workflow), by: { $0 })
+        let counts: [(name: String, count: Int)] = Dictionary(grouping: tasks.compactMap(\.graphName), by: { $0 })
             .map { ($0.key, $0.value.count) }
         let ordered = counts.sorted { left, right in
             left.count != right.count ? left.count > right.count : left.name < right.name
@@ -783,7 +781,7 @@ struct BacklogView: View {
                     Text(wave).font(Typography.body(11)).foregroundStyle(palette.textSecondary).lineLimit(1)
                 }
                 BacklogOwnerMark(owner: BacklogOwner(task), holder: task.runtime?.owner)
-                Menu { BacklogActions(model: model, view: view, list: list, tasks: list.targets(task.id), perform: perform) } label: {
+                Menu { actions(task, list) } label: {
                     Image(systemName: "ellipsis")
                 }
                 .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
@@ -808,12 +806,18 @@ struct BacklogView: View {
         .overlay(alignment: .top) {
             if dropTarget == task.id { Rectangle().fill(palette.accent).frame(height: 2).allowsHitTesting(false) }
         }
-        .contextMenu { BacklogActions(model: model, view: view, list: list, tasks: list.targets(task.id), perform: perform) }
+        .contextMenu { actions(task, list) }
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(selected ? .isSelected : [])
-        .accessibilityAction(named: Text("Move up")) { perform(.nudge(-1, list.targets(task.id).map(\.id))) }
-        .accessibilityAction(named: Text("Move down")) { perform(.nudge(1, list.targets(task.id).map(\.id))) }
+        .accessibilityAction(named: Text("Move up")) { perform(.nudge(-1), on: list.targets(task.id)) }
+        .accessibilityAction(named: Text("Move down")) { perform(.nudge(1), on: list.targets(task.id)) }
         .accessibilityIdentifier("wave-row-\(task.id)")
+    }
+
+    /// A row's "···" and right-click menu.
+    private func actions(_ task: RoadmapTask, _ list: BacklogList) -> BacklogActions {
+        let tasks = list.targets(task.id)
+        return BacklogActions(model: model, list: list, tasks: tasks) { perform($0, on: tasks) }
     }
 
     private func click(_ task: RoadmapTask, _ list: BacklogList) {
@@ -856,7 +860,7 @@ struct BacklogView: View {
         switch press.key {
         case .downArrow, .upArrow:
             let offset = press.key == .downArrow ? 1 : -1
-            if modifiers == .command { perform(.nudge(offset, selection)) }
+            if modifiers == .command { perform(.nudge(offset)) }
             else if modifiers.isEmpty || modifiers == .shift { state.wrappedValue.step(offset, extending: modifiers == .shift, rows: list.ids) }
             else { return .ignored }
         case .escape where !selection.isEmpty: state.wrappedValue.clear()
@@ -882,7 +886,7 @@ struct BacklogView: View {
     /// Every backlog action goes through here, so the toolbar, row menu and keys agree.
     enum Action {
         case start(String?), claim, edit, abandon, toTop
-        case nudge(Int, [String])
+        case nudge(Int)
         case reorder([(task: RoadmapTask, rank: Int)])
         case move(String?)
         case save(RoadmapTask, String)
@@ -903,13 +907,21 @@ struct BacklogView: View {
             state.wrappedValue.draft = task.task.description
         case .abandon: abandoning = tasks.isEmpty ? nil : tasks
         case .toTop: reorder(list.toTop(tasks.map(\.id)))
-        case .nudge(let offset, let ids):
-            if list.canReorder { reorder(list.nudge(ids, by: offset)) }
+        case .nudge(let offset):
+            if list.canReorder { reorder(list.nudge(tasks.map(\.id), by: offset)) }
             else { state.wrappedValue.notice = "Order lives in each Wave" }
         case .reorder(let writes): reorder(writes)
         case .move(let wave): model.moveBacklog(tasks, toWave: wave, in: view)
         case .save(let task, let text): Task { register(await model.saveBacklogBrief(task, text: text, in: view), "Edit Brief") }
         }
+    }
+
+    /// A row's own menu acts on `tasks`: a row outside the selection becomes the
+    /// selection, so every action reads one set.
+    private func perform(_ action: Action, on tasks: [RoadmapTask]) {
+        let ids = Set(tasks.map(\.id))
+        if ids != list.selection { state.wrappedValue.selection = ids }
+        perform(action)
     }
 
     private func reorder(_ writes: [(task: RoadmapTask, rank: Int)]) {
@@ -1051,8 +1063,8 @@ struct BacklogToolbar: View {
             }
             if arrows {
                 Group {
-                    Button { perform(.nudge(-1, tasks.map(\.id))) } label: { Image(systemName: "arrow.up") }.help("Move up (⌘↑)")
-                    Button { perform(.nudge(1, tasks.map(\.id))) } label: { Image(systemName: "arrow.down") }.help("Move down (⌘↓)")
+                    Button { perform(.nudge(-1)) } label: { Image(systemName: "arrow.up") }.help("Move up (⌘↑)")
+                    Button { perform(.nudge(1)) } label: { Image(systemName: "arrow.down") }.help("Move down (⌘↓)")
                 }
                 .disabled(!list.canReorder)
             }
@@ -1211,19 +1223,12 @@ struct BacklogMoveItems: View {
 /// A row's "···" and right-click menu, over the selection when the row is in it.
 struct BacklogActions: View {
     let model: WorkModel
-    let view: WorkNavigation.Board
     let list: BacklogList
     let tasks: [RoadmapTask]
-    let perform: (BacklogView.Action) -> Void
+    /// Makes `tasks` the selection, then acts on it.
+    let run: (BacklogView.Action) -> Void
 
     var body: some View {
-        // A row outside the selection becomes the selection, so every action below reads one set.
-        let run = { (action: BacklogView.Action) in
-            if Set(tasks.map(\.id)) != list.selection {
-                model.navigation.backlogs[view, default: BacklogState()].selection = Set(tasks.map(\.id))
-            }
-            perform(action)
-        }
         Button("Open") { if let task = tasks.first { model.openBacklog(task) } }.disabled(tasks.count != 1)
         if tasks.contains(where: \.awaitsStart) {
             Button(BacklogList.startLabel(tasks)) { run(.start(nil)) }.disabled(BacklogList.startUnavailable(tasks) != nil)
@@ -1232,8 +1237,8 @@ struct BacklogActions: View {
         Button("Claim") { run(.claim) }.disabled(!tasks.contains { BacklogOwner($0) == .nobody })
         Button("Edit brief") { run(.edit) }.disabled(tasks.count != 1)
         Menu("Move") { BacklogMoveItems(model: model, list: list, tasks: tasks, perform: run) }
-        Button("Move up") { run(.nudge(-1, tasks.map(\.id))) }.disabled(!list.canReorder)
-        Button("Move down") { run(.nudge(1, tasks.map(\.id))) }.disabled(!list.canReorder)
+        Button("Move up") { run(.nudge(-1)) }.disabled(!list.canReorder)
+        Button("Move down") { run(.nudge(1)) }.disabled(!list.canReorder)
         Button("Copy ID") {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(tasks.map(\.task.identifier).joined(separator: " "), forType: .string)

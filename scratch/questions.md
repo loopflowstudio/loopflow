@@ -41,3 +41,8 @@
 
 - A started Task nobody holds gets Open, not Continue, in the backlog. Continue from a last stop such as demo reaches `end` and approves Auto-Ship, and the design already says the backlog must not reproduce Continue/Ship. The other reading: keep a one-click Continue in the backlog and warn when it will merge, which needs the run action and its consequence on the wire (`TaskRunControl` carries only a refusal).
 - "Run without stopping" still lists six Graphs (auto, deep-clean, incident, optimize, queue, task-design). Whether the first menu should hold only auto and incident is for the demo to show.
+
+## From compress, November 19
+
+- `lf repo people` (GitHub users behind Task owners, cached in `github_people`) has no Desktop reader now that the standup board is gone. Left in place: it is a documented command. Deleting it means a `-- leaving: github_people` marker and removing the served `repo.people` read.
+- VoiceOver's Move up/down on a row outside the selection now selects that row first, as the row menu does.

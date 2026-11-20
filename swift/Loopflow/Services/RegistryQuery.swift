@@ -1165,7 +1165,7 @@ public struct RegistryQuery: Sendable {
     }
 
     /// `lf task update <issue> --rank=<rank>`: the Task's position in its Project,
-    /// from 1; Rust renumbers its siblings and moves it in Linear.
+    /// from 0; Rust renumbers its siblings and moves it in Linear.
     public func rankTask(issue: String, rank: Int, cwd: String) async throws {
         _ = try await write(.taskUpdate(directory: cwd, issue: issue, notes: nil, rank: rank))
     }

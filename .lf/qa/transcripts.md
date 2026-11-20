@@ -46,8 +46,8 @@ the `CLAUDE_*`/`CODEX_*` markers kept, the real `HOME` and a private
 `LF_HOME`. A fresh directory's trust dialog defaults to "No, exit": Down,
 Enter. A kept marker shows "⚠ Transcript saving is off — inherited
 CLAUDE_CODE_CHILD_SESSION marker" in the footer, no `.jsonl` appears, and
-`lf session resume <session>` ends with "No conversation found with session
-ID". The provider thread is `agent_sessions.provider_thread` in the private
+`lf session resume <session>` starts the conversation again ("This
+conversation has no saved claude transcript…"). The provider thread is `agent_sessions.provider_thread` in the private
 `loopflow.db` (Python `sqlite3` with `?mode=ro`; the sqlite3 CLI couldn't
 open it here). `ps eww -o command= -p <claude pid>` shows the environment lf
 handed the provider; walk the PTY child's descendants to find it.

@@ -141,8 +141,12 @@ Corrected in the second qa pass (`scratch/qa.html`, at 8273da9e9b): the
 "no saved … transcript" line is on screen in the view, above the provider's
 first output, in 8 of 8 lost-thread opens. The first pass's "nobody sees it"
 was its driver's escape stripping deleting the text. The docs example and
-"and says so" are back, and the concept review's "a sentence with no reader"
-section does not hold.
+"and says so" are back.
+
+Concept review at 0882c821ee (`scratch/concept-review.html`, regenerated):
+nothing to change. The two mismatches left are one: the recorded thread
+means "saved" only in the interactive opener; `has_provider_history` and the
+headless readers (c2ed1c) still take it as resumable.
 
 Done in qa: real Claude 2.1.329 with no CLI on `PATH`, then installed; Esc at
 the first screen then reopen; a saved thread reopened with `--resume`; a

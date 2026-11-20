@@ -76,7 +76,7 @@ An interactive client may `exec` into a held terminal.
 | Codex chat | `codex`, prompt in argv | provider (start hook) |
 | Codex work session | `codex --remote` after lf opens the app-server thread | provider |
 | OpenCode | `opencode --standalone`, prompt in `--prompt` | lf (`--session ses_…`) |
-| Antigravity | `agy`, prompt in `-i`; its command sandbox does not reach `~/.lf`, so the first `lf` command stops at "Run this command?" unless `yolo` | provider (hook callbacks; follows `/new`, `/fork`, `/resume`) |
+| Antigravity | `agy`, prompt in `-i`; its command sandbox does not reach `~/.lf`, so under `yolo: false` the first `lf` command stops at "Run this command?" | provider (hook callbacks; follows `/new`, `/fork`, `/resume`) |
 
 `cargo test -p loopflow-execution --lib harness::launch_matrix -- --nocapture`
 runs every harness as a chat, work session, batch and worker against stand-in provider scripts, and prints each cell's argv, hook ownership, wait mechanism and recorded thread.

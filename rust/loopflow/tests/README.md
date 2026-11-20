@@ -545,8 +545,8 @@ through composition, live repository skill overrides in global recipes, personal
 file precedence, explicit CLI/environment selection and empty/false/unset values.
 Session/resume fixtures create local Tasks through the CLI and wait for each
 worker before reading its selection. Stand-ins establish launch behavior, not
-configured-provider recovery. Claude's headless permission floor is independent
-of the resolved `yolo` preference; terminal bypass checks own its negation.
+configured-provider recovery. A headless run skips permissions whatever `yolo`
+resolves to; attended terminal checks own its negation.
 Launch and preview fixtures select a harness explicitly or save a fixture-local
 `default_agent`; they must not depend on the developer's installed providers.
 Keep composed launch matrices split into bounded behavioral cases so each stays

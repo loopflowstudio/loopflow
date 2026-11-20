@@ -192,6 +192,31 @@ onto the predicate.
    tests that pinned the floors.
 3. **Docs and help**: the doc files, catalog description, `--yolo` help.
 
+## Status (implement)
+
+All three slices are built on this branch, stacked on LOO-1013 (#1998) with
+`lf sync LOO-1013`; `lf sync main` once it merges.
+
+- One predicate, `AgentConfig::skips_permissions(Mode)`, in
+  `agent/mod.rs`. Callers pass the attended fact each harness has: Claude
+  terminal and Antigravity terminal `launch.kind.mode()`, Claude stream
+  `Headless`, Codex app-server `Interactive` only with a native client
+  attached, Codex terminal `kind.mode()`, OpenCode `kind.mode()`.
+  Antigravity's headless run still passes the flag unconditionally (headless
+  by construction).
+- Deleted: the Codex/Claude vendor-config readers and floors,
+  `is_task_checkout`, `checkout_yolo`, the `batch` parameter of
+  `resolve_session_config`, the forced bypass in `ops/commit.rs`.
+- Taught: the launch-policy fixture opened its "attended" terminal as a
+  `Batch`; it now says `Chat`, which is what `lf -i` launches.
+- Checks run: `cargo test -p loopflow --lib launch_policy` (pass);
+  `cargo test -p loopflow-execution --lib -- config:: harness::launch_matrix
+  agent:: harness::` (pass); integration `config_tests::
+  documented_commands:: settings_launch_tests::`: one failure,
+  `automatic_agent_selection_requires_exactly_one_installed_harness`
+  (agent discovery, untouched here; gate reruns it from an empty
+  directory per the macOS PATH trap). `session_launch_contract` left to gate.
+
 ## Demo
 
 In a repository with no `yolo` setting: `lf -a claude` opens Claude showing

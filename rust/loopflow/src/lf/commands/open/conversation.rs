@@ -279,9 +279,9 @@ pub(super) fn resolve(target: &mut Resolved, prepare: bool) -> Result<()> {
     })
 }
 
-/// A launch-scoped acknowledgement, removed after its caller settles. The
-/// transport writes it only after the native conversation is ready for input.
-/// A failed child leaves its error visible and reports failure through this file.
+/// A launch-scoped receipt, removed after its caller settles. The transport
+/// writes "attached" once the native conversation has started, or the error
+/// that stopped it; a failed child also leaves that error on screen.
 #[derive(Debug)]
 pub(super) struct Attachment {
     directory: tempfile::TempDir,

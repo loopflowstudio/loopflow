@@ -306,7 +306,7 @@ const TOOL_DIRS: [&str; 7] = [
 ];
 
 /// `TOOL_DIRS` with `~/` under `home`.
-pub fn tool_dirs(home: &Path) -> [String; 7] {
+pub fn tool_dirs(home: &Path) -> [String; TOOL_DIRS.len()] {
     TOOL_DIRS.map(|entry| match entry.strip_prefix("~/") {
         Some(rest) => home.join(rest).to_string_lossy().into_owned(),
         None => entry.to_owned(),
@@ -336,10 +336,7 @@ pub fn repair_path() {
         return;
     };
     let path = std::env::var("PATH").unwrap_or_default();
-    let repaired = tool_path(&path, &home);
-    if repaired != path {
-        std::env::set_var("PATH", repaired);
-    }
+    std::env::set_var("PATH", tool_path(&path, &home));
 }
 
 pub fn which_on_path(name: &Path) -> Option<PathBuf> {

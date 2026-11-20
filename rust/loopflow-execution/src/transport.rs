@@ -2022,8 +2022,10 @@ fn view(
                             .inspect_err(|error| tracing::debug!(%error, "viewer readiness was not delivered"))
                             .is_ok();
                             returning = Some(detach);
+                            // A tab launch succeeds only when this view is attached
+                            // and its Session's native client is ready.
                             if attached && acknowledged {
-                                acknowledge_open();
+                                answer_open("attached");
                             }
                             if let Some(status) = &mut status {
                                 status.native_ready();
@@ -2301,12 +2303,6 @@ fn pass_open(command: &mut Command) {
     }
 }
 
-/// A tab launch succeeds only when this view is attached and its Session's
-/// native client is ready. Startup errors before Return leave no success receipt.
-fn acknowledge_open() {
-    answer_open("attached");
-}
-
 /// Answer `lf open`: "attached", or why the opening failed. The first answer
 /// stands: the launcher's own error beats its viewer's.
 fn answer_open(answer: &str) {
@@ -2329,12 +2325,9 @@ fn answer_open(answer: &str) {
 /// error. The pane waits; the receipt says why. A viewer whose conversation
 /// exited leaves the answer to the launcher, or to the pane's status line.
 pub fn end_open(result: &Result<()>) {
-    let Err(error) = result else {
+    let (Err(error), Some(_)) = (result, open_receipt()) else {
         return;
     };
-    if open_receipt().is_none() {
-        return;
-    }
     let reason = format!("{error:#}");
     tracing::warn!(
         command = std::env::args().skip(1).collect::<Vec<_>>().join(" "),
@@ -2657,8 +2650,7 @@ mod open_receipt_tests {
     use std::process::Command;
 
     use super::{
-        acknowledge_open, answer_open, carry_across_exec, open_receipt, take_open_receipt,
-        OPEN_RECEIPT_ENV,
+        answer_open, carry_across_exec, open_receipt, take_open_receipt, OPEN_RECEIPT_ENV,
     };
 
     #[test]
@@ -2666,15 +2658,12 @@ mod open_receipt_tests {
         let _env = crate::journal::test_env_lock();
         let dir = tempfile::tempdir().unwrap();
         let receipt = dir.path().join("receipt");
-        for answer in ["'claude' is not installed", "a later error"] {
+        for answer in ["'claude' is not installed", "a later error", "attached"] {
             std::env::set_var(OPEN_RECEIPT_ENV, &receipt);
             take_open_receipt();
             answer_open(answer);
             assert!(open_receipt().is_none());
         }
-        std::env::set_var(OPEN_RECEIPT_ENV, &receipt);
-        take_open_receipt();
-        acknowledge_open();
         assert_eq!(
             std::fs::read_to_string(&receipt).unwrap(),
             "'claude' is not installed"

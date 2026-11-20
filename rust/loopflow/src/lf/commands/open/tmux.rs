@@ -25,31 +25,22 @@ pub(super) fn open(target: &Resolved, focus: bool, argv: &[String]) -> Result<St
         ),
         _ => TmuxLocation::current(),
     };
-    let tmux = || {
-        caller
-            .as_ref()
-            .map(host_command)
-            .unwrap_or_else(|| Command::new("tmux"))
-    };
-    // `new-window -t` names a window: tmux 3.7 refuses a pane there.
-    let after = match &caller {
-        Some(location) => {
-            let mut command = tmux();
-            command.args([
-                "display-message",
-                "-p",
-                "-t",
-                &location.pane,
-                "#{window_id}",
-            ]);
-            Some(run_host(command, "tmux")?.trim().to_owned())
-        }
-        None => None,
-    };
-    let mut command = tmux();
+    let mut command = caller
+        .as_ref()
+        .map(host_command)
+        .unwrap_or_else(|| Command::new("tmux"));
     command.arg("new-window");
-    if let Some(window) = &after {
-        command.args(["-a", "-t", window]);
+    if let Some(location) = &caller {
+        // `new-window -t` names a window: tmux 3.7 refuses a pane there.
+        let mut lookup = host_command(location);
+        lookup.args([
+            "display-message",
+            "-p",
+            "-t",
+            &location.pane,
+            "#{window_id}",
+        ]);
+        command.args(["-a", "-t", run_host(lookup, "tmux")?.trim()]);
     }
     if !focus {
         command.arg("-d");

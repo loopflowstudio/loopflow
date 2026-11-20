@@ -163,7 +163,7 @@ CI runs the full suites.
 
 ### Slices
 
-Status, November 19: slices 1–6 are built (6 at `fc22206d35`). A third concept review of that build found nothing to change: the row menu, the button, ⌘↩ and the docs agree, and Open (`openTaskDestination`) runs no Graph. The branch holds main through `f76129f677` (merge `09c29fd429`, #1991), which touched no backlog, Graph or Desktop file. Nothing has been seen in the real app.
+Status, November 19: slices 1–6 are built (6 at `fc22206d35`). A third concept review of that build found nothing to change: the row menu, the button, ⌘↩ and the docs agree, and Open (`openTaskDestination`) runs no Graph. The branch holds main through `f76129f677` (merge `09c29fd429`, #1991), which touched no backlog, Graph or Desktop file. QA, November 19 (`scratch/qa.html`): the Dev app rendered a private world's backlog and followed every write; the screen was locked, so no click, key, drag or menu has been seen.
 
 1. **Rust — built.** `description:` on Graph files, `lf graph list` prints it, catalog DTO in both languages, `RoadmapTask.owned_by_you`, served `task.update` takes `notes` and `rank`.
 2. **Swift list — built.** `BacklogView.swift`; `BacklogState` lives in `WorkNavigation.backlogs`; `BacklogList` is the projection. Default conversation share is 0.236.
@@ -187,6 +187,7 @@ Status, November 19: slices 1–6 are built (6 at `fc22206d35`). A third concept
    - Kept: the row's standing, the Abandon dialog naming PRs, no workflow menu on a started row. `runs` from the builtin directory still offers a repository's Wave Graph for a Task (in `scratch/questions.md`).
 
 Remaining:
+- From QA: narrow widths no longer wrap (header sheds the chapter then Objective, search drops under the filter, the toolbar folds Edit/Move/Abandon into "···"), and someone else's owner mark is an outline. Open: a repository Graph that includes a builtin (`- research`) makes it a piece and moves it under More; the filter reads "All 0" while work loads.
 - The demo and the hands-on run in the Dev app: drag feel, key focus, the split Start's menu rendering, toolbar collapse at narrow widths, the File button beside Start, the chooser's new rows. The seed is a scratch Wave with eight Tasks in a private Machine, built the way `.lf/skills/demo.md` and `.lf/qa/desktop.md` describe. Backlog rows have no `lf desktop` socket route: `lf desktop capture -p backlog` reads the list, and selecting, dragging and the menus need a person or headless view tests.
 - Reorder has no optimistic projection: rows move when the Work update arrives, while Claim, Start, Move and Abandon show in the click.
 - `lf graph show NAME --json` now compiles the whole catalog to fill `included_by`. Not measured.

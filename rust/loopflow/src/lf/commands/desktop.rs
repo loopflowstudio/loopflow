@@ -1402,7 +1402,7 @@ fn dispatch(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result
             max_bytes,
             trim,
         } => {
-            // A view part with text, such as a Wave board, captures as rendered.
+            // A view part with text, such as a Wave backlog, captures as rendered.
             if let Some(part) = window.view_part(verb.target.pane.as_deref()) {
                 let text = part.text.as_deref().ok_or_else(|| {
                     DesktopError::Target(format!(

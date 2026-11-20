@@ -1496,7 +1496,7 @@ impl SelfCommand {
 /// base view; without either, a command acts on the terminal it runs in (`LF_TERMINAL_ID`).
 #[derive(Args, Debug, Clone, Default)]
 pub struct DesktopTargetArgs {
-    /// Pane path: a view part (board), session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix
+    /// Pane path: a view part (backlog), session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix
     #[arg(short = 'p', long = "pane", value_name = "PATH")]
     pub pane: Option<String>,
     /// Desktop window: ID, position or ID suffix

@@ -614,16 +614,42 @@ struct BacklogView: View {
 
     private func header(_ list: BacklogList) -> some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
-            HStack(alignment: .firstTextBaseline, spacing: Spacing.md) {
-                Text(roadmap?.wave.displayName ?? model.repositoryName).font(Typography.strong(17))
-                    .accessibilityIdentifier("wave-title")
-                if let roadmap {
-                    if let error = roadmap.projects.unavailableReason {
-                        Text("Project unavailable · \(error)").font(Typography.body(12)).foregroundStyle(palette.warning)
-                    } else if let project = roadmap.currentProject {
-                        Text(project.name).font(Typography.body(12)).foregroundStyle(palette.textSecondary)
-                            .lineLimit(1).accessibilityIdentifier("wave-current-project")
-                    }
+            // The chapter, then the objective's disclosure, give way before the name does.
+            ViewThatFits(in: .horizontal) {
+                titleLine(list, project: true, objective: true)
+                titleLine(list, project: false, objective: true)
+                titleLine(list, project: false, objective: false)
+            }
+            if let roadmap, list.state.showsObjective { objective(roadmap) }
+            // Side by side, or the search under the filter when the backlog is narrow.
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: Spacing.md) {
+                    BacklogFilterPicker(selection: state.filter, count: list.count)
+                    Spacer(minLength: Spacing.sm)
+                    search(list).frame(minWidth: 180, maxWidth: 280)
+                }
+                VStack(alignment: .leading, spacing: Spacing.sm) {
+                    BacklogFilterPicker(selection: state.filter, count: list.count)
+                    search(list)
+                }
+            }
+        }
+        .padding(.horizontal, Spacing.xl).padding(.vertical, Spacing.md)
+    }
+
+    private func titleLine(_ list: BacklogList, project showsProject: Bool, objective showsObjective: Bool) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: Spacing.md) {
+            Text(roadmap?.wave.displayName ?? model.repositoryName).font(Typography.strong(17)).lineLimit(1)
+                .layoutPriority(1).accessibilityIdentifier("wave-title")
+            if let roadmap {
+                if let error = roadmap.projects.unavailableReason {
+                    Text("Project unavailable · \(error)").font(Typography.body(12)).foregroundStyle(palette.warning)
+                        .lineLimit(1)
+                } else if showsProject, let project = roadmap.currentProject {
+                    Text(project.name).font(Typography.body(12)).foregroundStyle(palette.textSecondary)
+                        .lineLimit(1).accessibilityIdentifier("wave-current-project")
+                }
+                if showsObjective {
                     Button {
                         state.wrappedValue.showsObjective.toggle()
                     } label: {
@@ -634,37 +660,33 @@ struct BacklogView: View {
                         }
                         .font(Typography.body(12)).foregroundStyle(palette.actionInk)
                     }
-                    .buttonStyle(WorkPlainButtonStyle())
+                    .buttonStyle(WorkPlainButtonStyle()).fixedSize()
                     .help(roadmap.wave.goal)
                     .accessibilityIdentifier("wave-objective")
                 }
-                Spacer(minLength: 0)
-                ShowHiddenMenu(model: model, view: view)
-                if let roadmap { waveMenu(roadmap) }
-                Button { model.navigation.palette = .newTask } label: { Label("New", systemImage: "plus") }
-                    .buttonStyle(WorkOutlineButtonStyle()).help("File a Task (⌘N)")
-                    .accessibilityIdentifier("backlog-new")
             }
-            if let roadmap, list.state.showsObjective { objective(roadmap) }
-            HStack(spacing: Spacing.md) {
-                BacklogFilterPicker(selection: state.filter, count: list.count)
-                Spacer(minLength: Spacing.sm)
-                HStack(spacing: Spacing.sm) {
-                    Image(systemName: "magnifyingglass").foregroundStyle(palette.textTertiary)
-                    TextField("Search titles and briefs", text: state.query).textFieldStyle(.plain)
-                        .accessibilityIdentifier("backlog-search")
-                    if !list.state.query.isEmpty {
-                        Button { state.wrappedValue.query = "" } label: { Image(systemName: "xmark.circle.fill") }
-                            .buttonStyle(.plain).foregroundStyle(palette.textTertiary).help("Clear search")
-                    }
-                }
-                .font(Typography.body(13))
-                .padding(.horizontal, Spacing.sm).padding(.vertical, 5)
-                .frame(maxWidth: 280)
-                .background(palette.surfaceMuted, in: RoundedRectangle(cornerRadius: 6))
+            Spacer(minLength: 0)
+            ShowHiddenMenu(model: model, view: view)
+            if let roadmap { waveMenu(roadmap) }
+            Button { model.navigation.palette = .newTask } label: { Label("New", systemImage: "plus") }
+                .buttonStyle(WorkOutlineButtonStyle()).fixedSize().help("File a Task (⌘N)")
+                .accessibilityIdentifier("backlog-new")
+        }
+    }
+
+    private func search(_ list: BacklogList) -> some View {
+        HStack(spacing: Spacing.sm) {
+            Image(systemName: "magnifyingglass").foregroundStyle(palette.textTertiary)
+            TextField("Search titles and briefs", text: state.query).textFieldStyle(.plain)
+                .accessibilityIdentifier("backlog-search")
+            if !list.state.query.isEmpty {
+                Button { state.wrappedValue.query = "" } label: { Image(systemName: "xmark.circle.fill") }
+                    .buttonStyle(.plain).foregroundStyle(palette.textTertiary).help("Clear search")
             }
         }
-        .padding(.horizontal, Spacing.xl).padding(.vertical, Spacing.md)
+        .font(Typography.body(13))
+        .padding(.horizontal, Spacing.sm).padding(.vertical, 5)
+        .background(palette.surfaceMuted, in: RoundedRectangle(cornerRadius: 6))
     }
 
     private func waveMenu(_ roadmap: WaveRoadmap) -> some View {
@@ -963,7 +985,7 @@ private struct BacklogDrag: ViewModifier {
     }
 }
 
-/// Filled for you, muted for someone else, a dashed ring for nobody.
+/// Filled for you, a muted outline for someone else, a dashed ring for nobody.
 struct BacklogOwnerMark: View {
     let owner: BacklogOwner
     let holder: TaskOwner?
@@ -973,7 +995,7 @@ struct BacklogOwnerMark: View {
         Group {
             switch owner {
             case .you: Image(systemName: "person.crop.circle.fill").foregroundStyle(palette.accentInk)
-            case .someone: Image(systemName: "person.crop.circle.fill").foregroundStyle(palette.textTertiary)
+            case .someone: Image(systemName: "person.crop.circle").foregroundStyle(palette.textTertiary)
             case .nobody:
                 Circle().strokeBorder(palette.textTertiary, style: StrokeStyle(lineWidth: 1, dash: [2, 2]))
                     .frame(width: 13, height: 13)
@@ -1019,11 +1041,13 @@ struct BacklogFilterPicker: View {
         }
         .padding(2)
         .background(palette.surfaceMuted, in: Capsule())
+        .fixedSize()
     }
 }
 
 /// The toolbar acts on the selection and is disabled with none. Start is its one
-/// filled shape; the position, then ↑↓, give way before anything clips.
+/// filled shape; the position, then ↑↓, give way, then Edit, Move and Abandon
+/// fold into one menu. No label wraps.
 struct BacklogToolbar: View {
     let model: WorkModel
     let view: WorkNavigation.Board
@@ -1036,6 +1060,7 @@ struct BacklogToolbar: View {
             bar(position: true, arrows: true)
             bar(position: false, arrows: true)
             bar(position: false, arrows: false)
+            folded
         }
         .disabled(list.selected.isEmpty)
         .padding(.horizontal, Spacing.xl).padding(.vertical, Spacing.sm)
@@ -1072,7 +1097,33 @@ struct BacklogToolbar: View {
         }
         .buttonStyle(BacklogQuietButtonStyle())
         .font(Typography.body(12.5))
+        .lineLimit(1)
         .fixedSize(horizontal: false, vertical: true)
+    }
+
+    /// The narrowest bar: Start, Claim and the rest under "···".
+    private var folded: some View {
+        let tasks = list.selected
+        return HStack(spacing: Spacing.sm) {
+            BacklogStartButton(model: model, list: list, perform: perform)
+            Button("Claim\(count)") { perform(.claim) }
+                .disabled(!tasks.contains { BacklogOwner($0) == .nobody })
+                .help("Make it yours without starting it (C)").accessibilityIdentifier("backlog-claim")
+            Spacer(minLength: 0)
+            Menu {
+                Button("Edit brief") { perform(.edit) }.disabled(list.opened == nil)
+                Menu("Move") { BacklogMoveItems(model: model, list: list, tasks: tasks, perform: perform) }
+                Button("Move up") { perform(.nudge(-1)) }.disabled(!list.canReorder)
+                Button("Move down") { perform(.nudge(1)) }.disabled(!list.canReorder)
+                Divider()
+                Button("Abandon\(count)…", role: .destructive) { perform(.abandon) }
+            } label: { Image(systemName: "ellipsis") }
+                .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().help("More actions")
+                .accessibilityIdentifier("backlog-more")
+        }
+        .buttonStyle(BacklogQuietButtonStyle())
+        .font(Typography.body(12.5))
+        .lineLimit(1)
     }
 
     private var positionText: String {

@@ -43,7 +43,7 @@ On a branch with a wire change (LOO-903's `owned_by_you` is the case that
 failed): `uv run python scripts/loopflow-dev.py run` prints
 
 ```
-This branch changes what the server sends (LocalTask, WaveDetail, RoadmapSnapshot).
+This branch changes what the server sends (GraphCatalogEntry, GraphSubject, RoadmapTask, Write).
 Opening a copy of the Machine from 14:02; changes are refused there.
 ```
 
@@ -224,7 +224,11 @@ DTO changes.
   the existing "no terminal" state. Terminal work uses the Machine or a fake
   world.
 - Tracker and PR refreshes do not run; rows show what the store last recorded.
-  How a failed refresh presents is looked at when slice 2 first opens a copy.
+  Seen November 20 on the real copy: all 254 Task rows read tracker state
+  `available` with their stored `synced_at`, PR rows carry their stored
+  publication, and the copy's log held no warning. The window itself was not
+  seen (the screen capture was black); whether a row turns **Last known** once
+  its stored sync time ages is not established.
 
 ### Windows belong to their Machine
 
@@ -307,10 +311,10 @@ start `lf server run` on the copy.
 - A served Task read returns the seeded Task. *(in the test)*
 - `task.run`, a Session start and a Session stop each return the sentence.
   *(in the test)*
-- After 2 recovery intervals the stand-in provider was never executed and the
-  `sleep` is still running. *(remaining: the test seeds `one-task`, which has
-  no Session with a live pid and no conversation due for recovery; a writable
-  copy's server started none in 15 s, so the test would pass with recovery on)*
+- The Machine has one Task conversation whose provider is alive and one
+  prepared with no server to start it. The copy's log says "ready on a copy of
+  the Machine" and holds no failed write, the stand-in provider never ran and
+  the live provider is still running. *(in the test)*
 - A pane launch through the copy's lf starts no provider. *(in the test)*
 - The source `loopflow.db` is byte-identical before and after, the copy's is
   unchanged after the commands, and the seeded checkout has no new or changed
@@ -371,34 +375,64 @@ server`, fake-world recipes, `welcome` and `status` as they are.
 
 ## Slices
 
-1. **Built**, less one check. A branch server serves a read-only copy, starts
-   nothing and admits no change: `lf-world copy` (`world::copy`), `copy::seal`
-   and `copy::sealed_at` in storage, `server/copy.rs`, `Operation::changes`,
+1. **Built.** A branch server serves a read-only copy, starts nothing and
+   admits no change: `lf-world copy` (`world::copy`), `copy::seal` and
+   `copy::sealed_at` in storage, `server/copy.rs`, `Operation::changes`,
    `installation::server::stop`, and `copy_world`.
 
    What it showed, on the real store on November 20: `lf-world copy` of the
    688 MB store took 2.8 s. The branch's `lf server run` on the copy answered
    a `plan.list` subscription with the real Tasks, and `task.run`,
    `task.steer`, `session.continue` and `request.upload` with the sentence.
-   The copy's `lf.log` held no failed write: served reads and subscriptions
-   need none. SQLite created `-shm` and an empty `-wal` beside each 0444 file
-   and read through them. `lf -b default` and `lf resume <session>` through
-   the copy's lf both stopped at "attempt to write a readonly database" before
-   any provider ran. The fallback (a writable copy) is not needed.
+   SQLite created `-shm` and an empty `-wal` beside each 0444 file and read
+   through them. `lf -b default` and `lf resume <session>` through the copy's
+   lf both stopped at "attempt to write a readonly database" before any
+   provider ran.
 
-   Remaining:
-   - `copy_world` seeds a conversation due for recovery and a Session whose
-     pid is a live `sleep`, and shows the provider never ran and the `sleep`
-     survived. Break it in your head: with `wake` and `recovery` started on a
-     copy, today's test still passes.
-   - `installation::server::stop` (`launchctl bootout`) has not been run
-     against a loaded job; slice 2's `run --copy` twice does.
-2. **The launcher chooses.** The comparison, the printed line, `--copy` and
-   `--world` on both commands, `lf-world` built when needed, the `LF_HOME`
-   pass-through removed, the Python test. Check by launching Dev three ways:
-   `run --copy` on this branch, `run` on a checkout whose wire matches the
-   installed server, and `run --world` on a fake world. Look at how tracker and
-   PR rows read in the copy.
+   The read-only store is also what stops recovery. With `wake`, `recovery`
+   and `maintenance` started on a sealed copy that held a conversation due
+   for recovery, no provider ran: `continuing` writes before it starts one.
+   What that server does is log failed writes from boot on (retention,
+   statistics, "recovery pass failed", and "terminal exit not recorded" every
+   2 s). So `copy_world` reads the copy's log; a provider check alone passes
+   either way. On a writable copy the same server started the provider 2 s
+   after boot.
+
+   A world's `World::checkout` prepares no Task conversation, unlike
+   `lf checkout`; `one-task` has none. The test seeds through the CLI.
+2. **Built.** `_choose_opening` in `scripts/loopflow-dev.py`: `--world`, then
+   `--copy`, then the Machine when the bundled lf opens the repository and
+   both `lf server describe --json` documents are equal, else a copy with the
+   reason printed. `lf-world` is built beside `lf` only when a copy is made.
+   The inherited `LF_HOME` no longer reaches the app.
+   `python/tests/test_loopflow_dev.py` covers each branch of the choice and
+   the environment it launches with.
+
+   What it showed, November 20, this branch against installed 21d541a87:
+   - The two documents are equal, so `run` prints "Opening the Machine."
+     (the choice was run; Dev was not launched on the Machine). Against
+     LOO-903's document the names are GraphCatalogEntry, GraphSubject,
+     RoadmapTask and Write.
+   - `run --copy` printed "Opening a copy of the Machine from 01:53; changes
+     are refused there." Dev's window for `/Users/jack/src/loopflow` listed
+     the 19 working Tasks (`lf desktop ls`). Its server logged "ready on a
+     copy of the Machine" and nothing else. The installed server kept
+     instance 033984e9 throughout.
+   - A second `run --copy` booted out the loaded job
+     `com.loopflow.server.530be3a272dbf20a` (pid 57908) and the same label
+     came back as pid 63838: `installation::server::stop` works against a
+     loaded job.
+   - `run --world` on a `one-task` world showed one window, the world's.
+     The restored-window case of slice 3 did not appear here, since the
+     bundle's saved window was the real repository's and the world got its
+     own.
+   - Reading Dev's own socket from a shell needs
+     `LF_DESKTOP=com.loopflow.mac.dev`; without it `lf desktop` looks for the
+     installed app's socket in the copy's home.
+
+   Not done: the `lf sync main` line is printed only when the Machine refused
+   the bundled lf and the copy then failed; the launcher cannot tell a store
+   ahead of the branch from any other failed copy.
 3. **Windows belong to their Machine; a world says when its directory is too
    long.** `world::copy` repeats `World::new`'s directories and three
    stand-ins; the length check is needed in both, so they become one setup

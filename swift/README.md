@@ -20,7 +20,7 @@ and this build can't share the Machine, so Dev opens a copy of it:
 
 ```console
 $ uv run python scripts/loopflow-dev.py run
-This branch changes what the server sends (LocalTask, WaveDetail, RoadmapSnapshot).
+This branch changes what the server sends (GraphCatalogEntry, GraphSubject, RoadmapTask, Write).
 Opening a copy of the Machine from 14:02; changes are refused there.
 ```
 

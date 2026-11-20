@@ -47,6 +47,15 @@ Settled while building slice 1, each reversible:
 14. `lf-world copy <dir>` refuses a `<dir>` that exists without `env.json`,
     since it deletes the directory.
 
+Settled while building slice 2, each reversible:
+
+15. `--copy` and `--world` cannot be given together.
+16. With `--copy` the launcher compares nothing and prints only the copy line.
+17. A document with equal `$defs` and another difference names the top-level
+    keys that differ; more than six names end "and N more".
+18. `copy_world` checks the copy's log for failed writes. It is the one place
+    a server that started its writers on a copy shows.
+
 Open, exposed by the docs: when the Machine's store has a migration the branch
 lacks, `run` names `lf sync main`. In a Task checkout `lf sync main` also undoes
 a sync onto another Task. Is that the command to name there, or should it say
@@ -73,7 +82,8 @@ Not established:
   swift/README.md says both "runs its bundled CLI on the main Machine's store"
   and "Main-Machine commands forward to installed lf"; only `lf install server`
   was seen to exec the installed lf (`delegate_selected`).
-- How tracker and PR rows read in a copy, where refreshes cannot run.
+- Whether a copy's tracker rows turn **Last known** as their stored sync time
+  ages. At launch they read `available`; the window was not seen.
 - Whether SwiftUI lets a restored window be dropped before it shows.
 
 Seen and left alone:

@@ -388,6 +388,7 @@ fn one_task_waits_at_ship_review_after_planning_and_building() {
     assert_eq!(
         keys,
         [
+            "auto",
             "comments",
             "conversation",
             "graph_processes",

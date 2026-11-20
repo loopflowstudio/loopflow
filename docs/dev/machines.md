@@ -164,7 +164,7 @@ inside one IMMEDIATE transaction:
 | Someone else's | Your own Wave Machine; your later claim wins |
 
 A write for a Task another Machine runs travels as the operation itself, not
-as a command line. Running, shipping, claiming or unassigning the Task, setting
+as a command line. Running, claiming or unassigning the Task, setting
 its auto, and opening or resuming its Session, reach the writer the same way:
 
 ```bash

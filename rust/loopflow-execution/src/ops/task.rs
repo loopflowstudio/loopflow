@@ -927,12 +927,13 @@ async fn try_start_task_run(
         .filter(|row| auto_on && requested.is_none_or(|name| name == row.graph.name));
     match standing.as_ref().map(|row| (row, &row.run)) {
         // A live run reads auto at each interactive step, so it stands in
-        // from here without being started again.
+        // from here without being started again. The mark is written before
+        // the wait for its Graph, so a slow registration cannot lose it.
         Some((row, Some((cursor, carrier))))
             if crate::store::task_work::carrier_may_run(carrier) =>
         {
+            auto::turn_on(store, task)?;
             if let Some(graph_process) = auto::running_graph(store, task, &carrier.id).await? {
-                auto::turn_on(store, task)?;
                 let at = row.graph.step_name_of(cursor);
                 return Ok(Some(TaskRunStart::Live {
                     run: format!(

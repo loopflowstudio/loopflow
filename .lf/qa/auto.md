@@ -104,7 +104,7 @@ Selection state `auto` is a Dashboard expression (`lf desktop dashboard query
 registers the world's repository in the real `~/.lf` and starts real
 conversations there.
 
-Recovery: a shipped run's carrier is the command as typed, with parent 1:
+Recovery: an auto run's carrier is the command as typed, with parent 1:
 `lf task auto on <id>`, or a bare `lf task auto on` from the
 checkout (find it with `ps -axo pid,ppid,pgid,command | grep <LF_HOME's bin>`);
 `kill -9 -<its pgid>` and its

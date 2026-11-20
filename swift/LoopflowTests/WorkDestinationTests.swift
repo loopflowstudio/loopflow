@@ -411,7 +411,8 @@ struct WorkDestinationTests {
     func dashboardTileOpensConversationInPlace() async throws {
         let planning = try fixture()
         let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(planning.utf8))
-        let task = try #require(snapshot.tasks.items.first)
+        // A finished Task opens its conversation only when asked.
+        let task = try #require(snapshot.tasks.items.last)
         let location = WorkspaceIdentity(machineId: "machine-local", worktree: "/src/task")
         let record = try tileRecord(task, at: location)
         let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
@@ -452,7 +453,8 @@ struct WorkDestinationTests {
     func repositoryPageTileRetriesInPlace() async throws {
         let planning = try fixture()
         let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(planning.utf8))
-        let task = try #require(snapshot.tasks.items.first)
+        // A finished Task opens its conversation only when asked.
+        let task = try #require(snapshot.tasks.items.last)
         let location = WorkspaceIdentity(machineId: "machine-local", worktree: "/src/task")
         let record = try tileRecord(task, at: location)
         let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)

@@ -1,8 +1,9 @@
 //! A Task's auto setting. `lf task auto on` is an `lf task run` whose request asks
 //! for auto, and `auto: on` in configuration turns it on as a Task takes up
 //! its Graph. Auto is a setting on the Task, one `task_auto` row, held before
-//! and after it takes up a Graph; the run reads it at each interactive step, standing in for the person while it is on, and at each
-//! step that merges, waiting there while it is off. `lf task auto off` turns
+//! and after it takes up a Graph. The run reads it at each interactive step,
+//! standing in for the person while it is on, and at each step that merges,
+//! waiting there while it is off. `lf task auto off` turns
 //! it off; `lf task auto on` turns it on again.
 
 use crate::durable::GraphProcessFilter;
@@ -155,10 +156,10 @@ pub fn off(issue: &str, reason: Option<&str>) -> OpsResult<Option<bool>> {
     let Some((task, was_on)) = turned else {
         return Ok(None);
     };
-    if was_on {
-        if let Ok(worktree) = task.worktree() {
-            super::clear_task_pr_merge_before_head_mutation(worktree, true, &|_| {})?;
-        }
+    // A run with no interactive step ahead arms a merge without a mark, so
+    // the request is taken back whether or not auto was on.
+    if let Ok(worktree) = task.worktree() {
+        super::clear_task_pr_merge_before_head_mutation(worktree, true, &|_| {})?;
     }
     Ok(Some(was_on))
 }

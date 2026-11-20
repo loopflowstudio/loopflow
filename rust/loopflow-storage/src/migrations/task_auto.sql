@@ -1,7 +1,7 @@
 -- Auto is a setting on the Task: 'on' (`lf task auto on`, or `auto: on` in
 -- configuration) or 'off' (`lf task auto off`), with when and who (`Starter`
 -- JSON, resolved when it was set). A row is the mark; no row means nobody has
--- set it, and a Task holds one before it takes up a Graph. `lf task auto on`
+-- set it. A Task can hold one before it takes up a Graph. `lf task auto on`
 -- turns it on, then runs the Task; no ship process carries a Task, so its log
 -- and the shared handoff stamp leave.
 CREATE TABLE task_auto (

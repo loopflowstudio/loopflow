@@ -1055,9 +1055,9 @@ mod tests {
         let task = store
             .create_task(&crate::work::task::NewTask {
                 id: TaskId::new(),
-                repository_id: crate::test_fixture::repository(&store, "/auto-ship"),
+                repository_id: crate::test_fixture::repository(&store, "/auto"),
                 project_id: None,
-                title: "Ship".into(),
+                title: "Auto".into(),
                 description: String::new(),
                 due_date: None,
             })

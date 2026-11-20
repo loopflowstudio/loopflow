@@ -4,6 +4,7 @@
 //! line, and the next turn continues it with `--conversation`. A terminal is
 //! `agy -i <prompt>`, whose first hook callback names the conversation.
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
@@ -32,8 +33,6 @@ struct State {
     turn: Option<Turn>,
     /// Writes what the current process's turn establishes.
     writer: Option<FactWriter>,
-    /// lf stopped the current turn's process.
-    interrupted: bool,
 }
 
 #[derive(Debug)]
@@ -95,6 +94,7 @@ impl Driver {
         mut child: Child,
         stdout: ChildStdout,
         stderr: Stderr,
+        stopped: Arc<AtomicBool>,
     ) -> JoinHandle<()> {
         let state = self.state.clone();
         let events = self.events.clone();
@@ -120,7 +120,7 @@ impl Driver {
                 return;
             };
             // Stopped by this driver, or with the lf process a signal is ending.
-            let interrupted = std::mem::take(&mut state.interrupted) || crate::agent::interrupted();
+            let interrupted = stopped.load(Ordering::SeqCst) || crate::agent::interrupted();
             let decoded = turn.finish(interrupted, &stderr.read());
             super::common::publish(state.writer.as_mut(), decoded, &events);
         })
@@ -285,17 +285,16 @@ impl StreamDriver for Driver {
         let owner = self.owner.clone();
         let (command, stderr) = self.command(thread.as_ref())?;
         let mut child = super::agent_process::spawn(command, None, &owner, self.kind)?;
-        self.run.pid = child.id();
+        let stopped = self.run.began(child.id());
         let stdin = child.stdin.take().expect("Antigravity stdin was piped");
         let stdout = child.stdout.take().expect("Antigravity stdout was piped");
 
         {
             let mut state = self.state.lock().expect("Antigravity state lock poisoned");
-            state.interrupted = false;
             state.writer = Some(super::common::writer(&owner));
             state.turn = Some(Turn::new(thread));
         }
-        self.run.reader = Some(self.spawn_reader(child, stdout, stderr));
+        self.run.reader = Some(self.spawn_reader(child, stdout, stderr, stopped));
 
         // `agy` runs one turn per line of input and exits at end of input.
         let line = format!(
@@ -314,21 +313,16 @@ impl StreamDriver for Driver {
         // A run has no in-band cancel: stopping its process ends the turn, and
         // the next input continues the conversation by its `--conversation`.
         {
-            let mut state = self.state.lock().expect("Antigravity state lock poisoned");
+            let state = self.state.lock().expect("Antigravity state lock poisoned");
             if state.turn.is_none() {
                 return Ok(());
             }
-            state.interrupted = true;
         }
-        self.run.settle(&self.owner).await
+        self.run.stop(&self.owner).await
     }
 
     async fn stop(&mut self) -> Result<()> {
-        self.state
-            .lock()
-            .expect("Antigravity state lock poisoned")
-            .interrupted = true;
-        self.run.settle(&self.owner).await
+        self.run.stop(&self.owner).await
     }
 
     fn agent_session(&self) -> Option<AgentSessionId> {
@@ -393,14 +387,12 @@ impl super::Launcher for loopflow_harness::Antigravity {
         if payload["lastUserInput"].as_str().is_none_or(str::is_empty) {
             return None;
         }
-        // A model call comes before a conversation's stop, so a stop moves nothing.
-        let first = declared != ContextMoment::Stop
-            && thread_file.is_some_and(|file| follow_thread(file, conversation));
-        // Each `agy` process counts its model calls from 0, and call 0 of a
-        // later turn in the same process is that turn's prompt.
+        // A model call comes before a conversation's stop, so a stop moves
+        // nothing. Each `agy` process counts its model calls from 0, and call
+        // 0 of a later turn in the same process is that turn's prompt.
         let (moment, event) = if declared == ContextMoment::Stop {
             (ContextMoment::Stop, "Stop")
-        } else if first {
+        } else if thread_file.is_some_and(|file| follow_thread(file, conversation)) {
             (ContextMoment::Start, "SessionStart")
         } else if payload["invocationNum"] == 0 {
             (declared, "UserPromptSubmit")

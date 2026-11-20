@@ -1197,30 +1197,31 @@ fn _failure_reason(result: &AgentProcessResult, failure: AgentFailure) -> String
 /// spent quota or a model the provider does not serve. The decoder's code
 /// decides when it names a cause; otherwise the provider's words do.
 pub(crate) fn routing_failure(code: &str, message: &str) -> Option<AgentFailure> {
-    AgentFailure::from_code(code).or_else(|| _worded_failure(message, _routing_words))
+    _failure(code, message, _routing_words)
 }
 
 /// [`routing_failure`], then the transient failures lf retries for a provider
 /// that does not retry them itself.
 pub(crate) fn provider_failure(code: &str, message: &str) -> Option<AgentFailure> {
-    AgentFailure::from_code(code).or_else(|| {
-        _worded_failure(message, |line| {
-            _routing_words(line).or_else(|| classify_retryable_agent_failure(line))
-        })
+    _failure(code, message, |line| {
+        _routing_words(line).or_else(|| classify_retryable_agent_failure(line))
     })
 }
 
-/// The gravest failure any line of a provider's message states. A phrase list
-/// reads one line: "model" and "is not available" on different lines name
-/// nothing.
-fn _worded_failure(
+/// What `code` names, else the gravest failure any line of the message
+/// states. A phrase list reads one line: "model" and "is not available" on
+/// different lines name nothing.
+fn _failure(
+    code: &str,
     message: &str,
     words: impl Fn(&str) -> Option<AgentFailure>,
 ) -> Option<AgentFailure> {
-    message
-        .lines()
-        .filter_map(words)
-        .reduce(AgentFailure::graver)
+    AgentFailure::from_code(code).or_else(|| {
+        message
+            .lines()
+            .filter_map(words)
+            .reduce(AgentFailure::graver)
+    })
 }
 
 fn _routing_words(line: &str) -> Option<AgentFailure> {

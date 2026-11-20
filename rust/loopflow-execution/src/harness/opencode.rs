@@ -3,6 +3,7 @@
 //! lf names the conversation (`--session ses_…`), and the context plugin
 //! supplies instructions, context, steers and turn reports in both.
 use crate::harness::LaunchKind;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use anyhow::{anyhow, bail, Result};
@@ -34,8 +35,6 @@ struct State {
     named: Option<String>,
     /// Writes what the current process's turn establishes.
     writer: Option<FactWriter>,
-    /// lf stopped the current turn's process.
-    interrupted: bool,
 }
 
 impl State {
@@ -126,6 +125,7 @@ impl Driver {
         mut child: Child,
         stdout: ChildStdout,
         stderr: Stderr,
+        stopped: Arc<AtomicBool>,
     ) -> JoinHandle<()> {
         let state = self.state.clone();
         let events = self.events.clone();
@@ -153,7 +153,7 @@ impl Driver {
                 return;
             };
             // Stopped by this driver, or with the lf process a signal is ending.
-            let interrupted = std::mem::take(&mut state.interrupted) || crate::agent::interrupted();
+            let interrupted = stopped.load(Ordering::SeqCst) || crate::agent::interrupted();
             let mut decoded = Vec::new();
             if !exited && !interrupted {
                 let detail = stderr.read();
@@ -219,17 +219,16 @@ impl StreamDriver for Driver {
         }
         let (command, stderr) = self.command(&config, &thread)?;
         let mut child = super::agent_process::spawn(command, None, &owner, self.kind)?;
-        self.run.pid = child.id();
+        let stopped = self.run.began(child.id());
         let stdin = child.stdin.take().expect("OpenCode stdin was piped");
         let stdout = child.stdout.take().expect("OpenCode stdout was piped");
 
         {
             let mut state = self.state.lock().expect("OpenCode state lock poisoned");
-            state.interrupted = false;
             state.writer = Some(super::common::writer(&owner));
             state.sent = Some(thread);
         }
-        self.run.reader = Some(self.spawn_reader(child, stdout, stderr));
+        self.run.reader = Some(self.spawn_reader(child, stdout, stderr, stopped));
 
         // `opencode run` reads its message from stdin and starts at end of input.
         if let Err(error) = super::common::send(owner, stdin, message.into_bytes()).await {
@@ -244,21 +243,16 @@ impl StreamDriver for Driver {
         // A run has no in-band cancel: stopping its process ends the turn, and
         // the next input continues the conversation by its `--session`.
         {
-            let mut state = self.state.lock().expect("OpenCode state lock poisoned");
+            let state = self.state.lock().expect("OpenCode state lock poisoned");
             if state.sent.is_none() && state.turn.is_none() {
                 return Ok(());
             }
-            state.interrupted = true;
         }
-        self.run.settle(&self.owner).await
+        self.run.stop(&self.owner).await
     }
 
     async fn stop(&mut self) -> Result<()> {
-        self.state
-            .lock()
-            .expect("OpenCode state lock poisoned")
-            .interrupted = true;
-        self.run.settle(&self.owner).await
+        self.run.stop(&self.owner).await
     }
 
     fn agent_session(&self) -> Option<AgentSessionId> {

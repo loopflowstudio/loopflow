@@ -4,10 +4,8 @@ or, with no `--output-format`, a terminal whose person sends `-i` and leaves.
 
 It prints what `agy` 1.5.13 prints and runs the hooks in its `--add-dir`
 folder's `.agents/hooks.json` as that version does. The model `no-such-model`
-is refused as an unknown model is; a file `agy-refusal` beside `bin/` refuses
-every run with its text, for a spent quota or a signed-out login. Each turn
-is appended to the conversation's `transcript_full.jsonl` under the home, where
-lf reads final answers and usage.
+is refused as an unknown model is. Each turn is appended to the conversation's
+`transcript_full.jsonl` under the home, where lf reads final answers and usage.
 
 A file `hold-turn` beside `bin/` keeps a headless turn running, with `holding`
 written once it is under way, until the file is removed.
@@ -164,9 +162,6 @@ def main():
     line = sys.stdin.readline()
     prompt = json.loads(line)["message"]["content"] if line.strip() else ""
     _receive(prompt)
-    refusal = HOME / "agy-refusal"
-    if refusal.exists():
-        _refuse(refusal.read_text().strip())
     model = _option("--model")
     if model == "no-such-model":
         _refuse(

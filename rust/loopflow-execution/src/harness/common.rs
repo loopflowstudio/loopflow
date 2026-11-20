@@ -89,12 +89,27 @@ pub(super) fn diagnostics(
 pub(super) struct Run {
     pub pid: Option<u32>,
     pub reader: Option<JoinHandle<()>>,
+    stopped: Arc<AtomicBool>,
 }
 
 impl Run {
     /// Admission makes the child the leader of its own group.
     pub fn group(&self) -> Option<u32> {
         self.pid.filter(|pid| *pid > 1)
+    }
+
+    /// Follow the process a turn just started. The flag it hands the turn's
+    /// reader says whether lf stopped that process.
+    pub fn began(&mut self, pid: Option<u32>) -> Arc<AtomicBool> {
+        self.pid = pid;
+        self.stopped = Arc::default();
+        self.stopped.clone()
+    }
+
+    /// End the process as lf's own doing: its turn is interrupted, not failed.
+    pub async fn stop(&mut self, owner: &Recording) -> anyhow::Result<()> {
+        self.stopped.store(true, Ordering::SeqCst);
+        self.settle(owner).await
     }
 
     /// Record the process's exit and stop whatever of it is left.

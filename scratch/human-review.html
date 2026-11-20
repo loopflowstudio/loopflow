@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<title>LOO-995 human review — Waves without chapters</title>
+<style>
+:root{color-scheme:light dark;--bg:#fbfbf9;--fg:#1d1d1b;--mut:#66645e;--line:#deddd6;--code:#f0efe9;--yes:#1f7a3a;--no:#b3261e}
+@media (prefers-color-scheme:dark){:root{--bg:#161614;--fg:#e9e8e2;--mut:#9c9a92;--line:#33322e;--code:#22221f;--yes:#6fcf8a;--no:#ff8a80}}
+body{background:var(--bg);color:var(--fg);font:16px/1.5 system-ui,sans-serif;max-width:60rem;margin:2rem auto;padding:0 1.25rem}
+h1{font-size:1.6rem;margin-bottom:.2rem}h2{margin-top:2.2rem;border-bottom:1px solid var(--line);padding-bottom:.2rem}
+pre,code{font:14.5px/1.45 ui-monospace,Menlo,monospace}pre{background:var(--code);padding:.9rem 1rem;border-radius:6px;overflow-x:auto}
+code{background:var(--code);padding:0 .25rem;border-radius:3px}pre code{background:none;padding:0}
+table{border-collapse:collapse;width:100%;font-size:.95rem}td,th{border-bottom:1px solid var(--line);padding:.4rem .5rem;vertical-align:top;text-align:left}
+.yes{color:var(--yes);font-weight:600}.no{color:var(--no);font-weight:600}.mut{color:var(--mut)}
+ol li{margin-bottom:.6rem}
+</style></head><body>
+<h1>LOO-995: Waves without chapters</h1>
+<p class="mut"><code>scratch/human-review.html</code> · branch <code>jack-heart/43bf9b-remove-chapters-krs</code> at <code>6c7374b3e4</code> · PR <a href="https://github.com/loopflowstudio/loopflow/pull/1997">#1997</a>, stacked on LOO-938 (#1983) · 179 files, +2,409 / −14,500. Written headless; nobody has reacted to it yet.</p>
+
+<h2>1. What changes for people</h2>
+<ul>
+<li><code>lf wave create</code> makes a Wave and nothing else: no Project, no tracker write.</li>
+<li>A Task created in or moved into a Wave joins the Wave's newest started Project, else its newest open one, else a new started Project named for the Wave. If the Wave has more than one open Project, the command says which one it joined.</li>
+<li>Gone: the "current" Project, activation, rollover, KRs, metric targets, live metrics, the Project run journal, and <code>lf wave update-project</code>, <code>edit-project</code> and <code>plan bind</code>. Projects themselves stay: they start, end, show status and sync with Linear or Asana.</li>
+</ul>
+
+<h2>2. Product concepts beside code concepts</h2>
+<p>From <code>scratch/concept-review.html</code> (second review of the built branch, at <code>a5e8d9c827</code>; no code changed after it).</p>
+<table>
+<tr><th>Person knows</th><th>Code has</th><th></th></tr>
+<tr><td>Wave</td><td><code>waves</code> row + <code>.lf/wave/&lt;name&gt;/</code>, no Project</td><td class="yes">yes</td></tr>
+<tr><td>Project that starts and ends</td><td><code>projects</code>, <code>ProjectStatus</code>, <code>tracker_wave_projects.position</code>, <code>WaveProjectsView</code></td><td class="yes">yes</td></tr>
+<tr><td>Nobody runs a Project</td><td>run journal deleted; interrupts take <code>&amp;TaskId</code></td><td class="yes">yes</td></tr>
+<tr><td>Where a new Task lands</td><td><code>new_task_project_in</code> / <code>join_project_in</code>, inside the write</td><td class="yes">yes</td></tr>
+<tr><td>Open Project</td><td><code>OPEN_PROJECT</code>, defined once</td><td class="yes">yes</td></tr>
+<tr><td>KRs and metrics are gone</td><td>no type, command, wire field or view; only upgrade conversion remains</td><td class="yes">yes</td></tr>
+<tr><td>Which Project a Task is in</td><td>on the wire; printed only at create/move</td><td class="no">no</td></tr>
+<tr><td>No-tracker Wave: never made a Project</td><td>a Project named for the Wave, made by the first Task</td><td class="no">no</td></tr>
+<tr><td>Nothing controls a Project</td><td><code>ChildRef::Project</code>, built by one test</td><td class="no">no</td></tr>
+<tr><td>(removed word)</td><td><code>~/.lf/chapter-locks</code> kept for released clients</td><td class="no">no</td></tr>
+</table>
+<p><b>Biggest mismatch:</b> a Wave with no tracker still gets a Project the person never asked for, because a Task reaches its Wave through its Project. Fixing it means Wave membership on the Task itself (LOO-980 territory), outside what the steer allowed. The smallest one, <code>ChildRef::Project</code>, is ~30 lines of dead arm that was already dead on the base.</p>
+
+<h2>3. Try it</h2>
+<pre><code>cd /Users/jack/src/loopflow.43bf9b-remove-chapters-krs
+cargo build -p loopflow
+export LF_HOME=$(mktemp -d) LF=./target/debug/lf
+$LF wave create billing                       # 0 Projects
+$LF task create --wave billing 'Invoice export'
+$LF wave status billing                       # Project billing · started, Task under the Wave</code></pre>
+<p class="mut">Use a private <code>LF_HOME</code> (above), not your real one. The installed 0.16.0 is newer than the stack base, so a store it wrote may refuse the branch build.</p>
+
+<h2>4. What was checked</h2>
+<pre><code>$ lf wave create billing                  # projects [(0,)]
+$ lf task create --wave billing 'Tax lines'
+Tax lines · 0cf5d8 in Project Billing v2    # two open Projects
+$ lf task interrupt 8f360d
+8f360d: stopped Graph qa at hang
+# returning store from base: "Billing v1 · current · started" + KR
+#   → "Billing v1 · started", new Task joins it, KR not shown, doctor ok</code></pre>
+<ul>
+<li>QA passes 1 and 2 (<code>scratch/qa.html</code>): first visit, first Task makes the Project, Linear queue (Project then Task, no KR fields), two open Projects, Task in a completed Project runs, upgrade from base, interrupts, moves, served <code>wave.plan</code>, 149 headless Desktop tests.</li>
+<li>Clippy (all targets, <code>-D warnings</code>), fmt, focused Rust tests, 47/47 DTO fixtures, <code>schema_page.py --check</code>, migration staging checks against the merge-base.</li>
+</ul>
+<p><b>Not checked:</b> the full CI matrix. CI on #1997 skipped the suites because the PR's base is LOO-938's branch, not <code>main</code>; it runs at gate or once LOO-938 lands. Linear create/update against the real workspace (no stand-in in the shipped binary; one unit test covers it). Desktop in a live window (no display).</p>
+<p><b>Known, inherited from LOO-938, not this branch:</b> <code>check_architecture.py</code> omissions for LOO-938 tables; <code>planning_lookup_tests::missing_git_task_never_falls_through_to_linear</code> and the Linear OAuth contention test fail identically on the base; interrupting an Auto-Ship Task relaunches it via recovery until <code>lf task hold</code>.</p>
+
+<h2>5. Choices made on your behalf</h2>
+<table>
+<tr><th>Chosen</th><th>Passed over</th></tr>
+<tr><td>New Task joins newest started, else newest open, else a new one</td><td>a <code>--project</code> flag; asking when several are open</td></tr>
+<tr><td><code>edit-project</code> removed with the other two commands</td><td>keeping a local rename for no-tracker Waves</td></tr>
+<tr><td>Saved KR text hidden, kept in the leaving column until the contract exports it</td><td>showing it read-only</td></tr>
+<tr><td>Project run journal deleted in this Task (slice 5)</td><td>a separate cleanup Task</td></tr>
+<tr><td><code>ChildRef::Project</code> left in place</td><td>a sixth slice</td></tr>
+<tr><td><code>~/.lf/chapter-locks</code> path kept</td><td>renaming it (would split locks with released clients)</td></tr>
+<tr><td>Authored <code>.lf/wave/**</code> chapter/metric files left alone</td><td>editing Wave content</td></tr>
+</table>
+
+<h2>6. Questions (still yours)</h2>
+<ol>
+<li>When a Wave has several open Projects, a new Task should: (a) join the newest started, as built; (b) ask; (c) take <code>--project</code>.</li>
+<li>Without a tracker, nothing renames, adds or completes a Project. (a) fine; (b) bring back a local <code>lf wave edit-project</code>-style rename; (c) do LOO-980 so no-tracker Waves have no Project at all.</li>
+<li><code>lf wave status</code> lists Projects, then Tasks flat. (a) leave it; (b) group Tasks under their Project when there are several.</li>
+<li>The Task title still says "a Project is a Wave's optional tracker link", which the steer ruled out. (a) retitle the Task to match the PR; (b) leave it.</li>
+<li><code>ChildRef::Project</code>: (a) leave it; (b) file a cleanup Task.</li>
+</ol>
+
+<h2>Stand-in decision</h2>
+<p>Nobody was present. Every promised behavior in the plan was walked and works; the open items are product choices or inherited from the base, and none is a missing or broken behavior. Decision: go on to delivery. Questions 1–5 stay open for Jack.</p>
+</body></html>

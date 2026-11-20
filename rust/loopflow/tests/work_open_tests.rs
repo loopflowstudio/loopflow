@@ -1528,18 +1528,11 @@ esac
         std::fs::Permissions::from_mode(0o755),
     )
     .unwrap();
-    // A macOS agent may inherit only the system PATH. Rex installs its CLI
-    // under the account's Application Support directory.
-    #[cfg(target_os = "macos")]
-    {
-        let installed = home.path().join("Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS");
-        std::fs::create_dir_all(&installed).unwrap();
-        std::fs::rename(bin.path().join("rex"), installed.join("rex")).unwrap();
-    }
     for destination in ["current", "moved"] {
         let placement = format!(
             "rex:{}",
             serde_json::json!({
+                "bin_dir":bin.path(),
                 "server":format!("unix:///{destination}"),
                 "session":format!("session:{destination}"),
                 "block":format!("block:{destination}"),
@@ -1571,9 +1564,7 @@ esac
             repo.path(),
             Some(bin.path()),
             &[
-                #[cfg(target_os = "macos")]
                 ("HOME", home.path().to_str().unwrap()),
-                #[cfg(target_os = "macos")]
                 ("PATH", "/usr/bin:/bin"),
                 ("LF_AGENT_CALLER", &caller),
                 ("REX_SERVER", "unix:///stale"),

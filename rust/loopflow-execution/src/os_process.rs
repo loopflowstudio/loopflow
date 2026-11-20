@@ -294,12 +294,10 @@ pub fn execution_context() -> Result<loopflow_storage::child::ChildExecutionCont
 /// Where the tools lf starts live (providers, `gh`, `git`, `node`). launchd,
 /// systemd and an SSH command give lf a `PATH` holding none of them; a
 /// terminal's usually holds all of them.
-const TOOL_DIRS: &[&str] = &[
+const TOOL_DIRS: [&str; 7] = [
     "~/.local/bin",
     // OpenCode's installer puts it here and nowhere else.
     "~/.opencode/bin",
-    #[cfg(target_os = "macos")]
-    "~/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS",
     "/opt/homebrew/bin",
     "/opt/homebrew/sbin",
     "/usr/local/bin",
@@ -308,14 +306,11 @@ const TOOL_DIRS: &[&str] = &[
 ];
 
 /// `TOOL_DIRS` with `~/` under `home`.
-pub fn tool_dirs(home: &Path) -> Vec<String> {
-    TOOL_DIRS
-        .iter()
-        .map(|&entry| match entry.strip_prefix("~/") {
-            Some(rest) => home.join(rest).to_string_lossy().into_owned(),
-            None => entry.to_owned(),
-        })
-        .collect()
+pub fn tool_dirs(home: &Path) -> [String; TOOL_DIRS.len()] {
+    TOOL_DIRS.map(|entry| match entry.strip_prefix("~/") {
+        Some(rest) => home.join(rest).to_string_lossy().into_owned(),
+        None => entry.to_owned(),
+    })
 }
 
 /// `path` with each tool directory it lacks appended. Appending only resolves

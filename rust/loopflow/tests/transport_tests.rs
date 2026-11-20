@@ -573,7 +573,6 @@ printf '%s' "$answer" > '{home}/answer'
         .output()
         .unwrap();
     assert!(agent.status.success(), "{agent:?}");
-    let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap());
     let opened = fixture
         .command(&[
             "open",
@@ -586,7 +585,8 @@ printf '%s' "$answer" > '{home}/answer'
             "--tab",
             "--json",
         ])
-        .env("PATH", &path)
+        .env("PATH", "/usr/bin:/bin")
+        .env("REX_BIN_DIR", &bin)
         .output()
         .unwrap();
     assert!(opened.status.success(), "{opened:?}");

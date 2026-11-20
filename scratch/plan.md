@@ -322,9 +322,3 @@ by name.
    test. Run the three test commands above. This slice proves nothing else
    in the code keyed on the old string.
 2. **Swift + docs + skills + website + qa note**, then the sweep grep.
-
-### Conflicts
-
-Task 4bd948 (yolo on by default) edits the same `yolo` help line in
-`config/catalog.rs` and the docs around it; expect a small rebase conflict
-there. Keep this change to the harness name in that line.

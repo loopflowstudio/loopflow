@@ -2,6 +2,30 @@
 <style>body{font:15px/1.5 -apple-system,sans-serif;max-width:1000px;margin:2em auto;color:#222}pre{background:#111;color:#ddd;padding:1em;overflow:auto;font-size:12px}td,th{border:1px solid #ccc;padding:4px 8px;text-align:left;vertical-align:top}table{border-collapse:collapse}.ok{background:#eefbea}</style>
 <h1>QA: yolo is on by default</h1>
 <p>Branch build <code>lf 0.16.0+5920cb8db</code>, private <code>LF_HOME</code>s under <code>/tmp/lf-qa-yolo</code>. Stand-in providers logged argv; real Claude and real Codex for the demo cells. No code changed; nothing broke.</p>
+<h2>0. Rerun on 7ccfe9a41 (after #1998 merged and the agy rename)</h2>
+<p>Branch build <code>lf 0.16.0+7ccfe9a41</code>, private homes under <code>/tmp/lf-qa-agy</code>. No code changed.</p>
+<table>
+<tr><th>harness</th><th>attended, unset</th><th>attended, yolo=false</th><th>unattended, unset</th><th>unattended, yolo=false</th></tr>
+<tr class="ok"><td>claude</td><td><code>--dangerously-skip-permissions</code></td><td>none</td><td>skips</td><td>skips</td></tr>
+<tr class="ok"><td>codex</td><td><code>--sandbox danger-full-access --ask-for-approval never</code></td><td>none</td><td>app-server (params not visible to a stand-in)</td><td>app-server</td></tr>
+<tr class="ok"><td>opencode</td><td>allow-all <code>permissions</code></td><td>plugins only</td><td>allow-all + <code>--auto</code></td><td>allow-all + <code>--auto</code></td></tr>
+<tr class="ok"><td>agy</td><td><code>--dangerously-skip-permissions</code></td><td>none</td><td>skips</td><td>skips</td></tr>
+</table>
+<p>Real <code>agy</code>, repository under the home directory:</p>
+<pre>lf -b -a agy --setting yolo=false : 'Run … curl -sI https://example.com | head -1 ; touch agy-proof.txt'
+HTTP/2 200                       (agy-proof.txt created)
+
+lf -a agy : 'Run … with BypassSandbox false, do not retry: curl -sI https://example.com | head -1'   (TUI)
+transcript: Command output: HTTP/2 200    -> PLANNER_RESPONSE "HTTP/2 200"
+
+lf -a agy --setting yolo=false : (same prompt)   (TUI)
+transcript: Command exited with code 0.  No output from command   (agy's own sandbox, no network)</pre>
+<p>Naming: <code>lf -a antigravity</code> and <code>lf set --global agents antigravity</code> both refuse with "unsupported agent harness 'antigravity': use 'claude', 'codex', 'opencode', 'pi', or 'agy'"; <code>agy</code> saves. <code>lf config settings --all</code>: <code>yolo true Built-in</code>. Launch folders are now <code>.lf/prompts/…-agy/</code>; <code>.lf/qa/antigravity.md</code> said <code>-antigravity/</code> and is fixed.</p>
+<p>Still wrong, both older than this branch:</p>
+<ul>
+<li><code>lf -a foo</code> prints <code>Error: invalid data: invalid graph: CLI: invalid graph: unsupported agent harness 'foo': …</code>; the installed release reads the same with 'antigravity' in the list. The settings error is wrapped by <code>LoadError::InvalidGraph</code> twice and then by storage's <code>invalid data</code>.</li>
+<li><code>--yolo</code> appears in no help output (<code>lf --help</code>, <code>lf help</code>, <code>lf help run</code>, <code>lf default --help</code>), in the release too, so the new help line in <code>lf/mod.rs:95</code> is not shown anywhere.</li>
+</ul>
 <h2>1. The four cells, per harness</h2>
 <p>Attended = <code>lf -a H : 'say hi'</code> on a PTY; unattended = <code>lf -b -a H : 'say hi'</code>.</p>
 <table><tr><th>harness</th><th>attended, yolo unset</th><th>attended, <code>--setting yolo=false</code></th><th>unattended, unset</th><th>unattended, yolo=false</th></tr><tr><td>claude</td><td class=ok>skips</td><td class=ok>none</td><td class=ok>skips</td><td class=ok>skips</td></tr><tr><td>codex</td><td class=ok>danger-full-access + never</td><td class=ok>none</td><td class=ok>danger-full-access + never (stand-in can't show app-server params; same code path as yolo=false)</td><td class=ok>danger-full-access + never (real Codex rollout; curl reached example.com)</td></tr><tr><td>opencode</td><td class=ok>allow-all</td><td class=ok>none</td><td class=ok>allow-all + --auto</td><td class=ok>allow-all + --auto</td></tr><tr><td>antigravity</td><td class=ok>skips</td><td class=ok>none</td><td class=ok>skips</td><td class=ok>skips</td></tr></table>

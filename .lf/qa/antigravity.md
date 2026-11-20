@@ -27,7 +27,7 @@ What to read afterwards:
 - Which thread an input can resume: `session_events.provider_thread` where
   `kind='captured'`. `lf resume` reads that, not `agent_sessions`.
 - What the hooks saw: the launch folder is
-  `<checkout>/.lf/prompts/<stamp>-<rand>-antigravity/` (`hook.sh`,
+  `<checkout>/.lf/prompts/<stamp>-<rand>-agy/` (`hook.sh`,
   `.agents/hooks.json`). `agy` runs the script fresh each time, so adding a
   `printf … >> trace.log` line to a live launch's `hook.sh` traces its calls
   and lf's replies.
@@ -96,7 +96,7 @@ before the answer exists.
 - Signed out: give `lf` an empty `HOME` (`HOME=/tmp/…/fakehome lf -b default
   '…' -a agy`; `LF_HOME` stays set). `agy` answers "authentication
   failed or timed out" and lf prints the sign-in advice. For the move, `lf set
-  --global agents 'antigravity,opencode:opencode/gemini-4-carbon'` and add
+  --global agents 'agy,opencode:opencode/gemini-4-carbon'` and add
   `XDG_DATA_HOME=<real home>/.local/share` so OpenCode keeps its login.
 - OpenCode's unserved model: `-a opencode:opencode/no-such-model-xyz`
   ("Model unavailable: …"); first in `agents`, a Task step goes on under the

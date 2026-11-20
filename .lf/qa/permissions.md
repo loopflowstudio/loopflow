@@ -32,3 +32,11 @@ so `yolo: false` still shows bypass on. To see Claude ask, put
 A personal `lf config set yolo false` in the main checkout reaches the
 Session's `.agent` worktree; a committed `.lf/config.yaml` reaches only the
 checkouts that have that commit.
+
+Real `agy` in a TUI shows the setting by what a command reaches, not by a
+footer: in a repository under the home directory, ask it to run `curl -sI
+https://example.com | head -1` "with BypassSandbox false, do not retry". With
+`yolo` unset the transcript (`brain/<conversation>/…/transcript_full.jsonl`)
+holds `HTTP/2 200`; under `--setting yolo=false` the command runs in `agy`'s
+sandbox, exits 0 and prints nothing. A first launch in a folder `agy` has not
+seen shows "Do you trust the contents of this project?" whatever `yolo` says.

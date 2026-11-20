@@ -34,3 +34,11 @@ shows them with numbered questions.
   what the launch sent: a headless capture under `yolo: false` records
   `false` though it skipped. Left as is; renaming changes the capture wire
   shape and would be its own Task.
+
+## From qa on 7ccfe9a41 (2026-11-20)
+
+- **`--yolo` is in no help output**, release included, so its help line is
+  not shown. Left as is: older than this branch.
+- **`lf -a foo` reads "invalid data: invalid graph: CLI: invalid graph:
+  unsupported agent harness 'foo'"**: three wrappers on one settings error.
+  Older than this branch; the refusal of `antigravity` is where people meet it.

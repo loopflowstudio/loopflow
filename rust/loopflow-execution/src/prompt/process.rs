@@ -168,9 +168,7 @@ fn prepare_prompt(
         .skill
         .as_ref()
         .filter(|skill| {
-            agent
-                .harness
-                .harness()
+            crate::harness::launcher(agent.harness)
                 .capabilities()
                 .native_skills
                 .is_some()

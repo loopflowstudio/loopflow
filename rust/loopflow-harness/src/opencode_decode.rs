@@ -5,12 +5,12 @@
 
 use serde_json::{json, Value};
 
-use super::fact::{Decoded, ProviderFact, ProviderTurn, Signal};
+use crate::fact::{Decoded, ProviderFact, ProviderTurn, Signal};
 use loopflow_model::chat::types::{ConversationEvent, ConversationItem, FileEdit, Lifecycle};
 
 /// One Loopflow turn in an OpenCode conversation.
 #[derive(Debug)]
-pub(super) struct Turn {
+pub struct Turn {
     turn: ProviderTurn,
     final_text: String,
     /// The turn's first failure, kept on its completion.
@@ -116,8 +116,8 @@ impl Turn {
                         .collect();
                     self.asked = true;
                     out.extend(self.fail_as(
-                        loopflow_storage::session::UNANSWERED_QUESTION,
-                        &super::common::unanswered_question("OpenCode", &asked.join(" ")),
+                        loopflow_model::chat::types::UNANSWERED_QUESTION,
+                        &crate::fact::unanswered_question("OpenCode", &asked.join(" ")),
                     ));
                 }
             }
@@ -148,7 +148,7 @@ impl Turn {
             return Vec::new();
         }
         let message = sanitize_error_message(reason);
-        self.error = Some(loopflow_storage::session::turn_error(code, &message));
+        self.error = Some(loopflow_model::chat::types::turn_error(code, &message));
         vec![ConversationEvent::Error {
             code: code.into(),
             message,
@@ -306,7 +306,7 @@ fn tool_item(part: &Value, id: &str, status: Lifecycle) -> ConversationItem {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::harness::fact::{fact_lines, trace};
+    use crate::fact::{fact_lines, trace};
 
     fn turn() -> Turn {
         Turn::new(ProviderTurn {

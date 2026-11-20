@@ -293,7 +293,8 @@ printf '%s\n' "$*" >> "$HOME/launches"
             .skip_while(|arg| *arg != "--session-id")
             .nth(1)
             .unwrap();
-        let project = crate::transcript::live::claude_project(&home.join(".claude"), repo.path());
+        let project =
+            loopflow_harness::transcript::live::claude_project(&home.join(".claude"), repo.path());
         std::fs::create_dir_all(&project).unwrap();
         std::fs::write(project.join(format!("{thread}.jsonl")), "{}\n").unwrap();
         std::fs::write(

@@ -329,13 +329,13 @@ fn a_task_conversation_says_how_it_ended_and_what_happens_next() {
     summary.last_started_at = Some(2_000);
     assert_eq!(
         outlook(&summary).unwrap().at,
-        crate::transcript::rfc3339(2_000),
+        loopflow_harness::transcript::rfc3339(2_000),
         "a start counted after the death is under way"
     );
     summary.start_failure = Some("no PTY left: 511 in use (kern.tty.ptmx_max)".into());
     assert_eq!(
         outlook(&summary).unwrap().at,
-        crate::transcript::rfc3339(2_000 + crate::ops::pr_landing::repair_backoff(2)),
+        loopflow_harness::transcript::rfc3339(2_000 + crate::ops::pr_landing::repair_backoff(2)),
         "a start that failed is not under way: the next waits its backoff"
     );
 
@@ -354,7 +354,9 @@ fn a_task_conversation_says_how_it_ended_and_what_happens_next() {
         (next.kind, next.at),
         (
             ComingBack,
-            crate::transcript::rfc3339(2_000 + crate::ops::pr_landing::repair_backoff(2))
+            loopflow_harness::transcript::rfc3339(
+                2_000 + crate::ops::pr_landing::repair_backoff(2)
+            )
         ),
         "a death after that start waits its backoff"
     );
@@ -511,7 +513,7 @@ fn a_task_conversation_says_how_it_ended_and_what_happens_next() {
     );
     assert_eq!(
         failed.at,
-        crate::transcript::rfc3339(5_000 + crate::ops::pr_landing::repair_backoff(1))
+        loopflow_harness::transcript::rfc3339(5_000 + crate::ops::pr_landing::repair_backoff(1))
     );
     summary.start_failure = None;
 

@@ -8,9 +8,9 @@ use std::fs;
 use anyhow::{anyhow, bail, Context, Result};
 use serde_json::Value;
 
-use crate::harness::HarnessKind;
 use crate::session::LfSession;
-use crate::transcript::{self, RequestSource, Turn, TurnItem};
+use loopflow_harness::transcript::{self, RequestSource, Turn, TurnItem};
+use loopflow_harness::HarnessKind;
 use loopflow_model::chat::types::{ConversationItem, Lifecycle};
 use loopflow_storage::sqlite::SqliteStore;
 
@@ -35,8 +35,8 @@ fn turns(store: &SqliteStore, session: &LfSession) -> Result<Vec<Turn>> {
         .input_provider_session(session.input_key()?)?
         .ok_or_else(|| anyhow!("Session {id} has no native conversation to continue"))?;
     let thread = &reference.agent_session;
-    let located = transcript::locate(store, harness, thread, &session.cwd)?;
-    let transcript::Located::Found { source, .. } = located else {
+    let located = crate::transcript::locate(store, harness, thread, &session.cwd)?;
+    let crate::transcript::Located::Found { source, .. } = located else {
         bail!("The {from} transcript of Session {id} ({thread}) was not found. Keep this conversation open and retry after {from} saves its first turn.");
     };
     transcript::read(harness, &source)
@@ -179,7 +179,7 @@ fn tail(text: &str, chars: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::transcript::Source;
+    use loopflow_harness::transcript::Source;
 
     fn write(lines: &[Value]) -> tempfile::NamedTempFile {
         let file = tempfile::NamedTempFile::new().unwrap();

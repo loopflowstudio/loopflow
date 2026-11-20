@@ -148,14 +148,21 @@ impl Table {
     ) -> anyhow::Result<Vec<String>> {
         use loopflow_execution::harness::{Launch, Mode};
         let kind = config.agent.harness;
-        if kind.harness().capabilities().turn_limit && mode == Mode::Headless {
+        if loopflow_execution::harness::launcher(kind)
+            .capabilities()
+            .turn_limit
+            && mode == Mode::Headless
+        {
             return loopflow_execution::harness::claude::stream_args(
                 config,
                 start.thread().as_ref(),
                 None,
             );
         }
-        if !kind.harness().capabilities().turn_limit {
+        if !loopflow_execution::harness::launcher(kind)
+            .capabilities()
+            .turn_limit
+        {
             return Ok(Vec::new());
         }
         let admitted =
@@ -164,8 +171,7 @@ impl Table {
             start,
             ..loopflow_execution::harness::launch_for_test(kind, config, &admitted)
         };
-        Ok(kind
-            .harness()
+        Ok(loopflow_execution::harness::launcher(kind)
             .open(&launch)?
             .process
             .get_args()

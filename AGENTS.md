@@ -278,7 +278,7 @@ recorded Tasks and every steer, turn and event they wrote. Every agent shares
 one SQLite write lock. Check new queries with `EXPLAIN QUERY PLAN` against a
 store that size.
 
-**Harness, transport and hook code (`rust/loopflow-execution/src/harness/**`, `transport*`):**
+**Harness, transport and hook code (`rust/loopflow-execution/src/harness/**`, `rust/loopflow-harness/**`, `transport*`):**
 lf is a session manager, context adder and hook interjector on top of a
 harness, never a middleman that can break the conversation. It is never in the
 byte path between a person and their provider except as a pass-through that

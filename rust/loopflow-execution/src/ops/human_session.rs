@@ -1121,8 +1121,7 @@ async fn fresh_launch(
     launch_lock: File,
     kind: crate::harness::LaunchKind,
 ) -> Result<ConversationLaunch> {
-    let config =
-        crate::agent::resolve_session_config(session, serde_yaml_ng::Value::Null, None, false)?;
+    let config = crate::agent::resolve_session_config(session, serde_yaml_ng::Value::Null, None)?;
     let work = match work_selector(session) {
         Some(selector) => crate::ops::resolve_work_binding(store, &session.cwd, &selector)
             .await

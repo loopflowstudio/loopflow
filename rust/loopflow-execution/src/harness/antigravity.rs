@@ -70,7 +70,7 @@ impl Driver {
     /// The run for one turn, and where its stderr goes.
     fn command(&self, thread: Option<&AgentSessionId>) -> Result<(Command, Stderr)> {
         let config = &self.config;
-        let mut command = Command::new(loopflow_harness::HarnessKind::Antigravity.program());
+        let mut command = Command::new(loopflow_harness::HarnessKind::Antigravity.as_str());
         command.args([
             "--input-format",
             "stream-json",
@@ -85,7 +85,11 @@ impl Driver {
             context.configure_hooks(command.as_std_mut())?;
         }
         super::configure_vendor_std_env(command.as_std_mut())?;
-        let stderr = Stderr::pipe(&mut command, config, "antigravity")?;
+        let stderr = Stderr::pipe(
+            &mut command,
+            config,
+            loopflow_harness::HarnessKind::Antigravity.as_str(),
+        )?;
         Ok((command, stderr))
     }
 
@@ -170,7 +174,7 @@ fn launch_folder(config: &AgentConfig, kind: LaunchKind) -> Result<Option<PathBu
     let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
     let folder = tempfile::Builder::new()
         .prefix(&format!("{stamp}-"))
-        .suffix("-antigravity")
+        .suffix("-agy")
         .tempdir_in(&prompts)?
         .keep();
     let agents = folder.join(".agents");
@@ -223,7 +227,7 @@ case "$1:$payload" in
 stop:*) ;;
 *'"invocationNum":'[1-9]*) quiet && {{ echo '{{}}'; exit 0; }} ;;
 esac
-reply=$(printf '%s' "$payload" | {command} "$1" --harness antigravity)
+reply=$(printf '%s' "$payload" | {command} "$1" --harness agy)
 if [ -n "$reply" ]; then printf '%s\n' "$reply"; else echo '{{}}'; fi
 exit 0
 "#,
@@ -346,8 +350,7 @@ impl super::Launcher for loopflow_harness::Antigravity {
             turn_limit: false,
             output_schema: false,
             respawns_after_crash: false,
-            install_hint:
-                "Install it with `brew install --cask antigravity-cli`; the command is `agy`.",
+            install_hint: "Install it with `brew install --cask antigravity-cli`.",
         }
     }
     fn classify_failure(&self, code: &str, message: &str) -> Option<AgentFailure> {
@@ -456,7 +459,7 @@ impl super::Launcher for loopflow_harness::Antigravity {
         let (mut args, input) = launch.terminal_input()?;
         let mut client = super::native_session::NativeClient::new(launch)?;
         args.extend(options(launch.config, client.thread.as_ref(), launch.kind)?);
-        if launch.config.skip_permissions {
+        if launch.config.skips_permissions(launch.kind.mode()) {
             args.push("--dangerously-skip-permissions".into());
         }
         let cwd = client.process.get_current_dir();
@@ -519,11 +522,7 @@ mod tests {
         let bin = home.join("bin");
         std::fs::create_dir(&bin).unwrap();
         let script = bin.join("agy");
-        std::fs::write(
-            &script,
-            include_str!("../../tests/support/antigravity_cli.py"),
-        )
-        .unwrap();
+        std::fs::write(&script, include_str!("../../tests/support/agy_cli.py")).unwrap();
         std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
         // The stand-in is Python, found on the PATH the test began with.
         let path = std::env::var_os("PATH").unwrap_or_default();
@@ -545,7 +544,7 @@ mod tests {
         let recording = super::super::admit_for_test(ledger.home());
         let _path = stand_in(ledger.home());
         let config = AgentConfig {
-            agent: crate::config::Agent::parse("antigravity:gemini-fixture").unwrap(),
+            agent: crate::config::Agent::parse("agy:gemini-fixture").unwrap(),
             task_prompt: "the task".into(),
             system_prompt: "Answer in French.".into(),
             cwd: Some(ledger.home().to_owned()),
@@ -620,7 +619,7 @@ mod tests {
         let recording = super::super::admit_for_test(ledger.home());
         let _path = stand_in(ledger.home());
         let config = AgentConfig {
-            agent: crate::config::Agent::parse("antigravity:no-such-model").unwrap(),
+            agent: crate::config::Agent::parse("agy:no-such-model").unwrap(),
             cwd: Some(ledger.home().to_owned()),
             ..AgentConfig::default()
         };
@@ -661,7 +660,7 @@ mod tests {
         let recording = super::super::admit_for_test(ledger.home());
         let cwd = tempfile::tempdir().unwrap();
         let config = AgentConfig {
-            agent: crate::config::Agent::parse("antigravity:gemini-fixture").unwrap(),
+            agent: crate::config::Agent::parse("agy:gemini-fixture").unwrap(),
             task_prompt: "-start here".into(),
             cwd: Some(cwd.path().to_owned()),
             ..AgentConfig::default()
@@ -675,7 +674,7 @@ mod tests {
         let resumed = AgentConfig {
             resume_token: Some("conversation-1".into()),
             task_prompt: String::new(),
-            skip_permissions: true,
+            yolo: true,
             ..config
         };
         assert_eq!(
@@ -724,7 +723,7 @@ mod tests {
         .unwrap();
         let args = |cwd: &std::path::Path| {
             let config = AgentConfig {
-                agent: crate::config::Agent::parse("antigravity").unwrap(),
+                agent: crate::config::Agent::parse("agy").unwrap(),
                 cwd: Some(cwd.to_owned()),
                 ..AgentConfig::default()
             };
@@ -936,10 +935,10 @@ mod tests {
         assert_eq!(
             calls().lines().collect::<Vec<_>>(),
             [
-                "__context-block --moment tool --harness antigravity",
-                "__context-block --moment tool --harness antigravity",
-                "__context-block --moment stop --harness antigravity",
-                "__context-block --moment tool --harness antigravity",
+                "__context-block --moment tool --harness agy",
+                "__context-block --moment tool --harness agy",
+                "__context-block --moment stop --harness agy",
+                "__context-block --moment tool --harness agy",
             ]
         );
     }
@@ -974,7 +973,7 @@ mod tests {
     async fn live_basic_turn_completes() {
         let (tx, mut rx) = mpsc::unbounded_channel();
         let config = AgentConfig {
-            agent: crate::config::Agent::parse("antigravity").unwrap(),
+            agent: crate::config::Agent::parse("agy").unwrap(),
             cwd: Some(std::env::temp_dir()),
             ..AgentConfig::default()
         };

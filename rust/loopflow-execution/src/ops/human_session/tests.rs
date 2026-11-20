@@ -1697,7 +1697,7 @@ fn a_session_switched_to_another_provider_resumes_on_it() {
         let resumed = store.session(&record.id).await.unwrap().unwrap();
         assert_eq!(resumed.provider.as_deref(), Some("codex"));
         let config =
-            crate::agent::resolve_session_config(&resumed, serde_yaml_ng::Value::Null, None, false)
+            crate::agent::resolve_session_config(&resumed, serde_yaml_ng::Value::Null, None)
                 .unwrap();
         assert_eq!(config.agent.to_string(), "codex");
         assert_eq!(config.resume_token, Some("codex-thread".into()));

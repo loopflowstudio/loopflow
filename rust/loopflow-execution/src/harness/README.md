@@ -76,7 +76,7 @@ An interactive client may `exec` into a held terminal.
 | Codex chat | `codex`, prompt in argv | provider (start hook) |
 | Codex work session | `codex --remote` after lf opens the app-server thread | provider |
 | OpenCode | `opencode --standalone`, prompt in `--prompt` | lf (`--session ses_…`) |
-| Antigravity | `agy`, prompt in `-i`; its command sandbox does not reach `~/.lf`, so the first `lf` command stops at "Run this command?" unless `yolo` | provider (hook callbacks; follows `/new`, `/fork`, `/resume`) |
+| Antigravity | `agy`, prompt in `-i`; its command sandbox does not reach `~/.lf`, so under `yolo: false` the first `lf` command stops at "Run this command?" | provider (hook callbacks; follows `/new`, `/fork`, `/resume`) |
 
 `cargo test -p loopflow-execution --lib harness::launch_matrix -- --nocapture`
 runs every harness as a chat, work session, batch and worker against stand-in provider scripts, and prints each cell's argv, hook ownership, wait mechanism and recorded thread.
@@ -115,7 +115,7 @@ row names the test that shows it; "no" is a gap with its owner.
 | records its usage in the Task's history | yes | yes | yes | yes | yes | same test; `transcript::facts::tests::a_pi_turn_loopflow_recorded_takes_the_session_files_usage`; `transcript::antigravity::tests::` |
 | receives the step's context | yes | yes | yes | yes | yes | same test; `harness::context::tests::`; `harness::antigravity::tests::` |
 | hears a steer sent while it runs, after its next tool | yes | yes | yes | yes | yes | same test; `harness::context::tests::`; `harness::antigravity::tests::` |
-| runs as `yolo` in its Task's checkout | yes | yes | yes | yes | yes | `harness::launch_matrix` |
+| never asks permission, whatever `yolo` says | yes | yes | yes | yes | yes | `harness::launch_matrix` |
 | is passed over when its CLI is not installed, or named once when it was the only choice | yes | yes | yes | yes | yes | `task_graph_launch_tests::a_step_that_cannot_launch_is_not_started_again` |
 | fails the turn, with the question as its reason, when it asks one and nobody is there; the run stops after that one attempt | no: not read (Task 48edb9) | no: not read (Task 48edb9) | yes | yes | no: not read (Task 48edb9) | `task_graph_launch_tests::a_question_with_nobody_there_ends_the_step` |
 | stops on `lf task interrupt` with its turn recorded interrupted; the next `lf task run` starts the step again | yes | yes | yes | yes | yes | `a_worker_stops_on_interrupt_and_the_next_run_starts_its_step_again_on_claude_and_codex`, `…_on_opencode_and_pi`, `…_on_antigravity` |

@@ -279,10 +279,7 @@ fn generate_commit_message(repo: &Path, agent: MessageAgent<'_>) -> OpsResult<Co
         timeout: Some(COMMIT_MESSAGE_TIMEOUT),
         ..Default::default()
     };
-    let launch = AgentConfig {
-        skip_permissions: true,
-        ..message_launch(repo, &skill, agent, prompt)?
-    };
+    let launch = message_launch(repo, &skill, agent, prompt)?;
     let failure = match run_agent(&launch, &process, crate::harness::LaunchKind::Batch) {
         Ok(result) if result.exit_code == 0 => {
             let combined = format!("{}\n{}", result.stdout, result.stderr);
@@ -326,7 +323,7 @@ pub(crate) fn message_launch(
         codex_service_tier: config.codex.service_tier,
         task_prompt: prompt,
         cwd: Some(repo.to_path_buf()),
-        skip_permissions: config.yolo,
+        yolo: config.yolo,
         fallback_agents,
         ..AgentConfig::new(agent)
     })

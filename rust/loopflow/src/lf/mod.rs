@@ -92,7 +92,7 @@ pub struct Cli {
     #[arg(skip)]
     pub resolved_invocation: Option<loopflow_execution::skills::invocation::SkillInvocation>,
 
-    /// Skip permission prompts
+    /// Skip permission prompts in this conversation, over a configured `yolo: false`
     #[arg(long)]
     pub yolo: bool,
 

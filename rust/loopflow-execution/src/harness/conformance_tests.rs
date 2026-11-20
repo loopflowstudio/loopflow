@@ -439,30 +439,30 @@ fn each_harness_classifies_its_own_refusals() {
         // `agy` 1.5.13, signed out and with an unknown `--model`.
         (
             Antigravity,
-            "antigravity_error",
+            "agy_error",
             "authentication failed or timed out",
             CredentialInvalidated,
         ),
         (
             Antigravity,
-            "antigravity_error",
+            "agy_error",
             "Error: authentication required. Run 'agy' to log in, then retry.",
             CredentialInvalidated,
         ),
         (
             Antigravity,
-            "antigravity_error",
+            "agy_error",
             "invalid model selection (--model \"no-such-model-xyz\" --effort \"\"): model no-such-model-xyz is not recognized as a known model or custom model in settings",
             ModelUnavailable,
         ),
         // From the binary's strings; no quota refusal has been seen live.
         (
             Antigravity,
-            "antigravity_error",
+            "agy_error",
             "You have exhausted your quota on this model.",
             UsageLimit,
         ),
-        (Antigravity, "antigravity_error", "RESOURCE_EXHAUSTED", UsageLimit),
+        (Antigravity, "agy_error", "RESOURCE_EXHAUSTED", UsageLimit),
         (Claude, "provider_rate_limited", "rejected: seven_day", UsageLimit),
         (Codex, "provider_model_unavailable", "", ModelUnavailable),
     ] {

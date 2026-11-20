@@ -1,0 +1,3 @@
+- Kept `Launcher::installed(kind)` rather than restoring `check_cli_available(&str)`; only its body changes. Reverse if the string helper is wanted back.
+- Desktop picker shows `agy` (the agent name, like `pi`); the pane label still reads "Antigravity".
+- Stand-in renamed `antigravity_cli.py` → `agy_cli.py`; Rust type/module names keep the product name.

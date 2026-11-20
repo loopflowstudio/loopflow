@@ -1,8 +1,12 @@
 # Orchestration
 
-Loopflow ships ready-to-use Skills and Graphs for software engineering, and
-every one of them is a plain text template you can extend, replace, or compose
-in `.lf/` — version-controlled and reviewed like code.
+You've launched a Skill and a Graph. This page makes them yours: which agent
+runs each step, which machine runs the Graph, how a Task moves from idea to
+landed PR, and how a Wave keeps going.
+
+Loopflow ships reasonable Graphs for software engineering, and they are
+templates. Copy one with `lf graph customize feature`, change it, or write down
+the way you work and share it.
 
 ## Skills
 
@@ -133,7 +137,7 @@ A `loop:` block repeats as long as its final step says `iterate`. The built-in
 - pr-publish
 ```
 
-Any Skill can be the deciding step of a loop — it returns `advance`, `iterate`
+Any Skill can be the deciding step of a loop: it returns `advance`, `iterate`
 (with direction), or `blocked` (with a question). There is no arbitrary pass
 limit; loops continue while useful work remains.
 
@@ -145,7 +149,7 @@ limit; loops continue while useful work remains.
   pane automatically; elsewhere, their paths are printed in the conversation).
 - **`qa`** maintains repo-local verification playbooks under `.lf/qa/`, one
   file per surface. The first line of each file states when to read it, so runs
-  open only the playbooks relevant to their diff — and update them when a
+  open only the playbooks relevant to their diff, and update them when a
   surface changes.
 
 ### Conditional routing (`xor:`)
@@ -172,7 +176,7 @@ lf graph optimize : "cut p50 export time on the 60k-row dataset"
 ```
 
 `optimize` measures a baseline, plans one change, implements it, and keeps or
-reverts based on the measurement until no clear improvement remains — then
+reverts based on the measurement until no clear improvement remains, then
 compresses and re-measures. Compose it with `deliver` to ship the win:
 
 ```yaml
@@ -181,7 +185,7 @@ compresses and re-measures. Compose it with `deliver` to ship the win:
 - graph: deliver
 ```
 
-## Where a person takes part (`interactive:`)
+## Where a person takes part
 
 Mark any step `interactive:` to pause for human input; every other step runs
 headless. Built-in `feature` puts you in the loop at three high-leverage
@@ -218,7 +222,7 @@ to `build`, or move on to `deliver`.
 |---|---|
 | `feature` | `explore` (interactive) → `plan` → `build` ↔ `human-review` (interactive) → `deliver` → `verify` (interactive) |
 | `code` | Same as `feature`, starting at `plan` (default when no Graph is configured) |
-| `auto` | `pursue` then `deliver` with no interactive stops — request to merged PR autonomously |
+| `auto` | `pursue` then `deliver` with no interactive stops: request to merged PR without you |
 | `research` | Investigate and report findings without opening a PR |
 | `optimize` | Iterative measure → change → keep/revert loop |
 
@@ -231,7 +235,7 @@ lf --wave product set wave.graph feature  # personal override without committing
 
 ### Failure, retries, and holding Auto-Ship
 
-- Failed steps retry up to 3 times from that step (earlier steps stay done).
+- A failed step is tried again, up to three attempts, starting at that step (earlier steps stay done).
   Pre-launch failures (such as a missing harness CLI) fail immediately so you
   can fix them and run `lf task run`.
 - If a headless OpenCode or Pi agent asks a question, the run stops and prints
@@ -276,5 +280,5 @@ Make mechanical changes directly; write a scratch design first when the
 change crosses storage, auth, or public APIs.
 ```
 
-Next: [Troubleshooting](troubleshooting.md) — what survives crashes and how to
+Next: [Troubleshooting](troubleshooting.md): what survives crashes and how to
 diagnose anything that stops.

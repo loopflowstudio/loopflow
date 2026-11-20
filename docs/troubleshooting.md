@@ -1,11 +1,11 @@
 # Troubleshooting
 
-When something stops, check three things in order: what survived, what went
-wrong, and what to run next.
+Something stopped. Three questions, in order: what survived, what went wrong,
+what to run next. Every command here is complete and runnable as written.
 
 ## 1. What survived
 
-Crashes, reboots, and closed terminals lose very little:
+A crash, a reboot or a closed terminal loses less than it looks like.
 
 | Survives | Where it lives | Resume with |
 |---|---|---|
@@ -43,13 +43,13 @@ lf server status   # readiness, socket, build, and connection error
 lf doctor          # installation and store health
 ```
 
-- **Opening… Input paused / Reconnecting…** — agents run in a separate
+- **Opening… Input paused / Reconnecting…**: agents run in a separate
   `lf holder run` process, so they keep working while the server restarts. Keep
   the pane open; click **Refresh session** or **Retry connection** if automatic
   retries stop (neither restarts the agent or replays input).
-- **Disabled background access** — re-enable Loopflow in macOS System Settings
+- **Disabled background access**: re-enable Loopflow in macOS System Settings
   (or the Linux user service).
-- **Build mismatch** — run `lf install` (do not start a second `lf server run`
+- **Build mismatch**: run `lf install` (do not start a second `lf server run`
   by hand).
 
 ## "Loopflow server is not running"
@@ -156,7 +156,7 @@ lf machine doctor --json                     # lists stray agent processes by PI
 
 Expect one `lf server run`, one `lf holder run` per build with open work
 sessions (each exits a minute after its last conversation ends), and one `lf`
-per active Graph or headless run. Stop leftovers individually by PID — never
+per active Graph or headless run. Stop leftovers individually by PID, never
 `pkill lf`, which kills live work in other checkouts.
 
 ## A Wave isn't moving

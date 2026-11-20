@@ -27,13 +27,13 @@ lf task run INF-123                                   # place worktree, start Gr
 lf task run INF-124 --stack-on INF-123                # dependent Task on INF-123's branch
 lf sync INF-123                                       # stack the current Task on INF-123
 lf task report INF-123 "took the smaller approach"    # post progress (not treated as a steer)
-lf task status INF-123 --json                         # inspect durable state
+lf task status INF-123 --json                         # read its recorded state
 lf task wait INF-123 --until terminal                 # block until done or abandoned
 ```
 
 **Delegation rule:** only delegate a strict subset that can finish
 independently as its own PR. Never delegate the entire problem or the single
-blocker in front of you — resolve that inline.
+blocker in front of you; resolve that inline.
 
 **Stacking rule:** always use `lf task run --stack-on <ID>` or `lf sync <ID>`
 (and `lf sync main` to detach). Never `git merge` another Task's branch or run
@@ -74,7 +74,7 @@ Running Sessions read steers after their next tool call; idle work sessions
 wake automatically. Use `lf task report` for progress notes so they are not
 delivered back as steers.
 
-A stopped or crashed Graph stays as history and never resumes — read
+A stopped or crashed Graph stays as history and never resumes. Read
 `lf task status INF-123 --json` and `lf graph show <RUN_ID> --json`, then
 continue remaining steps with `lf task run INF-123`.
 
@@ -83,7 +83,7 @@ continue remaining steps with `lf task run INF-123`.
 Pick the commitment level that matches the state of the work:
 
 ```bash
-lf pr publish    # ready PR, headless — the agent default
+lf pr publish    # ready PR, headless; the agent default
 lf pr submit     # synced, scratch cleared, ready for a person's merge click
 lf land          # request auto-merge (add --wait-and-fix to repair CI until merged)
 ```

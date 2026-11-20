@@ -1,12 +1,13 @@
 # PRs, checkouts, machines and accounts
 
-This page covers taking code from branch to production: pull requests, review
-while CI runs, automatic CI repair, stacked branches, releases, remote SSH and
-rented machines, and service authentication.
+Your Task came back as a pull request. This page takes it the rest of the way:
+landed, with failing CI repaired for you, then released. It also covers the
+environment that work runs in: checkouts, other Machines, native provider logins
+and service authentication.
 
-Land, publish, CI repair, and release are Loopflow's own verbs so Skills and
-Graphs stay code-host agnostic. GitHub is supported today (requires `gh` signed
-in).
+Land, publish, CI repair and release are Loopflow's own verbs, so Skills and
+Graphs that use them don't care which code host is behind them. GitHub is the
+code host today; you need [`gh`](https://cli.github.com) signed in.
 
 ## Pull requests
 
@@ -100,7 +101,7 @@ then run `lf sync --continue` (or `lf sync --abort`).
 
 ### Stack dependent Tasks
 
-Stack one Task on any other open Task that has a branch — before the parent
+Stack one Task on any other open Task that has a branch, before the parent
 lands or even opens a PR:
 
 ```bash
@@ -123,7 +124,7 @@ Synced onto origin/jack/loo-12-retry-budget.
   `main` (`lf sync main`) removes inherited parent commits and keeps only the
   child's own work, preserving the Task, branch, and PR identity.
 - Always record stacks with `lf task run --stack-on`, `lf task checkout --stack-on`,
-  or `lf sync <ID>` — not manual `git merge` or `gh pr edit --base`. If a PR's
+  or `lf sync <ID>`, not manual `git merge` or `gh pr edit --base`. If a PR's
   base disagrees with the recorded stack, `lf pr publish` leaves the base
   untouched and prints the command to reconcile either side.
 - If the parent has unpublished local commits, stacking bases on
@@ -175,7 +176,7 @@ release:
 
 `lf server status` inspects the local client server (used by Desktop and held
 conversations); `lf install` updates it. Machine commands choose **where work
-runs** — your laptop, an always-on SSH box, a pool of boxes, or an on-demand
+runs**: your laptop, an always-on SSH box, a pool of boxes, or an on-demand
 rental. See [Connect clients](server.md) for server lifecycle and phone access.
 
 ### SSH machines, pools, and on-demand rentals
@@ -239,8 +240,8 @@ launchctl bootout gui/$(id -u)/com.loopflow.refresh
 Re-enable with `launchctl enable gui/$(id -u)/com.loopflow.refresh && lf schedule`.
 On Linux, remove the `# loopflow install schedule` crontab line.
 
-For any other recurring job — such as settling landings with Desktop closed
-(`lf pr reconcile`) or running a daily `wave-operate` or release — use your OS
+For any other recurring job, such as settling landings with Desktop closed
+(`lf pr reconcile`) or running a daily `wave-operate` or release, use your OS
 scheduler. On Linux, crontab works directly; on macOS, use a LaunchAgent in
 `~/Library/LaunchAgents` whenever the job needs Keychain credentials or runs an
 agent.
@@ -276,5 +277,5 @@ Full flags: [`lf pr`](lf-reference.md#lf-pr), [`lf repo`](lf-reference.md#lf-rep
 [`lf wt`](lf-reference.md#lf-wt), [`lf machine`](lf-reference.md#lf-machine),
 [`lf account`](lf-reference.md#lf-account).
 
-Next: [Surfaces](surfaces.md) — Loopflow Desktop, Rex, cmux, Herdr, tmux, and
+Next: [Surfaces](surfaces.md): Loopflow Desktop, Rex, cmux, Herdr, tmux, and
 building your own UI.

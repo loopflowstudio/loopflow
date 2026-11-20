@@ -1,7 +1,7 @@
 # Get Started
 
-Your first hour with Loopflow: install `lf`, run a prompt, run a Skill, hand off
-a Task that comes back as a pull request, review it, and land it.
+The first hour: install, one prompt, one Skill, one Task that comes back as a
+pull request, and the conversation you pick back up to land it.
 
 ## Install
 
@@ -117,7 +117,7 @@ questions.
 lf resume --task <ID>            # open from any terminal, on whichever harness it ran
 ```
 
-Ask for changes right there. Close the terminal and come back next week — the
+Ask for changes right there. Close the terminal and come back next week: the
 conversation persists across window closes, `lf install` updates, crashes, and
 reboots.
 
@@ -166,5 +166,5 @@ with `lf server status`, or see [Connect clients](server.md).
 | `-a HARNESS[:MODEL]` | Run on `claude`, `codex`, `opencode`, or `pi` |
 | `-i` / `-b` | Interactive / headless (waits until finished) |
 
-Next: [Work](work.md) — parallel Tasks, steering, stacked PRs, team trackers,
+Next: [Work](work.md): parallel Tasks, steering, stacked PRs, team trackers,
 and Waves.

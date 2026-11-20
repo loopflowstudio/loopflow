@@ -6,7 +6,7 @@ lf install         # update Loopflow and keep its server registration in sync
 ```
 
 Loopflow Desktop and held Task conversations connect through a local client
-server on your Machine. `lf install` registers and updates it automatically —
+server on your Machine. `lf install` registers and updates it automatically:
 no manual daemon setup or Tailscale configuration needed for local use.
 `lf server status` is read-only: it reports readiness, the socket path, and the
 running build as JSON without installing or modifying anything.
@@ -46,7 +46,7 @@ disk or on GitHub.
 - **Closing Desktop.** Quitting Desktop leaves the server, holders, and running
   Graphs untouched. After a logout or reboot, the server automatically restarts
   active Task work sessions and runs
-  ([after a kill or reboot](sessions.md#after-a-kill-a-crash-or-a-reboot)).
+  ([after a kill or reboot](sessions.md#auto-recovery-after-a-kill-crash-or-reboot)).
 
 ## Recover a submitted creation
 
@@ -86,7 +86,7 @@ lf server mobile --off      # disable remote access; local Sessions keep running
 
 A phone signed into the same Tailscale user can attach to running Sessions on
 this Machine. Enabling local server access or adding SSH Machines does not
-enable phone access. For local-only use, no network port is opened — keep the
+enable phone access. For local-only use, no network port is opened; keep the
 local Unix socket private.
 
 Next: [Surfaces](surfaces.md) · [Connection troubleshooting](troubleshooting.md#desktop-cannot-connect).

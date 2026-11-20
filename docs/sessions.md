@@ -1,8 +1,10 @@
 # Sessions
 
-Every agent conversation `lf` starts — interactive or headless — is a Session.
-It keeps its title, its Task or Wave association, and its provider's native
-history across terminals, updates, crashes, and reboots.
+You've run `lf resume --task LOO-12` and landed back in a Task's conversation.
+Every conversation lf starts, interactive or headless, is a Session: it keeps
+its name, its Task and its provider's native history, whichever terminal or
+agent it ran in. This page covers finding them, steering them, what keeps
+running through an update, and what comes back after a crash.
 
 ## Resume or open another view
 
@@ -15,7 +17,7 @@ lf open --task LOO-12 --focus      # reveal an existing view without opening a n
 ```
 
 A conversation can be open in multiple terminals (and Desktop) at once, and
-every view can type — a draft started in one appears in the others. The view
+every view can type: a draft started in one appears in the others. The view
 you last attached, typed in, or focused sets the terminal's size and colors.
 See [Workspaces](workspaces.md) for host support (`desktop`, `rex`, `cmux`,
 `herdr`, `tmux`, `terminal`).
@@ -34,7 +36,7 @@ lf resume <session> --fork         # new Session in the same Work from this conv
 lf session new                     # fresh provider thread for this scope, seeded with what the last one knew
 ```
 
-**Conversation lifetimes.** Wave and repository conversations run until you
+Wave and repository conversations run until you
 quit their agent. Task conversations stay alive while the Task is open. Once a
 Task completes, its unviewed conversation closes about 15 minutes after live
 work settles (returning later continues from saved history without reopening
@@ -52,7 +54,7 @@ managed by the local server vs. bare:
 | **Chat** | `lf`, `lf <skill>`, `lf -i`, interactive `lf graph` | Runs directly in your terminal (`Ctrl+C`/`Ctrl+Z` go straight to the agent); ends with the terminal | None; reads transcript at exit |
 | **Batch** | `lf -b <skill>` | Headless child of its caller; prints output and exits | None; reads transcript at exit |
 
-A Session can change kind between launches — for example, binding a chat to a
+A Session can change kind between launches: for example, binding a chat to a
 Task reopens it as a work session next time.
 
 Running `lf` from inside an existing Claude Code or Codex conversation always
@@ -141,7 +143,7 @@ session_675c…   detached  LOO-472     CI under five          last turn ended 3
 `detached` means a held conversation is running with no terminal currently
 showing it; `lf resume` reattaches.
 
-**Works for raw conversations too.** Loopflow reads the tail of each provider's
+This works for raw conversations too. Loopflow reads the tail of each provider's
 own transcript read-only (`~/.claude/projects`, `~/.codex/sessions`,
 `~/.pi/agent/sessions`, `~/.local/share/opencode/opencode.db`), so even plain
 `claude`, `codex`, `pi`, or `opencode` sessions you started outside `lf` appear
@@ -157,7 +159,7 @@ Filter flags combine: `--wave <name>`, `--primary [task|wave|repository]`,
 `--orphan`, `--on claude[:opus]`, `--search <text>`, and `--page --json` /
 `--after <cursor>` for stable pagination.
 
-**What transcripts show:** whether a turn is running and for how long, when the
+Transcripts show whether a turn is running and for how long, when the
 last turn ended or was interrupted, and its model and tokens. Transcripts
 cannot tell whether an active turn is paused on a permission prompt or question
 (providers write that only after you answer), so those read as `turn running`
@@ -187,7 +189,7 @@ lf session steers <session>                          # pending vs. delivered
 - **Running Sessions** receive steers at their next provider boundary (after a
   tool call or turn).
 - **Idle work sessions** (Claude or Codex held by the server) wake
-  automatically when a steer, Task comment, or Graph step update arrives — no
+  automatically when a steer, Task comment, or Graph step update arrives, with no
   per-conversation watcher process required. Pi and OpenCode hear updates at
   their next boundary.
 - **Chats** are never woken while idle; in a Task checkout they receive updates
@@ -234,5 +236,5 @@ See [Native authentication](subscriptions.md).
 
 Every flag: [`lf session`](lf-reference.md#lf-session).
 
-Next: [Ops](ops.md) — pull requests, CI repair, stacked branches, releases,
+Next: [Ops](ops.md): pull requests, CI repair, stacked branches, releases,
 and remote machines.

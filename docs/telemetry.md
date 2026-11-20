@@ -1,12 +1,13 @@
 # Telemetry
 
-Every agent run leaves a local record on your Machine. This page shows how to
-read it back: token usage and cost, context breakdowns, Task summaries,
-conversation transcripts, live processes, and health checks. Loopflow Desktop's
-Telemetry view reads the exact same records.
+Your agents have been working: launched by hand, running Tasks, landing PRs.
+Every run left a record on this machine. This page reads it back: what each
+conversation cost, what each command did, what is running right now, and
+whether Loopflow's own records are sound. Desktop's Telemetry view shows the
+same records; it keeps no copy of its own.
 
-Missing data stays missing: usage a provider never reported shows as `-` (never
-`0`), and a process without an exit record stays `unknown` (never guessed).
+Missing evidence stays missing. Usage a provider never reported reads as `-`,
+never as zero, and a process with no exit record is unknown, not still running.
 
 ## Cost and context budgets
 
@@ -18,7 +19,7 @@ lf session usage --weekly                 # weekly trend by step, harness, Task,
 ```
 
 Each row reports input, output, and cache-read tokens, cost (where the provider
-reports it — Pi and OpenCode report per-turn cost; Claude and Codex report
+reports it: Pi and OpenCode report per-turn cost; Claude and Codex report
 tokens, plus Claude's running `total_cost_usd`), finished streams (`FINAL`),
 and any recording gaps (`GAPS`).
 
@@ -30,7 +31,7 @@ rows.
 
 `--context` breaks each step's input into instructions, memory, scratch, goal,
 steers, carried conversation, and tool output. Check or adjust your authoring
-targets with `lf context` ([Context budgets](config.md#context-budgets)).
+targets with `lf context` ([Context budgets](config.md#context-budgets-and-assembly)).
 
 ## Task summaries
 
@@ -58,7 +59,7 @@ lf session retention                                          # what providers s
 ```
 
 Conversation text stays in each provider's native store (Claude, Codex, Pi
-files, or OpenCode's SQLite DB) — Loopflow reads it on demand rather than
+files, or OpenCode's SQLite DB); Loopflow reads it on demand rather than
 duplicating it. Claude removes conversations idle longer than
 `cleanupPeriodDays` (30 days by default in Claude's `settings.json`); Codex,
 OpenCode, and Pi keep everything.
@@ -109,5 +110,5 @@ can inspect and stop them by PID.
 `lf usage`, `lf history`, and `lf doctor` resolve to the same commands. Full
 flags: [`lf session`](lf-reference.md#lf-session).
 
-Next: [Orchestration](orchestration.md) — customize Skills, compose Graphs,
+Next: [Orchestration](orchestration.md): customize Skills, compose Graphs,
 loops, and human review checkpoints.

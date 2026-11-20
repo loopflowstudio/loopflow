@@ -1,8 +1,8 @@
 # Configuration
 
 Configure Loopflow with `lf set` or by editing YAML files directly. Every
-setting works across four scopes — your global defaults, your private repo/Wave
-overrides, committed repo defaults, and committed Wave defaults — and can
+setting works across four scopes (your global defaults, your private repo/Wave
+overrides, committed repo defaults, and committed Wave defaults) and can
 target a single Skill or a single step inside a Graph.
 
 ## Common recipes
@@ -26,10 +26,12 @@ skill:
     agent: codex
 ```
 
-- `agent` pins a choice.
-- `default_agent` sets a fallback (lets another `agent` win, and lets headless
-  work fail over through `agents`).
-- `agents` is the ordered list of providers/models Loopflow tries on failover.
+- `agent` pins a choice (wins over any `default_agent`, and stays on that
+  harness instead of falling back through `agents`).
+- `default_agent` sets the preferred starting agent: it jumps to the front of
+  `agents` while keeping the rest of `agents` behind it as fallbacks, and yields
+  to any applicable `agent` pin.
+- `agents` is the ordered list of providers/models Loopflow falls back through.
 
 ### Keep going when a provider runs out
 
@@ -67,7 +69,7 @@ codex: provider usage limit; continuing on claude:fable
 - **Pi and OpenCode** do not report structured usage-limit errors, so a failure
   on either stops with the provider's error.
 
-Scope `agents` per repo, Wave, or Skill — a narrower `agents` replaces the
+Scope `agents` per repo, Wave, or Skill; a narrower `agents` replaces the
 wider one as a unit:
 
 ```bash
@@ -172,9 +174,10 @@ Within one source: **Wave > repository > global**, and **Graph step > Skill >
 general**.
 
 For agent selection, every applicable `agent` (pinned choice) beats every
-`default_agent` (fallback). Within each class, the order above applies.
-`default_agent` moves its entry to the front of `agents` when its declaration
-ranks at least as high as `agents`.
+`default_agent` (preferred starting agent). Within each class, the order above
+applies. `default_agent` jumps to the front of `agents`, keeping the rest of
+`agents` behind it as fallbacks, whenever its declaration ranks at least as
+high as `agents`.
 
 | Declarations | Effective order |
 |---|---|
@@ -294,7 +297,7 @@ What enters a launch:
 - Loopflow adds `LOOPFLOW.md` (the operating contract), `scratch/` Markdown,
   and the active Wave's `GOAL.md`/`MEMORY.md` (plus ancestor Waves) in a
   refreshed block that survives compaction.
-- `--docs` / `context.docs` enter as complete UTF-8 bodies (up to 100 files);
+- `--docs` / `context.docs` enter as complete UTF-8 bodies;
   `--diff` references Git inspection commands; `-c` appends the clipboard.
 - `scratch/` notes written during a branch are cleaned up automatically by
   `lf pr submit` and `lf land` (`lf scratch clear` removes added files while
@@ -323,7 +326,7 @@ lf set machine.tasks '<machine-id>'   # default Machine for new Tasks
 
 Work launched from your laptop onto a remote Machine carries your laptop's
 personal preferences; work started directly on the remote uses the remote's
-saved preferences. Credentials never forward automatically — opt in per
+saved preferences. Credentials never forward automatically; opt in per
 variable or home file with `forward.env` and `forward.files`
 ([Remote Machines and rentals](subscriptions.md#remote-machines-and-rentals)).
 

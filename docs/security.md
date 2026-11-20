@@ -24,7 +24,7 @@ what the agent can reach.
 ## Choose the execution boundary first
 
 Loopflow runs coding agents and subprocesses with the authority of the OS user
-running `lf`. A Git worktree isolates branches, not security — interactive
+running `lf`. A Git worktree isolates branches, not security: interactive
 Claude and Codex worktree sessions also get write access to the main repo's
 `.git` metadata so Git commands work.
 
@@ -48,7 +48,7 @@ work legible; they do not contain hostile code, skills, hooks, or MCP servers.
   unsandboxed tools. More-permissive vendor configs are never downgraded.
 - **Headless Task runs** (`lf task run`, `lf ship`, and `lf -b <skill>` in a
   Task checkout) run as `yolo` on all four harnesses and can write anywhere the
-  OS user can. See [Configuration](/docs/config#yolo).
+  OS user can. See [Configuration](config.md#permissions-yolo-and-worktree-sandboxes).
 
 ## Credentials over SSH
 
@@ -65,7 +65,7 @@ lf --machine mini -a codex implement
   For unattended rentals, opt in to forwarding via `forward.env` and
   `forward.files` ([Remote Machines and rentals](subscriptions.md#remote-machines-and-rentals)).
   Only variables and home files named in personal `forward` settings are sent;
-  Existing destination files are retained.
+  existing destination files are retained.
 - **Service transfer:** OpenSSH verifies the host key and Loopflow checks the
   saved Machine identity before transfer. Credential bytes travel through SSH
   stdin, never in command arguments or logs, and land with owner-only

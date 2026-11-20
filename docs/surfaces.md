@@ -1,6 +1,6 @@
 # Surfaces
 
-Your Tasks and conversations live in `lf`, not inside a single window. Open
+Your Tasks and conversations live in `lf`, not in a window. Open
 them wherever you already work: Loopflow Desktop, Rex, cmux, Herdr, tmux, or
 any plain terminal.
 
@@ -31,7 +31,7 @@ lf open --task LOO-12 --host desktop          # open in Loopflow Desktop
   `lf --task LOO-12 open --link --format markdown` (paste into PRs, Slack, or
   notes; installing `lf` registers the `loopflow:` URL handler).
 
-**Present docs in Desktop:**
+To present docs in Desktop:
 
 ```bash
 lf open --host desktop --file docs/usage.md --file README.md
@@ -40,18 +40,18 @@ lf open --host desktop --file docs/usage.md --file README.md
 Opens those files in Desktop's Files pane (rendered Markdown/HTML, keeping
 active drafts intact) without launching a conversation or editor.
 
-**Session titles.** `lf session rename SESSION 'Resume repair'` updates the
+`lf session rename SESSION 'Resume repair'` updates the
 terminal title via standard OSC sequences, plus native cmux tabs/workspaces and
 tmux windows. Rex and Herdr users can configure title display in those apps'
 own settings.
 
 ## Loopflow Desktop
 
-The native macOS app reads the same local store as `lf` — no duplicate database:
+The native macOS app reads the same local store as `lf`; it keeps no copy of its own:
 
 - **Sidebar (⌘1–9):** your working Tasks in shared order (dragging reorders
   them for CLI lists too).
-- **Task workspace:** three resizable panes — `session` (conversation), `shell`
+- **Task workspace:** three resizable panes: `session` (conversation), `shell`
   (at the Task's worktree), and `browser` (Files, Graph log, local dev URLs).
 - **Dashboards:** saved side-by-side grids of Tasks selected by query.
 - **Wave and repository views:** the scope's conversation beside a standup
@@ -82,9 +82,9 @@ If the Machine pauses briefly, edits still show immediately and flush once it
 reconnects. After ~10 seconds offline, mutation controls disable until the
 connection returns. See [Connect clients](server.md) for connection recovery.
 
-## Script Desktop (`lf desktop`)
+## Script Desktop
 
-`lf desktop` is Desktop's pane and window API — the equivalent of tmux's or
+`lf desktop` is Desktop's pane and window API, the equivalent of tmux's or
 cmux's CLI:
 
 ```bash
@@ -107,7 +107,7 @@ lists every part. `send` types without submitting; `send-key enter` submits.
 
 ## Build your own view
 
-Every surface — including Desktop, tmux plugins, and custom GUIs — reads the
+Every surface, including Desktop, tmux plugins and custom GUIs, reads the
 same `--subscribe --json` streams (NDJSON, one line on every change until stdin
 closes):
 
@@ -176,5 +176,5 @@ Status protocol) to mark a pane available when waiting for input.
 Run `lf desktop actions` for every verb and shortcut. Full flags:
 [`lf open`](lf-reference.md#lf-open), [`lf desktop`](lf-reference.md#lf-desktop).
 
-Next: [Telemetry](telemetry.md) — cost, context budgets, transcripts, and
+Next: [Telemetry](telemetry.md): cost, context budgets, transcripts, and
 health checks.

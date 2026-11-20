@@ -10,13 +10,13 @@ Every term the docs use, in one plain sentence.
 | **Graph** | A YAML workflow of Skills, commands, loops, and branches in `.lf/graphs/` (or a builtin). |
 | **Workflow** | The Graph a Task took up and the step it currently stands at. |
 | **Interactive step** | A Graph step written `interactive: <skill>`, where work pauses for human input (`-b` runs it headless). |
-| **Loopflow** | A Graph with at least one `loop:` block that can iterate until its deciding step advances. |
+| **Loopflow** | A graph that can go back and try again. Exactly: a graph with at least one backward edge. |
 | **Deciding step** | The final Skill of a `loop:` block, returning `advance`, `iterate`, or `blocked`. |
 | **Task** | One unit of work with its own worktree, branch, persistent conversation, workflow, and pull request. |
 | **Wave** | An ongoing area of work with a `GOAL.md`, curated `MEMORY.md`, KRs, and shared defaults for its Tasks. |
 | **Plan** | Shared Waves, Projects, and Tasks (`lf wave plan`, `lf plan list`). |
 | **KR** | Key result: an observable outcome stated for a Wave's Project. |
-| **Memory** | `MEMORY.md`, where a Wave keeps durable decisions and context across Tasks. |
+| **Memory** | `MEMORY.md`, where a Wave keeps decisions and context across Tasks. |
 | **Session** (**LfSession**) | A continuable agent conversation (interactive or headless) with identity, steers, and native provider history. |
 | **Work session** | A Task, Wave, or repository conversation running in a held terminal; survives window close and `lf install`, and wakes on steers. |
 | **Worker** | A headless step of a Task Graph (or Discord Wave reply) whose turns are reported to the server. |
@@ -31,7 +31,7 @@ Every term the docs use, in one plain sentence.
 | **Harness** / **provider** | The coding agent Loopflow drives: Claude Code, Codex, OpenCode, or Pi. |
 | **Scratch** | The `scratch/` directory for temporary working notes; `lf scratch clear` removes added files on submit/land. |
 
-Work session, worker, chat, and batch are launch kinds — a Session can change
+Work session, worker, chat, and batch are launch kinds; a Session can change
 kind between launches (for example, binding a chat to a Task reopens it as a
 work session). Contributors looking for internal runtime contracts can check
 [cutover status](dev/reference-cutover.md#cutover-status).

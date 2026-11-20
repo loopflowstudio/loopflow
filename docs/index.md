@@ -6,22 +6,22 @@ lf init
 npx skills add loopflowstudio/loopflow --skill loopflow -g   # teach your coding agent to use lf
 ```
 
-Loopflow (`lf`) is a local-first task and workflow system for coding agents.
-You describe the outcome you want; each Task gets its own Git worktree, branch,
-persistent conversation, workflow, and pull request. Organize Tasks into Waves
-to give each area of your codebase its own goal, memory, and defaults.
+`lf` is how your agent orchestra conducts itself. It's a task system for coding
+agents: you say what you want, and each Task gets its own conversation, its own
+workflow and its own pull request. Organize Tasks into Waves to give each area of
+work its own defaults. It works with Claude Code, Codex, OpenCode and Pi, on your
+existing subscriptions, inside whatever terminal, multiplexer and tracker you
+already use.
 
-It runs on **Claude Code, Codex, OpenCode, and Pi**, using your existing native
-logins, inside whatever terminal, multiplexer, or tracker you already use.
-Nothing is hosted: conversations and code stay on your machine, and only the
-plan syncs (through a Git ref by default, or two-way with Linear or Asana).
+**Your agent can drive it.** The last install line teaches your own coding agent
+to use `lf`, so you can just ask it: *"Split the auth cleanup into Tasks and run
+them with lf."* [What the skill teaches](https://github.com/loopflowstudio/loopflow/blob/main/skills/loopflow/README.md).
 
-**Your coding agent can drive it.** The third install line teaches Claude Code,
-Codex, OpenCode, or Pi to operate `lf`, so you can stay in your main
-conversation and say: *"Split the auth cleanup into Tasks and run them with
-lf."* [What the skill teaches](https://github.com/loopflowstudio/loopflow/blob/main/skills/loopflow/README.md).
+Run Tasks in parallel, each in its own worktree and branch. Nothing is hosted:
+conversations stay on your machine, and only the plan travels, through a Git
+ref by default or two-way with Linear or Asana.
 
-**1. Every Task is a durable conversation backed by a workflow.**
+**1. A Task is a conversation with a workflow behind it.**
 
 ```bash
 lf task create "fix the flaky retry test" --run                    # files it, starts its workflow, opens its conversation
@@ -31,18 +31,17 @@ lf resume --task <ID>                                              # pick up its
 
 Each Task carries:
 
-- **One persistent conversation.** Talk to the agent, review its work, and get
-  status updates in one thread. Open it in multiple terminals or Desktop at
-  once; it survives closing windows, `lf install` updates, crashes, and reboots.
+- **One conversation.** A persistent chat thread with your agent where everything
+  about the Task goes: you talk in it, reviews happen in it, results come back to
+  it. Open it in several terminals or Desktop at once; it outlives closed
+  windows, `lf install` updates, crashes and reboots.
 - **A workflow (Graph).** Steps like `design`, `implement`, `qa`, `human-review`,
   and `deliver`, each running in the Task's own worktree and branch. `lf task run`
   pauses at `interactive:` steps for your input and runs the rest headless;
   `lf -b task run` or `lf ship` runs every step autonomously.
-- **One branch, worktree, PR, and tracker issue,** kept in sync — including
-  stacked Tasks (`lf sync <parent-ID>`) and automatic CI repair
-  (`lf land --wait-and-fix`).
-- **Full history and cost.** Every turn, token count, context breakdown, and
-  Graph step recorded locally.
+- **Its own pull request, branch and tracker issue,** kept together, through
+  stacked Tasks (`lf sync <parent-ID>`) and CI repair (`lf land --wait-and-fix`).
+- **Its history.** Every conversation, Graph run and step, and what each cost.
 
 ```bash
 lf steer <ID> "keep the retry budget at 3"   # redirects running work at its next turn or step
@@ -51,10 +50,10 @@ lf session usage --task <ID>                 # tokens and cost across every run
 lf land --wait-and-fix                       # merge when CI passes; repair failures if not
 ```
 
-**2. Workflows are plain Markdown and YAML in your repo.** A Graph is a YAML
-list of Skills, and a Skill is a Markdown file — committed, reviewed like code,
-and shared with your team. Mix harnesses per step and configure automatic
-usage-limit failover (`agents: [claude, codex]`).
+**2. Write down how work runs.** A Task's workflow is a Graph: a YAML list of
+Skills, and a Skill is a Markdown file, both in your repository and reviewed like
+code. Each step can name its own agent, and `agents: [claude, codex]` moves
+headless work to the next one when a provider hits its usage limit.
 
 ```markdown
 <!-- .lf/skills/audit.md -->
@@ -83,10 +82,10 @@ Built-in Graphs (`feature`, `code`, `auto`, `research`, `optimize`) work out of
 the box and are templates you can customize (`lf graph customize feature`).
 Extend built-in Skills with `extends: builtin` instead of forking them.
 
-**3. Waves give ongoing areas of work their own memory and defaults.** A Wave
-holds a lasting objective (`GOAL.md`), curated memory (`MEMORY.md`), KRs, and
-defaults (Graph, agent, machine) inherited by every Task in it. Your repository
-is the default scope for Tasks outside a Wave.
+**3. Organize Tasks into Waves.** A Wave is an area of work with its own goal
+(`GOAL.md`), memory (`MEMORY.md`) and plan, and its own setup for every Task in
+it: the Graph, the agent, and the machine where it runs. Your repository is the
+Wave for Tasks without one.
 
 ```yaml
 # .lf/wave/infrastructure/config.yaml (committed)
@@ -99,8 +98,7 @@ lf --wave infrastructure set machine mini    # run your infra Tasks on a remote 
 lf wave status infrastructure                # every setting and where it came from
 ```
 
-**No Task required.** Use `lf` directly to launch any harness or Skill in your
-current terminal:
+**Without a Task,** `lf` still launches any agent or Skill directly:
 
 ```bash
 lf : "fix the flaky retry test"            # launch your default agent
@@ -111,31 +109,28 @@ lf resume                                  # return to this checkout's conversat
 
 ## What makes Loopflow different
 
-- **Local-first, zero hosted control plane.** Everything runs on your machine
-  (or your own SSH hosts and on-demand rentals). You keep your native Claude
-  Code, Codex, OpenCode, and Pi logins — no proxy billing, no cloud lock-in,
-  and transcripts never leave your machine.
-- **Multi-harness with automatic failover.** Route design to Claude,
-  implementation to Codex, and commit messages to Haiku. When a provider hits a
-  usage limit, headless steps automatically move to the next agent in your
-  `agents` list or wait and retry.
-- **Version-controlled workflows.** Skills (Markdown) and Graphs (YAML) live in
-  `.lf/` and review like code. Compose loops (`implement → sync → realign`),
-  conditional branches (`xor`), docs-first authoring (`write-docs`), repo-local
-  QA playbooks (`.lf/qa/`), and one-page `human-review` summaries.
-- **Built for small teams without forcing a tool switch.** Teammates review PRs
-  on GitHub and comment in Linear or Asana without installing `lf`; their
-  comments arrive as steers to running agents. Without a tracker, plans sync
-  over a Git ref on `origin`.
-- **Surface-agnostic.** Use Loopflow Desktop on macOS (plus phone access over
-  Tailscale), or stay in Rex, cmux, Herdr, tmux, or a plain terminal. Every
-  surface reads the same local store and `--subscribe --json` streams.
+- **It runs on your machine.** Agents run on your laptop, your own SSH hosts,
+  or a machine you rent for one Task. Loopflow hosts nothing and bills nothing:
+  each agent uses its own Claude Code, Codex, OpenCode or Pi login, and talks
+  to its provider directly.
+- **Any agent, per step.** Send design to Claude, implementation to Codex and
+  commit messages to Haiku. When a provider hits its usage limit, headless
+  steps move to the next agent in your `agents` list, or wait and try again.
+- **Workflows are files in your repository.** Skills are Markdown and Graphs
+  are YAML under `.lf/`, reviewed like code. A Graph can loop
+  (`implement → sync → realign`), branch (`xor`), write the docs before the
+  code (`write-docs`), keep QA playbooks (`.lf/qa/`), and stop for you with
+  one summary page (`human-review`).
+- **Your team keeps its tools.** Teammates review PRs on GitHub and comment in
+  Linear or Asana without installing `lf`; their comments reach running agents
+  as steers. With no tracker, the plan syncs through a Git ref on `origin`.
+- **Any window.** Use Loopflow Desktop on macOS (and your phone, over
+  Tailscale), or stay in Rex, cmux, Herdr, tmux or a plain terminal. They all
+  read the same local store and the same `--subscribe --json` streams.
 
 ## Navigate by use case
 
-Jump straight to what matters for your setup:
-
-| If you are evaluating… | Start here |
+| You want to know about… | Read |
 |---|---|
 | Running your first Task from prompt to merged PR | [Get started](getting-started.md) |
 | Parallel Tasks, steering, stacking PRs, and team sync (Git, Linear, Asana) | [Work](work.md) |

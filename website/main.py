@@ -361,7 +361,7 @@ def generate_llms_txt() -> str:
     return f"""# Loopflow
 > Local-first task and workflow system for coding agents (Claude Code, Codex, OpenCode, Pi). Each Task gets its own Git worktree, branch, persistent multi-view conversation, customizable YAML/Markdown workflow (Graph), and pull request.
 
-Loopflow runs locally on macOS or Linux (or over SSH / rented Daytona, Modal, RunPod, and AWS machines) using your native provider logins — no hosted control plane or wrapper billing.
+Loopflow runs locally on macOS or Linux (or over SSH / rented Daytona, Modal, RunPod, and AWS machines) using your native provider logins. Nothing is hosted, and Loopflow bills nothing.
 
 Key capabilities:
 - **Multi-harness + failover:** Mix Claude Code, Codex, OpenCode, and Pi per repo, Wave, Skill, or Graph step; configure `agents: [claude, codex]` for automatic usage-limit failover and backoff.

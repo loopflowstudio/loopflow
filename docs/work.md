@@ -1,9 +1,9 @@
 # Work
 
-You've run your first Task. This page covers running several Tasks in parallel,
-stacking dependent changes, steering work in flight, sharing plans with your
-team (via Git, Linear, or Asana), and organizing ongoing areas of work into
-Waves.
+You've handed off a Task: `lf task create`, then `lf -b task run`. This page
+picks up from there: handing off several at once and stacking them, steering
+one while it runs, seeing where everything stands, sharing the plan with
+teammates, and grouping longer objectives into Waves.
 
 ## Run Tasks in parallel
 
@@ -20,31 +20,31 @@ and at most one open pull request. Every agent working on a Task starts from
 the same shared context: the Task's title, notes, thread, checkout, `scratch/`,
 and (when in a Wave) the Wave's goal, memory, and KRs.
 
-**Instant checkouts.** A new Task branches from `origin/<default>` as of the
+A new Task branches from `origin/<default>` as of the
 last background fetch (its first `lf sync` catches up). Loopflow keeps one
 warm worktree at `<repo>.ready` beside your repo so creation is instant, then
 replenishes it in the background. `lf wt prune` leaves it alone, and deleting
 it is safe.
 
-**Stacking Tasks.** Pass `--stack-on LOO-12` when starting a dependent Task, or
+To stack a dependent Task, pass `--stack-on LOO-12` when starting it, or
 run `lf sync LOO-12` inside an existing Task's worktree to stack it on `LOO-12`.
 `lf sync` carries the child through the parent's updates and squash merge;
 `lf sync main` detaches it back onto the default branch.
 
-**Task conversations.** `lf task run`, `lf ship`, and `lf task checkout`
+`lf task run`, `lf ship`, and `lf task checkout`
 prepare the Task's primary conversation and the local server starts it in the
 background within seconds (with no background conversation cap). An in-place
 `lf -i task run` uses your current terminal instead. Pass `--open` to attach
 when launch returns: a direct CLI call attaches in the current terminal, while
 an agent tool call opens a sibling tab ([Workspaces](workspaces.md#choose-where-it-appears)).
-If opening fails, the Graph keeps running — fix the host issue and run
+If opening fails, the Graph keeps running: fix the host issue and run
 `lf open --task LOO-12`.
 
 Task conversations stay alive while the Graph runs and come back automatically
-after a kill, crash, or reboot ([Sessions](sessions.md#after-a-kill-a-crash-or-a-reboot)).
+after a kill, crash, or reboot ([Sessions](sessions.md#auto-recovery-after-a-kill-crash-or-reboot)).
 A conversation you explicitly quit stays quit until you `lf resume --task LOO-12`.
 
-**Investigating a failure.** Run `lf incident` inside any Task checkout (even
+To investigate a failure, run `lf incident` inside any Task checkout (even
 after the Task is done) to run an independent investigation with that Task's
 context without changing its Graph position or completion state.
 
@@ -153,7 +153,7 @@ lf task unassign LOO-12            # clear ownership; history stays intact
 ### Git ref (default, zero accounts)
 
 By default, Tasks, threads, and status sync through a Git ref on `origin`
-(`refs/loopflow/planning/shared/main`) — never a branch. Anyone who clones the
+(`refs/loopflow/planning/shared/main`), never a branch. Anyone who clones the
 repo reads and writes the same plan with no external account. Every command
 saves locally first and syncs asynchronously, so nothing blocks on the network.
 
@@ -173,7 +173,7 @@ tracker:
 
 ### Linear or Asana (two-way sync)
 
-Coworkers do not need to install `lf` — they keep working in Linear or Asana,
+Coworkers do not need to install `lf`: they keep working in Linear or Asana,
 and changes stay synchronized both ways:
 
 ```bash
@@ -260,8 +260,8 @@ Make mechanical changes directly; write a scratch design first when the change
 crosses storage, auth, or public APIs.
 ```
 
-`MEMORY.md` beside it holds durable context: decisions, dead ends, and facts
-downstream Tasks need. Agents update it as work ships, and `realign` keeps
+`MEMORY.md` beside it holds what later Tasks need: decisions, dead ends and facts.
+Agents update it as work ships, and `realign` keeps
 plan, code, and memory in sync. Both files are ordinary Markdown in Git,
 reviewed in PRs. Check each file's context footprint with
 `lf context --wave billing`.
@@ -311,9 +311,9 @@ leaves teammates' Tasks untouched. Run it on a schedule with your OS scheduler:
 On macOS, scheduled commands that need Keychain credentials belong in a
 LaunchAgent under `~/Library/LaunchAgents` rather than cron.
 
-### KRs, nested Waves, and Discord
+### Plan it: KRs and targets
 
-**KRs and metric targets.** A Wave's current Project holds its Tasks, KRs, and
+A Wave's current Project holds its Tasks, KRs, and
 targets:
 
 ```bash
@@ -328,12 +328,14 @@ lf wave update-project --wave billing --file project.json
 Updating a Project replaces its KRs and targets in place; started Tasks keep
 their worktrees and PRs.
 
-**Nested Waves.** Create `.lf/wave/infrastructure/release/GOAL.md` and address
+### Nested Waves
+
+Create `.lf/wave/infrastructure/release/GOAL.md` and address
 it as `infrastructure/release`. Agents read the parent's top-level Markdown,
 then the child's (siblings stay out). A root `MEMORY.md` applies even with no
 Wave selected.
 
-**Rename or remove a Wave.**
+### Rename or remove a Wave
 
 ```bash
 lf wave rename billing payments          # moves files on main; keeps Tasks, ID, and planning
@@ -345,7 +347,9 @@ lf wave remove payments --delete-backlog # delete unstarted Tasks instead; start
 Removal retires the Wave and its children, folds a child's `MEMORY.md` into its
 parent, and keeps completed history readable via `lf wave show payments`.
 
-**Discord bridge.** Talk to a Wave from a Discord channel:
+### Talk to it from Discord
+
+Talk to a Wave from a Discord channel:
 
 ```yaml
 # .lf/wave/billing/config.yaml
@@ -395,5 +399,5 @@ is held until moved back, because the Initiative determines which Wave owns it.
 
 Every flag: [`lf task`](lf-reference.md#lf-task), [`lf wave`](lf-reference.md#lf-wave).
 
-Next: [Sessions](sessions.md) — persistent conversations, multi-view attach,
+Next: [Sessions](sessions.md): persistent conversations, multi-view attach,
 and crash recovery.

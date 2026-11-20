@@ -51,7 +51,7 @@ board, while Rex, Herdr, and cmux open native Task tabs (one per Task
 conversation, in a new Rex session, Herdr workspace, or cmux group). Pass
 `--no-focus` to keep your current tab selected.
 
-External hosts own their own layouts — add splits, shells, and editors with
+External hosts own their own layouts: add splits, shells, and editors with
 your terminal's normal controls. Desktop remembers your per-Task pane layout on
 each Mac independently.
 

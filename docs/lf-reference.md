@@ -9,7 +9,7 @@ lf session list --json
 The command tree below is generated from the released `lf` binary when the
 website builds; run `lf help --all` for the exact same tree locally. Canonical
 command paths are shown, and unique shortcuts also resolve (for example
-`lf land` → `lf task pr land`). See [Get started](getting-started.md) for
+`lf land` → `lf pr land`). See [Get started](getting-started.md) for
 walkthrough examples.
 
 ## Selection, output, and exit codes
@@ -25,7 +25,8 @@ walkthrough examples.
 - `--json` emits one JSON document; `--subscribe --json` streams NDJSON lines
   until stdin closes. Diagnostics print to stderr.
 - Exit codes: `0` success, `1` operational failure, `2` syntax/lookup error,
-  `8` checks still pending (`lf checks`), `130` interrupted.
+  `8` checks still pending (`lf checks`), `130` interrupted. A successful
+  auto-merge request is not a merge.
 
 ## Graph runs
 
@@ -37,5 +38,5 @@ lf task interrupt EXP-12
 
 Each launch starts a new Graph run recording its own PID, steps, exit codes,
 and errors (`--state current|completed|stopped`). A stopped run is history and
-never resumes — inspect it, fix the cause, and run `lf task run` to continue
+never resumes: inspect it, fix the cause, and run `lf task run` to continue
 from the step it stopped on.

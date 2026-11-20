@@ -77,7 +77,7 @@ lf set --global forward.files '[~/.codex/auth.json]'
 | `forward.env` | Reads each named variable from this Machine's environment, else Doppler |
 | `forward.files` | Copies each home-relative file (`0600` in a `0700` dir) when the destination has none |
 
-- Values and files travel over SSH stdin — never in command arguments, logs, or
+- Values and files travel over SSH stdin, never in command arguments, logs, or
   the store.
 - A destination that already has a named file keeps its own (and logs if it
   differs). Missing local variables or files stop the launch before renting.
@@ -87,7 +87,7 @@ lf set --global forward.files '[~/.codex/auth.json]'
   subscription runs onto API billing.
 - **Codex:** forward `~/.codex/auth.json` on Plus/Pro (treat it like a
   password; note that concurrent refreshes across copies can sign each other
-  out — prefer a dedicated login, `codex login --device-auth`, or
+  out; prefer a dedicated login, `codex login --device-auth`, or
   `CODEX_ACCESS_TOKEN` on Business/Enterprise).
 
 ## Service authentication

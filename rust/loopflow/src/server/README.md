@@ -1298,7 +1298,7 @@ provider. A lost
 connection alone does not establish process death.
 
 Desktop reconnects to the same held terminal with bounded backoff. See
-[connection loss](../../../../docs/server.md#keep-editing-through-a-connection-loss)
+[connection loss](../../../../docs/server.md#keep-working-through-a-connection-loss)
 for connection status and recovery controls outside terminal bytes.
 
 The Loopflow Session, provider conversation, serving AgentProcess and the

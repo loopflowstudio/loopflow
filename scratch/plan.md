@@ -31,7 +31,7 @@ What the code has, one answer each:
 
 | the person's idea | the code's one owner |
 |---|---|
-| the agent's name and the command it runs | `HarnessKind` (`as_str`, `program`, `installed`) |
+| the agent's name and the command it runs | `HarnessKind::as_str`, `Harness::program`, `Launcher::installed` |
 | a provider refused, and why | the harness, asked once per error event: `classify_failure(code, message)`; the answer travels as `AgentProcessResult.failure` |
 | what happens next (move, wait, retry, stop with advice) | `_run_with_retries`, which reads `result.failure` and nothing else |
 | the conversation a launch owns (resume, and "not a subagent's") | the thread file beside the launch's delivery file |
@@ -50,7 +50,7 @@ replaces them:
    again in lf.** lf reads the payload; the script only decides whether
    starting lf is worth it. See "Hooks".
 3. **`check_cli_available(cli)` took a harness name or any program.** All
-   three callers mean a harness. `HarnessKind::installed()` replaces it.
+   three callers mean a harness. `Launcher::installed()` replaces it.
 
 ## Done when
 
@@ -351,10 +351,36 @@ QA on real `agy` 1.5.13 (2026-11-20), a private Machine with its server;
 
 ## Left to build
 
-Nothing in the plan's slices. What is left is the demo on real `agy`, for qa
-or demo: `lf task run <Task> -a antigravity` with a steer mid-step and
-`lf history usage --task`; a Task's work session in the TUI; a step whose
-first agent is `opencode` with no credits moving to the next agent.
+From the review of the built change (`scratch/concept-review.html`,
+2026-11-20). One pass, no new behavior:
+
+1. **Say what a Task's conversation on Antigravity meets.** In the terminal
+   `agy` runs commands in its own sandbox, which does not reach `~/.lf`; the
+   first `lf` command fails there and the model asks "Run this command?" to
+   run it outside. A headless step is not sandboxed. Today only
+   `scratch/questions.md` and `.lf/qa/antigravity.md` say so.
+   - `docs/config.md`, "Antigravity": one paragraph. The prompt, the answer
+     that allows `lf` for the conversation, and that `yolo` removes it.
+   - `docs/troubleshooting.md`: one row for "Run this command?" /
+     "Operation not permitted" from `lf` inside `agy`.
+   - `rust/loopflow-execution/src/harness/README.md`: a clause on the
+     Antigravity launch row.
+   - Result: `cargo test -p loopflow --test integration --
+     documented_commands::` still passes.
+2. **One true statement of who writes the thread file.** The comment above
+   the write in `emit_block` (`rust/loopflow/src/lf/commands/context.rs`,
+   "lf asks only a bare Codex launch for its thread") is false since
+   Antigravity: say that a launch whose provider names the conversation keeps
+   it beside its delivery, that Codex's launch creates the file to ask and
+   Antigravity's first callback claims it. `Launcher::hook_callback`'s doc
+   (`harness/mod.rs`) says an implementation may claim the file. Comments
+   only.
+3. **`harness/README.md`'s method table** gains `hook_callback` and
+   `hook_reply` beside `classify_failure`.
+
+Then the demo on real `agy`, for qa or demo: a Task's work session in the
+TUI; a step whose first agent is `opencode` with no credits moving to the
+next agent.
 
 ## Design
 
@@ -633,7 +659,7 @@ Details the docs settled, for the build to match or correct:
 
 | state | what happens |
 |---|---|
-| `agy` not installed | passed over for the next agent; named once, with the install hint, when it was the only choice (`HarnessKind::installed()`) |
+| `agy` not installed | passed over for the next agent; named once, with the install hint, when it was the only choice (`Launcher::installed()`) |
 | not signed in | `result.status` `ERROR`, "authentication failed": `CredentialInvalidated`, next agent, or the sign-in advice when none is left. Exit is 0 when stdin is `/dev/null`, so the driver fails the turn on `status`, not on the exit code |
 | model not served | `ModelUnavailable`, next agent |
 | quota spent | `UsageLimit`, next agent (phrases from the binary, not seen live) |
@@ -703,6 +729,18 @@ is unchanged line for line.
 - **Usage counts the parent conversation only** (see Exclusions). Nothing in
   `lf history usage` marks the number as partial.
 - **Trust by session `--settings`** for lf-created worktrees only.
+- **A Task's conversation on Antigravity keeps `agy`'s own permission
+  prompts**, so its first `lf` command asks before running outside the
+  sandbox, and the docs say so. Passed over: `yolo` for every Task
+  conversation on Antigravity (interactive sessions use each vendor's own
+  prompts on every other harness), and a session grant for `lf` through
+  `agy`'s `permissions` settings (not explored; a separate outcome).
+- **`hook_callback` may claim the thread file.** Passed over: a pure
+  `hook_callback` with `emit_block` owning every write, which needs one more
+  trait answer to save one `fs::write`.
+- **A provider start publishes the resume reference when the launch
+  published none, on every harness.** Only a provider-named terminal reaches
+  it today. Passed over: limiting it to `ThreadName::Reported`.
 - **`agy` is assumed to retry transient failures itself** (`routing_failure`
   after its own phrases). If a live 503 shows it does not, switch to
   `provider_failure`: one line.

@@ -68,291 +68,276 @@
 
 <h1>Do the product's concepts and the code's concepts line up?</h1>
 <p class="lede">Antigravity as a fifth harness, with failure classification
-on the Harness API. Reviewed before the build: commit <code>264a4848ec</code>
-plus <code>scratch/plan.md</code>.</p>
+on the Harness API. Reviewed after the build: <code>0dfa88e3dd</code> against
+its base <code>c7f2724ab4</code>, 70 files. The page written before the build
+is at <code>e01c5cf1d5</code>.</p>
 
-<p><strong>Area taken:</strong> the Harness contract, meaning everything lf
-asks of a provider's CLI, as it would stand with a fifth harness in it and
-with "why did the provider refuse" as one of its questions. Wider than the
-plan's file list because the plan adds three methods to that contract
-(<code>program</code>, <code>classify_failure</code>, the hook adapter), and
-each one is a claim about who owns an idea.</p>
+<p><strong>Area taken:</strong> the Harness contract as it now stands with
+five harnesses in it, and what a person meets when they pick
+<code>antigravity</code>: a headless step, a Task's own conversation in the
+TUI, a refusal, a resume. Wider than the diff because the QA fixes reached the
+store (<code>with_provider_context</code>) and the hook command
+(<code>lf __context-block --harness</code>), which every harness shares.</p>
 
-<p><span class="tag exists">exists</span> is in the tree today.
+<p><span class="tag exists">exists</span> is in the tree.
 <span class="tag proposed">proposed</span> is what this review wrote into the
-plan. No code changed.</p>
+plan for the next implement pass. No code changed.</p>
 
 <h2>One interaction, walked</h2>
-<p>A step has <code>agents: [antigravity, claude]</code>. The Antigravity
-quota is spent.</p>
+<p><code>lf task run LOO-12 -a antigravity</code>. lf starts two things on
+Antigravity: the step's worker, and the Task's own conversation, an
+<code>agy</code> TUI in a held terminal.</p>
 
-<p><span class="tag exists">exists</span> after <code>264a4848ec</code>, as
-the plan had it:</p>
+<p><span class="tag exists">exists</span> The worker, seen on real
+<code>agy</code> 1.5.13:</p>
 <div class="flow">
-  <div class="step"><b>agy</b>prints <code>result</code> with
-    <code>status: ERROR</code></div>
+  <div class="step"><b>worker</b><code>agy --input-format stream-json
+    --dangerously-skip-permissions</code>, one process per turn</div>
   <div class="arrow">→</div>
-  <div class="step"><b>decoder</b>emits
-    <code>Error { code, message }</code></div>
+  <div class="step"><b>first model call</b><code>PreInvocation</code> runs
+    <code>hook.sh</code>; lf answers the context block</div>
   <div class="arrow">→</div>
-  <div class="step bad"><b>drive::run</b>writes
-    <code>"{code}: {message}\n"</code> into a string named
-    <code>stderr</code>; classifies some codes itself
-    (<code>from_code</code>)</div>
+  <div class="step"><b>lf steer</b>reaches the step after its next tool
+    (2 s in QA)</div>
   <div class="arrow">→</div>
-  <div class="step bad"><b>agent/mod.rs</b>splits <code>stderr</code> into
-    lines, asks the harness about each
-    (<code>classify_failure(line)</code>)</div>
-  <div class="arrow">→</div>
-  <div class="step"><b>retry loop</b>moves to <code>claude</code>;
-    <code>lf task status</code> says why</div>
+  <div class="step"><b>done</b>answer, conversation id and tokens recorded;
+    the Graph advances</div>
 </div>
 
-<p><span class="tag proposed">proposed</span></p>
+<p><span class="tag exists">exists</span> The Task's own conversation, in a
+worktree under the home directory, without <code>yolo</code>:</p>
 <div class="flow">
-  <div class="step"><b>agy</b>prints <code>result</code> with
-    <code>status: ERROR</code></div>
+  <div class="step"><b>TUI</b><code>agy -i …</code>, trusted for the session,
+    context block delivered</div>
   <div class="arrow">→</div>
-  <div class="step"><b>decoder</b>emits
-    <code>Error { code, message }</code></div>
+  <div class="step"><b>a steer or a Task update arrives</b>the model decides
+    to run <code>lf task status</code></div>
   <div class="arrow">→</div>
-  <div class="step new"><b>drive::run</b>asks the harness at the event:
-    <code>classify_failure(code, message)</code>; keeps the gravest in
-    <code>result.failure</code></div>
+  <div class="step bad"><b>agy's command sandbox</b><code>lf</code> fails:
+    "Operation not permitted" on the Machine's files under
+    <code>~/.lf</code></div>
   <div class="arrow">→</div>
-  <div class="step"><b>retry loop</b>reads <code>result.failure</code>;
-    moves to <code>claude</code>; <code>lf task status</code> says why</div>
+  <div class="step bad"><b>"Run this command?"</b>the model asks to run it
+    outside the sandbox; in a held terminal nobody is there</div>
 </div>
 
-<p><strong>Failure:</strong> <code>agy</code> is signed out and nothing is
-left in the order. The person reads "The antigravity login was revoked; sign
-in again on this Machine: run <code>agy</code> and sign in". The plan did not
-set that advice or an install hint; both are in it now.</p>
-<p><strong>Recovery:</strong> they sign in and run <code>lf task run</code>
-again. The step starts on <code>antigravity</code>. Nothing was stored about
-the refusal that has to be cleared, which is right and unchanged.</p>
+<p><strong>Failure:</strong> the quota is spent and
+<code>agents: [antigravity, claude]</code>. The decoder reports
+<code>Error { antigravity_error, … }</code>, <code>drive::run</code> asks
+<code>classify_failure</code> at that event, the retry loop reads
+<code>result.failure</code>, the step goes on under <code>claude</code> and
+<code>lf task status</code> says why. One owner at each station; the
+unserved-model case ran live, the quota case only against the stand-in.</p>
+
+<p><strong>Recovery:</strong> the person opens the Task's conversation with
+<code>lf resume --task</code>, answers <code>2</code> ("allow
+<code>lf</code> for the conversation") and it carries on. Nothing in lf's
+docs tells them that is what the prompt is, or that <code>yolo</code> removes
+it.</p>
 
 <h2>The pairings</h2>
 <table>
 <tr><th>What a person knows</th><th>What the code has</th><th></th><th>What is wrong</th></tr>
 
-<tr><td>A provider refused the step, and why (quota, sign-in, model)</td>
-<td><code>ConversationEvent::Error.code</code>;
-<code>AgentFailure::from_code</code> in <code>drive::run</code>;
-<code>Harness::classify_failure(line)</code> over a re-split
-<code>stderr</code>; <code>AgentProcessResult.failure</code></td>
-<td class="no">no</td>
-<td>An action with no single owner. Two places classify, and the new trait
-method is handed text lf formatted itself, not the provider's. A multi-line
-provider error (Antigravity's unknown-model message lists every model) is
-cut at its newlines before the harness sees it.</td></tr>
-
-<tr><td>What happens next: move, wait, retry, or stop with advice</td>
-<td><code>_run_with_retries</code></td>
+<tr><td>The agent they name, <code>antigravity</code>, and the command it
+runs, <code>agy</code></td>
+<td><code>HarnessKind::as_str</code>, <code>Harness::program</code>,
+<code>Launcher::installed</code></td>
 <td class="yes">yes</td>
-<td>One loop, one order. It should read only <code>result.failure</code>;
-today it also calls the classifier.</td></tr>
+<td>One name everywhere lf prints it. <code>check_cli_available</code> is
+gone. The plan's model table still said <code>HarnessKind::installed</code>;
+corrected.</td></tr>
 
-<tr><td>An agent's name, and whether it is installed</td>
-<td><code>HarnessKind::as_str</code>, <code>program()</code>,
-<code>check_cli_available(cli: &amp;str)</code></td>
-<td class="no">no</td>
-<td>One parameter for two ideas: <code>check_cli_available</code> now takes
-"a harness by its name, or any other program" and guesses. All three callers
-hold a harness.</td></tr>
+<tr><td>A provider refused, and why</td>
+<td><code>Launcher::classify_failure(code, message)</code>, asked in
+<code>drive::report</code>; <code>AgentProcessResult.failure</code></td>
+<td class="yes">yes</td>
+<td>The first review's biggest mismatch is closed.
+<code>_classify_agent_failure</code>, <code>_find_provider_error</code> and
+the <code>classifies_failures</code> capability are gone.</td></tr>
 
-<tr><td>(nothing: a person never sees a hook)</td>
-<td>Which moment a hook callback is: start, turn opening, mid-turn, stop</td>
+<tr><td>What happens next: move, wait, retry, stop with advice</td>
+<td><code>_run_with_retries</code>, reading <code>result.failure</code></td>
+<td class="yes">yes</td>
+<td>It no longer reads the error text.</td></tr>
+
+<tr><td>The Task's conversation can act on the Task
+(run <code>lf</code>)</td>
+<td>Nothing. <code>Antigravity::open</code> grants the launch folder and the
+main <code>.git</code>; <code>lf</code> itself runs inside
+<code>agy</code>'s command sandbox</td>
 <td class="no">no</td>
-<td>Decided twice in the plan: a shell script reads
-<code>invocationNum</code> and picks <code>--moment</code>, then lf reads the
-same payload again to rename its fields. The script's check fails closed: if
-<code>agy</code> ever prints a space after the colon, a managed turn is never
-reported and the context block never arrives.</td></tr>
+<td>A concept the product has and this harness's launch does not carry. On
+Claude and Codex a work session runs <code>lf</code> freely; here it stops on
+a prompt. Recorded only in <code>scratch/questions.md</code>, which
+<code>lf pr submit</code> clears.</td></tr>
 
 <tr><td>"This conversation" (what <code>lf resume</code> reopens)</td>
-<td><code>reported_thread_path</code> beside the delivery file; and, in the
-plan, a second id file beside <code>hooks.json</code> for telling subagents
-apart; and <code>agent_id</code> checked inline in <code>emit_block</code>
-for Claude</td>
+<td>The thread file beside the delivery file, written by
+<code>claim_thread</code> inside <code>hook_callback</code>, again by
+<code>emit_block</code> at a start, read by <code>native_session</code> at
+exit; and, since QA, the store's provider start publishing a resume reference
+for an input that has none</td>
 <td class="no">no</td>
-<td>One idea under three names. "Is this callback from the conversation this
-launch owns" is the same question for Claude's subagents and Antigravity's,
-and the same id is what resume needs.</td></tr>
+<td>One idea with two writers and a comment that is now false:
+<code>emit_block</code> says "lf asks only a bare Codex launch for its
+thread, by creating the file", and Antigravity's file is always created, by a
+method whose doc says it reads. Behavior is right; who owns the write is not
+stated in one place.</td></tr>
+
+<tr><td>(nothing: a person never sees a hook)</td>
+<td><code>hook_callback</code>, <code>hook_reply</code>,
+<code>HookCallback</code>; <code>--harness</code> on
+<code>lf __context-block</code></td>
+<td class="yes">yes*</td>
+<td>The harness reads its own callback and shapes its own reply; the script
+only gates. *<code>harness/README.md</code>'s method table lists
+<code>classify_failure</code> and not these two.</td></tr>
 
 <tr><td>What the step cost</td>
-<td>Transcript reader, <code>step-&lt;n&gt;</code> turn names joining stream
-and transcript</td>
-<td class="yes">yes*</td>
-<td>The join is cleaner than Pi's time matching. *The number leaves out
-subagents and nothing on screen says so. See question 3.</td></tr>
-
-<tr><td>Steers and context reach the step</td>
-<td>Launch folder under the cwd, <code>PreInvocation</code> hook,
-<code>lf __context-block</code></td>
+<td><code>transcript/antigravity.rs</code>, <code>step-&lt;n&gt;</code> turn
+names</td>
 <td class="yes">yes</td>
-<td>The workspace-order finding and the no-<code>PreToolUse</code> finding
-are what make this safe; both are from live runs and both hold.</td></tr>
+<td>Parent conversation only; <code>docs/config.md</code> says so.</td></tr>
 
-<tr><td>The folder is trusted</td>
-<td>Session <code>--settings</code> for lf-created worktrees, the rule
-<code>claude_trust</code> uses</td>
+<tr><td>The folder is trusted; Git works in a worktree</td>
+<td><code>trust</code>, <code>main_git_dir</code></td>
 <td class="yes">yes</td>
-<td>Same rule, same reach, nothing written to the provider's home.</td></tr>
+<td>Session settings and one <code>--add-dir</code>; nothing written to
+<code>~/.gemini</code>.</td></tr>
 
 <tr><td>The step asked a question and nobody was there</td>
 <td>Nothing: <code>agy</code> ends the turn <code>SUCCESS</code></td>
 <td class="no">no</td>
-<td>The Graph advances on an answer that restates the question. Same gap as
-Claude and Codex; Task 48edb9 owns all three. Outside this work.</td></tr>
+<td>Same gap as Claude and Codex; Task 48edb9 owns all three. Outside this
+work.</td></tr>
 </table>
 
-<h2>The biggest mismatch: who says why a provider refused</h2>
-<p>The Task's own title puts failure classification on the Harness API. The
-committed method does that in name. In practice the harness is asked to parse
-a line that <code>drive::run</code> built from an event the harness's own
-decoder emitted two steps earlier.</p>
+<h2>The biggest mismatch: a Task conversation that cannot run lf</h2>
+<p>The plan opens with "work the way they do for Claude, Codex, OpenCode and
+Pi: chat, work session, batch and worker". Three of the four do. The work
+session opens, hears lf and resumes, and then cannot call lf back without a
+person approving it, and the only record of that is a scratch note.</p>
 
 <div class="cols">
 <div class="card before">
-<h3>Before <span class="tag exists">exists</span></h3>
-<pre><code>// harness/mod.rs
-fn classify_failure(&amp;self, line: &amp;str)
-    -> Option&lt;AgentFailure&gt;;
-
-// drive.rs, at each Error event
-stderr.push_str(&amp;format!("{code}: {message}\n"));
-failure = failure.or(AgentFailure::from_code(&amp;code));
-
-// agent/mod.rs, after the run
-result.failure = result.failure.or_else(||
-    result.stderr.lines()
-        .filter_map(|l| harness.classify_failure(l))
-        .min_by_key(rank));</code></pre>
-<p class="small">Three stations. Codes win over words by arrival order;
-words are ranked. The retry tests feed <code>stderr</code> strings shaped
-like lf's own formatting.</p>
+<h3><span class="tag exists">exists</span> Before</h3>
+<p><code>docs/config.md</code>, Antigravity: "A step gets the Task's context
+and hears <code>lf steer</code> after its next tool." Nothing about the
+terminal.</p>
+<p><code>docs/troubleshooting.md</code>: no row for "Run this command?" or
+"Operation not permitted" from <code>lf</code> inside <code>agy</code>.</p>
+<p>A person who opens the Task's conversation finds it waiting on a prompt
+they have no way to read as lf's.</p>
 </div>
 <div class="card after">
-<h3>After <span class="tag proposed">proposed</span></h3>
-<pre><code>// harness/mod.rs
-fn classify_failure(&amp;self, code: &amp;str, message: &amp;str)
-    -> Option&lt;AgentFailure&gt;;
-
-// drive.rs, at each Error event
-stderr.push_str(&amp;format!("{code}: {message}\n"));
-failure = gravest(failure,
-    launch.harness.classify_failure(&amp;code, &amp;message));
-
-// agent/mod.rs, after the run
-let Some(failure) = result.failure else { return Ok(result) };</code></pre>
-<p class="small">One question, asked where the event is.
-<code>_classify_agent_failure</code> and the loose <code>from_code</code>
-call go. <code>stderr</code> is only what a person reads.</p>
+<h3><span class="tag proposed">proposed</span> After</h3>
+<p><code>docs/config.md</code>, Antigravity, one paragraph: in the terminal
+<code>agy</code> runs commands in its own sandbox, so the first
+<code>lf</code> command asks "Run this command?"; allow it for the
+conversation, or launch with <code>yolo</code>. Headless steps are not
+sandboxed.</p>
+<p><code>docs/troubleshooting.md</code>: one row, the prompt and the two
+answers.</p>
+<p><code>harness/README.md</code>: the Antigravity launch row says the same
+in a clause.</p>
 </div>
 </div>
 
-<p><strong>What survives:</strong> Claude and Codex classify a single failure
-exactly as now (<code>provider_failure</code> is <code>from_code</code>, then
-the same phrase lists). Pi and OpenCode still leave transient failures to the
-provider. A turn the provider finished is still not a failure.</p>
-<p><strong>What changes on purpose:</strong> when one turn reports two
-different failures, the gravest wins whichever arrived first. Today a coded
-one wins over a worded one.</p>
-<p><strong>Counterexample tried:</strong> a run that dies before any event
-(the driver cannot start). It returns <code>CoreError</code> today and is
-never classified by either design. No difference.</p>
-<p><strong>Passed over:</strong> a typed failure on
-<code>ConversationEvent::Error</code> itself. That is the truest shape, and
-it would delete <code>from_code</code> and the string codes. It is also a
-recorded wire type in <code>loopflow-model</code>, so it is its own change:
-a new optional field, fixtures in three languages, and every decoder's error
-sites.</p>
+<p><strong>Chosen for review:</strong> say it, and leave the launch as it is.
+Passed over: turning <code>yolo</code> on for every Task conversation on
+Antigravity (the docs promise "Interactive sessions use each vendor's own
+permission settings and prompts", and this would break that for one harness),
+and granting <code>lf</code> through <code>agy</code>'s
+<code>permissions</code> settings (the keys are in the binary and were not
+explored; <code>--add-dir ~/.lf</code> is ruled out because a folder that
+sorts before the checkout becomes where commands run).</p>
 
-<h2>The second one: a hook callback read in two places</h2>
+<p><strong>Counterexample tried:</strong> a checkout under <code>/tmp</code>.
+The sandbox reaches <code>/tmp</code>, so nothing fails there, which is why
+the stand-in tests and the first live runs never saw it. A person's repository is
+under their home directory, so the docs state it as what happens, with no
+<code>/tmp</code> exception.</p>
+
+<h2>The second one: who writes the thread file</h2>
 <div class="cols">
 <div class="card before">
-<h3>Before <span class="tag exists">in the plan</span></h3>
-<p>The shell script saves the first <code>conversationId</code>, drops other
-conversations, matches <code>"invocationNum":0</code> to choose
-<code>--moment start | tool | steer</code>, and applies the marker gate.
-Then <code>lf __context-block --harness antigravity</code> reads the payload
-again to rename fields and shape the reply.</p>
-<p class="small">The plan's own test list puts "a subagent's hook payload
-gets <code>{}</code>" under <code>harness::antigravity</code>, a Rust test,
-while its design puts the filter in shell.</p>
+<h3><span class="tag exists">exists</span> Before</h3>
+<pre><code>// antigravity.rs, inside hook_callback ("what a callback means")
+claim_thread(file, conversation)   // creates and writes the file
+
+// context.rs, emit_block, right after
+// lf asks only a bare Codex launch for its thread,
+// by creating the file beside its delivery.
+if reported.exists() { write(&amp;reported, thread) }  // writes it again</code></pre>
 </div>
 <div class="card after">
-<h3>After <span class="tag proposed">proposed</span></h3>
-<p>The script answers one thing: is starting lf worth it. Mid-turn calls
-(<code>invocationNum</code> 1-9) go through the marker gate; anything it does
-not recognize starts lf.</p>
-<p><code>Harness::hook_callback</code> answers the rest from the payload:
-whose conversation (the thread file beside the delivery file, the one resume
-already uses), which moment, and the normalized callback. Its default is
-today's Claude and Codex behavior, with the <code>agent_id</code> check
-moved in from <code>emit_block</code>.</p>
-<p class="small">Cost: one lf start at each subagent's first model call.</p>
+<h3><span class="tag proposed">proposed</span> After</h3>
+<p>No new type and no moved code. The comment in <code>emit_block</code>
+says what is true: a launch whose provider names the conversation keeps it in
+the file beside its delivery; Codex's launch creates the file to ask, and
+Antigravity's first callback claims it. <code>hook_callback</code>'s doc on
+the trait says an implementation may claim the file.</p>
 </div>
 </div>
+<p class="small">Passed over: making <code>hook_callback</code> pure and
+having <code>emit_block</code> own every write. It needs a "this harness
+always claims" answer on the trait, which is one more method to save one
+<code>fs::write</code>.</p>
 
-<h2>What did not change</h2>
-<p>One <code>agy</code> process per turn; the provider names the thread; the
-launch folder under the cwd; <code>PreInvocation</code> and
-<code>Stop</code> as the only declared hooks; trust by session setting;
-<code>step-&lt;n&gt;</code> turn names; the five slices and their order.
-Slice 1 is still the one that can prove the plan wrong, and it now starts
-with the classification move, since that is what Antigravity's
-<code>status: ERROR</code> plugs into.</p>
+<h2>Looked at and left</h2>
+<p><strong>The store's provider start now publishes a resume reference for
+any harness whose input has none</strong> (it used to leave that to the
+launch). Claude and OpenCode name their thread before launch and Codex work
+sessions open theirs first, so only a provider-named terminal reaches the new
+branch; <code>a_start_names_what_reconnect_resumes_when_the_launch_named_nothing</code>
+covers it. The reference is published with no account id.</p>
+<p><strong><code>classify_failure</code> lives on <code>Launcher</code>
+(execution), not <code>Harness</code> (<code>loopflow-harness</code>)</strong>,
+because <code>AgentFailure</code> is execution's. A provider's refusal words
+are something it writes, so the split crate is their truer home. Moving the
+type is a change with no behavior in it.</p>
+<p><strong><code>--harness</code> absent means Claude's shape</strong>, which
+Codex, Pi and OpenCode also send. Naming it on every hook would change the
+declarations Codex asks a person to trust.</p>
 
 <h2>Outside this work</h2>
-<p><strong>The word "provider".</strong> In the retry loop
-<code>provider</code> is a harness name; in <code>provider_auth</code> it is
-an account home that only Claude and Codex have. Antigravity, one sign-in
-serving Gemini, Claude and GPT models, makes the difference visible. The
-revoked-login rule compares harness names and is right for it. Renaming is a
-sweep of its own.</p>
-<p><strong>A question nobody answers</strong> (Task 48edb9), as in the
-table.</p>
+<p><strong>Letting <code>lf</code> through <code>agy</code>'s sandbox without
+a prompt.</strong> It takes reading <code>agy</code>'s permission grants
+(<code>permissions</code>, <code>grants</code>) on a live TUI and a per-session
+<code>--settings</code> entry beside <code>trustedWorkspaces</code>.</p>
+<p><strong>A question nobody answers</strong> (Task 48edb9).</p>
+<p><strong>Subagent tokens</strong> in <code>lf history usage</code>.</p>
 
 <h2>Questions</h2>
 <ol class="q">
-<li>Where is a failure classified?
+<li>A Task's conversation on Antigravity stops at "Run this command?" the
+first time it runs <code>lf</code>.
   <ol>
-  <li>At the error event, <code>classify_failure(code, message)</code>.
-    <em>Chosen; in the plan.</em></li>
-  <li>Keep <code>classify_failure(line)</code> as committed.</li>
-  <li>Go further now: a typed failure on
-    <code>ConversationEvent::Error</code>, no string codes.</li>
+  <li>Document it; the launch stays as it is. <em>Chosen.</em></li>
+  <li>Launch Task conversations on Antigravity with
+    <code>--dangerously-skip-permissions</code> whatever <code>yolo</code>
+    says.</li>
+  <li>Hold the change until a session grant for <code>lf</code> is found in
+    <code>agy</code>'s settings.</li>
   </ol></li>
-<li>Does <code>-a agy</code> work?
+<li>The thread file's two writers.
   <ol>
-  <li>No. The agent is <code>antigravity</code>; the install hint names the
-    command. <em>Chosen.</em></li>
-  <li>Yes, as an alias that records as <code>antigravity</code>.</li>
-  <li>Name the harness <code>agy</code>, the way the other four are named
-    for the command a person types.</li>
+  <li>Keep the code; correct the two comments. <em>Chosen.</em></li>
+  <li>Make <code>hook_callback</code> pure; <code>emit_block</code> owns the
+    file.</li>
   </ol></li>
-<li>An Antigravity step that used subagents shows only the parent's tokens.
+<li>Where <code>classify_failure</code> lives.
   <ol>
-  <li>Ship it that way; say so in the README. <em>Chosen.</em></li>
-  <li>Count them in this change: follow each <code>invoke_subagent</code>
-    result to its own transcript.</li>
-  <li>Ship it, and mark the number as partial in
-    <code>lf history usage</code>.</li>
+  <li><code>Launcher</code>, as built. <em>Chosen.</em></li>
+  <li>Move <code>AgentFailure</code> and the phrase lists to
+    <code>loopflow-harness</code>, beside the decoders.</li>
   </ol></li>
-<li>Who filters a subagent's hook?
+<li>A provider start publishing the resume reference when the launch
+published none.
   <ol>
-  <li>lf, from the payload, at the cost of one process per subagent.
-    <em>Chosen.</em></li>
-  <li>The shell script, by <code>ANTIGRAVITY_CONVERSATION_ID</code>, once a
-    live run shows a subagent's hook carries its own id there.</li>
-  </ol></li>
-<li>When one turn reports two different failures:
-  <ol>
-  <li>The gravest wins (credential, usage limit, model, transient).
-    <em>Chosen.</em></li>
-  <li>Keep today's rule: a coded failure wins over a worded one.</li>
+  <li>For every harness, as built. <em>Chosen.</em></li>
+  <li>Only for a harness whose managed thread is <code>Reported</code>.</li>
   </ol></li>
 </ol>
 

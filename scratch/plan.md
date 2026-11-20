@@ -238,16 +238,47 @@ What slice 3 taught (from 25 real transcripts on this Machine):
 - `each_turn_is_one_run_that_continues_the_conversation_agy_named` took over
   60 s in that run; not looked into.
 
+Slice 4, the terminal (2026-11-20):
+
+- Real `agy` 1.5.13 in a pseudo-terminal, a throwaway repo with its own
+  `LF_HOME`. In the main checkout, `lf default 'Reply with exactly: pong' -a
+  antigravity` stopped on "Do you trust the contents of this project?". In a
+  worktree made with `lf wt create`, the same command went straight to the
+  prompt and answered `pong` with no dialog. After ctrl+c twice, both
+  Sessions hold `provider=antigravity` and the conversation id `agy` printed
+  in "Resume with … --conversation=<id>". `lf resume <session>` reopened that
+  conversation: the TUI showed the first prompt and `pong`.
+- Not run on real `agy`: a work session (a Task's conversation) and a steer
+  into an open TUI. qa or demo.
+- Run, all ok: `cargo test -p loopflow-execution --lib -- harness::antigravity
+  harness::launch_matrix` (17 passed; all four Antigravity cells run) and
+  `cargo clippy -p loopflow-execution --all-targets -- -D warnings`.
+
+What is in the tree for it:
+
+- `Antigravity::open`: the options a headless turn passes, then
+  `--dangerously-skip-permissions` when `config.skip_permissions`,
+  `--settings {"trustedWorkspaces":[cwd, canonical cwd]}` in a worktree lf
+  created (`trust`), and `-i <prompt>`. A launch with no known thread sets
+  `reported_thread`; `claim_thread` fills it at the first callback and
+  `native_session::run` records it when `agy` exits.
+- The stand-in `agy` without `--output-format` is the TUI: one turn from
+  `-i`, its hooks, its transcript, exit.
+- The matrix's `Mode::Interactive` skip is gone.
+
+What slice 4 taught:
+
+- `each_turn_is_one_run_that_continues_the_conversation_agy_named` takes 4 s
+  alone. Its 60 s was the wait for the ledger the launch matrix holds when
+  both run in one invocation.
+- Go-style flags: `-i` takes the next argument whatever it starts with (a
+  prompt beginning with `-` is under test as argv, not seen live).
+
 ## Left to build
 
-Next is slice 4.
+Next is slice 5.
 
-1. **The terminal (slice 4).** `open`, the launch matrix's Chat and
-   WorkSession cells (delete the `Mode::Interactive` skip).
-   `native_session.rs` already starts `program()`. The bare thread report
-   needs no new write: `claim_thread` already puts the conversation id in
-   `reported_thread_path` at the launch's first callback.
-2. **Names (slice 5).** Every list of harness names: `error.rs`, `config.rs`
+1. **Names (slice 5).** Every list of harness names: `error.rs`, `config.rs`
    tests, `prompt/process.rs`, `loopflow-test-support/src/lib.rs`,
    `config/catalog.rs` (`yolo`, `chrome` help), `launch_policy_tests.rs`,
    Swift (`WorkspacePanesView.swift`, `SessionProgramStatus.swift`), docs,
@@ -615,9 +646,9 @@ is unchanged line for line.
    `hook_callback` / `hook_reply` behind `--harness`.
 3. **Built (see "Built").** Usage: `transcript/antigravity.rs`, `step-<n>`
    turn names, `locate_transcript`; `lf history usage --task` shows the step.
-4. **The terminal.** `open` (`-i`, trust setting, resume), bare thread report
-   through `reported_thread_path`, `recognizes` (`agy` or `antigravity`),
-   launch matrix chat and work-session cells.
+4. **Built (see "Built").** The terminal: `open` (`-i`, trust setting,
+   resume), the thread reported through `reported_thread_path`, launch
+   matrix chat and work-session cells.
 5. **Names.** Every list in "Left to build" 2.
 
 ## Not checked
@@ -630,9 +661,15 @@ is unchanged line for line.
 - Whether `agy` always prints `"invocationNum":N` without a space. The gate
   fails open if it does not.
 - An exhausted-quota refusal, live.
-- Whether `trustedWorkspaces` wants the path as given or canonical: the probe
-  passed both `/tmp/…` and `/private/tmp/…` and the dialog did not appear.
-  Pass both.
+- Whether `trustedWorkspaces` wants the path as given or canonical: both are
+  passed and the dialog did not appear.
+- A terminal whose launcher becomes `agy` (a held terminal:
+  `native_session::run` execs when `transport::current()` is set) has no lf
+  process left to read the thread file at exit. A managed launch's start
+  boundary gives the server the conversation; a bare one in a held terminal
+  is in bare Codex's position. Neither was run.
+- A launch from a subdirectory of an lf-created worktree: the trusted folder
+  is the launch cwd, not the worktree root.
 
 ## Unrelated to this change
 

@@ -1079,8 +1079,7 @@ mod tests {
 
     #[test]
     fn bare_harnesses_defer_model_selection_to_the_provider() {
-        for harness in loopflow_harness::HarnessKind::ALL {
-            let harness = harness.as_str();
+        for harness in HarnessKind::ALL.map(HarnessKind::as_str) {
             assert_eq!(parse_agent(harness), (harness.to_string(), None));
         }
     }

@@ -77,8 +77,7 @@ pub fn run(launch: &Launch<'_>, process: &ProcessConfig) -> Result<AgentProcessR
                                 }
                             }
                             ConversationEvent::Error { code, message, .. } => {
-                                stderr.push_str(&format!("{code}: {message}\n"));
-                                failure = graver(failure, launch.harness.classify_failure(&code, &message));
+                                report(&launch, &code, &message, &mut stderr, &mut failure);
                                 if launch.harness.terminal_error(&code)
                                 {
                                     exit_code = Some(1);
@@ -99,8 +98,7 @@ pub fn run(launch: &Launch<'_>, process: &ProcessConfig) -> Result<AgentProcessR
             while let Ok(event) = event_rx.try_recv() {
                 if let Some(runtime) = runtime { runtime.record_conversation(event.clone()); }
                 if let ConversationEvent::Error { code, message, .. } = event {
-                    stderr.push_str(&format!("{code}: {message}\n"));
-                    failure = graver(failure, launch.harness.classify_failure(&code, &message));
+                    report(&launch, &code, &message, &mut stderr, &mut failure);
                 }
             }
             if process.stream && !stdout.ends_with('\n') {
@@ -133,11 +131,18 @@ pub fn run(launch: &Launch<'_>, process: &ProcessConfig) -> Result<AgentProcessR
     })
 }
 
-/// The failure that decides what happens after a turn that reported `next`
-/// after `so_far`.
-fn graver(so_far: Option<AgentFailure>, next: Option<AgentFailure>) -> Option<AgentFailure> {
-    match (so_far, next) {
-        (Some(so_far), Some(next)) => Some(so_far.graver(next)),
-        (so_far, next) => so_far.or(next),
-    }
+/// Keep an error the provider reported: its text is what a person reads as
+/// the reason, and the gravest failure of the turn decides what happens next.
+fn report(
+    launch: &Launch<'_>,
+    code: &str,
+    message: &str,
+    stderr: &mut String,
+    failure: &mut Option<AgentFailure>,
+) {
+    stderr.push_str(&format!("{code}: {message}\n"));
+    *failure = [*failure, launch.harness.classify_failure(code, message)]
+        .into_iter()
+        .flatten()
+        .reduce(AgentFailure::graver);
 }

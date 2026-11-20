@@ -20,7 +20,6 @@ use crate::context_block::ContextMoment;
 use crate::harness::fact_writer::FactWriter;
 use crate::harness::{Driver as StreamDriver, HarnessError, HookCallback, LaunchKind, Recording};
 use loopflow_harness::antigravity_decode::Turn;
-use loopflow_harness::fact::Decoded;
 use loopflow_harness::Harness;
 use loopflow_model::chat::types::ConversationEvent;
 use loopflow_model::id::AgentSessionId;
@@ -34,27 +33,6 @@ struct State {
     writer: Option<FactWriter>,
     /// lf stopped the current turn's process.
     interrupted: bool,
-}
-
-impl State {
-    /// Record what a turn established and hand its display events on. A
-    /// record lf could not write is a gap, never a lost conversation event.
-    fn publish(
-        &mut self,
-        decoded: Vec<Decoded>,
-        events: &mpsc::UnboundedSender<ConversationEvent>,
-    ) {
-        if let Some(writer) = self.writer.as_mut() {
-            if let Err(error) = writer.record(&decoded) {
-                tracing::warn!(%error, "failed to record Antigravity activity");
-            }
-        }
-        for decoded in decoded {
-            if let Decoded::Display(event) = decoded {
-                let _ = events.send(event);
-            }
-        }
-    }
 }
 
 #[derive(Debug)]
@@ -105,11 +83,8 @@ impl Driver {
     }
 
     /// The run for one turn, and the file its stderr goes to.
-    fn command(
-        &self,
-        config: &AgentConfig,
-        thread: Option<&AgentSessionId>,
-    ) -> Result<(Command, std::fs::File)> {
+    fn command(&self, thread: Option<&AgentSessionId>) -> Result<(Command, std::fs::File)> {
+        let config = &self.config;
         let mut command = Command::new(loopflow_harness::HarnessKind::Antigravity.program());
         command.args([
             "--input-format",
@@ -161,7 +136,7 @@ impl Driver {
                     if let Some(thread) = turn.thread().cloned() {
                         state.thread = Some(thread);
                     }
-                    state.publish(decoded, &events);
+                    super::common::publish(state.writer.as_mut(), decoded, &events);
                 }
             }
             let _ = child.wait().await;
@@ -177,7 +152,7 @@ impl Driver {
                 .seek(SeekFrom::Start(diagnostics_start))
                 .and_then(|_| diagnostics.read_to_string(&mut stderr));
             let decoded = turn.finish(interrupted, &stderr);
-            state.publish(decoded, &events);
+            super::common::publish(state.writer.as_mut(), decoded, &events);
         })
     }
 }
@@ -325,7 +300,8 @@ impl StreamDriver for Driver {
     }
 
     async fn send_input(&mut self, content: &str) -> Result<()> {
-        let Some(message) = build_turn_content(content, &self.config, self.first_turn) else {
+        let Some(message) = super::common::turn_content(content, &self.config, self.first_turn)
+        else {
             return Ok(());
         };
         let thread = {
@@ -336,32 +312,17 @@ impl StreamDriver for Driver {
             state.thread.clone()
         };
         self.settle_process().await?;
-        {
-            // Each run is a new AgentProcess of the same Session.
-            let Recording {
-                store,
-                session,
-                attachment,
-            } = &mut self.owner;
-            *attachment = match &self.runtime {
-                Some(runtime) => runtime.prepare_agent_process(session, attachment)?,
-                None => crate::process::attachment::prepare_session_agent_process(
-                    store, session, attachment,
-                )?,
-            };
-            self.config.env.insert(
-                crate::process::AGENT_CALLER_ENV.into(),
-                serde_json::to_string(
-                    &attachment.caller(session.clone().into(), crate::journal::current_trace_id()),
-                )?,
-            );
-        }
+        super::common::next_agent_process(
+            &mut self.owner,
+            self.runtime.as_ref(),
+            &mut self.config,
+        )?;
         let owner = self.owner.clone();
-        let (command, diagnostics) = self.command(&self.config, thread.as_ref())?;
+        let (command, diagnostics) = self.command(thread.as_ref())?;
         let diagnostics_start = diagnostics.metadata()?.len();
         let mut child = super::agent_process::spawn(command, None, &owner, self.kind)?;
         self.pid = child.id();
-        let mut stdin = child.stdin.take().expect("Antigravity stdin was piped");
+        let stdin = child.stdin.take().expect("Antigravity stdin was piped");
         let stdout = child.stdout.take().expect("Antigravity stdout was piped");
 
         {
@@ -387,20 +348,9 @@ impl StreamDriver for Driver {
             "{}\n",
             serde_json::json!({"event": "user", "message": {"content": message}})
         );
-        let Recording {
-            store,
-            session,
-            attachment,
-        } = owner;
-        let sent = tokio::task::spawn_blocking(move || {
-            store.with_session_dispatch(&session, &attachment, || {
-                super::dispatch::write_fenced(&mut stdin, line.as_bytes())
-            })
-        })
-        .await?;
-        if let Err(error) = sent {
+        if let Err(error) = super::common::send(owner, stdin, line.into_bytes()).await {
             self.settle_process().await?;
-            return Err(error.into());
+            return Err(error);
         }
         self.first_turn = false;
         Ok(())
@@ -434,19 +384,6 @@ impl StreamDriver for Driver {
             .thread
             .clone()
     }
-}
-
-fn build_turn_content(content: &str, config: &AgentConfig, first_turn: bool) -> Option<String> {
-    let task = if first_turn {
-        config.task_prompt.trim()
-    } else {
-        ""
-    };
-    let parts: Vec<&str> = [task, content.trim()]
-        .into_iter()
-        .filter(|part| !part.is_empty())
-        .collect();
-    (!parts.is_empty()).then(|| parts.join("\n\n"))
 }
 
 impl super::Launcher for loopflow_harness::Antigravity {
@@ -501,10 +438,9 @@ impl super::Launcher for loopflow_harness::Antigravity {
             Some(file) => claim_thread(file, conversation)?,
             None => false,
         };
-        let stop = payload["hookEventName"] == "Stop" || declared == ContextMoment::Stop;
         // Each `agy` process counts its model calls from 0, and call 0 of a
         // later turn in the same process is that turn's prompt.
-        let (moment, event) = if stop {
+        let (moment, event) = if declared == ContextMoment::Stop {
             (ContextMoment::Stop, "Stop")
         } else if first {
             (ContextMoment::Start, "SessionStart")

@@ -18,7 +18,7 @@ use crate::agent::AgentConfig;
 use crate::harness::fact_writer::FactWriter;
 use crate::harness::Recording;
 use crate::harness::{Driver as StreamDriver, HarnessError};
-use loopflow_harness::fact::{Decoded, ProviderFact, ProviderTurn};
+use loopflow_harness::fact::{ProviderFact, ProviderTurn};
 use loopflow_harness::opencode_decode::Turn;
 use loopflow_harness::Harness;
 use loopflow_model::chat::types::ConversationEvent;
@@ -38,25 +38,6 @@ struct State {
 }
 
 impl State {
-    /// Record what a turn established and hand its display events on. A
-    /// record lf could not write is a gap, never a lost conversation event.
-    fn publish(
-        &mut self,
-        decoded: Vec<Decoded>,
-        events: &mpsc::UnboundedSender<ConversationEvent>,
-    ) {
-        if let Some(writer) = self.writer.as_mut() {
-            if let Err(error) = writer.record(&decoded) {
-                tracing::warn!(%error, "failed to record OpenCode activity");
-            }
-        }
-        for decoded in decoded {
-            if let Decoded::Display(event) = decoded {
-                let _ = events.send(event);
-            }
-        }
-    }
-
     /// Start the turn the sent input began. OpenCode names a turn by the user
     /// message it stored for the input, which is how its transcript is read;
     /// a run whose message cannot be found gets a name of lf's own.
@@ -75,7 +56,8 @@ impl State {
                 turn: id.clone(),
             };
             self.turn = Some(Turn::new(turn.clone()));
-            self.publish(
+            super::common::publish(
+                self.writer.as_mut(),
                 vec![
                     ProviderFact::SessionObserved(thread).into(),
                     ProviderFact::TurnAnswered {
@@ -188,7 +170,7 @@ impl Driver {
                         // Nobody can answer: end the run before it assumes one.
                         let _ = child.start_kill();
                     }
-                    state.publish(decoded, &events);
+                    super::common::publish(state.writer.as_mut(), decoded, &events);
                 }
             }
             let exited = child.wait().await.is_ok_and(|status| status.success());
@@ -211,7 +193,7 @@ impl Driver {
                 }
             }
             decoded.extend(turn.finish(exited, interrupted));
-            state.publish(decoded, &events);
+            super::common::publish(state.writer.as_mut(), decoded, &events);
         })
     }
 }
@@ -242,7 +224,8 @@ impl StreamDriver for Driver {
     }
 
     async fn send_input(&mut self, content: &str) -> Result<()> {
-        let Some(message) = build_turn_content(content, &self.config, self.first_turn) else {
+        let Some(message) = super::common::turn_content(content, &self.config, self.first_turn)
+        else {
             return Ok(());
         };
         {
@@ -256,26 +239,11 @@ impl StreamDriver for Driver {
             .clone()
             .ok_or_else(|| anyhow!("OpenCode has not started"))?;
         self.settle_process().await?;
-        {
-            // Each run is a new AgentProcess of the same Session.
-            let Recording {
-                store,
-                session,
-                attachment,
-            } = &mut self.owner;
-            *attachment = match &self.runtime {
-                Some(runtime) => runtime.prepare_agent_process(session, attachment)?,
-                None => crate::process::attachment::prepare_session_agent_process(
-                    store, session, attachment,
-                )?,
-            };
-            self.config.env.insert(
-                crate::process::AGENT_CALLER_ENV.into(),
-                serde_json::to_string(
-                    &attachment.caller(session.clone().into(), crate::journal::current_trace_id()),
-                )?,
-            );
-        }
+        super::common::next_agent_process(
+            &mut self.owner,
+            self.runtime.as_ref(),
+            &mut self.config,
+        )?;
         let owner = self.owner.clone();
         let mut config = self.config.clone();
         if let Some(context) = &mut config.conversation_context {
@@ -284,7 +252,7 @@ impl StreamDriver for Driver {
         let (command, diagnostics) = self.command(&config, &thread)?;
         let mut child = super::agent_process::spawn(command, None, &owner, self.kind)?;
         self.pid = child.id();
-        let mut stdin = child.stdin.take().expect("OpenCode stdin was piped");
+        let stdin = child.stdin.take().expect("OpenCode stdin was piped");
         let stdout = child.stdout.take().expect("OpenCode stdout was piped");
 
         {
@@ -306,20 +274,9 @@ impl StreamDriver for Driver {
         self.reader = Some(self.spawn_reader(child, stdout, diagnostics));
 
         // `opencode run` reads its message from stdin and starts at end of input.
-        let Recording {
-            store,
-            session,
-            attachment,
-        } = owner;
-        let sent = tokio::task::spawn_blocking(move || {
-            store.with_session_dispatch(&session, &attachment, || {
-                super::dispatch::write_fenced(&mut stdin, message.as_bytes())
-            })
-        })
-        .await?;
-        if let Err(error) = sent {
+        if let Err(error) = super::common::send(owner, stdin, message.into_bytes()).await {
             self.settle_process().await?;
-            return Err(error.into());
+            return Err(error);
         }
         self.first_turn = false;
         Ok(())
@@ -349,19 +306,6 @@ impl StreamDriver for Driver {
     fn agent_session(&self) -> Option<AgentSessionId> {
         self.thread.clone()
     }
-}
-
-fn build_turn_content(content: &str, config: &AgentConfig, first_turn: bool) -> Option<String> {
-    let task = if first_turn {
-        config.task_prompt.trim()
-    } else {
-        ""
-    };
-    let parts: Vec<&str> = [task, content.trim()]
-        .into_iter()
-        .filter(|part| !part.is_empty())
-        .collect();
-    (!parts.is_empty()).then(|| parts.join("\n\n"))
 }
 
 fn environment(
@@ -523,9 +467,7 @@ mod tests {
     use crate::harness::LaunchKind;
     use crate::process::attachment;
 
-    use super::{
-        build_turn_content, mpsc, AgentConfig, Command, ConversationEvent, Driver, StreamDriver,
-    };
+    use super::{mpsc, AgentConfig, Command, ConversationEvent, Driver, StreamDriver};
     use loopflow_model::chat::types::{ConversationItem, Lifecycle};
 
     #[tokio::test]
@@ -583,7 +525,7 @@ mod tests {
 
     #[test]
     fn build_turn_content_includes_task_prompt_on_first_turn() {
-        let content = build_turn_content(
+        let content = super::super::common::turn_content(
             "",
             &AgentConfig {
                 task_prompt: "task".to_string(),

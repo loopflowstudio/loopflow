@@ -4237,7 +4237,13 @@ mod tests {
                 state: AutoSetting::On, issue: None, graph: Some(graph), reason: Some(reason), json: true
             } }) if reason == "go" && graph == "code"
         ));
-        assert!(Cli::try_parse_from(["lf", "ship", "LOO-1"]).is_err());
+        // `lf ship` is no command of its own: it would name a skill.
+        assert!(matches!(
+            Cli::try_parse_from(["lf", "ship", "LOO-1"])
+                .unwrap()
+                .command,
+            Some(Commands::External(_))
+        ));
         assert!(
             Cli::try_parse_from(["lf", "task", "auto", "off", "--graph", "code"])
                 .unwrap()

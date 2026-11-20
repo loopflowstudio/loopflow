@@ -261,7 +261,7 @@ const RESPONSES: &[(&str, &str, &str)] = &[
         include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_running.json"),
     ),
     (
-        "task_ship_answer",
+        "task_auto_on_answer",
         "task.auto.on",
         include_str!(
             "../../../loopflow-execution/tests/fixtures/dto/server/task_auto_on_answer.json"

@@ -441,7 +441,7 @@ Gate: regenerate `server_schema.json` (Starter variant, `approve` doc), run
 `dto_fixtures::`, `server::schema::tests::`, `golden_prompt` (skill text),
 `documented_commands::`, `config::` catalogue tests, Swift DTOFixtureTests.
 
-## To build: `lf ship` goes; `lf task auto on` is the command
+## Built: `lf ship` goes; `lf task auto on` is the command
 
 Direction 2026-11-19: "lets kill lf ship; isnt that just lf task auto on?"
 It is: `lf ship`'s own help says "`lf task auto on` is this command".
@@ -458,3 +458,25 @@ It is: `lf ship`'s own help says "`lf task auto on` is this command".
   builtin skills (task-session, task-operate, repo/wave operate, pr-land),
   `.lf/skills`, `.lf/qa`, help text.
 - `ship-review` keeps its name: it reviews what ships, not the command.
+
+Built 2026-11-19 (`fa171df836`): `Commands::Ship` deleted; `TaskCommand::Auto`
+gained `--graph` (off with `--graph` is a usage error); `Cli::turns_auto_on`
+marks the run's dispatch, detach and handoff sites in `bin/lf.rs`; only `auto
+off` goes through shared mutation dispatch. `task.ship` → `task.auto.on`
+(`TaskAutoOn`, `engine::task::auto_on`, `spell_auto_on` = `--task X task auto
+on --json`); fixtures `task_auto_on.json`, `task_auto_on_answer.json`; Swift
+`.taskAutoOn`, `WorkModel.turnAutoOn`. `TaskProcessOptions.ship` is
+`auto_on`. `server_schema.json` regenerated. `lf ship` now fails to parse
+(asserted in `lf::tests`). Released skill text and `.lf/wave` memory and
+release notes still say `lf ship`; they are history.
+
+Run 2026-11-19: `cargo nextest run -p loopflow -p loopflow-execution --lib`
+over `lf::tests::`, `adapter_tests::`, `server::schema::tests::`,
+`lf::commands::write::tests::`, `config::keys::tests::`, `engine::task::` and
+the auto/ship/batch/Wave-auto `task_graph_launch_tests`: 85 run, 3 failed
+(a stale `lf ship` parse assertion: it parses as an external skill; the schema's
+RESPONSES name), fixed, the 9 rerun passed. Clippy clean.
+
+Not run here: `golden_prompt` (skill text changed; regenerate at gate),
+`documented_commands::`, Swift `ServerProtocolTests`/`DesktopHeadlessTests`/
+`PendingChangesTests`, iOS, `served_reads`, `machine_commands`.

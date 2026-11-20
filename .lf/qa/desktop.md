@@ -108,9 +108,11 @@ Run the app's bundled `lf` with the world's `env.json` variables and
   stand-in. `lf desktop do refresh-session -p session`, `desktop send`/`send-key`
   and `desktop capture --region scrollback` drive and read the pane; a pane's
   `attachment` reads `opening`, `usable` or `failed`. Reuse no markers across runs: scrollback keeps earlier replies.
-- Reinstalling the bundle changes its `lf`: the running private server then
-  answers "uses another executable" and panes lose their surfaces. Restart that
-  server with the new bundled `lf`; held providers survive in the old holder.
+- Reinstalling the bundle changes its `lf`: the running private server stays
+  `ready` and keeps running the old build (`lf server status` gives its
+  `executable_sha256`; compare `shasum -a 256` of the bundled `lf`). Restart
+  that server with the new bundled `lf` to run the new code; held providers
+  survive in the old holder.
 - To see what a pane inherited, compare `lsof -p <app pid>` pipe addresses with
   those of its children and of the PIDs in the world's `processes` table.
 - Quit with `NSRunningApplication(processIdentifier:).terminate()` from a

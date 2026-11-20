@@ -67,6 +67,20 @@ Settled while building slice 3, each reversible:
     opens the launch's repository and closes. Just closing it would leave a
     launch whose saved windows were all another Machine's with no window.
 
+Settled while building slice 4, each reversible:
+
+22. A reading this build can't decode fails its part, not the observation:
+    the other parts stay current and nothing reopens in a loop. The Notice is
+    the part's own ("The plan couldn't be read: This Loopflow (…) can't read
+    what the server (…) sent. (missing owned_by_you at body.tasks.0)"), not a
+    bare sentence as the README first had it.
+23. Where decoding stopped is in the Notice, since Desktop's shared library
+    has no log.
+24. Desktop's client version is `<version>+<source revision>`; `lf server
+    status` lists it under `clients`.
+25. `lf install server` that still finds another executable answering after
+    10 s says "another executable still answers".
+
 Idea, not built: Desktop's socket in a short per-home directory, as
 `machine_route.rs` does for SSH control sockets (`/tmp/lf-ssh-<uid>-<digest>`).
 Then no directory is too long and the notice goes.
@@ -86,10 +100,6 @@ Not established:
   (`rust/loopflow/src/lf/commands/open.rs`, `DesktopApp::select`). Not
   reproduced. If it is that, a world's `env.json` could carry
   `LF_DESKTOP=com.loopflow.mac.dev`.
-- Why the Dev app showed "The Machine is away" when its reads failed to
-  decode; `ServerLink.lostLink` only names disconnects. The Dev app logged
-  nothing about the failure. Slice 4 establishes it before changing the
-  sentence.
 - Whether `lf task create` on the read-only copy reached Linear before the
   store refused. The error came from SQLite and no Task was filed locally; the
   tracker was not checked.

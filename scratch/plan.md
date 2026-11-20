@@ -323,7 +323,7 @@ and never started; run `lf-world copy`; start `lf server run` on the copy.
 opening store: the Machine; a differing `$defs` entry: a copy, naming it; a
 refusing store: a copy; `--copy`; `--world`) and the environment each passes.
 *(built)* A Swift test covers a restored window from another Machine
-*(built)* and a decode failure's notice. *(slice 4)*
+*(built)* and a decode failure's notice. *(built)*
 
 Checks, November 20 at 0715825870:
 
@@ -483,14 +483,41 @@ server`, fake-world recipes, `welcome` and `status` as they are.
      Machine. An app launched on another home without `--repo` asks that
      Machine for the last repository the account opened anywhere. The
      launcher always passes `--repo`, so Dev does not meet it.
-4. **Next: `lf server status`, and the decode sentence.** `status()` in
-   `rust/loopflow-execution/src/machine/client.rs:83` stops erroring on
-   another executable and `installation::server::ensure` compares the hash
-   itself, after every other caller of `status()` is read. Establish why a
-   decode failure showed "The Machine is away" before giving it its own
-   sentence, with a Swift test of that notice. Then the Dev bundle's
-   `lf server status` against the installed server reports ready, and
-   `.lf/qa/desktop.md:111` and `.lf/qa/held-terminals.md:40` are corrected.
+4. **Built.** `client::status()` reports `ready` whenever the server answers
+   at a revision this build speaks and carries the server's
+   `executable_sha256`; `installation::server::ensure` compares that hash with
+   its own executable and registers again when they differ. A reading whose
+   body does not decode fails its part alone, with `ServerLink.unreadable`
+   and where decoding stopped as the reason (`WorkFrame.unread`,
+   `LineSubscription.unreadable`). Desktop's client version carries its source
+   revision, so the sentence tells a Dev build from the installed one.
+
+   What it showed:
+   - Why a decode failure read "The Machine is away": one undecodable frame
+     failed the whole observation (`WorkSubscriptions.receive`), and
+     `WorkModel.keepWorkCurrent` calls `pendingChanges.linkLost()` on every
+     error. Each reopened observation failed on the same frame, so the link
+     never returned and went away after ten seconds; `NoticeCenter.read`
+     holds part failures while the link is not connected, so nothing else was
+     said. `keepWorkCurrent` is unchanged: a server that is not running also
+     arrives there as a plain error and should read as away.
+   - Seen November 20: `target/debug/lf server status` (sha 619fe20a5a5e)
+     against the installed server (executable bde305c4900a, 0.16.0+21d541a87)
+     printed `ready: true`, `error: null` and the installed lf's `instance`,
+     033984e9. Run with the branch's debug `lf`, not the Dev bundle's copy.
+   - Other readers of `status()`: `lf server status`, `ServerLocation.path`
+     in Desktop (reads `socket`, `ready`, `error`), and test fixtures that
+     wait on `ready`. None wanted the executable compared.
+   - A line that is not a reading at all, or a transport that does not know
+     its server (`lf … --subscribe` over a pipe), still fails the observation.
+
+   Checks: `cargo test -p loopflow --test served_reads configuration_` 2
+   passed (its fixture now waits on `status().ready` from the test binary,
+   another executable than the server's);
+   `scripts/test_desktop.sh --filter 'aReadingThisBuildCannotDecodeNamesBothBuilds|invalidFrames|scopeChange|serverEndingASubscriptionFailsItAlone'`
+   4 passed. Not run: clippy, the iOS build, `lf install server` replacing a
+   server left by another executable (`transport_tests`), and the Notice in a
+   Dev window against a server of another wire. Gate and CI.
 5. **Docs.** Written ahead of the code, describing the behavior above; each
    slice checks its part against them and corrects whichever is wrong.
    - `swift/README.md`: the opening section (the three things Dev opens, the
@@ -504,5 +531,5 @@ server`, fake-world recipes, `welcome` and `status` as they are.
      `rust/loopflow/src/server/README.md`: what `ready` means; the decode
      Notice in place of "Build mismatch".
    - `scripts/testing.md`: `run` and `copy_world`.
-   - Left for slice 4, once the new behavior is seen: `.lf/qa/desktop.md:111`
-     and `.lf/qa/held-terminals.md:40` quote "uses another executable".
+   - `.lf/qa/desktop.md` and `.lf/qa/held-terminals.md` no longer quote
+     "uses another executable" (slice 4). Neither scenario was run again.

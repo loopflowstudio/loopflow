@@ -107,6 +107,12 @@ public actor ServerLink {
 
     public var isClosed: Bool { failure != nil }
 
+    /// What a window says of a reading from this server that this build can't
+    /// decode: the two are different builds, and the sentence names both.
+    public nonisolated var unreadable: String {
+        "This Loopflow (\(endpoint.client.version)) can't read what the server (\(welcome.build)) sent."
+    }
+
     /// Ends the connection on purpose: requests fail and watches end rather than resume.
     public func close() async {
         fail(RegistryQueryError(Self.closed), resumable: false)
@@ -265,7 +271,8 @@ public actor ServerLink {
             do { try await subscription.start() }
             catch { subscription.finish(throwing: error) }
         }
-        return ServerWatch(updates: updates, checkpoint: subscription.checkpoint, cancel: subscription.cancel)
+        return ServerWatch(updates: updates, checkpoint: subscription.checkpoint, cancel: subscription.cancel,
+                           unreadable: { subscription.unreadable })
     }
 
     fileprivate func register(_ subscription: ServerSubscription, query: ServedRead, resume: String?) async throws {
@@ -456,6 +463,8 @@ public struct ServerWatch<Output: Sendable>: Sendable {
     public let updates: AsyncThrowingStream<Output, any Error>
     public let checkpoint: @Sendable (UInt64) -> Void
     public let cancel: @Sendable () -> Void
+    /// `ServerLink.unreadable` for the server its updates come from; nil before one answers.
+    public let unreadable: @Sendable () -> String?
 }
 
 /// One subscription's updates across links; checkpoints before a link is ready wait.
@@ -470,6 +479,8 @@ final class ServerSubscription: @unchecked Sendable {
     private var resumeToken: String?
     private var eventBaseline = false
     private var recovery: Task<Void, Never>?
+    /// The newest link's sentence for an update its consumer can't decode.
+    private var unreadableText: String?
     private let query: ServedRead
     private let consumesEvents: Bool
     private let connect: @Sendable () async throws -> ServerLink
@@ -506,6 +517,7 @@ final class ServerSubscription: @unchecked Sendable {
         // baseline reading can arrive before `register` returns.
         let (stopped, resume) = lock.withLock {
             eventBaseline = false
+            unreadableText = link.unreadable
             return (self.stopped, consumesEvents ? nil : resumeToken)
         }
         guard !stopped else { return }
@@ -536,6 +548,8 @@ final class ServerSubscription: @unchecked Sendable {
         }
         if !resume { finish(throwing: error) }
     }
+
+    var unreadable: String? { lock.withLock { unreadableText } }
 
     func checkpoint(_ checkpoint: UInt64) {
         let target: ServerLink? = lock.withLock {

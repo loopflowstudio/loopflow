@@ -52,7 +52,8 @@ enum ServerClient {
             guard case .reading(let frame) = update else { return nil }
             return Data(frame.bytes)
         }
-        return LineSubscription(lines: watch.updates, send: checkpoints(watch), cancel: watch.cancel)
+        return LineSubscription(lines: watch.updates, send: checkpoints(watch), cancel: watch.cancel,
+                                unreadable: watch.unreadable)
     }
 
     /// Readings and occurrences share one stream so the consumer applies its
@@ -192,7 +193,8 @@ extension ServerEndpoint {
     /// The Machine's server on its private Unix socket.
     static func unix(path: String) -> ServerEndpoint {
         ServerEndpoint(
-            client: ServerClientIdentity(kind: "desktop", platform: "macos", name: "Loopflow", version: LaunchJournal.appVersion),
+            client: ServerClientIdentity(kind: "desktop", platform: "macos", name: "Loopflow",
+                                          version: "\(LaunchJournal.appVersion)+\(DesktopLog.sourceRevision)"),
             control: { try UnixSocketCarrier(path: path, limit: ServerProtocol.maxMessage) },
             ticketed: { try UnixSocketCarrier(path: path, limit: ServerProtocol.maxBulk) })
     }

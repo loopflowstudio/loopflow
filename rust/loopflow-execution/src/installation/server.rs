@@ -18,8 +18,19 @@ pub fn ensure() -> Result<crate::machine::client::Status> {
         .mode(0o600)
         .open(crate::machine::socket_path()?.with_extension("install-lock"))?;
     lock.lock_exclusive()?;
+    // A server that answers is ready for every client; only this command
+    // also asks that it be the selected installation, replacing one left
+    // running by the build before a promotion.
+    let selected = crate::installation::ArtifactIdentity::capture(
+        crate::installation::ArtifactRole::Cli,
+        &std::env::current_exe()?,
+    )?
+    .sha256;
+    let installed = |status: &crate::machine::client::Status| {
+        status.ready && status.executable_sha256.as_ref() == Some(&selected)
+    };
     let before = crate::machine::client::status()?;
-    if before.ready {
+    if installed(&before) {
         return Ok(before);
     }
     let home = crate::store::lf_home_dir().canonicalize()?;
@@ -28,10 +39,15 @@ pub fn ensure() -> Result<crate::machine::client::Status> {
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
         let status = crate::machine::client::status()?;
-        if status.ready {
+        if installed(&status) {
             return Ok(status);
         }
         if Instant::now() >= deadline {
+            if status.ready {
+                anyhow::bail!(
+                    "Loopflow server did not start within 10s: another executable still answers"
+                );
+            }
             // A socket that never listened has no reason beyond the wait.
             match status.error.filter(|_| status.listening) {
                 Some(error) => anyhow::bail!("Loopflow server did not start within 10s: {error}"),

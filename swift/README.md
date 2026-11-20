@@ -103,10 +103,11 @@ If no name is known, the failed row says
 **Task unavailable**. Desktop reconnects automatically. A successful replacement
 updates the rows, retaining the selected workspace, panes and drafts.
 When the app and the server are different builds and a read arrives that the
-app can't decode, the Notice names both, and `lf install` brings them together:
+app can't decode, the Notice for that part names both and where decoding
+stopped, and `lf install` brings them together. The other parts stay current:
 
 ```
-This Loopflow (0.16.0+3500440e9) can't read what the server (0.16.0+21d541a87) sent.
+The plan couldn't be read: This Loopflow (0.16.0+3500440e9) can't read what the server (0.16.0+21d541a87) sent. (missing owned_by_you at body.tasks.0)
 ```
 
 **The Machine is away** means only that the connection is down.

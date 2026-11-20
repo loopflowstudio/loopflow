@@ -137,6 +137,10 @@ What it taught:
 
 ## Left to build
 
+Next is slice 2 (items 1, 3 and 6): it is the first time `agy` runs under a
+Task with lf's hooks loaded from the launch folder, and the subagent and
+moment rules in "Hooks" are untested until then.
+
 1. Hooks: the launch folder's `hooks.json` and gate script (the folder is
    made today only when the launch has instructions; a launch with a
    `conversation_context` needs it too), `hook_callback` and `hook_reply`.
@@ -166,8 +170,8 @@ What it taught:
 
 ```
 agy --input-format stream-json --output-format stream-json
-    [--dangerously-skip-permissions]   # config.skip_permissions
-    [--model <slug>] [--conversation <id>] --add-dir <launch folder>
+    --dangerously-skip-permissions     # always headless; see "What it taught"
+    [--model <slug>] [--conversation <id>] [--add-dir <launch folder>]
 ```
 
 One line on stdin, `{"event":"user","message":{"content":"…"}}`, then close
@@ -179,12 +183,12 @@ Headless reads `conversation_id` from the `init` line. A bare terminal launch
 gets it from its first hook through `reported_thread_path`, as bare Codex does.
 
 **Terminal:** `agy -i "<prompt>"` (argv; `validate_terminal_turn`),
-`--conversation <id>` to resume, same `--model`, permission and `--add-dir`
-flags.
+`--conversation <id>` to resume, same `--model` and `--add-dir` flags;
+`--dangerously-skip-permissions` follows `config.skip_permissions`.
 
 **The launch folder** carries instructions and hooks with nothing written to
 `~/.gemini` and no hook file in the checkout root:
-`<launch cwd>/.lf/prompts/<stamp>-antigravity/.agents/`
+`<launch cwd>/.lf/prompts/<stamp>-<rand>-antigravity/.agents/`
 
 - `AGENTS.md`: `system_prompt_with_structured_replies(config)`.
 - `hooks.json` + a hook script: only when the launch has a
@@ -420,8 +424,8 @@ user-facing contract.
 - Names only: `README.md`, `docs/index.md`, `docs/getting-started.md`,
   `docs/glossary.md`, `skills/loopflow/README.md`, builtin `init.md`
   (`command -v … pi agy`).
-- Left for slice 5: `harness/README.md` (its rows name tests that do not
-  exist yet), `swift/README.md`, `docs/dev/*`.
+- Left for slice 5: `harness/README.md`'s five-column tables (its rows name
+  tests that do not exist yet), `swift/README.md`, `docs/dev/*`.
 
 Details the docs settled, for the build to match or correct:
 
@@ -469,12 +473,8 @@ Details the docs settled, for the build to match or correct:
 - `Capabilities::classifies_failures` and the early return in
   `_run_with_retries` (done).
 - `_find_provider_error` (done).
-- `_classify_agent_failure` and the `harness` argument it took: nothing reads
-  a failure out of `result.stderr`.
-- The `AgentFailure::from_code` call in `drive::run`.
-- `check_cli_available`: `replay.rs`, `ops/recovery.rs` and
-  `start_on_installed_agent` ask `HarnessKind::installed()`. Its path tests
-  already belong to `os_process::which_on_path`.
+- `_classify_agent_failure`, the `AgentFailure::from_code` call in
+  `drive::run` and `check_cli_available` (done).
 - The `agent_id` check in `emit_block` (now the default `hook_callback`).
 - README rows "no: failures unclassified (LOO-518)" and "(Task 98edc6)", and
   the sentence "A 'no' for OpenCode or Pi means the step stops with the
@@ -542,7 +542,7 @@ is unchanged line for line.
 4. **The terminal.** `open` (`-i`, trust setting, resume), bare thread report
    through `reported_thread_path`, `recognizes` (`agy` or `antigravity`),
    launch matrix chat and work-session cells.
-5. **Names.** Every list in "Left to build" 6, Swift, docs, `skills/loopflow`,
+5. **Names.** Every list in "Left to build" 5, Swift, docs, `skills/loopflow`,
    README tables with five columns.
 
 ## Not checked

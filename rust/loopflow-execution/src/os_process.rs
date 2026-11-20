@@ -294,7 +294,7 @@ pub fn execution_context() -> Result<loopflow_storage::child::ChildExecutionCont
 /// Where the tools lf starts live (providers, `gh`, `git`, `node`). launchd,
 /// systemd and an SSH command give lf a `PATH` holding none of them; a
 /// terminal's usually holds all of them.
-pub const TOOL_DIRS: [&str; 6] = [
+const TOOL_DIRS: [&str; 6] = [
     "~/.local/bin",
     "/opt/homebrew/bin",
     "/opt/homebrew/sbin",

@@ -336,14 +336,14 @@ exit "$result""#.into(),
         match self.wait(Duration::from_secs(30)) {
             Ok(()) => receipt.status = OpenStatus::Usable,
             Err(error) => {
+                let reason = format!("{error:#}");
                 tracing::warn!(
                     url = receipt.url,
                     destination = receipt.destination.as_deref().unwrap_or_default(),
-                    error = format!("{error:#}"),
+                    error = %reason,
                     "lf open: the conversation did not attach"
                 );
                 receipt.status = OpenStatus::Failed;
-                let reason = format!("{error:#}");
                 receipt.reason = Some(format!(
                     "{}; retry the same command",
                     reason.trim_end().trim_end_matches('.')

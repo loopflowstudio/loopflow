@@ -2279,12 +2279,9 @@ fn acknowledge_open() {
     answer_open("attached");
 }
 
-/// Why this opening failed, for `lf open` to report. The first answer stands:
-/// the launcher's own error beats the output its viewer relayed afterwards.
-fn fail_open(reason: &str) {
-    answer_open(reason);
-}
-
+/// Answer `lf open`: "attached", or why the opening failed. The first answer
+/// stands: the launcher's own error beats the output its viewer relayed
+/// afterwards.
 fn answer_open(answer: &str) {
     let Some(path) = std::env::var_os(OPEN_RECEIPT_ENV) else {
         return;
@@ -2316,23 +2313,33 @@ fn keep_open_tail(bytes: &[u8]) {
     tail.drain(..excess);
 }
 
-/// Answer an opening this process failed without attaching: its own error,
-/// else what the provider said before exiting. A launcher that ran its
-/// conversation to a clean end leaves the answer to its viewer.
+/// Answer an opening this command failed without attaching: its own error,
+/// else what the provider said before exiting. The pane waits; the receipt
+/// says why. A launcher that ran its conversation to a clean end leaves the
+/// answer to its viewer.
 pub fn end_open(result: &Result<()>, code: u8) {
     let Err(error) = result else {
         return;
     };
+    if std::env::var_os(OPEN_RECEIPT_ENV).is_none() {
+        return;
+    }
+    let reason = format!("{error:#}");
+    tracing::warn!(
+        command = std::env::args().skip(1).collect::<Vec<_>>().join(" "),
+        error = %reason,
+        "conversation opened by lf open failed before attaching"
+    );
     if error
         .downcast_ref::<crate::process::CommandExit>()
         .is_none()
     {
-        return fail_open(&format!("{error:#}"));
+        return answer_open(&reason);
     }
     let tail = OPEN_TAIL
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    fail_open(&open_failure(&String::from_utf8_lossy(&tail), code));
+    answer_open(&open_failure(&String::from_utf8_lossy(&tail), code));
 }
 
 fn open_failure(tail: &str, code: u8) -> String {
@@ -2653,7 +2660,7 @@ pub fn report_exit(code: u8) {
 
 #[cfg(test)]
 mod open_receipt_tests {
-    use super::{acknowledge_open, fail_open, open_failure, OPEN_RECEIPT_ENV};
+    use super::{acknowledge_open, answer_open, open_failure, OPEN_RECEIPT_ENV};
 
     #[test]
     fn the_first_answer_to_an_opening_stands() {
@@ -2661,10 +2668,10 @@ mod open_receipt_tests {
         let dir = tempfile::tempdir().unwrap();
         let receipt = dir.path().join("receipt");
         std::env::set_var(OPEN_RECEIPT_ENV, &receipt);
-        fail_open("'claude' is not installed");
+        answer_open("'claude' is not installed");
         assert!(std::env::var_os(OPEN_RECEIPT_ENV).is_none());
         std::env::set_var(OPEN_RECEIPT_ENV, &receipt);
-        fail_open("relayed tail");
+        answer_open("relayed tail");
         std::env::set_var(OPEN_RECEIPT_ENV, &receipt);
         acknowledge_open();
         assert_eq!(

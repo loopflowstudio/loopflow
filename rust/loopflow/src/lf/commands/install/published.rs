@@ -951,7 +951,7 @@ fn schedule_plist(binary: &Path, logs: &Path, frequency: InstallFrequency) -> St
 }
 
 /// A LaunchAgent running the installed `lf args…` with its install directory
-/// and PATH, logging to `log`; `timing` holds its schedule keys.
+/// first on `PATH`, logging to `log`; `timing` holds its schedule keys.
 fn launch_agent_plist(
     label: &str,
     binary: &Path,

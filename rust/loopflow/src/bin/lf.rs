@@ -1514,18 +1514,7 @@ fn main() -> std::process::ExitCode {
             loopflow_execution::engine::launch::report::<()>(Err(error));
         }
         let code = journal::command_exit_code(&result);
-        // Still set: `lf open` put this command in a pane and it ended before
-        // its conversation attached. The pane waits; the receipt says why.
-        if std::env::var_os(loopflow_execution::transport::OPEN_RECEIPT_ENV).is_some() {
-            if let Err(error) = &result {
-                tracing::warn!(
-                    command = std::env::args().skip(1).collect::<Vec<_>>().join(" "),
-                    error = format!("{error:#}"),
-                    "conversation opened by lf open failed before attaching"
-                );
-            }
-            loopflow_execution::transport::end_open(&result, code);
-        }
+        loopflow_execution::transport::end_open(&result, code);
         loopflow_execution::transport::report_exit(code);
         result
     });

@@ -7,13 +7,7 @@ pub const EXPECTED_MACHINE_ID_ENV: &str = "LF_EXPECTED_MACHINE_ID";
 /// Shell that finds `lf` and npm-installed providers before lf can repair its
 /// own `PATH`: non-interactive SSH skips shell profiles.
 pub fn remote_path() -> String {
-    let dirs: Vec<String> = crate::os_process::TOOL_DIRS
-        .iter()
-        .map(|dir| match dir.strip_prefix("~/") {
-            Some(rest) => format!("$HOME/{rest}"),
-            None => (*dir).to_owned(),
-        })
-        .collect();
+    let dirs = crate::os_process::tool_dirs(std::path::Path::new("$HOME"));
     format!(
         "export PATH=\"$PATH:{}\"; if command -v npm >/dev/null 2>&1; then PATH=\"$PATH:$(npm config get prefix 2>/dev/null)/bin\"; fi",
         dirs.join(":")

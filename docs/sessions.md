@@ -496,8 +496,8 @@ tool call), not a summary. On the harness it already uses, `-a` changes nothing.
 The switch sticks. A Session continues on the provider its latest message ran
 on, so after the Codex turn above a plain `lf resume <session>`, `lf open`,
 Desktop or the phone reopens it on Codex, in Codex's conversation, under a
-Codex account. The Claude conversation stays in the history; switch back with `-a claude`. A Graph
-step that went on to the next provider of `default_agent` moves its Session the
+Codex account. The Claude conversation stays in the history; switch back with
+`-a claude`. A Graph step that went on to the next provider of `default_agent` moves its Session the
 same way.
 
 ## Steer without interrupting

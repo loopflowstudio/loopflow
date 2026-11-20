@@ -138,8 +138,8 @@ A successful conversation open means the Session attached, not just that the
 host created a tab. When it doesn't attach, the opening command fails with the
 reason the conversation gave: lf's own error, or the provider's last words if it
 exited before it was ready. The pane keeps the same text on screen and waits
-for Enter. Correct the cause and retry the same command. Desktop rechecks its pane before opening another;
-a terminal retry attaches one more view, so if attachment completed before the
+for Enter. Correct the cause and retry the same command. Desktop rechecks its
+pane before opening another; a terminal retry attaches one more view, so if attachment completed before the
 reply was lost, `--focus` reveals the first one.
 
 Starting a Task's first conversation needs a harness. With no `default_agent` and

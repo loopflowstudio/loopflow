@@ -105,8 +105,9 @@ lf doctor          # installation and store health
   retries stop (neither restarts the agent or replays input).
 - **Disabled background access**: re-enable Loopflow in macOS System Settings
   (or the Linux user service).
-- **Build mismatch**: run `lf install` (do not start a second `lf server run`
-  by hand).
+- **This Loopflow (…) can't read what the server (…) sent**: the app and the
+  server are different builds. Run `lf install` (do not start a second
+  `lf server run` by hand).
 
 ## "Loopflow server is not running"
 
@@ -190,7 +191,7 @@ grep 'recording gap' ~/.lf/logs/lf.log | tail
 If the server is slow or restarting, turn hooks time out after 2 seconds so
 your conversation never stalls, logging a `recording gap` and a `store-gap`
 entry in history. Steers read directly from the store and retry after 15
-seconds if undelivered. If `lf server status` reports a mismatched build, run
+seconds if undelivered. If `lf server status` reports a protocol revision error, run
 `lf install`; to refresh hooks in an older running Session, quit its agent and
 run `lf resume`.
 

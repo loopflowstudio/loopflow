@@ -1513,7 +1513,10 @@ fn main() -> std::process::ExitCode {
             .downcast_ref::<loopflow_execution::process::CommandExit>()
             .is_none()
         {
-            eprintln!("Error: {error:?}");
+            match loopflow::server::copy::write_refused(&error) {
+                Some(sentence) => eprintln!("{sentence}"),
+                None => eprintln!("Error: {error:?}"),
+            }
         }
     }
     std::process::ExitCode::from(code)

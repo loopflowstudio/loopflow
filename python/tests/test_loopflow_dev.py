@@ -1,6 +1,6 @@
 import importlib.util
+import json
 import plistlib
-import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -18,84 +18,224 @@ finally:
     sys.path.pop(0)
 
 
-@pytest.mark.parametrize("debug", [False, True])
-@pytest.mark.parametrize("private_home,supported", [(False, False), (False, True), (True, True)])
-def test_demo_launch_requires_work_opening_on_selected_runtime(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-    debug: bool,
-    private_home: bool,
-    supported: bool,
-) -> None:
-    app = tmp_path / "Loopflow Dev.app"
-    cli = app / "Contents/MacOS/lf"
-    cli.parent.mkdir(parents=True)
-    selected_home = str(tmp_path / "private-machine") if private_home else ""
-    # Source help succeeds even when main-Machine dispatch cannot open Work.
-    cli.write_text(
+def _write_lf(path: Path, served: dict, opens: str = "any") -> None:
+    """An `lf` that describes `served` and opens repositories on the Machine,
+    in a world (`LF_HOME` set), or anywhere."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    refused = {"any": "false", "world": '[ -z "$LF_HOME" ]', "nowhere": "true"}[opens]
+    path.write_text(
         "#!/bin/sh\n"
-        'case "$*" in *--help*) exit 0;; esac\n'
-        'if [ -n "$LF_AGENT_CALLER$LF_TASK" ]; then exit 9; fi\n'
-        'test "$LF_BIN" = "$0" || exit 9\n'
-        f'test "$LF_HOME" = {shlex.quote(selected_home)} || exit 9\n'
-        f'if [ "{supported}" = "True" ]; then printf \'{{}}\\n\'; exit 0; fi\n'
-        "echo \"error: unrecognized subcommand 'identity'\" >&2\n"
-        "exit 2\n"
+        # An app launch carries no enclosing agent.
+        'if [ -n "$LF_AGENT_CALLER$LF_TASK" ]; then echo "agent context leaked" >&2; exit 9; fi\n'
+        f'if [ "$1 $2" = "server describe" ]; then cat <<\'JSON\'\n{json.dumps(served)}\nJSON\n'
+        "exit 0; fi\n"
+        f"if {refused}; then echo 'store schema is ahead of this lf' >&2; exit 2; fi\n"
+        "printf '{}\\n'\n"
     )
-    cli.chmod(0o755)
-    assert subprocess.run([str(cli), "config", "repository", "--help"]).returncode == 0
+    path.chmod(0o755)
 
+
+WIRE = {"x-revision": 8, "$defs": {"RoadmapTask": {"required": ["id"]}, "Write": {}}}
+CHANGED = {"x-revision": 8, "$defs": {"RoadmapTask": {"required": ["id", "owned_by_you"]}}}
+
+
+@pytest.fixture
+def launcher(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """The launcher with its build, copy and app launch replaced. Returns a
+    function that runs `run` or `run-debug` and reports what was launched."""
+    app = tmp_path / "Loopflow Dev.app"
+    copy = tmp_path / "copy"
+    installed = tmp_path / "installed"
     monkeypatch.setattr(loopflow_dev, "DEV_APP", app)
     monkeypatch.setattr(loopflow_dev, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(loopflow_dev, "COPY_DIR", copy)
     monkeypatch.setattr(loopflow_dev, "_install_dev_app", lambda: None)
     monkeypatch.setattr(loopflow_dev, "_stop_loopflow_app", lambda _: None)
+    # The shell of an agent inside a world: none of it chooses what Dev opens.
     monkeypatch.setenv("LF_AGENT_CALLER", "enclosing-agent")
     monkeypatch.setenv("LF_TASK", "enclosing-task")
     monkeypatch.setenv("LF_BIN", "/unrelated/lf")
-    if private_home:
-        monkeypatch.setenv("LF_HOME", str(tmp_path / "private-machine"))
-    else:
-        monkeypatch.delenv("LF_HOME", raising=False)
+    monkeypatch.setenv("LF_HOME", str(tmp_path / "inherited-world"))
+    monkeypatch.setenv("PATH", f"{installed}:/usr/bin:/bin")
+    launched: dict = {}
 
-    launched = tmp_path / "launched"
+    def copy_machine() -> bool:
+        if launched.get("copy_fails"):
+            print("migration 0142 failed", file=sys.stderr)
+            return False
+        (copy / "home").mkdir(parents=True)
+        (copy / "home/loopflow.db").touch()
+        (copy / "env.json").write_text(json.dumps({"LF_HOME": str(copy / "home")}))
+        launched["copied"] = True
+        return True
 
     def run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess:
         if command[0] == "open":
-            launched.touch()
+            pairs = [command[i + 1] for i, word in enumerate(command) if word == "--env"]
+            launched["env"] = dict(pair.split("=", 1) for pair in pairs)
+            launched["repo"] = command[-1]
         return subprocess.CompletedProcess(command, 0)
 
     def launch(*args: object, **kwargs: object) -> int:
-        launched.touch()
+        launched["env"] = kwargs["env"]
+        launched["repo"] = kwargs["args"][-1]
         return 0
 
+    monkeypatch.setattr(loopflow_dev, "_copy_machine", copy_machine)
     monkeypatch.setattr(loopflow_dev, "run", run)
     monkeypatch.setattr(loopflow_dev, "run_app_bundle_with_log", launch)
-    result = loopflow_dev.cmd_run_debug(tmp_path) if debug else loopflow_dev.cmd_run()
 
-    assert result == (0 if supported else 1)
-    assert launched.exists() == supported
-    if not supported:
-        error = capsys.readouterr().err
-        assert "unrecognized subcommand 'identity'" in error
-        assert "bundled CLI" in error
+    def start(debug: bool, **flags: object) -> tuple[int, dict]:
+        command = loopflow_dev.cmd_run_debug if debug else loopflow_dev.cmd_run
+        return command(**flags), launched
+
+    start.bundled = app / "Contents/MacOS/lf"
+    start.installed = installed / "lf"
+    start.copy = copy
+    start.launched = launched
+    return start
+
+
+@pytest.mark.parametrize("debug", [False, True])
+def test_a_branch_that_speaks_the_installed_wire_opens_the_machine(
+    launcher, capsys: pytest.CaptureFixture[str], debug: bool
+) -> None:
+    _write_lf(launcher.bundled, WIRE)
+    _write_lf(launcher.installed, WIRE)
+
+    result, launched = launcher(debug)
+
+    assert result == 0
+    assert "Opening the Machine." in capsys.readouterr().out
+    assert "copied" not in launched
+    # The Machine, whatever `LF_HOME` the launching shell carries.
+    assert "LF_HOME" not in launched["env"]
+    assert launched["env"]["LF_BIN"] == str(launcher.bundled)
+
+
+@pytest.mark.parametrize("debug", [False, True])
+def test_a_branch_that_changes_the_wire_opens_a_copy_and_names_the_types(
+    launcher, capsys: pytest.CaptureFixture[str], debug: bool
+) -> None:
+    _write_lf(launcher.bundled, CHANGED)
+    _write_lf(launcher.installed, WIRE)
+
+    result, launched = launcher(debug)
+
+    assert result == 0
+    said = capsys.readouterr().out
+    assert "This branch changes what the server sends (RoadmapTask, Write)." in said
+    assert "Opening a copy of the Machine from " in said
+    assert "changes are refused there." in said
+    assert launched["env"]["LF_HOME"] == str(launcher.copy / "home")
+    assert launched["env"]["LF_BIN"] == str(launcher.bundled)
+
+
+def test_a_store_the_branch_cannot_open_opens_a_copy_and_says_why(
+    launcher, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _write_lf(launcher.bundled, WIRE, opens="world")
+    _write_lf(launcher.installed, WIRE)
+
+    result, launched = launcher(False)
+
+    assert result == 0
+    said = capsys.readouterr().out
+    assert "store schema is ahead of this lf" in said
+    assert "Opening a copy of the Machine from " in said
+    assert launched["env"]["LF_HOME"] == str(launcher.copy / "home")
+
+
+def test_no_installed_lf_opens_a_copy_and_says_so(
+    launcher, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _write_lf(launcher.bundled, WIRE)
+
+    result, launched = launcher(False)
+
+    assert result == 0
+    assert "No installed lf to compare this branch with." in capsys.readouterr().out
+    assert launched["copied"]
+
+
+def test_copy_opens_a_copy_on_a_branch_that_could_open_the_machine(
+    launcher, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _write_lf(launcher.bundled, WIRE)
+    _write_lf(launcher.installed, WIRE)
+
+    result, launched = launcher(False, copy=True)
+
+    assert result == 0
+    said = capsys.readouterr().out
+    assert "Opening a copy of the Machine from " in said
+    assert "This branch changes" not in said
+    assert launched["env"]["LF_HOME"] == str(launcher.copy / "home")
+
+
+def test_a_copy_that_cannot_be_made_launches_nothing_and_names_the_way_forward(
+    launcher, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _write_lf(launcher.bundled, WIRE, opens="nowhere")
+    _write_lf(launcher.installed, WIRE)
+    launcher.launched["copy_fails"] = True
+
+    result, launched = launcher(False)
+
+    assert result == 1
+    assert "env" not in launched
+    captured = capsys.readouterr()
+    assert "store schema is ahead of this lf" in captured.out
+    assert "migration 0142 failed" in captured.err
+    assert "lf sync main" in captured.err
+
+
+@pytest.mark.parametrize("debug", [False, True])
+def test_world_opens_that_world_and_its_repository(
+    launcher, tmp_path: Path, capsys: pytest.CaptureFixture[str], debug: bool
+) -> None:
+    world = tmp_path / "w1"
+    (world / "repo").mkdir(parents=True)
+    env = {"LF_HOME": str(world / "home"), "PATH": f"{world}/bin:/usr/bin:/bin"}
+    (world / "env.json").write_text(json.dumps(env))
+    _write_lf(launcher.bundled, CHANGED, opens="world")
+
+    result, launched = launcher(debug, world=world)
+
+    assert result == 0
+    assert f"Opening the world at {world}." in capsys.readouterr().out
+    assert "copied" not in launched
+    assert launched["env"]["LF_HOME"] == str(world / "home")
+    assert launched["env"]["PATH"] == env["PATH"]
+    assert launched["repo"] == str(world / "repo")
+
+
+def test_a_world_the_bundled_lf_cannot_open_launches_nothing(
+    launcher, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    world = tmp_path / "w1"
+    (world / "repo").mkdir(parents=True)
+    (world / "env.json").write_text(json.dumps({"LF_HOME": str(world / "home")}))
+    _write_lf(launcher.bundled, WIRE, opens="nowhere")
+
+    result, launched = launcher(False, world=world)
+
+    assert result == 1
+    assert "env" not in launched
+    assert "store schema is ahead of this lf" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize(
     "failure", [FileNotFoundError("missing helper"), subprocess.TimeoutExpired("lf", 30)]
 )
-def test_repository_opening_reports_unavailable_helper(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-    failure: Exception,
+def test_an_unavailable_bundled_lf_is_the_refusal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: Exception
 ) -> None:
     def fail(*args: object, **kwargs: object) -> None:
         raise failure
 
     monkeypatch.setattr(loopflow_dev.subprocess, "run", fail)
-    assert not loopflow_dev._check_repository_opening(tmp_path)
-    assert str(failure) in capsys.readouterr().err
+    assert loopflow_dev._repository_refusal(tmp_path) == str(failure)
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="plutil rewrites the bundle plist")

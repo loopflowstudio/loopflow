@@ -36,8 +36,9 @@ To see a server whose executable was replaced under it: copy the build to
 three paths (`lf`, `client`, `lf-b` with appended bytes), start the server
 from `lf` with `LF_BIN` naming that path (`lf install server`, or
 `lf server run`), then `rm lf && cp lf-b lf`. Drive the old server with
-`client`, the unreplaced copy of its build: the replaced path is another
-build, and the server answers it "uses another executable". A live holder
+`client`, the unreplaced copy of its build. The replaced path is another
+build: its `lf server status` still reports `ready`, with an
+`executable_sha256` that is not its own. A live holder
 keeps serving new terminals; stop it (the `lf holder run` under your `bin/`
 path) and the next `lf desktop shell <task> --checkout <path> --id <id>
 --create` fails naming both builds. `lf install server` from the replaced

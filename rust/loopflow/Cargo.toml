@@ -135,7 +135,7 @@ bytes = "1"
 futures-util = "0.3"
 libc = "0.2"
 reqwest = { version = "0.13", features = ["blocking", "json", "stream"] }
-rusqlite = { version = "0.40", features = ["backup", "bundled", "hooks", "trace"] }
+rusqlite = { version = "0.43", features = ["backup", "bundled", "hooks", "trace"] }
 fs2 = "0.4"
 time = { version = "0.3", features = ["formatting", "parsing", "serde"] }
 tokio = { version = "1", features = ["io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }

@@ -11,6 +11,51 @@ td,th{padding:.3em .6em;border-bottom:1px solid #eee;text-align:left;vertical-al
 <h1>LOO-995 QA: Waves without chapters</h1>
 <p>Branch <code>lf</code> (debug, <code>79bbf78d6</code> plus this step's fixes) on private homes under <code>/tmp/lf-qa-995</code>, every command with <code>LF_*</code> cleared and stdin closed. Returning-user state was written by an <code>lf</code> built from stack base <code>c2beea658a</code> (LOO-938). The installed 0.16.0 is newer than that base, so the branch refuses its stores ("migration task_conversation_recovery is unknown").</p>
 
+<h2>Pass 2 (07ff7bfd4: slice 5, realign, compress)</h2>
+<p>Branch <code>lf</code> at <code>07ff7bfd4</code> on fresh private homes <code>/tmp/lf-qa-995b</code> (first visit) and <code>/tmp/lf-qa-995r</code> (returning, written by stack base <code>c2beea658a</code>). Stand-in <code>claude</code> runs <code>cat &gt; /dev/null</code> so a skill step stays live.</p>
+
+<h3>A. Interrupting a live Task Graph <span class="ok">works</span></h3>
+<pre>$ lf wave create billing            # 0 projects rows
+$ lf task create 'Bill monthly' --wave billing   # joins new Project billing · started
+$ lf task run 8f360d                # Graph qa: cmd help task, step hang
+  latest Graph: Step … is running hang
+$ lf task interrupt 8f360d
+8f360d: stopped Graph qa at hang
+graph log:  Graph qa interrupted at hang.
+            Task run interrupted; not starting it again.
+task status: Graph qa: stopped at hang · hang: process exited with status 130</pre>
+<p><code>--json</code> receipt: <code>{"kind":"interrupt","work":{"kind":"task",…},"target":"stopped Graph qa at hang"}</code>. After <code>lf task hold 8f360d</code> a further interrupt answers <code>has no live run; nothing to stop. Scheduled automation is off.</code>. <code>project_events</code>, <code>project_transitions</code>, <code>metric_*</code>: 0 rows.</p>
+
+<h3>B. Moving a Task to a new Wave <span class="ok">works</span></h3>
+<pre>$ lf task move 8f360d --wave ops
+task_8f360d…: membership saved
+lf wave status ops:      Project   ops (proj_3dcc…) · started
+lf wave status billing:  Project   billing (proj_9b67…) · started   # stays, now empty</pre>
+
+<h3>C. Returning user from the stack base <span class="ok">works</span></h3>
+<p>Base <code>lf</code>: <code>wave create billing</code>, a Task run to done, <code>--wave billing wave update-project --file krs.json</code> (one KR), <code>wave edit-project billing --name 'Billing v1'</code>, a second Task:</p>
+<pre>  Project   Billing v1 (proj_6191…) · current · started
+  [ ] Invoices export in under 1s</pre>
+<p>Branch on the same home:</p>
+<pre>  Project   Billing v1 (proj_6191…) · started
+  8ccc55  unstarted   —   Second old task  ready
+  718e82  unstarted   —   New after upgrade  ready      # new Task joins Billing v1
+lf machine doctor:  ok store  selected database is compatible with this build</pre>
+<p>The KR text is still in <code>projects.krs</code> (54 bytes); the store health check passes over it. Task interrupts use the same <code>task_events</code> rows as on the base, so none need moving.</p>
+
+<h3>Unreached in pass 2</h3>
+<ul>
+<li>Linear Project create/update after compress (<code>content</code> is sent on create; an update reads <code>content</code> only to replace the prose): the shipped binary has no Linear stand-in, and this run doesn't write to the real Linear workspace. Covered only by <code>project_updates_read_content_only_to_replace_observed_prose</code>.</li>
+<li>Desktop: no display.</li>
+</ul>
+
+<h3>Seen in pass 2, present on the base</h3>
+<ul>
+<li>After <code>lf task run</code> approves Auto-Ship (no interactive step left), <code>lf task interrupt</code> stops the Graph, and the next read's recovery starts <code>lf --task … ship</code>, which runs a fresh Graph. Interrupting three times in this run made three Graph runs. <code>lf task hold</code> stops it. The interrupt doc says it stops "scheduled automation" too. The branch doesn't change this path: the callers are the same as on <code>c2beea658a</code>.</li>
+<li>The base's <code>lf -b task run</code> with no server running registered a launchd job for the temporary home. I removed it.</li>
+</ul>
+
+<h2>Pass 1 (79bbf78d6)</h2>
 <h2>1. First visit: <code>lf wave create</code> makes no Project <span class="ok">works</span></h2>
 <pre>$ lf wave create billing
 Added Wave billing; committed .lf/wave/billing on /private/tmp/lf-qa-995/repo (426aeada37)

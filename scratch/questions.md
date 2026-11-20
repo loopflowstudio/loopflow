@@ -73,3 +73,7 @@ Each choice below was made headless and is reversible before release.
   - `lf wave plan <wave>` prints JSON with or without `--json`, on a TTY
     too; the base does the same.
 
+- **QA pass 2 (07ff7bfd4, 2026-11-20):** on an Auto-Ship-approved Task,
+  `lf task interrupt` stops the live Graph, then recovery's `lf --task <id> ship`
+  starts a fresh one (three interrupts, three Graph runs); `lf task hold`
+  stops it. Same callers on stack base `c2beea658a`; not this branch's.

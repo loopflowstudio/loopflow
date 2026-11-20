@@ -116,7 +116,7 @@ What is in the tree:
   `harness/common.rs`.
 - The launch matrix has an Antigravity Batch cell.
 - `harness/README.md`: the limits row is "yes" for OpenCode and Pi and
-  `classify_failure` has its own row. Its tables still have four columns.
+  `classify_failure` has its own row.
 
 Slice 2, a worker hears lf (2026-11-20):
 
@@ -135,8 +135,7 @@ Slice 2, a worker hears lf (2026-11-20):
   call gets "This Session" and its Task, the call after the tool gets the
   steer, and the stand-in fails the run if a subagent's hook is answered with
   anything.
-- The launch matrix's Antigravity Worker cell runs; the skip is now only for
-  the two terminal cells (slice 4).
+- The launch matrix's Antigravity Worker cell runs.
 - Run at realign (2026-11-20), both ok: `cargo test -p loopflow-execution
   --lib -- harness::antigravity harness::launch_matrix` (14 passed) and
   `cargo test -p loopflow --lib
@@ -238,8 +237,6 @@ What slice 3 taught (from 25 real transcripts on this Machine):
   Running exactly while a tool or a model call is outstanding. A
   `USER_INPUT` that arrives while a tool is unanswered marks the turn
   interrupted.
-- `each_turn_is_one_run_that_continues_the_conversation_agy_named` took over
-  60 s in that run; not looked into.
 
 Slice 4, the terminal (2026-11-20):
 
@@ -302,6 +299,29 @@ Slice 5, names (2026-11-20):
   to every PATH, so no fixture here ever has exactly one harness; it fails the
   same way without this change) and the Swift suite
   (`scripts/test_desktop.sh --filter SessionsStoreTests`).
+
+After the merge of main (c7f2724, the `loopflow-harness` split; 30 files
+touched on both sides), 2026-11-20:
+
+- Run on the merged tree, all ok: `cargo test -p loopflow-harness` (90
+  passed); `cargo test -p loopflow-execution --lib -- harness::antigravity
+  harness::launch_matrix harness::conformance_tests agent::tests::` (52
+  passed); `cargo test -p loopflow --lib --
+  task_graph_launch_tests::a_task_step_runs_as_a_worker_on_every_harness
+  task_graph_launch_tests::a_worker_stops_on_interrupt`; `cargo test -p
+  loopflow --test session_launch_contract -- opencode`. Clippy was not run
+  after the merge; gate or CI runs it.
+- `a_worker_stops_on_interrupt_…_on_opencode_and_pi` failed at least 9 runs of 11
+  here with attempts `["failed", "interrupted"]`: "opencode_error:
+  json.decoder.JSONDecodeError: Extra data: line 1 column 187". `lf task run`
+  starts the Task's own conversation (`lf holder run`, the OpenCode TUI) and
+  the worker's `opencode run` within the same millisecond; both stand-in
+  processes rewrote `native-opencode-config.json` and one read the other's
+  half-written copy. The stand-in file is the same on main; nothing in this
+  branch's diff reaches it. Fixed in `tests/support/opencode_cli.py`: that
+  file is gone (nothing else read it) and the sessions, locations and model
+  files are written whole by rename. `antigravity_cli.py` writes
+  `agy-steps.json` the same way. After: 7 of 7 ok.
 
 ## Left to build
 
@@ -620,14 +640,14 @@ Details the docs settled, for the build to match or correct:
 - `_find_provider_error` (done).
 - `_classify_agent_failure`, the `AgentFailure::from_code` call in
   `drive::run` and `check_cli_available` (done).
-- The `agent_id` check in `emit_block` (done: `HookCallback::plain`).
+- The `agent_id` check in `emit_block` (done: the trait's default
+  `hook_callback` holds it).
 - README rows "no: failures unclassified (LOO-518)" and "(Task 98edc6)", and
   the sentence "A 'no' for OpenCode or Pi means the step stops with the
-  provider's error (limits)". Those two Tasks close with this change.
-- Every `Command::new(kind.as_str())` and `["claude", "codex", "opencode",
-  "pi"]` literal that `HarnessKind::ALL` or `program()` can answer: the Swift
-  picker reads its list from the wire if one already carries it, else gains
-  the fifth name.
+  provider's error (limits)" (done). Those two Tasks close with this change.
+- Every `["claude", "codex", "opencode", "pi"]` literal that
+  `HarnessKind::ALL` or `program()` can answer (done; the Swift picker gained
+  the fifth name).
 
 What must survive: Pi and OpenCode still retry their own transient failures
 (`routing_failure`, not `provider_failure`); Claude and Codex classification

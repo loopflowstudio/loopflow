@@ -12,12 +12,18 @@ from pathlib import Path
 
 HOME = Path(__file__).resolve().parent.parent
 SESSIONS = HOME / "native-sessions.json"
-SERVER_CONFIG = HOME / "native-opencode-config.json"
 LOCATIONS = HOME / "native-locations.json"
 
 
+def _write(path, value):
+    """Whole or not at all: a Task's conversation and its worker launch at once."""
+    partial = path.with_name(f"{path.name}.{os.getpid()}")
+    partial.write_text(json.dumps(value))
+    partial.replace(path)
+
+
 def _save(sessions):
-    SESSIONS.write_text(json.dumps(sessions))
+    _write(SESSIONS, sessions)
     _store(sessions)
 
 
@@ -62,7 +68,7 @@ def _record_launch():
                 "cwd": os.getcwd(),
                 "participant": os.environ.get("LF_USER_NAME"),
                 "opencode": json.dumps(CONFIG),
-                "server": json.loads(SERVER_CONFIG.read_text()),
+                "server": CONFIG,
                 "model": json.loads((HOME / "native-model.json").read_text())
                 if (HOME / "native-model.json").exists()
                 else None,
@@ -286,7 +292,6 @@ def _flag(name):
 if "--version" in sys.argv:
     raise SystemExit(0)
 CONFIG = json.loads(os.environ.get("OPENCODE_CONFIG_CONTENT", "{}"))
-SERVER_CONFIG.write_text(json.dumps(CONFIG))
 sessions = json.loads(SESSIONS.read_text()) if SESSIONS.exists() else {}
 locations = json.loads(LOCATIONS.read_text()) if LOCATIONS.exists() else {}
 # `--session` names the conversation to continue, or to create.
@@ -294,10 +299,10 @@ session = _flag("--session") or "ses_" + uuid.uuid4().hex
 assert session.startswith("ses"), session
 sessions.setdefault(session, [])
 locations[session] = os.getcwd()
-LOCATIONS.write_text(json.dumps(locations))
+_write(LOCATIONS, locations)
 if model := _flag("--model"):
     provider, _, name = model.partition("/")
-    (HOME / "native-model.json").write_text(json.dumps({"providerID": provider, "id": name}))
+    _write(HOME / "native-model.json", {"providerID": provider, "id": name})
 _save(sessions)
 if "run" not in sys.argv:
     _record_launch()

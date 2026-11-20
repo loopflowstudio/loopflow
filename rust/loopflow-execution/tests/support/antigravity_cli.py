@@ -223,7 +223,10 @@ def main():
         },
     )
     steps[conversation] = step + 2
-    STEPS.write_text(json.dumps(steps))
+    # Whole or not at all: a Task's conversation and its worker launch at once.
+    partial = STEPS.with_name(f"{STEPS.name}.{os.getpid()}")
+    partial.write_text(json.dumps(steps))
+    partial.replace(STEPS)
 
 
 if __name__ == "__main__":

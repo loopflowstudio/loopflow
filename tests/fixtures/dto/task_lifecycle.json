@@ -166,6 +166,7 @@
         "work_id": "task_9d1de6a17408459aa2db78181c5fb02a"
       },
       "section": "done",
+      "owned_by_you": false,
       "task": {
         "tracker_state": {
           "synced_at": 1793156337,
@@ -767,6 +768,7 @@
           "work_id": "task_9d1de6a17408459aa2db78181c5fb02a"
         },
         "section": "done",
+        "owned_by_you": false,
         "task": {
           "tracker_state": {
             "synced_at": 1793156337,
@@ -1128,6 +1130,7 @@
         "work_id": "task_9d1de6a17408459aa2db78181c5fb02a"
       },
       "section": "done",
+      "owned_by_you": false,
       "task": {
         "tracker_state": {
           "synced_at": 1793156337,
@@ -1703,6 +1706,7 @@
           "work_id": "task_9d1de6a17408459aa2db78181c5fb02a"
         },
         "section": "done",
+        "owned_by_you": false,
         "task": {
           "tracker_state": {
             "synced_at": 1793156337,
@@ -2064,6 +2068,7 @@
         "work_id": "task_9d1de6a17408459aa2db78181c5fb02a"
       },
       "section": "working",
+      "owned_by_you": false,
       "task": {
         "tracker_state": {
           "synced_at": 1793156337,
@@ -2597,6 +2602,7 @@
           "work_id": "task_9d1de6a17408459aa2db78181c5fb02a"
         },
         "section": "working",
+        "owned_by_you": false,
         "task": {
           "tracker_state": {
             "synced_at": 1793156337,

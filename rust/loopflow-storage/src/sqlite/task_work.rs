@@ -922,7 +922,8 @@ impl SqliteStore {
 
     /// Count one more start of the Task's run, if it still stands where the
     /// caller read it, carried by the `carrier` that died. Returns false,
-    /// writing nothing, when another start or a new carrier came first.
+    /// writing nothing, when the carrier recorded its own exit or another
+    /// start came first.
     pub fn count_task_run_restart(
         &self,
         task: &TaskId,
@@ -932,7 +933,8 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn.execute(
             "UPDATE task_graphs SET restarts=restarts+1,restarted_at=?4
-             WHERE task_id=?1 AND lf_process_id=?2 AND restarts=?3",
+             WHERE task_id=?1 AND lf_process_id=?2 AND restarts=?3
+               AND (run_pid IS NOT NULL OR run_died_at IS NOT NULL)",
             rusqlite::params![
                 task.as_str(),
                 carrier.as_str(),

@@ -52,6 +52,7 @@
       "reason": "Linear Task is canceled"
     },
     "section": "abandoned",
+    "owned_by_you": false,
     "graph_name": "feature",
     "latest_graph_process": null,
     "execution": null,
@@ -118,6 +119,7 @@
       "reason": "Linear Task is canceled"
     },
     "section": "abandoned",
+    "owned_by_you": false,
     "graph_name": "feature",
     "latest_graph_process": null,
     "execution": null,
@@ -184,6 +186,7 @@
       "reason": "Linear Task is canceled"
     },
     "section": "abandoned",
+    "owned_by_you": false,
     "graph_name": "feature",
     "latest_graph_process": null,
     "execution": null,
@@ -250,6 +253,7 @@
       "reason": "Linear Task is canceled"
     },
     "section": "abandoned",
+    "owned_by_you": false,
     "graph_name": "feature",
     "latest_graph_process": null,
     "execution": null,
@@ -316,6 +320,7 @@
       "reason": "Linear Task is canceled"
     },
     "section": "abandoned",
+    "owned_by_you": false,
     "graph_name": "feature",
     "latest_graph_process": null,
     "execution": null,
@@ -382,6 +387,7 @@
       "reason": "Linear Task is canceled"
     },
     "section": "abandoned",
+    "owned_by_you": false,
     "graph_name": "feature",
     "latest_graph_process": null,
     "execution": null,
@@ -448,6 +454,7 @@
       "reason": "Linear Task is canceled"
     },
     "section": "abandoned",
+    "owned_by_you": false,
     "graph_name": "feature",
     "latest_graph_process": null,
     "execution": null,
@@ -514,6 +521,7 @@
       "reason": "Task is ready to start"
     },
     "section": "backlog",
+    "owned_by_you": false,
     "graph_name": "feature",
     "latest_graph_process": null,
     "execution": null,
@@ -581,6 +589,7 @@
       "reason": "Task is ready to start"
     },
     "section": "backlog",
+    "owned_by_you": false,
     "graph_name": "feature",
     "latest_graph_process": null,
     "execution": null,
@@ -648,6 +657,7 @@
       "reason": "Task is ready to start"
     },
     "section": "backlog",
+    "owned_by_you": false,
     "graph_name": "feature",
     "latest_graph_process": null,
     "execution": null,
@@ -715,6 +725,7 @@
       "reason": "Task is ready to start"
     },
     "section": "backlog",
+    "owned_by_you": false,
     "graph_name": "feature",
     "latest_graph_process": null,
     "execution": null,
@@ -782,6 +793,7 @@
       "reason": "Linear Task is complete"
     },
     "section": "done",
+    "owned_by_you": false,
     "graph_name": "feature",
     "latest_graph_process": null,
     "execution": null,
@@ -848,6 +860,7 @@
       "reason": "Linear Task is complete"
     },
     "section": "done",
+    "owned_by_you": false,
     "graph_name": "feature",
     "latest_graph_process": null,
     "execution": null,
@@ -914,6 +927,7 @@
       "reason": "Linear Task is complete"
     },
     "section": "done",
+    "owned_by_you": false,
     "graph_name": "feature",
     "latest_graph_process": null,
     "execution": null,
@@ -980,6 +994,7 @@
       "reason": "Task is ready to start"
     },
     "section": "backlog",
+    "owned_by_you": false,
     "graph_name": "feature",
     "latest_graph_process": null,
     "execution": null,
@@ -1047,6 +1062,7 @@
       "reason": "Linear Task is canceled"
     },
     "section": "abandoned",
+    "owned_by_you": false,
     "graph_name": "feature",
     "latest_graph_process": null,
     "execution": null,

@@ -1,5 +1,6 @@
 {
   "name": "study",
+  "description": null,
   "source": null,
   "compiled": {
     "name": "study",
@@ -115,6 +116,8 @@
     ]
   },
   "unavailable": null,
+  "included_by": [],
+  "runs": "task",
   "composition": {
     "revision": "fixture-study-composition",
     "items": [

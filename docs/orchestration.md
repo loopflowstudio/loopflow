@@ -235,6 +235,31 @@ lf graph customize feature                # writes .lf/graphs/feature.yaml
 lf --wave product set wave.graph feature  # personal override without committing
 ```
 
+### Describe a Graph
+
+```yaml
+# .lf/graphs/ship-api.yaml
+description: Build the endpoint, audit it, then deliver.
+steps:
+- implement
+- audit
+- interactive: demo
+- graph: deliver
+```
+
+```console
+$ lf graph list
+code       Build, deliver and verify. You review the change, then check it on main.
+my-graph
+ship-api   Build the endpoint, audit it, then deliver.
+```
+
+`description:` is one line saying what running the Graph gets you. Desktop's
+Start menu shows it beside the Graph's name, with a stop count taken from its
+`interactive:` steps. Every builtin has one. A Graph without it, written as a
+bare list of steps, still runs and still lists; Start offers it under
+**More ›**.
+
 ### Auto
 
 Auto is a setting on the Task: on, off, or never set. While it is on, the

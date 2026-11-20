@@ -51,7 +51,6 @@ public enum ServedRead: Equatable, Sendable, Encodable {
     case machineSelf
     case desktopPortfolio
     case configSettings(directory: String, wave: String?, skill: String?, graph: String?, step: String?)
-    case repoPeople(directory: String)
     case graphList(directory: String)
     case desktopViewGet(directory: String, expression: String?)
     case taskRuns(directory: String, task: String, after: String?)
@@ -131,8 +130,6 @@ public enum ServedRead: Equatable, Sendable, Encodable {
             return ["config", "settings", "--json"] + (wave.map { ["--wave", $0] } ?? [])
                 + (skill.map { ["--skill", $0] } ?? []) + (graph.map { ["--graph", $0] } ?? [])
                 + (step.map { ["--step", $0] } ?? [])
-        case .repoPeople:
-            return ["repo", "people", "--json"]
         case .graphList:
             return ["graph", "list", "--json"]
         case .desktopViewGet(_, let expression):
@@ -229,7 +226,6 @@ public enum ServedRead: Equatable, Sendable, Encodable {
         case .desktopPortfolio: TaggedFields("desktop.portfolio")
         case .configSettings(let directory, let wave, let skill, let graph, let step):
             TaggedFields("config.settings", ["directory": directory, "wave": wave, "skill": skill, "graph": graph, "step": step])
-        case .repoPeople(let directory): TaggedFields("repo.people", ["directory": directory])
         case .graphList(let directory): TaggedFields("graph.list", ["directory": directory])
         case .desktopViewGet(let directory, let expression):
             TaggedFields("desktop.view.get", ["directory": directory, "expression": expression])
@@ -283,7 +279,7 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
     case taskComplete(directory: String, issue: String)
     case taskReopen(directory: String, issue: String)
     case taskAbandon(directory: String, issue: String)
-    case taskUpdate(directory: String, issue: String, notes: String)
+    case taskUpdate(directory: String, issue: String, notes: String?, rank: Int?)
     case taskClaim(directory: String, issue: String)
     case taskUnassign(directory: String, issue: String)
     /// Start the Task's run detached; `approve` runs every step headless to
@@ -388,7 +384,9 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
         case .taskComplete(_, let issue): return ["task", "complete", issue, "--json"]
         case .taskReopen(_, let issue): return ["task", "reopen", issue, "--json"]
         case .taskAbandon(_, let issue): return ["task", "abandon", issue, "--json"]
-        case .taskUpdate(_, let issue, let notes): return ["task", "update", issue, "--notes=\(notes)", "--json"]
+        case .taskUpdate(_, let issue, let notes, let rank):
+            return ["task", "update", issue] + (notes.map { ["--notes=\($0)"] } ?? [])
+                + (rank.map { ["--rank=\($0)"] } ?? []) + ["--json"]
         case .taskClaim(_, let issue): return ["task", "claim", issue, "--json"]
         case .taskUnassign(_, let issue): return ["task", "unassign", issue, "--json"]
         case .taskRun(_, let issue, let graph, let from, let agent, let approve):
@@ -567,8 +565,8 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
             TaggedFields("task.reopen", ["directory": directory, "issue": issue])
         case .taskAbandon(let directory, let issue):
             TaggedFields("task.abandon", ["directory": directory, "issue": issue])
-        case .taskUpdate(let directory, let issue, let notes):
-            TaggedFields("task.update", ["directory": directory, "issue": issue, "notes": notes])
+        case .taskUpdate(let directory, let issue, let notes, let rank):
+            TaggedFields("task.update", ["directory": directory, "issue": issue, "notes": notes, "rank": rank])
         case .taskClaim(let directory, let issue):
             TaggedFields("task.claim", ["directory": directory, "issue": issue])
         case .taskUnassign(let directory, let issue):
@@ -1099,12 +1097,6 @@ public struct RegistryQuery: Sendable {
         return try Self.decode([GraphCatalogEntry].self, from: stdout)
     }
 
-    /// The repository's Task owners with their GitHub users; lf caches each email's lookup.
-    public func repoPeople(cwd: String?) async throws -> [RepoPerson] {
-        let stdout = try await serve(.repoPeople(directory: cwd ?? "/"))
-        return try Self.decode([RepoPerson].self, from: stdout)
-    }
-
     public func customizeGraph(_ name: String, cwd: String?) async throws -> String {
         // Without a repository it customizes from `/`, where the app runs.
         struct Customized: Decodable { let path: String }
@@ -1119,12 +1111,13 @@ public struct RegistryQuery: Sendable {
     }
 
     /// New Task: Rust files the request in `wave` (nil files it in the
-    /// repository) and admits its conversation with the request as the first
-    /// turn. Returns once both are recorded; the conversation makes the
-    /// checkout and starts the Graph.
-    public func createTask(request: String, wave: String?, graph: String?, cwd: String?, requestID: String = UUID().uuidString) async throws -> TaskCreated {
+    /// repository). With `run` it also admits its conversation with the request
+    /// as the first turn and returns once both are recorded; the conversation
+    /// makes the checkout and starts the Graph. Without, the Task is filed
+    /// unstarted and nothing runs.
+    public func createTask(request: String, wave: String?, graph: String?, run: Bool, cwd: String?, requestID: String = UUID().uuidString) async throws -> TaskCreated {
         try Self.decode(TaskCreated.self, from: await write(.taskCreate(directory: cwd ?? "/", requestID: requestID,
-            title: nil, request: request, wave: wave, graph: graph, session: nil, run: true)))
+            title: nil, request: request, wave: wave, graph: graph, session: nil, run: run)))
     }
 
     /// The graph a new Task in `wave`, or the repository when nil, would take up.
@@ -1169,7 +1162,13 @@ public struct RegistryQuery: Sendable {
     }
 
     public func updateTaskDirective(id: String, text: String, cwd: String) async throws {
-        _ = try await write(.taskUpdate(directory: cwd, issue: id, notes: text))
+        _ = try await write(.taskUpdate(directory: cwd, issue: id, notes: text, rank: nil))
+    }
+
+    /// `lf task update <issue> --rank=<rank>`: the Task's position in its Project,
+    /// from 0; Rust renumbers its siblings and moves it in Linear.
+    public func rankTask(issue: String, rank: Int, cwd: String) async throws {
+        _ = try await write(.taskUpdate(directory: cwd, issue: issue, notes: nil, rank: rank))
     }
 
     /// One Task's complete patch, or the patch for a selected changed file.

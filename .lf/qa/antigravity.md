@@ -10,7 +10,7 @@ Set up as `.lf/qa/opencode-pi-workers.md` does (repo with a bare origin,
 
 ```bash
 lf task create '<request>' --json < /dev/null
-lf task run <id> -a antigravity < /dev/null   # returns once the Graph registers
+lf task run <id> -a agy < /dev/null   # returns once the Graph registers
 lf steer <id> '<direction>'              # ~15 s in; it lands after the next tool
 lf task wait <id> --until terminal --timeout 150
 lf history usage --task <id>
@@ -59,7 +59,7 @@ Killing only the PTY child leaves a chat's `agy` running: kill it by pid.
 
 # Switching conversations in the TUI
 
-In a worktree from `lf wt create`, `lf default '<prompt>' -a antigravity`
+In a worktree from `lf wt create`, `lf default '<prompt>' -a agy`
 needs no server. Type the command, pause a second, then Enter:
 
 - `/new` (the menu lists it as "/clear (new)"), then a prompt.
@@ -85,16 +85,16 @@ before the answer exists.
 
 # Failures on demand
 
-- Unserved model: `lf set --global agents 'antigravity:no-such-model-xyz,antigravity'`,
+- Unserved model: `lf set --global agents 'agy:no-such-model-xyz,agy'`,
   then `lf task run <id>` with no `-a`. `lf task status` reads "went on under
-  antigravity after: antigravity_error: invalid model selection …" while the
+  agy after: agy_error: invalid model selection …" while the
   step runs; the row is in `agent_limit_recoveries`. Clear
   `$LF_HOME/config.yaml` afterwards: every later launch, a resumed
   conversation included, takes the first agent.
 - Interrupt: `lf task interrupt <id>` mid-step; `turns.status` is
   `interrupted` and no `agy --input-format` process is left.
 - Signed out: give `lf` an empty `HOME` (`HOME=/tmp/…/fakehome lf -b default
-  '…' -a antigravity`; `LF_HOME` stays set). `agy` answers "authentication
+  '…' -a agy`; `LF_HOME` stays set). `agy` answers "authentication
   failed or timed out" and lf prints the sign-in advice. For the move, `lf set
   --global agents 'antigravity,opencode:opencode/gemini-4-carbon'` and add
   `XDG_DATA_HOME=<real home>/.local/share` so OpenCode keeps its login.
@@ -102,7 +102,7 @@ before the answer exists.
   ("Model unavailable: …"); first in `agents`, a Task step goes on under the
   next entry.
 - `--yolo` in the TUI: `lf default 'Run exactly this one shell command …: lf
-  session list' -a antigravity --yolo` in a worktree under the home directory
+  session list' -a agy --yolo` in a worktree under the home directory
   runs `lf` once; without the flag the screen shows the command twice (the
   sandboxed failure, then the retry outside).
 - Not reachable here: a spent quota, a Machine without `agy` (lf's own PATH

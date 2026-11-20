@@ -200,7 +200,18 @@ Review page: `scratch/concept-review.html`.
 
 ## Also in this change: the Antigravity agent is named `agy`
 
-Not built yet. Folded in from Task 4fb4fe, whose kickoff wrote this.
+Built (both slices). Folded in from Task 4fb4fe, whose kickoff wrote this.
+Implement ran `cargo test -p loopflow-harness --lib` (90 pass),
+`-p loopflow-execution --lib harness::` (135 pass), `-p loopflow --lib`
+for the two worker tests and `launch_policy` (8 pass), and
+`documented_commands::` (pass). By hand on a branch build, `lf -a antigravity`
+and `lf set --global agents antigravity` both fail "unsupported agent harness
+'antigravity': use 'claude', 'codex', 'opencode', 'pi', or 'agy'"; `agy` saves.
+Also changed beyond the list: the transcript usage `provider` field reads
+`agy`, and the Antigravity sandbox paragraphs in `docs/config.md` and
+`docs/troubleshooting.md` now say they apply only under `yolo: false`.
+Remaining for gate: Swift `SessionsStoreTests` in CI; the demo needs `agy`
+installed.
 
 A person names the harness by its command, like the other four: `lf -a agy`,
 `agents: [agy, claude]`, `agy:gemini-3.8-flash-high`,

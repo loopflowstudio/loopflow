@@ -256,14 +256,13 @@ tools and does not support cross-harness history transfer.
 ```bash
 brew install --cask antigravity-cli     # installs the `agy` command
 agy                                     # sign in
-lf -a antigravity implement
-lf -b -a antigravity:gemini-3.8-flash-high implement
-lf task run LOO-12 -a antigravity       # every step of the Task
+lf -a agy implement
+lf -b -a agy:gemini-3.8-flash-high implement
+lf task run LOO-12 -a agy               # every step of the Task
 ```
 
-The agent is `antigravity` in `-a`, `agents` and everything lf prints; `agy`
-is only the command it runs. Bare `antigravity` uses the model `agy` is set
-to; `antigravity:<model>` takes a name from `agy models`. Antigravity owns its
+Bare `agy` uses the model `agy` is set to; `agy:<model>` takes a name from
+`agy models`. Antigravity owns its
 sign-in and conversations under `~/.gemini/antigravity-cli`; Loopflow gives
 each launch its instructions and hooks in a folder under the checkout's
 `.lf/prompts/` and writes nothing to `~/.gemini`. A step gets the Task's
@@ -272,14 +271,14 @@ context and hears `lf steer` after its next tool. A spent quota, a signed-out
 
 ```bash
 lf task status LOO-12
-#   implement went on under claude after: antigravity_error: invalid model selection (--model "gemini-9" --effort ""): model gemini-9 is not recognized as a known model or custom model in settings
+#   implement went on under claude after: agy_error: invalid model selection (--model "gemini-9" --effort ""): model gemini-9 is not recognized as a known model or custom model in settings
 ```
 
-In the terminal, `agy` runs commands in its own sandbox, which does not reach
-`~/.lf`. The first `lf` command a conversation runs fails there, and `agy`
-asks "Run this command?" to run it outside: answer `2` to allow `lf` for the
-rest of the conversation. `--yolo` skips the question. A headless step is not
-sandboxed and never asks.
+Under `yolo: false`, `agy` runs terminal commands in its own sandbox, which
+does not reach `~/.lf`. The first `lf` command a conversation runs fails
+there, and `agy` asks "Run this command?" to run it outside: answer `2` to
+allow `lf` for the rest of the conversation. With `yolo` on, the default, and
+on every headless step, nothing is sandboxed and nothing asks.
 
 `/new`, `/fork` and `/resume` in the terminal keep the conversation on lf: the
 one you switch to gets the context block and your steers from its first
@@ -295,7 +294,7 @@ Limit which harnesses appear in pickers (additive across global and repo
 config):
 
 ```yaml
-supported_harnesses: [claude, codex, opencode, pi, antigravity]
+supported_harnesses: [claude, codex, opencode, pi, agy]
 ```
 
 ## Permissions (`yolo`) and worktree access

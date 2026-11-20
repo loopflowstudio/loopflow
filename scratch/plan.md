@@ -90,7 +90,9 @@ part of this one.
 All three slices are on this branch, stacked on LOO-1013 (#1998, open on
 2026-11-20) with `lf sync LOO-1013`; `lf sync main` once it merges.
 
-- `AgentConfig::skips_permissions(Mode)` in `agent/mod.rs` is the one rule.
+- `AgentConfig::skips_permissions(Mode)` in `agent/mod.rs` is the one rule;
+  the field it reads is `AgentConfig.yolo` (recorded requests keep the
+  `skip_permissions` key).
   Claude terminal and Antigravity terminal pass `launch.kind.mode()`, Claude
   stream `Headless`, Codex app-server `Interactive` only with a native client
   attached, Codex terminal and OpenCode `kind.mode()`. Antigravity's headless

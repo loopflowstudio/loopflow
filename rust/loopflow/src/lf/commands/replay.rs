@@ -44,7 +44,7 @@ fn replay_at(home: &std::path::Path, selector: &str) -> Result<String> {
         output_schema: request.output_schema.clone(),
         max_turns: request.max_turns,
         cwd: Some(source.cwd.clone()),
-        skip_permissions: request.skip_permissions,
+        yolo: request.skip_permissions,
         chrome: request.chrome,
         codex_service_tier: request.codex_service_tier,
         ..AgentConfig::new(agent)

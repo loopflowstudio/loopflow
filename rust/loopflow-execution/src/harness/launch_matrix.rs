@@ -164,7 +164,7 @@ fn every_harness_runs_all_four_launch_kinds() {
                         cwd: Some(cwd.into()),
                         system_prompt: "fixed instructions".into(),
                         chrome: Some(true),
-                        skip_permissions: yolo,
+                        yolo,
                         task_prompt: "say hi".into(),
                         conversation_context: Some(crate::context_block::ContextDelivery {
                             identity: None,

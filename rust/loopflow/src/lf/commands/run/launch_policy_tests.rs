@@ -272,7 +272,7 @@ fn launch_bypass_and_chrome_take_the_command_line_then_personal_then_repository(
             let launch = table.launch(&flags).unwrap();
             assert_eq!(launch.config.agent.to_string(), harness);
             assert_eq!(
-                launch.config.skip_permissions, expected,
+                launch.config.yolo, expected,
                 "{harness} yolo: {repository_yolo:?} {flags:?}"
             );
         }
@@ -368,7 +368,7 @@ fn resume_applies_current_policy_and_command_line_overrides() {
                 format!("{provider}:{model}").as_str(),
                 "{row}"
             );
-            assert_eq!(resumed.config.skip_permissions, bypass, "{row}");
+            assert_eq!(resumed.config.yolo, bypass, "{row}");
             if provider == "claude" {
                 assert_eq!(resumed.bypass(), bypass, "{row}");
                 assert_eq!(resumed.chrome(), [chrome], "{row}");

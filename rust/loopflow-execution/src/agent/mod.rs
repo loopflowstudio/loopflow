@@ -180,7 +180,7 @@ pub struct AgentConfig {
     /// Working directory.
     pub cwd: Option<std::path::PathBuf>,
     /// The resolved `yolo` setting. Ask `skips_permissions` what a launch sends.
-    pub skip_permissions: bool,
+    pub yolo: bool,
     /// Graph-runner-injected structured replies (rendered via harness prompt guidance).
     pub structured_replies: Vec<StructuredReply>,
     /// Temp file for relaying shell directives back to the invoking shell.
@@ -210,7 +210,7 @@ impl AgentConfig {
             max_turns: None,
             resume_token: None,
             cwd: None,
-            skip_permissions: false,
+            yolo: false,
             structured_replies: Vec::new(),
             directive_relay: None,
             launch_lock: None,
@@ -221,7 +221,7 @@ impl AgentConfig {
     /// Whether the provider runs without asking permission: `yolo`, or nobody
     /// is attending to answer a prompt.
     pub fn skips_permissions(&self, mode: crate::harness::Mode) -> bool {
-        self.skip_permissions || mode == crate::harness::Mode::Headless
+        self.yolo || mode == crate::harness::Mode::Headless
     }
 
     pub fn apply_agent_override(&mut self) -> Result<(), crate::error::LoadError> {
@@ -260,7 +260,7 @@ impl std::fmt::Debug for AgentConfig {
             .field("max_turns", &self.max_turns)
             .field("resume_token", &self.resume_token)
             .field("cwd", &self.cwd)
-            .field("skip_permissions", &self.skip_permissions)
+            .field("yolo", &self.yolo)
             .field("structured_replies", &self.structured_replies)
             .field("directive_relay", &self.directive_relay)
             .field("launch_lock", &self.launch_lock.is_some())
@@ -1367,7 +1367,7 @@ mod tests {
             (false, Mode::Headless, true),
         ] {
             let launch = AgentConfig {
-                skip_permissions: yolo,
+                yolo,
                 ..default_launch()
             };
             let claude = claude_options(&launch, None, None, mode);
@@ -1471,7 +1471,7 @@ mod tests {
             system_prompt: "Keep the complete context.\n".repeat(6_000),
             cwd: Some(home.path().to_path_buf()),
             agent: crate::config::Agent::parse("claude:sonnet").unwrap(),
-            skip_permissions: true,
+            yolo: true,
             max_turns: Some(5),
             structured_replies: vec![StructuredReply {
                 name: "suggest_actions".into(),
@@ -1903,7 +1903,7 @@ mod tests {
                 agent: crate::config::Agent::parse(agent)
                     .unwrap()
                     .with_configured_model(&config),
-                skip_permissions: true,
+                yolo: true,
                 ..default_launch()
             };
             for args in [

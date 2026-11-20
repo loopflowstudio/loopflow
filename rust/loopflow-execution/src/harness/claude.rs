@@ -748,7 +748,7 @@ mod tests {
                     AgentConfig {
                         agent: crate::config::Agent::parse(settings.agent().unwrap()).unwrap(),
                         chrome: settings.chrome,
-                        skip_permissions: settings.yolo,
+                        yolo: settings.yolo,
                         cwd: Some(home.into()),
                         ..crate::agent::AgentConfig::default()
                     },

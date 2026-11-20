@@ -675,7 +675,7 @@ mod tests {
         let resumed = AgentConfig {
             resume_token: Some("conversation-1".into()),
             task_prompt: String::new(),
-            skip_permissions: true,
+            yolo: true,
             ..config
         };
         assert_eq!(

@@ -1183,7 +1183,7 @@ for line in sys.stdin:
             agent_config: AgentConfig {
                 task_prompt: task.to_string(),
                 cwd: Some(home.path().to_path_buf()),
-                skip_permissions: true,
+                yolo: true,
                 env,
                 ..AgentConfig::new(loopflow_execution::config::Agent::parse("claude").unwrap())
             },
@@ -1301,7 +1301,7 @@ for line in sys.stdin:
                 agent_config: AgentConfig {
                     task_prompt: task.to_string(),
                     cwd: Some(repo.to_path_buf()),
-                    skip_permissions: true,
+                    yolo: true,
                     env,
                     ..AgentConfig::new(loopflow_execution::config::Agent::parse("claude").unwrap())
                 },

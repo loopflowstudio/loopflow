@@ -88,7 +88,7 @@ pub fn resolve_session_config(
             .is_none_or(|harness| harness == provider);
     let mut config = AgentConfig {
         cwd: Some(session.cwd.clone()),
-        skip_permissions: current.yolo,
+        yolo: current.yolo,
         chrome: current.chrome,
         codex_service_tier: current.codex.service_tier,
         output_schema: output_schema.cloned(),

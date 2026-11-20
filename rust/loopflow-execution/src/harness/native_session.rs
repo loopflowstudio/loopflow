@@ -550,25 +550,6 @@ fn run_client(
     let title = &mut client.title;
     // Only an explicit remote connection is a client of a surviving AgentProcess.
     let owned = client.remote.is_none().then_some(&attachment);
-    // Refused before the provider conversation is recorded, so the next launch
-    // starts it fresh instead of resuming one that never ran. A Session's
-    // first launch (`lf resume` starting a repository conversation) names no
-    // Work on its command line; its recorded Session does.
-    if launch.kind.is_managed() {
-        crate::harness::agent_process::require_server()?;
-    }
-    // A provider whose CLI is not on `PATH` never starts either; Claude
-    // answers `--resume` of a conversation it never wrote with "No
-    // conversation found", and the Session could not be opened again.
-    if crate::os_process::which_command(process).is_none() {
-        if let Some(owner) = owned {
-            crate::harness::agent_process::record_missing_provider(process, owner)?;
-        }
-        bail!(missing_agent_message(launch.harness.kind()));
-    }
-    // The receipt names this opening; the provider's own `lf` commands are
-    // not openings, and a failing one must not log as one.
-    process.env_remove(crate::transport::OPEN_RECEIPT_ENV);
     if let (Some(capture_dir), Some(agent_session)) = (capture_dir.as_deref(), agent_session) {
         crate::session_record::write_provider_session(capture_dir, agent_session, None)?;
     }
@@ -585,6 +566,12 @@ fn run_client(
     if crate::transport::current().is_some() {
         // Hand the wait to the execution owner and become the provider, or its
         // client: no launcher sits beside the agent holding the heap that built it.
+        // Becoming the provider leaves nobody to say it failed, and the
+        // announcement below tells the viewer, and an `lf open` behind it, that
+        // the provider started. Refuse first what exec would.
+        if crate::os_process::which_command(process).is_none() {
+            return Err(anyhow!(missing_agent_message(launch.harness.kind())));
+        }
         if let Some(capture) = capture {
             capture.observe_provider(agent_session.cloned());
         }

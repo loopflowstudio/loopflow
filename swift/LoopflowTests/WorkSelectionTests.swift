@@ -28,7 +28,7 @@ struct WorkSelectionTests {
     @Test func everyStateRustSendsDecodes() throws {
         let states = try JSONDecoder().decode(
             [WorkSelectionState].self, from: loadFixtureData("selection_states.json"))
-        #expect(states.contains(.working) && states.contains(.autonomous))
+        #expect(states.contains(.working) && states.contains(.auto))
     }
 
     @Test func queryPlansArriveFromTheirSubscription() throws {
@@ -92,8 +92,8 @@ extension WorkModel {
                       wave: wave, reason: "")
     }
 
-    func applyStartedFixture(working: [String], autonomous: [String] = [], wave: String? = nil, repository: String = "repo") {
-        applyStartedFixture(working.map { ($0, [.working]) } + autonomous.map { ($0, [.autonomous]) }, wave: wave, repository: repository)
+    func applyStartedFixture(working: [String], auto: [String] = [], wave: String? = nil, repository: String = "repo") {
+        applyStartedFixture(working.map { ($0, [.working]) } + auto.map { ($0, [.working, .auto]) }, wave: wave, repository: repository)
     }
 }
 

@@ -27,19 +27,21 @@ impl Machines {
         let home = root.path().join("local");
         let remote = root.path().join("remote");
         fs::create_dir_all(&home).unwrap();
+        fs::create_dir_all(remote.join("bin")).unwrap();
         fs::create_dir_all(remote.join(".local/bin")).unwrap();
         fs::create_dir_all(remote.join("project's checkout")).unwrap();
         fs::create_dir_all(root.path().join("bin")).unwrap();
+        // Put transport doubles on the incoming PATH. The remote preamble
+        // appends .local/bin to find lf, after the system tools.
         executable(
             &root.path().join("bin/ssh"),
             &format!(
                 r#"#!/bin/sh
 for arg in "$@"; do remote_command="$arg"; done
-cd '{}' || exit 1
-exec env -i HOME='{}' PATH=/usr/bin:/bin bash -c "$remote_command"
+cd '{remote}' || exit 1
+exec env -i HOME='{remote}' PATH='{remote}/bin:/usr/bin:/bin' bash -c "$remote_command"
 "#,
-                remote.display(),
-                remote.display()
+                remote = remote.display(),
             ),
         );
         // Credential side effects stay inside the fixture even on macOS.
@@ -135,7 +137,7 @@ esac
         fs::rename(bin.join("lf"), bin.join("lf-published")).unwrap();
         // The download side effect is replaced, not the add/install/probe workflow.
         executable(
-            &bin.join("curl"),
+            &self.root.path().join("remote/bin/curl"),
             &format!(
                 r#"#!/bin/sh
 cat <<'INSTALLER'
@@ -551,11 +553,19 @@ fn broken_existing_lf_and_failed_installer_do_not_register_a_machine() {
         .success());
     assert!(!fixture.root.path().join("installed").exists());
     fs::remove_file(bin.join("lf")).unwrap();
-    executable(&bin.join("curl"), "#!/bin/sh\necho 'exit 1'\n");
+    let attempted = fixture.root.path().join("installer-attempted");
+    executable(
+        &fixture.root.path().join("remote/bin/curl"),
+        &format!(
+            "#!/bin/sh\nprintf '%s\\n' \"touch '{}'\" 'exit 1'\n",
+            attempted.display()
+        ),
+    );
     assert!(!fixture
         .terminal(&["machine", "add", "mini"], "y\n")
         .status
         .success());
+    assert!(attempted.exists());
     assert_eq!(
         fixture.json(&["machine", "list", "--json"]),
         serde_json::json!([])
@@ -635,7 +645,7 @@ fn machine_add_on_the_remote_updates_only_its_registry() {
         ),
     );
     executable(
-        &remote.join(".local/bin/ssh"),
+        &remote.join("bin/ssh"),
         &format!(
             "#!/bin/sh\nprintf 'lf {}\\nhome_33333333333333333333333333333333\\n'\n",
             loopflow::build_info::BUILD_VERSION
@@ -3090,8 +3100,8 @@ fn task_move_to_a_mini_without_the_repository_takes_it_in_from_planning() {
     );
 }
 
-/// The laptop's run approved Auto-Ship, and the approval travels in planning.
-/// Once the Task moved back, mini's recovery must not start shipping it.
+/// The laptop's run turned auto on, and it travels with the Task's Graph.
+/// Once the Task moved back, mini's recovery must not start it again.
 #[test]
 fn mini_starts_nothing_for_a_task_that_moved_back() {
     let fixture = preview_machines();
@@ -3132,7 +3142,6 @@ fn mini_starts_nothing_for_a_task_that_moved_back() {
             .unwrap();
         assert_success(&output);
         let stderr = String::from_utf8_lossy(&output.stderr);
-        assert!(stderr.contains("Auto-Ship approval moved to"), "{stderr}");
         assert!(!stderr.contains("did not continue"), "{stderr}");
     };
     move_to("mini");
@@ -3161,15 +3170,14 @@ fn mini_starts_nothing_for_a_task_that_moved_back() {
     let ships: i64 = rusqlite::Connection::open(&remote_db)
         .unwrap()
         .query_row(
-            "SELECT count(*) FROM task_ship_events WHERE task_id=?1 AND kind='carried'
-             AND (pid IS NOT NULL OR ended_at IS NOT NULL)",
+            "SELECT count(*) FROM graph_processes WHERE task_id=?1",
             [task.as_str()],
             |row| row.get(0),
         )
         .unwrap();
     assert_eq!(
         ships, 1,
-        "mini should ship only once, while it owns the Task"
+        "mini should run the Task only once, while it owns the Task"
     );
 }
 
@@ -4059,10 +4067,10 @@ tee -a '{record}/input' | env -i HOME='{remote}' PATH=/usr/bin:/bin bash -c "$re
             remote = remote.display(),
         ),
     );
-    let held = fixture.json(&["task", "hold", task.as_str(), "--json"]);
+    let held = fixture.json(&["task", "auto", "off", task.as_str(), "--json"]);
     assert_eq!(
         held,
-        serde_json::json!({"issue": task.as_str(), "stopped": false})
+        serde_json::json!({"issue": task.as_str(), "was_on": false})
     );
 
     let commands = fs::read_to_string(record.join("commands")).unwrap();
@@ -4072,11 +4080,11 @@ tee -a '{record}/input' | env -i HOME='{remote}' PATH=/usr/bin:/bin bash -c "$re
             .any(|line| line == "exec 'lf' 'server' 'connect'"),
         "{commands}"
     );
-    assert!(!commands.contains("hold"), "{commands}");
+    assert!(!commands.contains("auto"), "{commands}");
     let (hello, request) = entry_input(&record);
     assert_eq!(hello["client"]["kind"], "machine");
     assert_eq!(request["sender"]["repository"], plan.repository.as_str());
-    assert_eq!(request["operation"]["kind"], "task.hold");
+    assert_eq!(request["operation"]["kind"], "task.auto.off");
     assert_eq!(request["operation"]["issue"], task.as_str());
 }
 
@@ -4336,7 +4344,7 @@ esac
             ran.display()
         ),
     );
-    let output = fixture.run(&["task", "hold", task.as_str(), "--json"]);
+    let output = fixture.run(&["task", "auto", "off", task.as_str(), "--json"]);
     assert!(!output.status.success());
     let error = String::from_utf8_lossy(&output.stderr);
     assert!(
@@ -4360,7 +4368,7 @@ fn an_lf_that_dies_before_answering_says_so_and_what_it_printed() {
             1,
         ),
     );
-    let output = fixture.run(&["task", "hold", task.as_str(), "--json"]);
+    let output = fixture.run(&["task", "auto", "off", task.as_str(), "--json"]);
     assert_eq!(output.status.code(), Some(1));
     let error = String::from_utf8_lossy(&output.stderr);
     assert!(
@@ -4385,7 +4393,7 @@ fn an_unreachable_destination_names_the_ssh_check_not_its_server() {
             1,
         ),
     );
-    let output = fixture.run(&["task", "hold", task.as_str(), "--json"]);
+    let output = fixture.run(&["task", "auto", "off", task.as_str(), "--json"]);
     assert_eq!(output.status.code(), Some(1));
     let error = String::from_utf8_lossy(&output.stderr);
     assert!(

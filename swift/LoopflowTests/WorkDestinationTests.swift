@@ -190,6 +190,9 @@ struct WorkDestinationTests {
             throw RegistryQueryError("A created Task reads and prepares nothing after its answer: \(args)")
         }
         let (model, registry) = destinationModel(query: query, repoPath: task.task.repo)
+        // The Wave and repository primaries open warm on load, outside the
+        // created Task, and their resumes land whenever the executor runs them.
+        registry.canPrepare = { false }
         model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [], fixed: true)
         model.navigation.palette = .newTask
         let deadline = ContinuousClock.now + .seconds(3)
@@ -267,6 +270,7 @@ struct WorkDestinationTests {
             throw RegistryQueryError("A created Task reads nothing after its answer: \(args)")
         }
         let (model, registry) = destinationModel(query: query, repoPath: task.task.repo)
+        registry.canPrepare = { false } // Warm primaries are not this Task's reads.
         model.applyFixture(roadmap: .available(without), waves: .available([]), workActivity: .loading, repos: [], fixed: true)
         try await model.createTask(request: "fix the flaky retry test", wave: nil, graph: nil, requestID: UUID().uuidString)
         #expect(model.navigation.startingTask == nil)
@@ -407,7 +411,8 @@ struct WorkDestinationTests {
     func dashboardTileOpensConversationInPlace() async throws {
         let planning = try fixture()
         let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(planning.utf8))
-        let task = try #require(snapshot.tasks.items.first)
+        // A finished Task opens its conversation only when asked.
+        let task = try #require(snapshot.tasks.items.last)
         let location = WorkspaceIdentity(machineId: "machine-local", worktree: "/src/task")
         let record = try tileRecord(task, at: location)
         let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
@@ -448,7 +453,8 @@ struct WorkDestinationTests {
     func repositoryPageTileRetriesInPlace() async throws {
         let planning = try fixture()
         let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(planning.utf8))
-        let task = try #require(snapshot.tasks.items.first)
+        // A finished Task opens its conversation only when asked.
+        let task = try #require(snapshot.tasks.items.last)
         let location = WorkspaceIdentity(machineId: "machine-local", worktree: "/src/task")
         let record = try tileRecord(task, at: location)
         let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)

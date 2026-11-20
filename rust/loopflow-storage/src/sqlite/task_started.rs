@@ -13,7 +13,7 @@ impl SqliteStore {
     }
 
     /// Whether work on the Task began: an owner, a started event, a Session or
-    /// Graph step in its checkout, a Graph past `start`, or approval to ship.
+    /// Graph step in its checkout, or a Graph past `start`.
     pub fn task_begun(&self, task: &TaskId) -> StoreResult<bool> {
         let mut connection = self.conn.lock().expect("store mutex poisoned");
         let conn = connection.savepoint()?;
@@ -36,7 +36,7 @@ impl SqliteStore {
             return Ok(true);
         }
         conn.query_row(
-            "SELECT t.shipped_at IS NOT NULL OR EXISTS(SELECT 1 FROM task_graphs tg WHERE tg.task_id=t.id AND NOT (tg.step='start' AND tg.lf_process_id IS NULL)) FROM tasks t WHERE t.id=?1",
+            "SELECT EXISTS(SELECT 1 FROM task_graphs tg WHERE tg.task_id=t.id AND NOT (tg.step='start' AND tg.lf_process_id IS NULL)) FROM tasks t WHERE t.id=?1",
             [task.as_str()],
             |row| row.get(0),
         )

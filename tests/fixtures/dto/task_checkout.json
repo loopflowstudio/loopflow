@@ -17,7 +17,9 @@
     "state": "idle",
     "reason": "Checkout prepared",
     "step": null,
-    "captured": null
+    "captured": null,
+    "died": null,
+    "outlook": null
   },
   "worktree": "/src/loopflow.workspace",
   "workspace_slug": "workspace",
@@ -47,8 +49,8 @@
     "name": "LOO-291 task",
     "requester": "Maya"
   },
-  "ship_approval": null,
-  "ship_stop": {
+  "auto": {
+    "state": "off",
     "at": 1793266380,
     "by": {
       "kind": "person",

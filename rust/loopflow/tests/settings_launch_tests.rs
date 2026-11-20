@@ -50,7 +50,7 @@ fn bad_config_lines_do_not_stop_graph_commands() {
     let preferences = "# default_agent: claude:fable\ndefault_agent: codex\nfuture: {enabled: true}\nbroken: [do-not-print-this-value\nclaude: {model: opus, future: true}\nyolo: perhaps\nskills: {implement: {agent: 'claude:fable', future: true}}\naccount: {claude: [saved]}\naccounts: {claude: {saved: {login_email: saved@example.com}}}\n";
     fs::write(home.path().join("config.yaml"), preferences).unwrap();
     for args in [
-        vec!["--context", "graph", "auto"],
+        vec!["--context", "graph", "code"],
         vec!["config", "settings", "--skill", "implement", "--json"],
     ] {
         let output = command(repo.path(), home.path(), &args).output().unwrap();
@@ -99,7 +99,7 @@ fn bad_config_lines_do_not_stop_graph_commands() {
     )
     .unwrap();
     assert!(
-        command(repo.path(), home.path(), &["--context", "graph", "auto"])
+        command(repo.path(), home.path(), &["--context", "graph", "code"])
             .output()
             .unwrap()
             .status
@@ -107,7 +107,7 @@ fn bad_config_lines_do_not_stop_graph_commands() {
     );
     for args in [
         vec!["set", "--global", "yolo", "perhaps"],
-        vec!["--setting", "yolo=perhaps", "--context", "graph", "auto"],
+        vec!["--setting", "yolo=perhaps", "--context", "graph", "code"],
     ] {
         assert!(!command(repo.path(), home.path(), &args)
             .output()

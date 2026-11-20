@@ -290,13 +290,14 @@ Unreadable app/default/selection/cursor text prevents Apply; ANSI colors keep
 their source values. Personal non-color Ghostty settings still load; its `theme =` is ignored and its file never written.
 Source and license notices ship offline with the catalogue.
 
-**Auto-Ship** hands a Task off; it leaves Working tasks and its ship process lands it.
-It sits at the right end of the Workflow bar under the jump bar, beside the Task's
-stages as dots (click them for each stage) and what is running now. While the
-handoff exists, the same spot holds Stop Auto-Ship, including while it is
-restarting or waiting for assignment. Clicking it raises the Notice
-"LOO-5 Auto-Ship requested · Undo"; Undo is Stop Auto-Ship.
-Open a Dashboard with `state:shipping` to watch Tasks executing autonomously.
+The **Auto** toggle turns a Task's auto setting on and runs it, as `lf task auto on`
+does: its run stands in at each interactive step and lands the PR. It sits at
+the right end of the Workflow bar under the jump bar, beside the Task's stages
+as dots (click them for each stage) and what is running now. Turning it on
+raises the Notice "LOO-5 Auto on requested · Undo"; Undo is auto off, the same
+as switching the toggle off (`lf task auto off`). While auto is on, the Task's
+board card and sidebar row carry an Auto badge.
+Open a Dashboard with `state:auto` to watch those Tasks.
 
 ```text
 ⌘T          new shell tab in the Task’s Shell tool
@@ -1066,7 +1067,7 @@ name (the `lf desktop` verb), title, arguments, default keys and `perform`.
 the Desktop socket look actions up there; nothing else mutates navigation or panes.
 Keys and menus act on the shown workspace's focused pane; a socket request names an
 exact window and pane, and `lf desktop` resolves those from one inspection (see the
-[CLI examples](../docs/surfaces.md#drive-desktop-from-a-script)).
+[CLI examples](../docs/surfaces.md#script-desktop)).
 
 `DesktopServer` (`LoopflowMac/DesktopServer.swift`) binds
 `$LF_HOME/run/desktop/<bundle-id>.sock` at launch (0700 directory, 0600 socket,

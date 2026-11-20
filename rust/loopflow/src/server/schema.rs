@@ -107,12 +107,12 @@ const REQUESTS: &[&str] = &[
     include_str!("../../../loopflow-execution/tests/fixtures/dto/server/skill_list.json"),
     include_str!("../../../loopflow-execution/tests/fixtures/dto/server/skill_run.json"),
     include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_from_session.json"),
-    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_hold.json"),
+    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_auto_off.json"),
     include_str!("../../../loopflow-execution/tests/fixtures/dto/server/machine_request.json"),
     include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_interrupt.json"),
     include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_report.json"),
     include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_run.json"),
-    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_ship.json"),
+    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_auto_on.json"),
     include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_steer.json"),
     include_str!("../../../loopflow-execution/tests/fixtures/dto/server/view_plan.json"),
     include_str!("../../../loopflow-execution/tests/fixtures/dto/server/wave_plan_bind.json"),
@@ -249,9 +249,11 @@ const RESPONSES: &[(&str, &str, &str)] = &[
         include_str!("../../../loopflow-execution/tests/fixtures/dto/server/skill_entries.json"),
     ),
     (
-        "task_held",
-        "task.hold",
-        include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_held.json"),
+        "task_auto_off_answer",
+        "task.auto.off",
+        include_str!(
+            "../../../loopflow-execution/tests/fixtures/dto/server/task_auto_off_answer.json"
+        ),
     ),
     (
         "task_running",
@@ -259,9 +261,11 @@ const RESPONSES: &[(&str, &str, &str)] = &[
         include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_running.json"),
     ),
     (
-        "task_shipping",
-        "task.ship",
-        include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_shipping.json"),
+        "task_auto_on_answer",
+        "task.auto.on",
+        include_str!(
+            "../../../loopflow-execution/tests/fixtures/dto/server/task_auto_on_answer.json"
+        ),
     ),
     (
         "wave_plan_connected",

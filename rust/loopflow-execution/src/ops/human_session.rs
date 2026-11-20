@@ -674,16 +674,7 @@ fn session_ending(
             format!("could not start: {failure}{}", again("tries", "trying", at)),
         ),
         (ServerStart::Left(left), None) => {
-            let left = match left {
-                Left::OutOfStarts => Some(format!("started {attempts} times")),
-                Left::Elsewhere if conversation => {
-                    Some("its Task is not checked out here".to_string())
-                }
-                // Not a Task's conversation: nothing here ever starts it.
-                Left::Elsewhere | Left::Quit => None,
-                Left::NotClaimedHere => Some("its Task is not claimed on this Machine".to_string()),
-                Left::NoServer => Some("no server runs here to start it".to_string()),
-            };
+            let left = left_reason(left, attempts, conversation);
             let reason = match (left, failure) {
                 (Some(left), Some(failure)) => {
                     Some(format!("{left}; last start failed: {failure}"))
@@ -737,8 +728,27 @@ fn ending_here(
     session_ending(session, now, claimed, crate::ops::recovery::server_runs)
 }
 
+/// Why the server leaves something that is down to a person, ready to
+/// print; `None` when nothing here ever starts it. A Task's conversation and
+/// a Task's run say it in the same words.
+pub(crate) fn left_reason(
+    left: crate::ops::recovery::Left,
+    starts: u32,
+    of_task: bool,
+) -> Option<String> {
+    use crate::ops::recovery::Left;
+    match left {
+        Left::OutOfStarts => Some(format!("started {starts} times")),
+        Left::Elsewhere if of_task => Some("its Task is not checked out here".to_string()),
+        // Not a Task's: nothing here ever starts it.
+        Left::Elsewhere | Left::Quit => None,
+        Left::NotClaimedHere => Some("its Task is not claimed on this Machine".to_string()),
+        Left::NoServer => Some("no server runs here to start it".to_string()),
+    }
+}
+
 /// This Machine's local `HH:MM` for a Unix time.
-fn clock(at: i64) -> String {
+pub(crate) fn clock(at: i64) -> String {
     chrono::DateTime::from_timestamp(at, 0).map_or_else(
         || at.to_string(),
         |at| at.with_timezone(&chrono::Local).format("%H:%M").to_string(),
@@ -1225,23 +1235,16 @@ pub async fn open(
     let summary = current_summary(store, &session.id)?;
     let intent = invocation_intent(&session, &summary, false, false);
     drop(progress);
-    // Another harness starts a new thread from the log. So does a thread whose
-    // transcript is gone, which cannot resume: one request per lost thread, so
-    // a start retried after a crash creates it once.
-    let fresh = if intent == NewThread {
-        Some((handoff_agent(&session), uuid::Uuid::new_v4().to_string()))
-    } else {
-        lost_thread(store, &session, &summary, held_elsewhere)?
-    };
-    if let Some((agent, request_id)) = fresh {
+    // Another harness starts a new thread from the log.
+    if intent == NewThread {
         drop(launch_lock);
         let (_, launch) = new_thread(
             store,
             &session.id,
-            agent.as_deref(),
+            handoff_agent(&session).as_deref(),
             true,
             json,
-            &request_id,
+            &uuid::Uuid::new_v4().to_string(),
         )
         .await?;
         let session = store
@@ -1309,35 +1312,25 @@ pub async fn open(
     )
 }
 
-/// The fresh thread a resumable conversation needs when its provider's
-/// transcript is gone and nothing runs it, keyed to that lost thread.
-fn lost_thread(
+/// The provider thread this input can resume: the one recorded for it, if the
+/// provider saved its transcript. A launch that ended before the provider
+/// wrote anything, or a transcript deleted since, leaves none, and the
+/// conversation starts again from its first request.
+fn saved_thread(
     store: &SharedStore,
-    session: &LfSession,
-    summary: &crate::session::SessionSummary,
-    held_elsewhere: bool,
-) -> Result<Option<(Option<String>, String)>> {
-    if held_elsewhere || is_running(session_state(summary)) {
-        return Ok(None);
-    }
-    let (Some(key), Some(provider)) =
-        (session.artifact_key.as_deref(), session.provider.as_deref())
-    else {
-        return Ok(None);
-    };
-    let Some(thread) = store.sqlite.input_provider_session(key)? else {
+    artifact_key: &str,
+    provider: &str,
+) -> Result<Option<loopflow_storage::session_record::ProviderSessionRef>> {
+    let Some(thread) = store.sqlite.input_provider_session(artifact_key)? else {
         return Ok(None);
     };
     if !crate::transcript::thread_lost(&store.sqlite, provider, &thread.agent_session)? {
-        return Ok(None);
+        return Ok(Some(thread));
     }
     crate::journal::request::diagnostic(format_args!(
-        "The {provider} transcript of this conversation is gone; continuing on a fresh thread."
+        "This conversation has no saved {provider} transcript; starting it again from its first request."
     ));
-    Ok(Some((
-        None,
-        format!("fresh-thread:{}:{}", session.id, thread.agent_session),
-    )))
+    Ok(None)
 }
 
 fn current_summary(store: &SharedStore, id: &str) -> Result<crate::session::SessionSummary> {
@@ -1629,14 +1622,8 @@ pub async fn new_thread(
     if let Some(refusal) = run_refusal(&store.sqlite, &session)? {
         bail!(refusal);
     }
-    let thread = match session.artifact_key.as_deref() {
-        Some(key) => store.sqlite.input_provider_session(key)?,
-        None => None,
-    };
-    let threaded = match thread {
-        Some(thread) => {
-            !crate::transcript::thread_lost(&store.sqlite, &from, &thread.agent_session)?
-        }
+    let threaded = match session.artifact_key.as_deref() {
+        Some(key) => saved_thread(store, key, &from)?.is_some(),
         None => false,
     };
     // A conversation with no provider history, or whose transcript is gone,
@@ -1995,7 +1982,7 @@ pub(crate) fn resume_native_session(
         bail!("Session {} changed its input before resume", session.id);
     }
     let native = NativeSession::of(&session)?;
-    let provider_session = store.sqlite.input_provider_session(artifact_key)?;
+    let provider_session = saved_thread(store, artifact_key, native.provider)?;
     if provider_session.is_none() {
         if !crate::harness::HarnessKind::parse(native.provider)
             .is_some_and(|kind| kind.harness().capabilities().initial_prompt_on_resume)

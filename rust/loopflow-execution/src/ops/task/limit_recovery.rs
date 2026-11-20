@@ -68,7 +68,6 @@ pub(crate) fn restarts_by_itself(store: &SqliteStore, task: &TaskId) -> OpsResul
 }
 
 /// Start again every waiting run whose wait is over and that `restarts_by_itself`.
-/// A shipping Task's own restart does it, through the same `waiting_on_limit`.
 pub(crate) fn restart_waiting_runs() -> OpsResult<()> {
     block_on_task(async {
         let store = task_store().await?;
@@ -77,11 +76,8 @@ pub(crate) fn restart_waiting_runs() -> OpsResult<()> {
             .sqlite
             .tasks_past_a_limit_wait(now)
             .map_err(task_error)?;
-        let shipping = store.sqlite.local_shipping_tasks().map_err(task_error)?;
         for id in waited {
-            if shipping.iter().any(|(shipped, _)| *shipped == id)
-                || !restarts_by_itself(&store.sqlite, &id)?
-            {
+            if !restarts_by_itself(&store.sqlite, &id)? {
                 continue;
             }
             let Some(wait) = waiting_on_limit(&store.sqlite, &id).map_err(task_error)? else {
@@ -96,7 +92,7 @@ pub(crate) fn restart_waiting_runs() -> OpsResult<()> {
             let Some(worktree) = task.worktree.as_ref().filter(|path| path.is_dir()) else {
                 continue;
             };
-            super::ship::restart_lf_in(
+            super::run_recovery::restart_lf_in(
                 worktree,
                 wait.agent.as_deref(),
                 &["task", "run", &task.identifier],

@@ -553,6 +553,7 @@ fn adopting_a_checkout_with_a_running_graph_prevents_another_run() {
             adopted.path(),
             None,
             None,
+            false,
             |_| false,
         )
         .unwrap_err();
@@ -595,6 +596,7 @@ fn adopting_a_checkout_with_a_running_graph_prevents_another_run() {
         adopted.path(),
         None,
         None,
+        false,
         |_| false
     )
     .is_ok());

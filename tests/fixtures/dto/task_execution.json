@@ -2,5 +2,7 @@
   "state": "unknown",
   "reason": "Worker liveness is unknown; inspect its Session before recovery",
   "step": null,
-  "captured": 12
+  "captured": 12,
+  "died": null,
+  "outlook": null
 }

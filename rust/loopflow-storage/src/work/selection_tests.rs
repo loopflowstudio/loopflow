@@ -532,11 +532,6 @@ fn working_tasks_are_the_working_section_and_the_others_have_their_own_queries()
             SelectionState::Unstarted,
             SelectionState::Backlog,
         ),
-        (
-            "shipping",
-            SelectionState::Shipping,
-            SelectionState::Autonomous,
-        ),
     ]
     .into_iter()
     .map(|(id, state, section)| SelectionWork {
@@ -571,10 +566,8 @@ fn working_tasks_are_the_working_section_and_the_others_have_their_own_queries()
         )),
         ["idle", "active", "moving"]
     );
-    assert_eq!(
-        ids(Selection::parse("state:autonomous", None).unwrap()),
-        ["shipping"]
-    );
+    assert!(Selection::parse("state:autonomous", None).is_err());
+    assert!(Selection::parse("state:shipping", None).is_err());
     assert_eq!(
         ids(Selection::parse("state:backlog", None).unwrap()),
         ["unassigned", "unstarted"]

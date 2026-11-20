@@ -193,7 +193,7 @@ enum WaveViewPart: String, CaseIterable, Hashable {
 
 /// The section a Wave board shows, one at a time; Backlog by default.
 enum WaveBoardSection: String, CaseIterable, Hashable {
-    case backlog, working, autonomous, done
+    case backlog, working, done
 
     var title: String { rawValue.capitalized }
 }

@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>LOO-938 · human review</title>
+<style>
+:root { color-scheme: light dark; --fg:#1b1b1b; --bg:#fbfaf7; --muted:#666; --rule:#ddd; --code:#f0eee8; --yes:#1f7a3a; --no:#a33; }
+@media (prefers-color-scheme: dark) { :root { --fg:#e8e6e1; --bg:#161615; --muted:#9a978f; --rule:#333; --code:#22211f; --yes:#6fcf8a; --no:#f08080; } }
+body { font: 16px/1.5 -apple-system, "Helvetica Neue", sans-serif; color:var(--fg); background:var(--bg); max-width: 60rem; margin: 2rem auto; padding: 0 1.25rem; }
+h1 { font-size: 1.5rem; margin-bottom: .2rem; } h2 { font-size: 1.15rem; margin-top: 2.2rem; border-top: 1px solid var(--rule); padding-top: 1rem; }
+pre, code { font: 14px/1.4 ui-monospace, Menlo, monospace; } pre { background: var(--code); padding: .8rem 1rem; overflow-x: auto; border-radius: 4px; }
+code { background: var(--code); padding: 0 .2em; border-radius: 3px; } pre code { background: none; padding: 0; }
+table { border-collapse: collapse; width: 100%; font-size: 15px; } td, th { text-align: left; vertical-align: top; padding: .4rem .5rem; border-bottom: 1px solid var(--rule); }
+.yes { color: var(--yes); font-weight: 600; } .no { color: var(--no); font-weight: 600; } .muted { color: var(--muted); }
+ol.q > li { margin-bottom: .9rem; } ol.q ol { list-style: lower-alpha; }
+</style>
+</head>
+<body>
+<h1>LOO-938 · one plan at every size</h1>
+<p class="muted">PR <a href="https://github.com/loopflowstudio/loopflow/pull/1983">#1983</a> “Share Tasks and Waves across Machines as you save”, head <code>5f5c2e6fe6</code> (main merged in). This page: <code>scratch/human-review.html</code>. Written headless; nobody has read it yet, so every question below is still open.</p>
+
+<h2>1. What changes for people</h2>
+<p>Without Linear or Asana, the plan travels with the repository. Each Machine pushes its whole plan to <code>refs/loopflow/plan/&lt;machine id&gt;</code> as part of the save, and its server reads the others’ once a minute. Clone the repository on a second Machine, or as a teammate, and the plan is there. No account, no hub, no <code>--bind</code>. A hub (<code>lf machine hub mini</code>) makes it seconds instead of a minute, and is no longer where the plan lives. Two edits to one field: the later one wins everywhere, with nothing ever <code>lost</code> or <code>conflicted</code>. Two claims made apart: the first one holds.</p>
+<pre><code>laptop$ lf task create 'plan smoke'
+plan smoke · 3e1c9a
+laptop$ lf repo tracker
+Plan: Git origin.
+Hub mini.
+
+$ lf repo tracker            # offline
+Plan: Git origin, failing since Nov 18 14:02, 3 unsent.
+  3e1c9a
+  5b20c4
+  wave billing
+  fatal: unable to access 'https://github.com/acme/product/': Could not resolve host: github.com
+
+$ lf repo tracker            # two Machines each made Wave "design" offline
+Plan: Git origin, 3 not taken.
+  wave design from mini has the name of a Wave here; `lf wave rename design &lt;new name&gt;` on either Machine lets both arrive</code></pre>
+<p class="muted">From <code>docs/work.md</code> “Share the plan with your team”. Linear and Asana repositories behave as on main.</p>
+
+<h2>2. Product concepts beside code concepts</h2>
+<table>
+<tr><th>Person says</th><th>Code has</th><th></th></tr>
+<tr><td>“The plan”</td><td>each store, plus <code>plan_stamps(owner_id, field, at, machine_id)</code>; newest stamp wins</td><td class="yes">yes</td></tr>
+<tr><td>“Share it through Git / a hub”</td><td>two carriers, one cursor each in <code>plan_carriers</code>, one record shape, one way in (<code>planning_write::apply</code>)</td><td class="yes">yes</td></tr>
+<tr><td>“My save went out”</td><td><code>plan_carriers::send</code> after every save, both carriers, one 5 s deadline</td><td class="yes">yes</td></tr>
+<tr><td>“N unsent”</td><td>records in <code>plan_changes</code> past <code>sent_seq</code>, including what the hub brought that this Machine’s ref hasn’t repeated</td><td class="no">no</td></tr>
+<tr><td>“I claimed it first”</td><td>ownership entries with <code>order</code> and <code>seen</code>; first-wins without a tracker</td><td class="yes">yes</td></tr>
+<tr><td>“A Wave is its name”</td><td><code>waves.id</code> per Machine; two of one name wait as <code>not taken</code> until a rename</td><td class="no">no</td></tr>
+<tr><td>“This repository”</td><td>an id per clone, other clones’ ids as locators</td><td class="no">no</td></tr>
+<tr><td>“Sync now”</td><td><code>lf task sync &lt;issue&gt;</code>: the Task named is unused without a tracker</td><td class="no">no</td></tr>
+</table>
+<p><b>Biggest mismatch:</b> “unsent” counts the mirror, not your changes. With a hub and no server, a save’s Git push runs beside the hub read, so what the hub just brought reads <code>Plan: Git origin, 3 unsent.</code> naming a Task the mini made, until the next save or sync. It mends itself. Fixing it means either hub-then-Git in a save (a hanging hub then eats Git’s five seconds) or counting only this Machine’s own changes (which hides the teammate-who-can’t-push case whole-plan refs exist for). Question 1.</p>
+
+<h2>3. Try it</h2>
+<p>Two homes on one bare remote, as QA ran it (<code>.lf/qa/tracker.md</code> has the full script):</p>
+<pre><code>cd /Users/jack/src/loopflow.loo-938-send-every-planning && cargo build -p loopflow
+git init --bare /tmp/r.git && git clone /tmp/r.git /tmp/L && git clone /tmp/r.git /tmp/M
+(cd /tmp/L && LF_HOME=/tmp/hL /Users/jack/src/loopflow.loo-938-send-every-planning/target/debug/lf task create 'from laptop')
+(cd /tmp/M && LF_HOME=/tmp/hM /Users/jack/src/loopflow.loo-938-send-every-planning/target/debug/lf task list) # the laptop's Task is there
+(cd /tmp/L && LF_HOME=/tmp/hL /Users/jack/src/loopflow.loo-938-send-every-planning/target/debug/lf repo tracker)    # Plan: Git origin.</code></pre>
+<p class="muted">Not launched here: Desktop.</p>
+
+<h2>4. What was checked</h2>
+<table>
+<tr><th>Check</th><th>Result</th></tr>
+<tr><td>Storage <code>sqlite::plan_carriers::</code>, <code>planning_write::</code>, <code>revisions::</code>; execution <code>ops::plan_git::</code>; schema and DTO fixtures (36 after the last compress)</td><td>passed 2026-11-18</td></tr>
+<tr><td>Acceptance test <code>the_later_change_shows_on_both_machines_through_the_hub</code>: three homes, bare remote, hub, refused push, fourth Git-only home</td><td>passed after slice 6 (250 s of nextest’s 300 at load 108); not rerun after compress</td></tr>
+<tr><td>Swift <code>DTOFixtureTests|WorkModelTests</code></td><td>100 passed</td></tr>
+<tr><td>By hand (<code>scratch/qa.html</code>): first visit, two Machines, hub, offline, split Wave and rename, hub cleared</td><td>works; the “still wrong” list is below</td></tr>
+<tr><td>Fourth concept review (<code>scratch/concept-review.html</code>)</td><td>nothing to build</td></tr>
+<tr><td><code>cargo check --all-targets</code> on the three crates after merging main (409 files, including the <code>loopflow-harness</code> split)</td><td id="postmerge">clean, 2026-11-20 (no tests rerun after the merge)</td></tr>
+<tr><td>CI on the PR</td><td>suites deferred: checkpoint PR with scratch, <code>scratch-clear</code> passed, matrix skipped. Not a pass.</td></tr>
+</table>
+<p><b>Not checked, and why:</b> the full suites, <code>binary(transport_tests)</code>, <code>transport::</code>, <code>performance_tests::</code>, <code>session_lifecycle_tests</code>, the Task launch fixtures. All are gate’s list. <code>of_two_claims_made_apart_the_first_holds_on_both_machines</code> timed out at 300 s under load three times and then passed unchanged, so by the repository’s rule it is flaky; gate finds the cause or rewrites it. Desktop’s plan lines: no Dev app launched (another checkout’s was running). A real mini over SSH and etude’s cutover: by hand after release.</p>
+<p><b>Still wrong (QA, worst first):</b> a command can make up to three five-second waits in a row with a carrier hanging (<code>lf task create --wave &lt;new&gt;</code> 16 s); the mirror “unsent” above; one WARN a minute per split Wave; <code>lf task sync</code> prints nothing while it waits; a teammate’s Machine reads as an id.</p>
+
+<h2>5. Choices made on your behalf</h2>
+<table>
+<tr><th>Chosen</th><th>Passed over</th></tr>
+<tr><td>A Machine’s ref holds its whole plan</td><td>the design’s “only fields whose newest stamp is mine”, which drops values when a teammate can reach a hub but can’t push</td></tr>
+<tr><td>Stamp = <code>max(wall ms, highest seen + 1)</code>, machine id breaks ties</td><td>a bare counter, where the Machine that writes more wins unseen races</td></tr>
+<tr><td>Existing values unstamped, read as <code>(0, this Machine)</code></td><td>stamping from the old Git journal’s clocks (tables this branch retires)</td></tr>
+<tr><td>Server fetches every 60 s, no setting; saves push at once (≤ 5 s)</td><td>asking the running server to exchange; a shorter minute</td></tr>
+<tr><td>Id per clone, locators learned from refs</td><td>converging on the lower id (hid every Task saved under the first id)</td></tr>
+<tr><td>Two Waves of one name: shown as <code>not taken</code> with the rename, read again each exchange</td><td>joining them at import</td></tr>
+<tr><td>Tracker repositories untouched; a person’s own Machines on Linear don’t exchange by Git</td><td>the design’s version, moved to LOO-980 with “your order of your claimed Tasks”</td></tr>
+<tr><td><code>lf task run</code> still takes over a teammate’s Task after seeing their claim</td><td>refusing</td></tr>
+</table>
+
+<h2>6. Questions</h2>
+<ol class="q">
+<li>“N unsent” counting what the hub brought:
+  <ol><li>leave it; it settles at the next save or minute</li><li>a save sends to the hub, then pushes</li><li>count only this Machine’s own changes</li></ol></li>
+<li>Three five-second waits in one command when a carrier hangs:
+  <ol><li>leave it; offline fails at once, only a hang costs this</li><li>one deadline per command, in its own Task</li></ol></li>
+<li>Two Waves of one name made apart:
+  <ol><li>shown plus rename is enough</li><li>join them at import, in its own Task</li></ol></li>
+<li>A teammate who can fetch but not push reads a push error on the line for good:
+  <ol><li>leave it</li><li>read <code>Plan: Git origin, read only.</code> once a clone has never pushed</li></ol></li>
+<li>Does <code>docs/security.md</code> need “anyone who can push can change any Task”?
+  <ol><li>yes</li><li>no, <code>docs/work.md</code> says it</li></ol></li>
+<li>From earlier passes, as built: <code>lf task run</code> takes over a teammate’s Task; <code>lf task sync</code> needs an unused Task id; a teammate’s Machine reads as its id; an id per clone. Which to file?
+  <ol><li>none</li><li>name them</li></ol></li>
+</ol>
+
+<h2>Outcome of this pass</h2>
+<p>Nobody was here. Every promised behavior in the plan is built and was seen working by hand. No gap is concrete enough to send back to implement, so the Task goes on to gate. Questions 1 to 6 wait for you; none blocks delivery, and each is reversible before release.</p>
+</body>
+</html>

@@ -2,6 +2,7 @@
 import Darwin
 import Foundation
 import Loopflow
+import Synchronization
 
 /// Shared Work operations use the server over one connection per location;
 /// service errors remain visible.
@@ -48,11 +49,18 @@ enum ServerClient {
     /// A subscription on the location's connection; `send` carries checkpoints,
     /// `cancel` ends it. After a reading, connection loss resumes the same stream.
     static func subscribe(_ query: ServedRead, location: ServerLocation = .shared) -> LineSubscription {
-        let watch = ServerLink.subscribe(query, connect: { try await links.link(for: location) }) { update -> Data? in
+        // The newest link's sentence for a reading this build can't decode; nil before one connects.
+        let unreadable = Mutex<String?>(nil)
+        let watch = ServerLink.subscribe(query, connect: {
+            let link = try await links.link(for: location)
+            unreadable.withLock { $0 = link.unreadable }
+            return link
+        }) { update -> Data? in
             guard case .reading(let frame) = update else { return nil }
             return Data(frame.bytes)
         }
-        return LineSubscription(lines: watch.updates, send: checkpoints(watch), cancel: watch.cancel)
+        return LineSubscription(lines: watch.updates, send: checkpoints(watch), cancel: watch.cancel,
+                                unreadable: { unreadable.withLock { $0 } })
     }
 
     /// Readings and occurrences share one stream so the consumer applies its
@@ -192,7 +200,8 @@ extension ServerEndpoint {
     /// The Machine's server on its private Unix socket.
     static func unix(path: String) -> ServerEndpoint {
         ServerEndpoint(
-            client: ServerClientIdentity(kind: "desktop", platform: "macos", name: "Loopflow", version: LaunchJournal.appVersion),
+            client: ServerClientIdentity(kind: "desktop", platform: "macos", name: "Loopflow",
+                                          version: "\(LaunchJournal.appVersion)+\(DesktopLog.sourceRevision)"),
             control: { try UnixSocketCarrier(path: path, limit: ServerProtocol.maxMessage) },
             ticketed: { try UnixSocketCarrier(path: path, limit: ServerProtocol.maxBulk) })
     }

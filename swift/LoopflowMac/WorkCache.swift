@@ -66,12 +66,14 @@ final class WorkCache: @unchecked Sendable {
     /// shares it, so one window's save never drops another's repository.
     static let home = WorkCache(directory: homeDirectory)
 
-    /// Where Desktop keeps what it saves inside the Machine.
-    static var homeDirectory: URL {
-        let home = ProcessInfo.processInfo.environment["LF_HOME"].flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: $0) }
+    /// The Machine this process is on: `LF_HOME`, else `~/.lf`.
+    static var machineHome: URL {
+        ProcessInfo.processInfo.environment["LF_HOME"].flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: $0) }
             ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".lf", isDirectory: true)
-        return home.appendingPathComponent("desktop-cache", isDirectory: true)
     }
+
+    /// Where Desktop keeps what it saves inside the Machine.
+    static var homeDirectory: URL { machineHome.appendingPathComponent("desktop-cache", isDirectory: true) }
 
     /// The saved workspace, or `nil` when absent, corrupt or from another version.
     /// An unusable file is removed so the next save starts clean.

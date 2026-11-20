@@ -107,6 +107,12 @@ public actor ServerLink {
 
     public var isClosed: Bool { failure != nil }
 
+    /// What a window says of a reading from this server that this build can't
+    /// decode: the two are different builds, and the sentence names both.
+    public nonisolated var unreadable: String {
+        "This Loopflow (\(endpoint.client.version)) can't read what the server (\(welcome.build)) sent."
+    }
+
     /// Ends the connection on purpose: requests fail and watches end rather than resume.
     public func close() async {
         fail(RegistryQueryError(Self.closed), resumable: false)

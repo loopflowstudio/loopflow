@@ -1949,9 +1949,9 @@ impl Server {
     fn start(repo: &Path, home: &Path) -> Self {
         let server = Self(isolated_lf(repo, home, &["server", "run"]));
         let deadline = std::time::Instant::now() + Duration::from_secs(20);
-        // Readiness as a client sees it; `status()` would compare the server's
-        // executable with this test binary.
-        while loopflow_execution::machine::client::Connection::open().is_err() {
+        // This test binary is another executable than the server's, and the
+        // server is as ready for it as for its own `lf`.
+        while !loopflow_execution::machine::client::status().unwrap().ready {
             assert!(std::time::Instant::now() < deadline, "server did not start");
             std::thread::sleep(Duration::from_millis(20));
         }

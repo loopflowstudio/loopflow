@@ -550,22 +550,6 @@ fn run_client(
     let title = &mut client.title;
     // Only an explicit remote connection is a client of a surviving AgentProcess.
     let owned = client.remote.is_none().then_some(&attachment);
-    // Refused before the provider conversation is recorded, so the next launch
-    // starts it fresh instead of resuming one that never ran. A Session's
-    // first launch (`lf resume` starting a repository conversation) names no
-    // Work on its command line; its recorded Session does.
-    if launch.kind.is_managed() {
-        crate::harness::agent_process::require_server()?;
-    }
-    // A provider whose CLI is not on `PATH` never starts either; Claude
-    // answers `--resume` of a conversation it never wrote with "No
-    // conversation found", and the Session could not be opened again.
-    if crate::os_process::which_command(process).is_none() {
-        if let Some(owner) = owned {
-            crate::harness::agent_process::record_missing_provider(process, owner)?;
-        }
-        bail!(missing_agent_message(launch.harness.kind()));
-    }
     if let (Some(capture_dir), Some(agent_session)) = (capture_dir.as_deref(), agent_session) {
         crate::session_record::write_provider_session(capture_dir, agent_session, None)?;
     }

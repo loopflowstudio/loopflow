@@ -132,5 +132,5 @@ Select `--session` to keep the chat and linked checkout, or `--worktree` for
 the checkout alone. Plain `lf task create` files new work; `--run` starts it
 without implicitly adopting anything. `lf session list --json` supplies
 conversation IDs. See
-[Work](../../../../docs/work.md#keep-work-already-in-progress) for shared checkouts,
+[Work](../../../../docs/work.md#adopt-work-already-in-progress) for shared checkouts,
 existing-Task continuation and recovery.

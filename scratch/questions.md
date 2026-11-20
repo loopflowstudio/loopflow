@@ -15,5 +15,8 @@
   Linear import reads issues per Project only (`ListProjectIssues`). So on
   another Machine a Task in an ancestor's Project lists under that Project's
   Wave, and a Task with no Project never shows up. On main every Wave Task had
-  a Project, so connected Wave Tasks crossed Machines. Candidates: LOO-980's
-  marker, or reading the team's no-Project issues. `docs/work.md` now says this.
+  a Project, so connected Wave Tasks crossed Machines. LOO-980 rules out a
+  marker ("No Linear attachment") and removes team-issue ingest; its "own
+  Machines exchanging through Git on a tracker repository" is where
+  `tasks.wave_id` would cross. Its "Wave membership is derived from the link,
+  not stored" contradicts this branch's `tasks.wave_id`. `docs/work.md` now says this.

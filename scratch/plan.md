@@ -36,9 +36,17 @@ it is in lives only in Loopflow's plan; a connected repository has no Git or
 hub exchange, so another Machine lists it under the Project's Wave. A Task with no Project still goes to the repository's tracker, as
 an issue in no Project (a Linear team issue; in Asana, the repository's team
 project), the path a Task in no Wave already takes. A Task created in the
-tracker joins the Wave linked to its Project. Marking the child Wave on
-the issue (a description marker or an Attachment) is not built; LOO-980 owns
-the tracker link.
+tracker joins the Wave linked to its Project.
+
+Nothing marks the child Wave on the issue: LOO-980's brief decides "Nothing
+Loopflow-only is stored on a tracker item. No Linear attachment". Carrying
+`tasks.wave_id` between Machines on a connected repository belongs to
+LOO-980's "A person's own Machines exchanging through Git on a tracker
+repository"; until then another Machine lists such a Task under its
+Project's Wave, or not at all. LOO-980's brief also says "Wave membership is
+derived from the link, not stored"; this branch stores it, from the
+direction quoted above, so that line of LOO-980 needs changing before it is
+built.
 
 ## Schema
 
@@ -129,6 +137,9 @@ QA after slice 2 (`scratch/qa.html`): Wave Tasks with no Project queue a
 Linear create and print "pending Linear sync"; `unavailable_tasks` is off
 every JSON read. Docs fixed for two claims that no longer held. Open: what a
 second Machine sees on a connected repository (`scratch/questions.md`).
+
+Concept review after slice 2 (`scratch/concept-review.html`): no code to
+change; the tracker remedy above now follows LOO-980's decisions.
 
 Next: gate publishes the branch so CI runs the suites.
 

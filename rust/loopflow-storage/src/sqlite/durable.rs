@@ -5,7 +5,6 @@ use time::OffsetDateTime;
 use crate::child::ChildRef;
 use crate::execution::{AbandonReceipt, TaskState};
 use crate::rows::now_unix;
-use crate::work::project::ProjectEventKind;
 use crate::work::task::TaskEventKind;
 use crate::{StoreError, StoreResult};
 use loopflow_model::durable::{Author, MachineId, TaskId, WorkRef, WorkStatus};
@@ -232,56 +231,29 @@ impl SqliteStore {
         Ok(steer)
     }
 
-    /// Record an interrupt request as a durable comment on the Work's event
-    /// stream. A live run observes it (past its launch cursor) and ends the
-    /// current turn; with no live run it is inert history.
-    pub fn append_interrupt(&self, work: &WorkRef) -> StoreResult<i64> {
+    /// Append a Task interrupt. A live run ends its current turn when it sees
+    /// an interrupt newer than its launch cursor.
+    pub fn append_interrupt(&self, task: &TaskId) -> StoreResult<i64> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        require_ready_work(&tx, work)?;
-        let id = match work {
-            WorkRef::Task(task_id) => {
-                super::children::insert_task_event_in(&tx, task_id, &TaskEventKind::Interrupt)?.id
-            }
-            WorkRef::Project(project_id) => {
-                let project = super::children::project_in(&tx, project_id)?;
-                super::children::insert_project_event_in(
-                    &tx,
-                    &project,
-                    &ProjectEventKind::Interrupt,
-                )?
-                .id
-            }
-            WorkRef::Wave(_) => {
-                return Err(StoreError::InvalidData(
-                    "Waves are not interrupted through the Work event stream".to_string(),
-                ))
-            }
-        };
+        require_ready_work(&tx, &WorkRef::Task(task.clone()))?;
+        let id = super::children::insert_task_event_in(&tx, task, &TaskEventKind::Interrupt)?.id;
         tx.commit()?;
         Ok(id)
     }
 
-    /// The id of the newest interrupt request on the Work, or 0 when there is
+    /// The id of the newest interrupt request on the Task, or 0 when there is
     /// none. A run stamps this at launch and re-reads it; a higher value means a
     /// new interrupt to act on.
-    pub fn latest_interrupt_id(&self, work: &WorkRef) -> StoreResult<i64> {
+    pub fn latest_interrupt_id(&self, task: &TaskId) -> StoreResult<i64> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let (table, column, id) = match work {
-            WorkRef::Task(task_id) => ("task_events", "task_id", task_id.as_str().to_string()),
-            WorkRef::Project(project_id) => (
-                "project_events",
-                "project_id",
-                project_id.as_str().to_string(),
-            ),
-            WorkRef::Wave(_) => return Ok(0),
-        };
-        let sql = format!(
-            "SELECT COALESCE(MAX(id), 0) FROM {table}
-             WHERE {column}=?1 AND json_extract(kind_json, '$.kind')='interrupt'"
-        );
-        conn.query_row(&sql, params![id], |row| row.get(0))
-            .map_err(StoreError::from)
+        conn.query_row(
+            "SELECT COALESCE(MAX(id), 0) FROM task_events
+             WHERE task_id=?1 AND json_extract(kind_json, '$.kind')='interrupt'",
+            [task.as_str()],
+            |row| row.get(0),
+        )
+        .map_err(StoreError::from)
     }
 }
 

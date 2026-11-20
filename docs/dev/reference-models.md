@@ -119,7 +119,7 @@ These are the accepted product owners; see [cutover status](reference-cutover.md
 for the current implementation boundary.
 
 ```text
-Wave --< Task --< Graph run       a Wave's planning binds one Linear Project
+Wave --< Project --< Task --< Graph run
 
 LfSession --- AgentProcess         one current provider, recorded on the Session
 LfSession --> attached lf          nullable current attachment, fenced by token

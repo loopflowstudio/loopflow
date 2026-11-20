@@ -26,7 +26,7 @@ use crate::store::task_work::TaskGraphRecord;
 use crate::store::ProcessIdentityEvidence;
 use crate::store::SharedStore;
 use crate::transcript::{Located, Source};
-use loopflow_model::durable::{MachineId, RepositoryId, TaskId, TaskOwnershipEntry, WorkRef};
+use loopflow_model::durable::{MachineId, RepositoryId, TaskId, TaskOwnershipEntry};
 use loopflow_model::id::{AgentSessionId, LfSessionId, WaveId};
 use loopflow_storage::graph_process::Execution;
 use loopflow_storage::sqlite::task_moves::{MoveInFlight, MoveStage};
@@ -435,9 +435,7 @@ async fn stop_graphs(store: &SharedStore, task: &Task) -> Result<Option<StoppedG
     if processes.is_empty() {
         return Ok(None);
     }
-    store
-        .append_interrupt(&WorkRef::Task(task.id.clone()))
-        .await?;
+    store.append_interrupt(&task.id).await?;
     for process in &processes {
         if let Some((pid, birth)) = process.pid.zip(process.os_started_at) {
             if crate::process::os_process::process_identity_evidence(pid, birth)

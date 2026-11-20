@@ -12,7 +12,7 @@ use std::process::Command;
 use loopflow_execution::child::ChildRef;
 use loopflow_execution::linear::{LinearIssueId, LinearProjectId};
 use loopflow_execution::store::migrations;
-use loopflow_execution::work::project::{Project, ProjectEventKind, ProjectId};
+use loopflow_execution::work::project::{Project, ProjectId};
 use loopflow_execution::work::task::{
     LinearWritebackState, Observation, PrMergeMode, Task, TaskId, TaskPr, TaskPrId,
 };
@@ -94,29 +94,13 @@ fn put_project_snapshot(home: &Path, wave: &Wave, project: &Project) {
         .expect("seed PM snapshot");
 }
 
-fn seed_credential_history(home: &Path) -> Project {
+fn seed_started_project(home: &Path) -> Project {
     let wave = seed(home, "infrastructure");
     let store = loopflow_execution::store::open_sqlite(&home.join("loopflow.db"))
         .expect("open status store");
     let now = OffsetDateTime::now_utc();
     let project = test_project(&wave, "stability-security", now);
     store.insert_project(&project).expect("seed Project");
-    let failure = store
-        .append_project_event(
-            &project.id,
-            &ProjectEventKind::Failed {
-                error: "project runner failed: credential is missing".to_string(),
-                resumable: true,
-            },
-        )
-        .expect("record failure history");
-    rusqlite::Connection::open(home.join("loopflow.db"))
-        .expect("open status store")
-        .execute(
-            "UPDATE project_events SET created_at=created_at-60 WHERE id=?1",
-            [failure.id],
-        )
-        .expect("age historical failure");
     put_project_snapshot(home, &wave, &project);
     project
 }
@@ -144,21 +128,6 @@ fn status_json(home: &Path, args: &[&str], ambient_wave_id: Option<&str>) -> ser
     );
     let stdout = String::from_utf8(output.stdout).expect("utf8");
     serde_json::from_str(stdout.trim()).unwrap_or_else(|err| panic!("not JSON: {err}\n{stdout}"))
-}
-
-fn status_human(home: &Path, wave: &str) -> String {
-    let output = Command::new(loopflow_test_support::lf_binary())
-        .args(["wave", "status", wave])
-        .env("LF_HOME", home)
-        .current_dir(home.join("repo"))
-        .output()
-        .expect("lf wave status runs");
-    assert!(
-        output.status.success(),
-        "lf wave status failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    String::from_utf8(output.stdout).expect("status is utf8")
 }
 
 /// A roadmap Wave holding its share of the roadmap's Tasks, as `wave status`
@@ -470,9 +439,9 @@ fn seed_previous_release_task_pr(home: &Path) {
 }
 
 #[test]
-fn project_operator_failures_remain_historical_without_reappearing_on_the_wave() {
+fn wave_status_and_roadmap_list_a_started_project_without_tasks() {
     let home = tempfile::tempdir().expect("tempdir");
-    let project = seed_credential_history(home.path());
+    let project = seed_started_project(home.path());
     let status = status_json(home.path(), &["infrastructure"], None);
     let roadmap = roadmap_json(home.path(), "infrastructure");
     let expected_projects = serde_json::json!({
@@ -493,19 +462,7 @@ fn project_operator_failures_remain_historical_without_reappearing_on_the_wave()
         assert_eq!(view["tasks"]["state"], "ok");
         assert_eq!(view["tasks"]["items"], serde_json::json!([]));
         assert_eq!(view["unavailable_tasks"], serde_json::json!([]));
-        assert!(!view.to_string().contains("credential"));
     }
-    let human = status_human(home.path(), "infrastructure");
-    assert!(!human.contains("credential"));
-    let store = loopflow_execution::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
-    assert_eq!(
-        store
-            .latest_project_failure(&project.id)
-            .unwrap()
-            .unwrap()
-            .message,
-        "project runner failed: credential is missing"
-    );
 }
 
 /// The reproduced break: inside a Wave agent's environment, `LF_WAVE_ID` is a wave id, and

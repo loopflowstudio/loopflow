@@ -19,7 +19,7 @@ use time::OffsetDateTime;
 use crate::execution::TaskState;
 use crate::planning::{LinearIssueId, LinearProjectId};
 use crate::rows::now_unix;
-use crate::work::project::{Project, ProjectEvent, ProjectEventKind, ProjectId};
+use crate::work::project::{Project, ProjectId};
 use crate::work::task::NewTask;
 use crate::work::task::{
     CiObservation, GithubObservation, GithubPr, LinearWritebackState, PrMergeRequest, PrPhase,
@@ -32,6 +32,8 @@ use loopflow_model::id::WaveId;
 
 use super::{SqliteStore, TaskCheckout};
 
+const OPEN_PROJECT: &str =
+    "work_state='ready' AND status IN ('started','backlog','planned','paused')";
 const BRANCH_TASK_IDS: &str = "SELECT task_id FROM task_checkouts WHERE branch=?1
     UNION SELECT task_id FROM task_prs WHERE branch=?1";
 
@@ -1288,10 +1290,9 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn
             .query_row(
-                "SELECT p.project_name FROM tasks t JOIN projects p ON p.id=t.project_id
+                &format!("SELECT p.project_name FROM tasks t JOIN projects p ON p.id=t.project_id
                  WHERE t.id=?1 AND EXISTS(
-                    SELECT 1 FROM projects o WHERE o.wave_id=p.wave_id AND o.work_state='ready'
-                    AND o.status IN ('started','backlog','planned','paused') LIMIT 1 OFFSET 1)",
+                    SELECT 1 FROM projects o WHERE o.wave_id=p.wave_id AND {OPEN_PROJECT} LIMIT 1 OFFSET 1)"),
                 [task.as_str()],
                 |row| row.get(0),
             )
@@ -1321,88 +1322,6 @@ impl SqliteStore {
             }
         }
         Ok(projects)
-    }
-
-    pub fn append_project_event(
-        &self,
-        project_id: &ProjectId,
-        kind: &ProjectEventKind,
-    ) -> StoreResult<ProjectEvent> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let project = project_in(&transaction, project_id)?;
-        let event = insert_project_event_in(&transaction, &project, kind)?;
-        transaction.commit()?;
-        Ok(event)
-    }
-
-    pub fn project_events_after(
-        &self,
-        project_id: &ProjectId,
-        cursor: i64,
-    ) -> StoreResult<Vec<ProjectEvent>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut statement = conn.prepare(
-            "SELECT id, project_id, kind_json, created_at
-             FROM project_events WHERE project_id=?1 AND id>?2 ORDER BY id",
-        )?;
-        let rows =
-            statement.query_map(params![project_id.as_str(), cursor], map_project_event_row)?;
-        let mut events = Vec::new();
-        for row in rows {
-            events.push(row?);
-        }
-        Ok(events)
-    }
-
-    /// When this Project last appended a durable event. The progress
-    /// signal for the Project body observation, mirroring [`Self::latest_task_event_at`].
-    pub fn latest_project_event_at(
-        &self,
-        project_id: &ProjectId,
-    ) -> StoreResult<Option<OffsetDateTime>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let seconds: Option<i64> = conn.query_row(
-            "SELECT MAX(created_at) FROM project_events WHERE project_id = ?1",
-            params![project_id.as_str()],
-            |row| row.get(0),
-        )?;
-        Ok(seconds.map(crate::rows::unix_to_datetime))
-    }
-
-    pub fn latest_project_event(
-        &self,
-        project_id: &ProjectId,
-    ) -> StoreResult<Option<ProjectEvent>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.query_row(
-            "SELECT id, project_id, kind_json, created_at
-             FROM project_events WHERE project_id=?1 ORDER BY id DESC LIMIT 1",
-            params![project_id.as_str()],
-            map_project_event_row,
-        )
-        .optional()
-        .map_err(StoreError::from)
-    }
-
-    pub fn latest_project_failure(
-        &self,
-        project_id: &ProjectId,
-    ) -> StoreResult<Option<crate::work::project::HistoricalFailure>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let event = conn
-            .query_row(
-                "SELECT id, project_id, kind_json, created_at
-                 FROM project_events
-                 WHERE project_id=?1 AND json_extract(kind_json, '$.kind')='failed'
-                 ORDER BY id DESC LIMIT 1",
-                params![project_id.as_str()],
-                map_project_event_row,
-            )
-            .optional()?;
-        Ok(event
-            .as_ref()
-            .and_then(crate::work::project::HistoricalFailure::from_event))
     }
 }
 
@@ -2439,11 +2358,10 @@ pub(super) fn task_events_after_in(
 }
 
 fn new_task_project_in(conn: &Connection, wave: &WaveId) -> StoreResult<Option<ProjectId>> {
-    let mut query = conn.prepare_cached(
-        "SELECT id FROM projects WHERE wave_id=?1 AND work_state='ready'
-         AND status IN ('started','backlog','planned','paused')
-         ORDER BY status='started' DESC,created_at DESC,id DESC LIMIT 1",
-    )?;
+    let mut query = conn.prepare_cached(&format!(
+        "SELECT id FROM projects WHERE wave_id=?1 AND {OPEN_PROJECT}
+         ORDER BY status='started' DESC,created_at DESC,id DESC LIMIT 1"
+    ))?;
     Ok(query
         .query_row([wave], |row| {
             Ok(ProjectId::from_raw(row.get::<_, String>(0)?))
@@ -2507,17 +2425,6 @@ fn map_project_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Project> {
     })
 }
 
-fn map_project_event_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectEvent> {
-    let kind: ProjectEventKind = serde_json::from_str(&row.get::<_, String>(2)?)
-        .map_err(|error| invalid_column(2, error))?;
-    Ok(ProjectEvent {
-        id: row.get(0)?,
-        project_id: ProjectId::from_raw(row.get::<_, String>(1)?),
-        kind,
-        created_at: crate::rows::unix_to_datetime(row.get(3)?),
-    })
-}
-
 pub(super) fn insert_task_event_in(
     conn: &Connection,
     task_id: &TaskId,
@@ -2536,30 +2443,6 @@ pub(super) fn insert_task_event_in(
     Ok(TaskEvent {
         id: event_id,
         task_id: task_id.clone(),
-        kind: kind.clone(),
-        created_at: crate::rows::unix_to_datetime(created_at),
-    })
-}
-
-pub(super) fn insert_project_event_in(
-    conn: &Connection,
-    project: &Project,
-    kind: &ProjectEventKind,
-) -> StoreResult<ProjectEvent> {
-    let created_at = now_unix();
-    conn.execute(
-        "INSERT INTO project_events (project_id, kind_json, created_at)
-         VALUES (?1, ?2, ?3)",
-        params![
-            project.id.as_str(),
-            serde_json::to_string(kind)?,
-            created_at
-        ],
-    )?;
-    let event_id = conn.last_insert_rowid();
-    Ok(ProjectEvent {
-        id: event_id,
-        project_id: project.id.clone(),
         kind: kind.clone(),
         created_at: crate::rows::unix_to_datetime(created_at),
     })

@@ -2129,8 +2129,6 @@ mod tests {
         store.create_project(&project).await.unwrap();
         let task = make_task(&store, &wave, &project);
         store.seed_task(&task, &make_task_pr(&task)).await.unwrap();
-        let work = WorkRef::Task(task.id.clone());
-
         let interrupts = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let mut harness = RecordingHarness {
             interrupts: interrupts.clone(),
@@ -2140,20 +2138,20 @@ mod tests {
 
         // A run launches with the cursor at the newest interrupt: prior requests
         // are inert history, never re-fired.
-        let mut cursor = store.latest_interrupt_id(&work).await.unwrap();
-        crate::ops::child::observe_interrupt(&store, &work, &mut harness, &mut cursor).await;
+        let mut cursor = store.latest_interrupt_id(&task.id).await.unwrap();
+        crate::ops::child::observe_interrupt(&store, &task.id, &mut harness, &mut cursor).await;
         assert_eq!(count(), 0, "no interrupt requested yet");
 
         // A new request ends the current turn exactly once.
-        store.append_interrupt(&work).await.unwrap();
-        crate::ops::child::observe_interrupt(&store, &work, &mut harness, &mut cursor).await;
+        store.append_interrupt(&task.id).await.unwrap();
+        crate::ops::child::observe_interrupt(&store, &task.id, &mut harness, &mut cursor).await;
         assert_eq!(count(), 1);
-        crate::ops::child::observe_interrupt(&store, &work, &mut harness, &mut cursor).await;
+        crate::ops::child::observe_interrupt(&store, &task.id, &mut harness, &mut cursor).await;
         assert_eq!(count(), 1, "the same request never fires twice");
 
         // A second request fires again.
-        store.append_interrupt(&work).await.unwrap();
-        crate::ops::child::observe_interrupt(&store, &work, &mut harness, &mut cursor).await;
+        store.append_interrupt(&task.id).await.unwrap();
+        crate::ops::child::observe_interrupt(&store, &task.id, &mut harness, &mut cursor).await;
         assert_eq!(count(), 2);
     }
 

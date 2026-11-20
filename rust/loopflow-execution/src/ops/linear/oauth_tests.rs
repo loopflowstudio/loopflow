@@ -121,21 +121,6 @@ async fn pm_read_linear_oauth_recovers() {
         updated_at: timestamp,
     };
     fixture.store.create_project(&project).await.unwrap();
-    fixture
-        .store
-        .append_project_event(
-            &project.id,
-            &loopflow_storage::work::project::ProjectEventKind::Steer {
-                steer_id: loopflow_model::id::SteerId::new(),
-            },
-        )
-        .await
-        .unwrap();
-    let history = fixture
-        .store
-        .project_events_after(&project.id, 0)
-        .await
-        .unwrap();
     fixture.seed_snapshot(&wave).await;
     fixture.seed(now() - 1).await;
     let (oauth, exchanges) = test_server::spawn(vec![
@@ -184,14 +169,6 @@ async fn pm_read_linear_oauth_recovers() {
     );
 
     assert!(refreshed.tracker_synced_at > project.tracker_synced_at);
-    assert_eq!(
-        fixture
-            .store
-            .project_events_after(&project.id, 0)
-            .await
-            .unwrap(),
-        history
-    );
     assert_eq!(exchanges.lock().await.len(), 2);
     assert!(exchanges
         .lock()

@@ -432,9 +432,6 @@ pub(crate) fn validate_persisted_json(conn: &rusqlite::Connection) -> StoreResul
         "id",
         "kind_json",
     )?);
-    failures.extend(validate_json_column::<
-        crate::work::project::ProjectEventKind,
-    >(conn, "project_events", "id", "kind_json")?);
     failures.extend(validate_json_column::<Vec<String>>(
         conn,
         "ci_incidents",

@@ -25,6 +25,7 @@ WHERE subject IN ('krs','metric_targets') AND phase IN ('queued','sent','conflic
 -- leaving: pm_projects.metric_targets LOO-995
 -- Nothing reads or writes these since chapters ended.
 -- leaving: projects.legacy_current LOO-995
+-- leaving: project_events LOO-995
 -- leaving: projects.iteration LOO-995
 -- Live metrics are gone: no contract, instrument or observation is read.
 -- leaving: metric_instruments LOO-995

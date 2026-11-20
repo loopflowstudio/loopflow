@@ -3259,7 +3259,7 @@ pub fn task_interrupt(issue: &str) -> OpsResult<TaskControlResult> {
         let work = loopflow_model::durable::WorkRef::Task(task.id.clone());
         let receipt = match live_execution(&store, &task).await? {
             Some(target) => {
-                store.append_interrupt(&work).await.map_err(task_error)?;
+                store.append_interrupt(&task.id).await.map_err(task_error)?;
                 super::child::WorkControlReceipt::Interrupt { work, target }
             }
             None => super::child::WorkControlReceipt::NoLiveRun { work },

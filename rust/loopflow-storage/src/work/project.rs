@@ -5,7 +5,6 @@ use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
 use crate::planning::{LinearBindingError, LinearProjectId};
-use crate::work::task::{TaskEventKind, TaskId};
 pub use loopflow_model::durable::ProjectId;
 use loopflow_model::id::WaveId;
 
@@ -56,78 +55,6 @@ pub struct Project {
     #[schemars(with = "String")]
     #[serde(with = "time::serde::rfc3339")]
     pub updated_at: OffsetDateTime,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum ProjectEventKind {
-    Started,
-    BodyHandedOff {
-        handoff: crate::child::ChildBodyHandoff,
-    },
-    TaskObserved {
-        task_id: TaskId,
-        task_event_id: i64,
-        event: Box<TaskEventKind>,
-    },
-    IterationCompleted {
-        iteration: u32,
-        summary: String,
-    },
-    /// Historical authored direction; the immutable publication owns its text.
-    Steer {
-        steer_id: loopflow_model::id::SteerId,
-    },
-    /// A request to end the Project's current turn so the next re-reads its
-    /// direction immediately. Acted on only by a live run, and not a report out.
-    Interrupt,
-    Completed {
-        summary: String,
-    },
-    Failed {
-        error: String,
-        resumable: bool,
-    },
-}
-
-impl ProjectEventKind {
-    pub fn is_wave_observable(&self) -> bool {
-        !matches!(
-            self,
-            Self::Started | Self::TaskObserved { .. } | Self::Steer { .. } | Self::Interrupt
-        )
-    }
-
-    fn failure_reason(&self) -> Option<&str> {
-        match self {
-            Self::Failed { error, .. } => Some(error),
-            _ => None,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ProjectEvent {
-    pub id: i64,
-    pub project_id: ProjectId,
-    pub kind: ProjectEventKind,
-    pub created_at: OffsetDateTime,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct HistoricalFailure {
-    pub message: String,
-    #[serde(with = "time::serde::rfc3339")]
-    pub occurred_at: OffsetDateTime,
-}
-
-impl HistoricalFailure {
-    pub fn from_event(event: &ProjectEvent) -> Option<Self> {
-        Some(Self {
-            message: event.kind.failure_reason()?.to_string(),
-            occurred_at: event.created_at,
-        })
-    }
 }
 
 impl Project {

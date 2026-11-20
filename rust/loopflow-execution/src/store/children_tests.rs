@@ -440,7 +440,7 @@ fn canonical_task_fields_survive_restart_and_reach_another_machine_through_the_h
 }
 
 #[test]
-fn project_edits_preserve_retired_iteration_and_events() {
+fn project_edits_preserve_retired_iteration() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("loopflow.db");
     let store = crate::store::opening::open_ephemeral(&path).unwrap();
@@ -450,15 +450,6 @@ fn project_edits_preserve_retired_iteration_and_events() {
         .lock()
         .unwrap()
         .execute("UPDATE projects SET iteration=7 WHERE id=?1", [id.as_str()])
-        .unwrap();
-    let event = store
-        .append_project_event(
-            &id,
-            &loopflow_storage::work::project::ProjectEventKind::IterationCompleted {
-                iteration: 7,
-                summary: "Retained historical judgment".into(),
-            },
-        )
         .unwrap();
     store
         .edit_project_fields(
@@ -474,7 +465,6 @@ fn project_edits_preserve_retired_iteration_and_events() {
     let project = store.project(&id).unwrap().unwrap();
     assert_eq!(project.name, "Renamed body of work");
     assert_eq!(project.summary, "New summary");
-    assert_eq!(store.project_events_after(&id, 0).unwrap(), vec![event]);
     let iteration: u32 = store
         .conn
         .lock()

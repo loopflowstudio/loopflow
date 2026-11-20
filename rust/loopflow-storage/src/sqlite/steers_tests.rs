@@ -487,7 +487,7 @@ fn a_new_task_session_skips_steers_an_earlier_session_read() {
 }
 
 #[test]
-fn migration_preserves_released_event_copies_and_planning_receipts() {
+fn migration_preserves_task_steers_interrupts_and_planning_receipts() {
     use crate::migration_runner::{apply_before_migration, migration_section_sql};
     let conn = rusqlite::Connection::open_in_memory().unwrap();
     apply_before_migration(
@@ -512,18 +512,6 @@ fn migration_preserves_released_event_copies_and_planning_receipts() {
         )
         .unwrap();
     assert_eq!(body, "Historical 界 direction");
-    let copies = conn.prepare("SELECT e.id,p.text FROM project_events e JOIN steers p
-        ON p.id=COALESCE(json_extract(e.kind_json,'$.event.steer_id'),json_extract(e.kind_json,'$.steer_id'))
-        ORDER BY e.id").unwrap().query_map([], |row| Ok((row.get::<_,i64>(0)?,row.get::<_,String>(1)?)))
-        .unwrap().collect::<rusqlite::Result<Vec<_>>>().unwrap();
-    assert_eq!(
-        copies,
-        vec![
-            (21, body),
-            (22, "Project history".into()),
-            (23, "Orphan retained source".into())
-        ]
-    );
     let receipt: String = conn
         .query_row(
             "SELECT comment_id FROM task_linear_ingested_comments",
@@ -538,16 +526,6 @@ fn migration_preserves_released_event_copies_and_planning_receipts() {
         })
         .unwrap();
     assert_eq!(interruption, r#"{"kind":"interrupt"}"#);
-    let events = conn
-        .prepare("SELECT kind_json FROM project_events")
-        .unwrap()
-        .query_map([], |row| row.get::<_, String>(0))
-        .unwrap()
-        .collect::<rusqlite::Result<Vec<_>>>()
-        .unwrap();
-    for event in events {
-        serde_json::from_str::<crate::work::project::ProjectEventKind>(&event).unwrap();
-    }
 }
 
 fn selections(store: &SqliteStore) -> Vec<(Option<String>, String, String)> {

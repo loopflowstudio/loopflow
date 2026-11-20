@@ -34,7 +34,8 @@ What the code has, one answer each:
 | the agent's name and the command it runs | `HarnessKind::as_str`, `Harness::program`, `Launcher::installed` |
 | a provider refused, and why | the harness, asked once per error event: `classify_failure(code, message)`; the answer travels as `AgentProcessResult.failure` |
 | what happens next (move, wait, retry, stop with advice) | `_run_with_retries`, which reads `result.failure` and nothing else |
-| the conversation a launch owns (resume, and "not a subagent's") | the thread file beside the launch's delivery file |
+| the conversation they are in (what hears lf, what `lf resume` reopens) | the thread file beside the launch's delivery file: the last conversation a person's input reached. `/new`, `/fork` and `/resume` in the TUI move it |
+| (nothing: a person never typed into a subagent) | a callback with an empty `lastUserInput` is a subagent's, as Claude's with an `agent_id` is |
 | what a hook callback means (which moment, whose conversation, what shape the reply takes) | the harness: `hook_callback`, `hook_reply` |
 
 Three places where the first draft of this plan had two owners, and what
@@ -363,6 +364,46 @@ loopflow-harness --all-targets -- -D warnings`.
 
 ## Left to build
 
+**Slice 6: lf follows the conversation a person switches to.** Everything
+else is built; this is the one open item. See "Hooks", "Whose conversation"
+for the design and "What real `agy` 1.5.13 showed" for the probe behind it.
+
+As built, the first `conversationId` written to the thread file owns the
+launch for good and every other id is answered `{}` as a subagent's. Seen on
+real `agy` 1.5.13 (2026-11-20): `/new` and `/fork` in the TUI each continue
+under a new id, so after either one the conversation gets no context block,
+no steer and no Task update, a Task's conversation reports no turns, and
+`lf resume` reopens the conversation the person left. Claude's `/clear` and
+`/resume` are followed today (`SessionStart` matcher `startup|resume|clear`,
+`NativeBoundary::Select`); the store already moves the selection and the
+resume reference at a start. Only Antigravity's `hook_callback` refuses.
+
+Build, in this order:
+
+1. `hook_callback` in `harness/antigravity.rs`: an empty `lastUserInput` is
+   `None` before the thread file is read; otherwise a `conversationId` that
+   differs from the file (or an empty file) rewrites it and is Start.
+   `claim_thread` becomes "did the conversation change", a `bool`.
+2. `tests/support/antigravity_cli.py`: the subagent's payload has an empty
+   `lastUserInput` (as real `agy` sends); the TUI stand-in reads a `/new`
+   line and continues under a second id.
+3. Tests: `harness::antigravity` unit cases for the three payloads below
+   (`/new`, `/fork`, a subagent); one launch test where the TUI stand-in
+   switches and the Session's recorded thread and `lf resume` argv name the
+   second conversation, and the second conversation got the context block.
+4. Docs: `docs/config.md` "Antigravity" says `/new`, `/fork` and `/resume`
+   keep the conversation on lf; `harness/README.md`'s `hook_callback` row and
+   the trait doc in `harness/mod.rs` say "the conversation a person's input
+   reached" instead of "claims".
+5. On real `agy`: `lf -a antigravity` in an lf-created worktree, `/new`, a
+   prompt, quit; `lf resume` reopens the second conversation, and its
+   transcript holds the injected context block.
+
+If step 1 cannot tell a subagent from a switch on real `agy` (a subagent
+that sends a non-empty `lastUserInput`), stop there: keep the first-id rule
+and say in `docs/config.md` and `docs/troubleshooting.md` that `/new`, `/fork`
+and `/resume` leave lf with the first conversation.
+
 The review's doc pass is in (`docs/config.md` "Antigravity",
 `docs/troubleshooting.md` "Antigravity asks \"Run this command?\" for `lf`",
 `harness/README.md` launch row and method table, the thread-file comments in
@@ -451,17 +492,26 @@ payload.
   not this launch's conversation. The default is today's behavior: the
   declared `--moment`, the payload as sent, `None` when `agent_id` is set
   (Claude's subagents; that check leaves `emit_block`). Antigravity's:
-  - **Whose conversation.** The thread file is `reported_thread_path` beside
-    the launch's delivery file (the hook inherits `LF_CONTEXT_DELIVERY`). The
-    launch's first callback writes its `conversationId` there, resumed or
-    not. A payload with any other `conversationId` is `None`: `{}`, no
-    boundary, no steers claimed.
-    Subagents run the same hooks under their own id (seen live, below);
-    without this a subagent's `Stop` would end the worker's turn and a
-    subagent would claim the Session's steers. The same file is how a bare
-    launch reports its thread for resume, so one file answers both.
+  - **Whose conversation.** A callback with an empty `lastUserInput` is a
+    subagent's: `None` (`{}`, no boundary, no steers claimed). Subagents run
+    the same hooks under their own id (seen live, below); without this a
+    subagent's `Stop` would end the worker's turn and a subagent would claim
+    the Session's steers. Every other callback is the launch's own, whatever
+    its id: a person typed into it. (Built today, and replaced by slice 6:
+    the first id written to the thread file owns the launch and any other id
+    is `None`.)
+  - **Which conversation.** The thread file is `reported_thread_path` beside
+    the launch's delivery file (the hook inherits `LF_CONTEXT_DELIVERY`). It
+    holds the conversation the last callback named. A callback whose
+    `conversationId` differs from it, or that finds it empty, writes its id
+    there: the first of a launch, and the first after `/new`, `/fork` or
+    `/resume <id>` in the TUI. The same file is how a bare launch reports its
+    thread for resume, so it names the conversation the person quit in.
   - **Which moment.** `Stop` is Stop. A `PreInvocation` that wrote the thread
-    file is Start: the first of every launch, so of every headless turn.
+    file is Start: the first of every launch, so of every headless turn, and
+    the first in a conversation the person switched to. The server's start
+    selects that conversation for the Session and moves the resume reference
+    (`with_provider_context`, as for Claude's `/clear`).
     `invocationNum` 0 after that opens a later turn in the same process: the
     moment its hook declared, Tool for a managed launch (the server marks the
     turn working), Steer for a bare one. Anything else is Steer.
@@ -628,6 +678,28 @@ OpenCode's refusal, from `~/.lf/runs/6c/6c7c…/opencode.stderr.log`:
 Models credits. Top up at https://opencode.ai/console/…/billing?credits=1.
 OpenCode Go covers only requests to the OpenCode Go provider."
 
+Switching conversations in the TUI (2026-11-20; `agy -i 'Reply with
+exactly: one'`, then `/new`, a prompt, `/fork`, a prompt; hooks that log and
+answer `{}`):
+
+```
+SessionStart   9fabb8b0                lastUserInput "Reply with exactly: one"
+PreInvocation  9fabb8b0  (0, 1)
+Stop           9fabb8b0
+SessionStart   b87dfb22                lastUserInput "Reply with exactly: two"     # after /new
+PreInvocation  b87dfb22  (0, 1)
+Stop           b87dfb22
+PreInvocation  c4e3ea26  (0, 3)        lastUserInput "Reply with exactly: three"   # after /fork
+Stop           c4e3ea26
+```
+
+- One `agy` process, three conversation ids. `/new` runs `SessionStart`;
+  `/fork` does not and starts at `initialNumSteps` 3 (the forked history).
+- Every callback of a conversation a person typed into carries their text in
+  `lastUserInput`, `SessionStart` and `Stop` included. A subagent's is empty.
+- `/resume <id>` was not driven; the changelog in the binary says it switches
+  conversations inside the session the same way.
+
 The hooks guide inside the binary (`strings` of
 `/opt/homebrew/Caskroom/antigravity-cli/*/antigravity`, "# Lifecycle Hooks")
 is the fullest reference; docs: https://antigravity.google/docs/hooks/,
@@ -745,9 +817,14 @@ is unchanged line for line.
   conversation on Antigravity (interactive sessions use each vendor's own
   prompts on every other harness), and a session grant for `lf` through
   `agy`'s `permissions` settings (not explored; a separate outcome).
-- **`hook_callback` may claim the thread file.** Passed over: a pure
+- **`hook_callback` writes the thread file.** Passed over: a pure
   `hook_callback` with `emit_block` owning every write, which needs one more
   trait answer to save one `fs::write`.
+- **A subagent is told by its empty `lastUserInput`, not by arriving
+  second.** Passed over: keeping "the first id owns the launch", which reads
+  a person's `/new` or `/fork` as a subagent and silently stops delivering
+  to the conversation they are in; and telling a switch by `SessionStart`,
+  which `/fork` does not run and a subagent does.
 - **A provider start publishes the resume reference when the launch
   published none, on every harness.** Only a provider-named terminal reaches
   it today. Passed over: limiting it to `ThreadName::Reported`.
@@ -767,6 +844,9 @@ is unchanged line for line.
    resume), the thread reported through `reported_thread_path`, launch
    matrix chat and work-session cells.
 5. **Built (see "Built").** Names.
+6. **Next (see "Left to build").** lf follows `/new`, `/fork` and `/resume`
+   in the TUI: a subagent is a callback with no user input, and the thread
+   file names the conversation the person is in.
 
 ## Not checked
 
@@ -783,6 +863,9 @@ is unchanged line for line.
 - A bare launch in a held terminal (the launcher becomes `agy`, so no lf
   process reads the thread file at exit) is in bare Codex's position. A
   managed one was run and fixed (see QA above).
+- Whether a subagent's `lastUserInput` is empty in every callback and every
+  mode: seen empty in the one subagent run above. Slice 6 depends on it and
+  says what to do if it is not.
 - A launch from a subdirectory of an lf-created worktree: the trusted folder
   is the launch cwd, not the worktree root.
 

@@ -54,3 +54,7 @@
   again on this Machine: run `agy` and sign in". The sentence is the one
   every harness shares for a credential failure; "revoked" is wrong for a
   first sign-in. Left as is.
+- In an `agy` TUI lf follows the conversation a person switches to (`/new`,
+  `/fork`, `/resume`), and a subagent is the callback with an empty
+  `lastUserInput`. The other choice keeps the first conversation for the
+  life of the launch and documents that the commands leave lf behind.

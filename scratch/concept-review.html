@@ -61,286 +61,199 @@
   ol.q > li { margin-bottom: 14px; }
   ol.q ol { list-style: lower-alpha; margin-top: 4px; }
   .small { font-size: 14px; color: var(--muted); }
+  ol.q > li { margin-bottom: 14px; } ol.q ol { list-style: lower-alpha; }
+  .chosen { color: var(--new); font-weight: 600; }
 </style>
 </head>
-<body>
-<main>
-
+<body><main>
 <h1>Do the product's concepts and the code's concepts line up?</h1>
-<p class="lede">Antigravity as a fifth harness, with failure classification
-on the Harness API. Reviewed after the build: <code>0dfa88e3dd</code> against
-its base <code>c7f2724ab4</code>, 70 files. The page written before the build
-is at <code>e01c5cf1d5</code>.</p>
+<p class="lede">Antigravity as a fifth harness, with failure classification on
+the Harness API. Second review after the build: <code>29aab441dc</code> against
+its base <code>c7f2724ab4</code>. The first one is at <code>1b2963cc96</code>.</p>
 
-<p><strong>Area taken:</strong> the Harness contract as it now stands with
-five harnesses in it, and what a person meets when they pick
-<code>antigravity</code>: a headless step, a Task's own conversation in the
-TUI, a refusal, a resume. Wider than the diff because the QA fixes reached the
-store (<code>with_provider_context</code>) and the hook command
-(<code>lf __context-block --harness</code>), which every harness shares.</p>
+<p><b>Area taken:</b> what a person meets in a conversation lf launched on
+<code>antigravity</code>, start to quit to resume, and the Harness contract
+behind it (<code>hook_callback</code>, the thread file, the store's provider
+start). The last pass was docs, a shared per-turn <code>Run</code> for OpenCode
+and Antigravity, and OpenCode's unserved model; all three hold. This pass
+walked the terminal a second time and typed a command the first walk did
+not.</p>
 
 <p><span class="tag exists">exists</span> is in the tree.
-<span class="tag proposed">proposed</span> is what this review wrote into the
-plan for the next implement pass. No code changed.</p>
+<span class="tag proposed">proposed</span> is what this review wrote into
+<code>scratch/plan.md</code> as slice 6. No code changed.</p>
 
 <h2>One interaction, walked</h2>
-<p><code>lf task run LOO-12 -a antigravity</code>. lf starts two things on
-Antigravity: the step's worker, and the Task's own conversation, an
-<code>agy</code> TUI in a held terminal.</p>
+<p><code>lf -a antigravity</code> in a Task's worktree. The person works a
+while, then types <code>/new</code> (or <code>/fork</code>) in
+<code>agy</code>, as they would type <code>/clear</code> in Claude.</p>
 
-<p><span class="tag exists">exists</span> The worker, seen on real
-<code>agy</code> 1.5.13:</p>
+<p><span class="tag exists">exists</span> Run on real <code>agy</code> 1.5.13
+today, with hooks that only log:</p>
+<pre><code>SessionStart   9fabb8b0           lastUserInput "Reply with exactly: one"
+PreInvocation  9fabb8b0  (0, 1)
+Stop           9fabb8b0
+SessionStart   b87dfb22           lastUserInput "Reply with exactly: two"     # after /new
+PreInvocation  b87dfb22  (0, 1)
+Stop           b87dfb22
+PreInvocation  c4e3ea26  (0, 3)   lastUserInput "Reply with exactly: three"   # after /fork
+Stop           c4e3ea26</code></pre>
+<p>One process, three conversation ids. What lf does with them as built:</p>
 <div class="flow">
-  <div class="step"><b>worker</b><code>agy --input-format stream-json
-    --dangerously-skip-permissions</code>, one process per turn</div>
+  <div class="step"><b>first prompt</b><code>9fabb8b0</code> is written to the
+  thread file; context block delivered</div>
   <div class="arrow">→</div>
-  <div class="step"><b>first model call</b><code>PreInvocation</code> runs
-    <code>hook.sh</code>; lf answers the context block</div>
+  <div class="step"><b>/new</b><code>agy</code> continues under
+  <code>b87dfb22</code></div>
   <div class="arrow">→</div>
-  <div class="step"><b>lf steer</b>reaches the step after its next tool
-    (2 s in QA)</div>
+  <div class="step bad"><b>every later hook</b><code>claim_thread</code>: not
+  the first id, so "a subagent's". lf answers <code>{}</code></div>
   <div class="arrow">→</div>
-  <div class="step"><b>done</b>answer, conversation id and tokens recorded;
-    the Graph advances</div>
+  <div class="step bad"><b>what the person has</b>no context block, no steer,
+  no Task update; a Task's conversation reports no turns</div>
 </div>
-
-<p><span class="tag exists">exists</span> The Task's own conversation, in a
-worktree under the home directory, without <code>yolo</code>:</p>
-<div class="flow">
-  <div class="step"><b>TUI</b><code>agy -i …</code>, trusted for the session,
-    context block delivered</div>
-  <div class="arrow">→</div>
-  <div class="step"><b>a steer or a Task update arrives</b>the model decides
-    to run <code>lf task status</code></div>
-  <div class="arrow">→</div>
-  <div class="step bad"><b>agy's command sandbox</b><code>lf</code> fails:
-    "Operation not permitted" on the Machine's files under
-    <code>~/.lf</code></div>
-  <div class="arrow">→</div>
-  <div class="step bad"><b>"Run this command?"</b>the model asks to run it
-    outside the sandbox; in a held terminal nobody is there</div>
-</div>
-
-<p><strong>Failure:</strong> the quota is spent and
-<code>agents: [antigravity, claude]</code>. The decoder reports
-<code>Error { antigravity_error, … }</code>, <code>drive::run</code> asks
-<code>classify_failure</code> at that event, the retry loop reads
-<code>result.failure</code>, the step goes on under <code>claude</code> and
-<code>lf task status</code> says why. One owner at each station; the
-unserved-model case ran live, the quota case only against the stand-in.</p>
-
-<p><strong>Recovery:</strong> the person opens the Task's conversation with
-<code>lf resume --task</code>, answers <code>2</code> ("allow
-<code>lf</code> for the conversation") and it carries on. Nothing in lf's
-docs tells them that is what the prompt is, or that <code>yolo</code> removes
-it.</p>
+<p><b>Failure:</b> nothing says so. The conversation looks alive and lf is
+silent in it. <code>lf steer</code> is accepted and never arrives.</p>
+<p><b>Recovery:</b> quit and <code>lf resume</code>. It reopens
+<code>9fabb8b0</code>, the conversation they left, not the one they were
+in.</p>
+<p>On Claude the same move works: <code>SessionStart</code> runs for
+<code>startup|resume|clear</code>, the store's start selects the new
+conversation for the Session and moves the resume reference
+(<code>with_provider_context</code>, <code>NativeBoundary::Select</code>).
+The store already has the idea. Antigravity's <code>hook_callback</code> never
+lets the callback reach it.</p>
 
 <h2>The pairings</h2>
 <table>
 <tr><th>What a person knows</th><th>What the code has</th><th></th><th>What is wrong</th></tr>
-
-<tr><td>The agent they name, <code>antigravity</code>, and the command it
-runs, <code>agy</code></td>
+<tr><td>The conversation I am in: it hears lf, and <code>lf resume</code>
+reopens it</td>
+<td><code>claim_thread</code>: the first <code>conversationId</code> of the
+launch, for good</td>
+<td class="no">no</td>
+<td>One name for two ideas. "Owner of the launch" was built to mean "not a
+subagent", and it also means "not the conversation you switched to".</td></tr>
+<tr><td>(nothing: nobody types into a subagent)</td>
+<td>Any id that arrives second</td>
+<td class="no">no</td>
+<td>The payload says it directly: a subagent's <code>lastUserInput</code> is
+empty, a person's conversation carries their text in every callback.
+Arrival order is a stand-in for that.</td></tr>
+<tr><td>The agent they name and the command it runs</td>
 <td><code>HarnessKind::as_str</code>, <code>Harness::program</code>,
-<code>Launcher::installed</code></td>
-<td class="yes">yes</td>
-<td>One name everywhere lf prints it. <code>check_cli_available</code> is
-gone. The plan's model table still said <code>HarnessKind::installed</code>;
-corrected.</td></tr>
-
+<code>Launcher::installed</code></td><td class="yes">yes</td><td></td></tr>
 <tr><td>A provider refused, and why</td>
-<td><code>Launcher::classify_failure(code, message)</code>, asked in
-<code>drive::report</code>; <code>AgentProcessResult.failure</code></td>
-<td class="yes">yes</td>
-<td>The first review's biggest mismatch is closed.
-<code>_classify_agent_failure</code>, <code>_find_provider_error</code> and
-the <code>classifies_failures</code> capability are gone.</td></tr>
-
+<td><code>classify_failure(code, message)</code> at the error event;
+<code>AgentProcessResult.failure</code></td><td class="yes">yes</td>
+<td>OpenCode's real "Model unavailable: …" is now one of its own
+phrases, with the line it printed under test.</td></tr>
 <tr><td>What happens next: move, wait, retry, stop with advice</td>
-<td><code>_run_with_retries</code>, reading <code>result.failure</code></td>
+<td><code>_run_with_retries</code> reading <code>result.failure</code></td>
+<td class="yes">yes</td><td></td></tr>
+<tr><td>A turn is one run of the CLI (OpenCode, Antigravity)</td>
+<td><code>common::Run</code>, <code>Stderr</code>, <code>writer</code></td>
 <td class="yes">yes</td>
-<td>It no longer reads the error text.</td></tr>
-
-<tr><td>The Task's conversation can act on the Task
-(run <code>lf</code>)</td>
-<td>Nothing. <code>Antigravity::open</code> grants the launch folder and the
-main <code>.git</code>; <code>lf</code> itself runs inside
-<code>agy</code>'s command sandbox</td>
-<td class="no">no</td>
-<td>A concept the product has and this harness's launch does not carry. On
-Claude and Codex a work session runs <code>lf</code> freely; here it stops on
-a prompt. Recorded only in <code>scratch/questions.md</code>, which
-<code>lf pr submit</code> clears.</td></tr>
-
-<tr><td>"This conversation" (what <code>lf resume</code> reopens)</td>
-<td>The thread file beside the delivery file, written by
-<code>claim_thread</code> inside <code>hook_callback</code>, again by
-<code>emit_block</code> at a start, read by <code>native_session</code> at
-exit; and, since QA, the store's provider start publishing a resume reference
-for an input that has none</td>
-<td class="no">no</td>
-<td>One idea with two writers and a comment that is now false:
-<code>emit_block</code> says "lf asks only a bare Codex launch for its
-thread, by creating the file", and Antigravity's file is always created, by a
-method whose doc says it reads. Behavior is right; who owns the write is not
-stated in one place.</td></tr>
-
-<tr><td>(nothing: a person never sees a hook)</td>
-<td><code>hook_callback</code>, <code>hook_reply</code>,
-<code>HookCallback</code>; <code>--harness</code> on
-<code>lf __context-block</code></td>
-<td class="yes">yes*</td>
-<td>The harness reads its own callback and shapes its own reply; the script
-only gates. *<code>harness/README.md</code>'s method table lists
-<code>classify_failure</code> and not these two.</td></tr>
-
-<tr><td>What the step cost</td>
-<td><code>transcript/antigravity.rs</code>, <code>step-&lt;n&gt;</code> turn
-names</td>
-<td class="yes">yes</td>
-<td>Parent conversation only; <code>docs/config.md</code> says so.</td></tr>
-
-<tr><td>The folder is trusted; Git works in a worktree</td>
-<td><code>trust</code>, <code>main_git_dir</code></td>
-<td class="yes">yes</td>
-<td>Session settings and one <code>--add-dir</code>; nothing written to
-<code>~/.gemini</code>.</td></tr>
-
+<td>Two copies became one. A failed run reads only its own stderr.</td></tr>
+<tr><td>The Task's conversation can run <code>lf</code></td>
+<td><code>agy</code>'s sandbox stops it at "Run this command?"</td>
+<td class="yes">said</td>
+<td>The last review's biggest mismatch. <code>docs/config.md</code>,
+<code>docs/troubleshooting.md</code> and the harness README now say it and the
+two answers. The launch is unchanged, as chosen.</td></tr>
+<tr><td>What the step cost</td><td><code>transcript/antigravity.rs</code>,
+<code>step-&lt;n&gt;</code> turn names</td><td class="yes">yes</td>
+<td>Parent conversation only; the docs say so.</td></tr>
+<tr><td>"Sign in" at a dead end</td>
+<td>One sentence for every credential failure: "The antigravity login was
+revoked; sign in again…"</td><td class="no">no</td>
+<td>A never-signed-in <code>agy</code> reads as revoked. Small; question 3.</td></tr>
 <tr><td>The step asked a question and nobody was there</td>
 <td>Nothing: <code>agy</code> ends the turn <code>SUCCESS</code></td>
-<td class="no">no</td>
-<td>Same gap as Claude and Codex; Task 48edb9 owns all three. Outside this
-work.</td></tr>
+<td class="no">no</td><td>Task 48edb9 owns it for three harnesses. Outside
+this work.</td></tr>
 </table>
 
-<h2>The biggest mismatch: a Task conversation that cannot run lf</h2>
-<p>The plan opens with "work the way they do for Claude, Codex, OpenCode and
-Pi: chat, work session, batch and worker". Three of the four do. The work
-session opens, hears lf and resumes, and then cannot call lf back without a
-person approving it, and the only record of that is a scratch note.</p>
-
+<h2>The biggest mismatch: lf stays with a conversation the person left</h2>
 <div class="cols">
-<div class="card before">
-<h3><span class="tag exists">exists</span> Before</h3>
-<p><code>docs/config.md</code>, Antigravity: "A step gets the Task's context
-and hears <code>lf steer</code> after its next tool." Nothing about the
-terminal.</p>
-<p><code>docs/troubleshooting.md</code>: no row for "Run this command?" or
-"Operation not permitted" from <code>lf</code> inside <code>agy</code>.</p>
-<p>A person who opens the Task's conversation finds it waiting on a prompt
-they have no way to read as lf's.</p>
+<div class="card before"><h3><span class="tag exists">exists</span> Before</h3>
+<pre><code>// antigravity.rs
+fn claim_thread(file, id) -> Option&lt;bool&gt; {
+  match read(file) {
+    owner if owner == id => Some(false),
+    owner if !owner.is_empty() => None,   // a subagent… or /new, /fork
+    _ => { write(file, id); Some(true) }  // first of the launch
+  }
+}</code></pre>
+<p>Two questions answered by one file: whose callback is this, and which
+conversation is the launch's. The second answer can never change.</p>
 </div>
-<div class="card after">
-<h3><span class="tag proposed">proposed</span> After</h3>
-<p><code>docs/config.md</code>, Antigravity, one paragraph: in the terminal
-<code>agy</code> runs commands in its own sandbox, so the first
-<code>lf</code> command asks "Run this command?"; allow it for the
-conversation, or launch with <code>yolo</code>. Headless steps are not
-sandboxed.</p>
-<p><code>docs/troubleshooting.md</code>: one row, the prompt and the two
-answers.</p>
-<p><code>harness/README.md</code>: the Antigravity launch row says the same
-in a clause.</p>
-</div>
-</div>
+<div class="card after"><h3><span class="tag proposed">proposed</span> After</h3>
+<pre><code>// whose: the payload says
+if payload["lastUserInput"] is empty { return None }  // a subagent
 
-<p><strong>Chosen for review:</strong> say it, and leave the launch as it is.
-Passed over: turning <code>yolo</code> on for every Task conversation on
-Antigravity (the docs promise "Interactive sessions use each vendor's own
-permission settings and prompts", and this would break that for one harness),
-and granting <code>lf</code> through <code>agy</code>'s
-<code>permissions</code> settings (the keys are in the binary and were not
-explored; <code>--add-dir ~/.lf</code> is ruled out because a folder that
-sorts before the checkout becomes where commands run).</p>
-
-<p><strong>Counterexample tried:</strong> a checkout under <code>/tmp</code>.
-The sandbox reaches <code>/tmp</code>, so nothing fails there, which is why
-the stand-in tests and the first live runs never saw it. A person's repository is
-under their home directory, so the docs state it as what happens, with no
-<code>/tmp</code> exception.</p>
-
-<h2>The second one: who writes the thread file</h2>
-<div class="cols">
-<div class="card before">
-<h3><span class="tag exists">exists</span> Before</h3>
-<pre><code>// antigravity.rs, inside hook_callback ("what a callback means")
-claim_thread(file, conversation)   // creates and writes the file
-
-// context.rs, emit_block, right after
-// lf asks only a bare Codex launch for its thread,
-// by creating the file beside its delivery.
-if reported.exists() { write(&amp;reported, thread) }  // writes it again</code></pre>
-</div>
-<div class="card after">
-<h3><span class="tag proposed">proposed</span> After</h3>
-<p>No new type and no moved code. The comment in <code>emit_block</code>
-says what is true: a launch whose provider names the conversation keeps it in
-the file beside its delivery; Codex's launch creates the file to ask, and
-Antigravity's first callback claims it. <code>hook_callback</code>'s doc on
-the trait says an implementation may claim the file.</p>
+// which: the file names where the person is
+let changed = read(file) != id;
+if changed { write(file, id) }
+moment = Stop | Start if changed | …as today</code></pre>
+<p>A switched conversation is a Start: it gets the context block, the server
+selects it for the Session and moves the resume reference, as it does for
+Claude's <code>/clear</code>. Nothing new in the store or in
+<code>emit_block</code>.</p>
 </div>
 </div>
-<p class="small">Passed over: making <code>hook_callback</code> pure and
-having <code>emit_block</code> own every write. It needs a "this harness
-always claims" answer on the trait, which is one more method to save one
-<code>fs::write</code>.</p>
+<p><b>Normal path:</b> one conversation; the file is written once; identical
+to today. A headless turn: each process's first callback finds the id it was
+resumed with or an empty file, as today.</p>
+<p><b>Failure:</b> a subagent calls. Empty <code>lastUserInput</code>,
+<code>None</code>, as today, and no longer dependent on it calling second.</p>
+<p><b>Recovery:</b> <code>/new</code>, work, quit, <code>lf resume</code>: the
+file names the second conversation, so that is what reopens.
+<code>/resume &lt;first id&gt;</code> inside <code>agy</code> moves it
+back.</p>
+<p><b>Counterexample kept:</b> a subagent whose <code>lastUserInput</code> is
+not empty would be read as a switch, end the worker's turn at its
+<code>Stop</code> and take its steers. Seen empty in the one subagent run
+recorded in the plan; not seen across modes. The plan says what to do if the
+build finds one: keep the first-id rule and state the limit in the docs.</p>
+<p><b>Passed over:</b> telling a switch by <code>SessionStart</code>
+(<code>/fork</code> does not run it; a subagent does), and documenting the
+limit without trying (the store already follows a switch for every harness
+that reports one).</p>
 
 <h2>Looked at and left</h2>
-<p><strong>The store's provider start now publishes a resume reference for
-any harness whose input has none</strong> (it used to leave that to the
-launch). Claude and OpenCode name their thread before launch and Codex work
-sessions open theirs first, so only a provider-named terminal reaches the new
-branch; <code>a_start_names_what_reconnect_resumes_when_the_launch_named_nothing</code>
-covers it. The reference is published with no account id.</p>
-<p><strong><code>classify_failure</code> lives on <code>Launcher</code>
-(execution), not <code>Harness</code> (<code>loopflow-harness</code>)</strong>,
-because <code>AgentFailure</code> is execution's. A provider's refusal words
-are something it writes, so the split crate is their truer home. Moving the
-type is a change with no behavior in it.</p>
-<p><strong><code>--harness</code> absent means Claude's shape</strong>, which
-Codex, Pi and OpenCode also send. Naming it on every hook would change the
-declarations Codex asks a person to trust.</p>
+<ul>
+<li><b>An <code>ERROR</code> result with no <code>error</code> text</b> reads
+"Antigravity reported an error": the fallback is in <code>Turn::fail</code>
+once, not at each caller.</li>
+<li><b><code>classify_failure</code> on <code>Launcher</code></b>, the thread
+file's write inside <code>hook_callback</code>, and a provider start
+publishing the resume reference for every harness: as chosen last time, and
+slice 6 leans on the last two.</li>
+</ul>
 
 <h2>Outside this work</h2>
-<p><strong>Letting <code>lf</code> through <code>agy</code>'s sandbox without
-a prompt.</strong> It takes reading <code>agy</code>'s permission grants
-(<code>permissions</code>, <code>grants</code>) on a live TUI and a per-session
-<code>--settings</code> entry beside <code>trustedWorkspaces</code>.</p>
-<p><strong>A question nobody answers</strong> (Task 48edb9).</p>
-<p><strong>Subagent tokens</strong> in <code>lf history usage</code>.</p>
+<ul>
+<li>Letting <code>lf</code> through <code>agy</code>'s sandbox with a session
+grant instead of a prompt.</li>
+<li>A question nobody answers (Task 48edb9). Subagent tokens in
+<code>lf history usage</code>.</li>
+</ul>
 
 <h2>Questions</h2>
 <ol class="q">
-<li>A Task's conversation on Antigravity stops at "Run this command?" the
-first time it runs <code>lf</code>.
-  <ol>
-  <li>Document it; the launch stays as it is. <em>Chosen.</em></li>
-  <li>Launch Task conversations on Antigravity with
-    <code>--dangerously-skip-permissions</code> whatever <code>yolo</code>
-    says.</li>
-  <li>Hold the change until a session grant for <code>lf</code> is found in
-    <code>agy</code>'s settings.</li>
-  </ol></li>
-<li>The thread file's two writers.
-  <ol>
-  <li>Keep the code; correct the two comments. <em>Chosen.</em></li>
-  <li>Make <code>hook_callback</code> pure; <code>emit_block</code> owns the
-    file.</li>
-  </ol></li>
-<li>Where <code>classify_failure</code> lives.
-  <ol>
-  <li><code>Launcher</code>, as built. <em>Chosen.</em></li>
-  <li>Move <code>AgentFailure</code> and the phrase lists to
-    <code>loopflow-harness</code>, beside the decoders.</li>
-  </ol></li>
-<li>A provider start publishing the resume reference when the launch
-published none.
-  <ol>
-  <li>For every harness, as built. <em>Chosen.</em></li>
-  <li>Only for a harness whose managed thread is <code>Reported</code>.</li>
-  </ol></li>
+<li>A person switches conversations inside an lf-launched <code>agy</code>.
+<ol><li class="chosen">lf follows: the thread file names the conversation they
+are in; a subagent is the callback with no user input. Chosen; slice 6.</li>
+<li>lf stays with the first conversation and the docs say <code>/new</code>,
+<code>/fork</code> and <code>/resume</code> leave it behind.</li></ol></li>
+<li>If a subagent turns up with a non-empty <code>lastUserInput</code>.
+<ol><li class="chosen">Fall back to 1b. Chosen.</li>
+<li>Keep both rules: a new id is a switch only when it has user input and the
+launch is a terminal.</li></ol></li>
+<li>The credential sentence for a never-signed-in CLI.
+<ol><li class="chosen">Leave "was revoked". Chosen: one sentence for every
+harness, and the advice after it is right.</li>
+<li>Reword for every harness: "is not signed in on this Machine".</li></ol></li>
 </ol>
-
-</main>
-</body>
-</html>
+</main></body></html>

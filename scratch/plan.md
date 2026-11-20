@@ -96,44 +96,17 @@ wrapper's "Conversation exited before attachment (status N)".
 first-answer-wins, `Attachment::settle` reporting the receipt text plus
 "; retry the same command".
 
-**Changes from the second concept review (next pass).**
-
-1. *The receipt is handed on by name, not inherited.* As built,
-   `LF_OPEN_RECEIPT` is ambient: every `lf` the viewer or launcher starts
-   inherits it, and `end_open` lets any of them answer. Counterexample:
-   `agent_process::require_server` runs `lf install server` (`readiness_command`)
-   and tolerates its failure when the server answers afterwards; that child's
-   error becomes the first answer, and `lf open` reports `failed` for a
-   conversation that attached. When the launch does fail, the reason is the
-   install child's error, not the launcher's "Loopflow server is not running".
-   lf starts itself from some fifty places; stripping the variable at each is
-   the wrong direction (`native_session.rs:571` is one such strip).
-   - `transport::initialize` takes `LF_OPEN_RECEIPT` out of the process
-     environment into a static (`main` is still single-threaded there);
-     `answer_open` and `end_open` read the static.
-   - The two places that continue the same opening put it on the child they
-     start: `start_held`'s environment map (the launcher) and the viewer's own
-     re-exec in `relay_with_preview`, if that exec happens before the
-     acknowledgement (check; drop this hand-off if it doesn't).
-   - Delete `process.env_remove(OPEN_RECEIPT_ENV)` in
-     `native_session.rs`: a provider can't inherit what the environment
-     doesn't hold.
-2. *The tail goes.* `OPEN_TAIL`, `keep_open_tail`, `open_failure`, the
-   `CommandExit` branch of `end_open` and the test
-   `a_provider_that_exits_unready_is_reported_in_its_own_words` are deleted.
-   The acknowledgement is written when the provider process is spawned, so a
-   provider that prints an error and exits is already `usable` (qa saw this
-   with a stand-in); and a launcher that fails writes its own error first. The
-   tail could only answer for a launcher that crashed without returning from
-   `main`. `end_open` becomes: a failed command that holds the receipt and whose
-   error is not a `CommandExit` answers with that error; the warn line stays.
-   Revert the `ANSI_ESCAPE_RE` widening and the `pub(crate)` on
-   `strip_ansi_escape_codes` in `provider_auth/mod.rs` unless another caller
-   needs them. If `usable` is later made to wait until the provider takes
-   input, the tail belongs with that change.
-3. *Docs.* `docs/workspaces.md` "If opening fails" says the reason is "lf's own
-   error, or the provider's last words if it exited before it was ready". Cut
-   the second half; say `usable` means the provider was started.
+**Built from the second concept review:** `transport::initialize` takes
+`LF_OPEN_RECEIPT` out of the environment into the `OPEN_RECEIPT` static. It is
+put back by name in three places, each the same opening continuing:
+`start_held`'s environment map (the launcher), the viewer's two re-execs before
+the acknowledgement (`relay_with_preview`, and the relay that becomes the
+installed lf on a revision skew), and `transport::carry_across_exec` (the entry
+gate at `~/.local/bin/lf` runs `initialize` before it execs the selected
+installation, so without this an installed lf would drop every receipt). The
+relayed tail and the `native_session.rs` strip are gone; `provider_auth`'s
+regex is as it was. If `usable` is later made to wait until the provider takes
+input, a tail belongs with that change.
 
 **Who answers, in order:** the launcher's own error, else the viewer's own
 error, else the wrapper's status line.
@@ -145,8 +118,9 @@ it) → the write fails silently.
 a unit test that after the take the process environment holds no
 `LF_OPEN_RECEIPT`; `a_failed_opening_reports_the_conversations_own_reason`
 (kept); the fixture `a_launch_that_found_no_provider_leaves_nothing_to_resume`
-still reads the launcher's exact error from the receipt, which now shows the
-hand-off through `start_held` works.
+reads the launcher's exact error from the receipt, which shows the hand-off
+through `start_held` works. It returns early, printing why, on a Machine with
+`claude` in a system tool directory.
 
 ## 3. The pane command never names a harness it wasn't given
 
@@ -185,8 +159,8 @@ All four built (commits 54c70a2345 and the one after).
    with "'claude' is not installed" and holds no exit line. `transport::end_open`
    runs in `main` for every failed command holding the variable; a clean exit
    (code 0) writes nothing and leaves the wrapper's line, so a launcher that ran
-   its conversation to the end can't answer for its viewer. Section 2 "Changes
-   from the second concept review" removes the tail and the ambient variable.
+   its conversation to the end can't answer for its viewer. The variable is no longer
+   ambient and the tail is gone (section 2).
 3. **No recorded `--agent`** — done. `Resolved.agent` deleted; `resume_argv`
    reads `agent_override()`.
 4. **Plists, systemd, SSH, Swift** — done. `REMOTE_PATH` is `remote_path()`.
@@ -209,13 +183,10 @@ and added `~/.opencode/bin` to the tool directories.
   never hid `gh` this way, so the exposure is a macOS Machine: a fixture that
   counted on `gh` being absent now reaches an unauthenticated real one. Gate
   reads the first CI run for this, macOS job included.
-- **`a_launch_that_found_no_provider_leaves_nothing_to_resume` depends on the
-  Machine.** Choice made for review: the fixture returns early, printing why,
-  when `claude` resolves on `os_process::tool_path("/usr/bin:/bin:/usr/sbin:/sbin", <fixture HOME>)`
-  (a Homebrew-installed Claude Code). Passed over: a variable that makes lf
-  skip a tool directory (a test-only knob in production code), and leaving the
-  test to fail on such a Machine.
-- **Section 2's three changes** are the next implement pass.
+- **The entry-gate hand-off has no end-to-end check.** The fixtures run
+  `target/debug/lf` directly, never through an installation's gate. The unit
+  test covers `carry_across_exec`; an installed `lf open --json` with the
+  provider missing is the real check (qa).
 
 ## Larger than this change (on `scratch/concept-review.html`)
 

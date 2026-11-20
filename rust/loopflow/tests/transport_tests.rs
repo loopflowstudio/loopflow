@@ -3391,11 +3391,23 @@ fn a_launch_refused_for_a_stopped_server_leaves_nothing_to_resume() {
 #[test]
 fn a_launch_that_found_no_provider_leaves_nothing_to_resume() {
     let fixture = Fixture::new();
+    // lf appends its tool directories to any PATH, so a Claude Code installed
+    // in one of the system's is found and nothing here is missing.
+    let bare = "/usr/bin:/bin:/usr/sbin:/sbin";
+    let searched = loopflow_execution::os_process::tool_path(bare, fixture.home.path());
+    if let Some(found) = searched
+        .split(':')
+        .map(|dir| Path::new(dir).join("claude"))
+        .find(|claude| claude.exists())
+    {
+        eprintln!("skipped: this Machine has {}", found.display());
+        return;
+    }
     let _service = ServerProof::start(&fixture, false);
     let path = fixture.waiting_provider();
     let missing = fixture
         .command(&["-a", "claude", "resume"])
-        .env("PATH", "/usr/bin:/bin:/usr/sbin:/sbin")
+        .env("PATH", bare)
         .env("LF_OPEN_RECEIPT", fixture.home.path().join("receipt"))
         .env_remove("RUST_LOG")
         .output()

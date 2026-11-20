@@ -68,3 +68,10 @@
   it ambient and accepting that `lf install server`'s failure can answer.
 - The bare-PATH provider fixture returns early on a Machine with `claude` in a
   system tool directory.
+
+## Implement, second pass (headless)
+
+- The receipt is also handed across the installation entry gate's exec
+  (`transport::carry_across_exec`) and the viewer's revision-skew exec. The
+  plan named two hand-offs; these two are the same process becoming another lf
+  before it answers.

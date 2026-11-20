@@ -1514,7 +1514,7 @@ fn main() -> std::process::ExitCode {
             loopflow_execution::engine::launch::report::<()>(Err(error));
         }
         let code = journal::command_exit_code(&result);
-        loopflow_execution::transport::end_open(&result, code);
+        loopflow_execution::transport::end_open(&result);
         loopflow_execution::transport::report_exit(code);
         result
     });

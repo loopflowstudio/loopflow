@@ -566,9 +566,6 @@ fn run_client(
         }
         bail!(missing_agent_message(launch.harness.kind()));
     }
-    // The receipt names this opening; the provider's own `lf` commands are
-    // not openings, and a failing one must not log as one.
-    process.env_remove(crate::transport::OPEN_RECEIPT_ENV);
     if let (Some(capture_dir), Some(agent_session)) = (capture_dir.as_deref(), agent_session) {
         crate::session_record::write_provider_session(capture_dir, agent_session, None)?;
     }

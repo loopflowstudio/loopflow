@@ -134,10 +134,9 @@ lf open --task ENG-123 --tab --host rex --json
 # {"status": "failed", "reason": "'claude' is not installed. Install it with `npm install -g @anthropic-ai/claude-code`, then open `claude` to sign in; retry the same command", ...}
 ```
 
-A successful conversation open means the Session attached, not just that the
-host created a tab. When it doesn't attach, the opening command fails with the
-reason the conversation gave: lf's own error, or the provider's last words if it
-exited before it was ready. The pane keeps the same text on screen and waits
+A successful conversation open means the Session attached and its provider was
+started, not just that the host created a tab. When it doesn't attach, the
+opening command fails with lf's own error. The pane keeps the same text on screen and waits
 for Enter. Correct the cause and retry the same command. Desktop rechecks its
 pane before opening another; a terminal retry attaches one more view, so if attachment completed before the
 reply was lost, `--focus` reveals the first one.

@@ -118,7 +118,55 @@ What is in the tree:
 - `harness/README.md`: the limits row is "yes" for OpenCode and Pi and
   `classify_failure` has its own row. Its tables still have four columns.
 
-What it taught:
+Slice 2, a worker hears lf (2026-11-20):
+
+- Real `agy` 1.5.13, a throwaway repo with its own `LF_HOME`:
+  `lf -b default 'Your context names a passphrase in scratch/plan.md. Reply
+  with the passphrase only; do not read any file.' -a antigravity` printed the
+  passphrase. The transcript has three rows: `USER_INPUT`, a `SYSTEM_MESSAGE`
+  "injected by a PreInvocation hook" holding the context block, and one
+  `PLANNER_RESPONSE` with no tool call. So `--add-dir` loaded lf's
+  `hooks.json`, the script ran, and `injectSteps` reached the model.
+- Not run on real `agy`: a Task step (`lf task run … -a antigravity`) and a
+  steer mid-step. They need a Machine server for the test home; qa or demo
+  runs them. The stand-in covers both.
+- `a_task_step_runs_as_a_worker_on_every_harness` has an Antigravity cell: the
+  step settles, the Graph advances, the thread is recorded, the first model
+  call gets "This Session" and its Task, the call after the tool gets the
+  steer, and the stand-in fails the run if a subagent's hook is answered with
+  anything. Its final-answer and usage assertions are skipped for Antigravity
+  (`let transcript = provider != "antigravity"`); slice 3 deletes that.
+- The launch matrix's Antigravity Worker cell runs; the skip is now only for
+  the two terminal cells (slice 4).
+
+What is in the tree for it:
+
+- `HookCallback` and `Harness::hook_callback` / `hook_reply`
+  (`harness/mod.rs`); `HookCallback::plain` holds the `agent_id` check that
+  was in `emit_block`. `lf __context-block --harness <name>` picks the
+  harness; without the flag the callback is read as Claude's shape.
+- `antigravity.rs`: `launch_folder` (made for instructions or a conversation
+  context), `hooks`, `hook_script`, `claim_thread`, and the two trait methods.
+  The script is `<launch folder>/hook.sh`, outside `.agents`; `hooks.json`
+  runs it as `/bin/sh '<path>' tool|steer|stop`.
+- `ContextDelivery::hook_command` and `steer_gate`, taken out of
+  `hook_settings` so the script and Claude's hooks share one gate.
+
+What slice 2 changed in the design (the "Hooks" section below is corrected):
+
+- **lf never writes the thread file at launch.** The Machine server accepts a
+  turn or a steer claim only from a process whose adapter a start activated
+  (`with_provider_context`), and every headless turn is a new process. So the
+  first callback of every launch is Start, with `source` `resume` when
+  `initialNumSteps > 1`, and a resumed turn gets the context block again, as
+  OpenCode's does. The launch's own conversation always calls before any
+  subagent, so the first id written is the owner.
+- The start's extra prompt boundary is `HookCallback.prompt`; `emit_block`
+  sends it only for a managed launch.
+- `${reply:-{}}` is not `{}` in sh: it expands to the reply plus a stray `}`.
+  The script tests the reply instead.
+
+What slice 1 taught:
 
 - One process per turn, `status`-not-exit failure and the reported thread fit
   `drive::run` with no new concept. `drive::run` already reads
@@ -137,20 +185,16 @@ What it taught:
 
 ## Left to build
 
-Next is slice 2 (items 1, 3 and 6): it is the first time `agy` runs under a
-Task with lf's hooks loaded from the launch folder, and the subagent and
-moment rules in "Hooks" are untested until then.
+Next is slice 3 (item 2): `lf history show --final` fails today for an
+Antigravity Session ("the transcript of conversation … is gone"), and usage
+is absent.
 
-1. Hooks: the launch folder's `hooks.json` and gate script (the folder is
-   made today only when the launch has instructions; a launch with a
-   `conversation_context` needs it too), `hook_callback` and `hook_reply`.
+1. Done (slice 2).
 2. `transcript/antigravity.rs`: `transcript_full.jsonl` to `Turn`s, and
-   `locate_transcript` / `direct_transcript`.
-3. `lf __context-block --harness <name>`
-   (`rust/loopflow/src/lf/commands/context.rs`, `lf/mod.rs`): the named
-   harness reads the callback (`hook_callback`) and shapes the reply
-   (`hook_reply`). The `agent_id` check in `emit_block` moves into the default
-   `hook_callback`.
+   `locate_transcript` / `direct_transcript`. Then delete the `transcript`
+   guard in `a_task_step_runs_as_a_worker_on_every_harness` and give the
+   stand-in a transcript and usage.
+3. Done (slice 2).
 4. The terminal: `open`, bare thread report, the launch matrix's Chat and
    WorkSession cells. `native_session.rs` already starts `program()`.
 5. Every list of harness names: `error.rs`, `config.rs` tests,
@@ -158,9 +202,7 @@ moment rules in "Hooks" are untested until then.
    `config/catalog.rs` (`yolo`, `chrome` help), `launch_policy_tests.rs`,
    Swift (`WorkspacePanesView.swift`, `SessionProgramStatus.swift`), docs,
    `skills/loopflow`.
-6. Tests: the stand-in grows hooks and a tool turn; the launch matrix's
-   Worker cell;
-   `task_graph_launch_tests::a_task_step_runs_as_a_worker_on_every_harness`.
+6. Done (slice 2), except the transcript-backed assertions in item 2.
 7. `harness/README.md`: the launch table and the Task-step table with five
    columns.
 
@@ -191,7 +233,7 @@ gets it from its first hook through `reported_thread_path`, as bare Codex does.
 `<launch cwd>/.lf/prompts/<stamp>-<rand>-antigravity/.agents/`
 
 - `AGENTS.md`: `system_prompt_with_structured_replies(config)`.
-- `hooks.json` + a hook script: only when the launch has a
+- `hooks.json`, and `hook.sh` beside `.agents`: only when the launch has a
   `conversation_context`.
 - It must be under the launch cwd (see "workspace order" below), and
   `git::exclude(cwd, ".lf/prompts/")` keeps it out of Git.
@@ -224,27 +266,28 @@ payload.
   declared `--moment`, the payload as sent, `None` when `agent_id` is set
   (Claude's subagents; that check leaves `emit_block`). Antigravity's:
   - **Whose conversation.** The thread file is `reported_thread_path` beside
-    the launch's delivery file (the hook inherits `LF_CONTEXT_DELIVERY`). lf
-    writes the id there at launch when it resumes (`--conversation`); else
-    the first callback writes its `conversationId`. A payload with any other
-    `conversationId` is `None`: `{}`, no boundary, no steers claimed.
+    the launch's delivery file (the hook inherits `LF_CONTEXT_DELIVERY`). The
+    launch's first callback writes its `conversationId` there, resumed or
+    not. A payload with any other `conversationId` is `None`: `{}`, no
+    boundary, no steers claimed.
     Subagents run the same hooks under their own id (seen live, below);
     without this a subagent's `Stop` would end the worker's turn and a
     subagent would claim the Session's steers. The same file is how a bare
     launch reports its thread for resume, so one file answers both.
   - **Which moment.** `Stop` is Stop. A `PreInvocation` that wrote the thread
-    file is Start. `invocationNum` 0 opens a turn: Tool for a managed launch
-    (the server marks the turn working), Steer for a bare one. Anything else
-    is Steer.
+    file is Start: the first of every launch, so of every headless turn.
+    `invocationNum` 0 after that opens a later turn in the same process: the
+    moment its hook declared, Tool for a managed launch (the server marks the
+    turn working), Steer for a bare one. Anything else is Steer.
   - `source` is `startup` when `initialNumSteps <= 1`, else `resume`.
 - **`Harness::hook_reply(event, text)`**: default
   `hookSpecificOutput.additionalContext`; Antigravity's
   `{"injectSteps":[{"systemMessage":{"systemMessage":"<text>"}}]}`.
 - The server receives the normalized callback, so nothing past `emit_block`
   learns a fifth payload shape.
-- A managed start is also the first prompt: after the Start boundary, report
-  a Tool boundary named `UserPromptSubmit` so the server marks the turn
-  working.
+- A managed start is also the first prompt (`HookCallback.prompt`): after
+  the Start boundary, `emit_block` reports a Tool boundary named
+  `UserPromptSubmit` so the server marks the turn working.
 
 **Folder trust.** The TUI stops on "Do you trust the contents of this
 project?" in a folder it has not seen; headless runs do not ask. A terminal
@@ -475,7 +518,7 @@ Details the docs settled, for the build to match or correct:
 - `_find_provider_error` (done).
 - `_classify_agent_failure`, the `AgentFailure::from_code` call in
   `drive::run` and `check_cli_available` (done).
-- The `agent_id` check in `emit_block` (now the default `hook_callback`).
+- The `agent_id` check in `emit_block` (done: `HookCallback::plain`).
 - README rows "no: failures unclassified (LOO-518)" and "(Task 98edc6)", and
   the sentence "A 'no' for OpenCode or Pi means the step stops with the
   provider's error (limits)". Those two Tasks close with this change.
@@ -532,7 +575,7 @@ is unchanged line for line.
    on the second. This is the slice that can prove the plan wrong: it shows
    whether one process per turn, `status`-not-exit failure and the reported
    thread fit `drive::run` without a new concept.
-2. **A worker hears lf.** The launch folder, the gate script,
+2. **Built (see "Built").** A worker hears lf. The launch folder, the gate script,
    `hook_callback` and `hook_reply` behind `--harness` on `__context-block`.
    `lf task run <Task> -a antigravity`, then `lf steer` mid-step; the worker
    test's Antigravity cell. A second resume turn shows `--conversation` with a

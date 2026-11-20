@@ -23,3 +23,12 @@
   beside the run, not in `lf task status`.
 - A `result` with `status: SUCCESS` and an empty `response` completes the
   turn with no answer. OpenCode's driver fails a turn that has no answer.
+- Every headless Antigravity turn gets the context block again: each turn is
+  a new `agy` process and its first hook callback is a start. OpenCode does
+  the same. The other choice, a start only for a new conversation, leaves a
+  resumed process unable to report turns or claim steers.
+- `lf __context-block` with no `--harness` reads the callback as Claude's
+  shape, which Codex, Pi and OpenCode's hooks also send. Naming the harness on
+  every hook would change the declarations Codex asks a person to trust.
+- `agy` is given `hook.sh` in the launch folder, beside `.agents`, not inside
+  it: what `agy` does with an unknown file in `.agents` was not checked.

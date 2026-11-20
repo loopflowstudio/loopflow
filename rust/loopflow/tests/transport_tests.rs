@@ -12,6 +12,7 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::os::fd::{AsRawFd, FromRawFd};
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
 use std::time::{Duration, Instant};
@@ -651,7 +652,9 @@ fn first_native_launch_keeps_only_valid_desktop_terminal_placement() {
         // A bare launch runs directly, from a Desktop pane too.
         let mut command = fixture.command(&["-i", "-a", "claude", ":", "terminal placement"]);
         command.env("PATH", path).env("LF_SERVER", "1");
-        let terminal = Terminal::spawn_with_placement(command, Some(valid));
+        // The stand-in waits on /dev/tty while we read the active attachment.
+        take_controlling_terminal(&mut command);
+        let mut terminal = Terminal::spawn_with_placement(command, Some(valid));
         let launch = fixture.launches(1).pop().unwrap();
         let session = session_of(&fixture.sql(), &launch);
         // The launching lf's placement, recorded on the attachment it holds.
@@ -663,6 +666,7 @@ fn first_native_launch_keeps_only_valid_desktop_terminal_placement() {
                 |row| row.get(0),
             )
             .unwrap();
+        terminal.assert_viewing("bare Desktop conversation");
         terminal.stop();
         assert_eq!(placement.as_deref(), valid.then_some("desktop-shell"));
     }
@@ -673,7 +677,6 @@ fn first_native_launch_keeps_only_valid_desktop_terminal_placement() {
 /// closing the terminal ends it.
 #[test]
 fn bare_lf_runs_its_provider_in_the_foreground_and_ends_with_its_terminal() {
-    use std::os::unix::process::CommandExt;
     let fixture = Fixture::new();
     let path = fixture.provider(
         r#"#!/bin/sh
@@ -712,16 +715,7 @@ read -r answer < /dev/tty
         .stdin(slave.try_clone().unwrap())
         .stdout(slave.try_clone().unwrap())
         .stderr(slave);
-    // SAFETY: setsid and ioctl are async-signal-safe. The PTY becomes lf's
-    // controlling terminal, as a shell's is.
-    unsafe {
-        command.pre_exec(|| {
-            if libc::setsid() < 0 || libc::ioctl(0, libc::TIOCSCTTY as _, 0) < 0 {
-                return Err(std::io::Error::last_os_error());
-            }
-            Ok(())
-        });
-    }
+    take_controlling_terminal(&mut command);
     let mut lf = command.spawn().unwrap();
     drop(command);
     // The reader holds the only master descriptor; closing the terminal is
@@ -1096,6 +1090,20 @@ fn session_new_json_launches_once_and_keeps_the_session() {
 #[test]
 fn provider_changing_resume_json_launches_once_and_keeps_the_session() {
     prepared_thread_json("resume", false, "codex");
+}
+
+/// Give the child its own session with the PTY on stdin as its terminal.
+fn take_controlling_terminal(command: &mut Command) {
+    // SAFETY: setsid and ioctl are async-signal-safe. Stdin is installed
+    // before the hook runs.
+    unsafe {
+        command.pre_exec(|| {
+            if libc::setsid() < 0 || libc::ioctl(0, libc::TIOCSCTTY as _, 0) < 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
 }
 
 /// An `lf resume` typed at a terminal: its screen is a pseudo-terminal, read

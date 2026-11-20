@@ -39,7 +39,7 @@ overview tabs all open conversations the same way.
 |---|---|
 | missing for this scope | starts one and says so |
 | running in an lf terminal, shown or not | opens one more view here; other views stay open and all of them type |
-| ended or crashed | continues the same provider thread from its history |
+| ended or crashed | continues the provider thread it saved, or starts again from its first request |
 | running in a client lf can't share (`lf <skill>` in another terminal, say) | takes it over and says so: that client ends and the conversation continues here; unsent text there is lost |
 
 If attachment fails, resume reports the failure and leaves that work intact.

@@ -36,8 +36,8 @@ lf resume <session-id>
 Resume retains the native conversation ID. Older conversations stored outside
 the native home are adopted as transcript history only. Existing native history takes precedence; newer transcript data
 is retained. Credentials are never copied as part of resume. A conversation
-the provider never saved starts again from its first request and says so; it
-never opens empty.
+the provider never saved starts again from its first request; it never opens
+empty.
 
 Usage records retain provider-reported tokens and costs. Native clients own
 subscription limits and authentication; Loopflow does not poll quotas or change

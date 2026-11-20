@@ -395,7 +395,7 @@ fn a_holder_started_from_a_replaced_executable_fails_at_once_naming_both_builds(
     let executable = directory.path().join("lf");
     std::fs::write(&executable, format!("#!/bin/sh\necho \"$$ {replaced}\"\n")).unwrap();
     std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o755)).unwrap();
-    super::client::HOLDER_EXECUTABLE.with(|holder| *holder.borrow_mut() = Some(executable.clone()));
+    super::client::HOLDER_EXECUTABLE.set(Some(executable.clone()));
 
     let error = Client::ensure(&place, BUILD).unwrap_err().to_string();
 

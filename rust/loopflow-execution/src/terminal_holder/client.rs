@@ -58,16 +58,14 @@ impl Client {
             return Ok(client);
         }
         let executable = holder_executable()?;
-        if let Some(started) = spawn(&executable)? {
-            // The executable was replaced since this process started: its
-            // holder binds another build's place, and nobody will bind this one.
-            if started.get(..12) != build.get(..12) {
-                bail!(
-                    "The executable at {} is now build {started}; this server is build {build} \
-                     and has been replaced since it started. Restart it with lf server restart",
-                    executable.display()
-                );
-            }
+        // The executable was replaced since this process started: its holder
+        // binds another build's place, and nobody will bind this one.
+        if let Some(started) = spawn(&executable)?.filter(|started| started != build) {
+            bail!(
+                "The executable at {} is now build {started}; this server is build {build} \
+                 and has been replaced since it started. Restart it with lf server restart",
+                executable.display()
+            );
         }
         let deadline = Instant::now() + STARTUP;
         loop {
@@ -206,26 +204,20 @@ impl Output {
     }
 }
 
-/// The executable a holder is started from: this process's own.
-#[cfg(not(test))]
-fn holder_executable() -> io::Result<PathBuf> {
-    std::env::current_exe()
-}
-
 #[cfg(test)]
 thread_local! {
+    /// A test's stand-in for the executable its holder is started from.
     pub(super) static HOLDER_EXECUTABLE: std::cell::RefCell<Option<PathBuf>> =
         const { std::cell::RefCell::new(None) };
 }
 
-#[cfg(test)]
+/// The executable a holder is started from: this process's own.
 fn holder_executable() -> io::Result<PathBuf> {
-    HOLDER_EXECUTABLE.with(|executable| {
-        executable
-            .borrow()
-            .clone()
-            .map_or_else(std::env::current_exe, Ok)
-    })
+    #[cfg(test)]
+    if let Some(executable) = HOLDER_EXECUTABLE.with_borrow(Clone::clone) {
+        return Ok(executable);
+    }
+    std::env::current_exe()
 }
 
 /// Start a holder from `executable` in its own session, so that stopping or

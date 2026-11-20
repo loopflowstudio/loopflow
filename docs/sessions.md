@@ -39,7 +39,7 @@ overview tabs all open conversations the same way.
 |---|---|
 | missing for this scope | starts one and says so |
 | running in an lf terminal, shown or not | opens one more view here; other views stay open and all of them type |
-| ended or crashed | continues the same provider thread from its history |
+| ended or crashed | continues the provider thread it saved, or starts again from its first request |
 | running in a client lf can't share (`lf <skill>` in another terminal, say) | takes it over and says so: that client ends and the conversation continues here; unsent text there is lost |
 
 If attachment fails, resume reports the failure and leaves that work intact.
@@ -359,10 +359,20 @@ lf task status LOO-12
 # Run died 12:01 at implement · no server runs here to start it; `lf task run LOO-12` starts it again
 ```
 
-A crash can take the provider's transcript with it, as when the provider was
-killed before saving its first turn. Then the conversation starts again on a
-fresh thread with its original request, whether the server starts it or you
-do with `lf resume`, and the old thread stays in `lf session history`.
+A launch can end before the provider saves anything: `claude` missing from
+`PATH`, a failed login or trust prompt, a crash, or Ctrl+C before you typed.
+Opening that conversation again starts it on a fresh thread with its original
+request, whether the server starts it, you run `lf resume` or `lf session
+resume`, or a pane opens it. The same happens when the provider's transcript
+was deleted. The old thread stays in `lf session history`.
+
+```bash
+lf resume 7f3a2c
+# This conversation has no saved claude transcript; starting it again from its first request.
+```
+
+A conversation the provider did save always resumes its thread. If the
+provider then refuses that resume, the Session stays as it was.
 
 A work session that has never run reads as that, not as a death. Until its
 first agent runs it is starting, as is any start still under way, and a start

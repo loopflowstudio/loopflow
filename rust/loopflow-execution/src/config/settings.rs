@@ -1328,7 +1328,8 @@ mod tests {
                 None,
             )
             .unwrap();
-            assert!(!resolved.config.yolo);
+            // An unreadable `yolo` falls to the default, which is on.
+            assert!(resolved.config.yolo);
             assert!(resolved.config.claude.model.is_none());
             if values.starts_with("context:") {
                 assert_eq!(resolved.config.context.docs, ["README.md"]);

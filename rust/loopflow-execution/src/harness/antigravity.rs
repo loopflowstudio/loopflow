@@ -456,7 +456,7 @@ impl super::Launcher for loopflow_harness::Antigravity {
         let (mut args, input) = launch.terminal_input()?;
         let mut client = super::native_session::NativeClient::new(launch)?;
         args.extend(options(launch.config, client.thread.as_ref(), launch.kind)?);
-        if launch.config.skip_permissions {
+        if launch.config.skips_permissions(launch.kind.mode()) {
             args.push("--dangerously-skip-permissions".into());
         }
         let cwd = client.process.get_current_dir();

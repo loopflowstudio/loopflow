@@ -3395,15 +3395,27 @@ fn a_launch_refused_for_a_stopped_server_leaves_nothing_to_resume() {
 /// A launch that could not find the provider's CLI named a Claude conversation
 /// that Claude never wrote. The next launch starts it fresh; `--resume` on that
 /// name answers "No conversation found" and the conversation never opens.
-/// Started by `lf open`, the failure is in a pane that closes, so the log keeps it.
+/// Started by `lf open`, the launcher's error answers the opening and the log keeps it.
 #[test]
 fn a_launch_that_found_no_provider_leaves_nothing_to_resume() {
     let fixture = Fixture::new();
+    // lf appends its tool directories to any PATH, so a Claude Code installed
+    // in one of the system's is found and nothing here is missing.
+    let bare = "/usr/bin:/bin:/usr/sbin:/sbin";
+    let searched = loopflow_execution::os_process::tool_path(bare, fixture.home.path());
+    if let Some(found) = searched
+        .split(':')
+        .map(|dir| Path::new(dir).join("claude"))
+        .find(|claude| claude.exists())
+    {
+        eprintln!("skipped: this Machine has {}", found.display());
+        return;
+    }
     let _service = ServerProof::start(&fixture, false);
     let path = fixture.waiting_provider();
     let missing = fixture
         .command(&["-a", "claude", "resume"])
-        .env("PATH", "/usr/bin:/bin:/usr/sbin:/sbin")
+        .env("PATH", bare)
         .env("LF_OPEN_RECEIPT", fixture.home.path().join("receipt"))
         .env_remove("RUST_LOG")
         .output()
@@ -3413,6 +3425,10 @@ fn a_launch_that_found_no_provider_leaves_nothing_to_resume() {
     assert!(shown.contains("'claude' is not installed"), "{missing:?}");
     let log = std::fs::read_to_string(fixture.home.path().join("logs/lf.log")).unwrap();
     assert!(log.contains("'claude' is not installed"), "{log}");
+    // The launcher answered the opening with its own error, before the pane's status line.
+    let reason = std::fs::read_to_string(fixture.home.path().join("receipt")).unwrap();
+    assert!(reason.starts_with("'claude' is not installed"), "{reason}");
+    assert!(!reason.contains("status"), "{reason}");
 
     fixture.resume_starts_a_new_thread(&path, 1);
 }

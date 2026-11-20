@@ -25,32 +25,38 @@ pub(super) fn open(target: &Resolved, focus: bool, argv: &[String]) -> Result<St
         ),
         _ => TmuxLocation::current(),
     };
-    let window = |after: Option<&str>| {
-        let mut command = caller
-            .as_ref()
-            .map(host_command)
-            .unwrap_or_else(|| Command::new("tmux"));
-        command.arg("new-window");
-        if let Some(pane) = after {
-            command.args(["-a", "-t", pane]);
-        }
-        if !focus {
-            command.arg("-d");
-        }
-        command
-            .args([
-                "-P",
-                "-F",
-                "#{pane_id}",
-                "-n",
-                &target.destination_name(),
-                "-c",
-            ])
-            .arg(target.cwd())
-            .arg(&shell);
-        run_host(command, "tmux")
-    };
-    let output = window(caller.as_ref().map(|location| location.pane.as_str()))?;
+    let mut command = caller
+        .as_ref()
+        .map(host_command)
+        .unwrap_or_else(|| Command::new("tmux"));
+    command.arg("new-window");
+    if let Some(location) = &caller {
+        // `new-window -t` names a window: tmux 3.7 refuses a pane there.
+        let mut lookup = host_command(location);
+        lookup.args([
+            "display-message",
+            "-p",
+            "-t",
+            &location.pane,
+            "#{window_id}",
+        ]);
+        command.args(["-a", "-t", run_host(lookup, "tmux")?.trim()]);
+    }
+    if !focus {
+        command.arg("-d");
+    }
+    command
+        .args([
+            "-P",
+            "-F",
+            "#{pane_id}",
+            "-n",
+            &target.destination_name(),
+            "-c",
+        ])
+        .arg(target.cwd())
+        .arg(&shell);
+    let output = run_host(command, "tmux")?;
     let pane = output.trim();
     anyhow::ensure!(!pane.is_empty(), "tmux reply named no pane");
     Ok(pane.to_owned())

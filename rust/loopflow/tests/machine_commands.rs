@@ -27,19 +27,21 @@ impl Machines {
         let home = root.path().join("local");
         let remote = root.path().join("remote");
         fs::create_dir_all(&home).unwrap();
+        fs::create_dir_all(remote.join("bin")).unwrap();
         fs::create_dir_all(remote.join(".local/bin")).unwrap();
         fs::create_dir_all(remote.join("project's checkout")).unwrap();
         fs::create_dir_all(root.path().join("bin")).unwrap();
+        // Put transport doubles on the incoming PATH. The remote preamble
+        // appends .local/bin to find lf, after the system tools.
         executable(
             &root.path().join("bin/ssh"),
             &format!(
                 r#"#!/bin/sh
 for arg in "$@"; do remote_command="$arg"; done
-cd '{}' || exit 1
-exec env -i HOME='{}' PATH=/usr/bin:/bin bash -c "$remote_command"
+cd '{remote}' || exit 1
+exec env -i HOME='{remote}' PATH='{remote}/bin:/usr/bin:/bin' bash -c "$remote_command"
 "#,
-                remote.display(),
-                remote.display()
+                remote = remote.display(),
             ),
         );
         // Credential side effects stay inside the fixture even on macOS.
@@ -135,7 +137,7 @@ esac
         fs::rename(bin.join("lf"), bin.join("lf-published")).unwrap();
         // The download side effect is replaced, not the add/install/probe workflow.
         executable(
-            &bin.join("curl"),
+            &self.root.path().join("remote/bin/curl"),
             &format!(
                 r#"#!/bin/sh
 cat <<'INSTALLER'
@@ -551,11 +553,19 @@ fn broken_existing_lf_and_failed_installer_do_not_register_a_machine() {
         .success());
     assert!(!fixture.root.path().join("installed").exists());
     fs::remove_file(bin.join("lf")).unwrap();
-    executable(&bin.join("curl"), "#!/bin/sh\necho 'exit 1'\n");
+    let attempted = fixture.root.path().join("installer-attempted");
+    executable(
+        &fixture.root.path().join("remote/bin/curl"),
+        &format!(
+            "#!/bin/sh\nprintf '%s\\n' \"touch '{}'\" 'exit 1'\n",
+            attempted.display()
+        ),
+    );
     assert!(!fixture
         .terminal(&["machine", "add", "mini"], "y\n")
         .status
         .success());
+    assert!(attempted.exists());
     assert_eq!(
         fixture.json(&["machine", "list", "--json"]),
         serde_json::json!([])
@@ -635,7 +645,7 @@ fn machine_add_on_the_remote_updates_only_its_registry() {
         ),
     );
     executable(
-        &remote.join(".local/bin/ssh"),
+        &remote.join("bin/ssh"),
         &format!(
             "#!/bin/sh\nprintf 'lf {}\\nhome_33333333333333333333333333333333\\n'\n",
             loopflow::build_info::BUILD_VERSION

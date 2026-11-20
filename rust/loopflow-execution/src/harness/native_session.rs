@@ -550,9 +550,6 @@ fn run_client(
     let title = &mut client.title;
     // Only an explicit remote connection is a client of a surviving AgentProcess.
     let owned = client.remote.is_none().then_some(&attachment);
-    // The receipt names this opening; the provider's own `lf` commands are
-    // not openings, and a failing one must not log as one.
-    process.env_remove(crate::transport::OPEN_RECEIPT_ENV);
     if let (Some(capture_dir), Some(agent_session)) = (capture_dir.as_deref(), agent_session) {
         crate::session_record::write_provider_session(capture_dir, agent_session, None)?;
     }
@@ -569,6 +566,12 @@ fn run_client(
     if crate::transport::current().is_some() {
         // Hand the wait to the execution owner and become the provider, or its
         // client: no launcher sits beside the agent holding the heap that built it.
+        // Becoming the provider leaves nobody to say it failed, and the
+        // announcement below tells the viewer, and an `lf open` behind it, that
+        // the provider started. Refuse first what exec would.
+        if crate::os_process::which_command(process).is_none() {
+            return Err(anyhow!(missing_agent_message(launch.harness.kind())));
+        }
         if let Some(capture) = capture {
             capture.observe_provider(agent_session.cloned());
         }

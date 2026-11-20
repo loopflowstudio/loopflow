@@ -362,13 +362,8 @@ antigravity` (8), the two Antigravity worker tests in
 `task_graph_launch_tests`, and `cargo clippy -p loopflow-execution -p
 loopflow-harness --all-targets -- -D warnings`.
 
-## Left to build
-
-**Slice 6 is built on the stand-in; its run on real `agy` is left** (step 5
-below, for qa). See "Hooks", "Whose conversation" for the design and "What
-real `agy` 1.5.13 showed" for the probe behind it.
-
-Built (implement, 2026-11-20):
+Slice 6 (implement, 2026-11-20), on the stand-in; "Hooks", "Whose conversation"
+has the design and "What real `agy` 1.5.13 showed" the probe behind it:
 
 - `hook_callback` in `harness/antigravity.rs`: an empty `lastUserInput` is
   `None` before the thread file is read; otherwise a model call whose
@@ -390,16 +385,6 @@ Built (implement, 2026-11-20):
 | `cargo test -p loopflow-execution --lib -- harness::launch_matrix` | `antigravity_follows_the_conversation_a_person_switches_to`: both conversations got the context block, the Session's thread and provider record name the second, and the reopen argv is `--conversation <second>`; the five-harness matrix passes | implement, CI |
 | `cargo test -p loopflow --lib task_graph_launch_tests::a_task_step_runs_as_a_worker_on_every_harness` | passed with the subagent's empty `lastUserInput` | implement, CI |
 | `cargo clippy -p loopflow-execution --all-targets -- -D warnings`, `documented_commands::` | clean; 4 passed | implement, CI |
-
-Left, for qa on real `agy`: `lf -a antigravity` in an lf-created worktree,
-`/new`, a prompt, quit; `lf resume` reopens the second conversation, and its
-transcript holds the injected context block. Then the same with `/fork` and
-`/resume <id>` (never driven live).
-
-If a subagent turns up on real `agy` with a non-empty `lastUserInput`, go
-back to the first-id rule and say in `docs/config.md` and
-`docs/troubleshooting.md` that `/new`, `/fork` and `/resume` leave lf with
-the first conversation.
 
 The review's doc pass is in (`docs/config.md` "Antigravity",
 `docs/troubleshooting.md` "Antigravity asks \"Run this command?\" for `lf`",
@@ -429,6 +414,18 @@ QA after compress, real `agy` 1.5.13 and OpenCode 2.0.32 (2026-11-20);
 - Still not reached: an OpenCode balance refusal (the account has credits and
   OpenCode ignores a project `baseURL` override for its own provider), a spent
   Antigravity quota, a Machine without `agy`.
+
+## Left to build
+
+Nothing. One check is left for qa on real `agy`, slice 6's: `lf -a antigravity` in an lf-created worktree,
+`/new`, a prompt, quit; `lf resume` reopens the second conversation, and its
+transcript holds the injected context block. Then the same with `/fork` and
+`/resume <id>` (never driven live).
+
+If a subagent turns up on real `agy` with a non-empty `lastUserInput`, go
+back to the first-id rule and say in `docs/config.md` and
+`docs/troubleshooting.md` that `/new`, `/fork` and `/resume` leave lf with
+the first conversation.
 
 ## Design
 
@@ -839,7 +836,7 @@ is unchanged line for line.
    resume), the thread reported through `reported_thread_path`, launch
    matrix chat and work-session cells.
 5. **Built (see "Built").** Names.
-6. **Built on the stand-in; real `agy` left to qa (see "Left to build").** lf follows `/new`, `/fork` and `/resume`
+6. **Built (see "Built"); its run on real `agy` is qa's (see "Left to build").** lf follows `/new`, `/fork` and `/resume`
    in the TUI: a subagent is a callback with no user input, and the thread
    file names the conversation the person is in.
 

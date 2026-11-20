@@ -17,8 +17,6 @@ Each choice below was made headless and is reversible before release.
   the one Project its first Task made: no `lf` command renames, adds or
   completes a Project (`docs/work.md` "Projects" states this). Is that the
   wanted no-tracker behavior, or does a local rename stay?
-  (`SqliteStore::edit_project` now has only test callers and stays in place
-  pending this choice.)
 - **Saved KR text:** KR text in saved `projects.krs` (47 of 64 Projects on the
   measured store) stops being shown on `lf` surfaces; it stays in the leaving
   column until the contract's export and in Linear Project `content`.
@@ -28,8 +26,9 @@ Each choice below was made headless and is reversible before release.
 - **Authored Wave files:** this repository's `.lf/wave/product/GOAL.md`
   "Chapter planning" section and `.lf/wave/intelligence/metrics/*.md` are left
   alone (Wave memory and authored Wave content).
-- **Lock path rename:** `~/.lf/chapter-locks` is renamed `wave-locks`; a lock
-  held by a running old `lf` during the swap is not seen by the new one.
+- **Lock directory:** keep `~/.lf/chapter-locks` so running released clients and branch builds lock the same file.
+
+- **Released Project selection:** the staged schema keeps `selected_project_owner_update`. On an upgraded store, a non-null `waves.current_project_id` can still prevent that Project from moving to a different Wave until the contract removes the trigger. It does not prevent moving Tasks or ending a Project.
 
 ## Run observations
 

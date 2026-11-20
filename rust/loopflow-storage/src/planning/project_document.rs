@@ -9,8 +9,7 @@ use serde::{Deserialize, Serialize};
 type ProjectDocumentResult<T> = Result<T, ProjectDocumentError>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ProjectField {
-    HistoricalWorkflow,
+enum Section {
     Krs,
     Targets,
 }
@@ -26,17 +25,17 @@ pub struct ReleasedKr {
 #[derive(Debug)]
 pub struct ProjectDocument<'a> {
     /// The `## Metric targets` JSON array, unread except by released conversion.
-    pub released_targets: serde_json::Value,
+    pub released_targets: Vec<serde_json::Value>,
     pub released_krs: Vec<ReleasedKr>,
     source: &'a str,
-    fields: Vec<(std::ops::Range<usize>, ProjectField)>,
+    fields: Vec<std::ops::Range<usize>>,
 }
 
 impl ProjectDocument<'_> {
     pub fn description(&self) -> String {
         let mut prose = String::new();
         let mut start = 0;
-        for (range, _) in &self.fields {
+        for range in &self.fields {
             prose.push_str(&self.source[start..range.start]);
             start = range.end;
         }
@@ -49,7 +48,7 @@ impl ProjectDocument<'_> {
     pub fn observed_description(&self) -> String {
         let mut parts = Vec::new();
         let mut start = 0;
-        for (range, _) in &self.fields {
+        for range in &self.fields {
             let part = self.source[start..range.start].trim();
             if !part.is_empty() {
                 parts.push(part);
@@ -69,7 +68,7 @@ impl ProjectDocument<'_> {
         // change the independently saved fields.
         let mut result = description.trim_end().to_owned();
         result.push_str("\n\n");
-        for (range, _) in &self.fields {
+        for range in &self.fields {
             result.push_str(&self.source[range.clone()]);
         }
         let parsed = parse_project_document(&result)?;
@@ -87,7 +86,7 @@ impl ProjectDocument<'_> {
 }
 
 pub fn parse_project_document(source: &str) -> ProjectDocumentResult<ProjectDocument<'_>> {
-    use ProjectField::{HistoricalWorkflow, Krs, Targets};
+    use Section::{Krs, Targets};
     let mut section = None;
     let mut fields = Vec::new();
     let mut fence: Option<(char, usize, bool)> = None;
@@ -105,7 +104,7 @@ pub fn parse_project_document(source: &str) -> ProjectDocumentResult<ProjectDocu
             let closing = trimmed.chars().take_while(|ch| *ch == marker).count() >= length
                 && trimmed.trim_matches(marker).is_empty();
             if managed {
-                fields.push((range, Targets));
+                fields.push(range);
                 if !closing {
                     targets.push(line);
                 }
@@ -122,7 +121,7 @@ pub fn parse_project_document(source: &str) -> ProjectDocumentResult<ProjectDocu
                 let managed = section == Some(Targets) && matches!(language, "" | "json");
                 if managed {
                     fenced_targets = true;
-                    fields.push((range, Targets));
+                    fields.push(range);
                 }
                 if let Some(kr) = current_kr.take() {
                     krs.push(kr);
@@ -134,7 +133,7 @@ pub fn parse_project_document(source: &str) -> ProjectDocumentResult<ProjectDocu
         // Retain released declarations byte-for-byte when editing other fields;
         // they no longer select a Workflow or need value/precedence parsing.
         if trimmed.starts_with("workflow:") || trimmed.starts_with("flow:") {
-            fields.push((range, HistoricalWorkflow));
+            fields.push(range);
             continue;
         }
         if trimmed.starts_with('#') {
@@ -146,8 +145,8 @@ pub fn parse_project_document(source: &str) -> ProjectDocumentResult<ProjectDocu
                 "## KRs" => Some(Krs),
                 _ => None,
             };
-            if let Some(section) = section {
-                fields.push((range, section));
+            if section.is_some() {
+                fields.push(range);
             }
             continue;
         }
@@ -172,7 +171,7 @@ pub fn parse_project_document(source: &str) -> ProjectDocumentResult<ProjectDocu
                             text: text.trim().into(),
                             holds,
                         });
-                        fields.push((range, Krs));
+                        fields.push(range);
                     }
                 } else if trimmed.is_empty() {
                     // A new paragraph is prose, not a continuation of the last KR.
@@ -182,7 +181,7 @@ pub fn parse_project_document(source: &str) -> ProjectDocumentResult<ProjectDocu
                 } else if let Some(kr) = current_kr.as_mut() {
                     kr.text.push(' ');
                     kr.text.push_str(trimmed);
-                    fields.push((range, Krs));
+                    fields.push(range);
                 }
             }
             _ => {}
@@ -200,21 +199,19 @@ pub fn parse_project_document(source: &str) -> ProjectDocumentResult<ProjectDocu
         for (line, range) in raw_targets {
             targets.push(line);
             if !line.trim().is_empty() {
-                fields.push((range, Targets));
+                fields.push(range);
             }
         }
     }
 
     let released_targets = if targets.iter().all(|line| line.trim().is_empty()) {
-        serde_json::Value::Array(Vec::new())
+        Vec::new()
     } else {
-        serde_json::from_str::<Vec<serde_json::Value>>(&targets.concat())
-            .map(serde_json::Value::Array)
-            .map_err(|error| {
-                ProjectDocumentError(format!("invalid Project metric targets: {error}"))
-            })?
+        serde_json::from_str::<Vec<serde_json::Value>>(&targets.concat()).map_err(|error| {
+            ProjectDocumentError(format!("invalid Project metric targets: {error}"))
+        })?
     };
-    fields.sort_unstable_by_key(|(range, _)| range.start);
+    fields.sort_unstable_by_key(|range| range.start);
     Ok(ProjectDocument {
         released_targets,
         released_krs: krs,

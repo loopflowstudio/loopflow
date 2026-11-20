@@ -44,7 +44,7 @@ hangs KRs and metrics on a Project or a Wave.
     `started` Project, else its newest `backlog`, `planned` or `paused` one
     (by `created_at DESC, id DESC`), else a `started` Project named for the
     Wave created inside the same save or move transaction (`join_project_in`
-    in `promote_task_prepared` and `move_task_to_wave`), so a failed save
+    in `promote_task_prepared` and `move_task`), so a failed save
     leaves no orphan Project.
   - Measured on one store written by main (62 live Waves, 64 Projects,
     2026-11-18): of the 17 Waves with a `current_project_id`, this rule
@@ -130,22 +130,11 @@ hangs KRs and metrics on a Project or a Wave.
 
 All implementation slices are complete.
 
-### For `compress`
-
-- `SqliteStore::join_project` (`rust/loopflow-storage/src/sqlite/children.rs:1288`)
-  and the `name: Option<&str>` parameter on `join_project_in`
-  (`children.rs:2472`) were added in slice 1 before slice 2 moved Task creation
-  and moves onto `join_project_in(&tx, wave, None)`. `join_project` now has
-  only test callers (`test_fixture.rs`, `test_support::seed_wave_project` and
-  unit/integration tests): move the named seeding helper behind test support /
-  `#[cfg(test)]` so `join_project_in` takes `(conn, wave)` only.
-- Note: `SqliteStore::edit_project`
-  (`rust/loopflow-storage/src/sqlite/project_content.rs:21`) also has only test
-  callers since `lf wave edit-project` went; `scratch/questions.md` keeps it
-  pending the open local-rename question unless `compress` folds its test uses
-  into `planning_write` directly.
-
 ### Checks recorded and deferred
+
+- Compress: `cargo check --all-targets`, `cargo fmt --check` and `git diff --check` passed.
+  Focused Rust tests passed for storage Projects (26), cross-build field decoding (2),
+  membership moves, rollback in an empty Wave, CLI Graph defaults and first-Task Project creation.
 
 - `cargo check --all-targets`: passed (all 7 workspace crates, post-merge with
   LOO-938 `c2beea658a`).

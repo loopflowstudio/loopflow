@@ -40,7 +40,8 @@ mod pr_landings;
 mod processes;
 pub use processes::{PreviousAgentDisposition, SessionTransfer};
 mod program_status;
-pub mod project_content;
+#[cfg(test)]
+mod project_content_tests;
 pub mod provider_transitions;
 mod rentals;
 pub mod repositories;

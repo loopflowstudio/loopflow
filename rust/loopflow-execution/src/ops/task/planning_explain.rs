@@ -211,13 +211,13 @@ async fn read_planning(
                 .flatten();
             report.action = Some(TaskPlanningAction::Move {
                 wave: destination.as_ref().map(|w| w.id().to_string()),
-                project: project.as_ref().map(|p| p.id.to_string()),
+                project: project.as_ref().map(ToString::to_string),
                 previous_project: task.project_id.as_ref().map(ToString::to_string),
             });
             if let Err(error) = store.sqlite.validate_task_move(
                 &task.id,
                 task.project_id.as_ref(),
-                project.as_ref().map(|p| &p.id),
+                project.as_ref(),
             ) {
                 report.impediments.push(error.to_string());
             }
@@ -390,7 +390,7 @@ async fn read_creation(
         project: selected, ..
     }) = &mut report.action
     {
-        *selected = joined.map(|project| project.id.to_string());
+        *selected = joined.map(|id| id.to_string());
     }
     Ok(())
 }

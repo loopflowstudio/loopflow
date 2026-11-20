@@ -31,7 +31,7 @@ pub fn seed_wave_project(
     name: &str,
 ) -> loopflow_storage::StoreResult<Project> {
     let wave = loopflow::work::wave::bootstrap::ensure_wave(store, repo, name)?;
-    store.join_project(&wave, name)
+    store.seed_project(&wave)
 }
 
 #[allow(dead_code)] // Shared helper compiled into each integration test binary.

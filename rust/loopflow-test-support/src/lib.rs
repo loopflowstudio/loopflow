@@ -66,7 +66,7 @@ const RUNNING_OWNERS: &str = "SELECT pid,1 FROM (
     SELECT agent_pid pid FROM agent_sessions UNION SELECT attached_pid FROM agent_sessions
     UNION SELECT pid FROM graph_processes UNION SELECT pid FROM graph_process_steps
     UNION SELECT run_pid FROM task_graphs UNION SELECT pid FROM task_ship_events
-    UNION SELECT project_activation_pid FROM waves UNION SELECT repair_pid FROM ci_incidents
+    UNION SELECT repair_pid FROM ci_incidents
 ) WHERE pid IS NOT NULL";
 /// Rows a released lf or a fixture wrote, finished ones included.
 const PROCESS_ROWS: &str = "SELECT pid,completed_at IS NULL FROM processes WHERE pid IS NOT NULL";

@@ -340,7 +340,7 @@ impl World {
         Ok(())
     }
 
-    /// Add a Wave and its current Project, as `lf wave add` does.
+    /// Add a Wave, as `lf wave add` does.
     pub fn wave(&self, name: &str) -> Result<()> {
         self.runtime
             .block_on(loopflow_execution::ops::wave_lifecycle::add(

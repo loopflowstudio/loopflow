@@ -320,7 +320,7 @@ impl SqliteStore {
         if let Some(input) = creation {
             let mut input = input.clone();
             if let Some(wave) = creation_wave {
-                input.project_id = Some(join_project_in(&tx, wave, None)?.id);
+                input.project_id = Some(join_project_in(&tx, wave)?);
             }
             create_task_in(&tx, &input)?;
         }
@@ -1249,14 +1249,14 @@ impl SqliteStore {
 
     pub fn project(&self, project_id: &ProjectId) -> StoreResult<Option<Project>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        project_on(&conn, project_id)
+        Ok(project_in(&conn, project_id).optional()?)
     }
 
     pub fn project_by_project(&self, project: &str) -> StoreResult<Option<Project>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let snapshot = conn.savepoint()?;
         if let Ok(project_id) = ProjectId::parse(project) {
-            if let Some(project) = project_on(&snapshot, &project_id)? {
+            if let Some(project) = project_in(&snapshot, &project_id).optional()? {
                 return Ok(Some(project));
             }
         }
@@ -1278,31 +1278,21 @@ impl SqliteStore {
 
     /// The Project a new Task in `wave` joins: its newest `started` Project,
     /// else its newest other open one. Nobody sets it and nothing gates on it.
-    pub fn new_task_project(&self, wave: &WaveId) -> StoreResult<Option<Project>> {
+    pub fn new_task_project(&self, wave: &WaveId) -> StoreResult<Option<ProjectId>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         new_task_project_in(&conn, wave)
     }
 
-    /// `new_task_project`, or a `started` Project named `name` made now for a
-    /// Wave with no open one.
-    pub fn join_project(&self, wave: &WaveId, name: &str) -> StoreResult<Project> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let project = join_project_in(&tx, wave, Some(name))?;
-        tx.commit()?;
-        Ok(project)
-    }
-
-    /// `project`'s name when its Wave holds other open Projects: what a
-    /// command says about the Project a Task joined, since nobody chose it.
-    pub fn project_among_several(&self, project: &ProjectId) -> StoreResult<Option<String>> {
+    /// Name the Task's Project when its Wave offered several choices.
+    pub fn joined_project_name(&self, task: &TaskId) -> StoreResult<Option<String>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn
             .query_row(
-                "SELECT p.project_name FROM projects p WHERE p.id=?1 AND EXISTS(
+                "SELECT p.project_name FROM tasks t JOIN projects p ON p.id=t.project_id
+                 WHERE t.id=?1 AND EXISTS(
                     SELECT 1 FROM projects o WHERE o.wave_id=p.wave_id AND o.work_state='ready'
                     AND o.status IN ('started','backlog','planned','paused') LIMIT 1 OFFSET 1)",
-                [project.as_str()],
+                [task.as_str()],
                 |row| row.get(0),
             )
             .optional()?
@@ -1340,11 +1330,7 @@ impl SqliteStore {
     ) -> StoreResult<ProjectEvent> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let project = transaction.query_row(
-            PROJECT_SELECT,
-            params![project_id.as_str()],
-            map_project_row,
-        )?;
+        let project = project_in(&transaction, project_id)?;
         let event = insert_project_event_in(&transaction, &project, kind)?;
         transaction.commit()?;
         Ok(event)
@@ -2094,12 +2080,6 @@ pub(super) fn resolve_task_id_in(
     Ok(None)
 }
 
-fn project_on(conn: &Connection, project_id: &ProjectId) -> StoreResult<Option<Project>> {
-    conn.query_row(PROJECT_SELECT, [project_id.as_str()], map_project_row)
-        .optional()
-        .map_err(StoreError::from)
-}
-
 pub(super) fn task_on(conn: &Connection, task_id: &TaskId) -> StoreResult<Option<Task>> {
     conn.query_row(
         &format!("{TASK_COLUMNS} WHERE t.id=?1"),
@@ -2458,31 +2438,26 @@ pub(super) fn task_events_after_in(
         .map_err(StoreError::from)
 }
 
-/// The Project a new Task joins and how many open Projects its Wave holds,
-/// so a command can name the one it chose among several.
-fn new_task_project_in(conn: &Connection, wave: &WaveId) -> StoreResult<Option<Project>> {
-    let mut query = conn.prepare_cached(&format!(
-        "{PROJECT_COLUMNS} WHERE wave_id=?1 AND work_state='ready'
+fn new_task_project_in(conn: &Connection, wave: &WaveId) -> StoreResult<Option<ProjectId>> {
+    let mut query = conn.prepare_cached(
+        "SELECT id FROM projects WHERE wave_id=?1 AND work_state='ready'
          AND status IN ('started','backlog','planned','paused')
-         ORDER BY status='started' DESC,created_at DESC,id DESC LIMIT 1"
-    ))?;
-    Ok(query.query_row([wave], map_project_row).optional()?)
+         ORDER BY status='started' DESC,created_at DESC,id DESC LIMIT 1",
+    )?;
+    Ok(query
+        .query_row([wave], |row| {
+            Ok(ProjectId::from_raw(row.get::<_, String>(0)?))
+        })
+        .optional()?)
 }
 
-pub(super) fn join_project_in(
-    conn: &Connection,
-    wave: &WaveId,
-    name: Option<&str>,
-) -> StoreResult<Project> {
+pub(crate) fn join_project_in(conn: &Connection, wave: &WaveId) -> StoreResult<ProjectId> {
     if let Some(project) = new_task_project_in(conn, wave)? {
         return Ok(project);
     }
-    let name: String = match name {
-        Some(name) => name.into(),
-        None => conn.query_row("SELECT name FROM waves WHERE id=?1", [wave], |row| {
-            row.get(0)
-        })?,
-    };
+    let name: String = conn.query_row("SELECT name FROM waves WHERE id=?1", [wave], |row| {
+        row.get(0)
+    })?;
     let id = ProjectId::new();
     planning_write::create(
         conn,
@@ -2498,7 +2473,7 @@ pub(super) fn join_project_in(
         ),
         planning_write::WriteOrigin::Local,
     )?;
-    Ok(project_in(conn, &id)?)
+    Ok(id)
 }
 
 const PROJECT_COLUMNS: &str = "SELECT
@@ -2506,16 +2481,12 @@ const PROJECT_COLUMNS: &str = "SELECT
     wave_id, pm_snapshot_synced_at,
     created_at, updated_at, status, project_summary
     FROM projects";
-pub(super) const PROJECT_SELECT: &str = "SELECT
-    id, external_project_id, project_slug, project_name, description,
-    wave_id, pm_snapshot_synced_at,
-    created_at, updated_at, status, project_summary
-    FROM projects WHERE id=?1";
-pub(super) fn project_in(conn: &Connection, id: &ProjectId) -> rusqlite::Result<Project> {
-    conn.query_row(PROJECT_SELECT, [id.as_str()], map_project_row)
+pub(crate) fn project_in(conn: &Connection, id: &ProjectId) -> rusqlite::Result<Project> {
+    conn.prepare_cached(&format!("{PROJECT_COLUMNS} WHERE id=?1"))?
+        .query_row([id.as_str()], map_project_row)
 }
 
-pub(super) fn map_project_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Project> {
+fn map_project_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Project> {
     Ok(Project {
         id: ProjectId::from_raw(row.get::<_, String>(0)?),
 
@@ -2743,7 +2714,7 @@ mod local_planning_tests {
             id
         };
         let joined = |store: &crate::sqlite::SqliteStore| {
-            store.new_task_project(wave.id()).unwrap().unwrap().id
+            store.new_task_project(wave.id()).unwrap().unwrap()
         };
         project("done", ProjectStatus::Completed, 9);
         let planned = project("planned", ProjectStatus::Planned, 5);
@@ -2752,13 +2723,7 @@ mod local_planning_tests {
         let old = project("old", ProjectStatus::Started, 1);
         let new = project("new", ProjectStatus::Started, 2);
         assert_eq!(joined(&store), new);
-        // Joining never makes a Project while one is open, and names none
-        // when the Task had no choice of several.
-        assert_eq!(store.join_project(wave.id(), "billing").unwrap().id, new);
-        assert_eq!(
-            store.project_among_several(&new).unwrap().as_deref(),
-            Some("new")
-        );
+        assert_eq!(store.seed_project(wave.id()).unwrap().id, new);
 
         // A Project ends in the tracker or by `abandon`; the next Task goes
         // to what is still open, and a Wave with nothing open gets a Project.
@@ -2778,10 +2743,9 @@ mod local_planning_tests {
         for id in [&old, &planned, &paused] {
             end(id);
         }
-        let made = store.join_project(wave.id(), "billing").unwrap();
+        let made = store.seed_project(wave.id()).unwrap();
         assert_eq!(made.name, "billing");
         assert_eq!(made.status, ProjectStatus::Started);
-        assert_eq!(store.project_among_several(&made.id).unwrap(), None);
         assert_eq!(store.list_projects(Some(wave.id())).unwrap().len(), 6);
     }
 

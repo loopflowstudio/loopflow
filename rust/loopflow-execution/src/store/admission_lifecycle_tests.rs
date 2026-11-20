@@ -42,8 +42,7 @@ fn a_task_launches_in_any_project_of_its_wave() {
         store
             .new_task_project(task.wave_id.as_ref().unwrap())
             .unwrap()
-            .unwrap()
-            .id,
+            .unwrap(),
         newer.id
     );
     for status in [

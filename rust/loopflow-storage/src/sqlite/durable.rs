@@ -244,11 +244,7 @@ impl SqliteStore {
                 super::children::insert_task_event_in(&tx, task_id, &TaskEventKind::Interrupt)?.id
             }
             WorkRef::Project(project_id) => {
-                let project = tx.query_row(
-                    super::children::PROJECT_SELECT,
-                    params![project_id.as_str()],
-                    super::children::map_project_row,
-                )?;
+                let project = super::children::project_in(&tx, project_id)?;
                 super::children::insert_project_event_in(
                     &tx,
                     &project,
@@ -580,16 +576,6 @@ mod durable_store_tests {
                 0
             );
         }
-        // Changing a parent cannot invalidate an already reserved child's ancestry.
-        assert!(conn
-            .execute(
-                "UPDATE projects SET wave_id=?1 WHERE id=?2",
-                rusqlite::params![
-                    other_wave.as_str(),
-                    task.project_id.as_ref().unwrap().as_str()
-                ]
-            )
-            .is_err());
     }
 
     #[test]
@@ -608,7 +594,8 @@ mod durable_store_tests {
             .unwrap();
         let barrier = Arc::new(Barrier::new(2));
         let writer_barrier = barrier.clone();
-        let project_id = task.project_id.clone();
+        let project_id = task.project_id.unwrap();
+        let destination = other_wave.clone();
         let db = dir.path().join("loopflow.db");
         let writer = thread::spawn(move || {
             let conn = rusqlite::Connection::open(db).unwrap();
@@ -618,7 +605,7 @@ mod durable_store_tests {
             writer_barrier.wait();
             conn.execute(
                 "UPDATE projects SET wave_id=?1 WHERE id=?2",
-                rusqlite::params![other_wave.as_str(), project_id.as_ref().unwrap().as_str()],
+                rusqlite::params![destination.as_str(), project_id.as_str()],
             )
         });
         barrier.wait();
@@ -626,10 +613,7 @@ mod durable_store_tests {
         input.work_source = Some(WorkSource::Checkout);
         let saved = reserve_session_in(&tx, input, None).unwrap();
         tx.commit().unwrap();
-        let error = writer.join().unwrap().unwrap_err();
-        assert!(error
-            .to_string()
-            .contains("selected Project cannot change Wave ownership"));
+        assert_eq!(writer.join().unwrap().unwrap(), 1);
         let (run_wave, project_wave): (String, String) = conn
             .query_row(
                 "SELECT r.wave_id,p.wave_id FROM agent_sessions r JOIN tasks t ON t.id=r.task_id
@@ -638,7 +622,8 @@ mod durable_store_tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(run_wave, task.wave_id.as_ref().unwrap().as_str());
+        assert_eq!(saved.wave_id, task.wave_id);
+        assert_eq!(run_wave, other_wave.as_str());
         assert_eq!(run_wave, project_wave);
     }
 

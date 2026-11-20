@@ -781,23 +781,11 @@ pub async fn wave_graph(
     selector: Option<&str>,
     in_wave: bool,
 ) -> OpsResult<WaveGraph> {
-    // A read: it opens the registry as it is and creates none.
-    #[cfg(any(test, feature = "test-support"))]
-    let scoped = super::linear::LINEAR_TEST_CONTEXT
-        .try_with(|context| Store::from_sqlite_for_test(context.store.sqlite.clone()))
-        .ok();
-    #[cfg(not(any(test, feature = "test-support")))]
-    let scoped = None;
-    let store = match scoped {
-        Some(store) => store,
-        None => crate::store::read_existing_registry()
-            .map_err(task_error)?
-            .ok_or_else(|| task_error("Planning unavailable: local registry is absent"))?,
-    };
     let wave = if in_wave {
+        let store = crate::store::read_existing_registry().map_err(task_error)?;
         Some(
             crate::work::wave::context::resolve_managed_wave(
-                Some(&store),
+                store.as_ref(),
                 Some(repo),
                 selector,
                 std::env::var("LF_WAVE_ID").ok().as_deref(),
@@ -3062,10 +3050,7 @@ pub fn joined_project_suffix(task: &loopflow_model::durable::TaskId) -> String {
     let name = crate::store::read_existing_registry()
         .ok()
         .flatten()
-        .and_then(|store| {
-            let project = store.sqlite.task(task).ok()??.project_id?;
-            store.sqlite.project_among_several(&project).ok()?
-        });
+        .and_then(|store| store.sqlite.joined_project_name(task).ok().flatten());
     name.map(|name| format!(" in Project {name}"))
         .unwrap_or_default()
 }
@@ -3141,17 +3126,14 @@ pub fn task_move_membership(repo: &Path, issue: &str, wave: Option<&str>) -> Ops
         for wave in &waves {
             guards.push(super::planning_sync::lock_wave_planning(wave).await?);
         }
-        match destination {
-            Some(wave) => {
-                store
-                    .sqlite
-                    .move_task_to_wave(&task.id, task.project_id.as_ref(), wave.id())
-            }
-            None => store
-                .sqlite
-                .move_task(&task.id, task.project_id.as_ref(), None),
-        }
-        .map_err(task_error)?;
+        store
+            .sqlite
+            .move_task(
+                &task.id,
+                task.project_id.as_ref(),
+                destination.as_ref().map(Wave::id),
+            )
+            .map_err(task_error)?;
         drop(guards);
         super::planning_sync::sync_after_save(
             &store,

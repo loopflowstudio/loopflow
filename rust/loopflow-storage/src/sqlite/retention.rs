@@ -217,7 +217,7 @@ fn forget_old_history(
 // Liveness: runs and agents whose OS process is gone
 
 /// A record that runs as an OS process and has not ended: a Graph run or
-/// step, a Project activation, a Task's or its shipping's carrier, or a
+/// step, a Task's or its shipping's carrier, or a
 /// Session's agent.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RunningOwner {

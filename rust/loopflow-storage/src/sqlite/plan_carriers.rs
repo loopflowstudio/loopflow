@@ -675,7 +675,7 @@ mod tests {
     fn task(store: &SqliteStore, title: &str) -> (WaveId, TaskId) {
         let wave = Wave::new(WaveId::new(), "plan".into(), REPO.into());
         crate::test_fixture::wave(store, &wave);
-        let project = store.join_project(wave.id(), "Plan").unwrap().id;
+        let project = store.seed_project(wave.id()).unwrap().id;
         let task = TaskId::new();
         store
             .create_task(&NewTask {

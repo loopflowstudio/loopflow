@@ -330,9 +330,7 @@ fn seed_stale_project_work(
         created_at: now,
         updated_at: now,
     };
-    store
-        .insert_project(&current)
-        .expect("seed current Project");
+    store.insert_project(&current).expect("seed Project");
     start_only(home, &wave, current.tracker_id.as_ref().unwrap().as_str());
 
     let bin = home.join("bin");

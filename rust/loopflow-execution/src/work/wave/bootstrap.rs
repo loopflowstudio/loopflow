@@ -412,10 +412,7 @@ mod tests {
         .unwrap();
         let collision = Wave::new(WaveId::new(), "occupied".into(), canonical.to_string());
         store.create_wave(&collision).await.unwrap();
-        store
-            .sqlite
-            .join_project(collision.id(), "Existing plan")
-            .unwrap();
+        store.sqlite.seed_project(collision.id()).unwrap();
         assert!(crate::work::wave::relocate::relocate_wave(
             &store,
             root.id(),

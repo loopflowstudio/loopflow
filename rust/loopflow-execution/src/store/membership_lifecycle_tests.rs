@@ -51,7 +51,9 @@ fn membership_moves_preserve_work_and_capture_owners() {
             .unwrap();
         assert!(store.task(&task.id).unwrap().unwrap().project_id.is_none());
     }
-    store.move_task(&task.id, None, Some(&product.id)).unwrap();
+    store
+        .move_task(&task.id, None, Some(&product.wave_id))
+        .unwrap();
     assert_eq!(store.session_history(&session.id, 0, 0).unwrap(), before);
     assert_eq!(
         store.session(&session.id).unwrap().unwrap().wave_id,
@@ -69,12 +71,14 @@ fn membership_moves_preserve_work_and_capture_owners() {
     )
     .unwrap();
     assert_eq!(next.wave_id, Some(product.wave_id.clone()));
-    assert!(store.move_task(&task.id, None, Some(&other.id)).is_err());
     assert!(store
-        .move_task(&task.id, Some(&product.id), Some(&foreign.id))
+        .move_task(&task.id, None, Some(&other.wave_id))
+        .is_err());
+    assert!(store
+        .move_task(&task.id, Some(&product.id), Some(&foreign.wave_id))
         .is_err());
     store
-        .move_task(&task.id, Some(&product.id), Some(&product.id))
+        .move_task(&task.id, Some(&product.id), Some(&product.wave_id))
         .unwrap();
     store.move_task(&task.id, Some(&product.id), None).unwrap();
     let final_input = crate::store::sessions::replace_session_input(

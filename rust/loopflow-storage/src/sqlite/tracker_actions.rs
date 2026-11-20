@@ -1398,7 +1398,7 @@ mod tests {
             "/repo".into(),
         );
         crate::test_fixture::wave(&store, &wave);
-        let here = store.join_project(wave.id(), "billing").unwrap().id;
+        let here = store.seed_project(wave.id()).unwrap().id;
         // The released lf made Projects before fields were stamped.
         let unstamped = loopflow_model::durable::ProjectId::new();
         store

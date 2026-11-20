@@ -559,7 +559,7 @@ fn public_task_prefixes_resolve_and_report_ambiguity() {
             row.get(0)
         })
         .unwrap();
-    let project = store.join_project(&wave, "inbox").unwrap().id;
+    let project = store.seed_project(&wave).unwrap().id;
     for (id, title) in [(first, "First"), (second, "Second")] {
         store
             .create_task(&loopflow_execution::work::task::NewTask {
@@ -1155,7 +1155,10 @@ fn project_reads_keep_canonical_identity_and_authored_order_after_edits() {
         for edited in [false, true] {
             if edited {
                 store
-                    .edit_project(&projects[1].id, Some("Edited"), None, None)
+                    .edit_project_fields(
+                        &projects[1].id,
+                        &[WorkValue::ProjectName(Some("Edited".into()))],
+                    )
                     .unwrap();
             }
             if edited {
@@ -1599,7 +1602,7 @@ fn moving_saves_membership_offline_and_retains_inbound_changes() {
             );
             loopflow_execution::work::wave::bootstrap::upsert_wave(&store, &wave).unwrap();
             lf(repo.path(), home.path(), &["wave", "add", name, "--json"]);
-            let mut project = store.join_project(wave.id(), name).unwrap();
+            let mut project = store.seed_project(wave.id()).unwrap();
             if mapped {
                 // Bind through the writer so foreground Git exchange sees the same
                 // identity as SQLite, rather than restoring a pre-binding journal.

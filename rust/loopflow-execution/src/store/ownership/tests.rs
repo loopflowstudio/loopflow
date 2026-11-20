@@ -471,9 +471,7 @@ fn a_failed_save_into_an_empty_wave_makes_no_project() {
     assert!(store.list_projects(Some(&wave)).unwrap().is_empty());
     fail("DROP TRIGGER reject;
           CREATE TRIGGER reject BEFORE UPDATE OF project_id ON tasks BEGIN SELECT RAISE(ABORT,'injected'); END;");
-    assert!(store
-        .move_task_to_wave(&standalone.id, None, &wave)
-        .is_err());
+    assert!(store.move_task(&standalone.id, None, Some(&wave)).is_err());
     assert!(store.list_projects(Some(&wave)).unwrap().is_empty());
     fail("DROP TRIGGER reject;");
 
@@ -488,9 +486,7 @@ fn a_failed_save_into_an_empty_wave_makes_no_project() {
         None,
     )
     .unwrap();
-    store
-        .move_task_to_wave(&standalone.id, None, &wave)
-        .unwrap();
+    store.move_task(&standalone.id, None, Some(&wave)).unwrap();
     let projects = store.list_projects(Some(&wave)).unwrap();
     assert_eq!(projects.len(), 1);
     assert_eq!(projects[0].name, "product");

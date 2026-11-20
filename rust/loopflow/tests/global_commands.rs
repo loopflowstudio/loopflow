@@ -622,7 +622,7 @@ fn repo_selection_carries_scoped_task_prefix_through_reads_and_writes() {
                 |row| row.get(0),
             )
             .unwrap();
-        let project = store.join_project(&wave, "inbox").unwrap().id;
+        let project = store.seed_project(&wave).unwrap().id;
         store
             .create_task(&loopflow_execution::work::task::NewTask {
                 repository_id: loopflow_execution::repository::location::ensure_repository(
@@ -2285,7 +2285,7 @@ fn task_planning_explain_move_resolves_destination_and_retains_recorded_work() {
         );
     }
     // Setup owns these locks; preview must not recreate them.
-    let _ = fs::remove_dir_all(home.path().join(".lf/wave-locks"));
+    let _ = fs::remove_dir_all(home.path().join(".lf/chapter-locks"));
     let path = home.path().join(".lf/loopflow.db");
     let store = loopflow_execution::store::open_sqlite(&path).unwrap();
     let db = rusqlite::Connection::open(&path).unwrap();
@@ -2295,7 +2295,7 @@ fn task_planning_explain_move_resolves_destination_and_retains_recorded_work() {
                 row.get(0)
             })
             .unwrap();
-        store.join_project(&id, wave).unwrap().id.to_string()
+        store.seed_project(&id).unwrap().id.to_string()
     };
     let source = project("source");
     let destination = project("destination");
@@ -2414,7 +2414,7 @@ fn task_planning_explain_move_resolves_destination_and_retains_recorded_work() {
         .query_row("SELECT count(*) FROM waves", [], |row| row.get(0))
         .unwrap();
     assert_eq!(count, 2);
-    let _ = fs::remove_dir_all(home.path().join(".lf/wave-locks"));
+    let _ = fs::remove_dir_all(home.path().join(".lf/chapter-locks"));
     // Recorded work stays put while its planning membership can change.
     db.execute(
         "INSERT INTO task_checkouts(task_id,worktree) VALUES(?1,?2)
@@ -2479,7 +2479,7 @@ fn task_planning_explain_move_resolves_destination_and_retains_recorded_work() {
     assert_eq!(remote["impediments"], serde_json::json!([]));
     db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
     assert!(fs::read(&path).unwrap() == before);
-    assert!(!home.path().join(".lf/wave-locks").exists());
+    assert!(!home.path().join(".lf/chapter-locks").exists());
     assert!(!repo.path().join(".lf/tmp").exists());
 }
 

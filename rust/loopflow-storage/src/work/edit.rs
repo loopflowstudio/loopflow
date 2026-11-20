@@ -65,30 +65,29 @@ pub struct StampedRecord {
     pub fields: Vec<StampedValue>,
 }
 
-fn known_fields<'de, D: serde::Deserializer<'de>>(
-    deserializer: D,
-) -> Result<Vec<StampedValue>, D::Error> {
-    Ok(skip_unknown(Vec::<Value>::deserialize(deserializer)?))
-}
-
-/// A saved list of values, such as a queued tracker `create`, without the
-/// fields this build no longer has, such as KRs and metric targets.
-pub fn known_values(values: Value) -> StoreResult<Vec<WorkValue>> {
-    Ok(skip_unknown(serde_json::from_value::<Vec<Value>>(values)?))
-}
-
-fn skip_unknown<T: serde::de::DeserializeOwned>(fields: Vec<Value>) -> Vec<T> {
-    fields
+fn known_fields<'de, D, T>(deserializer: D) -> Result<Vec<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: serde::de::DeserializeOwned,
+{
+    Vec::<Value>::deserialize(deserializer)?
         .into_iter()
-        .filter_map(|field| {
-            let name = field.get("field").cloned();
-            serde_json::from_value(field)
-                .inspect_err(|error| {
-                    tracing::warn!(field = ?name, %error, "skipped a plan field this build does not know");
-                })
-                .ok()
+        .filter(|entry| {
+            if let Some(name) = entry["field"].as_str() {
+                if !WorkValue::knows_field(name) {
+                    tracing::warn!(field = name, "skipped an unknown plan field");
+                    return false;
+                }
+            }
+            true
         })
+        .map(|entry| serde_json::from_value(entry).map_err(serde::de::Error::custom))
         .collect()
+}
+
+/// Read a saved tracker baseline using the same fields as a plan record.
+pub fn known_values(values: Value) -> StoreResult<Vec<WorkValue>> {
+    Ok(known_fields(values)?)
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -112,6 +111,10 @@ macro_rules! work_values {
             $(#[serde(rename = $field)] $variant($value),)*
         }
         impl WorkValue {
+            fn knows_field(name: &str) -> bool {
+                matches!(name, $($field)|*)
+            }
+
             /// The typed variant is also its portable conflict key.
             pub fn field(&self) -> &'static str {
                 match self { $(Self::$variant(_) => $field,)* }
@@ -206,6 +209,14 @@ impl WorkValue {
 #[cfg(test)]
 mod tests {
     use super::{StampedRecord, WorkValue};
+
+    #[test]
+    fn malformed_known_fields_fail_the_record() {
+        let record = serde_json::json!({"table":"waves","id":"w","fields":[
+            {"field":"wave_name","value":false,"at":3,"machine":"home_a"}
+        ]});
+        assert!(serde_json::from_value::<StampedRecord>(record).is_err());
+    }
 
     #[test]
     fn a_record_from_another_build_reads_without_the_fields_this_build_dropped() {

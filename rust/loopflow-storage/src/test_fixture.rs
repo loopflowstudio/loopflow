@@ -133,10 +133,36 @@ pub fn wave(store: &SqliteStore, wave: &crate::work::wave::Wave) {
     assert!(store.upsert_wave_prepared(wave, None).unwrap());
 }
 
+impl SqliteStore {
+    pub fn seed_project(&self, wave: &WaveId) -> StoreResult<Project> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let id = crate::sqlite::children::join_project_in(&tx, wave)?;
+        let project = crate::sqlite::children::project_in(&tx, &id)?;
+        tx.commit()?;
+        Ok(project)
+    }
+
+    pub fn edit_project_fields(
+        &self,
+        project: &ProjectId,
+        values: &[crate::work::edit::WorkValue],
+    ) -> StoreResult<()> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        crate::sqlite::planning_write::local(
+            &tx,
+            &crate::work::edit::WorkEdit::for_target(project.as_str(), values),
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+}
+
 pub fn project(store: &SqliteStore, repo: &str, name: &str) -> Project {
     let wave = crate::work::wave::Wave::new(WaveId::new(), name.into(), repo.into());
     self::wave(store, &wave);
-    store.join_project(wave.id(), name).unwrap()
+    store.seed_project(wave.id()).unwrap()
 }
 
 pub fn ownership(store: &SqliteStore, scope: TaskScope) -> OwnershipFacts {

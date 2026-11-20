@@ -3,6 +3,7 @@ use loopflow_model::durable::{ProjectId, RepositoryId, TaskId};
 use loopflow_model::id::WaveId;
 use loopflow_storage::migration_runner::migration_section_sql;
 use loopflow_storage::sqlite::SqliteStore;
+use loopflow_storage::work::edit::WorkValue::{ProjectName, ProjectSummary};
 use loopflow_storage::work::task::{NewTask, TaskUpdate};
 use rusqlite::params;
 
@@ -460,7 +461,13 @@ fn project_edits_preserve_retired_iteration_and_events() {
         )
         .unwrap();
     store
-        .edit_project(&id, Some("Renamed body of work"), Some("New summary"), None)
+        .edit_project_fields(
+            &id,
+            &[
+                ProjectName(Some("Renamed body of work".into())),
+                ProjectSummary("New summary".into()),
+            ],
+        )
         .unwrap();
     drop(store);
     let store = crate::store::opening::open_ephemeral(&path).unwrap();

@@ -163,6 +163,7 @@ What is in the tree for it:
 
 What slice 2 changed in the design (the "Hooks" section below is corrected):
 
+- (Slice 6 replaced the first-id rule in this list: see "Hooks".)
 - **lf never writes the thread file at launch.** The Machine server accepts a
   turn or a steer claim only from a process whose adapter a start activated
   (`with_provider_context`), and every headless turn is a new process. So the
@@ -418,6 +419,14 @@ QA after compress, real `agy` 1.5.13 and OpenCode 2.0.32 (2026-11-20);
 ## Left to build
 
 Nothing.
+
+Concept review at f077eceeac (2026-11-20), the area with slice 6 in it:
+nothing to change. Every structural pairing in `scratch/concept-review.html`
+reads yes. What it left as questions: the shared sign-in sentence says
+"revoked" for a login that never existed (a change to four harnesses'
+wording, its own outcome), `agy`'s sandbox prompt in a Task's conversation,
+and usage without subagents. One counterexample not tried: a prompt with no
+text would read as a subagent's callback.
 
 QA on real `agy` 1.5.13 at c439ab0e34 (2026-11-20), slice 6's live check;
 `scratch/qa.html` scenarios 7 to 10 have the transcripts. No code changed.

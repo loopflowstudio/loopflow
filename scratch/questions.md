@@ -58,3 +58,6 @@
   `/fork`, `/resume`), and a subagent is the callback with an empty
   `lastUserInput`. The other choice keeps the first conversation for the
   life of the launch and documents that the commands leave lf behind.
+- A prompt with no text (an attachment alone) may send an empty
+  `lastUserInput`, which lf reads as a subagent's callback: that turn gets
+  no context block or steer. Not tried on real `agy`.

@@ -408,6 +408,26 @@ mod tests {
     use super::terminate_process_group;
 
     #[test]
+    fn a_program_is_found_only_as_an_executable_file() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+        let found = |path: &std::path::Path| super::which_on_path(path).is_some();
+
+        let root = tempfile::tempdir().unwrap();
+        let provider = root.path().join("provider");
+        std::fs::write(&provider, "#!/bin/sh\nexit 1\n").unwrap();
+        std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(!found(&provider));
+        std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(found(&provider));
+        let linked = root.path().join("linked-provider");
+        symlink(&provider, &linked).unwrap();
+        assert!(found(&linked));
+        std::fs::remove_file(provider).unwrap();
+        assert!(!found(&linked));
+        assert!(!found(root.path()));
+    }
+
+    #[test]
     fn a_bare_path_gains_the_tool_directories_after_its_own() {
         let home = std::path::Path::new("/Users/maya");
         let path = super::tool_path("/usr/bin:/bin:/opt/homebrew/bin", home);

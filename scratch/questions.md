@@ -14,3 +14,12 @@
   coded failure won over a worded one.
 - A subagent's first model call starts one `lf` that answers `{}`; the shell
   script does not filter by conversation.
+- A headless Antigravity turn always passes
+  `--dangerously-skip-permissions`, whatever `yolo` says, as OpenCode's
+  always passes `--auto`. The other choice is to follow `yolo` and let a
+  refused permission fail or stall the step.
+- An Antigravity failure's reason is the first line of what `agy` said. The
+  rest (the list of models it does serve) is in `antigravity.stderr.log`
+  beside the run, not in `lf task status`.
+- A `result` with `status: SUCCESS` and an empty `response` completes the
+  turn with no answer. OpenCode's driver fails a turn that has no answer.

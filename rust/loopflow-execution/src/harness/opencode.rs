@@ -6,7 +6,7 @@ use crate::harness::LaunchKind;
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{anyhow, bail, Result};
 use async_trait::async_trait;
 use serde_json::Value;
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -152,7 +152,7 @@ impl Driver {
         super::configure_agent_env(&mut command, config);
         command.envs(environment(config, None, self.kind)?);
         super::configure_vendor_std_env(command.as_std_mut())?;
-        let log = match diagnostics(config)? {
+        let log = match super::common::diagnostics(config, "opencode")? {
             Some(log) => log,
             None => tempfile::tempfile()?,
         };
@@ -213,26 +213,6 @@ impl Driver {
             state.publish(decoded, &events);
         })
     }
-}
-
-/// OpenCode's stderr, kept beside the launch's capture: its own failures and
-/// the context plugin's recording gaps.
-fn diagnostics(config: &AgentConfig) -> Result<Option<std::fs::File>> {
-    let Some(key) = config.env.get(crate::session_record::CAPTURE_KEY_ENV) else {
-        return Ok(None);
-    };
-    let path = crate::session_record::capture_dir(key)?.join("opencode.stderr.log");
-    let mut options = std::fs::OpenOptions::new();
-    options.create(true).append(true).read(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
-    }
-    let log = options
-        .open(&path)
-        .with_context(|| format!("open OpenCode diagnostics {}", path.display()))?;
-    Ok(Some(log))
 }
 
 #[async_trait]
@@ -745,13 +725,16 @@ impl super::Harness for OpenCode {
             })
             .collect()
     }
-    fn classify_failure(&self, line: &str) -> Option<crate::agent::AgentFailure> {
+    fn classify_failure(&self, code: &str, message: &str) -> Option<crate::agent::AgentFailure> {
         // "Insufficient balance. This request is pay-as-you-go, billed to
         // OpenCode Models credits." OpenCode retries a transient failure itself.
-        if line.to_ascii_lowercase().contains("insufficient balance") {
+        if message
+            .to_ascii_lowercase()
+            .contains("insufficient balance")
+        {
             return Some(crate::agent::AgentFailure::UsageLimit);
         }
-        crate::agent::routing_failure(line)
+        crate::agent::routing_failure(code, message)
     }
     fn kind(&self) -> super::HarnessKind {
         super::HarnessKind::OpenCode
@@ -810,7 +793,7 @@ impl super::Harness for OpenCode {
             crate::agent::validate_terminal_turn(&prompt)?;
             client.process.args(["--prompt", &prompt]);
         }
-        client.stderr = diagnostics(launch.config)?;
+        client.stderr = super::common::diagnostics(launch.config, "opencode")?;
         Ok(client)
     }
 }

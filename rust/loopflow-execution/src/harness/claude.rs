@@ -1397,8 +1397,8 @@ impl super::Harness for Claude {
             owned,
         )
     }
-    fn classify_failure(&self, line: &str) -> Option<crate::agent::AgentFailure> {
-        crate::agent::provider_failure(line)
+    fn classify_failure(&self, code: &str, message: &str) -> Option<crate::agent::AgentFailure> {
+        crate::agent::provider_failure(code, message)
     }
     fn kind(&self) -> super::HarnessKind {
         super::HarnessKind::Claude

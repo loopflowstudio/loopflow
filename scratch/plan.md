@@ -81,61 +81,84 @@ Headless, against the stand-in `agy` (no sign-in, no display):
 On real `agy` (needs its sign-in; qa or demo, never a required check): the
 demo above.
 
-## Done in 264a4848ec (does not compile yet)
+## Built
 
-- `harness/mod.rs`: `HarnessKind::Antigravity` (`"antigravity"`), `ALL` has
-  five, `Harness::program()` (default: the kind's name; Antigravity answers
-  `agy`), required `Harness::classify_failure`, `classifies_failures` removed.
-  `pub mod antigravity; mod antigravity_decode;` are declared; neither file
-  exists yet.
-- `agent/mod.rs`: `_classify_agent_failure(harness, result)` asks the harness
-  per stderr line and keeps the old precedence (credential, usage limit, model,
-  transient). `routing_failure` (no transient) and `provider_failure` (with
-  transient) are the shared phrase lists. `check_cli_available` maps a harness
-  name to its program.
+Slice 1, and it runs on real `agy` 1.5.13 (2026-11-20):
 
-Of that, three things change (see "Failures" and "What goes"):
-`classify_failure` takes `(code, message)` and is called from `drive::run`;
-`_classify_agent_failure` goes; `check_cli_available` becomes
-`HarnessKind::installed()`.
-- `claude.rs`, `codex.rs`: `provider_failure`. `pi.rs`: `routing_failure` (Pi
-  retries transient failures itself; `pi_failure_keeps_exact_history_…` holds
-  that). `opencode.rs`: "insufficient balance" is a usage limit, then
-  `routing_failure`.
+- `lf -b default 'Reply with exactly: pong' -a antigravity` printed `pong`,
+  exit 0; the Session row holds `provider=antigravity` and the conversation id
+  `agy` reported in `init`.
+- `agents: [antigravity:no-such-model-xyz, antigravity]`, same command with no
+  `-a`: stderr "antigravity:no-such-model-xyz: model unavailable; continuing
+  on antigravity", then `pong`.
+- `-a antigravity:no-such-model-xyz` alone: "agent stopped after model
+  unavailable. antigravity_error: invalid model selection (…) is not
+  recognized as a known model or custom model in settings" and the "No
+  fallback remains" advice. The "Available models:" list is cut.
+- The instructions reached `agy` as
+  `.lf/prompts/<stamp>-<rand>-antigravity/.agents/AGENTS.md` through
+  `--add-dir`.
+
+What is in the tree:
+
+- `classify_failure(code, message)` on every harness, asked in `drive::run` at
+  each error event, gravest kept (`AgentFailure::graver`).
+  `_classify_agent_failure`, the `from_code` call in `drive::run` and
+  `check_cli_available` are gone; `HarnessKind::installed()` replaces the last.
+- `harness/antigravity.rs` (driver, `classify_failure`, AGENTS.md launch
+  folder, `open` refuses), `harness/antigravity_decode.rs`,
+  `transcript/antigravity.rs` (reads no turns), the stand-in
+  `tests/support/antigravity_cli.py`, two real traces under
+  `harness/testdata/`.
+- `sanitize_error_message` and the `<harness>.stderr.log` opener moved to
+  `harness/common.rs`; OpenCode and Antigravity share them.
+- The launch matrix has an Antigravity Batch cell; its other three cells are
+  skipped by an `if` in `every_harness_runs_all_four_launch_kinds` that
+  slices 2 and 4 delete.
+- `harness/README.md`: the limits row is "yes" for OpenCode and Pi and
+  `classify_failure` has its own row. Its tables still have four columns.
+
+What it taught:
+
+- One process per turn, `status`-not-exit failure and the reported thread fit
+  `drive::run` with no new concept. `drive::run` already reads
+  `agent_session()` after every event, so a thread named in the first line is
+  recorded.
+- **A headless run always passes `--dangerously-skip-permissions`**, as
+  OpenCode's always passes `--auto`; `config.skip_permissions` is not what
+  decides it. Without the flag `init` says `"permission_mode":"request-review"`
+  (`echo hi` still ran), and nobody is there to review. `docs/security.md`
+  already says this. The terminal (slice 4) follows `config.skip_permissions`.
+- A tool that finishes fast prints only its `DONE` step, and an
+  `agent_response` that only calls a tool prints `DONE` with no text.
+- `/usr/bin/python3` here is 3.9: `native_codex.py` had one `str | None`
+  annotation that failed the matrix's Codex cell on this Machine before any
+  Antigravity cell ran. Quoted now.
 
 ## Left to build
 
-0. Move classification to the error event (see "Failures"), and
-   `HarnessKind::installed()`.
-1. `harness/antigravity.rs`: `Antigravity` harness, headless `Driver`, the
-   per-launch folder, hook payload adapter.
-2. `harness/antigravity_decode.rs`: stream-json lines to `Decoded`.
-3. `transcript/antigravity.rs`: `transcript_full.jsonl` to `Turn`s.
-4. `lf __context-block --harness <name>`
+1. Hooks: the launch folder's `hooks.json` and gate script (the folder is
+   made today only when the launch has instructions; a launch with a
+   `conversation_context` needs it too), `hook_callback` and `hook_reply`.
+2. `transcript/antigravity.rs`: `transcript_full.jsonl` to `Turn`s, and
+   `locate_transcript` / `direct_transcript`.
+3. `lf __context-block --harness <name>`
    (`rust/loopflow/src/lf/commands/context.rs`, `lf/mod.rs`): the named
    harness reads the callback (`hook_callback`) and shapes the reply
    (`hook_reply`). The `agent_id` check in `emit_block` moves into the default
    `hook_callback`.
-5. Program name: `native_session.rs` (lines near 31, 276, 492, 530) builds
-   `Command::new(kind.as_str())`; use `program()`. Generalize the "Codex
-   reported no conversation" warning.
-6. Every list of harness names: `error.rs`, `config.rs` tests,
+4. The terminal: `open`, bare thread report, the launch matrix's Chat and
+   WorkSession cells. `native_session.rs` already starts `program()`.
+5. Every list of harness names: `error.rs`, `config.rs` tests,
    `prompt/process.rs`, `loopflow-test-support/src/lib.rs`,
    `config/catalog.rs` (`yolo`, `chrome` help), `launch_policy_tests.rs`,
    Swift (`WorkspacePanesView.swift`, `SessionProgramStatus.swift`), docs,
    `skills/loopflow`.
-7. Tests: a stand-in `agy` under `rust/loopflow-execution/tests/support/`
-   (model on `opencode_cli.py`), `harness::launch_matrix` cells,
-   `task_graph_launch_tests::a_task_step_runs_as_a_worker_on_every_harness`,
-   decoder trace under `harness/testdata/`, each harness's refusal words in
-   `conformance_tests.rs`. The `agent::tests::` that fed `stderr` text to
-   `_run_with_retries` set `failure` on the result instead; the phrase tests
-   call the shared lists.
-8. `harness/README.md`: the launch table, the Task-step table (five columns),
-   the limits row now "yes" for OpenCode and Pi, `classify_failure` as its
-   own row in the method table (out of the `capabilities()` row), and the
-   sentence "headless results retain answer text and typed turn failures"
-   now true of every harness.
+6. Tests: the stand-in grows hooks and a tool turn; the launch matrix's
+   Worker cell;
+   `task_graph_launch_tests::a_task_step_runs_as_a_worker_on_every_harness`.
+7. `harness/README.md`: the launch table and the Task-step table with five
+   columns.
 
 ## Design
 
@@ -262,9 +285,9 @@ message }`; `drive::run` asks `launch.harness.classify_failure(&code,
 - The direct `AgentFailure::from_code` call in `drive::run` goes: the harness
   method is the one question.
 - Antigravity's decoder reports a `result` whose `status` is `ERROR` as
-  `Error { code: "antigravity_error", message: <result.error> }` and fails
-  the turn; `agy` exiting with no `result` line reports the last stderr line
-  the same way. Its `classify_failure`, then `routing_failure`:
+  `Error { code: "antigravity_error", message: <first line of result.error> }`
+  and fails the turn; `agy` exiting with no `result` line reports the last
+  stderr line the same way. Its `classify_failure`, then `routing_failure`:
   - usage limit: "exhausted your quota", "quota reached", `QUOTA_EXHAUSTED`,
     `RESOURCE_EXHAUSTED`, "usage limit reached", "out of credits"
   - credential: "authentication required", "authentication failed"
@@ -407,8 +430,7 @@ Details the docs settled, for the build to match or correct:
   without the "Available models:" list; `opencode_error: Insufficient
   balance. …`.
 - `docs/security.md` says a headless Antigravity run skips permission
-  prompts, i.e. `config.skip_permissions` is set for unattended runs as it is
-  for Claude. Check in slice 1.
+  prompts. Built so: the headless driver always passes the flag.
 - `docs/config.md` says Antigravity terminal prompts share the 122,880-byte
   argument cap (`validate_terminal_turn`).
 
@@ -496,7 +518,7 @@ is unchanged line for line.
 
 ## Slices
 
-1. **A batch on real `agy`, and the tree compiles.** Classification at the
+1. **Built (see "Built").** A batch on real `agy`, and the tree compiles. Classification at the
    error event first (it touches four built harnesses and the retry tests,
    and it is what Antigravity's `status: ERROR` plugs into).
    `antigravity.rs` with the `Driver` and `classify_failure`,

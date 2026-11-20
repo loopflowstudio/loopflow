@@ -4,6 +4,7 @@
 //! and what to say when it is gone are derived here when read.
 
 pub mod answer;
+pub mod antigravity;
 pub(crate) mod claude;
 pub(crate) mod codex;
 pub mod facts;

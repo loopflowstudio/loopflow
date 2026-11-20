@@ -39,7 +39,8 @@ Each harness file answers the rest:
 
 | method | answers |
 |---|---|
-| `capabilities()` | who names the thread, initial prompt on resume, failure classification, native skills, turn limit, output schema, respawn after crash, install hint |
+| `capabilities()` | who names the thread, initial prompt on resume, native skills, turn limit, output schema, respawn after crash, install hint |
+| `classify_failure(code, message)` | what an error its decoder reported means for the run: next agent, retry, or nothing lf acts on |
 | `open(&Launch)` | native interactive client: argv, hook and title flags |
 | `driver(&Launch, events, approval)` | headless stream `Driver`: start, input, interrupt, stop |
 
@@ -87,7 +88,7 @@ row names the test that shows it; "no" is a gap with its owner.
 | is passed over when its CLI is not installed, or named once when it was the only choice | yes | yes | yes | yes | `task_graph_launch_tests::a_step_that_cannot_launch_is_not_started_again` |
 | fails the turn, with the question as its reason, when it asks one and nobody is there; the run stops after that one attempt | no: not read (Task 48edb9) | no: not read (Task 48edb9) | yes | yes | `task_graph_launch_tests::a_question_with_nobody_there_ends_the_step` |
 | stops on `lf task interrupt` with its turn recorded interrupted; the next `lf task run` starts the step again | yes | yes | yes | yes | `a_worker_stops_on_interrupt_and_the_next_run_starts_its_step_again_on_claude_and_codex`, `a_worker_stops_on_interrupt_and_the_next_run_starts_its_step_again_on_opencode_and_pi` |
-| moves to the next agent on a usage limit | yes | yes | no: failures unclassified (LOO-518) | no: failures unclassified (Task 98edc6) | `agent::tests::` fallthrough tests |
+| moves to the next agent on a usage limit, a revoked login or a model the provider does not serve | yes | yes | yes | yes | `harness::conformance_tests::each_harness_classifies_its_own_refusals`; `agent::tests::` fallthrough tests |
 | as an idle work session, hears a steer | yes | yes | no: next turn only (Task 540073) | no: next turn only (Task 540073) | `server::wake::tests::` |
 
 Context and steers reach every harness the same way: it runs
@@ -117,8 +118,15 @@ On all four harnesses, `lf task interrupt` ends the worker with exit 130,
 records its turn as interrupted, and leaves the Graph at that step. The next
 `lf task run` starts the step in a new conversation.
 
-A "no" for OpenCode or Pi means the step stops with the provider's error (limits)
-or the steer waits for the next turn (idle wake); neither loses work.
+A "no" for OpenCode or Pi means the steer waits for the next turn (idle wake);
+no work is lost.
+
+Each harness's decoder reports a provider failure as an error event, and
+`drive::run` asks that harness what it means (`classify_failure`), once, at the
+event. The gravest answer of a failed turn (revoked login, spent quota,
+unserved model, then transient) is the result's `failure`; the retry policy
+reads that and never the error text. Claude and Codex leave transient failures
+to lf; OpenCode, Pi and Antigravity retry their own, so theirs answer `None`.
 
 A skill keeps one `LfProcess` across successive provider `AgentProcess` instances.
 Its shared `LfProcessRuntime` in [`process/runtime.rs`](../process/runtime.rs)

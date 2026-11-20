@@ -359,6 +359,11 @@ impl HarnessKind {
         self.harness().program()
     }
 
+    /// Whether this harness's CLI is on `PATH`.
+    pub fn installed(self) -> bool {
+        crate::os_process::which_on_path(std::path::Path::new(self.program())).is_some()
+    }
+
     pub const ALL: [Self; 5] = [
         Self::Claude,
         Self::Codex,
@@ -488,12 +493,12 @@ pub trait Harness: Sync + std::fmt::Debug {
         self.kind().as_str()
     }
     fn capabilities(&self) -> Capabilities;
-    /// What one line of the provider's own error says went wrong, for the
+    /// What an error this harness's decoder reported says went wrong, for the
     /// failures the provider leaves to lf: a spent quota, a revoked login or
     /// an unserved model moves the run to the next agent in its order, and a
-    /// transient failure is retried. `None` for a line that names no cause,
+    /// transient failure is retried. `None` for an error that names no cause,
     /// and for a failure the provider retries itself.
-    fn classify_failure(&self, line: &str) -> Option<crate::agent::AgentFailure>;
+    fn classify_failure(&self, code: &str, message: &str) -> Option<crate::agent::AgentFailure>;
     fn open(&self, launch: &Launch<'_>) -> Result<native_session::NativeClient>;
     fn driver(
         &self,

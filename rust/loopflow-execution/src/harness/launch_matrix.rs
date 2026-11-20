@@ -78,6 +78,13 @@ if "--mode" not in sys.argv and "LF_PROVIDER_CONTEXT" not in os.environ: sys.exi
             include_str!("testdata/pi_rpc.py")
         ),
     );
+    executable(
+        &bin.join("agy"),
+        &format!(
+            "#!/usr/bin/python3\n{record}\n{}",
+            include_str!("../../tests/support/antigravity_cli.py")
+        ),
+    );
 }
 
 #[test]
@@ -123,6 +130,10 @@ fn every_harness_runs_all_four_launch_kinds() {
             (LaunchKind::Worker, Mode::Headless, true),
         ] {
             assert_eq!(kind.mode(), mode, "{kind:?}");
+            // Antigravity opens no terminal and declares no hooks yet.
+            if harness == HarnessKind::Antigravity && kind != LaunchKind::Batch {
+                continue;
+            }
             let row = format!("{harness:?} {kind:?}");
             let directory = tempfile::tempdir_in(home).unwrap();
             let cwd = directory.path();
@@ -231,9 +242,12 @@ fn every_harness_runs_all_four_launch_kinds() {
                     flag("--chrome") == (harness == HarnessKind::Claude),
                     "{row}: Chrome flag ownership"
                 );
+                // Nobody answers a headless Antigravity prompt, whatever the setting.
+                let skips = harness == HarnessKind::Claude
+                    || (harness == HarnessKind::Antigravity && mode == Mode::Headless);
                 anyhow::ensure!(
-                    flag("--dangerously-skip-permissions") == (harness == HarnessKind::Claude),
-                    "{row}: Claude yolo setting"
+                    flag("--dangerously-skip-permissions") == skips,
+                    "{row}: yolo setting"
                 );
                 if harness == HarnessKind::OpenCode {
                     let settings = commands

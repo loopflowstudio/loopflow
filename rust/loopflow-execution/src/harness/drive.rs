@@ -78,7 +78,7 @@ pub fn run(launch: &Launch<'_>, process: &ProcessConfig) -> Result<AgentProcessR
                             }
                             ConversationEvent::Error { code, message, .. } => {
                                 stderr.push_str(&format!("{code}: {message}\n"));
-                                failure = failure.or(AgentFailure::from_code(&code));
+                                failure = graver(failure, launch.harness.classify_failure(&code, &message));
                                 if launch.harness.terminal_error(&code)
                                 {
                                     exit_code = Some(1);
@@ -100,6 +100,7 @@ pub fn run(launch: &Launch<'_>, process: &ProcessConfig) -> Result<AgentProcessR
                 if let Some(runtime) = runtime { runtime.record_conversation(event.clone()); }
                 if let ConversationEvent::Error { code, message, .. } = event {
                     stderr.push_str(&format!("{code}: {message}\n"));
+                    failure = graver(failure, launch.harness.classify_failure(&code, &message));
                 }
             }
             if process.stream && !stdout.ends_with('\n') {
@@ -130,4 +131,13 @@ pub fn run(launch: &Launch<'_>, process: &ProcessConfig) -> Result<AgentProcessR
             .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
         result
     })
+}
+
+/// The failure that decides what happens after a turn that reported `next`
+/// after `so_far`.
+fn graver(so_far: Option<AgentFailure>, next: Option<AgentFailure>) -> Option<AgentFailure> {
+    match (so_far, next) {
+        (Some(so_far), Some(next)) => Some(so_far.graver(next)),
+        (so_far, next) => so_far.or(next),
+    }
 }

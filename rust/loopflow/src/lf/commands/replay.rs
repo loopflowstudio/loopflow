@@ -3,7 +3,6 @@
 use anyhow::{anyhow, Context, Result};
 use std::io::Write;
 
-use loopflow_execution::agent::check_cli_available;
 use loopflow_execution::agent::run_agent;
 use loopflow_execution::agent::AgentConfig;
 use loopflow_execution::agent::ProcessConfig;
@@ -53,7 +52,7 @@ fn replay_at(home: &std::path::Path, selector: &str) -> Result<String> {
     config.apply_agent_override()?;
     let selected_harness = config.agent.harness.as_str().to_owned();
     let model = config.agent.model.clone();
-    if !check_cli_available(&selected_harness) {
+    if !config.agent.harness.installed() {
         return Err(anyhow!(
             "'{selected_harness}' CLI is unavailable on this Machine"
         ));

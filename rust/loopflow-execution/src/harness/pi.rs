@@ -664,9 +664,9 @@ impl super::Harness for Pi {
             owned,
         )
     }
-    fn classify_failure(&self, line: &str) -> Option<crate::agent::AgentFailure> {
+    fn classify_failure(&self, code: &str, message: &str) -> Option<crate::agent::AgentFailure> {
         // Pi retries a transient failure itself.
-        crate::agent::routing_failure(line)
+        crate::agent::routing_failure(code, message)
     }
     fn kind(&self) -> super::HarnessKind {
         super::HarnessKind::Pi

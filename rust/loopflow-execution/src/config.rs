@@ -11,9 +11,8 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
-#[cfg(not(test))]
-use crate::agent::check_cli_available;
 use crate::error::LoadError;
+use crate::harness::HarnessKind;
 
 pub mod catalog;
 mod definitions;
@@ -169,17 +168,17 @@ pub(crate) fn resume_choice(provider: &str, model: Option<&str>, selected: Optio
 /// Select automatically only when exactly one supported harness is installed.
 pub fn default_agent() -> Option<&'static str> {
     #[cfg(test)]
-    let is_installed = |agent: &str| agent == crate::harness::HarnessKind::Codex.as_str();
+    let is_installed = |agent: HarnessKind| agent == HarnessKind::Codex;
     #[cfg(not(test))]
-    let is_installed = check_cli_available;
+    let is_installed = HarnessKind::installed;
     installed_agent(is_installed)
 }
 
-fn installed_agent(is_installed: impl Fn(&str) -> bool) -> Option<&'static str> {
-    let mut installed = crate::harness::HarnessKind::ALL
+fn installed_agent(is_installed: impl Fn(HarnessKind) -> bool) -> Option<&'static str> {
+    let mut installed = HarnessKind::ALL
         .into_iter()
-        .map(crate::harness::HarnessKind::as_str)
-        .filter(|agent| is_installed(agent));
+        .filter(|agent| is_installed(*agent))
+        .map(HarnessKind::as_str);
     let only = installed.next()?;
     installed.next().is_none().then_some(only)
 }
@@ -1026,7 +1025,10 @@ mod tests {
 
     #[test]
     fn default_agent_is_the_one_installed() {
-        assert_eq!(installed_agent(|agent| agent == "claude"), Some("claude"));
+        assert_eq!(
+            installed_agent(|agent| agent == HarnessKind::Claude),
+            Some("claude")
+        );
         assert_eq!(installed_agent(|_| true), None);
         assert_eq!(installed_agent(|_| false), None);
     }

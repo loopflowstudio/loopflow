@@ -308,8 +308,8 @@ approve command: give feedback in the Task's conversation, which knows its step
 and how to go on.
 
 Off takes back the interactive steps and the merge. Never set, a run that
-reaches a merging step lands: `lf task run` after `ship-review` goes through `deliver`, and `pursue`, which has
-no interactive step, lands without the setting ever being on. `lf task run` says
+reaches a merging step lands: `lf task run` after `ship-review` goes through `deliver`, and a Graph
+with no interactive step that ends in `deliver` lands without the setting ever being on. `lf task run` says
 so on its `merges:` line. A failing run leaves auto alone: the Task stops at
 the failed step, and the next `lf task run` stands in again. A PR merged by hand
 is met by the run's own landing step, which sees the merge and goes on.
@@ -323,8 +323,9 @@ is met by the run's own landing step, which sees the merge and goes on.
 | `done` · `abandoned` | completed, dropped |
 
 Builtins are `feature` (explore, then plan, build, ship-review, deliver, verify), `code`
-(the same without explore), `auto` (pursue then deliver, no interactive step: request to merged PR
-without you) and `research` (findings, no PR). To change one, copy it, commit it,
+(the same without explore), `pursue` (plan then build, no interactive step: request to published
+PR) and `research` (findings, no PR). `auto: on` beside `graph:` turns
+auto on for every Task that takes the Graph up. To change one, copy it, commit it,
 and select it for a Wave with `graph: feature` in `.lf/wave/product/config.yaml`:
 
 ```bash

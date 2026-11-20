@@ -110,6 +110,12 @@ asserts the off is kept), `documented_commands::`; clippy clean. Not run:
 `two_people`, `transport::`, `session_lifecycle_tests`, `performance_tests::`
 and the Swift suites the testing page names for a schema change; gate and CI.
 
+Realign at `9c657bfb39` read the slice against its brief: no `task_graphs`
+auto reference is left, the fixture and the upgrade test exist as named.
+`docs/orchestration.md` still listed the deleted builtin `auto` graph and said
+`pursue` lands; `pursue` ends at `pr-publish`. It now names `pursue` as
+request to published PR, and the `auto: on` key.
+
 Realign 2026-11-19 at `76b2bd214e` ran the two fixtures that still named the
 deleted `auto` graph: `local_planning::auto_graph_runs_a_task_to_end` (waited
 60 s at `code`'s first step) and
@@ -122,14 +128,15 @@ they stood for. `wave_lifecycle`'s fold fixture names `graph: feature`
 Checks nobody has run since the last three commits (`1048cee3cf`,
 `fa171df836`, `76b2bd214e`); gate and CI:
 
-- `golden_prompt` (skill text changed; regenerate), `documented_commands::`,
-  `dto_fixtures::`, `config::` catalogue tests.
+- `golden_prompt` (skill text changed; regenerate), `config::` catalogue
+  tests. (`documented_commands::` and `dto_fixtures::` passed at `9c657bfb39`.)
 - Swift: `scripts/test_desktop.sh --filter 'DTOFixtureTests|ServerProtocolTests|RegistryQueryTests|WorkModelTests|WorkNavigationTests|WaveStandupTests|WorkSelectionTests|TaskStatusTests|TaskConceptTests|DesktopHeadlessTests|PendingChangesTests|WorkCacheTests|TaskRowMetadataTests'`.
   Before main was merged in: 285 tests, 3 failures, all the base's
   `WorkPart(rawValue: "activity")`.
 - iOS (`uv run python scripts/test_ios.py`): `TaskWorkspaceView.swift` and
   `TaskListView.swift` were edited and never compiled.
-- `served_reads`, `machine_commands` (both edited for the auto operations),
+- `served_reads` beyond `server_operations_match_their_lf_commands`,
+  `machine_commands` (both edited for the auto operations),
   `performance_tests::`, `world_recipes::`, `two_people`, the rest of
   `local_planning`, the website docs check.
 - Recovery fixtures that time out here with and without this branch's edits

@@ -10,7 +10,7 @@ The step-by-step account this file replaced: `ade953f915:scratch/loo-515-task-de
 
 Status: built, the tour skill and the two diff settings included; nothing since
 the November 18 first try in the Dev app has been seen on screen. PR #1949 is
-open at `6d503e2991`, mergeable, level with main.
+open and mergeable; its head follows this branch.
 
 ## What exists
 
@@ -215,6 +215,16 @@ by one toggle. Neither writes into the other; both stay in the count ("4 of 9
 files"). The tour skill's "docs, data model, logic, tests, generated" repeats
 the default `diff_groups` in prose, as asked ("roughly suggest similar overall
 guidance in our default skill").
+
+Seventh pass, November 19, over the repairs as built: nothing to change. Read
+at `b8b0f0484f`: no `diff-order`, `DiffOrder` or "worker's order" outside
+`scratch/`; `tour.md` states the behind rule and `human-review.md` defers to
+it; `TourWriting` is idle, launching, launched, failed, and the button returns
+at launched. One word for whoever next edits `TaskFileDocument.swift`: the
+comment on `readTourAge` says "stale" where every other place says "behind".
+The five questions under Remaining are product choices no accepted decision
+settles; each is about something only the screen shows, so they go to the demo
+unanswered.
 
 The `lf` installed on this Machine is `0.16.0+f5ff6a6c7`, a build of main past
 the release, and prints the `diff_groups` warning twice per command until the

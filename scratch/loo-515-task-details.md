@@ -10,7 +10,7 @@ The step-by-step account this file replaced: `ade953f915:scratch/loo-515-task-de
 
 Status: built, the tour skill and the two diff settings included; nothing since
 the November 18 first try in the Dev app has been seen on screen. PR #1949 is
-open at `2b27c7eaef`.
+open at `6d503e2991`, mergeable, level with main.
 
 ## What exists
 
@@ -319,4 +319,4 @@ files:
   page and Task switches.
 - No GitHub patch renderer remains.
 
-Check (November 19): `cargo test -p loopflow-execution --lib config::` → 105 passed (before the conflict-free merge of main `2750c9e0fb`); after the sixth-pass repairs and their compress `scripts/test_desktop.sh --filter 'TaskFilesTests|ReviewDiffTests'` → 51 passed and `cargo test -p loopflow --test golden_prompt` → passed with regenerated goldens; branch `lf config explain diff_groups` selects the repository's list. Gate/CI: clippy, `documented_commands::`, the full swift suite, `global_commands` (PR #1949's suites are skipped at `2b27c7eaef`). Demo: the pane on screen.
+Check (November 19): `cargo test -p loopflow-execution --lib config::` → 105 passed (before the conflict-free merge of main `2750c9e0fb`); after the sixth-pass repairs and their compress `scripts/test_desktop.sh --filter 'TaskFilesTests|ReviewDiffTests'` → 51 passed and `cargo test -p loopflow --test golden_prompt` → passed with regenerated goldens; branch `lf config explain diff_groups` selects the repository's list. Gate/CI: clippy, `documented_commands::`, the full swift suite, `global_commands` (PR #1949's suites are skipped at `6d503e2991`). Demo: the pane on screen.

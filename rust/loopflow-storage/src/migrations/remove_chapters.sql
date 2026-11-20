@@ -1,5 +1,6 @@
 -- A Wave no longer selects one of its Projects (LOO-995): a new Task joins
--- the Wave's newest started Project, read from `projects` each time. Released
+-- the newest started Project of its Wave, else of the nearest ancestor Wave
+-- that has one, else none, read from `projects` each time. Released
 -- lf still reads these members, so they stay, unwritten, until a contract
 -- drops them with their idle triggers and rebuilds `waves`.
 -- leaving: waves.current_project_id LOO-995

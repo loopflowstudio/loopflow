@@ -2919,7 +2919,7 @@ pub fn task_sync(repo: &Path, issue: &str, answer: Option<LostAnswer>) -> OpsRes
             .await
             .map_err(task_error)?
             .ok_or_else(|| task_error("Task is missing"))?;
-        if saved.tracker_id.is_none() && saved.goes_to_tracker() {
+        if saved.tracker_id.is_none() {
             let sync = store.task_tracker_sync(&saved.id).map_err(task_error)?;
             let reason = sync
                 .actions

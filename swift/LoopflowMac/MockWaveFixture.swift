@@ -310,8 +310,7 @@ enum MockWaveFixture {
               }
             ],
             "truncated": false
-          },
-          "unavailable_tasks": []
+          }
         }
         """#
 }

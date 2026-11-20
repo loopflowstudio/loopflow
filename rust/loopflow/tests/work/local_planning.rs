@@ -1010,21 +1010,28 @@ fn a_task_makes_no_project_and_joins_the_newest_started_one() {
                 String::from_utf8(output.stderr).unwrap(),
             )
         };
-        // The first Task stays in its Wave with no Project, and a tracker
-        // hears of neither.
+        // The first Task stays in its Wave with no Project; a connected
+        // tracker still gets it, as an issue in no Project.
         let (first, warning) = create("First");
         assert!(!first.contains("in Project"), "{first}");
-        assert!(!warning.contains("pending"), "{warning}");
+        assert_eq!(
+            warning.contains("pending Linear sync"),
+            connected,
+            "{warning}"
+        );
         assert!(store.list_projects(None).unwrap().is_empty());
         let tasks = store.list_tasks(Some(&wave)).unwrap();
         assert_eq!(tasks.len(), 1);
         assert_eq!(tasks[0].project_id, None);
-        assert!(unconfirmed(
-            &store,
-            loopflow_storage::sqlite::tracker_actions::ActionOwner::Task(tasks[0].id.clone()),
-            loopflow_storage::sqlite::tracker_actions::ActionKind::Create,
-        )
-        .is_none());
+        assert_eq!(
+            unconfirmed(
+                &store,
+                loopflow_storage::sqlite::tracker_actions::ActionOwner::Task(tasks[0].id.clone()),
+                loopflow_storage::sqlite::tracker_actions::ActionKind::Create,
+            )
+            .is_some(),
+            connected
+        );
 
         // Two started Projects, as the tracker would report them: new Tasks
         // join the newer and the command says which.

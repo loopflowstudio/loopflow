@@ -111,9 +111,7 @@ pub fn create(
         .planning_transport()
         .map(|tracker| tracker.name())
         // An admitted creation exchanges planning after its answer.
-        .filter(|_| {
-            receipt.task.tracker_id.is_none() && receipt.task.goes_to_tracker() && after.is_none()
-        })
+        .filter(|_| receipt.task.tracker_id.is_none() && after.is_none())
     {
         writeln!(
             io.error,

@@ -1,5 +1,4 @@
 use loopflow::lf::commands::waves::{Evidence, RoadmapSnapshot, WaveDetailSnapshot};
-use loopflow_execution::durable::TaskState;
 
 const WAVE_DETAIL: &str = include_str!("../../../tests/fixtures/dto/wave_detail.json");
 const ROADMAP: &str = include_str!("../../../tests/fixtures/dto/roadmap_snapshot.json");
@@ -105,9 +104,8 @@ fn wave_detail_preserves_graph_and_machine() {
 }
 
 #[test]
-fn status_preserves_stranded_tasks_alongside_project_history() {
+fn status_keeps_task_runtime_alongside_project_status() {
     let snapshot: WaveDetailSnapshot = serde_json::from_str(WAVE_DETAIL).unwrap();
-    assert_eq!(snapshot.unavailable_tasks[0].status, TaskState::Unstarted);
     let Evidence::Ok { items, .. } = snapshot.tasks else {
         panic!("available tasks")
     };

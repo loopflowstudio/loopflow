@@ -13893,42 +13893,6 @@
       ],
       "type": "object"
     },
-    "UnavailableTaskEvidence": {
-      "description": "Non-terminal durable Task Work whose historical Project is no longer in the\ncurrent PM snapshot.",
-      "properties": {
-        "owner": {
-          "$ref": "#/$defs/NextMoveOwner"
-        },
-        "reason": {
-          "type": "string"
-        },
-        "recovery": {
-          "type": "string"
-        },
-        "status": {
-          "$ref": "#/$defs/TaskState"
-        },
-        "task_id": {
-          "type": "string"
-        },
-        "task_identifier": {
-          "type": "string"
-        },
-        "work_id": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "work_id",
-        "task_id",
-        "task_identifier",
-        "status",
-        "owner",
-        "reason",
-        "recovery"
-      ],
-      "type": "object"
-    },
     "Untyped": {
       "description": "Untyped on the wire: any JSON value, with no shape promised."
     },
@@ -14170,13 +14134,6 @@
         "tasks": {
           "$ref": "#/$defs/Evidence3"
         },
-        "unavailable_tasks": {
-          "description": "Durable Project Work that cannot join the current PM plan, including\nnon-terminal Tasks stranded under a terminal historical Project.",
-          "items": {
-            "$ref": "#/$defs/UnavailableTaskEvidence"
-          },
-          "type": "array"
-        },
         "wave": {
           "$ref": "#/$defs/WaveSnapshot"
         }
@@ -14185,7 +14142,6 @@
         "wave",
         "projects",
         "tasks",
-        "unavailable_tasks",
         "history",
         "setup"
       ],
@@ -14393,12 +14349,6 @@
         "projects": {
           "$ref": "#/$defs/Evidence2"
         },
-        "unavailable_tasks": {
-          "items": {
-            "$ref": "#/$defs/UnavailableTaskEvidence"
-          },
-          "type": "array"
-        },
         "wave": {
           "$ref": "#/$defs/WaveSnapshot"
         }
@@ -14406,8 +14356,7 @@
       "required": [
         "graph",
         "wave",
-        "projects",
-        "unavailable_tasks"
+        "projects"
       ],
       "type": "object"
     },

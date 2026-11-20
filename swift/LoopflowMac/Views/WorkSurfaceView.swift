@@ -140,9 +140,6 @@ struct WorkSurfaceView: View {
                     TaskWorkflowHeader(model: model, task: task, work: model.taskWork[task.id])
                         .id(task.id)
                 }
-                if let unavailable = found.wave?.unavailableTasks.first(where: { $0.taskId == task.id }) {
-                    evidenceBanner(title: "Retained Task · planning unavailable", detail: unavailable.reason)
-                }
                 TaskHistoryView(model: model, task: task)
                     .id(task.id)
                 // Raw records, for when the Workflow and the Graph process log disagree with them.
@@ -219,25 +216,6 @@ struct WorkSurfaceView: View {
         )
     }
 
-    private func evidenceBanner(title: String, detail: String) -> some View {
-        HStack(alignment: .top, spacing: Spacing.sm) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(palette.warning)
-            VStack(alignment: .leading, spacing: Spacing.xxs) {
-                Text(title)
-                    .font(Typography.strong(11))
-                    .foregroundStyle(palette.text)
-                Text(detail)
-                    .font(Typography.caption(10))
-                    .foregroundStyle(palette.textSecondary)
-                    .textSelection(.enabled)
-            }
-            Spacer()
-        }
-        .padding(.horizontal, Spacing.xl)
-        .padding(.vertical, Spacing.sm)
-        .background(palette.warning.opacity(0.12))
-    }
 }
 
 struct TaskDirectiveEditor: View {

@@ -414,8 +414,7 @@ struct RegistryQueryTests {
       }
     ],
     "truncated": false
-  },
-  "unavailable_tasks": []
+  }
 }
 """
         let query = RegistryQuery { args, _ in
@@ -520,8 +519,7 @@ struct RegistryQueryTests {
             "state": "ok",
             "items": [],
             "truncated": false
-          },
-          "unavailable_tasks": []
+          }
         }
         """
         let query = RegistryQuery { _, _ in json }

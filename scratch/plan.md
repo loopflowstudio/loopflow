@@ -75,8 +75,6 @@ listing's query with `EXPLAIN QUERY PLAN` at about 10,000 Tasks.
 - `move_task` writes both fields; the move preview uses `task_move_project`.
 - Storage readers (listing, counts, steers, CI incidents, Session completion,
   `task_wave_in`) read `t.wave_id`.
-- A Task in a Wave with no Project gets no tracker `create`; a standalone Task
-  (no Wave) still goes to the tracker as before.
 - Test: `local_planning_tests::a_task_joins_its_wave_project_else_its_nearest_ancestors…`;
   plan test `query_plans::a_wave_lists_its_own_tasks_by_index`.
 
@@ -107,23 +105,25 @@ import left a Task without a Wave when its Project came in the same batch;
 a Task that never goes to the tracker (`Task::goes_to_tracker`); five
 `local_planning` tests still expected the old rule.
 
-## Next (slice 2, from the concept review)
+## Built (slice 2, from the concept review)
 
-1. Delete `Task::goes_to_tracker` (`loopflow-storage/src/work/task/mod.rs`)
-   and its callers (`loopflow/src/lf/commands/task_create.rs:115`,
-   `loopflow-execution/src/ops/task.rs:2922`; both then ask only
-   `tracker_id.is_none()`), and the `(t.project_id IS NOT NULL OR t.wave_id IS
-   NULL)` clause in `tracker_actions::uncreated`. Flip
-   `local_planning::a_task_makes_no_project_and_joins_the_newest_started_one`
-   (around `local_planning.rs:1312`) to expect the "pending Linear sync" line
-   and a queued create. `docs/work.md:438` drops "stays out of the tracker".
-2. Delete `unavailable_tasks`: the wire field on `lf wave status --json` and
-   the roadmap, its printer, Swift's model and decoding, and the DTO fixtures
-   (`grep -rln unavailable_tasks rust swift tests`).
-3. Edit `remove_chapters.sql`'s top comment for the climbing rule.
+- `Task::goes_to_tracker` and the `uncreated` clause are gone: every Task in a
+  connected repository gets a tracker `create`, Project or not.
+  `local_planning::a_task_makes_no_project_and_joins_the_newest_started_one`
+  expects the "pending Linear sync" line and a queued create when connected.
+- `unavailable_tasks` is gone from the wire (`lf wave status`, the roadmap),
+  its printer, Swift's model, the Desktop notice, banner and row, the DTO
+  fixtures and `server_schema.json`.
+- `remove_chapters.sql`'s top comment states the climbing rule.
 
-Then gate publishes the branch so CI runs the suites (PR #1997 shows no run
-since slice 1 landed).
+Checks, run locally: nextest `local_planning::a_task_makes_no_project…`,
+`dto_fixtures::`, `status_tests::`, `server::schema::tests::` (70/70);
+clippy on loopflow, storage, execution: clean; `scripts/test_desktop.sh
+--filter 'DTOFixtureTests|RegistryQueryTests|WorkDestinationTests|WorkNavigationTests'`
+(193 passed). For gate and CI: `documented_commands::` (docs/work.md changed),
+`binary(golden_prompt)`, the full suites.
+
+Next: gate publishes the branch so CI runs the suites.
 
 ## Shows it worked
 

@@ -435,8 +435,9 @@ Meter usage events · LOO-12 in Project Invoicing
 
 A tracker holds an issue in a Project, never a Wave. A Task in a parent's
 Project is that Project's issue there; which child Wave it sits in lives in
-Loopflow's plan. A Task in a Wave with no Project stays out of the tracker,
-and an issue made in the tracker joins the Wave linked to its Project.
+Loopflow's plan. A Task with no Project still goes to the tracker, as an
+issue in no Project, and an issue made in the tracker joins the Wave linked to
+its Project.
 
 `lf task move` keeps a Task's Project when the new Wave is that Project's
 Wave or below it, and otherwise places it again. A started Task keeps its

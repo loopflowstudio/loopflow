@@ -674,9 +674,6 @@ struct DTOFixtureTests {
 
 
         #expect(detail.projects.items.first?.sync.actions[1].kind == "order")
-        #expect(detail.unavailableTasks[0].taskIdentifier == "W2-127")
-        #expect(detail.unavailableTasks[0].status == .unstarted)
-        #expect(detail.unavailableTasks[0].owner == .wave)
         #expect(detail.tasks.items.map(\.task.identifier) == ["INF-123", "INF-124"])
         #expect(detail.tasks.items[0].task.state == "unstarted")
         #expect(detail.tasks.items[0].runtime?.provider == nil)
@@ -719,9 +716,6 @@ struct DTOFixtureTests {
         let product = try #require(roadmap.waves.first)
         #expect(product.wave.name == "product")
 
-        #expect(product.unavailableTasks[0].taskIdentifier == "W2-127")
-        #expect(product.unavailableTasks[0].status == .unstarted)
-        #expect(product.unavailableTasks[0].recovery.contains("lf task status task_40fbeea"))
         let tasks = product.tasks.items
         #expect(tasks.map(\.section) == [.backlog, .backlog, .backlog, .done])
         #expect(tasks.map(\.condition.state) == [.clear, .waiting, .clear, .clear])

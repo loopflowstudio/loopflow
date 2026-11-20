@@ -1516,14 +1516,7 @@ struct WorkDestinationTests {
     }
 
     @Test func historicalTaskWithoutPlanningHasNoDeadEndGraphAction() async throws {
-        var snapshot = try #require(JSONSerialization.jsonObject(with: Data(fixture().utf8)) as? [String: Any])
-        var waves = try #require(snapshot["waves"] as? [[String: Any]])
-        var unavailable = try #require(waves[0]["unavailable_tasks"] as? [[String: Any]])
-        unavailable[0]["task_id"] = "issue-available"
-        waves[0]["unavailable_tasks"] = unavailable
-        snapshot["waves"] = waves
-        let data = String(decoding: try JSONSerialization.data(withJSONObject: snapshot), as: UTF8.self)
-        let exact = try oneTask(data, taskId: "issue-available")
+        let exact = try oneTask(fixture(), taskId: "issue-available")
         let (model, _) = destinationModel(query: RegistryQuery { _, _ in exact })
         await model.openTaskLink(TaskLink(issue: "PRD-52", repo: nil))
         #expect(model.selection == .task(id: "issue-available"))

@@ -318,7 +318,7 @@ async fn projectless_task_adopts_repository_ownership() {
 }
 
 #[tokio::test]
-async fn missing_and_unavailable_tasks_do_not_create_planning_or_execution() {
+async fn missing_and_unreadable_issues_do_not_create_planning_or_execution() {
     for (response, diagnostic) in [
         (
             json!({"data":{"issue":null}}),

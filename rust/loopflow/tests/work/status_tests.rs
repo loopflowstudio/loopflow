@@ -461,7 +461,6 @@ fn wave_status_and_roadmap_list_a_started_project_without_tasks() {
         assert_eq!(view["wave"]["status"], "ready");
         assert_eq!(view["tasks"]["state"], "ok");
         assert_eq!(view["tasks"]["items"], serde_json::json!([]));
-        assert_eq!(view["unavailable_tasks"], serde_json::json!([]));
     }
 }
 
@@ -602,10 +601,8 @@ fn orphaned_task_work_preserves_status_and_roadmap_evidence() {
             assert!(tasks
                 .iter()
                 .any(|task| task["task"]["identifier"] == "W2-127"));
-            assert!(view["unavailable_tasks"].as_array().unwrap().is_empty());
         }
         assert_eq!(wave["projects"], status["projects"]);
-        assert_eq!(wave["unavailable_tasks"], status["unavailable_tasks"]);
     }
 }
 
@@ -825,13 +822,6 @@ fn exact_task_roadmap_retains_history_without_starting_work() {
             assert_eq!(
                 tasks[0]["task"]["name"],
                 "Preserve historical architecture evidence"
-            );
-            assert!(
-                result["waves"][0]["unavailable_tasks"]
-                    .as_array()
-                    .unwrap()
-                    .is_empty(),
-                "the saved Task remains readable without its old provider Project"
             );
         }
     }

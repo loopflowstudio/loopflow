@@ -68,9 +68,6 @@ pub struct WaveDetailSnapshot {
     pub wave: WaveSnapshot,
     pub projects: Evidence<ProjectSummary>,
     pub tasks: Evidence<RoadmapTask>,
-    /// Durable Project Work that cannot join the current PM plan, including
-    /// non-terminal Tasks stranded under a terminal historical Project.
-    pub unavailable_tasks: Vec<UnavailableTaskEvidence>,
     /// This Wave's Machine-local Session history, newest first.
     pub history: Evidence<SessionHistory>,
     /// What the Wave's Tasks run, where, and which logins pay, with each source.
@@ -325,19 +322,6 @@ impl PrSnapshot {
     }
 }
 
-/// Non-terminal durable Task Work whose historical Project is no longer in the
-/// current PM snapshot.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct UnavailableTaskEvidence {
-    pub work_id: String,
-    pub task_id: String,
-    pub task_identifier: String,
-    pub status: TaskState,
-    pub owner: NextMoveOwner,
-    pub reason: String,
-    pub recovery: String,
-}
-
 /// `lf wave show` — every Wave's plan joined to durable Work and local delivery
 /// evidence, bucketed by planning section.
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
@@ -355,7 +339,6 @@ pub struct WaveRoadmap {
     pub graph: Option<String>,
     pub wave: WaveSnapshot,
     pub projects: Evidence<ProjectSummary>,
-    pub unavailable_tasks: Vec<UnavailableTaskEvidence>,
 }
 
 impl RoadmapSnapshot {
@@ -634,7 +617,6 @@ pub(crate) async fn wave_detail(store: &SharedStore, wave: &Wave) -> Result<Wave
         wave: snapshot,
         projects: project_planning(store, wave).await,
         tasks,
-        unavailable_tasks: Vec::new(),
         setup: loopflow_execution::work::wave::setup::read_wave_setup(store, wave, &checkout)
             .await?,
     })
@@ -1486,7 +1468,6 @@ async fn roadmap_snapshot(
             graph: loopflow_execution::work::wave::config::wave_graph(&checkout, wave.slug())?,
             wave: snapshot,
             projects: project_planning(store, wave).await,
-            unavailable_tasks: Vec::new(),
         });
     }
     roadmaps.sort_by(|a, b| a.wave.name.cmp(&b.wave.name));
@@ -2639,17 +2620,7 @@ fn print_status(status: &WaveDetailSnapshot) {
             }
         }
     }
-    print_unavailable_tasks(&status.unavailable_tasks);
     print_history(&status.history);
-}
-
-fn print_unavailable_tasks(tasks: &[UnavailableTaskEvidence]) {
-    for task in tasks {
-        println!(
-            "  {}  unavailable: {} · {}",
-            task.task_identifier, task.reason, task.recovery
-        );
-    }
 }
 
 fn print_history(history: &Evidence<SessionHistory>) {
@@ -2782,7 +2753,6 @@ fn print_roadmap(roadmap: &RoadmapSnapshot) {
     for wave in &roadmap.waves {
         print_wave_heading(&wave.wave);
         print_projects(&wave.projects);
-        print_unavailable_tasks(&wave.unavailable_tasks);
         let tasks = match roadmap.wave_tasks(wave) {
             Evidence::Unavailable { reason } => {
                 println!("  tasks unavailable: {reason}");

@@ -285,9 +285,6 @@ private struct RoadmapWaveCard: View {
                 }
                 if truncated { Text("Older Tasks are truncated.").foregroundStyle(palette.warning) }
             }
-            ForEach(roadmap.unavailableTasks, id: \.taskId) { task in
-                Text("\(task.taskIdentifier): \(task.reason) · \(task.recovery)").foregroundStyle(palette.warning)
-            }
         }
         .padding(Spacing.lg)
         .background(palette.surface)

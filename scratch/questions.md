@@ -7,12 +7,6 @@
 - Already true before this change: every Task listing (`tasks_where`) reads
   `TaskIdentifiers::read`, a full `SCAN tasks` (`SELECT lower(substr(id,6)),
   issue_identifier FROM tasks`). The Wave filter itself uses `tasks_wave`.
-- `unavailable_tasks` on `lf wave status --json` and the roadmap is now always
-  `[]`: the check that filled it read a Task's Project outside its Wave as
-  missing, and `tasks.project_id`'s foreign key means it can't be missing.
-  QA removed the check; the wire field, its printer and Swift's decoding
-  are still there. Deleting them touches about 20 files across Rust, Swift
-  and the DTO fixtures.
 - `lf task status --json` gives `task.wave` as the leaf name (`refunds`),
   `lf task show` gives `execution.wave` as the path (`billing/refunds`).
   The installed build does the same; not changed here.

@@ -1481,7 +1481,6 @@ public struct WaveRoadmap: Sendable, Hashable {
     public let projects: WorkEvidence<ProjectPlanningSnapshot>
     /// This Wave's share of the roadmap's Tasks, which the wire sends once.
     public let tasks: WorkEvidence<RoadmapTask>
-    public let unavailableTasks: [UnavailableTaskEvidence]
 
     public var workMap: WaveWorkMap {
         WaveWorkMap(objective: wave.goal, projects: projects, tasks: tasks)
@@ -1489,7 +1488,6 @@ public struct WaveRoadmap: Sendable, Hashable {
 
     enum CodingKeys: String, CodingKey {
         case wave, projects, graph
-        case unavailableTasks = "unavailable_tasks"
     }
 
     init(from decoder: Decoder, roadmapTasks: WorkEvidence<RoadmapTask>) throws {
@@ -1499,28 +1497,6 @@ public struct WaveRoadmap: Sendable, Hashable {
         self.wave = wave
         projects = try container.decode(WorkEvidence<ProjectPlanningSnapshot>.self, forKey: .projects)
         tasks = roadmapTasks.filter { $0.task.waveId == wave.id }
-        unavailableTasks = try container.decode([UnavailableTaskEvidence].self, forKey: .unavailableTasks)
-    }
-}
-
-/// Durable Project Work that cannot join the current PM plan, including
-/// non-terminal Tasks stranded under a terminal historical Project.
-/// Non-terminal durable Task Work whose historical Project is absent from the
-/// current PM plan.
-public struct UnavailableTaskEvidence: Decodable, Sendable, Hashable {
-    public let workId: String
-    public let taskId: String
-    public let taskIdentifier: String
-    public let status: TaskState
-    public let owner: WorkNextMoveOwner
-    public let reason: String
-    public let recovery: String
-
-    enum CodingKeys: String, CodingKey {
-        case status, owner, reason, recovery
-        case workId = "work_id"
-        case taskId = "task_id"
-        case taskIdentifier = "task_identifier"
     }
 }
 
@@ -1530,7 +1506,6 @@ public struct WaveDetailSnapshot: Decodable, Sendable {
     public let wave: WaveSnapshot
     public let projects: WorkEvidence<ProjectPlanningSnapshot>
     public let tasks: WorkEvidence<RoadmapTask>
-    public let unavailableTasks: [UnavailableTaskEvidence]
     public let history: WorkEvidence<SessionHistory>
 
     public var workMap: WaveWorkMap {
@@ -1539,7 +1514,6 @@ public struct WaveDetailSnapshot: Decodable, Sendable {
 
     enum CodingKeys: String, CodingKey {
         case wave, projects, tasks, history
-        case unavailableTasks = "unavailable_tasks"
     }
 }
 

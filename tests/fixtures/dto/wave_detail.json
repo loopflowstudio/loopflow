@@ -603,17 +603,6 @@
     ],
     "truncated": false
   },
-  "unavailable_tasks": [
-    {
-      "work_id": "task_40fbeeaadfbca5367aa7391432ae84ff",
-      "task_id": "linear-task-w2-127",
-      "task_identifier": "W2-127",
-      "status": "unstarted",
-      "owner": "wave",
-      "reason": "Task's owning Project is absent from the current PM snapshot",
-      "recovery": "lf task status task_40fbeeaadfbca5367aa7391432ae84ff --json"
-    }
-  ],
   "projects": {
     "state": "ok",
     "items": [

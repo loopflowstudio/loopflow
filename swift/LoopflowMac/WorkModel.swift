@@ -1863,8 +1863,8 @@ final class WorkModel {
         endLaunchWhenCurrent()
         selectRequestedWaveIfNeeded()
         if visibleRoadmaps.allSatisfy({ wave in
-            guard case .available(_, false) = wave.tasks else { return false }
-            return wave.unavailableTasks.isEmpty
+            if case .available(_, false) = wave.tasks { return true }
+            return false
         }) {
             clearSelectionIfOutsideScope()
         }
@@ -1968,8 +1968,8 @@ final class WorkModel {
         endLaunchWhenCurrent()
         selectRequestedWaveIfNeeded()
         if visibleRoadmaps.allSatisfy({ wave in
-            guard case .available(_, false) = wave.tasks else { return false }
-            return wave.unavailableTasks.isEmpty
+            if case .available(_, false) = wave.tasks { return true }
+            return false
         }) {
             clearSelectionIfOutsideScope()
         }
@@ -2304,7 +2304,6 @@ final class WorkModel {
         }
         if navigation.showsSelection { workspaceRegistry?.clearPresentation() }
         setSelection(selection)
-        reportOutsidePlan()
         if let selection { Perf.acknowledged(Perf.taskWorkspaceReady, id: selection.id, owner: navigation.performanceOwner) }
         if selection == nil { navigation.sidebarWaveID = nil }
         if let selection, selection.kind == .wave {
@@ -2805,29 +2804,6 @@ final class WorkModel {
         change(task, .abandon(task: issue), .taskAbandon(directory: directory(task), issue: issue), "abandoned")
     }
 
-    // MARK: Tasks outside the plan
-
-    @ObservationIgnored private var outsidePlanNotice: String?
-
-    /// While the open Wave's reading lists Tasks outside the current plan, one
-    /// condition Notice says so; its action copies every recovery command.
-    private func reportOutsidePlan() {
-        let roadmap = selection.flatMap { $0.kind == .wave ? wave(id: $0.id) : nil }
-        let outside = roadmap?.unavailableTasks ?? []
-        let key = roadmap.map { "outside-plan-\($0.wave.id)" }
-        if let shown = outsidePlanNotice, shown != key || outside.isEmpty { navigation.notices.clear(key: shown) }
-        outsidePlanNotice = outside.isEmpty ? nil : key
-        guard let key, let first = outside.first else { return }
-        let text = outside.count == 1 ? "\(first.taskIdentifier) is outside the current plan"
-            : "\(outside.count) Tasks are outside the current plan"
-        let recovery = outside.map(\.recovery).joined(separator: "\n")
-        let reasons = outside.map { "\($0.taskIdentifier): \($0.reason)" }.joined(separator: "\n")
-        navigation.notices.post(Notice(text, key: key, action: Notice.Action("Copy recovery", help: reasons) {
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(recovery, forType: .string)
-        }, kind: .condition))
-    }
-
     // MARK: Read failures
 
     /// Every reading a window shows arrives through here, for `NoticeCenter.read`'s
@@ -3274,7 +3250,6 @@ final class WorkModel {
         if roadmap != next { roadmap = next }
         guard case .success(let (_, text)) = result else { return false }
         showsSavedPlanning = false
-        reportOutsidePlan()
         if let text { cache?.saveRoadmap(text) }
         openWarmConversations()
         return true

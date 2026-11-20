@@ -195,6 +195,11 @@ slice 2 stays a named failure; making the holder executable belong to its build
 (`Place` carries the executable the server spawns) is passed over here as
 larger than a flaky-test Task.
 
+Second pass, after the build: nothing to change. The page gained the built
+error and its recovery, one pairing ("my server is an old build": three
+sentences, two detectors, no one restart command) and question 4. That one is
+larger than this work; `service.rs:955` waits on it.
+
 ## Docs (write-docs, 2026-11-19)
 
 Changed: `rust/loopflow/tests/README.md` (the `LOOPFLOW_TEST_LF` paragraph:

@@ -21,16 +21,20 @@ p.mute{color:var(--mute)}
 </head>
 <body>
 <h1>Which <code>lf</code> does a test run?</h1>
-<p class="mute">Area taken: the test-fixture CLI and the holder it spawns, plus the two in-process traps (the <code>with_process</code> OnceLock, Swift warm openings). All four flaky tests come down to a test seeing something it did not start. 1b is the one where the product's concepts are off, so most of the page is about 1b.</p>
+<p class="mute">Second pass, after the build (base <code>origin/main</code>, head <code>edf0aeef5f</code>): the code matches this page; one row and question 4 are new. Area taken: the test-fixture CLI and the holder it spawns, plus the two in-process traps (the <code>with_process</code> OnceLock, Swift warm openings). All four flaky tests come down to a test seeing something it did not start. 1b is the one where the product's concepts are off, so most of the page is about 1b.</p>
 
 <h2>The interaction</h2>
-<p>A developer edits <code>lf.rs</code> and runs <code>cargo test -p loopflow --test session_launch_contract</code>. Today:</p>
+<p>A developer edits <code>lf.rs</code> and runs <code>cargo test -p loopflow --test session_launch_contract</code>. On main:</p>
 <pre>cargo links lf (dev features, 03ff…)   → target/debug/lf
 fixture starts MachineServer          ← target/debug/lf   (server is 03ff, keys holder place 03ff)
 test calls lf_binary()                → cargo build lf (no dev features, aef4…) → target/debug/lf
 server spawns current_exe()           ← target/debug/lf   (now aef4: binds holder-aef4.sock)
 server polls holder-03ff.sock … 20 s  → "Holder … is not answering: No such file or directory"</pre>
 <p>Rerun and it passes: the path already holds aef4 before the server starts. The failure names a socket, not the cause.</p>
+<p>As built: the integration binary's ctor sets <code>LOOPFLOW_TEST_LF</code> to its own <code>CARGO_BIN_EXE_lf</code>, so line 3 never runs (27/27 on the first run after a link, same hash before and after). With that line removed, the test fails in about two seconds with:</p>
+<pre>The executable at …/target/debug/lf is now build 7db1716ee77a; this server is build 405a35a6b8f1
+and has been replaced since it started. Run `lf install server` to restart it</pre>
+<p>Recovery, run on a private Machine under launchd: <code>lf install server</code> from the replaced path restarted the server and the next shell was held. A foreground <code>lf server run</code> has no command that restarts it.</p>
 
 <h2>Concepts, paired</h2>
 <table>
@@ -39,6 +43,7 @@ server polls holder-03ff.sock … 20 s  → "Holder … is not answering: No suc
 <tr><td>a build of lf</td><td>a path (<code>target/debug/lf</code>) <em>and</em> a SHA-256 (<code>terminal_holder::build()</code>)</td><td class="no">no</td><td>The holder is keyed by the hash but started by the path. Anything that relinks the path (cargo, <code>lf install</code>'s <code>fs::rename</code>) splits them.</td></tr>
 <tr><td>the holder of my terminals</td><td><code>Place::of(build)</code>, <code>Client::ensure</code></td><td class="yes">yes</td><td>One build, one place. Sound; only the spawn path betrays it.</td></tr>
 <tr><td>"holder didn't start"</td><td>20 s poll, then the socket path</td><td class="no">no</td><td>A different-build holder that is up and bound looks like a dead one.</td></tr>
+<tr><td>"my server is an old build"</td><td><code>lf server status</code> from the new build ("uses another executable"); the holder ready-line check in <code>Client::ensure</code>; <code>service.rs:955</code> ("restart it with lf server restart", not a command)</td><td class="no">no</td><td>One fact, three sentences, two detectors, and no single action: <code>lf install server</code> restarts a launchd server that reads not-ready, leaves a ready one alone, and never reaches a foreground one. The new error names the one command that works for its case.</td></tr>
 <tr><td>"this process is the CLI"</td><td><code>PROCESS_STARTED_AT</code> OnceLock via <code>journal::with_process</code></td><td class="yes">yes</td><td>Right concept for the binary; a lib test could set it process-wide. Plan cfg-gates it out of lib tests.</td></tr>
 <tr><td>"New Task closes the sheet, nothing else asked"</td><td>test log of <code>requests</code>; warm-primary <code>Task</code>s</td><td class="yes">yes</td><td>Warm openings are intended product behavior; the test just must not watch them. <code>canPrepare = { false }</code> says so.</td></tr>
 </table>
@@ -46,11 +51,11 @@ server polls holder-03ff.sock … 20 s  → "Holder … is not answering: No suc
 <h2>Biggest mismatch: a build is spawned by path</h2>
 <div class="cols">
 <div><b>Before</b><br>The server knows its build (hash at start) and spawns <code>current_exe()</code>, trusting the path still holds that build. When it doesn't, 20 s of polling and a socket error.</div>
-<div><b>After this plan</b><br>Integration tests stop relinking the path (ctor sets <code>LOOPFLOW_TEST_LF</code> = <code>CARGO_BIN_EXE_lf</code>). The holder's ready line carries its build; a mismatch fails at once: <em>executable at &lt;path&gt; is now &lt;b&gt;; this server is &lt;a&gt; and was replaced since it started.</em></div>
+<div><b>Built</b><br>Integration tests stop relinking the path (ctor sets <code>LOOPFLOW_TEST_LF</code> = <code>CARGO_BIN_EXE_lf</code>). The holder's ready line carries its build; a mismatch fails at once, naming the path, both builds in the twelve digits the socket is named by, and <code>lf install server</code>.</div>
 </div>
 <div class="prop"><b class="tag">Proposed, larger than this Task:</b> make the mismatch unspellable. <code>Place</code> carries the executable the holder runs; the server links (or copies) its own executable there at start, checks the hash once, and always spawns that file. Then no relink of <code>target/debug/lf</code> and no <code>lf install</code> can hand a server the wrong holder, and the nested-build gap below disappears for the holder. Costs: a binary per live build under the holder state, cross-volume copy when a hardlink fails, cleanup when the holder exits.</div>
 
-<h2>What the plan now says differently</h2>
+<h2>What the first pass changed in the plan (all built)</h2>
 <ul>
 <li><b>Gap named.</b> Lib test binaries (<code>--lib</code>, incl. <code>tests/work/</code>; loopflow-execution's tests) have no <code>CARGO_BIN_EXE_lf</code> and still nested-build onto the same path. Under bare <code>cargo nextest run</code> without <code>LOOPFLOW_TEST_LF</code> they can still swap it under an integration binary. <code>scripts/test.py</code>, CI, and plain <code>cargo test</code> ordering avoid it. Listed in Exclusions.</li>
 <li><b>Slice 2's error names the cause</b>, the replaced server, not only the two hashes. Production reaches it too: <code>installation.rs:753</code> renames over the entry gate under a live server.</li>
@@ -60,7 +65,8 @@ server polls holder-03ff.sock … 20 s  → "Holder … is not answering: No suc
 <h2>Unchanged and checked</h2>
 <ul>
 <li>1a and 3 are fixed on main; the <code>with_process</code> cfg is one line that closes the trap for <code>loopflow-execution</code> lib tests. It can't be widened to <code>test-support</code>: the unified <code>lf</code> built during <code>cargo test</code> calls it.</li>
-<li>Swift: confirm the warm <code>session resume</code> first; the fix is the existing <code>canPrepare</code> guard.</li>
+<li>Swift: the probe saw the two warm <code>session resume</code> requests; both New Task tests set the existing <code>canPrepare</code> guard.</li>
+<li>The mismatch is found after the spawn, so a holder of the new build starts with no server and exits by itself within a minute. Hashing the path before spawning would save that process and add a race between the hash and the exec; the ready line says what really started. Left as built.</li>
 </ul>
 
 <h2>Questions</h2>
@@ -76,6 +82,10 @@ server polls holder-03ff.sock … 20 s  → "Holder … is not answering: No suc
 <li>Bare <code>cargo nextest run</code> without <code>LOOPFLOW_TEST_LF</code>:
  <br>a) supported, close the gap;
  <br>b) unsupported, document <code>scripts/test.py</code> as the way.</li>
+<li>Restarting a server (the row above):
+ <br>a) leave it: <code>lf install server</code> for a replaced one, nothing for a ready one, and <code>service.rs:955</code> keeps naming a missing command;
+ <br>b) file a Task: one sentence for "this server is an old build", written once, and one command that restarts any server;
+ <br>c) only fix <code>service.rs:955</code>'s text, once there is a command to name.</li>
 </ol>
 </body>
 </html>

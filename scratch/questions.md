@@ -5,7 +5,7 @@
 - Repository scope disables reordering ("Order lives in each Wave") because rank is per Project.
 - Start's menu lists described Graphs; undescribed custom Graphs sit under "More ›".
 - Multi-row moves and multi-Start loop over single-Task writes in Swift rather than a new Rust batch op.
-- Start's menu lists every described Graph, so composition pieces (deliver, pursue, refresh, queue) and optimize, task-design and vsm-operate appear under "Run without stopping" beside auto and incident. The docs example shows only auto and incident. Hide pieces with a catalog flag, or drop their descriptions, if the menu reads as noise.
+- Start's menu lists every described Graph, so composition pieces (deliver, pursue, refresh, queue) and optimize, task-design and vsm-operate appear under "Run without stopping" beside incident. Hide pieces with a catalog flag, or drop their descriptions, if the menu reads as noise.
 - Rank sorts the list across Projects; ⌘↑↓ past a row of another Project writes nothing, since rank is per Project. A Wave whose backlog spans Projects may want grouping (LOO-996).
 - Undo uses the window's `UndoManager`, registered when a write lands; a reorder undone before the Work update arrives restores from the ranks read at the time.
 - The narrowed filter is bracketed in the capture text (`[Mine 1]`); All, the default, is not.
@@ -46,3 +46,8 @@
 
 - `lf repo people` (GitHub users behind Task owners, cached in `github_people`) has no Desktop reader now that the standup board is gone. Left in place: it is a documented command. Deleting it means a `-- leaving: github_people` marker and removing the served `repo.people` read.
 - VoiceOver's Move up/down on a row outside the selection now selects that row first, as the row menu does.
+
+## From the sync onto main, November 20
+
+- Main's #1976 deleted the builtin `auto` Graph and the Autonomous section: auto is a Task setting (`lf task auto on`). Start's "Run without stopping" no longer offers auto, and the sidebar's Autonomous list is gone. The backlog has no Auto control; Start on a Task with auto on runs past its interactive steps. An "Auto" choice beside Start is the open question.
+- The standup board stays deleted; main's Auto badge on its rows had nowhere to go, and the Task cards below keep theirs.

@@ -40,7 +40,8 @@ struct BacklogViewTests {
         row["graph_name"] = workflow.map { $0 as Any } ?? NSNull()
         row["lifecycle"] = step == nil ? "unstarted" : "idle"
         row["run_control"] = ["unavailable": unavailable.map { $0 as Any } ?? NSNull()]
-        row["execution"] = step.map { ["state": "idle", "reason": "Stopped at \($0)", "step": $0, "captured": NSNull()] as Any }
+        row["execution"] = step.map { ["state": "idle", "reason": "Stopped at \($0)", "step": $0, "captured": NSNull(),
+                                              "died": NSNull(), "outlook": NSNull()] as Any }
             ?? NSNull()
         row["pr"] = pr.map { number in
             ["id": "pr-\(id)", "sequence": 1, "slug": id, "branch": "you/\(id)", "base_commit": "1111111", "phase": "open",

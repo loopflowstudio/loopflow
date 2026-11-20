@@ -123,6 +123,16 @@ Synced onto origin/jack/loo-12-retry-budget.
 - Moving a stacked Task to a different parent (`lf sync LOO-14`) or detaching to
   `main` (`lf sync main`) removes inherited parent commits and keeps only the
   child's own work, preserving the Task, branch, and PR identity.
+- A stack names a Task, not one of its PRs. When LOO-12's PR closes without
+  merging and LOO-12 opens another, the next `lf sync` in LOO-13 follows it and
+  records the new PR; landing and `lf pr publish` follow the same way, and a
+  new PR that has already merged carries the child onto the default branch.
+  When LOO-12 has no PR left to follow, sync stops and names both ways forward:
+
+  ```text
+  $ lf sync
+  stack parent LOO-12's PR #1971 closed without merging; `lf sync LOO-12` restacks this Task on its branch, `lf sync main` detaches it
+  ```
 - Always record stacks with `lf task run --stack-on`, `lf task checkout --stack-on`,
   or `lf sync <ID>`, not manual `git merge` or `gh pr edit --base`. If a PR's
   base disagrees with the recorded stack, `lf pr publish` leaves the base

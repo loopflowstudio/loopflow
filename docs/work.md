@@ -28,8 +28,9 @@ it is safe.
 
 To stack a dependent Task, pass `--stack-on LOO-12` when starting it, or
 run `lf sync LOO-12` inside an existing Task's worktree to stack it on `LOO-12`.
-`lf sync` carries the child through the parent's updates and squash merge;
-`lf sync main` detaches it back onto the default branch.
+`lf sync` carries the child through the parent's updates and squash merge, and
+on to the parent's next PR when the stacked one closes unmerged; `lf sync main`
+detaches it back onto the default branch.
 
 `lf task run`, `lf task auto on`, and `lf task checkout`
 prepare the Task's primary conversation and the local server starts it in the

@@ -7,3 +7,10 @@
   adoption: the transcript has no cwd. `conversation_summaries.db` has it.
 - `agy` is assumed to retry transient provider failures itself, as OpenCode
   and Pi do. Not seen live.
+- `-a agy` is not accepted; the agent is `antigravity` and the install hint
+  names the command.
+- When one turn reports two different provider failures, the gravest wins
+  (credential, usage limit, model, transient) whichever came first. Before, a
+  coded failure won over a worded one.
+- A subagent's first model call starts one `lf` that answers `{}`; the shell
+  script does not filter by conversation.

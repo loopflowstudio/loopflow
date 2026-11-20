@@ -9,15 +9,48 @@ here; the process it execs is named `antigravity`).
 Two changes ride with it:
 
 - **Failure classification is part of the Harness API.** Each harness answers
-  `classify_failure(line)`; the `classifies_failures` capability is gone. A
-  spent quota, a revoked login or an unserved model moves a run to the next
-  agent on every harness.
+  `classify_failure(code, message)` once, for each error its own decoder
+  reports; the `classifies_failures` capability is gone. A spent quota, a
+  revoked login or an unserved model moves a run to the next agent on every
+  harness.
 - **OpenCode running out of credits fails over.** Today it stops the step.
 
 The demo: `lf task run <Task> -a antigravity` runs a step on real `agy`, the
 step hears `lf steer` after its next tool, and `lf history usage --task` shows
 its tokens. Then a step whose first agent is `opencode` with no credits moves
 to the next agent in `agents` and finishes.
+
+## The model
+
+What a person knows: an **agent** they name (`antigravity`,
+`antigravity:gemini-3.8-flash-high`), the **order** in `agents`, and three
+things lf tells them: why a step moved to the next agent, what to do when it
+could not (install, sign in, add an agent), and what the step cost.
+
+What the code has, one answer each:
+
+| the person's idea | the code's one owner |
+|---|---|
+| the agent's name and the command it runs | `HarnessKind` (`as_str`, `program`, `installed`) |
+| a provider refused, and why | the harness, asked once per error event: `classify_failure(code, message)`; the answer travels as `AgentProcessResult.failure` |
+| what happens next (move, wait, retry, stop with advice) | `_run_with_retries`, which reads `result.failure` and nothing else |
+| the conversation a launch owns (resume, and "not a subagent's") | the thread file beside the launch's delivery file |
+| what a hook callback means (which moment, whose conversation, what shape the reply takes) | the harness: `hook_callback`, `hook_reply` |
+
+Three places where the first draft of this plan had two owners, and what
+replaces them:
+
+1. **A failure was classified from a line lf wrote itself.** `drive::run`
+   turns each `ConversationEvent::Error { code, message }` into the text
+   `"{code}: {message}\n"` and calls it `stderr`; `_classify_agent_failure`
+   split that text back into lines and asked the harness about each. The
+   harness's decoder made the event; the harness is asked about the event.
+   See "Failures".
+2. **A hook's moment was decided in a shell script and its payload read
+   again in lf.** lf reads the payload; the script only decides whether
+   starting lf is worth it. See "Hooks".
+3. **`check_cli_available(cli)` took a harness name or any program.** All
+   three callers mean a harness. `HarnessKind::installed()` replaces it.
 
 ## Done when
 
@@ -41,13 +74,14 @@ Headless, against the stand-in `agy` (no sign-in, no display):
 |---|---|---|
 | `cargo test -p loopflow-execution --lib harness::launch_matrix` | five harnesses × chat, work session, batch, worker: argv, hook ownership, recorded thread | implement, CI |
 | `cargo test -p loopflow --lib task_graph_launch_tests::a_task_step_runs_as_a_worker_on_every_harness` | an Antigravity step settles, records answer, thread and usage, gets its context, hears a steer after its next tool | implement, CI |
-| `cargo test -p loopflow-execution --lib agent::tests::` | OpenCode's balance line and Antigravity's quota, sign-in and model lines each move the run to the next agent; Pi still retries nothing | implement, CI |
-| `cargo test -p loopflow-execution --lib harness::antigravity` | decoder trace from real 1.5.13 output; a subagent's hook payload gets `{}` | implement, CI |
+| `cargo test -p loopflow-execution --lib agent::tests::` | a run whose result says usage limit, revoked login or unserved model moves to the next agent; a transient one is retried | implement, CI |
+| `cargo test -p loopflow-execution --lib harness::conformance_tests` | each harness's own refusal words, through its `classify_failure`: OpenCode's balance line, Antigravity's quota, sign-in and model errors; Pi, OpenCode and Antigravity answer `None` for a transient failure | implement, CI |
+| `cargo test -p loopflow-execution --lib harness::antigravity` | decoder trace from real 1.5.13 output; a `result` with `status: ERROR` fails the turn with a classified failure; a subagent's hook payload is not this launch's and gets `{}`; first callback is Start, `invocationNum` 0 opens a turn | implement, CI |
 
 On real `agy` (needs its sign-in; qa or demo, never a required check): the
 demo above.
 
-## Done in this checkout (uncommitted, does not compile yet)
+## Done in 264a4848ec (does not compile yet)
 
 - `harness/mod.rs`: `HarnessKind::Antigravity` (`"antigravity"`), `ALL` has
   five, `Harness::program()` (default: the kind's name; Antigravity answers
@@ -59,6 +93,11 @@ demo above.
   transient). `routing_failure` (no transient) and `provider_failure` (with
   transient) are the shared phrase lists. `check_cli_available` maps a harness
   name to its program.
+
+Of that, three things change (see "Failures" and "What goes"):
+`classify_failure` takes `(code, message)` and is called from `drive::run`;
+`_classify_agent_failure` goes; `check_cli_available` becomes
+`HarnessKind::installed()`.
 - `claude.rs`, `codex.rs`: `provider_failure`. `pi.rs`: `routing_failure` (Pi
   retries transient failures itself; `pi_failure_keeps_exact_history_…` holds
   that). `opencode.rs`: "insufficient balance" is a usage limit, then
@@ -66,13 +105,17 @@ demo above.
 
 ## Left to build
 
+0. Move classification to the error event (see "Failures"), and
+   `HarnessKind::installed()`.
 1. `harness/antigravity.rs`: `Antigravity` harness, headless `Driver`, the
    per-launch folder, hook payload adapter.
 2. `harness/antigravity_decode.rs`: stream-json lines to `Decoded`.
 3. `transcript/antigravity.rs`: `transcript_full.jsonl` to `Turn`s.
 4. `lf __context-block --harness <name>`
    (`rust/loopflow/src/lf/commands/context.rs`, `lf/mod.rs`): the named
-   harness reads the callback and shapes the reply.
+   harness reads the callback (`hook_callback`) and shapes the reply
+   (`hook_reply`). The `agent_id` check in `emit_block` moves into the default
+   `hook_callback`.
 5. Program name: `native_session.rs` (lines near 31, 276, 492, 530) builds
    `Command::new(kind.as_str())`; use `program()`. Generalize the "Codex
    reported no conversation" warning.
@@ -84,10 +127,15 @@ demo above.
 7. Tests: a stand-in `agy` under `rust/loopflow-execution/tests/support/`
    (model on `opencode_cli.py`), `harness::launch_matrix` cells,
    `task_graph_launch_tests::a_task_step_runs_as_a_worker_on_every_harness`,
-   decoder trace under `harness/testdata/`, a failover test for OpenCode's
-   balance line and Antigravity's quota line, `conformance_tests.rs`.
+   decoder trace under `harness/testdata/`, each harness's refusal words in
+   `conformance_tests.rs`. The `agent::tests::` that fed `stderr` text to
+   `_run_with_retries` set `failure` on the result instead; the phrase tests
+   call the shared lists.
 8. `harness/README.md`: the launch table, the Task-step table (five columns),
-   the limits row now "yes" for OpenCode and Pi.
+   the limits row now "yes" for OpenCode and Pi, `classify_failure` as its
+   own row in the method table (out of the `capabilities()` row), and the
+   sentence "headless results retain answer text and typed turn failures"
+   now true of every harness.
 
 ## Design
 
@@ -129,28 +177,43 @@ after-a-tool hook. lf declares `PreInvocation` and, for a managed launch,
 `Stop`. Nothing else: a `PreToolUse` handler that answers `{}` denies every
 tool ("tool call denied by pre-tool hook", seen live).
 
-- The hook script keeps the launch's conversation: the first `PreInvocation`
-  writes its `conversationId` beside `hooks.json` (the hook's cwd). **A
-  payload from any other conversation gets `{}` and starts no lf.** Subagents
-  run the same hooks under their own id (seen live, below); without this a
-  subagent's `Stop` would end the worker's turn and a subagent would claim the
-  Session's steers. Claude's hook does the same on `agent_id`.
-- First call of the launch: `lf __context-block --moment start`. Later calls:
-  `invocationNum` 0 opens a turn (managed: `--moment tool`, ungated);
-  otherwise the gated `--moment steer`, with the marker gate `hook_settings`
-  builds. The script reads `"invocationNum":0` with a shell `case`; a quote
-  inside `lastUserInput` is escaped, so user text cannot match it.
-- `Stop` (managed only): `--moment stop`.
-- The script always exits 0 and prints `{}` when lf prints nothing.
-- The script passes `--harness antigravity`. `emit_block` asks that harness
-  to read the callback and to shape the reply, two `Harness` methods whose
-  defaults are today's Claude/Codex behavior (`hook_callback`: the payload as
-  sent; `hook_reply`: `hookSpecificOutput.additionalContext`). Antigravity's
-  read `conversationId` → `session_id`, name the event `SessionStart` /
-  `UserPromptSubmit` / `PostToolUse` / `Stop`, set `source` `startup` when
-  `initialNumSteps <= 1`, else `resume`, and answer
-  `{"injectSteps":[{"systemMessage":{"systemMessage":"<text>"}}]}`. The
-  server receives the normalized callback, so nothing past `emit_block`
+The script decides one thing: whether starting lf is worth it. lf reads the
+payload.
+
+- **The script.** `PreInvocation`: read stdin; when the payload has
+  `"invocationNum":` followed by 1-9 (a model call inside a turn), run the
+  marker gate `hook_settings` builds and exit with `{}` when no steer may be
+  waiting; otherwise pipe the payload to
+  `lf __context-block --harness antigravity`. `Stop` (managed only): the same
+  command, ungated. It always exits 0 and prints `{}` when lf prints nothing.
+  The gate fails open: a payload the pattern does not recognize starts lf, so
+  a changed payload costs a process, never a missed context block or an
+  unreported turn. A quote inside `lastUserInput` is escaped, so user text
+  cannot match the pattern.
+- **`Harness::hook_callback(payload, declared moment, thread file)`** answers
+  the moment and the callback in the shape `emit_block` already reads
+  (`session_id`, `hook_event_name`, `source`), or `None` when the callback is
+  not this launch's conversation. The default is today's behavior: the
+  declared `--moment`, the payload as sent, `None` when `agent_id` is set
+  (Claude's subagents; that check leaves `emit_block`). Antigravity's:
+  - **Whose conversation.** The thread file is `reported_thread_path` beside
+    the launch's delivery file (the hook inherits `LF_CONTEXT_DELIVERY`). lf
+    writes the id there at launch when it resumes (`--conversation`); else
+    the first callback writes its `conversationId`. A payload with any other
+    `conversationId` is `None`: `{}`, no boundary, no steers claimed.
+    Subagents run the same hooks under their own id (seen live, below);
+    without this a subagent's `Stop` would end the worker's turn and a
+    subagent would claim the Session's steers. The same file is how a bare
+    launch reports its thread for resume, so one file answers both.
+  - **Which moment.** `Stop` is Stop. A `PreInvocation` that wrote the thread
+    file is Start. `invocationNum` 0 opens a turn: Tool for a managed launch
+    (the server marks the turn working), Steer for a bare one. Anything else
+    is Steer.
+  - `source` is `startup` when `initialNumSteps <= 1`, else `resume`.
+- **`Harness::hook_reply(event, text)`**: default
+  `hookSpecificOutput.additionalContext`; Antigravity's
+  `{"injectSteps":[{"systemMessage":{"systemMessage":"<text>"}}]}`.
+- The server receives the normalized callback, so nothing past `emit_block`
   learns a fifth payload shape.
 - A managed start is also the first prompt: after the Start boundary, report
   a Tool boundary named `UserPromptSubmit` so the server marks the turn
@@ -183,15 +246,40 @@ answers again (seen live: steps 9, 10, 11 of one turn). The turn's answer is
 its last `PLANNER_RESPONSE` with `content`. Rows carry no cwd, so
 `recent_transcripts` answers nothing (see Exclusions).
 
-**Failures** (`classify_failure`), then `routing_failure`:
+**Failures.** A provider's failure is classified once, where lf first sees
+it. Each decoder already reports it as `ConversationEvent::Error { code,
+message }`; `drive::run` asks `launch.harness.classify_failure(&code,
+&message)` at that event and keeps the gravest answer of the turn
+(credential, usage limit, model, then transient) in
+`AgentProcessResult.failure`, dropped when the turn completed anyway.
+`_run_with_retries` reads `result.failure` and never the error text;
+`result.stderr` stays what a person reads as the reason.
 
-- usage limit: "exhausted your quota", "quota reached", `QUOTA_EXHAUSTED`,
-  `RESOURCE_EXHAUSTED`, "usage limit reached", "out of credits"
-- credential: "authentication required", "authentication failed"
-- model: "is not recognized as a known model"
+- `routing_failure(code, message)` and `provider_failure(code, message)`:
+  `AgentFailure::from_code(code)`, else the phrase lists over the message's
+  lines. Claude and Codex answer `provider_failure`; Pi and OpenCode
+  `routing_failure`, OpenCode after its own "insufficient balance".
+- The direct `AgentFailure::from_code` call in `drive::run` goes: the harness
+  method is the one question.
+- Antigravity's decoder reports a `result` whose `status` is `ERROR` as
+  `Error { code: "antigravity_error", message: <result.error> }` and fails
+  the turn; `agy` exiting with no `result` line reports the last stderr line
+  the same way. Its `classify_failure`, then `routing_failure`:
+  - usage limit: "exhausted your quota", "quota reached", `QUOTA_EXHAUSTED`,
+    `RESOURCE_EXHAUSTED`, "usage limit reached", "out of credits"
+  - credential: "authentication required", "authentication failed"
+  - model: "is not recognized as a known model"
+- What changes on purpose: when one turn reports two different failures, the
+  gravest wins whichever came first. Today a coded failure wins over a worded
+  one (`failure.or`). A turn with one failure classifies as it does now.
 
 Antigravity's phrases other than the model and authentication lines come from
 the binary's strings, not from a refusal seen live.
+
+**What the person reads at a dead end.** `install_hint`: "Install it with
+`brew install --cask antigravity-cli`; the command is `agy`."
+`sign_in_advice`: "run `agy` and sign in". The agent is named `antigravity`
+everywhere lf prints it.
 
 **Capabilities:** no native skills, no turn limit, no output schema (`agy`
 has `--json-schema`; not wired), no respawn after crash, no `Provider` (native
@@ -294,13 +382,14 @@ https://antigravity.google/docs/cli/reference.
 
 | state | what happens |
 |---|---|
-| `agy` not installed | passed over for the next agent; named once when it was the only choice (`check_cli_available` through `program()`) |
-| not signed in | `result.status` `ERROR`, stderr "authentication required": `CredentialInvalidated`, next agent. Exit is 0 when stdin is `/dev/null`, so the driver fails the turn on `status`, not on the exit code |
+| `agy` not installed | passed over for the next agent; named once, with the install hint, when it was the only choice (`HarnessKind::installed()`) |
+| not signed in | `result.status` `ERROR`, "authentication failed": `CredentialInvalidated`, next agent, or the sign-in advice when none is left. Exit is 0 when stdin is `/dev/null`, so the driver fails the turn on `status`, not on the exit code |
 | model not served | `ModelUnavailable`, next agent |
 | quota spent | `UsageLimit`, next agent (phrases from the binary, not seen live) |
 | `agy` exits with no `result` line | the turn fails with the last stderr line as its reason, as OpenCode's does |
 | no `init` line before the failure | no thread recorded; the turn gets a UUID name; nothing to resume |
 | hook cannot start lf, or the server does not answer | the script prints `{}` and exits 0; a recording gap in `logs/lf.log`, never a failed turn |
+| the hook payload changes shape | the script's gate does not match and lf starts at every model call; an unreadable payload gets `{}` |
 | transcript missing or half-written | `Located::Gone(Gap::FileMissing)`; usage absent for that turn, the turn itself stays as the driver recorded it |
 | a headless question (`ask_question`) | not read: the turn ends `SUCCESS`. README row "no", with Claude and Codex (Task 48edb9) |
 
@@ -324,6 +413,13 @@ https://antigravity.google/docs/cli/reference.
 - `Capabilities::classifies_failures` and the early return in
   `_run_with_retries` (done).
 - `_find_provider_error` (done).
+- `_classify_agent_failure` and the `harness` argument it took: nothing reads
+  a failure out of `result.stderr`.
+- The `AgentFailure::from_code` call in `drive::run`.
+- `check_cli_available`: `replay.rs`, `ops/recovery.rs` and
+  `start_on_installed_agent` ask `HarnessKind::installed()`. Its path tests
+  already belong to `os_process::which_on_path`.
+- The `agent_id` check in `emit_block` (now the default `hook_callback`).
 - README rows "no: failures unclassified (LOO-518)" and "(Task 98edc6)", and
   the sentence "A 'no' for OpenCode or Pi means the step stops with the
   provider's error (limits)". Those two Tasks close with this change.
@@ -344,6 +440,21 @@ is unchanged line for line.
   seen working, and OpenCode's driver is the model to copy.
 - **Hook harness named by flag** (`--harness antigravity`), not sniffed from
   camelCase keys.
+- **The harness is asked about the error event, not about a line.** Passed
+  over: keeping `classify_failure(line)` over the text `drive::run` composes
+  (works, but the harness parses lf's own formatting and a multi-line
+  provider error is cut at its newlines), and putting a typed failure on
+  `ConversationEvent::Error` (the truest shape, but that is a recorded wire
+  type in `loopflow-model`; a separate change).
+- **lf reads the hook payload; the script only gates.** Passed over: the
+  script choosing the moment and filtering subagents in shell. That costs an
+  lf start at each subagent's first model call and buys one place that reads
+  the payload, under test in Rust.
+- **One name, `antigravity`.** `-a agy` is not accepted; the missing-CLI
+  message names the command. Passed over: `agy` as an alias (one idea under
+  two names in config and history).
+- **Usage counts the parent conversation only** (see Exclusions). Nothing in
+  `lf history usage` marks the number as partial.
 - **Trust by session `--settings`** for lf-created worktrees only.
 - **`agy` is assumed to retry transient failures itself** (`routing_failure`
   after its own phrases). If a live 503 shows it does not, switch to
@@ -351,19 +462,22 @@ is unchanged line for line.
 
 ## Slices
 
-1. **A batch on real `agy`, and the tree compiles.** `antigravity.rs` with
-   the `Driver` and `classify_failure`, `antigravity_decode.rs`, a transcript
+1. **A batch on real `agy`, and the tree compiles.** Classification at the
+   error event first (it touches four built harnesses and the retry tests,
+   and it is what Antigravity's `status: ERROR` plugs into).
+   `antigravity.rs` with the `Driver` and `classify_failure`,
+   `antigravity_decode.rs`, a transcript
    reader that returns no turns yet, `native_session.rs` on `program()`,
    `open` returning "not built yet". Stand-in `agy`
-   (`tests/support/antigravity_cli.py`) and the failover tests for OpenCode's
-   balance line and Antigravity's three refusals.
+   (`tests/support/antigravity_cli.py`) and the refusal-word tests for
+   OpenCode's balance line and Antigravity's three refusals.
    `lf -b default 'reply pong' -a antigravity` prints pong and records the
    conversation id; `-a antigravity:no-such-model` with a second agent lands
    on the second. This is the slice that can prove the plan wrong: it shows
    whether one process per turn, `status`-not-exit failure and the reported
    thread fit `drive::run` without a new concept.
-2. **A worker hears lf.** The launch folder, the hook script with the
-   conversation filter, `--harness` on `__context-block`.
+2. **A worker hears lf.** The launch folder, the gate script,
+   `hook_callback` and `hook_reply` behind `--harness` on `__context-block`.
    `lf task run <Task> -a antigravity`, then `lf steer` mid-step; the worker
    test's Antigravity cell. A second resume turn shows `--conversation` with a
    fresh launch folder.
@@ -377,13 +491,23 @@ is unchanged line for line.
 
 ## Not checked
 
+- Whether a subagent's hook sees its own id or the parent's in
+  `ANTIGRAVITY_CONVERSATION_ID`. Nothing depends on it: lf compares the
+  payload's `conversationId`.
+
 - Whether `agy` retries transient failures itself (see Choices).
+- Whether `agy` always prints `"invocationNum":N` without a space. The gate
+  fails open if it does not.
 - An exhausted-quota refusal, live.
 - Whether `trustedWorkspaces` wants the path as given or canonical: the probe
   passed both `/tmp/…` and `/private/tmp/…` and the dialog did not appear.
   Pass both.
 
 ## Unrelated to this change
+
+A headless `ask_question` ends the turn `SUCCESS` and the Graph advances on
+an answer that restates the question. Claude and Codex have the same gap;
+Task 48edb9 owns all three.
 
 "Agent execution unavailable: agent opencode:opencode/gemini-4-carbon uses
 harness OpenCode, which does not support a managed execution boundary" comes

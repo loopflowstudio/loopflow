@@ -190,17 +190,53 @@ Chosen while building, not by Jack, reversible before release:
   every command in a checkout whose `.lf/config.yaml` has the list (seen on
   `lf task status` here).
 
-## Concept review, November 19 (fifth pass)
+## Concept review, November 19 (sixth pass)
 
-Page: `scratch/concept-review.html`. It reviewed through `7b3484d303`, before
-the tour skill and `diff_groups`; those two have had no concept review. Its
-model: one comparison read three ways (order, hidden, filter).
+Page: `scratch/concept-review.html`. Reviewed through `21fc32c91f`, the tour
+skill and `diff_groups` included. The model holds: one comparison read three
+ways (order, hidden, filter); the settings give the default order, the tour
+stacks on top for one change.
 
-Stays different on purpose: two hide lists. The worker's `hide:` is per change,
+Next for implement, settled by what is already decided (none is built):
+
+1. **The tour has one name.** It is "tour" on the skill, the button, the menu
+   and the status line, `scratch/diff-order.yaml` and `DiffOrder` in the file
+   and the type, and "the worker's order" / "Hidden by the worker for this
+   change" in the pane and README. Jack's words give the file to the tour ("the
+   tour could live as some sort of simple yaml") and "diff_Order" to the
+   default groups. The file becomes `scratch/tour.yaml`, the type `DiffTour`
+   (`ReviewOrdering` keeps "order" for the menu), and the heading reads
+   "Hidden by the tour for this change": since Write tour, the writer is
+   whoever ran the skill, a plain chat's button included, not only the worker.
+   Nothing reads the old path; no tour file has shipped.
+2. **Behind has one rule.** Desktop: a commit after `at` changed a file outside
+   `scratch/`. `human-review.md`: "its `at:` is not the head commit". Every
+   `lf` step commits `scratch/`, so the commit that carries the tour already
+   moves the head past `at`, and human-review rewrites a current tour every
+   time. The skill takes Desktop's rule, said once in `tour.md`.
+3. **A tour run that dies gives the button back.** Today "Writing the tour…"
+   holds until a file with a different `at` lands; the store lives as long as
+   the app, so a run that fails after launch (no harness, a spent limit) leaves
+   no button until restart, and so does a rewrite that lands with the same or
+   no `at`. Nothing reports the run ending, so the pane stops modelling it:
+   the wait ends when the file's content changes, and once the launch has
+   answered the button is offered again beside the log path. Cost accepted: a
+   second click during a healthy run starts a second run that rewrites the
+   same file.
+
+Stays different on purpose: two hide lists. The tour's `hide:` is per change,
 matches a path or folder prefix, carries a reason and is revealed entry by
 entry. `diff_hidden` is a setting, uses the pattern rule above and is revealed
 by one toggle. Neither writes into the other; both stay in the count ("4 of 9
-files").
+files"). The tour skill's "docs, data model, logic, tests, generated" repeats
+the default `diff_groups` in prose, as asked ("roughly suggest similar overall
+guidance in our default skill").
+
+Seen while reviewing: the `lf` installed on this Machine is
+`0.16.0+f5ff6a6c7`, a build of main past the release, and prints the
+`diff_groups` warning twice per command. Here the warning ends at the first
+`lf install` after this merges; question 5 below is about Machines on the
+tagged release.
 
 ## Remaining
 

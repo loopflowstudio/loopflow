@@ -49,3 +49,5 @@
 
 
 - 2026-11-19 realign (headless): the plan's appended tour and diff-settings log is folded into What exists, Decisions and Limits. "Whether the worker's order should outlive publish" is closed by Jack's "Tour doesnt need to survive submitting the tour". Carried to the demo, in the plan's Remaining: keep this repository's `diff_groups` block and take the released `lf`'s warning until a release, or land the block with that release; and the three choices made while building (replace instead of merge, flat keys, the default order). The fifth concept review predates the tour skill and `diff_groups`.
+
+- 2026-11-19 concept review, sixth pass (headless), the first over the tour skill and `diff_groups`: three changes for implement, in the plan under "Concept review". Chosen by the review, not by Jack, reversible: the file is renamed `scratch/tour.yaml` and the heading reads "Hidden by the tour for this change"; the Write/Update tour button returns once the launch answers, so a second click can start a second run. The five demo questions in Remaining are unchanged and unanswered.

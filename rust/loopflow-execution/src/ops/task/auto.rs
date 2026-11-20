@@ -1,7 +1,7 @@
 //! A Task's auto setting. `lf task auto on` is an `lf task run` whose request asks
 //! for auto, and `auto: on` in configuration turns it on as a Task takes up
-//! its Graph. Auto is one mark on `task_graphs`; the run reads it at each
-//! interactive step, standing in for the person while it is on, and at each
+//! its Graph. Auto is a setting on the Task, one `task_auto` row, held before
+//! and after it takes up a Graph; the run reads it at each interactive step, standing in for the person while it is on, and at each
 //! step that merges, waiting there while it is off. `lf task auto off` turns
 //! it off; `lf task auto on` turns it on again.
 
@@ -68,7 +68,7 @@ fn set(
     Ok(before.is_some_and(|before| before.state == AutoState::On))
 }
 
-/// `lf task auto on` turns auto on once the Task has its Graph, lifting an off.
+/// `lf task auto on` turns auto on, lifting an off.
 pub(super) fn turn_on(store: &SharedStore, task: &Task) -> OpsResult<()> {
     set(store, task, AutoState::On, caller(store, task)?, false)?;
     Ok(())

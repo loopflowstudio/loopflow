@@ -181,14 +181,13 @@ pub struct SavedTaskGraphRow {
 }
 
 /// A Task's Graph as another Machine takes it up: the graph it took up, the
-/// step it stands at, the cursor its run sets out from again, if it is on
-/// one, and its auto mark. The run's Process stays behind.
+/// step it stands at and the cursor its run sets out from again, if it is on
+/// one. The run's Process stays behind.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SavedTaskGraphRecord {
     pub graph: String,
     pub step: String,
     pub run_start: Option<String>,
-    pub auto: Option<Auto>,
 }
 
 fn task_graph_row(
@@ -280,7 +279,7 @@ fn run_restarts_in(conn: &rusqlite::Connection, task: &TaskId) -> StoreResult<Ta
         .unwrap_or(TaskRunRestarts { count: 0, at: None }))
 }
 
-/// Auto on a Task's Graph: whether its interactive steps run headless,
+/// Auto, a setting on the Task: whether its interactive steps run headless,
 /// standing in for the person, and whether its landing may merge.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
@@ -327,8 +326,7 @@ pub(super) fn auto_in(conn: &rusqlite::Connection, task: &TaskId) -> StoreResult
     use rusqlite::OptionalExtension;
     let Some((state, at, by)) = conn
         .query_row(
-            "SELECT auto,auto_at,auto_by FROM task_graphs
-             WHERE task_id=?1 AND auto IS NOT NULL",
+            "SELECT state,set_at,set_by FROM task_auto WHERE task_id=?1",
             [task.as_str()],
             |row| {
                 Ok((
@@ -703,7 +701,6 @@ impl SqliteStore {
             graph,
             step,
             run_start,
-            auto: auto_in(&conn, task)?,
         }))
     }
 
@@ -718,34 +715,45 @@ impl SqliteStore {
     ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let run = record.run_start.as_ref().zip(by);
-        let auto = record.auto.as_ref();
         conn.execute(
-            "INSERT OR REPLACE INTO task_graphs(task_id,graph,step,run_start,lf_process_id,updated_at,
-                 auto,auto_at,auto_by)
-             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)",
+            "INSERT OR REPLACE INTO task_graphs(task_id,graph,step,run_start,lf_process_id,updated_at)
+             VALUES(?1,?2,?3,?4,?5,?6)",
             rusqlite::params![
                 task.as_str(),
                 record.graph,
                 record.step,
                 run.map(|(start, _)| start),
                 run.map(|(_, by)| by.as_str()),
-                crate::rows::now_unix(),
-                auto.map(|mark| mark.state.as_str()),
-                auto.map(|mark| mark.at),
-                auto.map(|mark| serde_json::to_string(&mark.by)).transpose()?
+                crate::rows::now_unix()
             ],
         )?;
         Ok(())
     }
 
+    /// A Task that moved here holds the auto mark it left with, or none.
+    pub fn place_moved_task_auto(&self, task: &TaskId, mark: Option<&Auto>) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        match mark {
+            Some(mark) => conn.execute(
+                "INSERT OR REPLACE INTO task_auto(task_id,state,set_at,set_by) VALUES(?1,?2,?3,?4)",
+                rusqlite::params![
+                    task.as_str(),
+                    mark.state.as_str(),
+                    mark.at,
+                    serde_json::to_string(&mark.by)?
+                ],
+            )?,
+            None => conn.execute("DELETE FROM task_auto WHERE task_id=?1", [task.as_str()])?,
+        };
+        Ok(())
+    }
+
     /// Take up `graph` for the Task as it is defined now, at `start`. It
-    /// replaces the Task's earlier Graph and keeps its auto mark.
+    /// replaces the Task's earlier Graph.
     pub fn take_up_task_graph(&self, task: &TaskId, graph: &str) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
-            "INSERT OR REPLACE INTO task_graphs(task_id,graph,step,updated_at,auto,auto_at,auto_by)
-             SELECT ?1,?2,?3,?4,old.auto,old.auto_at,old.auto_by
-             FROM (SELECT 1) LEFT JOIN task_graphs old ON old.task_id=?1",
+            "INSERT OR REPLACE INTO task_graphs(task_id,graph,step,updated_at) VALUES(?1,?2,?3,?4)",
             rusqlite::params![task.as_str(), graph, START, crate::rows::now_unix()],
         )?;
         Ok(())
@@ -846,7 +854,7 @@ impl SqliteStore {
 
     /// Set the Task's auto mark, noting it in the Task's history. With
     /// `unset_only`, a standing mark stays and nothing is written. Returns the
-    /// mark it had; a Task with no Graph has none and keeps none.
+    /// mark it had.
     pub fn set_task_auto(
         &self,
         task: &TaskId,
@@ -856,11 +864,13 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction()?;
         let before = auto_in(&tx, task)?;
-        if unset_only && before.is_some() {
-            return Ok(before);
-        }
+        let write = if unset_only {
+            "INSERT OR IGNORE INTO task_auto(task_id,state,set_at,set_by) VALUES(?1,?2,?3,?4)"
+        } else {
+            "INSERT OR REPLACE INTO task_auto(task_id,state,set_at,set_by) VALUES(?1,?2,?3,?4)"
+        };
         let set = tx.execute(
-            "UPDATE task_graphs SET auto=?2,auto_at=?3,auto_by=?4 WHERE task_id=?1",
+            write,
             rusqlite::params![
                 task.as_str(),
                 mark.state.as_str(),
@@ -869,7 +879,7 @@ impl SqliteStore {
             ],
         )?;
         if set == 0 {
-            return Ok(None);
+            return auto_in(&tx, task);
         }
         if before.as_ref().map(|before| before.state) != Some(mark.state) {
             let summary = format!("auto {}: {}", mark.state.as_str(), mark.by);
@@ -1061,21 +1071,24 @@ mod tests {
         };
         let on = mark(super::AutoState::On, 10);
         let stopped = mark(super::AutoState::Off, 20);
-        // No Graph, nothing to carry the mark.
-        store.set_task_auto(&task.id, &on, false).unwrap();
-        assert_eq!(store.task_auto(&task.id).unwrap(), None);
-        store
-            .take_up_task_graph(&task.id, r#"{"name":"code","steps":[]}"#)
-            .unwrap();
+        // The Task holds its mark before it takes up a Graph.
         assert_eq!(store.set_task_auto(&task.id, &on, false).unwrap(), None);
-        store.set_task_auto(&task.id, &stopped, false).unwrap();
-        // A configured default keeps a stop; taking up another graph keeps it too.
-        store
-            .set_task_auto(&task.id, &mark(super::AutoState::On, 30), true)
-            .unwrap();
-        store
-            .take_up_task_graph(&task.id, r#"{"name":"feature","steps":[]}"#)
-            .unwrap();
+        assert_eq!(
+            store.set_task_auto(&task.id, &stopped, false).unwrap(),
+            Some(on)
+        );
+        // A configured default keeps a stop; taking up a graph, then another, keeps it too.
+        assert_eq!(
+            store
+                .set_task_auto(&task.id, &mark(super::AutoState::On, 30), true)
+                .unwrap(),
+            Some(stopped.clone())
+        );
+        for graph in ["code", "feature"] {
+            store
+                .take_up_task_graph(&task.id, &format!(r#"{{"name":"{graph}","steps":[]}}"#))
+                .unwrap();
+        }
         drop(store);
         let store = crate::test_fixture::open(&path).unwrap();
         assert_eq!(store.task_auto(&task.id).unwrap(), Some(stopped));
@@ -1257,9 +1270,6 @@ mod tests {
             store
         };
         let (laptop, mini) = (open(&laptop_dir), open(&mini_dir));
-        laptop
-            .take_up_task_graph(&id, r#"{"name":"code","steps":[]}"#)
-            .unwrap();
         let on = super::Auto {
             state: super::AutoState::On,
             at: 7,
@@ -1268,11 +1278,14 @@ mod tests {
             },
         };
         laptop.set_task_auto(&id, &on, false).unwrap();
-        let record = laptop.task_graph_record(&id).unwrap().unwrap();
-        // Delivered twice, as a retried move is.
-        mini.place_moved_task_graph(&id, &record, None).unwrap();
-        mini.place_moved_task_graph(&id, &record, None).unwrap();
+        // It has taken up no Graph. Delivered twice, as a retried move is.
+        let mark = laptop.task_auto(&id).unwrap();
+        mini.place_moved_task_auto(&id, mark.as_ref()).unwrap();
+        mini.place_moved_task_auto(&id, mark.as_ref()).unwrap();
         assert_eq!(mini.task_auto(&id).unwrap(), Some(on));
+        // Reopened where it went, it comes back with none.
+        laptop.place_moved_task_auto(&id, None).unwrap();
+        assert_eq!(laptop.task_auto(&id).unwrap(), None);
     }
 
     #[test]
@@ -1284,7 +1297,7 @@ mod tests {
             &crate::test_fixture::observers(),
             &crate::test_fixture::build(),
             &conn,
-            "task_graph_auto",
+            "task_auto",
         );
         let (shipping, stopped, withdrawn, never) =
             (TaskId::new(), TaskId::new(), TaskId::new(), TaskId::new());
@@ -1300,10 +1313,17 @@ mod tests {
         ] {
             conn.execute_batch(&format!(
                 "INSERT INTO tasks(id,repository_id,issue_identifier,created_at,shipped_at)
-                 VALUES('{task}','repo_1','{issue}',1,10);
-                 INSERT INTO task_graphs(task_id,graph,step,updated_at)
-                 VALUES('{task}','{{\"name\":\"code\",\"steps\":[]}}','start',1);"
+                 VALUES('{task}','repo_1','{issue}',1,10);"
             ))
+            .unwrap();
+        }
+        // The stopped Task never ran: it has no Graph, and its stop still arrives.
+        for task in [&shipping, &withdrawn, &never] {
+            conn.execute(
+                "INSERT INTO task_graphs(task_id,graph,step,updated_at)
+                 VALUES(?1,'{\"name\":\"code\",\"steps\":[]}','start',1)",
+                [task.as_str()],
+            )
             .unwrap();
         }
         conn.execute_batch(&format!(
@@ -1317,7 +1337,7 @@ mod tests {
             &crate::test_fixture::observers(),
             &crate::test_fixture::build(),
             &conn,
-            "task_graph_auto",
+            "task_auto",
         );
         let mark = |task| super::auto_in(&conn, task).unwrap();
         let person = |name: Option<&str>| crate::process::Starter::Person {

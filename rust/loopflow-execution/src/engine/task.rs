@@ -81,12 +81,7 @@ pub struct AutoOff {
 
 impl AutoOff {
     pub fn render(&self) -> String {
-        let issue = &self.issue;
-        if self.was_on {
-            format!("{issue}: auto off")
-        } else {
-            format!("{issue}: auto was not on")
-        }
+        format!("{}: auto off", self.issue)
     }
 }
 
@@ -327,11 +322,6 @@ mod tests {
             "../../tests/fixtures/dto/server/task_auto_off_answer.json"
         ));
         assert_eq!(off.render(), "LOO-1: auto off");
-        let was_off = AutoOff {
-            was_on: false,
-            ..off
-        };
-        assert_eq!(was_off.render(), "LOO-1: auto was not on");
         // A missing field is an error, never a default.
         assert!(serde_json::from_str::<TaskRun>(r#"{"state":"running","issue":"LOO-1"}"#).is_err());
         let waiting = TaskRun::Waiting {

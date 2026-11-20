@@ -1508,8 +1508,6 @@ fn server_operations_match_their_lf_commands() {
         assert_eq!(written["owner"], printed["owner"], "{args:?}");
         assert_eq!(written["owner"].is_null(), !claimed, "{written}");
     }
-    // Auto is a mark on the Task's Graph; this Task has none, so a stop
-    // saves nothing, served or through `lf`. The ship tests hold Tasks that do.
     // No run is live, so an interrupt reaches nothing, in the app as through `lf`.
     let interrupt = Write::TaskInterrupt {
         directory: directory.clone(),
@@ -1582,8 +1580,10 @@ fn server_operations_match_their_lf_commands() {
         .unwrap()["execution"]["auto"]["by"]
             .clone()
     };
+    // Auto is the Task's setting: this Task has taken up no Graph and keeps
+    // the off, served or through `lf`.
     compare(stop.clone(), &|| stop.clone(), &stopped);
-    assert!(stopped().is_null(), "a Task with no Graph saved a stop");
+    assert!(!stopped().is_null(), "a Task with no Graph lost its off");
     // Why auto went off is a comment on the Task.
     server_write(Write::TaskAutoOff {
         directory: directory.clone(),

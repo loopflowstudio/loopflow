@@ -570,11 +570,7 @@ impl SqliteStore {
             )?;
             super::task_state::decide_in(&tx, id, "unstarted")?;
             // Reopening clears auto: it ended with the Task.
-            tx.execute(
-                "UPDATE task_graphs SET auto=NULL,auto_at=NULL,auto_by=NULL
-                 WHERE task_id=?1 AND auto IS NOT NULL",
-                [id.as_str()],
-            )?;
+            tx.execute("DELETE FROM task_auto WHERE task_id=?1", [id.as_str()])?;
             insert_task_event_in(
                 &tx,
                 id,

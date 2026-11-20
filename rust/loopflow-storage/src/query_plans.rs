@@ -537,9 +537,6 @@ mod tests {
                 due_date: None,
             })
             .unwrap();
-        store
-            .take_up_task_graph(&task, r#"{"name":"code","steps":[]}"#)
-            .unwrap();
         let mark = crate::sqlite::Auto {
             state: crate::sqlite::AutoState::On,
             at: 1,

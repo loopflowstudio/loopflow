@@ -206,7 +206,7 @@ pub struct TaskSnapshot {
     pub actions: TaskActionModel,
     /// Who started the Task's latest Graph.
     pub started_by: Option<crate::process::Starter>,
-    /// Auto on the Task's Graph: on, off, and who set it when;
+    /// The Task's auto setting: on, off, and who set it when;
     /// `null` when nobody has.
     #[serde(deserialize_with = "Option::deserialize")]
     pub auto: Option<loopflow_storage::sqlite::Auto>,

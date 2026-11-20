@@ -56,11 +56,14 @@ pub struct MovedTask {
     pub ownership_marker: String,
     /// Absent before the Task takes up a Graph.
     pub graph: Option<TaskGraphRecord>,
+    /// The Task's auto mark. Absent when nobody set one, and from a released
+    /// sender, whose Task arrives with none.
+    pub auto: Option<loopflow_storage::sqlite::Auto>,
     /// Absent unless the move stopped a running Graph, which continues where
     /// the Task arrives.
     pub stopped: Option<StoppedGraph>,
     /// Auto on, as a released receiver reads it: its Task ships there.
-    /// Receivers read `graph.auto`; LOO-971 deletes the key.
+    /// Receivers read `auto`; LOO-971 deletes the key.
     pub approval: Option<ReleasedShipApproval>,
 }
 
@@ -256,6 +259,7 @@ pub async fn send_task(
         };
     let (session, history) =
         taken.map_or((None, None), |(session, history)| (Some(session), history));
+    let auto = store.sqlite.task_auto(&task.id)?;
     let moved = Move {
         from_machine_id: crate::store::machines::local_machine(&store.sqlite)?.id,
         session,
@@ -266,10 +270,9 @@ pub async fn send_task(
             identifier: task.identifier.clone(),
             ownership_marker: loopflow_storage::sqlite::task_ownership::marker(&claim)?,
             graph: crate::store::task_work::task_graph_record(&store.sqlite, &task.id)?,
+            auto: auto.clone(),
             stopped,
-            approval: store
-                .sqlite
-                .task_auto(&task.id)?
+            approval: auto
                 .filter(|mark| mark.state == loopflow_storage::sqlite::AutoState::On)
                 .map(|mark| ReleasedShipApproval {
                     at: mark.at,
@@ -786,7 +789,7 @@ pub fn checkout_of(
 }
 
 /// This Machine owns the Task from here: the move's claim, then its checkout of
-/// the carried branch, then its Graph where it stood, with its auto mark.
+/// the carried branch, then its auto mark and its Graph where it stood.
 async fn take_in_task(
     store: &SharedStore,
     main: &Path,
@@ -797,6 +800,9 @@ async fn take_in_task(
     arriving_task(store, main, &moved.task_id, name).await?;
     // Publish the new claim only after replacing the old carrier. Recovery
     // could otherwise restart the graph this Machine owned before the move.
+    store
+        .sqlite
+        .place_moved_task_auto(&moved.task_id, moved.auto.as_ref())?;
     if let Some(graph) = &moved.graph {
         crate::store::task_work::place_moved_task_graph(
             &store.sqlite,

@@ -126,8 +126,8 @@ impl SqliteStore {
 pub(super) fn auto_on_in(conn: &Connection, ids: &str) -> StoreResult<HashSet<TaskId>> {
     task_set(
         conn,
-        "SELECT task_id FROM task_graphs
-         WHERE task_id IN (SELECT value FROM json_each(?1)) AND auto='on'",
+        "SELECT task_id FROM task_auto
+         WHERE task_id IN (SELECT value FROM json_each(?1)) AND state='on'",
         ids,
     )
 }

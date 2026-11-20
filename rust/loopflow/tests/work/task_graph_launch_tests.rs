@@ -2630,7 +2630,7 @@ fn end_is_retained_while_the_tasks_pr_blocks_completion() {
     // Nothing turned auto on; a stop stands at `end` all the same.
     let stop = task.run(&["--task", "INF-123", "task", "auto", "off"]);
     let stop = String::from_utf8_lossy(&stop.stdout);
-    assert!(stop.contains("INF-123: auto was not on"), "{stop}");
+    assert!(stop.contains("INF-123: auto off"), "{stop}");
     let error = refusal(task.run(&["task", "complete", "INF-123"]));
     assert!(error.to_lowercase().contains("pull request"), "{error}");
     assert_eq!(task.graph()["position"], at("end"));
@@ -3174,6 +3174,24 @@ fn a_waves_auto_on_takes_every_step_of_its_tasks_and_an_off_still_wins() {
 }
 
 #[test]
+fn an_off_before_the_first_run_outlasts_a_waves_auto_on() {
+    let task = stand_in_task();
+    task.set_wave_setting("auto", "on");
+    // The Task has taken up no Graph; the off is the Task's all the same.
+    let off = task.run(&["task", "auto", "off", "INF-123"]);
+    let off = String::from_utf8_lossy(&off.stdout);
+    assert!(off.contains("INF-123: auto off"), "{off}");
+    task.task_run_ok(&["task", "run", "INF-123"]);
+    assert_eq!(task.graph()["position"], at("review"));
+    assert!(stand_ins(&task).is_empty());
+    assert!(
+        task.text_status().contains("auto: off by "),
+        "{}",
+        task.text_status()
+    );
+}
+
+#[test]
 fn auto_on_a_running_task_reports_its_run_and_starts_nothing() {
     let task = stand_in_task();
     fs::write(task.home.path().join("hold"), "").unwrap();
@@ -3247,7 +3265,7 @@ fn auto_off_kills_nothing_and_its_run_carries_on() {
     assert!(first.wait().unwrap().success());
     let again = task.run(&["--task", "INF-123", "task", "auto", "off"]);
     let again = String::from_utf8_lossy(&again.stdout);
-    assert!(again.contains("INF-123: auto was not on"), "{again}");
+    assert!(again.contains("INF-123: auto off"), "{again}");
     assert!(
         task.text_status().contains("auto: off by "),
         "{}",

@@ -279,7 +279,8 @@ the Task reaches `end`, which requests completion.
 
 ### Auto
 
-Auto is one setting on the Task's Graph: on, off, or never set. Status says
+Auto is a setting on the Task: on, off, or never set. A Task holds it before
+its first run and through every Graph it takes up; reopening the Task clears it. Status says
 what is happening; auto says who takes the interactive steps. While it is on,
 the Task's runs stand in for you at each interactive step they reach and may
 merge the PR. Turning it on means nobody is waited for, so it runs the Task:
@@ -301,14 +302,13 @@ standing in at `ship-review` when it gets there.
 waits there, or reaches a merging step (`lf land`, `lf pr arm`, `pr-land`) and
 waits before it: "Waiting at pr land: auto is off (Maya). `lf task auto on INF-1` lands it."
 Auto-merge that Loopflow armed is disarmed. Off stands: only `lf task auto on` turns
-it back on. `lf -b task run` stands in at every step for its own run and
+it back on, and an `auto: on` in configuration never does. `lf -b task run` stands in at every step for its own run and
 writes no auto, so with auto off it still waits at the landing step. Other Graphs in the Task's worktree never move it. There is no
 approve command: give feedback in the Task's conversation, which knows its step
 and how to go on.
 
-Auto decides who takes the interactive steps; it is not what lets a PR
-merge. Any run that reaches a merging step lands unless auto is off:
-`lf task run` after `ship-review` goes through `deliver`, and `pursue`, which has
+Off takes back the interactive steps and the merge. Never set, a run that
+reaches a merging step lands: `lf task run` after `ship-review` goes through `deliver`, and `pursue`, which has
 no interactive step, lands without the setting ever being on. `lf task run` says
 so on its `merges:` line. A failing run leaves auto alone: the Task stops at
 the failed step, and the next `lf task run` stands in again. A PR merged by hand

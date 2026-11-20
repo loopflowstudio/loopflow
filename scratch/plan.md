@@ -17,12 +17,11 @@ PR #1976, base `main`. Main (through #1985) is merged in at `726f8a320f`.
 Status and setting are separate axes. `TaskState` says what is happening; the
 auto setting says who takes the interactive steps. One word: **auto**.
 
-- **The setting** is, as built, one mark on `task_graphs` (Remaining moves it
-  to its own `task_auto` row): `auto` (`on` | `off`, NULL
-  when never set), `auto_at`, `auto_by` (`Starter` JSON resolved at write
-  time). Rust `Option<Auto>`, `AutoState { On, Off }`. It moves with the
-  Graph record, survives taking up another graph, and is cleared by reopening
-  the Task. Migration `task_graph_auto` adds the columns and
+- **The setting** is one `task_auto` row per Task: `state` (`on` | `off`),
+  `set_at`, `set_by` (`Starter` JSON resolved at write time); no row when
+  never set. Rust `Option<Auto>`, `AutoState { On, Off }`. A Task holds it
+  before its first run and through every Graph it takes up, it moves with the
+  Task, and reopening clears it. Migration `task_auto` adds the table and
   `task_summaries.auto`, backfills from `task_ship_events`, NULLs
   `tasks.shipped_at` (so a released lf during upgrade skew stops relaunching
   `lf ship`), and marks `task_ship_events`, `tasks.shipped_at` and
@@ -75,77 +74,41 @@ when the PR merges.
 
 ## Remaining
 
-One slice, from the concept review at `dbff3f811e`
-(`scratch/concept-review.html`): **auto is the Task's, so store it on the
-Task.** Then gate.
+Gate. Nothing is left to build.
 
-Everything a person is told says auto is a setting on the Task, and the code
-already treats it that way: it outlives taking up another graph
-(`take_up_task_graph` copies the three columns across), and only reopening
-clears it. It is parked on `task_graphs`, so a Task with no Graph row cannot
-hold one. With `auto: on` in a Wave's config that loses a person's off:
+Implement 2026-11-19, the concept review's slice (auto is the Task's, so it is
+stored on the Task):
 
-```bash
-# .lf/wave/infra/config.yaml has  auto: on
-lf task create 'rotate the signing key'     # INF-9, never run
-lf task auto off INF-9                      # "INF-9: auto was not on"; nothing saved
-lf task run INF-9                           # take-up finds auto unset, config turns it on
-                                            # the run stands in at ship-review and merges
-```
+- `task_auto(task_id, state, set_at, set_by)`, one row per Task that has it
+  set; the migration is renamed `task_auto.sql` and backfills every Task's
+  latest ship event, with or without a Graph. `set_at`/`set_by` because `by`
+  is an SQL keyword. Its three `store_revision_task_auto_*` triggers advance
+  `planning`.
+- `set_task_auto` writes the row for any Task (`INSERT OR IGNORE` when
+  `unset_only`); `take_up_task_graph` copies nothing; reopening deletes the
+  row; `task_begun` reads no auto. No fixture needed the dropped clause.
+- The mark travels as `MovedTask.auto` and is placed whether or not a Graph
+  came with it (`place_moved_task_auto`: the sender's mark or none replaces
+  what the receiver held, with no history line). A released sender omits it
+  and its Task arrives with none, as before.
+- `lf task auto off` prints "X: auto off" either way.
+- A dev store that applied the old `task_graph_auto` draft has `auto*`
+  columns on `task_graphs` and no `task_auto`; QA worlds made before this
+  commit are rebuilt, not upgraded.
 
-`docs/orchestration.md` says "Off stands: only `lf task auto on` turns it back
-on." A released `lf task hold` on a never-run Task is dropped by the migration
-for the same reason.
-
-Build:
-
-- **Storage.** A table `task_auto(task_id PRIMARY KEY REFERENCES tasks(id) ON
-  DELETE CASCADE, state CHECK (state IN ('on','off')), at, by)`: a row is the
-  mark, no row is never set. Edit this branch's migration in place
-  (`task_graph_auto.sql`; rename it `task_auto` if `scripts/new_migration.py`
-  and `build.rs` take the rename, since nothing on origin/main names it): no
-  `auto*` columns on `task_graphs`, the backfill writes one row per Task from
-  its latest `task_ship_events` approval or stop whether or not it has a
-  Graph, and `store_revision_task_auto_<insert|update|delete>` triggers
-  advance the domain `task_graphs` advances today. `task_summaries.auto`
-  stays. `SCHEMA.md` gets the table.
-- **Writes.** `set_task_auto` upserts and never answers "no Graph";
-  `unset_only` is `INSERT OR IGNORE`. `take_up_task_graph` stops copying the
-  mark. Reopening deletes the row. `auto_in` and the row-state query in
-  `task_details.rs` read the table.
-- **Move.** The mark travels as `auto` on the Move record beside `graph`, so a
-  Task moved before its first run keeps its off; `TaskGraphRecord.auto` and
-  its `#[serde(default)]` go. The released `approval` key stays as it is until
-  LOO-971.
-- **`task_begun`** (`sqlite/task_started.rs`) drops its `tg.auto='on'` clause:
-  auto on is always a run, which leaves a Graph past `start` or a Graph step.
-  It is the one state read of the setting left. If a fixture shows a Task that
-  is on and not begun any other way, keep the clause against the new table and
-  say which fixture in this plan.
-- **Words.** `lf task auto off` prints "INF-9: auto off" whether or not it was
-  on (`AutoOff::render`); `was_on` stays on the wire for the disarm. Docs say
-  "a setting on the Task" (`docs/orchestration.md`, the module comment in
-  `ops/task/auto.rs`, `AutoState`'s comment, the migration's header).
-  `docs/orchestration.md` also says in one paragraph that auto "is not what
-  lets a PR merge" and that a run "lands unless auto is off"; say it once the
-  way the command's help does: off takes back the interactive steps and the
-  merge.
-- **Test** what a person would notice, one fixture each:
-  `an_off_before_the_first_run_outlasts_a_waves_auto_on` (beside
-  `a_waves_auto_on_takes_every_step_of_its_tasks_and_an_off_still_wins`: off
-  on a never-run Task, then `lf task run`, stops at the first interactive
-  step and status reads `auto: off by …`), and an upgrade fixture seeded from
-  released SQL where a stop on a Task with no `task_graphs` row arrives as
-  `off`. Run them with the existing auto launch fixtures, `dto_fixtures::` and
-  `server::schema::tests::`.
-
-Nothing on the wire changes shape: `TaskExecutionSnapshot.auto`, the selection
-state `auto` and both operations read the same `Auto`.
-
-Passed over: taking a Graph up at `auto off` so the mark has a row (an earlier
-build's mark-only take-up left a Task that owed setup and refused the person's
-own run); letting `lf config set auto off` exist as a personal opt-out (it
-answers a different question, every Task instead of this one).
+Run here: storage `an_auto_off_stands_until_auto_on`,
+`a_moved_task_keeps_its_auto_mark_where_it_arrives`,
+`a_released_tasks_ship_log_becomes_its_auto_mark` (its stopped Task has no
+Graph row), `auto_reads_and_writes_plan_by_index`, `revisions::`, the
+migration runner tests (152 passed); application
+`an_off_before_the_first_run_outlasts_a_waves_auto_on`, the four neighbouring
+auto launch fixtures, `end_is_retained_while_the_tasks_pr_blocks_completion`,
+`engine::task::`, `dto_fixtures::`, `server::schema::tests::` (schema
+regenerated: two doc comments), `served_reads`'
+`server_operations_match_their_lf_commands` (it asserted the lost off; now
+asserts the off is kept), `documented_commands::`; clippy clean. Not run:
+`two_people`, `transport::`, `session_lifecycle_tests`, `performance_tests::`
+and the Swift suites the testing page names for a schema change; gate and CI.
 
 Realign 2026-11-19 at `76b2bd214e` ran the two fixtures that still named the
 deleted `auto` graph: `local_planning::auto_graph_runs_a_task_to_end` (waited

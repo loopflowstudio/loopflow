@@ -352,7 +352,7 @@
       "type": "object"
     },
     "AutoState": {
-      "description": "Auto on a Task's Graph: whether its interactive steps run headless,\nstanding in for the person, and whether its landing may merge.",
+      "description": "Auto, a setting on the Task: whether its interactive steps run headless,\nstanding in for the person, and whether its landing may merge.",
       "oneOf": [
         {
           "const": "on",
@@ -13738,7 +13738,7 @@
               "type": "null"
             }
           ],
-          "description": "Auto on the Task's Graph: on, off, and who set it when;\n`null` when nobody has."
+          "description": "The Task's auto setting: on, off, and who set it when;\n`null` when nobody has."
         },
         "base_commit": {
           "type": [

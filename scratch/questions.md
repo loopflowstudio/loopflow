@@ -151,3 +151,11 @@ Open: `-b` — offered "batch only, writes no auto" (1), keep (2), `--auto` (3);
 - Made for review: the config default applies at every take-up (also `lf task run X <other graph>`), not only the first, and only when auto is unset. Attribution is a new `Starter::Config` variant rather than a separate type for auto's setter.
 - Jack, on `-b`: "no i think its right as it is -- -b should work on task run much like it does a regular graph". Plan: `-b` stands in for its own run, writes no auto.
 - Jack: "lets kill lf ship; isnt that just lf task auto on?"
+
+## Auto on the Task (implement, 2026-11-19)
+
+Made for review:
+- Columns are `set_at` and `set_by`, not the plan's `at` and `by`: `by` is an SQL keyword and would need quoting in every statement.
+- The migration file is renamed `task_auto.sql`. A dev store that applied the `task_graph_auto` draft is rebuilt, not upgraded.
+- A moved Task's mark replaces whatever the receiver held, including with nothing (`place_moved_task_auto`), and writes no "auto on:" history line there; `set_task_auto` would have kept a stale mark from an earlier stay.
+- `served_reads` asserted "a Task with no Graph saved a stop" as wrong; it now asserts the off is kept.

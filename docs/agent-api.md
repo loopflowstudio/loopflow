@@ -119,6 +119,41 @@ pane automation, and `lf --machine <id>` to run any command on a remote
 Machine. See [Telemetry](telemetry.md) and [Surfaces](surfaces.md) for full
 schemas.
 
+## The owners
+
+Tracked Work follows Wave → Task in navigation. A Wave owns its objective and
+memory; its planning holds Tasks, KRs and targets.
+A Task owns its checkout and its PR history, with one current PR. Every
+conversation and Graph attributed to it is part of its work. The Task has one
+captured graph and position, advanced by `lf task run` and `lf ship`; independent
+Graph runs do not move that position.
+
+LfSession keeps a continuable conversation, whether interactive or headless,
+and records the lf attached to it and the agent it runs: pid, OS start time and
+exit. A Graph run is one lf process and the steps it starts; the run and each
+step record their own pid, start, end, exit code and error. No table records lf
+commands themselves: one an agent issues is a tool call in its transcript.
+Alive means the OS still has the recorded pid with the recorded start time.
+Provider turns and retries remain history inside the conversation; they do not
+create another generic execution object.
+
+A recorded pid grants neither process-control authority nor permission to move
+a Graph cursor. Each attachment starts a new agent with a fresh token, which
+fences out the old writer; the conversation keeps its identity.
+Passive observation acquires no claim. See the [contract and cutover status](dev/reference-cutover.md#cutover-status)
+for the remaining reader, wire and lifecycle conversion.
+
+## The contract
+
+Loopflow launches receive a small launcher contract: work in the supplied
+checkout, follow the requested tools and repository conventions, and answer in
+the current Session. Standalone native skills retain their own guidance.
+
+The Task model and its commands are in that text, so every launch carries
+them. Association supplies context and ownership; the selected skill or Graph supplies
+the procedure. Keep repeatable instructions with that skill and repository rules
+in its agent guide.
+
 ## Memory and cleanup
 
 - **Wave memory:** `.lf/wave/<name>/MEMORY.md` is plain Markdown; edit it

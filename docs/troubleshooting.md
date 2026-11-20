@@ -36,6 +36,62 @@ lf graph list --runs --state current         # live Graph runs
 | Stopped at a failed step, ready to retry | `lf task run <ID>` |
 | Need to redo an earlier step | `lf task run <ID> --from <step>` |
 
+## A Task stopped advancing
+
+**Symptom:** the Task is not done, but nothing is moving, or its agent
+exited.
+
+```bash
+lf task status <ID> --json
+lf session usage --days 0 --task <ID> --json   # every Session input the Task ever made
+lf session list --task <ID>
+```
+
+Dirty files under a live Graph are ongoing progress. An idle Task Graph does not
+prove helper Sessions are idle, and a finished launcher does not prove its
+interactive Session closed: check Sessions separately.
+
+`lf task interrupt <ID>` stops a running Graph: an agent step ends at once, an
+operation finishes and nothing follows, and the run exits 130. With nothing
+live it records nothing and says so.
+
+If the Task's worktree never finished being created, status keeps the Task and
+names the exact path and branch to restore before launching.
+
+## The Task is idle, but waiting on something
+
+Task state says what the Task is doing (`idle`, `active`, `moving`, `shipping`,
+…); whether anyone owns it is separate (`lf task claim`, `lf task unassign`). What it is waiting on (a child Task, review, CI, merge) is its
+`reason`; Desktop's condition, with the evidence behind it, is in `lf task show`:
+
+```bash
+lf task status <ID> --json
+lf task show <ID> --json
+```
+
+Resolve the named fact: open the conversation, inspect the child, repair CI,
+merge. There is no run slot or PR-limit counter to clear.
+
+## Doctor reports a failure
+
+```bash
+lf doctor --json
+```
+
+Doctor checks installation selection, store compatibility and stray processes
+separately. It reads storage without initializing it or applying migrations, so
+an incompatible store still reports which Sessions and runs it can read.
+
+Binary freshness compares against locally cached `origin/main`, without
+fetching. That reference may be stale, and merged source may be newer than the
+stable release. `lf install` installs that stable release; Doctor
+itself installs nothing.
+
+Contention reads the last day of `logs/lf.log`: `database is locked` failures
+and any write that held the store lock for 3 s or more, grouped by the lf
+binary that logged them, with the holder's pids and the function that held the
+lock. Lines from binaries older than this check group as `unidentified (older lf)`.
+
 ## Desktop cannot connect
 
 ```bash

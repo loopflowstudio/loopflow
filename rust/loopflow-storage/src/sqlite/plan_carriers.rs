@@ -47,6 +47,63 @@ pub struct PlanCarrier {
     pub error: Option<String>,
     /// When the carrier stopped working, while it still doesn't.
     pub failing_since: Option<i64>,
+    /// What its last read brought that could not be written here; `None`
+    /// when it took everything.
+    pub not_taken: Option<NotTaken>,
+}
+
+/// A record a carrier brought that this Machine could not write.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Skipped {
+    pub id: String,
+    /// Why, and what to do about it when something can be done.
+    pub reason: String,
+}
+
+/// What a carrier's read brought that this Machine could not write. As an
+/// error it is the exchange's, never the carrier's own: the carrier worked.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{count} not taken: {reason}")]
+pub struct NotTaken {
+    /// How many records.
+    pub count: usize,
+    /// Why the first was not, and what to do about it when something can be
+    /// done.
+    pub reason: String,
+}
+
+impl NotTaken {
+    /// `None` when nothing was skipped. A record two refs brought counts once.
+    pub fn of(skipped: &[Skipped]) -> Option<Self> {
+        let first = skipped.first()?;
+        let records = skipped
+            .iter()
+            .map(|record| record.id.as_str())
+            .collect::<BTreeSet<_>>();
+        Some(Self {
+            count: records.len(),
+            reason: first.reason.clone(),
+        })
+    }
+}
+
+fn set_not_taken(
+    conn: &Connection,
+    repo: &str,
+    carrier: Carrier,
+    skipped: &[Skipped],
+) -> StoreResult<()> {
+    let not_taken = NotTaken::of(skipped);
+    conn.execute(
+        "UPDATE plan_carriers SET not_taken=?3,not_taken_reason=?4 WHERE repo=?1 AND carrier=?2",
+        params![
+            repo,
+            carrier.as_str(),
+            not_taken.as_ref().map(|not_taken| not_taken.count as i64),
+            not_taken.map(|not_taken| not_taken.reason),
+        ],
+    )?;
+    Ok(())
 }
 
 /// Records changed after a cursor, each whole and stamped.
@@ -98,7 +155,8 @@ pub(crate) fn changed(conn: &Connection, table: &str, id: &str) -> StoreResult<(
 fn carrier_in(conn: &Connection, repo: &str, carrier: Carrier) -> StoreResult<Option<PlanCarrier>> {
     Ok(conn
         .query_row(
-            "SELECT peer,sent_seq,seen_seq,error,failing_since FROM plan_carriers
+            "SELECT peer,sent_seq,seen_seq,error,failing_since,not_taken,not_taken_reason
+             FROM plan_carriers
              WHERE repo=?1 AND carrier=?2",
             params![repo, carrier.as_str()],
             |row| {
@@ -108,6 +166,12 @@ fn carrier_in(conn: &Connection, repo: &str, carrier: Carrier) -> StoreResult<Op
                     seen_seq: row.get(2)?,
                     error: row.get(3)?,
                     failing_since: row.get(4)?,
+                    not_taken: row.get::<_, Option<i64>>(5)?.zip(row.get(6)?).map(
+                        |(count, reason)| NotTaken {
+                            count: count as usize,
+                            reason,
+                        },
+                    ),
                 })
             },
         )
@@ -190,7 +254,7 @@ impl SqliteStore {
         conn.execute(
             "INSERT INTO plan_carriers(repo,carrier,peer,sent_seq) VALUES(?1,?2,?3,0)
              ON CONFLICT(repo,carrier) DO UPDATE SET peer=excluded.peer,sent_seq=0,seen_seq=NULL,
-                error=NULL,failing_since=NULL",
+                error=NULL,failing_since=NULL,not_taken=NULL,not_taken_reason=NULL",
             params![repo, carrier.as_str(), peer],
         )?;
         carrier_in(&conn, repo, carrier)?.ok_or(StoreError::NotFound)
@@ -272,6 +336,22 @@ impl SqliteStore {
         Ok(tips)
     }
 
+    /// What Git's read of the other Machines' refs could not write here;
+    /// nothing, when it took them all.
+    pub fn record_not_taken(
+        &self,
+        repo: &str,
+        carrier: Carrier,
+        skipped: &[Skipped],
+    ) -> StoreResult<()> {
+        set_not_taken(
+            &self.conn.lock().expect("store mutex poisoned"),
+            repo,
+            carrier,
+            skipped,
+        )
+    }
+
     /// Every record of `machine`'s plan ref at `tip` has been taken in.
     pub fn record_plan_ref(&self, repo: &str, machine: &str, tip: &str) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
@@ -322,15 +402,20 @@ impl SqliteStore {
     /// stamp of each field wins. `from` names the carrier that read them from
     /// its peer and the peer's watermark they reach; records that peer just
     /// gave are not sent back to it unless something else here is unsent.
+    ///
+    /// Returns the records that could not be written here. With any, the
+    /// carrier in `from` keeps the watermark it held, so its next read brings
+    /// them again, and its `not_taken` says so; a read that takes everything
+    /// clears it.
     pub fn apply_plan_records(
         &self,
         repo: &str,
         records: &[StampedRecord],
         from: Option<(Carrier, i64)>,
         names: &MachineNames,
-    ) -> StoreResult<()> {
+    ) -> StoreResult<Vec<Skipped>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let mut tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let caught_up = match from {
             Some((carrier, _)) => {
                 let held = carrier_in(&tx, repo, carrier)?.ok_or(StoreError::NotFound)?;
@@ -339,13 +424,16 @@ impl SqliteStore {
             None => false,
         };
         let arriving = new_comments(&tx, records)?;
-        let written = planning_write::apply(&tx, repo, records)?;
+        let (written, skipped) = apply_each(&mut tx, repo, records, names)?;
         comments_arrived(&tx, &written, &arriving, names)?;
         if let Some((carrier, seen_seq)) = from {
-            tx.execute(
-                "UPDATE plan_carriers SET seen_seq=?3 WHERE repo=?1 AND carrier=?2",
-                params![repo, carrier.as_str(), seen_seq],
-            )?;
+            if skipped.is_empty() {
+                tx.execute(
+                    "UPDATE plan_carriers SET seen_seq=?3 WHERE repo=?1 AND carrier=?2",
+                    params![repo, carrier.as_str(), seen_seq],
+                )?;
+            }
+            set_not_taken(&tx, repo, carrier, &skipped)?;
             if caught_up {
                 tx.execute(
                     "UPDATE plan_carriers SET sent_seq=
@@ -357,8 +445,122 @@ impl SqliteStore {
             }
         }
         tx.commit()?;
-        Ok(())
+        Ok(skipped)
     }
+}
+
+/// Why `record` could not be written here. A Wave whose name an active Wave
+/// here holds names the Machine it came from and the command that lets both
+/// arrive; anything else gives the store's reason.
+fn why_not_taken(
+    conn: &Connection,
+    repo: &str,
+    record: &StampedRecord,
+    error: &StoreError,
+    names: &MachineNames,
+) -> StoreResult<String> {
+    let named = record.fields.iter().find_map(|field| match &field.value {
+        WorkValue::WaveName(name) => Some((name, &field.machine)),
+        _ => None,
+    });
+    if let Some((name, machine)) = named {
+        let held: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM waves
+             WHERE repo=?1 AND name=?2 AND id<>?3 AND retired_at IS NULL)",
+            params![repo, name, record.id],
+            |row| row.get(0),
+        )?;
+        if held {
+            let from = names
+                .iter()
+                .find(|(id, _)| id.as_str() == machine)
+                .map_or(machine, |(_, name)| name);
+            return Ok(format!(
+                "wave {name} from {from} has the name of a Wave here; \
+                 `lf wave rename {name} <new name>` on either Machine lets both arrive"
+            ));
+        }
+    }
+    let kind = match record.table.as_str() {
+        "waves" => "wave",
+        "projects" => "project",
+        "tasks" => "task",
+        _ => "comment",
+    };
+    Ok(format!(
+        "{kind} {} could not be written here: {error}",
+        record.id
+    ))
+}
+
+/// Write `records` together; when one cannot be written here (a Wave whose
+/// name another Wave already holds, a comment whose Task is missing), take
+/// them a record at a time, parents first, skip and log what fails, so the
+/// rest of the plan still arrives. A Wave goes with its Projects: each names
+/// the other. Returns what was written and what was skipped.
+fn apply_each(
+    tx: &mut rusqlite::Transaction<'_>,
+    repo: &str,
+    records: &[StampedRecord],
+    names: &MachineNames,
+) -> StoreResult<(Vec<WorkEdit>, Vec<Skipped>)> {
+    let together = tx.savepoint()?;
+    if let Ok(written) = planning_write::apply(&together, repo, records) {
+        together.commit()?;
+        return Ok((written, Vec::new()));
+    }
+    drop(together);
+    let wave_of = |record: &StampedRecord| {
+        record.fields.iter().find_map(|field| match &field.value {
+            WorkValue::ProjectWave(wave) => Some(wave.clone()),
+            _ => None,
+        })
+    };
+    let arriving_waves = records
+        .iter()
+        .filter(|record| record.table == "waves")
+        .map(|record| record.id.as_str())
+        .collect::<BTreeSet<_>>();
+    let mut units = Vec::<Vec<StampedRecord>>::new();
+    for table in planning_write::WORK_TABLES {
+        for record in records.iter().filter(|record| record.table == table) {
+            match table {
+                "waves" => units.push(
+                    std::iter::once(record)
+                        .chain(records.iter().filter(|project| {
+                            project.table == "projects"
+                                && wave_of(project).as_deref() == Some(record.id.as_str())
+                        }))
+                        .cloned()
+                        .collect(),
+                ),
+                "projects"
+                    if wave_of(record)
+                        .is_some_and(|wave| arriving_waves.contains(wave.as_str())) => {}
+                _ => units.push(vec![record.clone()]),
+            }
+        }
+    }
+    let (mut written, mut skipped) = (Vec::new(), Vec::new());
+    for unit in units {
+        let one = tx.savepoint()?;
+        match planning_write::apply(&one, repo, &unit) {
+            Ok(edits) => {
+                one.commit()?;
+                written.extend(edits);
+            }
+            Err(error) => {
+                drop(one);
+                tracing::warn!(id = %unit[0].id, %error, "skipped a plan record that cannot be written here");
+                let reason = why_not_taken(tx, repo, &unit[0], &error, names)?;
+                skipped.extend(unit.into_iter().map(|record| Skipped {
+                    id: record.id,
+                    reason: reason.clone(),
+                }));
+            }
+        }
+    }
+    Ok((written, skipped))
 }
 
 /// The comments in `records` this Machine does not have yet.
@@ -720,6 +922,61 @@ mod tests {
             hub.get_wave(&wave).unwrap().unwrap().name(),
             "renamed later"
         );
+    }
+
+    #[test]
+    fn a_wave_named_like_one_held_here_is_shown_not_taken_until_one_is_renamed() {
+        let dir = tempfile::tempdir().unwrap();
+        let (laptop, hub) = (machine(&dir, "laptop"), machine(&dir, "hub"));
+        // Each Machine made a Wave called "plan" before seeing the other's.
+        let (_, theirs) = task(&hub, "in the hub's plan");
+        let (wave, mine) = task(&laptop, "in the laptop's plan");
+        let other = crate::test_fixture::project(&laptop, REPO, "other");
+        let apart = TaskId::new();
+        laptop
+            .create_task(&NewTask {
+                repository_id: crate::test_fixture::repository(&laptop, REPO),
+                id: apart.clone(),
+                project_id: Some(other.id),
+                title: "in another Wave".into(),
+                description: "Brief".into(),
+                due_date: None,
+            })
+            .unwrap();
+        let not_taken = |store: &SqliteStore| {
+            let held = store.plan_carrier(REPO, Carrier::Hub).unwrap().unwrap();
+            (held.not_taken, held.seen_seq)
+        };
+        exchange(&laptop, &hub);
+        assert_eq!(title(&hub, &apart), "in another Wave");
+        assert!(hub.task(&mine).unwrap().is_none());
+        assert!(laptop.task(&theirs).unwrap().is_none());
+        // The hub's Wave, its Project and its Task, with what to do; and the
+        // hub is read from the same place next time.
+        let (held, seen) = not_taken(&laptop);
+        let held = held.unwrap();
+        assert_eq!(held.count, 3);
+        assert!(
+            held.reason.starts_with("wave plan from ")
+                && held.reason.contains("`lf wave rename plan <new name>`"),
+            "{held}"
+        );
+        assert_eq!(seen, None);
+        // Later changes still travel, and the line stays.
+        retitle(&laptop, &apart, "still arriving");
+        exchange(&laptop, &hub);
+        assert_eq!(title(&hub, &apart), "still arriving");
+        assert!(not_taken(&laptop).0.is_some());
+
+        // One of the two is renamed: the next read writes what waited.
+        rename_wave(&laptop, &wave, "laptop-plan");
+        exchange(&laptop, &hub);
+        assert_eq!(title(&laptop, &theirs), "in the hub's plan");
+        let (held, seen) = not_taken(&laptop);
+        assert_eq!(held, None);
+        assert!(seen.is_some());
+        // The hub took the laptop's Wave with its new name.
+        assert_eq!(title(&hub, &mine), "in the laptop's plan");
     }
 
     #[test]

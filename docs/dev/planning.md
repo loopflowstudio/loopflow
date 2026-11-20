@@ -217,8 +217,10 @@ conflict state between Loopflow Machines and no Machine owns the plan.
   changes nothing bumps nothing, which is what ends an exchange.
 - **`plan_carriers`** holds one row per repository and carrier (`git`, `hub`):
   the peer, how far into `plan_changes` the carrier has taken (`sent_seq`), the
-  hub's watermark read to (`seen_seq`), and the last error. A carrier's unsent
-  records are those past its `sent_seq`. Sending one twice changes nothing, so
+  hub's watermark read to (`seen_seq`), the last error, and how many records
+  its last read brought that this Machine could not write, with why
+  (`not_taken`, `not_taken_reason`). A carrier's
+  unsent records are those past its `sent_seq`. Sending one twice changes nothing, so
   there is no per-field queue and no sent-but-unconfirmed phase.
 
 Comments, ownership entries and created records only append. Deletion is a
@@ -241,7 +243,18 @@ reads the files that changed in each other Machine's ref since the tip in
 `plan_refs`, applies them through the one way in, then commits the records
 past `sent_seq` onto its own ref and pushes. It uses no index and no worktree,
 and runs outside any SQLite transaction. A file that does not parse, or a
-field this build does not know, is skipped and logged; the rest applies. Each
+field this build does not know, is skipped and logged; the rest applies. A
+record, from either carrier, that cannot be written here, such as a Wave
+whose name another active Wave of the repository already holds, is not
+taken, with its Projects and Tasks, and the rest applies. The import returns
+those records. Git then leaves that ref's tip out of `plan_refs`, the hub
+carrier keeps its `seen_seq`, and a hub answers `plan.apply` with their count
+so the sender keeps its `sent_seq`: each carrier brings them again at every
+exchange until they can be written. `plan_carriers.not_taken` holds their
+count and `not_taken_reason` why the first was not (`wave design from mini
+…`), set and cleared by a read; the exchange fails with both
+(`3 not taken: wave design from mini …`), so `lf task sync` exits 1, and the
+carrier's own `error` stays empty. Each
 clone keeps its own repository id and records the id every fetched ref names
 as a locator of its checkout (`locate_repository`), so a hub or a move that
 names the repository by another Machine's id finds it and no saved Task
@@ -255,16 +268,31 @@ through its own clone. The carrier is `ssh <hub> lf server connect`
 (`ops/plan_hub.rs`). Clearing the hub deletes its carrier rows and loses
 nothing.
 
-**When they run.** The Machine server owns both. After each command it answers
-it exchanges with the hub and pushes to Git, one exchange per repository at a
-time and at most one every five seconds after the last. One server task fetches
-every repository that has a remote and no tracker every 60 s, which is also
-when a save made by the CLI is pushed; the CLI itself sends to the hub only.
-`lf task sync` does both in the foreground. The first `lf task list` or `lf repo tracker` in a clone the Machine
+**When they run.** `ops/plan_carriers.rs` has two verbs. `send` follows every
+save, from the CLI or the server: the hub takes the records past its cursor and
+Git pushes this Machine's ref as last fetched, with no fetch, both within five
+seconds. While Git holds something not taken the save fetches and reads as
+well, since the save may be the rename that lets it arrive. A push that fails, runs out of time or is refused (the remote's copy
+of the ref is ahead of the one fetched) leaves its records unsent. `sync` reads
+and sends by each carrier: `lf task sync`, `lf wave status --sync`, before a
+claim, before `lf wave create` or `lf task create --wave` makes a Wave (five
+seconds at most, so a Wave of that name made elsewhere is joined, not made
+twice), on a Task lookup that misses, and after each command the server
+answers, one exchange per repository at a time and at most one every five
+seconds after the last. One server task runs the Git exchange for
+every repository that has a remote and no tracker every 60 s, which is how
+another Machine's change arrives with no hub; with no server it waits for
+`lf task sync`. The first `lf task list` or `lf repo tracker` in a clone the Machine
 has saved nothing in does one exchange before it reads, which registers the
-clone for the server's minute. A cold Task lookup,
-provider exit, `lf wave status --sync` and `lf repo tracker --subscribe` read
-the hub too.
+clone for the server's minute. A served read of such a clone answers with an
+empty plan once and exchanges after its reply. Task creation reads
+nothing first: the send after its save takes in what changed at the hub. A
+provider exit reads the hub only; `lf repo tracker --subscribe` reads the
+store alone. Every
+exchange a command waits on without asking for it (a save, a claim, a first
+read, a read of the hub) is stopped at five seconds: Git is killed and the
+hub's answer is waited for until then, and the next exchange carries the
+rest. `lf task sync` waits as long as the carriers take.
 
 A change costs one small commit per Machine on the remote; sized for about ten
 Machines per repository. Tracker repositories use none of this:
@@ -334,10 +362,11 @@ of any owner (`lf repo tracker answer <id> --keep-theirs | --use-mine`, served
 as `repo.tracker.answer` for Desktop's Keep / Use mine on every line; `lf task sync
 --keep-theirs | --use-mine` answers a Task's whole slice). Without a tracker,
 `lf repo tracker` has one line per carrier, `Plan: Git origin, 2 unsent.` and
-`Hub mini.`, each with its unsent records by identifier and its last error, or
+`Hub mini.`, each with its unsent records by identifier, its last error and
+what it brought that was not taken (`Plan: Git origin, 3 not taken.`), or
 `Plan: this Machine.` with no remote and no hub; `--json` carries the same as
 `plan: {git, hub}`, each `{remote | machine, unsent, records, error,
-failing_since}` or null; `unsent` counts and `records` names the first twenty. Linear checks run
+failing_since, not_taken: {count, reason} | null}` or null; `unsent` counts and `records` names the first twenty. Linear checks run
 at the boundaries described below. A short save attempts delivery after its
 answer. No resident, whole-store callback, scheduler or
 implicit turn/Graph replay is involved.

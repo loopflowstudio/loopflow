@@ -201,8 +201,7 @@ it answers instantly and offline.
 `{"answers", "unavailable", "body"}`, where `body` is
 what `--json` prints. Write `{"id": 1, "args": {"query": "parser"}}` to stdin to
 change what it reads, or `{"id": 2}` to ask for a fresh reading; the next line
-answers that id. It stops when stdin closes. `lf repo tracker --subscribe` also
-keeps exchanging with the hub while it runs.
+answers that id. It stops when stdin closes.
 
 A Graph that stopped or crashed stays as history; nothing resumes it. Read
 `lf task status`, then launch what remains with `lf task run`. The Task keeps
@@ -235,13 +234,11 @@ second Machine and the plan is there, with nothing to set up:
 laptop$ lf task create 'plan smoke'
 plan smoke · 3e1c9a
 laptop$ lf repo tracker
-Plan: Git origin, 1 unsent.
-  3e1c9a
-laptop$ lf repo tracker
 Plan: Git origin.
 ```
 
-On the mini, `lf task list` shows the Task within a couple of minutes; the
+The Task is on the remote in seconds and `lf task list` on the mini shows it
+within a minute; the
 first `lf task list` in a fresh clone reads the remote before it answers. A
 teammate who clones the repository sees the same plan, and their Tasks appear
 in yours: no account and no server, only push access to the repository.
@@ -254,8 +251,8 @@ processes stay on the Machine that ran them. Claims follow your Git
 
 Every command saves on this Machine first, so nothing waits on the network.
 Each Machine pushes its plan to a ref of its own on the remote
-(`refs/loopflow/plan/<machine id>`) within a minute of a change, a few seconds
-after one made in Desktop, and fetches the others' once a minute;
+(`refs/loopflow/plan/<machine id>`) as part of the save, for five seconds at
+most, and its server fetches the others' once a minute;
 `lf task sync <issue>` does both now. The refs stay out of
 `git branch`, `git status` and a plain clone. A repository with no remote reads
 `Plan: this Machine.` and sends nothing.
@@ -279,6 +276,22 @@ Plan: Git origin, unreachable since Nov 18 14:02, 3 unsent.
 ```
 
 They go when the remote answers again.
+
+A Wave has one name in a repository. `lf wave create` and
+`lf task create --wave` read the plan first, so a Wave a teammate just made
+is the one you join. When two Machines each made one offline, neither
+overwrites the other, and the line says what is waiting:
+
+```text
+$ lf repo tracker
+Plan: Git origin, 3 not taken.
+  wave design from mini has the name of a Wave here; `lf wave rename design <new name>` on either Machine lets both arrive
+```
+
+```bash
+lf wave rename design design-site     # on either Machine
+lf task sync 3e1c9a                   # on the other: each now holds both Waves, their Projects and Tasks
+```
 
 The plan is as private as the repository. Anyone who can fetch it can read the
 plan, and anyone who can push to it can change any Task.

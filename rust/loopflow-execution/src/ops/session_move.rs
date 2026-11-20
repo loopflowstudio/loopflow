@@ -442,11 +442,7 @@ async fn ready(
     if let (Err(_), Some((_, repository, _))) = (&checked, task) {
         let hub = crate::ops::plan_hub::hub(&store.sqlite)?;
         if let (Some(hub), Some(path)) = (hub, store.sqlite.repository_path(repository)?) {
-            if hub.id == target.id
-                && crate::ops::plan_hub::sync(store, &path, false)
-                    .await
-                    .is_ok()
-            {
+            if hub.id == target.id && crate::ops::plan_hub::sync(store, &path).await.is_ok() {
                 checked = crate::machine::ssh::request(target, &args, None).await;
             }
         }

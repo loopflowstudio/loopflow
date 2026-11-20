@@ -2,14 +2,15 @@
 //! exchanged with live. It carries stamped records and decides nothing; this
 //! is which Machine it is, one exchange with it, and its answers.
 use std::path::Path;
+use std::time::Instant;
 
 use anyhow::{anyhow, Context, Result};
 
 use crate::engine::{Error, ErrorCode};
 use crate::machine::client::Connection;
-use crate::machine::wire::{PlanChanges, Secrets, Selection, Sender, ServerOperation};
+use crate::machine::wire::{PlanApplied, PlanChanges, Secrets, Selection, Sender, ServerOperation};
 use loopflow_model::durable::{Machine, RepositoryId};
-use loopflow_storage::sqlite::plan_carriers::Carrier;
+use loopflow_storage::sqlite::plan_carriers::{Carrier, NotTaken};
 use loopflow_storage::sqlite::SqliteStore;
 use loopflow_storage::work::edit::StampedRecord;
 
@@ -51,37 +52,52 @@ pub fn set_hub(
 
 // ---- Another Machine's side ----
 
-/// Exchange `repo`'s plan with this Machine's hub, when it has one and the
-/// repository has no Linear or Asana. With `send_only`, see [`exchange`].
-pub async fn sync(store: &crate::store::Store, repo: &str, send_only: bool) -> Result<()> {
-    if crate::ops::tracker::connected(repo) {
-        return Ok(());
-    }
-    let Some(hub) = hub(&store.sqlite)? else {
-        return Ok(());
-    };
-    let (sqlite, repo) = (store.sqlite.clone(), repo.to_owned());
-    crate::journal::request::spawn_blocking(move || exchange(&sqlite, &repo, &hub, send_only))
-        .await?
+/// [`exchange`] for `repo`, when it has no Linear or Asana, for as long as
+/// the hub takes: a move waits for its plan to be there.
+pub async fn sync(store: &crate::store::Store, repo: &str) -> Result<()> {
+    super::plan_carriers::on_thread(store, repo, |store, repo| exchange(store, repo, Why::Asked))
+        .await
 }
 
-/// Send `hub` the records of `repo` it has not taken, then take in what
-/// changed there. Either order gives the same plan. With `send_only`, a
-/// repository with nothing unsent that has read the hub before asks it
-/// nothing. The outcome is recorded for `lf repo tracker`.
-pub fn exchange(store: &SqliteStore, repo: &str, hub: &Machine, send_only: bool) -> Result<()> {
+/// Why an exchange runs, which is how long it may take.
+#[derive(Debug, Clone, Copy)]
+pub(super) enum Why {
+    /// Someone asked for the plan: as long as the hub takes.
+    Asked,
+    /// A read nobody asked for, over by then.
+    Read(Instant),
+    /// After a save, over by then. A repository with nothing unsent that has
+    /// read the hub before asks it nothing.
+    Save(Instant),
+}
+
+/// Send this Machine's hub, when it has one, the records of `repo` it has not
+/// taken, then take in what changed there. Either order gives the same plan.
+/// One with an end waits for an exchange already running and for the hub's
+/// answers only until then. The outcome is recorded for `lf repo tracker`.
+/// What the hub gave and this Machine could not write is the error, and the
+/// next exchange reads the hub from the same place.
+pub(super) fn exchange(store: &SqliteStore, repo: &str, why: Why) -> Result<()> {
+    let Some(hub) = hub(store)? else {
+        return Ok(());
+    };
     let Some(repository) = store.repository_id(repo)? else {
         return Ok(());
     };
-    // One exchange per repository at a time; the next one reads what this one wrote.
-    let _turn = super::plan_carriers::lock(store, "plan-hub", &repository)?;
+    let until = match why {
+        Why::Asked => None,
+        Why::Read(until) | Why::Save(until) => Some(until),
+    };
+    let _turn = super::plan_carriers::lock(store, "plan-hub", &repository, until)?;
     let held = store.select_carrier(repo, Carrier::Hub, hub.id.as_str())?;
-    if send_only && held.seen_seq.is_some() && store.plan_unsent(repo, Carrier::Hub, 0)?.count == 0
+    if matches!(why, Why::Save(_))
+        && held.seen_seq.is_some()
+        && store.plan_unsent(repo, Carrier::Hub, 0)?.count == 0
     {
         return Ok(());
     }
     let result = (|| {
-        let mut connection = open(store, repo, hub, &repository)?;
+        let mut connection = open(store, repo, &hub, &repository, until)?;
         send(store, &mut connection, repo, &repository, held.sent_seq)?;
         let mut since = held.seen_seq;
         let mut records = Vec::new();
@@ -99,15 +115,15 @@ pub fn exchange(store: &SqliteStore, repo: &str, hub: &Machine, send_only: bool)
                 break;
             }
         }
-        store.apply_plan_records(
+        let skipped = store.apply_plan_records(
             repo,
             &records,
             Some((Carrier::Hub, since.unwrap_or(0))),
             &crate::store::ownership::machine_names(store)?,
         )?;
-        Ok(())
+        NotTaken::of(&skipped).map_or(Ok(()), |not_taken| Err(not_taken.into()))
     })();
-    let error = result.as_ref().err().map(|error| format!("{error:#}"));
+    let error = super::plan_carriers::carrier_error(&result);
     store.record_carrier_exchange(repo, Carrier::Hub, error.as_deref())?;
     result
 }
@@ -117,6 +133,7 @@ fn open(
     repo: &str,
     hub: &Machine,
     repository: &RepositoryId,
+    until: Option<Instant>,
 ) -> Result<Connection> {
     let local = crate::store::machines::local_machine(store)?;
     let sender = Sender {
@@ -130,7 +147,7 @@ fn open(
         },
         secrets: Secrets::default(),
     };
-    let connection = Connection::open_on(hub, sender)?;
+    let connection = Connection::open_on(hub, sender, until)?;
     if connection.welcome().server_revision < crate::machine::wire::PLAN_REVISION {
         return Err(Error::new(ErrorCode::Incompatible, crate::machine::ssh::outdated(hub)).into());
     }
@@ -147,7 +164,9 @@ fn request<T: serde::de::DeserializeOwned>(
 
 /// Every record changed here past `sent_seq`, a page a request. The cursor
 /// moves once the hub has answered a page; a page whose answer is lost goes
-/// again, and the hub taking the same records twice changes nothing.
+/// again, and the hub taking the same records twice changes nothing. From
+/// the first page the hub could not write whole, the cursor stays: the later
+/// pages still go, and all of them go again at the next exchange.
 fn send(
     store: &SqliteStore,
     connection: &mut Connection,
@@ -155,18 +174,22 @@ fn send(
     repository: &RepositoryId,
     mut sent_seq: i64,
 ) -> Result<()> {
+    let mut taken = true;
     loop {
         let page = store.plan_records_since(repo, sent_seq, BUDGET)?;
         if !page.records.is_empty() {
-            let _: serde_json::Value = request(
+            let applied: PlanApplied = request(
                 connection,
                 ServerOperation::PlanApply {
                     repository: repository.clone(),
                     records: page.records,
                 },
             )?;
+            taken &= applied.not_taken == 0;
         }
-        store.plan_sent(repo, Carrier::Hub, page.seq)?;
+        if taken {
+            store.plan_sent(repo, Carrier::Hub, page.seq)?;
+        }
         sent_seq = page.seq;
         if !page.more {
             return Ok(());
@@ -181,14 +204,16 @@ pub fn apply_here(
     store: &SqliteStore,
     repository: &RepositoryId,
     records: &[StampedRecord],
-) -> Result<serde_json::Value> {
-    store.apply_plan_records(
+) -> Result<PlanApplied> {
+    let skipped = store.apply_plan_records(
         &checkout(store, repository)?,
         records,
         None,
         &crate::store::ownership::machine_names(store)?,
     )?;
-    Ok(serde_json::json!({}))
+    Ok(PlanApplied {
+        not_taken: skipped.len(),
+    })
 }
 
 /// `plan.changes`: what changed here after `since`.

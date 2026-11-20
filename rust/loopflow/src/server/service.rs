@@ -1275,7 +1275,7 @@ async fn request(
     let completion = tests::take_request_completion(&id);
     let write = operation.is_write();
     let mut operation = operation;
-    // A command run here reads what changed on the hub and sends what it saved.
+    // A command run here is followed by one exchange by each plan carrier.
     let planned = matches!(origin, Origin::Local)
         .then(|| operation.directory())
         .flatten();
@@ -1467,7 +1467,9 @@ async fn served(
             records,
         }) => {
             plan_here(reservation, move |store| {
-                loopflow_execution::ops::plan_hub::apply_here(store, &repository, &records)
+                Ok(serde_json::to_value(
+                    loopflow_execution::ops::plan_hub::apply_here(store, &repository, &records)?,
+                )?)
             })
             .await
         }

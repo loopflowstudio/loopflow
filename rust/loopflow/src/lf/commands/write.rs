@@ -1374,6 +1374,7 @@ impl Remote {
         let mut connection = loopflow_execution::machine::client::Connection::open_on(
             &self.machine,
             self.sender.clone(),
+            None,
         )?;
         let answer =
             connection.request(crate::server::wire::Operation::Write(self.change.clone()))?;

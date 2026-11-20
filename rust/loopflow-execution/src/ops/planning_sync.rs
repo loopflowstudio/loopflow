@@ -1,4 +1,4 @@
-//! Local-save delivery to the repository's tracker or hub, and the planning
+//! Local-save delivery to the repository's tracker or plan carriers, and the planning
 //! store and locks every planning command shares.
 
 use crate::work::wave::Wave;
@@ -85,9 +85,9 @@ where
 async fn sync_saved(store: &Store, repo: &str, saved: &ActionOwner) {
     let attempt = async {
         if !super::tracker::connected(repo) {
-            return super::plan_hub::sync(store, repo, true)
+            return super::plan_carriers::send(store, repo)
                 .await
-                .map_err(message);
+                .map_err(|error| message(format!("{error:#}")));
         }
         super::tracker::drain::drain_repository(
             store,
@@ -160,7 +160,8 @@ pub(crate) fn check_directory(directory: &Path) -> OpsResult<()> {
     sync_directory(directory, false)
 }
 
-/// `wave status --sync`'s exchange, before it refreshes the Wave inventory.
+/// `wave status --sync`'s exchange with Linear or Asana, before it refreshes
+/// the Wave inventory.
 pub fn refresh_directory(directory: &Path) -> OpsResult<()> {
     sync_directory(directory, true)
 }
@@ -175,13 +176,10 @@ fn sync_directory(directory: &Path, refresh: bool) -> OpsResult<()> {
         .block_on(async {
             let store = planning_store().await?;
             if !super::tracker::connected(&repo) {
-                // A provider exit reads the hub; an asked-for refresh fetches too.
-                let synced = if refresh {
-                    super::plan_carriers::sync(&store, &repo).await
-                } else {
-                    super::plan_hub::sync(&store, &repo, false).await
-                };
-                return synced.map_err(message);
+                // Nobody asked for this read, so it fetches nothing.
+                return super::plan_carriers::read(&store, &repo)
+                    .await
+                    .map_err(message);
             }
             if refresh {
                 super::tracker_events::refresh_repository(&store, &repo).await;

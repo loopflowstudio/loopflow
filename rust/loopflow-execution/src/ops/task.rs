@@ -740,14 +740,17 @@ pub(crate) fn scope_graph_default(
     repo: &Path,
     wave: Option<&str>,
 ) -> OpsResult<(String, ConfigSource)> {
-    let layers = crate::config::config_layers(Some(repo), wave).map_err(task_error)?;
-    let resolved = crate::config::settings::resolve_layers(&layers, None).map_err(task_error)?;
+    let resolved = crate::config::resolved(Some(repo), wave).map_err(task_error)?;
     let source = resolved.settings["graph"]
         .selected()
         .expect("graph has a builtin default")
         .source;
     Ok((
-        resolved.config.graph.expect("graph has a builtin default"),
+        resolved
+            .config
+            .graph
+            .clone()
+            .expect("graph has a builtin default"),
         source,
     ))
 }
@@ -2005,9 +2008,6 @@ pub fn task_create(
     let main = crate::git::worktrees::main_repo_root(repo).map_err(task_error)?;
     block_on_task(async {
         let store = Arc::new(super::planning_sync::planning_store().await?);
-        if let Err(error) = super::plan_hub::sync(&store, &main.to_string_lossy(), false).await {
-            tracing::debug!(error = %format!("{error:#}"), "hub read pending; creating from this Machine's plan");
-        }
         let receipt = receipt.map(|identity| Receipt {
             identity,
             admit: None,
@@ -2071,9 +2071,6 @@ pub(crate) fn sync_admitted(main: &Path, task: &loopflow_model::durable::TaskId)
     let synced = block_on_task(async {
         let store = Arc::new(super::planning_sync::planning_store().await?);
         let repo = main.to_string_lossy();
-        if let Err(error) = super::plan_hub::sync(&store, &repo, false).await {
-            tracing::warn!(error = %format!("{error:#}"), "hub read after creation failed");
-        }
         super::planning_sync::sync_after_save(
             &store,
             &repo,
@@ -2332,28 +2329,32 @@ fn truncate_task_title(value: &str, max_chars: usize) -> String {
 }
 
 /// Current launch preferences at the Task checkout, with no saved Task agent.
+/// Your own settings are found from `repository`, so they hold for a Task
+/// whose checkout is gone.
 pub fn resolve_task_agent(
     worktree: &Path,
+    repository: &Path,
     wave: Option<&str>,
-    personal: &crate::config::PersonalSettings,
     skill: Option<&crate::graph::Skill>,
 ) -> OpsResult<crate::config::Agent> {
-    let config =
-        crate::config::load_wave_config_with(Some(worktree), wave, personal)?.unwrap_or_default();
-    let resolved = crate::config::settings::resolve(&config, skill)?;
+    let shared = crate::config::resolved_for_task(worktree, repository, wave)?;
+    let Some(skill) = skill else {
+        return Ok(crate::config::Agent::parse(shared.config.agent()?)?);
+    };
+    let resolved = crate::config::settings::resolve(&shared.config, Some(skill))?;
     Ok(crate::config::Agent::parse(resolved.config.agent()?)?)
 }
 
 fn task_configuration_refusal(
     task: &Task,
+    repository: &Path,
     wave: Option<&str>,
-    personal: &crate::config::PersonalSettings,
     skill: Option<&crate::graph::Skill>,
 ) -> Option<String> {
     let worktree = task.worktree.as_deref()?;
     // A Graph's steps may choose different agents; no general preference is
     // required to inspect or start the Graph. Each launch resolves its own choice.
-    let agent = match resolve_task_agent(worktree, wave, personal, skill) {
+    let agent = match resolve_task_agent(worktree, repository, wave, skill) {
         Ok(agent) => agent,
         Err(OpsError::Load(crate::error::LoadError::AgentSelection)) if skill.is_none() => {
             return None
@@ -2369,11 +2370,11 @@ fn task_configuration_refusal(
 /// non-resumable failure as its latest event.
 pub fn task_process_refusal_after(
     task: &Task,
+    repository: &Path,
     wave: Option<&str>,
-    personal: &crate::config::PersonalSettings,
     latest: Option<&loopflow_storage::work::task::TaskEvent>,
 ) -> Option<String> {
-    task_configuration_refusal(task, wave, personal, None)
+    task_configuration_refusal(task, repository, wave, None)
         .or_else(|| task_event_process_refusal(latest).map(str::to_string))
 }
 

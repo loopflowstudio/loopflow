@@ -2449,7 +2449,8 @@ fn read_bounded_revision_text(
 fn classify_release_notes_degradation(err: &CommandError) -> Option<ReleaseNotesDegradation> {
     let stderr = err.stderr.to_lowercase();
     let message = err.message.to_lowercase();
-    let combined = format!("{stderr}\n{message}");
+    // Codex writes `You’ve`.
+    let combined = format!("{stderr}\n{message}").replace('’', "'");
     let mentions_agent_cli = combined.contains("claude")
         || combined.contains("codex")
         || combined.contains("opencode")

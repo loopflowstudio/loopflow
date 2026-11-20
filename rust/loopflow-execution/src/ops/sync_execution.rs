@@ -225,9 +225,9 @@ pub fn checkpoint_uncommitted_work(repo: &Path, message: &str) -> Result<bool> {
     Ok(true)
 }
 
-/// Hand a conflicted sync to exactly one recovery agent under the owning
-/// operation's scoped ids. The agent continues the existing sequencer; the
-/// caller keeps ownership and performs verification and the single push.
+/// Run one conflict resolution under the owning operation's scoped IDs.
+/// The agent continues the existing sequencer. The caller keeps ownership
+/// and performs verification and the single push.
 fn resolve_sync_conflict(
     repo_root: &Path,
     onto: &str,
@@ -360,10 +360,15 @@ fn process_skill_agent(
     capture.finish(outcome)?;
     let result = result?;
     if result.exit_code != 0 {
+        let reason = result.stderr.trim();
+        let reason = if reason.is_empty() {
+            String::new()
+        } else {
+            format!("\n{reason}")
+        };
         return Err(anyhow!(
-            "agent exited with code {} while resolving {}",
-            result.exit_code,
-            skill_name,
+            "agent exited with code {} while resolving {skill_name}{reason}",
+            result.exit_code
         ));
     }
     Ok(())

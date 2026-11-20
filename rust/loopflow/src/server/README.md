@@ -34,6 +34,14 @@ address and its lock remain stable so already-running relays can recover across
 the rename. There is one listener, with no alias or alternate protocol path.
 Work and credentials stay in place.
 
+For a repository without Linear or Asana the service also reads the shared
+plan. A save, here or in the CLI, sends its own records at once
+(`plan_carriers::send`: the hub, and a Git push with no fetch, five seconds at
+most). The service reads and sends (`plan_carriers::sync`) after each command
+it answers that names a directory, and fetches every such repository's plan
+refs every 60 s, which is when another Machine's change arrives with no hub.
+[Without a tracker](../../../../docs/dev/planning.md#without-a-tracker-stamps-and-carriers) has the carriers.
+
 ## Local protocol, revision 9
 
 One connection per client over the same-user Unix socket. Every message is one
@@ -255,6 +263,36 @@ itself, without a separate clock, checkout or probe policy for each operation.
 Database-derived joins retain their transactional snapshot; external
 observations do not share that transaction.
 
+Resolved settings and the skill catalog are worked out once per change to the
+files they came from, not once per reading. Save `.lf/config.yaml`, a personal
+or global settings file, a Wave's files or a skill under `.lf/skills`,
+`.claude`, `.agents` or `.codex`, and every subscription that read it gets a
+new reading within about a second:
+
+```bash
+lf wave show mac --subscribe --json &
+lf set default_agent codex    # a new line: Tasks with no agent of their own name codex
+```
+
+An edit that changes nothing in the selected answer sends no line. Until a
+file changes, readings share one resolved value per checkout and Wave, one for
+your global `config.yaml`, and one catalog per set of skill directories. A file that fails to load gives every
+reading the same error it gives `lf config settings`, and the server warns
+about it once per edit. A `--setting` override belongs to the command that
+carries it: a read with one resolves for itself and leaves the shared value
+alone. Settings from the environment are the server's own, the same for every
+reading, and identify the shared value along with the checkout and Wave.
+
+In code this is `observe::derived`: a value computed from observed facts,
+kept with the facts its computation read and computed again when one changes.
+`observe::Derived` lists every such value and what identifies it. A
+computation reads observed facts and its key, nothing else; an input from the
+environment, a thread-local or the store goes in the key. With no reading
+active (any bare `lf` command) `derived` computes inline and keeps nothing.
+A bare read that asks for one value many times, as Task details do for every
+Task in a checkout, runs inside `observe::reading`: one reading that lasts for
+that call.
+
 Every operation names its `kind` as a dotted resource and verb, beside its
 fields. `lf/commands/read.rs` (`Read`) and `lf/commands/write.rs` (`Write`) own
 the shared kinds; `wire::ServerOperation` owns the server's own.
@@ -293,7 +331,7 @@ case names one operation, including distinct claim/unassign and pin/unpin writes
 | `session.rename`, `.bind`, `.resume`, `.new` | `lf session <verb>`, `lf resume` | write |
 | `session.steer` | `lf [--wave <wave>] steer [<id>] <message>` | write; `engine::session::steer` |
 | `session.boundary` | none; provider hooks through `lf __context-block` ([Turn and tool boundaries](#turn-and-tool-boundaries)) | server |
-| `plan.changes`, `plan.apply` | none; another Machine whose hub this is (`lf machine hub`), over `lf server connect` | server; stamped records in both directions, `ops::plan_hub::changes_here`, `apply_here` (revision 9) |
+| `plan.changes`, `plan.apply` | none; another Machine whose hub this is (`lf machine hub`), over `lf server connect` | server; stamped records in both directions, `ops::plan_hub::changes_here`, `apply_here` (revision 9); `plan.apply` answers how many records the hub could not write, which the sender keeps unsent |
 | `session.status` | `lf session observe-status <id> --terminal <terminal> --stream <stream> --sequence <n>`, the snapshot on stdin | write; one Program Status reading from the terminal showing a Session. A stream's first reading replaces any earlier stream; a late reading never replaces a newer one |
 | `wave.list`, `wave.graph` | `lf wave list`, `lf wave graph show` | read |
 | `wave.plan` | `lf wave plan <wave>` | read |

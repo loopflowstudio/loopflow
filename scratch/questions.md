@@ -11,8 +11,8 @@ Made for review in `scratch/plan.md`; each is reversible before release.
   `lf` before installing.
 - A repository with no remote writes no plan ref.
 - Git fetch every 60 s per repository, by the Machine server, no setting. A
-  command run without the server leaves Git unsent until the server or
-  `lf task sync`.
+  save pushes its own records at once (slice 4); without the server, other
+  Machines' changes wait for `lf task sync`.
 - Tracker repositories are untouched in this Task: a person's own Machines do
   not exchange through Git or the hub there. The design says they do. Needs
   "which refs are mine" and one owner per field; left for the tracker Task
@@ -101,11 +101,9 @@ Still open from before:
     reads. Without it a teammate's fresh clone showed an empty plan and
     `Plan: Git origin.` for good, since the server only fetches registered
     repositories. Desktop's reads of such a clone do not do this.
-  - A save made by the CLI is pushed on the server's minute, not "a few
-    seconds after a change": 38 s to push and 97 s to show on the other
-    Machine, measured. A `task.create` over the socket pushed in 1.6 s.
-    `docs/work.md` now says "within a couple of minutes". Should a CLI save
-    ask the running server to push?
+  - Measured before slice 4: a CLI save took 38 s to push and 97 s to show
+    on the other Machine; a `task.create` over the socket pushed in 1.6 s.
+    Slice 4 answered it: the save pushes itself.
   - A second clone of one remote under the same `LF_HOME` shows an empty plan
     (its Task ids already belong to the first clone) and, with a hub, an error
     telling the person to `--bind`. Its own saves go out on the Machine's ref.
@@ -124,6 +122,93 @@ Still open from before:
   - Left as built and asked on the page: `lf task run` taking over a Task a
     teammate holds; `lf task sync` needing a Task id without a tracker; a
     teammate's Machine reading as its id; an id per clone.
+
+- Slice 4 (implement, 2026-11-18), each reversible before release:
+  - Every CLI save in a repository with a remote and no tracker now waits on
+    a `git push`, five seconds at most. Against GitHub over SSH that is a
+    second or two a save, not measured here.
+  - A push still running at five seconds is stopped (`git push` is killed),
+    and the record stays unsent.
+  - A push the remote refuses is not retried with a fetch by the save; it
+    waits for the server's minute or `lf task sync`. With no server, saves
+    after a refusal stay unsent until `lf task sync`.
+  - A served read of a clone the Machine has saved nothing in answers empty
+    once and is right on the next read. Left as is.
+  - The hub's send has no deadline of its own; only the wait for it is five
+    seconds.
+
+- QA after slice 4 (2026-11-18), each reversible before release:
+  - Waits a command did not ask for are bounded per wait, not per command:
+    a create or a claim with a carrier hanging takes 10 to 15 s (two
+    five-second waits in a row). One deadline per command would need it
+    passed from the command down; not done.
+  - `lf task sync` and a move's hub exchange stay unbounded (120 s per hub
+    answer, SSH's own limits for Git), since someone asked for them. They
+    print nothing while they wait.
+
+- Second concept review (2026-11-18): the hub read before and after
+  `lf task create` goes (plan slice 5). Reversible. A `--wave` made on
+  another Machine seconds earlier then needs `lf task sync` first.
+  `lf task sync` still prints nothing while it waits; left as is.
+
+- QA after slice 5 (2026-11-18), headless:
+  - Two Machines that each make a Wave of one name (`lf wave create design`
+    on both, or `lf task create --wave design` before the other's Wave has
+    arrived, which makes the Wave: on main) hold two Waves that can never
+    meet: `idx_waves_active_locator` allows one active Wave per repository,
+    parent and name. Before this pass that failed every later exchange by
+    both carriers. Now the import skips that Wave, its Projects and Tasks
+    and logs each (`skipped a plan record that cannot be written here`);
+    everything else keeps arriving. Nothing on screen says the plan is split:
+    `lf repo tracker` reads `Plan: Git origin.` Should the later Wave of a
+    name join the earlier one (its Tasks move to it), be renamed, or show on
+    the line as not taken?
+  - `lf repo tracker --subscribe` no longer reads the hub; its read had
+    failed on the stream's read-only store every time. A hub change shows
+    there after the next save, `lf task sync` or the server's exchange.
+
+- Third concept review (2026-11-18, `scratch/concept-review.html`), each
+  reversible before release:
+  - Two Waves of one name made apart are shown (`N not taken`, with the
+    rename that fixes it) and read again at each exchange; they are not
+    joined. Passed over: joining at import, the higher id retired into the
+    lower. Larger than this Task; question 1 on the page.
+  - Making a Wave (`lf wave create`, `--wave` naming a Wave not here) looks
+    first by each carrier, five seconds at most.
+  - `not_taken` is its own field beside `error`; the line still says
+    `unreachable since` for a push the remote refused (question 3).
+
+- Implement, slice 6 (2026-11-18), each reversible before release:
+  - `plan.apply` answers `{not_taken: N}` and the sender keeps those records
+    unsent (the plan had only the read side). The hub's reason is not shown
+    on the sender: its line reads `Hub mini, N unsent.` and, for a Wave name,
+    its own read shows the mirror `not taken`. A record only the hub cannot
+    write (a comment whose Task the hub lacks) shows as unsent with no reason.
+    Should `plan.apply` carry the hub's reason back?
+  - A Wave name held here is matched by repository and name, not parent; a
+    child Wave clashing under another parent would get the store's reason,
+    not the rename hint.
+  - `lf wave create` holds the Wave lifecycle lock through the look, up to
+    five seconds with a carrier hanging.
+  - The line names the other Machine by id unless it is an added Machine.
+
+- QA after slice 6 (2026-11-18), headless, each reversible before release:
+  - While Git holds something not taken, every save fetches and reads as
+    well (five seconds at most), so the rename the line asks for clears it
+    in the same command. Cost: one fetch per save for as long as a Wave is
+    split. What is still not taken is not an error of the save.
+  - `lf machine hub --clear` prints `No hub.`; the old line said the plan
+    stays here, which is false with a remote.
+  - Left as is: with a hub and no server, what the hub brings on a save
+    shows as `Git origin, N unsent` until the next save or sync. Should the
+    Git push of a save follow the hub's read instead of running beside it
+    (slower save, nothing left over)?
+  - Left as is: one WARN per skipped Wave per exchange while a Wave is split.
+
+- Fourth concept review (2026-11-18, `scratch/concept-review.html`): nothing
+  changed. Left as built: `N unsent` includes records the hub brought that
+  this Machine's ref has not repeated (passed over: hub then Git in a save;
+  counting only this Machine's own changes).
 
 # Open choices (43bf9b, kickoff, 2026-11-18, headless)
 

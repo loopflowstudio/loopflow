@@ -77,10 +77,21 @@ public struct CarrierStanding: Decodable, Sendable, Equatable {
     public let error: String?
     /// Unix seconds since the carrier stopped working.
     public let failingSince: Int?
+    /// What the carrier's last read brought that this Machine could not
+    /// write.
+    public let notTaken: NotTaken?
+
+    public struct NotTaken: Decodable, Sendable, Equatable {
+        /// How many records.
+        public let count: Int
+        /// Why the first was not, and what to do about it.
+        public let reason: String
+    }
 
     enum CodingKeys: String, CodingKey {
         case unsent, records, error
         case failingSince = "failing_since"
+        case notTaken = "not_taken"
     }
 
     public init(from decoder: Decoder) throws {
@@ -89,15 +100,18 @@ public struct CarrierStanding: Decodable, Sendable, Equatable {
         records = try values.decode([String].self, forKey: .records)
         error = try values.decode(String?.self, forKey: .error)
         failingSince = try values.decode(Int?.self, forKey: .failingSince)
+        notTaken = try values.decode(NotTaken?.self, forKey: .notTaken)
     }
 
-    /// `name`, then since when it has not worked and how much is unsent.
+    /// `name`, then since when it has not worked, how much is unsent and how
+    /// much was not taken.
     public func line(_ name: String) -> String {
         var line = name
         if let failingSince {
             line += ", unreachable since \(Date(timeIntervalSince1970: TimeInterval(failingSince)).formatted(date: .omitted, time: .shortened))"
         }
         if unsent > 0 { line += ", \(unsent) unsent" }
+        if let notTaken { line += ", \(notTaken.count) not taken" }
         return line + "."
     }
 }

@@ -674,7 +674,7 @@ pub enum Commands {
 /// size and checkout.
 #[derive(Subcommand, Debug)]
 pub enum RepoCommand {
-    /// Show where the repository's plan lives: its tracker and open and lost actions, or its hub
+    /// Show how the repository's plan travels: its tracker and open and lost actions, or its Git remote and hub
     #[command(args_conflicts_with_subcommands = true)]
     Tracker {
         #[command(subcommand)]
@@ -2983,11 +2983,11 @@ pub enum MachineCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Keep this Machine's plan on an added machine, for every repository
-    /// without Linear or Asana; bare, show where it is
+    /// Exchange this Machine's plan with an added machine, live, for every
+    /// repository without Linear or Asana; bare, show which
     Hub {
         machine: Option<String>,
-        /// Keep the plan on this Machine again
+        /// Stop exchanging with the hub; the plan stays on this Machine
         #[arg(long, conflicts_with = "machine")]
         clear: bool,
     },

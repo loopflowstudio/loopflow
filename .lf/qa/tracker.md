@@ -42,15 +42,22 @@ case: a home `T` beside a script `t` is the same path. A second clone under
 the *same* `LF_HOME` is a different repository to lf and shows an empty plan;
 its saves go out on the Machine's one ref.
 
-With no server a save waits for `lf task sync <id>`. With `lf server run` for
-each home, a CLI save is pushed on the server's minute and fetched on the
-other's (97 s measured); a `task.create` over the socket is pushed in about
-2 s. To time it, poll `git -C <bare> for-each-ref refs/loopflow/plan`.
+Every save pushes its own ref at once, CLI or socket (about a second
+against a local bare remote). Another Machine reads it on `lf task sync <id>`,
+or on its server's minute (53 s measured). With a hub, the save is on the hub
+when the command returns. To time it, poll `git -C <bare> for-each-ref refs/loopflow/plan`.
 
 To make the remote fail, `git remote set-url origin /nonexistent.git`, save
 and `lf task sync <id>`: `lf repo tracker` reads `unreachable since …` with
 Git's reason, and `--json` fills `plan.git.error` and `failing_since`.
-Restore the URL afterwards. For a first-wins claim race, point one home's
+Restore the URL afterwards. A missing path fails at once; to see whether a
+command keeps to its five seconds, make the remote hang instead: an
+executable that runs `sleep 60`, set as `git config core.sshCommand <it>`,
+with `remote set-url origin git@slow.example:x/y.git`. Time each command
+(`python3 -I -c 'import time;print(time.time())'` before and after); with a
+hanging remote or hub a save, a claim, a create or a first read returns in
+about 5 s (a create's send reads the hub too: one wait), `lf task sync` waits as
+long as the carriers take. Unset `core.sshCommand` afterwards. For a first-wins claim race, point one home's
 remote at the missing path while both run `lf task claim <id>`, restore it,
 then `lf task sync <id>` on each; the losing home's steer is a row in
 `steers` with `source` `ownership:<entry>`.
@@ -59,7 +66,10 @@ A hub needs no real host: put an `ssh` first on the laptop home's `PATH` that
 runs its last argument with `bash -c` under the hub home's `HOME` and
 `LF_HOME`, with the branch `lf` at that home's `~/.local/bin/lf`; then
 `lf machine add mini` and `lf machine hub mini`. A flag file the stand-in
-checks (exit 255) takes the hub down. The hub must have fetched the laptop's
+checks (exit 255) takes the hub down. For a sleeping mini, have a second
+flag sleep 10 s before exiting 255 (SSH's `ConnectTimeout`); for a hub that
+accepts and never answers, a third flag sleeps 120 s. `pkill -f` the
+stand-in's own path afterwards, never a broader pattern. The hub must have fetched the laptop's
 ref once before it knows the laptop's repository id.
 
 For the returning-user case, build a home with the installed binary
@@ -86,3 +96,43 @@ preview and prints context only. A bad `origin` URL does not make
 `fetch_repository` return an error (the failure is stored on the destination),
 so the post-creation `tracker fetch after creation failed` warning is not
 reachable that way.
+
+`lf repo tracker --subscribe` needs `--json` and reads the store only (the
+stream's store is read-only); run it in the background into a file and
+`pkill -f` its exact command line. Off a TTY, `lf task show` prints JSON;
+`lf task list | grep <id>` is the quick read of a title.
+
+Two Machines making a Wave of one name is the import's hardest case:
+`lf wave create design` on both homes (or `lf task create --wave design` on
+one, which makes the Wave), a Task in each, then `lf task sync <id>` on both.
+Do it offline (`git remote set-url origin /nonexistent.git` around each
+create): online, the second create reads the plan first and joins the first
+Wave. Each keeps its own `design` and its Tasks; everything else still
+crosses. `lf task sync` exits 1 and `lf repo tracker` reads
+`Plan: Git origin, 3 not taken.` with the rename under it (the other Machine
+by id unless it was added with `lf machine add`). `lf wave rename design
+<new>` on one home clears that home's line at once (a save reads too while
+something is not taken); the other home clears on its next save, `lf task
+sync <id>` or server minute. Both lists then hold all the Tasks and both
+lines read `Plan: Git origin.` The skipped records are also
+`WARN loopflow_storage::sqlite::plan_carriers` lines in each home's
+`logs/lf.log`.
+
+The hub home's server comes back after `pkill`: a command reaching it
+through the stand-in `ssh` registers a launchd job for that home
+(`com.loopflow.server.<hash>`, plist under `<home>/.lf/server.plist`). Find
+it with `launchctl print gui/$(id -u)/<label> | grep path` and stop it with
+`launchctl bootout gui/$(id -u)/<label>` when done. Replace the home's binary
+(`rm`, then copy) before restarting it.
+
+The hub carries the same case: take the hub down (the stand-in's flag) and
+both remotes away, make the Wave on both, bring only the hub back and
+`lf task sync <id>` on the laptop. Its line reads
+`Hub mini, 3 unsent, 3 not taken.` with the reason; the rename on the laptop
+clears it and the mini's list holds both. `lf task sync` still exits 1 on
+Git's error while the remotes are away.
+
+For the minute, run the laptop's `lf server run` in the background (record
+its PID), type nothing on the laptop and poll `lf task list` there after a
+save on the mini: 40 to 60 s. The minute's exchange is silent; a split Wave
+is one `skipped a plan record` WARN per exchange in `logs/lf.log`.

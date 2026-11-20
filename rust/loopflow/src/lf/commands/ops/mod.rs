@@ -507,7 +507,7 @@ impl PlanningRefresh {
 }
 
 /// Refresh shared planning before `wave status --sync` reads it: the Wave from
-/// Linear, or without a tracker the repository's plan from its hub.
+/// Linear, or without a tracker the repository's plan by each carrier it has.
 pub fn refresh_status(directory: &std::path::Path, wave: Option<&str>) -> Result<PlanningRefresh> {
     let repo = loopflow_execution::repo::working_directory_in(directory)?;
     if !loopflow_execution::ops::tracker::connected(&repo.to_string_lossy()) {

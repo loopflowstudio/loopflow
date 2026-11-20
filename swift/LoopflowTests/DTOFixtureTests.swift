@@ -927,7 +927,9 @@ struct DTOFixtureTests {
         #expect(plan.plan?.hub?.machine == "mini")
         #expect(plan.plan?.hub?.standing.records == ["3e1c9a07"])
         #expect(plan.plan?.git?.remote == "origin")
-        #expect(plan.line == "Plan: Git origin.")
+        #expect(plan.line == "Plan: Git origin, 3 not taken.")
+        #expect(plan.plan?.git?.standing.notTaken?.reason.hasPrefix("wave design from mini ") == true)
+        #expect(plan.plan?.hub?.standing.notTaken == nil)
         #expect(plan.plan?.hub?.line.hasPrefix("Hub mini, unreachable since ") == true)
         #expect(plan.plan?.hub?.line.hasSuffix(", 1 unsent.") == true)
         let linear = #"{"tracker":"linear","plan":null,"actions":[]}"#

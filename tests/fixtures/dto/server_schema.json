@@ -2471,6 +2471,17 @@
             "null"
           ]
         },
+        "not_taken": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NotTaken"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "What the carrier's last read brought that this Machine could not\nwrite, and reads again at each exchange. `null` when it took\neverything."
+        },
         "records": {
           "description": "The first of them in change order: a Task's identifier, `wave <name>`,\n`project <name>` or `comment <id>`.",
           "items": {
@@ -2494,7 +2505,8 @@
         "unsent",
         "records",
         "error",
-        "failing_since"
+        "failing_since",
+        "not_taken"
       ],
       "type": "object"
     },
@@ -3303,6 +3315,17 @@
           "description": "The hub's name.",
           "type": "string"
         },
+        "not_taken": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NotTaken"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "What the carrier's last read brought that this Machine could not\nwrite, and reads again at each exchange. `null` when it took\neverything."
+        },
         "records": {
           "description": "The first of them in change order: a Task's identifier, `wave <name>`,\n`project <name>` or `comment <id>`.",
           "items": {
@@ -3322,7 +3345,8 @@
         "unsent",
         "records",
         "error",
-        "failing_since"
+        "failing_since",
+        "not_taken"
       ],
       "type": "object"
     },
@@ -3886,7 +3910,7 @@
           "type": "array"
         },
         "hub": {
-          "description": "It holds this Machine's plan (`lf machine hub`).",
+          "description": "This Machine exchanges its plan with it (`lf machine hub`).",
           "type": "boolean"
         },
         "id": {
@@ -4135,6 +4159,25 @@
         "external"
       ],
       "type": "string"
+    },
+    "NotTaken": {
+      "properties": {
+        "count": {
+          "description": "How many records.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "reason": {
+          "description": "Why the first was not, and what to do about it when something can be\ndone: `wave design from mini has the name of a Wave here; …`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "count",
+        "reason"
+      ],
+      "type": "object"
     },
     "Observation": {
       "description": "Freshness of the GitHub observation behind the Task's returned PR state.\nThe durable attempt metadata lives on `TaskPr`; this derived view tells one\ncaller whether it read GitHub, reused a recent reading, or opened a degraded\ncircuit while preserving the cached PR fields.",
@@ -4545,6 +4588,22 @@
         "use_existing_worktree"
       ],
       "type": "string"
+    },
+    "PlanApplied": {
+      "additionalProperties": false,
+      "description": "What `plan.apply` answers.",
+      "properties": {
+        "not_taken": {
+          "description": "How many of the records could not be written here (a Wave whose name\na Wave here holds, and what hangs from it). The sender keeps them\nunsent and sends them again.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "not_taken"
+      ],
+      "type": "object"
     },
     "PlanBoard": {
       "properties": {
@@ -8801,7 +8860,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "The hub's side of a plan exchange: take in another Machine's stamped\nrecords of `repository`'s plan, in one transaction. Each field is\nwritten only when its stamp is newer than the one held here, so\nrepeating it changes nothing. Answers `{}`.",
+          "description": "The hub's side of a plan exchange: take in another Machine's stamped\nrecords of `repository`'s plan, in one transaction. Each field is\nwritten only when its stamp is newer than the one held here, so\nrepeating it changes nothing.",
           "properties": {
             "kind": {
               "const": "plan.apply",
@@ -8824,8 +8883,7 @@
           ],
           "type": "object",
           "x-result": {
-            "additionalProperties": false,
-            "type": "object"
+            "$ref": "#/$defs/PlanApplied"
           }
         },
         {

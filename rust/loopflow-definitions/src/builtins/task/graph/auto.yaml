@@ -1,4 +1,0 @@
-description: "Request to merged PR without a person: build and publish, then deliver."
-steps:
-- graph: pursue
-- graph: deliver

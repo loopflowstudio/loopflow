@@ -70,6 +70,16 @@ Run the app's bundled `lf` with the world's `env.json` variables and
 `LF_DESKTOP=com.loopflow.mac.dev`; the control socket is under the world's
 `LF_HOME`, so `lf desktop state --json` reads only that app.
 
+- Check the screen first: `ioreg -n Root -d1 -a | grep -c CGSSessionScreenIsLocked`
+  prints 1 when it is locked, and then `screencapture` returns a black frame
+  ("could not create image from window" for `-l <id>`). The app still launches
+  and answers its socket, so say which checks were socket reads and which were seen.
+- The app registers `com.loopflow.server.<hash>` for the world's home with the
+  real `launchctl` (the world's refusing one is not used). After quitting it,
+  stop the world as `.lf/qa/auto.md` describes.
+- The Auto toggle, Claim, Unassign and Abandon have no `lf desktop` verb:
+  `lf desktop state --json` shows the Task page's `run_control`, and the views
+  are covered by `DesktopHeadlessTests`.
 - Drive it over the socket: `lf desktop ls`, `lf desktop goto 1`,
   `lf desktop run --task <id> '<line>'`. Do not use `lf desktop view` or
   `lf open` there: they open a `loopflow://` URL, and when

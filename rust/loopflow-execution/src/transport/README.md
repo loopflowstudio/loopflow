@@ -33,13 +33,13 @@ caller's process.
 | Resume a chat with no message | chat | its terminal |
 | Resume a bound or primary Session, or open a Task, Wave or repository conversation | work session | held interactive terminal, independent of its viewer |
 | Open a conversation in a held terminal through a Desktop pane or framed `lf --machine` view | work session | held interactive terminal, independent of its viewer |
-| Headless steps of `lf task run` or `lf ship`, and the `ci-fix` run landing starts | worker | headless until the step or repair ends |
+| Headless steps of `lf task run` or `lf task auto on`, and the `ci-fix` run landing starts | worker | headless until the step or repair ends |
 | A Discord answer for a Wave | worker | returns the answer to the bridge |
 | Desktop Task shells | held shell | independent of its viewer, no hooks |
 
-`lf task run` starts no agent itself. `transport::detach_current` reruns it
-detached from its terminal so the Graph outlives the caller; `lf -b task run`
-waits for it.
+`lf task run` and `lf task auto on` start no agent themselves. `transport::detach_current`
+reruns them detached from their terminal so the Graph outlives the caller;
+`lf -b task run` waits for it.
 
 To open a work session from the CLI, `lf` calls `session.start` and becomes
 a view of the returned terminal. With the server unreachable it fails with
@@ -512,7 +512,7 @@ from `/dev/null` and closed inherited descriptors except release locks and
 worktree leases. Task steps themselves wait inside their Graph's process tree.
 
 `LF_LAUNCHER_FD` carries the admitted LfProcess ID and a `released` message.
-Server launches, landing watchers and ship restarts record the ID and append
+Server launches, landing watchers and run restarts record the ID and append
 output to `logs/detached.log`. A pipe closing without an ID leaves delivery
 unknown; nothing launches again on that uncertainty. Workers report turns and
 read Task steers while running without a PTY, viewer or screen. Their own

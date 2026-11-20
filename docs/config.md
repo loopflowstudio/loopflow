@@ -1045,7 +1045,7 @@ allows every action through `permissions` in `OPENCODE_CONFIG_CONTENT`. Pi has
 no permission prompts or sandbox to skip.
 
 A headless run in its Task's checkout runs as `yolo` on every harness, whatever
-`yolo` is set to: `lf task run`, `lf ship`, and `lf -b <skill>` there. Nothing
+`yolo` is set to: `lf task run`, `lf task auto on`, and `lf -b <skill>` there. Nothing
 confines its writes to the checkout. To contain a Task, choose where it runs
 ([Security](security.md#choose-the-execution-boundary-first)).
 

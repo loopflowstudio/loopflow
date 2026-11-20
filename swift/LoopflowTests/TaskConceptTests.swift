@@ -168,18 +168,6 @@ struct TaskConceptTests {
         #expect(!task.isCompleted)
     }
 
-    @Test(arguments: ["restarting", "unassigned"])
-    func handoffsRemainStoppableBetweenRuns(state: String) throws {
-        var row = try activeTaskWire()
-        row["lifecycle"] = "idle"
-        row["shipping"] = ["shipped_at": 1, "state": state, "reason": "Handoff remains active"]
-        let task = try JSONDecoder().decode(RoadmapTask.self, from: JSONSerialization.data(withJSONObject: row))
-        let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Passive rendering") }, repoPath: "/repo")
-        let control = TaskShipControl(model: model, task: task)
-        _ = try control.inspect().find(viewWithAccessibilityIdentifier: "task-ship-stop")
-        #expect(throws: (any Error).self) { try control.inspect().find(viewWithAccessibilityIdentifier: "task-ship") }
-    }
-
     @Test func missingKeysFailAndSavedActivityCannotReturn() throws {
         var row = try activeTaskWire()
         for key in ["lifecycle", "selection_states"] {
@@ -195,7 +183,6 @@ struct TaskConceptTests {
         let restored = try JSONDecoder().decode(RoadmapTask.self, from: Data(quiet.utf8))
         #expect(restored.selectionStates == [.active, .working])
         #expect(restored.runControl.unavailable != nil)
-        #expect(restored.shipControl.unavailable != nil)
     }
 }
 #endif

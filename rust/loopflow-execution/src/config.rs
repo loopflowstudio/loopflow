@@ -299,6 +299,14 @@ pub enum ReleaseCompletion {
     GithubRelease,
 }
 
+/// `auto: on`: each Task turns auto on as it takes up its Graph, unless
+/// someone set it first. It has no other value; leave it out for none.
+#[derive(schemars::JsonSchema, Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AutoDefault {
+    On,
+}
+
 /// Repository merge policy; GitHub's allowed methods remain authoritative.
 #[derive(schemars::JsonSchema, Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]

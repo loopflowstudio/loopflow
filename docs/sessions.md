@@ -164,8 +164,7 @@ lf task run LOO-12 --json          # the same, answering {state, graph_process, 
 ```
 
 A batch runs its agent as a child and waits for it. Work commands (a Graph,
-`lf -b task run`, a landing watcher,
-`lf ship`) run in a process of their own that outlives the command that
+`lf task run` or `lf task auto on`, a landing watcher) run in a process of their own that outlives the command that
 started it, writing the log the command names; `lf -b task run` prints that log as it grows and exits with the
 Graph. Nothing hosts either: no server, no holder.
 
@@ -173,7 +172,7 @@ Graph. Nothing hosts either: no server, no holder.
 |---|---|
 | Processes | the `lf` running the work and the agent it started; a Graph's runner, and each step's agent beneath it |
 | Output | `lf -b <skill>` prints to its caller; a Graph writes `~/.lf/logs/graph-<process>.log` |
-| The caller exits or is killed | `lf -b <skill>` ends with it, like any child process; a Graph, landing watcher or `lf ship` keeps running and its log has the rest |
+| The caller exits or is killed | `lf -b <skill>` ends with it, like any child process; a Graph or landing watcher keeps running and its log has the rest |
 | The start is never acknowledged | the command says delivery is unknown and starts nothing again; `lf task status` shows whether it ran |
 | Steers | reach a Graph's steps and `lf -b <skill>` run for a Task through that Task |
 
@@ -210,7 +209,7 @@ ten conversations, not the holder.
 
 | Opened with | Runs in |
 |---|---|
-| a person's interactive step of `lf task run` or `lf ship`, `lf resume --task`, a Wave session command | the holder |
+| a person's interactive step of `lf task run` or `lf task auto on`, `lf resume --task`, a Wave session command | the holder |
 | a Desktop pane or framed `lf --machine` view opening a held conversation | the holder |
 | `lf resume <session>` of a conversation one of those opened | the holder |
 | a Desktop Task shell | the holder |
@@ -332,10 +331,10 @@ lf task status LOO-12
 # Conversation: quit 12:03; `lf resume --task LOO-12` opens it
 ```
 
-A Task run whose `lf task run` or `lf ship` died is carried again the same
-way, from the step it reached, and its workers with it. A run that was waiting
-for you at an interactive step stops there again; being carried again never
-approves Auto-Ship you had not approved.
+A Task run whose `lf task run` or `lf task auto on` died is carried again the same
+way, as `lf task run`, from the step it reached, and its workers with it. A
+run that was waiting for you at an interactive step stops there again; being
+carried again never turns auto on.
 
 After a reboot the server brings work back one start at a time, the most
 recently active Task first. The first start after a death is immediate; each
@@ -347,7 +346,7 @@ those 5 starts count from zero.
 ```bash
 lf task status LOO-12
 # Conversation: died 09:14 (exit 1) · started 5 times; `lf resume --task LOO-12` opens it
-# Run died 5 times at implement; `lf task run LOO-12` starts it again
+# Run died 09:14 at implement · started 5 times; `lf task run LOO-12` starts it again
 ```
 
 The line promises a start only when this Machine will make one. With no
@@ -357,6 +356,7 @@ it says so and gives the command instead:
 ```bash
 lf task status LOO-12
 # Conversation: died 12:01 (exit 137) · no server runs here to start it; `lf resume --task LOO-12` opens it
+# Run died 12:01 at implement · no server runs here to start it; `lf task run LOO-12` starts it again
 ```
 
 A launch can end before the provider saves anything: `claude` missing from
@@ -504,11 +504,11 @@ log of the conversation so far (what was asked, what was answered, one line per
 tool call), not a summary. On the harness it already uses, `-a` changes nothing.
 
 The switch sticks. A Session continues on the provider its latest message ran
-on, so after the Codex turn above a plain `lf resume <session>`, Desktop or the
-phone reopens it on Codex, in Codex's conversation, under a Codex account. The
-Claude conversation stays in the history; switch back with `-a claude`. A Graph
-step that went on to the next provider of `default_agent` moves its Session the
-same way.
+on, so after the Codex turn above a plain `lf resume <session>`, `lf open`,
+Desktop or the phone reopens it on Codex, in Codex's conversation, under a
+Codex account. The Claude conversation stays in the history; switch back with
+`-a claude`. A Graph step that went on to the next provider of `default_agent`
+moves its Session the same way.
 
 ## Steer without interrupting
 

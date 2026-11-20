@@ -1957,12 +1957,12 @@ mod tests {
                 // The fixture's repository has no checkout here, so the hold fails and is logged.
                 let answer = client.receive().await.unwrap();
                 assert!(
-                    matches!(&answer, ServerMessage::Error { id: Some(id), .. } if id == "hold-1"),
+                    matches!(&answer, ServerMessage::Error { id: Some(id), .. } if id == "auto-1"),
                     "{answer:?}"
                 );
             });
         let log = std::fs::read_to_string(loopflow_execution::diagnostic_log::log_path()).unwrap();
-        assert!(log.contains("request=hold-1"), "{log}");
+        assert!(log.contains("request=auto-1"), "{log}");
         assert!(!log.contains("sk-fixture"), "{log}");
     }
 

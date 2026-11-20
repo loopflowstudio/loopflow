@@ -16,10 +16,11 @@ Tasks, use a local bare Git origin, `planning: {provider: git, personal: true}`
 and `graph: qa-normal` in `.lf/config.yaml`. Commit and push those definitions,
 then `lf task create --title "Launch QA" --json` creates local planning data.
 Create with stdin closed; `--graph` on creation requires `--run`.
-Before `task.ship`, place the Task with `lf checkout <id> --json`; creating or
-binding a prepared Session alone does not place its checkout. `task.ship` returns
-the shipping Process ID. Inspect its Graph through `lf task status <id> --json`
-and pass that Graph's ID to `lf graph show`; the shipping carrier is not a Graph.
+Before `task.auto.on`, place the Task with `lf checkout <id> --json`; creating or
+binding a prepared Session alone does not place its checkout. `task.auto.on` returns
+what `task.run` returns (`state: running`, `graph_process`, `merges: true`); on a
+Task whose run is live it turns auto on and returns that run. `task.auto.off`
+takes `reason: null` and answers `{issue, was_on}`; nothing but `task.auto.on` turns auto on.
 
 For a checkout without launching a Graph, run `lf wt create qa --json`, take
 its `path`, then pass it to `lf task create --worktree <path> --title ... --json`.

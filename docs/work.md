@@ -22,7 +22,7 @@ carries the child through the parent's updates and squash merge. To stack a
 Task that already exists, run `lf sync LOO-12` in its worktree; `lf sync main`
 takes it back off.
 
-`lf task run`, `lf ship`, and an explicit `lf task checkout` prepare the Task's
+`lf task run`, `lf task auto on`, and an explicit `lf task checkout` prepare the Task's
 conversation, and the Machine server starts it in the background within
 seconds. When its agent is not installed, the server records why on the
 conversation.
@@ -143,7 +143,7 @@ person's work.
 Plain `lf task create` files new work, including from an owned checkout or
 Session. `--run` starts the created Task; it does not opt into adoption.
 Explicit sources work with or without `--run`. Creation alone starts no Graph
-and approves no Auto-Ship. Binding also requires an explicit Session ID.
+and leaves auto unset. Binding also requires an explicit Session ID.
 
 Main and Wave checkouts remain shared. A selected Session there can become a
 Task conversation without moving its cwd; an explicit later `lf task checkout`
@@ -170,7 +170,7 @@ checkout is adopted. Closed or headless Sessions cannot become primary.
 lf steer LOO-12 "keep the retry budget at 3"   # reaches its agents at their next step or turn
 lf task status LOO-12 --json                        # the thread: your steers, teammates', the agents' reports
 lf task interrupt LOO-12                          # stop its running Graph
-lf task unassign LOO-12                           # nobody owns it: ship and CI repair stop; live processes finish
+lf task unassign LOO-12                           # nobody owns it: CI repair stops; live processes finish
 ```
 
 A steer saves locally first, then reaches every Session working on the Task at

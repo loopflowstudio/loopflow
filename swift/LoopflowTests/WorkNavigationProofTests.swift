@@ -149,7 +149,8 @@ struct WorkNavigationProofTests {
         var items = try #require(tasks["items"] as? [[String: Any]])
         let taskIndex = try #require(items.firstIndex { ($0["task"] as? [String: Any])?["id"] as? String == "issue-review" })
         items[taskIndex]["latest_graph_process"] = latest
-        items[taskIndex]["execution"] = ["state": "running", "reason": "Running", "step": NSNull(), "captured": NSNull()]
+        items[taskIndex]["execution"] = ["state": "running", "reason": "Running", "step": NSNull(), "captured": NSNull(),
+                                        "died": NSNull(), "outlook": NSNull()]
         tasks["items"] = items; plan["tasks"] = tasks
         let roadmap = String(decoding: try JSONSerialization.data(withJSONObject: plan), as: UTF8.self)
         let planning = RoadmapSource(roadmap)

@@ -171,9 +171,12 @@ struct WorkCLISubscriptionTests {
         let workspace = try #require(registry.selectedWork.flatMap(registry.retained))
         let task = try #require(model.task(id: id)?.task)
         let checkout = try #require(task.reference.workspace?.identity)
-        // Automatic opening prepares this Session; nothing mounts it, so no provider launches.
+        // The Wave board's tile or the warm opening fills this pane, whichever runs
+        // first, and only the opening selects its conversation. The mounted page
+        // selects the focused pane's Session; nothing mounts here, so the test does.
         try await eventually { workspace.multiplexer.sessionPane?.sessionId != nil }
         let sessionID = try #require(workspace.multiplexer.sessionPane?.sessionId)
+        model.navigation.selectedSessionId = sessionID
         #if canImport(GhosttyKit)
         let surfaceID = TerminalIdentity.session(sessionID, machineId: machineID)
         let surface = registry.surfaces.view(for: surfaceID)

@@ -95,8 +95,8 @@ The Mac app shows the same records the commands print; it keeps no copy of its o
   Task's checkout and a `browser` for Files, the Graph log and local pages.
 - **Dashboards**: Tasks side by side, chosen by a query.
 - **Wave view**: the Wave conversation on the left, its [backlog](#the-backlog)
-  on the right, and the Tasks being worked on three to a page below. The
-  repository page is the same view over every repository Task. Every pane and
+  on the right, and the Tasks being worked on three to a page below. A Task
+  with auto on carries an Auto badge on its card. The repository page is the same view over every repository Task. Every pane and
   view part zooms and hides from buttons on hover, its dividers drag, and the
   header's `Show…` menu brings hidden parts back.
 - **⌘K**: search Waves, Tasks, Sessions and Graphs.
@@ -112,7 +112,8 @@ lf desktop dashboard query attention 'state:available or state:blocked'   # save
 ```
 
 Queries take `wave:`, `task:`, `kind:task|wave` and
-`state:open|available|busy|blocked|unstarted|idle|active|moving|shipping|backlog|working|autonomous|done`;
+`state:open|available|busy|blocked|unstarted|idle|active|moving|backlog|working|done|auto`
+(`auto` is an open Task whose auto setting is on);
 whitespace means AND, and `or` and parentheses compose.
 
 ### Changes show at once
@@ -129,7 +130,7 @@ count drops by one. The same holds on a remote Machine and on the phone.
 | Unassign | no owner; the Task moves to Backlog |
 | Move | the Task leaves one Wave's list and joins the other |
 | Rename a Session | the new title |
-| Start, Auto-Ship, Stop Auto-Ship | a Notice: "LOO-5 Auto-Ship requested" |
+| Start, the **Auto** toggle on or off | a Notice: "LOO-5 Auto on requested" |
 
 The Machine's next reading replaces what the click showed. If the Machine
 refuses, the row comes back and one Notice says why:
@@ -139,8 +140,8 @@ LOO-4 couldn't be completed: its PR #12 is open · Show
 ```
 
 A Notice is one line at the bottom of the window with at most one action. A new
-one replaces the last; it goes after six seconds. Auto-Ship's Notice carries
-**Undo**, which stops Auto-Ship. A read that fails also raises a Notice, once,
+one replaces the last; it goes after six seconds. Auto on's Notice carries
+**Undo**, which turns auto off. A read that fails also raises a Notice, once,
 and the view keeps what it last showed. Some Notices stand until what they say
 ends: the Machine away, a Wave with Tasks outside its plan (**Copy recovery**),
 a new Task saved before its Machine answered. They wait under the six-second
@@ -227,7 +228,6 @@ times it stops for you:
   research                Investigate and report, with no PR      1 stop
   More ›
   Run without stopping
-  auto                    Request to merged PR without a person   merges without asking
   deep-clean              Delete what an area no longer needs     never stops
   incident                Restore first, then fix the cause       never stops
   optimize                Move one number                         never stops
@@ -239,7 +239,7 @@ Several Tasks whose workflows differ show the split,
 `Start 3 · feature 2 · code 1`, and the menu opens with "Each Task's own
 workflow"; clicking Start runs each on its own. Pick a workflow below it to run
 all of them on that one. Workflows under "Run without stopping" never wait for
-you, and Auto-Ship may merge their PRs. **More ›** holds the pieces other
+you. **More ›** holds the pieces other
 Graphs include, such as `build` and `deliver`, and Graphs with no
 `description:` ([describe a Graph](orchestration.md#describe-a-graph)). A
 Graph that runs for a Wave is not offered for a Task. The New Task sheet lists
@@ -336,7 +336,7 @@ Every Task list read (`lf task list`, `lf wave show`, `lf wave status`,
 ```
 
 `runtime.status` is one of `unstarted`, `idle`, `active`, `moving`,
-`shipping`, `done` or `abandoned`. `lifecycle` includes completion or cancellation
+`done` or `abandoned`. `lifecycle` includes completion or cancellation
 of never-started work; `selection_states` supplies the same lifecycle, board
 section and conversation activity used by Dashboard filters;
 `next_move.owner` (`user`, `wave`, `task`, `ci`, `external`) says who moves it

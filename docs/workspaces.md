@@ -129,12 +129,19 @@ splits again.
 
 ## If opening fails
 
-A successful conversation open means the Session attached, not just that the
-host created a tab. Attachment failures return a failure to the opening command
-and leave readable diagnostics in the destination. Correct the reported cause
-and retry the same command. Desktop rechecks its pane before opening another;
-a terminal retry attaches one more view, so if attachment completed before the
-reply was lost, `--focus` reveals the first one.
+```bash
+lf open --task ENG-123 --tab --host rex --json
+# {"receipts": [{"host": "rex", "status": "failed",
+#   "reason": "'claude' is not installed. Install it with `npm install -g @anthropic-ai/claude-code`, then open `claude` to sign in; retry the same command", ...}]}
+```
+
+A successful conversation open means the Session attached and its provider was
+started, not just that the host created a tab. When it doesn't attach, the
+opening command fails with lf's own error. The pane keeps the same text on
+screen and waits for Enter. Correct the cause and retry the same command.
+Desktop rechecks its pane before opening another; a terminal retry attaches one
+more view, so if attachment completed before the reply was lost, `--focus`
+reveals the first one.
 
 Starting a Task's first conversation needs a harness. With no `default_agent` and
 several harnesses installed, choose one for this invocation or set a default:
@@ -143,6 +150,20 @@ several harnesses installed, choose one for this invocation or set a default:
 lf -a claude open --task ENG-123
 lf set --global default_agent claude
 ```
+
+Opening never changes a conversation's harness on its own. Without `-a`, the
+pane continues on the harness the conversation last ran on, so a retry, a
+restored tab or Desktop reopening it lands where `lf -a codex resume` last put
+it. `lf -a codex open --task ENG-123` moves it, as
+[switching agents](sessions.md#switch-agents-mid-conversation) does.
+
+A pane finds the harness and its tools wherever the host was started, including
+a Rex or tmux server started at login: lf looks in `~/.local/bin`,
+`~/.opencode/bin`, `/opt/homebrew/bin`, `/opt/homebrew/sbin`, `/usr/local/bin`,
+`/usr/local/sbin` and `~/.cargo/bin` after the host's own `PATH`. The pane does
+not inherit the `PATH` of the terminal you ran `lf open` from, so a tool
+reachable only through your shell startup files (nvm, mise, asdf or pyenv
+shims) is missing there unless it is also in one of those directories.
 
 A host or attachment failure never substitutes a workflow pane for the
 conversation. In a workspace, tools that opened successfully remain available

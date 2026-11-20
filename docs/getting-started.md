@@ -80,9 +80,9 @@ you to try the change, then deliver it and stop again for you to check it on
 `main`. Name it once; the Task keeps it, and each `lf task run <ID>` continues
 from where it stopped. Set `graph: code` in `.lf/config.yaml` and every new Task
 takes it up. `lf -b task run <ID>` runs straight through both stops with an agent
-standing in; `auto` has no stops: with `graph: auto` in
-`.lf/wave/<wave>/config.yaml`, that Wave's Tasks run from request to merged PR
-without you.
+standing in. With `auto: on` beside `graph:` in `.lf/wave/<wave>/config.yaml`,
+that Wave's Tasks run from request to merged PR without you; `lf task auto off
+<ID>` takes one back.
 
 While it runs:
 
@@ -94,9 +94,9 @@ lf session list                  # what is running: each conversation, OS-confir
 ## 4. Pick up the conversation
 
 When the PR is published, the Task waits at its review, in the Task's own
-conversation: one page built from what the run produced. It shows what changes,
-whether the product's concepts and the code's line up, how to try it, what was
-checked, the choices made for you and the questions left open.
+conversation: one page built from what the run produced. It shows what ships,
+how to try it, the choices made for you, and everything left outside the PR,
+each with a proposal to fix it here, give it its own Task or drop it.
 
 ```bash
 lf resume --task <ID>            # from any terminal, on whatever agent it ran
@@ -108,15 +108,16 @@ week. After a crash or reboot, use the same command to reopen its saved history.
 ## 5. Land it
 
 ```bash
-lf ship <ID>                     # the remaining steps, then merge; repairs failing CI until it lands
-lf task hold <ID>                # withdraw it; disarms the auto-merge it armed
+lf task auto on <ID>                     # auto on: the remaining steps, then merge; repairs failing CI until it lands
+lf task auto off <ID>            # the run waits at its next interactive step; disarms the auto-merge it armed
 ```
 
-`lf ship` stands in for you at each remaining interactive step and runs `deliver`: `reflect`,
+`lf task auto on` turns auto on and runs the Task: the run stands in for you at
+each remaining interactive step and runs `deliver`: `reflect`,
 `gate`, then `lf land --wait-and-fix`. `reflect` turns what you said during the
 Task into edits to your skills. `gate` publishes the PR first, so CI is already
-running while it [reviews the change](ops.md#review-while-ci-runs). `lf ship`
-returns once the Task is shipping (`-b` waits);
+running while it [reviews the change](ops.md#review-while-ci-runs). `lf task auto on`
+returns once the run starts, like `lf task run` (`-b` waits);
 `lf task status` follows it. The Task completes when the PR merges, and its
 worktree is cleaned up later by `lf wt prune`.
 

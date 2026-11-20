@@ -86,6 +86,14 @@
     "conflicts": {}
   },
   "summary": null,
+  "auto": {
+    "state": "on",
+    "at": 1795107435,
+    "by": {
+      "kind": "config",
+      "layer": "wave"
+    }
+  },
   "stack_parent": {
     "identifier": "LOO-1",
     "branch": "jack/loo-1-parse-mail",

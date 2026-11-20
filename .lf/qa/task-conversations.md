@@ -125,7 +125,7 @@ each fresh start adds one input to the Session. The notice prints on the startin
 resume` shows it, a viewer attaching to the pass's terminal later does not.
 
 A Task run: add `.lf/graphs/qarun.yaml` (`- implement` then `- interactive:
-human-review`), commit it, and `lf task run <task> qarun`. Its headless step
+ship-review`), commit it, and `lf task run <task> qarun`. Its headless step
 needs a `claude` ahead of the world's on both the server's and the CLI's
 `PATH` that, for `-p`, reads one line, waits for a marker file, prints a
 stream-json `result` line, and otherwise execs the world's. Kill the carrier's

@@ -355,6 +355,11 @@ fn task_detail_says_each_fact_once() {
         "the server's sentence, printed as given"
     );
     assert_eq!(
+        detail.auto.as_ref().unwrap().by.to_string(),
+        "wave config",
+        "a Wave's `auto: on` turned it on"
+    );
+    assert_eq!(
         serde_json::to_value(&detail).unwrap(),
         serde_json::from_str::<serde_json::Value>(json).unwrap()
     );
@@ -423,6 +428,25 @@ fn task_status_preserves_canonical_work_and_tracker_state() {
 }
 
 #[test]
+fn a_died_run_carries_where_it_died_and_the_conversations_outlook() {
+    use loopflow_execution::ops::human_session::SessionOutlookKind;
+    use loopflow_execution::ops::task_execution::TaskExecutionSnapshot;
+    let json = include_str!("../../../tests/fixtures/dto/task_execution_died.json");
+    let execution: TaskExecutionSnapshot = serde_json::from_str(json).unwrap();
+    let value: serde_json::Value = serde_json::from_str(json).unwrap();
+    assert_eq!(serde_json::to_value(&execution).unwrap(), value);
+    assert_eq!(execution.died.as_ref().unwrap().at_step, "implement");
+    let outlook = execution.outlook.as_ref().unwrap();
+    assert_eq!(outlook.kind, SessionOutlookKind::WaitingForYou);
+    assert_eq!(outlook.command.as_deref(), Some("lf task run LOO-12"));
+    for key in ["died", "outlook"] {
+        let mut missing = value.clone();
+        missing.as_object_mut().unwrap().remove(key);
+        assert!(serde_json::from_value::<TaskExecutionSnapshot>(missing).is_err());
+    }
+}
+
+#[test]
 fn graph_compositions_round_trip_distinct_compositions_and_required_children() {
     use loopflow_execution::graph::compiled::GraphCatalogEntry;
     let json = include_str!("../../../tests/fixtures/dto/graph_composition.json");
@@ -476,7 +500,9 @@ fn prepared_checkout_retains_owning_home_without_starting_execution() {
         snapshot.started_by.as_ref().unwrap().to_string(),
         "Session \"LOO-291 task\" for Maya"
     );
-    assert_eq!(snapshot.ship_stop.as_ref().unwrap().by.to_string(), "Maya");
+    let auto = snapshot.auto.as_ref().unwrap();
+    assert_eq!(auto.state, loopflow_storage::sqlite::AutoState::Off);
+    assert_eq!(auto.by.to_string(), "Maya");
     assert_eq!(
         serde_json::to_value(&snapshot).unwrap(),
         serde_json::from_str::<serde_json::Value>(json).unwrap()

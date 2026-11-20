@@ -120,8 +120,11 @@ Questions 1 and 2 got no written answer in scratch.
   `outcome_unknown` ("…; inspect the affected work before retrying"), as
   `task.run` does through the shared launch path. `task.auto.off` now answers
   `not_found`.
-- QA 2026-11-19: a released hold on a never-run Task does not survive the
-  upgrade; same root as the last item below.
+- QA 2026-11-19 (fifth pass): `lf task status` on a Task with no checkout
+  appends its auto to the `Not checked out on <machine>` line; before, an off
+  set ahead of the first run showed only in `--json`. No fixture reads that
+  line with auto set (every launch fixture's Task has a checkout). Reverse by
+  dropping the phrase in `bin/lf.rs`.
 - QA 2026-11-19: Task checkout waits 10 s for the worktree lease instead of
   failing at once. Reverse by restoring `acquire_worktree_lease` in
   `restore_task_checkout`; two starts at once then fail one caller.

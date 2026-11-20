@@ -90,6 +90,14 @@ conversation's `--append-system-prompt-file` is in `ps` under its `lf holder run
 An unknown ID answers `no Task exists for …`
 (served: `not_found`) for `auto off`; `task.auto.on` still answers `outcome_unknown`.
 
+Before a first run: `lf task auto off <id>` on a fresh `lf task create`, then
+`lf config set auto on` and a bare `lf task run <id> <graph>` stops at the
+interactive step with no `merges:` line. `lf task complete` then `lf task
+reopen` clears the mark (`auto` null in `--json`; the row is in `task_auto`).
+Across Machines (the two homes of `.lf/qa/machine-moves.md`): the mark arrives
+with the Task, set or not, and replaces what the receiver held; the laptop
+reads it back as `State: unstarted · auto: off by Demo, …` from mini's server.
+
 Selection state `auto` is a Dashboard expression (`lf desktop dashboard query
 'Auto' 'state:auto'` prints JSON), not a `lf task list` filter. Never run
 `lf desktop view` here: it opens `loopflow://` in the installed app, which
@@ -124,7 +132,11 @@ start the branch's on the same home. The branch migrates it in place on the
 first read; copy the home first to repeat the check. The released lf has no
 `ship-review` skill: name the upgrade graph's interactive step `human-review`.
 A Task left waiting there ships after the upgrade (the captured Graph carries
-its skill). A released `lf task hold` on a Task that never took a Graph leaves
-nothing behind: after the upgrade it reads `idle` with no auto. A released ship's row
+its skill). A released `lf task hold` on a Task that never took a Graph comes through as
+`auto: off by <person>`; with no checkout, `lf task status` shows it on the
+`Not checked out on <machine> · auto: off by …` line. A repository graph that
+still names `human-review` then fails a branch run with "skill not found:
+human-review"; give the home a second graph naming `ship-review` (push, merge
+into existing checkouts) for the runs after the upgrade. A released ship's row
 names nobody (`person` NULL), so the backfilled setting reads `auto: on,
 <time>` with no "by"; a released hold names its person.

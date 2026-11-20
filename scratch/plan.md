@@ -197,7 +197,28 @@ Swift `DesktopHeadlessTests|ServerProtocolTests|DTOFixtureTests|TaskStatusTests|
 read the Task page; the screen was locked, so the toggle and badge are still
 unseen. iOS not compiled.
 
+QA 2026-11-19, fifth pass at `efd2a36fcc` (`scratch/qa.html`), the
+`task_auto` slice on three private homes: an off set before any run outlasts
+a personal `auto: on` and the run stops at `ship-review`; `auto on` lifts it;
+complete then reopen clears it; the served `task.auto.off` on a never-run
+Task. Upgrade from 0.16.0: a live ship reads `auto: on` and finished, a hold
+after a ship reads off, and a hold on a never-run Task now arrives as
+`auto: off by Demo` and stops that Task's first run at its interactive step.
+Machine moves through a stand-in `ssh`: off, on and unset marks arrive on
+mini; back on the laptop a mark cleared on mini replaced the laptop's stale
+off. Fixed: `lf task status` showed no auto for a Task without a checkout
+(now on the `Not checked out on …` line; no fixture);
+`planning_failure_keeps_the_stored_workflow_readable` still renamed the gone
+`task_graphs.auto` column and failed, it now drops `task_auto` (passed).
+Clippy clean. Not seen: the Desktop toggle and badge (the one Dev app bundle
+was running another checkout's build). A store that applied the earlier
+`task_graph_auto` draft answers "no such table: task_auto"; the real `~/.lf`
+never took it.
+
 Shape, for gate's review and ship-review's filing:
+
+- A repository graph that names `human-review` fails with "skill not found:
+  human-review" once this lands. No graph under `~/src/*/.lf` names it.
 
 - Off means two things: the person takes the interactive steps, and nothing
   merges. After `auto off`, a person's own `lf task run` past review waits at

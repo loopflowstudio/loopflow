@@ -1274,14 +1274,21 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
                 }
                 match status.task.as_ref().filter(|task| task.worktree.is_none()) {
                     // Under the line naming where it runs, indented; alone, by name.
+                    // A Task holds its auto setting before it has a checkout.
                     Some(task) => println!(
-                        "{}  {}",
+                        "{}  {}{}",
                         if elsewhere.is_some() {
                             ""
                         } else {
                             task.identifier.as_str()
                         },
-                        loopflow_execution::ops::task_ownership::not_checked_out_here()
+                        loopflow_execution::ops::task_ownership::not_checked_out_here(),
+                        status
+                            .execution
+                            .as_ref()
+                            .and_then(|execution| execution.auto.as_ref())
+                            .map(loopflow::lf::commands::task_row::auto_phrase)
+                            .unwrap_or_default()
                     ),
                     None if elsewhere.is_none() => match &status.execution {
                         Some(execution) => print_task_snapshot(execution, false)?,

@@ -4769,8 +4769,7 @@ mod tests {
         conn.execute_batch(&fixture).unwrap();
         loopflow_execution::store::migrations::upgrade_from_migration(&conn, "task_paused");
         // The planning read, not this setup, fails.
-        conn.execute_batch("ALTER TABLE task_graphs RENAME COLUMN auto TO auto_gone")
-            .unwrap();
+        conn.execute_batch("DROP TABLE task_auto").unwrap();
         let frontier =
             loopflow_execution::store::migrations::latest_applied_version_sqlite(&conn).unwrap();
         let store: loopflow_execution::store::SharedStore =
@@ -4799,7 +4798,7 @@ mod tests {
                 roadmap.tasks
             );
         };
-        assert!(reason.contains("no such column: auto"), "{reason}");
+        assert!(reason.contains("no such table: task_auto"), "{reason}");
         let graph = loopflow_execution::store::task_work::task_overview(&store.sqlite, &task)
             .unwrap()
             .0

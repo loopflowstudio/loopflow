@@ -16,6 +16,119 @@ private lf-world Machine (<code>lf-world build task-review /tmp/lfq975/r</code>)
 The world's <code>gh</code> answers reads only, so <code>land</code> succeeds only on a PR merged by hand; a failure there
 still shows the run got past the auto check.</p>
 
+<h2>Fifth pass, 2026-11-19 at <code>efd2a36fcc</code></h2>
+<p>What changed since the fourth pass: auto is a <code>task_auto</code> row on the Task, held before its first run,
+backfilled from every Task's last ship event, carried by a Machine move, cleared by reopening. Three private homes
+under <code>/tmp/lfq968e</code>, each with the branch's own <code>lf server run</code> and the marker-file stand-in:
+a fresh <code>lf-world build task-review</code>; a home made by the installed lf 0.16.0 and then opened by the branch;
+a laptop and a mini joined by a stand-in <code>ssh</code>.</p>
+
+<h3>A. Off before the first run <span class="ok">works</span></h3>
+<pre>$ lf task create 'Fold case in search terms' --json      # 8d98bf, never run, no checkout
+$ lf task auto off 8d98bf
+8d98bf: auto off
+$ lf task auto off 8d98bf --json
+{"issue":"8d98bf","was_on":false}
+$ lf config set auto on
+$ lf task run 8d98bf qaship
+8d98bf · qaship from start running as Graph run 3af7aea9-…        # no "merges:" line
+$ lf task status 8d98bf
+8d98bf  active · auto: off by Demo, Nov 19 18:01
+  Graph qaship: at ship-review
+$ lf task auto on 8d98bf
+8d98bf: standing in at ship-review
+  merges: this run may merge the PR; `lf task auto off 8d98bf` stops it
+8d98bf  moving · auto: on by Demo, Nov 19 18:03
+  Graph qaship: running at land</pre>
+<p>A second Task that nobody set, run bare under the same personal config, printed the <code>merges:</code> line, read
+<code>auto: on by personal config</code> and went through to <code>land</code>. The served <code>task.auto.off</code> on a
+never-run Task answered <code>{"issue":"76354b","was_on":false}</code> twice and advanced <code>planning</code> each time.
+<code>state:auto</code> in a Dashboard query listed the two Tasks with auto on and neither of the offs.</p>
+
+<h3>B. <code>lf task status</code> hid an off set before the first run <span class="fixed">fixed</span></h3>
+<pre>before
+$ lf task status 8d98bf
+Planning: unstarted · current
+Unowned
+8d98bf  Not checked out on Jacks-MacBook-Pro-2          # --json had auto: {state: off, by: Demo}
+
+after
+76354b  Not checked out on Jacks-MacBook-Pro-2 · auto: off by Demo, Nov 19 18:03</pre>
+<p>A Task with no checkout prints no run block, which is where the auto phrase lived. The phrase now follows the
+<code>Not checked out on …</code> line (<code>bin/lf.rs</code>). No fixture reads that line with auto set: every launch
+fixture's Task already has a checkout.</p>
+
+<h3>C. Complete, then reopen <span class="ok">works</span></h3>
+<pre>$ lf task auto off d87890 --reason 'wait for the design'
+$ lf task complete d87890
+auto {state: off, by: Demo}   summary {auto: off, ended: done, …}
+$ lf task reopen d87890
+d87890: reopened; its Graph unchanged
+auto None                     summary {auto: off, ended: done, …}      # task_auto row gone</pre>
+
+<h3>D. Returning from lf 0.16.0 <span class="ok">works</span></h3>
+<p>Made with the installed lf: <code>lf ship b9fd73</code> held at <code>implement</code>; <code>lf task hold 7f6693</code> on a
+Task that never ran; <code>lf ship 50cd32</code> then <code>lf task hold 50cd32</code>; <code>ada920</code> untouched. Then the
+released server stopped and the branch's started on the same home.</p>
+<pre>task_ship_events (0.16.0)                       task_auto (branch, after its first read)
+b9fd73 approved  person NULL                    b9fd73 on   {"kind":"person","name":null}
+50cd32 approved  person NULL                    50cd32 off  {"kind":"person","name":"Demo"}
+7f6693 stopped   Demo                           7f6693 off  {"kind":"person","name":"Demo"}
+50cd32 stopped   Demo                           (ada920: no row)      tasks.shipped_at: all NULL
+
+b9fd73  moving · auto: on, Nov 19 18:05         # the released ship's run, still going
+50cd32  idle · auto: off by Demo, Nov 19 18:05
+7f6693  json auto: {state: off, by: Demo}       # before this slice the hold on a never-run Task was lost</pre>
+<p>With the marker removed the released run took <code>human-review</code> itself and reached <code>end</code>
+(<code>done · auto: on</code>). A bare branch <code>lf task run 50cd32</code> stopped at <code>human-review</code> with nobody
+standing in. <code>7f6693</code>, run on a graph naming <code>ship-review</code>, stopped there; <code>lf task auto on
+7f6693</code> stood in and it read <code>done · auto: on by Demo, Nov 19 18:08</code>.</p>
+<p>The home's graph named <code>human-review</code>, which the released lf needs. On the branch a first run of that graph
+answers <code>Error: skill not found: human-review</code> and writes nothing (auto stayed off). No graph under
+<code>~/src/*/.lf</code> names it.</p>
+
+<h3>E. Moving a Task between Machines <span class="ok">works</span></h3>
+<pre>laptop                                              mini, after `lf task move &lt;id&gt; --machine mini`
+73ad00  never run, auto off                         73ad00  Not checked out on … · auto: off by Demo, Nov 19 18:10
+223bf1  auto on, stopped at land (no PR)            223bf1  idle · auto: on by Demo, Nov 19 18:10
+d4778c  never set                                   d4778c  Not checked out on …
+
+laptop $ lf task status 73ad00
+Runs on mini; read from its server.
+State: unstarted · auto: off by Demo, Nov 19 18:10 · ready</pre>
+<p>Then on mini: <code>73ad00</code> completed and reopened (mark cleared), <code>lf task auto off d4778c</code>, and both
+moved back. The laptop still held its own stale <code>off</code> row for <code>73ad00</code>; after the arrival it read no
+auto, and <code>d4778c</code> read <code>auto: off by Demo, Nov 19 18:12</code>.</p>
+<p>The first move of <code>223bf1</code> answered "the claude transcript of Session … is unavailable … nothing moved":
+the stand-in <code>claude</code> writes no transcript. With that file written the move went through; it is a fixture gap,
+now in <code>.lf/qa/machine-moves.md</code>.</p>
+
+<h3>F. A test that still renamed the gone column <span class="fixed">fixed</span></h3>
+<p><code>planning_failure_keeps_the_stored_workflow_readable</code> broke the planning read with
+<code>ALTER TABLE task_graphs RENAME COLUMN auto …</code>; the column left with this slice, so its setup would fail.
+It now drops <code>task_auto</code> and expects "no such table: task_auto". Passed
+(<code>cargo test -p loopflow --lib planning_failure_keeps_the_stored_workflow_readable</code>).</p>
+
+<h3>Not reached</h3>
+<ul>
+<li>The Desktop Auto toggle and badge, a third time: the one Dev app bundle was running another checkout's build
+(<code>loopflow.loo-515-make-task-pr</code>), so it was left alone. The Swift suites cover decoding and the view.</li>
+<li>iOS is still not compiled.</li>
+<li>A store that applied the earlier <code>task_graph_auto</code> draft (the fourth pass's world) answers
+<code>Error: sqlite error: no such table: task_auto</code> to the branch. The real <code>~/.lf</code> never took that
+draft (no <code>task_auto</code>, no <code>auto*</code> column on <code>task_graphs</code>).</li>
+</ul>
+
+<h3>Still wrong, worst first</h3>
+<ol>
+<li>The status line for a Task with no checkout has no fixture.</li>
+<li>After a released <code>lf task hold</code> killed a run, the branch reads <code>Graph up: stopped at implement</code>
+beside <code>latest Graph: Step … is running implement</code>: the released hold left its step process running
+(parent 1). The released lf's leftover, read faithfully.</li>
+<li>After reopening, <code>summary.auto</code> still says what the finished run had while <code>auto</code> is null. Both
+are true.</li>
+</ol>
+
 <h2>Fourth pass, 2026-11-19 at <code>2c53f20ade</code></h2>
 <p>What changed since the third pass: <code>lf ship</code> and <code>lf task hold</code> are gone, <code>lf task auto on|off</code>
 are the commands, <code>auto: on</code> is a config key, <code>-b</code> writes no auto, the builtin <code>auto</code> graph is gone.

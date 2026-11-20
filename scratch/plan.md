@@ -232,6 +232,15 @@ Shape, for gate's review and ship-review's filing:
 - A Task waiting at an interactive step reads "latest Graph: Graph … finished;
   nothing further is launched" (base behavior).
 - `task.shipped` meaning "merged".
+- Upgrade reads a released withdrawal (a ship that ended on a failure) as
+  `auto: off by` the row's person; that Task's next run waits at land. Chosen
+  as the safe reading; the other is no mark.
+
+Concept review 2026-11-19, seventh pass at `103dac6709`
+(`scratch/concept-review.html`): nothing to change. The `task_auto` slice
+closed the sixth pass's mismatches (auto's home, `task_begun`, the off answer,
+the docs paragraph). Left for ship-review, each larger than this Task: off's
+two promises, a config default read once, the 30 s poll, the unread `outlook`.
 
 ## What the work taught
 

@@ -2,251 +2,152 @@
 <html lang="en">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LOO-968 concept review: auto as built, sixth pass</title>
+<title>LOO-968 concept review: auto as built, seventh pass</title>
 <style>
-  :root {
-    color-scheme: light dark;
-    --bg: #fbfaf7; --fg: #1d1c1a; --dim: #66625b; --line: #dcd8cf;
-    --card: #ffffff; --code: #f1eee7;
-    --yes: #1f6f43; --no: #a3341f; --part: #8a6100;
-    --prop-bg: #fbf1dc; --prop-line: #d9b45f;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #171614; --fg: #ebe7df; --dim: #a09a8f; --line: #38352f;
-      --card: #1f1e1b; --code: #2a2824;
-      --yes: #6fcf97; --no: #f08b77; --part: #e2b64c;
-      --prop-bg: #33290f; --prop-line: #8a6a1c;
-    }
-  }
-  body { background: var(--bg); color: var(--fg); margin: 0;
-    font: 16px/1.55 -apple-system, "Segoe UI", system-ui, sans-serif; }
-  main { max-width: 980px; margin: 0 auto; padding: 40px 24px 80px; }
-  h1 { font-size: 28px; line-height: 1.2; margin: 0 0 8px; }
-  h2 { font-size: 20px; margin: 44px 0 12px; }
-  h3 { font-size: 16px; margin: 0 0 8px; }
-  p { margin: 0 0 12px; }
-  .dim { color: var(--dim); }
-  code, pre { font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
-  code { background: var(--code); padding: 1px 5px; border-radius: 4px; }
-  pre { background: var(--code); padding: 14px 16px; border-radius: 8px;
-    overflow-x: auto; margin: 0 0 12px; }
-  pre code { background: none; padding: 0; }
-  table { border-collapse: collapse; width: 100%; background: var(--card);
-    border: 1px solid var(--line); border-radius: 8px; }
-  th, td { text-align: left; vertical-align: top; padding: 10px 12px;
-    border-bottom: 1px solid var(--line); }
-  th { font-size: 14px; }
-  tr:last-child td { border-bottom: 0; }
-  .yes { color: var(--yes); font-weight: 600; }
-  .no { color: var(--no); font-weight: 600; }
-  .part { color: var(--part); font-weight: 600; }
-  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-  @media (max-width: 760px) { .cols { grid-template-columns: 1fr; } }
-  .card { background: var(--card); border: 1px solid var(--line);
-    border-radius: 8px; padding: 16px; }
-  .proposed { background: var(--prop-bg); border: 1px solid var(--prop-line);
-    border-radius: 8px; padding: 16px; }
-  .wrong { color: var(--no); }
-  ol.q > li { margin-bottom: 14px; }
-  ol.q ol { list-style: lower-alpha; margin-top: 4px; }
+:root { color-scheme: light dark; --bg:#fbfaf7; --fg:#1d1c1a; --mute:#6b675f; --line:#dedad0; --panel:#f1eee6;
+  --yes:#1f7a3d; --no:#b3261e; --part:#9a6200; --prop:#fff4d6; --propline:#d9b24c; }
+@media (prefers-color-scheme: dark) { :root { --bg:#161513; --fg:#ebe7dd; --mute:#9c968a; --line:#34312b; --panel:#1f1d1a;
+  --yes:#6fcf8a; --no:#ff8a80; --part:#f0b955; --prop:#33290f; --propline:#8a6b1c; } }
+body { background:var(--bg); color:var(--fg); font:16px/1.55 -apple-system, system-ui, sans-serif; max-width:60rem; margin:2.5rem auto; padding:0 1.25rem; }
+h1 { font-size:1.6rem; margin-bottom:.2rem; } h2 { font-size:1.15rem; margin-top:2.4rem; border-bottom:1px solid var(--line); padding-bottom:.3rem; }
+p.lede { color:var(--mute); margin-top:0; }
+code, pre { font:13px/1.5 ui-monospace, Menlo, monospace; }
+pre { background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:.8rem 1rem; overflow-x:auto; }
+table { border-collapse:collapse; width:100%; } th, td { text-align:left; vertical-align:top; padding:.55rem .6rem; border-bottom:1px solid var(--line); }
+th { font-weight:600; font-size:.9rem; color:var(--mute); }
+.yes { color:var(--yes); font-weight:700; } .no { color:var(--no); font-weight:700; } .part { color:var(--part); font-weight:700; }
+.cols { display:grid; grid-template-columns:1fr 1fr; gap:1rem; } @media (max-width:44rem) { .cols { grid-template-columns:1fr; } }
+.prop { background:var(--prop); border:1px solid var(--propline); border-radius:6px; padding:.2rem 1rem .6rem; }
+.was { border:1px solid var(--line); border-radius:6px; padding:.2rem 1rem .6rem; }
+ol.q > li { margin-bottom:.8rem; } ol.q ol { list-style:lower-alpha; }
+small { color:var(--mute); }
 </style>
-<main>
-<h1>Do the concepts line up? Auto, sixth pass</h1>
-<p><b>Area:</b> how a Task goes on without a person: the auto setting, what
-turns it on and off (a person, a config), what a run does with it, and what
-each surface says about it. Taken this wide because the Task's claim is about
-the whole, and because three things arrived after the fifth pass: the config
-<code>auto: on</code>, <code>lf ship</code>'s deletion, and <code>-b</code>
-writing no auto.</p>
-<p class="dim">Reviewed at <code>dbff3f811e</code> against <code>main</code>
-(209 files, +4,328 / −4,096). Tan panels are proposed and not built.
-Everything else exists.</p>
+<body>
+<h1>Do the concepts line up? Auto, seventh pass</h1>
+<p class="lede"><b>Area:</b> how a Task goes on without a person: the auto setting, who sets it (a person, a config),
+what a run does with it, where it is stored and what each surface says. The whole of PR #1976, read after the sixth
+pass's slice (auto on its own <code>task_auto</code> row) was built and driven by QA.</p>
+<p><small>Reviewed at <code>103dac6709</code> against <code>main</code> (212 files, +4,698 / −4,108). Read from the code
+and from QA's fifth pass (<code>scratch/qa.html</code>); nothing was run again here. Tan panels are proposed and not
+built. Everything else exists.</small></p>
+
+<p><b>Outcome: nothing to change in this work.</b> The sixth pass's "no" rows are yes. What is left is larger than
+this Task and listed below.</p>
 
 <h2>One interaction, with its failure and recovery</h2>
-<pre><code># .lf/wave/infra/config.yaml:   graph: code
+<pre># .lf/wave/infra/config.yaml:   graph: code
 #                               auto: on
-
 lf task create 'rotate the signing key'      # INF-9. This one I want to read first.
-lf task auto off INF-9
-#   INF-9: auto was not on                   <span class="wrong">← nothing was saved</span>
+lf task auto off INF-9                       # INF-9: auto off          ← kept, before any run
+lf task status INF-9                         # … Not checked out on laptop · auto: off by Maya, Nov 19 17:40
+lf task run INF-9                            # takes up `code`; the Wave's auto: on finds a mark and leaves it
+#   the run stops at ship-review; Maya reads the diff in the Task's conversation
 
-lf task run INF-9
-#   takes up `code`; auto is unset, so the Wave's config turns it on
-lf task status INF-9
-#   INF-9  moving · auto: on by wave config
-#   the run stands in at ship-review and merges the PR
+# failure: the run dies at build
+lf task status INF-9                         # Run died at build · starting again     (server carries `lf task run INF-9`)
+#   it comes back as a plain run; auto is still off, so it still stops at ship-review
 
-# recovery, if it is caught in time: say it again, now that a Graph row exists
-lf task auto off INF-9                       # INF-9: auto off
-#   Waiting at pr land: auto is off (Maya). `lf task auto on INF-9` lands it.</code></pre>
-<p>The same words work one minute later and not one minute earlier. A merge
-is the one thing here that cannot be taken back, and it follows an off.
-<code>docs/orchestration.md</code> says "Off stands: only
-<code>lf task auto on</code> turns it back on."</p>
-<p class="dim">Read from the code (<code>set_task_auto</code> is an
-<code>UPDATE task_graphs … WHERE task_id</code> that answers "no mark" on
-zero rows; <code>auto::configured</code> writes with <code>unset_only</code>)
-and seen by QA's fourth pass. Not run again here.</p>
+# recovery, and letting go
+lf task auto on INF-9                        # INF-9 · code from ship-review running as Graph run …
+lf task status INF-9                         # INF-9  moving · auto: on by Maya, Nov 19 18:02</pre>
+<p>One minute earlier or later, the same words do the same thing. Before the sixth pass's slice the first
+<code>off</code> saved nothing and the Wave's config merged the PR.</p>
 
 <h2>Pairings</h2>
 <table>
 <tr><th>What a person knows</th><th>In the code</th><th></th><th>Note</th></tr>
 <tr><td>Auto is a setting on the Task</td>
-  <td><code>task_graphs.auto{,_at,_by}</code>; <code>take_up_task_graph</code>
-  copies them onto the next Graph; reopen NULLs them</td>
-  <td class="no">no</td>
-  <td>The code keeps it alive across Graphs, so it already treats it as the
-  Task's. It is stored on a record the Task may not have yet. Biggest
-  mismatch, below.</td></tr>
-<tr><td>On, off</td>
-  <td><code>Option&lt;Auto&gt;</code>, <code>AutoState {On, Off}</code>:
-  three values</td>
-  <td class="part">partly</td>
-  <td>Never set and off differ twice: a config default fills only "never
-  set", and a run that reaches a merging step lands on "never set" and waits
-  on off. Both have a reason. Question 2.</td></tr>
+  <td><code>task_auto(task_id, state, set_at, set_by)</code>; <code>Option&lt;Auto&gt;</code>; <code>MovedTask.auto</code>; reopen deletes the row</td>
+  <td class="yes">yes</td><td>A row is the mark. No copy across Graphs, no "needs a first run". Was the biggest mismatch.</td></tr>
 <tr><td>Status and auto are separate</td>
-  <td><code>task_state_sql</code>, <code>TaskSection::of</code> never read it;
-  <code>task_begun</code> does (<code>tg.auto='on'</code>)</td>
-  <td class="part">partly</td>
-  <td>One read left from when approval came before the run. Auto on is always
-  a run now, so the clause adds nothing. In the plan.</td></tr>
+  <td><code>task_state_sql</code>, <code>TaskSection::of</code>, <code>task_begun</code>: none reads auto</td>
+  <td class="yes">yes</td><td>No shipping state, no Autonomous section; rows learn it through <code>state:auto</code>.</td></tr>
 <tr><td><code>lf task auto on</code> is the Task's run, asked for auto</td>
-  <td><code>AutoCommand::On</code> → <code>task.auto.on</code> →
-  <code>carry_task_run</code>, answering <code>TaskRun</code></td>
-  <td class="yes">yes</td>
-  <td>"Ship is shorthand" is now literally true with no word left for it.</td></tr>
-<tr><td><code>lf task auto off</code> takes the steps and the merge back</td>
-  <td><code>auto::off</code>, <code>stopped_landing</code>,
-  <code>waiting_to_land</code>, <code>AutoOff {issue, was_on}</code></td>
-  <td class="part">partly</td>
-  <td>"auto was not on" is the answer both when nothing needed doing and when
-  nothing could be saved. In the plan: it prints "auto off" and always
-  saves.</td></tr>
+  <td><code>AutoCommand::On</code> → <code>task.auto.on</code> → the one carrier, answering <code>TaskRun</code></td>
+  <td class="yes">yes</td><td>"Ship is shorthand" is true with no word left for it. Desktop's toggle sends the same operation.</td></tr>
+<tr><td><code>lf task auto off</code> takes it back, and stands</td>
+  <td><code>task.auto.off</code>, <code>set_task_auto</code> (replace); a config default is <code>INSERT OR IGNORE</code></td>
+  <td class="yes">yes</td><td>Always saved, always prints "auto off".</td></tr>
+<tr><td>On, off</td>
+  <td>no row, <code>On</code>, <code>Off</code>: three values</td>
+  <td class="part">partly</td><td>The toggle shows two. Never set and off differ at a merging step: a person's run past
+  <code>ship-review</code> lands when never set and waits when off. The docs now say so in one paragraph. Biggest
+  mismatch left; question 1.</td></tr>
 <tr><td>A Wave, a repository or you can make auto the default</td>
-  <td><code>auto: on</code>, <code>AutoDefault</code>,
-  <code>Starter::Config {layer}</code>, <code>WaveSetup.auto</code></td>
-  <td class="yes">yes</td>
-  <td>Written once at take-up with its layer as the setter, so status can say
-  who. A later config edit does not reach Tasks already taken up.</td></tr>
+  <td><code>auto: on</code>, <code>Starter::Config {layer}</code>, <code>WaveSetup.auto</code></td>
+  <td class="yes">yes</td><td>Written once at take-up, so "by wave config" can outlive the config line. Question 2.</td></tr>
 <tr><td><code>-b</code> stands in for this run only</td>
   <td><code>launcher.batch</code> in <code>stands_in</code>; no auto write</td>
-  <td class="yes">yes</td>
-  <td>Same meaning on a Task run as on any Graph.</td></tr>
+  <td class="yes">yes</td><td>Same meaning on a Task run as on any Graph.</td></tr>
 <tr><td>A run that died comes back and says so</td>
-  <td><code>run_recovery.rs</code>,
-  <code>TaskExecutionSnapshot.{died, outlook, reason}</code></td>
-  <td class="yes">yes</td>
-  <td><code>outlook</code> is decoded and has no reader; surfaces print
-  <code>reason</code>.</td></tr>
-<tr><td>The review before delivery</td>
-  <td>step and skill <code>ship-review</code></td>
-  <td class="yes">yes</td><td></td></tr>
-<tr><td>What the docs say off does</td>
-  <td><code>docs/orchestration.md</code>, Auto: "it is not what lets a PR
-  merge" and "lands unless auto is off", one paragraph</td>
-  <td class="no">no</td>
-  <td>The command's help says it in one line. In the plan.</td></tr>
+  <td><code>run_recovery.rs</code>, <code>TaskExecutionSnapshot.{died, outlook, reason}</code></td>
+  <td class="part">partly</td><td><code>outlook</code> crosses the wire, Swift decodes it, and nothing reads it: every surface prints
+  <code>reason</code>. A field the code has and the person never sees.</td></tr>
+<tr><td>The review before delivery</td><td>step and skill <code>ship-review</code></td><td class="yes">yes</td><td></td></tr>
 </table>
 
-<h2>Biggest mismatch: the Task's setting is stored on its Graph</h2>
+<h2>Biggest mismatch left: off is two promises</h2>
 <div class="cols">
-<div class="card">
-<h3>Existing</h3>
-<pre><code>task_graphs
-  task_id  graph  step  …
-  auto  auto_at  auto_by      -- NULL ×3: never set
+<div class="was"><p><b>Existing</b></p>
+<pre>stands_in:        auto == on  → stand in
+waiting_to_land:  auto == off → wait at the merging step
+                  never set   → land
 
-set_task_auto:  UPDATE task_graphs … WHERE task_id
-                0 rows → "no mark", nothing kept
-take_up_task_graph:
-  INSERT OR REPLACE … SELECT old.auto,old.auto_at,old.auto_by
-reopen:   UPDATE … SET auto=NULL,…
-Move:     graph.auto  (absent before a Graph)
-upgrade:  a released hold on a never-run Task is dropped</code></pre>
-</div>
-<div class="proposed">
-<h3>Proposed</h3>
-<pre><code>task_auto
-  task_id PRIMARY KEY → tasks
-  state ('on'|'off')  at  by   -- no row: never set
+lf task auto off X
+lf task run X        # you take ship-review yourself
+#   Waiting at pr land: auto is off (Maya).
+#   `lf task auto on X` lands it.</pre>
+<p>"Auto on" is the way to land a Task you reviewed yourself, with no step left to stand in at.</p></div>
+<div class="prop"><p><b>Proposed, its own Task</b></p>
+<pre>each interactive step records who took it:
+  a person | a stand-in
 
-set_task_auto:  upsert; INSERT OR IGNORE for a config default
-take_up_task_graph:
-  writes the Graph, nothing else
-reopen:   DELETE
-Move:     auto, beside graph
-upgrade:  every Task's latest approval or stop becomes its row</code></pre>
+landing waits only when auto is off
+and the last interactive step was stood in for
+
+lf task auto off X
+lf task run X        # you take ship-review yourself
+#   lands</pre>
+<p>Off then means one thing: you take the interactive steps. An off said after a stood-in review still stops the
+merge, because that review was not yours.</p></div>
 </div>
-</div>
-<p>One row is the mark, and a Task can hold it from the moment it exists. The
-copy across Graphs, the three NULLs and the "no Graph" answer go. Nothing on
-the wire changes shape.</p>
-<div class="proposed">
-<pre><code>lf task auto off INF-9          # INF-9: auto off
-lf task status INF-9            # INF-9  unstarted · auto: off by Maya, Nov 19 17:40
-lf task run INF-9               # the Wave's auto: on finds a mark and leaves it;
-                                # the run stops before its first interactive step</code></pre>
-</div>
-<p><b>Tested against.</b></p>
-<ul>
-<li><b>Normal.</b> Never-run Task in an <code>auto: on</code> Wave, nobody
-says anything: take-up inserts the config's row, as today.</li>
-<li><b>Failure.</b> Two first runs at once: both
-<code>INSERT OR IGNORE</code> the config mark, one row. A person's off
-landing between them wins, because the config write never replaces.</li>
-<li><b>Recovery.</b> A Task moved to another Machine before its first run
-carries its off on the Move record. A reopened Task has no row and takes its
-config default again, as now.</li>
-<li><b>Counterexample kept.</b> An off on a never-run Task in a Wave with no
-<code>auto: on</code> now leaves a row that changes nothing until a run
-reaches a merging step, where that run waits. That is what off already means
-after a first run (question 2).</li>
-<li><b>Passed over.</b> Taking a Graph up at <code>auto off</code> so the
-row exists: an earlier build's mark-only take-up left a Task that owed setup
-and refused the person's own run. Columns on <code>tasks</code>: a planning
-table whose update triggers compare every column. A personal
-<code>auto: off</code> config value: it answers "every Task", not "this
-one".</li>
-</ul>
+<p><b>Tested against.</b> <i>Normal:</i> off, own review, run: lands. <i>Failure:</i> off said while a stood-in run is
+past review: last interactive step was a stand-in, so it waits, as now. <i>Recovery:</i> the person runs the Task
+again; it needs somewhere to put their review, so the Task goes back to <code>ship-review</code>, not to
+<code>auto on</code>. <i>Counterexample kept:</i> a Graph with no interactive step and auto off has no step to go back
+to; it must keep waiting for <code>auto on</code>, so the off-at-land read cannot be deleted outright.</p>
+<p>Not in this work: it changes what Graph steps record and where an off puts a Task, and the present rule is
+documented and safe (an off never lets a merge through).</p>
 
 <h2>Larger than this work</h2>
 <ul>
-<li><b>Off is two promises.</b> "I take the interactive steps" and "nothing
-merges". After an off, your own <code>lf task run</code> past
-<code>ship-review</code> waits at land until you say
-<code>lf task auto on</code>, which by then has no step left to stand in at.
-Collapsing it needs the run to know whether a person or a stand-in took the
-last interactive step, and to put the Task back there on an off; that is a
-change to what Graph steps record.</li>
-<li><b><code>auto::running_graph</code> polls up to 30 s</b> so
-<code>TaskRunStart::Live</code> can name a Graph run. If <code>Live</code>
-named the carrier, the wait would go; it changes the <code>TaskRun</code>
-answer.</li>
-<li><b>A config default is read once.</b> Removing <code>auto: on</code> from
-a Wave leaves its taken-up Tasks on, attributed to "wave config". Resolving
-the default at read would make the attribution always true and cost a config
-read in every projection that shows auto.</li>
+<li><b>A config default is read once.</b> Removing <code>auto: on</code> from a Wave leaves its taken-up Tasks on,
+attributed to "wave config". Resolving at read costs a config read in every projection that shows auto.</li>
+<li><b><code>auto::running_graph</code> polls up to 30 s</b> so <code>TaskRunStart::Live</code> can name a Graph run.
+If <code>Live</code> named the carrier the wait would go; it changes the <code>TaskRun</code> answer.</li>
+<li><b><code>outlook</code> on the run snapshot has no reader.</b> Either a surface uses it in place of
+<code>reason</code>'s wording, or it leaves the wire.</li>
+<li><b>Upgrade reads a released withdrawal as off.</b> A ship that ended on a failure under 0.16.0 arrives as
+<code>auto: off by</code> the row's person, though nobody said off, and that Task's next run waits at land. It is the
+safe reading of an ended approval; under the new rule a failure would have left auto on.</li>
+<li><b>LOO-971</b> drops <code>task_ship_events</code>, <code>tasks.shipped_at</code>,
+<code>task_summaries.ship_events</code>; Task d3af77 removes the <code>graph: auto</code> fold.</li>
 </ul>
 
 <h2>Questions</h2>
 <ol class="q">
-<li>Auto's home. Chosen for review: its own row per Task.
-  <ol><li>Keep it: <code>task_auto</code>, a row is the mark.</li>
-  <li>Three columns on <code>tasks</code> instead.</li>
-  <li>Leave it on <code>task_graphs</code> and document that an off needs a
-  first run.</li></ol></li>
 <li>Off at the landing step, when you took <code>ship-review</code> yourself.
-  <ol><li>Keep: it waits until <code>lf task auto on</code>.</li>
-  <li>Your own run past review lands; only a stood-in run waits. Its own
-  Task.</li></ol></li>
-<li>An off on a Task that was never on prints:
-  <ol><li>"INF-9: auto off" (chosen).</li>
-  <li>"INF-9: auto off (was not on)".</li></ol></li>
+  <ol><li>Keep: it waits until <code>lf task auto on</code> (as built).</li>
+  <li>Your own run past review lands; only a stood-in review waits. Its own Task.</li></ol></li>
 <li>A config default that is later removed:
   <ol><li>Tasks already taken up stay on (as built).</li>
   <li>Resolve it at read, so they follow the config. Its own Task.</li></ol></li>
+<li><code>TaskExecutionSnapshot.outlook</code>:
+  <ol><li>Leave it for a surface to pick up.</li>
+  <li>Drop it from the wire until one does.</li></ol></li>
+<li>A released withdrawal after upgrade:
+  <ol><li>Off (as built).</li>
+  <li>No mark: the Task takes its config default again.</li></ol></li>
 </ol>
-</main>
+</body>
 </html>

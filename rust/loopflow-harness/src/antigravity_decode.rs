@@ -11,7 +11,7 @@ use super::fact::{Decoded, ProviderFact, ProviderTurn, Signal};
 use loopflow_model::chat::types::{ConversationEvent, ConversationItem, Lifecycle};
 use loopflow_model::id::AgentSessionId;
 
-pub const ERROR_CODE: &str = "antigravity_error";
+pub const ERROR_CODE: &str = "agy_error";
 
 /// One Loopflow turn in an Antigravity conversation.
 #[derive(Debug)]
@@ -388,7 +388,7 @@ mod tests {
         assert_eq!(
             errors(&decoded),
             [(
-                "antigravity_error",
+                "agy_error",
                 "invalid model selection (--model \"no-such-model-xyz\" --effort \"\"): model no-such-model-xyz is not recognized as a known model or custom model in settings"
             )]
         );
@@ -406,7 +406,7 @@ mod tests {
         decoded.extend(turn.finish(false, ""));
         assert_eq!(
             errors(&decoded),
-            [("antigravity_error", "authentication failed or timed out")]
+            [("agy_error", "authentication failed or timed out")]
         );
         assert!(fact_lines(&decoded).last().unwrap().ends_with(" Failed"));
     }
@@ -417,16 +417,13 @@ mod tests {
         let decoded = turn.finish(false, "warming up\nError: the model stream broke\n\n");
         assert_eq!(
             errors(&decoded),
-            [("antigravity_error", "Error: the model stream broke")]
+            [("agy_error", "Error: the model stream broke")]
         );
 
         let mut silent = Turn::new(None);
         assert_eq!(
             errors(&silent.finish(false, "")),
-            [(
-                "antigravity_error",
-                "Antigravity exited before finishing the turn"
-            )]
+            [("agy_error", "Antigravity exited before finishing the turn")]
         );
     }
 

@@ -509,11 +509,11 @@ pub trait Launcher: Harness {
     }
     /// Whether this harness's CLI is on `PATH`.
     fn installed(&self) -> bool {
-        crate::os_process::which_on_path(std::path::Path::new(self.program())).is_some()
+        crate::os_process::which_on_path(std::path::Path::new(self.kind().as_str())).is_some()
     }
     /// Whether a running process is this client's terminal program.
     fn recognizes(&self, process: &crate::process::OsProcess) -> bool {
-        process.command == self.program()
+        process.command == self.kind().as_str()
     }
     fn locate_transcript(
         &self,

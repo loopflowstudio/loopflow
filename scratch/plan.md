@@ -123,6 +123,8 @@ clippy on loopflow, storage, execution: clean; `scripts/test_desktop.sh
 (193 passed). For gate and CI: `documented_commands::` (docs/work.md changed),
 `binary(golden_prompt)`, the full suites.
 
+Compress after slice 2: one `started_project` test helper in `local_planning`; `with_task_waves` reads its Project's Wave in one step. Checks, run locally: storage `sqlite::plan` (14), nextest `local_planning::a_task_makes_no_project…` and `canonical_status_retains…`.
+
 Next: gate publishes the branch so CI runs the suites.
 
 ## Shows it worked

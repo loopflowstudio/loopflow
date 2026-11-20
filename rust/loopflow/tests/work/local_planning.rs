@@ -25,6 +25,27 @@ fn unconfirmed(
         .map(|action| action.id)
 }
 
+/// A started Project in `wave`, as a tracker would report one.
+fn started_project(
+    wave: &loopflow_model::id::WaveId,
+    name: &str,
+    created_at: time::OffsetDateTime,
+) -> loopflow_execution::work::project::Project {
+    loopflow_execution::work::project::Project {
+        id: loopflow_model::durable::ProjectId::new(),
+        summary: String::new(),
+        slug: name.to_lowercase(),
+        name: name.into(),
+        description: String::new(),
+        status: ProjectStatus::Started,
+        tracker_id: None,
+        tracker_synced_at: None,
+        wave_id: wave.clone(),
+        created_at,
+        updated_at: created_at,
+    }
+}
+
 fn command(repo: &Path, home: &Path, args: &[&str]) -> Command {
     let mut command = Command::new(loopflow_test_support::lf_binary());
     for (name, _) in std::env::vars_os() {
@@ -1036,21 +1057,8 @@ fn a_task_makes_no_project_and_joins_the_newest_started_one() {
         // Two started Projects, as the tracker would report them: new Tasks
         // join the newer and the command says which.
         let now = time::OffsetDateTime::now_utc();
-        let project = |name: &str, created_at| loopflow_execution::work::project::Project {
-            id: loopflow_model::durable::ProjectId::new(),
-            summary: String::new(),
-            slug: name.to_lowercase(),
-            name: name.into(),
-            description: String::new(),
-            status: ProjectStatus::Started,
-            tracker_id: None,
-            tracker_synced_at: None,
-            wave_id: wave.clone(),
-            created_at,
-            updated_at: created_at,
-        };
-        let older = project("Product", now);
-        let newer = project("Invoicing", now + time::Duration::days(1));
+        let older = started_project(&wave, "Product", now);
+        let newer = started_project(&wave, "Invoicing", now + time::Duration::days(1));
         store.insert_project(&older).unwrap();
         store.insert_project(&newer).unwrap();
         let (second, _) = create("Second");
@@ -2406,22 +2414,13 @@ fn canonical_status_retains_content_and_execution_across_acquisition_states() {
     let store = loopflow_execution::store::open_sqlite(&path).unwrap();
     let task = store.task(&id).unwrap().unwrap();
     // The tracker's Project, which the Task belongs to.
-    let now = time::OffsetDateTime::now_utc();
-    let project = loopflow_execution::work::project::Project {
-        id: loopflow_model::durable::ProjectId::new(),
-        summary: String::new(),
-        slug: "inbox".into(),
-        name: "inbox".into(),
-        description: String::new(),
-        status: loopflow_execution::work::project::ProjectStatus::Started,
-        tracker_id: Some(
-            loopflow_execution::linear::LinearProjectId::new("provider-project").unwrap(),
-        ),
-        tracker_synced_at: None,
-        wave_id: task.wave_id.clone().unwrap(),
-        created_at: now,
-        updated_at: now,
-    };
+    let mut project = started_project(
+        task.wave_id.as_ref().unwrap(),
+        "inbox",
+        time::OffsetDateTime::now_utc(),
+    );
+    project.tracker_id =
+        Some(loopflow_execution::linear::LinearProjectId::new("provider-project").unwrap());
     store.insert_project(&project).unwrap();
     rusqlite::Connection::open(&path)
         .unwrap()

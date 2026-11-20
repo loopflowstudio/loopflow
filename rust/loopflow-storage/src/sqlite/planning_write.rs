@@ -485,11 +485,11 @@ fn with_task_waves(conn: &Connection, mut edits: Vec<WorkEdit>) -> StoreResult<V
             _ => None,
         });
         let project_wave = match batch_wave {
-            Some(wave) => wave,
-            None => match super::children::project_wave_in(conn, project)? {
-                Some(wave) => wave,
-                None => continue,
-            },
+            Some(wave) => Some(wave),
+            None => super::children::project_wave_in(conn, project)?,
+        };
+        let Some(project_wave) = project_wave else {
+            continue;
         };
         let current: Option<WaveId> = conn
             .prepare_cached("SELECT wave_id FROM tasks WHERE id=?1")?

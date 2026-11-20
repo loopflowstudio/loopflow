@@ -138,6 +138,11 @@ Slice 2, a worker hears lf (2026-11-20):
   (`let transcript = provider != "antigravity"`); slice 3 deletes that.
 - The launch matrix's Antigravity Worker cell runs; the skip is now only for
   the two terminal cells (slice 4).
+- Run at realign (2026-11-20), both ok: `cargo test -p loopflow-execution
+  --lib -- harness::antigravity harness::launch_matrix` (14 passed) and
+  `cargo test -p loopflow --lib
+  task_graph_launch_tests::a_task_step_runs_as_a_worker_on_every_harness`.
+  CI runs them after.
 
 What is in the tree for it:
 
@@ -185,26 +190,32 @@ What slice 1 taught:
 
 ## Left to build
 
-Next is slice 3 (item 2): `lf history show --final` fails today for an
-Antigravity Session ("the transcript of conversation … is gone"), and usage
-is absent.
+Next is slice 3: `lf history show --final` fails today for an Antigravity
+Session ("the transcript of conversation … is gone"), and usage is absent.
 
-1. Done (slice 2).
-2. `transcript/antigravity.rs`: `transcript_full.jsonl` to `Turn`s, and
-   `locate_transcript` / `direct_transcript`. Then delete the `transcript`
-   guard in `a_task_step_runs_as_a_worker_on_every_harness` and give the
-   stand-in a transcript and usage.
-3. Done (slice 2).
-4. The terminal: `open`, bare thread report, the launch matrix's Chat and
-   WorkSession cells. `native_session.rs` already starts `program()`.
-5. Every list of harness names: `error.rs`, `config.rs` tests,
-   `prompt/process.rs`, `loopflow-test-support/src/lib.rs`,
+1. **Transcript and usage (slice 3).** `transcript/antigravity.rs`:
+   `transcript_full.jsonl` to `Turn`s, and `locate_transcript` /
+   `direct_transcript`. Then delete the `transcript` guard in
+   `a_task_step_runs_as_a_worker_on_every_harness` and give the stand-in a
+   transcript and usage.
+2. **The terminal (slice 4).** `open`, the launch matrix's Chat and
+   WorkSession cells (delete the `Mode::Interactive` skip).
+   `native_session.rs` already starts `program()`. The bare thread report
+   needs no new write: `claim_thread` already puts the conversation id in
+   `reported_thread_path` at the launch's first callback.
+3. **Names (slice 5).** Every list of harness names: `error.rs`, `config.rs`
+   tests, `prompt/process.rs`, `loopflow-test-support/src/lib.rs`,
    `config/catalog.rs` (`yolo`, `chrome` help), `launch_policy_tests.rs`,
    Swift (`WorkspacePanesView.swift`, `SessionProgramStatus.swift`), docs,
-   `skills/loopflow`.
-6. Done (slice 2), except the transcript-backed assertions in item 2.
-7. `harness/README.md`: the launch table and the Task-step table with five
-   columns.
+   `skills/loopflow`. `harness/README.md`: the launch table and the Task-step
+   table with five columns.
+4. **One path through `emit_block` (from reading slice 2).**
+   `emit_block(…, harness: Option<HarnessKind>)` branches twice on `None` to
+   call `HookCallback::plain` and `plain_reply`, which are also the trait's
+   defaults. With an absent `--harness` read as `HarnessKind::Claude`,
+   `emit_block` asks one harness both questions, the two `match harness`
+   blocks go, and `plain` / `plain_reply` fold into the trait defaults. No
+   hook declaration changes.
 
 ## Design
 
@@ -561,32 +572,16 @@ is unchanged line for line.
 
 ## Slices
 
-1. **Built (see "Built").** A batch on real `agy`, and the tree compiles. Classification at the
-   error event first (it touches four built harnesses and the retry tests,
-   and it is what Antigravity's `status: ERROR` plugs into).
-   `antigravity.rs` with the `Driver` and `classify_failure`,
-   `antigravity_decode.rs`, a transcript
-   reader that returns no turns yet, `native_session.rs` on `program()`,
-   `open` returning "not built yet". Stand-in `agy`
-   (`tests/support/antigravity_cli.py`) and the refusal-word tests for
-   OpenCode's balance line and Antigravity's three refusals.
-   `lf -b default 'reply pong' -a antigravity` prints pong and records the
-   conversation id; `-a antigravity:no-such-model` with a second agent lands
-   on the second. This is the slice that can prove the plan wrong: it shows
-   whether one process per turn, `status`-not-exit failure and the reported
-   thread fit `drive::run` without a new concept.
-2. **Built (see "Built").** A worker hears lf. The launch folder, the gate script,
-   `hook_callback` and `hook_reply` behind `--harness` on `__context-block`.
-   `lf task run <Task> -a antigravity`, then `lf steer` mid-step; the worker
-   test's Antigravity cell. A second resume turn shows `--conversation` with a
-   fresh launch folder.
+1. **Built (see "Built").** A batch on real `agy`; classification at the
+   error event on every harness.
+2. **Built (see "Built").** A worker hears lf: launch folder, gate script,
+   `hook_callback` / `hook_reply` behind `--harness`.
 3. **Usage.** `transcript/antigravity.rs`, `step-<n>` turn names,
    `locate_transcript`; `lf history usage --task` shows the step.
 4. **The terminal.** `open` (`-i`, trust setting, resume), bare thread report
    through `reported_thread_path`, `recognizes` (`agy` or `antigravity`),
    launch matrix chat and work-session cells.
-5. **Names.** Every list in "Left to build" 5, Swift, docs, `skills/loopflow`,
-   README tables with five columns.
+5. **Names.** Every list in "Left to build" 3, and item 4 there.
 
 ## Not checked
 

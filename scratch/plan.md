@@ -1,34 +1,59 @@
-# 343ad5: Loopflow Dev opens a read-only snapshot of the Machine
+# 343ad5: Loopflow Dev on real data, on the Machine when it can and on a copy when it can't
 
 ## Outcome
 
 `uv run python scripts/loopflow-dev.py run` on any branch opens Loopflow Dev on
-the Machine's real Waves, Tasks and Sessions as of that moment, served by the
-branch's own server from a read-only copy of the store. The installed server,
-its store and every running Session are not touched: the Dev build never
-connects to them.
+the Machine's real Waves, Tasks and Sessions, and says in one line which of two
+things it opened:
+
+- **The Machine**, when the branch's lf opens the store and speaks the wire the
+  installed server speaks. This is today's path: live terminals, real changes.
+- **A copy of the Machine**, when either differs, or with `--copy`. The branch's
+  own server serves a read-only copy of the store taken at launch. The
+  installed server, its store and every running Session are not touched.
+
+`--world <dir>` opens a fake world, as now. Those are the three things a Dev
+build can look at: the Machine, a copy of it, a fake world.
+
+| | Real data | Changes work | Live terminals | Branch may change wire or schema |
+| --- | --- | --- | --- | --- |
+| The Machine | yes | yes | yes | no |
+| A copy | yes, as of launch | no, refused with one sentence | no | yes |
+| A fake world | no | yes | stand-in providers | yes |
 
 Done when:
 
 - On a branch that changes a wire DTO or adds a migration, `loopflow-dev.py run`
-  shows the real repository window with today's Tasks, not empty lists.
-- While Loopflow Dev runs, the installed `lf server status` reports the same
-  `instance` and its pid is unchanged, and `~/.lf/loopflow.db` has no row the
-  Dev build wrote.
-- A change made in Loopflow Dev (run a Task, steer, create) answers with one
-  sentence saying this is a snapshot, and starts no provider.
-- `loopflow-dev.py run --world <dir>` opens a fake world and shows only that
-  world's windows.
-- swift/README.md and scripts/testing.md describe this one way.
+  prints which types differ, opens a copy, and the repository window shows
+  today's Tasks, not empty lists.
+- On a branch that leaves both alone, `run` opens the Machine as it does today.
+- While Loopflow Dev runs on a copy, the installed `lf server status` reports
+  the same `instance` and pid, `~/.lf/loopflow.db` has no row the Dev build
+  wrote, no real Session process was signalled, and no file changed in any real
+  worktree.
+- A change made on a copy (run a Task, steer, create, start a Session) answers
+  with one sentence and runs no command code.
+- `loopflow-dev.py run --world <dir>` shows only that world's windows.
+- `lf server status` from a branch build says the installed server is ready.
+- swift/README.md and scripts/testing.md describe this once.
 
 ## Demo
 
 On a branch with a wire change (LOO-903's `owned_by_you` is the case that
-failed): `uv run python scripts/loopflow-dev.py run`. Loopflow Dev opens the
-loopflow repository with the real backlog. In another terminal `lf server
-status` still shows the installed server's instance. Click Run on a Task in
-Dev: "This is a snapshot of the Machine from 14:02; make changes in Loopflow or
-with lf."
+failed): `uv run python scripts/loopflow-dev.py run` prints
+
+```
+This branch changes what the server sends (LocalTask, WaveDetail, RoadmapSnapshot).
+Opening a copy of the Machine from 14:02; changes are refused there.
+```
+
+Loopflow Dev opens the loopflow repository with the real backlog. In another
+terminal `lf server status` still shows the installed server's instance. Click
+Run on a Task in Dev: "This is a copy of the Machine from 14:02; make changes
+in Loopflow or with lf."
+
+On `main`, the same command prints "Opening the Machine" and a Session's
+terminal is live.
 
 ## What was found
 
@@ -39,47 +64,65 @@ reports "Loopflow server uses another executable"
 with the Dev bundle's lf (3500440e9) against the installed server
 (21d541a87). That comparison only feeds `installation::server::ensure`, which
 uses it to decide whether to re-register after a promotion. `Connection::open`
-and Swift's `ServerLink` negotiate by protocol revision alone, and `lf install
-server` from a Dev build on the default home execs the installed lf
-(`delegate_selected`). The installed server's log shows it served the Dev app
-`config.theme` at 08:57:53Z, so the link was up.
+and Swift's `ServerLink` negotiate by protocol revision alone. The installed
+server's log shows it served the Dev app `config.theme` at 08:57:53Z, so the
+link was up.
 
 **The lists were empty because the branch changed the wire.** LOO-903 added a
 required `owned_by_you` to `local_task`, `wave_detail` and `roadmap_snapshot`
 (`git diff 21d541a87 3500440e9 -- tests/fixtures/dto`). Wire types carry no
-defaults, both protocol revisions are 8, so the hello passed and every snapshot
-failed to decode. A Dev app on the installed server works only for branches
-that leave every DTO and operation alone, and nothing tells the two cases
-apart before the window is empty. That route is closed.
+defaults, both protocol revisions are 8, so the hello passed and every read
+failed to decode. Revision 8 names the framing and negotiation, not the shape
+of what is sent. The shape is already one document: `lf server describe
+--json`, checked in as `tests/fixtures/dto/server_schema.json`. It needs no
+store and no running server, so two builds can be compared before anything
+opens.
 
 **A branch server on the real home is a second live Machine.** The server
 starts `wake` (messages idle conversations through their real inboxes) and
 `recovery` (starts Task conversations it believes died, in held terminals) at
 boot (`rust/loopflow/src/server/service.rs:186`, `recovery.rs`, `wake.rs`). On
 the default home it would also fight for the socket and the SMAppService
-registration. Closed by the November 4 constraint.
+registration. Closed by the constraint that a running Session never breaks
+because a Dev build started.
 
-**A snapshot a branch build can read takes two seconds.** Probe, November 20:
+**A copy a branch build can read takes two seconds.** Probe, November 20:
 `sqlite3 -readonly ~/.lf/loopflow.db ".backup …"` copied the 688 MB store in
-2.0 s. With `LF_HOME` at the copy, the Dev bundle's lf listed the real Tasks
-(`task list`), Sessions (`session list`) and `wave status infrastructure`.
-`store::copy::snapshot` (`rust/loopflow-storage/src/copy.rs`) already does this
-copy with an APFS clone for `lf install`.
+2.0 s; `history.db` is 98 MB. With `LF_HOME` at the copy, the Dev bundle's lf
+listed the real Tasks (`task list`), Sessions (`session list`) and `wave status
+infrastructure`. `store::copy::snapshot` (`rust/loopflow-storage/src/copy.rs`)
+already does this copy with an APFS clone for `lf install`.
 
-**A read-only file is the whole containment.** After `chmod 444` on the copy,
-the same three reads still worked, and `lf task create` failed with "sqlite
-error: attempt to write a readonly database" before filing anything. The
-private home also minted its own `provider-token.key`, so the copied service
-tokens don't decrypt there.
+**A read-only file stops store writes, and only those.** After `chmod 444` on
+the copy, the same three reads still worked, and `lf task create` failed with
+"sqlite error: attempt to write a readonly database" before filing anything
+locally. Whether it reached Linear first was not checked. The private home
+minted its own `provider-token.key`, so the copied service tokens don't decrypt
+there. A copied store still names real things outside itself: live pids, real
+worktrees, tracker ids, PR numbers.
+
+**Copies of the Machine were built once and deleted.** `lf clone` (#1549,
+October 14) made a writable copy: it scrubbed credentials, routes, pids,
+endpoints and attachment tokens and ran everything in a macOS sandbox, about
+1,000 lines with its tests. #1755 (October 29) deleted it with the draft-era
+store machinery; one first use had taken 265 s against an 8.8 GB store. Its
+rule was "a branch with no new migration runs its own code directly on
+`~/.lf`; a branch with one runs against a fresh private `LF_HOME`", and
+docs/dev/machines.md says "Loopflow never copies main data into it". Two
+things have changed: the copy now takes 2 s, and a fresh private home has no
+real data, which is the gap this Task reports. This design keeps the first
+half of that rule and replaces the second. It does not bring back the scrub or
+the sandbox: the copy is never writable.
 
 **The fake-world workaround failed for three separate reasons.**
 - Restored windows: `WindowGroup(for: RepositoryWorkspace.self)` restores the
-  Dev bundle's saved windows whatever `LF_HOME` it runs with
-  (`swift/LoopflowMac/LoopflowApp.swift:93`), so the world got the real
-  repository's window.
+  bundle's saved windows whatever `LF_HOME` it runs with
+  (`swift/LoopflowMac/LoopflowApp.swift:93`). `RepositoryWorkspace` is `{id,
+  path}` and does not say which Machine it belongs to, so the world got the
+  real repository's window.
 - Path length: the world's log has `Desktop API unavailable … error="Socket
   path exceeds 103 bytes"` for `home/run/desktop/com.loopflow.mac.dev.sock`
-  under the long scratchpad path.
+  under the long scratchpad path. Nothing said so before the window opened.
 - The installed Loopflow.app (pid 36218, started 01:08:52) was running with the
   world's `LF_HOME` and the demo Session's `LF_AGENT_CALLER`, without `LF_BIN`.
   It rewrote the world's `server.plist` to `/Applications/Loopflow.app/…/lf`
@@ -87,137 +130,252 @@ tokens don't decrypt there.
   from `loopflow-dev.py` (that always sets `LF_BIN`). What launched it is not
   established; see `scratch/questions.md`.
 
+**Desktop already has "this window cannot change the Machine right now".**
+`PendingChanges.Link.away` disables change controls and shows a standing
+notice, "The Machine is away; showing what was last read". The Dev app showed
+that sentence when its reads failed to decode, though the link was up. Why is
+not established; `ServerLink.lostLink` only names disconnects.
+
+**`welcome` and `status` reject unknown fields** (`#[serde(deny_unknown_fields)]`
+in `rust/loopflow-execution/src/machine/wire.rs`). A field added to either
+breaks every older Rust client at connect, including the lf inside running
+Sessions after an install. Neither is changed here.
+
 ## Design
 
-A **snapshot world** is a world directory (`env.json`, `home/`, empty provider
-homes) whose `home/loopflow.db` and `home/history.db` are read-only copies of
-the Machine's. `lf-world snapshot <dir>` makes one: stop the server that last
+### The launcher chooses, and says which
+
+`loopflow-dev.py run` and `run-debug` share one choice, made after the build:
+
+1. `--world <dir>`: that world.
+2. `--copy`: a copy.
+3. Otherwise the Machine, when both hold:
+   - the bundled lf opens the store (`lf config repository --json`, the check
+     `_check_repository_opening` already runs), and
+   - the bundled lf's `server describe --json` equals the installed lf's. The
+     installed lf is the public `lf` entry run with every `LF_*` cleared.
+4. Otherwise a copy. The launcher prints why: the store's refusal, or the
+   names under `$defs` whose definitions differ.
+
+The comparison is the whole document. A difference that would have decoded
+fine opens a copy when the Machine would have worked; that errs toward the
+safe side and is not tuned further.
+
+`LF_HOME` reaches the app only from this choice. The pass-through of an
+inherited `LF_HOME` in `_app_environment` goes: a shell that carries a world's
+environment no longer decides what Dev opens.
+
+### A copy of the Machine
+
+A copy is a world directory (`env.json`, `home/`, empty provider homes, and the
+same `bin/` stand-ins a built world has for `gh`, `launchctl` and the
+providers) whose `home/loopflow.db` and `home/history.db` are read-only copies
+of the Machine's. `lf-world copy <dir>` makes one: stop the server that last
 served `<dir>`, `copy::snapshot` both databases from the default home, open the
 store once so a branch migration applies (a private home migrates itself),
-checkpoint, `chmod 0444`. The directory is replaced on each call.
+checkpoint, `chmod 0444`. The directory is replaced on each call. The launcher
+builds `lf-world` beside `lf` when it needs a copy and always uses `~/.lf-copy`:
+one launchd job (`com.loopflow.server.<digest of the home>`) is reused, and
+`~/.lf-copy/home/run/desktop/com.loopflow.mac.dev.sock` is 62 bytes.
 
-The store file's mode is the single source of truth. Three behaviors derive
-from it, none from a flag or marker:
+The word is "copy" everywhere a person reads it: the command, the directory,
+the sentence, the docs. "Snapshot" already means a subscription's frame
+(`roadmap_snapshot`) and `copy::snapshot`.
+
+The store's mode is the one fact; nothing is flagged or marked. What follows
+from it:
 
 - **The server acts only on a store it can write.** A server whose store opens
   read-only serves reads and subscriptions and does not start `wake`,
   `recovery`, `maintenance` or remote control.
-- **Commands fail at the store.** The server's command dispatch turns that
-  failure into one sentence written in Rust and carried on the wire: "This is a
-  snapshot of the Machine from HH:MM; make changes in Loopflow or with lf." The
-  time is the database file's modification time.
-- **No provider can run.** The world's `CLAUDE_CONFIG_DIR` and `CODEX_HOME` are
-  empty, as in a fake world, and a launch cannot record its Session.
+- **That server admits no change.** A `Write`, a Session start or continue, or
+  an upload is answered at dispatch, before any command code runs, with one
+  sentence written in Rust: "This is a copy of the Machine from HH:MM; make
+  changes in Loopflow or with lf." The time is the database file's
+  modification time. Refusing at admission, not mapping the SQLite failure
+  afterwards, is what keeps a command from signalling a real pid, touching a
+  real worktree or calling the tracker before its store write fails.
+- **An lf that Desktop starts beside the server** (a pane launch) meets the
+  read-only store and the world's stand-ins: no provider login, a `gh` that
+  refuses writes, a token key that decrypts nothing.
 
-`loopflow-dev.py run` and `run-debug` take `--world <dir>`. Without it they run
-`lf-world snapshot ~/.lf-view` and open that. `~/.lf-view` is fixed and short:
-one launchd job (`com.loopflow.server.<digest of the home>`) is reused, not one
-per run, and `~/.lf-view/home/run/desktop/com.loopflow.mac.dev.sock` is 62
-bytes. Both pass `-ApplePersistenceIgnoreState YES`, so the window opened is
-the `--repo` one and nothing is restored from another home.
+The first is the server's own conduct, the second covers everything that goes
+through it, the third is the backstop for what doesn't. The acceptance check
+measures the outside effects directly, since the mode alone does not promise
+them.
 
-`lf server status` on the default home execs the installed lf the way `lf
-install server` does, so a branch build reports the installed server's real
-readiness.
+Desktop shows the refusal through the notice path every refused write uses. No
+DTO changes.
 
-Choices made for review:
+### What a copy shows
 
-- **`run` always opens a snapshot; the Dev app no longer joins the real
-  Machine.** Passed over: keeping today's live path for branches that leave the
-  wire alone. It gives live terminals and real changes from Dev, and it is the
-  path that silently empties on a wire change and lets branch code write the
-  real store.
-- **Read-only by file mode, not a server flag.** Passed over: a writable copy
-  with `lf server run --observe`. A flag covers the server but not the lf
-  children Desktop starts.
-- **The snapshot is as of launch.** Running `run` again refreshes it. Passed
-  over: a branch server reading the live store read-only, which fails on any
-  branch with a migration and holds read transactions on the real WAL.
+- Planning, Tasks, Waves, Sessions and history as of the copy's time.
+- Session rows show the liveness the OS reports now, since the copied rows name
+  real pids. Nothing in a copy signals them.
+- No held terminals: the copy's home has no holders, so a Session pane shows
+  the existing "no terminal" state. Terminal work uses the Machine or a fake
+  world.
+- Tracker and PR refreshes do not run; rows show what the store last recorded.
+  How a failed refresh presents is looked at when slice 2 first opens a copy.
+
+### Windows belong to their Machine
+
+A window value names the Machine it was opened on. A restored window whose
+Machine is not the one this launch is on is not shown. This replaces a launcher
+flag: the installed app opened on a world's home, as on November 20, is covered
+too. Saved windows from before the change carry no Machine and are dropped
+once.
+
+If SwiftUI gives no way to drop a restored window before it shows, the fallback
+is `-ApplePersistenceIgnoreState YES` on copy and world launches, and the plan
+records which was used.
+
+### A world says when its directory is too long
+
+`lf-world build` and `lf-world copy` fail at creation when
+`<dir>/home/run/desktop/com.loopflow.mac.dev.sock` exceeds the socket limit,
+naming the length and the limit. Today the world builds and Desktop's API is
+silently missing.
+
+### `lf server status` says what is true
+
+`ready` means the server answers at a revision this build speaks. A different
+executable is not an error: status reports the server's executable hash, and
+`installation::server::ensure`, the one caller that needs "the same executable"
+to decide re-registration, compares it. A branch build then reports the
+installed server ready without exec'ing another lf. Every other caller of
+`status()` is read before the change; one that relied on the old meaning asks
+for the comparison by name.
+
+### A read that cannot be decoded is not "the Machine is away"
+
+Establish first why a decode failure reached `awayText`. Then a decode failure
+shows its own sentence, naming both builds from `welcome.build` and the app's
+own: "This Loopflow (0.16.0+3500440e9) can't read what the server
+(0.16.0+21d541a87) sent." The launcher's comparison keeps Dev from getting
+here; the installed app meets it whenever the app and server builds part.
+
+## Choices made for review
+
+- **`run` opens the Machine when the branch speaks its wire, a copy
+  otherwise.** Passed over: always a copy. It is one behavior, but it takes
+  live terminals and real changes away from Swift-only branches, where today's
+  path works, and it drops the half of #1755's rule that held. Also passed
+  over: always the Machine, failing on a difference; that leaves wire-changing
+  branches with fake data only.
+- **The copy is read-only.** Passed over: a writable, disposable copy, so that
+  dragging and creating can be tried on real data. Everything a copied row
+  points at is real, so it needs the scrub and sandbox #1755 deleted.
+  Interactions on a wire-changing branch are tried in a fake world.
+- **Read-only by file mode, refused at admission.** Passed over: `lf server
+  run --observe` on a writable copy; a flag covers the server but not the lf
+  children Desktop starts. Also passed over: letting commands run and wording
+  the SQLite failure; effects outside the store come first.
+- **The copy is as of launch.** `run` again refreshes it. Passed over: a branch
+  server reading the live store read-only, which fails on any branch with a
+  migration and holds read transactions on the real WAL.
+- **Restored windows are fixed in the app, not by a launcher flag.**
+- **`status` changes its meaning of `ready`; nothing delegates.**
+
+## Outside this work
+
+- A copy's window does not say it is a copy until a change is refused. A
+  standing label needs the sentence on the wire; `welcome` and `status` reject
+  unknown fields, so it takes a new read that older servers lack, plus a
+  second reason beside `away` for `PendingChanges.acceptsChanges` to be false.
+- What launched the installed app on the world's home.
+- The `com.loopflow.server.<digest>` launchd jobs that test homes of other
+  worktrees left running (19 on November 20). A copy's own job stays loaded
+  after Dev quits and is replaced by the next `lf-world copy`.
+- Live terminals of real Sessions on a wire-changing branch.
 
 ## Acceptance check at gate
 
-One Rust integration test, `snapshot_world`: seed a home with a Task and a
-Session whose attachment looks live, with a stand-in provider on `PATH`; run
-`lf-world snapshot`; start `lf server run` on the snapshot.
+One Rust integration test, `copy_world`: seed a home with a Task, a repository
+checkout, and a Session whose recorded pid is a live `sleep` and whose
+attachment looks live, with a stand-in provider on `PATH`; run `lf-world copy`;
+start `lf server run` on the copy.
 
 - A served Task read returns the seeded Task.
-- A `task.run` command returns the snapshot sentence.
-- After 2 recovery intervals the stand-in provider was never executed.
-- The source `loopflow.db` is byte-identical before and after, and the
-  snapshot's is unchanged after the command.
+- `task.run`, a Session start and a Session stop each return the sentence.
+- After 2 recovery intervals the stand-in provider was never executed and the
+  `sleep` is still running.
+- A pane launch through the copy's lf starts no provider.
+- The source `loopflow.db` is byte-identical before and after, the copy's is
+  unchanged after the commands, and the seeded checkout has no new or changed
+  file.
 
-`cargo test -p loopflow --test integration snapshot_world` passes. The launch
-arguments get a new Python test beside `scripts/loopflow-dev.py`; none exists
-today.
+`cargo test -p loopflow --test integration copy_world` passes. A new Python
+test beside `scripts/loopflow-dev.py` covers the choice (same documents and an
+opening store: the Machine; a differing `$defs` entry: a copy, naming it; a
+refusing store: a copy; `--copy`; `--world`) and the environment each passes.
+A Swift test covers a restored window from another Machine and a decode
+failure's notice.
 
 ## Surfaces
 
 | Surface | Change |
 | --- | --- |
-| `lf-world snapshot <dir>` | New. Prints the same `env.json` shape as `build`. |
-| `lf server run` | Serves a read-only store without its three writers. |
-| Server command dispatch | One sentence for a read-only store. |
-| `lf server status` | Delegates on the default home. |
-| `scripts/loopflow-dev.py` | `run`/`run-debug` default to the snapshot; `--world` on both. |
-| Loopflow Dev | Shows the server's sentence through the existing notice path. No DTO change. |
-| swift/README.md, scripts/testing.md, docs/dev/machines.md, docs/dev/reference.md | One way, described once. |
+| `scripts/loopflow-dev.py run`, `run-debug` | Choose the Machine or a copy and print which; `--copy` and `--world` on both. |
+| `lf-world copy <dir>` | New. Prints the same `env.json` shape as `build`. Both say when `<dir>` is too long. |
+| `lf server run` | Serves a read-only store without its writers and admits no change. |
+| `lf server status` | `ready` no longer depends on the executable. |
+| Loopflow, Loopflow Dev | Restored windows from another Machine are not shown; a decode failure has its own sentence. |
+| swift/README.md, scripts/testing.md, docs/dev/machines.md, docs/dev/reference.md | The three things Dev opens, described once. |
 
 ## Absent and error states
 
-- No `~/.lf/loopflow.db`: `lf-world snapshot` says there is no Machine to copy
-  and names `lf-world build`.
-- A branch migration fails on the copy: the snapshot command fails with the
-  migration error; nothing launches.
-- Held terminals: a snapshot home has no holders, so a Session pane shows the
-  existing "no terminal" state. Terminal UI work uses a fake world.
-- Session rows show the liveness the OS reports now; everything else is as of
-  the snapshot time.
+- No `~/.lf/loopflow.db`: `lf-world copy` says there is no Machine to copy and
+  names `lf-world build`.
+- No installed lf to compare with: a copy, saying so.
+- A branch migration fails on the copy: the command fails with the migration
+  error; nothing launches.
+- The Machine's store has a migration the branch doesn't know: neither the
+  Machine nor a copy opens; the launcher prints the store's refusal and names
+  `lf sync main`.
 
 ## Operational boundary
 
-- Snapshot plus migration under 5 s for a 700 MB store on APFS; `.backup` took
+- Copy plus migration under 5 s for a 700 MB store on APFS; `.backup` took
   2.0 s without the clone.
 - The copy reads the live store under one read transaction and never writes it.
-- `~/.lf-view` is private to the account (0700): it holds the full store.
-
-## Exclusions
-
-- Live terminals of real Sessions inside Loopflow Dev.
-- Changing real data from a Dev build.
-- Cleaning up the `com.loopflow.server.<digest>` launchd jobs that test homes
-  of other worktrees left running (19 on November 20).
-- Why the Dev app showed "The Machine is away" for a decode failure.
+- `~/.lf-copy` is private to the account (0700): it holds the full store.
 
 ## What goes
 
-- `scripts/loopflow-dev.py`: the `LF_HOME` pass-through in `_app_environment`,
-  and the "ordinary app commands never migrate the shared database" hint in
-  `_check_repository_opening`.
-- swift/README.md "Build system": the paragraphs on the bundled helper
-  forwarding Main-Machine commands and on `run` checking the shared schema.
+- `scripts/loopflow-dev.py`: the inherited-`LF_HOME` pass-through in
+  `_app_environment`; the "ordinary app commands never migrate the shared
+  database" hint in `_check_repository_opening`, replaced by the choice's own
+  line.
+- `client.rs`: the "uses another executable" error in `status()`.
+- swift/README.md: the opening paragraph and "Build system" paragraphs on which
+  lf runs where are rewritten as the three cases; "Main-Machine commands
+  forward to installed lf" goes unless the code is found to do it.
 - docs/dev/machines.md: "Loopflow never copies main data into it".
 - docs/dev/reference.md Fake world row: "Nothing is shared with a real Machine"
-  gains the snapshot.
+  gains the copy.
 
-Stays: `status()`'s executable comparison (it decides re-registration after a
-promotion), `delegate_selected`, fake-world recipes, the installed app's window
-restoration.
+Stays: today's path onto the Machine, `delegate_selected` for `lf install
+server`, fake-world recipes, `welcome` and `status` as they are.
 
 ## Slices
 
-1. **A branch server serves a read-only snapshot and starts nothing.** The one
-   that could prove the plan wrong. `lf-world snapshot`, the server's
-   writable-store check, and the `snapshot_world` test without the sentence.
+1. **A branch server serves a read-only copy, starts nothing and admits no
+   change.** The one that could prove the plan wrong. `lf-world copy`, the
+   server's writable-store check, the admission sentence, and `copy_world`.
    It shows whether served reads and subscriptions (which stamp observations)
    work on a store they cannot write, whether WAL mode holds on a 0444 file
-   under a long-lived server, and that recovery and a pane launch start no
-   provider. If served reads need writes, the fallback is a writable copy whose
-   actors stay off; decide then, with the failing read in hand.
-2. **`loopflow-dev.py run` opens it.** Default snapshot at `~/.lf-view`,
-   `--world` on both commands, `-ApplePersistenceIgnoreState YES`. Check by
-   launching Dev on this branch and on a fake world; if SwiftUI ignores the
-   AppKit default, `.restorationBehavior(.disabled)` when `--repo` is passed.
-   Remove the `LF_HOME` pass-through.
-3. **The sentence, and `lf server status` delegation.** Command dispatch maps
-   the read-only failure; the acceptance test gains its assertion.
-4. **Docs.** swift/README.md, scripts/testing.md, machines.md, reference.md.
+   under a long-lived server, and that recovery and a pane launch reach nothing
+   outside the copy. If served reads need writes, the fallback is a writable
+   copy with the same admission refusal and writers off; decide then, with the
+   failing read in hand, and say so here.
+2. **The launcher chooses.** The comparison, the printed line, `--copy` and
+   `--world` on both commands, `lf-world` built when needed, the `LF_HOME`
+   pass-through removed, the Python test. Check by launching Dev three ways:
+   `run --copy` on this branch, `run` on a checkout whose wire matches the
+   installed server, and `run --world` on a fake world. Look at how tracker and
+   PR rows read in the copy.
+3. **Windows belong to their Machine; a world says when its directory is too
+   long.**
+4. **`lf server status`, and the decode sentence.**
+5. **Docs.** swift/README.md, scripts/testing.md, machines.md, reference.md.

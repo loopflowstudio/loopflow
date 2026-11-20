@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>343ad5 concept review: Loopflow Dev on real data</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #fbfaf7; --fg: #1d1c1a; --muted: #6a665e; --line: #dedad0;
+    --card: #ffffff; --yes: #1f7a45; --no: #b3261e; --part: #96650a;
+    --new-bg: #e9f3ff; --new-line: #3b7fd1; --old-bg: #f3f1ea; --code: #efece4;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #17171a; --fg: #ebe9e3; --muted: #a09c92; --line: #34343a;
+      --card: #1f1f24; --yes: #62c98a; --no: #f0857c; --part: #e0b45a;
+      --new-bg: #172a40; --new-line: #6aa9ee; --old-bg: #26262b; --code: #2a2a30;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+    font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  main { max-width: 1040px; margin: 0 auto; padding: 40px 24px 80px; }
+  h1 { font-size: 28px; line-height: 1.2; margin: 0 0 8px; }
+  h2 { font-size: 20px; margin: 44px 0 12px; }
+  h3 { font-size: 16px; margin: 0 0 6px; }
+  p { margin: 0 0 12px; }
+  .lede { color: var(--muted); max-width: 760px; }
+  code, pre { font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+  code { background: var(--code); padding: 1px 5px; border-radius: 4px; }
+  pre { background: var(--code); padding: 12px 14px; border-radius: 8px; overflow-x: auto; margin: 0 0 12px; }
+  table { width: 100%; border-collapse: collapse; background: var(--card);
+    border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  th, td { text-align: left; vertical-align: top; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+  th { font-weight: 600; font-size: 14px; }
+  tr:last-child td { border-bottom: 0; }
+  .yes { color: var(--yes); font-weight: 600; white-space: nowrap; }
+  .no { color: var(--no); font-weight: 600; white-space: nowrap; }
+  .part { color: var(--part); font-weight: 600; white-space: nowrap; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 760px) { .grid { grid-template-columns: 1fr; } }
+  .box { border: 1px solid var(--line); border-radius: 10px; padding: 16px; background: var(--old-bg); }
+  .box.new { background: var(--new-bg); border-color: var(--new-line); border-style: dashed; }
+  .tag { display: inline-block; font-size: 13px; padding: 1px 8px; border-radius: 999px;
+    border: 1px solid var(--line); color: var(--muted); margin-left: 6px; }
+  .tag.new { border: 1px dashed var(--new-line); color: var(--new-line); }
+  .window { border: 1px solid var(--line); border-radius: 8px; background: var(--card); margin-top: 10px; overflow: hidden; }
+  .bar { padding: 6px 10px; border-bottom: 1px solid var(--line); font-size: 13px; color: var(--muted); }
+  .rows { padding: 10px; font-size: 14px; min-height: 96px; }
+  .row { padding: 4px 0; border-bottom: 1px dotted var(--line); }
+  .row:last-child { border-bottom: 0; }
+  .notice { margin: 8px 10px 10px; padding: 6px 10px; border-radius: 6px; font-size: 13px;
+    border: 1px solid var(--line); background: var(--code); }
+  .empty { color: var(--muted); font-style: italic; }
+  ol.q > li { margin-bottom: 18px; }
+  ol.q ol { list-style: lower-alpha; margin-top: 6px; }
+  .chosen { font-weight: 600; }
+  .small { font-size: 14px; color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+
+<h1>Loopflow Dev on real data</h1>
+<p class="lede">Task 343ad5, reviewed before anything is built. The area taken: everything a branch's Desktop build can be pointed at, how it gets pointed there, and what it says when the two sides disagree. That is wider than the kickoff plan's read-only copy; the plan was reviewed as one answer among several, and it changed.</p>
+<p class="small">Solid boxes exist today. Dashed blue boxes are proposed.</p>
+
+<h2>One interaction, walked</h2>
+<div class="grid">
+  <div class="box">
+    <h3>November 20, as it happened</h3>
+    <p>A branch adds one required field, <code>owned_by_you</code>. <code>loopflow-dev.py run</code> builds and opens Loopflow Dev on the Machine.</p>
+    <div class="window">
+      <div class="bar">Loopflow Dev: loopflow</div>
+      <div class="rows"><span class="empty">No Tasks</span></div>
+      <div class="notice">The Machine is away; showing what was last read</div>
+    </div>
+    <p style="margin-top:10px">The Machine was not away: the server answered <code>config.theme</code>. <code>lf server status</code> from the branch said "uses another executable", which was also not the cause. Both builds speak protocol revision 8. The fake world tried next showed the real repository's restored window, lost its Desktop socket to a 103-byte limit, and had the installed app re-register its server.</p>
+  </div>
+  <div class="box new">
+    <h3>Proposed</h3>
+<pre>$ uv run python scripts/loopflow-dev.py run
+This branch changes what the server sends
+(LocalTask, WaveDetail, RoadmapSnapshot).
+Opening a copy of the Machine from 14:02;
+changes are refused there.</pre>
+    <div class="window">
+      <div class="bar">Loopflow Dev: loopflow</div>
+      <div class="rows">
+        <div class="row">343ad5 Develop branch Swift UIs…</div>
+        <div class="row">LOO-903 Redesign backlog management</div>
+        <div class="row">…today's real backlog</div>
+      </div>
+      <div class="notice">After clicking Run: This is a copy of the Machine from 14:02; make changes in Loopflow or with lf.</div>
+    </div>
+    <p style="margin-top:10px">On a branch that leaves wire and schema alone, the same command prints "Opening the Machine" and works as today, live terminals included.</p>
+  </div>
+</div>
+
+<h2>Do the product's concepts and the code's line up?</h2>
+<table>
+  <tr><th style="width:23%">What a person knows</th><th style="width:27%">What the code has</th><th style="width:8%">Match</th><th>What is wrong, and what the plan does</th></tr>
+  <tr>
+    <td>"Can this build talk to that server?"</td>
+    <td>Protocol revision 8 in <code>hello</code>; the server's executable hash; the schema from <code>lf server describe --json</code></td>
+    <td class="no">no</td>
+    <td>One question, three answers that disagree. The revision said yes, the hash said no, and the schema, the only one that was right, is never compared. <span class="tag new">proposed</span> The launcher compares the two builds' schemas before opening anything.</td>
+  </tr>
+  <tr>
+    <td>What Loopflow Dev is looking at</td>
+    <td><code>LF_HOME</code>, inherited from whatever shell ran the launcher, or from <code>--world</code> on one of two commands</td>
+    <td class="no">no</td>
+    <td>The person never chose; an environment variable did. <span class="tag new">proposed</span> Three named things: the Machine, a copy of it, a fake world. The launcher picks and prints which. The inherited <code>LF_HOME</code> pass-through goes.</td>
+  </tr>
+  <tr>
+    <td>The Machine, live</td>
+    <td>Dev's Swift on the installed server; the bundled lf on <code>~/.lf</code></td>
+    <td class="yes">yes</td>
+    <td>Works for branches that change neither wire nor schema. Kickoff removed it; the review keeps it. It is also the rule #1755 set three weeks ago.</td>
+  </tr>
+  <tr>
+    <td>A copy of the Machine</td>
+    <td>Nothing today. <code>lf clone</code> (#1549) was this, writable and sandboxed, and #1755 deleted it. machines.md: "Loopflow never copies main data into it"</td>
+    <td class="no">no</td>
+    <td>Kickoff reintroduced copies without that history. <span class="tag new">proposed</span> A read-only copy in a world directory, 2 s for 688 MB where the old one took 265 s for 8.8 GB, with none of the scrub or sandbox because it is never writable.</td>
+  </tr>
+  <tr>
+    <td>"Snapshot"</td>
+    <td>A subscription's frame (<code>roadmap_snapshot</code>), <code>copy::snapshot</code>, and kickoff's "snapshot world"</td>
+    <td class="no">no</td>
+    <td>One name for three ideas; kickoff's own text used two of them in adjacent paragraphs. <span class="tag new">proposed</span> "Copy" wherever a person reads it: <code>lf-world copy</code>, <code>~/.lf-copy</code>, the sentence.</td>
+  </tr>
+  <tr>
+    <td>"You can't change things here"</td>
+    <td>Kickoff: a 0444 file, "the whole containment"; the SQLite error reworded afterwards</td>
+    <td class="part">partly</td>
+    <td>The file stops store writes only. A copied row names a real pid, a real worktree, a tracker id; a command can act on those before its store write fails. <span class="tag new">proposed</span> The server refuses a change at admission, before command code runs. The file mode stays the one fact it derives from, and the test measures the outside: the pid still runs, the worktree is untouched.</td>
+  </tr>
+  <tr>
+    <td>"The Machine is away"</td>
+    <td><code>PendingChanges.Link.away</code>, shown for a lost link and, on November 20, for reads that would not decode</td>
+    <td class="no">no</td>
+    <td>One sentence for two states. <span class="tag new">proposed</span> A decode failure names both builds. Why it reached the away notice is established first.</td>
+  </tr>
+  <tr>
+    <td>"Is the server ready?"</td>
+    <td><code>lf server status</code>: <code>ready:false</code> when the server runs another executable</td>
+    <td class="no">no</td>
+    <td>The answer to "is it up" carried "is it mine", which only re-registration after an install needs. <span class="tag new">proposed</span> <code>ready</code> means it answers; <code>ensure</code> compares executables itself. Kickoff had the branch lf exec the installed one to answer instead.</td>
+  </tr>
+  <tr>
+    <td>The windows I had open</td>
+    <td>SwiftUI restoration per bundle id of <code>RepositoryWorkspace {id, path}</code></td>
+    <td class="no">no</td>
+    <td>Windows belong to a Machine; they are saved per app. <span class="tag new">proposed</span> A window names its Machine and is not restored on another. Kickoff's launcher flag missed the installed app opened on a world's home, which happened that day.</td>
+  </tr>
+  <tr>
+    <td>A fake world</td>
+    <td><code>World</code>, <code>lf-world build</code>, <code>env.json</code>, stand-in <code>gh</code>, <code>launchctl</code> and providers</td>
+    <td class="yes">yes</td>
+    <td>The copy reuses the directory shape and the stand-ins. One gap: a world in a long directory silently loses Desktop's socket. <span class="tag new">proposed</span> <code>lf-world</code> says so at creation.</td>
+  </tr>
+  <tr>
+    <td>Never break a running Session</td>
+    <td>A second server on <code>~/.lf</code> would run <code>wake</code> and <code>recovery</code> on real conversations</td>
+    <td class="yes">yes</td>
+    <td>Kickoff found this and closed it; unchanged. On a copy those writers do not start.</td>
+  </tr>
+</table>
+
+<h2>The biggest mismatch</h2>
+<p>Nothing in the product answers "what is this Dev build looking at, and can it read it?" before the window opens. Kickoff answered by removing the question: always a copy. That fixes the empty window and takes away the live path that works for Swift-only branches.</p>
+<div class="grid">
+  <div class="box">
+    <h3>Kickoff's plan</h3>
+    <table>
+      <tr><th>Branch</th><th>Dev opens</th></tr>
+      <tr><td>Swift only</td><td>Read-only copy. No terminals, no changes.</td></tr>
+      <tr><td>Changes wire or schema</td><td>Read-only copy.</td></tr>
+    </table>
+    <p style="margin-top:10px" class="small">One behavior. Terminal work and anything interactive moves to fake worlds for every branch.</p>
+  </div>
+  <div class="box new">
+    <h3>After review</h3>
+    <table>
+      <tr><th>Branch</th><th>Dev opens</th></tr>
+      <tr><td>Swift only</td><td>The Machine, as today.</td></tr>
+      <tr><td>Changes wire or schema</td><td>Read-only copy, with the differing types printed.</td></tr>
+      <tr><td><code>--copy</code></td><td>Read-only copy, on request.</td></tr>
+      <tr><td><code>--world dir</code></td><td>A fake world.</td></tr>
+    </table>
+    <p style="margin-top:10px" class="small">Two outcomes from one command, told apart in one printed line. The comparison errs toward the copy.</p>
+  </div>
+</div>
+
+<h2>Tested against three paths</h2>
+<table>
+  <tr><th style="width:18%">Path</th><th>What happens</th><th style="width:30%">What must survive</th></tr>
+  <tr><td>Normal</td><td>Wire-changing branch: copy taken, branch migration applied to the copy, branch server serves it, real backlog on screen.</td><td>Installed server's instance and pid; <code>~/.lf/loopflow.db</code> byte for byte.</td></tr>
+  <tr><td>Failure</td><td>Run, steer, create, start or stop a Session on the copy: one sentence, no command code. A pane launch meets a read-only store and stand-in providers.</td><td>Real Session processes, real worktrees, the tracker.</td></tr>
+  <tr><td>Recovery</td><td><code>run</code> again replaces the copy. After the branch merges and is installed, the same branch opens the Machine.</td><td>Nothing in the copy is worth keeping, by construction.</td></tr>
+</table>
+<p style="margin-top:12px">Counterexamples kept: served reads may need to write (observation stamps), which slice 1 exists to find out; a doc-comment change in a wire type opens a copy needlessly; a branch behind main's migrations opens neither and is told to sync; tracker and PR refreshes cannot run in a copy, and how that reads has not been seen.</p>
+
+<h2>Outside this work</h2>
+<p>A copy's window does not say it is a copy until a change is refused. A standing label, with change controls off the way they are while the Machine is away, needs the sentence on the wire. <code>welcome</code> and <code>status</code> reject unknown fields, and a field added there breaks the lf inside every running Session at the next install, so it takes a new read instead. Left as question 3.</p>
+
+<h2>Questions</h2>
+<ol class="q">
+  <li>What should <code>run</code> open?
+    <ol>
+      <li class="chosen">The Machine when the branch speaks its wire and schema, a copy otherwise. (in the plan)</li>
+      <li>Always a copy. One behavior; Swift-only branches lose live terminals and real changes in Dev.</li>
+      <li>Always the Machine, stopping with the difference printed. Wire-changing branches get fake data only.</li>
+    </ol>
+  </li>
+  <li>Can the copy be changed?
+    <ol>
+      <li class="chosen">No. Read-only; interactions on a wire-changing branch are tried in a fake world. (in the plan)</li>
+      <li>Yes, and thrown away at the next run. Drags and creates work on the real backlog. It needs what <code>lf clone</code> had: pids, routes and tokens scrubbed and a sandbox around real worktrees.</li>
+    </ol>
+  </li>
+  <li>Should a copy's window say so all the time?
+    <ol>
+      <li class="chosen">Not in this work; the sentence appears when a change is refused. (in the plan)</li>
+      <li>Yes: a standing notice and disabled change controls, through a new read.</li>
+    </ol>
+  </li>
+  <li>Restored windows from another Machine:
+    <ol>
+      <li class="chosen">The app drops them; a window names its Machine. Saved windows are lost once. (in the plan)</li>
+      <li>The launcher passes <code>-ApplePersistenceIgnoreState YES</code>; covers launcher starts only.</li>
+    </ol>
+  </li>
+  <li>The word:
+    <ol>
+      <li class="chosen">Copy. (in the plan)</li>
+      <li>Snapshot.</li>
+    </ol>
+  </li>
+  <li><code>lf server status</code> from a branch build:
+    <ol>
+      <li class="chosen"><code>ready</code> when the server answers; the executable is a fact beside it. (in the plan)</li>
+      <li>Exec the installed lf to answer, as <code>lf install server</code> does.</li>
+    </ol>
+  </li>
+</ol>
+
+</main>
+</body>
+</html>

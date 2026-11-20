@@ -140,7 +140,7 @@ A flag switches it; `lf install` with no flag, `lf schedule` and a rerun of
 which on a Mac installs that run's signed, notarized Loopflow.app with its `lf`.
 Every install of a build schedules `lf install` daily (launchd, or cron on Linux)
 unless a cadence is already installed, so a Machine stays on its stream unasked.
-[Turning it off](../docs/ops.md#updates) is a launchd step; on Linux the next
+[Turning it off](../docs/ops.md#updates-and-scheduling) is a launchd step; on Linux the next
 install adds the line back.
 
 Installation also provisions a separate minute-based cleanup job: `lf task retire`

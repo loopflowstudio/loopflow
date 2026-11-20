@@ -366,6 +366,11 @@ request, whether the server starts it, you run `lf resume` or `lf session
 resume`, or a pane opens it. The same happens when the provider's transcript
 was deleted. The old thread stays in `lf session history`.
 
+```bash
+lf resume 7f3a2c
+# This conversation has no saved claude transcript; starting it again from its first request.
+```
+
 A conversation the provider did save always resumes its thread. If the
 provider then refuses that resume, the Session stays as it was.
 

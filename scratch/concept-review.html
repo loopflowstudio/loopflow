@@ -68,6 +68,7 @@ $ lf resume
 </table>
 
 <h2>Biggest mismatch: a sentence with no reader</h2>
+<p><b>Corrected by the second qa pass (scratch/qa.html):</b> the line is on screen in the view, above the provider's first output, in 8 of 8 lost-thread opens. The first pass's driver deleted it while stripping escapes. This section and the "no reader" item below do not hold; the docs example is back.</p>
 <p><code>open</code> runs twice for a terminal open: once in the process you typed in, which hands off at <code>delegate_session</code>, and once in the held terminal's <code>lf</code>, which goes on to <code>open_waiting_locked</code> and execs the provider. Everything decided after the hand-off is decided where no view exists yet. <code>saved_thread</code> lives there, correctly: it is the one place every opener reaches. Its sentence lives there too, and lands in <code>$LF_HOME/screens/*.ghostsnp</code>.</p>
 <p>The same placement holds for "Stopped the … client that had this conversation; continuing here." (TakeOver), which <code>docs/sessions.md</code> also promises with "says so". Not checked in a real terminal here; it is printed on the same side of the hand-off.</p>
 <div class="cols">

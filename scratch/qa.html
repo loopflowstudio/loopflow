@@ -1,49 +1,130 @@
-<!doctype html><meta charset="utf-8"><title>LOO-984 qa</title>
-<style>body{font:15px/1.5 -apple-system,system-ui;max-width:860px;margin:2em auto;padding:0 1em;color:#222}pre{background:#f4f4f4;padding:.7em;overflow:auto;font-size:13px}td,th{border-bottom:1px solid #ddd;padding:.4em;vertical-align:top;text-align:left}table{border-collapse:collapse;width:100%}.ok{color:#176b2c}.bad{color:#a11}</style>
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>LOO-984 qa</title>
+<style>
+  body { font: 15px/1.5 -apple-system, system-ui, sans-serif; max-width: 980px; margin: 2.5rem auto; padding: 0 1.25rem; color: #1b1b1f; }
+  h1 { font-size: 1.5rem; margin-bottom: .25rem; }
+  h2 { font-size: 1.1rem; margin-top: 2.2rem; }
+  p.lede { color: #55555f; margin-top: 0; }
+  table { border-collapse: collapse; width: 100%; margin: .75rem 0; }
+  th, td { border-bottom: 1px solid #e3e3ea; padding: .5rem .6rem; text-align: left; vertical-align: top; }
+  th { font-weight: 600; background: #f6f6f9; }
+  td.id { font-weight: 600; white-space: nowrap; }
+  pre { background: #16161c; color: #e6e6ee; padding: .8rem 1rem; border-radius: 6px; overflow-x: auto; font: 12.5px/1.45 ui-monospace, Menlo, monospace; }
+  code { font: 13px ui-monospace, Menlo, monospace; background: #f1f1f5; padding: 0 .25em; border-radius: 3px; }
+  pre code { background: none; padding: 0; }
+  .ok { color: #17713a; font-weight: 600; }
+  .bad { color: #a8321f; font-weight: 600; }
+  .fix { border-left: 3px solid #17713a; padding: .1rem .9rem; background: #f2f9f4; }
+  .wrong { border-left: 3px solid #a8321f; padding: .1rem .9rem; background: #fbf3f1; }
+</style>
+</head>
+<body>
+
 <h1>LOO-984 qa: a launch that ends before Claude saves opens again</h1>
-<p>Branch-built <code>lf</code> (42b5d7877e), real Claude Code 2.1.329 on the ambient login, private <code>LF_HOME</code>s under <code>/tmp/lfqa984</code>, a Python PTY driving <code>lf -a claude resume</code> in fresh repositories. What launched is read from <code>agent_sessions.agent_command</code> and the captured inputs in <code>session_events</code>. 2026-11-19.</p>
+<p class="lede">Second pass, at 8273da9e9b (after compress). Branch-built <code>lf</code>, real Claude Code 2.1.329 on the ambient login, private <code>LF_HOME</code>s, a Python PTY driving <code>lf resume</code> in new repositories and in an <code>lf-world</code> Task. What launched is read from <code>agent_sessions.agent_command</code> and the captured inputs; what a person sees is the PTY's raw bytes rendered through a terminal emulator (pyte). 2026-11-19.</p>
 
 <h2>Scenarios</h2>
 <table>
 <tr><th>#</th><th>What I did</th><th>What happened</th></tr>
-<tr><td>A</td><td>Real Claude. First open, Enter on "No, exit" at Claude's first screen (the <code>--add-dir</code> dialog). Then reopen.</td><td class="ok">First open: <code>--session-id 5d2910d8…</code>, "claude exited with 1.", no transcript. Reopen: new input 2, <code>--session-id 15f44d75…</code>, Claude's dialog again. No "No conversation found".</td></tr>
-<tr><td>B</td><td>Real Claude still on its first screen killed (crash before saving). Reopen.</td><td class="ok">New input 3, <code>--session-id 1956e3a4…</code>.</td></tr>
-<tr><td>E</td><td>Real Claude, new repository. Esc at the first screen, reopen, answer "Yes, add it".</td><td class="ok">Reopen: input 2 <code>--session-id a1edb49c…</code>; Claude ran lf's first request and saved <code>a1edb49c….jsonl</code>.</td></tr>
-<tr><td>R</td><td>Real Claude got past its first screen and answered lf's first turn ("Nothing is in flight here… What do you want to work on?"). Killed it, reopened.</td><td class="ok"><code>--resume 914b0b93…</code>; after the dialog the view showed the earlier turn and the prompt.</td></tr>
-<tr><td>S</td><td>Stand-in <code>claude</code> on <code>PATH</code> that prints its thread and exits 1, opened three times.</td><td class="ok">Each open a new input and a new <code>--session-id</code> (5dbee4bf, 89e552ee, 3dba7e94); never <code>--resume</code>.</td></tr>
-<tr><td>D</td><td>Looked for "Claude has no saved copy of this conversation; starting it again from its first request." in every view above.</td><td class="bad">Never shown in a view. A temporary probe showed <code>saved_thread</code> running in the held terminal's <code>lf</code> (the process that execs Claude), and the line sits in <code>$LF_HOME/screens/*.ghostsnp</code>; it is written before the view attaches.</td></tr>
+<tr><td class="id">M</td><td>New repository, no <code>claude</code> on <code>PATH</code>: <code>lf -a claude resume</code>. Then <code>PATH</code> restored, <code>lf resume &lt;id&gt;</code> as the first run printed, "Yes, add it" at Claude's dialog.</td><td><span class="ok">Works.</span> First run: "Error: 'claude' is not installed. Install it with …", exit 1, thread <code>eb8f680e</code> recorded. Reopen: new input, <code>--session-id d7e04531</code>, the lost-transcript line, Claude's dialog, then Claude ran lf's first request and saved <code>d7e04531….jsonl</code>.</td></tr>
+<tr><td class="id">R</td><td>Killed that Claude after it saved, reopened.</td><td><span class="ok">Works.</span> <code>--resume d7e04531</code>; the earlier turn and the prompt are on screen. No new input.</td></tr>
+<tr><td class="id">T</td><td>Killed it again, moved its transcript away, opened the conversation from two terminals at the same moment.</td><td><span class="ok">Works.</span> One new input, one Claude (<code>--session-id 03f1bcd5</code>), both views on it, both showing the line and the dialog.</td></tr>
+<tr><td class="id">E</td><td>New repository, real Claude. Esc at the first screen, then reopen.</td><td><span class="ok">Works.</span> First open exits 1 with nothing saved (<code>919112ee</code>). Reopen: <code>--session-id 80286b6b</code>, screen below. No "No conversation found".</td></tr>
+<tr><td class="id">P</td><td>Stand-in <code>claude</code> that writes a transcript on <code>--session-id</code> and exits 1 on <code>--resume</code>. Opened three times.</td><td><span class="ok">Works.</span> Opens 2 and 3 both ran <code>--resume 65dc0430</code> and failed; one input, one <code>agent_sessions</code> row, the Session as it was. The view shows the provider's own "No conversation found …" and "claude exited with 1."</td></tr>
+<tr><td class="id">S</td><td>Removed that transcript, stand-in now exits before saving. <code>lf session resume &lt;id&gt;</code> in the repository, then <code>lf resume &lt;id&gt;</code> from <code>/tmp</code>.</td><td><span class="ok">Works.</span> Each a new <code>--session-id</code> (<code>d1f4c8c3</code>, <code>71904aec</code>), never <code>--resume</code>. <code>lf session history</code> keeps all three threads.</td></tr>
+<tr><td class="id">U</td><td>Returning Machine. The installed <code>lf</code> (f5ff6a6c7) recorded two failed launches in a private home: no CLI, then a stand-in exit 1. Stopped its server, opened the home with the branch.</td><td><span class="ok">Works.</span> Branch open: new input, <code>--session-id 6d52d950</code>, the line shown.</td></tr>
+<tr><td class="id">W</td><td>Task conversation in <code>lf-world build one-task</code>. Opened the saved conversation with <code>lf resume --task 8cbde2</code>, typed a line. Moved the transcript away, <code>kill -9</code> the provider, reopened.</td><td><span class="ok">Works.</span> Saved: "resumed 91f1e289: 4 lines". After the kill nothing restarted on its own in 12 s. Reopen: the line, "started bf688b7c", the Task conversation's first request delivered, typing answered. <code>lf task status</code>: "Conversation: running".</td></tr>
+<tr><td class="id">H</td><td>Headless turn to U's never-saved conversation, real Claude: <code>lf -b -a claude session resume &lt;id&gt; --message '…'</code>.</td><td><span class="bad">Fails.</span> Runs <code>--resume 6d52d950</code>: "agent exited with code 1: claude_result: No conversation found with session ID: 6d52d950-…". Not touched by this branch; filed as Task c2ed1c.</td></tr>
+<tr><td class="id">X</td><td>Same kind of conversation, switched headless: <code>lf -b -a codex session resume &lt;id&gt; --message '…'</code>.</td><td><span class="bad">Refuses.</span> "The claude transcript of Session … was not found. Keep this conversation open and retry after claude saves its first turn." The thread never ran, so there is nothing to wait for. In c2ed1c.</td></tr>
 </table>
 
-<h2>Transcripts</h2>
-<p>A, first open (control sequences stripped):</p>
-<pre>Nothing to resume here; starting a new conversation.
-| Preparing claude (0s)/ Opening claude terminal (0s)
-Security guide
-❯ No, exit   Yes, add it
-Enter to confirm · Esc to cancel
+<h2>What a person sees</h2>
+<p>E, the reopen, as rendered (120×40):</p>
+<pre><code>This conversation has no saved claude transcript; starting it again from its first request.
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Adding a new directory:
+ /private/tmp/lfqa984b/r4
+ This session hasn't worked here before. Is this a directory you created or one you trust?
+ Claude Code'll be able to read, edit, and execute files here. Its skills, commands, and agents load and can run
+ commands, and so can the git settings of its repository. Your answer holds for this session. Starting Claude Code in
+ this directory and trusting it there lasts, and covers its whole repository or everything below it.
+ Security guide
+ ❯ No, exit
+   Yes, add it
+ Enter to confirm · Esc to cancel</code></pre>
 
-Left "repo". Continue with: lf resume 98c79bdc890a41bbac7afd803f86bd6b
-claude exited with 1.</pre>
-<p>S, second open (stand-in):</p>
-<pre>stand-in claude: --name repo2 --settings
-stand-in started thread 9264e360-c54c-4e98-a2d7-2cf4701539ec
-Left "repo2". Continue with: lf resume 7b7b1eb329a641eab5d03d58ed21ecfb
-claude exited with 1.</pre>
-<p>Held screen of the same kind of open (<code>strings screens/*.ghostsnp</code>):</p>
-<pre>Claude has no saved copy of this conversation; starting it again from its first request.
-stand-in claude: --name repo3 --settings
-stand-in started thread 3dba7e94-45f7-4b1c-a62a-3ba2f5f9f5fe
-claude exited with 1.</pre>
+<p>M, first run with no CLI:</p>
+<pre><code>Nothing to resume here; starting a new conversation.
+Left “r1”. Continue with: lf resume 958440abcddf4671a4065fcc9e058ecd
+Error: 'claude' is not installed. Install it with `npm install -g @anthropic-ai/claude-code`, then open `claude` to sign in.</code></pre>
+
+<p>M, after the reopen and "Yes, add it" (Claude's answer to lf's first request, on thread <code>d7e04531</code>):</p>
+<pre><code>Nothing is in flight in this repository, and I changed nothing.
+  - Tasks and Waves: none.
+  - Graph runs: none current.
+  - Sessions: only this one.
+  …
+What do you want to work on?</code></pre>
+
+<p>W, the Task conversation's view across the kill and the reopen:</p>
+<pre><code>hello
+reply 91f1e289-306c-4ba0-9ce1-c45ea0d37c70: hello
+
+Left “Design transcript search”. Continue with: lf resume session_9ac2961be44949a5a0b60bbb3d3f31f2
+
+claude exited with 137.
+This conversation has no saved claude transcript; starting it again from its first request.
+started bf688b7c-4ef7-46bf-823e-c5da61db5497
+reply bf688b7c-…: &lt;lf:message&gt;
+reply bf688b7c-…: &lt;lf:primary-session&gt;
+reply bf688b7c-…: This is the one ongoing primary conversation of its repository, Wave or Task, and nobody has asked for anything yet. …
+still here
+reply bf688b7c-4ef7-46bf-823e-c5da61db5497: still here</code></pre>
+
+<p>S, the store after three exits before saving (one Session, three inputs):</p>
+<pre><code>agent_sessions: 85137faf…  claude  … --session-id 71904aec-19f2-4b6c-b36a-2ebc2667a0e7 --
+captured inputs:
+  65dc0430-b26d-41a4-8cfe-2fee6ef5a876
+  d1f4c8c3-ada5-4f5d-b2ad-8ed5aac41c5e
+  71904aec-19f2-4b6c-b36a-2ebc2667a0e7</code></pre>
 
 <h2>Fixed</h2>
-<ul><li><code>docs/sessions.md</code> showed the "no saved copy" line under <code>lf resume</code>; nobody sees it there, so the example is gone. Choice noted in <code>scratch/questions.md</code>.</li></ul>
+<div class="fix">
+<p><b>The first pass's finding D was wrong, and the docs had been cut to match it.</b> It reported that "no saved … transcript; starting it again from its first request." never reaches a view. It does: 8 of 8 lost-thread opens in this pass show it above the provider's first output (M, T twice, E, S twice, U, W). The first pass's driver stripped escapes with a pattern that ends an OSC only at BEL; lf and Claude end theirs with <code>ESC \</code>, so the pattern deleted everything up to the next BEL, the line included. Run against this pass's raw bytes, that pattern removes the line too.</p>
+<p>Restored: the <code>lf resume 7f3a2c</code> example in <code>docs/sessions.md</code> (with the current wording) and "and says so" in <code>docs/subscriptions.md</code>. Corrected: <code>scratch/plan.md</code>, <code>scratch/questions.md</code>, the "a sentence with no reader" section of <code>scratch/concept-review.html</code>, and <code>.lf/qa/resume.md</code>, which now says how to render a view and how to strip escapes.</p>
+</div>
+<p>No product code changed in this pass.</p>
 
 <h2>Where it stands</h2>
-<p><b>Works:</b> every launch that ended before Claude saved (exit at the first screen, crash, missing provider in the stand-in) reopens on a new thread with its first request; a saved thread resumes.</p>
-<p><b>Couldn't reach:</b> Ctrl+C at an empty Claude prompt through lf. lf's conversations start with lf's own first turn, so Claude saves as soon as it is past its first screen; the first screen is the only quit-before-typing point, and it was covered.</p>
+<p><b>Works:</b> every interactive opener (<code>lf resume</code>, <code>lf resume &lt;id&gt;</code>, <code>lf session resume &lt;id&gt;</code>, <code>lf resume --task</code>) reopens a conversation whose launch ended before Claude saved, or whose transcript is gone, on a new thread with its first request, and says so. A saved thread resumes; a provider that refuses that resume leaves the Session unchanged. Failed launches recorded by the installed <code>lf</code> reopen the same way.</p>
+
+<p><b>Couldn't reach:</b></p>
+<ul>
+<li>A pane open in Desktop or Rex. It reaches the same <code>open_waiting_locked</code>; not driven here because it needs the person's running app.</li>
+<li>The recovery watcher restarting a killed Task conversation by itself: the world's Session had no viewer-less restart in the 12 s I watched. <code>a_killed_task_conversation_comes_back_once_and_a_quit_one_stays_quit</code> covers it in CI.</li>
+<li>A lost Codex thread. Codex records its thread only after its hook reports it, so there was no honest way to make one without editing the store.</li>
+<li>Ctrl+C at an empty Claude prompt through lf: lf's conversations start with lf's own first turn, so the first screen is the only quit-before-typing point (E).</li>
+</ul>
+
 <p><b>Still wrong, worst first:</b></p>
+<div class="wrong">
 <ol>
-<li>The "no saved copy" line never reaches a terminal view (D). The conversation opens correctly; the person just isn't told why it started over.</li>
+<li><b>A headless turn to a never-saved conversation fails with "No conversation found" (H).</b> <code>lf -b session resume &lt;id&gt; --message</code> takes the recorded thread from <code>resolve_session_config</code>, and <code>agent/mod.rs</code> falls back to <code>store.session_thread</code> when that is empty, so it is two readers, and what such a turn should carry (the message, or the first request then the message) is a product choice. Same symptom as this Task on an opener the plan didn't name. Task c2ed1c.</li>
+<li><b>The headless provider switch tells you to wait for a save that cannot come (X).</b> In c2ed1c.</li>
+<li><b>Each failed launch adds an input to the Session</b> (S: three). They are the record of what was tried and the plan keeps them; a conversation that fails daily grows by one a day.</li>
 <li><code>resume_intent</code> and Desktop still call a lost thread "Resume" (plan exclusion, unchanged).</li>
-<li>Keys sent in a view's first seconds to Claude's first screen were sometimes lost; a second view answered it. Held-terminal input, outside this change.</li>
+<li><b>QA homes leave servers behind.</b> Opening a conversation in a private <code>LF_HOME</code> registers a launchd job that restarts <code>lf server run</code> after a kill. The first pass's five servers were still running; all ten from both passes are booted out now, and <code>.lf/qa/resume.md</code> has the step. Many other <code>com.loopflow.server.&lt;hash&gt;</code> jobs from other checkouts' temporary homes are loaded on this Machine; I left them.</li>
 </ol>
+</div>
+
+<h2>Checks</h2>
+<ul>
+<li><code>cargo build -p loopflow --bin lf</code> and <code>--bin lf-world</code>: built at 8273da9e9b.</li>
+<li>No tests run in this pass: only docs and notes changed. Gate/CI still owes the acceptance tests in <code>scratch/plan.md</code>.</li>
+</ul>
+
+</body>
+</html>

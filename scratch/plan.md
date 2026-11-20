@@ -134,27 +134,30 @@ Remaining: nothing to build. Gate still owes the acceptance tests in CI.
 
 Kept as built, from the concept review (`scratch/concept-review.html`):
 
-- `saved_thread`'s "no saved … transcript" line is printed by the held terminal's own
-  `lf`, after `delegate_session` and before a view attaches (qa D: present
-  only in `$LF_HOME/screens/*.ghostsnp`), so nobody running `lf resume` sees
-  it. The docs no longer promise it (52d3183121). *Made for review:* the line
-  stays where the decision is; passed over printing from the viewing process
-  (a second place deciding, able to disagree with the holder) and deleting
-  it (the only trace of why, in the held screen).
 - `new_thread` on a lost thread prints "no saved … transcript" then "seeded with its
-  original request". It runs before the hand-off, both show, and they read
-  as one account.
+  original request". Both show, and they read as one account.
 
-Done in qa (`scratch/qa.html`): real Claude 2.1.329, exit at the first
-screen then `lf -a claude resume` started a new `--session-id` thread with
-the first request; a saved thread reopened with `--resume`.
+Corrected in the second qa pass (`scratch/qa.html`, at 8273da9e9b): the
+"no saved … transcript" line is on screen in the view, above the provider's
+first output, in 8 of 8 lost-thread opens. The first pass's "nobody sees it"
+was its driver's escape stripping deleting the text. The docs example and
+"and says so" are back, and the concept review's "a sentence with no reader"
+section does not hold.
 
-Larger than this Task, on the page with what each would take: open-time lines
-printed after `delegate_session` have no reader (TakeOver's "Stopped the …
-client" likely among them, not checked in a terminal); `has_provider_history`
-means recorded, not saved.
+Done in qa: real Claude 2.1.329 with no CLI on `PATH`, then installed; Esc at
+the first screen then reopen; a saved thread reopened with `--resume`; a
+deleted transcript opened from two terminals at once (one new thread); a
+provider refusing a saved thread's resume (Session unchanged); failed
+launches recorded by the installed `lf` reopened by the branch; a Task
+conversation in an lf-world.
+
+Larger than this Task: `has_provider_history` means recorded, not saved.
+Also larger, found in qa and filed as Task c2ed1c: a headless turn
+(`lf -b session resume <id> --message`) to a never-saved conversation still
+runs `--resume` and fails with "No conversation found"; the headless provider
+switch refuses with advice to wait for a save that cannot come.
 
 ## Docs (written first)
 
 - `docs/sessions.md`, the paragraph after the `lf task status` "no server" example: any launch that ended before the provider saved (missing CLI, login/trust exit, crash, Ctrl+C before typing) opens again from its first request on every opener, a saved conversation that the provider refuses to resume stays as it was.
-- `docs/subscriptions.md`, Resume paragraph: "Missing history is reported" replaced by "starts again from its first request; it never opens empty."
+- `docs/subscriptions.md`, Resume paragraph: "Missing history is reported" replaced by "starts again from its first request and says so; it never opens empty."

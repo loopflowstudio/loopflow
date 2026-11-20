@@ -27,10 +27,28 @@ does not cover the dialog.
 For a provider that dies before saving, put a stand-in `claude` first on the
 private `PATH` that echoes its `--session-id`/`--resume` argument and exits 1.
 
-Lines the held terminal's own `lf` prints before the view attaches (the
-open-time diagnostics in `ops/human_session.rs`) do not reach the view; they
-are in `$LF_HOME/screens/*.ghostsnp` (`strings`).
+Open-time lines such as "This conversation has no saved claude transcript…"
+are on screen in the view, above the provider's first output. Save the PTY's
+raw bytes and render them (`uv run --no-project --with pyte python`, a
+`pyte.HistoryScreen(120, 40)` fed through `pyte.ByteStream`) to see what a
+person sees. When stripping escapes by regex, end an OSC at BEL or `ESC \`:
+lf's and Claude's OSCs end in `ESC \`, and a BEL-only pattern deletes the
+text up to the next BEL, open-time lines included.
 
-Stop the private home's `lf server run` and `lf holder run` by PID after
-checking `ps eww` shows its `LF_HOME`; a held `claude` outlives its view.
-Delete the scratch repositories and their `~/.claude/projects` folders.
+For a provider that refuses a saved thread, have the stand-in write
+`~/.claude/projects/<cwd>/<id>.jsonl` on `--session-id` and exit 1 on
+`--resume`. For a Task conversation, `lf-world build one-task` (see
+`task-conversations.md`): its stand-in answers "No conversation found" to a
+`--resume` with no transcript, so move the seeded transcript away, kill the
+stand-in and run `lf resume --task <id>`.
+
+Opening a conversation in a private home registers a launchd job
+(`com.loopflow.server.<hash>`, plist in the home) that restarts `lf server
+run` when you kill it. To stop it, read the PID's `LF_HOME` with `ps eww`,
+find its label in `launchctl list`, and
+`launchctl bootout gui/$(id -u)/<label>`; then kill the home's `lf holder
+run` and the providers it holds (a held `claude` outlives its view). Delete
+the scratch repositories and their `~/.claude/projects` folders.
+
+A headless turn (`lf -b session resume <id> --message …`) does not take this
+path: it resumes the recorded thread whether or not a transcript exists.

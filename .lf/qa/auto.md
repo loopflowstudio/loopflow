@@ -47,7 +47,7 @@ carries it as `execution.auto`). Served: hello from
 takes nothing else (a never-run Task takes up the repository's graph), and
 `task.auto.off` takes `"reason":null` beside them and answers `{issue, was_on}`.
 Check `lf task auto on` on a Task waiting at `ship-review` (it stands in
-there) and on a never-run Task (one Graph run); `lf ship` no longer parses.
+there) and on a never-run Task (one Graph run); `lf ship` names no command ("skill or graph not found: ship").
 With `--json` the run is the only thing on stdout; "standing in at …" goes to
 stderr. Two at the same moment on a never-run Task leave one run:
 both print it and exit 0, and `lf task status` shows one Graph run. The losing
@@ -100,8 +100,8 @@ Copy the installed binary out (`cp $(readlink -f ~/.local/bin/lf) …`), make a
 fresh repo (local Git identity, a bare origin, `graph:` naming a graph with a
 headless step) and `LF_HOME`. Keep the world's `bin` on `PATH`: its `launchctl`
 refuses, so the released lf registers no launchd job; start the released
-`lf server run` detached instead. `lf checkout <id>`, then `lf task auto on <id>`
-detached with the marker file holding its step (released `lf ship` blocks its
+`lf server run` detached instead. `lf checkout <id>`, then the released `lf ship <id>`
+detached with the marker file holding its step (it blocks its
 caller), and `lf task hold <id>` on another. Stop the released server and
 start the branch's on the same home. The branch migrates it in place on the
 first read; copy the home first to repeat the check. The released lf has no

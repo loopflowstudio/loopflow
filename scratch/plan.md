@@ -4,55 +4,15 @@
 > proposed graph to be auto mode, and has grown into this sprawling concept.
 > lets reduce its impact on the overall system and protocol" — Jack, 2026-11-18
 
-After the first build, on the concept review's "one idea, three words"
-(shipping state, Autonomous section, Auto-Ship mark): "I tink this should be in
-scope". Then, choosing from `scratch/explore.html`: "this is cloest" (vision C,
-a setting and no state); "i think lf task auto on lf task auto off maybe?";
-"ok lets take the next pass. Just become an Auto toggle works."
+Later direction, word for word, is in `scratch/questions.md`: the shipping
+state and Autonomous section in scope, vision C ("a setting and no state"),
+`lf task auto on|off`, the Auto toggle, ship-review, the run outlook, the
+config `auto: on` modifier, `-b`, and "lets kill lf ship; isnt that just lf
+task auto on?".
 
-PR #1976, base `main`. Main (through #1985) is merged in at `726f8a320f`;
-that merge resolved `sqlite.rs`, `commands/graph.rs` and `lf/mod.rs` by hand.
-`cargo check -p loopflow --all-targets` passes at that merge (2026-11-19); no
-test has run since it.
-
-## Auto on is one action
-
-Concept review, 2026-11-19 (`scratch/concept-review.html`), a choice made for
-review: auto on means nobody is waited for, so turning it on runs the Task.
-`lf task auto on X`, `lf ship X` and Desktop's toggle are one operation.
-
-Built 2026-11-19:
-
-- `lf task auto on [ISSUE] [--reason] [--json]` parses as `lf ship`
-  (`Cli::checked` in `rust/loopflow/src/lf/mod.rs`), so every dispatch, detach
-  and remote route that names `Commands::Ship` serves both spellings. With no
-  ISSUE on a branch with no Task it makes one, as `lf ship` does.
-- `ops::task::ship::auto_on` and its no-Graph refusal are gone. On the wire
-  `task.ship` is the one way to turn auto on; `task.auto` became
-  `task.auto.off {directory, issue, reason}` answering `{issue, was_on}`
-  (`AutoOff`). Fixtures `task_auto_off.json`, `task_auto_off_answer.json`.
-- `ships` is `merges` on `TaskRun::Running` and `TaskRunStart::Run`, printed
-  `merges:`.
-- Run recovery lives in `ops/task/run_recovery.rs`.
-- Tests: `auto_on_at_a_waiting_step_stands_in_there_with_one_graph_run`,
-  `auto_on_a_task_that_never_ran_leaves_exactly_one_run`, and the parse row in
-  `lf::tests`.
-
-Run 2026-11-19 at `56e542adac`: `cargo test -p loopflow --lib --
-task_graph_launch_tests::auto_o lf::tests`, 41 passed (the two `auto_on_*`
-fixtures, `auto_off_sticks_through_a_headless_relaunch`, the parse tests).
-Not run since this change: Swift `ServerProtocolTests`, `RegistryQueryTests`
-and iOS (`RegistryQuery.swift`, `WorkModel.swift`, `TaskWorkspaceView.swift`
-were edited for `task.auto.off` and `merges`). Gate and CI.
-
-Passed over: keeping `auto on` a pure setting stored on the Task so it can
-precede a Graph, with a bare run standing in at the waiting step. That keeps
-two actions and changes what a bare `lf task run` means at an interactive step
-("I finished this step"). Lost on purpose: arming auto on a waiting Task
-without starting anything.
+PR #1976, base `main`. Main (through #1985) is merged in at `726f8a320f`.
 
 ## What exists
-
 
 Status and setting are separate axes. `TaskState` says what is happening; the
 auto setting says who takes the interactive steps. One word: **auto**.
@@ -66,182 +26,79 @@ auto setting says who takes the interactive steps. One word: **auto**.
   `tasks.shipped_at` (so a released lf during upgrade skew stops relaunching
   `lf ship`), and marks `task_ship_events`, `tasks.shipped_at` and
   `task_summaries.ship_events` leaving for LOO-971.
-- **Who sets it:** `lf ship`, spelled `lf task auto on` too (on, always, the
-  only thing that lifts a stop; served as `task.ship`); `lf task auto off
-  [ISSUE] [--reason] [--json]` (served as `task.auto.off`);
-  `lf -b task run` (on, unless off). Nothing else: no route
-  approval, and failures, refusals and reaching `end` leave it alone.
-- **`lf ship <task>`** is the run, asked for auto (detached, `lf task run`'s
-  output, `task.ship` returns `TaskRun`). On a live run it reports that run. On
-  a Task waiting at an interactive step it stands in at that step.
-- **What reads it:** the Graph runner, at each interactive step of a Task run
-  (`RunningGraph::stands_in`), and the landing step, which waits only on
-  `off` ("Waiting at pr land: auto is off (Maya). `lf ship` lands it.").
-  `task_state_sql` and `TaskSection::of` never read it. `auto off` kills
-  nothing: the run stops at its next interactive step or landing.
+- **Who sets it**, and nothing else does:
+  - `lf task auto on [ISSUE] [--graph <g>] [--reason] [--json]`, served as
+    `task.auto.on`. It is the run, asked for auto: detached, `lf task run`'s
+    output, answering `TaskRun`. On a live run it turns auto on and reports
+    that run (`merges: true`); on a Task waiting at an interactive step it
+    stands in there; at `end` it answers `Ended` and writes nothing. With no
+    ISSUE it takes the checkout's Task, or makes one for the branch. It is the
+    only thing that lifts an off.
+  - `lf task auto off [ISSUE] [--reason] [--json]`, served as `task.auto.off`,
+    answering `{issue, was_on}`. It kills nothing: the run stops at its next
+    interactive step or at landing. `--reason` is a Task comment.
+  - `auto: on` in a Wave, repository or personal config, written as a Task
+    takes up a Graph and only when its auto is unset, attributed to the layer
+    (`Starter::Config`, "auto: on by wave config").
+- **`lf ship` is gone**, with `Commands::Ship`, `task.ship`, `lf task hold`,
+  `task.hold`, the ship carrier loop and its log API, `ShippingSnapshot`,
+  `TaskShip`, `ship_control` and the builtin `auto` graph. `lf ship` now reads
+  "skill or graph not found: ship". A released config's `graph: auto` reads as
+  `graph: code` + `auto: on` (`keys::fold`) until Task d3af77 removes it.
+- **`-b` on `task run`** works as on any Graph: that run stands in at every
+  interactive step and the caller waits. It writes no auto, so a died `-b` run
+  restarts as a bare run and stops at its next interactive step.
+- **What reads the setting:** the Graph runner at each interactive step of a
+  Task run (`RunningGraph::stands_in`), and the landing step, which waits only
+  on `off` (`TaskGraph::waiting_to_land`: "Waiting at land: auto is off
+  (Maya). `lf task auto on X` lands it."). `task_state_sql` and
+  `TaskSection::of` never read it.
 - **No `shipping` state, no Autonomous section.** A Task with auto on reads
   `moving` in Working while it runs. Rows learn the setting through the
   selection state `auto` (`state:auto`).
-- **One carrier, one recovery path:** a dead run of any Task is carried again
-  as `lf task run ISSUE` under the conversation's start limit
-  (`CONVERSATION_STARTS`, 5, then it waits for a person);
-  a Task that moves Machines continues the same way. The ship carrier loop,
-  `restart_ship`, `ship_halt`, `ship_settle_merge`, the ship log API,
-  `ShippingSnapshot`, `TaskShip`, `lf task hold`, `task.hold` and the
-  `ship --stop` alias are deleted.
+- **One recovery path:** a dead run of any Task is carried again as
+  `lf task run ISSUE` under the conversation's start limit
+  (`CONVERSATION_STARTS`, 5); a moved Task continues the same way.
+  `TaskExecutionSnapshot` carries `died {at_step, at}` and `outlook`; `reason`
+  is the one sentence, written in Rust.
 - **Surfaces:** `lf task status` first line `LOO-1  moving · auto: on by Maya,
   Nov 18 09:04`; snapshot field `auto`; Desktop `TaskAutoControl` toggle (on
-  sends `task.ship`, off `task.auto.off`) and `AutoBadge` on cards and rows; docs,
-  builtin operate skills, `.lf/qa/auto.md` and AGENTS.md say auto.
+  sends `task.auto.on`, off `task.auto.off`, enabled by `run_control`) and
+  `AutoBadge`; docs, builtin skills, `.lf/qa/auto.md` and AGENTS.md say auto.
+- **`human-review` is `ship-review`**, step and skill. A Task waiting at
+  `human-review` in a stored Graph keeps that name until it takes a Graph up
+  again.
 
 `refs/wip/loo-968-auto-ship-rename` holds a dropped rename-only diff; delete it
 when the PR merges.
 
-## What the work taught
-
-- A bare `lf task run` on a Task waiting at an interactive step means "the
-  person finished this step" and continues after it, whatever auto says. That
-  stays; it is why `lf task auto on` becomes the ship operation instead of a
-  mark followed by a bare run.
-- State never reads the setting, so auto on with nothing running at an
-  interactive step reads `active`, not `idle`.
-- A released `lf ship` that dies across the upgrade is not carried again (its
-  carrier lived on `task_ship_events`); the Task reads `idle`, auto on, and
-  `lf task run` carries it. Reverse by copying a live ship carrier's pid onto
-  `task_graphs.run_pid` in the migration.
-- Hand-merged PRs: the land step meets the merge
-  (`a_ship_meets_a_hand_merged_pr_at_its_landing_step`). Graphs with no land
-  step finish their steps into `end` and completion settles; no merge check
-  between steps.
-
-## QA, second pass (2026-11-19, at `e3104cd354` plus two fixes)
-
-`scratch/qa.html`. Fixed: `lf task status` at a landing wait with auto off
-read "Graph … finished; nothing further is launched" and `action: run`, and
-that run waited again at once; it now reads the runner's sentence
-(`auto::landing_wait`, "Waiting at land: auto is off (Demo). `lf ship X` lands
-it.") as `execution.state: waiting`, `action: no_action`, asserted in
-`auto_off_sticks_through_a_headless_relaunch`. `lf task auto off` on an
-unknown ID answered "…; inspect the affected work before retrying"
-(`outcome_unknown`); it now answers `not_found`. Driven and working: ship with
-`--reason` on never-run, live and ship-review-waiting Tasks; bare
-`lf task auto on` from a hand-merged Task's checkout to `done`; served
-`task.ship` racing CLI `auto on` (one run, both exit 0); died run with and
-without a server (carried in 3 s); reopen clears auto. Auto tests 4 passed;
-clippy clean.
-
 ## Remaining
 
-Concept review, fourth pass: built, then cut by QA's third pass
-(`scratch/qa.html`). `TaskGraph::waiting_to_land(auto, issue)` is the one
-predicate for a landing wait and `lf task status` prints it. The Task
-conversation's `TaskGraph::guidance` was never delivered (a Task launch's
-message comes from `task_input::task_seed`; `WorkBinding.context` for a Task
-reaches no provider), so it and its append in `bind_selected_work` are
-deleted. A run's landing stop no longer also prints "the Task waits there for
-its conversation".
+Nothing to build. Next is gate.
 
-Concept review, fifth pass (at `bff5dc68ee`): nothing to change; every pairing lines up.
+Realign 2026-11-19 at `76b2bd214e` ran the two fixtures that still named the
+deleted `auto` graph: `local_planning::auto_graph_runs_a_task_to_end` (waited
+60 s at `code`'s first step) and
+`…::your_graph_for_a_wave_selects_the_builtin_auto` ("graph not found: auto").
+Both are deleted; `a_waves_auto_on_takes_every_step_of_its_tasks_and_an_off_still_wins`
+and `keys::tests::a_released_auto_graph_reads_as_code_with_auto_on` hold what
+they stood for. `wave_lifecycle`'s fold fixture names `graph: feature`
+(passed). `docs/dev/index.html` regenerated (it still said `lf ship`).
 
-Then gate. The checks under "Checks nobody has run" below are gate's and CI's.
+Checks nobody has run since the last three commits (`1048cee3cf`,
+`fa171df836`, `76b2bd214e`); gate and CI:
 
-## Built: the last ship words on the wire
-
-Concept review, third pass, 2026-11-19 at `cb20b422a6`
-(`scratch/concept-review.html`). Choices made for review; reversals are in
-`scratch/questions.md`.
-
-- `ship_control` is gone from `RoadmapTask`, Swift, the fixtures and
-  `server_schema.json`; the Auto toggle reads `task.runControl.unavailable`.
-  `facts.steps` stays: the row's `step` reads it. A Task at `end` whose
-  completion is pending shows an enabled toggle that answers `ended`.
-- `lf ship --reason` is the run's `TaskProcessOptions.reason` (the steer
-  `task_place` appends, written before a live run is found, so a ship onto a
-  running Task steers it too).
-  `lf task auto off --reason` is a Task comment
-  (`append_task_comment_async`, so it reaches the tracker); `set_task_auto`
-  takes no note. `task.ship` has no `reason` field on the wire, so only
-  `task.auto.off`'s doc changed.
-- `docs/dev/reference-models.md` no longer names a ship event or `lf ship`
-  as a spawner. `task_shipping.json` is `task_ship_answer.json`.
-
-Checks, 2026-11-19, run here; gate and CI run the suites:
-
-- `cargo nextest run … -E 'test(dto_fixtures::) | test(server::schema::tests::) | test(lf::tests::) | test(typed_answers_keep_the_wire_shape) | test(sqlite::task_work::) | test(machine::wire::)'`: 106 passed.
-- `test(server_operations_match_their_lf_commands) | test(documented_commands::)` with a resolved `TMPDIR`: 5 passed; the served test holds the new "why auto went off is a comment" assertion and took 208 s.
-- `scripts/test_desktop.sh --filter 'DTOFixtureTests|WorkCacheTests|DesktopHeadlessTests|TaskStatusTests|TaskConceptTests|RegistryQueryTests|WaveLensTests|ServerProtocolTests'`: 163 passed.
-- Not run here: `cargo clippy`, the iOS suite (shared Swift models changed).
-
-Larger than this work, on the page and not filed: the "Graph … finished;
-nothing further is launched" sentence on a Task waiting at an interactive
-step (base behavior); auto stored on the Task so it can precede a Graph; the
-30 s wait in `auto::running_graph`; `task.shipped` meaning "merged"; the
-`auto` Graph's name. Ship-review decides which become Tasks.
-
-QA 2026-11-19 at `75abe5ce1c` plus two fixes (`scratch/qa.html`), on a private
-lf-world Machine with the branch `lf` and its server:
-
-- Fixed: a second ship at the same moment exited 1 with "acquire worktree
-  lease: … is owned by another active operation". `restore_task_checkout` now
-  waits up to 10 s for the checkout lease (`CHECKOUT_LEASE_WAIT`).
-- Fixed: with three ships at once, 1 Task in 5 had one ship exit 1 with "the
-  Task's run is carried by another `lf task run`". `try_start_task_run` read
-  the row again after its selection, so its start could name, and replace, a
-  carrier that set out in between. It now reads the Task again when that row
-  names a live carrier. After both fixes: 12 Tasks, three ships each, every
-  exit 0, one Graph run each. Neither fix has a fixture; the race is not
-  deterministic from outside.
-- Driven and working: ship on a never-run, waiting, running, landing-wait,
-  done and Task-less-branch start; `auto off` mid-run stops at `land`
-  ("Waiting at land: auto is off (Demo). `lf ship` lands it."); a failed land
-  stops after 3 and keeps auto on; `lf -b task run` after an off waits at
-  land; reopen clears auto; `task.ship` and `task.auto.off` over the socket;
-  Desktop's spellings (`lf --task X ship --json`, `lf task auto off X --json`);
-  `state:auto` in a Dashboard query.
-- A died run with no server read "Run died at implement · no server runs here
-  to start it; `lf task run cf17c1` starts it again"; with a server, "… ·
-  starting again", and the pass carried it as `lf task run cf17c1` in about a
-  minute.
-- Upgrade from the installed 0.16.0 (`f5ff6a6c7`): a live released ship reads
-  `moving · auto: on, Nov 19 10:51` and finished; a Task waiting at
-  `human-review` shipped with `lf task auto on` (the captured Graph carries
-  the old skill text).
-- `scripts/test_desktop.sh --filter 'ServerProtocolTests|RegistryQueryTests|DTOFixtureTests|WorkModelTests|TaskStatusTests|TaskConceptTests|DesktopHeadlessTests'`:
-  169 tests passed. `task_graph_launch_tests::{auto_o,a_ship,task_ship}`: 14
-  passed. Clippy clean.
-
-What QA found and left (also in `scratch/questions.md`):
-
-- A released `lf task hold` on a Task that never took a Graph is gone after
-  the upgrade (no `task_graphs` row to hold the mark), and `lf task auto off`
-  on such a Task answers "auto was not on", exit 0. A later `lf -b task run`
-  turns auto on and may merge.
-- `--reason` was stored as a `progress` Task event no read printed. Since
-  fixed: see "the last ship words on the wire".
-- A Task waiting at an interactive step reads "latest Graph: Graph qaship
-  finished; nothing further is launched".
-- Not driven: the Desktop window (toggle and badge), iOS, a ship arriving in
-  the 30 s before a carrier's Graph registers, a moved Task.
-
-What an earlier build showed, when `lf task auto on` took up a Graph without
-running it: the Task read
-"Conversation: starting", "latest Graph: Starting feature", with an open
-Session. A Task that took up a Graph and never ran it owes setup
-(`ops/human_session/setup.rs`): its conversation starts `lf task run`
-detached, and the person's own `lf task run` then met that live run and
-refused. So the early take-up was itself a request to run.
-
-Checks nobody has run since main was merged in (2026-11-19):
-
-- Swift build and `scripts/test_desktop.sh --filter 'DTOFixtureTests|ServerProtocolTests|RegistryQueryTests|WorkModelTests|WorkNavigationTests|WaveStandupTests|WorkSelectionTests|TaskStatusTests|TaskConceptTests|DesktopHeadlessTests|PendingChangesTests|WorkCacheTests|TaskRowMetadataTests'`:
-  `TaskWork.swift`, `DTOFixtureTests`, `DesktopHeadlessTests` combine `auto`
-  with main's `stack_parent`. Before the merge: 285 tests, 3 failures, all the
-  base's `WorkPart(rawValue: "activity")`. Gate.
+- `golden_prompt` (skill text changed; regenerate), `documented_commands::`,
+  `dto_fixtures::`, `config::` catalogue tests.
+- Swift: `scripts/test_desktop.sh --filter 'DTOFixtureTests|ServerProtocolTests|RegistryQueryTests|WorkModelTests|WorkNavigationTests|WaveStandupTests|WorkSelectionTests|TaskStatusTests|TaskConceptTests|DesktopHeadlessTests|PendingChangesTests|WorkCacheTests|TaskRowMetadataTests'`.
+  Before main was merged in: 285 tests, 3 failures, all the base's
+  `WorkPart(rawValue: "activity")`.
 - iOS (`uv run python scripts/test_ios.py`): `TaskWorkspaceView.swift` and
-  `TaskListView.swift` were edited and never compiled. Gate/CI.
-- `served_reads`, `machine_commands` (both edited for `task.auto`),
-  `performance_tests::`, `world_recipes::`, `two_people`, the website docs
-  check (`docs/dev/index.html` regeneration if it asks). CI.
+  `TaskListView.swift` were edited and never compiled.
+- `served_reads`, `machine_commands` (both edited for the auto operations),
+  `performance_tests::`, `world_recipes::`, `two_people`, the rest of
+  `local_planning`, the website docs check.
+- A released lf reading a config with the new `auto:` key: not tested.
 - Recovery fixtures that time out here with and without this branch's edits
   ("waiting for the restart", "waiting for the Task conversation and Graph
   launches"): `a_restarted_wait_keeps_its_explicit_agent`,
@@ -254,229 +111,91 @@ Checks nobody has run since main was merged in (2026-11-19):
 - `a_ship_meets_a_hand_merged_pr_at_its_landing_step` and
   `a_ship_whose_run_fails_the_same_way_stops_and_keeps_auto_on` failed once on
   "read the fixture's Machine server status" beside a Swift build and passed
-  at `-j 2`. Gate reads CI.
+  at `-j 2`.
+- Not driven by anyone: the Desktop window (toggle and badge), iOS, an auto on
+  arriving in the 30 s before a carrier's Graph registers, a moved Task, and
+  the last three commits as a person would use them (config `auto: on`,
+  `lf task auto on --graph`).
 
-Passed before the merge (2026-11-19): storage and execution lib filters (221),
-the `loopflow` filters (240 of 245, the five above), `documented_commands::`,
-`binary(golden_prompt)`, clippy.
+Last run here, 2026-11-19 after `fa171df836`: `cargo nextest run -p loopflow
+-p loopflow-execution --lib` over `lf::tests::`, `adapter_tests::`,
+`server::schema::tests::`, `lf::commands::write::tests::`,
+`config::keys::tests::`, `engine::task::` and the auto/batch/Wave-auto
+`task_graph_launch_tests`: 85 run, 3 failed on stale `lf ship` assertions,
+fixed in `76b2bd214e`, the 9 rerun passed. Clippy clean.
 
-Shape, for gate's review:
+Shape, for gate's review and ship-review's filing:
 
 - `auto off` on a Task with no Graph saves nothing and answers "auto was not
-  on". The mark has no home before a Graph row exists.
+  on": the mark has no home before a Graph row exists. A released
+  `lf task hold` on a never-run Task is lost in the upgrade the same way.
+  Storing auto on the Task would close both.
 - Off means two things: the person takes the interactive steps, and nothing
   merges. After `auto off`, a person's own `lf task run` past review waits at
-  `pr land` until `lf ship`. Never set differs: such a run lands.
-- The builtin `auto` Graph shares its name with the setting. Renaming it is
-  its own Task.
-- Open, nobody has decided: whether `lf -b task run` should write auto on.
-- The auto setting lives in `ops/task/auto.rs` (`ask`, `off`,
-  `running_graph`, and `ship_branch_task` for a branch with no Task).
-  `commands/ship.rs` is gone: `lf ship` is a `carry_task_run` call in
-  `bin/lf.rs` beside `lf task run`'s. Compress 2026-11-19: clippy clean;
-  storage `sqlite::task_work` 6 passed; `loopflow --lib lf::tests
-  task_graph_launch_tests::auto_o …::a_ship_on_a_running` 42 passed.
-- `TaskExecutionSnapshot.outlook` is on the wire and decoded in Swift, and
-  no surface reads it: CLI and Desktop print `reason`. Either Desktop uses it
-  the way it uses a conversation's outlook, or the field goes and `died` plus
-  `reason` carry the run.
+  land until `lf task auto on`. Never set differs: such a run lands.
+- `TaskExecutionSnapshot.outlook` is on the wire and decoded in Swift, and no
+  surface reads it: CLI and Desktop print `reason`.
 - `auto::running_graph` polls up to 30 s for a carrier's Graph to register so
-  `TaskRunStart::Live` can name a Graph run. If `Live` named the carrier
-  instead, the wait and its second sentence ("is running graph …" after 30 s)
-  would go. Not driven: a ship arriving inside that window.
+  `TaskRunStart::Live` can name a Graph run. If `Live` named the carrier, the
+  wait would go.
+- A Task waiting at an interactive step reads "latest Graph: Graph … finished;
+  nothing further is launched" (base behavior).
+- `task.shipped` meaning "merged".
 
-## Built: ship is a run that asks for auto
+## What the work taught
 
-Built 2026-11-19 (concept review, second pass). `lf ship` is `carry_task_run`
-with `TaskProcessOptions.ship`; `-b` is the run's `TaskRunMode::Headless`,
-carried once. `start_task_run` (`ops/task.rs`) writes what either asks of auto
-once, after its own take-up (`auto::ask`). A Graph run derives "stops at
-interactive steps" from being a Task run with neither `-b` nor `-i`.
+- A bare `lf task run` on a Task waiting at an interactive step means "the
+  person finished this step" and continues after it, whatever auto says. That
+  is why auto on is the run and not a mark followed by a bare run.
+- An earlier build let `lf task auto on` take up a Graph without running it.
+  The Task read "Conversation: starting", "latest Graph: Starting feature":
+  a Task that took a Graph up and never ran it owes setup
+  (`ops/human_session/setup.rs`), its conversation started `lf task run`
+  detached, and the person's own run then met that live run and refused.
+- State never reads the setting, so auto on with nothing running at an
+  interactive step reads `active`, not `idle`.
+- With the take-up inside the run, two first runs at once both took a Graph
+  up and the second's `INSERT OR REPLACE` wiped the first's run. A first
+  take-up is `take_up_first_task_graph` (`INSERT OR IGNORE`); the loser reads
+  the Task again.
+- The Task conversation's `TaskGraph::guidance` reached no provider (a Task
+  launch's message comes from `task_input::task_seed`), so it was deleted.
+- A released `lf ship` that dies across the upgrade is not carried again; the
+  Task reads `idle`, auto on, and `lf task run` carries it. Reverse by copying
+  a live ship carrier's pid onto `task_graphs.run_pid` in the migration.
+- Hand-merged PRs: the land step meets the merge. Graphs with no land step
+  finish into `end` and completion settles.
 
-- A person's ask on a Task waiting at an interactive step starts at that step
-  (`select_task_run`'s `stands_in`); on a live run it turns auto on and
-  answers `TaskRunStart::Live` (printed as `TaskRun::Running`, `merges: true`,
-  exit 0); at `end` it answers `Ended` and writes nothing.
-- `ship_on`, `ShipStart`, `graph_for_ship`, `task_for_auto`, `live_graph_run`
-  are deleted.
-- What it taught: with the take-up in the run, two first runs at once would
-  both take a Graph up, and the second's `INSERT OR REPLACE` wiped the first's
-  run. A Task with no Graph now takes its first up with
-  `take_up_first_task_graph` (`INSERT OR IGNORE`); the loser, and a run that
-  loses `start_task_graph_run`, reads the Task again. So "moved on graph …
-  while this run was starting" is gone: a bare run that loses gets "is running
-  graph …", a ship reports the live run.
-- A ship that meets a carrier whose Graph process has not registered waits up
-  to 30 s for it (`auto::running_graph`), then falls to the bare run's
-  sentence.
-- Changed on purpose: a ship that fails before its run starts leaves auto
-  unset. A done or abandoned Task gets the run's sentences ("is done; `lf task
-  reopen` …", "is abandoned; inspect …"), not ship's own.
-- Not in a fixture: two ships at the same moment. QA drives it.
-- `a_ship_on_a_running_task_reports_its_run_and_starts_nothing` turns auto
-  off before the ship, so the `on` it reads is the ship's, and counts one
-  Graph run. Passed 2026-11-19; the ship call returned in 0.7 s.
+## What QA showed (2026-11-19, `scratch/qa.html`, when the command was `lf ship`)
 
-Stored and wire value is `off` (`AutoState::Off`, `task_graph_auto.sql`,
-`task_checkout.json`, `server_schema.json`, Swift `Auto.State.off`,
-`docs/telemetry.md`).
+On a private lf-world Machine with the branch `lf` and its server:
 
-Run 2026-11-19: `task_graph_launch_tests::{auto_o,a_ship,task_ship,a_stopped_ship}`
-15 passed; storage `sqlite::task_work sqlite::task_summaries` 7 passed;
-execution `task_graph:: ops::task::explain::tests:: store::task_work_lifecycle_tests`
-14 passed; `golden_prompt` passed; `server::schema::tests:: lf::tests::
-lf::commands::write::tests::` with the two auto-off fixtures, 51 passed;
-`dto_fixtures::` 50 passed; `documented_commands::` 4 passed; clippy clean.
-
-## Built: the Task run takes the conversation's outlook type
-
-Direction 2026-11-19 (exact words in `scratch/questions.md`, "Run outlook").
-Built 2026-11-19:
-
-- `TaskExecutionSnapshot` carries `died {at_step, at}` and `outlook`
-  (`SessionOutlook`), both required and nullable. `reason` is the one
-  sentence, written in Rust: "Run died 12:01 at implement · starting again",
-  "… · starts again 12:05", "… · started 5 times; `lf task run X` starts it
-  again". `DiedRun::reason`, `next_at` and `RUN_RESTARTS` are gone.
-- One rule: `DiedRun::server_start` asks `recovery::server_start` with the
-  run's restarts, so a run and a conversation share the 5 starts, the
-  backoff and the reasons it is left (`human_session::left_reason`). No
-  server, not claimed here and not checked out here read `blocked` with the
-  command; before, they read `waiting` and promised a start.
-- `died.at` is null until retention records the death: a carrier found dead
-  by its pid has no time, and the sentence drops the clock ("Run died at
-  demo · …"). That is the usual case right after a kill.
-- Fixture `task_execution_died.json` (Rust and Swift); every execution
-  fixture gained the two keys; `server_schema.json` regenerated.
-- Desktop prints `reason`; nothing there reads `outlook` yet.
-- Also fixed: `TaskWorkView.autoLine` still named `Auto.State.stopped`, so
-  the Swift package did not build since the stored word became `off`.
-
-Run 2026-11-19: `ops::task::run_recovery::` (2), `ops::human_session::tests::`
-(33), `dto_fixtures::` (51), `server::schema::tests::` (8),
-`task_graph_launch_tests::a_task_run_whose_carrier_died…`,
-`documented_commands::` (4), `scripts/test_desktop.sh --filter
-'TaskGraphProofTests|DTOFixtureTests'` (64), clippy: all pass.
-
-Not driven: a died run with no server, as a person would see it in
-`lf task status` (QA). The unit rows cover the sentence.
+- A second auto on at the same moment exited 1 with "acquire worktree lease:
+  … is owned by another active operation"; `restore_task_checkout` now waits
+  up to 10 s (`CHECKOUT_LEASE_WAIT`). With three at once, 1 Task in 5 had one
+  exit 1 with "the Task's run is carried by another `lf task run`";
+  `try_start_task_run` now reads the Task again when the row names a live
+  carrier. After both: 12 Tasks, three each, every exit 0, one Graph run each.
+  Neither fix has a fixture; the race is not deterministic from outside.
+- Working: auto on for a never-run, waiting, running, landing-wait, done and
+  Task-less-branch start, with `--reason`; `auto off` mid-run stops at land; a
+  failed land stops after 3 and keeps auto on; reopen clears auto; both
+  operations over the socket and racing the CLI (one run, both exit 0);
+  `state:auto` in a Dashboard query; from a hand-merged Task's checkout to
+  `done`.
+- A died run with no server read "Run died at implement · no server runs here
+  to start it; `lf task run cf17c1` starts it again"; with a server, "… ·
+  starting again", carried in about a minute.
+- Upgrade from the installed 0.16.0 (`f5ff6a6c7`): a live released ship reads
+  `moving · auto: on, Nov 19 10:51` and finished; a Task waiting at
+  `human-review` went on with auto on (the captured Graph carries the old
+  skill text).
+- Fixed from QA: `lf task status` at a landing wait with auto off now reads
+  the runner's sentence as `execution.state: waiting`, `action: no_action`;
+  `lf task auto off` on an unknown ID answers `not_found`.
 
 ## Exclusions
 
-- Changing what `lf -b` means beyond writing auto.
 - An `auto:` key in graph YAML: auto is a Task fact, not a graph property.
-- `.lf/graphs/autonomous.yaml` is a graph name; it stays.
 - The contract migration that drops what is leaving: LOO-971.
-
-## Built: human-review is ship-review
-
-Built 2026-11-19. Step and skill renamed everywhere (`code.yaml`,
-`feature.yaml`, `ship-review.md`, `builtins.rs`, `task_session.md`,
-`.lf/skills/task-session.md`, docs, `.lf/qa`, fixtures, tests); the page is
-`scratch/ship-review.html`. The skill's goals are understanding and a decision
-on every finding, with the filing bar; headless it fixes small things, files
-what clears the bar and goes on. `concept-review.md` says a wrong model in the
-area is this work, however large, and after build means another full pass.
-`docs/orchestration.md` and `docs/getting-started.md` describe the new page.
-
-A Task waiting at `human-review` in a stored Graph keeps that captured graph,
-so its step name stays until it takes a Graph up again.
-
-Not run here: `world_recipes::`, `local_planning` (renamed step in
-assertions). CI.
-
-## Built: a Wave's default graph takes an optional auto modifier; the `auto` graph goes
-
-Direction 2026-11-19 (exact words in `scratch/questions.md`, "The auto graph").
-Auto already stands in at every interactive step, `verify` included, so
-`code` with auto on is the whole path to done with nobody there. The `auto`
-graph is that minus `verify`, under the setting's word.
-
-- Config key `auto: on` beside `graph:` in `.lf/wave/<wave>/config.yaml` and
-  `.lf/config.yaml` (read next to `work/wave/config.rs::wave_graph` and the
-  repository `graph:` in `config/settings.rs`). When a Task first takes up its
-  Graph and its auto is unset, it is written `on`, attributed to the config
-  (`auto: on by wave config` / `by repository config`). After that it is the
-  ordinary setting: `lf task auto off` works per Task. No other value; absent
-  means unset.
-- Delete the builtin `task/graph/auto.yaml` and `.lf/graphs/autonomous.yaml`
-  (a duplicate of it, no Wave uses it). README, `docs/index.md`,
-  `docs/getting-started.md` say `graph: code` + `auto: on` instead of
-  `graph: auto`. Tests and fixtures that write `graph: auto` move to the key.
-- Shared-file rule: a released config naming `graph: auto` keeps resolving on
-  the branch as `code` with the auto default, marked with the Task that
-  removes it; file that Task in this change. Released lf must ignore the new
-  `auto:` key (settings already tolerate unknown keys; confirm with a test).
-- `-b` on `task run` works as it does on any Graph (`lf -b graph X`): this
-  run goes headless, stands in at every interactive step, and the caller
-  waits for it. It writes no auto: the setting's writers are `lf ship` /
-  `lf task auto on|off` and the config default. `stands_in` in
-  `lf/commands/graph.rs` keeps `launcher.batch` → stand in; remove the auto
-  write `-b` does today (`AutoAsk`/`TaskRunMode::Headless` path in
-  `start_task_run`). Recovery restarts a died `-b` run as a bare `lf task
-  run`, so a restarted run stops at its next interactive step unless auto is
-  on. Update `task.run`'s `approve` docs ("turning auto on" goes), docs and
-  the operate skills that use `-b` to ship (they say `lf ship`).
-
-Built 2026-11-19:
-
-- `auto: Option<AutoDefault>` (`on` only) in the config catalogue, General
-  applicability, so Wave, repository and personal configs take it.
-  `auto::configured` runs after any take-up in `try_start_task_run` and writes
-  `on` only when unset (`set_task_auto`'s `keeps_off` became `unset_only`).
-  Attribution is a new `Starter::Config { layer: wave | repository |
-  personal }` ("auto: on by wave config"); Swift `Starter.config(layer:)`;
-  `task_detail.json` carries it.
-- `-b` writes no auto (`auto::ask` takes only `ship`); `stands_in` unchanged.
-- `task/graph/auto.yaml` and `.lf/graphs/autonomous.yaml` deleted.
-  `keys::fold` reads `graph: auto` as `graph: code` + `auto: on`, marked for
-  removal by Task d3af77 (filed here). Released lf ignoring `auto:`: not
-  tested here; the released reader's unknown-key handling is for gate/QA.
-- Docs: README, `docs/index.md`, getting-started, orchestration, planning,
-  launch-plan and task-operate skills, `task.run` help and `approve` docs.
-- Test: `a_waves_auto_on_takes_every_step_of_its_tasks_and_an_off_still_wins`;
-  the batch fixture asserts `auto` stays null; `keys::tests::a_released_auto_graph_reads_as_code_with_auto_on`.
-
-Gate: regenerate `server_schema.json` (Starter variant, `approve` doc), run
-`dto_fixtures::`, `server::schema::tests::`, `golden_prompt` (skill text),
-`documented_commands::`, `config::` catalogue tests, Swift DTOFixtureTests.
-
-## Built: `lf ship` goes; `lf task auto on` is the command
-
-Direction 2026-11-19: "lets kill lf ship; isnt that just lf task auto on?"
-It is: `lf ship`'s own help says "`lf task auto on` is this command".
-
-- Delete `Commands::Ship` and its rewrite in `lf/mod.rs` (the `--task …
-  ship` respelling, the ISSUE→`--task` shim) and `spell_ship`. `lf task auto
-  on [ISSUE] [--graph <g>] [--reason] [--json]` takes what `lf ship` had:
-  `--graph` (take up another graph), `--reason` (the run's reason), and no
-  ISSUE = the checkout's Task, or a new one for its branch.
-- Wire: `task.ship` → `task.auto.on`, beside `task.auto.off`; Swift
-  `DesktopActions`, `server/schema.rs`, DTO fixtures follow. No alias.
-- Every printed sentence that says "`lf ship` lands it" / "`lf ship <ID>`"
-  says `lf task auto on <ID>`. Docs (~50 files name `lf ship`), README,
-  builtin skills (task-session, task-operate, repo/wave operate, pr-land),
-  `.lf/skills`, `.lf/qa`, help text.
-- `ship-review` keeps its name: it reviews what ships, not the command.
-
-Built 2026-11-19 (`fa171df836`): `Commands::Ship` deleted; `TaskCommand::Auto`
-gained `--graph` (off with `--graph` is a usage error); `Cli::turns_auto_on`
-marks the run's dispatch, detach and handoff sites in `bin/lf.rs`; only `auto
-off` goes through shared mutation dispatch. `task.ship` → `task.auto.on`
-(`TaskAutoOn`, `engine::task::auto_on`, `spell_auto_on` = `--task X task auto
-on --json`); fixtures `task_auto_on.json`, `task_auto_on_answer.json`; Swift
-`.taskAutoOn`, `WorkModel.turnAutoOn`. `TaskProcessOptions.ship` is
-`auto_on`. `server_schema.json` regenerated. `lf ship` now fails to parse
-(asserted in `lf::tests`). Released skill text and `.lf/wave` memory and
-release notes still say `lf ship`; they are history.
-
-Run 2026-11-19: `cargo nextest run -p loopflow -p loopflow-execution --lib`
-over `lf::tests::`, `adapter_tests::`, `server::schema::tests::`,
-`lf::commands::write::tests::`, `config::keys::tests::`, `engine::task::` and
-the auto/ship/batch/Wave-auto `task_graph_launch_tests`: 85 run, 3 failed
-(a stale `lf ship` parse assertion: it parses as an external skill; the schema's
-RESPONSES name), fixed, the 9 rerun passed. Clippy clean.
-
-Not run here: `golden_prompt` (skill text changed; regenerate at gate),
-`documented_commands::`, Swift `ServerProtocolTests`/`DesktopHeadlessTests`/
-`PendingChangesTests`, iOS, `served_reads`, `machine_commands`.
+- Removing the `graph: auto` config fallback: Task d3af77.

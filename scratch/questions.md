@@ -1,8 +1,9 @@
 # LOO-968 open choices
 
 Choices made headless, each with how to reverse it. Names are today's
-(`auto`, `lf task auto off`); the first build called them Auto-Ship and
-`lf task hold`.
+(`auto`, `lf task auto on|off`); earlier builds called them Auto-Ship,
+`lf ship` and `lf task hold`, and entries below that say "ship" mean
+`lf task auto on`.
 
 ## What people said
 
@@ -51,14 +52,11 @@ Questions 1 and 2 got no written answer in scratch.
   no stored Graph is rewritten.
 - **The run-outlook steer is in the plan as this Task's next section**, not
   filed: `DiedRun::reason` is code this PR adds. Reverse by filing it.
-- **`lf task auto on` is the `lf ship` operation** (concept review,
-  2026-11-19). It parses as `lf ship`: it runs the Task, standing in at a
-  waiting interactive step. Reverse by restoring a mark-only write; to arm
+- **`lf task auto on` runs the Task** (concept review, 2026-11-19),
+  standing in at a waiting interactive step. Reverse by restoring a mark-only write; to arm
   ahead of a first run instead, store auto on the Task.
 - **`lf task auto on` with no ISSUE on a branch with no Task makes one**, as
-  `lf ship` does, since the two are one parse. Reverse by keeping the
-  `TaskCommand::Auto` variant through dispatch and matching both where
-  `Commands::Ship` is matched.
+  `lf ship` did.
 - **The served off is `task.auto.off`**, answering `{issue, was_on}`.
 - **`ships` became `merges`** on the run receipt.
 - **Reopening a Task clears auto.**
@@ -66,7 +64,7 @@ Questions 1 and 2 got no written answer in scratch.
   step with nothing running, reads `active` (was `idle`).
 - **Rows learn auto through the selection state `auto`**, not a field on each
   row DTO. A done or abandoned Task never carries it.
-- **Desktop's toggle on sends `task.ship`** (auto on, then the run).
+- **Desktop's toggle on sends `task.auto.on`** (auto on, then the run).
 - **A moved Task continues as `lf task run`** on the destination;
   `mini_starts_nothing_for_a_task_that_moved_back` counts mini's Graph runs.
 - **A released `lf ship` that dies across the upgrade is not carried again.**
@@ -119,12 +117,11 @@ Questions 1 and 2 got no written answer in scratch.
   failing at once. Reverse by restoring `acquire_worktree_lease` in
   `restore_task_checkout`; two starts at once then fail one caller.
 
-- Whether `lf -b task run` should write auto on.
 - A Graph process killed with its carrier stays open until the hourly prune,
   so the Task reads `moving` with nothing running. Base behavior;
   `lf machine prune` settles it.
 - `lf task auto off` before a first run saves nothing, so a later
-  `lf -b task run` turns auto on. Storing auto on the Task would close it.
+  config default or `lf task auto on` turns it on. Storing auto on the Task would close it.
 
 ## Ship review (2026-11-19)
 

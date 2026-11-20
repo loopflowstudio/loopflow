@@ -3,7 +3,7 @@
 use anyhow::{anyhow, Result};
 
 use crate::lf::commands::WorkFilter;
-pub use crate::session_record::SessionHistory;
+pub use loopflow_execution::session_record::SessionHistory;
 
 const WINDOW_DAYS: i64 = 7;
 const MAX_SESSIONS: usize = 50;
@@ -11,17 +11,20 @@ const MAX_SESSIONS: usize = 50;
 /// Shared Session history, newest input first. SQL selects the recent budget
 /// before decoding; exact Task and caller-input drills remain complete.
 pub(crate) fn collect_recent_history(
-    store: &crate::store::sqlite::SqliteStore,
+    store: &loopflow_storage::sqlite::SqliteStore,
     filter: WorkFilter,
 ) -> Result<(Vec<SessionHistory>, bool)> {
     let since = chrono::Utc::now().timestamp() - WINDOW_DAYS * 24 * 3600;
-    Ok(store.recent_conversation_history(
-        filter.wave,
-        filter.project,
-        filter.task,
-        since,
-        MAX_SESSIONS,
-    )?)
+    Ok(
+        loopflow_execution::store::sessions::recent_conversation_history(
+            store,
+            filter.wave,
+            filter.project,
+            filter.task,
+            since,
+            MAX_SESSIONS,
+        )?,
+    )
 }
 
 /// Select conversations in SQL before reading their subordinate history.
@@ -30,12 +33,16 @@ pub(crate) fn collect_history(
     parent: Option<&str>,
     since: i64,
 ) -> Result<Vec<SessionHistory>> {
-    let database = crate::store::database_path_from_env()?;
+    let database = loopflow_execution::store::database_path_from_env()?;
     if !database.exists() {
         return Ok(Vec::new());
     }
-    let store = crate::store::sqlite::SqliteStore::open_processes_read_only(&database)?;
-    Ok(store.conversation_history(
+    let store = loopflow_storage::sqlite::SqliteStore::open_read_only(
+        &database,
+        loopflow_execution::store::token_key::encryption_key,
+    )?;
+    Ok(loopflow_execution::store::sessions::conversation_history(
+        &store,
         filter.wave,
         filter.project,
         filter.task,
@@ -64,11 +71,13 @@ pub fn inspect(selector: &str, view: SessionView, json: bool) -> Result<()> {
 pub(crate) fn render(selector: &str, view: SessionView, json: bool) -> Result<String> {
     use std::fmt::Write;
     let mut output = String::new();
-    let home = crate::store::lf_home_dir();
-    let database = crate::store::database_path_from_env()?;
-    let store = crate::store::sqlite::SqliteStore::open_processes_read_only(&database)?;
-    let snapshot = store
-        .input_history(selector)
+    let home = loopflow_execution::store::lf_home_dir();
+    let database = loopflow_execution::store::database_path_from_env()?;
+    let store = loopflow_storage::sqlite::SqliteStore::open_read_only(
+        &database,
+        loopflow_execution::store::token_key::encryption_key,
+    )?;
+    let snapshot = loopflow_execution::store::sessions::input_history(&store, selector)
         .map_err(|error| anyhow!("Session capture unavailable: {error}"))?;
     if view == SessionView::Transcript {
         let conversation = super::history_transcript::session(&store, &snapshot.session_id)?;
@@ -83,13 +92,13 @@ pub(crate) fn render(selector: &str, view: SessionView, json: bool) -> Result<St
         }
         return Ok(output);
     }
-    let input = crate::session_record::parse_artifact_key(snapshot.selector())?;
-    let dir = crate::session_record::record_dir(&home, &input)
+    let input = loopflow_execution::session_record::parse_artifact_key(snapshot.selector())?;
+    let dir = loopflow_execution::session_record::record_dir(&home, &input)
         .ok_or_else(|| anyhow!("Input {} has no artifact path", snapshot.selector()))?;
     if view == SessionView::Final {
-        let answer = store
-            .input_final_answer(&input)
-            .map_err(|error| anyhow!("Capture final answer unavailable: {error}"))?;
+        let answer =
+            loopflow_execution::transcript::answer::input_final_answer_for_people(&store, &input)
+                .map_err(|error| anyhow!("Capture final answer unavailable: {error:#}"))?;
         return match answer {
             Some(answer) => {
                 writeln!(&mut output, "{answer}")?;
@@ -107,7 +116,7 @@ pub(crate) fn render(selector: &str, view: SessionView, json: bool) -> Result<St
         };
     }
     if view == SessionView::Instructions {
-        let decisions = crate::context_usage::read_instructions(&dir)
+        let decisions = loopflow_execution::context_usage::read_instructions(&dir)
             .map_err(|error| anyhow!("Instruction evidence unavailable: {error}"))?;
         if json {
             writeln!(&mut output, "{}", serde_json::to_string(&decisions)?)?;
@@ -115,17 +124,21 @@ pub(crate) fn render(selector: &str, view: SessionView, json: bool) -> Result<St
             writeln!(
                 &mut output,
                 "{}",
-                crate::context_usage::render_instructions(&decisions)
+                loopflow_execution::context_usage::render_instructions(&decisions)
             )?;
         }
         return Ok(output);
     }
     if view == SessionView::Context {
-        let step = crate::context_usage::step_context(&home, &store, &snapshot);
+        let step = loopflow_execution::context_usage::step_context(&home, &store, &snapshot);
         if json {
             writeln!(&mut output, "{}", serde_json::to_string(&step)?)?;
         } else {
-            writeln!(&mut output, "{}", crate::context_usage::render_step(&step))?;
+            writeln!(
+                &mut output,
+                "{}",
+                loopflow_execution::context_usage::render_step(&step)
+            )?;
         }
         return Ok(output);
     }
@@ -157,7 +170,7 @@ pub(crate) fn render(selector: &str, view: SessionView, json: bool) -> Result<St
         "Working directory: {}",
         snapshot.worktree.as_deref().unwrap_or("unknown")
     )?;
-    let manifest = crate::session_record::read_manifest(&dir).ok();
+    let manifest = loopflow_execution::session_record::read_manifest(&dir).ok();
     writeln!(
         &mut output,
         "Replay: {}",
@@ -165,17 +178,17 @@ pub(crate) fn render(selector: &str, view: SessionView, json: bool) -> Result<St
             .as_ref()
             .and_then(|manifest| manifest.process.as_ref())
         {
-            Some(launch) if launch.replay_unavailable_reason().is_none() => "available",
-            Some(_) | None => "unavailable",
+            Some(_) => "available",
+            None => "unavailable",
         }
     )?;
     writeln!(&mut output, "Evidence gaps: {}", snapshot.evidence_gaps)?;
     writeln!(
         &mut output,
         "{}",
-        crate::context_usage::render_step(&crate::context_usage::step_context(
-            &home, &store, &snapshot
-        ))
+        loopflow_execution::context_usage::render_step(
+            &loopflow_execution::context_usage::step_context(&home, &store, &snapshot)
+        )
     )?;
     for transition in store.provider_transitions(&snapshot.session_id)? {
         writeln!(

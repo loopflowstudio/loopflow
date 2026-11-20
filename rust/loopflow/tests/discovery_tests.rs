@@ -5,14 +5,14 @@ use std::env;
 use std::fs;
 use std::sync::{Mutex, OnceLock};
 
-use loopflow::builtins::{
+use loopflow_definitions::builtins::{
     builtin_graph_names, builtin_skill_description, builtin_skill_names, BUILTIN_GRAPH_CATEGORIES,
     BUILTIN_SKILL_CATEGORIES,
 };
-use loopflow::definition::{resolve_definition, Target};
-use loopflow::graph::load_graph;
-use loopflow::graph::load_skill;
-use loopflow::skills::catalog::SkillCatalog;
+use loopflow_execution::definition::{resolve_definition, Target};
+use loopflow_execution::graph::load_graph;
+use loopflow_execution::graph::load_skill;
+use loopflow_execution::skills::catalog::SkillCatalog;
 use tempfile::TempDir;
 
 static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();

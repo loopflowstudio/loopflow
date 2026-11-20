@@ -57,15 +57,73 @@ nothing the list lacks is tried. A lone bare `claude` (`agents: claude`) has no
 next entry, so it tries Claude's other models instead: Opus, then Sonnet, then
 Haiku.
 
-When a usage limit refuses a headless step, it tries your next login for that
-provider, then the next entry in `agents`. If the provider reports that the
-model is unavailable, the step moves directly to the next entry without marking
-the login’s quota spent. An explicit model pin stops instead.
+When a usage limit or model-unavailable error refuses headless work, it tries
+the next entry and says so. That covers Graph steps, `lf -b <skill>`, commit
+messages, PR titles and bodies, and sync conflict resolution:
+
+```bash
+lf set --global agents codex,claude:fable,claude:opus
+lf pr open
+# codex: provider usage limit; continuing on claude:fable
+# claude:fable: provider usage limit; continuing on claude:opus
+# https://github.com/acme/app/pull/412
+```
+
+Each entry uses its native client's own login. An explicit agent pins the
+harness; an explicit model pin stays on that model. Once the order runs out,
+the command reports the last entry's reason and the order it tried. If commit
+message generation exhausts the order, `lf commit` uses its default message.
+A PR copy failure looks like this:
+
+```
+Error: PR copy generation failed (exit 1): provider_rate_limited: rejected: five_hour
+claude_result: You've hit your limit.
+Nothing is left in its order after codex, claude:fable, claude:opus; add another agent to `agents`
+```
+
+Only a Graph step waits for more usage: once every entry has refused on a usage
+limit, it waits 5, 15, 30, then 60 minutes, trying the whole order again after
+each, and then stops. The steps of `lf -b <graph>` are Graph steps and wait
+the same way, which includes a name that is both a skill and a Graph, such as
+`lf -b research`. Other commands stop when the order runs out of usage. Pi and
+OpenCode do not report why they refused, so an entry for either stops there.
+Interactive Sessions keep the refusal visible and require an explicit retry or
+move, with or without a Task.
+
+A Graph step also passes over an entry whose CLI is not installed on this
+Machine. Either move shows on the Task:
 
 ```bash
 lf task status MTG-328
-#   compress went on under claude after: codex_error: You've hit your usage limit
+#   compress went on under claude after: provider_rate_limited: You’ve hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/settings/usage to purchase more credits or try again at 3:36 PM.
+#   implement went on under codex after: 'opencode' is not installed
 ```
+
+The first word is the cause the provider stated and the rest is its own
+message. The stated cause decides the move, so a reworded message still moves
+on; [Rate limits](troubleshooting.md#rate-limits) lists the causes.
+
+A model the account can't use counts as unavailable, and so does a model name
+that doesn't exist:
+
+```yaml
+agents: [codex:gpt-6.1-astra, claude]
+```
+
+```bash
+lf task status MTG-328
+#   compress went on under claude after: provider_model_unavailable: The 'gpt-6.1-astra' model is not supported when using Codex with a ChatGPT account.
+```
+
+A misspelled entry moves on the same way, so read that line when work runs
+somewhere you didn't expect.
+
+When the missing CLI was the only choice (a pin, or the last entry), the step
+fails once with [how to install it](troubleshooting.md#agent-not-found). Chats
+and batches never move: a missing CLI stops them with the same message.
+
+OpenCode and Pi failures are not read for usage limits. A step that fails on
+either stops with the provider's error instead of moving or waiting.
 
 | Setting | Compress tries | Everything else tries |
 | --- | --- | --- |
@@ -75,10 +133,11 @@ lf task status MTG-328
 | `default_agent: claude` plus `skill.compress.agents: [codex]` | Codex only | Claude only |
 | `lf -a codex graph code` | Codex only | Codex only |
 
-An `agent` choice or `-a` pins one provider: the step changes login, never
-provider. It waits for a known reset; with no reset or next entry, it stops
-once. Neither choice is checked against `agents`, so `-a pi` runs Pi for that
-command whatever the list says.
+An `agent` choice or `-a` pins the harness. Bare Claude can still try its other
+models; `claude:opus` pins the model too. Loopflow never switches logins or
+reads reset times.
+Neither choice is checked against `agents`, so `-a pi` runs Pi for that command
+whatever the list says.
 The list covers what Loopflow picks by itself.
 
 A narrower `agents` replaces the wider one whole, so a repository, Wave or
@@ -112,7 +171,7 @@ through its models like a one-entry list.
 
 The older comma list, `default_agent: claude,codex`, still reads as
 `agents: [claude, codex]` with `default_agent: claude`, and warns with the
-file and the replacement. [When an account runs out](subscriptions.md#when-an-account-runs-out)
+file and the replacement. [When a provider refuses work](subscriptions.md#when-a-provider-refuses-work)
 has each move a step makes.
 
 ## Let a repository choose its exceptions
@@ -290,25 +349,11 @@ lf --setting context.diff=false design
 `context` also holds `diff_files`, `paste` and `budgets`. The existing `--docs`,
 `--diff` and clipboard flags address those same settings.
 
-## Choose accounts and where work runs
+## Choose where work runs
 
-```yaml
-# ~/.lf/config.yaml
-account:
-  claude: [work@example.com, personal@example.com]
-  codex: [work@example.com]
-```
-
-Use your connected accounts' login emails, in preference order; an account with
-no login email is named by its ID. To use only your work Claude account in this
-repository:
-
-```bash
-lf set account.claude '[work@example.com]'
-```
-
-The repository list replaces the global list. Accounts apply to a global, repository
-or Wave scope; they are not selected per skill.
+Claude and Codex use native authentication on the execution Machine. Use the
+native client's sign-in flow there, or explicitly configure supported credentials
+with [named forwarding](#remote-work) for unattended work.
 
 Once a remote machine is registered, select its durable ID for new Tasks:
 
@@ -364,8 +409,7 @@ itself log into an account, provision a machine or move existing work.
 
 Setters validate before writing, preserve unrelated content and comments, and
 protect against concurrent edits. Hand edits invalidate the same readers. Config
-inspection and bootstrap preferences do not require a compatible database; account
-or machine availability can still require runtime observations.
+inspection and bootstrap preferences do not require a compatible database; machine availability can still require runtime observations.
 
 File readers print warnings and skip unknown keys, invalid values and malformed
 YAML entries, including settings inside skills and Graph steps. Warnings identify
@@ -390,11 +434,12 @@ a setter to edit that file; setters preserve comments and unrelated content.
 personal global file. Bare `set` edits private repository settings; `--wave`
 selects a Wave within that private file. Add `--shared` to edit the committed repository or Wave file.
 
-Keys sit on their primitive: `repo.plan.team`, `skill.<name>.agent`,
-`wave.graph`, `wave.<id>.account`. A file or command may spell a key by its
-trailing path (`planning.team`, `graph`), by the typed layout
-(`skills.<name>.agent`, `waves.<id>.account`) or, for the Linear team, the
-released `linear.team`. `lf set` gathers the key's group into the typed layout,
+Keys sit on their primitive: `repo.tracker.linear.team`, `skill.<name>.agent`,
+`wave.graph`, `wave.<id>.agent`. A file or command may spell a key by its
+trailing path (`tracker.linear.team`, `graph`), by the typed layout
+(`skills.<name>.agent`, `waves.<id>.agent`) or, for the Linear team, the
+released `linear.team`. A repository has one tracker, so setting another tracker's key
+replaces the block. `lf set` gathers the key's group into the typed layout,
 the one released `lf` reads too; `lf config catalog` lists each key with its
 shorthands.
 
@@ -433,8 +478,7 @@ Then the list is the whole order, and `--explain` marks `default_agent` unused.
 
 Lists and compound settings follow their declared merge rules. `context.docs`,
 `context.exclude`, `summaries` and `supported_harnesses` add in precedence order; `[]`
-clears earlier contributions. Keyed maps merge by key. Account lists and `agents`
-preserve order and replace as a unit. `planning` replaces its complete tagged provider
+clears earlier contributions. Keyed maps merge by key. `agents` preserves order and replaces as a unit. `tracker` replaces its complete tagged
 configuration. `false` is a value; omission and `unset` reveal lower declarations.
 
 ## Source, scope and target
@@ -451,8 +495,7 @@ A personal Wave preference is **personal source, Wave scope**. The same Wave's
 committed preference is **repository source, Wave scope**. A file path records
 where the declaration was written; it does not create another authority tier.
 
-A setting supports only meaningful combinations. Account order has global,
-repository and Wave scopes but no skill target. Appearance has no Graph-step
+A setting supports only meaningful combinations. Appearance has no Graph-step
 target. Native provider settings remain owned by the provider. The settings
 catalogue supplies the same applicability and validation to files, CLI and Desktop;
 unsupported combinations report an explanation rather than being silently ignored.
@@ -470,6 +513,11 @@ and Graph topology still come from the selected or captured definitions.
 | --- | --- |
 | Laptop, targeting a remote machine | Laptop's |
 | Shell directly on the remote | Remote's saved preferences |
+
+Credentials stay on the executor unless you name them: `forward.env` and
+`forward.files` carry named variables and home files from the initiating
+Machine to a remote launch. See
+[Remote Machines and rentals](subscriptions.md#remote-machines-and-rentals).
 
 Forward authored declarations with their scope, target and choice/fallback
 meaning. Do not turn the effective result into command-line overrides or combine
@@ -493,7 +541,7 @@ identity, while host-local preferences come from the executor's current definiti
 Resolve machine selection once at the origin to a durable identity. A selection
 that names the current machine runs locally. Existing assigned work does not
 forward itself again. Preferences neither install tools nor transfer credentials;
-provider conversation/account continuity still constrains resume.
+provider conversation continuity still constrains resume.
 
 ## Your display name
 
@@ -517,7 +565,7 @@ identity. Persisted artifacts name their participant; conversation replies use
 | Behavior | CLI Flag | Config |
 |----------|----------|--------|
 | Agent | `-a claude:opus` | `agent: claude:opus` |
-| [Planning synchronization](work.md#share-the-plan) | — | `repo.plan`: `{provider: linear, team: "<id>"}`, `{provider: asana, team: "<gid-or-url>"}`, `{provider: notion, team: "<page-url-or-id>"}` or `{provider: git, shared: team}` |
+| [Tracker](work.md#share-the-plan) | — | `tracker`: `{linear: {team: "<id>"}}`, `{asana: {team: "<gid-or-url>"}}` or `{git: {shared: team}}` |
 | Interactive terminal | direct TTY or `-i` | — |
 | Include docs | `--docs README.md,docs/` | `context: {docs: [README.md, docs/]}` |
 | Include branch files | `--diff files` | `context: {diff_files: true}` |
@@ -559,7 +607,7 @@ wrapper hooks; host declarations and saved Codex trust decisions remain unchange
 
 ```bash
 lf context                         # size targets, sources and current usage
-lf context --wave intelligence     # local Wave memory and scratch
+lf context --wave intelligence     # local Wave memory
 lf context --task LOO-303 --json    # Task checkout, including Wave memory
 ```
 
@@ -569,7 +617,6 @@ Edit the existing repo `.lf/config.yaml`:
 context:
   budgets:
     memory_tokens: 6000
-    scratch_tokens: 8000
 ```
 
 Override individual fields for a Wave in `.lf/wave/<name>/config.yaml`:
@@ -581,14 +628,14 @@ context:
 ```
 
 Each field follows the same source and scope precedence. `lf context` shows the winning source for every value.
-The same block supports `memory_bytes` and `scratch_bytes`. Values must be positive
+The same block supports `memory_bytes`. Values must be positive
 integers. These are authoring targets, not launch limits; exceeding them does not
-refuse a launch or select its context. The retired `goal_*` and `input_*` keys are removed.
+refuse a launch or select its context. The retired `goal_*`, `input_*` and
+`scratch_*` keys are removed; a file that still sets a scratch target loads without it.
 
-`lf context` measures recursive scratch Markdown and checkout Wave/ancestor memory,
-without contacting a provider or reading the clipboard. Defaults are 16,000 tokens /
-128 KiB for memory and 12,000 tokens / 96 KiB for scratch. Curate stale notes gradually,
-preserving live decisions and evidence; re-query after writing.
+`lf context` measures checkout Wave/ancestor memory, without contacting a provider
+or reading the clipboard. The default is 16,000 tokens / 128 KiB. Curate stale notes
+gradually, preserving live decisions and evidence; re-query after writing.
 
 The first conversation turn contains the skill, request and explicitly selected
 documents. Codex uses app-server input and Claude uses streamed or file input.
@@ -686,9 +733,8 @@ previous target tag.
 
 ### Loopflow Guidance
 
-Launches receive the small `LOOPFLOW.md` contract. Task- and Wave-associated
-launches also preload Work guidance. Read `lf help skill work` when entering
-Work APIs from an existing conversation. Standalone native skills retain their
+Launches receive the small `LOOPFLOW.md` contract, which holds the Task model
+and its commands. Standalone native skills retain their
 own guidance. Association selects context; a requested skill or Graph selects
 the procedure.
 
@@ -807,7 +853,7 @@ All three keys work in CLI `--setting`, `LF_SETTINGS`, personal and shared files
 LF-owned skill metadata, and Graph occurrence settings.
 
 Bare `claude` uses the [saved Claude model](#claude-model) when set; otherwise,
-bare harness names use the model selected by that provider account. Add
+bare harness names use the model selected in that native client's configuration. Add
 `harness:model` only when the invocation must pin a specific model. OpenCode
 model strings use `provider/model` form:
 
@@ -816,6 +862,18 @@ agent: opencode                          # user's OpenCode default
 agent: opencode:opencode/glm-5.2         # explicit model
 agent: opencode:moonshotai/kimi-k2       # explicit provider/model
 ```
+
+A Task runs on any of the four. `-a` on `lf task run` chooses for every step of
+that run:
+
+```bash
+lf task run LOO-12 -a opencode:opencode/gemini-4-carbon
+lf task run LOO-12 -a pi:anthropic/claude-sonnet-4-6
+lf task status LOO-12               # each step's answer, usage and where the Graph stands
+```
+
+Each step gets the Task's context and steers, records its answer, usage and
+native conversation, and the Graph goes on to the next step.
 
 ### Claude model
 
@@ -838,10 +896,9 @@ team. The setting follows [normal precedence](#which-value-wins); inspect it
 with `lf config settings --explain`. `lf unset --global claude.model` removes
 the global declaration. With no applicable value, Claude chooses its own model.
 
-Account routing checks capacity for the starting model. A bare `claude` with
-nothing behind it in `agents` retains
-[capacity fallthrough](subscriptions.md#when-an-account-runs-out) to other models;
-`claude:opus` pins Opus.
+In headless runs, a bare `claude` with nothing behind it in `agents` can
+fall through to other Claude models after a classified refusal;
+`claude:opus` pins Opus. Interactive runs require an explicit retry or move.
 
 ### Codex service tier
 
@@ -909,12 +966,11 @@ run through the same saved-steer receipts used by other harnesses. An emitted
 receipt means local delivery, not proof the model incorporated it. Idle Sessions
 stay idle. Direct RPC steering reports queued, rejected or uncertain delivery
 independently of the initiating turn's result.
-Managed account switching, subscription limits, native response schemas,
+Automatic subscription-limit recovery, native response schemas,
 turn limits and transferring Pi history to another harness are unavailable.
 Headless extension dialogs fail with an instruction
 to open the Session interactively. Pi's tools use the OS user's permissions;
-project trust and the working directory do not sandbox them. Provider-only
-worktree confinement is unsupported; managed Tasks use the caller's OS boundary.
+project trust and the working directory do not sandbox them.
 
 ### Supported Harnesses
 
@@ -984,19 +1040,17 @@ that are already more permissive are not downgraded. For example, Codex
 
 `--yolo` or `yolo: true` is the explicit Loopflow bypass: Claude uses
 `--dangerously-skip-permissions`, Codex sends `sandbox: "danger-full-access"`
-and `approvalPolicy: "never"` through its app-server protocol, and OpenCode uses
-`permission: {"*": "allow"}` via `OPENCODE_CONFIG_CONTENT`.
+and `approvalPolicy: "never"` through its app-server protocol, and OpenCode
+allows every action through `permissions` in `OPENCODE_CONFIG_CONTENT`. Pi has
+no permission prompts or sandbox to skip.
 
-Managed Task turns require an execution boundary independently of vendor
-permission settings. Claude and Codex bypass their own permission prompts within
-managed execution; `yolo` does not remove the required boundary. Pi uses the same
-caller-owned OS environment and its own credentials; no vendor sandbox is implied.
-OpenCode cannot currently satisfy that managed execution requirement. For
-provider-only worktree scope, Codex uses `workspace-write`, Claude uses its strict fail-closed Bash
-sandbox, and OpenCode denies external-directory tools, including with `yolo`.
+A headless run in its Task's checkout runs as `yolo` on every harness, whatever
+`yolo` is set to: `lf task run`, `lf ship`, and `lf -b <skill>` there. Nothing
+confines its writes to the checkout. To contain a Task, choose where it runs
+([Security](security.md#choose-the-execution-boundary-first)).
 
 Stopped-session resume reloads Loopflow settings at the saved checkout. The
-provider's conversation identity and account stay attached; a current model
+provider's conversation identity stays attached; native authentication applies; a current model
 selection for that provider applies. The [saved Claude default](#claude-model)
 does not replace a recorded Session model. A configured different provider does
 not change the provider of the latest input. A `default_agent` can refresh the model for
@@ -1005,8 +1059,8 @@ the Session stays on the new provider
 ([Switch agents](sessions.md#switch-agents-mid-conversation)). CLI overrides
 take precedence. Connecting
 to an already running provider keeps its existing launch settings. Historical
-replay uses captured inputs. Native history from an account's own home, from
-before every launch shared one, moves into the shared home when it resumes.
+replay uses captured inputs. Older managed-home transcripts are adopted into the native home on resume,
+without copying credentials. Missing history is reported.
 
 Claude turn limits and native JSON schemas require headless mode; terminal
 launches reject them. Other headless providers report unsupported turn limits
@@ -1047,21 +1101,16 @@ summaries:
     tokens: 5000
 ```
 
-### Accounts and Profiles
+### Native authentication and service profiles
 
-Account registration uses domain commands. Ordered account preferences use the
-same file-backed settings as other declarations:
+Sign in through `claude` or `codex login` on the execution Machine. Loopflow
+honors `CLAUDE_CONFIG_DIR`, `CODEX_HOME` and native API-key configuration.
+See [Native authentication](subscriptions.md) for resume, recovery and supported
+remote setup.
 
-```bash
-lf account connect claude=primary@example.com --chrome-profile primary@example.com
-
-lf set account.claude primary@,engineering@
-lf --account primary@ implement
-```
-
-See [Subscription Management](/docs/subscriptions) for identity storage,
-access profiles, routing, health, selectors, and remote development. See
-[Security](/docs/security) for machine logins and trust boundaries.
+Service authentication still uses commands such as
+`lf account connect linear --chrome-profile Work`. See
+[Security](security.md) for Machine credentials and execution restrictions.
 
 ### Skill sources
 
@@ -1179,7 +1228,7 @@ other hosts need publication, identity and completion support together.
 ### How do Task worktrees and independent clones share preferences?
 
 Independent clones have independent private preferences, even when they have the
-same Git remote. This includes account order and machine preferences. New clones
+same Git remote. This includes machine preferences. New clones
 start without another clone's private overrides; copy or import them deliberately.
 Task worktrees share the main checkout's `lf.config.local.yaml`. LF resolves that
 file through Git's worktree metadata; a Task's working directory does not give it
@@ -1206,15 +1255,14 @@ name does not reuse its preferences.
 
 ### What stays in the database?
 
-Files hold declared preferences, including account order, preferred machines,
-pool availability, rental templates and admission limits. The database holds live state and observations: account usage,
-cooldowns, machine identity, Sessions, execution history and Desktop’s current saved
-Task arrangements. A saved Desktop arrangement is current state, not a default.
+Files hold declared preferences, including preferred machines,
+pool availability, rental templates and admission limits. The database holds live
+state and observations: provider-reported usage, machine identity, Sessions and
+execution history. Desktop keeps its pane arrangements on each Mac, outside the
+database.
 
-`task_layout` holds the default layout for `lf workspace`, including Wave-scoped
-preferences ([workspaces](workspaces.md#set-a-waves-default)). External hosts own the
-workspaces launched from it or from Desktop layouts; LF keeps no external-host
-workspace registry. Ordinary `lf open` does not apply these layouts.
+External hosts own the workspaces lf opens; LF keeps no external-host workspace
+registry.
 
 Credentials stay with their secret/provider owner. The database is not an
 additional preference override layer.

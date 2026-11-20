@@ -11,10 +11,8 @@
     "provider": "codex",
     "account": null,
     "model": null,
-    "blocked": false,
     "cwd": "/src/loopflow.task",
     "state": "active",
-    "ready_summary": null,
     "open_argv": [
       "lf",
       "session",
@@ -29,26 +27,10 @@
     "turn": null,
     "raw": false,
     "work_path": "product / LOO-291",
-    "actions": [
-      {
-        "kind": "open",
-        "label": "Open here",
-        "help": "Open this Session in a terminal",
-        "unavailable_reason": "This Session is active in another terminal; use Take back to transfer it"
-      },
-      {
-        "kind": "move_here",
-        "label": "Take back",
-        "help": "Transfer control here; unsent text in the previous terminal is not transferred",
-        "unavailable_reason": null
-      },
-      {
-        "kind": "reveal",
-        "label": "Show conversation",
-        "help": "Continue existing history without taking another terminal's input",
-        "unavailable_reason": "This conversation is controlled elsewhere; use Take back to continue here"
-      }
-    ],
+    "action": {
+      "label": "Take over",
+      "help": "Continue here; the client that has it ends, unsent text there is lost"
+    },
     "graph_membership": {
       "kind": "step",
       "graph": "task-design",
@@ -79,6 +61,10 @@
       "source": "codex",
       "text": "Current provider output"
     },
-    "transition": null
+    "transition": null,
+    "ended": null,
+    "start": null,
+    "outlook": null,
+    "status_line": "running"
   }
 ]

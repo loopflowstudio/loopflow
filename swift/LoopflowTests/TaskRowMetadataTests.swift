@@ -9,14 +9,22 @@ import ViewInspector
 @Suite("Sidebar Task metadata")
 @MainActor
 struct TaskRowMetadataTests {
-    @Test("Validated reports win over runtime inference", arguments: [ProgramStatusState.idle, .working, .done, .blocked, .error])
-    func reportedStatus(state: ProgramStatusState) throws {
+    @Test("Validated reports win over runtime inference", arguments: [
+        (ProgramStatusState.idle, "Available"), (.working, "Busy"), (.done, "Done"),
+        (.blocked, "Blocked"), (.error, "Error"),
+    ])
+    func reportedStatus(state: ProgramStatusState, label: String) throws {
         let report = ProgramStatusReport(state: state, id: "worker", kind: nil, progress: nil,
                                          app: "cargo", title: nil, msg: "**literal**\u{202E}")
         let reporting = try session("reporter", status: ProgramStatusRecords(seen: true, records: [report]))
         let waiting = try session("waiting", availability: .available)
         let status = SessionProgramStatus(sessions: [waiting, reporting], unavailable: nil)
-        #expect(status.label == state.rawValue.capitalized)
+        #expect(status.label == label)
+        let task = try #require(roadmap().waves.first?.tasks.items[1])
+        let row = TaskRowMetadata(id: task.id, task: task, status: status)
+        #expect(try row.inspect().find(text: label).string() == label)
+        let pane = ProgramStatusLabel(status: try #require(reporting.programStatus))
+        #expect(try pane.inspect().find(text: "\(label) · **literal**").string() == "\(label) · **literal**")
         #expect(status.help.contains("reporter"))
         #expect(status.help.contains("**literal**"))
         #expect(!status.help.contains("\u{202E}"))
@@ -82,12 +90,12 @@ struct TaskRowMetadataTests {
             let status = SessionProgramStatus(sessions: records, unavailable: nil)
             #expect(status.label == nil)
             #expect(status.tone == nil)
-            let view = TaskRowMetadata(task: task, status: status)
+            let view = TaskRowMetadata(id: task.id, task: task, status: status)
             #expect(throws: (any Error).self) {
                 try view.inspect().find(viewWithAccessibilityIdentifier: "work-program-status-\(task.id)")
             }
         }
-        let unavailable = TaskRowMetadata(task: task, status: .unavailable("Offline"))
+        let unavailable = TaskRowMetadata(id: task.id, task: task, status: .unavailable("Offline"))
         let icon = try unavailable.inspect().find(viewWithAccessibilityIdentifier: "work-program-status-unavailable-\(task.id)")
         #expect(try icon.accessibilityLabel().string().contains("Offline"))
     }
@@ -99,7 +107,7 @@ struct TaskRowMetadataTests {
                                        app: nil, title: nil, msg: "Build failed")
         let reported = SessionProgramStatus(sessions: [try session("failed", status: .init(seen: true, records: [error]))], unavailable: nil)
         #expect(reported.tone == .failure)
-        let selected = TaskRowMetadata(task: task, status: reported).workSelection(true)
+        let selected = TaskRowMetadata(id: task.id, task: task, status: reported).workSelection(true)
         #expect(try selected.inspect().find(text: "Error").string() == "Error")
         let available = SessionProgramStatus(sessions: [try session("available", availability: .available)], unavailable: nil)
         #expect(available.tone == .available)
@@ -113,10 +121,10 @@ struct TaskRowMetadataTests {
     func ownerLine() throws {
         let tasks = try roadmap().waves.flatMap(\.tasks.items)
         let owned = try #require(tasks.first { $0.runtime?.owner != nil })
-        let view = TaskRowMetadata(task: owned, status: .unknown)
+        let view = TaskRowMetadata(id: owned.id, task: owned, status: .unknown)
         #expect(try view.inspect().find(text: "Jack Heart on mini").string() == "Jack Heart on mini")
         let unowned = try #require(tasks.first { $0.runtime != nil && $0.runtime?.owner == nil })
-        #expect(try TaskRowMetadata(task: unowned, status: .unknown).inspect().find(text: "Unowned").string() == "Unowned")
+        #expect(try TaskRowMetadata(id: unowned.id, task: unowned, status: .unknown).inspect().find(text: "Unowned").string() == "Unowned")
         let unknown = try JSONDecoder().decode(TaskOwner.self, from: Data("""
         {"person":null,"person_id":null,"person_key":null,"machine":{"id":null,"label":null}}
         """.utf8))
@@ -130,7 +138,7 @@ struct TaskRowMetadataTests {
     @Test("Task identifiers remain visible without an external issue URL")
     func identifierWithoutLink() throws {
         let task = try #require(roadmap().waves.flatMap(\.tasks.items).first { $0.reference.issueUrl == nil })
-        let view = TaskRowMetadata(task: task, status: .unknown)
+        let view = TaskRowMetadata(id: task.id, task: task, status: .unknown)
         #expect(try view.inspect().find(text: task.task.identifier).string() == task.task.identifier)
         #expect(throws: (any Error).self) {
             try view.inspect().find(viewWithAccessibilityIdentifier: "work-task-link-\(task.id)")
@@ -221,9 +229,9 @@ struct TaskRowMetadataTests {
         value["id"] = id
         value["title"] = id
         value["state"] = state.rawValue
-        value["task_ids"] = ["ts_review00000000000000000000000000"]
+        value["task_ids"] = ["issue-review"]
         var workspace = try #require(value["workspace"] as? [String: Any])
-        workspace["task_id"] = "ts_review00000000000000000000000000"
+        workspace["task_id"] = "issue-review"
         value["workspace"] = workspace
         value["availability"] = availability?.rawValue ?? NSNull() as Any
         value["program_status"] = try status.map { try JSONSerialization.jsonObject(with: JSONEncoder().encode($0)) } ?? NSNull()

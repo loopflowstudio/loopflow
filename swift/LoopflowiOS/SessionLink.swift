@@ -13,9 +13,10 @@ struct SessionNotRunning: LocalizedError {
 
 /// The phone's hold on one Task's running Session.
 ///
-/// The device touched last has the terminal: opening fits it to the phone and
-/// takes the keyboard. When another device takes it back, this one stops
-/// drawing and waits for **Continue here**. Nothing typed is ever sent twice.
+/// Every device viewing the Session may type; the one touched last sizes the
+/// terminal. Opening fits it to the phone. When another device takes the size,
+/// this one stops drawing and waits for **Continue here**. Nothing typed is
+/// ever sent twice.
 @MainActor
 @Observable
 final class SessionLink {
@@ -24,10 +25,12 @@ final class SessionLink {
         case disconnected(String), unavailable(String)
     }
 
-    let task: WorkViewPlan.Content
+    let task: MobileTask
+    let session: String
     private(set) var state: State = .opening
     /// Draws terminal bytes; `true` clears the screen first.
     @ObservationIgnored var render: ((Data, Bool) -> Void)?
+    @ObservationIgnored var prepareFrame: (() -> Void)?
     @ObservationIgnored private let client: RemoteMobileClient
     @ObservationIgnored private var attachment: RemoteAttachment?
     @ObservationIgnored private var events: Task<Void, Never>?
@@ -37,16 +40,15 @@ final class SessionLink {
     @ObservationIgnored private var wantsOpen = true
     @ObservationIgnored private var resumeOnReturn = false
     /// From asking for the Session to its first screen, and from input to the next output.
-    @ObservationIgnored private var opening: Perf.Wait?
-    @ObservationIgnored private var echo: Perf.Wait?
+    @ObservationIgnored private var opening: Interaction?
+    @ObservationIgnored private var echo: Interaction?
+    @ObservationIgnored private var hasSnapshot = false
+    @ObservationIgnored private var openingObserved = false
 
-    init(client: RemoteMobileClient, task: WorkViewPlan.Content) {
+    init(client: RemoteMobileClient, task: MobileTask, session: String) {
         self.client = client
         self.task = task
-        if task.primarySession == nil {
-            state = .unavailable(task.unavailable.first ?? "This Task has no Session on this Machine.")
-            wantsOpen = false
-        }
+        self.session = session
     }
 
     var canStart: Bool { state == .ended || state == .notRunning }
@@ -67,11 +69,12 @@ final class SessionLink {
     }
 
     func open() async {
-        guard let session = task.primarySession else { return }
         guard let size else { wantsOpen = true; return }
         close()
         state = .opening
-        self.opening = Perf.begin("session_open")
+        hasSnapshot = false
+        openingObserved = false
+        self.opening = Perf.takeOpening(task.id) ?? Perf.begin("return_session", scenario: "remote_attach")
         let opening = generation
         do {
             let link = try await client.attach(sessionID: session, size: size)
@@ -100,7 +103,7 @@ final class SessionLink {
 
     /// Continue a recorded conversation whose terminal stopped, then open it.
     func start() async {
-        guard canStart, let session = task.primarySession, let size else { return }
+        guard canStart, let size else { return }
         close()
         state = .opening
         let opening = generation
@@ -118,14 +121,14 @@ final class SessionLink {
         guard state == .elsewhere, let size else { return }
         state = .opening
         do {
-            try attachment?.takeControl(size: size)
+            try attachment?.takeSize(size)
             sentSize = size
         } catch { fail(error.localizedDescription) }
     }
 
     func send(_ bytes: Data) {
         guard state == .live, !bytes.isEmpty else { return }
-        if echo == nil { echo = Perf.begin("input_echo") }
+        if echo == nil { echo = Perf.begin("typing_echo", scenario: "remote_terminal") }
         do { try attachment?.send(bytes) }
         catch { fail("That may not have been delivered. Reconnect and check before sending it again.") }
     }
@@ -154,6 +157,8 @@ final class SessionLink {
         attachment?.close()
         attachment = nil
         sentSize = nil
+        opening?.finish(.cancelled)
+        echo?.finish(.cancelled)
         opening = nil
         echo = nil
     }
@@ -162,15 +167,15 @@ final class SessionLink {
         switch event {
         case .snapshot(let data):
             render?(data, true)
-            if let opening { Perf.end(opening, "bytes=\(data.count)") }
-            opening = nil
+            hasSnapshot = true
+            finishOpeningIfUsable()
         case .output(let data):
             // Another device's grid would garble this one; its next snapshot replaces the screen.
             if state != .elsewhere { render?(data, false) }
             if let echo { Perf.end(echo) }
             echo = nil
-        case .control(let input, let geometry):
-            state = input && geometry ? .live : .elsewhere
+        case .sizing(let sizing):
+            state = sizing ? .live : .elsewhere
             if state == .live, let size, sentSize != size { fit(columns: size.columns, rows: size.rows) }
         case .ended:
             close()
@@ -178,9 +183,22 @@ final class SessionLink {
         case .disconnected(let reason): fail(reason)
         case .geometry, .programStatus: break
         }
+        finishOpeningIfUsable()
+    }
+
+    private func finishOpeningIfUsable() {
+        guard hasSnapshot, state == .live, let opening, !openingObserved else { return }
+        openingObserved = true
+        Perf.end(opening) { [weak self] in self?.prepareFrame?() }
+        Task {
+            await opening.waitForObservation()
+            if self.opening === opening { self.opening = nil }
+        }
     }
 
     private func fail(_ message: String) {
+        opening?.finish(.failed)
+        echo?.finish(.failed)
         close()
         state = .disconnected(message)
     }

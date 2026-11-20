@@ -10,13 +10,6 @@ struct LocalLfError: LocalizedError {
 }
 
 enum LocalWaveAgentLauncher {
-    /// Run a filed Task on its graph. `lf task run` owns graph selection,
-    /// worktree placement and where to start; the app does not reproduce them.
-    /// It returns once the Task's Graph is running, which keeps on without the app.
-    static func runTask(repoPath: String, issue: String) async throws {
-        _ = try await queryLf(["task", "run", issue], cwd: WaveOrigin.resolve(repoPath))
-    }
-
     /// Ensure Task Work and its checkout without running a Graph; returns
     /// the authoritative worktree.
     static func checkoutTask(repoPath: String, issue: String) async throws -> WorkspaceIdentity {
@@ -63,6 +56,9 @@ enum LocalWaveAgentLauncher {
     /// facts by shelling the daemonless Machine `lf` over the local store, not
     /// by streaming a center. Throws on a spawn failure or a non-zero exit.
     static func queryLf(_ subargs: [String], cwd: String?, input: String? = nil) async throws -> String {
+        let work = InteractionTrace.current?.work
+        let counted = work?.cliRead() == true
+        defer { if counted { work?.requestFinished() } }
         let lfPath = try controlLfPath()
         let result: (status: Int32, stdout: String, stderr: String)
         do {
@@ -129,8 +125,11 @@ enum LocalWaveAgentLauncher {
         cwd: String? = nil,
         input: String? = nil
     ) async throws -> (status: Int32, stdout: String, stderr: String) {
+        let interaction = InteractionTrace.current.flatMap { $0.work.isSealed ? nil : $0 }
         let worker = Task.detached(priority: .userInitiated) {
-            try await collect(args, cwd: cwd, input: input)
+            try await InteractionTrace.$current.withValue(interaction) {
+                try await collect(args, cwd: cwd, input: input)
+            }
         }
         return try await withTaskCancellationHandler {
             let result = try await worker.value
@@ -141,12 +140,47 @@ enum LocalWaveAgentLauncher {
         }
     }
 
+    private static func recordSQL(_ directory: URL, work: InteractionWork) {
+        guard let files = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil),
+              !files.isEmpty else { work.sqlUnavailable(); return }
+        for file in files where file.pathExtension == "jsonl" {
+            guard let data = try? String(contentsOf: file, encoding: .utf8),
+                  let last = data.split(separator: "\n").last,
+                  let row = try? JSONSerialization.jsonObject(with: Data(last.utf8)) as? [String: Any],
+                  row["event"] as? String == "end",
+                  let statements = row["statements"] as? UInt64,
+                  let rows = row["rows"] as? UInt64 else { work.sqlUnavailable(); continue }
+            work.sql(statements: statements, rows: rows, receipt: file.lastPathComponent)
+        }
+    }
+
     private static func collect(
         _ args: [String], cwd: String?, input: String?
     ) async throws -> (status: Int32, stdout: String, stderr: String) {
         try Task.checkCancellation()
         let deadline = ProcessInfo.processInfo.systemUptime + 30
         let process = queryProcess(args, cwd: cwd)
+        let interaction = InteractionTrace.current
+        var receipts: URL?
+        if let interaction, let executable = args.first, executable.hasSuffix("/lf") || executable == "lf" {
+            let directory = WorkCache.homeDirectory.appendingPathComponent("timings/interaction-cli")
+                .appendingPathComponent(interaction.id.uuidString).appendingPathComponent(UUID().uuidString)
+            if (try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)) != nil {
+                receipts = directory
+                process.environment?["LF_PERF_OUTPUT"] = directory.path
+                process.environment?["LF_PERF_INTERACTION"] = interaction.id.uuidString
+            } else { interaction.work.sqlUnavailable() }
+        }
+        defer {
+            if let interaction, let receipts {
+                recordSQL(receipts, work: interaction.work)
+                try? FileManager.default.removeItem(at: receipts)
+                let parent = receipts.deletingLastPathComponent()
+                if (try? FileManager.default.contentsOfDirectory(atPath: parent.path).isEmpty) == true {
+                    try? FileManager.default.removeItem(at: parent)
+                }
+            }
+        }
         let stdout = Pipe.uninherited()
         let stderr = Pipe.uninherited()
         let stdin = input.map { _ in Pipe.uninherited() }

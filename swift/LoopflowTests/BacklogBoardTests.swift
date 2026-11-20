@@ -163,9 +163,6 @@ struct BacklogBoardTests {
         let backlog = model.backlog(view)
         #expect(!backlog.rows.isEmpty)
         for row in backlog.rows { _ = try board.inspect().find(viewWithAccessibilityIdentifier: "wave-row-\(row.id)") }
-        for notice in roadmap.unavailableTasks {
-            _ = try board.inspect().find(viewWithAccessibilityIdentifier: "wave-notice-\(notice.taskId)")
-        }
         let first = try #require(backlog.rows.first)
         model.navigation.backlogs[view, default: BacklogState()].select(first.id)
         if !first.task.description.isEmpty {

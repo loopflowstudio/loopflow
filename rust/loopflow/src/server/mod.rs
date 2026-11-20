@@ -1,31 +1,26 @@
 //! Standalone transport for shared reads and commands; owns no execution.
+mod answers;
 pub(crate) mod boundary;
-pub mod client;
-pub(crate) mod events;
-pub mod holder;
+pub mod connect;
+mod maintenance;
 pub mod mobile;
 mod outbox;
+mod recovery;
 mod remote;
 pub mod schema;
 mod service;
-mod statistics;
 mod subscriptions;
 mod ticket;
 mod wake;
 pub mod wire;
 
-use std::path::PathBuf;
-
-pub fn socket_path() -> anyhow::Result<PathBuf> {
-    // Keep the installed endpoint stable: relays from before the namespace
-    // cutover must reconnect to this same listener after an update.
-    Ok(crate::transport::private_directory()?.join("machine.sock"))
-}
+pub use loopflow_execution::machine::socket_path;
 
 /// `PATH` with the directories a GUI-started process lacks: an OS supervisor
-/// gives this service the same minimal `PATH` it gives the app, and everything
-/// the server starts (`gh`, a provider) must resolve as it does in a terminal.
-fn supervised_path(path: &str, home: &std::path::Path) -> String {
+/// gives this service, and a terminal host's server, the same minimal `PATH`
+/// it gives the app, and everything they start (`gh`, a provider) must resolve
+/// as it does in a terminal.
+pub(crate) fn supervised_path(path: &str, home: &std::path::Path) -> String {
     let mut entries: Vec<String> = path
         .split(':')
         .filter(|entry| !entry.is_empty())

@@ -2,9 +2,7 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-use loopflow::planning_git::{
-    PlanningDestination, PlanningGit, PlanningGitError, PlanningPublication,
-};
+use loopflow_execution::planning_git::{PlanningGit, PlanningGitError, PlanningPublication};
 use loopflow_test_support::TestRepo;
 
 fn git(repo: &Path, args: &[&str]) -> String {
@@ -27,7 +25,9 @@ const PLANNING_REF: &str = "refs/loopflow/planning/users/00000000-0000-4000-8000
 fn transport(repo: &Path) -> PlanningGit {
     PlanningGit::new(
         repo,
-        &PlanningDestination::resolve(repo, "origin", PLANNING_REF).unwrap(),
+        &loopflow_execution::planning_git::resolve_destination(repo, "origin", PLANNING_REF)
+            .unwrap()
+            .unwrap(),
     )
     .unwrap()
 }
@@ -243,8 +243,13 @@ fn selected_destinations_never_mix_retained_or_published_plans() {
     let personal = transport(repo.path());
     let shared = PlanningGit::new(
         repo.path(),
-        &PlanningDestination::resolve(repo.path(), "origin", "refs/loopflow/planning/shared/team")
-            .unwrap(),
+        &loopflow_execution::planning_git::resolve_destination(
+            repo.path(),
+            "origin",
+            "refs/loopflow/planning/shared/team",
+        )
+        .unwrap()
+        .unwrap(),
     )
     .unwrap();
     let private = personal.save(b"private fixture", None, None).unwrap();
@@ -257,8 +262,13 @@ fn selected_destinations_never_mix_retained_or_published_plans() {
     assert_eq!(personal.fetch().unwrap(), Some(private.clone()));
     assert_eq!(personal.local().unwrap(), Some(private));
     assert_eq!(shared.fetch().unwrap(), Some(joined));
-    assert!(PlanningDestination::resolve(repo.path(), "origin", "refs/loopflow/planning").is_err());
-    assert!(PlanningDestination::resolve(
+    assert!(loopflow_execution::planning_git::resolve_destination(
+        repo.path(),
+        "origin",
+        "refs/loopflow/planning"
+    )
+    .is_err());
+    assert!(loopflow_execution::planning_git::resolve_destination(
         repo.path(),
         "origin",
         "refs/loopflow/planning/users/display-name"
@@ -278,11 +288,12 @@ fn independent_destinations_can_both_confirm_conflicting_task_delegation() {
     let personal = transport(first.path());
     let shared = PlanningGit::new(
         second.path(),
-        &PlanningDestination::resolve(
+        &loopflow_execution::planning_git::resolve_destination(
             second.path(),
             "origin",
             "refs/loopflow/planning/shared/team",
         )
+        .unwrap()
         .unwrap(),
     )
     .unwrap();
@@ -311,7 +322,10 @@ fn independent_destinations_can_both_confirm_conflicting_task_delegation() {
 fn saved_binding_survives_alias_redirection_without_publishing_to_the_replacement() {
     let repo = TestRepo::new();
     let replacement = TestRepo::new();
-    let destination = PlanningDestination::resolve(repo.path(), "origin", PLANNING_REF).unwrap();
+    let destination =
+        loopflow_execution::planning_git::resolve_destination(repo.path(), "origin", PLANNING_REF)
+            .unwrap()
+            .unwrap();
     let saved_binding = serde_json::to_vec(&destination).unwrap();
     let planning = PlanningGit::new(repo.path(), &destination).unwrap();
     let saved = planning.save(b"private planning", None, None).unwrap();
@@ -351,5 +365,21 @@ fn divergent_fetch_and_push_endpoints_cannot_be_bound() {
             replacement.bare_path().to_str().unwrap(),
         ],
     );
-    assert!(PlanningDestination::resolve(repo.path(), "origin", PLANNING_REF).is_err());
+    assert!(loopflow_execution::planning_git::resolve_destination(
+        repo.path(),
+        "origin",
+        PLANNING_REF
+    )
+    .is_err());
+}
+
+#[test]
+fn checkout_without_the_remote_has_no_destination() {
+    let repo = TestRepo::new();
+    git(repo.path(), &["remote", "remove", "origin"]);
+    assert_eq!(
+        loopflow_execution::planning_git::resolve_destination(repo.path(), "origin", PLANNING_REF)
+            .unwrap(),
+        None
+    );
 }

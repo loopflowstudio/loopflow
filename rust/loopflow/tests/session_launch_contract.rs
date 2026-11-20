@@ -1,13 +1,124 @@
 //! Public launch and continuation contract, with providers recording their real process inputs.
 #![cfg(unix)]
 use std::fs;
-use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
+use std::os::unix::process::CommandExt;
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
 
 use loopflow_test_support::{MachineServer, TestRepo};
 use serde_json::Value;
+
+/// A Claude stand-in that counts its dispatches and reports a `rejected`
+/// rate limit before each result; `refused` also fails the turn.
+fn rate_limited_fixture(refused: bool) -> Fixture {
+    let fixture = Fixture::new("claude:opus");
+    let provider = fixture.home.path().join("bin/claude");
+    let mut source = fs::read_to_string(&provider).unwrap().replace(
+        "    message = json.loads(sys.stdin.readline())",
+        "    with open(os.environ['HOME']+'/dispatches', 'a') as out:\n        out.write('dispatch\\n')\n    message = json.loads(sys.stdin.readline())",
+    ).replace(
+        "    print(json.dumps({'type':'result'",
+        "    print(json.dumps({'type':'rate_limit_event','rate_limit_info':{'status':'rejected','rate_limit_type':'five_hour'}}), flush=True)\n    print(json.dumps({'type':'result'",
+    );
+    if refused {
+        source = source.replace(
+            "'subtype':'success','result':'done'",
+            "'subtype':'error_during_execution','is_error':True,'result':\"You've hit your limit.\\nResets 3pm (America/Los_Angeles).\"",
+        );
+    }
+    fs::write(provider, source).unwrap();
+    fixture
+}
+
+impl Fixture {
+    fn dispatches(&self) -> String {
+        fs::read_to_string(self.home.path().join("dispatches")).unwrap()
+    }
+}
+
+#[test]
+fn a_graph_step_refused_on_its_pinned_agent_shows_the_message_and_waits() {
+    let fixture = rate_limited_fixture(true);
+    fixture.repo.create_file(".lf/skills/probe.md", "probe");
+    fixture
+        .repo
+        .create_file(".lf/graphs/refusal-probe.yaml", "- probe\n");
+    // The real waits are minutes long: read until the wait is announced, then
+    // stop the run. Its schedule and final stop are unit-tested.
+    let mut child = fixture
+        .command()
+        .args(["-b", "-a", "claude:opus", "graph", "refusal-probe"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .process_group(0)
+        .spawn()
+        .unwrap();
+    let stderr = std::io::BufReader::new(child.stderr.take().unwrap());
+    let (lines, announced) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        use std::io::BufRead;
+        for line in stderr.lines().map_while(Result::ok) {
+            if lines.send(line).is_err() {
+                return;
+            }
+        }
+    });
+    let mut stderr = String::new();
+    while !stderr.contains("before trying again") {
+        let line = announced
+            .recv_timeout(std::time::Duration::from_secs(60))
+            .unwrap_or_else(|_| panic!("no usage-limit wait was announced: {stderr}"));
+        stderr.push_str(&line);
+        stderr.push('\n');
+    }
+    // The Graph and its step share the process group started above.
+    let group = i32::try_from(child.id()).unwrap();
+    Command::new("/bin/kill")
+        .args(["-TERM", "--", &format!("-{group}")])
+        .status()
+        .unwrap();
+    child.wait().unwrap();
+
+    assert!(stderr.contains("You've hit your limit."), "{stderr}");
+    assert!(
+        stderr.contains("Resets 3pm (America/Los_Angeles)."),
+        "{stderr}"
+    );
+    assert!(stderr.contains("Waiting until "), "{stderr}");
+    // It waits before a second dispatch, never instead of the first.
+    assert_eq!(fixture.dispatches(), "dispatch\n");
+}
+
+#[test]
+fn headless_work_outside_a_graph_stops_at_a_usage_limit_with_the_provider_message() {
+    let fixture = rate_limited_fixture(true);
+    let output = fixture
+        .command()
+        .args(["-b", "-a", "claude:opus", ":", "say done"])
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success(), "{stderr}");
+    assert!(stderr.contains("You've hit your limit."), "{stderr}");
+    assert!(!stderr.contains("Waiting until "), "{stderr}");
+    assert_eq!(fixture.dispatches(), "dispatch\n");
+}
+
+#[test]
+fn a_turn_the_provider_finishes_succeeds_despite_a_rejected_rate_limit_event() {
+    let fixture = rate_limited_fixture(false);
+    let output = fixture
+        .command()
+        .args(["-b", "-a", "claude:opus", ":", "say done"])
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    success(&output);
+    assert_eq!(fixture.dispatches(), "dispatch\n");
+}
 
 struct Fixture {
     /// Task and Wave launches start their agent only once it answers.
@@ -33,16 +144,24 @@ impl Fixture {
         for harness in ["claude", "codex", "opencode"] {
             let script = fixture.home.path().join("bin").join(harness);
             let source = if harness == "opencode" {
-                include_str!("support/opencode_server.py").replace("__WAIT__", "False")
+                include_str!("../../loopflow-execution/tests/support/opencode_cli.py")
+                    .replace("__WAIT__", "False")
             } else {
                 r#"#!/usr/bin/python3
 import json, os, sys, runpy
+from pathlib import Path
 args = sys.argv[1:]
 if '--version' in args:
     print('fixture'); sys.exit(0)
 if '--dangerously-bypass-hook-trust' in args:
     sys.exit(2)
-record = {'args': args, 'cwd': os.getcwd(), 'opencode': os.environ.get('OPENCODE_CONFIG_CONTENT'), 'participant': os.environ.get('LF_USER_NAME'), 'account': os.environ.get('LF_PROVIDER_ACCOUNT_ID'), 'codex_home': os.environ.get('CODEX_HOME')}
+record = {'args': args, 'cwd': os.getcwd(), 'opencode': os.environ.get('OPENCODE_CONFIG_CONTENT'), 'participant': os.environ.get('LF_USER_NAME'), 'account': os.environ.get('LF_PROVIDER_ACCOUNT_ID'), 'codex_home': os.environ.get('CODEX_HOME'), 'forwarded': os.environ.get('CLAUDE_CODE_OAUTH_TOKEN')}
+if os.path.basename(sys.argv[0]) in ('claude','codex'):
+    provider = os.path.basename(sys.argv[0])
+    native = os.environ['CLAUDE_CONFIG_DIR' if provider == 'claude' else 'CODEX_HOME']
+    auth = native + ('/.credentials.json' if provider == 'claude' else '/auth.json')
+    record['native_auth'] = json.load(open(auth)) if os.path.isfile(auth) else None
+
 if '--append-system-prompt-file' in args:
     record['context'] = open(args[args.index('--append-system-prompt-file')+1]).read()
 stream = '--input-format' in args
@@ -50,7 +169,12 @@ if stream:
     message = json.loads(sys.stdin.readline())
     record['input'] = message
 elif os.path.basename(sys.argv[0]) == 'claude':
-    record['input'] = sys.stdin.read()
+    if '--session-id' in args:
+        project = Path(native) / 'projects' / 'fixture'
+        project.mkdir(parents=True, exist_ok=True)
+        (project / (args[args.index('--session-id')+1] + '.jsonl')).write_text('{}\n')
+    # Resume opens history with no seed; a held terminal keeps stdin open.
+    record['input'] = '' if '--resume' in args else sys.stdin.read()
 with open(os.environ['HOME']+'/received.json.tmp', 'w') as out:
     json.dump(record, out)
 os.replace(os.environ['HOME']+'/received.json.tmp', os.environ['HOME']+'/received.json')
@@ -63,7 +187,7 @@ if stream:
 elif os.path.basename(sys.argv[0]) == 'codex':
     sys.path.insert(0, SUPPORT_DIRECTORY)
     runpy.run_path(SUPPORT_DIRECTORY+'/native_codex.py', run_name='__main__')
-"#.replace("SUPPORT_DIRECTORY", &serde_json::to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support")).unwrap())
+"#.replace("SUPPORT_DIRECTORY", &serde_json::to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../loopflow-execution/tests/support")).unwrap())
             };
             fs::write(&script, source).unwrap();
             fs::set_permissions(script, fs::Permissions::from_mode(0o755)).unwrap();
@@ -128,19 +252,20 @@ elif os.path.basename(sys.argv[0]) == 'codex':
     }
 
     fn create_wave(&self) {
-        let store = loopflow::store::sqlite::SqliteStore::new(
-            &self.home.path().join("machine/loopflow.db"),
-        )
-        .unwrap();
-        store
-            .create_wave(&loopflow::work::wave::Wave::new(
-                loopflow::id::WaveId::new(),
+        let store =
+            loopflow_execution::store::open_sqlite(&self.home.path().join("machine/loopflow.db"))
+                .unwrap();
+        loopflow_execution::work::wave::bootstrap::upsert_wave(
+            &store,
+            &loopflow_execution::work::wave::Wave::new(
+                loopflow_model::id::WaveId::new(),
                 "fixture".into(),
-                loopflow::repository::CanonicalRepo::discover(self.repo.path())
+                loopflow_execution::repository::discover(self.repo.path())
                     .unwrap()
                     .to_string(),
-            ))
-            .unwrap();
+            ),
+        )
+        .unwrap();
     }
 
     fn settings(&self, provider: &str, yolo: bool, chrome: bool) {
@@ -162,10 +287,33 @@ fn files_named(dir: &Path, file: &str) -> Vec<std::path::PathBuf> {
     found
 }
 
+/// The Machine's store, with Session history attached as `history` and turns as `usage`.
+fn machine_db(home: &Path) -> rusqlite::Connection {
+    let store = home.join("machine/loopflow.db");
+    let db = rusqlite::Connection::open(&store).unwrap();
+    db.execute(
+        "ATTACH ?1 AS history",
+        [loopflow_storage::history::history_path(&store)
+            .to_string_lossy()
+            .as_ref()],
+    )
+    .unwrap();
+    db.execute(
+        "ATTACH ?1 AS usage",
+        [loopflow_storage::history::history_path(&store)
+            .to_string_lossy()
+            .as_ref()],
+    )
+    .unwrap();
+    db
+}
+
 fn success(output: &Output) {
     assert!(
         output.status.success(),
-        "{}",
+        "{}\n{}\n{}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
 }
@@ -209,7 +357,7 @@ fn bypass(value: &Value, provider: &str, enabled: bool) {
             assert!(!args(value).contains(&"--dangerously-bypass-approvals-and-sandbox"));
         }
         "opencode" => {
-            let config: Value = serde_json::from_str(value["opencode"].as_str().unwrap()).unwrap();
+            let config = &value["server"];
             assert_eq!(
                 config["permissions"][0]["effect"].as_str() == Some("allow"),
                 enabled,
@@ -225,7 +373,7 @@ fn opencode_diagnostics_stay_off_the_terminal_on_launch_and_resume() {
     let fixture = Fixture::new("opencode");
     fs::write(
         fixture.home.path().join("bin/opencode"),
-        include_str!("support/opencode_server.py").replace("__WAIT__", "False")
+        include_str!("../../loopflow-execution/tests/support/opencode_cli.py").replace("__WAIT__", "False")
             .replace("    _record_launch()\n    if False:", r#"    _record_launch()
     mode = 'resume' if (HOME / 'opened').exists() else 'launch'
     (HOME / 'opened').touch()
@@ -279,7 +427,7 @@ fn opencode_diagnostics_stay_off_the_terminal_on_launch_and_resume() {
 }
 
 #[test]
-fn opencode_failure_before_session_creation_keeps_diagnostics() {
+fn opencode_startup_failure_reports_its_exit_and_keeps_diagnostics() {
     let fixture = Fixture::new("opencode");
     fs::write(
         fixture.home.path().join("bin/opencode"),
@@ -294,7 +442,7 @@ fn opencode_failure_before_session_creation_keeps_diagnostics() {
     assert!(!output.status.success());
     let stderr = String::from_utf8(output.stderr).unwrap();
     assert!(
-        stderr.contains("startup failure without a session"),
+        stderr.contains("opencode exited with exit status: 23"),
         "{stderr}"
     );
     let logs = files_named(fixture.home.path(), "opencode.stderr.log");
@@ -306,61 +454,45 @@ fn opencode_failure_before_session_creation_keeps_diagnostics() {
 }
 
 #[test]
-fn opencode_terminal_setup_failure_stops_the_private_server() {
-    let fixture = Fixture::new("opencode");
-    let source = include_str!("support/opencode_server.py")
-        .replace("__WAIT__", "False")
-        .replace(
-            "        if self.path == \"/api/event\":",
-            r#"        if self.path == "/api/event":
-            (HOME / 'server-port').write_text(str(self.server.server_port))
-            for path in Path(os.environ['LF_HOME']).glob('runs/*/*/opencode.stderr.log'):
-                path.unlink()
-                path.mkdir()"#,
-        );
-    fs::write(fixture.home.path().join("bin/opencode"), source).unwrap();
-    let mut child = fixture
-        .command()
-        .args(["-i", ":", "launch"])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
-    while child.try_wait().unwrap().is_none() {
-        if std::time::Instant::now() >= deadline {
-            child.kill().unwrap();
-            child.wait().unwrap();
-            panic!("terminal setup failure left the server worker waiting");
-        }
-        std::thread::sleep(std::time::Duration::from_millis(10));
-    }
-    let output = child.wait_with_output().unwrap();
-    assert!(!output.status.success());
-    assert!(
-        String::from_utf8_lossy(&output.stderr).contains("open OpenCode diagnostics"),
-        "{output:?}"
-    );
-    let port: u16 = fs::read_to_string(fixture.home.path().join("server-port"))
-        .unwrap()
-        .parse()
-        .unwrap();
-    assert!(std::net::TcpStream::connect((std::net::Ipv4Addr::LOCALHOST, port)).is_err());
-}
-
-#[test]
 fn terminal_launch_and_resume_use_current_policy_and_preserve_native_identity() {
     for provider in ["claude", "codex", "opencode"] {
         let fixture = Fixture::new(provider);
         fixture.settings(provider, true, true);
-        // A bare Codex launch runs plain `codex`; behind its app-server it is Work.
-        let mut launch = vec!["-i", ":", "--", "--- keep spaces and 雪"];
-        if provider == "codex" {
-            fixture.create_wave();
-            launch.splice(1..1, ["--wave", "fixture"]);
+        if provider != "opencode" {
+            let native = fixture.home.path().join(format!(".{provider}"));
+            fs::create_dir_all(&native).unwrap();
+            let file = if provider == "claude" {
+                ".credentials.json"
+            } else {
+                "auth.json"
+            };
+            fs::write(native.join(file), br#"{"fixture_login":"A"}"#).unwrap();
+            let machine = fixture.home.path().join("machine");
+            let saved = machine.join(format!("accounts/{provider}/retired"));
+            fs::create_dir_all(&saved).unwrap();
+            fs::write(saved.join(file), br#"{"fixture_login":"B"}"#).unwrap();
+            rusqlite::Connection::open(machine.join("loopflow.db")).unwrap().execute(
+                "INSERT INTO provider_accounts(provider,account_id,home,credential_state,cooldown_until,created_at,updated_at) VALUES(?1,'retired',?2,'missing',4000000000,1,1)",
+                rusqlite::params![provider,saved.to_str().unwrap()]).unwrap();
         }
+        let session = (provider == "codex").then(|| {
+            crate::support::prepare_native_conversation(
+                &fixture.home.path().join("machine/loopflow.db"),
+                fixture.repo.path(),
+                "codex",
+                None,
+                "--- keep spaces and 雪",
+            )
+        });
+        let launch = match &session {
+            Some(session) => vec!["-i", "resume", session],
+            None => vec!["-i", ":", "--", "--- keep spaces and 雪"],
+        };
         let first = fixture.run(&launch);
         bypass(&first, provider, true);
+        if provider != "opencode" {
+            assert_eq!(first["native_auth"]["fixture_login"], "A");
+        }
         assert_eq!(
             Path::new(first["cwd"].as_str().unwrap())
                 .canonicalize()
@@ -405,6 +537,10 @@ fn terminal_launch_and_resume_use_current_policy_and_preserve_native_identity() 
         fixture.settings(&format!("{provider}:{current_model}"), false, false);
         let resumed = fixture.run(&["session", "resume", &session]);
         bypass(&resumed, provider, false);
+        if provider != "opencode" {
+            assert_eq!(resumed["native_auth"]["fixture_login"], "A");
+            assert!(resumed["account"].is_null());
+        }
         assert!(args(&resumed).contains(&token.as_str()));
         assert!(!args(&resumed)
             .iter()
@@ -434,6 +570,8 @@ fn headless_launch_and_graph_keep_current_options() {
         .repo
         .create_file(".lf/skills/probe.md", "INITIAL_SKILL_ONLY");
     fixture.settings("claude:sonnet", true, true);
+    fixture.repo.stage_all();
+    fixture.repo.commit("Define the probe skill");
     fixture.create_wave();
     let first = fixture.run(&["-b", "--wave", "fixture", "probe", "first turn"]);
     pair(&first, "--input-format", "stream-json");
@@ -442,6 +580,8 @@ fn headless_launch_and_graph_keep_current_options() {
     fixture
         .repo
         .create_file(".lf/graphs/launch-probe.yaml", "- probe\n");
+    fixture.repo.stage_all();
+    fixture.repo.commit("Define the probe Graph");
     let flowed = fixture.run(&["--yolo", "--chrome", "on", "graph", "launch-probe"]);
     bypass(&flowed, "claude", true);
     assert!(args(&flowed).contains(&"--chrome"));
@@ -486,6 +626,14 @@ fn machine_dispatch_resolves_destination_policy_and_forwards_launch_and_resume_o
     let local = Fixture::new("codex:local-model");
     let remote = Fixture::new("claude:remote-model");
     local.settings("codex:local-model", true, true);
+    let remote_auth = remote.home.path().join(".claude");
+    fs::create_dir_all(&remote_auth).unwrap();
+    fs::write(
+        remote_auth.join(".credentials.json"),
+        br#"{"fixture_login":"remote-A"}"#,
+    )
+    .unwrap();
+
     remote.settings("claude:remote-model", false, false);
     let remote_bin = remote.home.path().join(".local/bin");
     fs::create_dir_all(&remote_bin).unwrap();
@@ -509,7 +657,7 @@ fn machine_dispatch_resolves_destination_policy_and_forwards_launch_and_resume_o
     fs::write(
         &ssh,
         format!(
-            "#!/usr/bin/python3\nimport os, sys\nos.chdir({cwd})\nos.execve('/bin/bash', ['bash', '-c', sys.argv[-1]], {environment})\n",
+            "#!/usr/bin/python3\nimport os, sys\nassert 'credentials' not in sys.argv[-1], 'unexpected credential transfer'\nos.chdir({cwd})\nos.execve('/bin/bash', ['bash', '-c', sys.argv[-1]], {environment})\n",
             cwd = serde_json::to_string(remote.repo.path()).unwrap(),
         ),
     )
@@ -537,6 +685,7 @@ fn machine_dispatch_resolves_destination_policy_and_forwards_launch_and_resume_o
     };
     let first = dispatch(&["-i", ":", "destination defaults"]);
     bypass(&first, "claude", false);
+    assert_eq!(first["native_auth"]["fixture_login"], "remote-A");
     pair(&first, "--model", "remote-model");
     assert!(args(&first).contains(&"--no-chrome"));
     assert_eq!(
@@ -554,6 +703,7 @@ fn machine_dispatch_resolves_destination_policy_and_forwards_launch_and_resume_o
     let session = remote.session();
     let resumed = dispatch(&["session", "resume", &session]);
     bypass(&resumed, "claude", false);
+    assert_eq!(resumed["native_auth"]["fixture_login"], "remote-A");
     pair(&resumed, "--resume", native);
     pair(&resumed, "--model", "remote-model");
     assert!(args(&resumed).contains(&"--no-chrome"));
@@ -572,6 +722,162 @@ fn machine_dispatch_resolves_destination_policy_and_forwards_launch_and_resume_o
     pair(&explicit, "--model", "haiku");
     assert!(args(&explicit).contains(&"--chrome"));
     assert_eq!(remote.session(), session);
+}
+
+/// Rentals authenticate from names: Claude's `claude setup-token` value as
+/// `CLAUDE_CODE_OAUTH_TOKEN`, and a Plus/Pro Codex login as `~/.codex/auth.json`
+/// (Codex access tokens exist only for Business and Enterprise workspaces).
+#[test]
+fn setup_token_and_codex_auth_json_reach_a_remote_launch_only_by_name() {
+    const TOKEN: &str = "fixture-setup-token-secret";
+    const AUTH: &str = r#"{"tokens":{"refresh_token":"fixture-auth-json-secret"}}"#;
+    let local = Fixture::new("claude:opus");
+    let remote = Fixture::new("claude:opus");
+    fs::write(
+        local.home.path().join("machine/config.yaml"),
+        "forward:\n  env: [CLAUDE_CODE_OAUTH_TOKEN]\n  files: [~/.codex/auth.json]\n",
+    )
+    .unwrap();
+    fs::create_dir_all(local.home.path().join(".codex")).unwrap();
+    fs::write(local.home.path().join(".codex/auth.json"), AUTH).unwrap();
+    let remote_bin = remote.home.path().join(".local/bin");
+    fs::create_dir_all(&remote_bin).unwrap();
+    std::os::unix::fs::symlink(env!("CARGO_BIN_EXE_lf"), remote_bin.join("lf")).unwrap();
+    let environment = serde_json::json!({
+        "HOME": remote.home.path(),
+        "LF_HOME": remote.home.path().join("machine"),
+        "LF_BIN": env!("CARGO_BIN_EXE_lf"),
+        "PATH": format!("{}:/usr/bin:/bin", remote.home.path().join("bin").display()),
+        "CLAUDE_CONFIG_DIR": remote.home.path().join(".claude"),
+    });
+    let argv_log = local.home.path().join("ssh-argv");
+    let ssh = local.home.path().join("bin/ssh");
+    fs::write(
+        &ssh,
+        format!(
+            "#!/usr/bin/python3\nimport json, os, sys\nopen({log}, 'a').write(json.dumps(sys.argv) + '\\n')\nos.chdir({cwd})\nos.execve('/bin/bash', ['bash', '-c', sys.argv[-1]], {environment})\n",
+            log = serde_json::to_string(&argv_log).unwrap(),
+            cwd = serde_json::to_string(remote.repo.path()).unwrap(),
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(ssh, fs::Permissions::from_mode(0o755)).unwrap();
+    success(
+        &local
+            .command()
+            .args(["machine", "add", "fixture", "--repo"])
+            .arg(remote.repo.path())
+            .output()
+            .unwrap(),
+    );
+    let launch = |token: Option<&str>| {
+        let mut command = local.command();
+        if let Some(token) = token {
+            command.env("CLAUDE_CODE_OAUTH_TOKEN", token);
+        }
+        command
+            .args(["--machine", "fixture", "-b", ":", "say done"])
+            .output()
+            .unwrap()
+    };
+
+    // An environment file a failed launch never read is swept by the next delivery.
+    let stale = remote.home.path().join(".lf/forward/unread");
+    fs::create_dir_all(stale.parent().unwrap()).unwrap();
+    fs::write(&stale, "export CLAUDE_CODE_OAUTH_TOKEN=old\n").unwrap();
+    fs::File::options()
+        .write(true)
+        .open(&stale)
+        .unwrap()
+        .set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(3600))
+        .unwrap();
+    let output = launch(Some(TOKEN));
+    success(&output);
+    assert_eq!(remote.received()["forwarded"], TOKEN);
+    let copied = remote.home.path().join(".codex/auth.json");
+    assert_eq!(fs::read_to_string(&copied).unwrap(), AUTH);
+    assert_eq!(
+        fs::metadata(&copied).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
+    assert_eq!(
+        fs::metadata(copied.parent().unwrap())
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777,
+        0o700
+    );
+    // The forwarded environment's transient file is gone once the launch read it.
+    assert_eq!(
+        fs::read_dir(remote.home.path().join(".lf/forward"))
+            .unwrap()
+            .count(),
+        0
+    );
+    let mut seen = vec![
+        fs::read(&argv_log).unwrap(),
+        output.stdout.clone(),
+        output.stderr.clone(),
+    ];
+    for fixture in [&local, &remote] {
+        for file in files_named(&fixture.home.path().join("machine"), "loopflow.db")
+            .into_iter()
+            .chain(files_named(
+                &fixture.home.path().join("machine"),
+                "loopflow.db-wal",
+            ))
+            .chain(files_named(&fixture.home.path().join("machine"), "lf.log"))
+        {
+            seen.push(fs::read(file).unwrap());
+        }
+    }
+    for bytes in &seen {
+        let text = String::from_utf8_lossy(bytes);
+        assert!(!text.contains(TOKEN), "a forwarded value leaked: {text}");
+        assert!(
+            !text.contains("fixture-auth-json-secret"),
+            "a file leaked: {text}"
+        );
+    }
+
+    // A destination already holding the same file says nothing about it.
+    let output = launch(Some(TOKEN));
+    success(&output);
+    assert!(
+        !String::from_utf8_lossy(&output.stderr).contains("keeps its own"),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    // A destination with its own login keeps it.
+    fs::write(&copied, "destination login").unwrap();
+    let output = launch(Some(TOKEN));
+    success(&output);
+    assert_eq!(fs::read_to_string(&copied).unwrap(), "destination login");
+    assert!(String::from_utf8_lossy(&output.stderr).contains("keeps its own ~/.codex/auth.json"));
+
+    // A named value this Machine cannot supply stops before anything reaches SSH.
+    fs::remove_file(&argv_log).unwrap();
+    let output = launch(None);
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr)
+            .contains("forward.env names CLAUDE_CODE_OAUTH_TOKEN"),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(!argv_log.exists());
+
+    // A command that launches no agent carries nothing, so it needs no value.
+    let output = local
+        .command()
+        .args(["--machine", "fixture", "machine", "self", "--json"])
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!stderr.contains("forward.env"), "{stderr}");
+    assert!(argv_log.exists(), "{stderr}");
 }
 
 #[path = "support/mod.rs"]
@@ -663,11 +969,11 @@ fn task_conversation_preparation_is_passive_and_connect_uses_shared_launch_setti
 }
 
 #[test]
-fn native_codex_failed_bootstrap_preserves_account_and_pending_input() {
+fn another_agent_resumes_a_failed_codex_bootstrap_on_its_own_input() {
     let fixture = Fixture::new("codex");
     let machine = fixture.home.path().join("machine");
-    support::register_codex_account(&machine);
     fixture.create_wave();
+    // A chat is a bare Codex terminal; this one exits before starting a thread.
     fs::write(machine.join("fail-terminal"), "").unwrap();
     let failed = fixture
         .command()
@@ -675,9 +981,6 @@ fn native_codex_failed_bootstrap_preserves_account_and_pending_input() {
             "-i",
             "--wave",
             "fixture",
-            "--only-account",
-            "fixture@example.com",
-            "--yolo",
             ":",
             "Preserve this initial request",
         ])
@@ -686,41 +989,6 @@ fn native_codex_failed_bootstrap_preserves_account_and_pending_input() {
     assert!(!failed.status.success());
     let session = fixture.session();
     fs::remove_file(machine.join("fail-terminal")).unwrap();
-    fixture.settings("codex:current-model", false, false);
-    let resumed = fixture.run(&["session", "resume", &session]);
-    bypass(&resumed, "codex", false);
-    assert_eq!(resumed["account"], "fixture");
-    assert_eq!(resumed["params"]["model"], "current-model");
-    assert!(resumed["turns"][0]
-        .to_string()
-        .contains("Preserve this initial request"));
-    assert_eq!(fixture.session(), session);
-}
-
-#[test]
-fn another_agent_resumes_a_failed_codex_bootstrap_on_its_own_input() {
-    let fixture = Fixture::new("codex");
-    let machine = fixture.home.path().join("machine");
-    support::register_codex_account(&machine);
-    fixture.create_wave();
-    fs::write(machine.join("fail-server"), "").unwrap();
-    let failed = fixture
-        .command()
-        .args([
-            "-i",
-            "--wave",
-            "fixture",
-            "--only-account",
-            "fixture@example.com",
-            ":",
-            "Preserve this initial request",
-        ])
-        .output()
-        .unwrap();
-    assert!(!failed.status.success());
-    let session = fixture.session();
-    fs::remove_file(machine.join("fail-server")).unwrap();
-    // The server failed before Codex started a thread.
     let resumed = fixture.run(&["-a", "claude", "session", "resume", &session]);
     // A fresh Claude input, not the reopened Codex bootstrap.
     assert!(args(&resumed).contains(&"--session-id"), "{resumed}");
@@ -737,290 +1005,11 @@ fn another_agent_resumes_a_failed_codex_bootstrap_on_its_own_input() {
 }
 
 #[test]
-fn a_codex_terminal_moved_to_another_login_ends_and_says_where_it_went() {
-    let fixture = Fixture::new("codex");
-    let machine = fixture.home.path().join("machine");
-    support::register_codex_account(&machine);
-    support::register_codex_login(&machine, "other");
-    let idling = machine.join("idling");
-    // The one idle client ignores losing its server, as Codex 0.164 does.
-    fs::write(machine.join("idle-terminal"), "").unwrap();
-    fixture.create_wave();
-    let mut first = fixture
-        .command()
-        .args([
-            "-i",
-            "--wave",
-            "fixture",
-            "--account",
-            "fixture@example.com",
-            ":",
-            "hello",
-        ])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
-    while fs::read_to_string(&idling).map_or(true, |pid| pid.is_empty()) {
-        assert!(
-            first.try_wait().unwrap().is_none(),
-            "first launch ended early"
-        );
-        assert!(std::time::Instant::now() < deadline, "client never idled");
-        std::thread::sleep(std::time::Duration::from_millis(50));
-    }
-    let client: libc::pid_t = fs::read_to_string(&idling).unwrap().parse().unwrap();
-    let session = fixture.session();
-    let thread = fs::read_to_string(machine.join("native-thread")).unwrap();
-    success(
-        &fixture
-            .command()
-            .args(["--account", "codex=other@example.com", "resume", &session])
-            .output()
-            .unwrap(),
-    );
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-    while first.try_wait().unwrap().is_none() {
-        if std::time::Instant::now() >= deadline {
-            let _ = first.kill();
-            panic!("the moved terminal stayed open");
-        }
-        std::thread::sleep(std::time::Duration::from_millis(50));
-    }
-    let first = first.wait_with_output().unwrap();
-    // The owner reports a client's exit in the terminal it ran in.
-    let printed = format!(
-        "{}{}",
-        String::from_utf8_lossy(&first.stdout),
-        String::from_utf8_lossy(&first.stderr)
-    );
-    assert!(first.status.success(), "{:?}: {printed}", first.status);
-    assert!(
-        printed.contains(&format!(
-            "This conversation moved to account other@example.com: lf resume {session}"
-        )),
-        "{printed}"
-    );
-    // SAFETY: signal 0 only probes whether the fixture's client still exists.
-    assert_ne!(unsafe { libc::kill(client, 0) }, 0, "client still running");
-    assert_eq!(
-        fs::read_to_string(machine.join("native-thread")).unwrap(),
-        thread
-    );
-    assert_eq!(fixture.session(), session);
-    // The old launcher's exit leaves the new login's pin in place.
-    let pinned: String = rusqlite::Connection::open(machine.join("loopflow.db"))
-        .unwrap()
-        .query_row(
-            "SELECT account_id FROM provider_session_accounts WHERE provider_session_id=?1",
-            [&thread],
-            |row| row.get(0),
-        )
-        .unwrap();
-    assert_eq!(pinned, "other");
-}
-
-#[test]
-fn a_running_claude_named_onto_another_login_keeps_its_client_and_says_where_it_runs() {
-    let fixture = Fixture::new("claude");
-    let machine = fixture.home.path().join("machine");
-    let bin = fixture.home.path().join("bin");
-    // Signing the shared home in goes through the Keychain on macOS.
-    fs::write(bin.join("security"), support::FAKE_SECURITY).unwrap();
-    fs::set_permissions(bin.join("security"), fs::Permissions::from_mode(0o755)).unwrap();
-    fs::write(
-        bin.join("claude"),
-        r#"#!/usr/bin/python3
-import os, select, sys
-if '--version' in sys.argv:
-    print('fixture'); sys.exit(0)
-home = os.environ['LF_HOME']
-sys.stdin.read()
-terminal = open('/dev/tty')
-open(home+'/claude-pids', 'a').write(str(os.getpid())+'\n')
-while not os.path.exists(home+'/quit'):
-    if select.select([terminal], [], [], 0.05)[0] and terminal.readline().strip() == 'resumed':
-        open(home+'/resumed-input', 'w').write(str(os.getpid()))
-"#,
-    )
-    .unwrap();
-    support::register_claude_login(&machine, "fixture");
-    support::register_claude_login(&machine, "other");
-    let signed_in = |name: &str| {
-        let token = format!("{name}-token");
-        let mut stores = vec![fixture.home.path().join(".claude/.credentials.json")];
-        if let Ok(items) = fs::read_dir(bin.join("keychain")) {
-            stores.extend(items.map(|item| item.unwrap().path()));
-        }
-        stores
-            .iter()
-            .any(|store| fs::read_to_string(store).is_ok_and(|text| text.contains(&token)))
-    };
-    let wait = |what: &str, done: &mut dyn FnMut() -> bool| {
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
-        while !done() {
-            assert!(std::time::Instant::now() < deadline, "{what}");
-            std::thread::sleep(std::time::Duration::from_millis(50));
-        }
-    };
-    let mut first = fixture
-        .command()
-        .env("USER", "fixture")
-        // Give Claude a controlling terminal after it consumes prompt-file stdin.
-        .env("LF_VIEWER_STREAM", "1")
-        .args([
-            "-i",
-            "--account",
-            "claude=fixture@example.com",
-            ":",
-            "hello",
-        ])
-        // Keep the first viewer's input open while the second viewer attaches.
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
-    let pids = machine.join("claude-pids");
-    wait("Claude never started", &mut || {
-        assert!(first.try_wait().unwrap().is_none(), "first launch ended");
-        pids.exists()
-    });
-    assert!(signed_in("fixture"));
-    let session = fixture.session();
-
-    let mut output = fixture
-        .command()
-        .env("USER", "fixture")
-        .args(["--account", "claude=other@example.com", "resume", &session])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
-    wait("the login never moved", &mut || signed_in("other"));
-    output
-        .stdin
-        .as_mut()
-        .unwrap()
-        .write_all(b"resumed\n")
-        .unwrap();
-    // The login changes before resume attaches. Quit only after its viewer can
-    // reach the existing client, or the test itself can make resume relaunch it.
-    wait("the resumed viewer never reached Claude", &mut || {
-        machine.join("resumed-input").exists()
-    });
-    fs::write(machine.join("quit"), "").unwrap();
-    let output = output.wait_with_output().unwrap();
-    let printed = format!(
-        "{}{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert!(
-        printed.contains("claude is now signed in as other@example.com"),
-        "{printed}"
-    );
-    first.wait().unwrap();
-    // The same client carried on: a resume that relaunched would add a pid.
-    assert_eq!(
-        fs::read_to_string(&pids).unwrap().lines().count(),
-        1,
-        "{printed}"
-    );
-    // `--account` names one resume; nothing is held.
-    assert!(!machine.join("accounts/claude/held").exists());
-}
-
-#[test]
-fn a_held_login_takes_next_and_the_launch_over_an_order_naming_another() {
-    let fixture = Fixture::new("codex");
-    let machine = fixture.home.path().join("machine");
-    support::register_codex_account(&machine);
-    support::register_codex_login(&machine, "other");
-    let lf = |args: &[&str]| {
-        let output = fixture.command().args(args).output().unwrap();
-        success(&output);
-        output
-    };
-    let next = || -> Value {
-        let launches: Vec<Value> =
-            serde_json::from_slice(&lf(&["account", "next", "--json"]).stdout).unwrap();
-        launches
-            .into_iter()
-            .find(|launch| launch["provider"] == "codex")
-            .unwrap()
-    };
-    let launch = |args: &[&str]| -> String {
-        let launched = fixture.run(&[args, &["-i", "--yolo", ":", "hello"]].concat());
-        launched["account"].as_str().unwrap().to_owned()
-    };
-    // What `lf account use` leaves behind; its own switch needs a Codex daemon.
-    let hold = || fs::write(machine.join("accounts/codex/held"), "fixture").unwrap();
-    lf(&["set", "account.codex", "other@example.com"]);
-    assert_eq!(next()["login"], "other@example.com");
-    assert_eq!(launch(&[]), "other");
-
-    hold();
-    let held = next();
-    assert_eq!(held["login"], "fixture@example.com");
-    assert_eq!(held["reason"], "held by lf account use until it fills up");
-    assert_eq!(launch(&[]), "fixture");
-
-    assert_eq!(launch(&["--account", "codex=other@example.com"]), "other");
-    assert_eq!(next()["login"], "fixture@example.com");
-
-    // Paused, the login is out of rotation but not out of a hold.
-    lf(&["account", "pause", "codex=fixture@example.com"]);
-    hold();
-    assert_eq!(next()["login"], "fixture@example.com");
-    assert_eq!(launch(&[]), "fixture");
-}
-
-#[test]
-fn native_resume_preserves_the_selected_account_in_the_shared_home() {
-    for selection in ["--account", "--only-account"] {
-        let fixture = Fixture::new("codex");
-        let machine = fixture.home.path().join("machine");
-        support::register_codex_account(&machine);
-        let first = fixture.run(&[
-            "-i",
-            selection,
-            "fixture@example.com",
-            "--yolo",
-            ":",
-            "hello",
-        ]);
-        assert_eq!(first["account"], "fixture");
-        let shared = fixture.home.path().join(".codex");
-        assert_eq!(Path::new(first["codex_home"].as_str().unwrap()), shared);
-        assert_eq!(
-            fs::read(shared.join("auth.json")).unwrap(),
-            fs::read(machine.join("accounts/codex/fixture/auth.json")).unwrap()
-        );
-        let session = fixture.session();
-        fixture.settings("codex", false, false);
-        let resumed = fixture.run(&["session", "resume", &session]);
-        assert_eq!(resumed["account"], "fixture");
-        assert_eq!(resumed["codex_home"], first["codex_home"]);
-        bypass(&resumed, "codex", false);
-    }
-}
-
-#[test]
 fn linked_worktree_metadata_is_accessible_on_launch_and_resume() {
     for provider in ["claude", "codex"] {
         let fixture = Fixture::new(provider);
         fixture.repo.stage_all();
         fixture.repo.commit("fixture config");
-        // Codex reaches its app-server as Work.
-        let launch: &[&str] = if provider == "codex" {
-            fixture.create_wave();
-            &["-i", "--wave", "fixture", ":", "--", "--- literal prompt"]
-        } else {
-            &["-i", ":", "--", "--- literal prompt"]
-        };
         let worktree = fixture.home.path().join("work tree with spaces");
         success(
             &Command::new("git")
@@ -1030,11 +1019,24 @@ fn linked_worktree_metadata_is_accessible_on_launch_and_resume() {
                 .output()
                 .unwrap(),
         );
+        let prepared = (provider == "codex").then(|| {
+            crate::support::prepare_native_conversation(
+                &fixture.home.path().join("machine/loopflow.db"),
+                &worktree,
+                "codex",
+                None,
+                "--- literal prompt",
+            )
+        });
+        let launch = match &prepared {
+            Some(session) => vec!["-i", "resume", session],
+            None => vec!["-i", ":", "--", "--- literal prompt"],
+        };
         success(
             &fixture
                 .command()
                 .current_dir(&worktree)
-                .args(launch)
+                .args(&launch)
                 .output()
                 .unwrap(),
         );
@@ -1091,8 +1093,6 @@ fn linked_worktree_metadata_is_accessible_on_launch_and_resume() {
 #[test]
 fn codex_headless_start_receives_current_policy_on_the_wire() {
     let fixture = Fixture::new("codex:first-model");
-    let machine = fixture.home.path().join("machine");
-    support::register_codex_account(&machine);
     fixture.create_wave();
     let script = support::codex_app_server_script("done", "").replace(
         "read -r thread_start",
@@ -1162,8 +1162,7 @@ fn live_taskless_provider_switch_preserves_identity_and_accepts_terminal_input()
     )
     .unwrap();
     let machine = fixture.home.path().join("machine");
-    support::register_codex_account(&machine);
-    let store = loopflow::store::sqlite::SqliteStore::new(&machine.join("loopflow.db")).unwrap();
+    let store = loopflow_execution::store::open_sqlite(&machine.join("loopflow.db")).unwrap();
     let before = store.session(&session).unwrap().unwrap();
     assert!(before.completed_at.is_none());
     assert!(before.task_id.is_none() && before.wave_id.is_none());
@@ -1179,7 +1178,7 @@ fn live_taskless_provider_switch_preserves_identity_and_accepts_terminal_input()
     let _ = first.kill();
     first.wait().unwrap();
     success(&switched);
-    // A bare Codex launch is plain `codex`: the import rides its opening prompt.
+    // A taskless chat reopens as a chat: bare Codex takes the history as argv.
     let imported = fixture.received();
     assert!(
         args(&imported)
@@ -1228,7 +1227,6 @@ fn provider_switch_imports_session_history_with_current_policy() {
         .to_string(),
     )
     .unwrap();
-    support::register_codex_account(&fixture.home.path().join("machine"));
     let script = support::codex_app_server_script("done", "")
         .replace(
             "read -r thread_start",
@@ -1268,10 +1266,8 @@ fn opencode_headless_start_selects_the_model_and_permissions() {
         if managed {
             fixture.create_wave();
         }
-        let script = include_str!("support/opencode_server.py").replace("__WAIT__", "False").replace(
-        "            if evidence := os.environ.get(\"LF_TEST_REPLAY_EVIDENCE\"):",
-        "            (HOME / 'received.json').write_text(json.dumps({'session':self.path.split('/')[3], 'request':body, 'config':json.loads(os.environ['OPENCODE_CONFIG_CONTENT'])}))\n            if evidence := os.environ.get(\"LF_TEST_REPLAY_EVIDENCE\"):"
-    );
+        let script = include_str!("../../loopflow-execution/tests/support/opencode_cli.py")
+            .replace("__WAIT__", "False");
         fs::write(fixture.home.path().join("bin/opencode"), script).unwrap();
         fixture.settings("opencode:opencode/first-model", true, false);
         let first = fixture.run(if managed {
@@ -1286,8 +1282,8 @@ fn opencode_headless_start_selects_the_model_and_permissions() {
             .unwrap()["id"],
             "first-model"
         );
-        assert_eq!(first["config"]["permissions"][0]["effect"], "allow");
-        let plugin = first["config"]["plugins"][0]
+        assert_eq!(first["server"]["permissions"][0]["effect"], "allow");
+        let plugin = first["server"]["plugins"][0]
             .as_str()
             .unwrap()
             .strip_prefix("file://")
@@ -1377,7 +1373,7 @@ fn wave_targets_prepare_reuse_and_open_in_the_selected_checkout_in_both_formats(
     fixture.create_wave();
     let other = TestRepo::new();
     let store =
-        loopflow::store::sqlite::SqliteStore::new(&fixture.home.path().join("machine/loopflow.db"))
+        loopflow_execution::store::open_sqlite(&fixture.home.path().join("machine/loopflow.db"))
             .unwrap();
     let wave = store.list_waves(None).unwrap().into_iter().next().unwrap();
     let wave_id = wave.id().as_str();
@@ -1513,7 +1509,7 @@ fn contextual_resume_uses_scope_and_recovers_unassociated_checkouts() {
     };
     let first = prepare(fixture.repo.path(), &["resume"]);
     let store =
-        loopflow::store::sqlite::SqliteStore::new(&fixture.home.path().join("machine/loopflow.db"))
+        loopflow_execution::store::open_sqlite(&fixture.home.path().join("machine/loopflow.db"))
             .unwrap();
     assert_eq!(
         store
@@ -1610,8 +1606,7 @@ fn contextual_resume_uses_scope_and_recovers_unassociated_checkouts() {
     assert_eq!(explanation["resolution"]["session"]["value"], id);
     assert_eq!(count(), before);
     assert_eq!(prepare(&linked, &["resume", id])["id"], id);
-    // Beside an id, a Task or Wave only makes the resume managed: the id
-    // still selects, whatever Work the flag names.
+    // Beside a Task or Wave flag, the id still selects the Session.
     for argv in [
         vec!["resume", id, "--wave", "fixture"],
         vec!["--task", "missing", "resume", id],
@@ -1622,12 +1617,12 @@ fn contextual_resume_uses_scope_and_recovers_unassociated_checkouts() {
 }
 
 #[test]
-fn missing_native_history_fails_without_replacing_the_selected_conversation() {
+fn provider_rejected_resume_keeps_the_selected_conversation() {
     let fixture = Fixture::new("claude:sonnet");
     fixture.run(&["-i", ":", "existing history"]);
     let id = fixture.session();
     let store =
-        loopflow::store::sqlite::SqliteStore::new(&fixture.home.path().join("machine/loopflow.db"))
+        loopflow_execution::store::open_sqlite(&fixture.home.path().join("machine/loopflow.db"))
             .unwrap();
     let saved = store.session(&id).unwrap().unwrap();
     let received = fixture.received();
@@ -1693,6 +1688,8 @@ say({'type': 'result', 'session_id': 'context-fixture', 'subtype': 'success', 'r
     .unwrap();
     fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
     fixture.repo.create_file(".lf/skills/probe.md", "Probe.");
+    fixture.repo.stage_all();
+    fixture.repo.commit("Define the probe skill");
 
     success(
         &fixture
@@ -1724,7 +1721,7 @@ fn pi_fixture() -> Fixture {
         &script,
         format!(
             "#!/usr/bin/python3 -I\n{}",
-            include_str!("../src/harness/testdata/pi_rpc.py")
+            include_str!("../../loopflow-execution/src/harness/testdata/pi_rpc.py")
         ),
     )
     .unwrap();
@@ -1749,6 +1746,13 @@ fn pi_public_headless_skill_delivers_context() {
         fixture
             .repo
             .create_file("scratch/pi-context.md", "Pi context sentinel.");
+        // Pi keeps its conversation under its own home; the stand-in writes
+        // it in the checkout, which is no edit of the skill's.
+        fixture
+            .repo
+            .create_file(".gitignore", "pi-conversation.jsonl\n");
+        fixture.repo.stage_all();
+        fixture.repo.commit("Define the Pi skill and its context");
         let output = fixture
             .command()
             .env(
@@ -1805,18 +1809,25 @@ fn pi_native_callbacks_retain_identity_final_output_and_usage() {
     let fixture = pi_fixture();
     // Pi's callbacks carry provider context only for a managed launch.
     fixture.create_wave();
+    let prepared = crate::support::prepare_native_conversation(
+        &fixture.home.path().join("machine/loopflow.db"),
+        fixture.repo.path(),
+        "pi",
+        None,
+        "Native Pi input",
+    );
     let output = fixture
         .command()
         .env(
             "PI_FIXTURE_RECORD",
             fixture.home.path().join("received.json"),
         )
-        .args(["-i", "--wave", "fixture", ":", "Native Pi input"])
+        .args(["-i", "resume", &prepared])
         .output()
         .unwrap();
     success(&output);
     let session = fixture.session();
-    let db = rusqlite::Connection::open(fixture.home.path().join("machine/loopflow.db")).unwrap();
+    let db = machine_db(fixture.home.path());
     let (provider, thread): (String, String) = db
         .query_row(
             "SELECT provider,provider_thread FROM agent_sessions WHERE id=?1",
@@ -1836,18 +1847,17 @@ fn pi_native_callbacks_retain_identity_final_output_and_usage() {
             .display()
             .to_string()
     );
-    let output: String = db.query_row("SELECT json_extract(payload,'$.text') FROM session_events WHERE session_id=?1 AND kind='output'", [&session], |row| row.get(0)).unwrap();
-    assert_eq!(output, "native answer");
-    let tokens: i64 = db.query_row("SELECT json_extract(payload,'$.usage.total_input_tokens') FROM session_events WHERE session_id=?1 AND kind='usage' ORDER BY seq DESC LIMIT 1", [&session], |row| row.get(0)).unwrap();
+    assert_eq!(pi_final_answer(&fixture, &session), "native answer");
+    let tokens: i64 = db.query_row("SELECT total_input_tokens FROM history.turns WHERE session_id=?1 AND usage_at IS NOT NULL ORDER BY id DESC LIMIT 1", [&session], |row| row.get(0)).unwrap();
     assert_eq!(tokens, 26);
     let receipts: i64 = db
         .query_row(
-            "SELECT count(*) FROM session_events WHERE session_id=?1 AND kind='usage'",
+            "SELECT count(*) FROM history.turns WHERE session_id=?1 AND usage_at IS NOT NULL",
             [&session],
             |row| row.get(0),
         )
         .unwrap();
-    // The turn's three native receipts merge into one usage row.
+    // The turn's three native receipts merge into one turn's usage.
     assert_eq!(receipts, 1);
     let received = fixture.received();
     assert!(args(&received).contains(&"--extension"));
@@ -1861,28 +1871,29 @@ fn pi_native_callbacks_retain_identity_final_output_and_usage() {
 fn pi_native_crash_keeps_the_paid_step_and_interrupts_the_turn() {
     let fixture = pi_fixture();
     fixture.create_wave();
+    let prepared = crate::support::prepare_native_conversation(
+        &fixture.home.path().join("machine/loopflow.db"),
+        fixture.repo.path(),
+        "pi",
+        None,
+        "Crash after a paid model step",
+    );
     let output = fixture
         .command()
         .env("PI_FIXTURE_CRASH", "1")
-        .args([
-            "-i",
-            "--wave",
-            "fixture",
-            ":",
-            "Crash after a paid model step",
-        ])
+        .args(["-i", "resume", &prepared])
         .output()
         .unwrap();
     assert!(!output.status.success());
     let session = fixture.session();
-    let db = rusqlite::Connection::open(fixture.home.path().join("machine/loopflow.db")).unwrap();
+    let db = machine_db(fixture.home.path());
     let (count, tokens): (i64, i64) = db.query_row(
-        "SELECT count(*), json_extract(payload,'$.usage.total_input_tokens') FROM session_events WHERE session_id=?1 AND kind='usage'",
+        "SELECT count(*), total_input_tokens FROM history.turns WHERE session_id=?1 AND usage_at IS NOT NULL",
         [&session], |row| Ok((row.get(0)?, row.get(1)?))).unwrap();
     assert_eq!((count, tokens), (1, 13));
     // The exit read closes the turn the transcript left open.
     let statuses: Vec<String> = db
-        .prepare("SELECT json_extract(payload,'$.status') FROM session_events WHERE session_id=?1 AND kind='completed' AND provider_turn IS NOT NULL")
+        .prepare("SELECT status FROM history.turns WHERE session_id=?1 AND ended_at IS NOT NULL")
         .unwrap()
         .query_map([&session], |row| row.get(0))
         .unwrap()
@@ -1895,12 +1906,19 @@ fn pi_native_crash_keeps_the_paid_step_and_interrupts_the_turn() {
 fn pi_native_failed_start_reopens_without_replacing_the_loopflow_session() {
     let fixture = pi_fixture();
     fixture.create_wave();
+    let prepared = crate::support::prepare_native_conversation(
+        &fixture.home.path().join("machine/loopflow.db"),
+        fixture.repo.path(),
+        "pi",
+        None,
+        "Initial input",
+    );
     let provider = fixture.home.path().join("bin/pi");
     let original = fs::read(&provider).unwrap();
     fs::write(&provider, "#!/bin/sh\nexit 9\n").unwrap();
     let failed = fixture
         .command()
-        .args(["-i", "--wave", "fixture", ":", "Initial input"])
+        .args(["-i", "resume", &prepared])
         .output()
         .unwrap();
     assert!(!failed.status.success());
@@ -1913,7 +1931,7 @@ fn pi_native_failed_start_reopens_without_replacing_the_loopflow_session() {
         .unwrap();
     success(&resumed);
     assert_eq!(fixture.session(), id);
-    let db = rusqlite::Connection::open(fixture.home.path().join("machine/loopflow.db")).unwrap();
+    let db = machine_db(fixture.home.path());
     let sessions: i64 = db
         .query_row(
             "SELECT count(*) FROM agent_sessions WHERE provider='pi'",
@@ -1922,12 +1940,152 @@ fn pi_native_failed_start_reopens_without_replacing_the_loopflow_session() {
         )
         .unwrap();
     assert_eq!(sessions, 1);
-    let outputs: i64 = db
-        .query_row(
-            "SELECT count(*) FROM session_events WHERE session_id=?1 AND kind='output'",
-            [&id],
-            |row| row.get(0),
-        )
+    assert_eq!(pi_final_answer(&fixture, &id), "native answer");
+}
+
+/// What `lf history show --final` prints for a Session, read from Pi's file.
+fn pi_final_answer(fixture: &Fixture, session: &str) -> String {
+    let output = fixture
+        .command()
+        .args(["history", "show", session, "--final"])
+        .output()
         .unwrap();
-    assert_eq!(outputs, 1);
+    success(&output);
+    String::from_utf8(output.stdout).unwrap().trim().to_owned()
+}
+
+#[test]
+fn native_auth_owns_launches_with_a_populated_catalog() {
+    for provider in ["claude", "codex"] {
+        for task_owned in [false, true] {
+            let fixture = Fixture::new(provider);
+            let machine = fixture.home.path().join("machine");
+            let _env = support::EnvGuard::with_lf_home(&[], &machine);
+            let native = fixture.home.path().join(format!(".{provider}"));
+            fs::create_dir_all(&native).unwrap();
+            let credential = if provider == "claude" {
+                ".credentials.json"
+            } else {
+                "auth.json"
+            };
+            let login = native.join(credential);
+            let bytes = br#"{"fixture_login":"A"}"#;
+            fs::write(&login, bytes).unwrap();
+            let saved = machine.join(format!("accounts/{provider}/saved"));
+            fs::create_dir_all(&saved).unwrap();
+            fs::write(saved.join(credential), br#"{"fixture_login":"B"}"#).unwrap();
+            let db = rusqlite::Connection::open(machine.join("loopflow.db")).unwrap();
+            db.execute("INSERT INTO provider_accounts(provider,account_id,home,credential_state,utilization_percent,cooldown_until,cooldown_reason,created_at,updated_at) VALUES(?1,'saved',?2,'missing',100,4000000000,'fixture',1,1)",
+                rusqlite::params![provider, saved.to_str().unwrap()]).unwrap();
+            // Released preferences stay readable but have no launch authority.
+            fs::write(machine.join("config.yaml"), format!("account: {{{provider}: [saved]}}\naccounts: {{{provider}: {{saved: {{login_email: saved@example.com}}}}}}\n")).unwrap();
+            let executable = fixture.home.path().join("bin").join(provider);
+            let source = if provider == "claude" {
+                let original = fs::read_to_string(&executable).unwrap();
+                original.replace(
+                    "args = sys.argv[1:]",
+                    r#"args = sys.argv[1:]
+if '--version' not in args:
+    assert os.environ['CLAUDE_CONFIG_DIR'] == os.environ['HOME']+'/.claude'
+    assert 'LF_PROVIDER_ACCOUNT_ID' not in os.environ
+    try:
+        auth = json.load(open(os.environ['CLAUDE_CONFIG_DIR']+'/.credentials.json'))
+    except FileNotFoundError:
+        sys.stdin.readline()
+        print('native login required', file=sys.stderr); sys.exit(34)
+    # An exported API key never reaches Claude: it bills the native login.
+    assert 'ANTHROPIC_API_KEY' not in os.environ
+    with open(os.environ['HOME']+'/auth-seen.json','w') as out: json.dump(auth,out)
+"#,
+                )
+            } else {
+                support::codex_app_server_script(
+                    "done",
+                    r#"
+[ "$CODEX_HOME" = "$HOME/.codex" ] || exit 35
+[ -z "$LF_PROVIDER_ACCOUNT_ID" ] || exit 36
+[ -f "$CODEX_HOME/auth.json" ] || { echo 'native login required' >&2; exit 34; }
+[ -z "${OPENAI_API_KEY+set}" ] || exit 37
+cp "$CODEX_HOME/auth.json" "$HOME/auth-seen.json"
+"#,
+                )
+            };
+            let source = if provider == "claude" {
+                source.replace("    message['session_id'] = token", "    print(json.dumps({'type':'rate_limit_event','rate_limit_info':{'status':'allowed_warning','utilization':1.0}}), flush=True)\n    message['session_id'] = token")
+            } else {
+                source.replace("read -r turn_start", "read -r turn_start\necho '{\"method\":\"account/rateLimits/updated\",\"params\":{\"rateLimits\":{\"primary\":{\"usedPercent\":100,\"windowDurationMins\":300}}}}'")
+            };
+            fs::write(&executable, source).unwrap();
+            let task = task_owned.then(|| {
+                let base = Command::new("git")
+                    .args(["rev-parse", "HEAD"])
+                    .current_dir(fixture.repo.path())
+                    .output()
+                    .unwrap();
+                support::register_task_without_pr(
+                    &machine,
+                    fixture.repo.path(),
+                    "main",
+                    String::from_utf8(base.stdout).unwrap().trim(),
+                )
+                .task
+            });
+            let mut command = fixture.command();
+            command.arg("-b").env(
+                if provider == "claude" {
+                    "ANTHROPIC_API_KEY"
+                } else {
+                    "OPENAI_API_KEY"
+                },
+                "fixture-native-api-key",
+            );
+            if let Some(task) = &task {
+                command.args(["--task", task.id.as_str()]);
+            }
+            success(&command.args([":", "finish the fixture"]).output().unwrap());
+            let session = fixture.session();
+            let thread = || {
+                db.query_row(
+                    "SELECT provider_thread FROM agent_sessions WHERE id=?1",
+                    [&session],
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap()
+            };
+            assert!(!thread().is_empty());
+            let seen: Value = serde_json::from_slice(
+                &fs::read(fixture.home.path().join("auth-seen.json")).unwrap(),
+            )
+            .unwrap();
+            assert_eq!(seen["fixture_login"], "A");
+            assert_eq!(fs::read(&login).unwrap(), bytes);
+            assert_eq!(
+                fs::read(saved.join(credential)).unwrap(),
+                br#"{"fixture_login":"B"}"#
+            );
+            let state: (String, i64, Option<i64>) = db.query_row("SELECT credential_state,cooldown_until,last_selected_at FROM provider_accounts WHERE provider=?1 AND account_id='saved'", [provider], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?))).unwrap();
+            assert_eq!(state, ("missing".into(), 4000000000, None));
+            let claims: i64 = db
+                .query_row(
+                    "SELECT COUNT(*) FROM provider_session_accounts",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(claims, 0);
+            // Removing the native login reaches the provider's own error, despite B.
+            fs::remove_file(&login).unwrap();
+            let failed = fixture
+                .command()
+                .args(["-b", ":", "try without login"])
+                .output()
+                .unwrap();
+            assert!(!failed.status.success());
+            assert!(
+                String::from_utf8_lossy(&failed.stderr).contains("native login required"),
+                "{provider}, Task={task_owned}: {}",
+                String::from_utf8_lossy(&failed.stderr)
+            );
+        }
+    }
 }

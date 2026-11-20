@@ -16,7 +16,7 @@ facts.
 ## Request flow
 
 ```text
-argv -> Process admission -> Skill discovery -> prompt -> provider route
+argv -> Process admission -> Skill discovery -> prompt -> model and harness
                                                         |
                                                         v
                                      LfSession reservation + input capture
@@ -85,8 +85,9 @@ Zombies, birth mismatch and valid absence count as death. Observations grant no
 signal or settlement authority. Public Task-status/scheduled agreement and
 installed acceptance remain unproved.
 Invocation-owned retry settles the exact old AgentProcess before reserving its
-replacement, retaining native/account history. Account failover selects a fresh
-thread; same-account retry retains it. Generic stop still preserves takeover.
+replacement, retaining native history and prior outcomes. Headless fallback
+keeps the thread within a harness and imports history when changing harness.
+Interactive refusal requires an explicit retry or move. Generic stop preserves takeover.
 Generation-based caller/status wires and optional launches remain publication
 blockers.
 
@@ -118,7 +119,7 @@ Native exit instead adopts a plain recorder through `CaptureHandoff`, with
 attachment cleanup owned separately by the process owner. Its recording failures
 are logged without changing the provider's exit result.
 
-The [harness guide](../../rust/loopflow/src/harness/README.md) maps these
+The [harness guide](../../rust/loopflow-execution/src/harness/README.md) maps these
 responsibilities to source files.
 
 ## Publish before spawn
@@ -217,7 +218,7 @@ The Codex terminal talks to its app-server directly, on the private Unix WebSock
 the AgentProcess opened; lf carries none of its bytes. lf's instructions, hooks,
 shell policy and writable roots are `-c` overrides on that private `codex app-server`,
 so every thread on it has them, including one the person starts with `/new` or
-`/fork`; they extend what the account route, a wrapper and the user's config already
+`/fork`; they extend what native provider configuration and a wrapper already
 give it, read first from a short-lived stdio app-server started the same way. The
 launcher starts or resumes the thread, names a new thread so it has a rollout to
 resume (Codex 0.166.0 has none until a first turn or a name), then execs into
@@ -330,8 +331,9 @@ start/assignment evidence; uncertainty never becomes an invented token split.
 
 Conversation, Graph and command summaries filter and page in SQL before opening
 payloads. Exact detail can load the selected captured input, transcript or final
-answer. Without correlated native output from a completed turn, the final answer
-is absent; retained transcript prose never substitutes for it.
+answer. The final answer is the last message of the input's completed turn in
+its provider's transcript; when that transcript is gone, the read fails and
+names where it looked.
 
 Session inventory reads the selected rows, Work labels and indexed Graph metadata;
 it does not decode captures or Session history. Readiness text remains the exact

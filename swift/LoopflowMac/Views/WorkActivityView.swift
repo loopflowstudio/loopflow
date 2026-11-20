@@ -10,9 +10,6 @@ struct WorkActivityView: View {
         VStack(spacing: 0) {
             header
             Divider()
-            if let reason = model.workActivity.errorMessage {
-                evidenceBanner(reason)
-            }
             content
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -65,7 +62,7 @@ struct WorkActivityView: View {
 
     @ViewBuilder
     private var content: some View {
-        if model.workActivity.value == nil, model.workActivity.errorMessage == nil {
+        if model.workActivity.isLoading {
             ProgressView("Reading Activity…")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .accessibilityIdentifier("loopflow-activity-loading")
@@ -109,7 +106,7 @@ struct WorkActivityView: View {
 
             VStack(alignment: .leading, spacing: Spacing.xs) {
                 HStack(alignment: .firstTextBaseline, spacing: Spacing.xs) {
-                    Text("\((entry.work.kind == .project ? "CHAPTER" : entry.work.kind.rawValue.uppercased())) · \(entry.subject)")
+                    Text("\(entry.work.kind.rawValue.uppercased()) · \(entry.subject)")
                         .font(Typography.strong(8))
                         .tracking(0.6)
                         .foregroundStyle(palette.textSecondary)
@@ -144,7 +141,7 @@ struct WorkActivityView: View {
             case .wave:
                 "Wave · \(waveName(work.id))"
             case .project:
-                "Wave · \(model.waveForChapter(projectId: work.id)?.wave.name ?? work.id)"
+                "Wave · \(model.waveForProject(projectId: work.id)?.wave.name ?? work.id)"
             case .task:
                 "Task · \(model.task(id: work.id)?.task.task.identifier ?? work.id)"
             }
@@ -160,7 +157,7 @@ struct WorkActivityView: View {
             case .wave:
                 model.wave(id: work.id)?.wave.goal
             case .project:
-                model.waveForChapter(projectId: work.id)?.wave.goal
+                model.waveForProject(projectId: work.id)?.wave.goal
             case .task:
                 model.task(id: work.id)?.task.condition.reason
             }
@@ -192,18 +189,6 @@ struct WorkActivityView: View {
 
     private func exactTime(_ time: Date) -> String {
         time.formatted(date: .abbreviated, time: .shortened)
-    }
-
-    private func evidenceBanner(_ reason: String) -> some View {
-        Label(reason, systemImage: "exclamationmark.triangle.fill")
-            .font(Typography.caption(9))
-            .foregroundStyle(palette.warning)
-            .lineLimit(2)
-            .textSelection(.enabled)
-            .padding(.horizontal, Spacing.lg)
-            .padding(.vertical, Spacing.sm)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(palette.warning.opacity(0.10))
     }
 
 }

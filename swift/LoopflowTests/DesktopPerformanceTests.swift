@@ -112,14 +112,14 @@ struct DesktopPerformanceTests {
         }
         // The outline lists started Tasks only, so the renamed Task is one of those.
         let current = model.projection.waves.flatMap { wave in wave.tasks.map { (wave.roadmap.wave.id, $0) } }
-        guard let (wave, listed) = current.first(where: { $0.1.task.runtime?.owner != nil && !$0.1.task.task.isTerminal }) else {
+        guard let (wave, listed) = current.first(where: { $0.1.task.runtime?.owner != nil && !$0.1.task.isCompleted }) else {
             try journal.write(["event": "setup", "outcome": "unavailable",
                                "reason": "No started Task in \(repo) to rename and model a new one on"])
             throw PerformanceFailure("unavailable", "No started Task in this repository")
         }
         let template = listed.task.task
         let scenarios = ["task_renamed", "task_created"]
-        try journal.write(["event": "plan", "population_version": "home-copy-v2",
+        try journal.write(["event": "plan", "population_version": "home-copy-v3-task-rows",
                            "populations": ["home": current.count], "samples": samples,
                            "scenarios": scenarios, "endpoint": "store_commit_to_native_capture_ocr",
                            "poll_interval_ms": 5, "frame_hitches": NSNull(),
@@ -133,7 +133,7 @@ struct DesktopPerformanceTests {
         model.select(.task(id: listed.task.id))
         let run = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
         let shows = { (text: String) in window.outlineText.contains { $0.contains(text) } }
-        let restore = "UPDATE pm_items SET body=json_set(body,'$.name','\(template.name.sqlQuoted)') WHERE id='\(template.id.sqlQuoted)';"
+        let restore = "UPDATE tasks SET issue_title='\(template.name.sqlQuoted)' WHERE id='\(template.id.sqlQuoted)';"
 
         do {
             for attempt in 0..<samples {
@@ -143,24 +143,23 @@ struct DesktopPerformanceTests {
                 model.select(.task(id: listed.task.id))
                 await model.refresh()
                 try await written("task_renamed", attempt, journal, window, store, sql: """
-                    UPDATE pm_items SET body=json_set(body,'$.name','\(label) moved') WHERE id='\(template.id.sqlQuoted)';
+                    UPDATE tasks SET issue_title='\(label) moved' WHERE id='\(template.id.sqlQuoted)';
                     """, ready: { shows("\(label) moved") })
                 model.select(.wave(id: wave))
                 await model.refresh()
                 let fresh = String(format: "Fresh %03d", attempt)
                 try await written("task_created", attempt, journal, window, store, sql: """
-                    INSERT INTO pm_items(repo,provider,id,identifier,project_id,observed_at,needs_refresh,body)
-                    SELECT repo,provider,'\(task)','BENCH-\(attempt)',project_id,unixepoch(),0,
-                        json_set(body,'$.id','\(task)','$.identifier','BENCH-\(attempt)','$.name','\(fresh)','$.rank',0)
-                    FROM pm_items WHERE id='\(template.id.sqlQuoted)';
+                    INSERT INTO tasks(id,repository_id,project_id,issue_identifier,created_at,issue_title,planning_rank,planning_state)
+                    SELECT '\(task)',repository_id,project_id,'BENCH-\(attempt)',unixepoch(),'\(fresh)',0,'unstarted'
+                    FROM tasks WHERE id='\(template.id.sqlQuoted)';
                     """, ready: { window.contentText.contains { $0.contains(fresh) } })
 
                 // Outside every interval: the next attempt starts from the same Tasks.
-                try store.write("DELETE FROM pm_items WHERE id='\(task)'; \(restore)")
+                try store.write("DELETE FROM tasks WHERE id='\(task)'; \(restore)")
                 try await wait(window, render: true, for: .seconds(60)) { !shows(label) }
             }
         } catch {
-            try? store.write("DELETE FROM pm_items WHERE id LIKE 'bench-\(run)-%'; \(restore)")
+            try? store.write("DELETE FROM tasks WHERE id LIKE 'bench-\(run)-%'; \(restore)")
             try journal.write(["event": "setup_or_journey", "population": "home",
                                "outcome": (error as? PerformanceFailure)?.outcome ?? "failed",
                                "reason": String(describing: error)])
@@ -382,7 +381,7 @@ struct DesktopPerformanceTests {
         try #require(model.sessions.value?.count == taskCount / 2)
         let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
         let workspace = fixtureWork(registry, fixtureWorkspace(checkout.path))
-        let files = workspace.files(issue: "perf-work-0", cwd: checkout.path, query: query)
+        let files = workspace.files(issue: "perf-task-0", cwd: checkout.path, query: query)
         files.autosave = false
         let multiplexer = workspace.multiplexer
         multiplexer.load(sessionId: "perf-session-0", location: model.sessions.value?.first { $0.id == "perf-session-0" }?.workspace?.identity)
@@ -715,7 +714,7 @@ struct DesktopPerformanceTests {
                 try journal.write(["event": "reopen_request", "round": round,
                                    "selected_session": model.navigation.selectedSessionId as Any? ?? NSNull(),
                                    "state": String(describing: store.sessions.first { $0.id == fixture.sessionId }?.state),
-                                   "actions": String(describing: store.sessions.first { $0.id == fixture.sessionId }?.record.actions)])
+                                   "action": String(describing: store.sessions.first { $0.id == fixture.sessionId }?.record.action)])
             }, ready: {
                 let terminal = registry.surfaces.view(for: identity)
                 let hasHistory = terminal.surface.map {
@@ -977,7 +976,7 @@ struct DesktopPerformanceTests {
             }
             task["reference"] = reference
             var runtime = try #require(task["runtime"] as? [String: Any])
-            runtime["work_id"] = "perf-work-\(index)"
+            runtime["work_id"] = "perf-task-\(index)"
             runtime["owner"] = ["person": "Jack Heart", "person_id": NSNull(), "machine": ["id": NSNull(), "label": NSNull()]] as [String: Any]
             task["runtime"] = runtime
             return task
@@ -993,13 +992,13 @@ struct DesktopPerformanceTests {
         let planning = PerformancePlanning(roadmap: roadmap)
         let sessions = try JSONSerialization.data(withJSONObject: stride(from: 0, to: taskCount, by: 2).map { index in
             ["id": "perf-session-\(index)", "turn": NSNull(), "raw": false, "interactive": true,
-             "work": ["kind": "task", "id": "perf-work-\(index)"],
+             "work": ["kind": "task", "id": "perf-task-\(index)"],
              "workspace": ["machine_id": fixtureMachineId, "worktree": checkout,
-                           "task_id": "perf-work-\(index)", "unavailable": NSNull()],
+                           "task_id": "perf-task-\(index)", "unavailable": NSNull()],
              "title": String(format: "Conversation %03d", index), "detail": "Benchmark fixture",
-             "cwd": checkout, "wave_id": "wave-1", "state": "active", "ready_summary": NSNull(), "work_path": NSNull(),
-             "actions": sessionActionFixture(state: "active"),
-             "blocked": false, "title_source": "generated", "task_primary": false, "graph_membership": ["kind": "independent"], "task_ids": ["perf-work-\(index)"], "agent_process_id": "44444444-4444-4444-8444-444444444444", "terminal_ids": [], "open_argv": ["must-not-launch"]] as [String: Any]
+             "cwd": checkout, "wave_id": "wave-1", "state": "active", "work_path": NSNull(),
+             "action": sessionActionFixture(state: "active"),
+             "blocked": false, "title_source": "generated", "ended": NSNull(), "start": NSNull(), "outlook": NSNull(), "status_line": NSNull(), "task_primary": false, "graph_membership": ["kind": "independent"], "task_ids": ["perf-task-\(index)"], "agent_process_id": "44444444-4444-4444-8444-444444444444", "terminal_ids": [], "open_argv": ["must-not-launch"]] as [String: Any]
         })
         let historyTemplate = try #require(JSONSerialization.jsonObject(with: Data(contentsOf:
             root.appendingPathComponent("tests/fixtures/dto/session_history_summary.json"))) as? [String: Any])
@@ -1029,9 +1028,9 @@ struct DesktopPerformanceTests {
             case "task" where args.dropFirst().first == "show":
                 return #"{"overview":\#(workJSON),"graph_processes":[],"comments":\#(commentsJSON),"execution":null,"row":null}"#
             case "task" where args.dropFirst().first == "changes":
-                return #"{"issue_identifier":"PERF-0","task_id":"perf-work-0","base_commit":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","head_commit":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","files":[{"path":"notes.txt","old_path":null,"committed":true,"staged":false,"unstaged":false,"untracked":false}],"scratch":[],"scratch_truncated":false,"recovery_directory":null}"#
+                return #"{"issue_identifier":"PERF-0","task_id":"perf-task-0","base_commit":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","head_commit":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","files":[{"path":"notes.txt","old_path":null,"committed":true,"staged":false,"unstaged":false,"untracked":false}],"scratch":[],"scratch_truncated":false,"recovery_directory":null}"#
             case "task" where args.dropFirst().first == "file":
-                return #"{"issue_identifier":"PERF-0","task_id":"perf-work-0","path":"notes.txt","content":"Original notes","state":"text","revision":"fixed","size_bytes":14,"recoveries":[],"read_only_reason":null}"#
+                return #"{"issue_identifier":"PERF-0","task_id":"perf-task-0","path":"notes.txt","content":"Original notes","state":"text","revision":"fixed","size_bytes":14,"recoveries":[],"read_only_reason":null}"#
             case "session" where args.dropFirst().first == "history": return #"{"truncated":false,"items":[]}"#
             default: throw RegistryQueryError("Benchmark does not launch providers or mutate planning")
             }
@@ -1066,12 +1065,12 @@ struct DesktopPerformanceFixtureTests {
             try await Task.sleep(for: .milliseconds(5))
         }
         await model.loadTaskContext(task: task.task)
-        #expect(model.graphCatalog.errorMessage == nil)
-        #expect(model.taskWork[task.task.id].errorMessage == nil)
-        #expect(model.taskContext[task.task.id].errorMessage == nil)
+        #expect(model.graphCatalog.failure == nil)
+        #expect(model.taskWork[task.task.id].failure == nil)
+        #expect(model.taskContext[task.task.id].failure == nil)
         await model.loadSessionHistory(task: task.task)
         #expect(model.sessionHistory[task.task.id].value?.count == 256)
-        #expect(model.sessionHistory[task.task.id].errorMessage == nil)
+        #expect(model.sessionHistory[task.task.id].failure == nil)
         let store = TaskFilesStore(issue: "PERF-0", cwd: NSTemporaryDirectory(), query: query)
         store.autosave = false
         store.selection = "notes.txt"
@@ -1137,7 +1136,7 @@ private final class PerformanceReader {
             }
         }
         send(.task, request.id, #"""
-            {"overview":{"sessions":[],"graph_processes":\#(graphs),"processes":[],"graph":null},"graph_processes":\#(runs),"comments":{"identifier":"\#(task)","comments":[],"pending_sync":[],"conflicts":{},"refresh_error":null},"execution":null}
+            {"overview":{"sessions":[],"graph_processes":\#(graphs),"graph":null},"graph_processes":\#(runs),"comments":{"identifier":"\#(task)","comments":[],"pending_sync":[],"conflicts":{},"refresh_error":null},"execution":null}
             """#)
     }
 
@@ -1145,7 +1144,7 @@ private final class PerformanceReader {
     private func send(_ part: WorkPart, _ answers: Int, _ body: String) {
         let scope = scope ?? WorkScope(repo: nil, headless: false, task: nil, activity: nil, taskListWave: nil)
         sequence += 1
-        let line = #"{"answers":\#(answers),"unavailable":null,"body":\#(body)}"#
+        let line = #"{"answers":\#(answers),"unavailable":null,"body":\#(body),"read_at":null}"#
         // A frame this file wrote; one that does not decode fails the wait on it.
         if let frame = try? WorkFrame.decode(part: part, scope: scope, sequence: sequence, line: Data(line.utf8)) {
             continuation?.yield(frame)

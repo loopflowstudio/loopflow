@@ -40,7 +40,7 @@
       "process": {
         "state": "unbound"
       },
-      "planning_observed_at": null
+      "tracker_synced_at": null
     },
     "action": {
       "kind": "run",
@@ -95,7 +95,7 @@
       "process": {
         "state": "unbound"
       },
-      "planning_observed_at": null
+      "tracker_synced_at": null
     },
     "action": {
       "kind": "wait",
@@ -149,7 +149,7 @@
       "process": {
         "state": "unbound"
       },
-      "planning_observed_at": null
+      "tracker_synced_at": null
     },
     "action": {
       "kind": "end",
@@ -202,7 +202,7 @@
       "process": {
         "state": "unbound"
       },
-      "planning_observed_at": null
+      "tracker_synced_at": null
     },
     "action": null,
     "impediments": [],

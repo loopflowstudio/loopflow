@@ -1,0 +1,11 @@
+description: "Move one number: measure, plan, change, keep or revert, until no clear way forward remains."
+steps:
+- step: {name: measure, id: baseline}
+- step: {name: optimize-plan, id: first-plan}
+- loop:
+    - implement
+    - step: {name: measure, id: compare}
+    - optimize-plan         # decides: another change, or done
+- compress
+- graph: refresh
+- step: {name: measure, id: final}

@@ -4,14 +4,14 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 
-use crate::definition::{resolve_definition, DefinitionKind, Target};
-use crate::graph::compiled::{CompiledGraph, GraphNode, GraphNodeKind};
-use crate::graph::output::GraphOutput;
-use crate::graph::{compile_graph, GraphDefinition};
 use crate::lf::commands::run;
 use crate::lf::Cli;
-use crate::ops::WorkBinding;
-use crate::skills::invocation::SkillInvocation;
+use loopflow_execution::definition::{resolve_definition, DefinitionKind, Target};
+use loopflow_execution::graph::compiled::{CompiledGraph, GraphNode, GraphNodeKind};
+use loopflow_execution::graph::output::GraphOutput;
+use loopflow_execution::graph::{compile_graph, GraphDefinition};
+use loopflow_execution::ops::WorkBinding;
+use loopflow_execution::skills::invocation::SkillInvocation;
 
 /// Assemble the launch's ordinary input from existing local evidence only.
 pub fn assemble(
@@ -23,7 +23,7 @@ pub fn assemble(
 ) -> Result<ContextPreview> {
     let runtime = tokio::runtime::Runtime::new()?;
     let mut binding = runtime.block_on(async {
-        let Some(store) = crate::store::read_existing_registry()? else {
+        let Some(store) = loopflow_execution::store::read_existing_registry()? else {
             anyhow::ensure!(
                 cli.task.is_none() && cli.wave.is_none(),
                 "Work input unavailable: no local registry"
@@ -33,10 +33,10 @@ pub fn assemble(
         let store = std::sync::Arc::new(store);
         let binding = if let Some(task) = &cli.task {
             Some(
-                crate::ops::resolve_work_selection(
+                loopflow_execution::ops::resolve_work_selection(
                     &store,
                     repo,
-                    crate::ops::WorkSelection {
+                    loopflow_execution::ops::WorkSelection {
                         task: Some(task),
                         wave: cli.wave.as_deref(),
                     },
@@ -44,13 +44,13 @@ pub fn assemble(
                 .await?,
             )
         } else {
-            crate::ops::resolve_execution_binding(&store, repo).await?
+            loopflow_execution::ops::resolve_execution_binding(&store, repo).await?
         };
         if let Some(wave) = cli.wave.as_deref().filter(|_| cli.task.is_none()) {
-            let selected = crate::ops::resolve_work_selection(
+            let selected = loopflow_execution::ops::resolve_work_selection(
                 &store,
                 repo,
-                crate::ops::WorkSelection {
+                loopflow_execution::ops::WorkSelection {
                     task: cli.task.as_deref(),
                     wave: Some(wave),
                 },
@@ -65,11 +65,12 @@ pub fn assemble(
         };
 
         if let Some(WorkBinding {
-            work: crate::durable::WorkRef::Task(id),
+            work: loopflow_model::durable::WorkRef::Task(id),
             ..
         }) = &binding
         {
-            let route = store.sqlite.task_execution_route(id)?;
+            let route =
+                loopflow_execution::store::ownership::task_execution_route(&store.sqlite, id)?;
             anyhow::ensure!(
                 route.machine_id == store.local_machine().await?.id,
                 "Task input is on Machine {}; run the preview directly there",
@@ -205,10 +206,10 @@ fn preview_graph(
     binding: Option<&WorkBinding>,
 ) -> Result<GraphContextPreview> {
     let items = compile_graph(graph, repo)?;
-    let compiled = CompiledGraph::new(&graph.name, &items);
+    let compiled = loopflow_execution::graph::compiled::compile(&graph.name, &items);
     let mut current = if let Some(skill) = match items.first() {
-        Some(crate::graph::ConcreteStep::Skill(skill)) => Some(skill.clone()),
-        Some(crate::graph::ConcreteStep::Xor(branch)) => Some(branch.router_skill()),
+        Some(loopflow_execution::graph::ConcreteStep::Skill(skill)) => Some(skill.clone()),
+        Some(loopflow_execution::graph::ConcreteStep::Xor(branch)) => Some(branch.router_skill()),
         _ => None,
     } {
         let mut launch = cli.process_options();

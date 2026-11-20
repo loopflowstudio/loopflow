@@ -147,19 +147,16 @@ struct WorkShipButtonStyle: ButtonStyle {
 }
 
 /// Collapsed heading for a demand-read Task section (Comments, Session history):
-/// chevron, caps title, optional count, and the read's progress or failure.
+/// chevron, caps title, optional count, and the read's progress.
 struct WorkDisclosureHeading: View {
     let title: String
     let count: Int?
     let expanded: Bool
     let inFlight: Bool
-    /// Present when the latest read failed; true when an earlier value remains.
-    let failure: Bool?
     let identifier: String
     let accessibilityLabel: String
     let help: String
     let toggle: () -> Void
-    let retry: () -> Void
     @Environment(\.palette) private var palette
 
     var body: some View {
@@ -188,18 +185,6 @@ struct WorkDisclosureHeading: View {
             .accessibilityIdentifier("\(identifier)-toggle")
             if inFlight {
                 ProgressView().controlSize(.mini)
-            } else if let hasLastGood = failure {
-                Text(hasLastGood ? "May be out of date" : "Unavailable")
-                    .font(Typography.strong(10.5))
-                    .foregroundStyle(WorkTone.warning.text(in: palette))
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 1)
-                    .background(WorkTone.warning.fill(in: palette), in: RoundedRectangle(cornerRadius: 4))
-                    .accessibilityIdentifier("\(identifier)-stale")
-                Button("Retry", action: retry)
-                    .buttonStyle(WorkOutlineButtonStyle())
-                    .controlSize(.small)
-                    .accessibilityIdentifier("\(identifier)-retry")
             }
         }
     }
@@ -264,7 +249,8 @@ extension ProgramStatusState {
         case .blocked: .warning
         case .error: .failure
         case .done: .done
-        case .idle, .clear: .neutral
+        case .idle: .available
+        case .clear: .neutral
         }
     }
 }

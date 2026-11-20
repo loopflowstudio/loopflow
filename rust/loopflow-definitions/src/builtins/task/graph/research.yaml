@@ -1,0 +1,5 @@
+description: Investigate and report, with no PR. The Task ends on findings you accept.
+steps:
+- loop:
+    - step: research
+    - interactive: research

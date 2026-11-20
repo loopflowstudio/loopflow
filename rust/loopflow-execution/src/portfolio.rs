@@ -1,0 +1,461 @@
+//! Machine-local repository membership. Reading never registers Work or starts Sessions.
+use std::collections::BTreeSet;
+use std::fs;
+use std::path::{Path, PathBuf};
+
+use anyhow::{bail, Context, Result};
+use serde::{Deserialize, Serialize};
+
+use crate::git::worktree_root;
+use crate::git::worktrees::main_repo_root;
+
+#[derive(schemars::JsonSchema, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PortfolioMode {
+    Folder,
+    Manual,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct PortfolioRepo {
+    pub path: String,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct Portfolio {
+    pub configured: bool,
+    pub mode: PortfolioMode,
+    pub root: String,
+    pub repos: Vec<PortfolioRepo>,
+    pub error: Option<String>,
+}
+
+#[derive(schemars::JsonSchema, Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Selection {
+    mode: PortfolioMode,
+    paths: BTreeSet<PathBuf>,
+}
+
+/// A change to which repositories the app shows; also the served
+/// `desktop.portfolio.set` write's `change`, tagged by `action`.
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+#[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
+pub enum PortfolioCommand {
+    /// Discover immediate main checkouts in a folder (defaults to the saved folder)
+    Folder { path: Option<PathBuf> },
+    /// Use only explicitly selected repositories
+    Manual,
+    /// Add repositories to the saved manual selection
+    Add { paths: Vec<PathBuf> },
+    /// Remove manual membership, preserving files and open workspaces
+    Remove { path: PathBuf },
+    /// Import previous Desktop membership only when no selection has been saved
+    Import { paths: Vec<PathBuf> },
+}
+
+fn absolute(path: &Path, directory: &Path) -> Result<PathBuf> {
+    let path = if let Ok(rest) = path.strip_prefix("~") {
+        dirs::home_dir()
+            .context("Home directory unavailable")?
+            .join(rest)
+    } else if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        directory.join(path)
+    };
+    Ok(path.canonicalize().unwrap_or(path))
+}
+
+fn main_repository(path: &Path, directory: &Path) -> Result<PathBuf> {
+    let path = absolute(path, directory)?;
+    if worktree_root(&path)?.canonicalize()? != path {
+        bail!("{} is not a repository root", path.display());
+    }
+    let main = main_repo_root(&path)?.canonicalize()?;
+    if worktree_root(&main)?.canonicalize()? != main {
+        bail!("{} has no main checkout", path.display());
+    }
+    Ok(main)
+}
+
+fn selection(config: &serde_yaml_ng::Value) -> Result<Option<Selection>> {
+    config
+        .get("portfolio")
+        .cloned()
+        .map(serde_yaml_ng::from_value)
+        .transpose()
+        .context("Invalid portfolio configuration")
+}
+
+fn reading(config: &serde_yaml_ng::Value, directory: &Path) -> Result<Portfolio> {
+    let selected = selection(config)?;
+    let root: PathBuf = config
+        .get("repo_root")
+        .cloned()
+        .map(serde_yaml_ng::from_value)
+        .transpose()?
+        .unwrap_or(
+            dirs::home_dir()
+                .context("Home directory unavailable")?
+                .join("src"),
+        );
+    let root = absolute(&root, directory)?;
+    let mode = selected.as_ref().map_or(PortfolioMode::Folder, |s| s.mode);
+    let mut result = Portfolio {
+        configured: selected.is_some(),
+        mode,
+        root: root.to_string_lossy().into_owned(),
+        repos: vec![],
+        error: None,
+    };
+    match mode {
+        PortfolioMode::Folder => match fs::read_dir(&root) {
+            Ok(entries) => {
+                let mut paths = BTreeSet::new();
+                for entry in entries {
+                    let entry = entry.with_context(|| format!("Read {}", root.display()))?;
+                    let path = entry.path();
+                    if path
+                        .file_name()
+                        .is_some_and(|name| name.to_string_lossy().starts_with('.'))
+                    {
+                        continue;
+                    }
+                    match fs::symlink_metadata(path.join(".git")) {
+                        Ok(_) => {}
+                        Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                        Err(error) => {
+                            result.repos.push(PortfolioRepo {
+                                path: path.to_string_lossy().into_owned(),
+                                error: Some(error.to_string()),
+                            });
+                            continue;
+                        }
+                    }
+                    match main_repository(&path, directory) {
+                        Ok(main) if path.canonicalize()? == main => {
+                            paths.insert(main);
+                        }
+                        Ok(_) => {}
+                        Err(error) => result.repos.push(PortfolioRepo {
+                            path: path.to_string_lossy().into_owned(),
+                            error: Some(error.to_string()),
+                        }),
+                    }
+                }
+                result
+                    .repos
+                    .extend(paths.into_iter().map(|path| PortfolioRepo {
+                        path: path.to_string_lossy().into_owned(),
+                        error: None,
+                    }));
+            }
+            Err(error) => result.error = Some(format!("Read {}: {error}", root.display())),
+        },
+        PortfolioMode::Manual => {
+            for path in selected.expect("manual mode requires a selection").paths {
+                let error = main_repository(&path, directory)
+                    .err()
+                    .map(|error| error.to_string());
+                result.repos.push(PortfolioRepo {
+                    path: path.to_string_lossy().into_owned(),
+                    error,
+                });
+            }
+        }
+    }
+    result.repos.sort_by(|a, b| a.path.cmp(&b.path));
+    Ok(result)
+}
+
+pub fn read() -> Result<Portfolio> {
+    read_in(&std::env::current_dir()?)
+}
+
+pub fn read_in(directory: &Path) -> Result<Portfolio> {
+    reading(
+        &crate::config::files::read(&crate::store::lf_home_dir().join("config.yaml"))?,
+        directory,
+    )
+}
+
+pub fn change(command: &PortfolioCommand, directory: &Path) -> Result<Portfolio> {
+    let portfolio = change_at(&crate::store::lf_home_dir(), command, directory)?;
+    if !matches!(command, PortfolioCommand::Remove { .. }) {
+        register_authored_waves(&portfolio, command, directory)?;
+    }
+    Ok(portfolio)
+}
+
+/// Desktop lists the Waves the planning store knows, so a repository joining
+/// the portfolio brings its authored `.lf/wave/` directories into the store. A
+/// removed Wave's kept directory stays removed. Registration never undoes the
+/// membership change; a repository that cannot register is logged.
+fn register_authored_waves(
+    portfolio: &Portfolio,
+    command: &PortfolioCommand,
+    directory: &Path,
+) -> Result<()> {
+    let mut repos: BTreeSet<PathBuf> = portfolio
+        .repos
+        .iter()
+        .filter(|repo| repo.error.is_none())
+        .map(|repo| PathBuf::from(&repo.path))
+        .collect();
+    // A manual selection saved while the folder mode shows keeps its added
+    // repositories out of the reading; they still join.
+    if let PortfolioCommand::Add { paths } | PortfolioCommand::Import { paths } = command {
+        repos.extend(
+            paths
+                .iter()
+                .filter_map(|path| main_repository(path, directory).ok()),
+        );
+    }
+    let runtime = tokio::runtime::Runtime::new()?;
+    for repo in repos {
+        if let Err(error) = runtime.block_on(crate::ops::wave_lifecycle::register_authored(&repo)) {
+            tracing::warn!(repo = %repo.display(), %error, "authored Waves were not registered");
+        }
+    }
+    Ok(())
+}
+
+fn change_at(home: &Path, command: &PortfolioCommand, directory: &Path) -> Result<Portfolio> {
+    let config = crate::config::files::update(&home.join("config.yaml"), |config| {
+        change_config(config, command, directory)?;
+        Ok(config.clone())
+    })?;
+    reading(&config, directory)
+}
+
+fn change_config(
+    config: &mut serde_yaml_ng::Value,
+    command: &PortfolioCommand,
+    directory: &Path,
+) -> Result<()> {
+    let previous = selection(config)?;
+    if matches!(command, PortfolioCommand::Import { .. }) && previous.is_some() {
+        bail!("Portfolio already configured; existing selection was preserved");
+    }
+    let mut selected = previous.unwrap_or(Selection {
+        mode: PortfolioMode::Folder,
+        paths: BTreeSet::new(),
+    });
+    match command {
+        PortfolioCommand::Folder { path } => {
+            if let Some(path) = path {
+                config["repo_root"] = serde_yaml_ng::to_value(absolute(path, directory)?)?;
+            }
+            selected.mode = PortfolioMode::Folder;
+        }
+        PortfolioCommand::Manual => selected.mode = PortfolioMode::Manual,
+        PortfolioCommand::Add { paths } => {
+            for path in paths {
+                selected.paths.insert(main_repository(path, directory)?);
+            }
+        }
+        PortfolioCommand::Import { paths } => {
+            for path in paths {
+                // Old entries may be unavailable. Preserve them for explicit removal.
+                selected
+                    .paths
+                    .insert(main_repository(path, directory).unwrap_or(absolute(path, directory)?));
+            }
+            selected.mode = PortfolioMode::Manual;
+        }
+        PortfolioCommand::Remove { path } => {
+            selected
+                .paths
+                .remove(&main_repository(path, directory).unwrap_or(absolute(path, directory)?));
+        }
+    }
+    config["portfolio"] = serde_yaml_ng::to_value(selected)?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+    use std::path::{Path, PathBuf};
+    use std::process::Command;
+
+    use super::{change_at, reading, Portfolio, PortfolioCommand, PortfolioMode};
+
+    fn git(path: &Path, args: &[&str]) {
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(path)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    fn repo(path: &Path) -> PathBuf {
+        fs::create_dir_all(path).unwrap();
+        git(path, &["init", "-q"]);
+        git(
+            path,
+            &[
+                "-c",
+                "user.name=Fixture",
+                "-c",
+                "user.email=fixture@example.test",
+                "commit",
+                "--allow-empty",
+                "-qm",
+                "fixture",
+            ],
+        );
+        path.canonicalize().unwrap()
+    }
+
+    #[test]
+    fn portfolio_modes_share_root_and_preserve_manual_membership() {
+        let fixture = tempfile::tempdir().unwrap();
+        let home = fixture.path().join("home");
+        let root = fixture.path().join("src");
+        let first = repo(&root.join("first"));
+        let second = repo(&root.join("second"));
+        let nested = repo(&root.join("group/nested"));
+        let outside = repo(&fixture.path().join("elsewhere/repo"));
+        let linked = root.join("linked");
+        git(
+            &first,
+            &["worktree", "add", "-qb", "linked", linked.to_str().unwrap()],
+        );
+        let alias = fixture.path().join("alias");
+        std::os::unix::fs::symlink(&first, &alias).unwrap();
+        fs::create_dir_all(&home).unwrap();
+        fs::write(home.join("config.yaml"), "agent: codex\n").unwrap();
+        let folder = change_at(
+            &home,
+            &PortfolioCommand::Folder {
+                path: Some(root.clone()),
+            },
+            &home,
+        )
+        .unwrap();
+        assert_eq!(
+            folder
+                .repos
+                .iter()
+                .map(|r| PathBuf::from(&r.path))
+                .collect::<Vec<_>>(),
+            [first.clone(), second]
+        );
+        change_at(
+            &home,
+            &PortfolioCommand::Add {
+                paths: vec![
+                    first.clone(),
+                    linked,
+                    alias,
+                    nested.clone(),
+                    outside.clone(),
+                ],
+            },
+            &home,
+        )
+        .unwrap();
+        let manual = change_at(&home, &PortfolioCommand::Manual, &home).unwrap();
+        assert_eq!(manual.repos.len(), 3);
+        assert!(manual.repos.iter().any(|r| Path::new(&r.path) == nested));
+        let changed = change_at(
+            &home,
+            &PortfolioCommand::Folder {
+                path: Some(fixture.path().join("elsewhere")),
+            },
+            &home,
+        )
+        .unwrap();
+        assert_eq!(changed.repos.len(), 1);
+        assert_eq!(Path::new(&changed.repos[0].path), outside);
+        assert_eq!(
+            change_at(&home, &PortfolioCommand::Manual, &home)
+                .unwrap()
+                .repos
+                .len(),
+            3
+        );
+        fs::remove_dir_all(&outside).unwrap();
+        let unavailable = reading(
+            &crate::config::files::read(&home.join("config.yaml")).unwrap(),
+            &home,
+        )
+        .unwrap();
+        assert!(unavailable
+            .repos
+            .iter()
+            .find(|r| Path::new(&r.path) == outside)
+            .unwrap()
+            .error
+            .is_some());
+        assert_eq!(
+            change_at(&home, &PortfolioCommand::Remove { path: outside }, &home)
+                .unwrap()
+                .repos
+                .len(),
+            2
+        );
+        assert!(first.exists());
+        assert_eq!(
+            crate::config::files::read(&home.join("config.yaml")).unwrap()["agent"],
+            "codex"
+        );
+        assert!(!home.join("state.db").exists());
+    }
+
+    #[test]
+    fn portfolio_import_is_explicit_and_does_not_replace_cli_selection() {
+        let fixture = tempfile::tempdir().unwrap();
+        let home = fixture.path().join("home");
+        let missing = fixture.path().join("missing");
+        let empty = reading(
+            &crate::config::files::read(&home.join("config.yaml")).unwrap(),
+            &home,
+        )
+        .unwrap();
+        assert!(!empty.configured);
+        assert_eq!(empty.mode, PortfolioMode::Folder);
+        assert!(!home.exists());
+        let imported = change_at(
+            &home,
+            &PortfolioCommand::Import {
+                paths: vec![missing.clone()],
+            },
+            &home,
+        )
+        .unwrap();
+        assert_eq!(imported.mode, PortfolioMode::Manual);
+        assert!(imported.repos[0].error.is_some());
+        assert!(change_at(&home, &PortfolioCommand::Import { paths: vec![] }, &home).is_err());
+        let broken_folder = change_at(
+            &home,
+            &PortfolioCommand::Folder {
+                path: Some(missing),
+            },
+            &home,
+        )
+        .unwrap();
+        assert!(broken_folder.error.is_some());
+        assert!(broken_folder.repos.is_empty());
+    }
+
+    #[test]
+    fn portfolio_dto_matches_shared_fixture() {
+        let value: serde_json::Value =
+            serde_json::from_str(include_str!("../../../tests/fixtures/dto/portfolio.json"))
+                .unwrap();
+        let portfolio: Portfolio = serde_json::from_value(value.clone()).unwrap();
+        assert_eq!(serde_json::to_value(portfolio).unwrap(), value);
+    }
+}

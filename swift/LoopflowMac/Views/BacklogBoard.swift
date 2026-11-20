@@ -310,7 +310,7 @@ struct BacklogList {
 
     // MARK: Text
 
-    /// A Wave's heading lines: name and status, objective, chapter Project and KRs.
+    /// A Wave's heading lines: name and status, objective, Project and KRs.
     static func heading(_ roadmap: WaveRoadmap) -> [String] {
         var lines = ["\(roadmap.wave.displayName) · \(roadmap.wave.status.label)"]
         if let objective = roadmap.wave.goal.split(separator: "\n").first { lines.append(String(objective)) }
@@ -358,14 +358,6 @@ struct BacklogList {
         default: return ("No unstarted work in this \(wave == nil ? "repository" : "Wave")", .new)
         }
     }
-
-    /// "Started 2 of 3 · LOO-456: reason", or "Started 3" when all did.
-    static func outcome(_ verb: String, _ results: [(task: RoadmapTask, error: String?)]) -> String {
-        let done = results.count { $0.error == nil }
-        let failures = results.compactMap { result in result.error.map { "\(result.task.task.identifier): \($0)" } }
-        let head = failures.isEmpty ? "\(verb) \(done)" : "\(verb) \(done) of \(results.count)"
-        return ([head] + failures).joined(separator: " · ")
-    }
 }
 
 /// What ⌘Z puts back: a reorder, a claim or a brief edit. Start and Abandon register nothing.
@@ -382,18 +374,14 @@ extension WorkModel {
         navigation.backlogs[view, default: BacklogState()].notice = notice
     }
 
-    private func failure(_ task: RoadmapTask, accepted: Bool) -> String? {
-        accepted ? nil : navigation.taskRunDrafts[task.id]?.error ?? "not accepted"
-    }
-
     /// Write each rank in turn; the first refusal stops the rest. Returns the inverse when any landed.
     @discardableResult
     func rankBacklog(_ writes: [(task: RoadmapTask, rank: Int)], in view: WorkNavigation.Board) async -> BacklogChange? {
         guard !writes.isEmpty else { return nil }
         var landed: [(task: RoadmapTask, rank: Int)] = []
         for write in writes {
-            guard await rankTask(write.task, rank: write.rank) else {
-                backlogNotice(view, "Order not saved · \(write.task.task.identifier): \(failure(write.task, accepted: false) ?? "")")
+            do { try await rankTask(write.task, rank: write.rank) } catch {
+                backlogNotice(view, "Order not saved · \(write.task.task.identifier): \(error.localizedDescription)")
                 break
             }
             landed.append(write)
@@ -405,43 +393,35 @@ extension WorkModel {
         return landed.isEmpty ? nil : .ranks(BacklogList.inverse(landed))
     }
 
-    /// Claim each unclaimed Task without starting it; returns the inverse when any claim landed.
+    // Claim, Start, Move and Abandon show in the click; a refusal posts its own
+    // Notice and puts that Task's row back.
+
+    /// Claim each unclaimed Task without starting it; returns the inverse.
     @discardableResult
-    func claimBacklog(_ tasks: [RoadmapTask], in view: WorkNavigation.Board) async -> BacklogChange? {
-        var results: [(task: RoadmapTask, error: String?)] = []
-        for task in tasks where BacklogOwner(task) == .nobody {
-            results.append((task, failure(task, accepted: await assignTask(task, claimed: true))))
-        }
-        let skipped = tasks.count - results.count
-        backlogNotice(view, BacklogList.outcome("Claimed", results) + (skipped > 0 ? " · \(skipped) already claimed" : ""))
-        let claimed = results.filter { $0.error == nil }.map(\.task)
+    func claimBacklog(_ tasks: [RoadmapTask], in view: WorkNavigation.Board) -> BacklogChange? {
+        let claimed = tasks.filter { BacklogOwner($0) == .nobody }
+        for task in claimed { assignTask(task, claimed: true) }
+        let skipped = tasks.count - claimed.count
+        backlogNotice(view, "Claimed \(claimed.count)" + (skipped > 0 ? " · \(skipped) already claimed" : ""))
         return claimed.isEmpty ? nil : .claims(claimed)
     }
 
-    /// Start each Task in turn, on `graph` or its own flow; ones that start stay started.
-    func startBacklog(_ tasks: [RoadmapTask], graph: String?, in view: WorkNavigation.Board) async {
-        var results: [(task: RoadmapTask, error: String?)] = []
-        for task in tasks {
-            results.append((task, failure(task, accepted: await startTask(graph, task: task))))
-        }
-        navigation.backlogs[view, default: BacklogState()].selection.subtract(results.filter { $0.error == nil }.map(\.task.id))
-        backlogNotice(view, BacklogList.outcome("Started", results))
+    /// Start each Task, on `graph` or its own flow.
+    func startBacklog(_ tasks: [RoadmapTask], graph: String?, in view: WorkNavigation.Board) {
+        for task in tasks { startTask(graph, task: task) }
+        navigation.backlogs[view, default: BacklogState()].selection.subtract(tasks.map(\.id))
+        backlogNotice(view, "Started \(tasks.count)")
     }
 
-    func moveBacklog(_ tasks: [RoadmapTask], toWave wave: String?, in view: WorkNavigation.Board) async {
-        var results: [(task: RoadmapTask, error: String?)] = []
-        for task in tasks { results.append((task, failure(task, accepted: await moveTask(task, toWave: wave)))) }
-        backlogNotice(view, BacklogList.outcome("Moved", results))
+    func moveBacklog(_ tasks: [RoadmapTask], toWave wave: String?, in view: WorkNavigation.Board) {
+        for task in tasks { moveTask(task, toWave: wave) }
+        backlogNotice(view, "Moved \(tasks.count)")
     }
 
-    func abandonBacklog(_ tasks: [RoadmapTask], in view: WorkNavigation.Board) async {
-        var results: [(task: RoadmapTask, error: String?)] = []
-        for task in tasks {
-            await abandonTask(task)
-            results.append((task, navigation.taskRunDrafts[task.id]?.error))
-        }
-        navigation.backlogs[view, default: BacklogState()].selection.subtract(results.filter { $0.error == nil }.map(\.task.id))
-        backlogNotice(view, BacklogList.outcome("Abandoned", results))
+    func abandonBacklog(_ tasks: [RoadmapTask], in view: WorkNavigation.Board) {
+        for task in tasks { abandonTask(task) }
+        navigation.backlogs[view, default: BacklogState()].selection.subtract(tasks.map(\.id))
+        backlogNotice(view, "Abandoned \(tasks.count)")
     }
 
     /// Save the brief being edited; returns the inverse when it landed.
@@ -465,7 +445,7 @@ extension WorkModel {
             await rankBacklog(writes, in: view)
             backlogNotice(view, "Order restored")
         case .claims(let tasks):
-            for task in tasks { await assignTask(task, claimed: false) }
+            for task in tasks { assignTask(task, claimed: false) }
             backlogNotice(view, tasks.count == 1 ? "Unclaimed \(tasks[0].task.identifier)" : "Unclaimed \(tasks.count) Tasks")
         case .brief(let task, let previous, let written):
             guard let current = self.task(id: task.id)?.task, current.task.description == written else {
@@ -524,7 +504,7 @@ struct BacklogBoard: View {
         .task(id: model.repoPath) { await model.loadGraphCatalog() }
         .confirmationDialog(abandonTitle, isPresented: Binding(get: { abandoning != nil }, set: { if !$0 { abandoning = nil } })) {
             Button("Abandon", role: .destructive) {
-                if let tasks = abandoning { Task { await model.abandonBacklog(tasks, in: view) } }
+                if let tasks = abandoning { model.abandonBacklog(tasks, in: view) }
                 abandoning = nil
             }
         } message: {
@@ -622,7 +602,7 @@ struct BacklogBoard: View {
                     Text(WaveMetricPortfolioPresentation(portfolio: roadmap.metricPortfolio).headline)
                         .font(Typography.body(12)).foregroundStyle(palette.textSecondary).lineLimit(1)
                         .accessibilityIdentifier("wave-metric-headline")
-                    PlanningSyncView(sync: project.sync)
+                    TrackerSyncView(sync: project.sync, repo: roadmap.wave.repo)
                 }
                 ForEach(project.krs) { kr in
                     Label(kr.text, systemImage: kr.holds ? "checkmark.circle.fill" : "xmark.circle")
@@ -636,29 +616,17 @@ struct BacklogBoard: View {
 
     // MARK: Notices
 
+    /// What the last backlog action did. Read failures, refusals and Tasks
+    /// outside the plan go to the window's Notice.
     @ViewBuilder
     private var notices: some View {
-        let list = list
-        let failure = model.roadmap.errorMessage ?? model.viewTasks(view)?.unavailableReason
-        VStack(alignment: .leading, spacing: Spacing.xs) {
-            if let failure {
-                HStack(spacing: Spacing.sm) {
-                    Text(list.all.isEmpty ? "Planning unavailable · \(failure)" : "Showing the last rows read · \(failure)")
-                        .foregroundStyle(palette.warning).lineLimit(2)
-                    Button("Retry") { Task { await model.refresh() } }.buttonStyle(WorkOutlineButtonStyle())
-                        .accessibilityIdentifier("backlog-retry")
-                }
-                .accessibilityIdentifier("wave-refresh-failed")
-            }
-            ForEach(roadmap?.unavailableTasks ?? [], id: \.taskId) { WavePlanningNotice(model: model, task: $0) }
-            if let notice = list.state.notice {
-                Text(notice).foregroundStyle(palette.textSecondary).lineLimit(2).textSelection(.enabled)
-                    .accessibilityIdentifier("backlog-notice")
-            }
+        if let notice = list.state.notice {
+            Text(notice).font(Typography.body(12.5)).foregroundStyle(palette.textSecondary).lineLimit(2)
+                .textSelection(.enabled)
+                .accessibilityIdentifier("backlog-notice")
+                .padding(.horizontal, Spacing.xl)
+                .padding(.vertical, Spacing.sm)
         }
-        .font(Typography.body(12.5))
-        .padding(.horizontal, Spacing.xl)
-        .padding(.vertical, failure != nil || list.state.notice != nil || roadmap?.unavailableTasks.isEmpty == false ? Spacing.sm : 0)
     }
 
     // MARK: Rows
@@ -825,8 +793,8 @@ struct BacklogBoard: View {
         let list = list
         let tasks = list.selected
         switch action {
-        case .start(let graph): Task { await model.startBacklog(tasks, graph: graph, in: view) }
-        case .claim: Task { register(await model.claimBacklog(tasks, in: view), "Claim") }
+        case .start(let graph): model.startBacklog(tasks, graph: graph, in: view)
+        case .claim: register(model.claimBacklog(tasks, in: view), "Claim")
         case .edit:
             guard let task = list.opened else { return }
             state.wrappedValue.editing = task.id
@@ -837,7 +805,7 @@ struct BacklogBoard: View {
             if list.canReorder { reorder(list.nudge(ids, by: offset)) }
             else { state.wrappedValue.notice = "Order lives in each Wave" }
         case .reorder(let writes): reorder(writes)
-        case .move(let wave): Task { await model.moveBacklog(tasks, toWave: wave, in: view) }
+        case .move(let wave): model.moveBacklog(tasks, toWave: wave, in: view)
         case .save(let task, let text): Task { register(await model.saveBacklogBrief(task, text: text, in: view), "Edit Brief") }
         }
     }
@@ -1083,7 +1051,7 @@ struct BacklogStartItems: View {
             ForEach(described.filter { $0.stops == 0 }) { item($0, shared) }
         }
         if model.graphCatalog.value == nil {
-            Text(model.graphCatalog.errorMessage.map { "Flows unavailable · \($0)" } ?? "Reading flows…")
+            Text(model.graphCatalog.failure.map { "Flows unavailable · \($0)" } ?? "Reading flows…")
         }
     }
 
@@ -1229,49 +1197,4 @@ struct WaveViewHeader: View {
     }
 }
 
-/// One quiet line names a Task outside the current plan; Details discloses reason and recovery.
-struct WavePlanningNotice: View {
-    let model: WorkModel
-    let task: UnavailableTaskEvidence
-    @Environment(\.palette) private var palette
-
-    var body: some View {
-        let open = model.navigation.expandedNotices.contains(task.taskId)
-        return VStack(alignment: .leading, spacing: Spacing.xs) {
-            HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
-                Image(systemName: "exclamationmark.circle")
-                    .foregroundStyle(palette.warning)
-                Text("\(task.taskIdentifier) is outside the current plan.")
-                    .foregroundStyle(WorkTone.warning.text(in: palette))
-                Spacer(minLength: Spacing.sm)
-                Button(open ? "Hide details" : "Details") {
-                    if open { model.navigation.expandedNotices.remove(task.taskId) } else { model.navigation.expandedNotices.insert(task.taskId) }
-                }
-                .buttonStyle(WorkPlainButtonStyle())
-                .foregroundStyle(palette.actionInk)
-                .accessibilityIdentifier("wave-notice-details-\(task.taskId)")
-            }
-            if open {
-                VStack(alignment: .leading, spacing: Spacing.xs) {
-                    Text("\(task.taskIdentifier): \(task.reason)").textSelection(.enabled)
-                    Text("Recover with").font(Typography.caption(11)).foregroundStyle(palette.textTertiary)
-                    Text(task.recovery)
-                        .font(Typography.code(11.5))
-                        .textSelection(.enabled)
-                        .padding(Spacing.sm)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(palette.surface, in: RoundedRectangle(cornerRadius: 6))
-                        .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(palette.border))
-                }
-                .foregroundStyle(palette.text)
-                .padding(.leading, 22)
-            }
-        }
-        .font(Typography.body(12.5))
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(WorkTone.warning.fill(in: palette).opacity(0.55), in: RoundedRectangle(cornerRadius: 10))
-        .accessibilityIdentifier("wave-notice-\(task.taskId)")
-    }
-}
 #endif

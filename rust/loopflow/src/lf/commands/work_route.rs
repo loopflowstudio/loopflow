@@ -1,11 +1,13 @@
 //! Work chooses execution; SSH transports the ordinary command unchanged.
 use std::path::Path;
 
-use crate::durable::{MachineId, RepositoryId, RepositoryIdentity, TaskExecutionRoute, TaskId};
 use crate::lf::{Cli, Commands, SessionCommand, TaskCommand};
-use crate::ops::human_session::moves::conversation_task;
-use crate::store::sqlite::SqliteStore;
 use anyhow::{anyhow, Result};
+use loopflow_execution::durable::TaskExecutionRoute;
+use loopflow_execution::machine::task::{read_registry, resolve_task_id};
+use loopflow_execution::ops::human_session::moves::conversation_task;
+use loopflow_model::durable::{MachineId, RepositoryId, RepositoryIdentity, TaskId};
+use loopflow_storage::sqlite::SqliteStore;
 
 pub fn identity(
     bind: Option<&RepositoryId>,
@@ -30,13 +32,19 @@ pub fn repository_identity(
     directory: &std::path::Path,
     bind: Option<&RepositoryId>,
     relocate: Option<&RepositoryId>,
-) -> Result<(crate::repository::CanonicalRepo, RepositoryIdentity)> {
-    let repo = crate::repository::CanonicalRepo::containing(directory)?
+) -> Result<(
+    loopflow_execution::repository::CanonicalRepo,
+    RepositoryIdentity,
+)> {
+    let repo = loopflow_execution::repository::containing(directory)?
         .ok_or_else(|| anyhow!("run `lf repo` in a repository"))?;
     let runtime = tokio::runtime::Runtime::new()?;
     let identity = runtime.block_on(async {
-        let store = crate::store::open_store(&crate::store::storage_config_from_env()?).await?;
-        crate::repository::location::reconcile(&store.sqlite, &repo, bind, relocate)?;
+        let store = loopflow_execution::store::open_store(
+            &loopflow_execution::store::storage_config_from_env()?,
+        )
+        .await?;
+        loopflow_execution::repository::location::reconcile(&store.sqlite, &repo, bind, relocate)?;
         store
             .sqlite
             .repository_identity(&repo.to_string())?
@@ -54,14 +62,10 @@ pub fn repository_path(id: &RepositoryId) -> Result<std::path::PathBuf> {
     Ok(path.into())
 }
 
-/// Routing observes existing records; initialization and schema upgrades belong
-/// to the operation that takes up Work, not destination lookup.
-fn read_registry() -> Result<Option<SqliteStore>> {
-    Ok(crate::store::read_existing_registry()?.map(|store| store.sqlite))
-}
-
 /// Resolve scoped selectors once, carrying exact IDs to downstream consumers.
-/// Unknown Tasks remain with ordinary repository-scoped planning acquisition.
+/// Routing reads existing records only: initialization and schema upgrades
+/// belong to the operation that takes up Work, and that command fetches
+/// unknown Tasks from the repository's tracker.
 pub fn resolve_repository_selection(cli: &mut Cli) -> Result<()> {
     if matches!(
         cli.command,
@@ -96,7 +100,7 @@ pub fn resolve_repository_selection(cli: &mut Cli) -> Result<()> {
     }
     let repo = if explicit_repository {
         Some(
-            crate::repository::CanonicalRepo::current()?
+            loopflow_execution::repository::current()?
                 .ok_or_else(|| anyhow!("selected repository is unavailable"))?
                 .to_string(),
         )
@@ -122,7 +126,7 @@ pub fn resolve_repository_selection(cli: &mut Cli) -> Result<()> {
 
 fn launch_task(cli: &Cli) -> Option<&str> {
     match &cli.command {
-        Some(Commands::Desktop { .. } | Commands::Open(_) | Commands::Workspace(_))
+        Some(Commands::Desktop { .. } | Commands::Open(_))
         | Some(Commands::Task {
             cmd: TaskCommand::Location { .. },
         }) => None,
@@ -181,10 +185,12 @@ fn worktree_task(cli: &Cli, directory: &Path) -> Result<Option<String>> {
 #[derive(Debug)]
 pub struct Forward {
     pub machine: MachineId,
-    /// The command as the destination parses it, when it differs from the caller's.
-    resumed: Option<Cli>,
     args: Vec<String>,
-    route: Option<TaskExecutionRoute>,
+    pub(super) route: Option<TaskExecutionRoute>,
+    /// The Wave a bare resume resolved here, which the destination opens.
+    pub(super) wave: Option<String>,
+    /// The repository the destination resolves its own checkout from.
+    pub(super) repository: Option<RepositoryId>,
 }
 
 impl Forward {
@@ -192,7 +198,7 @@ impl Forward {
         self,
         cli: &Cli,
         directory: &Path,
-        io: &mut super::mutation::CommandIo<'_>,
+        io: &mut loopflow_execution::command::CommandIo<'_>,
     ) -> Result<()> {
         // `directory` selected Work on this host. Its spelling is not a
         // destination path; the route carries the repository's portable ID.
@@ -213,7 +219,7 @@ impl Forward {
         super::ssh::run_with_io(
             self.machine.as_str(),
             false,
-            self.resumed.as_ref().unwrap_or(cli),
+            cli,
             &args,
             self.route,
             directory,
@@ -223,7 +229,7 @@ impl Forward {
 }
 
 /// Return whether dispatch completed remotely. No Task Graph or checkout is
-/// mutated before routing. Unknown provider aliases retain ordinary acquisition.
+/// mutated before routing. Unknown tracker aliases are still fetched as usual.
 pub fn dispatch(cli: &Cli, args: &[String]) -> Result<bool> {
     let Some(forward) = forward(cli, args, &std::env::current_dir()?)? else {
         return Ok(false);
@@ -237,13 +243,13 @@ pub fn dispatch(cli: &Cli, args: &[String]) -> Result<bool> {
     let result = super::ssh::run(
         forward.machine.as_str(),
         false,
-        forward.resumed.as_ref().unwrap_or(cli),
+        cli,
         &forward.args,
         forward.route,
     );
     if task_run {
         // The laptop waited for the run; a rented machine whose work drained goes back now.
-        super::rental::settle(&forward.machine);
+        loopflow_execution::rental::recovery::settle(&forward.machine);
     }
     result?;
     Ok(true)
@@ -265,7 +271,7 @@ pub fn forward(cli: &Cli, args: &[String], directory: &Path) -> Result<Option<Fo
     let Some(route) = resolve_task(&store, cli, selector, directory)? else {
         return Ok(None);
     };
-    if route.machine_id == store.local_machine()?.id {
+    if route.machine_id == loopflow_execution::store::machines::local_machine(&store)?.id {
         return Ok(None);
     }
     let ownership = matches!(
@@ -278,9 +284,8 @@ pub fn forward(cli: &Cli, args: &[String], directory: &Path) -> Result<Option<Fo
     if ownership && store.task_move_in_flight(&route.task_id)?.is_some() {
         return Ok(None);
     }
-    if !crate::journal::request::active()
-        && std::env::var_os(super::ssh::EXPECTED_MACHINE_ID_ENV).is_some()
-    {
+    // A command that arrived over SSH runs where it arrived.
+    if std::env::var_os(loopflow_execution::machine::ssh::EXPECTED_MACHINE_ID_ENV).is_some() {
         return Err(anyhow!("Task {selector} resolves to Machine {} on the destination; reconcile its planning/location before retrying (no work was started)", route.machine_id));
     }
     let mut forwarded = args[1..].to_vec();
@@ -292,9 +297,10 @@ pub fn forward(cli: &Cli, args: &[String], directory: &Path) -> Result<Option<Fo
         }
         return Ok(Some(Forward {
             machine: route.machine_id.clone(),
-            resumed: None,
             args: forwarded,
             route: Some(route),
+            wave: None,
+            repository: None,
         }));
     }
     // Carry the observed exact target in addition to the positional selector.
@@ -329,85 +335,11 @@ pub fn forward(cli: &Cli, args: &[String], directory: &Path) -> Result<Option<Fo
     }
     Ok(Some(Forward {
         machine: route.machine_id.clone(),
-        resumed: None,
         args: forwarded,
         route: Some(route),
+        wave: None,
+        repository: None,
     }))
-}
-
-/// The route of the Task `selector` names, when its Work lives on another
-/// Machine. Reads records only.
-pub(crate) fn remote_task(selector: &str) -> Result<Option<TaskExecutionRoute>> {
-    let Some(store) = read_registry()? else {
-        return Ok(None);
-    };
-    remote_task_in(&store, selector)
-}
-
-fn remote_task_in(store: &SqliteStore, selector: &str) -> Result<Option<TaskExecutionRoute>> {
-    let Some(task) = resolve_task_id(store, selector, None)? else {
-        return Ok(None);
-    };
-    let route = store.task_execution_route(&task)?;
-    Ok((route.machine_id != store.local_machine()?.id).then_some(route))
-}
-
-/// The other Machine that writes the Task's ownership: where it runs, unless
-/// a move from here has not arrived, which leaves the next entry here. A sent
-/// move's target is asked first: one that took the Task in, its answer lost,
-/// writes it like any Task that runs there.
-pub(crate) fn remote_ownership_writer(selector: &str) -> Result<Option<TaskExecutionRoute>> {
-    let Some(store) = read_registry()? else {
-        return Ok(None);
-    };
-    let Some(route) = remote_task_in(&store, selector)? else {
-        return Ok(None);
-    };
-    let Some(moving) = store.task_move_in_flight(&route.task_id)? else {
-        return Ok(Some(route));
-    };
-    let sent = matches!(
-        moving.stage,
-        crate::store::sqlite::task_moves::MoveStage::Sent { .. }
-    );
-    let arrived = sent && super::session_move::arrived_on(&route.task_id, &moving.to_machine_id)?;
-    Ok(arrived.then_some(route))
-}
-
-/// What `lf <args> --json` prints on the route's Machine: its API's value.
-/// Its diagnostics go to the request's log.
-pub(crate) fn run_remote(
-    route: TaskExecutionRoute,
-    directory: &Path,
-    args: &[String],
-) -> Result<serde_json::Value> {
-    let spelled = std::iter::once("lf".to_owned()).chain(args.iter().cloned());
-    let cli = <Cli as clap::Parser>::try_parse_from(spelled)?.checked()?;
-    let (mut output, mut error) = (Vec::new(), Vec::new());
-    let ran = super::ssh::run_with_io(
-        route.machine_id.clone().as_str(),
-        false,
-        &cli,
-        args,
-        Some(route),
-        directory,
-        Some(&mut super::mutation::CommandIo {
-            input: &mut std::io::empty(),
-            output: &mut output,
-            error: &mut error,
-        }),
-    );
-    let diagnostics = String::from_utf8_lossy(&error);
-    if let Err(failed) = ran {
-        return Err(match diagnostics.trim() {
-            "" => failed,
-            said => failed.context(format!("the destination said: {said}")),
-        });
-    }
-    for line in diagnostics.lines() {
-        crate::journal::request::diagnostic(format_args!("{line}"));
-    }
-    Ok(serde_json::from_slice(&output)?)
 }
 
 /// The Session an explicit `resume <session>` names.
@@ -441,27 +373,30 @@ fn moved_session(cli: &Cli, args: &[String]) -> Result<Option<Forward>> {
     let Some(id) = resumed_session(cli) else {
         return Ok(None);
     };
-    if !crate::journal::request::active()
-        && std::env::var_os(super::ssh::EXPECTED_MACHINE_ID_ENV).is_some()
-    {
+    // A command that arrived over SSH runs where it arrived.
+    if std::env::var_os(loopflow_execution::machine::ssh::EXPECTED_MACHINE_ID_ENV).is_some() {
         return Ok(None);
     }
     let Some(store) = read_registry()? else {
         return Ok(None);
     };
-    let id = crate::id::canonical_session(id);
+    let id = loopflow_model::id::canonical_session(id);
     let machine = match conversation_task(&store, &id)? {
         Some(task) => {
-            let runs_on = store.task_execution_route(&task)?.machine_id;
-            (runs_on != store.local_machine()?.id).then_some(runs_on)
+            let runs_on =
+                loopflow_execution::store::ownership::task_execution_route(&store, &task)?
+                    .machine_id;
+            (runs_on != loopflow_execution::store::machines::local_machine(&store)?.id)
+                .then_some(runs_on)
         }
         None => store.session_moved_to(&id)?,
     };
     Ok(machine.map(|machine| Forward {
         machine,
-        resumed: None,
         args: args[1..].to_vec(),
         route: None,
+        wave: None,
+        repository: None,
     }))
 }
 
@@ -501,18 +436,16 @@ fn primary_session(cli: &Cli, args: &[String], directory: &Path) -> Result<Optio
     else {
         return Ok(None);
     };
-    if !crate::journal::request::active()
-        && std::env::var_os(super::ssh::EXPECTED_MACHINE_ID_ENV).is_some()
-    {
+    // A command that arrived over SSH runs where it arrived.
+    if std::env::var_os(loopflow_execution::machine::ssh::EXPECTED_MACHINE_ID_ENV).is_some() {
         return Ok(None);
     }
-    let Some(registry) = crate::store::read_existing_registry()? else {
+    let Some(registry) = loopflow_execution::store::read_existing_registry()? else {
         return Ok(None);
     };
-    let registry: crate::store::SharedStore = std::sync::Arc::new(registry);
+    let registry: loopflow_execution::store::SharedStore = std::sync::Arc::new(registry);
     let store = &registry.sqlite;
-    let repo =
-        crate::repository::CanonicalRepo::containing(directory)?.map(|repo| repo.to_string());
+    let repo = loopflow_execution::repository::containing(directory)?.map(|repo| repo.to_string());
     let repository = match (&cli.repository, repo.as_deref()) {
         (Some(repository), _) => Some(repository.clone()),
         (None, Some(repo)) => store.repository_id(repo)?,
@@ -534,9 +467,12 @@ fn primary_session(cli: &Cli, args: &[String], directory: &Path) -> Result<Optio
                 return Ok(None);
             };
             (
-                store
-                    .wave_owning_machine(&wave_id, crate::durable::MachineSetting::Session)?
-                    .0,
+                loopflow_execution::store::placement::wave_owning_machine(
+                    store,
+                    &wave_id,
+                    loopflow_model::durable::MachineSetting::Session,
+                )?
+                .0,
                 format!("Wave {wave}"),
             )
         }
@@ -545,14 +481,17 @@ fn primary_session(cli: &Cli, args: &[String], directory: &Path) -> Result<Optio
                 return Ok(None);
             };
             (
-                store
-                    .repository_owning_machine(repository, crate::durable::MachineSetting::Session)?
-                    .0,
+                loopflow_execution::store::placement::repository_owning_machine(
+                    store,
+                    repository,
+                    loopflow_model::durable::MachineSetting::Session,
+                )?
+                .0,
                 "this repository".to_string(),
             )
         }
     };
-    if machine == store.local_machine()?.id {
+    if machine == loopflow_execution::store::machines::local_machine(store)?.id {
         return Ok(None);
     }
     // The destination finds its own checkout by identity, never by this path.
@@ -570,16 +509,17 @@ fn primary_session(cli: &Cli, args: &[String], directory: &Path) -> Result<Optio
             forwarded.splice(0..0, ["--wave".into(), wave.clone()]);
         }
     }
-    if cli.repository.is_none() {
-        let repository = repository
+    let repository = repository
         .ok_or_else(|| anyhow!("{scope} runs on Machine {machine}; run `lf repo` here so it can address the repository"))?;
+    if cli.repository.is_none() {
         forwarded.splice(0..0, ["--repo-id".into(), repository.to_string()]);
     }
     Ok(Some(Forward {
         machine,
-        resumed: None,
         args: forwarded,
         route: None,
+        wave,
+        repository: Some(repository),
     }))
 }
 
@@ -593,7 +533,7 @@ enum ContextScope {
 /// Resolve as the local connect does. Task worktrees and unassociated ones are
 /// `None`: a Task routes by its claim, and an error belongs to the local connect.
 fn context_scope(
-    store: &crate::store::SharedStore,
+    store: &loopflow_execution::store::SharedStore,
     repo: Option<&str>,
     cwd: &Path,
 ) -> Result<Option<ContextScope>> {
@@ -601,8 +541,8 @@ fn context_scope(
         return Ok(None);
     };
     tokio::runtime::Runtime::new()?.block_on(async {
-        use crate::ops::human_session::{connection_scope, SessionTarget};
-        use crate::session::PrimaryScope;
+        use loopflow_execution::ops::human_session::{connection_scope, SessionTarget};
+        use loopflow_execution::session::PrimaryScope;
         Ok(
             match connection_scope(store, cwd, SessionTarget::Context).await {
                 Ok(PrimaryScope::Wave(id)) => store
@@ -613,12 +553,13 @@ fn context_scope(
                     .map(|wave| ContextScope::Wave(wave.name().to_string())),
                 Ok(PrimaryScope::Repository(_)) => Some(ContextScope::Repository),
                 Ok(PrimaryScope::Task(_)) | Err(_) => None,
+                Ok(_) => None,
             },
         )
     })
 }
 
-/// Inspect known Work only. Provider acquisition and plan exchange have their
+/// Inspect known Work only. Tracker fetches and plan exchange have their
 /// own owners; neither is run merely to choose a launch destination.
 pub(super) fn resolve(cli: &Cli) -> Result<Option<TaskExecutionRoute>> {
     let Some(selector) = launch_task(cli) else {
@@ -643,7 +584,7 @@ fn resolve_task(
             })?)
         } else if cli.repo.is_some() {
             Some(
-                crate::repository::CanonicalRepo::containing(directory)?
+                loopflow_execution::repository::containing(directory)?
                     .ok_or_else(|| anyhow!("selected repository is unavailable"))?
                     .to_string(),
             )
@@ -651,7 +592,10 @@ fn resolve_task(
             None
         };
     resolve_task_id(store, selector, repo.as_deref())?
-        .map(|task| store.task_execution_route(&task).map_err(Into::into))
+        .map(|task| {
+            loopflow_execution::store::ownership::task_execution_route(store, &task)
+                .map_err(Into::into)
+        })
         .transpose()
 }
 
@@ -669,7 +613,7 @@ pub fn location(
     let (repository, repo) = if let Some(repository) = &cli.repository {
         (repository.clone(), store.repository_path(repository)?)
     } else {
-        let repo = crate::repository::CanonicalRepo::current()?
+        let repo = loopflow_execution::repository::current()?
             .ok_or_else(|| anyhow!("select a repository before reading execution location"))?
             .to_string();
         let repository = store
@@ -694,53 +638,44 @@ pub fn location(
     let request = request
         .map(str::to_string)
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-    let readings = tokio::runtime::Runtime::new()?.block_on(crate::ops::task_location::observe(
-        &store,
-        &repository,
-        &task,
-        peers,
-        &request,
-    ))?;
+    let readings = tokio::runtime::Runtime::new()?.block_on(
+        loopflow_execution::ops::task_location::observe(
+            &store,
+            &repository,
+            &task,
+            peers,
+            &request,
+        ),
+    )?;
     if json {
         println!("{}", serde_json::to_string_pretty(&readings)?);
     } else {
-        println!("{}", crate::ops::task_location::render(&readings));
+        println!(
+            "{}",
+            loopflow_execution::ops::task_location::render(&readings)
+        );
     }
     Ok(())
 }
 
 /// Scope aliases and prefixes before routing, just as entry dispatch does.
 /// An unknown selector may still be acquired; known Work in another repo may not.
-fn resolve_task_id(
-    store: &SqliteStore,
-    selector: &str,
-    repo: Option<&str>,
-) -> Result<Option<TaskId>> {
-    let task = store.resolve_task_id(selector, repo)?;
-    if let Some(repo) = repo.filter(|_| task.is_none()) {
-        anyhow::ensure!(
-            store.resolve_task_id(selector, None)?.is_none(),
-            "Task {selector} does not belong to selected repository {repo}"
-        );
-    }
-    Ok(task)
-}
-
 #[cfg(test)]
 mod tests {
     use std::path::Path;
 
     use super::{launch_task, repository_path, resolve, resolve_task, without_placement};
-    use crate::durable::{RepositoryId, TaskId};
     use crate::lf::Cli;
-    use crate::store::sqlite::SqliteStore;
-    use crate::work::task::NewTask;
+
     use clap::Parser;
+    use loopflow_model::durable::{RepositoryId, TaskId};
+    use loopflow_storage::work::task::NewTask;
 
     #[test]
     fn routing_resolves_task_prefixes_within_historical_repository_locators() {
         let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
+        let store =
+            loopflow_execution::store::opening::open_ephemeral(&home.path().join("db")).unwrap();
         let first = TaskId::parse("task_abcd1234400080000000000000000001").unwrap();
         let second = TaskId::parse("task_abcd1235400080000000000000000002").unwrap();
         let selected_path = home.path().join("selected");
@@ -754,10 +689,16 @@ mod tests {
             (selected_repo, &first),
             (other_path.to_str().unwrap(), &second),
         ] {
-            let project = store.ensure_wave_project(repo, "inbox").unwrap();
+            let project = loopflow_execution::work::wave::bootstrap::ensure_wave_project(
+                &store, repo, "inbox",
+            )
+            .unwrap();
             store
                 .create_task(&NewTask {
-                    repository_id: store.ensure_repository(repo).unwrap(),
+                    repository_id: loopflow_execution::repository::location::ensure_repository(
+                        &store, repo,
+                    )
+                    .unwrap(),
                     due_date: None,
                     id: id.clone(),
                     project_id: Some(project.id),
@@ -768,11 +709,14 @@ mod tests {
         }
         let prior = store.repository_id(selected_repo).unwrap().unwrap();
         let selected = RepositoryId::new();
-        store.bind_repository(selected_repo, &selected).unwrap();
+        loopflow_execution::repository::location::bind_repository(&store, selected_repo, &selected)
+            .unwrap();
         let cli = Cli::try_parse_from(["lf", "--repo-id", prior.as_str()]).unwrap();
         assert_eq!(
             resolve_task(&store, &cli, "abcd", Path::new("/")).unwrap(),
-            Some(store.task_execution_route(&first).unwrap())
+            Some(
+                loopflow_execution::store::ownership::task_execution_route(&store, &first).unwrap()
+            )
         );
         assert_eq!(
             resolve_task(&store, &cli, first.as_str(), Path::new("/"))
@@ -798,7 +742,7 @@ mod tests {
 
     #[test]
     fn destination_lookup_preserves_missing_and_unreadable_registry() {
-        let _lock = crate::journal::test_env_lock();
+        let _lock = loopflow_execution::journal::test_env_lock();
         let _restore = crate::test_ambient::EnvGuard::clear(&["LF_HOME"]);
         let home = tempfile::tempdir().unwrap();
         std::env::set_var("LF_HOME", home.path());
@@ -817,12 +761,18 @@ mod tests {
 
     #[test]
     fn repository_lookup_does_not_register_an_unselected_plan() {
-        let _lock = crate::journal::test_env_lock();
+        let _lock = loopflow_execution::journal::test_env_lock();
         let _restore = crate::test_ambient::EnvGuard::clear(&["LF_HOME"]);
         let home = tempfile::tempdir().unwrap();
         std::env::set_var("LF_HOME", home.path());
-        let store = SqliteStore::open_ephemeral(&home.path().join("loopflow.db")).unwrap();
-        let id = store.ensure_repository("/selected/repository").unwrap();
+        let store =
+            loopflow_execution::store::opening::open_ephemeral(&home.path().join("loopflow.db"))
+                .unwrap();
+        let id = loopflow_execution::repository::location::ensure_repository(
+            &store,
+            "/selected/repository",
+        )
+        .unwrap();
         assert_eq!(
             repository_path(&id).unwrap(),
             std::path::Path::new("/selected/repository")

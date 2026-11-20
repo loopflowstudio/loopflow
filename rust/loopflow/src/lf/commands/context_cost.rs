@@ -11,9 +11,9 @@ use serde::Serialize;
 use time::OffsetDateTime;
 
 use crate::lf::commands::WorkFilter;
-use crate::lf::output::{format_int, truncate, Colors};
-use crate::ops::metrics::MetricProducerObservation;
-use crate::session_record::{SessionHistory, SILENCE_SECONDS};
+use loopflow_execution::ops::metrics::MetricProducerObservation;
+use loopflow_execution::output::{format_int, truncate, Colors};
+use loopflow_execution::session_record::{SessionHistory, SILENCE_SECONDS};
 
 /// 2026-09-23T00:00:00Z: the baseline week ends on 2026-09-30.
 const FIRST_WEEK_START: i64 = 1_790_121_600;
@@ -155,12 +155,16 @@ pub(crate) fn run(json: bool, filter: WorkFilter) -> Result<()> {
 }
 
 fn read_steps(filter: WorkFilter) -> Result<Vec<Step>> {
-    let database = crate::store::database_path_from_env()?;
+    let database = loopflow_execution::store::database_path_from_env()?;
     if !database.exists() {
         return Ok(Vec::new());
     }
-    let store = crate::store::sqlite::SqliteStore::open_processes_read_only(&database)?;
-    let sessions = store.conversation_history(
+    let store = loopflow_storage::sqlite::SqliteStore::open_read_only(
+        &database,
+        loopflow_execution::store::token_key::encryption_key,
+    )?;
+    let sessions = loopflow_execution::store::sessions::conversation_history(
+        &store,
         filter.wave,
         filter.project,
         filter.task,
@@ -391,14 +395,14 @@ fn publish(report: &ContextCostReport, now: OffsetDateTime) -> Vec<String> {
         return Vec::new();
     }
     let published = (|| -> Result<Vec<String>> {
-        let Some(repo) = crate::repository::CanonicalRepo::current()? else {
+        let Some(repo) = loopflow_execution::repository::current()? else {
             return Ok(vec!["not in a repository; not persisted".to_string()]);
         };
         tokio::runtime::Runtime::new()?.block_on(async {
-            let Some(store) = crate::store::open_existing_store().await? else {
+            let Some(store) = loopflow_execution::store::open_existing_store().await? else {
                 return Ok(vec!["no local Loopflow registry; not persisted".to_string()]);
             };
-            crate::ops::metrics::publish_metric_observations(
+            loopflow_execution::ops::metrics::publish_metric_observations(
                 &store,
                 repo.as_path(),
                 observations,

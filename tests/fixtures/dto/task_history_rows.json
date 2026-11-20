@@ -11,13 +11,12 @@
       "assignee": null,
       "due_date": null,
       "sync": {
-        "connected": false,
-        "changes": []
+        "actions": []
       },
-      "linear_id": null,
-      "acquisition": {
+      "tracker_id": null,
+      "tracker_state": {
         "state": "available",
-        "observed_at": null
+        "synced_at": null
       },
       "repo_id": "repo_00000000000040008000000000000001",
       "repo": "/repo",
@@ -65,7 +64,11 @@
     },
     "shipping": null,
     "pr": null,
-    "graph_source": null
+    "graph_source": null,
+    "lifecycle": "abandoned",
+    "selection_states": [
+      "done"
+    ]
   },
   {
     "task": {
@@ -79,13 +82,12 @@
       "assignee": null,
       "due_date": null,
       "sync": {
-        "connected": false,
-        "changes": []
+        "actions": []
       },
-      "linear_id": null,
-      "acquisition": {
+      "tracker_id": null,
+      "tracker_state": {
         "state": "available",
-        "observed_at": null
+        "synced_at": null
       },
       "repo_id": "repo_00000000000040008000000000000001",
       "repo": "/repo",
@@ -133,7 +135,11 @@
     },
     "shipping": null,
     "pr": null,
-    "graph_source": null
+    "graph_source": null,
+    "lifecycle": "abandoned",
+    "selection_states": [
+      "done"
+    ]
   },
   {
     "task": {
@@ -147,13 +153,12 @@
       "assignee": null,
       "due_date": null,
       "sync": {
-        "connected": false,
-        "changes": []
+        "actions": []
       },
-      "linear_id": null,
-      "acquisition": {
+      "tracker_id": null,
+      "tracker_state": {
         "state": "available",
-        "observed_at": null
+        "synced_at": null
       },
       "repo_id": "repo_00000000000040008000000000000001",
       "repo": "/repo",
@@ -201,7 +206,11 @@
     },
     "shipping": null,
     "pr": null,
-    "graph_source": null
+    "graph_source": null,
+    "lifecycle": "abandoned",
+    "selection_states": [
+      "done"
+    ]
   },
   {
     "task": {
@@ -215,13 +224,12 @@
       "assignee": null,
       "due_date": null,
       "sync": {
-        "connected": false,
-        "changes": []
+        "actions": []
       },
-      "linear_id": null,
-      "acquisition": {
+      "tracker_id": null,
+      "tracker_state": {
         "state": "available",
-        "observed_at": null
+        "synced_at": null
       },
       "repo_id": "repo_00000000000040008000000000000001",
       "repo": "/repo",
@@ -269,7 +277,11 @@
     },
     "shipping": null,
     "pr": null,
-    "graph_source": null
+    "graph_source": null,
+    "lifecycle": "abandoned",
+    "selection_states": [
+      "done"
+    ]
   },
   {
     "task": {
@@ -283,13 +295,12 @@
       "assignee": null,
       "due_date": null,
       "sync": {
-        "connected": false,
-        "changes": []
+        "actions": []
       },
-      "linear_id": null,
-      "acquisition": {
+      "tracker_id": null,
+      "tracker_state": {
         "state": "available",
-        "observed_at": null
+        "synced_at": null
       },
       "repo_id": "repo_00000000000040008000000000000001",
       "repo": "/repo",
@@ -337,7 +348,11 @@
     },
     "shipping": null,
     "pr": null,
-    "graph_source": null
+    "graph_source": null,
+    "lifecycle": "abandoned",
+    "selection_states": [
+      "done"
+    ]
   },
   {
     "task": {
@@ -351,13 +366,12 @@
       "assignee": null,
       "due_date": null,
       "sync": {
-        "connected": false,
-        "changes": []
+        "actions": []
       },
-      "linear_id": null,
-      "acquisition": {
+      "tracker_id": null,
+      "tracker_state": {
         "state": "available",
-        "observed_at": null
+        "synced_at": null
       },
       "repo_id": "repo_00000000000040008000000000000001",
       "repo": "/repo",
@@ -405,7 +419,11 @@
     },
     "shipping": null,
     "pr": null,
-    "graph_source": null
+    "graph_source": null,
+    "lifecycle": "abandoned",
+    "selection_states": [
+      "done"
+    ]
   },
   {
     "task": {
@@ -419,13 +437,12 @@
       "assignee": null,
       "due_date": null,
       "sync": {
-        "connected": false,
-        "changes": []
+        "actions": []
       },
-      "linear_id": null,
-      "acquisition": {
+      "tracker_id": null,
+      "tracker_state": {
         "state": "available",
-        "observed_at": null
+        "synced_at": null
       },
       "repo_id": "repo_00000000000040008000000000000001",
       "repo": "/repo",
@@ -473,7 +490,11 @@
     },
     "shipping": null,
     "pr": null,
-    "graph_source": null
+    "graph_source": null,
+    "lifecycle": "abandoned",
+    "selection_states": [
+      "done"
+    ]
   },
   {
     "task": {
@@ -487,13 +508,12 @@
       "assignee": null,
       "due_date": null,
       "sync": {
-        "connected": false,
-        "changes": []
+        "actions": []
       },
-      "linear_id": null,
-      "acquisition": {
+      "tracker_id": null,
+      "tracker_state": {
         "state": "available",
-        "observed_at": null
+        "synced_at": null
       },
       "repo_id": "repo_00000000000040008000000000000001",
       "repo": "/repo",
@@ -541,7 +561,12 @@
     },
     "shipping": null,
     "pr": null,
-    "graph_source": null
+    "graph_source": null,
+    "lifecycle": "unstarted",
+    "selection_states": [
+      "unstarted",
+      "backlog"
+    ]
   },
   {
     "task": {
@@ -555,13 +580,12 @@
       "assignee": null,
       "due_date": null,
       "sync": {
-        "connected": false,
-        "changes": []
+        "actions": []
       },
-      "linear_id": null,
-      "acquisition": {
+      "tracker_id": null,
+      "tracker_state": {
         "state": "available",
-        "observed_at": null
+        "synced_at": null
       },
       "repo_id": "repo_00000000000040008000000000000001",
       "repo": "/repo",
@@ -609,7 +633,12 @@
     },
     "shipping": null,
     "pr": null,
-    "graph_source": null
+    "graph_source": null,
+    "lifecycle": "unstarted",
+    "selection_states": [
+      "unstarted",
+      "backlog"
+    ]
   },
   {
     "task": {
@@ -623,13 +652,12 @@
       "assignee": null,
       "due_date": null,
       "sync": {
-        "connected": false,
-        "changes": []
+        "actions": []
       },
-      "linear_id": null,
-      "acquisition": {
+      "tracker_id": null,
+      "tracker_state": {
         "state": "available",
-        "observed_at": null
+        "synced_at": null
       },
       "repo_id": "repo_00000000000040008000000000000001",
       "repo": "/repo",
@@ -677,7 +705,12 @@
     },
     "shipping": null,
     "pr": null,
-    "graph_source": null
+    "graph_source": null,
+    "lifecycle": "unstarted",
+    "selection_states": [
+      "unstarted",
+      "backlog"
+    ]
   },
   {
     "task": {
@@ -691,13 +724,12 @@
       "assignee": null,
       "due_date": null,
       "sync": {
-        "connected": false,
-        "changes": []
+        "actions": []
       },
-      "linear_id": null,
-      "acquisition": {
+      "tracker_id": null,
+      "tracker_state": {
         "state": "available",
-        "observed_at": null
+        "synced_at": null
       },
       "repo_id": "repo_00000000000040008000000000000001",
       "repo": "/repo",
@@ -745,7 +777,12 @@
     },
     "shipping": null,
     "pr": null,
-    "graph_source": null
+    "graph_source": null,
+    "lifecycle": "unstarted",
+    "selection_states": [
+      "unstarted",
+      "backlog"
+    ]
   },
   {
     "task": {
@@ -759,13 +796,12 @@
       "assignee": null,
       "due_date": null,
       "sync": {
-        "connected": false,
-        "changes": []
+        "actions": []
       },
-      "linear_id": null,
-      "acquisition": {
+      "tracker_id": null,
+      "tracker_state": {
         "state": "available",
-        "observed_at": null
+        "synced_at": null
       },
       "repo_id": "repo_00000000000040008000000000000001",
       "repo": "/repo",
@@ -813,7 +849,11 @@
     },
     "shipping": null,
     "pr": null,
-    "graph_source": null
+    "graph_source": null,
+    "lifecycle": "done",
+    "selection_states": [
+      "done"
+    ]
   },
   {
     "task": {
@@ -827,13 +867,12 @@
       "assignee": null,
       "due_date": null,
       "sync": {
-        "connected": false,
-        "changes": []
+        "actions": []
       },
-      "linear_id": null,
-      "acquisition": {
+      "tracker_id": null,
+      "tracker_state": {
         "state": "available",
-        "observed_at": null
+        "synced_at": null
       },
       "repo_id": "repo_00000000000040008000000000000001",
       "repo": "/repo",
@@ -881,7 +920,11 @@
     },
     "shipping": null,
     "pr": null,
-    "graph_source": null
+    "graph_source": null,
+    "lifecycle": "done",
+    "selection_states": [
+      "done"
+    ]
   },
   {
     "task": {
@@ -895,13 +938,12 @@
       "assignee": null,
       "due_date": null,
       "sync": {
-        "connected": false,
-        "changes": []
+        "actions": []
       },
-      "linear_id": null,
-      "acquisition": {
+      "tracker_id": null,
+      "tracker_state": {
         "state": "available",
-        "observed_at": null
+        "synced_at": null
       },
       "repo_id": "repo_00000000000040008000000000000001",
       "repo": "/repo",
@@ -949,7 +991,11 @@
     },
     "shipping": null,
     "pr": null,
-    "graph_source": null
+    "graph_source": null,
+    "lifecycle": "done",
+    "selection_states": [
+      "done"
+    ]
   },
   {
     "task": {
@@ -963,13 +1009,12 @@
       "assignee": null,
       "due_date": null,
       "sync": {
-        "connected": false,
-        "changes": []
+        "actions": []
       },
-      "linear_id": null,
-      "acquisition": {
+      "tracker_id": null,
+      "tracker_state": {
         "state": "available",
-        "observed_at": null
+        "synced_at": null
       },
       "repo_id": "repo_00000000000040008000000000000001",
       "repo": "/repo",
@@ -1017,7 +1062,12 @@
     },
     "shipping": null,
     "pr": null,
-    "graph_source": null
+    "graph_source": null,
+    "lifecycle": "unstarted",
+    "selection_states": [
+      "unstarted",
+      "backlog"
+    ]
   },
   {
     "task": {
@@ -1031,13 +1081,12 @@
       "assignee": null,
       "due_date": null,
       "sync": {
-        "connected": false,
-        "changes": []
+        "actions": []
       },
-      "linear_id": null,
-      "acquisition": {
+      "tracker_id": null,
+      "tracker_state": {
         "state": "available",
-        "observed_at": null
+        "synced_at": null
       },
       "repo_id": "repo_00000000000040008000000000000001",
       "repo": "/repo",
@@ -1085,6 +1134,10 @@
     },
     "shipping": null,
     "pr": null,
-    "graph_source": null
+    "graph_source": null,
+    "lifecycle": "abandoned",
+    "selection_states": [
+      "done"
+    ]
   }
 ]

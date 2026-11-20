@@ -749,6 +749,7 @@ def test_rust_filter_runs_only_matching_tests_then_clippy():
     assert labels[-1] == "clippy"
     assert labels.index("rust") < labels.index("clippy")
     assert "--all" not in tests
+    assert "--workspace" in tests
     assert any("test(prompt::)" in argument for argument in tests)
 
 
@@ -888,8 +889,10 @@ def test_ui_host_suite_serializes_and_checks_machine_state():
         "swift/LoopflowMac/Views/WorkSurfaceView.swift",
         "scripts/loopflow-dev.py",
         "rust/loopflow/build.rs",
-        "rust/loopflow/ghostty-vt.json",
-        "rust/loopflow/ghostty-vt-patches/0004-vt-darwin-runtime.patch",
+        "rust/loopflow-execution/build.rs",
+        "rust/loopflow-terminal/build.rs",
+        "rust/loopflow-terminal/ghostty-vt.json",
+        "rust/loopflow-terminal/ghostty-vt-patches/0004-vt-darwin-runtime.patch",
     ],
 )
 def test_desktop_changes_select_headless_checks_without_host_automation(path: str) -> None:
@@ -902,6 +905,21 @@ def test_desktop_changes_select_headless_checks_without_host_automation(path: st
     assert not any("scripts/prove_wave_surface_states.sh" in command.argv for command in commands)
     # The slower Xcode compile remains explicit, but must recognize these inputs.
     assert next(s for s in gate.SUITES if s.name == "loopflow").match([path])
+
+
+@pytest.mark.parametrize(
+    ("path", "suites"),
+    [
+        ("rust/loopflow-storage/src/sqlite/sessions.rs", {"swift", "e2e"}),
+        ("rust/loopflow-storage/src/copy.rs", {"e2e"}),
+        ("rust/loopflow-execution/src/store/sessions.rs", {"e2e"}),
+        ("rust/loopflow-execution/src/git/worktrees.rs", {"e2e"}),
+    ],
+)
+def test_relocated_storage_keeps_its_boundary_checks(path: str, suites: set[str]) -> None:
+    assert (ROOT / path).is_file()
+    selected = {suite.name for suite in gate.SUITES if suite.match([path])}
+    assert suites <= selected
 
 
 def test_recovery_has_time_beyond_read_only_inventory(tmp_path, monkeypatch):

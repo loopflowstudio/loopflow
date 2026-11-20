@@ -10,10 +10,8 @@
   "provider": "codex",
   "account": "work",
   "model": null,
-  "blocked": false,
   "cwd": "/src/loopflow.task",
   "state": "unknown",
-  "ready_summary": "The design now reflects Jack's requested changes.",
   "open_argv": [
     "lf",
     "session",
@@ -26,20 +24,10 @@
   ],
   "terminal_ids": [],
   "work_path": "product / LOO-291",
-  "actions": [
-    {
-      "kind": "open",
-      "label": "Open here",
-      "help": "Open this Session in a terminal",
-      "unavailable_reason": null
-    },
-    {
-      "kind": "reveal",
-      "label": "Show conversation",
-      "help": "Continue existing history without taking another terminal's input",
-      "unavailable_reason": null
-    }
-  ],
+  "action": {
+    "label": "Open here",
+    "help": "Open this Session in a terminal"
+  },
   "graph_membership": {
     "kind": "step",
     "graph": "task-design",
@@ -66,5 +54,9 @@
   "preview": null,
   "transition": null,
   "turn": null,
-  "raw": false
+  "raw": false,
+  "ended": null,
+  "start": null,
+  "outlook": null,
+  "status_line": "unknown"
 }

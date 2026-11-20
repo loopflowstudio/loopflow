@@ -29,7 +29,17 @@ you**, **Working now**, **Backlog** or **Done** — in the Machine's order, with
 with a conversation come first; started Tasks nobody has opened a conversation
 for fold under "N without a conversation". Search covers title and checkout
 path. Pull to refresh. **+** opens New Task: describe the work, pick a
-repository, **Create & start**.
+repository, **Create & start**. The Task's conversation opens as soon as the
+Machine answers and prints its setup (checkout, then Graph) before the agent's
+prompt.
+
+Swipe a Task left and tap **Complete**: the row leaves the list at once. In a
+Task, the toolbar offers **Start** (not started), **Auto-Ship** (Working) or
+**Stop Auto-Ship** (Autonomous); each shows "LOO-5 Auto-Ship requested" at the
+bottom of the screen. If the Machine refuses, the row comes back and the same
+line says why. A list that fails to load keeps what it last showed and says so
+there too. The list opens on the last reading this phone saved for that
+Machine and filter, then updates.
 
 ## Task
 

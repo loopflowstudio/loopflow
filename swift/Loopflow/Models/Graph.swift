@@ -95,11 +95,12 @@ public struct GraphStepProcess: Decodable, Sendable, Hashable, Identifiable {
     public let completedAt: Int64?
     public let outcome: String?
     public let exitCode: Int32?
+    public let error: String?
 
     public var id: String { lfProcessId }
 
     enum CodingKeys: String, CodingKey {
-        case label, key, iterations, outcome
+        case label, key, iterations, outcome, error
         case lfProcessId = "lf_process_id"
         case startedAt = "started_at"
         case completedAt = "completed_at"

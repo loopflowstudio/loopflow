@@ -2,12 +2,12 @@ use std::error::Error;
 use std::path::PathBuf;
 
 use clap::Parser;
-use loopflow::prompt::drop_duplicate_docs;
-use loopflow::prompt::format_prompt;
-use loopflow::prompt::gather_context;
-use loopflow::prompt::ClipboardContext;
-use loopflow::prompt::GatherContextOpts;
-use loopflow::prompt::Surface;
+use loopflow_execution::prompt::drop_duplicate_docs;
+use loopflow_execution::prompt::format_prompt;
+use loopflow_execution::prompt::gather_context;
+use loopflow_execution::prompt::ClipboardContext;
+use loopflow_execution::prompt::GatherContextOpts;
+use loopflow_execution::prompt::Surface;
 
 #[derive(Parser, Debug)]
 #[command(name = "lf-prompt")]
@@ -45,27 +45,23 @@ struct Args {
     #[arg(long, default_value = "false", action = clap::ArgAction::Set)]
     clipboard: bool,
 
-    /// Task association for prompt fixtures; does not resolve or create Work
-    #[arg(long)]
-    work_task: Option<String>,
-
     /// Wave name
     #[arg(long)]
     wave: Option<String>,
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
+    loopflow::build_info::initialize();
     let args = Args::parse();
     let wave = args
         .wave
-        .or_else(loopflow::work::wave::context::resolve_ambient_wave_name);
+        .or_else(loopflow_execution::work::wave::context::resolve_ambient_wave_name);
 
     let opts = GatherContextOpts {
         repo_root: args.repo.clone(),
         skill: args.skill,
         message: None,
         operate: !args.no_loopflow,
-        work: args.work_task.map(loopflow::prompt::WorkContext::Task),
         surface: args.surface.unwrap_or_default(),
         docs: args.docs,
         files: Vec::new(),
@@ -86,4 +82,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("{prompt}");
 
     Ok(())
+}
+
+#[cfg(test)]
+#[ctor::ctor(unsafe)]
+fn initialize_test_build() {
+    loopflow_execution::test_support::isolate_from_the_developers_machine();
+    loopflow::build_info::initialize();
 }

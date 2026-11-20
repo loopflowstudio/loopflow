@@ -40,10 +40,6 @@ enum MockWaveFixture {
         return raw.flatMap(DetailState.init(rawValue:)) ?? .loading
     }
 
-    /// The failure a mock `error` state reports — a plausible offline reason,
-    /// never a raw stack. `WaveDetailReading` frames it as the disclosed footer.
-    static let refreshError = RegistryQueryError("the local registry is unreachable")
-
     /// The stable list, one Wave per lens state: green (a live body), red
     /// (stopped with active work), black (off and clean), plus a child Wave
     /// (parent set) to exercise future-ancestry row indentation.
@@ -94,15 +90,7 @@ enum MockWaveFixture {
     /// affordance stays on screen only while awaiting). Pure so the screenshot
     /// states are covered without launching the app.
     static func detailReading(state: DetailState) -> (reading: WaveDetailReading, awaitingFirstRead: Bool) {
-        var reading = WaveDetailReading()
-        switch state {
-        case .loading:
-            reading.clear()
-            return (reading, true)
-        case .error:
-            reading.recordFailure(refreshError)
-            return (reading, false)
-        }
+        (WaveDetailReading(), state == .loading)
     }
 
     static let detailJSON = #"""
@@ -183,8 +171,8 @@ enum MockWaveFixture {
             "items": [
               {
                 "id": "project-1",
-                "linear_id": null,
-                "sync": {"connected": false, "changes": []},
+                "tracker_id": null,
+                "sync": {"actions": []},
                 "slug": "release-feedback",
                 "name": "current",
                 "workflow": "incident",
@@ -214,7 +202,7 @@ enum MockWaveFixture {
                   "name": "Surface nightly failures",
                   "description": "Surface one focused failure.",
                   "rank": 1,
-                  "state": "unstarted", "completed_at": null, "due_date": null, "acquisition": {"state": "available", "observed_at": null}, "linear_id": null, "sync": {"connected": false, "changes": []},
+                  "state": "unstarted", "completed_at": null, "due_date": null, "tracker_state": {"state": "available", "synced_at": null}, "tracker_id": null, "sync": {"actions": []},
                   "assignee": "user-1"
                 },
                 "reference": {
@@ -233,7 +221,7 @@ enum MockWaveFixture {
                   "provider": "codex",
                   "owner": {"person": "Jack Heart", "person_id": null, "machine": {"id": null, "label": null}}
                 },
-                "graph_name":"feature","graph_source":"wave","latest_graph_process":null,"execution":null,"run_control":{"unavailable":null},
+                "graph_name":"feature","graph_source":"wave","latest_graph_process":null,"execution":null,"lifecycle":"unstarted","selection_states":["unstarted","backlog"],"run_control":{"unavailable":null},
                 "ship_control":{"unavailable":null},"shipping":null,
                 "next_move": {
                   "owner": "user",
@@ -301,7 +289,7 @@ enum MockWaveFixture {
                   "name": "Classify publish failures",
                   "description": "",
                   "rank": 2,
-                  "state": "unstarted", "completed_at": null, "due_date": null, "acquisition": {"state": "available", "observed_at": null}, "linear_id": null, "sync": {"connected": false, "changes": []},
+                  "state": "unstarted", "completed_at": null, "due_date": null, "tracker_state": {"state": "available", "synced_at": null}, "tracker_id": null, "sync": {"actions": []},
                   "assignee": null
                 },
                 "reference": {
@@ -309,7 +297,7 @@ enum MockWaveFixture {
                   "workspace": null
                 },
                 "runtime": null,
-                "graph_name":"feature","graph_source":"wave","latest_graph_process":null,"execution":null,"run_control":{"unavailable":null},
+                "graph_name":"feature","graph_source":"wave","latest_graph_process":null,"execution":null,"lifecycle":"unstarted","selection_states":["unstarted","backlog"],"run_control":{"unavailable":null},
                 "ship_control":{"unavailable":null},"shipping":null,
                 "next_move": {
                   "owner": "wave",

@@ -58,12 +58,17 @@ Loopflow chooses an automation floor for headless work only:
 
 - Non-interactive Codex runs get `workspace-write` and approval policy `never`.
 - Non-interactive Claude runs skip permission prompts.
-- Non-interactive OpenCode keeps its configured permissions; Loopflow answers
-  each permission ask for the running turn.
+- Non-interactive OpenCode runs with `--auto`: it approves every permission its
+  configuration does not deny.
 - Pi uses its own tool policy and credentials; it provides no built-in sandbox.
 - More-permissive vendor configuration remains more permissive.
 - Less-permissive vendor configuration is raised to this floor; Claude prints a
   warning when that happens.
+
+A headless run in its Task's checkout (`lf task run`, `lf ship`, `lf -b <skill>`
+there) goes past the floor: it runs as `yolo` on all four harnesses and can
+write anywhere the OS user can. Loopflow does not confine a Task to its
+checkout.
 
 Interactive launches send no permission settings, so the vendor's own
 configuration and approval prompts apply. `yolo: true` selects the vendor's full
@@ -80,46 +85,30 @@ is ready to ship. `lf pr submit` leaves the exact-head merge to a person;
 whether a PR merged. Release authority is separate and depends on the target's
 configured publisher workflow and credentials.
 
-## Understand account authority over SSH
+## Understand credential authority over SSH
 
 ```bash
 lf machine add mini
 lf machine connect mini github
-lf machine connect mini codex work@example.com
 lf machine connect mini opencode
 lf machine connect mini linear
-lf --machine mini --account codex=work@ implement
+ssh mini                         # sign in with the native Claude/Codex client
+lf --machine mini -a codex implement
 ```
 
-Only explicitly added machines receive credentials. OpenSSH checks the known host
-key and Loopflow checks the saved machine identity before transfer. Adding or
-checking a machine does not sign it in. Connecting runs in the foreground; a
-headless caller needing browser approval stops with the connect command.
+Claude and Codex use destination-native authentication. A Machine can keep its
+own login; unattended work can receive explicitly named environment variables
+or home files through [named forwarding](subscriptions.md#remote-machines-and-rentals).
+Loopflow does not choose a login, interpret those files or refresh them. Existing
+destination files are retained. Missing authentication produces the native
+client's error.
 
-Claude and Codex receive a fresh login minted in a private laptop directory,
-not the laptop's existing refresh credential. Linear receives a fresh OAuth grant.
-An OpenCode Console login gets a fresh device grant in a private laptop directory,
-checked to be the same OpenCode account; an OpenCode API key has no grant and is
-copied, like a GitHub token. OpenCode Zen must accept either before installation;
-it names no owner, so an API key's owner is not verified.
-Each login is checked against the intended provider identity before installation.
-GitHub receives gh's selected token through `gh auth login --with-token
---insecure-storage`; gh configures its HTTPS Git credential helper. Existing
-matching logins are retained and unrelated accounts remain.
-
-Credential bytes travel through SSH stdin. They never enter command arguments,
-exported environment variables, command records or diagnostic output. Native files
-are installed atomically with owner-only permissions. The target and other code
-running as that OS user can read them, just as after a normal login. Trust the
-remote OS account with the account's refresh authority.
-
-SSH provider launches run in the target's shared provider home, switched to the
-selected stored login; without a Keychain login there, Claude keeps it in a
-file. An owned target refreshes its own login. A rental holds only a Claude
-access token, which the laptop refreshes from a login it keeps for rentals and
-sends again before it expires, never while a Session runs. Neither depends on
-an origin broker or SSH-forwarded socket.
-Local shared-account behavior remains described in [subscriptions](subscriptions.md).
+Service credential transfer remains explicit. OpenSSH checks the known host key
+and Loopflow checks the saved Machine identity before transfer. Linear receives a
+fresh OAuth grant. OpenCode Console uses a fresh device grant; an OpenCode API
+key is copied, like a GitHub token. Trust the destination OS user with any
+credential installed there. Credential bytes travel through SSH stdin, never
+command arguments or diagnostic output. Native files use owner-only permissions.
 
 Linear credentials in SQLite are encrypted. The encryption key lives in an
 owner-only `provider-token.key` file. An existing platform key is retained before
@@ -128,16 +117,19 @@ encrypted credentials. Unlock that Keychain once to retain its key. Subsequent
 SSH use reads the private file. A fresh credential-free machine can create its
 own file key without an unlocked Keychain.
 
-SSH agent forwarding remains opt-in with `lf --machine <machine> --forward-agent`. Arbitrary
-Doppler secret exports and automatic ambient-token forwarding are removed. Set up
-other services on the target explicitly. No Doppler master credential is sent.
+SSH agent forwarding remains opt-in with `lf --machine <machine> --forward-agent`.
+Automatic ambient-token forwarding is disabled. Only variables and home files
+named in personal `forward` settings are sent; resolve variable values from the
+initiator's environment or Doppler. Names, rather than values, belong in settings.
+Do not name a broad Doppler credential when a scoped service token is sufficient.
 
 ## Keep client access separate from Machine logins
 
 The local Loopflow server accepts the same OS user through a private Unix socket.
-It exposes existing Work operations and bridges views of held terminals; the
-server still grants input control. A connection or reconnect does not give a viewer the
-right to replace another viewer's claim.
+It exposes existing Work operations and bridges views of held terminals. Any
+connection the server admits to a held terminal can type into it: access is
+granted per person and Machine, not per view, and there are no input claims to
+take or hold.
 
 Do not expose this socket through a network proxy: the proxy's local identity
 cannot authenticate a remote client. Authenticated phone access is separate
@@ -157,7 +149,7 @@ provider evidence under `$LF_HOME/runs/`. Bundle directories are owner-only
 (`0700`) and artifact files are `0600`. Provider or tool output can contain
 sensitive material, so treat the Machine store and payloads as sensitive even though it is
 local. The bundles are not uploaded to Linear, GitHub, or another Loopflow
-Machine. Reading another Machine with `lf --machine <machine-id> history list` executes the read on
+Machine. Reading another Machine with `lf --machine <machine-id> session history` executes the read on
 that machine.
 
 ## Keep bridge credentials private

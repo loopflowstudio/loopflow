@@ -1,7 +1,7 @@
 use std::path::Path;
 use std::process::{Command, Output};
 
-use loopflow::store::{open_ephemeral_store, StorageConfig};
+use loopflow_execution::store::{open_ephemeral_store, StorageConfig};
 use loopflow_test_support::TestRepo;
 use serde_json::Value;
 
@@ -53,7 +53,7 @@ fn default_git_plan_is_the_shared_main_ref() {
     initialize(home.path());
     let status: Value =
         serde_json::from_str(&run(repo.path(), home.path(), &["status", "--json"])).unwrap();
-    assert_eq!(status["transport"], "git");
+    assert_eq!(status["tracker"], "git");
     assert_eq!(
         status["destinations"][0]["reference"],
         "refs/loopflow/planning/shared/main"
@@ -77,7 +77,7 @@ fn personal_git_is_explicit_and_key_recovery_selects_the_same_ref() {
     initialize(right.path());
     let status: Value =
         serde_json::from_str(&run(repo.path(), left.path(), &["status", "--json"])).unwrap();
-    assert_eq!(status["transport"], "git");
+    assert_eq!(status["tracker"], "git");
     let key = run(repo.path(), left.path(), &["key"]);
     assert!(uuid::Uuid::parse_str(&key).is_ok());
     run(repo.path(), right.path(), &["key", "--recover", &key]);
@@ -121,7 +121,7 @@ fn repository_selects_shared_git_or_linear_without_manual_enrollment() {
     .unwrap();
     let status: Value =
         serde_json::from_str(&run(repo.path(), home.path(), &["status", "--json"])).unwrap();
-    assert_eq!(status["transport"], "linear");
+    assert_eq!(status["tracker"], "linear");
     assert_eq!(status["destinations"], serde_json::json!([]));
     let refs = Command::new("git")
         .current_dir(repo.path())
@@ -169,9 +169,11 @@ fn unavailable_linear_saves_locally_without_publishing_a_git_plan() {
         .unwrap();
     assert_eq!(title, "Buffered follow-up");
     assert_eq!(
-        conn.query_row("SELECT count(*) FROM planning_destinations", [], |r| r
-            .get::<_, i64>(0))
-            .unwrap(),
+        conn.query_row("SELECT count(*) FROM git_tracker_destinations", [], |r| r
+            .get::<_, i64>(
+            0
+        ))
+        .unwrap(),
         0
     );
     assert_eq!(
@@ -205,10 +207,7 @@ fn git_checkout_miss_does_not_fall_back_to_retained_linear_bindings() {
     let output = invoke_lf(repo.path(), home.path(), &["checkout", "MISSING-1"]);
     assert!(!output.status.success());
     let error = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        error.contains("not found in selected Git planning"),
-        "{error}"
-    );
+    assert!(error.contains("not found in the Git tracker"), "{error}");
     let conn = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     assert_eq!(
         conn.query_row("SELECT count(*) FROM tasks", [], |row| row.get::<_, i64>(0))
@@ -216,7 +215,7 @@ fn git_checkout_miss_does_not_fall_back_to_retained_linear_bindings() {
         0
     );
     assert_eq!(
-        conn.query_row("SELECT count(*) FROM pm_items", [], |row| row
+        conn.query_row("SELECT count(*) FROM tracker_items", [], |row| row
             .get::<_, i64>(0))
             .unwrap(),
         0

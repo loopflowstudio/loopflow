@@ -72,9 +72,9 @@ public struct ServerMessageOrder {
 private extension ServerMessage {
     var requestID: String? {
         switch self {
-        case .response(let id, _, _), .reading(let id, _, _), .bulk(let id, _, _), .ended(let id): id
+        case .response(let id, _, _, _), .reading(let id, _, _), .bulk(let id, _, _), .ended(let id): id
         case .event(let id, _, _): id
-        case .error(let id, _, _, _): id
+        case .error(let id, _, _, _, _): id
         case .welcome, .status, .admitted, .bridged: nil
         }
     }

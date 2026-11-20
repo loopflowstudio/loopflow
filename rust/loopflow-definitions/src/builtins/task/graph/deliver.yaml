@@ -1,0 +1,5 @@
+description: Learn from what people said, gate the branch, then land it and stay until it merges.
+steps:
+- reflect
+- gate
+- cmd: land --wait-and-fix

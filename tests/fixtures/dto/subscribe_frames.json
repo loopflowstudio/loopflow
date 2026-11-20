@@ -13,6 +13,11 @@
           "items": [],
           "truncated": false
         }
+      },
+      "work": null,
+      "read_at": {
+        "planning": 12,
+        "sessions": 41
       }
     }
   },
@@ -192,15 +197,19 @@
               "unavailable": [
                 "No primary Session is recorded",
                 "Recorded execution location is unavailable"
-              ],
-              "face": null,
-              "pane_revision": null
+              ]
             }
           ],
           "name": null,
-          "pinned": false
+          "pinned": false,
+          "viewer": null
         }
-      ]
+      ],
+      "work": null,
+      "read_at": {
+        "planning": 12,
+        "sessions": 41
+      }
     }
   },
   {
@@ -209,7 +218,12 @@
     "frame": {
       "answers": 7,
       "unavailable": null,
-      "body": []
+      "body": [],
+      "work": null,
+      "read_at": {
+        "planning": 12,
+        "sessions": 41
+      }
     }
   },
   {
@@ -218,7 +232,12 @@
     "frame": {
       "answers": 7,
       "unavailable": "Task LOO-1 is not registered",
-      "body": null
+      "body": null,
+      "work": null,
+      "read_at": {
+        "planning": 12,
+        "sessions": 41
+      }
     }
   },
   {
@@ -230,17 +249,11 @@
       "body": {
         "truncated": false,
         "items": []
-      }
-    }
-  },
-  {
-    "read": "lf monitor ps --json --subscribe",
-    "part": "activity",
-    "frame": {
-      "answers": 7,
-      "unavailable": null,
-      "body": {
-        "nodes": []
+      },
+      "work": null,
+      "read_at": {
+        "planning": 12,
+        "sessions": 41
       }
     }
   },
@@ -254,10 +267,8 @@
         "sync": null,
         "task": null,
         "project": null,
-        "observed_at": null,
         "plan_error": null,
         "plan_stale": false,
-        "plan_state": "available",
         "execution": null,
         "ownership": null,
         "overview": {
@@ -273,19 +284,34 @@
           "refresh_error": null,
           "conflicts": {}
         },
-        "row": null
+        "row": null,
+        "tracker_state": {
+          "state": "available",
+          "synced_at": null
+        }
+      },
+      "work": null,
+      "read_at": {
+        "planning": 12,
+        "sessions": 41
       }
     }
   },
   {
     "read": "lf planning status --json --subscribe",
-    "part": "peer_planning",
+    "part": "git_destinations",
     "frame": {
       "answers": 7,
       "unavailable": null,
       "body": {
-        "transport": "git",
-        "destinations": []
+        "tracker": "git",
+        "destinations": [],
+        "actions": []
+      },
+      "work": null,
+      "read_at": {
+        "planning": 12,
+        "sessions": 41
       }
     }
   }

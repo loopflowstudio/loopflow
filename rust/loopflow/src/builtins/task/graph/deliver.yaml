@@ -1,4 +1,0 @@
-description: Gate the branch, then land it and stay until it merges.
-steps:
-- gate
-- cmd: land --wait-and-fix

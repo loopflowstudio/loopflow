@@ -16,7 +16,7 @@ enum RegistryQueryLocal {
             let answer = try await CreationSubmissions.shared.submit(change, requestID: requestID)
             do {
                 switch change {
-                case .taskCreate: _ = try RegistryQuery.decode(TaskCreateReceipt.self, from: answer)
+                case .taskCreate: _ = try RegistryQuery.decode(TaskCreated.self, from: answer)
                 case .sessionNew: _ = try RegistryQuery.decode(SessionRecord.self, from: answer)
                 default: break
                 }
@@ -24,6 +24,8 @@ enum RegistryQueryLocal {
             } catch { throw SubmittedCreationError(requestID: requestID, cause: error) }
         default: return try await ServerClient.write(change)
         }
+    }, change: { change, requestID in
+        try await ServerClient.change(change, requestID: requestID)
     }, watchFiles: { args, cwd in
         // Only a remote Task's files: `lf --machine … task watch-files` over SSH.
         try await Task.detached(priority: .userInitiated) {

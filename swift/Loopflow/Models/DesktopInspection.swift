@@ -32,7 +32,7 @@ public struct DesktopChange: Codable, Sendable, Equatable {
 
 public struct DesktopOpening: Codable, Sendable, Equatable {
     public let revision: String
-    public enum Status: String, Codable, Sendable { case opening, usable, elsewhere, failed }
+    public enum Status: String, Codable, Sendable { case opening, usable, failed }
     public let url: String
     public let status: Status
     public let reason: String?
@@ -376,16 +376,35 @@ public struct DesktopSessionInspection: Codable, Sendable, Equatable {
     /// The Session reader currently supplies no observation timestamp. Do not
     /// substitute UI inspection time or the provider's generation for freshness.
     public let observedAt: String?
-    public let actions: [SessionAction]?
+    public let action: SessionAction?
 
     public init(id: String, machineId: String?, reading: String, reason: String?,
-                observedAt: String?, actions: [SessionAction]?) {
+                observedAt: String?, action: SessionAction?) {
         self.id = id; self.machineId = machineId; self.reading = reading; self.reason = reason
-        self.observedAt = observedAt; self.actions = actions
+        self.observedAt = observedAt; self.action = action
     }
     enum CodingKeys: String, CodingKey {
-        case id, reading, reason, actions
+        case id, reading, reason, action
         case machineId = "machine_id", observedAt = "observed_at"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(String.self, forKey: .id)
+        machineId = try values.decodeIfPresent(String.self, forKey: .machineId)
+        reading = try values.decode(String.self, forKey: .reading)
+        reason = try values.decodeIfPresent(String.self, forKey: .reason)
+        observedAt = try values.decodeIfPresent(String.self, forKey: .observedAt)
+        action = try values.decode(SessionAction?.self, forKey: .action)
+    }
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(id, forKey: .id)
+        try values.encode(machineId, forKey: .machineId)
+        try values.encode(reading, forKey: .reading)
+        try values.encode(reason, forKey: .reason)
+        try values.encode(observedAt, forKey: .observedAt)
+        try values.encode(action, forKey: .action)
     }
 }
 

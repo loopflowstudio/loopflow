@@ -81,13 +81,12 @@
       "rank": 0,
       "state": "unstarted",
       "sync": {
-        "connected": false,
-        "changes": []
+        "actions": []
       },
-      "linear_id": null,
-      "acquisition": {
+      "tracker_id": null,
+      "tracker_state": {
         "state": "available",
-        "observed_at": null
+        "synced_at": null
       },
       "repo_id": "repo_00000000000040008000000000000001",
       "repo": "/repo",
@@ -95,6 +94,11 @@
       "wave_id": null
     },
     "graph_name": "code",
-    "graph_source": "builtin"
+    "graph_source": "builtin",
+    "lifecycle": "unstarted",
+    "selection_states": [
+      "unstarted",
+      "backlog"
+    ]
   }
 }

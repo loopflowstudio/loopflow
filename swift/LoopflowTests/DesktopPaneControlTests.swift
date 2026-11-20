@@ -137,7 +137,7 @@ struct DesktopPaneControlTests {
                 resolution: WorkSelectionResolution(attention: [], members: members, unavailable: []),
                 arrangement: WorkArrangement(order: members, hidden: [], mode: .touched),
                 projection: WorkArrangementProjection(visible: members, suppressed: []), slots: DashboardSlotLayout(root: .slot(0)),
-                contents: ([a, b] + also).map { fixtureViewContent(work: $0, title: $0.id) })
+                contents: ([a, b] + also).map { fixtureViewContent(work: $0, title: $0.id) }, viewer: nil)
         }
         let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("No execution allowed") }, repoPath: "/repo")
         let registry = SessionsWorkspaceRegistry(localMachineId: identity.machineId)
@@ -181,14 +181,17 @@ struct DesktopPaneControlTests {
         #expect(throws: DesktopArgumentError.self) { try perform("navigate.sideways") }
         #expect(try perform("next").destination == .entered(from: .workingTasks, work: a))
         #expect(try perform("previous").destination == .entered(from: .workingTasks, work: b))
+        // The listed positions are the ones ⌘1–9 select.
+        let listed = try #require(router.inspect().windows.first).list
+        #expect(listed.map(\.position) == [1, 2])
+        #expect(listed.map(\.work) == [a, b])
         // A Wave view's Tasks are tiles too; back returns to the Wave.
         model.select(.wave(id: wave))
         #expect(try perform("enter", ["tile": "b"]).destination == .entered(from: .wave(wave), work: b))
         #expect(try perform("back").destination == .work(waveKey))
         #expect(throws: DesktopTargetError.self) { try perform("enter", ["tile": "absent"]) }
         let state = try #require(router.inspect().windows.first)
-        #expect(state.list.map(\.position) == [1, 2])
-        #expect(state.list.map(\.work) == [a, b])
+        #expect(state.list.map(\.work.id) == model.sidebarTaskIDs)
         #expect(state.actions.map(\.name) == DesktopAction.all.map(\.name))
         #expect(throws: DesktopTargetError.self) {
             try router.perform(DesktopActionRequest(repository: repository, window: UUID().uuidString, pane: nil, action: "back", args: [:]))
@@ -212,7 +215,7 @@ struct DesktopPaneControlTests {
             resolution: WorkSelectionResolution(attention: [], members: members, unavailable: []),
             arrangement: WorkArrangement(order: members, hidden: [], mode: .touched),
             projection: WorkArrangementProjection(visible: members, suppressed: []), slots: DashboardSlotLayout(root: .slot(0)),
-            contents: keys.map { fixtureViewContent(work: $0, title: $0.id) })
+            contents: keys.map { fixtureViewContent(work: $0, title: $0.id) }, viewer: nil)
         let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("No execution allowed") }, repoPath: "/repo")
         let registry = SessionsWorkspaceRegistry(localMachineId: identity.machineId)
         model.bindWorkspaces(registry, repository: repository)

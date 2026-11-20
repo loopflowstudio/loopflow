@@ -3,10 +3,8 @@
 `lf` is the API agents call to launch, steer, and observe other agents. There
 is no SDK. The verbs are the same binary you use; every read surface takes
 `--json`; and every launched agent receives the
-launcher contract (`LOOPFLOW.md`) in its context. Work-associated launches also
-receive the `work` skill body. Read `lf help skill work` before using Task or
-Wave APIs in an existing conversation. Choose the commands and Skills that
-fit the requested work. Work context does not select a Graph or authorize Wave
+launcher contract (`LOOPFLOW.md`) in its context, which holds the Task model
+and its commands. Choose the commands and Skills that fit the requested work. Work context does not select a Graph or authorize Wave
 memory maintenance; the selected Loopflow Graph owns that procedure.
 
 ## Select the execution or client surface
@@ -25,9 +23,8 @@ lf session history show SESSION --instructions
 lf session history show SESSION --instructions --json
 ```
 
-The retained input records why launcher guidance, Work guidance and selected
-skills were supplied. It also records automatic opt-out, missing Work association,
-and deduplication when `work` was selected as a skill. Use `--input INPUT` to
+The retained input records why launcher guidance and selected skills were
+supplied. It also records automatic opt-out. Use `--input INPUT` to
 inspect an earlier input belonging to that Session. These are recorded decisions,
 not a reconstruction from the repository's current state. Old captures may have
 less detailed reasons; missing captures report unavailable evidence. Native
@@ -52,7 +49,7 @@ kind as the Mac app. It may inspect status and start a Session when the person
 asks it to converse with a Wave.
 
 A Loopflow-launched Wave or Task agent is an internal participant.
-It receives `LOOPFLOW.md` and work guidance; typed Work observations carry durable coordination,
+It receives `LOOPFLOW.md`; typed Work observations carry durable coordination,
 and headless failures remain visible in ordinary output and recorded outcomes.
 
 A Wave directing a task is the internal case:
@@ -75,15 +72,18 @@ conversation and Graph attributed to it is part of its work. The Task has one
 captured graph and position, advanced by `lf task run` and `lf ship`; independent
 Graph runs do not move that position.
 
-Process records an actual lf command process. LfSession keeps a continuable
-conversation, whether interactive or headless. A Graph is one lf process and
-the step processes it starts. Provider turns and retries remain history
-inside the conversation; they do not create another generic execution object.
+LfSession keeps a continuable conversation, whether interactive or headless,
+and records the lf attached to it and the agent it runs: pid, OS start time and
+exit. A Graph run is one lf process and the steps it starts; the run and each
+step record their own pid, start, end, exit code and error. No table records lf
+commands themselves: one an agent issues is a tool call in its transcript.
+Alive means the OS still has the recorded pid with the recorded start time.
+Provider turns and retries remain history inside the conversation; they do not
+create another generic execution object.
 
-A child command records its causal parent and, when issued by an agent, its
-calling conversation and AgentProcess. That evidence grants neither
-process-control authority nor permission to move a Graph cursor. An attachment
-handoff retains conversation identity while fencing the old writer.
+A recorded pid grants neither process-control authority nor permission to move
+a Graph cursor. Each attachment starts a new agent with a fresh token, which
+fences out the old writer; the conversation keeps its identity.
 Passive observation acquires no claim. See the [contract and cutover status](dev/reference-cutover.md#cutover-status)
 for the remaining reader, wire and lifecycle conversion.
 
@@ -95,6 +95,7 @@ lf task run INF-123                    # place an existing Task, start its Graph
 lf task create --wave <wave> --title "add passkeys"  # file the issue; run it with `lf task run`
 pbpaste | lf task create --wave <wave>               # report from stdin; first line is the title
 lf task run INF-124 --stack-on INF-123 # dependent work before the parent lands
+lf sync INF-123                        # stack the Task you are in on INF-123
 ```
 
 The contract every agent runs under: **delegation must make the problem
@@ -116,6 +117,12 @@ in the parent's checkout to include them. Scratch follows the same Git
 merge behavior as other content, including edits to existing notes. The child's PR targets the parent's branch until
 merge, then `lf sync` merges main using the recorded fork as the comparison base.
 Child edits survive the parent's squash landing without replay.
+
+To build on another open Task from the Task you are already in, run
+`lf sync <its ID>`: it records the stack, moves your PR's base to the parent's
+branch and merges it. `lf sync main` undoes it. Never `git merge` another
+Task's branch or `gh pr edit --base`; lf reads neither, and `lf pr publish`
+reports the disagreement instead of fixing it.
 
 ## Run a child agent
 
@@ -144,7 +151,7 @@ involved. A finished
 A child does the work itself and starts no children unless its brief says to.
 
 A child job that recurs belongs in a skill under `.lf/skills/`, so the next
-child starts from it; `lf skill customize NAME` copies a builtin there to edit.
+child starts from it; `lf skill customize NAME` writes an extension of a builtin there to edit.
 Work that ends in its own PR is a Task; wait for it with `lf task wait`.
 
 ## Steer
@@ -194,9 +201,9 @@ Loopflow never guesses signal authority from a conversation ID, Work ID, PID, or
 tmux name. Wave operations are ordinary finite conversations; they have no long-running
 process to interrupt, resume, wait for, or attach to.
 
-Work survives its provider process. A Graph whose process died leaves its Processes
-as history; nothing resumes it. Inspect
-`lf task status ISSUE` and `lf process show ID --json`, then launch
+Work survives its provider process. A Graph whose process died stays as history,
+ended with an unknown result; nothing resumes it. Inspect
+`lf task status ISSUE` and `lf graph show RUN_ID --json`, then launch
 fresh work with `lf task run INF-123`. The Task keeps its durable
 direction, worktree and PR. `task run` never reopens terminal Work; create a
 new Task for new work.
@@ -249,17 +256,16 @@ lf wave status <wave> --json           # hierarchy plus one Rust-derived metric_
 lf wave show --json                      # every Wave repeats that required portfolio envelope
 lf session history --task INF-123 --json
 lf session usage --wave parser --json
-lf session history list --task INF-123 --json
 lf session usage --days 30 --json   # recorded provider usage, newest first
 lf session usage --task INF-123 --json # the same evidence drilled to one Task
 lf session usage --weekly --json   # context cost and turn time by week since 2026-09-30
 lf session usage --binds --json    # Task and Wave totals under prospective and post-hoc bind attribution
-lf process list --json                # one OS-live process frame
+lf graph list --runs --state current --json   # live Graph runs, each OS-confirmed
 lf session list --json --select id,title,state   # only those fields of each Session
 ```
 
 `lf wave list` is the registry plane, `lf wave status` is the focused operational view,
-and `lf wave show` joins the current plan to that runtime truth.
+and `lf wave show` joins the Wave's plan to that runtime truth.
 `lf session history` is the ordered durable history; each item reuses `WorkRef` and
 carries one typed fact with its execution, Task PR, or Steer evidence. Agents consume
 those projections; they do not rebuild the joins.
@@ -278,8 +284,7 @@ Loopflow launches receive a small launcher contract: work in the supplied
 checkout, follow the requested tools and repository conventions, and answer in
 the current Session. Standalone native skills retain their own guidance.
 
-Task- and Wave-associated launches also receive Work guidance. Read
-`lf help skill work` when entering Work APIs from an existing conversation.
-Association supplies context and ownership; the selected skill or Graph supplies
+The Task model and its commands are in that text, so every launch carries
+them. Association supplies context and ownership; the selected skill or Graph supplies
 the procedure. Keep repeatable instructions with that skill and repository rules
 in its agent guide.

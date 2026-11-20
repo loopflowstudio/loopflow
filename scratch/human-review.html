@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>LOO-986 human review</title>
+<style>
+  :root { color-scheme: light dark; --fg:#1a1a1a; --bg:#fdfdfc; --dim:#666; --line:#d8d8d4; --code:#f1f1ee; --yes:#1a7f37; --no:#b3261e; }
+  @media (prefers-color-scheme: dark) { :root { --fg:#e6e6e3; --bg:#161615; --dim:#9a9a96; --line:#3a3a37; --code:#222220; --yes:#57c26f; --no:#ff8a80; } }
+  body { font: 16px/1.5 -apple-system, system-ui, sans-serif; color: var(--fg); background: var(--bg); max-width: 60rem; margin: 2rem auto; padding: 0 1.2rem; }
+  h1 { font-size: 1.5rem; } h2 { font-size: 1.2rem; margin-top: 2.4rem; border-top: 1px solid var(--line); padding-top: 1.2rem; }
+  pre, code { font: 14px/1.45 ui-monospace, Menlo, monospace; background: var(--code); }
+  pre { padding: .8rem 1rem; overflow-x: auto; border-radius: 6px; } code { padding: .05rem .25rem; border-radius: 3px; }
+  table { border-collapse: collapse; width: 100%; } td, th { border-bottom: 1px solid var(--line); padding: .45rem .6rem; text-align: left; vertical-align: top; }
+  .yes { color: var(--yes); font-weight: 600; } .no { color: var(--no); font-weight: 600; } .dim { color: var(--dim); }
+  ol.q > li { margin-bottom: 1rem; } ol.q ol { list-style: lower-alpha; }
+</style>
+
+<h1>LOO-986: a pane's conversation starts from anywhere, says why it failed, and stays on its harness</h1>
+<p class="dim">PR <a href="https://github.com/loopflowstudio/loopflow/pull/1992">#1992</a>, branch at <code>0063fa68c0</code>, base <code>2750c9e0fb</code>, 2026-11-19. 28 files, +1026 −210. Written with nobody present; section 6 holds the questions that are still yours.</p>
+
+<h2>1. What changes for people</h2>
+<ul>
+  <li><b>A provider starts from wherever lf is started.</b> Desktop, the launchd server, a Rex or tmux pane, an SSH session: every <code>lf</code> appends seven tool directories to its own <code>PATH</code> first thing in <code>main</code>. No entry point carries its own repair any more.</li>
+  <li><b>A failed <code>lf open</code> says why.</b> The caller's <code>--json</code> <code>reason</code> and the text line hold lf's own error ("'claude' is not installed. …; retry the same command"). No <code>rex capture</code>. The pane still shows the error and waits for Enter.</li>
+  <li><b>Replaying a pane's command never moves the conversation.</b> The command names a harness only when the caller passed <code>-a</code>.</li>
+  <li><b>A cost:</b> a pane no longer gets the caller's <code>PATH</code>, so a tool reachable only through shell rc (Pi under nvm on this Machine) reads "not installed" in a launchd-started pane.</li>
+  <li>Also in the diff: <code>lf open --host tmux</code> works on tmux 3.7 (it opened nothing there, on main too), and <code>~/.opencode/bin</code> is a tool directory.</li>
+</ul>
+
+<h2>2. Product concepts beside code concepts</h2>
+<p class="dim">From <code>scratch/concept-review.html</code> (third pass, at <code>aa8b883529</code>; the one commit since is that review).</p>
+<table>
+  <tr><th>What a person knows</th><th>What the code has</th><th></th></tr>
+  <tr><td>"Open this conversation over there"</td><td><code>Resolved::resume_argv</code> → <code>lf session resume &lt;id&gt;</code></td><td class="yes">yes</td></tr>
+  <tr><td>"Move it to another harness"</td><td><code>-a</code> → <code>agent_override()</code> → <code>--agent</code></td><td class="yes">yes</td></tr>
+  <tr><td>"lf can find its tools"</td><td><code>os_process::TOOL_DIRS</code>, appended in <code>main</code>. Swift and the SSH snippet keep copies because they run before lf.</td><td class="yes">yes</td></tr>
+  <tr><td>"Why didn't it open?"</td><td>the receipt file; <code>answer_open</code>, <code>end_open</code>; first answer stands</td><td class="yes">yes</td></tr>
+  <tr><td>"It's open, I can type"</td><td><code>OpenStatus::Usable</code>, written when the provider process is spawned</td><td class="no">no</td></tr>
+  <tr><td>"Not installed"</td><td><code>which_command</code> over <code>PATH</code> + seven directories; said of Pi under nvm</td><td class="no">no</td></tr>
+  <tr><td>"The open failed, so nothing changed"</td><td><code>session resume --agent</code> records the move before the harness starts</td><td class="no">no</td></tr>
+</table>
+<p><b>Biggest mismatch: <code>usable</code>.</b> A provider that prints "No conversation found" and exits 1 at once is reported <code>usable</code>; the error is only in the pane. Fixing it means moving the acknowledgement from "process spawned" to a ready signal from each of four harnesses, with an answer for one that never gives it. That is where the provider's last words would be relayed. Its own Task; none is filed.</p>
+
+<pre>// rust/loopflow-execution/src/os_process.rs
+const TOOL_DIRS: [&amp;str; 7] = [
+    "~/.local/bin",
+    // OpenCode's installer puts it here and nowhere else.
+    "~/.opencode/bin",
+    "/opt/homebrew/bin",
+    "/opt/homebrew/sbin",
+    "/usr/local/bin",
+    "/usr/local/sbin",
+    "~/.cargo/bin",
+];
+
+// rust/loopflow/src/lf/commands/open.rs, resume_argv
+// Only the invocation's own choice: a recorded harness named here
+// would move the conversation back each time this command replays.
+if let Some(agent) = loopflow_execution::config::agent_override() {
+    argv.extend(["--agent".into(), agent]);
+}
+
+// rust/loopflow-execution/src/transport.rs
+fn answer_open(answer: &amp;str) {
+    let Some(path) = OPEN_RECEIPT.lock().expect("open receipt lock poisoned").take() else { return; };
+    let temporary = path.with_extension(std::process::id().to_string());
+    if std::fs::write(&amp;temporary, answer).is_ok() {
+        // Fails when another process answered first.
+        let _ = std::fs::hard_link(&amp;temporary, &amp;path);
+        let _ = std::fs::remove_file(&amp;temporary);
+    }
+}</pre>
+
+<h2>3. How to try it</h2>
+<p>No published build holds this branch, and the installed <code>lf</code> is main's. Build the branch and use it by absolute path, against a private home so the real store is untouched:</p>
+<pre>cd /Users/jack/src/loopflow.loo-986-a-pane-s
+cargo build -p loopflow --bin lf
+export LF_HOME=/tmp/lf-986 LF=$PWD/target/debug/lf     # then, inside a tmux pane:
+
+# 1. launchd's PATH starts the provider (USER is needed for Claude's Keychain login)
+env -i HOME=$HOME USER=$USER TERM=xterm-256color LF_HOME=$LF_HOME \
+  PATH=/usr/bin:/bin:/usr/sbin:/sbin $LF session resume &lt;session&gt;
+
+# 2. a failed open says why (Pi is only under nvm here)
+$LF open --task &lt;ID&gt; --tab --host tmux --json -a pi
+
+# 3. the pane command names no harness
+$LF open --session &lt;id&gt; --tab --host tmux --json     # then: tmux list-panes -a -F '#{pane_start_command}'</pre>
+<p class="dim">The private-Machine setup QA used is in <code>.lf/qa/native-conversations.md</code>.</p>
+
+<h2>4. What was checked, and what it showed</h2>
+<p class="dim">By hand in <code>scratch/qa.html</code>, two runs on 2026-11-19, the second at <code>815013de83</code>. Nothing was rerun for this page: the only commit since is a concept-review note.</p>
+<p><b>Provider missing, tmux</b> (<code>lf open --task 28a51a --tab --host tmux --json</code>, exit 1):</p>
+<pre>"host": "tmux",
+"destination": "%3",
+"status": "failed",
+"reason": "'claude' is not installed. Install it with `npm install -g @anthropic-ai/claude-code`, then open `claude` to sign in; retry the same command",</pre>
+<p>The pane:</p>
+<pre>Error: 'claude' is not installed. Install it with `npm install -g @anthropic-ai/claude-code`, then open `claude` to sign in.
+Conversation ended with an error. Correct the error above and retry lf open. Press Enter to close.</pre>
+<p><b>Other harnesses and hosts:</b> <code>-a codex</code> → <code>Codex config/read failed: codex CLI not found: codex; retry the same command</code>. Rex, <code>-a pi</code> → <code>'pi' is not installed. Install Pi 1.3 or later …; retry the same command</code>. Herdr as an agent tool call → Claude's reason; the conversation got no shim directory and no <code>VIRTUAL_ENV</code>.</p>
+<p><b>Launchd's <code>PATH</code>:</b> the <code>env -i</code> resume started real Claude Code, against a foreground server and against one registered under launchd. The provider's <code>PATH</code>:</p>
+<pre>/usr/bin:/bin:/usr/sbin:/sbin:/Users/jack/.local/bin:/Users/jack/.opencode/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/local/sbin:/Users/jack/.cargo/bin</pre>
+<p><b>Replay:</b> the pane's command was</p>
+<pre>env -u LF_AGENT_CALLER -u LF_AGENT_OVERRIDE 'LF_HOME=…' 'LF_OPEN_RECEIPT=…/receipt' /tmp/lf-qa-986/r2/a/bin/lf session resume d3e48d8605534fd8abaa478d23f5de4f</pre>
+<p>After <code>lf resume -a codex</code> elsewhere, typing it again attached to the Codex conversation: the store read <code>codex</code>, no <code>claude</code> process. <code>lf open … -a claude</code> then moved it back.</p>
+<p><b>Tests run:</b> <code>cargo test -p loopflow --test transport_tests a_launch_that_found_no_provider</code> and <code>-p loopflow-execution --lib open_receipt_tests</code> passed at <code>c8779a386c</code>; <code>os_process::</code> (44) and <code>tmux_</code> (1) passed; clippy clean on both crates.</p>
+
+<h3>Not checked</h3>
+<table>
+  <tr><td><b>CI's suites</b></td><td>Every test job on #1992 is <code>SKIPPED</code>: the PR conflicts with main. #1991 ("Reopen a Claude conversation that ended before Claude saved anything") and this branch both edit <code>rust/loopflow-execution/src/harness/native_session.rs</code>; one conflicted file, main is one commit ahead. The suites have never run on this change. This matters more than usual here: some twenty fixtures set <code>PATH=/usr/bin:/bin</code> to hide tools, and every <code>lf</code> now appends Homebrew, so on macOS a fixture that hid <code>gh</code> reaches a real one. Gate rebases and reads the first run, macOS job included.</td></tr>
+  <tr><td><b>The entry gate</b></td><td>An ordinary <code>lf open</code> names <code>~/.local/bin/lf</code>, which execs the installed build; the receipt is handed across by <code>carry_across_exec</code>. Unit-tested only, since <code>lf install</code> takes published builds. After the first one: <code>lf install --dev</code>, then from a tmux pane <code>lf open --task &lt;ID&gt; --tab --host tmux --json -a pi</code> must answer <code>failed</code> with Pi's reason, and a plain open <code>usable</code>. If the hand-off is wrong, every failed open reads "Conversation exited before attachment" again.</td></tr>
+  <tr><td><b>cmux, Desktop, systemd, SSH, the real Rex app</b></td><td>cmux is not installed; no app build was made; systemd and <code>remote_path()</code> need Linux or a remote; only a private Rex server was run, as the QA notes require.</td></tr>
+</table>
+
+<h2>5. Choices made on your behalf</h2>
+<table>
+  <tr><th>Chosen</th><th>Passed over</th></tr>
+  <tr><td>Repair <code>PATH</code> once in lf's <code>main</code>, for every lf process</td><td>The brief's idea, adding directories where a provider's <code>Command</code> is built: <code>gh</code>, <code>git</code> and the holder would still need the server's repair.</td></tr>
+  <tr><td><b>Append</b> the tool directories</td><td>Prepend, as <code>supervised_path</code> and Swift did. <code>remote_path()</code> for SSH now appends too (was prepended, <code>~/.cargo/bin</code> first), so a remote with a dev and a release <code>lf</code> gets its shell's order.</td></tr>
+  <tr><td>Drop the caller's <code>PATH</code> from the pane, as the brief asks</td><td>Carry it when the caller is a person; run the pane command through the login shell.</td></tr>
+  <tr><td>First answer to an opening stands; only the viewer and its launcher answer</td><td>Overwrite-last. The brief's idea of the wrapper writing stderr into the receipt: built as a relayed tail, then deleted, because nothing in the real product reached it.</td></tr>
+  <tr><td><code>LF_OPEN_RECEIPT</code> taken out of the environment at start and handed on by name (four places)</td><td>Leaving it ambient, where a failing <code>lf install server</code> child could answer for the opening.</td></tr>
+  <tr><td><code>--agent</code> only from <code>-a</code> or <code>LF_AGENT_OVERRIDE</code></td><td>—</td></tr>
+  <tr><td>tmux 3.7 fix and <code>~/.opencode/bin</code>, both outside the brief</td><td>Leaving tmux broken would have left the tmux acceptance unchecked.</td></tr>
+  <tr><td>The bare-<code>PATH</code> provider fixture returns early on a Machine with <code>claude</code> in a system tool directory</td><td>A stand-in that exits "not installed"; <code>HOME</code>-relative directories only.</td></tr>
+  <tr><td>The launcher's late "failed before attaching" log line left as on the base</td><td>Log only while the opening is unanswered.</td></tr>
+</table>
+
+<h2>6. Questions, still yours</h2>
+<ol class="q">
+  <li><b>Tools behind shell rc.</b> Pi under nvm reads "not installed" in a launchd-started pane.
+    <ol><li>Accept; add directories as they are missed (built).</li>
+    <li>Carry the caller's <code>PATH</code> when the caller is a person.</li>
+    <li>Run the pane command through the login shell.</li>
+    <li>Keep (a) but say "lf did not find 'pi' on its PATH".</li></ol></li>
+  <li><b><code>usable</code>.</b>
+    <ol><li>Stays "the provider was started" (built).</li>
+    <li>Becomes "the provider takes input", with its last words as the reason; its own Task.</li></ol></li>
+  <li><b>A failed <code>lf open -a &lt;harness&gt;</code>.</b>
+    <ol><li>Leaves the conversation moved (built).</li>
+    <li>Records the move only once the harness starts; its own Task.</li></ol></li>
+  <li><b>Sole installed harness.</b> With no agent preference and Claude missing, an open started OpenCode from <code>/opt/homebrew/bin</code> and answered <code>usable</code>. The rule is documented; the tool directories now make it apply under every <code>PATH</code>.
+    <ol><li>Fine (built).</li>
+    <li>A harness found only in a tool directory should not be picked silently.</li></ol></li>
+  <li><b>Failed panes pile up.</b> Each failed open leaves a pane waiting for Enter; an agent retrying four times left four.
+    <ol><li>Leave it; the pane is for a person (built).</li>
+    <li>Close the pane when the caller is an agent and the reason reached the receipt.</li></ol></li>
+  <li><b>Append vs prepend on a remote.</b> <code>remote_path()</code> now appends.
+    <ol><li>Append everywhere (built).</li>
+    <li>Keep <code>~/.cargo/bin</code> first on remotes so a dev <code>lf</code> wins.</li></ol></li>
+</ol>
+
+<h2>Standing in</h2>
+<p>All three "Done when" lines were seen working in the real product on tmux, Rex and Herdr, and the three mismatches are older than this change. Nothing promised is missing, so the change goes on to delivery. No reaction of yours is recorded here; questions 1–6 are open, and 2b and 3b have no Task filed.</p>
+</html>

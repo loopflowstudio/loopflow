@@ -27,3 +27,10 @@ shows them with numbered questions.
   roots matter exactly when `yolo: false`; dropping them when the launch skips
   permissions would remove the dialog, if bypass still reaches the main
   checkout without them (not probed). Left unchanged: it predates this branch.
+
+## From concept-review after build (2026-11-20)
+
+- **Recorded request key `skip_permissions` holds the `yolo` setting**, not
+  what the launch sent: a headless capture under `yolo: false` records
+  `false` though it skipped. Left as is; renaming changes the capture wire
+  shape and would be its own Task.

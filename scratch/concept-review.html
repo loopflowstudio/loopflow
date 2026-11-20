@@ -2,153 +2,82 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Concept review: yolo on by default (4bd948)</title>
+<title>Concept review: yolo on by default, as built (4bd948)</title>
 <style>
-  :root {
-    --bg: #fbfaf7; --fg: #1d1c1a; --muted: #6b6760; --line: #dedad2;
-    --card: #ffffff; --yes: #1f7a4a; --no: #b3341f; --prop: #2457b5;
-    --prop-bg: #eef3fc; --old-bg: #f6efe9; --code: #f1eee8;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #161614; --fg: #ece9e2; --muted: #9c978d; --line: #34322d;
-      --card: #1e1d1a; --yes: #5cc08a; --no: #ef7b62; --prop: #7da6f0;
-      --prop-bg: #1b2436; --old-bg: #2a211c; --code: #26241f;
-    }
-  }
-  body { background: var(--bg); color: var(--fg); font: 16px/1.55 ui-sans-serif, system-ui, -apple-system, sans-serif; margin: 0; }
-  main { max-width: 980px; margin: 0 auto; padding: 40px 24px 80px; }
-  h1 { font-size: 28px; margin: 0 0 6px; }
-  h2 { font-size: 20px; margin: 44px 0 12px; }
-  p.lede { color: var(--muted); margin: 0 0 24px; }
-  code { background: var(--code); padding: 1px 5px; border-radius: 4px; font: 13.5px ui-monospace, SFMono-Regular, Menlo, monospace; }
-  table { width: 100%; border-collapse: collapse; background: var(--card); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
-  th, td { text-align: left; vertical-align: top; padding: 10px 12px; border-bottom: 1px solid var(--line); font-size: 14.5px; }
-  th { font-weight: 600; }
-  tr:last-child td { border-bottom: 0; }
-  .yes { color: var(--yes); font-weight: 700; }
-  .no { color: var(--no); font-weight: 700; }
-  .tag { display: inline-block; font-size: 12px; font-weight: 600; padding: 1px 8px; border-radius: 999px; border: 1px solid currentColor; }
-  .tag.prop { color: var(--prop); }
-  .tag.old { color: var(--no); }
-  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-  .panel { border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; }
-  .panel.old { background: var(--old-bg); }
-  .panel.prop { background: var(--prop-bg); border-color: var(--prop); }
-  .panel h3 { margin: 0 0 8px; font-size: 16px; }
-  .callout { border-left: 4px solid var(--no); padding: 10px 16px; background: var(--card); margin: 12px 0; }
-  .grid4 td { text-align: center; font-weight: 600; }
-  .grid4 td:first-child, .grid4 th:first-child { text-align: left; }
-  .skip { color: var(--yes); }
-  .ask { color: var(--prop); }
-  .mixed { color: var(--no); }
-  pre { background: var(--code); padding: 12px 14px; border-radius: 6px; overflow-x: auto; font: 13.5px/1.5 ui-monospace, Menlo, monospace; }
-  ol.q li { margin-bottom: 14px; }
-  ol.q ol { list-style: lower-alpha; margin-top: 6px; }
-  @media (max-width: 720px) { .cols { grid-template-columns: 1fr; } }
+:root { --bg:#fbfaf7; --fg:#1d1c1a; --muted:#6b6760; --line:#dedad2; --card:#fff; --yes:#1f7a4a; --no:#b3341f; --prop:#2457b5; --prop-bg:#eef3fc; --old-bg:#f6efe9; --code:#f1eee8; }
+@media (prefers-color-scheme: dark) { :root { --bg:#161614; --fg:#ece9e2; --muted:#9c978d; --line:#34322d; --card:#1e1d1a; --yes:#5cc08a; --no:#ef7b62; --prop:#7da6f0; --prop-bg:#1b2436; --old-bg:#2a211c; --code:#26241f; } }
+body { background:var(--bg); color:var(--fg); font:16px/1.55 ui-sans-serif,system-ui,-apple-system,sans-serif; margin:0; }
+main { max-width:980px; margin:0 auto; padding:40px 24px 80px; }
+h1 { font-size:28px; margin:0 0 6px; } h2 { font-size:20px; margin:40px 0 12px; }
+p.lede { color:var(--muted); margin:0 0 24px; }
+code { background:var(--code); padding:1px 5px; border-radius:4px; font:13.5px ui-monospace,SFMono-Regular,Menlo,monospace; }
+table { width:100%; border-collapse:collapse; background:var(--card); border:1px solid var(--line); }
+th,td { text-align:left; vertical-align:top; padding:9px 12px; border-bottom:1px solid var(--line); font-size:14.5px; }
+.yes { color:var(--yes); font-weight:700; } .no { color:var(--no); font-weight:700; }
+.cols { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+.panel { border:1px solid var(--line); border-radius:8px; padding:14px 16px; }
+.panel.old { background:var(--old-bg); } .panel.prop { background:var(--prop-bg); border-color:var(--prop); }
+.panel h3 { margin:0 0 8px; font-size:16px; }
+.grid4 td { text-align:center; font-weight:600; } .grid4 td:first-child, .grid4 th:first-child { text-align:left; }
+.skip { color:var(--yes); } .ask { color:var(--prop); }
+pre { background:var(--code); padding:12px 14px; border-radius:6px; overflow-x:auto; font:13.5px/1.5 ui-monospace,Menlo,monospace; }
+.callout { border-left:4px solid var(--yes); padding:10px 16px; background:var(--card); margin:12px 0; }
+ol.q li { margin-bottom:14px; } ol.q ol { list-style:lower-alpha; margin-top:6px; }
+@media (max-width:720px) { .cols { grid-template-columns:1fr; } }
 </style>
 </head>
-<body>
-<main>
-
-<h1>yolo on by default: do the concepts line up?</h1>
-<p class="lede">Task 4bd948. Area reviewed: every place lf decides whether an agent asks permission, across Claude, Codex, OpenCode, Pi and Antigravity, attended and unattended. Not just the default literal: once it flips, everything else in that area only runs under a written <code>yolo: false</code>, so its meaning is the real design question.</p>
+<body><main>
+<h1>yolo on by default: do the concepts line up, as built?</h1>
+<p class="lede">Task 4bd948, reviewed at <code>d9037753f4</code> against base <code>660240716b</code>. Area: every place lf decides whether an agent asks permission, on Claude, Codex, OpenCode, Antigravity and Pi, attended and unattended. The earlier page reviewed the plan; this one reviews the code with the whole change in it.</p>
 
 <h2>What a person sees</h2>
-<p>One setting and one fact about the launch: is someone there?</p>
 <table class="grid4">
-  <tr><th></th><th>attended<br><small>lf, lf &lt;skill&gt;, task open, resume</small></th><th>unattended<br><small>lf -b, Task steps, auto, commit/PR text</small></th></tr>
-  <tr><td>before: unset</td><td class="ask">vendor prompts</td><td class="mixed">Claude skips · Codex workspace-write (full access in a Task checkout) · OpenCode --auto</td></tr>
-  <tr><td><span class="tag prop">proposed</span> unset / true</td><td class="skip">skips</td><td class="skip">skips</td></tr>
-  <tr><td><span class="tag prop">proposed</span> <code>yolo: false</code></td><td class="ask">vendor prompts; lf sends nothing</td><td class="skip">skips</td></tr>
+<tr><th></th><th>attended<br><small>lf, lf &lt;skill&gt;, task open, resume</small></th><th>unattended<br><small>lf -b, Task steps, auto, commit/PR text</small></th></tr>
+<tr><td><code>yolo</code> unset or true</td><td class="skip">skips</td><td class="skip">skips</td></tr>
+<tr><td><code>yolo: false</code></td><td class="ask">vendor's own prompts; lf sends nothing</td><td class="skip">skips</td></tr>
 </table>
-<pre>skips permissions  =  yolo  ||  nobody is attending</pre>
+<pre>AgentConfig::skips_permissions(mode) = self.yolo || mode == Mode::Headless     // agent/mod.rs</pre>
+<p>QA (<code>scratch/qa.html</code>) saw all four cells on all four harnesses, real Claude asking under <code>yolo: false</code> with a non-bypass vendor mode, and real headless Codex under <code>yolo: false</code> reaching <code>example.com</code> with <code>danger-full-access</code> + <code>never</code>.</p>
 
 <h2>Product concepts and code concepts</h2>
 <table>
-  <tr><th>Product concept</th><th>Code today</th><th>Lines up?</th><th>What is wrong</th></tr>
-  <tr><td>The <code>yolo</code> setting</td><td><code>config.yolo</code> → <code>AgentConfig.skip_permissions</code></td><td class="yes">yes</td><td>One row in <code>catalog.rs:276</code>, copied at four launch sites, none with its own default.</td></tr>
-  <tr><td>Whether someone is there</td><td><code>LaunchKind::mode()</code>; but also <code>stream</code> (Claude), <code>headless</code> (Codex), <code>!is_interactive &amp;&amp; !cli.context</code> (run.rs), <code>batch</code> (session.rs)</td><td class="no">no</td><td>One idea under four names, computed in four places.</td></tr>
-  <tr><td>"Don't stall when nobody's there"</td><td><code>claude_skip_permissions</code>, <code>codex_permission_policy</code>, OpenCode <code>--auto</code>, Antigravity flag</td><td class="no">no</td><td>One rule written once per harness, with different outcomes: Claude bypasses, Codex gets a sandbox floor that reads <code>~/.codex/config.toml</code> and raises it.</td></tr>
-  <tr><td>(none)</td><td>Task-checkout rule: <code>is_task_checkout</code>, <code>checkout_yolo</code>, <code>if batch</code> in session.rs</td><td class="no">no</td><td>A concept the person never sees. Fires only against a written <code>yolo: false</code> once the default is on, and silently overrides it.</td></tr>
-  <tr><td>(none)</td><td>Vendor-config readers: <code>ClaudePermissionMode</code>, <code>CodexPermissionConfig</code>, "never downgrade" merge, the defaultMode warning</td><td class="no">no</td><td>Exist to avoid lowering a vendor config while raising a floor. With "skips" always sending the top level, there is nothing to lower.</td></tr>
-  <tr><td>Commit message / PR text generation</td><td><code>ops/commit.rs:283</code> forces <code>skip_permissions: true</code></td><td class="no">no</td><td>A Batch launch already answers "nobody is there"; a second hard-coded yes.</td></tr>
-  <tr><td><code>--yolo</code> flag</td><td><code>lf/mod.rs:97</code></td><td class="yes">yes</td><td>Still meaningful: overrides a configured <code>yolo: false</code> for one launch. Help text must say so.</td></tr>
-  <tr><td>Worktree Git access</td><td><code>provider_writable_roots</code> → <code>--add-dir</code></td><td class="yes">yes</td><td>Separate concern; matters exactly when <code>yolo: false</code> keeps a sandbox. Stays.</td></tr>
-  <tr><td>lf answering Codex approval requests</td><td><code>harness::ApprovalPolicy::{AutoApprove, NativeClient}</code></td><td class="yes">yes</td><td>How lf answers a request on the wire, not what it asks the vendor for. Different thing; stays.</td></tr>
-  <tr><td>Pi's tools</td><td><code>pi.rs:142</code> keeps the user's policy</td><td class="yes">yes</td><td>Untouched.</td></tr>
+<tr><th>Product concept</th><th>Code, as built</th><th>Lines up?</th><th>Note</th></tr>
+<tr><td>The <code>yolo</code> setting</td><td><code>catalog.rs</code> row (default <code>true</code>) → <code>AgentConfig.yolo</code></td><td class="yes">yes</td><td>The field now has the setting's name. Every production launch copies <code>config.yolo</code> (<code>session.rs</code>, <code>process.rs</code>, <code>commit.rs</code>, <code>replay.rs</code>).</td></tr>
+<tr><td>Whether someone is there</td><td><code>LaunchKind::mode()</code> → <code>Mode::{Interactive, Headless}</code></td><td class="yes">yes</td><td>One source. Codex app-server derives it from <code>ApprovalPolicy::NativeClient</code>, which is set only when a native client attaches, so the two agree. Docs say "attend"; code says <code>Interactive</code>: same idea, existing enum.</td></tr>
+<tr><td>"Nobody there, so never ask"</td><td><code>skips_permissions</code>, asked by Claude terminal + stream, Codex terminal + app-server, OpenCode, Antigravity</td><td class="yes">yes</td><td>One predicate, one test (<code>permissions_are_skipped_unless_yolo_is_off_and_someone_attends</code>) plus <code>launch_matrix</code> rows.</td></tr>
+<tr><td>(none) Task-checkout rule</td><td>deleted: <code>is_task_checkout</code>, <code>checkout_yolo</code>, <code>batch</code> param</td><td class="yes">yes</td><td>Gone; grep finds nothing.</td></tr>
+<tr><td>(none) Vendor-config floors</td><td>deleted: <code>CodexPermissionConfig</code>, <code>ClaudePermissionMode</code>, readers, warning</td><td class="yes">yes</td><td>~240 lines out of <code>agent/mod.rs</code>.</td></tr>
+<tr><td>Commit / PR text</td><td>plain Batch launch</td><td class="yes">yes</td><td>The forced <code>skip_permissions: true</code> is gone; Batch already says nobody is there. QA: commit went ahead under <code>yolo=false</code>.</td></tr>
+<tr><td>A recorded launch request</td><td><code>session_record</code> field <code>skip_permissions</code> holding <code>yolo</code></td><td class="no">no, small</td><td>One name for two ideas: the key says "skips", the value is the setting. A headless capture with <code>yolo: false</code> records <code>false</code> though it skipped. Replay reruns the same kind, so behavior is right; only the name lies. Renaming changes the capture wire shape (fixtures, old captures) and is not this outcome.</td></tr>
+<tr><td><code>--yolo</code></td><td><code>lf/mod.rs</code> help: "over a configured <code>yolo: false</code>"</td><td class="yes">yes</td><td>Off stays <code>--setting yolo=false</code>.</td></tr>
+<tr><td>Worktree access</td><td><code>provider_writable_roots</code> → <code>--add-dir</code></td><td class="yes">yes</td><td>Sent whatever <code>yolo</code> says. Claude's "Adding a new directory" dialog under bypass predates the branch (<code>questions.md</code>).</td></tr>
+<tr><td>lf answering Codex approvals</td><td><code>ApprovalPolicy::{AutoApprove, NativeClient}</code></td><td class="yes">yes</td><td>How lf answers on the wire, not what it asks Codex for. Stays.</td></tr>
+<tr><td>Pi's tools</td><td>untouched</td><td class="yes">yes</td><td></td></tr>
 </table>
 
 <h2>Biggest mismatch</h2>
-<div class="callout">
-  "Nobody is there to answer" is one product idea implemented as three harness-specific floors plus a Task-checkout override. Under the kickoff plan (keep floors, delete checkout rule) a person who writes <code>yolo: false</code> to keep their prompts in conversations would find headless Codex Task steps in <code>workspace-write</code> with no network: no crate fetch, no PR, no <code>~/.lf</code> writes. Same setting, different meaning per harness.
-</div>
-
+<div class="callout">None that changes the design. The model the plan chose is the model the code has: one setting, one fact about the launch, one predicate. The only leftover is the recorded-request key name.</div>
 <div class="cols">
-  <div class="panel old">
-    <h3><span class="tag old">before</span> four ideas</h3>
-    <ul>
-      <li><code>yolo</code> setting</li>
-      <li>per-harness headless floor, reading vendor config</li>
-      <li>Task-checkout forces yolo when headless</li>
-      <li>commit text forces yolo</li>
-    </ul>
-    <p>~240 lines in <code>agent/mod.rs:420-660</code> plus run.rs and session.rs branches.</p>
-  </div>
-  <div class="panel prop">
-    <h3><span class="tag prop">proposed</span> one predicate</h3>
-    <ul>
-      <li>default flips to <code>true</code></li>
-      <li><code>skips = yolo || headless</code>, one function on <code>AgentConfig</code>, asked by every harness</li>
-      <li>floors, vendor-config readers, checkout rule and commit override deleted</li>
-    </ul>
-    <p>Lost on purpose: <code>yolo: false</code> no longer gives headless Codex outside a Task checkout a <code>workspace-write</code> sandbox. A <code>codex.sandbox</code> setting would be its own Task.</p>
-  </div>
+<div class="panel old"><h3>before this branch</h3>yolo setting · per-harness headless floor reading <code>~/.codex/config.toml</code> and <code>.claude/settings.json</code> · Task-checkout override · commit text forced on. Under <code>yolo: false</code> headless Claude bypassed, headless Codex got <code>workspace-write</code> outside a Task checkout.</div>
+<div class="panel prop"><h3>as built</h3>default on · <code>yolo || Headless</code> asked by every harness · the rest deleted. Lost on purpose: <code>yolo: false</code> no longer sandboxes headless Codex; docs point to a Machine, VM or container.</div>
 </div>
 
 <h2>Walked through</h2>
 <table>
-  <tr><th>Path</th><th>What happens</th></tr>
-  <tr><td>Normal</td><td>No setting anywhere. <code>lf -a claude</code> opens with bypass on; <code>lf task run</code> on Codex runs <code>danger-full-access</code> + <code>never</code>.</td></tr>
-  <tr><td>Opt out</td><td><code>yolo: false</code> in repo config. Attended Claude asks; attended Codex uses <code>~/.codex/config.toml</code> untouched. Task steps still run without asking, so the Graph doesn't stall.</td></tr>
-  <tr><td>Failure</td><td>Root shell or managed <code>disableBypassPermissionsMode</code>: Claude refuses <code>--dangerously-skip-permissions</code>. Headless already met this; attended launches now do. Recovery: <code>yolo: false</code> for attended; troubleshooting entry says so. Not probed.</td></tr>
-  <tr><td>Skew</td><td>A remote Machine on an older <code>lf</code> keeps the old default until upgraded. No migration.</td></tr>
-  <tr><td>Counterexample</td><td>Someone who wants headless Codex sandboxed for untrusted work. Before: <code>yolo: false</code> outside a Task checkout gave it. After: nothing does. Answer in the docs: lf has no sandbox; containment is a dedicated Machine, VM or container.</td></tr>
+<tr><th>Path</th><th>What happens</th></tr>
+<tr><td>Normal</td><td>No setting. <code>lf -a claude</code> shows bypass on and runs <code>touch</code> without asking (qa).</td></tr>
+<tr><td>Opt out</td><td>Committed <code>yolo: false</code>: attended Claude sends no flag and the vendor's mode decides; Task step workers still skip; resume picks the setting up next launch.</td></tr>
+<tr><td>Failure</td><td>Claude refuses bypass as root or under managed <code>disableBypassPermissionsMode</code>; attended launches now meet it. Recovery <code>yolo: false</code>, in <code>docs/troubleshooting.md</code>. Not probed.</td></tr>
+<tr><td>Counterexample</td><td>Someone wanting a sandboxed headless Codex: nothing gives it now. Separate outcome (<code>codex.sandbox</code>).</td></tr>
 </table>
-
-<h2>First slice</h2>
-<p>Flip the literal, add the predicate, route every harness through it, and extend <code>harness::launch_matrix</code> and <code>launch_policy_tests.rs</code> to the four cells on every harness. A path that still asks under headless shows a second rule. Deletion and docs follow. Full detail: <code>scratch/plan.md</code>.</p>
 
 <h2>Questions</h2>
 <ol class="q">
-  <li>What does <code>yolo: false</code> do to an unattended run?
-    <ol>
-      <li>Nothing: unattended never asks (chosen; in the plan).</li>
-      <li>Keep per-harness floors; headless Codex gets <code>workspace-write</code>, including Task steps (kickoff plan).</li>
-      <li>lf sends nothing at all; the vendor's config decides even headless.</li>
-    </ol>
-  </li>
-  <li>The headless Codex sandbox that 1a removes:
-    <ol>
-      <li>Gone; containment is a Machine/VM/container (chosen).</li>
-      <li>File a <code>codex.sandbox</code> setting as its own Task now.</li>
-    </ol>
-  </li>
-  <li>Turning yolo off for one launch:
-    <ol>
-      <li><code>--setting yolo=false</code>; <code>--yolo</code> stays as the override for a configured false (chosen).</li>
-      <li>Add <code>--no-yolo</code>.</li>
-      <li>Drop <code>--yolo</code>; it is the default now.</li>
-    </ol>
-  </li>
-  <li>Should attended launches say anything about bypass being on?
-    <ol>
-      <li>No; each vendor shows it (chosen).</li>
-      <li>One line in lf's terminal before handing over.</li>
-    </ol>
-  </li>
+<li>The recorded-request key <code>skip_permissions</code> holds the <code>yolo</code> setting.
+ <ol><li>Leave it (chosen: behavior is right, rename touches capture wire shape).</li><li>Rename to <code>yolo</code> in a separate Task with fixtures and an old-capture reader.</li><li>Record what was sent (<code>skips_permissions(mode)</code>) instead.</li></ol></li>
+<li>Claude's directory dialog under bypass.
+ <ol><li>Leave (chosen: predates this branch).</li><li>Drop <code>--add-dir</code> roots when the launch skips permissions, after probing that bypass still reaches the main checkout.</li></ol></li>
+<li>Sandboxed unattended Codex.
+ <ol><li>No lf sandbox; docs point to a Machine, VM or container (chosen).</li><li>File <code>codex.sandbox</code> as its own Task.</li></ol></li>
 </ol>
-
-</main>
-</body>
-</html>
+</main></body></html>

@@ -131,9 +131,12 @@ recovery watcher's lost-transcript case, now through `append_input`) and
 
 Remaining:
 
-- **Real Claude quit-before-typing check** (qa/gate, needs a Claude login):
-  the acceptance item above, through `lf` under a PTY like the probe; result
-  in the PR body.
+- Real Claude check done in qa (`scratch/qa.html`): Esc at Claude's first
+  screen, then `lf -a claude resume`, started a new `--session-id` thread and
+  Claude took the first request; no "No conversation found". A saved thread
+  reopened with `--resume`. Claude 2.1.329.
+- The "no saved copy" line never reaches a terminal view (printed in the held
+  terminal before the view attaches); see `scratch/questions.md`.
 - Small wart, left as is: `new_thread` on a lost thread prints both the
   "no saved copy" line and its own "seeded with its original request" line.
 

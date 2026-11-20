@@ -1,0 +1,49 @@
+<!doctype html><meta charset="utf-8"><title>LOO-984 qa</title>
+<style>body{font:15px/1.5 -apple-system,system-ui;max-width:860px;margin:2em auto;padding:0 1em;color:#222}pre{background:#f4f4f4;padding:.7em;overflow:auto;font-size:13px}td,th{border-bottom:1px solid #ddd;padding:.4em;vertical-align:top;text-align:left}table{border-collapse:collapse;width:100%}.ok{color:#176b2c}.bad{color:#a11}</style>
+<h1>LOO-984 qa: a launch that ends before Claude saves opens again</h1>
+<p>Branch-built <code>lf</code> (42b5d7877e), real Claude Code 2.1.329 on the ambient login, private <code>LF_HOME</code>s under <code>/tmp/lfqa984</code>, a Python PTY driving <code>lf -a claude resume</code> in fresh repositories. What launched is read from <code>agent_sessions.agent_command</code> and the captured inputs in <code>session_events</code>. 2026-11-19.</p>
+
+<h2>Scenarios</h2>
+<table>
+<tr><th>#</th><th>What I did</th><th>What happened</th></tr>
+<tr><td>A</td><td>Real Claude. First open, Enter on "No, exit" at Claude's first screen (the <code>--add-dir</code> dialog). Then reopen.</td><td class="ok">First open: <code>--session-id 5d2910d8…</code>, "claude exited with 1.", no transcript. Reopen: new input 2, <code>--session-id 15f44d75…</code>, Claude's dialog again. No "No conversation found".</td></tr>
+<tr><td>B</td><td>Real Claude still on its first screen killed (crash before saving). Reopen.</td><td class="ok">New input 3, <code>--session-id 1956e3a4…</code>.</td></tr>
+<tr><td>E</td><td>Real Claude, new repository. Esc at the first screen, reopen, answer "Yes, add it".</td><td class="ok">Reopen: input 2 <code>--session-id a1edb49c…</code>; Claude ran lf's first request and saved <code>a1edb49c….jsonl</code>.</td></tr>
+<tr><td>R</td><td>Real Claude got past its first screen and answered lf's first turn ("Nothing is in flight here… What do you want to work on?"). Killed it, reopened.</td><td class="ok"><code>--resume 914b0b93…</code>; after the dialog the view showed the earlier turn and the prompt.</td></tr>
+<tr><td>S</td><td>Stand-in <code>claude</code> on <code>PATH</code> that prints its thread and exits 1, opened three times.</td><td class="ok">Each open a new input and a new <code>--session-id</code> (5dbee4bf, 89e552ee, 3dba7e94); never <code>--resume</code>.</td></tr>
+<tr><td>D</td><td>Looked for "Claude has no saved copy of this conversation; starting it again from its first request." in every view above.</td><td class="bad">Never shown in a view. A temporary probe showed <code>saved_thread</code> running in the held terminal's <code>lf</code> (the process that execs Claude), and the line sits in <code>$LF_HOME/screens/*.ghostsnp</code>; it is written before the view attaches.</td></tr>
+</table>
+
+<h2>Transcripts</h2>
+<p>A, first open (control sequences stripped):</p>
+<pre>Nothing to resume here; starting a new conversation.
+| Preparing claude (0s)/ Opening claude terminal (0s)
+Security guide
+❯ No, exit   Yes, add it
+Enter to confirm · Esc to cancel
+
+Left "repo". Continue with: lf resume 98c79bdc890a41bbac7afd803f86bd6b
+claude exited with 1.</pre>
+<p>S, second open (stand-in):</p>
+<pre>stand-in claude: --name repo2 --settings
+stand-in started thread 9264e360-c54c-4e98-a2d7-2cf4701539ec
+Left "repo2". Continue with: lf resume 7b7b1eb329a641eab5d03d58ed21ecfb
+claude exited with 1.</pre>
+<p>Held screen of the same kind of open (<code>strings screens/*.ghostsnp</code>):</p>
+<pre>Claude has no saved copy of this conversation; starting it again from its first request.
+stand-in claude: --name repo3 --settings
+stand-in started thread 3dba7e94-45f7-4b1c-a62a-3ba2f5f9f5fe
+claude exited with 1.</pre>
+
+<h2>Fixed</h2>
+<ul><li><code>docs/sessions.md</code> showed the "no saved copy" line under <code>lf resume</code>; nobody sees it there, so the example is gone. Choice noted in <code>scratch/questions.md</code>.</li></ul>
+
+<h2>Where it stands</h2>
+<p><b>Works:</b> every launch that ended before Claude saved (exit at the first screen, crash, missing provider in the stand-in) reopens on a new thread with its first request; a saved thread resumes.</p>
+<p><b>Couldn't reach:</b> Ctrl+C at an empty Claude prompt through lf. lf's conversations start with lf's own first turn, so Claude saves as soon as it is past its first screen; the first screen is the only quit-before-typing point, and it was covered.</p>
+<p><b>Still wrong, worst first:</b></p>
+<ol>
+<li>The "no saved copy" line never reaches a terminal view (D). The conversation opens correctly; the person just isn't told why it started over.</li>
+<li><code>resume_intent</code> and Desktop still call a lost thread "Resume" (plan exclusion, unchanged).</li>
+<li>Keys sent in a view's first seconds to Claude's first screen were sometimes lost; a second view answered it. Held-terminal input, outside this change.</li>
+</ol>

@@ -46,7 +46,7 @@ Antigravity skip every prompt, and Pi uses its own unsandboxed tools.
 you attend. Unattended runs (`lf -b`, Task steps, auto, commit and PR text)
 never ask, whatever `yolo` says. Either way the agent can reach anything the OS
 user can; the execution boundary above is the only containment. See
-[Configuration](config.md#permissions-yolo-and-worktree-sandboxes).
+[Configuration](config.md#permissions-yolo-and-worktree-access).
 
 ## Credentials over SSH
 

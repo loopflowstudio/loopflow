@@ -66,8 +66,9 @@ codex: provider usage limit; continuing on claude:fable
 - **Single-entry bare `claude`** (`agents: [claude]` or `default_agent: claude`)
   tries Claude's other models (Opus → Sonnet → Haiku). Pinning a model
   (`claude:opus`) stays on that model.
-- **Pi and OpenCode** do not report structured usage-limit errors, so a failure
-  on either stops with the provider's error.
+- **Every harness** moves on the same three refusals: usage spent, a login
+  revoked, a model it can't serve. OpenCode out of credits moves on with
+  `opencode_error: Insufficient balance…`.
 
 Scope `agents` per repo, Wave, or Skill; a narrower `agents` replaces the
 wider one as a unit:
@@ -248,8 +249,45 @@ lf -b -a pi:anthropic/claude-sonnet-4-6 implement
 Pi 1.3.0 is the baseline. Pi owns its own credentials and session files
 (API keys in your environment or Doppler work automatically). Headless runs use
 Pi RPC; interactive runs keep Pi's native terminal UI. Pi does not sandbox
-tools and does not support automatic usage-limit failover or cross-harness
-history transfer.
+tools and does not support cross-harness history transfer.
+
+### Antigravity
+
+```bash
+brew install --cask antigravity-cli     # installs the `agy` command
+agy                                     # sign in
+lf -a antigravity implement
+lf -b -a antigravity:gemini-3.8-flash-high implement
+lf task run LOO-12 -a antigravity       # every step of the Task
+```
+
+The agent is `antigravity` in `-a`, `agents` and everything lf prints; `agy`
+is only the command it runs. Bare `antigravity` uses the model `agy` is set
+to; `antigravity:<model>` takes a name from `agy models`. Antigravity owns its
+sign-in and conversations under `~/.gemini/antigravity-cli`; Loopflow gives
+each launch its instructions and hooks in a folder under the checkout's
+`.lf/prompts/` and writes nothing to `~/.gemini`. A step gets the Task's
+context and hears `lf steer` after its next tool. A spent quota, a signed-out
+`agy` or an unserved model moves a Graph step to the next `agents` entry:
+
+```bash
+lf task status LOO-12
+#   implement went on under claude after: antigravity_error: invalid model selection (--model "gemini-9" --effort ""): model gemini-9 is not recognized as a known model or custom model in settings
+```
+
+In the terminal, `agy` runs commands in its own sandbox, which does not reach
+`~/.lf`. The first `lf` command a conversation runs fails there, and `agy`
+asks "Run this command?" to run it outside: answer `2` to allow `lf` for the
+rest of the conversation. `--yolo` skips the question. A headless step is not
+sandboxed and never asks.
+
+`/new`, `/fork` and `/resume` in the terminal keep the conversation on lf: the
+one you switch to gets the context block and your steers from its first
+prompt, and `lf resume` reopens the one you quit in.
+
+Usage counts the conversation lf started, not its subagents. A plain `agy`
+conversation is not listed in `lf session list`. Native response schemas, turn
+limits and `--effort` are unavailable.
 
 ### Supported harnesses
 
@@ -257,10 +295,10 @@ Limit which harnesses appear in pickers (additive across global and repo
 config):
 
 ```yaml
-supported_harnesses: [claude, codex, opencode, pi]
+supported_harnesses: [claude, codex, opencode, pi, antigravity]
 ```
 
-## Permissions (`yolo`) and worktree sandboxes
+## Permissions (`yolo`) and worktree access
 
 Agents act without asking permission. With no `yolo` setting, Claude, Codex,
 OpenCode and Antigravity run every edit and shell command straight through; Pi
@@ -291,9 +329,9 @@ has no sandbox of its own: an agent can do anything the OS user running `lf`
 can. To contain untrusted work, run it on a dedicated Machine, VM or container
 ([Security](security.md#choose-the-execution-boundary-first)).
 
-**Worktree access:** Claude and Codex conversations you attend from a Git
-worktree get write access to the main repo's `.git` metadata, so Git commands
-work under `yolo: false` too.
+**Worktree access:** Claude, Codex and Antigravity conversations you attend
+from a Git worktree get write access to the main repo's `.git` metadata, so
+Git commands work under `yolo: false` too.
 
 ## Context budgets and assembly
 

@@ -132,6 +132,7 @@ through your `agents` list; once exhausted, Graph steps wait 5, 15, 30, then
 | `provider_model_unavailable:` | Model unsupported or misspelled | Moves to next `agents` entry |
 | `provider_credential_invalidated:` | Login revoked or unrefreshable | Skips provider's models; tries next provider |
 | `provider_capacity:` | Provider overloaded | Retries same conversation |
+| `codex_error:`, `opencode_error:`, `antigravity_error:` | Nothing about the cause | Goes by the message: OpenCode's "Insufficient balance" or Antigravity's "exhausted your quota" moves to the next entry; an unrecognized one stops the step |
 
 ```bash
 lf set --global agents claude,codex
@@ -149,7 +150,20 @@ npm install -g @anthropic-ai/claude-code && claude
 
 With multiple harnesses installed and no default set, run
 `lf set --global default_agent claude` (or `lf set --global agents claude,codex`).
-For OpenCode, install OpenCode 2+ (`npm install -g @opencode/cli`).
+For OpenCode, install OpenCode 2+ (`npm install -g @opencode/cli`). The
+`antigravity` agent runs the `agy` command: `brew install --cask antigravity-cli`.
+
+## Antigravity asks "Run this command?" for `lf`
+
+In the terminal, `agy` sandboxes commands away from `~/.lf`, so `lf` fails
+inside it with "Operation not permitted" and `agy` asks to run it outside.
+Answer `2` to allow `lf` for the conversation, or launch with `--yolo`:
+
+```bash
+lf -a antigravity --yolo implement
+```
+
+Headless steps (`lf task run`, `lf -b`) are not sandboxed.
 
 ## Claude refuses to skip permissions
 

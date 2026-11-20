@@ -359,12 +359,12 @@ def generate_llms_txt() -> str:
         if doc_path(slug)
     )
     return f"""# Loopflow
-> Local-first task and workflow system for coding agents (Claude Code, Codex, OpenCode, Pi). Each Task gets its own Git worktree, branch, persistent multi-view conversation, customizable YAML/Markdown workflow (Graph), and pull request.
+> Local-first task and workflow system for coding agents (Claude Code, Codex, OpenCode, Pi, Antigravity). Each Task gets its own Git worktree, branch, persistent multi-view conversation, customizable YAML/Markdown workflow (Graph), and pull request.
 
 Loopflow runs locally on macOS or Linux (or over SSH / rented Daytona, Modal, RunPod, and AWS machines) using your native provider logins. Nothing is hosted, and Loopflow bills nothing.
 
 Key capabilities:
-- **Multi-harness + failover:** Mix Claude Code, Codex, OpenCode, and Pi per repo, Wave, Skill, or Graph step; configure `agents: [claude, codex]` for automatic usage-limit failover and backoff.
+- **Multi-harness + failover:** Mix Claude Code, Codex, OpenCode, Pi, and Antigravity per repo, Wave, Skill, or Graph step; configure `agents: [claude, codex]` for automatic usage-limit failover and backoff.
 - **Version-controlled workflows:** Markdown Skills (extend builtins with `extends: builtin`) and YAML Graphs with loops, `xor` branches, `write-docs`, repo-local `.lf/qa/` playbooks, one-page `human-review`, `reflect`, and `gate` (publishes PR first so CI runs during review).
 - **Durable Tasks & Sessions:** Isolated worktrees, stacked PRs (`lf sync <parent-ID>`), auto-merge with CI repair (`lf land --wait-and-fix`), and persistent conversations that survive terminal close, `lf install` updates, crashes, and reboots.
 - **Team-native planning:** Syncs via a Git ref on `origin` by default, or two-way with Linear or Asana; coworkers comment in Linear/Asana and review on GitHub without installing `lf`. Waves group Tasks with shared `GOAL.md`, `MEMORY.md`, KRs, and defaults.

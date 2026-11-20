@@ -633,6 +633,10 @@ impl super::Launcher for loopflow_harness::Pi {
             owned,
         )
     }
+    fn classify_failure(&self, code: &str, message: &str) -> Option<crate::agent::AgentFailure> {
+        // Pi retries a transient failure itself.
+        crate::agent::routing_failure(code, message)
+    }
     fn capabilities(&self) -> super::Capabilities {
         super::Capabilities {
             thread: super::ThreadNaming {
@@ -640,7 +644,6 @@ impl super::Launcher for loopflow_harness::Pi {
                 managed: super::ThreadName::Reported,
             },
             initial_prompt_on_resume: false,
-            classifies_failures: false,
             native_skills: None,
             turn_limit: false,
             output_schema: false,

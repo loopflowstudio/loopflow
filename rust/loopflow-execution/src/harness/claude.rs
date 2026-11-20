@@ -1291,6 +1291,9 @@ impl super::Launcher for loopflow_harness::Claude {
             owned,
         )
     }
+    fn classify_failure(&self, code: &str, message: &str) -> Option<crate::agent::AgentFailure> {
+        crate::agent::provider_failure(code, message)
+    }
     fn capabilities(&self) -> super::Capabilities {
         super::Capabilities {
             thread: super::ThreadNaming {
@@ -1298,7 +1301,6 @@ impl super::Launcher for loopflow_harness::Claude {
                 managed: super::ThreadName::Assigned,
             },
             initial_prompt_on_resume: false,
-            classifies_failures: true,
             native_skills: Some(crate::skills::catalog::SkillDialect::Claude),
             turn_limit: true,
             output_schema: true,

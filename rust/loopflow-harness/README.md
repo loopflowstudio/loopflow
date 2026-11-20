@@ -23,20 +23,20 @@ let turns = transcript::read(HarnessKind::Claude, &Source::File(path))?;   // Ve
 ## What lives here
 
 The crate answers one question: what does each native client (Claude Code,
-Codex, OpenCode, Pi) write, and where?
+Codex, OpenCode, Pi, Antigravity) write, and where?
 
 | | |
 |---|---|
-| `HarnessKind`; `Claude`, `Codex`, `OpenCode`, `Pi` | which client; one unit struct each |
-| `Harness` | what a client declares about itself: the commands that are it, where it keeps transcripts, how long it keeps them, its model names and sign-in advice |
-| `{claude,codex,opencode,pi}_decode`, `fact`, `lf_tag` | a live stream, decoded into facts |
+| `HarnessKind`; `Claude`, `Codex`, `OpenCode`, `Pi`, `Antigravity` | which client; one unit struct each |
+| `Harness` | what a client declares about itself: the commands that are it (`program`, `recognizes_driver`), where it keeps transcripts, how long it keeps them, its model names and sign-in advice |
+| `{claude,codex,opencode,pi,antigravity}_decode`, `fact`, `lf_tag` | a live stream, decoded into facts |
 | `transcript` | a saved conversation read into `Turn`s: `read`, `find`, `scan`, and `read_current` for the turn in progress |
 
 It never opens Loopflow's store, starts a process or reads the process table.
 OpenCode's reader opens OpenCode's own SQLite file. Launching a harness,
 recording it and joining a transcript to a Session are
 [execution](../loopflow-execution/src/harness/README.md)'s, which implements
-`Launcher` on the same four structs.
+`Launcher` on the same five structs.
 
 One thing here is Loopflow's own writing, not a client's: `transcript::Launch`
 and `lf_tag` parse the `<lf:skill:NAME>`, `<lf:message>` and

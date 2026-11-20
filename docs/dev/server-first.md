@@ -68,7 +68,7 @@ A Claude Code 2.1.322 transcript read the same day ends a turn with an
 so `end_turn` with nothing after it is the signal and `turn_duration` a
 confirmation.
 
-One reader per harness (`transcript/{claude,codex,pi,opencode}.rs`) turns a
+One reader per harness (`transcript/{claude,codex,pi,opencode,antigravity}.rs`) turns a
 transcript's rows into `Turn`s, for `lf history show` and the live reading
 alike: one turn from what woke the agent until it hands back, with its id,
 state, model and usage, and the requests and agent work inside it as items.

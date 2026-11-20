@@ -340,7 +340,7 @@ local uncommitted edits stay in Files.
 
 Open **•••** or press Command-/ for the selected Task’s actions. Row context
 menus use the same actions for the clicked Task. Command-T adds a shell tab. The main Session's menu switches between **Claude**,
-**Codex**, and **OpenCode**, continuing the same Session with its history.
+**Codex**, **OpenCode**, **Pi** and **Antigravity**, continuing the same Session with its history.
 **Refresh session** reconnects the pane to that conversation, including after a
 failed launch or stale connection. It keeps the provider's history and running
 process, and takes over a conversation a native client holds. The control

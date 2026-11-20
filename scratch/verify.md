@@ -18,12 +18,7 @@ tmux gives a new window the `PATH` of the client that ran `new-window`
 
 The pane command itself has no `PATH=`. The leak is `open/tmux.rs` `open`
 running `tmux new-window` with lf's own `PATH`, and the provider taking the
-viewer's `PATH`. Next: make the tmux window start from the tmux server's `PATH`
-(for example run the `new-window` client with `tmux show-environment -g PATH`,
-resolving `tmux` first), with a test in `work_open_tests.rs` that a caller
-`PATH` entry is absent from the pane's environment. Rex, Herdr and cmux were
-not driven here; their servers spawn the pane, so check whether the provider
-still takes the viewer's `PATH` there.
+viewer's `PATH`. Repaired under "Fix forward" below.
 
 ## Holds
 

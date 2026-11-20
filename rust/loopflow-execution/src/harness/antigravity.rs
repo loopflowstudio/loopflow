@@ -232,20 +232,17 @@ exit 0
     ))
 }
 
-/// Whether the conversation `id` is the one the launch owns, kept in
-/// `thread_file`, and whether this callback is the first to say so. The
-/// launch's own conversation calls first; a subagent runs the same hooks
-/// later under its own id.
-fn claim_thread(thread_file: &Path, id: &str) -> Option<bool> {
-    match std::fs::read_to_string(thread_file) {
-        Ok(owner) if !owner.trim().is_empty() => (owner.trim() == id).then_some(false),
-        _ => {
-            if let Err(error) = std::fs::write(thread_file, id) {
-                tracing::warn!(%error, "cannot keep the Antigravity conversation this launch owns");
-            }
-            Some(true)
-        }
+/// Point `thread_file` at the conversation `id` and say whether that moved
+/// it: the launch's first callback, and the first after `/new`, `/fork` or
+/// `/resume` in the terminal.
+fn follow_thread(thread_file: &Path, id: &str) -> bool {
+    if std::fs::read_to_string(thread_file).is_ok_and(|current| current.trim() == id) {
+        return false;
     }
+    if let Err(error) = std::fs::write(thread_file, id) {
+        tracing::warn!(%error, "cannot keep the Antigravity conversation this launch is in");
+    }
+    true
 }
 
 #[async_trait]
@@ -391,10 +388,14 @@ impl super::Launcher for loopflow_harness::Antigravity {
         let conversation = payload["conversationId"]
             .as_str()
             .filter(|id| !id.is_empty())?;
-        let first = match thread_file {
-            Some(file) => claim_thread(file, conversation)?,
-            None => false,
-        };
+        // A subagent runs the same hooks under its own id, and nobody typed
+        // into it. Every other conversation is one the person is in.
+        if payload["lastUserInput"].as_str().is_none_or(str::is_empty) {
+            return None;
+        }
+        // A model call comes before a conversation's stop, so a stop moves nothing.
+        let first = declared != ContextMoment::Stop
+            && thread_file.is_some_and(|file| follow_thread(file, conversation));
         // Each `agy` process counts its model calls from 0, and call 0 of a
         // later turn in the same process is that turn's prompt.
         let (moment, event) = if declared == ContextMoment::Stop {
@@ -479,11 +480,9 @@ impl super::Launcher for loopflow_harness::Antigravity {
         }
         if let Some(context) = &launch.config.conversation_context {
             let delivery = context.configure_hooks(&mut client.process)?;
-            if client.thread.is_none() {
-                // The launch's first hook callback names the conversation there.
-                client.reported_thread =
-                    Some(crate::context_block::reported_thread_path(&delivery));
-            }
+            // Hook callbacks keep the conversation the person is in there:
+            // a new one, or one `/new`, `/fork` or `/resume` switched to.
+            client.reported_thread = Some(crate::context_block::reported_thread_path(&delivery));
         }
         client.process.args(args);
         Ok(client)
@@ -793,24 +792,32 @@ mod tests {
     }
 
     #[test]
-    fn a_launch_reads_only_its_own_conversations_callbacks() {
+    fn a_launch_follows_the_conversation_a_person_is_in() {
         use ContextMoment::{Start, Steer, Stop, Tool};
         let directory = tempfile::tempdir().unwrap();
         let file = directory.path().join("launch.thread");
-        let call = |id: &str, event: &str, number: i64, steps: i64| {
+        let said = |id: &str, event: &str, number: i64, steps: i64, input: &str| {
             serde_json::json!({"conversationId": id, "hookEventName": event,
-                "invocationNum": number, "initialNumSteps": steps, "lastUserInput": "hi"})
+                "invocationNum": number, "initialNumSteps": steps, "lastUserInput": input})
         };
+        let call =
+            |id: &str, event: &str, number: i64, steps: i64| said(id, event, number, steps, "hi");
+        let thread = || std::fs::read_to_string(&file).unwrap();
         // The launch's first model call is its start and its first prompt.
         assert_eq!(
             callback(&file, Tool, call("parent", "PreInvocation", 0, 1)),
             Some((Start, "parent SessionStart startup".into(), true))
         );
-        assert_eq!(std::fs::read_to_string(&file).unwrap(), "parent");
-        // A subagent runs the same hooks under its own conversation.
-        for event in ["PreInvocation", "Stop"] {
-            assert_eq!(callback(&file, Tool, call("child", event, 0, 0)), None);
+        assert_eq!(thread(), "parent");
+        // A subagent runs the same hooks under its own conversation, and
+        // nobody typed into it.
+        for (declared, event) in [(Tool, "PreInvocation"), (Stop, "Stop")] {
+            assert_eq!(
+                callback(&file, declared, said("child", event, 0, 0, "")),
+                None
+            );
         }
+        assert_eq!(thread(), "parent");
         assert_eq!(
             callback(&file, Tool, call("parent", "PreInvocation", 1, 3)),
             Some((Steer, "parent PostToolUse resume".into(), false))
@@ -826,6 +833,22 @@ mod tests {
             callback(&file, Stop, call("parent", "Stop", 0, 0)),
             Some((Stop, "parent Stop startup".into(), false))
         );
+        // `/new` continues the same `agy` under a new conversation: a start.
+        assert_eq!(
+            callback(&file, Tool, call("new", "PreInvocation", 0, 1)),
+            Some((Start, "new SessionStart startup".into(), true))
+        );
+        assert_eq!(thread(), "new");
+        assert_eq!(
+            callback(&file, Stop, call("new", "Stop", 0, 0)),
+            Some((Stop, "new Stop startup".into(), false))
+        );
+        // `/fork` carries the history along, so its start is a resumed one.
+        assert_eq!(
+            callback(&file, Tool, call("fork", "PreInvocation", 0, 3)),
+            Some((Start, "fork SessionStart resume".into(), true))
+        );
+        assert_eq!(thread(), "fork");
         // A resumed conversation's first call in a new launch starts it again.
         let resumed = directory.path().join("resumed.thread");
         assert_eq!(

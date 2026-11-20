@@ -46,7 +46,7 @@ Each harness file answers the rest:
 |---|---|
 | `capabilities()` | who names the thread, initial prompt on resume, native skills, turn limit, output schema, respawn after crash, install hint |
 | `classify_failure(code, message)` | what an error its decoder reported means for the run: next agent, retry, or nothing lf acts on |
-| `hook_callback(payload, declared, thread_file)` | what a hook callback from its provider means: the moment, and whether the conversation is the launch's own; Antigravity's first callback claims the thread file |
+| `hook_callback(payload, declared, thread_file)` | what a hook callback from its provider means: the moment, and whether the conversation is one a person's input reached; Antigravity keeps the thread file on the conversation the person is in |
 | `hook_reply(event, text)` | the reply that puts text in front of the model, in the provider's shape |
 | `open(&Launch)` | native interactive client: argv, hook and title flags |
 | `driver(&Launch, events, approval)` | headless stream `Driver`: start, input, interrupt, stop |
@@ -76,7 +76,7 @@ An interactive client may `exec` into a held terminal.
 | Codex chat | `codex`, prompt in argv | provider (start hook) |
 | Codex work session | `codex --remote` after lf opens the app-server thread | provider |
 | OpenCode | `opencode --standalone`, prompt in `--prompt` | lf (`--session ses_…`) |
-| Antigravity | `agy`, prompt in `-i`; its command sandbox does not reach `~/.lf`, so the first `lf` command stops at "Run this command?" unless `yolo` | provider (first hook callback) |
+| Antigravity | `agy`, prompt in `-i`; its command sandbox does not reach `~/.lf`, so the first `lf` command stops at "Run this command?" unless `yolo` | provider (hook callbacks; follows `/new`, `/fork`, `/resume`) |
 
 `cargo test -p loopflow-execution --lib harness::launch_matrix -- --nocapture`
 runs every harness as a chat, work session, batch and worker against stand-in provider scripts, and prints each cell's argv, hook ownership, wait mechanism and recorded thread.
@@ -97,7 +97,10 @@ step, and an exit that settles the turn. Each later turn is another run with
 under `.lf/prompts/`, handed over with `--add-dir`; nothing is written to
 `~/.gemini`. Its one hook, before every model call, is the start, the prompt
 and the after-a-tool boundary. A subagent runs the same hooks under its own
-conversation id, and lf answers only the conversation the launch owns. In a
+conversation id with an empty `lastUserInput`, and lf answers only a
+conversation a person's input reached. `/new`, `/fork` and `/resume` in the
+terminal continue the same `agy` under another id: its first model call
+rewrites the launch's thread file and is a start. In a
 worktree lf created, the terminal is trusted for that session through
 `--settings`, so the folder dialog does not stop the launch.
 

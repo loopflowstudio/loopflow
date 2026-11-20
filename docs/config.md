@@ -281,6 +281,10 @@ asks "Run this command?" to run it outside: answer `2` to allow `lf` for the
 rest of the conversation. `--yolo` skips the question. A headless step is not
 sandboxed and never asks.
 
+`/new`, `/fork` and `/resume` in the terminal keep the conversation on lf: the
+one you switch to gets the context block and your steers from its first
+prompt, and `lf resume` reopens the one you quit in.
+
 Usage counts the conversation lf started, not its subagents. A plain `agy`
 conversation is not listed in `lf session list`. Native response schemas, turn
 limits and `--effort` are unavailable.

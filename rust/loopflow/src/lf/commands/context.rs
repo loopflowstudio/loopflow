@@ -287,8 +287,8 @@ pub fn emit_block(
     let (path, delivery) = load_delivery(delivery, &input)?;
     // A launch whose provider names the conversation keeps it in the thread
     // file beside its delivery. A bare Codex launch creates the file to ask,
-    // and the start callback fills it here; Antigravity's first callback
-    // claims it in `hook_callback`. Writing it opens no store; a failed write
+    // and the start callback fills it here; Antigravity's `hook_callback`
+    // keeps it on the conversation the person is in. Writing it opens no store; a failed write
     // only leaves the conversation unresumable.
     if moment == ContextMoment::Start {
         let reported = reported_thread_path(&path);

@@ -52,6 +52,7 @@ def _hook(event, conversation, **more):
         "cwd": str(Path.cwd()),
         "workspacePaths": [str(Path.cwd()), folder],
         "modelName": _option("--model") or "fixture",
+        # A person's text, escaped in the payload; a subagent's is empty.
         "lastUserInput": 'say "invocationNum":3',
         **more,
     }
@@ -127,18 +128,34 @@ def _wait(released, what):
 
 
 def _terminal():
-    """The TUI: the `-i` prompt is one turn, then the person leaves."""
+    """The TUI: the `-i` prompt is one turn, then the person leaves. A fixture's
+    `tui-new` beside `bin/` has them type `/new` and its text first, which
+    continues the same process under a second conversation."""
     prompt = _option("-i") or ""
     _receive(prompt)
+    prompts = [prompt]
+    if (HOME / "tui-new").exists():
+        prompts.append((HOME / "tui-new").read_text())
     conversation = _option("--conversation") or str(uuid.uuid4())
-    _hook("PreInvocation", conversation, invocationNum=0, initialNumSteps=1)
-    request = f"<USER_REQUEST>\n{prompt}\n</USER_REQUEST>"
-    rows = [
-        (0, "USER_INPUT", {"source": "USER_EXPLICIT", "content": request}),
-        (1, "PLANNER_RESPONSE", _call(20, 5, content=f"answer to: {prompt}\n")),
-    ]
-    _keep(conversation, rows)
-    _hook("Stop", conversation, executionNum=0, terminationReason="NO_TOOL_CALL")
+    heard = []
+    for prompt in prompts:
+        heard.append(
+            {
+                "conversation": conversation,
+                "context": _hook(
+                    "PreInvocation", conversation, invocationNum=0, initialNumSteps=1
+                ),
+            }
+        )
+        request = f"<USER_REQUEST>\n{prompt}\n</USER_REQUEST>"
+        rows = [
+            (0, "USER_INPUT", {"source": "USER_EXPLICIT", "content": request}),
+            (1, "PLANNER_RESPONSE", _call(20, 5, content=f"answer to: {prompt}\n")),
+        ]
+        _keep(conversation, rows)
+        _hook("Stop", conversation, executionNum=0, terminationReason="NO_TOOL_CALL")
+        conversation = str(uuid.uuid4())
+    (HOME / "tui-heard.json").write_text(json.dumps(heard))
 
 
 def main():
@@ -204,7 +221,9 @@ def main():
         kept.append((step + 1, "GENERIC", {"source": "MODEL", "content": "hi\n"}))
         tokens = (8, 3)
         # A subagent runs the same hooks under its own conversation.
-        heard = _hook("PreInvocation", str(uuid.uuid4()), invocationNum=0, initialNumSteps=0)
+        heard = _hook(
+            "PreInvocation", str(uuid.uuid4()), invocationNum=0, initialNumSteps=0, lastUserInput=""
+        )
         if heard:
             raise AssertionError(f"a subagent heard the launch's news: {heard}")
         steer = _hook("PreInvocation", conversation, invocationNum=1, initialNumSteps=step + 2)

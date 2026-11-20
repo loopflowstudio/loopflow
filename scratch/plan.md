@@ -171,9 +171,14 @@ A copy is a world directory (`env.json`, `home/`, empty provider homes, and the
 same `bin/` stand-ins a built world has for `gh`, `launchctl` and the
 providers) whose `home/loopflow.db` and `home/history.db` are read-only copies
 of the Machine's. `lf-world copy <dir>` makes one: stop the server that last
-served `<dir>`, `copy::snapshot` both databases from the default home, open the
-store once so a branch migration applies (a private home migrates itself),
-checkpoint, `chmod 0444`. The directory is replaced on each call. The launcher
+served `<dir>`, `copy::snapshot` both databases and copy `config.yaml` (the
+person's name and which repositories the Machine shows) from the Machine its
+shell is on (`LF_HOME`, else `~/.lf`), open the store once so a branch
+migration applies (a private home migrates itself), then `copy::seal`:
+checkpoint, stamp the file's modification time, `chmod 0444`. The stamp is
+needed because an APFS clone keeps the source's time, the Machine's last
+checkpoint. `<dir>` is replaced when it is absent or holds `env.json`; anything
+else is refused, since the command deletes it. The launcher clears `LF_*`,
 builds `lf-world` beside `lf` when it needs a copy and always uses `~/.lf-copy`:
 one launchd job (`com.loopflow.server.<digest of the home>`) is reused, and
 `~/.lf-copy/home/run/desktop/com.loopflow.mac.dev.sock` is 62 bytes.
@@ -187,12 +192,15 @@ from it:
 
 - **The server acts only on a store it can write.** A server whose store opens
   read-only serves reads and subscriptions and does not start `wake`,
-  `recovery`, `maintenance` or remote control.
-- **That server admits no change.** A `Write`, a Session start or continue, or
-  an upload is answered at dispatch, before any command code runs, with one
-  sentence written in Rust: "This is a copy of the Machine from HH:MM; make
-  changes in Loopflow or with lf." The time is the database file's
-  modification time. Refusing at admission, not mapping the SQLite failure
+  `recovery`, `maintenance`, remote control, the held-terminal registry or the
+  mobile listener. `session.attach` answers the existing "no running
+  terminal".
+- **That server admits no change.** A `Write`, a Session start, continue or
+  boundary, an upload or mobile setup (`Operation::changes`) is answered at
+  dispatch, before any command code runs, with one sentence written in Rust:
+  "This is a copy of the Machine from HH:MM; make changes in Loopflow or with
+  lf." The time is the database file's modification time. The error code is
+  `invalid`, which no client retries. Refusing at admission, not mapping the SQLite failure
   afterwards, is what keeps a command from signalling a real pid, touching a
   real worktree or calling the tracker before its store write fails.
 - **An lf that Desktop starts beside the server** (a pane launch) meets the
@@ -296,14 +304,17 @@ checkout, and a Session whose recorded pid is a live `sleep` and whose
 attachment looks live, with a stand-in provider on `PATH`; run `lf-world copy`;
 start `lf server run` on the copy.
 
-- A served Task read returns the seeded Task.
+- A served Task read returns the seeded Task. *(in the test)*
 - `task.run`, a Session start and a Session stop each return the sentence.
+  *(in the test)*
 - After 2 recovery intervals the stand-in provider was never executed and the
-  `sleep` is still running.
-- A pane launch through the copy's lf starts no provider.
+  `sleep` is still running. *(remaining: the test seeds `one-task`, which has
+  no Session with a live pid and no conversation due for recovery; a writable
+  copy's server started none in 15 s, so the test would pass with recovery on)*
+- A pane launch through the copy's lf starts no provider. *(in the test)*
 - The source `loopflow.db` is byte-identical before and after, the copy's is
   unchanged after the commands, and the seeded checkout has no new or changed
-  file.
+  file. *(in the test)*
 
 `cargo test -p loopflow --test integration copy_world` passes. A new Python
 test beside `scripts/loopflow-dev.py` covers the choice (same documents and an
@@ -360,9 +371,9 @@ server`, fake-world recipes, `welcome` and `status` as they are.
 
 ## Slices
 
-1. **Built.** A branch server serves a read-only copy, starts nothing and
-   admits no change: `lf-world copy` (`world::copy`), `copy::seal` and
-   `copy::sealed_at` in storage, `server/copy.rs`, `Operation::changes`,
+1. **Built**, less one check. A branch server serves a read-only copy, starts
+   nothing and admits no change: `lf-world copy` (`world::copy`), `copy::seal`
+   and `copy::sealed_at` in storage, `server/copy.rs`, `Operation::changes`,
    `installation::server::stop`, and `copy_world`.
 
    What it showed, on the real store on November 20: `lf-world copy` of the
@@ -375,26 +386,13 @@ server`, fake-world recipes, `welcome` and `status` as they are.
    the copy's lf both stopped at "attempt to write a readonly database" before
    any provider ran. The fallback (a writable copy) is not needed.
 
-   Differences from the design above:
-   - `lf-world copy` copies the Machine its own shell is on (`LF_HOME`, else
-     `~/.lf`), not always the default home; the launcher clears `LF_*`.
-   - It copies `config.yaml` too: the person's name and which repositories
-     the Machine shows.
-   - It replaces `<dir>` only when `<dir>/env.json` exists.
-   - `seal` stamps the file's modification time: an APFS clone keeps the
-     source's, which is the Machine's last checkpoint, not the copy's time.
-   - The server on a copy opens no held-terminal registry and no mobile
-     listener; `session.attach` answers the existing "no running terminal".
-   - The refusal's code is `invalid`. `session.boundary` and
-     `mobile.configure` are refused with the changes.
-   - `copy_world` seeds the `one-task` world. That world has no Session with
-     a live pid and no conversation due for recovery (a writable copy's server
-     started none in 15 s), so the test does not show recovery staying off or
-     a live process left unsignalled; the server never starts the pass, and
-     interrupt and stop are refused at admission. A seed with a due
-     conversation would let the test show it.
-   - Stopping the server that last served `<dir>` (`launchctl bootout`) has
-     not been run against a loaded job; slice 2's `run --copy` twice does.
+   Remaining:
+   - `copy_world` seeds a conversation due for recovery and a Session whose
+     pid is a live `sleep`, and shows the provider never ran and the `sleep`
+     survived. Break it in your head: with `wake` and `recovery` started on a
+     copy, today's test still passes.
+   - `installation::server::stop` (`launchctl bootout`) has not been run
+     against a loaded job; slice 2's `run --copy` twice does.
 2. **The launcher chooses.** The comparison, the printed line, `--copy` and
    `--world` on both commands, `lf-world` built when needed, the `LF_HOME`
    pass-through removed, the Python test. Check by launching Dev three ways:
@@ -402,7 +400,9 @@ server`, fake-world recipes, `welcome` and `status` as they are.
    installed server, and `run --world` on a fake world. Look at how tracker and
    PR rows read in the copy.
 3. **Windows belong to their Machine; a world says when its directory is too
-   long.**
+   long.** `world::copy` repeats `World::new`'s directories and three
+   stand-ins; the length check is needed in both, so they become one setup
+   here.
 4. **`lf server status`, and the decode sentence.**
 5. **Docs.** Written ahead of the code, describing the behavior above; each
    slice checks its part against them and corrects whichever is wrong.

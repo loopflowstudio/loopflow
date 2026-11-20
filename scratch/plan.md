@@ -129,24 +129,20 @@ the three transport tests, `provider_rejected_resume_keeps_the_selected_conversa
 recovery watcher's lost-transcript case, now through `append_input`) and
 `transcript::`.
 
-Remaining (from the concept review of the built change, `scratch/concept-review.html`):
+Remaining: nothing to build. Gate still owes the acceptance tests in CI.
 
-- **Docs promise a line nobody sees.** `saved_thread`'s "no saved copy" line
-  is printed by the held terminal's own `lf`, after `delegate_session` and
-  before a view attaches (qa D). The code stays as it is: the line belongs
-  where the decision is. Two doc edits, no code:
-  - `docs/subscriptions.md`, Resume paragraph: drop "and says so". It reads
-    "A conversation the provider never saved starts again from its first
-    request; it never opens empty."
-  - `docs/sessions.md`, the `lf resume` table row "ended or crashed":
-    "continues the provider thread it saved, or starts again from its first
-    request".
-  *Made for review:* passed over printing from the viewing process (a second
-  place deciding, able to disagree with the holder) and deleting the line
-  (the only trace of why, in the held screen).
+Kept as built, from the concept review (`scratch/concept-review.html`):
+
+- `saved_thread`'s "no saved copy" line is printed by the held terminal's own
+  `lf`, after `delegate_session` and before a view attaches (qa D: present
+  only in `$LF_HOME/screens/*.ghostsnp`), so nobody running `lf resume` sees
+  it. The docs no longer promise it (52d3183121). *Made for review:* the line
+  stays where the decision is; passed over printing from the viewing process
+  (a second place deciding, able to disagree with the holder) and deleting
+  it (the only trace of why, in the held screen).
 - `new_thread` on a lost thread prints "no saved copy" then "seeded with its
   original request". It runs before the hand-off, both show, and they read
-  as one account. Leave it.
+  as one account.
 
 Done in qa (`scratch/qa.html`): real Claude 2.1.329, exit at the first
 screen then `lf -a claude resume` started a new `--session-id` thread with

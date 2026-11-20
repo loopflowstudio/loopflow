@@ -23,6 +23,9 @@ LF_HOME="$(mktemp -d)" local-bin/lf wave list --json # explicit disposable exper
 cat release/SCHEDULE.md      # hosted-build and cron-host release boundaries
 ```
 
+`lf install` names each package as it downloads. In a terminal, release downloads
+show a progress bar and dev downloads show GitHub CLI's activity indicator.
+
 `scripts/install.py local` builds this worktree's `lf` into `<worktree>/local-bin/`
 and `Loopflow.app` into `local-bin/app.noindex/`, which Spotlight never indexes.
 Local builds never change the installed CLI and never migrate the main Machine.

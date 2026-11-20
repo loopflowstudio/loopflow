@@ -1166,7 +1166,9 @@ lf self sync-skills --repo  # repository skills/Graphs → this checkout
 
 Global exports go to `~/.claude/skills` and `~/.agents/skills`; repository exports
 go to the corresponding checkout directories, never home. Release promotion’s
-skill sync includes builtin Graphs. Recipes capture Graph topology at sync time;
+skill sync includes builtin Graphs and reports how many exports it wrote, pruned
+and skipped. Skips include Graph names claimed by skills and destinations already
+in use. Recipes capture Graph topology at sync time;
 sync again after adding, editing, removing or overriding repository definitions.
 Headless commands retain the defining Graph, authored step ID and source precedence
 in invocation files beside the recipe. Skill definitions and personal, repository, environment and CLI preferences

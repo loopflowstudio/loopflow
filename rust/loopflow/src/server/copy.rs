@@ -16,6 +16,14 @@ pub(super) fn refusal() -> Option<Error> {
     taken().map(|at| Error::new(ErrorCode::Invalid, sentence(at)))
 }
 
+/// The same sentence for an `lf` beside that server, such as one a Desktop
+/// pane runs: its command met the sealed store. `None` for any other failure.
+pub fn write_refused(error: &anyhow::Error) -> Option<String> {
+    // Some commands carry the store's failure as text, so the text is what is read.
+    let read_only = format!("{error:#}").contains("attempt to write a readonly database");
+    taken().filter(|_| read_only).map(sentence)
+}
+
 fn sentence(taken: SystemTime) -> String {
     let at = chrono::DateTime::<chrono::Local>::from(taken).format("%H:%M");
     format!("This is a copy of the Machine from {at}; make changes in Loopflow or with lf.")

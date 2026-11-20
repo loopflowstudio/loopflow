@@ -81,6 +81,15 @@ Settled while building slice 4, each reversible:
 25. `lf install server` that still finds another executable answering after
     10 s says "another executable still answers".
 
+Settled during QA, each reversible:
+
+26. An `lf` that meets the sealed store itself (a pane's `lf session resume`,
+    a shell tab, `lf desktop move`, `lf task create`) prints the copy's
+    sentence in place of "sqlite error: attempt to write a readonly
+    database". It is matched by that text when the store is sealed: some
+    commands carry the failure as a string, not a typed error.
+27. The decode Notice writes an array position as `0`, not Swift's `Index 0`.
+
 Idea, not built: Desktop's socket in a short per-home directory, as
 `machine_route.rs` does for SSH control sockets (`/tmp/lf-ssh-<uid>-<digest>`).
 Then no directory is too long and the notice goes.
@@ -101,8 +110,14 @@ Not established:
   reproduced. If it is that, a world's `env.json` could carry
   `LF_DESKTOP=com.loopflow.mac.dev`.
 - Whether `lf task create` on the read-only copy reached Linear before the
-  store refused. The error came from SQLite and no Task was filed locally; the
-  tracker was not checked.
+  store refused. In QA the copy's home held no tracker request log after two
+  refused creates, and the command left an empty `creation-locks` directory
+  there; Linear itself was not checked.
+- Dev on the Machine itself was not launched in QA (other agents' Sessions were
+  live); only the launcher's choice was run, and it printed "Opening the
+  Machine."
+- In a `one-task` world one of three conversation panes read `failed` on the
+  first launch and `usable` after the next launch replaced the world's server.
 - Whether a Dev build's lf forwards main-Machine commands to the installed lf.
   swift/README.md says both "runs its bundled CLI on the main Machine's store"
   and "Main-Machine commands forward to installed lf"; only `lf install server`

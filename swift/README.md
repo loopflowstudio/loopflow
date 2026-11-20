@@ -48,7 +48,9 @@ This is a copy of the Machine from 14:02; make changes in Loopflow or with lf.
 ```
 
 The window does not otherwise say it is a copy. Session rows show whether their
-processes are alive now; their panes have no terminal. Tracker and PR rows show
+processes are alive now; their panes have no terminal, and a pane or shell tab
+that tries to start one prints the same sentence, as any `lf` command that
+writes does there. Tracker and PR rows show
 what the store last recorded. The installed server, `~/.lf` and every running
 Session are untouched: `lf server status` reports the same `instance` before,
 during and after. For terminals or changes on a branch like this, use a fake

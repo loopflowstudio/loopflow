@@ -548,3 +548,13 @@ No slice remains. Gate and CI run what the slices list under "Not run".
 The sentence for an undecodable reading has one carrier,
 `LineSubscription.unreadable`: `ServerClient.subscribe` takes it from the link
 it connects. The pipe transport and two test transports pass `{ nil }`.
+
+QA, November 20 (`scratch/qa.html`): an `lf` that meets the sealed store
+prints the copy's sentence (`server::copy::write_refused`), and the decode
+Notice writes an array position as a number. Checks:
+
+- `cargo test -p loopflow --test integration copy_world`: 2 passed with the
+  pane's sentence asserted.
+- The Swift edit built into the Dev bundle; its test
+  (`aReadingThisBuildCannotDecodeNamesBothBuilds`) and clippy were not run.
+  Gate and CI.

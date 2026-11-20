@@ -300,6 +300,11 @@ fn a_copy_serves_the_machines_tasks_and_changes_nothing_outside_itself() {
     // A pane's `lf` reaches the store before any provider.
     let resumed = copied.lf(&["session", "resume", session]).output().unwrap();
     assert!(!resumed.status.success());
+    let said = String::from_utf8_lossy(&resumed.stderr);
+    assert!(
+        said.starts_with("This is a copy of the Machine from "),
+        "{said}"
+    );
     assert!(!copied.provider_ran.exists());
     assert!(alive(&copied.running));
     assert_eq!(digest(&store), copy_before);

@@ -467,8 +467,8 @@ writes! {
         on, agent, ..
     } => super::session::moved(on.as_deref(), agent)?,
 
-    /// `lf wave add <wave> [--objective <objective>] --json`: the Wave, its
-    /// authored files and first Project; an existing Wave is unchanged.
+    /// `lf wave create <wave> [--objective <objective>] --json`: the Wave and
+    /// its authored files; an existing Wave is unchanged.
     #[serde(rename = "wave.create")]
     WaveCreate {
         directory: PathBuf,

@@ -1138,8 +1138,8 @@ final class WorkModel {
             reading: state, reason: reason, observedAt: nil, action: state == "current" ? record?.action : nil)
     }
 
-    var historyWave: WaveSnapshot?
-    var historyReference: String?
+    var projectsWave: WaveSnapshot?
+    var projectsReference: String?
     @ObservationIgnored private(set) var historyLookup: Task<Void, Never>?
     var repoPath: String?
     var selection: WorkReference? { navigation.selection }
@@ -2342,8 +2342,8 @@ final class WorkModel {
             guard let entries = result?.projects.items else { continue }
             if entries.contains(where: { $0.matches(reference: reference) }) {
                 select(.wave(id: wave.wave.id))
-                historyReference = reference
-                historyWave = wave.wave
+                projectsReference = reference
+                projectsWave = wave.wave
                 return
             }
         }

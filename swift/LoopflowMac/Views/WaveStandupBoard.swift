@@ -194,8 +194,8 @@ struct WaveStandupBoard: View {
             ShowHiddenMenu(model: model, view: view)
             Menu {
                 Button("Projects") {
-                    model.historyReference = nil
-                    model.historyWave = roadmap.wave
+                    model.projectsReference = nil
+                    model.projectsWave = roadmap.wave
                 }.accessibilityIdentifier("wave-projects")
                 if let workflow = roadmap.graph {
                     Button("Workflow · \(workflow)") {

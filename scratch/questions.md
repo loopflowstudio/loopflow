@@ -54,3 +54,12 @@ Each choice below was made headless and is reversible before release.
     and `_check_runtime_sql` pass against the `origin/main` merge-base
     (`['plan_hub.sql', 'remove_chapters.sql']`), and
     `scripts/schema_page.py --check` passes.
+- **QA on the built branch (2026-11-20):**
+  - `ops::linear::planning_lookup_tests::missing_git_task_never_falls_through_to_linear`
+    fails alone under nextest with `Task "FIX-404" not found`, identically on
+    stack base `c2beea658a`; inherited from LOO-938.
+  - `ops::linear::tests::connect_adds_an_unregistered_wave_on_main_before_linking_it`
+    still asserted the deleted first Project; it now asserts none.
+  - `lf wave plan <wave>` prints JSON with or without `--json`, on a TTY
+    too; the base does the same.
+

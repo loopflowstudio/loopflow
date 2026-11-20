@@ -994,8 +994,8 @@ public struct RegistryQuery: Sendable {
         _ = try await write(.waveSync(directory: cwd, wave: wave))
     }
 
-    /// `lf wave create`: registers the Wave, commits its files on the main checkout and
-    /// ensures its first Project. Adding an existing Wave changes nothing, so this
+    /// `lf wave create`: registers the Wave and commits its files on the main
+    /// checkout; its first Task makes its first Project. Adding an existing Wave changes nothing, so this
     /// is also the explicit opening/retry operation; periodic reads stay observational.
     /// The receipt's `summary` names anything left to finish.
     @discardableResult

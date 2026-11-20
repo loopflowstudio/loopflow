@@ -556,7 +556,7 @@ pub fn connect(
 
 /// Link a Wave to its Linear Initiative and the repository Team. Connecting
 /// never creates a Wave itself: a name the store does not know is added first,
-/// so its files, first Project and commit land on the main checkout like any
+/// so its files and commit land on the main checkout like any
 /// other add; the binding's own files are committed there too.
 async fn connect_async(
     repo: &Path,
@@ -2210,8 +2210,8 @@ mod tests {
                             .expect("ops is registered");
                         assert_eq!(
                             fixture.store.sqlite.list_projects(Some(ops.id())).unwrap().len(),
-                            1,
-                            "add gives the Wave its first Project"
+                            0,
+                            "add gives the Wave no Project"
                         );
                     })
                     .await;

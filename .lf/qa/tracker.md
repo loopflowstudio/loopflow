@@ -132,6 +132,23 @@ both remotes away, make the Wave on both, bring only the hub back and
 clears it and the mini's list holds both. `lf task sync` still exits 1 on
 Git's error while the remotes are away.
 
+No `lf` command adds, renames or ends a Project without a tracker. To give a
+Wave a second Project, or end one, push a Project record as another Machine:
+copy `projects/<id>.json` from this home's ref, give it a new `proj_<32 hex>`
+id, the Wave's id in `project_wave`, a `home_<32 hex>` machine and a later
+`at`, commit it with the `repository` file in a fresh `git init` and
+`git push <bare> HEAD:refs/loopflow/plan/<that machine>`; `lf task sync <id>`
+takes it. Change `project_status` to `completed` with a later `at` and
+force-push to end it. Fields this build doesn't know (`project_krs`,
+`wave_project`) are `WARN loopflow_storage::work::edit: skipped an unknown
+plan field` lines.
+
+For a returning user on a stacked branch, the installed `lf` may be newer than
+the branch base and its store refuses the branch ("migration … is unknown").
+Build the base instead: `git worktree add --detach <dir> <base>` and
+`CARGO_TARGET_DIR=<other dir> cargo build -p loopflow --bin lf` (about four
+minutes), write the home with it, then open it with the branch.
+
 For the minute, run the laptop's `lf server run` in the background (record
 its PID), type nothing on the laptop and poll `lf task list` there after a
 save on the mini: 40 to 60 s. The minute's exchange is silent; a split Wave

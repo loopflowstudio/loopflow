@@ -170,7 +170,7 @@ struct WorkModelTests {
         let view = WorkSurfaceView(model: model)
         try view.inspect().find(button: "Projects").tap()
 
-        #expect(model.historyWave?.id == "wave-1")
+        #expect(model.projectsWave?.id == "wave-1")
         #expect(model.selection == .wave(id: "wave-1"))
     }
 
@@ -200,15 +200,15 @@ struct WorkModelTests {
         switch destination {
         case "history":
             #expect(model.selection == .wave(id: "wave-1"))
-            #expect(model.historyWave?.id == "wave-1")
-            #expect(model.historyReference == "old-plan")
+            #expect(model.projectsWave?.id == "wave-1")
+            #expect(model.projectsReference == "old-plan")
         case "task":
             #expect(model.selection == .task(id: "issue-now"))
-            #expect(model.historyWave == nil)
+            #expect(model.projectsWave == nil)
         default:
             #expect(model.repoPath == "/src/context")
             #expect(model.selection == nil)
-            #expect(model.historyWave == nil)
+            #expect(model.projectsWave == nil)
         }
     }
 

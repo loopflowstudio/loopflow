@@ -1415,7 +1415,7 @@ fn automatic_agent_selection_requires_exactly_one_installed_harness() {
 
     unresolved();
     for harness in loopflow_harness::HarnessKind::ALL {
-        let program = harness.program();
+        let program = harness.as_str();
         install(program);
         let agent = inspect();
         assert_eq!(agent["value"], harness.as_str());

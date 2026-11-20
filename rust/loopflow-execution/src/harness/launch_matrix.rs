@@ -83,7 +83,7 @@ if "--mode" not in sys.argv and "LF_PROVIDER_CONTEXT" not in os.environ: sys.exi
         &bin.join("agy"),
         &format!(
             "#!/usr/bin/python3\n{record}\n{}",
-            include_str!("../../tests/support/antigravity_cli.py")
+            include_str!("../../tests/support/agy_cli.py")
         ),
     );
 }
@@ -413,7 +413,7 @@ fn antigravity_follows_the_conversation_a_person_switches_to() {
             let capture = SessionRecorder::begin_at(
                 home,
                 SessionCaptureSpec {
-                    harness: "antigravity".into(),
+                    harness: "agy".into(),
                     model: None,
                     surface: "tui".into(),
                     cwd: cwd.into(),
@@ -429,7 +429,7 @@ fn antigravity_follows_the_conversation_a_person_switches_to() {
             capture.claim_session_attachment()?;
             let recording = Recording::from_runtime(&capture)?;
             let mut config = AgentConfig {
-                agent: crate::config::Agent::parse("antigravity").unwrap(),
+                agent: crate::config::Agent::parse("agy").unwrap(),
                 cwd: Some(cwd.into()),
                 task_prompt: "say hi".into(),
                 conversation_context: Some(crate::context_block::ContextDelivery {

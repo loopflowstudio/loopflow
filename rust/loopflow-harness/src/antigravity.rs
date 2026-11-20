@@ -12,9 +12,6 @@ impl Harness for Antigravity {
     fn kind(&self) -> HarnessKind {
         HarnessKind::Antigravity
     }
-    fn program(&self) -> &'static str {
-        "agy"
-    }
     fn sign_in_advice(&self) -> &'static str {
         "run `agy` and sign in"
     }

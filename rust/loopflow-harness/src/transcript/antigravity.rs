@@ -58,7 +58,7 @@ pub fn read(rows: &[Value]) -> Vec<Turn> {
                 let count = |key: &str| row[key].as_u64().unwrap_or(0);
                 calls.add(
                     &mut turns,
-                    "antigravity",
+                    "agy",
                     [
                         count("input_tokens"),
                         count("cache_read_tokens"),
@@ -203,7 +203,7 @@ mod tests {
                 output_tokens: 477,
             })
         );
-        assert_eq!(turn.receipt.usage["provider"], "antigravity");
+        assert_eq!(turn.receipt.usage["provider"], "agy");
         assert_eq!(turn.receipt.usage["usage"]["input_tokens"], 11931);
         let said = turn.agent().collect::<Vec<_>>();
         assert!(matches!(said[0],

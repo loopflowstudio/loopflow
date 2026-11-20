@@ -34,7 +34,7 @@ impl NativeClient {
             .clone()
             .map(Ok)
             .unwrap_or_else(std::env::current_dir)?;
-        let mut process = Command::new(launch.harness.program());
+        let mut process = Command::new(launch.harness.kind().as_str());
         crate::agent::remove_caller_session_env(&mut process);
         process
             .current_dir(&cwd)

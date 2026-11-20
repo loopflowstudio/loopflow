@@ -1993,7 +1993,7 @@ fn opencode_stand_in() -> String {
 }
 
 fn antigravity_stand_in() -> String {
-    include_str!("../../../loopflow-execution/tests/support/antigravity_cli.py").replace(
+    include_str!("../../../loopflow-execution/tests/support/agy_cli.py").replace(
         "Path(__file__).resolve().parent.parent",
         "Path(os.environ['LF_HOME'])",
     )
@@ -2025,12 +2025,7 @@ fn a_task_step_runs_as_a_worker_on_every_harness() {
             "Fixture completed.",
         ),
         ("pi", "pi:fixture/model", pi, "answer 1:"),
-        (
-            "antigravity",
-            "antigravity",
-            antigravity_stand_in(),
-            "answer to:",
-        ),
+        ("agy", "agy", antigravity_stand_in(), "answer to:"),
         ("claude", "claude", holding_claude(), "Held."),
         (
             "codex",
@@ -2039,10 +2034,7 @@ fn a_task_step_runs_as_a_worker_on_every_harness() {
             "Worker finished.",
         ),
     ] {
-        let program = loopflow_harness::HarnessKind::parse(provider)
-            .unwrap()
-            .program();
-        let task = GraphTask::with_tools(&[(program, &script)]);
+        let task = GraphTask::with_tools(&[(provider, &script)]);
         define_worker_graph(&task);
         let home = task.home.path();
         fs::write(home.join("release"), "").unwrap();
@@ -2212,20 +2204,12 @@ fn a_worker_stops_on_interrupt_and_the_next_run_starts_its_step_again_on_opencod
 
 #[test]
 fn a_worker_stops_on_interrupt_and_the_next_run_starts_its_step_again_on_antigravity() {
-    interrupt_a_worker(
-        "antigravity",
-        "antigravity",
-        &antigravity_stand_in(),
-        "answer to:",
-    );
+    interrupt_a_worker("agy", "agy", &antigravity_stand_in(), "answer to:");
 }
 
 fn interrupt_a_worker(provider: &str, agent: &str, script: &str, answer: &str) {
     {
-        let program = loopflow_harness::HarnessKind::parse(provider)
-            .unwrap()
-            .program();
-        let task = GraphTask::with_tools(&[(program, script)]);
+        let task = GraphTask::with_tools(&[(provider, script)]);
         define_worker_graph(&task);
         let home = task.home.path();
         fs::write(home.join("hold-turn"), "").unwrap();

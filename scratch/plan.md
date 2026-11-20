@@ -322,8 +322,8 @@ and never started; run `lf-world copy`; start `lf server run` on the copy.
 `python/tests/test_loopflow_dev.py` covers the choice (same documents and an
 opening store: the Machine; a differing `$defs` entry: a copy, naming it; a
 refusing store: a copy; `--copy`; `--world`) and the environment each passes.
-*(built)* A Swift test covers a restored window from another Machine and a
-decode failure's notice. *(slices 3 and 4)*
+*(built)* A Swift test covers a restored window from another Machine
+*(built)* and a decode failure's notice. *(slice 4)*
 
 Checks, November 20 at 0715825870:
 
@@ -333,7 +333,13 @@ Checks, November 20 at 0715825870:
   failed", "terminal exit not recorded" and "recovery pass failed" within
   80 ms of ready. CI runs the suite.
 - `uv run pytest python/tests/test_loopflow_dev.py`: 14 passed.
-- Not run: clippy on the branch, the Swift suites. Gate and CI.
+- Slice 3: `cargo test -p loopflow --lib world::tests::` 1 passed;
+  `copy_world` 2 passed again after the shared setup;
+  `scripts/test_desktop.sh --filter 'aWindowRestoredFromAnotherMachineIsNotShown|samePlanReusesItsRetainedWorkspace|WorkOpeningCLITests|WorkspaceRetentionTests'`
+  21 passed, before the launch view gained its cancellation branch and log
+  line; the Dev bundle built with them.
+- Not run: clippy on the branch, the full Swift suites, `world_recipes` and
+  `two_people` after the shared setup. Gate and CI.
 
 ## Surfaces
 
@@ -456,6 +462,23 @@ server`, fake-world recipes, `welcome` and `status` as they are.
      path used to show the cancellation as an error with Retry. Two stale
      restored windows would do that to each other, so the launch view now
      closes on cancellation.
+   - Seen November 20 with Dev at 8808224489. macOS restores a window only
+     after an exit that was not a quit: after quitting, the next launch's
+     window value was `nil`. After `kill -9` of Dev on a `one-task` world at
+     `/tmp/w343`, a launch on `~/.lf-copy` restored a window whose value was
+     the world's (`machine: "/tmp/w343/home"`). It took the launch path,
+     opened `/Users/jack/src/loopflow` on the copy and closed: eight seconds
+     later AppKit had two windows, "Loopflow Dev" not visible and "loopflow"
+     visible, and `lf desktop ls` listed one, the copy's. Read from temporary
+     log lines; the screen could not be captured. So the fallback flag
+     `-ApplePersistenceIgnoreState YES` is not used.
+   - `CGWindowListCopyWindowInfo` kept listing the closed launch window as on
+     screen, on every launch including one with no restoration. AppKit's
+     `isVisible` is what was read.
+   - `lf-world build one-task` in a 75-byte directory printed "Loopflow Dev
+     opens this world without `lf desktop`: …/home/run/desktop/
+     com.loopflow.mac.dev.sock is 121 bytes and a socket path holds 103. Use
+     a shorter directory." and built the world.
    - `LoopflowState.selectedRepoPath` is one file per account, not per
      Machine. An app launched on another home without `--repo` asks that
      Machine for the last repository the account opened anywhere.

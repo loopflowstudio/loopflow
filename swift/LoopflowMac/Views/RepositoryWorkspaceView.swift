@@ -29,7 +29,10 @@ struct WorkspaceLaunchView: View {
         } catch is CancellationError {
             // Another launch window asked for the same repository and opens it.
             dismiss()
-        } catch { self.error = error.localizedDescription }
+        } catch {
+            DesktopLog.home.error("Launch window could not open its repository", ["error": error.localizedDescription])
+            self.error = error.localizedDescription
+        }
     }
 }
 

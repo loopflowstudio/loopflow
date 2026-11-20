@@ -162,7 +162,7 @@ CI runs the full suites.
 
 ### Slices
 
-Status, November 19: slices 1–5 are built; slice 6 is planned and not built. The branch holds main through `f76129f677` (merge `09c29fd429`, #1991), which touched no backlog, Graph or Desktop file. Nothing has been seen in the real app.
+Status, November 19: slices 1–6 are built (6 at `fc22206d35`). A third concept review of that build found nothing to change: the row menu, the button, ⌘↩ and the docs agree, and Open (`openTaskDestination`) runs no Graph. The branch holds main through `f76129f677` (merge `09c29fd429`, #1991), which touched no backlog, Graph or Desktop file. Nothing has been seen in the real app.
 
 1. **Rust — built.** `description:` on Graph files, `lf graph list` prints it, catalog DTO in both languages, `RoadmapTask.owned_by_you`, served `task.update` takes `notes` and `rank`.
 2. **Swift list — built.** `BacklogView.swift`; `BacklogState` lives in `WorkNavigation.backlogs`; `BacklogList` is the projection. Default conversation share is 0.236.

@@ -25,3 +25,13 @@
 - The backlog's inline "Planning unavailable / Retry" line and the out-of-plan notice (`WavePlanningNotice`) are gone; main sends both to the window Notice.
 - Builtin Graphs main added (plan, build, redesign, deep-clean) got one-line `description:`s from their header comments, since every builtin needs one.
 - Start's menu after concept review item 4 (pieces under More ›): "Run without stopping" still holds deep-clean, optimize and task-design beside auto and incident. Taken the simpler way: they stay, and the docs example is redrawn to match. The other choice is a first menu of only auto and incident, which needs a way for a Graph to say it is not a first choice.
+
+## From building the concept review's changes, November 19
+
+- A started row's primary action reads "Continue" whatever its position; `run_control` carries only a refusal, and "Run again" needs the Task's Graph position, which the list row doesn't have.
+- File keeps the sheet open until Rust answers, unlike Start, so a refusal can't lose the words. It then clears that backlog's filter and search so the new row shows. It does not navigate to the Wave.
+- `runs: task | wave` was added to the catalog entry: nothing else on the wire says vsm-operate is a Wave's Graph. It comes from the builtin's directory, so a repository Graph is always `task`.
+- `queue` shows under "Run without stopping" in a repository with no `finish-queue`, since nothing there includes it.
+- New's chooser rows lost their step diagram for the menu's line (stops, first sentence); the sheet still draws the chosen workflow's steps.
+- The Task view's "Choose workflow" menu reads the same list, so it no longer offers a Wave's Graph or lists pieces first.
+- The suite is `BacklogViewTests` after the rename, not `BacklogBoardTests`.

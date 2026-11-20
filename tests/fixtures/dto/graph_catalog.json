@@ -133,6 +133,8 @@
       ]
     },
     "unavailable": null,
+    "included_by": [],
+    "runs": "task",
     "composition": {
       "revision": "fixture-feature-composition",
       "items": [
@@ -201,6 +203,8 @@
     "source": ".lf/graphs/broken.yaml",
     "compiled": null,
     "composition": null,
-    "unavailable": "failed to load skill \"missing\": not found"
+    "unavailable": "failed to load skill \"missing\": not found",
+    "included_by": [],
+    "runs": "task"
   }
 ]

@@ -942,7 +942,7 @@ final class WorkModel {
             opening: selectionOpening ?? taskOpening)
     }
 
-    /// A Wave view's board, conversation and strip; other views have no named parts yet.
+    /// A Wave view's backlog, conversation and strip; other views have no named parts yet.
     func desktopViewParts(repository: String) -> [DesktopViewPart] {
         guard let view = navigation.waveView else { return [] }
         let tiles = boardTiles(view)
@@ -951,9 +951,9 @@ final class WorkModel {
         let ratios = navigation.waveRatios[view] ?? WaveViewRatios()
         let zoomed = zoomedPart(in: view)
         return [
-            DesktopViewPart(name: "board", kind: .board, work: nil, text: backlogText(view),
-                            page: nil, pages: nil, visible: [], hidden: isHidden(.board, in: view),
-                            ratio: 1 - ratios.session, zoomed: zoomed == .board,
+            DesktopViewPart(name: "backlog", kind: .backlog, work: nil, text: backlogText(view),
+                            page: nil, pages: nil, visible: [], hidden: isHidden(.backlog, in: view),
+                            ratio: 1 - ratios.session, zoomed: zoomed == .backlog,
                             actions: ["hide", "show", "zoom", "resize"]),
             DesktopViewPart(name: "session", kind: .session, work: viewWork(view, repository: workspaceRepository ?? repository),
                             text: nil, page: nil, pages: nil, visible: [],
@@ -983,7 +983,7 @@ final class WorkModel {
         return workspaceRegistry?.retained(viewWork(view, repository: repository))
     }
 
-    /// The board and strip hide in navigation; the conversation hides as its session
+    /// The backlog and strip hide in navigation; the conversation hides as its session
     /// pane does, so `lf desktop hide -p session` and the hover button agree.
     func isHidden(_ part: WaveViewPart, in view: WorkNavigation.Board) -> Bool {
         guard part == .session else { return navigation.hiddenViewParts[view, default: WaveViewPart.hiddenByDefault].contains(part) }
@@ -1004,7 +1004,7 @@ final class WorkModel {
         workspace.setCollapsed(paneId: pane.id, collapsed: hidden)
     }
 
-    /// The part filling a Wave view. The board and strip zoom in navigation; the
+    /// The part filling a Wave view. The backlog and strip zoom in navigation; the
     /// conversation zooms as its session pane, so `lf desktop zoom -p session` agrees.
     func zoomedPart(in view: WorkNavigation.Board) -> WaveViewPart? {
         if let part = navigation.zoomedViewParts[view] { return part }
@@ -1023,7 +1023,7 @@ final class WorkModel {
         }
     }
 
-    /// A Wave view's backlog as `lf desktop capture -p board` reads it.
+    /// A Wave view's backlog as `lf desktop capture -p backlog` reads it.
     private func backlogText(_ view: WorkNavigation.Board) -> String? {
         let scope = view == .repository ? "Repository" : "Wave"
         switch viewTasks(view) {
@@ -1036,14 +1036,13 @@ final class WorkModel {
         }
     }
 
-    /// A Wave view's backlog: its unstarted Tasks in rank order, filtered and selected as the view left them.
+    /// A Wave view's backlog: its open Tasks nobody is running, in rank order, filtered and selected as the view left them.
     func backlog(_ view: WorkNavigation.Board) -> BacklogList {
         let waveNames = Dictionary(visibleRoadmaps.map { ($0.wave.id, $0.wave.displayName) }, uniquingKeysWith: { first, _ in first })
         let scope: String? = if case .wave(let id) = view { id } else { nil }
-        let defaultFlow = scope.flatMap { wave(id: $0)?.graph }
         let tasks = viewTasks(view)
         return BacklogList(tasks: tasks?.items ?? [], truncated: tasks?.truncated ?? false,
-                           wave: scope, defaultFlow: defaultFlow, waveNames: waveNames,
+                           wave: scope, waveNames: waveNames,
                            state: navigation.backlogs[view] ?? BacklogState())
     }
 
@@ -2199,7 +2198,7 @@ final class WorkModel {
         }.map(\.id)
     }
 
-    /// A Wave or repository row's count: its board's Working and Autonomous columns.
+    /// A Wave or repository row's count: its Working and Autonomous Tasks.
     func startedTaskCount(_ board: WorkNavigation.Board) -> Int {
         (viewTasks(board)?.items ?? []).count { $0.section == .working || $0.section == .autonomous }
     }
@@ -2607,7 +2606,7 @@ final class WorkModel {
         let destination = destinationGeneration
         let created: TaskCreated
         do {
-            created = try await query.createTask(request: request, wave: wave?.name, graph: graph, cwd: repoPath, requestID: requestID)
+            created = try await query.createTask(request: request, wave: wave?.name, graph: graph, run: true, cwd: repoPath, requestID: requestID)
         } catch is SubmittedCreationError {
             Perf.finish(.startTask, id: requestID, owner: owner.performanceOwner, outcome: .unmeasured)
             // The saved submission owns recovery. Keeping a submit button here
@@ -2627,6 +2626,29 @@ final class WorkModel {
             await openCreatedTask(created)
         }
         if owner.startingTask?.id == requestID { owner.startingTask = nil }
+    }
+
+    /// New Task, filed only: `lf task create REQUEST` puts it in `wave`'s backlog
+    /// (nil: the repository's) and starts nothing. Its row is selected there,
+    /// with the filter and search out of its way. Throws while nothing is filed;
+    /// a request whose answer is lost belongs to recovery, as in `createTask`.
+    func fileTask(request: String, wave: WaveSnapshot?, graph: String?) async throws {
+        let requestID = UUID().uuidString
+        let created: TaskCreated
+        do {
+            created = try await query.createTask(request: request, wave: wave?.name, graph: graph, run: false,
+                                                 cwd: repoPath, requestID: requestID)
+        } catch is SubmittedCreationError { return }
+        let view: WorkNavigation.Board = wave.map { .wave($0.id) } ?? .repository
+        var state = navigation.backlogs[view] ?? BacklogState()
+        state.filter = .all
+        state.query = ""
+        state.selection = []
+        state.select(created.receipt.task.id)
+        state.notice = "Filed \(created.receipt.task.identifier)"
+        navigation.backlogs[view] = state
+        // Its backlog row is the Task's presentation; nothing opens.
+        await CreationRecovery.shared.presented([requestID])
     }
 
     /// Install a created Task's conversation from the answer: its row selects the

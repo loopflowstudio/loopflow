@@ -309,7 +309,7 @@ struct DesktopAction {
         },
     ]
 
-    /// `lf desktop hide|show -p board|tiles` names a Wave view part in place of a pane.
+    /// `lf desktop hide|show -p backlog|tiles` names a Wave view part in place of a pane.
     private static let part = DesktopActionArgument(name: "part", kind: .string, required: false)
 
     /// The Wave view part `part=` names; nil when the action addresses a pane.
@@ -319,7 +319,7 @@ struct DesktopAction {
             throw DesktopTargetError("This window shows no Wave view. Nothing changed.")
         }
         guard let part = WaveViewPart(rawValue: name) else {
-            throw DesktopArgumentError("part=\(name) is not board, session or tiles; nothing changed.")
+            throw DesktopArgumentError("part=\(name) is not backlog, session or tiles; nothing changed.")
         }
         return (view, part)
     }
@@ -329,12 +329,12 @@ struct DesktopAction {
                                        part: WaveViewPart, ratio: Double) throws {
         let value = try context.string("toward")
         guard let toward = WaveViewPart(rawValue: value), toward != part else {
-            throw DesktopArgumentError("toward=\(value) must name another of board, session or tiles; nothing changed.")
+            throw DesktopArgumentError("toward=\(value) must name another of backlog, session or tiles; nothing changed.")
         }
         var ratios = context.model.navigation.waveRatios[view] ?? WaveViewRatios()
         switch (part, toward) {
-        case (.session, .board): ratios.session = ratio
-        case (.board, .session): ratios.session = 1 - ratio
+        case (.session, .backlog): ratios.session = ratio
+        case (.backlog, .session): ratios.session = 1 - ratio
         case (.tiles, _): ratios.band = 1 - ratio
         case (_, .tiles): ratios.band = ratio
         default: return

@@ -1110,12 +1110,13 @@ public struct RegistryQuery: Sendable {
     }
 
     /// New Task: Rust files the request in `wave` (nil files it in the
-    /// repository) and admits its conversation with the request as the first
-    /// turn. Returns once both are recorded; the conversation makes the
-    /// checkout and starts the Graph.
-    public func createTask(request: String, wave: String?, graph: String?, cwd: String?, requestID: String = UUID().uuidString) async throws -> TaskCreated {
+    /// repository). With `run` it also admits its conversation with the request
+    /// as the first turn and returns once both are recorded; the conversation
+    /// makes the checkout and starts the Graph. Without, the Task is filed
+    /// unstarted and nothing runs.
+    public func createTask(request: String, wave: String?, graph: String?, run: Bool, cwd: String?, requestID: String = UUID().uuidString) async throws -> TaskCreated {
         try Self.decode(TaskCreated.self, from: await write(.taskCreate(directory: cwd ?? "/", requestID: requestID,
-            title: nil, request: request, wave: wave, graph: graph, session: nil, run: true)))
+            title: nil, request: request, wave: wave, graph: graph, session: nil, run: run)))
     }
 
     /// The graph a new Task in `wave`, or the repository when nil, would take up.

@@ -251,7 +251,7 @@ struct TaskHistoryFilterTests {
         let model = WorkModel(query: query)
         model.applyFixture(roadmap: .available(roadmap), waves: .available([wave.wave.toWave()]), workActivity: .loading, repos: [])
         model.select(.wave(id: wave.wave.id))
-        let board = BacklogBoard(model: model, view: .wave(wave.wave.id))
+        let board = BacklogView(model: model, view: .wave(wave.wave.id))
         #expect(try board.inspect().find(viewWithAccessibilityIdentifier: "wave-title").text().string()
             == wave.wave.displayName)
         // Selecting a Wave never starts work; every backlog Task is in its list.

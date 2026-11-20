@@ -186,10 +186,15 @@ public struct GraphCatalogEntry: Decodable, Sendable, Hashable, Identifiable {
     public let compiled: CompiledGraph?
     public let composition: GraphComposition?
     public let unavailable: String?
+    /// The Graphs that include this one with `graph:`; empty for a Graph people start with.
+    public let includedBy: [String]
+    /// What it runs for: a Task, or a Wave's own operation.
+    public let runs: GraphSubject
     public var id: String { name }
 
     enum CodingKeys: String, CodingKey {
-        case name, description, source, compiled, composition, unavailable
+        case name, description, source, compiled, composition, unavailable, runs
+        case includedBy = "included_by"
     }
 
     public init(from decoder: any Decoder) throws {
@@ -200,7 +205,14 @@ public struct GraphCatalogEntry: Decodable, Sendable, Hashable, Identifiable {
         compiled = try values.decode(CompiledGraph?.self, forKey: .compiled)
         composition = try values.decode(GraphComposition?.self, forKey: .composition)
         unavailable = try values.decode(String?.self, forKey: .unavailable)
+        includedBy = try values.decode([String].self, forKey: .includedBy)
+        runs = try values.decode(GraphSubject.self, forKey: .runs)
     }
+}
+
+/// What a Graph is started on.
+public enum GraphSubject: String, Decodable, Sendable, Hashable {
+    case task, wave
 }
 
 /// A graph as a Workflow: `start`, its interactive steps in order, `end`, and

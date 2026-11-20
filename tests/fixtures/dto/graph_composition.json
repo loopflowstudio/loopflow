@@ -116,6 +116,8 @@
     ]
   },
   "unavailable": null,
+  "included_by": [],
+  "runs": "task",
   "composition": {
     "revision": "fixture-study-composition",
     "items": [

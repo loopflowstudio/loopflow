@@ -102,7 +102,7 @@ The Mac app shows the same records the commands print; it keeps no copy of its o
 - **⌘K**: search Waves, Tasks, Sessions and Graphs.
 
 Task lifecycle, conversation membership and availability agree across the page,
-sidebar, board and pickers. Dragging a sidebar Task changes the shared order used
+sidebar, backlog and pickers. Dragging a sidebar Task changes the shared order used
 by ordinary repository and Wave lists. See the [Desktop guide](../swift/README.md)
 for status, ownership and ordering details.
 
@@ -154,8 +154,9 @@ changes the Machine has not answered.
 
 ### The backlog
 
-Open a Wave and its unstarted Tasks are one ranked list, the next work first.
-Click a row and its brief opens under it; nothing starts until you press Start.
+Open a Wave and its open work nobody is running is one ranked list, the next
+work first. Click a row and its brief opens under it; nothing starts until you
+press Start.
 
 ```text
 Product · demo-20260924 · Objective ›                                    New
@@ -166,21 +167,26 @@ All 46 · Mine 1 · Available 43                                    Search…
            Show all 412 words
   LOO-456  Keep briefs readable on narrow windows                        ◌
   LOO-753  Retry provider launches · Infrastructure                      ○
+  LOO-781  Trim the launch prompt · at demo · PR #1902                   ◌
 ```
 
 The mark at a row's right edge is its owner: filled for you, muted for someone
 else, a dashed ring for nobody. A row shows its Wave when it isn't the one
-you're looking at.
+you're looking at. Most rows have never run. A Task someone started and nobody
+holds now is here too, and says where it stands: its step, and its PR.
 
 - **Find.** Search matches titles and briefs. **Mine** is what you've claimed;
-  **Available** is everything not claimed by someone else.
+  **Available** is everything not claimed by someone else. Changing the filter
+  or the search deselects the rows it hides, so an action reaches only rows
+  you can see.
 - **Select.** Click, ↑↓, ⌘-click, ⇧-click and ⇧↑↓ select. One selected Task
   shows its brief, cut at nine lines past 900 characters; several selected show
   none. ⌘A selects all and Esc clears.
 - **Act.** The toolbar acts on the selection, with a count when there are
   several. `···` on a row and right-click open the same actions: Start, Claim,
   Edit brief, Move to another Wave or to the top, Move up/down, Copy ID and
-  Abandon…. The narrowest window drops the position and ↑↓ first.
+  Abandon…. Abandon lists the Tasks it will remove and names the ones with a
+  PR before it writes. The narrowest window drops the position and ↑↓ first.
 - **Order.** Drag rows, press ⌘↑↓, or use Move ▾ › To top. The order is the
   Task's rank in its Wave, the same one `lf task list --wave product` prints and
   Linear shows. Over a whole repository, order belongs to each Wave, so
@@ -199,29 +205,48 @@ you're looking at.
 | ⌘⌫ | Abandon… |
 | ⌘↑ ⌘↓ | Move the selection up or down |
 
-#### Start picks a flow
+#### File without starting
 
-Start runs a Task's Graph, which Desktop calls its flow. The button names the
-one it will run: `Start · feature`, the Wave's default. ▾ lists the others,
-each with its description and how many times it stops for you:
+**New** (⌘N) opens the New Task sheet. **Start** files the Task and runs it.
+**File** runs `lf task create` without `--run`: the Task lands in that Wave's
+backlog, selected, and nothing starts.
+
+#### Start picks a workflow
+
+Start runs a Task's Graph, which Desktop calls its workflow. The button names
+the one it will run: `Start · feature`, the Task's own, else its Wave's, else
+the repository's. ▾ lists the others, each with its description and how many
+times it stops for you:
 
 ```text
-✓ Each Wave's flow        feature 2 · code 1
-  feature                 Explore, build, deliver and verify      3 stops
+✓ feature                 Explore, build, deliver and verify      3 stops
   code                    Build, deliver and verify               2 stops
+  redesign                Rethink a started Task                  1 stop
   research                Investigate and report, with no PR      1 stop
   More ›
   Run without stopping
   auto                    Request to merged PR without a person   merges without asking
+  deep-clean              Delete what an area no longer needs     never stops
   incident                Restore first, then fix the cause       never stops
+  optimize                Move one number                         never stops
+  queue                   Compress, integrate upstream changes    never stops
+  task-design             Draft the Task design                   never stops
 ```
 
-Several Tasks from Waves with different defaults show the split,
-`Start 3 · feature 2 · code 1`; clicking it starts each on its own Wave's flow.
-Pick a flow below "Each Wave's flow" to run all of them on that one. Flows under
-"Run without stopping" never wait for you, and Auto-Ship may merge their PRs.
-Graphs with no `description:` sit under **More ›**
-([describe a Graph](orchestration.md#describe-a-graph)).
+Several Tasks whose workflows differ show the split,
+`Start 3 · feature 2 · code 1`, and the menu opens with "Each Task's own
+workflow"; clicking Start runs each on its own. Pick a workflow below it to run
+all of them on that one. Workflows under "Run without stopping" never wait for
+you, and Auto-Ship may merge their PRs. **More ›** holds the pieces other
+Graphs include, such as `build` and `deliver`, and Graphs with no
+`description:` ([describe a Graph](orchestration.md#describe-a-graph)). A
+Graph that runs for a Wave is not offered for a Task. The New Task sheet lists
+the same workflows the same way.
+
+A started Task keeps its Graph: its button reads `Continue` and has no ▾. A
+selection of both says `Start 2 · feature · Continue 1`, and a workflow you
+pick applies to the unstarted ones only. When the Machine would refuse every
+selected Task, Start is off and its tooltip says why.
 
 Starting several starts each one in the click. A Task the Machine refuses comes
 back with its own Notice, and the others stay started. Started Tasks leave the
@@ -259,13 +284,13 @@ lf --task LOO-12 desktop send -p session 'also cover the timeout path'   # into 
 lf desktop browse http://localhost:5173
 lf desktop move -p browser --destination session --axis vertical
 lf desktop goto 2                                 # what ⌘2 does
-lf desktop capture -p board                       # the Wave's backlog as text: counts, then rows in order with owners
-lf desktop zoom --on -p board                     # the backlog fills the view; --off returns
+lf desktop capture -p backlog                     # the Wave's backlog as text: counts, then rows in order with owners
+lf desktop zoom --on -p backlog                   # the backlog fills the view; --off returns
 ```
 
 Without `-p`, a command acts on the terminal it runs in, so an agent's own tool
 call reaches its own pane. `-p` is a path on the screen: a pane (`session`,
-`shell`, `browser`), a Wave view part (`board`, `tiles`), a tab (`shell:2`), a
+`shell`, `browser`), a Wave view part (`backlog`, `tiles`), a tab (`shell:2`), a
 Dashboard tile (`3`, `LOO-12`) or `TILE/PANE`. `lf desktop state` lists each
 view's parts under `view_parts`, with their ratio, hidden and zoomed state. Each part matches full ID, then label, then position, then an ID
 suffix. Nothing follows focus: an ambiguous target lists the choices and changes nothing.

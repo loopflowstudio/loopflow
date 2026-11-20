@@ -341,7 +341,7 @@ struct DTOFixtureTests {
         #expect(report.windows[1].task?.runControl?.unavailable == "Task checkout is on another Machine")
         #expect(window.workspaces.first?.hiddenPanes == ["files-pane"])
         #expect(window.viewParts.isEmpty)
-        #expect(report.windows[1].viewParts.map(\.name) == ["board", "session", "tiles"])
+        #expect(report.windows[1].viewParts.map(\.name) == ["backlog", "session", "tiles"])
         #expect(report.windows[1].viewParts[0].text?.contains("All 0 · Mine 0") == true)
         #expect(report.windows[1].viewParts[2].ratio == 0.382)
         #expect(report.windows[1].viewParts.map(\.zoomed) == [false, false, true])

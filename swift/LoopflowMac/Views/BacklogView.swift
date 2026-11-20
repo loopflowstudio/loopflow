@@ -1,4 +1,4 @@
-// A Wave's backlog: its unstarted Tasks as one ranked list beside its conversation.
+// A Wave's backlog: its open work nobody is running, as one ranked list beside its conversation.
 
 #if os(macOS)
 import AppKit
@@ -21,7 +21,7 @@ enum BacklogOwner: Equatable {
         if task.ownedByYou { self = .you } else if task.runtime?.owner != nil { self = .someone } else { self = .nobody }
     }
 
-    /// The mark `lf desktop capture -p board` prints at a row's end.
+    /// The mark `lf desktop capture -p backlog` prints at a row's end.
     var mark: String {
         switch self {
         case .you: "●"
@@ -90,6 +90,12 @@ struct BacklogState: Equatable {
         settle()
     }
 
+    /// Drop selected rows the list no longer shows, as a changed filter or search leaves it.
+    mutating func keep(_ rows: [String]) {
+        selection.formIntersection(rows)
+        settle()
+    }
+
     private mutating func mark(_ id: String) {
         anchor = id
         cursor = id
@@ -102,21 +108,21 @@ struct BacklogState: Equatable {
     }
 }
 
-/// A Graph as Start offers it, read from the catalog: its description, how many
-/// times it stops for you and whether it merges before the first stop.
-struct BacklogFlow: Equatable, Identifiable {
+/// A Graph as Start and New offer it for a Task, read from the catalog: its
+/// description, how many times it stops for you and whether it merges before
+/// the first stop.
+struct StartFlow: Equatable, Identifiable {
     let name: String
     let description: String?
     let stops: Int
     let merges: Bool
+    /// Another Graph includes it with `graph:`: a piece, not somewhere to start.
+    let isPiece: Bool
     var id: String { name }
 
-    init(name: String, description: String?, stops: Int, merges: Bool) {
-        self.name = name; self.description = description; self.stops = stops; self.merges = merges
-    }
-
+    /// Nil for a Graph that does not load, or that runs for a Wave and not a Task.
     init?(_ entry: GraphCatalogEntry) {
-        guard let compiled = entry.compiled else { return nil }
+        guard entry.runs == .task, let compiled = entry.compiled else { return nil }
         func nodes(_ steps: [GraphNode]) -> [GraphNode] { steps.flatMap { [$0] + $0.paths.flatMap { nodes($0.steps) } } }
         let all = nodes(compiled.steps)
         let firstStop = all.firstIndex(where: \.interactive) ?? all.count
@@ -126,7 +132,11 @@ struct BacklogFlow: Equatable, Identifiable {
         merges = all[..<firstStop].contains { node in
             node.kind == .op && (node.label.hasPrefix("land") || node.label.hasPrefix("pr land"))
         }
+        isPiece = !entry.includedBy.isEmpty
     }
+
+    /// Offered first. A piece, or a Graph with no description, sits under More.
+    var isFirstChoice: Bool { description != nil && !isPiece }
 
     /// What starting it commits you to, shown at the menu item's end.
     var consequence: String {
@@ -145,9 +155,26 @@ struct BacklogFlow: Equatable, Identifiable {
     }
 }
 
-/// A view's backlog: its open, unstarted Tasks in rank order, filtered and
-/// searched, with the selection the view holds. Built from Rust's reading on
-/// every render; it owns no order or ownership of its own.
+/// The workflows a Task can start on, as Start's menu and New's chooser lay
+/// them out: those that stop for you, the pieces and undescribed ones under
+/// More, and those that never stop.
+struct StartFlows: Equatable {
+    let stopping: [StartFlow]
+    let more: [StartFlow]
+    let unattended: [StartFlow]
+
+    init(_ catalog: [GraphCatalogEntry]) {
+        let flows = catalog.compactMap(StartFlow.init)
+        stopping = flows.filter { $0.isFirstChoice && $0.stops > 0 }
+        more = flows.filter { !$0.isFirstChoice }
+        unattended = flows.filter { $0.isFirstChoice && $0.stops == 0 }
+    }
+}
+
+/// A view's backlog: its open work nobody is running, in rank order, filtered
+/// and searched, with the selection the view holds. Most rows are unstarted;
+/// a started Task nobody holds is here too and says where it stands. Built
+/// from Rust's reading on every render; it owns no order or ownership of its own.
 struct BacklogList {
     /// Every backlog Task, in rank order, before filtering.
     let all: [RoadmapTask]
@@ -156,17 +183,15 @@ struct BacklogList {
     let truncated: Bool
     /// The Wave this backlog belongs to; nil over a whole repository.
     let wave: String?
-    /// The Wave's own default flow, for Start's label with nothing selected.
-    let defaultFlow: String?
     let waveNames: [String: String]
     let state: BacklogState
+    /// The selected rows the list shows; a row the filter or search hides is not selected.
+    let selection: Set<String>
 
-    init(tasks: [RoadmapTask], truncated: Bool, wave: String?, defaultFlow: String?, waveNames: [String: String],
-         state: BacklogState) {
+    init(tasks: [RoadmapTask], truncated: Bool, wave: String?, waveNames: [String: String], state: BacklogState) {
         all = tasks.filter { $0.section == .backlog }.sorted { $0.task.rank < $1.task.rank }
         self.truncated = truncated
         self.wave = wave
-        self.defaultFlow = defaultFlow
         self.waveNames = waveNames
         self.state = state
         let needle = state.query.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -174,6 +199,7 @@ struct BacklogList {
             Self.passes(task, state.filter) && (needle.isEmpty
                 || "\(task.task.identifier) \(task.task.name) \(task.task.description)".localizedCaseInsensitiveContains(needle))
         }
+        selection = state.selection.intersection(rows.map(\.id))
     }
 
     static func passes(_ task: RoadmapTask, _ filter: BacklogFilter) -> Bool {
@@ -191,18 +217,15 @@ struct BacklogList {
 
     var ids: [String] { rows.map(\.id) }
 
-    /// The selected Tasks in list order; selected rows a filter hides still count.
-    var selected: [RoadmapTask] { all.filter { state.selection.contains($0.id) } }
+    /// The selected Tasks in list order: what every action reads.
+    var selected: [RoadmapTask] { rows.filter { selection.contains($0.id) } }
 
     /// The one selected Task, whose brief opens under its row.
-    var opened: RoadmapTask? {
-        guard state.selection.count == 1, let id = state.selection.first else { return nil }
-        return rows.first { $0.id == id }
-    }
+    var opened: RoadmapTask? { selection.count == 1 ? selected.first : nil }
 
     /// The Tasks an action on `id` applies to: the selection when the row is in it, else the row alone.
     func targets(_ id: String) -> [RoadmapTask] {
-        state.selection.contains(id) ? selected : all.filter { $0.id == id }
+        selection.contains(id) ? selected : rows.filter { $0.id == id }
     }
 
     /// The Wave a row names when it isn't the one being looked at.
@@ -213,30 +236,76 @@ struct BacklogList {
 
     // MARK: Start
 
-    /// Each Task's flow: the Graph Rust says its first run takes up.
-    static func flow(_ task: RoadmapTask) -> String { task.graphName ?? "code" }
+    /// A Task's workflow: the Graph Rust says its first run takes up.
+    static func workflow(_ task: RoadmapTask) -> String? { task.graphName }
 
-    /// The one flow every Task would run by default, or nil when they differ.
-    static func sharedFlow(_ tasks: [RoadmapTask]) -> String? {
-        let names = Set(tasks.map(flow))
-        return names.count == 1 ? names.first : nil
+    /// The one workflow every Task would run, or nil when they differ.
+    static func sharedWorkflow(_ tasks: [RoadmapTask]) -> String? {
+        let names = Set(tasks.map(workflow))
+        return names.count == 1 ? names.first ?? nil : nil
     }
 
-    /// "feature 2 · code 1": the most common flow first.
+    /// "feature 2 · code 1": the most common workflow first.
     static func breakdown(_ tasks: [RoadmapTask]) -> String {
-        let counts: [(name: String, count: Int)] = Dictionary(grouping: tasks, by: flow).map { ($0.key, $0.value.count) }
+        let counts: [(name: String, count: Int)] = Dictionary(grouping: tasks.compactMap(workflow), by: { $0 })
+            .map { ($0.key, $0.value.count) }
         let ordered = counts.sorted { left, right in
             left.count != right.count ? left.count > right.count : left.name < right.name
         }
         return ordered.map { "\($0.name) \($0.count)" }.joined(separator: " · ")
     }
 
-    /// What Start says it will do: "Start · feature", or "Start 3 · feature 2 · code 1".
-    var startLabel: String {
-        let tasks = selected
-        let count = tasks.count > 1 ? " \(tasks.count)" : ""
-        let flow = tasks.isEmpty ? defaultFlow ?? "code" : Self.sharedFlow(tasks) ?? Self.breakdown(tasks)
-        return "Start\(count) · \(flow)"
+    /// "PR #12" once the Task's PR is on GitHub.
+    static func pullRequest(_ task: RoadmapTask) -> String? {
+        task.pr?.publication?.github.map { "PR #\($0.number)" }
+    }
+
+    /// Where a started Task stands: its step, and its PR when it has one. Nil for an unstarted Task.
+    static func standing(_ task: RoadmapTask) -> String? {
+        guard !task.awaitsStart else { return nil }
+        let step = task.execution?.step ?? task.latestGraphProcess?.steps.last?.label
+        return ([step.map { "at \($0)" } ?? task.nextMove.reason] + [pullRequest(task)].compactMap { $0 })
+            .joined(separator: " · ")
+    }
+
+    /// What Start says it will do: "Start · feature", "Start 3 · feature 2 · code 1",
+    /// "Continue" for a started Task, and "Start 2 · feature · Continue 1" for both.
+    static func startLabel(_ tasks: [RoadmapTask]) -> String {
+        let fresh = tasks.filter(\.awaitsStart)
+        let going = tasks.count - fresh.count
+        guard !tasks.isEmpty else { return "Start" }
+        let mixed = !fresh.isEmpty && going > 0
+        var parts: [String] = []
+        if !fresh.isEmpty {
+            let names = sharedWorkflow(fresh) ?? breakdown(fresh)
+            parts.append("Start" + (fresh.count > 1 || mixed ? " \(fresh.count)" : "") + (names.isEmpty ? "" : " · \(names)"))
+        }
+        if going > 0 { parts.append("Continue" + (going > 1 || mixed ? " \(going)" : "")) }
+        return parts.joined(separator: " · ")
+    }
+
+    var startLabel: String { Self.startLabel(selected) }
+
+    /// Rust's reason when it would refuse to run every one of these Tasks.
+    static func startUnavailable(_ tasks: [RoadmapTask]) -> String? {
+        let reasons = tasks.compactMap(\.runControl.unavailable)
+        return reasons.count == tasks.count ? reasons.first : nil
+    }
+
+    // MARK: Abandon
+
+    /// What the Abandon dialog says before writing: which Tasks, and which have a PR.
+    static func abandonMessage(_ tasks: [RoadmapTask]) -> String {
+        func named(_ items: [String]) -> String {
+            items.count > 5 ? items.prefix(5).joined(separator: ", ") + " and \(items.count - 5) more"
+                : items.joined(separator: ", ")
+        }
+        var lines: [String] = []
+        if tasks.count > 1 { lines.append(named(tasks.map(\.task.identifier))) }
+        let published = tasks.compactMap { task in pullRequest(task).map { "\(task.task.identifier) (\($0))" } }
+        if !published.isEmpty { lines.append("With a PR: \(named(published))") }
+        lines.append("Each keeps its ID and history; its PRs and branches are removed.")
+        return lines.joined(separator: "\n")
     }
 
     // MARK: Order
@@ -321,8 +390,9 @@ struct BacklogList {
         return lines
     }
 
-    /// The backlog as an agent reads it with `lf desktop capture -p board`:
-    /// the filter counts, the shown one bracketed, then the rows in order with owners.
+    /// The backlog as an agent reads it with `lf desktop capture -p backlog`:
+    /// the filter counts, the shown one bracketed, then the rows in order with
+    /// where a started one stands and each row's owner.
     func text(heading: [String]) -> String {
         var lines = heading
         lines.append("")
@@ -335,8 +405,9 @@ struct BacklogList {
         if rows.isEmpty { lines.append("  \(empty.title)") }
         lines += rows.map { task in
             var line = "  \(task.task.identifier) \(task.task.name)"
+            if let standing = Self.standing(task) { line += " · \(standing)" }
             if let wave = waveLabel(task) { line += " · \(wave)" }
-            if state.selection.contains(task.id) { line = "›" + line.dropFirst() }
+            if selection.contains(task.id) { line = "›" + line.dropFirst() }
             return line + " \(BacklogOwner(task).mark)"
         }
         if truncated { lines.append("  Partial: searching the \(all.count) loaded") }
@@ -355,7 +426,7 @@ struct BacklogList {
         switch state.filter {
         case .mine: return ("You haven't claimed anything. \(count(.available)) are available.", .showAvailable)
         case .available where !all.isEmpty: return ("Everything here is claimed by someone else", .showAll)
-        default: return ("No unstarted work in this \(wave == nil ? "repository" : "Wave")", .new)
+        default: return ("This \(wave == nil ? "repository" : "Wave") has no open work nobody is running", .new)
         }
     }
 }
@@ -406,11 +477,14 @@ extension WorkModel {
         return claimed.isEmpty ? nil : .claims(claimed)
     }
 
-    /// Start each Task, on `graph` or its own flow.
+    /// Start each unstarted Task, on `graph` or its own workflow, and continue
+    /// each started one on the Graph it has.
     func startBacklog(_ tasks: [RoadmapTask], graph: String?, in view: WorkNavigation.Board) {
-        for task in tasks { startTask(graph, task: task) }
+        for task in tasks { startTask(task.awaitsStart ? graph : nil, task: task) }
         navigation.backlogs[view, default: BacklogState()].selection.subtract(tasks.map(\.id))
-        backlogNotice(view, "Started \(tasks.count)")
+        let fresh = tasks.count(where: \.awaitsStart)
+        backlogNotice(view, [fresh > 0 ? "Started \(fresh)" : nil,
+                             fresh < tasks.count ? "Continued \(tasks.count - fresh)" : nil].compactMap { $0 }.joined(separator: " · "))
     }
 
     func moveBacklog(_ tasks: [RoadmapTask], toWave wave: String?, in view: WorkNavigation.Board) {
@@ -464,7 +538,7 @@ extension WorkModel {
 
 /// A Wave view's backlog, the repository page included. A row's brief opens in
 /// place; nothing starts until Start.
-struct BacklogBoard: View {
+struct BacklogView: View {
     let model: WorkModel
     /// `.wave(id)` or `.repository`.
     let view: WorkNavigation.Board
@@ -498,17 +572,18 @@ struct BacklogBoard: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         // A fill that ignores safe areas escapes the part's clip into the titlebar
-        // and keeps a stale size there; this one is the board's frame exactly.
+        // and keeps a stale size there; this one is the backlog's frame exactly.
         .background(palette.background, ignoresSafeAreaEdges: [])
         .accessibilityIdentifier("wave-backlog")
         .task(id: model.repoPath) { await model.loadGraphCatalog() }
+        .onChange(of: [list.state.filter.rawValue, list.state.query]) { state.wrappedValue.keep(model.backlog(view).ids) }
         .confirmationDialog(abandonTitle, isPresented: Binding(get: { abandoning != nil }, set: { if !$0 { abandoning = nil } })) {
             Button("Abandon", role: .destructive) {
                 if let tasks = abandoning { model.abandonBacklog(tasks, in: view) }
                 abandoning = nil
             }
         } message: {
-            Text("Each keeps its ID and history; its PRs and branches are removed.")
+            Text(BacklogList.abandonMessage(abandoning ?? []))
         }
     }
 
@@ -590,7 +665,7 @@ struct BacklogBoard: View {
             }
         } label: { Image(systemName: "ellipsis.circle") }
             .menuStyle(.borderlessButton).fixedSize()
-            .accessibilityIdentifier("wave-board-menu")
+            .accessibilityIdentifier("wave-backlog-menu")
     }
 
     private func objective(_ roadmap: WaveRoadmap) -> some View {
@@ -665,12 +740,12 @@ struct BacklogBoard: View {
     }
 
     private func row(_ task: RoadmapTask, _ list: BacklogList) -> some View {
-        let selected = list.state.selection.contains(task.id)
+        let selected = list.selection.contains(task.id)
         let isOpen = list.opened?.id == task.id
         return HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
             Toggle("Select \(task.task.identifier)", isOn: Binding(get: { selected }, set: { _ in state.wrappedValue.toggle(task.id) }))
                 .toggleStyle(.checkbox).labelsHidden()
-                .opacity(hovered == task.id || !list.state.selection.isEmpty ? 1 : 0)
+                .opacity(hovered == task.id || !list.selection.isEmpty ? 1 : 0)
             HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
                 Text(task.task.identifier).font(Typography.code(11)).foregroundStyle(palette.textSecondary)
                     .frame(minWidth: 62, alignment: .leading).fixedSize()
@@ -679,6 +754,10 @@ struct BacklogBoard: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                 if list.state.editing == task.id {
                     Text("draft").font(Typography.body(11)).foregroundStyle(palette.accentInk)
+                }
+                if let standing = BacklogList.standing(task) {
+                    Text(standing).font(Typography.body(11)).foregroundStyle(palette.textSecondary).lineLimit(1)
+                        .accessibilityIdentifier("backlog-standing-\(task.id)")
                 }
                 if let wave = list.waveLabel(task) {
                     Text(wave).font(Typography.body(11)).foregroundStyle(palette.textSecondary).lineLimit(1)
@@ -914,7 +993,7 @@ struct BacklogToolbar: View {
     let model: WorkModel
     let view: WorkNavigation.Board
     let list: BacklogList
-    let perform: (BacklogBoard.Action) -> Void
+    let perform: (BacklogView.Action) -> Void
     @Environment(\.palette) private var palette
 
     var body: some View {
@@ -986,17 +1065,22 @@ struct BacklogQuietButtonStyle: ButtonStyle {
     }
 }
 
-/// Start, a split control: the main part runs each Task's flow, the chevron lists the others.
+/// Start, a split control: the main part runs each Task's own workflow, or
+/// continues a started one; the chevron lists the others for unstarted Tasks.
 struct BacklogStartButton: View {
     let model: WorkModel
     let list: BacklogList
-    let perform: (BacklogBoard.Action) -> Void
+    let perform: (BacklogView.Action) -> Void
     @Environment(\.palette) private var palette
     @Environment(\.isEnabled) private var isEnabled
 
     var body: some View {
-        let fill = isEnabled ? palette.accent : palette.surfaceElement
-        let ink = isEnabled ? palette.accentText : palette.textTertiary
+        let tasks = list.selected
+        let unavailable = BacklogList.startUnavailable(tasks)
+        let enabled = isEnabled && unavailable == nil
+        let fill = enabled ? palette.accent : palette.surfaceElement
+        let ink = enabled ? palette.accentText : palette.textTertiary
+        let fresh = tasks.filter(\.awaitsStart)
         HStack(spacing: 0) {
             Button { perform(.start(nil)) } label: {
                 Text(list.startLabel).font(Typography.strong(12.5)).lineLimit(1)
@@ -1004,59 +1088,77 @@ struct BacklogStartButton: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(WorkPlainButtonStyle())
-            .help(list.selected.count > 1 && BacklogList.sharedFlow(list.selected) == nil
-                  ? "Each Task on its Wave's flow (⌘↩)" : "⌘↩")
+            .help(unavailable ?? (fresh.count > 1 && BacklogList.sharedWorkflow(fresh) == nil
+                                  ? "Each Task on its own workflow (⌘↩)" : "⌘↩"))
             .accessibilityIdentifier("backlog-start")
-            Rectangle().fill(ink.opacity(0.35)).frame(width: 1).padding(.vertical, 4)
-            Menu {
-                BacklogStartItems(model: model, tasks: list.selected, perform: perform)
-            } label: {
-                Image(systemName: "chevron.down").font(.system(size: 10, weight: .bold))
+            // A started Task keeps its Graph, so only unstarted ones get the menu.
+            if tasks.isEmpty || !fresh.isEmpty {
+                Rectangle().fill(ink.opacity(0.35)).frame(width: 1).padding(.vertical, 4)
+                Menu {
+                    BacklogStartItems(model: model, tasks: tasks, perform: perform)
+                } label: {
+                    Image(systemName: "chevron.down").font(.system(size: 10, weight: .bold))
+                }
+                .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+                .tint(ink)
+                .padding(.horizontal, Spacing.xs)
+                .accessibilityIdentifier("backlog-start-menu")
+            } else {
+                Color.clear.frame(width: Spacing.xs, height: 1)
             }
-            .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
-            .tint(ink)
-            .padding(.horizontal, Spacing.xs)
-            .accessibilityIdentifier("backlog-start-menu")
         }
+        .disabled(unavailable != nil)
         .foregroundStyle(ink)
         .background(fill, in: Capsule())
         .fixedSize()
     }
 }
 
-/// Start's flow menu. With Waves whose defaults differ, the first item keeps
-/// each Task's own flow, and any flow below it runs all of them on that one.
+/// Start's workflow menu for the unstarted Tasks among `tasks`. When their
+/// workflows differ, the first item keeps each Task's own, and any workflow
+/// below it runs all of them on that one.
 struct BacklogStartItems: View {
     let model: WorkModel
     let tasks: [RoadmapTask]
-    let perform: (BacklogBoard.Action) -> Void
+    let perform: (BacklogView.Action) -> Void
 
     var body: some View {
-        let flows = (model.graphCatalog.value ?? []).compactMap(BacklogFlow.init)
-        let described = flows.filter { $0.description != nil }
-        let shared = BacklogList.sharedFlow(tasks)
-        if shared == nil, !tasks.isEmpty {
+        let fresh = tasks.filter(\.awaitsStart)
+        let shared = BacklogList.sharedWorkflow(fresh)
+        if shared == nil, fresh.count > 1 {
             Toggle(isOn: Binding(get: { true }, set: { _ in perform(.start(nil)) })) {
-                Text("Each Wave's flow")
-                Text(BacklogList.breakdown(tasks))
+                Text("Each Task's own workflow")
+                Text(BacklogList.breakdown(fresh))
             }
             Divider()
         }
-        ForEach(described.filter { $0.stops > 0 }) { item($0, shared) }
-        let undescribed = flows.filter { $0.description == nil }
-        if !undescribed.isEmpty {
-            Menu("More") { ForEach(undescribed) { item($0, shared) } }
-        }
-        Section("Run without stopping") {
-            ForEach(described.filter { $0.stops == 0 }) { item($0, shared) }
-        }
-        if model.graphCatalog.value == nil {
-            Text(model.graphCatalog.failure.map { "Flows unavailable · \($0)" } ?? "Reading flows…")
+        StartFlowItems(model: model, chosen: shared) { perform(.start($0)) }
+    }
+}
+
+/// The workflows a Task can start on, as menu items; `chosen` is checked.
+struct StartFlowItems: View {
+    let model: WorkModel
+    let chosen: String?
+    let choose: (String) -> Void
+
+    var body: some View {
+        if let catalog = model.graphCatalog.value {
+            let flows = StartFlows(catalog)
+            ForEach(flows.stopping) { item($0) }
+            if !flows.more.isEmpty {
+                Menu("More") { ForEach(flows.more) { item($0) } }
+            }
+            Section("Run without stopping") {
+                ForEach(flows.unattended) { item($0) }
+            }
+        } else {
+            Text(model.graphCatalog.failure.map { "Workflows unavailable · \($0)" } ?? "Reading workflows…")
         }
     }
 
-    private func item(_ flow: BacklogFlow, _ shared: String?) -> some View {
-        Toggle(isOn: Binding(get: { flow.name == shared }, set: { _ in perform(.start(flow.name)) })) {
+    private func item(_ flow: StartFlow) -> some View {
+        Toggle(isOn: Binding(get: { flow.name == chosen }, set: { _ in choose(flow.name) })) {
             Text("\(flow.name)  ·  \(flow.consequence)")
             if let summary = flow.summary { Text(summary) }
         }
@@ -1067,7 +1169,7 @@ struct BacklogMoveItems: View {
     let model: WorkModel
     let list: BacklogList
     let tasks: [RoadmapTask]
-    let perform: (BacklogBoard.Action) -> Void
+    let perform: (BacklogView.Action) -> Void
 
     var body: some View {
         Menu("To Wave") {
@@ -1088,19 +1190,20 @@ struct BacklogActions: View {
     let view: WorkNavigation.Board
     let list: BacklogList
     let tasks: [RoadmapTask]
-    let perform: (BacklogBoard.Action) -> Void
+    let perform: (BacklogView.Action) -> Void
 
     var body: some View {
         // A row outside the selection becomes the selection, so every action below reads one set.
-        let run = { (action: BacklogBoard.Action) in
-            if Set(tasks.map(\.id)) != list.state.selection {
+        let run = { (action: BacklogView.Action) in
+            if Set(tasks.map(\.id)) != list.selection {
                 model.navigation.backlogs[view, default: BacklogState()].selection = Set(tasks.map(\.id))
             }
             perform(action)
         }
-        let flow = BacklogList.sharedFlow(tasks).map { " · \($0)" } ?? ""
-        Button("Start\(flow)") { run(.start(nil)) }
-        Menu("Start with") { BacklogStartItems(model: model, tasks: tasks, perform: run) }
+        Button(BacklogList.startLabel(tasks)) { run(.start(nil)) }.disabled(BacklogList.startUnavailable(tasks) != nil)
+        if tasks.contains(where: \.awaitsStart) {
+            Menu("Start with") { BacklogStartItems(model: model, tasks: tasks, perform: run) }
+        }
         Button("Claim") { run(.claim) }.disabled(!tasks.contains { BacklogOwner($0) == .nobody })
         Button("Edit brief") { run(.edit) }.disabled(tasks.count != 1)
         Menu("Move") { BacklogMoveItems(model: model, list: list, tasks: tasks, perform: run) }
@@ -1121,7 +1224,7 @@ struct BacklogBrief: View {
     let view: WorkNavigation.Board
     let task: RoadmapTask
     let state: Binding<BacklogState>
-    let perform: (BacklogBoard.Action) -> Void
+    let perform: (BacklogView.Action) -> Void
     @Environment(\.palette) private var palette
 
     var body: some View {

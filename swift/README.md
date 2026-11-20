@@ -68,8 +68,8 @@ yourself, call `/usr/bin/log`, since zsh's builtin `log` shadows it:
 Working Tasks lists owned, started, unfinished Tasks, on any Machine this store
 records, in the repository's shared Task order. It is the
 repository's built-in query, so opening a Task neither adds nor reorders it.
-Click a Wave to scope the sidebar to its Working Tasks and subwaves; its board's
-Backlog keeps the unstarted ones. **‹ Repo** returns to Working Tasks. Unstarted Tasks
+Click a Wave to scope the sidebar to its Working Tasks and subwaves; its backlog
+keeps the open work nobody is running. **‹ Repo** returns to Working Tasks. Unstarted Tasks
 open their brief beside **Start**, which runs the Task's Workflow; opening alone
 starts nothing. Waves follow Tasks in the same scrolling sidebar, with counts
 from the planning inventory.

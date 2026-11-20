@@ -440,6 +440,14 @@ fn graph_compositions_round_trip_distinct_compositions_and_required_children() {
     ))
     .unwrap();
     assert!(catalog[0].composition.is_some() && catalog[1].composition.is_none());
+    for field in ["included_by", "runs"] {
+        let mut missing = serde_json::to_value(&catalog[0]).unwrap();
+        missing.as_object_mut().unwrap().remove(field);
+        assert!(
+            serde_json::from_value::<GraphCatalogEntry>(missing).is_err(),
+            "{field}"
+        );
+    }
 }
 
 #[test]
@@ -1240,7 +1248,7 @@ fn desktop_state_retains_outer_and_inner_layouts() {
             .iter()
             .map(|part| part.name.as_str())
             .collect::<Vec<_>>(),
-        ["board", "session", "tiles"]
+        ["backlog", "session", "tiles"]
     );
     assert!(parts[0].text.as_deref().unwrap().contains("All 0 · Mine 0"));
     assert_eq!(parts[2].ratio, 0.382);

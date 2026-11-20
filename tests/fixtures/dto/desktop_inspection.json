@@ -192,10 +192,10 @@
       "view": null,
       "view_parts": [
         {
-          "name": "board",
-          "kind": "board",
+          "name": "backlog",
+          "kind": "backlog",
           "work": null,
-          "text": "product · Active\n\nAll 0 · Mine 0 · Available 0\n  No unstarted work in this Wave",
+          "text": "product · Active\n\nAll 0 · Mine 0 · Available 0\n  No open work nobody is running in this Wave",
           "page": null,
           "pages": null,
           "visible": [],

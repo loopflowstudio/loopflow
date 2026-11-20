@@ -122,7 +122,7 @@ Run the app's bundled `lf` with the world's `env.json` variables and
   holder's children by the holder's PID, then unregister the copy with `lsregister -u`.
 - On the Working Tasks Dashboard (`lf desktop working-tasks`),
   `lf desktop move -p <task> --destination <task>` moves a tile and writes the
-  shared `task_orders`; Wave tiles are not enterable there, so the Wave board has
+  shared `task_orders`; Wave tiles are not enterable there, so the Wave backlog has
   no socket route. A locked screen also denies accessibility reads
   (`AXIsProcessTrusted` false), so header text is left to headless view tests.
 - To delay or break Work reads, SIGSTOP the private server. Desktop registers

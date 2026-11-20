@@ -249,7 +249,7 @@ fn graph_catalog_and_wave_selection_read_the_same_graphs() {
 }
 
 #[test]
-fn showing_one_definition_does_not_require_catalog_enumeration() {
+fn showing_one_definition_survives_an_unreadable_graphs_directory() {
     let repo = tempfile::tempdir().unwrap();
     let run = |name: &str| command(repo.path(), &["graph", "show", name, "--json"]);
     std::fs::create_dir(repo.path().join(".lf")).unwrap();

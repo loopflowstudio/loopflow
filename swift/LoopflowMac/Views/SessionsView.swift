@@ -1733,8 +1733,8 @@ struct SessionsContentView: View {
                 // backlog share the top band; the Tasks run along the bottom.
                 WaveViewLayout(model: model, view: view, workspace: entry) {
                     conversationPanes(key, entry, isFocused: navigation.palette == nil)
-                } board: {
-                    BacklogBoard(model: model, view: view)
+                } backlog: {
+                    BacklogView(model: model, view: view)
                 } tiles: {
                     WaveTiles(model: model, workspaces: workspaces, sessions: store, view: view)
                 }

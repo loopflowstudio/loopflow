@@ -841,8 +841,8 @@ pub enum DesktopCommand {
     /// Perform any registry action by name, as `lf desktop actions` lists them
     #[command(
         after_help = "Arguments are KEY=VALUE pairs. `-p` may name a view part \
-(`board`, `session`, `tiles` on a Wave view), which must accept the action:\n  \
-lf desktop do page -p tiles page=2\n  lf desktop do filter -p board days=14"
+(`backlog`, `session`, `tiles` on a Wave view), which must accept the action:\n  \
+lf desktop do page -p tiles page=2\n  lf desktop do zoom -p backlog on=true"
     )]
     Do {
         /// Action name from `lf desktop actions`
@@ -1490,7 +1490,7 @@ impl SelfCommand {
 }
 
 /// Which part of the view on screen a command acts on. `-p` is a path: a view part
-/// (`board`, `session`, `tiles` on a Wave view), a pane (`session`, `shell`,
+/// (`backlog`, `session`, `tiles` on a Wave view), a pane (`session`, `shell`,
 /// `browser`, `shell:2`), a Dashboard or Wave view tile (`3`, `LOO-519`), or `TILE/PANE`. `query:ID/TILE` and `working-tasks/TILE` name a
 /// saved record's tile by Work key without Desktop. Root `--task`/`--wave` set the
 /// base view; without either, a command acts on the terminal it runs in (`LF_TERMINAL_ID`).

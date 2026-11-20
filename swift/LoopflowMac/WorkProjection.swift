@@ -175,7 +175,7 @@ struct SessionRenameDraft: Equatable {
 
 /// A Wave view's named parts, as `lf desktop -p` names them.
 enum WaveViewPart: String, CaseIterable, Hashable {
-    case board, session, tiles
+    case backlog, session, tiles
 
     /// The Tasks strip distracts more than it helps for now (Jack Heart, LOO-673);
     /// Show… or `lf desktop show -p tiles` brings it back.
@@ -184,7 +184,7 @@ enum WaveViewPart: String, CaseIterable, Hashable {
     /// How the view's `Show…` menu names it.
     var title: String {
         switch self {
-        case .board: "Backlog"
+        case .backlog: "Backlog"
         case .session: "Session"
         case .tiles: "Tasks"
         }
@@ -226,9 +226,9 @@ final class WorkNavigation {
     }
     /// Each board's page; it outlives entering a tile and coming back. Nil is the unsaved view.
     var boardPages: [Board?: Int] = [:]
-    /// Each Wave view's hidden board and strip; its conversation hides as its session pane.
+    /// Each Wave view's hidden backlog and strip; its conversation hides as its session pane.
     var hiddenViewParts: [Board: Set<WaveViewPart>] = [:]
-    /// Each Wave view's zoomed board or strip; its conversation zooms as its session pane.
+    /// Each Wave view's zoomed backlog or strip; its conversation zooms as its session pane.
     var zoomedViewParts: [Board: WaveViewPart] = [:]
     var waveRatios: [Board: WaveViewRatios] = [:]
     /// Each Wave view's backlog selection, filter, search and draft; it outlives entering a Task.

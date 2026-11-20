@@ -232,22 +232,22 @@ DTO changes.
 
 ### Windows belong to their Machine
 
-A window value names the Machine it was opened on. A restored window whose
-Machine is not the one this launch is on is not shown. This replaces a launcher
-flag: the installed app opened on a world's home, as on November 20, is covered
-too. Saved windows from before the change carry no Machine and are dropped
-once.
-
-If SwiftUI gives no way to drop a restored window before it shows, the fallback
-is `-ApplePersistenceIgnoreState YES` on copy and world launches, and the plan
-records which was used.
+A window value names the Machine it was opened on: the home directory
+(`LF_HOME`, else `~/.lf`), since a copy carries the Machine's own id. A
+restored window whose Machine is not the one this launch is on takes the
+launch path: it opens the launch's repository on this Machine and closes.
+This replaces a launcher flag: the installed app opened on a world's home, as
+on November 20, is covered too. Saved windows from before the change carry no
+Machine and take that path once. Two windows of one plan on two Machines are
+different windows, so opening the copy's never raises a stale one.
 
 ### A world says when its directory is too long
 
-`lf-world build` and `lf-world copy` fail at creation when
+`lf-world build` and `lf-world copy` print one line on stderr when
 `<dir>/home/run/desktop/com.loopflow.mac.dev.sock` exceeds the socket limit,
-naming the length and the limit. Today the world builds and Desktop's API is
-silently missing.
+naming the length and the limit. They do not refuse: every fixture that builds
+a world under macOS's temporary directory is past the limit (118 bytes in
+`copy_world`) and none of them opens Desktop.
 
 ### `lf server status` says what is true
 
@@ -340,10 +340,10 @@ Checks, November 20 at 0715825870:
 | Surface | Change |
 | --- | --- |
 | `scripts/loopflow-dev.py run`, `run-debug` | Choose the Machine or a copy and print which; `--copy` and `--world` on both. |
-| `lf-world copy <dir>` | New. Prints the same `env.json` shape as `build`. Both say when `<dir>` is too long. |
+| `lf-world copy <dir>` | New. Prints the same `env.json` shape as `build`. Both say on stderr when `<dir>` is too long for Desktop's socket. |
 | `lf server run` | Serves a read-only store without its writers and admits no change. |
 | `lf server status` | `ready` no longer depends on the executable. |
-| Loopflow, Loopflow Dev | Restored windows from another Machine are not shown; a decode failure has its own sentence. |
+| Loopflow, Loopflow Dev | A restored window from another Machine opens the launch's repository instead; a decode failure has its own sentence. |
 | swift/README.md, scripts/testing.md, docs/dev/machines.md, docs/dev/reference.md | The three things Dev opens, described once. |
 
 ## Absent and error states
@@ -441,10 +441,24 @@ server`, fake-world recipes, `welcome` and `status` as they are.
    Not done: the `lf sync main` line is printed only when the Machine refused
    the bundled lf and the copy then failed; the launcher cannot tell a store
    ahead of the branch from any other failed copy.
-3. **Windows belong to their Machine; a world says when its directory is too
-   long.** `world::copy` repeats `World::new`'s directories and three
-   stand-ins; the length check is needed in both, so they become one setup
-   here.
+3. **Built.** `RepositoryWorkspace` carries `machine`, and `LoopflowApp`
+   mounts a window only when it was opened on this launch's Machine;
+   `world::prepare` is the one setup `World::create` and `world::copy` share,
+   and `WorldEnv::desktop_socket_notice` is the line `lf-world` prints.
+
+   What it showed:
+   - The refusal the plan had could not stand. With it, both `copy_world`
+     tests failed at fixture setup: "…/T/.tmpnT4riv/machine/home/run/desktop/
+     com.loopflow.mac.dev.sock is 118 bytes and a socket path holds 103".
+     `world_recipes`, `two_people`, the Swift fixtures and four scripts build
+     worlds the same way. The notice replaced it.
+   - A launch window that loses its opening to a newer request for the same
+     path used to show the cancellation as an error with Retry. Two stale
+     restored windows would do that to each other, so the launch view now
+     closes on cancellation.
+   - `LoopflowState.selectedRepoPath` is one file per account, not per
+     Machine. An app launched on another home without `--repo` asks that
+     Machine for the last repository the account opened anywhere.
 4. **`lf server status`, and the decode sentence.**
 5. **Docs.** Written ahead of the code, describing the behavior above; each
    slice checks its part against them and corrects whichever is wrong.

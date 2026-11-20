@@ -26,6 +26,9 @@ struct WorkspaceLaunchView: View {
         do {
             try await open()
             dismiss()
+        } catch is CancellationError {
+            // Another launch window asked for the same repository and opens it.
+            dismiss()
         } catch { self.error = error.localizedDescription }
     }
 }

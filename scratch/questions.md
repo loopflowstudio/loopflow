@@ -56,6 +56,21 @@ Settled while building slice 2, each reversible:
 18. `copy_world` checks the copy's log for failed writes. It is the one place
     a server that started its writers on a copy shows.
 
+Settled while building slice 3, each reversible:
+
+19. `lf-world` says a directory is too long for Desktop's socket and builds
+    the world anyway. Refusing broke every fixture that builds a world under
+    macOS's temporary directory.
+20. A window names its Machine by home directory, not Machine id: a copy has
+    the Machine's id.
+21. A restored window from another Machine becomes the launch view, which
+    opens the launch's repository and closes. Just closing it would leave a
+    launch whose saved windows were all another Machine's with no window.
+
+Idea, not built: Desktop's socket in a short per-home directory, as
+`machine_route.rs` does for SSH control sockets (`/tmp/lf-ssh-<uid>-<digest>`).
+Then no directory is too long and the notice goes.
+
 Open, exposed by the docs: when the Machine's store has a migration the branch
 lacks, `run` names `lf sync main`. In a Task checkout `lf sync main` also undoes
 a sync onto another Task. Is that the command to name there, or should it say
@@ -84,7 +99,6 @@ Not established:
   was seen to exec the installed lf (`delegate_selected`).
 - Whether a copy's tracker rows turn **Last known** as their stored sync time
   ages. At launch they read `available`; the window was not seen.
-- Whether SwiftUI lets a restored window be dropped before it shows.
 
 Seen and left alone:
 

@@ -69,13 +69,15 @@ target/debug/lf-world build one-task /tmp/w1
 uv run python scripts/loopflow-dev.py run --world /tmp/w1
 ```
 
-`lf-world list` names the recipes. Keep the directory short: `lf-world` refuses
-one whose `home/run/desktop/com.loopflow.mac.dev.sock` would pass the 103-byte
-socket limit, naming both lengths.
+`lf-world list` names the recipes. Keep the directory short: when
+`home/run/desktop/com.loopflow.mac.dev.sock` would pass the 103-byte socket
+limit, Dev opens the world without `lf desktop`, and `lf-world` says so when it
+builds, naming both lengths.
 
 A window belongs to the Machine it was opened on. A launch shows the windows
 saved for the Machine, copy or world it opens and none from another, so a world
-never shows your real repository's window. Only these flags choose what Dev
+never shows your real repository's window. A window saved for another one opens
+the launch's repository instead. Only these flags choose what Dev
 opens; an `LF_HOME` in the launching shell does not.
 
 Repository selectors list only Git main checkouts. Linked worktrees stay visible

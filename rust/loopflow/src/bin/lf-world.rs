@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use anyhow::{anyhow, Result};
 use clap::{Parser, Subcommand};
-use loopflow::world::{recipes, World};
+use loopflow::world::{recipes, World, WorldEnv};
 
 #[derive(Parser, Debug)]
 #[command(name = "lf-world")]
@@ -30,13 +30,9 @@ fn main() -> Result<()> {
                 .ok_or_else(|| anyhow!("unknown recipe {recipe}; see `lf-world list`"))?;
             let world = World::create(&dir)?;
             (recipe.build)(&world)?;
-            let env = world.finish()?;
-            println!("{}", serde_json::to_string_pretty(&env)?);
+            describe(&world.finish()?)?;
         }
-        Command::Copy { dir } => {
-            let env = loopflow::world::copy(&dir)?;
-            println!("{}", serde_json::to_string_pretty(&env)?);
-        }
+        Command::Copy { dir } => describe(&loopflow::world::copy(&dir)?)?,
         Command::List => {
             for recipe in recipes::RECIPES {
                 println!(
@@ -48,6 +44,15 @@ fn main() -> Result<()> {
             }
         }
     }
+    Ok(())
+}
+
+/// Print the environment and, on stderr, what its directory's length costs.
+fn describe(env: &WorldEnv) -> Result<()> {
+    if let Some(notice) = env.desktop_socket_notice() {
+        eprintln!("{notice}");
+    }
+    println!("{}", serde_json::to_string_pretty(env)?);
     Ok(())
 }
 

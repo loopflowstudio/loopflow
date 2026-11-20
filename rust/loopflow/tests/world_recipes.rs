@@ -3,7 +3,7 @@ use std::process::{Command, Output, Stdio};
 
 use serde_json::Value;
 
-fn clean(binary: &str, home: &Path) -> Command {
+pub(crate) fn clean(binary: &str, home: &Path) -> Command {
     let mut command = Command::new(binary);
     command
         .env_clear()
@@ -14,7 +14,7 @@ fn clean(binary: &str, home: &Path) -> Command {
     command
 }
 
-fn success(output: Output) -> String {
+pub(crate) fn success(output: Output) -> String {
     assert!(
         output.status.success(),
         "{}",

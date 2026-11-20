@@ -912,7 +912,8 @@ public struct RegistryQuery: Sendable {
                     }
                     continuation.onTermination = { _ in reader.cancel() }
                 }
-                return LineSubscription(lines: lines, send: subscription.send, cancel: subscription.cancel)
+                return LineSubscription(lines: lines, send: subscription.send, cancel: subscription.cancel,
+                                        unreadable: subscription.unreadable)
             }
         }
         return query

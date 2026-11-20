@@ -292,6 +292,42 @@ public struct WorkFrame: Sendable {
     }
 }
 
+extension WorkFrame {
+    /// `part`'s failed reading for a `line` whose body this build can't decode;
+    /// throws when the line is not a reading at all.
+    static func unread(part: WorkPart, sequence: Int, line: Data, reason: String) throws -> WorkFrame {
+        struct Unread: Decodable { init(from decoder: any Decoder) {} }
+        let read = try JSONDecoder().decode(Envelope<Unread>.self, from: line)
+        let content: Content = switch part {
+        case .planning: .planning(nil)
+        case .selections: .selections(nil)
+        case .taskList: .taskList(nil)
+        case .gitDestinations: .gitDestinations(nil)
+        case .sessions: .sessions(nil)
+        case .task: .task(nil)
+        case .workActivity: .workActivity(nil)
+        }
+        return WorkFrame(sequence: sequence, answers: read.answers, unavailable: reason, content: content,
+                         wire: nil, readAt: read.readAt)
+    }
+}
+
+extension DecodingError {
+    /// Where decoding stopped, for the log and the Notice: "(missing owned_by_you at body.tasks.0)".
+    fileprivate var place: String {
+        // An array position names itself "Index 0"; the path says 0.
+        func path(_ context: Context) -> String {
+            context.codingPath.map { $0.intValue.map(String.init) ?? $0.stringValue }.joined(separator: ".")
+        }
+        return switch self {
+        case .keyNotFound(let key, let context): "(missing \(key.stringValue) at \(path(context)))"
+        case .valueNotFound(_, let context), .typeMismatch(_, let context), .dataCorrupted(let context):
+            "(unexpected value at \(path(context)))"
+        @unknown default: "(unreadable)"
+        }
+    }
+}
+
 private func zip<A, B>(_ a: A?, _ b: B?) -> (A, B)? {
     guard let a, let b else { return nil }
     return (a, b)
@@ -304,12 +340,16 @@ public struct LineSubscription: Sendable {
     public let send: @Sendable (Data) -> Void
     /// Returns only after the subscription has ended.
     public let cancel: @Sendable () async -> Void
+    /// What to say of a line this build can't decode, when the transport knows
+    /// which server sent it: `ServerLink.unreadable`.
+    public let unreadable: @Sendable () -> String?
 
     public init(lines: AsyncThrowingStream<Data, any Error>, send: @escaping @Sendable (Data) -> Void,
-                cancel: @escaping @Sendable () async -> Void) {
+                cancel: @escaping @Sendable () async -> Void, unreadable: @escaping @Sendable () -> String?) {
         self.lines = lines
         self.send = send
         self.cancel = cancel
+        self.unreadable = unreadable
     }
 }
 
@@ -416,7 +456,15 @@ public final class WorkSubscriptions: @unchecked Sendable {
             guard !finished, var current = running[part], current.generation == generation else { return }
             do {
                 sequence += 1
-                let decoded = try WorkFrame.decode(part: part, scope: scope, sequence: sequence, line: line)
+                let decoded: WorkFrame
+                do {
+                    decoded = try WorkFrame.decode(part: part, scope: scope, sequence: sequence, line: line)
+                } catch let error as DecodingError {
+                    // Another build's reading fails this part alone, and says so;
+                    // the link is up and the other parts stay current.
+                    guard let reason = current.subscription.unreadable() else { throw error }
+                    decoded = try WorkFrame.unread(part: part, sequence: sequence, line: line, reason: "\(reason) \(error.place)")
+                }
                 let frame = decoded.answering(max(decoded.answers ?? 0, current.floor), sequence: sequence)
                 current.last = frame
                 running[part] = current

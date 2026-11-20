@@ -86,8 +86,12 @@ Checks:
 - `documented_commands::`, `binary(golden_prompt)` (the `split-wave` builtin
   changed), Swift DTO fixtures and the full suites: for gate and CI.
 
-Next: raw-SQL fixtures elsewhere that insert `tasks` with only `project_id`
-have no Wave now; CI shows which ones need `wave_id`.
+Raw-SQL `INSERT INTO tasks` without `wave_id`: only
+`rust/loopflow/tests/build_cleanup.rs:487` copies a `project_id`, and it reads
+no Wave; the rest set no Project. Nothing left to implement in this slice.
+
+Next: gate publishes the branch so CI runs the suites on these commits (PR
+#1997 shows no run since they landed).
 
 ## Shows it worked
 

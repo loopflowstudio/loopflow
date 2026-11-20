@@ -79,71 +79,74 @@ another way (a stand-in that exits "not installed", or `HOME`-relative only).
 
 ## 2. The receipt says why
 
-Today the pane's `lf session resume` is a transport viewer
-(`rust/loopflow-execution/src/transport.rs`). On success it writes `attached` to
-`$LF_OPEN_RECEIPT` (`acknowledge_open`). On failure nothing in lf writes the
-receipt; the shell wrapper writes "Conversation exited before attachment
-(status N)" and `Attachment::settle` adds "see the destination for diagnostics".
+The pane's `lf session resume` is a transport viewer
+(`rust/loopflow-execution/src/transport.rs`). It starts the launcher in a held
+terminal through the Machine server (`start_held`, which passes the viewer's
+environment as an explicit map) and writes `attached` to the receipt when the
+launcher reports the provider process started (`Event::Return` →
+`acknowledge_open`).
 
-Both messages in the acceptance are lf's own errors (`agent/mod.rs:1401`
-"'claude' is not installed", `provider_auth/mod.rs:193` "{provider} CLI not
-found"), but they can come from either of two processes: the pane's lf itself
-(resolution failed before any view), or the launcher inside the held terminal,
-whose text reaches the viewer only as relayed output followed by an exit code
-(`transport.rs` ~1890 returns `CommandExit(child_code)`).
+**The rule.** An opening has two lf processes: the viewer in the pane and the
+launcher in its held terminal. Only they answer, with lf's own error, and the
+first answer stands (`answer_open`: write a temporary, `hard_link` it to the
+receipt, which fails when the receipt exists). Anything else leaves the shell
+wrapper's "Conversation exited before attachment (status N)".
 
-**The rule (concept review).** The receipt is written once: the first answer
-stands. Every writer — the viewer's `acknowledge_open`, `fail_open` in any lf
-process, the shell wrapper — creates the file only if it is absent (write the
-temporary, then `std::fs::hard_link` it to the receipt, which fails when the
-receipt exists, and remove the temporary; the wrapper already checks
-`[ ! -f ]`). Without this the plan below has two lf processes holding
-`LF_OPEN_RECEIPT` — the launcher in the held terminal inherits it from the
-viewer (`native_session.rs:571` strips it only from the provider) — and the
-viewer's tail written after the launcher's precise error would replace it.
+**Built (slices 1–4):** `answer_open`, `end_open` called from `main`,
+first-answer-wins, `Attachment::settle` reporting the receipt text plus
+"; retry the same command".
 
-**Mechanism.** One failure writer, `transport::fail_open(text)`, beside
-`acknowledge_open`, under the rule above; it clears the env var, so it runs at
-most once per process.
-- The viewer keeps the last 4 KiB of relayed live output (`Tag::Out` and
-  `Tag::Err`, not `Tag::Snapshot`: replayed history of an existing conversation
-  is not why this opening failed) while the receipt is unacknowledged (nothing
-  once acknowledged, nothing without the env var). This also carries a
-  provider's own message when the provider itself exits before it is ready.
-- `bin/lf.rs` `main` calls `transport::end_open(&result, code)` for a failed
-  command still holding the env var: an error that isn't a `CommandExit` is
-  the answer itself; a `CommandExit` answers with the tail, ANSI-stripped and
-  blank lines dropped, plus the exit line. The warn line stays as the log
-  record.
-- The shell wrapper keeps its `[ ! -f "$receipt" ]` fallback for a command that
-  died without lf writing anything (killed, `lf` missing).
-- `Attachment::settle` reports the receipt text as the reason, ending "; retry
-  the same command"; "see the destination for diagnostics" is dropped.
+**Changes from the second concept review (next pass).**
 
-Who answers, in order: the launcher's own lf error (its `main`), else the
-viewer's own error (its `main`), else the tail (a provider that exited before it
-was ready, e.g. Claude's "No conversation found"), else the wrapper's status
-line.
+1. *The receipt is handed on by name, not inherited.* As built,
+   `LF_OPEN_RECEIPT` is ambient: every `lf` the viewer or launcher starts
+   inherits it, and `end_open` lets any of them answer. Counterexample:
+   `agent_process::require_server` runs `lf install server` (`readiness_command`)
+   and tolerates its failure when the server answers afterwards; that child's
+   error becomes the first answer, and `lf open` reports `failed` for a
+   conversation that attached. When the launch does fail, the reason is the
+   install child's error, not the launcher's "Loopflow server is not running".
+   lf starts itself from some fifty places; stripping the variable at each is
+   the wrong direction (`native_session.rs:571` is one such strip).
+   - `transport::initialize` takes `LF_OPEN_RECEIPT` out of the process
+     environment into a static (`main` is still single-threaded there);
+     `answer_open` and `end_open` read the static.
+   - The two places that continue the same opening put it on the child they
+     start: `start_held`'s environment map (the launcher) and the viewer's own
+     re-exec in `relay_with_preview`, if that exec happens before the
+     acknowledgement (check; drop this hand-off if it doesn't).
+   - Delete `process.env_remove(OPEN_RECEIPT_ENV)` in
+     `native_session.rs`: a provider can't inherit what the environment
+     doesn't hold.
+2. *The tail goes.* `OPEN_TAIL`, `keep_open_tail`, `open_failure`, the
+   `CommandExit` branch of `end_open` and the test
+   `a_provider_that_exits_unready_is_reported_in_its_own_words` are deleted.
+   The acknowledgement is written when the provider process is spawned, so a
+   provider that prints an error and exits is already `usable` (qa saw this
+   with a stand-in); and a launcher that fails writes its own error first. The
+   tail could only answer for a launcher that crashed without returning from
+   `main`. `end_open` becomes: a failed command that holds the receipt and whose
+   error is not a `CommandExit` answers with that error; the warn line stays.
+   Revert the `ANSI_ESCAPE_RE` widening and the `pub(crate)` on
+   `strip_ansi_escape_codes` in `provider_auth/mod.rs` unless another caller
+   needs them. If `usable` is later made to wait until the provider takes
+   input, the tail belongs with that change.
+3. *Docs.* `docs/workspaces.md` "If opening fails" says the reason is "lf's own
+   error, or the provider's last words if it exited before it was ready". Cut
+   the second half; say `usable` means the provider was started.
 
-**First probe of this slice:** the bare-PATH fixture already asserts the
-viewer's stdout holds "'claude' is not installed" (the held terminal relays the
-launcher's stderr), so the tail alone would carry it. The probe is now
-(`a_launch_that_found_no_provider_leaves_nothing_to_resume`) asserting
-the receipt file is exactly the launcher's error (`'claude' is not installed. …`,
-no relayed bytes around it): that shows the launcher holds the variable and
-wrote first. If it holds no variable, the tail answers and the order above loses
-its first rung; nothing else changes.
+**Who answers, in order:** the launcher's own error, else the viewer's own
+error, else the wrapper's status line.
 
 **Absent/error states:** receipt directory gone (caller timed out and dropped
-it) → write fails silently, as `acknowledge_open` does. Empty tail → the exit
-line alone ("Conversation exited before attachment (status N)").
+it) → the write fails silently.
 
-**Test:** `Attachment` unit test running a command that prints an error and
-exits 1 through the real wrapper: `wait` returns that error text. A
-`transport` unit test: `fail_open("first")` then `fail_open("second")` from a
-fresh env var leaves "first"; `acknowledge_open` after a failure leaves the
-failure. The fixture
-assertion above covers the lf side end to end.
+**Tests:** `the_first_answer_to_an_opening_stands` (kept, driving the static);
+a unit test that after the take the process environment holds no
+`LF_OPEN_RECEIPT`; `a_failed_opening_reports_the_conversations_own_reason`
+(kept); the fixture `a_launch_that_found_no_provider_leaves_nothing_to_resume`
+still reads the launcher's exact error from the receipt, which now shows the
+hand-off through `start_held` works.
 
 ## 3. The pane command never names a harness it wasn't given
 
@@ -182,8 +185,8 @@ All four built (commits 54c70a2345 and the one after).
    with "'claude' is not installed" and holds no exit line. `transport::end_open`
    runs in `main` for every failed command holding the variable; a clean exit
    (code 0) writes nothing and leaves the wrapper's line, so a launcher that ran
-   its conversation to the end can't answer for its viewer. The CSI regex in
-   `provider_auth` widened to ECMA-48 (`\x1b[?25h` leaked through before).
+   its conversation to the end can't answer for its viewer. Section 2 "Changes
+   from the second concept review" removes the tail and the ambient variable.
 3. **No recorded `--agent`** — done. `Resolved.agent` deleted; `resume_argv`
    reads `agent_override()`.
 4. **Plists, systemd, SSH, Swift** — done. `REMOTE_PATH` is `remote_path()`.
@@ -207,13 +210,20 @@ and added `~/.opencode/bin` to the tool directories.
   counted on `gh` being absent now reaches an unauthenticated real one. Gate
   reads the first CI run for this, macOS job included.
 - **`a_launch_that_found_no_provider_leaves_nothing_to_resume` depends on the
-  Machine.** It passes only where no `claude` sits in `/opt/homebrew/bin` or
-  `/usr/local/bin` (a Homebrew-installed Claude Code would). Open choice, not
-  made: (a) lf skips a tool directory under a variable only fixtures set — a
-  test-only knob in production code; (b) the fixture skips when
-  `/opt/homebrew/bin/claude` or `/usr/local/bin/claude` exists; (c) leave it
-  and accept the failure on such a Machine. Nothing in the code can subtract a
-  directory today.
+  Machine.** Choice made for review: the fixture returns early, printing why,
+  when `claude` resolves on `os_process::tool_path("/usr/bin:/bin:/usr/sbin:/sbin", <fixture HOME>)`
+  (a Homebrew-installed Claude Code). Passed over: a variable that makes lf
+  skip a tool directory (a test-only knob in production code), and leaving the
+  test to fail on such a Machine.
+- **Section 2's three changes** are the next implement pass.
+
+## Larger than this change (on `scratch/concept-review.html`)
+
+- `usable` means "the provider process was started", not "it takes input".
+- A failed `lf open -a <harness>` has already moved the conversation: the move
+  is recorded before the harness is known to start.
+- "Not installed" is said of tools a terminal finds (Pi under nvm): lf looks in
+  seven directories, a person expects what their shell finds.
 
 ## Exclusions
 

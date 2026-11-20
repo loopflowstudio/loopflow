@@ -57,3 +57,14 @@
 - Pi installed under nvm is "not installed" in a Rex pane on this Machine. This
   is the recorded cost of dropping the caller's `PATH`; before this change a
   terminal caller's `PATH` reached the pane.
+
+## Concept review after the build (headless)
+
+- The receipt's relayed tail is deleted rather than kept as a net for a crashed
+  launcher: nothing in the real product reached it (qa), and the pane still
+  shows a crash. It returns if `usable` is made to wait for input.
+- `LF_OPEN_RECEIPT` is taken out of the environment at start and handed to the
+  launcher by name, instead of stripping it at each child. Passed over: leaving
+  it ambient and accepting that `lf install server`'s failure can answer.
+- The bare-PATH provider fixture returns early on a Machine with `claude` in a
+  system tool directory.

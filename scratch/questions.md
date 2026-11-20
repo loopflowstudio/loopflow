@@ -1,9 +1,7 @@
 # LOO-995 questions
 
-- The plan says "A Task with no Project sends nothing to a tracker." Built more
-  narrowly: only a Task *in a Wave* with no Project stays out. Standalone Tasks
-  already go to Linear as team issues, and stopping that changes behavior
-  this slice doesn't own. Widen it if standalone Tasks should stay local too.
+- Concept review chose: every Task in a connected repository goes to the
+  tracker, Project or not (plan, "Made for review"). Standalone Tasks unchanged.
 - A retried creation compares the stored intent without its Wave: a retry
   naming another Wave reuses the first Task.
 - Already true before this change: every Task listing (`tasks_where`) reads

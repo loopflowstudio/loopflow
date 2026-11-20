@@ -33,8 +33,10 @@ that reaches a Wave through `tasks.project_id → projects.wave_id` moves to
 Linear and Asana hold an issue in a Project, never in a Wave. A Task in an
 ancestor's Project is that Project's issue in the tracker; which child Wave
 it is in lives only in Loopflow's plan, carried by Git and the hub like any
-other field. A Task with no Project sends nothing to a tracker. A Task created
-in the tracker joins the Wave linked to its Project. Marking the child Wave on
+other field. A Task with no Project still goes to the repository's tracker, as
+an issue in no Project (a Linear team issue; in Asana, the repository's team
+project), the path a Task in no Wave already takes. A Task created in the
+tracker joins the Wave linked to its Project. Marking the child Wave on
 the issue (a description marker or an Attachment) is not built; LOO-980 owns
 the tracker link.
 
@@ -52,6 +54,12 @@ listing's query with `EXPLAIN QUERY PLAN` at about 10,000 Tasks.
 - Without a tracker, nothing makes a Project once a Task no longer does, so
   a repository with no tracker has none. Existing Projects stay. Whether a
   command should make one is open.
+- A Task with no Project goes to the tracker (concept review, 2026-11-20).
+  Slice 1 kept a Wave Task with no Project plan-only, and `lf wave plan
+  connect` links an Initiative, not a Project, so a connected repository sent
+  no Wave Task at all and Tasks filed before a Project existed never went.
+  Passed over: `connect` making a Linear Project per Wave, which brings back a
+  Project made for the Wave. `scratch/concept-review.html`.
 - Moving a Task between Waves keeps its Project only when the new Wave is
   that Project's Wave or a descendant of it; otherwise the rule above
   places it again.
@@ -99,15 +107,31 @@ import left a Task without a Wave when its Project came in the same batch;
 a Task that never goes to the tracker (`Task::goes_to_tracker`); five
 `local_planning` tests still expected the old rule.
 
-Next: gate publishes the branch so CI runs the suites on these commits (PR
-#1997 shows no run since they landed).
+## Next (slice 2, from the concept review)
+
+1. Delete `Task::goes_to_tracker` (`loopflow-storage/src/work/task/mod.rs`)
+   and its callers (`loopflow/src/lf/commands/task_create.rs:115`,
+   `loopflow-execution/src/ops/task.rs:2922`; both then ask only
+   `tracker_id.is_none()`), and the `(t.project_id IS NOT NULL OR t.wave_id IS
+   NULL)` clause in `tracker_actions::uncreated`. Flip
+   `local_planning::a_task_makes_no_project_and_joins_the_newest_started_one`
+   (around `local_planning.rs:1312`) to expect the "pending Linear sync" line
+   and a queued create. `docs/work.md:438` drops "stays out of the tracker".
+2. Delete `unavailable_tasks`: the wire field on `lf wave status --json` and
+   the roadmap, its printer, Swift's model and decoding, and the DTO fixtures
+   (`grep -rln unavailable_tasks rust swift tests`).
+3. Edit `remove_chapters.sql`'s top comment for the climbing rule.
+
+Then gate publishes the branch so CI runs the suites (PR #1997 shows no run
+since slice 1 landed).
 
 ## Shows it worked
 
 ```bash
 lf wave create billing ; lf wave create billing/refunds
 lf task create --wave billing/refunds 'x'      # no Project; lf wave status billing/refunds lists it
-# with Linear: link billing to a Linear Project (lf wave plan connect billing)
+lf wave plan connect billing                   # Initiative only: x is now queued as a team issue
+# with a Linear Project made in billing's Initiative, then lf wave sync billing
 lf task create --wave billing/refunds 'y'      # in billing's Project; still listed under billing/refunds
 ```
 

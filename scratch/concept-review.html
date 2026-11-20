@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>LOO-995 concept review: a Task's Wave, its Project, and the tracker</title>
+<style>
+  :root { color-scheme: light dark; --bg:#fbfaf7; --fg:#1d1d1b; --mute:#6b6a65; --line:#dedbd2;
+          --yes:#1f7a3f; --no:#b3261e; --prop:#2a5db0; --propbg:#eaf0fb; --code:#f1efe8; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#161614; --fg:#e9e7e1; --mute:#9c9a93; --line:#34332f;
+            --yes:#6fcf8e; --no:#f28b82; --prop:#8ab4f8; --propbg:#1c2638; --code:#22211e; } }
+  body { background:var(--bg); color:var(--fg); font:16px/1.55 ui-sans-serif, -apple-system, system-ui, sans-serif;
+         max-width:58rem; margin:2.5rem auto; padding:0 1.25rem; }
+  h1 { font-size:1.6rem; margin-bottom:.2rem } h2 { margin-top:2.4rem; font-size:1.2rem }
+  p.lede { color:var(--mute); margin-top:0 }
+  code, pre { font:13.5px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; background:var(--code); border-radius:4px }
+  code { padding:.05em .3em } pre { padding:.8rem 1rem; overflow-x:auto }
+  table { border-collapse:collapse; width:100%; font-size:.94rem }
+  th, td { text-align:left; vertical-align:top; border-bottom:1px solid var(--line); padding:.5rem .5rem }
+  td.yes { color:var(--yes); font-weight:600 } td.no { color:var(--no); font-weight:600 }
+  .proposed { border-left:4px solid var(--prop); background:var(--propbg); padding:.7rem 1rem; border-radius:0 6px 6px 0 }
+  .proposed::before { content:"Proposed"; display:block; font-weight:600; color:var(--prop); margin-bottom:.3rem }
+  .cols { display:grid; grid-template-columns:1fr 1fr; gap:1rem } @media (max-width:46rem){ .cols{grid-template-columns:1fr} }
+  .card { border:1px solid var(--line); border-radius:6px; padding:.7rem 1rem }
+  .card h3 { margin:.1rem 0 .5rem; font-size:1rem }
+  ol.q > li { margin-bottom:.7rem } ol.q ol { list-style:lower-alpha; margin-top:.25rem }
+</style>
+
+<h1>Do a Task's Wave, Project and tracker issue line up?</h1>
+<p class="lede">Area reviewed: how a Task belongs to a Wave and reaches a tracker, with the whole LOO-995 branch in
+(chapters gone, no first Project, <code>tasks.wave_id</code>, the placement rule). Picked because slice 1 changed the
+one thing every tracker path leans on: whether a Task has a Project.</p>
+
+<h2>One interaction, walked</h2>
+<p>A repository connected to Linear. Someone runs:</p>
+<pre>lf wave create billing ; lf wave create billing/refunds
+lf wave plan connect billing                  # links billing to a Linear <b>Initiative</b>
+lf task create --wave billing/refunds 'Refund a mischarged invoice'</pre>
+<div class="cols">
+  <div class="card"><h3>Base (main)</h3>
+    <code>lf wave create</code> made a first Project; the Task joined it; the Project and the issue both went to
+    Linear. A coworker sees the issue.</div>
+  <div class="card"><h3>This branch</h3>
+    Nothing makes a Project, and <code>connect</code> links an Initiative, not a Project. The Task has no Project, so
+    <code>Task::goes_to_tracker</code> is false and no <code>create</code> is queued. <b>Linear never sees it.</b>
+    QA step 5 shows this as intended ("a tracker queue that leaves plan-only Tasks out").</div>
+</div>
+<p>Recovery today: someone makes a Linear Project inside the Initiative by hand, runs <code>lf wave sync</code>,
+and from then on <em>new</em> Tasks join it. Tasks filed before that never go: <code>tracker_actions::uncreated</code>
+skips them for good. A Task with <em>no Wave</em> in the same repository does go, as a team issue.</p>
+
+<h2>Product concepts against code concepts</h2>
+<table>
+  <tr><th>What a person knows</th><th>Code</th><th>Lines up?</th><th>What is wrong</th></tr>
+  <tr><td>A Task is in the Wave it was filed in</td><td><code>tasks.wave_id</code>, plan field <code>task_wave</code></td>
+      <td class="yes">yes</td><td>One field, read by every listing. Was read through the Project before.</td></tr>
+  <tr><td>A Project is a Wave's link to a tracker Project</td><td><code>projects.wave_id</code>, <code>external_project_id</code></td>
+      <td class="yes">yes</td><td>Projects now come only from the tracker. Several per Wave still allowed (open question in the plan).</td></tr>
+  <tr><td>Which tracker Project holds the issue</td><td><code>tasks.project_id</code>, rule in <code>task_project_in</code></td>
+      <td class="yes">yes</td><td>Two stored fields is right: the Wave is plan truth, the Project is tracker truth, and a tracker move changes only one.</td></tr>
+  <tr><td>"My repository syncs with Linear"</td><td><code>Task::goes_to_tracker</code> = <code>project.is_some() || wave.is_none()</code></td>
+      <td class="no">no</td><td>One idea, two answers. Being in a Wave takes a Task <em>out</em> of the tracker unless a Project happens to exist above it. Nobody would guess that rule, and nothing on screen says it.</td></tr>
+  <tr><td>Connect a Wave to Linear</td><td><code>ops::linear::connect</code> → Initiative</td>
+      <td class="no">no</td><td>The plan's demo says connect gives <code>billing</code> a Linear Project. It doesn't; with the predicate above, connect alone sends no Wave Task.</td></tr>
+  <tr><td>A Task in an ancestor's Project lists in its own Wave</td><td>readers on <code>t.wave_id</code></td>
+      <td class="yes">yes</td><td>QA walked it on two Machines.</td></tr>
+  <tr><td>(nothing)</td><td><code>unavailable_tasks</code> on <code>lf wave status --json</code>, its printer, Swift decoding</td>
+      <td class="no">no</td><td>A wire field the person never sees: always <code>[]</code> since QA removed the check. Left over from this branch's own redesign.</td></tr>
+  <tr><td>Move a Task to another Wave</td><td><code>move_task</code>, <code>task_move_project</code></td>
+      <td class="yes">yes</td><td>Keeps the Project when the new Wave is within it, else re-places. One owner.</td></tr>
+</table>
+
+<h2>The biggest mismatch: a Wave makes a Task private to Loopflow</h2>
+<p>The plan line was "A Task with no Project sends nothing to a tracker." It came from the pipeline, not from the
+direction quoted in the plan, which asked "how we tell with a tracker that a task in a certain wave": a Task in a
+Wave is expected to show up there. The plan also already answers where the Wave lives: "in Loopflow's plan, carried
+by Git and the hub". That holds for a Task in an ancestor's Project. It holds just as well for a Task in no Project.</p>
+<div class="proposed">
+  <p><b>A Task goes to the repository's tracker whether or not it has a Project.</b> No Project means an issue in no
+  Project: a Linear team issue, an Asana task in the repository's team project. Standalone Tasks already take this path
+  (<code>linear/actions.rs</code> sets <code>projectId</code> only from a <code>task_project</code>; Asana always adds the
+  repository project), so nothing new is built.</p>
+  <p>Deleted: <code>Task::goes_to_tracker</code>, its two callers (<code>task_create.rs:115</code>,
+  <code>ops/task.rs:2922</code>), and the <code>(t.project_id IS NOT NULL OR t.wave_id IS NULL)</code> clause in
+  <code>tracker_actions::uncreated</code>. The local_planning test that checks no create is queued flips to expect one.
+  <code>docs/work.md</code> loses "stays out of the tracker". The fix removes a precondition.</p>
+  <p>Passed over: making <code>connect</code> create one Linear Project per Wave. That brings back "a Project made for
+  the Wave", which this Task exists to remove.</p>
+</div>
+<div class="cols">
+  <div class="card"><h3>Before</h3>Filed in a Wave + no Project above → plan only, forever. Filed in no Wave → tracker.</div>
+  <div class="card"><h3>After</h3>Every Task in a connected repository → tracker; its Project there is its Project, or none.</div>
+</div>
+<p>Counterexample kept: someone wants a Wave's Tasks off Linear. Nothing asked for that, and a repository opts out of
+the tracker as a whole today. If it's wanted it is a Wave setting, not a side effect of having no Project.</p>
+
+<h2>Smaller, in this work</h2>
+<ul>
+  <li>Delete <code>unavailable_tasks</code> (wire field, printer, Swift model and decoding, DTO fixtures) — about 20 files.</li>
+  <li><code>remove_chapters.sql</code>'s top comment still says a new Task joins "the Wave's newest started Project";
+      the rule now climbs to ancestors. The migration is a draft, so edit it.</li>
+  <li>Fix the plan's demo: <code>lf wave plan connect</code> links an Initiative.</li>
+</ul>
+
+<h2>Larger than this work</h2>
+<p>An <code>lf</code> process from before an install that inserts a Task writes <code>project_id</code> and no
+<code>wave_id</code>; that Task lists in no Wave. The planning writer's fallback covers plan records, not a direct row
+insert. Closing it would take an insert trigger filling <code>wave_id</code> from the Project, or nothing if the
+upgrade-skew window is accepted.</p>
+
+<h2>Questions</h2>
+<ol class="q">
+  <li>Every Task in a tracker-connected repository goes to the tracker, Project or not.
+    <ol><li>Yes, as built next.</li><li>No: a Wave Task with no Project stays plan-only (today's branch).</li>
+        <li>Yes, plus a per-Wave opt-out.</li></ol></li>
+  <li>Should <code>lf wave plan connect &lt;wave&gt;</code> also make that Wave a Linear Project?
+    <ol><li>No: Projects start in the tracker.</li><li>Yes, one per connected Wave.</li></ol></li>
+  <li>Old <code>lf</code> inserting a Task without <code>wave_id</code> during an upgrade.
+    <ol><li>Accept it.</li><li>Add an insert trigger in <code>remove_chapters.sql</code>.</li></ol></li>
+  <li>Narrow a Wave to at most one Project (still open in the plan).
+    <ol><li>Yes.</li><li>No, several stay.</li></ol></li>
+</ol>
+</html>

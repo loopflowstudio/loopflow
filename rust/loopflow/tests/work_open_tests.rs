@@ -1532,6 +1532,7 @@ esac
         let placement = format!(
             "rex:{}",
             serde_json::json!({
+                "bin_dir":bin.path(),
                 "server":format!("unix:///{destination}"),
                 "session":format!("session:{destination}"),
                 "block":format!("block:{destination}"),
@@ -1563,6 +1564,8 @@ esac
             repo.path(),
             Some(bin.path()),
             &[
+                ("HOME", home.path().to_str().unwrap()),
+                ("PATH", "/usr/bin:/bin"),
                 ("LF_AGENT_CALLER", &caller),
                 ("REX_SERVER", "unix:///stale"),
                 ("REX_SESSION", "session:stale"),

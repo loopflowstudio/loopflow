@@ -707,7 +707,7 @@ Mac README and CLI reference.
 - Jack: "The diff is really about the underlying worker not the highest-level
   session."
 - Jack chose comments sent to the session, a sidebar and a reading order:
-  the `tour` skill writes `scratch/diff-order.yaml`; Desktop has a button.
+  the `tour` skill writes `scratch/tour.yaml`; Desktop has a button.
   It ends at publish (Jack: "Tour doesnt need to survive").
 - `diff_hidden` adds per layer; `diff_groups` replaces whole (an agent's
   choice over merging, unreviewed). Jack: "use the existing config parser to

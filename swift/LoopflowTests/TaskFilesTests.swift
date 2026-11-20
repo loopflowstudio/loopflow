@@ -880,9 +880,9 @@ struct TaskFilesTests {
         #expect(store.shownReview?.files.map(\.path) == ["scratch/notes.md"])
     }
 
-    /// The checkout's `scratch/diff-order.yaml` orders the Diff and hides what
-    /// the worker named, until you ask for it; your own hidden paths are untouched.
-    @Test func aWorkersOrderFileOrdersTheDiffAndHidesItsPathsUntilShown() async throws {
+    /// The checkout's `scratch/tour.yaml` orders the Diff and hides what
+    /// the tour named, until you ask for it; your own hidden paths are untouched.
+    @Test func aTourFileOrdersTheDiffAndHidesItsPathsUntilShown() async throws {
         let fixture = try Data(contentsOf: URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
             .appendingPathComponent("tests/fixtures/dto/task_files.json"))
@@ -897,7 +897,7 @@ struct TaskFilesTests {
                 value["files"] = paths.map { file.merging(["path": $0, "old_path": NSNull()]) { $1 } }
             case "file":
                 value["path"] = args[3]
-                value["content"] = args[3] == DiffOrder.path
+                value["content"] = args[3] == DiffTour.path
                     ? "first:\n  - path: z.swift\n    why: Start here\nhide:\n  - path: docs/\n    why: Rename only\n" : content
             default:
                 value["patch"] = paths.map { path in
@@ -912,9 +912,9 @@ struct TaskFilesTests {
         #expect(store.shownReview?.files.map(\.path) == ["z.swift", "a.swift"])
         #expect(store.shownGroups.first?.title == "Start here")
         #expect(store.step(1, in: .changes)?.path == "z.swift")
-        #expect(store.workerHides("docs/guide.md")?.why == "Rename only")
+        #expect(store.tourHides("docs/guide.md")?.why == "Rename only")
         #expect(store.hidden == [.init(pattern: "scratch/", source: "Default")])
-        store.shownWorkerHides = ["docs/"]
+        store.shownTourHides = ["docs/"]
         #expect(store.shownReview?.files.map(\.path) == ["z.swift", "a.swift", "docs/guide.md"])
         // By path reads folder by folder, top-level files first.
         store.orderingChoice = .path
@@ -948,7 +948,7 @@ struct TaskFilesTests {
             .appendingPathComponent("tests/fixtures/dto/task_files.json"))
         let old = String(repeating: "c", count: 40), head = String(repeating: "b", count: 40)
         let tour = OSAllocatedUnfairLock(initialState: "at: \(old)\nfirst:\n  - path: a.swift\n    why: Start here\n")
-        let sinceTour = OSAllocatedUnfairLock(initialState: ["a.swift", "scratch/diff-order.yaml"])
+        let sinceTour = OSAllocatedUnfairLock(initialState: ["a.swift", "scratch/tour.yaml"])
         let launches = OSAllocatedUnfairLock<[[String]]>(initialState: [])
         let store = TaskFilesStore(issue: "TEST-1", cwd: "/fixture", query: RegistryQuery { args, cwd in
             if args.first == "--batch" {
@@ -964,7 +964,7 @@ struct TaskFilesTests {
                 value["files"] = paths.map { file.merging(["path": $0, "old_path": NSNull()]) { $1 } }
             case "file":
                 value["path"] = args[3]
-                value["content"] = args[3] == DiffOrder.path ? tour.withLock({ $0 }) : "one\n"
+                value["content"] = args[3] == DiffTour.path ? tour.withLock({ $0 }) : "one\n"
             default:
                 value["patch"] = ["a.swift", "z.swift"].map { path in
                     "diff --git a/\(path) b/\(path)\n--- a/\(path)\n+++ b/\(path)\n@@ -1 +1 @@\n-uno\n+one\n"
@@ -978,7 +978,7 @@ struct TaskFilesTests {
         #expect(store.tourAction == "Update tour")
 
         // Committing only the tour itself leaves it current.
-        sinceTour.withLock { $0 = ["scratch/diff-order.yaml"] }
+        sinceTour.withLock { $0 = ["scratch/tour.yaml"] }
         await store.loadReview()
         #expect(store.tourStatus == nil && store.tourAction == nil)
 
@@ -988,13 +988,60 @@ struct TaskFilesTests {
         await store.writeTour()
         #expect(launches.withLock { $0 } == [["--batch", "skill", "tour", "/fixture"]])
         #expect(store.tourStatus == "Writing the tour… · its output: /logs/tour.log")
-        #expect(store.tourAction == nil)
 
         tour.withLock { $0 = "at: \(head)\nfirst:\n  - path: z.swift\n    why: Now here\n" }
         await store.loadReview()
         #expect(store.ordering == .tour)
         #expect(store.shownGroups.first?.title == "Now here")
         #expect(store.tourStatus == nil && store.tourAction == nil)
+    }
+
+    /// Nothing reports a tour run ending. Once its launch has answered, the
+    /// button is back beside the log path, so a run that died can be started
+    /// again; the wait ends when the file changes, whatever commit it names.
+    @Test func aTourRunThatWritesNothingLeavesTheButtonBesideItsLog() async throws {
+        let fixture = try Data(contentsOf: URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("tests/fixtures/dto/task_files.json"))
+        let old = String(repeating: "c", count: 40)
+        let tour = OSAllocatedUnfairLock(initialState: "at: \(old)\nfirst:\n  - path: a.swift\n    why: Start here\n")
+        let launches = OSAllocatedUnfairLock(initialState: 0)
+        let store = TaskFilesStore(issue: "TEST-1", cwd: "/fixture", query: RegistryQuery { args, _ in
+            if args.first == "--batch" {
+                launches.withLock { $0 += 1 }
+                return #"{"operation":"skill.run","lf_process_id":"p1","run":"skill tour","log":"/logs/tour.log"}"#
+            }
+            let root = try JSONSerialization.jsonObject(with: fixture) as! [String: Any]
+            var value = root[args[1]] as! [String: Any]
+            switch args[1] {
+            case "changes":
+                let file = (value["files"] as! [[String: Any]])[0]
+                value["files"] = [file.merging(["path": "a.swift", "old_path": NSNull()]) { $1 }]
+            case "file":
+                value["path"] = args[3]
+                value["content"] = args[3] == DiffTour.path ? tour.withLock({ $0 }) : "one\n"
+            default:
+                value["patch"] = "diff --git a/a.swift b/a.swift\n--- a/a.swift\n+++ b/a.swift\n@@ -1 +1 @@\n-uno\n+one\n"
+            }
+            return String(decoding: try JSONSerialization.data(withJSONObject: value), as: UTF8.self)
+        })
+        store.autosave = false
+        await store.loadReview()
+        await store.writeTour()
+
+        // The run died: the file never changes, and the next read keeps both.
+        await store.loadReview()
+        #expect(store.tourStatus == "Writing the tour… · its output: /logs/tour.log")
+        #expect(store.tourAction == "Update tour")
+        await store.writeTour()
+        #expect(launches.withLock { $0 } == 2)
+
+        // A rewrite at the same commit is still the run's file landing.
+        tour.withLock { $0 = "at: \(old)\nfirst:\n  - path: a.swift\n    why: Read this first\n" }
+        await store.loadReview()
+        #expect(store.shownGroups.first?.title == "Read this first")
+        #expect(store.tourStatus == "The tour was written at ccccccc · 1 file changed since")
+        #expect(store.tourAction == "Update tour")
     }
 
     @Test func aDiffWithoutATourOffersToWriteOne() async throws {

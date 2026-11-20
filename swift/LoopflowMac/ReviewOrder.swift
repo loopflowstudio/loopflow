@@ -2,9 +2,9 @@
 import Foundation
 import Loopflow
 
-/// What a worker says about reading its change: which files come first and
+/// What the tour says about reading a change: which files come first and
 /// which are not worth opening, each with an optional reason. Read from
-/// `scratch/diff-order.yaml` in the Task's checkout, written by the `tour`
+/// `scratch/tour.yaml` in the Task's checkout, written by the `tour`
 /// skill at the head commit it read:
 ///
 ///     at: 81d3fa5973e63a4394a25357502e635a3baf5d5b
@@ -14,7 +14,7 @@ import Loopflow
 ///     hide:
 ///       - path: docs/
 ///         why: Path literal renamed, nothing else
-struct DiffOrder: Equatable, Sendable {
+struct DiffTour: Equatable, Sendable {
     struct Entry: Equatable, Sendable {
         /// A file, or a directory and everything under it.
         var path: String
@@ -25,17 +25,17 @@ struct DiffOrder: Equatable, Sendable {
         }
     }
 
-    static let path = "scratch/diff-order.yaml"
+    static let path = "scratch/tour.yaml"
 
-    /// The head commit the order was written at; nil when the file does not say.
+    /// The head commit the tour was written at; nil when the file does not say.
     var at: String?
     var first: [Entry] = []
     var hide: [Entry] = []
 
     /// `at:` and the two lists of this one shape; anything else in the file is ignored.
-    static func parse(_ yaml: String) -> DiffOrder {
-        var order = DiffOrder()
-        var section: WritableKeyPath<DiffOrder, [Entry]>?
+    static func parse(_ yaml: String) -> DiffTour {
+        var order = DiffTour()
+        var section: WritableKeyPath<DiffTour, [Entry]>?
         func value(_ text: Substring) -> String {
             var text = text.trimmingCharacters(in: .whitespaces)
             if text.count >= 2, let quote = text.first, quote == "\"" || quote == "'", text.last == quote {
@@ -76,13 +76,13 @@ struct DiffOrder: Equatable, Sendable {
                 return path.isEmpty ? nil : Entry(path: path, why: entry.why)
             }
         }
-        return DiffOrder(at: order.at, first: named(order.first), hide: named(order.hide))
+        return DiffTour(at: order.at, first: named(order.first), hide: named(order.hide))
     }
 }
 
 /// How the Diff orders its files.
 enum ReviewOrdering: String, CaseIterable, Sendable {
-    /// The worker's files first, in its order; the rest by group.
+    /// The tour's files first, in its order; the rest by group.
     case tour = "Tour"
     /// Under the `diff_groups` headings; largest change first within each.
     case groups = "By group"
@@ -132,14 +132,14 @@ struct DiffGroupSetting: Equatable, Sendable {
 struct ReviewGroup: Equatable, Sendable, Identifiable {
     let id: String
     let title: String
-    /// The title is the worker's reason for reading these files first.
+    /// The title is the tour's reason for reading these files first.
     let isTour: Bool
     let files: [ReviewFile]
 
     /// Files in reading order, grouped. A tour names files; a file it does not
     /// name, or one added after it was written, follows by group, so the order
     /// can never lose a file.
-    static func arrange(_ files: [ReviewFile], ordering: ReviewOrdering, order: DiffOrder?,
+    static func arrange(_ files: [ReviewFile], ordering: ReviewOrdering, tour: DiffTour?,
                         groups: [DiffGroupSetting]) -> [ReviewGroup] {
         switch ordering {
         case .path:
@@ -154,19 +154,19 @@ struct ReviewGroup: Equatable, Sendable, Identifiable {
             return byGroup(files, groups)
         case .tour:
             var rest = files
-            var tour: [ReviewGroup] = []
-            for (index, entry) in (order?.first ?? []).enumerated() {
-                let named = byGroup(rest.filter { entry.matches($0.path) }, groups).flatMap(\.files)
-                guard !named.isEmpty else { continue }
+            var named: [ReviewGroup] = []
+            for (index, entry) in (tour?.first ?? []).enumerated() {
+                let files = byGroup(rest.filter { entry.matches($0.path) }, groups).flatMap(\.files)
+                guard !files.isEmpty else { continue }
                 rest.removeAll { entry.matches($0.path) }
                 // An entry without a reason reads on under the one above it.
-                if entry.why.isEmpty, let last = tour.last {
-                    tour[tour.count - 1] = ReviewGroup(id: last.id, title: last.title, isTour: true, files: last.files + named)
+                if entry.why.isEmpty, let last = named.last {
+                    named[named.count - 1] = ReviewGroup(id: last.id, title: last.title, isTour: true, files: last.files + files)
                 } else {
-                    tour.append(ReviewGroup(id: "tour:\(index)", title: entry.why, isTour: true, files: named))
+                    named.append(ReviewGroup(id: "tour:\(index)", title: entry.why, isTour: true, files: files))
                 }
             }
-            return tour + byGroup(rest, groups)
+            return named + byGroup(rest, groups)
         }
     }
 

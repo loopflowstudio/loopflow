@@ -5,7 +5,7 @@ import SwiftUI
 
 /// The Diff page: what is compared and how much changed, then the changed
 /// files beside the whole comparison as one review stream. The files are in
-/// the worker's order when it left one, else by kind; the file you are in
+/// the tour's order when there is one, else by kind; the file you are in
 /// stays named in a bar above the stream. Comments wait under their lines
 /// until you send them to the conversation's unsent input as one message.
 struct TaskChangesView: View {
@@ -166,7 +166,7 @@ struct TaskChangesView: View {
     }
 
     /// "7 changes in 4 files", or why there is nothing to count. Hidden files,
-    /// yours and the worker's, stay in the total: "7 changes in 4 of 9 files".
+    /// yours and the tour's, stay in the total: "7 changes in 4 of 9 files".
     private var title: String {
         if let reason = store.changesError { return "Comparison unavailable: \(reason)" }
         guard let changes = store.changes else { return "Reading changes…" }
@@ -262,7 +262,7 @@ struct TaskChangesView: View {
         .background(palette.surfaceMuted.opacity(0.5))
     }
 
-    /// Tour, By group or By path. Tour is offered when the worker left one.
+    /// Tour, By group or By path. Tour is offered when the checkout has one.
     private var orderMenu: some View {
         Menu {
             ForEach(ReviewOrdering.allCases.filter { $0 != .tour || store.hasTour }, id: \.self) { ordering in
@@ -275,22 +275,24 @@ struct TaskChangesView: View {
             Text(store.ordering.rawValue)
         }
         .menuStyle(.borderlessButton).fixedSize()
-        .help(store.hasTour ? "Order of the files. Tour is the worker's \(DiffOrder.path)"
-              : "Order of the files. A worker's \(DiffOrder.path) adds its tour")
+        .help(store.hasTour ? "Order of the files. Tour is the checkout's \(DiffTour.path)"
+              : "Order of the files. \(DiffTour.path) in the checkout adds a tour")
         .disabled(store.review == nil)
         .accessibilityIdentifier("changes-order")
     }
 
-    /// Write tour or Update tour: the `tour` skill rewrites the worker's order,
-    /// and the Diff reads in it once the file lands.
+    /// Write tour or Update tour: the `tour` skill rewrites the tour,
+    /// and the Diff reads in it once the file lands. The button comes back
+    /// beside the spinner once the run has started, in case it dies.
     @ViewBuilder private var tourButton: some View {
-        if store.isWritingTour {
+        if store.tourWriting.isUnderway {
             ProgressView().controlSize(.mini).help(store.tourStatus ?? "")
                 .accessibilityLabel("Writing the tour")
-        } else if let action = store.tourAction {
+        }
+        if let action = store.tourAction {
             Button(action) { Task { await store.writeTour() } }
                 .buttonStyle(WorkPlainButtonStyle())
-                .help("Run the tour skill in the Task's checkout to write \(DiffOrder.path)")
+                .help("Run the tour skill in the Task's checkout to write \(DiffTour.path)")
                 .disabled(store.review == nil)
                 .accessibilityIdentifier("changes-write-tour")
         }
@@ -391,7 +393,7 @@ struct TaskChangesView: View {
         }
     }
 
-    /// The worker's reason, above the first file it heads.
+    /// The tour's reason, above the first file it heads.
     private var headings: [String: String] {
         var headings: [String: String] = [:]
         for group in store.shownGroups where group.isTour && !group.title.isEmpty {
@@ -425,7 +427,7 @@ struct TaskChangesView: View {
 
 /// The changed files beside the stream, in its order and under its headings.
 /// Type to narrow the stream and click a file to bring it to the top. Below
-/// them, what the worker hid for this change with its reasons, and the path
+/// them, what the tour hid for this change with its reasons, and the path
 /// text you always hide in this repository.
 private struct ChangedFilesSidebar: View {
     static let width: CGFloat = 236
@@ -455,7 +457,7 @@ private struct ChangedFilesSidebar: View {
                     if store.shownGroups.isEmpty {
                         Text("No files to show").foregroundStyle(palette.textSecondary).padding(8)
                     }
-                    workerHidden
+                    tourHidden
                     alwaysHidden
                 }
                 .padding(.bottom, 12)
@@ -521,22 +523,22 @@ private struct ChangedFilesSidebar: View {
 
     private func fileCount(_ count: Int) -> String { count == 1 ? "1 file" : "\(count) files" }
 
-    /// Paths the worker left out of this change, each with its reason and one
+    /// Paths the tour left out of this change, each with its reason and one
     /// click to read it anyway. They never join your own hidden paths.
-    @ViewBuilder private var workerHidden: some View {
+    @ViewBuilder private var tourHidden: some View {
         let files = store.review?.files ?? []
-        let entries = (store.diffOrder?.hide ?? []).filter { entry in files.contains { entry.matches($0.path) } }
+        let entries = (store.diffTour?.hide ?? []).filter { entry in files.contains { entry.matches($0.path) } }
         if !entries.isEmpty {
-            heading("Hidden by the worker for this change")
+            heading("Hidden by the tour for this change")
             ForEach(entries, id: \.path) { entry in
-                let shown = store.shownWorkerHides.contains(entry.path)
+                let shown = store.shownTourHides.contains(entry.path)
                 VStack(alignment: .leading, spacing: 1) {
                     HStack(spacing: 6) {
                         Text(entry.path).font(Typography.code(11)).lineLimit(1).truncationMode(.head)
                         Text(fileCount(files.count { entry.matches($0.path) })).foregroundStyle(palette.textSecondary)
                         Spacer(minLength: 4)
                         Button(shown ? "Hide" : "Show") {
-                            if shown { store.shownWorkerHides.remove(entry.path) } else { store.shownWorkerHides.insert(entry.path) }
+                            if shown { store.shownTourHides.remove(entry.path) } else { store.shownTourHides.insert(entry.path) }
                         }
                         .buttonStyle(WorkPlainButtonStyle())
                     }

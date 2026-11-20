@@ -184,8 +184,10 @@ Chosen while building, not by Jack, reversible before release:
   write would run outside its checkout), and its files sit under one "Changed
   files" heading: there is no Swift copy of the default groups. The same
   heading shows until the settings read answers.
-- A tour run that fails after launching stays "Writing the tour…" with its log
-  path in the notice; no served read reports a launched Process ending.
+- A tour run that fails after launching keeps "Writing the tour…" with its log
+  path until the file changes or the app restarts; the button is back beside
+  it. No served read reports a launched Process ending. A rewrite that parses
+  to the same tour also leaves the notice up.
 - The released `lf` 0.16.0 prints "skipping diff_groups: unknown setting" on
   every command in a checkout whose `.lf/config.yaml` has the list (seen on
   `lf task status` here).
@@ -197,7 +199,7 @@ skill and `diff_groups` included. The model holds: one comparison read three
 ways (order, hidden, filter); the settings give the default order, the tour
 stacks on top for one change.
 
-Next for implement, settled by what is already decided (none is built):
+Settled by what is already decided, and built (`TourWriting` is idle, launching, launched or failed):
 
 1. **The tour has one name.** It is "tour" on the skill, the button, the menu
    and the status line, `scratch/diff-order.yaml` and `DiffOrder` in the file
@@ -336,4 +338,4 @@ files:
   page and Task switches.
 - No GitHub patch renderer remains.
 
-Check (November 19, before the conflict-free merge of main `2750c9e0fb`, which touched none of this branch's files): `cargo test -p loopflow-execution --lib config::` → 105 passed; `scripts/test_desktop.sh --filter 'TaskFilesTests|ReviewDiffTests'` → 50 passed, `TaskFilesTests` again after compress → 40 passed; branch `lf config explain diff_groups` selects the repository's list. Gate/CI: clippy, `documented_commands::`, goldens, the full swift suite, `global_commands` (PR #1949's suites are skipped at `2b27c7eaef`). Demo: the pane on screen.
+Check (November 19): `cargo test -p loopflow-execution --lib config::` → 105 passed (before the conflict-free merge of main `2750c9e0fb`); after the sixth-pass repairs `scripts/test_desktop.sh --filter 'TaskFilesTests|ReviewDiffTests'` → 51 passed and `cargo test -p loopflow --test golden_prompt` → passed with regenerated goldens; branch `lf config explain diff_groups` selects the repository's list. Gate/CI: clippy, `documented_commands::`, the full swift suite, `global_commands` (PR #1949's suites are skipped at `2b27c7eaef`). Demo: the pane on screen.

@@ -1,6 +1,6 @@
 ---
 requires: a change someone is about to read
-produces: scratch/diff-order.yaml, the order to read the change in and what to skip
+produces: scratch/tour.yaml, the order to read the change in and what to skip
 action_style: procedural
 ---
 Write the reading order for this change, so whoever opens the diff starts where it makes sense.
@@ -19,7 +19,7 @@ makes the rest make sense.
 **Hide only what is not worth opening:** a rename's fallout, regenerated
 snapshots, a lock file. Never hide something a reviewer should judge.
 
-**Write `scratch/diff-order.yaml` whole,** replacing what was there:
+**Write `scratch/tour.yaml` whole,** replacing what was there:
 
 ```yaml
 at: <the full commit `git rev-parse HEAD` printed when you read the diff>
@@ -33,5 +33,8 @@ hide:
 
 Name only the files that need a place; the rest follow in the default order.
 An entry without `why:` reads on under the one above it.
+
+A tour is behind once a commit after its `at:` changes a file outside
+`scratch/`. Committing the tour itself leaves it current.
 
 Change nothing else. Your whole job is this file.

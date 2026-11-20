@@ -340,8 +340,8 @@ checks, review and description with its age; a failed, stale (over two minutes)
 or behind-the-checkout reading stays readable but loses its colors, and merged
 never reads as a finished Task.
 
-The files read in the worker's order when the checkout has
-`scratch/diff-order.yaml`, which the `tour` skill writes (`lf help tour`):
+The files read in the tour's order when the checkout has
+`scratch/tour.yaml`, which the `tour` skill writes (`lf help tour`):
 
 ```yaml
 at: 81d3fa5973e63a4394a25357502e635a3baf5d5b
@@ -388,8 +388,10 @@ little shortened; `lf config catalog` prints it whole.
 outside `scratch/`, the stream says so ("The tour was written at 81d3fa5 · 3
 files changed since") and the toolbar offers **Update tour**; with no tour it
 offers **Write tour**. Either runs the `tour` skill headless in the Task's
-checkout and reads in Tour when the new file lands. Files changed since `at`
-still follow the named ones. Nothing rewrites the tour on its own, and a Task
+checkout and reads in Tour when the new file lands. Until then the stream
+shows "Writing the tour…" with the run's log path, and the button stays beside
+it: nothing reports the run ending, so a run that died is started again with a
+click. Files changed since `at` still follow the named ones. Nothing rewrites the tour on its own, and a Task
 on another Machine offers neither button.
 
 The sidebar lists the files in that order: type to narrow the stream, click a

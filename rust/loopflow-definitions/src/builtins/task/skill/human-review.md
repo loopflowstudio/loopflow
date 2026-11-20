@@ -22,9 +22,8 @@ make that easy to judge, not to review it again.
 **Fill a gap; don't repeat a finished step.** When a piece is missing or
 describes an older state of the branch, do that piece now: review the concepts,
 or use the change through its real path. When it is there and current, quote
-it. The reading order is one of these pieces: when `scratch/diff-order.yaml` is
-missing or its `at:` is not the head commit, write it as `lf help tour`
-describes.
+it. The reading order is one of these pieces: when `scratch/tour.yaml` is
+missing or behind, write it as `lf help tour` describes.
 
 **Write `scratch/human-review.html`.** One self-contained file, readable in
 light and dark, in this order:

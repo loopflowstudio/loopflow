@@ -850,16 +850,16 @@ final class TaskFilesStore {
             var parsed = await Task.detached(priority: .userInitiated) { ReviewDiff.parse(next.patch) }.value
             var cut = false
             if next.truncated { (parsed, cut) = await completed(parsed, base: base, head: target.head) }
-            let order = await readOrder()
+            let order = await readTour()
             let age = await readTourAge(order)
             guard !Task.isCancelled, generation == reviewGeneration, comparison == target else { return }
             for path in openedGaps.keys where review?.file(path) != parsed.file(path) { openedGaps[path] = nil }
             comments = comments.map { $0.anchored(in: parsed.file($0.selection.path).map(opened)) }
-            if isWritingTour, let order, order.at != diffOrder?.at {
+            if tourWriting.isUnderway, order != diffTour {
                 tourWriting = .idle
                 orderingChoice = .tour
             }
-            diffOrder = order
+            diffTour = order
             tourAge = age
             review = parsed
             reviewTruncated = cut
@@ -956,16 +956,16 @@ final class TaskFilesStore {
     var showsHidden = false { didSet { arrange() } }
     /// Narrows the stream to paths containing this text.
     var reviewFilter = "" { didSet { arrange() } }
-    /// The worker's `scratch/diff-order.yaml`, when the checkout has one.
-    private(set) var diffOrder: DiffOrder? { didSet { if diffOrder != oldValue { arrange() } } }
-    /// The order you chose; until then the worker's tour when there is one.
+    /// The checkout's `scratch/tour.yaml`, when it has one.
+    private(set) var diffTour: DiffTour? { didSet { if diffTour != oldValue { arrange() } } }
+    /// The order you chose; until then the tour when there is one.
     var orderingChoice: ReviewOrdering? { didSet { arrange() } }
-    /// Paths the worker hid that you asked to see.
-    var shownWorkerHides: Set<String> = [] { didSet { arrange() } }
+    /// Paths the tour hid that you asked to see.
+    var shownTourHides: Set<String> = [] { didSet { arrange() } }
     /// The changed files beside the stream: your choice, else open when there is room.
     var showsSidebar: Bool?
 
-    var hasTour: Bool { diffOrder?.first.isEmpty == false }
+    var hasTour: Bool { diffTour?.first.isEmpty == false }
 
     var ordering: ReviewOrdering {
         let choice = orderingChoice ?? .tour
@@ -976,12 +976,12 @@ final class TaskFilesStore {
         hidden.contains { DiffPattern.matches($0.pattern, path) }
     }
 
-    /// The worker's reason to leave a path out, until you ask to see it.
-    func workerHides(_ path: String) -> DiffOrder.Entry? {
-        diffOrder?.hide.first { $0.matches(path) && !shownWorkerHides.contains($0.path) }
+    /// The tour's reason to leave a path out, until you ask to see it.
+    func tourHides(_ path: String) -> DiffTour.Entry? {
+        diffTour?.hide.first { $0.matches(path) && !shownTourHides.contains($0.path) }
     }
 
-    /// The comparison as the Diff reads it: your hidden paths and the worker's
+    /// The comparison as the Diff reads it: your hidden paths and the tour's
     /// left out, then the filter, in the chosen order.
     private(set) var shownGroups: [ReviewGroup] = []
     private(set) var shownReview: ReviewDiff?
@@ -994,17 +994,17 @@ final class TaskFilesStore {
         }
         let filter = reviewFilter.trimmingCharacters(in: .whitespaces)
         let files = review.files.filter { file in
-            (showsHidden || !hides(file.path)) && workerHides(file.path) == nil
+            (showsHidden || !hides(file.path)) && tourHides(file.path) == nil
                 && (filter.isEmpty || file.path.range(of: filter, options: .caseInsensitive) != nil)
         }
-        shownGroups = ReviewGroup.arrange(files, ordering: ordering, order: diffOrder, groups: diffGroups)
+        shownGroups = ReviewGroup.arrange(files, ordering: ordering, tour: diffTour, groups: diffGroups)
         shownReview = ReviewDiff(files: shownGroups.flatMap(\.files))
     }
 
-    private func readOrder() async -> DiffOrder? {
-        guard let file = try? await query.taskFile(issue: issue, path: DiffOrder.path),
+    private func readTour() async -> DiffTour? {
+        guard let file = try? await query.taskFile(issue: issue, path: DiffTour.path),
               file.state == .text, let content = file.content else { return nil }
-        return DiffOrder.parse(content)
+        return DiffTour.parse(content)
     }
 
     // MARK: Tour
@@ -1021,20 +1021,29 @@ final class TaskFilesStore {
     /// Set when the tour is behind the head; nil while it is current or there is none.
     private(set) var tourAge: TourAge?
 
+    /// Nothing reports a tour run ending, so the wait ends when the file
+    /// changes; a run that dies leaves `launched` until the next click.
     enum TourWriting: Equatable {
         case idle
-        /// The `tour` skill is running headless; `log` is where its output
-        /// goes, once its launch answers.
-        case running(log: String?)
+        /// The click, until `lf` answers that the `tour` skill started.
+        case launching
+        /// The skill started headless; `log` is where its output goes.
+        case launched(log: String)
         case failed(String)
+
+        var isUnderway: Bool {
+            switch self {
+            case .launching, .launched: true
+            case .idle, .failed: false
+            }
+        }
     }
     private(set) var tourWriting = TourWriting.idle
-    var isWritingTour: Bool { if case .running = tourWriting { true } else { false } }
 
     /// A tour is stale when it names no commit, or when a commit after the one
     /// it names changed a file outside `scratch/`. Committing the tour itself
     /// leaves it current.
-    private func readTourAge(_ order: DiffOrder?) async -> TourAge? {
+    private func readTourAge(_ order: DiffTour?) async -> TourAge? {
         guard let order, let head = changes?.headCommit else { return nil }
         guard let at = order.at else { return TourAge(at: nil, changedFiles: nil) }
         if head.hasPrefix(at) || at.hasPrefix(head) { return nil }
@@ -1048,22 +1057,25 @@ final class TaskFilesStore {
     /// What the Diff says about the tour; nil while it is current or there is none.
     var tourStatus: String? {
         switch tourWriting {
-        case .running(let log): return log.map { "Writing the tour… · its output: \($0)" } ?? "Writing the tour…"
+        case .launching: return "Writing the tour…"
+        case .launched(let log): return "Writing the tour… · its output: \(log)"
         case .failed(let reason): return reason
         case .idle: break
         }
-        guard diffOrder != nil, let age = tourAge else { return nil }
+        guard diffTour != nil, let age = tourAge else { return nil }
         guard let at = age.at else { return "The tour names no commit, so it may be behind the change" }
         guard let changed = age.changedFiles else { return "The tour was written at \(at.prefix(7)), before the latest commits" }
         return "The tour was written at \(at.prefix(7)) · \(changed == 1 ? "1 file" : "\(changed) files") changed since"
     }
 
     /// Write tour when there is none, Update tour when it is behind; nil
-    /// while it is current, being written, or the checkout is on another Machine.
-    /// The `tour` skill only runs in a checkout on this Machine.
+    /// while it is current, its launch has not answered, or the checkout is on
+    /// another Machine. The `tour` skill only runs in a checkout on this
+    /// Machine. Offered again once the launch answers: a click during a
+    /// healthy run starts a second one that rewrites the same file.
     var tourAction: String? {
-        guard query.remoteMachine == nil, !isWritingTour else { return nil }
-        if diffOrder == nil { return "Write tour" }
+        guard query.remoteMachine == nil, tourWriting != .launching else { return nil }
+        if diffTour == nil { return "Write tour" }
         return tourAge != nil ? "Update tour" : nil
     }
 
@@ -1072,9 +1084,9 @@ final class TaskFilesStore {
     func writeTour() async {
         guard tourAction != nil else { return }
         noteInteraction()
-        tourWriting = .running(log: nil)
+        tourWriting = .launching
         do {
-            tourWriting = .running(log: try await query.runSkill("tour", checkout: cwd))
+            tourWriting = .launched(log: try await query.runSkill("tour", checkout: cwd))
         } catch {
             tourWriting = .failed("The tour could not start: \(error.localizedDescription)")
         }

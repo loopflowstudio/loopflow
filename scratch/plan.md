@@ -475,7 +475,7 @@ server`, fake-world recipes, `welcome` and `status` as they are.
    - `CGWindowListCopyWindowInfo` kept listing the closed launch window as on
      screen, on every launch including one with no restoration. AppKit's
      `isVisible` is what was read.
-   - `lf-world build one-task` in a 75-byte directory printed "Loopflow Dev
+   - `lf-world build one-task` in a directory 18 bytes too long printed "Loopflow Dev
      opens this world without `lf desktop`: …/home/run/desktop/
      com.loopflow.mac.dev.sock is 121 bytes and a socket path holds 103. Use
      a shorter directory." and built the world.

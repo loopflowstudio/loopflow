@@ -61,19 +61,6 @@ fn describe_prints_the_protocol_with_no_server_and_no_store() {
 }
 
 #[test]
-fn a_client_that_closes_at_once_leaves_the_server_listening() {
-    let home = tempfile::tempdir().unwrap();
-    let _env = EnvGuard::with_home(&[], Some(home.path()));
-    std::env::set_var("LF_HOME", home.path().canonicalize().unwrap());
-    let repo = TestRepo::new();
-    let mut server = Server::start(repo.path(), home.path());
-    let socket = loopflow::server::socket_path().unwrap();
-    drop(std::os::unix::net::UnixStream::connect(&socket).unwrap());
-    loopflow_execution::machine::client::Connection::open().unwrap();
-    assert!(server.0.try_wait().unwrap().is_none(), "the server exited");
-}
-
-#[test]
 fn configuration_edits_use_the_server_without_work_processes() {
     use loopflow::lf::commands::read::Read;
     use loopflow::lf::commands::write::Write;

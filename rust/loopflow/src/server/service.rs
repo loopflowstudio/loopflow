@@ -1633,7 +1633,7 @@ mod tests {
     use std::sync::{Arc, LazyLock, Mutex};
     use std::time::Duration;
 
-    use super::{connection, deliver_or_spill, Clients};
+    use super::{connection, deliver_or_spill, local, Clients};
     use crate::lf::commands::read::Read;
     use crate::server::subscriptions::Subscriptions;
     use crate::server::ticket::{Admission, Purpose, Tickets};
@@ -1644,8 +1644,8 @@ mod tests {
     };
     use loopflow_execution::engine::ErrorCode;
     use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
-    use tokio::net::UnixStream;
-    use tokio::sync::Semaphore;
+    use tokio::net::{UnixListener, UnixStream};
+    use tokio::sync::{mpsc, Semaphore};
     use tokio_util::codec::{Framed, LinesCodec};
 
     /// A subscription that needs no directory and reads an empty home.
@@ -1885,6 +1885,42 @@ mod tests {
             .build()
             .unwrap()
             .block_on(body);
+    }
+
+    #[tokio::test]
+    async fn a_client_that_closes_before_accept_leaves_the_server_listening() {
+        let directory = tempfile::tempdir_in("/tmp").unwrap();
+        let path = directory.path().join("server.sock");
+        let listener = UnixListener::bind(&path).unwrap();
+        // Queue and close the first client before the accept loop can run.
+        drop(UnixStream::connect(&path).await.unwrap());
+        let mut probe = UnixStream::connect(&path).await.unwrap();
+        let (remote_control, _remote_requests) = mpsc::channel(1);
+        let serving = local(
+            listener,
+            "incarnation".into(),
+            Arc::new("fixture".into()),
+            Arc::new(Semaphore::new(MAX_CONNECTIONS)),
+            Clients::default(),
+            remote_control,
+            Arc::new(Tickets::default()),
+            Arc::new(Subscriptions::default()),
+            None,
+        );
+        // A status probe checks that the listener answers without opening a
+        // Machine registry as a hello would.
+        let status = async {
+            probe.write_all(b"{\"type\":\"status\"}\n").await.unwrap();
+            let mut line = String::new();
+            BufReader::new(probe).read_line(&mut line).await.unwrap();
+            serde_json::from_str::<ServerMessage>(&line).unwrap()
+        };
+        tokio::select! {
+            result = serving => panic!("server stopped listening: {result:?}"),
+            result = tokio::time::timeout(Duration::from_secs(5), status) => {
+                assert!(matches!(result.unwrap(), ServerMessage::Status(_)));
+            }
+        }
     }
 
     #[test]

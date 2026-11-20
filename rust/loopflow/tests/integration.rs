@@ -10,6 +10,7 @@ mod config_tests;
 mod context_block_tests;
 mod context_launch_tests;
 mod context_tests;
+mod copy_world;
 mod default_conversation_tests;
 mod doctor_tests;
 mod documented_commands;

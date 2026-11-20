@@ -222,7 +222,6 @@ enum MockWaveFixture {
                   "owner": {"person": "Jack Heart", "person_id": null, "machine": {"id": null, "label": null}}
                 },
                 "graph_name":"feature","graph_source":"wave","latest_graph_process":null,"execution":null,"lifecycle":"unstarted","selection_states":["unstarted","backlog"],"run_control":{"unavailable":null},
-                "ship_control":{"unavailable":null},"shipping":null,
                 "next_move": {
                   "owner": "user",
                   "reason": "merge pull request head 333333333333 on GitHub"
@@ -298,7 +297,6 @@ enum MockWaveFixture {
                 },
                 "runtime": null,
                 "graph_name":"feature","graph_source":"wave","latest_graph_process":null,"execution":null,"lifecycle":"unstarted","selection_states":["unstarted","backlog"],"run_control":{"unavailable":null},
-                "ship_control":{"unavailable":null},"shipping":null,
                 "next_move": {
                   "owner": "wave",
                   "reason": "Task is ready to start"

@@ -158,10 +158,10 @@
       "project": "Mail",
       "parent_id": "task_11111111111111111111111111111111",
       "state": "idle",
-      "reason": "Waiting at human-review",
+      "reason": "Waiting at ship-review",
       "graph": {
         "name": "code",
-        "step": "human-review"
+        "step": "ship-review"
       },
       "pr": null,
       "next": "lf task run LOO-3"

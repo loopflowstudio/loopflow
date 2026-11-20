@@ -1113,7 +1113,7 @@ private struct WorkTestFixture {
         let query = RegistryQuery { args, _ in
             switch args.first {
             case "plan" where args.dropFirst().first == "list": return roadmapJSON
-            case "repo" where args.dropFirst().first == "tracker": return #"{"destinations":[]}"#
+            case "repo" where args.dropFirst().first == "tracker": return #"{"tracker":null,"plan":{"git":null,"hub":null},"actions":[]}"#
             case "desktop" where args.dropFirst().prefix(2) == ["view", "show"]:
                 return String(decoding: try JSONEncoder().encode(fixtureViewPlan(
                     owner: .init(repository: "repo", kind: .repository, id: "repo"), members: [])), as: UTF8.self)
@@ -1395,8 +1395,8 @@ struct TaskPlanningReadabilityTests {
         #expect(model.selectionPlans.failure == nil)
     }
 
-    @Test("Loaded empty descriptions omit the preview; shipping remains visible while updating", arguments: [false, true])
-    func emptyDescription(shipping: Bool) throws {
+    @Test("Loaded empty descriptions omit the preview, also while updating", arguments: [false, true])
+    func emptyDescription(saved: Bool) throws {
         let fixture = try WorkTestFixture.load()
         var root = try #require(JSONSerialization.jsonObject(with: Data(fixture.roadmapJSON.utf8)) as? [String: Any])
         var tasks = try #require(root["tasks"] as? [String: Any])
@@ -1405,7 +1405,6 @@ struct TaskPlanningReadabilityTests {
         task["description"] = ""
         items[0]["task"] = task
         items[0]["section"] = "working"
-        items[0]["shipping"] = shipping ? ["shipped_at": 1, "state": "landing", "reason": "Checks passed"] : NSNull()
         tasks["items"] = items
         root["tasks"] = tasks
         let wire = try JSONSerialization.data(withJSONObject: root)
@@ -1414,23 +1413,22 @@ struct TaskPlanningReadabilityTests {
         let cache = WorkCache(directory: directory)
         cache.saveRoadmap(String(decoding: wire, as: UTF8.self))
         cache.flush()
-        let model = WorkModel(query: fixture.query, repoPath: "/src/loopflow", cache: shipping ? cache : nil)
-        if !shipping {
+        let model = WorkModel(query: fixture.query, repoPath: "/src/loopflow", cache: saved ? cache : nil)
+        if !saved {
             model.applyFixture(roadmap: .available(try JSONDecoder().decode(RoadmapSnapshot.self, from: wire)),
                 waves: .available(fixture.waves), workActivity: .available(fixture.workActivity), repos: [], fixed: true)
         }
         let record = try #require(model.task(id: "issue-now")?.task)
         let member = WorkViewPlan.Content(
             work: .init(repository: "repo", kind: .task, id: record.runtime?.workId ?? record.id),
-            title: record.task.name, states: shipping ? [.autonomous] : [.working], identifier: record.task.identifier,
+            title: record.task.name, states: [.working], identifier: record.task.identifier,
             primarySession: nil, location: nil, argv: nil, unavailable: [])
         model.applyTaskList(fixtureViewPlan(owner: key, members: [member]), wave: nil, reason: "")
         let navigator = WorkNavigator(model: model, onOpenSession: { _ in })
         #expect(try navigator.inspect().find(text: record.task.name).string() == record.task.name)
         #expect(throws: (any Error).self) { try navigator.inspect().find(text: "Loading planning…") }
-        if shipping {
+        if saved {
             #expect(try navigator.inspect().find(text: "Updating…").string() == "Updating…")
-            #expect(try navigator.inspect().find(text: "Landing · Checks passed").string() == "Landing · Checks passed")
         }
     }
 

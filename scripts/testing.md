@@ -119,6 +119,13 @@ Configuration file loading or filtering changes also run
 `test(graph_defaults_follow_task_wave_and_repository)` and
 `test(wave_setup_tests::)` to cover live reload, invalid defaults and Wave scope.
 
+Store watch changes (`rust/loopflow-storage/src/changes.rs`) and anything the
+server's recovery pass reads also run `test(changes::)` and the three
+`context_launch_tests::` fixtures the pass serves (`a_killed_task_conversation`,
+`a_task_conversation_whose_agent`, `a_task_checkout_starts`) in one invocation:
+they fail together when the pass misses a commit, and a trace that slows the
+watcher hides it.
+
 Terminal-title changes run `test(transport::output::tests::)` and
 `binary(transport_tests)`. Cover attachment before the asynchronous Session-name
 lookup completes in a deterministic output test; a live attachment can miss that
@@ -138,6 +145,7 @@ so compilation cannot outlast its process-liveness fixtures.
 
 ```bash
 cargo test -p loopflow-execution --lib skills::catalog::          # one library module
+cargo test -p loopflow-harness claude_decode                      # one decoder or transcript reader; builds no storage or execution
 cargo test -p loopflow --test integration context_tests:: # one integration module
 cargo test -p loopflow --test golden_prompt              # one standalone binary
 uv run pytest python/tests/test_gate_bounded.py          # one Python file
@@ -165,6 +173,10 @@ fix, to reproduce a CI failure, or for a risk no suite covers:
 uv run python scripts/test.py --reuse-passing --rust-filter 'test(skills::catalog::) | test(prompt::) | binary(golden_prompt)'
 ```
 
+A decoder or transcript reader change names its crate, since its tests are not
+under a `harness::` module: `--rust-filter 'package(loopflow-harness) | test(harness::)'`
+runs them with execution's launch matrix and conformance suites.
+
 The runner runs architecture, Python, website and Swift suites when their
 paths changed, then Rust: inventory, `cargo fmt --check`, the filtered nextest
 run with one prepared fixture CLI, then `cargo clippy --all-targets -- -D warnings`.
@@ -190,6 +202,17 @@ talks to the CLI server; GhosttyKit supplies its renderer. Xcode also packages
 the selected helper. The runner's network sandbox blocks SwiftPM fetches; if the Swift suite fails
 with `transport 'https' not allowed`, run `swift package resolve` in `swift/` once
 and rerun.
+
+```bash
+uv run python scripts/loopflow-dev.py run          # the branch's Desktop on real data
+cargo test -p loopflow --test integration copy_world   # a copy changes nothing outside itself
+```
+
+`run` opens the Machine, or a read-only copy when the branch changes a wire type
+or adds a migration; [Loopflow for macOS](../swift/README.md) says which and
+what each allows. A change to `lf-world copy`, to what a server does on a
+read-only store, or to which requests it admits there runs `copy_world`.
+
 `--reuse-passing` returns at once for an identical tree and plan. A later pass
 narrows `--rust-filter` to what changed since the last pass.
 
@@ -279,8 +302,10 @@ prepared SQL invariants and migration checks stay in the storage crate.
 
 Cargo rebuilds changed libraries and their dependents. Command help or rendering
 rebuilds `loopflow`; execution and Task shipping edits rebuild `loopflow-execution`
-and `loopflow`; saved-record edits rebuild storage and both callers. Unchanged
-lower libraries can be reused. Binaries and test executables still compile and
+and `loopflow`; saved-record edits rebuild storage and both callers. A decoder
+or transcript reader edit rebuilds `loopflow-harness`, execution and `loopflow`,
+never storage, and neither a storage nor an execution edit rebuilds
+`loopflow-harness`. Unchanged lower libraries can be reused. Binaries and test executables still compile and
 link even when library compilations hit the cache. Use debug builds for local
 verification; never build `--release` to test.
 

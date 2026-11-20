@@ -116,6 +116,7 @@ struct PaneProgramHeading: Equatable {
         case "claude": name = "Claude"; symbol = "sparkle"
         case "pi": name = "Pi"; symbol = "terminal"
         case "opencode": name = "OpenCode"; symbol = "chevron.left.forwardslash.chevron.right"
+        case "agy": name = "Antigravity"; symbol = "terminal"
         case .some(let value) where !value.isEmpty:
             name = ProgramStatusReport.displaySafe(value); symbol = "bubble.left"
         default:

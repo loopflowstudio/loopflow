@@ -3,7 +3,6 @@
 use anyhow::{anyhow, Context, Result};
 use std::io::Write;
 
-use loopflow_execution::agent::check_cli_available;
 use loopflow_execution::agent::run_agent;
 use loopflow_execution::agent::AgentConfig;
 use loopflow_execution::agent::ProcessConfig;
@@ -45,9 +44,7 @@ fn replay_at(home: &std::path::Path, selector: &str) -> Result<String> {
         output_schema: request.output_schema.clone(),
         max_turns: request.max_turns,
         cwd: Some(source.cwd.clone()),
-        write_scope: request.write_scope,
-        execution_boundary: request.execution_boundary.clone(),
-        skip_permissions: request.skip_permissions,
+        yolo: request.skip_permissions,
         chrome: request.chrome,
         codex_service_tier: request.codex_service_tier,
         ..AgentConfig::new(agent)
@@ -55,7 +52,7 @@ fn replay_at(home: &std::path::Path, selector: &str) -> Result<String> {
     config.apply_agent_override()?;
     let selected_harness = config.agent.harness.as_str().to_owned();
     let model = config.agent.model.clone();
-    if !check_cli_available(&selected_harness) {
+    if !loopflow_execution::harness::launcher(config.agent.harness).installed() {
         return Err(anyhow!(
             "'{selected_harness}' CLI is unavailable on this Machine"
         ));
@@ -180,7 +177,7 @@ for line in sys.stdin:
             ("security", crate::test_support::FAKE_SECURITY.to_string()),
             (
                 "opencode",
-                include_str!("../../../../loopflow-execution/tests/support/opencode_server.py")
+                include_str!("../../../../loopflow-execution/tests/support/opencode_cli.py")
                     .replace("__WAIT__", "False"),
             ),
         ] {
@@ -229,8 +226,6 @@ for line in sys.stdin:
             account_id,
             max_turns: Some(3),
             codex_service_tier: None,
-            write_scope: loopflow_execution::agent::AgentWriteScope::Worktree,
-            execution_boundary: None,
             skip_permissions: true,
             chrome: None,
         };

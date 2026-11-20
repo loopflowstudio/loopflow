@@ -210,6 +210,7 @@ pub fn initialize() {
     if let Some(handoff) = Handoff::take() {
         let _ = HANDOFF.set(handoff);
     }
+    take_open_receipt();
 }
 
 /// The held terminal this process runs in, when it took up a held handoff.
@@ -273,7 +274,7 @@ impl LaunchInput {
     }
 }
 
-/// `lf task run` leaves its terminal: the Graph it starts outlives the caller,
+/// `lf task run` and `lf task auto on` leave their terminal: the Graph they start outlives the caller,
 /// and `lf -b task run` waits for it. Returns whether a detached child ran the
 /// command; in a held terminal, an already detached process or a Graph step it
 /// runs here.
@@ -434,6 +435,9 @@ pub fn start_held(
             None => env.remove(name),
         };
     }
+    if let Some(receipt) = open_receipt() {
+        env.insert(OPEN_RECEIPT_ENV.into(), receipt.into());
+    }
     let env = env
         .into_iter()
         .filter_map(|(name, value)| Some((name.into_string().ok()?, value.into_string().ok()?)))
@@ -497,6 +501,74 @@ pub fn nonblocking(fd: RawFd) -> io::Result<()> {
         }
     }
     Ok(())
+}
+
+/// PTYs allocated on this Machine against its limit. Every held terminal
+/// takes one, as does every terminal tab; they run out before anything else.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PtyUsage {
+    pub in_use: u64,
+    pub max: u64,
+    /// The setting that holds `max`.
+    pub limit: &'static str,
+}
+
+#[cfg(target_os = "macos")]
+pub fn pty_usage() -> Option<PtyUsage> {
+    let mut max: libc::c_int = 0;
+    let mut size = std::mem::size_of::<libc::c_int>();
+    // SAFETY: the name is NUL-terminated, and `max` and `size` are live
+    // locals describing one writable `c_int`.
+    let read = unsafe {
+        libc::sysctlbyname(
+            c"kern.tty.ptmx_max".as_ptr(),
+            std::ptr::from_mut(&mut max).cast(),
+            &mut size,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    let max = u64::try_from(max).ok().filter(|_| read == 0)?;
+    // devfs lists a `ttysNNN` node for each PTY while it is allocated.
+    let in_use = std::fs::read_dir("/dev")
+        .ok()?
+        .filter_map(Result::ok)
+        .filter(|entry| {
+            entry.file_name().to_str().is_some_and(|name| {
+                name.strip_prefix("ttys")
+                    .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
+            })
+        })
+        .count() as u64;
+    Some(PtyUsage {
+        in_use,
+        max,
+        limit: "kern.tty.ptmx_max",
+    })
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn pty_usage() -> Option<PtyUsage> {
+    let read = |path: &str| std::fs::read_to_string(path).ok()?.trim().parse().ok();
+    Some(PtyUsage {
+        in_use: read("/proc/sys/kernel/pty/nr")?,
+        max: read("/proc/sys/kernel/pty/max")?,
+        limit: "kernel.pty.max",
+    })
+}
+
+/// Why a held terminal got no PTY, as its conversation's start failure
+/// reads: the Machine has none left, or the OS error beside what is in use.
+pub(crate) fn pty_failure(error: &io::Error, usage: Option<PtyUsage>) -> String {
+    match usage {
+        Some(PtyUsage { in_use, max, limit }) if in_use >= max => {
+            format!("no PTY left: {in_use} in use ({limit})")
+        }
+        Some(PtyUsage { in_use, max, limit }) => {
+            format!("cannot open a PTY: {error} ({in_use} of {max} in use, {limit})")
+        }
+        None => format!("cannot open a PTY: {error}"),
+    }
 }
 
 pub(crate) fn terminal_pair() -> io::Result<(File, File)> {
@@ -1311,6 +1383,7 @@ fn relay_with_preview(
         command.args([RELAY_JSON_FLAG, session]);
     }
     crate::journal::carry_across_exec(&mut command)?;
+    pass_open(&mut command);
     let error = command.exec();
     tracing::warn!(%error, "cannot exec the terminal relay; relaying here");
     attach_with_terminal(id, session, terminal)
@@ -1949,8 +2022,10 @@ fn view(
                             .inspect_err(|error| tracing::debug!(%error, "viewer readiness was not delivered"))
                             .is_ok();
                             returning = Some(detach);
+                            // A tab launch succeeds only when this view is attached
+                            // and its Session's native client is ready.
                             if attached && acknowledged {
-                                acknowledge_open();
+                                answer_open("attached");
                             }
                             if let Some(status) = &mut status {
                                 status.native_ready();
@@ -2159,6 +2234,7 @@ fn replace_view(
                     command.args([RELAY_SESSION_FLAG, session.as_str()]);
                 }
                 crate::journal::carry_across_exec(&mut command)?;
+                pass_open(&mut command);
                 command.exec().to_string()
             }
             Err(error) => error.to_string(),
@@ -2202,17 +2278,67 @@ fn discard_reconnect_input(paste: &mut Paste) -> io::Result<()> {
 
 pub const OPEN_RECEIPT_ENV: &str = "LF_OPEN_RECEIPT";
 
-/// A tab launch succeeds only when this view is attached and its Session's
-/// native client is ready. Startup errors before Return leave no success receipt.
-fn acknowledge_open() {
-    let Some(path) = std::env::var_os(OPEN_RECEIPT_ENV) else {
+/// Where this process answers the `lf open` that started it. Only the viewer
+/// and the launcher it starts hold one: it is handed on by name, so nothing
+/// else lf runs can answer for the opening.
+static OPEN_RECEIPT: Mutex<Option<PathBuf>> = Mutex::new(None);
+
+fn take_open_receipt() {
+    let receipt = std::env::var_os(OPEN_RECEIPT_ENV).map(PathBuf::from);
+    std::env::remove_var(OPEN_RECEIPT_ENV);
+    *OPEN_RECEIPT.lock().expect("open receipt lock poisoned") = receipt;
+}
+
+fn open_receipt() -> Option<PathBuf> {
+    OPEN_RECEIPT
+        .lock()
+        .expect("open receipt lock poisoned")
+        .clone()
+}
+
+/// Hand the opening to the lf this process becomes.
+fn pass_open(command: &mut Command) {
+    if let Some(receipt) = open_receipt() {
+        command.env(OPEN_RECEIPT_ENV, receipt);
+    }
+}
+
+/// Answer `lf open`: "attached", or why the opening failed. The first answer
+/// stands: the launcher's own error beats its viewer's.
+fn answer_open(answer: &str) {
+    let Some(path) = OPEN_RECEIPT
+        .lock()
+        .expect("open receipt lock poisoned")
+        .take()
+    else {
         return;
     };
-    std::env::remove_var(OPEN_RECEIPT_ENV);
-    let path = Path::new(&path);
-    let temporary = path.with_extension("ready");
-    if std::fs::write(&temporary, "attached").is_ok() {
-        let _ = std::fs::rename(temporary, path);
+    let temporary = path.with_extension(std::process::id().to_string());
+    if std::fs::write(&temporary, answer).is_ok() {
+        // Fails when another process answered first.
+        let _ = std::fs::hard_link(&temporary, &path);
+        let _ = std::fs::remove_file(&temporary);
+    }
+}
+
+/// Answer an opening this command failed without attaching, with its own
+/// error. The pane waits; the receipt says why. A viewer whose conversation
+/// exited leaves the answer to the launcher, or to the pane's status line.
+pub fn end_open(result: &Result<()>) {
+    let (Err(error), Some(_)) = (result, open_receipt()) else {
+        return;
+    };
+    let reason = format!("{error:#}");
+    tracing::warn!(
+        command = std::env::args().skip(1).collect::<Vec<_>>().join(" "),
+        error = %reason,
+        "conversation opened by lf open failed before attaching"
+    );
+    if error
+        .downcast_ref::<crate::process::CommandExit>()
+        .is_none()
+    {
+        answer_open(&reason);
     }
 }
 
@@ -2462,11 +2588,12 @@ pub fn configure_child(command: &mut Command) {
 }
 
 /// An exec keeps this PID and its parent, so the replacing lf binary is still
-/// the direct child the handoff names.
+/// the direct child the handoff names, and still answers its opening.
 pub(crate) fn carry_across_exec(command: &mut Command) {
     if let Some(handoff) = HANDOFF.get() {
         handoff.pass(command, handoff.parent);
     }
+    pass_open(command);
 }
 
 /// Status travels beside output to the sole writer, never through capture pipes.
@@ -2518,6 +2645,54 @@ pub fn report_exit(code: u8) {
 }
 
 #[cfg(test)]
+mod open_receipt_tests {
+    use std::ffi::OsStr;
+    use std::process::Command;
+
+    use super::{
+        answer_open, carry_across_exec, open_receipt, take_open_receipt, OPEN_RECEIPT_ENV,
+    };
+
+    #[test]
+    fn the_first_answer_to_an_opening_stands() {
+        let _env = crate::journal::test_env_lock();
+        let dir = tempfile::tempdir().unwrap();
+        let receipt = dir.path().join("receipt");
+        for answer in ["'claude' is not installed", "a later error", "attached"] {
+            std::env::set_var(OPEN_RECEIPT_ENV, &receipt);
+            take_open_receipt();
+            answer_open(answer);
+            assert!(open_receipt().is_none());
+        }
+        assert_eq!(
+            std::fs::read_to_string(&receipt).unwrap(),
+            "'claude' is not installed"
+        );
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
+
+    /// `lf install server`, a provider and its tools inherit the environment;
+    /// none of them may answer for the opening.
+    #[test]
+    fn only_the_lf_this_one_becomes_inherits_the_opening() {
+        let _env = crate::journal::test_env_lock();
+        std::env::set_var(OPEN_RECEIPT_ENV, "/tmp/receipt");
+        take_open_receipt();
+        assert!(std::env::var_os(OPEN_RECEIPT_ENV).is_none());
+        let mut next = Command::new("lf");
+        carry_across_exec(&mut next);
+        assert_eq!(
+            next.get_envs()
+                .find(|(name, _)| *name == OPEN_RECEIPT_ENV)
+                .and_then(|(_, value)| value),
+            Some(OsStr::new("/tmp/receipt"))
+        );
+        take_open_receipt();
+        assert!(open_receipt().is_none());
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use std::ffi::OsStr;
     use std::os::unix::net::UnixStream;
@@ -2529,6 +2704,29 @@ mod tests {
         RelayOutput, Sizing, Viewer, CONTROL_ENV, HELD_ENV, LIMIT, PARENT_ENV,
     };
     use loopflow_model::id::TerminalId;
+
+    /// A start that gets no PTY names the shortage, not the OS error alone.
+    #[test]
+    fn a_pty_failure_says_when_the_machine_has_none_left() {
+        let error = std::io::Error::from_raw_os_error(libc::EAGAIN);
+        let usage = |in_use| {
+            Some(super::PtyUsage {
+                in_use,
+                max: 511,
+                limit: "kern.tty.ptmx_max",
+            })
+        };
+        assert_eq!(
+            super::pty_failure(&error, usage(511)),
+            "no PTY left: 511 in use (kern.tty.ptmx_max)"
+        );
+        let other = super::pty_failure(&error, usage(144));
+        assert!(other.starts_with("cannot open a PTY: "), "{other}");
+        assert!(
+            other.ends_with("(144 of 511 in use, kern.tty.ptmx_max)"),
+            "{other}"
+        );
+    }
 
     #[test]
     fn a_catching_up_views_terminal_answers_never_reach_the_agent() {
@@ -2785,8 +2983,7 @@ mod launch_mode_tests {
         use crate::session_record::{SessionCaptureSpec, SessionGraphMembership, SessionRecorder};
 
         let ledger = crate::journal::TestLedgerGuard::new();
-        crate::journal::with_process(|| {
-            crate::journal::admit_process(ledger.home(), &["lf".into(), "resume".into()]);
+        crate::journal::with_runtime(ledger.home(), &["lf".into(), "resume".into()], || {
             let store = crate::journal::process_ledger().unwrap();
             // Attribution selects a launch kind independently of the stored
             // surface. Resume eligibility is checked before delegation.

@@ -7,10 +7,81 @@ uv run python scripts/loopflow-dev.py run-debug    # launch with logs visible
 uv run python scripts/loopflow-dev.py test         # run Swift tests
 ```
 
-The development app runs its bundled CLI on the main Machine's store, which it
-reads but never migrates. Only an install advances the store's schema:
-`lf install --dev` for a green main build, `lf install` for your stream's release.
-With a private `LF_HOME`, an explicit `LF_BIN` selects the CLI instead.
+`run` opens Loopflow Dev on your real Waves, Tasks and Sessions from any branch,
+and says what it opened:
+
+```console
+$ uv run python scripts/loopflow-dev.py run
+Opening the Machine.
+```
+
+On a branch that changes a wire type or adds a migration, the installed server
+and this build can't share the Machine, so Dev opens a copy of it:
+
+```console
+$ uv run python scripts/loopflow-dev.py run
+This branch changes what the server sends (GraphCatalogEntry, GraphSubject, RoadmapTask, Write).
+Opening a copy of the Machine from 14:02; changes are refused there.
+```
+
+| Dev opens | With | Data | Changes | Session terminals |
+| --- | --- | --- | --- | --- |
+| The Machine | `run`, when the branch leaves wire and schema alone | Real, live | Work | Live |
+| A copy of the Machine | `run` on any other branch, or `run --copy` | Real, as of launch | Refused with one sentence | None |
+| A fake world | `run --world <dir>` | The recipe's | Work | Stand-in providers |
+
+`run-debug` takes the same flags and makes the same choice.
+
+**The Machine.** The installed server serves the window; the app's bundled `lf`
+runs its panes. The store is read and written but never migrated: only an
+install advances its schema (`lf install --dev` for a green main build,
+`lf install` for your stream's release).
+
+**A copy.** The branch's own server serves `~/.lf-copy`, a read-only copy of the
+store taken when `run` started; run it again for a newer one. The repository
+window shows the real backlog, Waves, Sessions and history. Clicking Run,
+steering, creating a Task or starting a Session answers with a Notice and does
+nothing:
+
+```
+This is a copy of the Machine from 14:02; make changes in Loopflow or with lf.
+```
+
+The window does not otherwise say it is a copy. Session rows show whether their
+processes are alive now; their panes have no terminal, and a pane or shell tab
+that tries to start one prints the same sentence, as any `lf` command that
+writes does there. Tracker and PR rows show
+what the store last recorded. The installed server, `~/.lf` and every running
+Session are untouched: `lf server status` reports the same `instance` before,
+during and after. For terminals or changes on a branch like this, use a fake
+world.
+
+`run` opens a copy when the bundled `lf` can't open the store, or when its
+`lf server describe --json` differs from the installed `lf`'s, and prints the
+store's refusal or the names of the types that differ. With no installed `lf` to
+compare with, it opens a copy and says so. When the store has a migration the
+branch lacks, neither opens: `run` prints the store's refusal and names
+`lf sync main`.
+
+**A fake world.** Build one, then open it:
+
+```bash
+cargo build -p loopflow --bin lf --bin lf-world
+target/debug/lf-world build one-task /tmp/w1
+uv run python scripts/loopflow-dev.py run --world /tmp/w1
+```
+
+`lf-world list` names the recipes. Keep the directory short: when
+`home/run/desktop/com.loopflow.mac.dev.sock` would pass the 103-byte socket
+limit, Dev opens the world without `lf desktop`, and `lf-world` says so when it
+builds, naming both lengths.
+
+A window belongs to the Machine it was opened on. A launch shows the windows
+saved for the Machine, copy or world it opens and none from another, so a world
+never shows your real repository's window. A window saved for another one opens
+the launch's repository instead. Only these flags choose what Dev
+opens; an `LF_HOME` in the launching shell does not.
+
 Repository selectors list only Git main checkouts. Linked worktrees stay visible
 only through the Task Work that owns them.
 
@@ -33,6 +104,15 @@ reading, or stays empty, and the Notice goes when a read succeeds. A Task withou
 If no name is known, the failed row says
 **Task unavailable**. Desktop reconnects automatically. A successful replacement
 updates the rows, retaining the selected workspace, panes and drafts.
+When the app and the server are different builds and a read arrives that the
+app can't decode, the Notice for that part names both and where decoding
+stopped, and `lf install` brings them together. The other parts stay current:
+
+```
+The plan couldn't be read: This Loopflow (0.16.0+3500440e9) can't read what the server (0.16.0+21d541a87) sent. (missing owned_by_you at body.tasks.0)
+```
+
+**The Machine is away** means only that the connection is down.
 Repeated identical Session errors leave the displayed reading unchanged; failed
 per-Wave or truncated replacements keep previously readable planning, including
 its saved copy. Delete the cache file to start from **Loading workspace…**.
@@ -290,13 +370,14 @@ Unreadable app/default/selection/cursor text prevents Apply; ANSI colors keep
 their source values. Personal non-color Ghostty settings still load; its `theme =` is ignored and its file never written.
 Source and license notices ship offline with the catalogue.
 
-**Auto-Ship** hands a Task off; it leaves Working tasks and its ship process lands it.
-It sits at the right end of the Workflow bar under the jump bar, beside the Task's
-stages as dots (click them for each stage) and what is running now. While the
-handoff exists, the same spot holds Stop Auto-Ship, including while it is
-restarting or waiting for assignment. Clicking it raises the Notice
-"LOO-5 Auto-Ship requested · Undo"; Undo is Stop Auto-Ship.
-Open a Dashboard with `state:shipping` to watch Tasks executing autonomously.
+The **Auto** toggle turns a Task's auto setting on and runs it, as `lf task auto on`
+does: its run stands in at each interactive step and lands the PR. It sits at
+the right end of the Workflow bar under the jump bar, beside the Task's stages
+as dots (click them for each stage) and what is running now. Turning it on
+raises the Notice "LOO-5 Auto on requested · Undo"; Undo is auto off, the same
+as switching the toggle off (`lf task auto off`). While auto is on, the Task's
+board card and sidebar row carry an Auto badge.
+Open a Dashboard with `state:auto` to watch those Tasks.
 
 ```text
 ⌘T          new shell tab in the Task’s Shell tool
@@ -339,7 +420,7 @@ local uncommitted edits stay in Files.
 
 Open **•••** or press Command-/ for the selected Task’s actions. Row context
 menus use the same actions for the clicked Task. Command-T adds a shell tab. The main Session's menu switches between **Claude**,
-**Codex**, and **OpenCode**, continuing the same Session with its history.
+**Codex**, **OpenCode**, **Pi** and **Antigravity**, continuing the same Session with its history.
 **Refresh session** reconnects the pane to that conversation, including after a
 failed launch or stale connection. It keeps the provider's history and running
 process, and takes over a conversation a native client holds. The control
@@ -786,14 +867,10 @@ only the selected Wave's `lf wave` process; it has no machine-wide service or
 remote-connection mode.
 
 The dev app supplies its bundled helper through `LF_BIN` and embedded shell PATH.
-Main-Machine commands forward to installed lf; new Sessions and agent children
-use its stable entry. Private-Home launches retain the bundled helper selection.
-Existing providers keep their environment when reattached.
-
-`run` and `run-debug` check `config repo --json` through that helper before
-launching. This checks repository registration, not all Desktop actions. Schema
-compatibility is checked by the store; ordinary commands cannot migrate the main
-database. Private `LF_HOME` experiments remain disposable and explicit.
+Existing providers keep their environment when reattached. What `run` and
+`run-debug` open (the Machine, a copy of it or a fake world) is chosen after the
+build, as [the opening section](#loopflow-for-macos) describes; a copy
+also needs `lf-world`, which the launcher builds beside `lf`.
 
 The installed app updates itself (`AppUpdater`, Sparkle), including a custom
 location reached by the public `lf` entry or selected by `LF_APPLICATIONS_DIR`. It
@@ -803,9 +880,11 @@ appcast), never check for updates.
 
 | Command | What it does |
 | --- | --- |
-| `uv run python scripts/loopflow-dev.py run` | Build and launch |
+| `uv run python scripts/loopflow-dev.py run` | Build and launch on the Machine, or a copy when the branch can't read it |
+| `uv run python scripts/loopflow-dev.py run --copy` | Build and launch on a copy of the Machine |
+| `uv run python scripts/loopflow-dev.py run --world <dir>` | Build and launch on a fake world |
 | `uv run python scripts/loopflow-dev.py install` | Build and install without launching |
-| `uv run python scripts/loopflow-dev.py run-debug` | Build and run with stdout |
+| `uv run python scripts/loopflow-dev.py run-debug` | The same choice as `run`, with stdout |
 | `uv run python scripts/loopflow-dev.py build` | Build only |
 | `uv run python scripts/loopflow-dev.py ghostty-build` | Rebuild the pinned patched GhosttyKit and emit its SwiftPM artifact/checksum |
 | `uv run python scripts/loopflow-dev.py test` | Run unit tests |
@@ -1066,7 +1145,7 @@ name (the `lf desktop` verb), title, arguments, default keys and `perform`.
 the Desktop socket look actions up there; nothing else mutates navigation or panes.
 Keys and menus act on the shown workspace's focused pane; a socket request names an
 exact window and pane, and `lf desktop` resolves those from one inspection (see the
-[CLI examples](../docs/surfaces.md#drive-desktop-from-a-script)).
+[CLI examples](../docs/surfaces.md#script-desktop)).
 
 `DesktopServer` (`LoopflowMac/DesktopServer.swift`) binds
 `$LF_HOME/run/desktop/<bundle-id>.sock` at launch (0700 directory, 0600 socket,

@@ -11,9 +11,8 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
-#[cfg(not(test))]
-use crate::agent::check_cli_available;
 use crate::error::LoadError;
+use loopflow_harness::HarnessKind;
 
 pub mod catalog;
 mod definitions;
@@ -131,10 +130,6 @@ pub const CLAUDE_MODEL_FAMILIES: [&str; 4] = ["fable", "opus", "sonnet", "haiku"
 /// The family Claude Code runs when a launch names no model.
 pub const CLAUDE_DEFAULT_MODEL_FAMILY: &str = "fable";
 
-/// The models a bare `claude` step falls through to when the one it runs
-/// hits a scoped limit, best first.
-pub const CLAUDE_MODEL_RUNGS: [&str; 3] = ["opus", "sonnet", "haiku"];
-
 /// An explicit invocation-wide choice; definitions and defaults never set it.
 pub const YOLO_OVERRIDE_ENV: &str = "LF_YOLO_OVERRIDE";
 pub const CHROME_OVERRIDE_ENV: &str = "LF_CHROME_OVERRIDE";
@@ -169,17 +164,17 @@ pub(crate) fn resume_choice(provider: &str, model: Option<&str>, selected: Optio
 /// Select automatically only when exactly one supported harness is installed.
 pub fn default_agent() -> Option<&'static str> {
     #[cfg(test)]
-    let is_installed = |agent: &str| agent == crate::harness::HarnessKind::Codex.as_str();
+    let is_installed = |agent: HarnessKind| agent == HarnessKind::Codex;
     #[cfg(not(test))]
-    let is_installed = check_cli_available;
+    let is_installed = |kind: HarnessKind| crate::harness::launcher(kind).installed();
     installed_agent(is_installed)
 }
 
-fn installed_agent(is_installed: impl Fn(&str) -> bool) -> Option<&'static str> {
-    let mut installed = crate::harness::HarnessKind::ALL
+fn installed_agent(is_installed: impl Fn(HarnessKind) -> bool) -> Option<&'static str> {
+    let mut installed = HarnessKind::ALL
         .into_iter()
-        .map(crate::harness::HarnessKind::as_str)
-        .filter(|agent| is_installed(agent));
+        .filter(|agent| is_installed(*agent))
+        .map(HarnessKind::as_str);
     let only = installed.next()?;
     installed.next().is_none().then_some(only)
 }
@@ -297,6 +292,14 @@ pub enum ReleaseCompletion {
     Tag,
     Workflow,
     GithubRelease,
+}
+
+/// `auto: on`: each Task turns auto on as it takes up its Graph, unless
+/// someone set it first. It has no other value; leave it out for none.
+#[derive(schemars::JsonSchema, Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AutoDefault {
+    On,
 }
 
 /// Repository merge policy; GitHub's allowed methods remain authoritative.
@@ -494,20 +497,20 @@ pub(crate) fn agent_list(value: &str) -> impl Iterator<Item = &str> {
 /// A selected harness and its provider model.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Agent {
-    pub harness: crate::harness::HarnessKind,
+    pub harness: HarnessKind,
     pub model: Option<String>,
 }
 
 impl Agent {
     pub fn parse(value: &str) -> Result<Self, LoadError> {
         let (name, model) = parse_agent(value);
-        let harness = crate::harness::HarnessKind::parse(&name)
-            .ok_or_else(|| LoadError::InvalidAgent(value.to_owned()))?;
+        let harness =
+            HarnessKind::parse(&name).ok_or_else(|| LoadError::InvalidAgent(value.to_owned()))?;
         Ok(Self { harness, model })
     }
 
     pub fn with_configured_model(mut self, config: &Config) -> Self {
-        if self.harness == crate::harness::HarnessKind::Claude && self.model.is_none() {
+        if self.harness == HarnessKind::Claude && self.model.is_none() {
             self.model = config.claude.model.clone();
         }
         self
@@ -956,7 +959,10 @@ mod tests {
 
     #[test]
     fn default_agent_is_the_one_installed() {
-        assert_eq!(installed_agent(|agent| agent == "claude"), Some("claude"));
+        assert_eq!(
+            installed_agent(|agent| agent == HarnessKind::Claude),
+            Some("claude")
+        );
         assert_eq!(installed_agent(|_| true), None);
         assert_eq!(installed_agent(|_| false), None);
     }
@@ -1011,7 +1017,7 @@ mod tests {
 
     #[test]
     fn bare_harnesses_defer_model_selection_to_the_provider() {
-        for harness in ["claude", "codex", "opencode", "pi"] {
+        for harness in HarnessKind::ALL.map(HarnessKind::as_str) {
             assert_eq!(parse_agent(harness), (harness.to_string(), None));
         }
     }
@@ -1084,7 +1090,7 @@ mod tests {
         assert!(config.agent.is_none());
         assert_eq!(config.agent().unwrap(), "codex");
         assert!(config.supported_harnesses.is_empty());
-        assert!(!config.yolo);
+        assert!(config.yolo);
         assert!(config.context.docs.is_empty());
         assert!(!config.context.diff_files);
         assert!(!config.context.diff);

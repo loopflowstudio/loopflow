@@ -217,7 +217,7 @@ fn forget_old_history(
 // Liveness: runs and agents whose OS process is gone
 
 /// A record that runs as an OS process and has not ended: a Graph run or
-/// step, a Project activation, a Task's or its shipping's carrier, or a
+/// step, a Project activation, a Task's carrier, or a
 /// Session's agent.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RunningOwner {
@@ -251,9 +251,7 @@ const RUNNING_OWNERS: &str = "
         project_activation_os_started_at,project_activation_started_at,NULL FROM waves
         WHERE project_activation_lf_process_id IS NOT NULL AND project_activation_ended_at IS NULL
     UNION ALL SELECT 'task_carrier',lf_process_id,run_pid,run_os_started_at,NULL,NULL
-        FROM task_graphs WHERE run_pid IS NOT NULL
-    UNION ALL SELECT 'ship_carrier',lf_process_id,pid,os_started_at,at,NULL FROM task_ship_events
-        WHERE kind IN ('approved','carried') AND pid IS NOT NULL AND ended_at IS NULL
+        FROM task_graphs WHERE lf_process_id IS NOT NULL AND run_pid IS NOT NULL
     UNION ALL SELECT 'session_agent',agent_process_id,agent_pid,agent_os_started_at,
         agent_started_at,id FROM agent_sessions
         WHERE agent_process_id IS NOT NULL AND agent_pid IS NOT NULL AND agent_ended_at IS NULL";
@@ -272,7 +270,6 @@ fn running_owners_in(conn: &Connection) -> StoreResult<Vec<RunningOwner>> {
             "graph_step" => Owner::Run(RunOwner::GraphStep),
             "activation" => Owner::Run(RunOwner::ProjectActivation),
             "task_carrier" => Owner::Run(RunOwner::TaskCarrier),
-            "ship_carrier" => Owner::Run(RunOwner::ShipCarrier),
             _ => Owner::SessionAgent {
                 session: row.get(5)?,
             },
@@ -298,6 +295,15 @@ fn end_dead_owners(conn: &Connection, dead: &[(RunningOwner, i64)]) -> StoreResu
         let unchanged = running_owners_in(&tx)?.contains(observed);
         if unchanged {
             match &observed.owner {
+                // A carrier's own end clears its OS process and says nothing
+                // more; a death is told apart by when it was found.
+                Owner::Run(RunOwner::TaskCarrier) => {
+                    tx.execute(
+                        "UPDATE task_graphs SET run_pid=NULL,run_os_started_at=NULL,run_died_at=?2
+                         WHERE lf_process_id=?1 AND run_pid IS NOT NULL",
+                        params![observed.id, at],
+                    )?;
+                }
                 Owner::Run(owner) => super::graph_inventory::finish_run_in(
                     &tx,
                     *owner,
@@ -368,6 +374,22 @@ fn is_busy(error: &rusqlite::Error) -> bool {
 #[cfg(test)]
 mod observation_tests {
     use super::{prune, running_owners};
+
+    #[test]
+    fn a_finished_task_with_a_leftover_pid_owns_no_process() {
+        let (_dir, store, task) = crate::test_fixture::store_with_task();
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO task_graphs(task_id,graph,step,updated_at,run_pid,run_os_started_at)
+                 VALUES(?1,'{}','end',1,123,456)",
+                [task.as_str()],
+            )
+            .unwrap();
+            assert!(super::running_owners_in(&conn).unwrap().is_empty());
+        }
+        assert!(store.recorded_lfs().unwrap().is_empty());
+    }
 
     /// A Session agent that died unseen ends at the next pass, unless it
     /// changed between observation and pruning.

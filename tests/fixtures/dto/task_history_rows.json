@@ -59,10 +59,6 @@
     "run_control": {
       "unavailable": "Linear Task is canceled"
     },
-    "ship_control": {
-      "unavailable": "Linear Task is canceled"
-    },
-    "shipping": null,
     "pr": null,
     "graph_source": null,
     "lifecycle": "abandoned",
@@ -130,10 +126,6 @@
     "run_control": {
       "unavailable": "Linear Task is canceled"
     },
-    "ship_control": {
-      "unavailable": "Linear Task is canceled"
-    },
-    "shipping": null,
     "pr": null,
     "graph_source": null,
     "lifecycle": "abandoned",
@@ -201,10 +193,6 @@
     "run_control": {
       "unavailable": "Linear Task is canceled"
     },
-    "ship_control": {
-      "unavailable": "Linear Task is canceled"
-    },
-    "shipping": null,
     "pr": null,
     "graph_source": null,
     "lifecycle": "abandoned",
@@ -272,10 +260,6 @@
     "run_control": {
       "unavailable": "Linear Task is canceled"
     },
-    "ship_control": {
-      "unavailable": "Linear Task is canceled"
-    },
-    "shipping": null,
     "pr": null,
     "graph_source": null,
     "lifecycle": "abandoned",
@@ -343,10 +327,6 @@
     "run_control": {
       "unavailable": "Linear Task is canceled"
     },
-    "ship_control": {
-      "unavailable": "Linear Task is canceled"
-    },
-    "shipping": null,
     "pr": null,
     "graph_source": null,
     "lifecycle": "abandoned",
@@ -414,10 +394,6 @@
     "run_control": {
       "unavailable": "Linear Task is canceled"
     },
-    "ship_control": {
-      "unavailable": "Linear Task is canceled"
-    },
-    "shipping": null,
     "pr": null,
     "graph_source": null,
     "lifecycle": "abandoned",
@@ -485,10 +461,6 @@
     "run_control": {
       "unavailable": "Linear Task is canceled"
     },
-    "ship_control": {
-      "unavailable": "Linear Task is canceled"
-    },
-    "shipping": null,
     "pr": null,
     "graph_source": null,
     "lifecycle": "abandoned",
@@ -556,10 +528,6 @@
     "run_control": {
       "unavailable": null
     },
-    "ship_control": {
-      "unavailable": null
-    },
-    "shipping": null,
     "pr": null,
     "graph_source": null,
     "lifecycle": "unstarted",
@@ -628,10 +596,6 @@
     "run_control": {
       "unavailable": null
     },
-    "ship_control": {
-      "unavailable": null
-    },
-    "shipping": null,
     "pr": null,
     "graph_source": null,
     "lifecycle": "unstarted",
@@ -700,10 +664,6 @@
     "run_control": {
       "unavailable": null
     },
-    "ship_control": {
-      "unavailable": null
-    },
-    "shipping": null,
     "pr": null,
     "graph_source": null,
     "lifecycle": "unstarted",
@@ -772,10 +732,6 @@
     "run_control": {
       "unavailable": null
     },
-    "ship_control": {
-      "unavailable": null
-    },
-    "shipping": null,
     "pr": null,
     "graph_source": null,
     "lifecycle": "unstarted",
@@ -844,10 +800,6 @@
     "run_control": {
       "unavailable": "Linear Task is complete"
     },
-    "ship_control": {
-      "unavailable": "Linear Task is complete"
-    },
-    "shipping": null,
     "pr": null,
     "graph_source": null,
     "lifecycle": "done",
@@ -915,10 +867,6 @@
     "run_control": {
       "unavailable": "Linear Task is complete"
     },
-    "ship_control": {
-      "unavailable": "Linear Task is complete"
-    },
-    "shipping": null,
     "pr": null,
     "graph_source": null,
     "lifecycle": "done",
@@ -986,10 +934,6 @@
     "run_control": {
       "unavailable": "Linear Task is complete"
     },
-    "ship_control": {
-      "unavailable": "Linear Task is complete"
-    },
-    "shipping": null,
     "pr": null,
     "graph_source": null,
     "lifecycle": "done",
@@ -1057,10 +1001,6 @@
     "run_control": {
       "unavailable": null
     },
-    "ship_control": {
-      "unavailable": null
-    },
-    "shipping": null,
     "pr": null,
     "graph_source": null,
     "lifecycle": "unstarted",
@@ -1129,10 +1069,6 @@
     "run_control": {
       "unavailable": "Linear Task is canceled"
     },
-    "ship_control": {
-      "unavailable": "Linear Task is canceled"
-    },
-    "shipping": null,
     "pr": null,
     "graph_source": null,
     "lifecycle": "abandoned",

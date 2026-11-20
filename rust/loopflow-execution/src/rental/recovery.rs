@@ -253,7 +253,7 @@ fn copy_up(sqlite: &SqliteStore, rental: &Rental, machine: &Machine) -> anyhow::
         .format(&time::format_description::well_known::Rfc3339)?;
     let script = format!(
         "{}; lf history export --since {}",
-        crate::machine::ssh::REMOTE_PATH,
+        crate::machine::ssh::remote_path(),
         crate::machine::ssh::sh_quote(&since)
     );
     let output = Command::new("ssh")
@@ -302,7 +302,7 @@ pub fn settle(machine: &MachineId) {
     }
 }
 
-/// Lazy recovery's give-back pass. A rental whose provider this process
+/// The server recovery pass's give-back. A rental whose provider this process
 /// cannot reach is reported only once its soft deadline passes; its provider
 /// deletes it at the hard deadline either way.
 ///

@@ -444,13 +444,12 @@ fn record_control_task_state(repo: &Path, owner: &GitOperationOwner) -> OpsResul
     };
     if let Some(stacked) = crate::ops::task::task_stack(repo)? {
         let default = get_default_branch(repo)?;
-        let clear_parent = stacked.parent_merged
+        let clear_parent = stacked.parent == crate::ops::task::StackParentPr::Merged
             || owner.target_ref == default
             || owner.target_ref == format!("origin/{default}");
         if clear_parent {
             let _mutation = crate::ops::task::lock_task_pr_mutation(repo)?;
             crate::ops::task::clear_task_pr_merge_before_head_mutation(repo, false, &|_| {})?;
-            return crate::ops::task::record_stack_sync(&stacked, target_sha, true);
         }
         return crate::ops::task::record_stack_sync(&stacked, target_sha, clear_parent);
     }

@@ -464,6 +464,35 @@ struct ServerClientTests {
         await fresh.cancel()
     }
 
+    @Test("A reading from another build fails its part with a sentence naming both builds")
+    func aReadingThisBuildCannotDecodeNamesBothBuilds() async throws {
+        let peer = try ServerPeer()
+        peer.serve { message, respond in
+            guard message["type"] as? String == "subscribe" else { return true }
+            let id = message["id"]!
+            respond(["type": "response", "revisions": NSNull(), "id": id, "trace_id": "trace", "result": NSNull()])
+            // A plan without the fields this build requires, as another build sends it.
+            respond(["type": "reading", "id": id, "checkpoint": "fixture-checkpoint",
+                     "frame": ["answers": NSNull(), "unavailable": NSNull(), "body": ["tasks": []], "read_at": NSNull()]])
+            return true
+        }
+        let location = peer.location
+        let observation = try WorkSubscriptions.observe { ServerClient.subscribe($0, location: location) }
+        var frames = observation.frames.makeAsyncIterator()
+        let frame = try #require(try await frames.next())
+        #expect(frame.content.part == "planning")
+        let reason = try #require(frame.unavailable)
+        #expect(reason.hasPrefix("This Loopflow (\(LaunchJournal.appVersion)+\(DesktopLog.sourceRevision)) can't read what the server (test) sent. (missing "))
+        // The Notice a window shows for it, with the link up.
+        let shown = await MainActor.run {
+            let notices = NoticeCenter()
+            notices.read("planning", "The plan", from: nil, to: reason, link: .connected)
+            return notices.current?.text
+        }
+        #expect(shown == "The plan couldn't be read: \(reason)")
+        await observation.cancel()
+    }
+
     @Test func serverEndingASubscriptionFailsItAlone() async throws {
         let peer = try ServerPeer()
         let subscriptionID = Mutex<String?>(nil)

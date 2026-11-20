@@ -284,9 +284,9 @@ pub(crate) fn validate_value(path: &[&str], value: &Value) -> Result<(), LoadErr
 
 fn validate_agent_policy(agent: &str) -> Result<(), LoadError> {
     let (harness, variant) = super::parse_agent(agent);
-    let kind = crate::harness::HarnessKind::parse(&harness).ok_or_else(|| {
+    let kind = loopflow_harness::HarnessKind::parse(&harness).ok_or_else(|| {
         invalid(format!(
-            "unsupported agent harness '{harness}': use 'claude', 'codex', 'opencode', or 'pi'"
+            "unsupported agent harness '{harness}': use 'claude', 'codex', 'opencode', 'pi', or 'agy'"
         ))
     })?;
     if let Some(model) = variant {
@@ -1323,7 +1323,8 @@ mod tests {
                 None,
             )
             .unwrap();
-            assert!(!resolved.config.yolo);
+            // An unreadable `yolo` falls to the default, which is on.
+            assert!(resolved.config.yolo);
             assert!(resolved.config.claude.model.is_none());
             if values.starts_with("context:") {
                 assert_eq!(resolved.config.context.docs, ["README.md"]);

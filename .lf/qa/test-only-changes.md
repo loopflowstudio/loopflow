@@ -32,3 +32,9 @@ swift/.build/debug/LoopflowSwiftPackageTests.xctest/Contents/MacOS/LoopflowSwift
 `Library/PrivateFrameworks`, and `DYLD_LIBRARY_PATH` to its `usr/lib`. The
 helper is in the Xcode toolchain's `usr/libexec/swift/pm/`. Timestamp each
 run to show the overlap.
+
+A fixture that runs `lf` sees whichever build is at `target/debug/lf`. To
+check a test on its first run after a link, `touch rust/loopflow/src/bin/lf.rs`,
+build with `cargo test … --no-run`, and hash `target/debug/lf` before and
+after the run with `LOOPFLOW_TEST_LF` unset: a different hash means a test
+process rebuilt `lf` under a running server.

@@ -462,7 +462,15 @@ fn summary_query(page: &str, by_id: bool, now: i64) -> String {
         (SELECT pin.account_id FROM provider_session_accounts pin WHERE pin.provider=s.provider AND pin.provider_session_id=a.provider_thread),
         COALESCE(captured.provider_thread IS NOT NULL,0),
         EXISTS(SELECT 1 FROM held_terminals t WHERE t.id=a.held_terminal_id AND t.ended_at IS NULL),
-        graph.pid,graph.os_started_at,graph.exit_code,graph.error,a.agent_ended_at IS NOT NULL
+        graph.pid,graph.os_started_at,graph.exit_code,graph.error,a.agent_ended_at IS NOT NULL,
+        a.agent_ended_at,a.agent_exit_code,
+        a.starts_since_turn,a.last_started_at,a.start_failure,
+        EXISTS(SELECT 1 FROM task_primary_sessions tp
+         JOIN tasks pt ON pt.id=tp.task_id
+         JOIN task_checkouts pc ON pc.task_id=tp.task_id
+         WHERE tp.session_id=a.id AND {here}),
+        a.agent_pid IS NULL AND a.agent_ended_at IS NULL
+         AND EXISTS(SELECT 1 FROM held_terminals t WHERE t.id=a.held_terminal_id AND t.ended_at IS NULL)
         FROM page s JOIN agent_sessions a ON a.id=s.id
         LEFT JOIN session_events captured ON captured.seq=s.current_capture
         LEFT JOIN graph_process_steps gs ON gs.lf_process_id=captured.lf_process_id
@@ -470,7 +478,8 @@ fn summary_query(page: &str, by_id: bool, now: i64) -> String {
         LEFT JOIN wave_addresses w ON w.id=s.wave_id
         LEFT JOIN tasks t ON t.id=s.task_id
         ORDER BY {order}", super::task_work::session_tasks("a"),
-        task_state = super::durable::task_state_sql("t"))
+        task_state = super::durable::task_state_sql("t"),
+        here = super::session_recovery::task_conversation_here_sql("a", "pt", "pc"))
 }
 
 fn read_summary(
@@ -547,6 +556,16 @@ fn read_summary(
             }),
             unviewed,
             held: live && row.get(36)?,
+            agent_end: row
+                .get::<_, Option<i64>>(42)?
+                .map(|at| {
+                    row.get(43)
+                        .map(|exit_code| crate::session::AgentEnd { at, exit_code })
+                })
+                .transpose()?,
+            starts_since_turn: row.get(44)?,
+            last_started_at: row.get(45)?,
+            start_failure: row.get(46)?,
             task_ids: serde_json::from_str(&row.get::<_, String>(24)?)?,
             primary_scope: row.get(25)?,
             agent_process_evidence,
@@ -559,6 +578,8 @@ fn read_summary(
             agent_process_id,
             task_terminal: row.get(27)?,
             task_primary: row.get(28)?,
+            in_task_checkout: row.get(47)?,
+            launching: row.get(48)?,
             captured: row.get(15)?,
             id: row.get(0)?,
             artifact_key: row

@@ -38,6 +38,9 @@ pub struct Status {
     pub instance: Option<String>,
     /// The newest protocol revision the server speaks.
     pub revision: Option<u32>,
+    /// The server's own executable; `lf install server` replaces a server
+    /// whose executable is not the selected installation's.
+    pub executable_sha256: Option<String>,
     /// Every welcomed connection still open; empty when no server answered.
     pub clients: Vec<ConnectedClient>,
     pub error: Option<String>,
@@ -50,6 +53,7 @@ pub fn status() -> Result<Status> {
         listening: false,
         instance: None,
         revision: None,
+        executable_sha256: None,
         clients: Vec::new(),
         error: None,
     };
@@ -75,24 +79,13 @@ pub fn status() -> Result<Status> {
             status.instance = Some(answer.instance);
             status.revision = Some(answer.revision);
             status.clients = answer.clients;
-            let expected = crate::installation::ArtifactIdentity::capture(
-                crate::installation::ArtifactRole::Cli,
-                &std::env::current_exe()?,
-            )?
-            .sha256;
-            if answer.executable_sha256 != expected {
-                Some(
-                    "Loopflow server uses another executable; obtain the selected installation"
-                        .into(),
-                )
-            } else if answer.min_revision > REVISION || answer.revision < MIN_REVISION {
-                Some(format!(
+            status.executable_sha256 = Some(answer.executable_sha256);
+            (answer.min_revision > REVISION || answer.revision < MIN_REVISION).then(|| {
+                format!(
                     "Loopflow server speaks protocol revisions {}–{}; this build speaks {MIN_REVISION}–{REVISION}; update the selected installation",
                     answer.min_revision, answer.revision
-                ))
-            } else {
-                None
-            }
+                )
+            })
         }
         Ok(Some(ServerMessage::Error { code, message, .. })) => Some(format!("{code}: {message}")),
         Ok(Some(_)) => Some("Server did not answer the readiness request".into()),

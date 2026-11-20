@@ -621,12 +621,12 @@ mod tests {
         );
 
         finish_run(&store, &run, "succeeded");
-        store.set_task_graph_step(&child, "human-review").unwrap();
+        store.set_task_graph_step(&child, "ship-review").unwrap();
         let (notices, updates) = unread(&store, "reader");
         assert_eq!(
             notices,
             [format!(
-                "{identifier} \"Log each retry\", which this conversation conducts, stopped at human-review. lf task status {identifier}"
+                "{identifier} \"Log each retry\", which this conversation conducts, stopped at ship-review. lf task status {identifier}"
             )]
         );
         assert!(updates.is_empty(), "a child's updates stay with the child");

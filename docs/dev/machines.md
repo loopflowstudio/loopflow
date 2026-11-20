@@ -166,11 +166,11 @@ inside one IMMEDIATE transaction:
 | Someone else's | Your own Wave Machine; your later claim wins |
 
 A write for a Task another Machine runs travels as the operation itself, not
-as a command line. Running, shipping, holding, claiming or unassigning the Task,
-and opening or resuming its Session, reach the writer the same way:
+as a command line. Running, claiming or unassigning the Task, setting
+its auto, and opening or resuming its Session, reach the writer the same way:
 
 ```bash
-lf task hold LOO-123 --json             # LOO-123 runs on mini; mini's server answers
+lf task auto off LOO-123 --json         # LOO-123 runs on mini; mini's server answers
 ssh mini lf server status               # while it runs, the laptop is a connected client
 ```
 
@@ -411,21 +411,21 @@ label; then the refusal prints the same check and retry. Addressed to mini from 
 runs on the laptop, which holds the move. A leaving move carries on: it
 commits, pushes and takes the conversation, which are safe to repeat. A sent
 move is delivered as it was sent, conversation included, without committing or
-pushing again. Either way the Graph continues on mini at the step it was on. If
-the Graph does not start on mini, the move still stands and the last line prints
-`lf task run MTG-321 --from 'implement'`, which starts it at that step on the
-Task's owner.
+pushing again. For a Task with auto not on, the move continues a Graph it
+stopped, starting it on mini at the saved step. If the Graph does not start,
+the move still stands and prints `lf task run MTG-321 --from 'implement'` to
+start it on the Task's owner.
 
 `lf task claim MTG-321` on the laptop first asks mini whether the move arrived.
 If it did, its answer lost, the Task runs on mini and the claim is written
 there. If it did not, or mini is gone, the laptop takes the Task back and the
 move ends.
 
-Auto-Ship approval travels with the move, as the Graph position does. Each
-Machine keeps approvals and stops as a log (who, when, which process). The continued run is a plain
-`lf task run`; when it stops at an interactive step, mini's ship process carries
-the Task on, as it would have on the laptop. `lf task hold MTG-321` withdraws the
-approval on either Machine. A Machine ships only Tasks it owns: once a Task has
+Auto travels with the move, as the Graph position does: it is one setting
+on the Task (on or off, who, when), carried whether or not the Task has run. The continued run is a plain
+`lf task run`; with auto on it stands in at interactive steps on mini, as
+it would have on the laptop. `lf task auto off MTG-321` turns it off on either
+Machine. A Machine ships only Tasks it owns: once a Task has
 left, its old checkout starts nothing.
 
 ## Own and rent Machines
@@ -498,7 +498,7 @@ export from any Machine but the one expected is refused; a failed copy deletes
 nothing. `lf session list` and `lf task status` name copies "from <machine>"
 after the sandbox is gone, and `lf session history show <session>` opens one. The give-back
 pass runs at the end of a forwarded `lf task run` for its rented Machine and in
-lazy recovery (any lf read of this Machine's work) for every rental; `lf ondemand list` only
+the Machine server's recovery pass for every rental; `lf ondemand list` only
 refreshes provider state and never ends a machine.
 
 ## Process topology
@@ -531,15 +531,15 @@ lf machine doctor
 ```
 
 Each owner record (a Session's agent and attachment, a Graph run or step, a
-Task or ship carrier) carries the pid and OS start time of the process it runs
+Task's carrier) carries the pid and OS start time of the process it runs
 as; liveness is one OS lookup against them. The Machine server's liveness pass
 records the end of an owner whose process died without writing it.
 
-Lazy recovery may reap only AgentProcesses whose recorded identity is live and
-whose attached lf is provably dead. `lf machine doctor` reports strays, OS
-processes carrying `LF_STEER_SESSION` or `LF_PROCESS_ID` that no live record
-claims, and kills nothing. An unclaimed provider PID is never killed merely
-because it resembles a Loopflow child.
+The server's recovery pass may reap only AgentProcesses whose recorded
+identity is live and whose attached lf is provably dead. `lf machine doctor`
+reports strays, OS processes carrying `LF_STEER_SESSION` or `LF_PROCESS_ID`
+that no live record claims, and kills nothing. An unclaimed provider PID is
+never killed merely because it resembles a Loopflow child.
 
 Cross-process control requires exact PID/start identity and the applicable
 conversation and AgentProcess record. Revalidate native scope or exclusive process
@@ -593,8 +593,30 @@ no other
 variable selects either. Every variable
 Loopflow sets or reads is listed in [Environment](environment.md). A private Home
 migrates itself on open, including a branch's unmerged migration; editing that
-migration afterwards needs a fresh `LF_HOME`. Loopflow never copies main data into
-it or promotes its contents.
+migration afterwards needs a fresh `LF_HOME`. Nothing in a private Home is
+promoted to the main Machine.
+
+```bash
+target/debug/lf-world copy ~/.lf-copy    # a read-only copy of this Machine's store
+```
+
+`lf-world copy <dir>` replaces `<dir>` with a world whose `loopflow.db` and
+`history.db` are read-only copies of the main Machine's, with the branch's
+migrations applied, and prints its `env.json` as `lf-world build` does. It
+copies the Machine its shell is on (`LF_HOME`, else `~/.lf`) and that
+Machine's `config.yaml`, and replaces `<dir>` only when it is absent or
+already a world. The directory is private to the account (0700): it holds the
+whole store. With no `~/.lf/loopflow.db` it says there is no Machine to copy
+and names `lf-world build`.
+
+A server whose store is read-only serves reads and subscriptions and starts no
+wake, recovery or maintenance pass, held terminal or mobile listener. It
+refuses every change, Session start and upload before any command code runs: "This is a copy of the Machine from 14:02;
+make changes in Loopflow or with lf." The time is when the copy was taken. The
+copied rows still name real pids, worktrees, Task IDs and PRs; nothing in a copy
+signals, edits or publishes to them. `scripts/loopflow-dev.py run` makes and
+opens one when a branch can't read the Machine
+([Loopflow for macOS](../../swift/README.md)).
 
 Published installation verifies immutable artifacts, validates the candidate on
 a temporary database snapshot, and advances only the main database under the
@@ -634,6 +656,7 @@ install command implementation under [`lf/commands/`](../../rust/loopflow/src/lf
 - Promotion owns artifact selection and app replacement, not conversation
   lifecycle.
 - Published preview uses a temporary snapshot; all ordinary writers share the main Machine.
+- A copy of the Machine is read-only and never a second live Machine.
 
 ## Next
 

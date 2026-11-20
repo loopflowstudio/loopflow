@@ -11,8 +11,10 @@ Commands:
     test            Build and run tests
     ghostty-build   Build the pinned patched GhosttyKit
     ghostty-vt-build  Build the libghostty-vt archives lf links (--publish uploads)
-    run             Build and launch the app
-    run-debug       Build and run with stdout visible (--world <dir> opens an lf-world)
+    run             Build and launch the app on the Machine, or a copy of it when
+                    the branch changes the wire or the schema (--copy: always a
+                    copy; --world <dir>: an lf-world)
+    run-debug       The same, with stdout visible
     release         Build release .app and .dmg (delegates to release-loopflow.py)
     clean           Remove dev app and reset permissions
     xcode           Open in Xcode
@@ -64,6 +66,9 @@ ENV_SETUP = REPO_ROOT / "scripts" / "env-setup.sh"
 DEV_LOG_DIR = Path.home() / ".lf" / "logs" / "dev"
 LOOPFLOW_STREAM_LOG = DEV_LOG_DIR / f"{REPO_ROOT.name}.loopflow-run-debug.log"
 DEV_CONTROL_CONFIG = "LoopflowDevControl.json"
+# The one read-only copy of the Machine a Dev build opens. Short, so its
+# Desktop socket fits the path limit; fixed, so its server job is reused.
+COPY_DIR = Path.home() / ".lf-copy"
 # One pin for the Ghostty revision Desktop's framework and lf's terminal library
 # are built from; build.rs reads the same file to fetch and link libghostty-vt.
 GHOSTTY_VT_PIN = REPO_ROOT / "rust" / "loopflow-terminal" / "ghostty-vt.json"
@@ -79,12 +84,13 @@ GHOSTTY_VT_TARGETS = {
 
 
 def _app_environment(repo: Path, world: Path | None = None) -> dict[str, str]:
+    """What the app is launched with. `world` is a fake world or a copy of the
+    Machine; without one the app is on the Machine, whatever this shell's
+    `LF_HOME` says."""
     env = {
         "LOOPFLOW_DEV_WAVE_REPO": str(repo),
         "LF_BIN": str(DEV_APP / "Contents/MacOS/lf"),
     }
-    if value := os.environ.get("LF_HOME"):
-        env["LF_HOME"] = value
     if world:
         env.update(json.loads((world / "env.json").read_text()))
     return env
@@ -520,30 +526,80 @@ def _publish_ghostty_vt_archive(archive: Path, name: str, sha256: str, base_url:
     return sha256
 
 
-def cmd_run() -> int:
+def cmd_run(copy: bool = False, world: Path | None = None) -> int:
     """Build and launch the app."""
     print("Building and running Loopflow...")
     result = cmd_install()
     if result != 0:
         return result
-    if not _check_repository_opening(REPO_ROOT):
+    opening = _choose_opening(REPO_ROOT, copy, world)
+    if opening is None:
         return 1
+    repo, world = opening
     # Tell the app which checkout initiated the launch. Repository discovery
     # collapses linked worktrees to their authoritative main checkout.
     command = ["open", "-n"]
-    for key, value in _app_environment(REPO_ROOT).items():
+    for key, value in _app_environment(repo, world).items():
         command.extend(["--env", f"{key}={value}"])
-    command.extend([str(DEV_APP), "--args", "--repo", str(REPO_ROOT)])
+    command.extend([str(DEV_APP), "--args", "--repo", str(repo)])
     run(command)
     return 0
 
 
-def _check_repository_opening(repo: Path, world: Path | None = None) -> bool:
+# --- What a launch opens ---
+
+
+def _choose_opening(repo: Path, copy: bool, world: Path | None) -> tuple[Path, Path | None] | None:
+    """Choose what this launch opens and print which: a fake world, a copy of
+    the Machine, or the Machine. Returns the repository and the world or copy
+    directory (`None`: the Machine), or `None` when nothing can open."""
+    if world:
+        repo = world / "repo"
+        if refusal := _repository_refusal(repo, world):
+            print(f"Loopflow Dev cannot open this world:\n{refusal}", file=sys.stderr)
+            return None
+        print(f"Opening the world at {world}.")
+        return repo, world
+    refusal = None
+    if not copy:
+        refusal = _repository_refusal(repo)
+        if refusal:
+            why = f"This branch's lf cannot open this repository on the Machine:\n{refusal}"
+        else:
+            why = _wire_difference()
+        if why is None:
+            print("Opening the Machine.")
+            return repo, None
+        print(why)
+    if not _copy_machine():
+        if refusal:
+            print(
+                "If the Machine's store is ahead of this branch, `lf sync main` "
+                "brings the branch up to it.",
+                file=sys.stderr,
+            )
+        return None
+    if refusal := _repository_refusal(repo, COPY_DIR):
+        print(f"Loopflow Dev cannot open the copy:\n{refusal}", file=sys.stderr)
+        return None
+    taken = time.localtime((COPY_DIR / "home" / "loopflow.db").stat().st_mtime)
+    print(
+        f"Opening a copy of the Machine from {time.strftime('%H:%M', taken)}; "
+        "changes are refused there."
+    )
+    return repo, COPY_DIR
+
+
+def _app_shell_environment() -> dict[str, str]:
+    """This shell's environment as an app launch has it: no enclosing agent's
+    Task, Session or Machine."""
+    return {key: value for key, value in os.environ.items() if not key.startswith("LF_")}
+
+
+def _repository_refusal(repo: Path, world: Path | None = None) -> str | None:
+    """Why the bundled `lf` cannot open `repo` there; `None` when it can."""
     cli = DEV_APP / "Contents" / "MacOS" / "lf"
-    # Match an app launch, not the enclosing agent's Task or process context.
-    env = {key: value for key, value in os.environ.items() if not key.startswith("LF_")}
-    env.update(_app_environment(repo, world))
-    print(f"Checking repository opening through {cli}...", flush=True)
+    env = _app_shell_environment() | _app_environment(repo, world)
     try:
         result = subprocess.run(
             [str(cli), "config", "repository", "--json"],
@@ -555,19 +611,69 @@ def _check_repository_opening(repo: Path, world: Path | None = None) -> bool:
             timeout=30,
         )
     except (OSError, subprocess.TimeoutExpired) as error:
-        detail = str(error)
-    else:
-        if result.returncode == 0:
-            return True
-        detail = result.stderr.strip() or f"lf exited with status {result.returncode}"
+        return str(error)
+    if result.returncode == 0:
+        return None
+    return result.stderr.strip() or f"lf exited with status {result.returncode}"
 
-    print(f"Loopflow Dev cannot open this repository:\n{detail}", file=sys.stderr)
-    print(
-        "The app uses its bundled CLI. Check the reported repository or schema error; "
-        "ordinary app commands never migrate the shared database.",
-        file=sys.stderr,
+
+def _served_types(lf: str | Path) -> dict | None:
+    """Everything `lf`'s server sends and accepts, as `lf server describe`
+    writes it; `None` from an `lf` that cannot say."""
+    try:
+        result = subprocess.run(
+            [str(lf), "server", "describe", "--json"],
+            env=_app_shell_environment(),
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        return json.loads(result.stdout) if result.returncode == 0 else None
+    except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError):
+        return None
+
+
+def _wire_difference() -> str | None:
+    """Why the installed server and this build cannot share a window; `None`
+    when both describe one wire. The whole document is compared: a difference
+    that would have decoded still opens a copy."""
+    installed = shutil.which("lf", path=_app_shell_environment().get("PATH"))
+    if installed is None:
+        return "No installed lf to compare this branch with."
+    ours = _served_types(DEV_APP / "Contents" / "MacOS" / "lf")
+    theirs = _served_types(installed)
+    if ours is None or theirs is None:
+        which = "This branch's lf" if ours is None else f"The installed lf ({installed})"
+        return f"{which} does not describe what its server sends."
+    if ours == theirs:
+        return None
+    ours_types, theirs_types = ours.get("$defs", {}), theirs.get("$defs", {})
+    names = sorted(
+        name
+        for name in ours_types.keys() | theirs_types.keys()
+        if ours_types.get(name) != theirs_types.get(name)
+    ) or sorted(key for key in ours.keys() | theirs.keys() if ours.get(key) != theirs.get(key))
+    listed = ", ".join(names[:6]) + (f" and {len(names) - 6} more" if len(names) > 6 else "")
+    return f"This branch changes what the server sends ({listed})."
+
+
+def _copy_machine() -> bool:
+    """Replace `COPY_DIR` with a read-only copy of the Machine's store,
+    migrated to this branch's schema. The Machine is `~/.lf`: every `LF_*`
+    is cleared."""
+    lf_world = _build_tool("lf-world")
+    env = _app_shell_environment() | {"LF_BIN": str(DEV_APP / "Contents/MacOS/lf")}
+    result = subprocess.run(
+        [str(lf_world), "copy", str(COPY_DIR)],
+        env=env,
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
     )
-    return False
+    if result.returncode != 0:
+        print(f"The Machine was not copied:\n{result.stderr.strip()}", file=sys.stderr)
+    return result.returncode == 0
 
 
 def _print_run_debug_checklist() -> None:
@@ -578,24 +684,22 @@ def _print_run_debug_checklist() -> None:
     print("  3. Verify Task conditions and PR delivery refresh from lf wave status.")
 
 
-def cmd_run_debug(repo: Path = REPO_ROOT, world: Path | None = None) -> int:
+def cmd_run_debug(repo: Path = REPO_ROOT, copy: bool = False, world: Path | None = None) -> int:
     """Build and run with stdout visible. `repo` is the repo the app opens;
     `world` is an `lf-world build` directory whose data and repo it opens instead."""
-    if world:
-        repo = world / "repo"
     print("Building and running Loopflow (debug mode with logs)...")
     result = cmd_install()
     if result != 0:
         return result
-    if not _check_repository_opening(repo, world):
+    opening = _choose_opening(repo, copy, world)
+    if opening is None:
         return 1
-    print("Logs: ~/.lf/logs/lf.log (exits: lf doctor)")
+    repo, world = opening
+    home = world / "home" if world else Path.home() / ".lf"
+    print(f"Logs: {home}/logs/lf.log (exits: lf doctor)")
     print(f"Stream log: {LOOPFLOW_STREAM_LOG}")
     print(f"Bundled lf: {DEV_APP}/Contents/MacOS/lf")
-    print(
-        "The app and its children use the bundled CLI; "
-        "LF_HOME selects data, not a different binary."
-    )
+    print("The app and its children use the bundled CLI.")
     print("Telemetry dashboard: Go → Telemetry (⌘1)")
     _print_run_debug_checklist()
     print("Press Ctrl+C to quit")
@@ -826,7 +930,8 @@ def _apply_dev_identity(plist: Path) -> None:
     run(["plutil", "-replace", "CFBundleDisplayName", "-string", "Loopflow Dev", str(plist)])
 
 
-def _build_control_tools() -> Path:
+def _build_tool(name: str) -> Path:
+    """Build this checkout's `lf` or `lf-world` for the Dev app."""
     # The app is a live operator surface even when its Swift shell is a dev
     # build. The app selects its bundled CLI for every child; an ordinary lf
     # never migrates the main Machine.
@@ -838,12 +943,12 @@ def _build_control_tools() -> Path:
         "build",
         "--locked",
         "--bin",
-        "lf",
+        name,
         "--target-dir",
         str(target_dir),
     ]
     run(cargo_cmd, cwd=REPO_ROOT)
-    source = target_dir / "debug" / "lf"
+    source = target_dir / "debug" / name
     if not source.exists():
         raise RuntimeError(f"Missing built binary: {source}")
     return source
@@ -852,12 +957,12 @@ def _build_control_tools() -> Path:
 def _copy_bundled_tools(app_macos_dir: Path) -> None:
     agents = app_macos_dir.parent / "Library/LaunchAgents"
     shutil.copytree(SWIFT_DIR / "LaunchAgents", agents, dirs_exist_ok=True)
-    shutil.copy(_build_control_tools(), app_macos_dir / "lf")
+    shutil.copy(_build_tool("lf"), app_macos_dir / "lf")
 
 
 def cmd_prepare_control_tools() -> int:
     """Prepare the same control binary the app verifies and copies."""
-    _build_control_tools()
+    _build_tool("lf")
     return 0
 
 
@@ -919,7 +1024,14 @@ def main() -> int:
                 default=REPO_ROOT,
                 help="Repo the app opens on launch (default: this checkout)",
             )
-            sub.add_argument(
+        if name in ("run", "run-debug"):
+            opened = sub.add_mutually_exclusive_group()
+            opened.add_argument(
+                "--copy",
+                action="store_true",
+                help="open a read-only copy of the Machine, whatever the branch changes",
+            )
+            opened.add_argument(
                 "--world",
                 type=lambda p: Path(p).expanduser().resolve(),
                 help="lf-world directory: open its repo with its LF_HOME and provider homes",
@@ -955,8 +1067,10 @@ def main() -> int:
         return 0
 
     func, _ = COMMANDS[args.command]
+    if args.command == "run":
+        return func(copy=args.copy, world=args.world)
     if args.command == "run-debug":
-        return func(repo=args.repo, world=args.world)
+        return func(repo=args.repo, copy=args.copy, world=args.world)
     if args.command == "setup":
         return func(install=args.install, dry_run=args.dry_run)
     if args.command == "bundle-control-tools":

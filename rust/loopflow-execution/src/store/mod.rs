@@ -2264,33 +2264,18 @@ mod tests {
         assert!(incidents[0].human_assisted);
     }
 
-    /// Records the text of every `send_current` it accepts; `steerable=false`
-    /// stands in for a worker (or a between-turns gap) that can't take live
-    /// input, so the caller must defer to the next boundary.
-    #[derive(Default)]
-    struct RecordingHarness {
-        sent: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+    /// Counts the interrupts it receives.
+    struct InterruptCountingHarness {
         interrupts: std::sync::Arc<std::sync::atomic::AtomicUsize>,
-        steerable: bool,
     }
 
     #[async_trait::async_trait]
-    impl crate::harness::Driver for RecordingHarness {
+    impl crate::harness::Driver for InterruptCountingHarness {
         async fn start(&mut self) -> anyhow::Result<()> {
             Ok(())
         }
         async fn send_input(&mut self, _content: &str) -> anyhow::Result<()> {
             Ok(())
-        }
-        async fn send_current(&mut self, content: &str) -> crate::harness::SendCurrentOutcome {
-            if self.steerable {
-                self.sent.lock().unwrap().push(content.to_string());
-                crate::harness::SendCurrentOutcome::Sent {
-                    provider_turn_id: "turn".to_string(),
-                }
-            } else {
-                crate::harness::SendCurrentOutcome::NotSteerable
-            }
         }
         async fn interrupt(&mut self) -> anyhow::Result<()> {
             self.interrupts
@@ -2325,9 +2310,8 @@ mod tests {
         let work = WorkRef::Task(task.id.clone());
 
         let interrupts = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let mut harness = RecordingHarness {
+        let mut harness = InterruptCountingHarness {
             interrupts: interrupts.clone(),
-            ..Default::default()
         };
         let count = || interrupts.load(std::sync::atomic::Ordering::SeqCst);
 
@@ -2833,7 +2817,12 @@ mod tests {
         // A parent update moves the child's durable fork without changing its
         // ownership or parent link.
         store
-            .sync_task_placement(&child.id, "parent-tip-2", false, OffsetDateTime::now_utc())
+            .sync_task_placement(
+                &child.id,
+                "parent-tip-2",
+                Some(&parent.id),
+                OffsetDateTime::now_utc(),
+            )
             .await
             .unwrap();
         let synced = store.get_task_pr(&child_pr.id).await.unwrap().unwrap();
@@ -2845,7 +2834,7 @@ mod tests {
         parent.updated_at = OffsetDateTime::now_utc();
         store.update_task_pr(&parent).await.unwrap();
         store
-            .sync_task_placement(&child.id, "main-after-200", true, OffsetDateTime::now_utc())
+            .sync_task_placement(&child.id, "main-after-200", None, OffsetDateTime::now_utc())
             .await
             .unwrap();
 

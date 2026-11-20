@@ -9,7 +9,8 @@ use crate::lf::SessionCommand;
 use crate::lf::SessionConnectionArgs;
 use crate::lf::SessionListArgs;
 use loopflow_execution::ops::human_session::{
-    ConversationLaunch, Opening, SessionRecord, SessionState,
+    ConversationLaunch, Opening, SessionEnd, SessionOutlook, SessionRecord, SessionStarts,
+    SessionState,
 };
 use loopflow_execution::session_record::SessionTitleSource;
 use loopflow_execution::store::{open_store, storage_config_from_env, Store};
@@ -405,6 +406,19 @@ pub struct SessionFacts {
     pub cwd: String,
     /// The provider's current AgentProcess generation.
     pub agent_process_id: Option<loopflow_model::id::AgentProcessId>,
+    /// How its last agent ended, as `lf session list` reads it.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub ended: Option<SessionEnd>,
+    /// The server's starts of it since it last finished a turn.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub start: Option<SessionStarts>,
+    /// Whether it comes up while it is not running, and what brings it.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub outlook: Option<SessionOutlook>,
+    /// All of the above as the server's one sentence; `lf task status`
+    /// prints the Task's conversation's as given.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub status_line: Option<String>,
 }
 
 impl SessionFacts {
@@ -418,6 +432,10 @@ impl SessionFacts {
             available: session.availability.is_some(),
             cwd: session.cwd,
             agent_process_id: session.agent_process_id,
+            ended: session.ended,
+            start: session.start,
+            outlook: session.outlook,
+            status_line: session.status_line,
         }
     }
 }
@@ -801,7 +819,7 @@ async fn resume(
     let cwd = std::env::current_dir()?;
     drop(progress);
     if let Some(message) = message {
-        let id = select(&store, &cwd, target).await?;
+        let id = select(&store, &cwd, target, request_id).await?;
         let session = loopflow_execution::ops::human_session::session_by_id(&store, &id)
             .await?
             .context("Session not found")?;
@@ -844,11 +862,13 @@ async fn resume(
     }
 }
 
-/// The conversation `lf resume` run from `directory` selects.
+/// The conversation `lf resume` run from `directory` selects, recorded as
+/// started by a person unless `request_id` is the recovery pass's own.
 async fn select(
     store: &Arc<Store>,
     directory: &Path,
     target: loopflow_execution::ops::human_session::SessionTarget<'_>,
+    request_id: Option<&str>,
 ) -> anyhow::Result<String> {
     let selected =
         loopflow_execution::ops::human_session::select_connection(store, directory, target).await?;
@@ -857,6 +877,12 @@ async fn select(
             "Nothing to resume here; starting a new conversation."
         ));
     }
+    loopflow_execution::ops::recovery::record_start(
+        &store.sqlite,
+        &selected.id.as_str().into(),
+        request_id,
+        time::OffsetDateTime::now_utc().unix_timestamp(),
+    )?;
     Ok(selected.id)
 }
 
@@ -873,7 +899,7 @@ async fn reopen(
     fork: bool,
     json: bool,
 ) -> anyhow::Result<Opening> {
-    let id = select(store, directory, target).await?;
+    let id = select(store, directory, target, request_id).await?;
     loopflow_execution::ops::human_session::open(
         store,
         directory,

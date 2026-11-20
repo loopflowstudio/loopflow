@@ -7,52 +7,65 @@ pull request, and the conversation you pick back up to land it.
 
 ```bash
 curl -fsSL https://loopflow.studio/install.sh | sh
-lf init                          # checks your agent and logins, then names one command to try
+lf init                          # checks your harnesses and logins, then suggests a first command
+npx skills add loopflowstudio/loopflow --skill loopflow -g   # optional: teach your coding agent to drive lf
 ```
 
-`lf` lands in `~/.local/bin`; set `LF_INSTALL_DIR=/path` to put it elsewhere.
-You need `git`, a project in a git repository, and one of Claude Code, Codex,
-OpenCode or Pi (1.3+) signed in. Pull requests also need `gh`, signed in.
+`lf` installs into `~/.local/bin` (override with `LF_INSTALL_DIR=/path`).
+You need `git`, a Git repository, and at least one signed-in coding agent:
+Claude Code, Codex, OpenCode, Pi (1.3+), or Antigravity. Pull requests also need `gh` signed
+in.
+
+Prefer Cargo? `cargo install --git https://github.com/loopflowstudio/loopflow --bin lf`.
+On macOS, [`Loopflow-latest.dmg`](https://downloads.loopflow.studio/Loopflow-latest.dmg)
+bundles `lf` and its local server with Loopflow Desktop.
 
 ## 1. Launch an agent
 
 ```bash
-lf : "fix the typo in README"            # on whichever of your logins has room
-lf -a codex : "fix the typo in README"   # the same prompt on Codex
+lf : "fix the typo in README"            # uses your default agent
+lf -a codex : "fix the typo in README"   # run the same prompt on Codex
 ```
 
-Run on `main`, and lf first carries your local commits and uncommitted files
-into a sibling worktree, so the conversation cannot dirty `main`. Bare `lf`
-opens the same general-purpose conversation without a prompt.
+If you run `lf` on `main`, it first moves your local commits and uncommitted
+files into a sibling worktree so the conversation cannot dirty `main`. Bare `lf`
+opens a general-purpose conversation with no initial prompt.
+
+If you have more than one harness installed, save a default or an automatic
+failover order:
+
+```bash
+lf set --global agents claude,codex      # start on Claude; move to Codex on usage limits
+```
 
 ## 2. Run a Skill
 
-Copy an error, run one command.
+Copy an error message to your clipboard and run one command:
 
 ```bash
-lf debug -c                     # paste the clipboard; it finds and fixes the cause
-lf --context debug -c           # print what the agent would receive, launch nothing
+lf debug -c                     # pastes your clipboard, finds the cause, and fixes it
+lf --context debug -c           # preview what the agent would receive without launching
 ```
 
-`-c` pastes your clipboard. lf assembles the rest: operating guidance, your
-`scratch/` notes, and any docs you name.
+Loopflow assembles the operating contract, your `scratch/` notes, and any extra
+context you request:
 
 ```bash
-lf gate --docs 'docs/*.md'      # add files, globs or directories
-lf gate --diff files            # add the bodies of files changed on the branch
+lf gate --docs 'docs/*.md'      # include files, globs, or directories
+lf gate --diff files            # include paths of files changed on this branch
 ```
 
-Try it on the demo repo:
+Try it on the demo repository:
 
 ```bash
 git clone https://github.com/loopflowstudio/loopflow-demos
 cd loopflow-demos/calculator
-python -m pytest test_calc.py    # see the bug; copy the error
-lf debug -c                      # fix it
+python -m pytest test_calc.py   # see the bug; copy the error
+lf debug -c                     # fix it
 ```
 
-`debug`, `design`, `implement`, `gate` and `qa` are built in. Your own Skill is a
-Markdown file:
+`debug`, `design`, `implement`, `qa`, `gate`, and more are built in. Your own
+Skill is a plain Markdown file in `.lf/skills/`:
 
 ```markdown
 <!-- .lf/skills/audit.md -->
@@ -61,97 +74,99 @@ Focus on input validation and auth boundaries.
 ```
 
 ```bash
-lf audit                         # runs your Skill by name
+lf audit                        # run it by name
 lf audit: focus on the login form
 ```
 
 ## 3. Hand off a Task
 
-A Task gets its own worktree, branch and pull request. Start one and walk away:
+A Task gets its own Git worktree, branch, persistent conversation, workflow,
+and pull request. Start one and keep working on something else:
 
 ```bash
-lf task create --title "add a divide-by-zero error"   # prints the Task ID
-lf task run <ID> code                                 # its own worktree; publishes a PR, then waits for you
-lf steer <ID> "raise ValueError, not ZeroDivisionError"   # reaches the run before its next step
+lf task create --title "add a divide-by-zero error"       # prints the Task ID
+lf task run <ID> code                                     # creates worktree, builds, publishes PR, then pauses for review
+lf steer <ID> "raise ValueError, not ZeroDivisionError"   # redirects the run before its next step
 ```
 
-`code` is the built-in Graph: build until it holds and publish the PR, stop for
-you to try the change, then deliver it and stop again for you to check it on
-`main`. Name it once; the Task keeps it, and each `lf task run <ID>` continues
-from where it stopped. Set `graph: code` in `.lf/config.yaml` and every new Task
-takes it up. `lf -b task run <ID>` runs straight through both stops with an agent
-standing in; `auto` has no stops: with `graph: auto` in
-`.lf/wave/<wave>/config.yaml`, that Wave's Tasks run from request to merged PR
-without you.
+`code` is a built-in Graph: it plans, implements in reviewable commits, runs
+`qa`, publishes the PR, pauses for your review, then delivers and pauses once
+more to verify on `main`. A Task remembers its Graph, so later `lf task run <ID>`
+calls continue from where it stopped.
 
-While it runs:
+- Set `graph: code` in `.lf/config.yaml` to make it the repo default.
+- Run `lf -b task run <ID>` to run straight through interactive stops headless.
+- Put `auto: on` beside `graph:` in `.lf/wave/<wave>/config.yaml` to take that
+  Wave's Tasks from request to merged PR autonomously; `lf task auto off <ID>`
+  takes one back.
+
+Check progress anytime:
 
 ```bash
-lf task status <ID>              # where it is, and why
-lf session list                  # what is running: each conversation, OS-confirmed
+lf task status <ID>              # current step, PR status, and what it needs
+lf session list                  # live conversations, OS-confirmed
 ```
 
 ## 4. Pick up the conversation
 
-When the PR is published, the Task waits at its review, in the Task's own
-conversation: one page built from what the run produced. It shows what changes,
-whether the product's concepts and the code's line up, how to try it, what was
-checked, the choices made for you and the questions left open.
+When the PR is ready, the Task pauses at `ship-review` in its own conversation.
+It prepares one summary page (`scratch/ship-review.html`) covering what ships,
+how to try it, the choices made for you, and everything left outside the PR,
+each with a proposal to fix it here, give it its own Task or drop it.
 
 ```bash
-lf resume --task <ID>            # from any terminal, on whatever agent it ran
+lf resume --task <ID>            # open from any terminal, on whichever harness it ran
 ```
 
-Ask for changes there. Close the window; the conversation is still there next
-week. After a crash or reboot, use the same command to reopen its saved history.
+Ask for changes right there. Close the terminal and come back next week: the
+conversation persists across window closes, `lf install` updates, crashes, and
+reboots.
 
 ## 5. Land it
 
 ```bash
-lf ship <ID>                     # the remaining steps, then merge; repairs failing CI until it lands
-lf task hold <ID>                # withdraw it; disarms the auto-merge it armed
+lf task auto on <ID>             # runs remaining steps, then merges; repairs failing CI until it lands
+lf task auto off <ID>            # wait at the next interactive step and disarm auto-merge
 ```
 
-`lf ship` stands in for you at each remaining interactive step and runs `deliver`: `reflect`,
-`gate`, then `lf land --wait-and-fix`. `reflect` turns what you said during the
-Task into edits to your skills. `gate` publishes the PR first, so CI is already
-running while it [reviews the change](ops.md#review-while-ci-runs). `lf ship`
-returns once the Task is shipping (`-b` waits);
-`lf task status` follows it. The Task completes when the PR merges, and its
-worktree is cleaned up later by `lf wt prune`.
+`lf task auto on` turns auto on and runs the Task: an agent stands in at each
+remaining interactive step, then `deliver` runs `reflect` (folds your feedback
+into skill improvements), `gate` (publishes the PR so CI starts, then reviews
+while CI runs), and `lf land --wait-and-fix`. It returns once the run starts,
+like `lf task run` (`-b` waits until merge). The Task completes when its PR merges, and
+`lf wt prune` cleans up finished worktrees later.
 
-Outside a Task, the same verbs work on any branch:
+The same landing commands work on any branch outside a Task:
 
 ```bash
 lf land                          # request auto-merge and return
-lf land --wait-and-fix           # stay until it merges, fixing CI on the way
+lf land --wait-and-fix           # stay until merged, repairing CI failures along the way
 ```
 
-## Keep it current
+## Keep Loopflow updated
 
 ```bash
-lf install                       # your stream's newest build (stable unless you switch)
-lf install --preview             # switch to every release as it ships
-lf install --dev                 # switch to the newest green main build (needs gh auth)
-lf schedule weekly               # every install updates daily; also weekly, hourly, 5min
-lf doctor                        # installation, store and process health
+lf install                       # update to the latest stable build
+lf install --preview             # follow every release as it ships
+lf install --dev                 # follow green main builds (needs gh auth)
+lf schedule weekly               # change auto-update cadence (daily by default; also hourly, 5min)
+lf doctor                        # check installation, store, and process health
 ```
 
-Prefer cargo? `cargo install --git https://github.com/loopflowstudio/loopflow --bin lf`.
-The Mac app, [`Loopflow-latest.dmg`](https://downloads.loopflow.studio/Loopflow-latest.dmg),
-bundles `lf` and its local client server. Installation prepares Desktop's
-connection automatically. Check it with `lf server status`; use `lf install` for
-updates. Machine commands still select where work runs. [Connect clients](server.md)
-explains the distinction and what happens during a connection loss.
+`lf install` also keeps the local client server (used by Loopflow Desktop and
+held Task conversations) in sync without interrupting running agents. Check it
+with `lf server status`, or see [Connect clients](server.md).
+
+## Common flags
 
 | Flag | What it does |
 |---|---|
-| `-c` | Paste the clipboard into the prompt |
-| `--docs PATH,…` | Add files, globs or directories |
-| `--diff files` / `--diff patch` | Add changed file bodies / the raw diff |
-| `--context` | Preview the assembled input; launch nothing |
-| `-a HARNESS[:MODEL]` | Run on claude, codex, opencode or pi |
-| `-i` / `-b` | Interactive / headless, returning when the work ends |
+| `-c` | Append clipboard contents to the prompt |
+| `--docs PATH,…` | Include files, globs, or directories |
+| `--diff files` / `--diff patch` | Reference changed file paths / raw diff |
+| `--context` | Preview assembled input without launching |
+| `-a HARNESS[:MODEL]` | Run on `claude`, `codex`, `opencode`, `pi`, or `agy` (Antigravity) |
+| `-i` / `-b` | Interactive / headless (waits until finished) |
 
-Next: [Work](work.md): many Tasks, their status, and Waves that keep a longer
-objective moving.
+Next: [Work](work.md): parallel Tasks, steering, stacked PRs, team trackers,
+and Waves.

@@ -36,12 +36,9 @@ delivered.
   Run on a childless Task it completes it; on a Task with an open child it
   leaves it open.
 - A parent whose own Graph ends: `lf task run <parent> qa-end` with a child
-  open. The launch approves Auto-Ship ("ships: no interactive step is left"),
-  and reaching `end` must withdraw it: `lf task status <parent>` shows no
-  `Auto-Ship approved` line, and its `--json` `.task.reason` matches the text
-  `action:` line. `$LF_HOME/logs/detached.log` gets one line per ship process a
-  read restarts ("<id> is already at its end"); a count that grows with each
-  `lf task status` means a Task is approved with nothing to ship.
+  open. Reaching `end` leaves it open: `lf task status <parent>` reads
+  `Finished · 1 child open`, and its `--json` `.task.reason` matches the text
+  `action:` line.
 - Wait on output, not time, before depending on what a `!` line did: a
   conversation that is still starting runs the line seconds after the driver
   has left. `["wait","parent: [0-9a-f]{6}",20]` after each `!lf task create`,

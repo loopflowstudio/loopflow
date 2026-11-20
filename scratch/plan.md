@@ -53,10 +53,23 @@ hangs KRs and metrics on a Project or a Wave.
     Waves have none and get one on their first Task.
   - `lf task create` and `lf task move` append ` in Project <name>`
     (`joined_project_suffix`) when the Wave holds more than one open Project.
+  - `OPEN_PROJECT` (`sqlite/children.rs`) defines an open Project once for
+    both `new_task_project_in` and `joined_project_name`.
   - A Task in any Project of its Wave launches without a selected-Project or
     In-Progress Project gate (`project_selection.rs`,
     `require_selected_project`, `require_current_task_project` and
     `RunOwner::ProjectActivation` are gone).
+- **Project run journal removed and interrupts scoped to Tasks
+  (`rust/loopflow-storage/src/work/project.rs`, `sqlite/children.rs`,
+  `sqlite/durable.rs`, `rust/loopflow-execution/src/ops/child.rs`,
+  `rust/loopflow/src/lf/commands/graph.rs`):**
+  - `ProjectEventKind`, `ProjectEvent`, `HistoricalFailure`, the `project_events`
+    readers/writers and wrappers, and `validate_persisted_json`'s
+    `project_events` check are gone.
+  - Every interrupt path resolves a `Task`, so `append_interrupt`,
+    `latest_interrupt_id` and `observe_interrupt` take `&TaskId`.
+    `WorkRef::Project`, `ChildRef::Project` and `WorkIdentity` stay as a Task's
+    parent in the Work tree.
 - **Tracker creation and cross-build plan records
   (`rust/loopflow-storage/src/sqlite/tracker_actions.rs`, `work/edit.rs`):**
   - `uncreated` tests `plan_stamps` (`project_wave`) instead of
@@ -102,13 +115,15 @@ hangs KRs and metrics on a Project or a Wave.
   `SCHEMA.md`, `docs/`, builtins):**
   - `remove_chapters.sql` retires queued `krs` / `metric_targets` rows in
     `tracker_actions` and marks `waves.current_project_id`, the seven
-    `waves.project_activation_*`, `project_transitions`,
+    `waves.project_activation_*`, `project_transitions`, `project_events`,
     `projects.{krs,metric_targets,legacy_current,iteration}`,
     `tracker_projects.{krs,metric_targets}`, `pm_projects.{krs,metric_targets}`,
     `metric_instruments` and `metric_observations` leaving under `LOO-995`.
     (`project_changes` stays unmarked here; it leaves with `task_changes`
     under the tracker-queue contract.)
-  - User docs, architecture docs (`docs/dev/reference.md`,
+  - `SCHEMA.md` and `docs/dev/reference.md` list `project_events`,
+    `project_transition_items` and `project_transitions` under "Leaving the
+    store". User docs, architecture docs (`docs/dev/reference.md`,
     `reference-models.md`, `reference-code.md`, `planning.md`) and builtin
     skills match the built code.
 
@@ -116,8 +131,9 @@ hangs KRs and metrics on a Project or a Wave.
 
 - Dropping the marked columns and tables, rebuilding `waves`, the idle triggers
   and `wave_addresses`: the contract migration after `STAGING_DAYS`, exporting
-  `projects.krs` (47 of 64 Projects on the measured store hold KR text, plus 4
-  instruments and 38 observations).
+  `projects.krs` (47 of 64 Projects on the measured store hold KR text),
+  `project_events` (30,536 rows on that store, newest 2026-09-24), 4
+  instruments and 38 observations.
 - Completing, adding or renaming a Project without a tracker (see
   `scratch/questions.md`).
 - Authored `.lf/wave/**` content in this repository, `.lf/chapters/**` in other
@@ -126,59 +142,21 @@ hangs KRs and metrics on a Project or a Wave.
 - Naming a Task's Project at creation (`--project`), Projects as finishing
   groups, and Wave membership from a tracker link (LOO-980).
 
-## Slice 5 — Project run journal removed
-
-Every interrupt path resolves a Task, including the Graph retry loop and live
-Task input. The interrupt cursor and event writer now take a Task ID. The
-Project journal types, readers, writers and semantic migration check are gone.
-Released migration fixtures still check that upgrades retain historical rows.
-The contract will export and drop `project_events` after the staging window.
-
-Task placement and the CLI's joined-Project message share the open-Project
-predicate. The architecture and generated schema list the journal and both
-transition tables under “Leaving the store.”
-
 ## Remaining work
 
-For gate: the Task title still says "a Project is a Wave's optional tracker
-link"; the PR title and body describe what was built (Projects stay real
-records; chapters, KRs and metrics go).
+No implementation slices remain. For `gate`: the Task title still says "a
+Project is a Wave's optional tracker link"; the PR title and body describe what
+was built (Projects stay real records; chapters, KRs, metrics and the Project
+run journal go), stacked on LOO-938 (PR #1971).
 
-### Checks recorded and deferred
+### Checks
 
-- Slice 5: `cargo check --all-targets`, `cargo fmt --check`, strict all-target
-  Clippy and the generated schema check passed. Six focused tests covered
-  Task placement, Wave status, interrupt delivery and stopping Graphs;
-  all 16 storage steer tests and four documented-command tests passed.
-  The architecture check still reports the LOO-938 omissions listed in
-  `scratch/questions.md`.
-
-- Compress: `cargo check --all-targets`, `cargo fmt --check` and `git diff --check` passed.
-  Focused Rust tests passed for storage Projects (26), cross-build field decoding (2),
-  membership moves, rollback in an empty Wave, CLI Graph defaults and first-Task Project creation.
-
-- `cargo check --all-targets`: passed (all 7 workspace crates, post-merge with
-  LOO-938 `c2beea658a`).
-- `cargo test -p loopflow --test integration dto_fixtures`: passed (47/47).
+- `cargo check --all-targets`, `cargo clippy --all-targets -- -D warnings`, `cargo fmt --check`, `git diff --check`: passed (slice 5).
+- Focused Rust tests (slice 5): Task placement, Wave status, interrupt delivery, stopping Graphs, all 16 storage steer tests (`loopflow-storage --lib steers`), 4 documented-command tests, and 47/47 `dto_fixtures` passed.
+- QA (`scratch/qa.html`): private-home walkthrough of `lf wave create` (0 Projects), first Task Project creation, queued Linear actions, multi-Project Wave join/completion, Task run in a completed Project, upgrade from base `c2beea658a`, `lf help wave` / `lf wave plan --help` / served `wave.plan`, and `scripts/test_desktop.sh` headless suites (149 tests in 9 suites) passed.
 - `uv run python scripts/schema_page.py --check`: passed.
-- `check_migrations` `_check_staging` and `_check_runtime_sql` against
-  `origin/main` merge-base: passed (`['plan_hub.sql', 'remove_chapters.sql']`);
-  full `uv run python scripts/check_migrations.py` waits on LOO-938 rebasing
-  onto `origin/main` (`task_auto.sql`).
-- `grep -ri 'key result\|metric_target' rust/ swift/ docs/`: matches only
-  released migrations (`src/migrations/*.sql`, `tests/fixtures/migrations/`),
-  `remove_chapters.sql`, `migration_runner.rs`'s conversion of released data,
-  `linear_migration_tests.rs`'s released-schema upgrade test, and
-  `SCHEMA.md`'s leaving marks.
-- Deferred to `gate` / CI:
-  - Acceptance flow in a fixture repository with stand-in Linear:
-    `lf wave create billing` (0 `projects` rows, no `projectCreate`),
-    `lf task create --wave billing x` (1 `projects` row `started`,
-    `projectCreate` then `issueCreate`), `lf wave plan billing --json` (no
-    `current`/`krs`/`metric_targets`/`metric_portfolio`/`project_readiness`),
-    `lf help wave` (no `update-project`/`edit-project`),
-    `lf wave plan bind billing x` (unrecognized subcommand), and second
-    `started` Project join/completion check.
-  - `cargo test -p loopflow --lib task_graph_launch_tests::`
-  - `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings`
-  - Swift / Desktop suites (`scripts/testing.md`) in CI / macOS test runner.
+- `grep -ri 'key result\|metric_target' rust/ swift/ docs/`: passed (matches only released migrations/fixtures, `remove_chapters.sql`, `migration_runner.rs` conversion of released rows, `linear_migration_tests.rs` upgrade test, and `SCHEMA.md` leaving marks).
+- `grep -rn 'ProjectEvent\|project_event' rust --include='*.rs'`: passed (matches only `migration_runner.rs` historical migration tests).
+- `check_migrations.py` `_check_staging` and `_check_runtime_sql` against `origin/main` merge-base: passed; full `uv run python scripts/check_migrations.py` runs in CI / after LOO-938 rebases onto `origin/main`.
+- `uv run python scripts/check_architecture.py`: no new omissions from LOO-995; LOO-938 omissions noted in `scratch/questions.md`.
+- `cargo test -p loopflow --lib task_graph_launch_tests::`, stand-in Linear e2e round-trip, full Rust matrix, and display-dependent Desktop views: deferred to `gate` / CI.

@@ -80,8 +80,10 @@ with its local write revision, optional tracker binding and last refresh time.
 `Project` likewise owns its fields directly; neither has a separate Plan wrapper.
 Project name, summary, description, status and rank are separate stored
 fields, saved, sent and refreshed through the same typed writer. Summary maps
-to Linear `description`. A Linear Project's `content` is never written or
-parsed; what an earlier release rendered there stays.
+to Linear `description`, and `Project.description` maps to Linear `content`;
+`parse_project_document` keeps any `## KRs`, `## Metric targets` or
+`workflow:` sections an earlier release rendered there out of the description
+and in place when the description changes.
 Partial events retain a field baseline's own revision and age rather than
 refreshing it with unrelated fields.
 
@@ -527,12 +529,6 @@ Cold detail discovers ownership, locks, then reads ownership again. Null detail
 invalidates only the cached revision and event it queried; it cannot invalidate
 a newer accepted Task. Readback follows the issue UUID across identifier changes.
 
-The `project_readiness` migration preserves original Linear Project bodies and
-refresh evidence before a one-time name/slug correction from fresh tracker
-facts. Only pre-cutover rows receive this exception; all non-name conflict checks
-remain, and later equal-revision name conflicts are rejected. Rejected ingestion
-cannot consume the exception or update durable Project facts first.
-
 List coverage never removes a Project merely because a later response omits it.
 Without removal evidence, refresh fails and retains the previous event.
 Project revisions do not establish ordering for separate Initiative/Team
@@ -540,9 +536,6 @@ relationships. A contradictory relationship set stays unresolved, retains its
 last-good facts, and blocks managed readers. Replaying a list or detail does not
 clear that uncertainty. Explicit reteam reconciles the exact confirmed Team set
 under refresh ownership; it cannot reconcile a changed Initiative.
-
-Historical tracker transitions and archival acknowledgements remain evidence of
-the removed rotation; nothing infers that their uncertain effects settled.
 
 ## Capture a Graph once
 

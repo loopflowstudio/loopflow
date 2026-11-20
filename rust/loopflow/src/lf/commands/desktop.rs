@@ -187,7 +187,7 @@ pub enum DesktopDestination {
 pub enum DesktopBoard {
     Dashboard(String),
     WorkingTasks,
-    /// A Wave view: its standup board and conversation above, its Tasks as tiles below.
+    /// A Wave view: its conversation and backlog above, its Tasks as tiles below.
     Wave(String),
     /// The repository page, the default Wave's view: every repository Task on its
     /// board, the repository conversation, its Working Tasks as tiles.

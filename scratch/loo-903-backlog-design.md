@@ -165,28 +165,22 @@ CI runs the full suites.
 
 ### Slices
 
-1. **This slice — Rust.**
-   - The graph `description:` key, with builtins converted.
-   - `lf graph list` output.
-   - Catalog DTO and fixtures in Rust and Swift.
-   - `owned_by_you`.
-   - Served `task.update` `rank`.
+Status, November 19: slices 1–4 are built in code; what remains is the demo and real-app exercise.
 
-   Focused tests: `cargo test -p loopflow --lib graph::`, the DTO fixtures, and `swift test --filter DTOFixture`.
-2. **Swift deletion and list.** Delete the standup board and its actions/tests. Build `BacklogList` + `BacklogBoard` rows, brief, selection, keys, filter, search and empty states. Change the default share to 0.236. Focused test: `BacklogBoardTests` projection and selection.
-3. **Actions.**
-   - Toolbar with the steer's styling, and the row menu.
-   - Reorder through rank, Claim, Edit, Move and Abandon.
-   - Start split control with the flow menu and mixed breakdown.
-   - Undo.
-   - Per-item failure notices.
+1. **Rust — built.** `description:` on Graph files (builtins converted, header comments removed), `lf graph list` prints it, catalog DTO in both languages, `RoadmapTask.owned_by_you` from one `You` reading per repository (`store/sqlite/task_ownership.rs`, which `OwnershipFacts` now holds), served `task.update` takes `notes` and `rank`. `DesktopViewPart` lost `section`/`done_days`.
+2. **Swift list — built.** `BacklogBoard.swift` replaces `WaveStandupBoard.swift`; `BacklogState` lives in `WorkNavigation.backlogs`; `BacklogList` is the projection (filter, search, selection, Start label, rank moves, capture text, empty states). Default conversation share is 0.236. The `section`/`filter` Desktop actions, `WaveBoardSection`, `githubPeople`, Swift `RepoPerson` and the `repo.people` Swift read are deleted. Show… names the part "Backlog".
+3. **Actions — built.** Toolbar (accent split Start, quiet secondaries, `ViewThatFits` drops position then ↑↓), row menu, keys via `.onKeyPress`, drag, rank reorder, Claim, Edit, Move, Abandon (confirmation dialog), undo through `UndoManager` with `BacklogChange` inverses, per-Task outcome notices.
+4. **Capture text and docs — built.** `lf desktop capture -p board` prints counts then rows with ●/○/◌ and › for selected. `docs/orchestration.md`'s `lf graph list` example matches the real output.
 
-   Focused test: `BacklogBoardTests` actions against a stub `RegistryQuery`.
-4. **Desktop capture text and docs.** The user docs are written ahead of the code; implementation makes them true or edits them:
-   - `docs/surfaces.md` "The backlog" (list, keys, Start's flow menu, empty states) and the `lf desktop capture -p board` example; the `section`/`filter` examples are gone.
-   - `docs/orchestration.md` "Describe a Graph" (`description:` + `steps:`, `lf graph list` output).
-   - `docs/workspaces.md`: "Desktop shows its backlog".
-   - Details the docs settled that the plan left open: a loading or unreachable backlog keeps its last rows with **Retry**; an empty Wave offers **New**; `incident` is listed under "Run without stopping" as "never stops".
+Remaining:
+- Demo seed (a scratch Wave with eight Tasks) and the hands-on run in the Dev app: drag feel, key focus, the split Start's menu rendering, toolbar collapse at narrow widths. None of these have been seen in the real app yet.
+- Reorder has no optimistic projection: rows move when the Work update arrives.
+- `PlanBoardTask` stays: `lf plan board` (bin/lf.rs) reads it; Swift `PlanBoard` has only fixture readers.
+
+Checks (headless, this Machine):
+- `cargo nextest -E 'test(graph::) | test(server::schema::tests::) | test(lf::tests::) | test(cli_discovery::) | test(documented_commands::) | test(dto_fixtures::) | test(graph_discovery_tests::) | test(task_ownership::) | binary(served_reads) | binary(golden_prompt) | test(world_recipes::)'`: pass, except `served_reads::screen_reads_are_compact_passive_and_match_cli`, which fails identically on base 0a31dd3c98 here (compact plan board empty); CI decides.
+- `cargo clippy --all-targets -- -D warnings`: clean.
+- `scripts/test_desktop.sh --filter 'BacklogBoardTests|DTOFixtureTests|TaskHistoryFilterTests|WorkNavigationTests|TaskGraphProofTests|NewTaskTests|DesktopHeadlessTests|WaveLensTests|RegistryQueryTests|WorkModelTests'`: pass after the `wave-backlog` identifier fix in DesktopHeadlessTests.
 
 Exploration history follows. Explore round 6, November 14, 2026, combined the composed reading workspace, compact rows and a separate full-width repository conversation. Review page: [explore.html](explore.html).
 

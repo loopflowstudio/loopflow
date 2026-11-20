@@ -327,6 +327,14 @@ fn a_copy_replaces_the_last_one_and_only_a_world() {
     assert!(!refused.status.success());
     assert!(other.join("keep").exists());
 
+    // A copy that fails leaves nothing that stops the next one.
+    let broken = copied.root.path().join("broken");
+    std::fs::create_dir(&broken).unwrap();
+    std::fs::write(broken.join("loopflow.db"), "not a database").unwrap();
+    assert!(!copied.copy_from(&broken, &copied.copy).status.success());
+    assert!(!copied.copy.exists());
+    copied.copy();
+
     let absent = copied.copy_from(&copied.root.path().join("nowhere"), &copied.copy);
     let said = String::from_utf8_lossy(&absent.stderr).into_owned();
     assert!(said.contains("there is no Machine to copy"), "{said}");

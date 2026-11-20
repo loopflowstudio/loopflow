@@ -1231,6 +1231,23 @@ pub fn copy(dir: &Path) -> Result<WorldEnv> {
         std::fs::remove_dir_all(dir)?;
     }
     let (dir, env) = prepare(dir)?;
+    // Written first, so a copy that was interrupted is still a world the next
+    // one replaces.
+    std::fs::write(
+        dir.join("env.json"),
+        serde_json::to_string_pretty(&env)? + "\n",
+    )?;
+    if let Err(error) = fill(&machine, &env) {
+        // A store that was copied and never sealed is not left behind.
+        let _ = std::fs::remove_dir_all(&dir);
+        return Err(error);
+    }
+    Ok(env)
+}
+
+/// Copy the Machine's stores and configuration into the world at `env`,
+/// migrate them to this build's schema and seal them.
+fn fill(machine: &Path, env: &WorldEnv) -> Result<()> {
     // The person's name and which repositories the Machine shows.
     if machine.join("config.yaml").exists() {
         std::fs::copy(machine.join("config.yaml"), env.lf_home.join("config.yaml"))?;
@@ -1251,11 +1268,7 @@ pub fn copy(dir: &Path) -> Result<WorldEnv> {
     for (_, destination) in &stores {
         loopflow_storage::copy::seal(destination)?;
     }
-    std::fs::write(
-        dir.join("env.json"),
-        serde_json::to_string_pretty(&env)? + "\n",
-    )?;
-    Ok(env)
+    Ok(())
 }
 
 /// Create `dir`, which must not exist, with what every World has: its home,

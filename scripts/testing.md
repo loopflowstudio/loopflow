@@ -197,6 +197,17 @@ talks to the CLI server; GhosttyKit supplies its renderer. Xcode also packages
 the selected helper. The runner's network sandbox blocks SwiftPM fetches; if the Swift suite fails
 with `transport 'https' not allowed`, run `swift package resolve` in `swift/` once
 and rerun.
+
+```bash
+uv run python scripts/loopflow-dev.py run          # the branch's Desktop on real data
+cargo test -p loopflow --test integration copy_world   # a copy changes nothing outside itself
+```
+
+`run` opens the Machine, or a read-only copy when the branch changes a wire type
+or adds a migration; [Loopflow for macOS](../swift/README.md) says which and
+what each allows. A change to `lf-world copy`, to what a server does on a
+read-only store, or to which requests it admits there runs `copy_world`.
+
 `--reuse-passing` returns at once for an identical tree and plan. A later pass
 narrows `--rust-filter` to what changed since the last pass.
 

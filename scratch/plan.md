@@ -378,4 +378,18 @@ server`, fake-world recipes, `welcome` and `status` as they are.
 3. **Windows belong to their Machine; a world says when its directory is too
    long.**
 4. **`lf server status`, and the decode sentence.**
-5. **Docs.** swift/README.md, scripts/testing.md, machines.md, reference.md.
+5. **Docs.** Written ahead of the code, describing the behavior above; each
+   slice checks its part against them and corrects whichever is wrong.
+   - `swift/README.md`: the opening section (the three things Dev opens, the
+     copy's sentence, windows per Machine, the socket-length refusal), the
+     decode Notice after "Last known", "Build system" and its command table.
+   - `docs/dev/machines.md`: `lf-world copy` and the read-only server under
+     "One main Machine"; one boundary contract.
+   - `docs/dev/reference.md`, `docs/dev/codebase.md`: the Fake world row and
+     `lf-world` line.
+   - `docs/server.md`, `docs/troubleshooting.md`,
+     `rust/loopflow/src/server/README.md`: what `ready` means; the decode
+     Notice in place of "Build mismatch".
+   - `scripts/testing.md`: `run` and `copy_world`.
+   - Left for slice 4, once the new behavior is seen: `.lf/qa/desktop.md:111`
+     and `.lf/qa/held-terminals.md:40` quote "uses another executable".

@@ -20,6 +20,29 @@ Choices made headless in `scratch/plan.md`, each reversible. The numbers match
 
 The copy is refreshed only by running `run` again.
 
+Settled while writing the docs, each reversible:
+
+7. `lf server status` JSON gains `executable_sha256`, the server's own; the
+   plan said only "reports the server's executable hash".
+8. The launcher prints "Opening the Machine." on the live path and, with no
+   installed lf, opens a copy and says so, as the plan's absent states have it.
+9. swift/README.md no longer says "Main-Machine commands forward to installed
+   lf; new Sessions and agent children use its stable entry": no code doing it
+   was found beyond `delegate_selected` for `lf install server`.
+   docs/dev/machines.md still says main-Machine dispatch ignores an inherited
+   `LF_BIN`; if that is true of a Dev build's panes, the README sentence comes
+   back.
+10. docs/troubleshooting.md tells a person who sees the decode Notice to run
+    `lf install`. That fits the installed app; in Dev the launcher's choice is
+    what avoids it.
+11. The README says the socket limit is 103 bytes, the number in the world's
+    log line.
+
+Open, exposed by the docs: when the Machine's store has a migration the branch
+lacks, `run` names `lf sync main`. In a Task checkout `lf sync main` also undoes
+a sync onto another Task. Is that the command to name there, or should it say
+"bring this branch up to main" and leave the command to the person?
+
 Not established:
 
 - What launched the installed Loopflow.app with the world's `LF_HOME` on

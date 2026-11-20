@@ -9,7 +9,9 @@ Loopflow Desktop and held Task conversations connect through a local client
 server on your Machine. `lf install` registers and updates it automatically:
 no manual daemon setup or Tailscale configuration needed for local use.
 `lf server status` is read-only: it reports readiness, the socket path, and the
-running build as JSON without installing or modifying anything.
+running build as JSON without installing or modifying anything. `ready` means
+the server answers at a protocol revision this `lf` speaks, whichever build is
+asking; `executable_sha256` names the server's own executable.
 
 ## Pick the right command
 

@@ -214,7 +214,7 @@ fn remote_inspect(machine: &Machine, args: &[&str]) -> Result<bool> {
 fn remote_command(machine: &Machine, args: &[&str], input: Option<&[u8]>) -> Result<Vec<u8>> {
     let script = format!(
         "{}; export {}={}; exec lf {}",
-        crate::machine::ssh::REMOTE_PATH,
+        crate::machine::ssh::remote_path(),
         crate::machine::ssh::EXPECTED_MACHINE_ID_ENV,
         crate::machine::ssh::sh_quote(machine.id.as_str()),
         args.iter()

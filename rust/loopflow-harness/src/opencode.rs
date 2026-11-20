@@ -29,7 +29,7 @@ impl Harness for OpenCode {
         HarnessKind::OpenCode
     }
     fn recognizes_driver(&self, command: &str) -> bool {
-        command_program(command, "opencode") && command.split_whitespace().any(|arg| arg == "serve")
+        command_program(command, "opencode") && command.split_whitespace().any(|arg| arg == "run")
     }
     fn provider_env(&self) -> &'static [&'static str] {
         &["OPENCODE_API_KEY"]

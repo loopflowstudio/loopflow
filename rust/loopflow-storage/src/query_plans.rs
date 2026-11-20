@@ -28,8 +28,8 @@ const GROWING: [&str; 17] = [
     "task_ownership",
     "task_primary_sessions",
     "task_retirements",
+    "task_auto",
     "task_update_readings",
-    "task_ship_events",
     "tasks",
 ];
 
@@ -42,8 +42,8 @@ const GROWING: [&str; 17] = [
 /// `tasks_abandoned` counts that store's 259 abandoned Tasks, and
 /// `task_checkouts_parent_pr` its 11 parent PRs;
 /// `task_primary_sessions` takes the 319 primaries `tasks_primary_session` counted.
-/// `task_ship_events` counts the 396 rows that store's 174 shipping and 12
-/// stopped Tasks backfill to, 216 of them naming a Process.
+/// `task_auto` counts the 186 marks that store's 174 shipping and 12 stopped
+/// Tasks backfill to.
 /// `task_ownership` counts November 13's 895 entries over 880 Tasks.
 /// `agent_sessions_attached` and `agent_sessions_unended_agent` count
 /// November 17's 117 attached Sessions and 17 unended agents of 22,221;
@@ -58,7 +58,7 @@ const MEASURED: &str = "DELETE FROM sqlite_stat1 WHERE tbl IN (
          'agent_sessions','processes','session_events','tasks','steer_delivered',
          'steer_adapters','projects','waves',
          'git_tracker_changes','git_tracker_routes','repository_plans','steers',
-         'task_retirements','task_checkouts','task_primary_sessions','task_ship_events',
+         'task_retirements','task_checkouts','task_primary_sessions','task_auto',
          'task_ownership','task_update_readings','session_activity');
      INSERT INTO sqlite_stat1(tbl,idx,stat) VALUES
          ('agent_sessions','agent_sessions_agent_process','17171 1'),
@@ -146,8 +146,7 @@ const MEASURED: &str = "DELETE FROM sqlite_stat1 WHERE tbl IN (
          ('task_ownership','idx_task_ownership_task','895 1'),
          ('task_ownership','sqlite_autoindex_task_ownership_1','895 1'),
          ('task_primary_sessions','sqlite_autoindex_task_primary_sessions_1','319 1'),
-         ('task_ship_events','task_ship_events_task','396 3 1'),
-         ('task_ship_events','task_ship_events_process','216 1'),
+         ('task_auto','sqlite_autoindex_task_auto_1','186 1'),
          ('task_primary_sessions','sqlite_autoindex_task_primary_sessions_2','319 1'),
          ('tasks','idx_tasks_issue_identifier','1219 1'),
          ('tasks','idx_tasks_project','1219 20 1'),
@@ -524,7 +523,7 @@ mod tests {
     }
 
     #[test]
-    fn auto_ship_log_reads_and_writes_plan_by_index() {
+    fn auto_reads_and_writes_plan_by_index() {
         let (_home, store, _task, _viewer) = fixture();
         let task = TaskId::new();
         store
@@ -537,30 +536,15 @@ mod tests {
                 due_date: None,
             })
             .unwrap();
+        let mark = crate::sqlite::Auto {
+            state: crate::sqlite::AutoState::On,
+            at: 1,
+            by: crate::process::Starter::Person { name: None },
+        };
         let traced = statements(&store, || {
-            store
-                .ship_task(
-                    &task,
-                    (
-                        &loopflow_model::id::LfProcessId::new(),
-                        &crate::graph_process::ExecutionStart::reserved(1),
-                    ),
-                    "ship",
-                )
-                .unwrap();
-            store.count_ship_restart(&task).unwrap();
-            store
-                .ship_task(
-                    &task,
-                    (
-                        &loopflow_model::id::LfProcessId::new(),
-                        &crate::graph_process::ExecutionStart::reserved(1),
-                    ),
-                    "ship",
-                )
-                .unwrap();
-            store.task_shipping(&task).unwrap();
-            store.reset_ship_restarts(&task).unwrap();
+            store.set_task_auto(&task, &mark, true).unwrap();
+            store.task_auto(&task).unwrap();
+            store.task_state(&task).unwrap();
         });
         let scans = growing_scans(&store, &traced);
         assert!(scans.is_empty(), "{}", scans.join("\n"));

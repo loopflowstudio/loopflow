@@ -13,6 +13,7 @@ use crate::error::LoadError;
 use crate::graph::runner::{ExecutionCursor, NestedCursor};
 use crate::graph::{compile_graph, load_authored_graph, ConcreteSkill, ConcreteStep};
 use loopflow_definitions::text::first_prose_line;
+use loopflow_storage::sqlite::{Auto, AutoState};
 
 pub use loopflow_storage::sqlite::task_work::{END, START};
 
@@ -179,7 +180,7 @@ impl CapturedGraph {
             .map(|(place, _)| place)
     }
 
-    /// The step that merges named `step`, where a Task someone stopped shipping waits.
+    /// The step that merges named `step`, where a Task someone turned auto off waits.
     pub fn landing_step(&self, step: &str, merges: fn(&[String]) -> bool) -> Option<Place> {
         let mut found = None;
         walk(&self.steps, &[], &mut |place, concrete| {
@@ -377,6 +378,19 @@ impl TaskGraph {
         }
     }
 
+    /// Why the Task waits here and what lands it, when it stands at a step
+    /// that is neither `start`, `end` nor interactive: it stopped before
+    /// merging, which only an off does.
+    pub fn waiting_to_land(&self, auto: Option<&Auto>, issue: &str) -> Option<String> {
+        let off = auto.filter(|mark| mark.state == AutoState::Off)?;
+        let TaskGraphPosition::At { step } = &self.position else {
+            return None;
+        };
+        let ends = step == START || step == END;
+        let interactive = self.interactive_steps.iter().any(|s| &s.name == step);
+        (!ends && !interactive).then(|| crate::ops::task::auto::landing_wait(step, off, issue))
+    }
+
     /// One line for text status.
     pub fn summary(&self) -> String {
         let name = &self.name;
@@ -387,33 +401,6 @@ impl TaskGraph {
                 if *running { "running" } else { "stopped" }
             ),
         }
-    }
-
-    /// What the Task conversation needs: the step it works and how to go on.
-    pub fn guidance(&self, issue: &str) -> String {
-        let summary = self.summary();
-        let mut lines = vec![match (&self.position, self.waiting_step()) {
-            (TaskGraphPosition::Run { running: true, .. }, _) => {
-                return format!("{summary}. A person takes part again when that run stops.");
-            }
-            (TaskGraphPosition::Run { at, .. }, _) => format!(
-                "{summary}. `lf task run {issue}` starts that run again at {at}; read its log in `lf task status {issue}` first."
-            ),
-            (_, Some(step)) => format!(
-                "{summary}. The Task conversation works this step with the {} skill; when the person is done, `lf task run {issue}` continues after it.",
-                step.skill
-            ),
-            (TaskGraphPosition::At { step }, None) if step == END => {
-                format!("{summary}.")
-            }
-            (TaskGraphPosition::At { .. }, None) => {
-                format!("{summary}. `lf task run {issue}` starts it.")
-            }
-        }];
-        lines.push(format!(
-            "`lf task run {issue} --from <step>` starts anywhere, to go back or skip ahead; `lf -b task run {issue}` and `lf ship {issue}` run headless to `end` and approve Auto-Ship, which may merge the PR, as does `lf task run {issue}` with no interactive step left ahead, so run them only when the person asks to ship or land; `lf graph <graph>` in the Task worktree runs a Graph without moving the Task."
-        ));
-        lines.join("\n")
     }
 }
 
@@ -435,6 +422,7 @@ pub(crate) fn validate_graph_name(name: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::{CapturedGraph, TaskGraph, TaskGraphPosition};
+    use loopflow_storage::sqlite::{Auto, AutoState};
 
     fn write(repo: &std::path::Path, path: &str, content: &str) {
         let path = repo.join(path);
@@ -453,7 +441,7 @@ mod tests {
             .into_iter()
             .map(|step| step.name)
             .collect();
-        assert_eq!(steps, ["explore", "human-review", "verify"]);
+        assert_eq!(steps, ["explore", "ship-review", "verify"]);
         let pursue = CapturedGraph::load("pursue", repo.path()).unwrap().unwrap();
         assert!(pursue.interactive_steps().is_empty());
         assert!(CapturedGraph::load("no-such-graph", repo.path())
@@ -469,7 +457,7 @@ mod tests {
             .unwrap();
         let explore = graph.interactive_step("explore").unwrap();
         let next = graph.after(&explore).unwrap();
-        assert_eq!(graph.next_interactive(&next), Some("human-review"));
+        assert_eq!(graph.next_interactive(&next), Some("ship-review"));
         // A composed graph's name finds its first step.
         let plan = graph.find("plan").unwrap();
         assert_eq!(plan.cursor().index, next.cursor().index);
@@ -510,32 +498,34 @@ mod tests {
     }
 
     #[test]
-    fn guidance_names_the_waiting_step_and_how_to_go_on() {
+    fn only_an_off_makes_a_merging_step_a_landing_wait() {
         let repo = tempfile::tempdir().unwrap();
         let graph = CapturedGraph::load("feature", repo.path())
             .unwrap()
             .unwrap();
-        let at = |position| TaskGraph {
+        let at = |step: &str| TaskGraph {
             name: graph.name.clone(),
             interactive_steps: graph.interactive_summary(),
-            position,
+            position: TaskGraphPosition::At { step: step.into() },
         };
-        let waiting = at(TaskGraphPosition::At {
-            step: "human-review".into(),
-        });
-        let guidance = waiting.guidance("INF-1");
-        assert!(
-            guidance.contains("with the human-review skill"),
-            "{guidance}"
+        let mark = |state| Auto {
+            state,
+            at: 0,
+            by: crate::process::Starter::Person {
+                name: Some("Maya".into()),
+            },
+        };
+        let off = mark(AutoState::Off);
+        assert_eq!(
+            at("land").waiting_to_land(Some(&off), "INF-1").as_deref(),
+            Some("Waiting at land: auto is off (Maya). `lf task auto on INF-1` lands it.")
         );
-        assert!(guidance.contains("`lf task run INF-1` continues after it"));
-        assert!(guidance.contains("--from <step>"));
-        let running = at(TaskGraphPosition::Run {
-            step: "explore".into(),
-            at: "implement".into(),
-            lf_process_id: "process".into(),
-            running: true,
-        });
-        assert!(!running.guidance("INF-1").contains("task run"));
+        assert_eq!(at("land").waiting_to_land(None, "INF-1"), None);
+        assert_eq!(
+            at("land").waiting_to_land(Some(&mark(AutoState::On)), "INF-1"),
+            None
+        );
+        assert_eq!(at("ship-review").waiting_to_land(Some(&off), "INF-1"), None);
+        assert_eq!(at("end").waiting_to_land(Some(&off), "INF-1"), None);
     }
 }

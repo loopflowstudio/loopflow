@@ -21,41 +21,9 @@ pub struct NativeClient {
     pub process: Command,
     pub remote: Option<PathBuf>,
     pub thread: Option<AgentSessionId>,
-    pub companion: Option<Companion>,
     pub(crate) title: Option<crate::terminal_title::TerminalTitle>,
     pub reported_thread: Option<PathBuf>,
     pub stderr: Option<File>,
-}
-
-pub struct Companion {
-    pub closed: Option<tokio::sync::oneshot::Sender<()>>,
-    pub worker: Option<std::thread::JoinHandle<Result<()>>>,
-}
-
-impl std::fmt::Debug for Companion {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Companion").finish_non_exhaustive()
-    }
-}
-impl Companion {
-    pub fn finish(&mut self) -> Result<()> {
-        if let Some(closed) = self.closed.take() {
-            let _ = closed.send(());
-        }
-        if let Some(worker) = self.worker.take() {
-            worker
-                .join()
-                .map_err(|_| anyhow!("provider observer panicked"))??;
-        }
-        Ok(())
-    }
-}
-impl Drop for Companion {
-    fn drop(&mut self) {
-        if let Err(error) = self.finish() {
-            tracing::warn!(%error, "cannot stop provider companion");
-        }
-    }
 }
 
 impl NativeClient {
@@ -70,7 +38,8 @@ impl NativeClient {
         let mut process = Command::new(program);
         crate::agent::remove_caller_session_env(&mut process);
         process
-            .current_dir(cwd)
+            .current_dir(&cwd)
+            .env("PWD", &cwd)
             .env_remove("LOOPFLOW_DIRECTIVE_FILE")
             .envs(&launch.config.env);
         crate::provider_auth::apply_provider_env_to_command(
@@ -88,7 +57,6 @@ impl NativeClient {
             title,
             remote: None,
             thread: launch.thread()?,
-            companion: None,
             reported_thread: None,
             stderr: None,
         })
@@ -523,8 +491,8 @@ pub fn run(
     let harness = launch.harness;
     let program = harness.kind().as_str();
     let mut progress = crate::startup::Startup::new(format!("Preparing {program}"));
-    // Admission and Task checks precede provider setup, including private servers
-    // and Claude's folder-trust write.
+    // Admission and Task checks precede provider setup, including Claude's
+    // folder-trust write.
     let owner = launch.recording;
     validate_launch(launch)?;
     if let Some(key) = launch
@@ -543,9 +511,6 @@ pub fn run(
     )?;
     let mut client = harness.open(launch)?;
     let result = run_client(launch, &mut client, launch_lock, capture, &mut progress);
-    if let Some(companion) = &mut client.companion {
-        companion.finish()?;
-    }
     if let Ok(outcome) = &result {
         if let Some(moved) = &outcome.moved {
             eprintln!("{moved}");
@@ -584,14 +549,7 @@ fn run_client(
     let process = &mut client.process;
     let title = &mut client.title;
     // Only an explicit remote connection is a client of a surviving AgentProcess.
-    let owned = (client.remote.is_none() && client.companion.is_none()).then_some(&attachment);
-    // Refused before the provider conversation is recorded, so the next launch
-    // starts it fresh instead of resuming one that never ran. A Session's
-    // first launch (`lf resume` starting a repository conversation) names no
-    // Work on its command line; its recorded Session does.
-    if launch.kind.is_managed() {
-        crate::harness::agent_process::require_server()?;
-    }
+    let owned = client.remote.is_none().then_some(&attachment);
     if let (Some(capture_dir), Some(agent_session)) = (capture_dir.as_deref(), agent_session) {
         crate::session_record::write_provider_session(capture_dir, agent_session, None)?;
     }
@@ -605,9 +563,15 @@ fn run_client(
         process.stderr(stderr);
     }
     record_interactive_opened(environment)?;
-    if client.companion.is_none() && crate::transport::current().is_some() {
+    if crate::transport::current().is_some() {
         // Hand the wait to the execution owner and become the provider, or its
         // client: no launcher sits beside the agent holding the heap that built it.
+        // Becoming the provider leaves nobody to say it failed, and the
+        // announcement below tells the viewer, and an `lf open` behind it, that
+        // the provider started. Refuse first what exec would.
+        if crate::os_process::which_command(process).is_none() {
+            return Err(anyhow!(missing_agent_message(launch.harness.kind())));
+        }
         if let Some(capture) = capture {
             capture.observe_provider(agent_session.cloned());
         }
@@ -1496,7 +1460,7 @@ mod tests {
         let opencode = bin.join("opencode");
         std::fs::write(
             &opencode,
-            include_str!("../../tests/support/opencode_server.py").replace("__WAIT__", "False"),
+            include_str!("../../tests/support/opencode_cli.py").replace("__WAIT__", "False"),
         )
         .unwrap();
         #[cfg(unix)]

@@ -48,6 +48,11 @@ pub(crate) fn configure_agent_env(command: &mut tokio::process::Command, config:
     if let Some(path) = &config.directive_relay {
         command.env("LOOPFLOW_DIRECTIVE_FILE", path);
     }
+    if let Some(cwd) = &config.cwd {
+        // OpenCode roots its session in `PWD`, not the process directory, so an
+        // inherited `PWD` would put a Task's worker in the main checkout.
+        command.current_dir(cwd).env("PWD", cwd);
+    }
     crate::provider_auth::apply_provider_env_to_command(config.agent.harness, command.as_std_mut());
 }
 
@@ -135,6 +140,24 @@ mod environment_tests {
     }
 
     #[tokio::test]
+    async fn provider_child_starts_in_its_checkout_with_a_matching_pwd() {
+        let checkout = tempfile::tempdir().unwrap();
+        let mut command = tokio::process::Command::new("/usr/bin/printenv");
+        command.arg("PWD").env("PWD", "/main/checkout");
+        let config = crate::agent::AgentConfig {
+            cwd: Some(checkout.path().to_path_buf()),
+            ..Default::default()
+        };
+        configure_agent_env(&mut command, &config);
+        let output = command.output().await.unwrap();
+        assert_eq!(
+            String::from_utf8(output.stdout).unwrap().trim(),
+            checkout.path().to_str().unwrap()
+        );
+        assert_eq!(command.as_std().get_current_dir(), Some(checkout.path()));
+    }
+
+    #[tokio::test]
     async fn provider_child_cannot_read_the_bridge_token() {
         let mut command = tokio::process::Command::new("/bin/sh");
         command.args(["-c", "test -z \"${LF_DISCORD_TOKEN+x}\""]);
@@ -181,36 +204,6 @@ pub enum HarnessError {
     TurnAlreadyInProgress,
 }
 
-pub fn is_turn_in_progress(err: &anyhow::Error) -> bool {
-    matches!(
-        err.downcast_ref::<HarnessError>(),
-        Some(HarnessError::TurnAlreadyInProgress)
-    )
-}
-
-/// What happened when the controller tried to deliver input to the exact
-/// provider Turn active at the time of the call.
-///
-/// This is deliberately an outcome rather than a provider capability. Codex,
-/// for example, accepts steering only for some Turn kinds, and a Turn can end
-/// between observation and delivery. This receipt never proves incorporation;
-/// authored input still belongs in a later boundary's durable seed.
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum SendCurrentOutcome {
-    Sent {
-        provider_turn_id: String,
-    },
-    NotSteerable,
-    Failed {
-        error: String,
-    },
-    Unknown {
-        provider_turn_id: Option<String>,
-        error: String,
-    },
-}
-
 /// How a harness answers vendor approval/permission requests.
 ///
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -229,14 +222,6 @@ pub trait Driver: Send + Sync {
     async fn start(&mut self) -> Result<()>;
     /// Start the next provider Turn from durable seed input.
     async fn send_input(&mut self, content: &str) -> Result<()>;
-    /// Try to deliver input to the exact Turn currently active.
-    ///
-    /// Harnesses without same-Turn input keep the default. A rejection or race
-    /// is not an error in the Work protocol; the controller seeds a later
-    /// boundary instead.
-    async fn send_current(&mut self, _content: &str) -> SendCurrentOutcome {
-        SendCurrentOutcome::NotSteerable
-    }
     /// Cancel the in-flight turn but keep the session alive for the next
     /// turn. The interrupted turn surfaces as a
     /// `TurnCompleted { status: Interrupted }` terminal event. No-op when no
@@ -364,7 +349,6 @@ impl ThreadNaming {
 pub struct Capabilities {
     pub thread: ThreadNaming,
     pub initial_prompt_on_resume: bool,
-    pub supports_execution_boundary: bool,
     pub classifies_failures: bool,
     pub native_skills: Option<crate::skills::catalog::SkillDialect>,
     pub turn_limit: bool,
@@ -406,9 +390,10 @@ impl Launch<'_> {
     pub fn thread(&self) -> Result<Option<AgentSessionId>> {
         let naming = self.harness.capabilities().thread;
         match self.start.thread() {
-            None if naming.for_kind(self.kind) == ThreadName::Assigned => {
-                self.recording.assigned_thread().map(Some)
-            }
+            None if naming.for_kind(self.kind) == ThreadName::Assigned => self
+                .recording
+                .assigned_thread()
+                .map(|thread| Some(self.harness.thread_name(thread))),
             thread => Ok(thread),
         }
     }
@@ -445,6 +430,11 @@ pub trait Launcher: Harness {
         events: mpsc::UnboundedSender<ConversationEvent>,
         approval: ApprovalPolicy,
     ) -> Box<dyn Driver>;
+
+    /// The native name of the conversation lf assigned `assigned` to.
+    fn thread_name(&self, assigned: AgentSessionId) -> AgentSessionId {
+        assigned
+    }
 
     fn validate_agent_process_close(
         &self,
@@ -559,43 +549,6 @@ pub fn admit_for_test(home: &std::path::Path) -> Recording {
         store,
         session: "fixture".into(),
         attachment,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use tokio::sync::mpsc;
-
-    use loopflow_harness::HarnessKind;
-
-    use super::{admit_for_test, launch_for_test, ApprovalPolicy, SendCurrentOutcome};
-    use crate::agent::AgentConfig;
-
-    #[tokio::test]
-    async fn current_send_is_decided_from_the_active_turn() {
-        let (tx, _rx) = mpsc::unbounded_channel();
-        for kind in HarnessKind::ALL {
-            let name = kind.as_str();
-            let config = AgentConfig {
-                agent: crate::config::Agent {
-                    harness: kind,
-                    model: None,
-                },
-                ..AgentConfig::default()
-            };
-            let home = tempfile::tempdir().unwrap();
-            let recording = admit_for_test(home.path());
-            let launch = launch_for_test(kind, &config, &recording);
-            let mut harness =
-                launch
-                    .harness
-                    .driver(&launch, tx.clone(), ApprovalPolicy::AutoApprove);
-            assert_eq!(
-                harness.send_current("direction").await,
-                SendCurrentOutcome::NotSteerable,
-                "an inactive {name} harness has no exact Turn to steer"
-            );
-        }
     }
 }
 

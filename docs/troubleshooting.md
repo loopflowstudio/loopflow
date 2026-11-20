@@ -15,12 +15,17 @@ lf resume                       # return to this scope’s conversation
 |---|---|---|
 | Conversations, interactive and headless | `~/.lf/loopflow.db`, `~/.lf/history.db` and the provider's own history | `lf resume SESSION`, `lf resume --task <ID>` |
 | A Task's worktree, branch, PR and thread | Beside your repository, on the code host | `lf task run <ID>` |
+| A Task's work session and run | Started again by the server unless you quit or stopped them | `lf task status <ID>` |
 | A stopped Graph | Its run and step results, as history | `lf task runs <ID>` |
 | Uncommitted files | The worktree; prune never removes them | `lf wt list` |
 
 A stopped Graph never resumes. `lf task run` starts a fresh one in the same
 checkout, with the Task's thread and its open PR, at the step the last one
-stopped on; the steps before it stay done.
+stopped on; the steps before it stay done. When a run's `lf task run` or
+`lf task auto on` died rather than stopped, the server runs it again for you, the
+first time at once; after 5 starts with no finished step `lf task status` names
+the command instead
+([after a kill or reboot](sessions.md#after-a-kill-a-crash-or-a-reboot)).
 
 ## What went wrong
 
@@ -265,7 +270,7 @@ names the exact path and branch to restore before launching.
 
 ## The Task is idle, but waiting on something
 
-Task state says what the Task is doing (`idle`, `active`, `moving`, `shipping`,
+Task state says what the Task is doing (`idle`, `active`, `moving`,
 …); whether anyone owns it is separate (`lf task claim`, `lf task unassign`). What it is waiting on (a child Task, review, CI, merge) is its
 `reason`; Desktop's condition, with the evidence behind it, is in `lf task show`:
 
@@ -285,17 +290,34 @@ Headless runs retry transient capacity, rate-limit, availability and transport
 failures four times, continuing the same provider conversation so partial work
 survives; the backoff tops out at 30 seconds.
 
-A classified usage-limit or model-unavailable refusal moves a Graph step
-through its configured model/harness order; other headless work stops with
-the provider error. It never selects another login or
-reads reset times. An explicit agent pins the harness; bare Claude can still
-try its other models. When the whole order, or an explicit model pin, is
-refused on a usage limit, the step waits 5, 15, 30, then 60 minutes, trying
+A classified usage-limit or model-unavailable refusal moves headless work
+through its configured model/harness order, one line per move:
+`codex: provider usage limit; continuing on claude`. It never selects another
+login or reads reset times. An explicit agent pins the harness; bare Claude can
+still try its other models. When the whole order, or an explicit model pin, is
+refused on a usage limit, a Graph step waits 5, 15, 30, then 60 minutes, trying
 again from the first entry after each; then it stops with the provider error
-and a next step. A revoked login skips its provider's other models and, with no
-other provider left, stops with how to sign in again. Other refusals stop at
-once. Interactive Sessions retain the
+and a next step. Commands (`lf -b <skill>`, `lf commit`, `lf pr open`, sync
+conflict resolution) stop trying agents when the order runs out of usage and
+name the agents tried. A revoked login skips its provider's other models and,
+with no other provider left, stops with how to sign in again. Other refusals
+stop at once. Interactive Sessions retain the
 refusal and require an explicit retry or move, even when attached to a Task.
+
+```bash
+lf task status MTG-328
+#   compress went on under claude after: provider_rate_limited: You’ve hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/settings/usage to purchase more credits or try again at 3:36 PM.
+```
+
+The first word of the reason is what the provider said went wrong:
+
+| Reason starts with | The provider said | A Graph step |
+| --- | --- | --- |
+| `provider_rate_limited:` | The account's usage is spent | Tries the next entry; waits once every entry is spent |
+| `provider_model_unavailable:` | The account can't use that model, or there is no such model | Tries the next entry |
+| `provider_credential_invalidated:` | The login was revoked or could not be refreshed | Skips that provider's other models and tries the next provider |
+| `provider_capacity:` | The provider is overloaded | Retries the same conversation |
+| `codex_error:` | Nothing about the cause | Goes by the message; one Loopflow doesn't recognize stops the step |
 
 ```bash
 lf set --global agents claude,codex
@@ -322,6 +344,17 @@ claude
 With no agent preference configured, lf uses the sole installed harness. If more
 than one is installed, choose with `lf set --global default_agent claude` or pass
 `-a claude` for one command. `lf config settings --explain` shows the selection.
+
+A Task step moves to the next entry of `agents` when its first choice is not
+installed, and `lf task status <ID>` names the move. Pinned with `-a`, or with
+nothing else in the order, the run stops after one attempt with this message:
+
+```bash
+lf task run LOO-12 -a opencode
+# 'opencode' is not installed. Install OpenCode 2 or later with `npm install -g @opencode/cli`; the `opencode-ai` package stops at 1.x.
+```
+
+Install it, sign in, and `lf task run LOO-12` again.
 
 ## Context too large
 
@@ -427,7 +460,7 @@ else belongs to a single conversation or view.
 | In `ps` | What it is | Stopping it loses |
 |---|---|---|
 | `lf holder run` | Holds the terminals of every Task, Wave and repository conversation and Desktop shell opened on its build | Every agent and shell it holds; `lf resume` continues each conversation from history |
-| `lf … task run`, `lf … graph run`, `lf … ship` | A Graph, landing watcher or ship running in a process of its own | The step in flight; `lf task status`, then `lf task run` what remains |
+| `lf … task run`, `lf … graph run`, `lf … task auto on` | A Graph or landing watcher running in a process of its own | The step in flight; `lf task status`, then `lf task run` what remains |
 | `lf -b <skill>` | A headless run, a child of whatever started it | That run; its caller sees it fail |
 | `lf session attach` | A terminal showing that conversation | Nothing; the conversation keeps running with no terminal showing it |
 | `lf session serve <ID>` | A conversation an earlier build opened | The running agent and any turn in flight; `lf resume <ID>` ends it and continues from history |

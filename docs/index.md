@@ -24,7 +24,7 @@ conversations stay on your machine, and only the plan travels.
 
 ```bash
 lf task create "fix the flaky retry test" --run           # files it, starts its workflow, opens its conversation
-lf -b task create "fix the flaky retry test" --run --graph auto   # straight to a merged PR, no stops
+lf -b task create "fix the flaky retry test" --run            # straight to a merged PR, no stops
 lf resume --task <ID>                                     # its conversation, from any terminal
 ```
 
@@ -89,7 +89,8 @@ without one.
 
 ```yaml
 # .lf/wave/infrastructure/config.yaml, committed: shaped like .lf/config.yaml
-graph: auto           # infrastructure Tasks go from request to merged PR without you
+graph: code
+auto: on              # infrastructure Tasks go from request to merged PR without you
 agent: claude:opus
 ```
 

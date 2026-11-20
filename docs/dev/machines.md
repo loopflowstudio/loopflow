@@ -164,11 +164,11 @@ inside one IMMEDIATE transaction:
 | Someone else's | Your own Wave Machine; your later claim wins |
 
 A write for a Task another Machine runs travels as the operation itself, not
-as a command line. Running, shipping, holding, claiming or unassigning the Task,
-and opening or resuming its Session, reach the writer the same way:
+as a command line. Running, claiming or unassigning the Task, setting
+its auto, and opening or resuming its Session, reach the writer the same way:
 
 ```bash
-lf task hold LOO-123 --json             # LOO-123 runs on mini; mini's server answers
+lf task auto off LOO-123 --json         # LOO-123 runs on mini; mini's server answers
 ssh mini lf server status               # while it runs, the laptop is a connected client
 ```
 
@@ -393,21 +393,21 @@ label; then the refusal prints the same check and retry. Addressed to mini from 
 runs on the laptop, which holds the move. A leaving move carries on: it
 commits, pushes and takes the conversation, which are safe to repeat. A sent
 move is delivered as it was sent, conversation included, without committing or
-pushing again. Either way the Graph continues on mini at the step it was on. If
-the Graph does not start on mini, the move still stands and the last line prints
-`lf task run MTG-321 --from 'implement'`, which starts it at that step on the
-Task's owner.
+pushing again. For a Task with auto not on, the move continues a Graph it
+stopped, starting it on mini at the saved step. If the Graph does not start,
+the move still stands and prints `lf task run MTG-321 --from 'implement'` to
+start it on the Task's owner.
 
 `lf task claim MTG-321` on the laptop first asks mini whether the move arrived.
 If it did, its answer lost, the Task runs on mini and the claim is written
 there. If it did not, or mini is gone, the laptop takes the Task back and the
 move ends.
 
-Auto-Ship approval travels with the move, as the Graph position does. Each
-Machine keeps approvals and stops as a log (who, when, which process). The continued run is a plain
-`lf task run`; when it stops at an interactive step, mini's ship process carries
-the Task on, as it would have on the laptop. `lf task hold MTG-321` withdraws the
-approval on either Machine. A Machine ships only Tasks it owns: once a Task has
+Auto travels with the move, as the Graph position does: it is one setting
+on the Task (on or off, who, when), carried whether or not the Task has run. The continued run is a plain
+`lf task run`; with auto on it stands in at interactive steps on mini, as
+it would have on the laptop. `lf task auto off MTG-321` turns it off on either
+Machine. A Machine ships only Tasks it owns: once a Task has
 left, its old checkout starts nothing.
 
 ## Own and rent Machines
@@ -480,7 +480,7 @@ export from any Machine but the one expected is refused; a failed copy deletes
 nothing. `lf session list` and `lf task status` name copies "from <machine>"
 after the sandbox is gone, and `lf session history show <session>` opens one. The give-back
 pass runs at the end of a forwarded `lf task run` for its rented Machine and in
-lazy recovery (any lf read of this Machine's work) for every rental; `lf ondemand list` only
+the Machine server's recovery pass for every rental; `lf ondemand list` only
 refreshes provider state and never ends a machine.
 
 ## Process topology
@@ -513,15 +513,15 @@ lf machine doctor
 ```
 
 Each owner record (a Session's agent and attachment, a Graph run or step, a
-Task or ship carrier) carries the pid and OS start time of the process it runs
+Task's carrier) carries the pid and OS start time of the process it runs
 as; liveness is one OS lookup against them. The Machine server's liveness pass
 records the end of an owner whose process died without writing it.
 
-Lazy recovery may reap only AgentProcesses whose recorded identity is live and
-whose attached lf is provably dead. `lf machine doctor` reports strays, OS
-processes carrying `LF_STEER_SESSION` or `LF_PROCESS_ID` that no live record
-claims, and kills nothing. An unclaimed provider PID is never killed merely
-because it resembles a Loopflow child.
+The server's recovery pass may reap only AgentProcesses whose recorded
+identity is live and whose attached lf is provably dead. `lf machine doctor`
+reports strays, OS processes carrying `LF_STEER_SESSION` or `LF_PROCESS_ID`
+that no live record claims, and kills nothing. An unclaimed provider PID is
+never killed merely because it resembles a Loopflow child.
 
 Cross-process control requires exact PID/start identity and the applicable
 conversation and AgentProcess record. Revalidate native scope or exclusive process

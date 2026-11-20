@@ -99,10 +99,10 @@ resume per harness:
 
 | Test | Wiring it proves |
 |---|---|
-| `terminal_launch_and_resume_use_current_policy_and_preserve_native_identity` | Claude terminal, Codex native and OpenCode server: settings reach each provider's argv, thread parameters or config through the owner and PTY; `session resume` continues the same native conversation with current settings |
+| `terminal_launch_and_resume_use_current_policy_and_preserve_native_identity` | Claude terminal, Codex native and OpenCode: settings reach each provider's argv, thread parameters or config through the owner and PTY; `session resume` continues the same native conversation with current settings |
 | `headless_launch_and_graph_keep_current_options` | Claude stream: a headless skill arrives on stream-json stdin; `--yolo --chrome on` reach a Graph step's launch |
 | `codex_headless_start_receives_current_policy_on_the_wire` | Codex headless: model and sandbox reach `thread/start` |
-| `opencode_headless_start_selects_the_model_and_permissions` | OpenCode headless: model, permissions and the context plugin reach the server |
+| `opencode_headless_start_selects_the_model_and_permissions` | OpenCode headless: model, permissions and the context plugin reach `opencode run` |
 | `pi_public_headless_skill_delivers_context`, `pi_native_callbacks_retain_identity_final_output_and_usage` | Pi launch and its native callbacks |
 | `previews_do_not_start_a_provider_and_terminal_schema_is_explicitly_unsupported` | `--context` and the handlers' schema refusals start no provider; a refused resume keeps its Session |
 | `task_conversation_preparation_is_passive_and_connect_uses_shared_launch_settings` | `resume --prepare` starts nothing; a Task conversation's first `lf resume` launches with shared settings and the next continues it |
@@ -111,12 +111,12 @@ The rest of `session_launch_contract` covers native authentication, provider swi
 OpenCode diagnostics and Machine dispatch.
 
 Task Graph run and its previews (`task_graph_launch_tests` in the library,
-`global_commands`), one Graph run to an interactive step and one to Auto-Ship:
+`global_commands`), one Graph run to an interactive step and one with auto on:
 
 | Test | Wiring it proves |
 |---|---|
 | `a_task_takes_up_its_waves_graph_and_keeps_the_one_it_named` | `task run` captures the Wave's Graph and stops the Task at its interactive step; a later bare run keeps the Graph a Task named |
-| `task_ship_runs_every_remaining_step_standing_in_at_each_interactive_step` | `-b --task … ship --reason` stands in at each interactive step, reaches `end` and completes the Task |
+| `auto_on_runs_every_remaining_step_standing_in_at_each_interactive_step` | `-b --task … task auto on --reason` stands in at each interactive step, reaches `end` and completes the Task |
 | `task_run_explain_explicit_and_checkout_inferred_actions_preserve_all_state` | `task run --explain` flags reach the preview; named, checkout and `--task` selections agree, conflicting ones refuse; the store's bytes don't change; launch refuses with the preview's reason |
 | `task_run_explain_reads_unstarted_work_without_preparing_it` | `LF_AS` reaches context resolution; previewing an unstarted Task leaves it without a checkout |
 | `task_checkout_explain_reuses_explicit_and_inferred_work_without_effects` | `task checkout --explain` flags reach the preview; selections agree; Git and store stay unchanged; `task checkout` acts on the same inferred Task |
@@ -160,7 +160,7 @@ Transport cleanup checks wait for both the recorded exit and socket removal:
 the interruption hook records completion before later cleanup hooks run.
 Relay exec changes also run `task_graph_launch_tests` and `land_tests`: a
 viewer's OS exit and its original command's recorded result must agree, including
-failed placement, failed shipping and a Graph held at landing.
+failed placement, failed shipping and a Graph waiting at landing with auto off.
 
 `session_activity` fixtures that stand for a provider's own facts (open tools,
 pending input, yielded) carry the AgentProcess's `attachment_token`; a row
@@ -302,7 +302,13 @@ Application lifecycle checks stay in `linear::events`; supplied-fact SQL
 checks live in `store::sqlite::linear_events`.
 
 CI and the disposable installation runner supply their prepared candidate through
-`LOOPFLOW_TEST_LF`, avoiding Cargo calls in each test process. Only set this to
+`LOOPFLOW_TEST_LF`, avoiding Cargo calls in each test process. Integration test
+binaries under `rust/loopflow/tests/` set it themselves, from the `lf` Cargo
+built beside them, so `cargo test -p loopflow --test session_launch_contract`
+runs no nested build and leaves `target/debug/lf` as Cargo linked it. Lib test
+binaries (`--lib`, which holds `tests/work/`) have no such `lf` and still run the
+nested build; under bare `cargo nextest run` beside integration binaries, set
+`LOOPFLOW_TEST_LF="$PWD/target/debug/lf"`. Only set this to
 the executable built from the current test source and build inputs; never an
 installed CLI. Compiled provenance fields have separate names from build inputs
 so nested Cargo does not invalidate the parent's build.
@@ -979,6 +985,14 @@ under the environment lock and restore the pin afterward.
 Attachment-rejection fixtures must also supply provider version probes and restrict
 PATH to their stand-ins: Claude checks `--version` before launching on first input.
 A locally installed provider must not make an otherwise incomplete fixture pass.
+
+A provider stand-in shows lf's hooks only if it runs them. A fixture that
+copies `loopflow-execution/tests/support/tool_turn.py` into `LF_HOME` gets a
+turn with one tool from the Claude, Codex, OpenCode and Pi stand-ins: the start
+hook's block in `hook-context`, `holding` while the tool runs, and after the
+fixture writes `tool-done`, the tool hook's steers in `hook-steer`. lf reads
+usage and final answers from the provider's transcript and skips a turn with
+no timestamp, so a stand-in dates the rows it writes.
 
 Changes to terminal provider probes or spawning must run both `session_cli_tests`
 and `agent_startup_tests`. An executable that exits with an error still started

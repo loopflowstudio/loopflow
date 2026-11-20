@@ -151,6 +151,16 @@ struct WorkSurfaceView: View {
                     .font(Typography.body(12))
                     .foregroundStyle(palette.textSecondary)
                     .accessibilityIdentifier("task-debug")
+                // A Task conversation that is not running, or that the server started again, prints the
+                // server's sentence: starting, coming back, or the command that opens it.
+                if let conversation = (sessions ?? []).first(where: \.taskPrimary),
+                   conversation.outlook != nil || conversation.start != nil,
+                   let line = conversation.statusLine {
+                    Label("Conversation: \(line)", systemImage: "arrow.clockwise")
+                        .font(Typography.body(12.5))
+                        .foregroundStyle(palette.textSecondary)
+                        .accessibilityIdentifier("task-conversation-line")
+                }
                 // Exact Available links preserve access to secondary conversations
                 // needing input without restoring a Session inventory.
                 ForEach((sessions ?? []).filter { $0.availability == .available }) { session in

@@ -127,6 +127,16 @@ pub(crate) fn activity(signals: impl IntoIterator<Item = Signal>) -> Vec<Decoded
         .collect()
 }
 
+/// Why a headless turn failed when its agent asked a person something.
+pub fn unanswered_question(harness: &str, question: &str) -> String {
+    let question = question.trim();
+    if question.is_empty() {
+        format!("{harness} asked a question with nobody there to answer it")
+    } else {
+        format!("{harness} asked a question with nobody there to answer it: {question}")
+    }
+}
+
 /// A recorded native trace under `src/testdata/`, one JSON value per line.
 #[cfg(any(test, feature = "test-support"))]
 pub fn trace(file: &str) -> Vec<Value> {

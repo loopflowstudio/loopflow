@@ -47,7 +47,7 @@ kernel locks                 live local exclusion authority
 | Execution | `agent_sessions`, `session_events`, `session_activity` | Conversations, selected captures, observed provider transitions, native completions, turn receipts and the current observations availability is judged from |
 | Graph processes | `graph_processes`, `graph_process_steps` | One append-only row per Graph process and per step it started |
 | Task graphs | `task_graphs` | The graph a Task took up, the step it stands at and the run carrying it |
-| Task on this Machine | `task_checkouts`, `task_primary_sessions`, `task_ship_events`, `task_moves` | Machine-local only: the checkout (worktree path, branch, base commit, parent PR) where this Machine has one, the Task's conversation here, Auto-Ship approvals and stops (who, when, which process), and each move this Machine sent or received (`sent`, `arrived`) |
+| Task on this Machine | `task_checkouts`, `task_primary_sessions`, `task_moves` | Machine-local only: the checkout (worktree path, branch, base commit, parent PR) where this Machine has one, the Task's conversation here, and each move this Machine sent or received (`sent`, `arrived`) |
 | CLI processes | `processes` | Indexed command lifecycle and immutable causal ancestry, written by command start and completion |
 | Repository relocation | `relocated_task_processes` | Retains Task membership for Processes whose cwd names a repository directory before it moved on this Machine; separate from moves between Machines |
 | Task delivery | `task_prs`, `task_pr_repair_incidents`, `task_linear_observations`, `task_linear_ingested_comments` | Optional PR, retained historical PRs and tracker events |

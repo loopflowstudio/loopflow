@@ -35,6 +35,22 @@ impl ClaudeDecoder {
         self.state.drain_open_items(status)
     }
 
+    /// A signal ended lf and Claude with it: every request still owed a
+    /// result was interrupted.
+    pub fn interrupt_pending(&mut self) -> Vec<Decoded> {
+        self.pending
+            .drain(..)
+            .map(|turn| {
+                ProviderFact::TurnCompleted {
+                    turn: Some(turn),
+                    status: Lifecycle::Interrupted,
+                    detail: json!({"status": "interrupted"}),
+                }
+                .into()
+            })
+            .collect()
+    }
+
     /// Decode one line; display events report under the runner's `turn_id`.
     pub fn decode(&mut self, line: &str, turn_id: &str) -> Result<Vec<Decoded>> {
         let Ok(value) = serde_json::from_str::<Value>(line) else {

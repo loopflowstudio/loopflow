@@ -11,7 +11,7 @@ use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 
-use crate::ops::error::{OpsError, OpsResult};
+use crate::ops::error::OpsResult;
 use crate::ops::task_actions::{derive_task_actions, TaskActionEvidence, TaskActionModel};
 use crate::store::SharedStore;
 use loopflow_storage::child::ChildRef;
@@ -28,8 +28,6 @@ pub fn task_snapshot(task: &Task) -> OpsResult<TaskSnapshot> {
 pub(super) async fn read_task_snapshot(store: &SharedStore, task: Task) -> OpsResult<TaskSnapshot> {
     let wave = owning_wave(store, &task).await?;
     let repo = repository_for_task(store, &task)?;
-    let personal =
-        crate::config::PersonalSettings::read(Some(&repo), wave.as_ref().map(|w| w.slug()));
     let project = match &task.project_id {
         Some(id) => Some(
             store
@@ -54,11 +52,22 @@ pub(super) async fn read_task_snapshot(store: &SharedStore, task: Task) -> OpsRe
         .work_status(&work)
         .await
         .map_err(|error| task_error(format!("failed to derive Task Work status: {error}")))?;
-    let execution = crate::ops::task_execution::task_execution(store, &task)
+    let mut execution = crate::ops::task_execution::task_execution(store, &task)
         .await
         .map_err(task_error)?;
     let work_set =
         crate::store::task_work::task_work(&store.sqlite, &task.id).map_err(task_error)?;
+    let auto = store.sqlite.task_auto(&task.id).map_err(task_error)?;
+    if execution.state == crate::ops::task_execution::TaskExecutionState::Idle {
+        if let Some(wait) = work_set
+            .graph
+            .as_ref()
+            .and_then(|graph| graph.waiting_to_land(auto.as_ref(), &task.identifier))
+        {
+            execution.state = crate::ops::task_execution::TaskExecutionState::Waiting;
+            execution.reason = wait;
+        }
+    }
     let status = store.task_state(&task.id).await.map_err(task_error)?;
     let parent_pr = match task.parent_pr_id.as_ref() {
         Some(parent_id) => store
@@ -94,7 +103,7 @@ pub(super) async fn read_task_snapshot(store: &SharedStore, task: Task) -> OpsRe
         let launch_refusal = if worktree_blocker.is_some() {
             None
         } else {
-            task_configuration_refusal(&task, wave.as_ref().map(|w| w.slug()), &personal, None)
+            task_configuration_refusal(&task, &repo, wave.as_ref().map(|w| w.slug()))
                 .or_else(|| task_event_process_refusal(latest_event.as_ref()).map(str::to_string))
         };
         let action_evidence = TaskActionEvidence {
@@ -116,8 +125,8 @@ pub(super) async fn read_task_snapshot(store: &SharedStore, task: Task) -> OpsRe
     };
     let agent = resolve_task_agent(
         task.worktree.as_deref().unwrap_or(&repo),
+        &repo,
         wave.as_ref().map(|w| w.slug()),
-        &personal,
         None,
     );
     let provider = agent.ok().map(|agent| agent.harness.as_str().to_owned());
@@ -132,7 +141,7 @@ pub(super) async fn read_task_snapshot(store: &SharedStore, task: Task) -> OpsRe
     });
     let completion_pending = completion_pending(store, &task)?;
     let starter = |session: Option<&loopflow_model::id::LfSessionId>| {
-        super::ship::starter(&store.sqlite, &repo, session).map_err(task_error)
+        super::auto::starter(&store.sqlite, &repo, session).map_err(task_error)
     };
     let started_by = store
         .sqlite
@@ -140,28 +149,6 @@ pub(super) async fn read_task_snapshot(store: &SharedStore, task: Task) -> OpsRe
         .map_err(task_error)?
         .get(&task.id)
         .map(|graph| starter(graph.caller_session.as_ref()))
-        .transpose()?;
-    let ship_approval = store
-        .sqlite
-        .task_shipping(&task.id)
-        .map_err(task_error)?
-        .map(|shipping| {
-            Ok::<_, OpsError>(super::ShipMark {
-                at: shipping.shipped_at,
-                by: starter(shipping.approving_session.as_ref())?,
-            })
-        })
-        .transpose()?;
-    let ship_stop = store
-        .sqlite
-        .task_ship_stop(&task.id)
-        .map_err(task_error)?
-        .map(|stop| {
-            Ok::<_, OpsError>(super::ShipMark {
-                at: stop.at,
-                by: super::ship::stopper(&store.sqlite, &stop).map_err(task_error)?,
-            })
-        })
         .transpose()?;
     Ok(TaskSnapshot {
         machine_id,
@@ -194,8 +181,7 @@ pub(super) async fn read_task_snapshot(store: &SharedStore, task: Task) -> OpsRe
         observation: task.observation,
         actions,
         started_by,
-        ship_approval,
-        ship_stop,
+        auto,
         stack_parent,
     })
 }

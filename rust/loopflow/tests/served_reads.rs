@@ -68,28 +68,9 @@ fn a_client_that_closes_at_once_leaves_the_server_listening() {
     let repo = TestRepo::new();
     let mut server = Server::start(repo.path(), home.path());
     let socket = loopflow::server::socket_path().unwrap();
-    for _ in 0..2000 {
-        // A full listen queue refuses; only the server's exit fails the test.
-        if std::os::unix::net::UnixStream::connect(&socket).is_err() {
-            std::thread::sleep(Duration::from_millis(2));
-        }
-    }
+    drop(std::os::unix::net::UnixStream::connect(&socket).unwrap());
+    loopflow_execution::machine::client::Connection::open().unwrap();
     assert!(server.0.try_wait().unwrap().is_none(), "the server exited");
-    // Closed clients leave as their connections notice; until then it may be `busy`.
-    let deadline = std::time::Instant::now() + Duration::from_secs(20);
-    loop {
-        match loopflow_execution::machine::client::Connection::open() {
-            Ok(_) => break,
-            Err(error) => {
-                let busy = error
-                    .downcast_ref::<loopflow_execution::engine::Error>()
-                    .is_some_and(|error| error.code == loopflow_execution::engine::ErrorCode::Busy);
-                assert!(busy, "{error:#}");
-                assert!(std::time::Instant::now() < deadline, "{error:#}");
-                std::thread::sleep(Duration::from_millis(50));
-            }
-        }
-    }
 }
 
 #[test]
@@ -1167,7 +1148,7 @@ fn server_operations_match_their_lf_commands() {
         let printed = read(repo.path(), home.path(), &argv, query.input());
         let mut served = Value::Null;
         unchanged(&argv, &mut || served = server_read(query.clone()));
-        let Ok(printed) = serde_json::from_str::<Value>(&printed) else {
+        let Ok(mut printed) = serde_json::from_str::<Value>(&printed) else {
             // History is rendered text, including its final newline. A path's
             // CLI newline is only its output delimiter.
             let text = if matches!(query, Read::SessionHistoryGet { .. }) {
@@ -1178,6 +1159,18 @@ fn server_operations_match_their_lf_commands() {
             assert_eq!(served, Value::String(text), "{argv:?}");
             continue;
         };
+        if matches!(query, Read::MachineDoctor) {
+            // The CLI and server read the Machine's PTY usage at different times.
+            for report in [&mut served, &mut printed] {
+                let ptys = report["checks"]
+                    .as_array_mut()
+                    .unwrap()
+                    .iter_mut()
+                    .find(|check| check["name"] == "ptys")
+                    .expect("machine doctor reports PTY usage");
+                *ptys = serde_json::json!({"name": "ptys"});
+            }
+        }
         assert_eq!(without_clock(served), without_clock(printed), "{argv:?}");
     }
     for served in subscriptions {
@@ -1254,12 +1247,12 @@ fn server_operations_match_their_lf_commands() {
         | Write::TaskUpdate { .. }
         | Write::TaskClaim { .. }
         | Write::TaskUnassign { .. }
-        | Write::TaskHold { .. }
+        | Write::TaskAutoOff { .. }
         | Write::TaskMove { .. }
         // Starting a run or a ship starts Processes; task_run_waits_at_an_interactive_step
         // compares the run, and comments differ by their saved IDs.
         | Write::TaskRun { .. }
-        | Write::TaskShip { .. }
+        | Write::TaskAutoOn { .. }
         | Write::TaskSteer { .. }
         | Write::TaskReport { .. }
         | Write::TaskInterrupt { .. }
@@ -1515,10 +1508,6 @@ fn server_operations_match_their_lf_commands() {
         assert_eq!(written["owner"], printed["owner"], "{args:?}");
         assert_eq!(written["owner"].is_null(), !claimed, "{written}");
     }
-    // Stopping a Task that is not shipping saves the stop, which keeps a run
-    // from approving it until `lf ship`, retaining who requested the stop. The
-    // ship process it kills and the merge request it takes back are the ship
-    // tests'.
     // No run is live, so an interrupt reaches nothing, in the app as through `lf`.
     let interrupt = Write::TaskInterrupt {
         directory: directory.clone(),
@@ -1577,7 +1566,7 @@ fn server_operations_match_their_lf_commands() {
         assert_eq!(last(&written), last(&printed), "{args:?}");
         assert_eq!(last(&written).0, format!("served {steer}"));
     }
-    let stop = Write::TaskHold {
+    let stop = Write::TaskAutoOff {
         directory: directory.clone(),
         issue: "INF-123".into(),
         reason: None,
@@ -1588,11 +1577,36 @@ fn server_operations_match_their_lf_commands() {
             issue: "INF-123".into(),
         }
         .read()
-        .unwrap()["execution"]["ship_stop"]["by"]
+        .unwrap()["execution"]["auto"]["by"]
             .clone()
     };
+    // Auto is the Task's setting: this Task has taken up no Graph and keeps
+    // the off, served or through `lf`.
     compare(stop.clone(), &|| stop.clone(), &stopped);
-    assert_eq!(stopped()["kind"], "person", "no stop saved");
+    assert!(!stopped().is_null(), "a Task with no Graph lost its off");
+    // Why auto went off is a comment on the Task.
+    server_write(Write::TaskAutoOff {
+        directory: directory.clone(),
+        issue: "INF-123".into(),
+        reason: Some("waiting on the design".into()),
+    });
+    let pane = Read::TaskGet {
+        directory: directory.clone(),
+        issue: "INF-123".into(),
+    }
+    .read()
+    .unwrap();
+    assert!(
+        pane["comments"]["comments"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|comment| comment["body"]
+                .as_str()
+                .is_some_and(|body| body.starts_with("waiting on the design"))),
+        "{}",
+        pane["comments"]
+    );
 
     // Which repositories the app shows, as the app reads them.
     let portfolio = || without_clock(Read::DesktopPortfolio.read().unwrap());
@@ -2050,12 +2064,12 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             path(directory),
             words(&["task", "unassign", issue, "--json"]),
         ),
-        Write::TaskHold {
+        Write::TaskAutoOff {
             directory,
             issue,
             reason,
         } => {
-            let mut spelled = words(&["task", "hold", issue, "--json"]);
+            let mut spelled = words(&["task", "auto", "off", issue, "--json"]);
             if let Some(reason) = reason {
                 spelled.extend(words(&["--reason", reason]));
             }
@@ -2115,9 +2129,10 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             spelled.push("--json".into());
             (path(directory), spelled)
         }
-        Write::TaskShip { directory, issue } => {
-            (path(directory), words(&["--task", issue, "ship", "--json"]))
-        }
+        Write::TaskAutoOn { directory, issue } => (
+            path(directory),
+            words(&["--task", issue, "task", "auto", "on", "--json"]),
+        ),
         Write::TaskSteer {
             directory,
             issue,

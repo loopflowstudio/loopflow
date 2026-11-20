@@ -119,6 +119,13 @@ Include `test(configuration_changes_reach_an_existing_subscription)`,
 `test(graph_defaults_follow_task_wave_and_repository)` and
 `test(wave_setup_tests::)` to cover live reload, invalid defaults and Wave scope.
 
+Store watch changes (`rust/loopflow-storage/src/changes.rs`) and anything the
+server's recovery pass reads also run `test(changes::)` and the three
+`context_launch_tests::` fixtures the pass serves (`a_killed_task_conversation`,
+`a_task_conversation_whose_agent`, `a_task_checkout_starts`) in one invocation:
+they fail together when the pass misses a commit, and a trace that slows the
+watcher hides it.
+
 Terminal-title changes run `test(transport::output::tests::)` and
 `binary(transport_tests)`. Cover attachment before the asynchronous Session-name
 lookup completes in a deterministic output test; a live attachment can miss that

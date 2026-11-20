@@ -2,7 +2,7 @@ use crate::harness::LaunchKind;
 use crate::process::OsProcess;
 use std::collections::{HashMap, VecDeque};
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -17,7 +17,7 @@ use crate::agent::AgentConfig;
 use crate::harness::common::TurnInProgressGuard;
 use crate::harness::fact_writer::{FactWriter, RequestOrigins};
 use crate::harness::Recording;
-use crate::harness::{Driver as StreamDriver, HarnessError, SendCurrentOutcome};
+use crate::harness::{Driver as StreamDriver, HarnessError};
 use crate::provider_auth::Provider;
 use loopflow_harness::claude_decode::ClaudeDecoder;
 use loopflow_harness::fact::{Decoded, ProviderFact};
@@ -27,10 +27,7 @@ use loopflow_model::id::AgentSessionId;
 /// One persistent `claude -p --input-format stream-json` process drives every
 /// turn of a run. `send_input` writes the seed message; the process stays alive
 /// (holding conversation context, warm prompt cache) for the next turn instead
-/// of respawning. `send_current` writes a steer mid-turn — claude applies it as
-/// the next turn in the same session — and the reader coalesces the seed turn
-/// and its queued steers into one `TurnCompleted` so the runner still sees one
-/// boundary per `send_input`.
+/// of respawning. Steers reach a running turn through the between-tool hook.
 pub struct Driver {
     events: mpsc::UnboundedSender<ConversationEvent>,
     config: AgentConfig,
@@ -43,10 +40,6 @@ pub struct Driver {
     /// respawn (after interrupt/crash) resumes it via `--resume`.
     agent_session: Arc<Mutex<Option<AgentSessionId>>>,
     turn_in_progress: Arc<AtomicBool>,
-    /// Provider results still owed for the current runner turn: 1 for the seed,
-    /// plus 1 per accepted `send_current`. The reader emits `TurnCompleted` only
-    /// when this reaches 0, coalescing queued steer turns into one boundary.
-    pending_results: Arc<AtomicI64>,
     /// The runner turn id every provider turn in the current coalesced boundary
     /// reports under. Set by `send_input`, read by the reader.
     current_turn_id: Arc<Mutex<Option<String>>>,
@@ -91,7 +84,6 @@ impl Driver {
             skill_input: None,
             agent_session: Arc::new(Mutex::new(launch.start.thread())),
             turn_in_progress: Arc::new(AtomicBool::new(false)),
-            pending_results: Arc::new(AtomicI64::new(0)),
             current_turn_id: Arc::new(Mutex::new(None)),
             requests: Arc::new(Mutex::new(HashMap::new())),
             decoder: Arc::new(Mutex::new(ClaudeDecoder::default())),
@@ -169,9 +161,6 @@ impl Driver {
         cmd.stdin(std::process::Stdio::piped());
         cmd.stdout(std::process::Stdio::piped());
         cmd.stderr(std::process::Stdio::piped());
-        if let Some(cwd) = &config.cwd {
-            cmd.current_dir(cwd);
-        }
         super::configure_vendor_std_env(cmd.as_std_mut())?;
         self.shutdown_requested.store(false, Ordering::SeqCst);
 
@@ -216,7 +205,6 @@ impl Driver {
     ) {
         let events = self.events.clone();
         let turn_in_progress = self.turn_in_progress.clone();
-        let pending_results = self.pending_results.clone();
         let current_turn_id = self.current_turn_id.clone();
         let shutdown = self.shutdown_requested.clone();
         let interrupted = self.interrupt_requested.clone();
@@ -298,18 +286,13 @@ impl Driver {
                             // The result still carries the provider's refusal
                             // and reset instructions. Let it finish the turn.
                         }
-                        // One provider turn ended. Only close the runner turn
-                        // once every queued steer turn has also drained.
                         Decoded::Fact(ProviderFact::TurnCompleted { status, .. }) => {
                             diagnostics.clear();
-                            if pending_results.fetch_sub(1, Ordering::SeqCst) <= 1 {
-                                pending_results.store(0, Ordering::SeqCst);
-                                let _ = events.send(ConversationEvent::TurnCompleted {
-                                    turn_id: turn_id(),
-                                    status,
-                                });
-                                turn_in_progress.store(false, Ordering::SeqCst);
-                            }
+                            let _ = events.send(ConversationEvent::TurnCompleted {
+                                turn_id: turn_id(),
+                                status,
+                            });
+                            turn_in_progress.store(false, Ordering::SeqCst);
                         }
                         Decoded::Fact(_) => {}
                     }
@@ -328,7 +311,19 @@ impl Driver {
                 })
                 .await;
 
-                let status = if interrupted.load(Ordering::SeqCst) {
+                // A signal ending lf takes Claude with it, and nothing reads
+                // this reader's events any more: it records the end itself.
+                let signalled = crate::agent::interrupted();
+                if signalled {
+                    let ended = decoder
+                        .lock()
+                        .expect("claude decoder lock poisoned")
+                        .interrupt_pending();
+                    if let Err(error) = writer.write(&ended) {
+                        tracing::warn!(%error, "could not record Claude's interrupted turn");
+                    }
+                }
+                let status = if signalled || interrupted.load(Ordering::SeqCst) {
                     Lifecycle::Interrupted
                 } else {
                     tracing::warn!("claude stream ended without a final result");
@@ -359,7 +354,6 @@ impl Driver {
                     status,
                 });
             }
-            pending_results.store(0, Ordering::SeqCst);
             turn_in_progress.store(false, Ordering::SeqCst);
         }));
     }
@@ -385,7 +379,6 @@ impl Driver {
                 let _ = task.await;
             }
         }
-        self.pending_results.store(0, Ordering::SeqCst);
         self.turn_in_progress.store(false, Ordering::SeqCst);
         Ok(())
     }
@@ -496,8 +489,6 @@ impl StreamDriver for Driver {
             .current_turn_id
             .lock()
             .expect("claude turn id lock poisoned") = Some(turn_id.clone());
-        // One result owed for this seed; each accepted steer adds another.
-        self.pending_results.store(1, Ordering::SeqCst);
         let _ = self.events.send(ConversationEvent::TurnStarted {
             turn_id: turn_id.clone(),
         });
@@ -528,48 +519,6 @@ impl StreamDriver for Driver {
 
         turn_guard.disarm();
         Ok(())
-    }
-
-    async fn send_current(&mut self, content: &str) -> SendCurrentOutcome {
-        if self.stdin.is_none() {
-            return SendCurrentOutcome::NotSteerable;
-        }
-        // Atomically join the open boundary. A separate bool check followed by
-        // `fetch_add` races the reader's final `fetch_sub`: a steer could be
-        // accepted after TurnCompleted and escape as a second boundary.
-        if self
-            .pending_results
-            .try_update(Ordering::SeqCst, Ordering::SeqCst, |pending| {
-                (pending > 0).then(|| pending.saturating_add(1))
-            })
-            .is_err()
-        {
-            return SendCurrentOutcome::NotSteerable;
-        }
-        let origin = match self.turn_origin() {
-            Ok(origin) => origin,
-            Err(error) => {
-                self.pending_results.fetch_sub(1, Ordering::SeqCst);
-                return SendCurrentOutcome::Failed {
-                    error: error.to_string(),
-                };
-            }
-        };
-        let request = uuid::Uuid::new_v4().to_string();
-        self.register_request(&request, origin);
-        if let Err(error) = self.send_line(user_message_line(content, &request)).await {
-            self.pending_results.fetch_sub(1, Ordering::SeqCst);
-            return SendCurrentOutcome::Failed {
-                error: format!("failed to write claude steer: {error}"),
-            };
-        }
-        let provider_turn_id = self
-            .current_turn_id
-            .lock()
-            .expect("claude turn id lock poisoned")
-            .clone()
-            .unwrap_or_default();
-        SendCurrentOutcome::Sent { provider_turn_id }
     }
 
     async fn interrupt(&mut self) -> Result<()> {
@@ -829,11 +778,6 @@ mod tests {
                         .unwrap();
                 let selection = crate::test_ambient::EnvGuard::clear(&["LF_HOME"]);
                 std::env::set_var("LF_HOME", other_home.path());
-                assert!(matches!(
-                    harness.send_current("same conversation").await,
-                    SendCurrentOutcome::Sent { .. }
-                ));
-                observed_input(home, "same conversation").await;
                 // The native conversation survives the OS process's interruption.
                 *harness.agent_session.lock().unwrap() = Some("native-conversation".into());
                 harness.interrupt().await.unwrap();
@@ -1188,52 +1132,6 @@ done
         assert_eq!(claude.completions("step"), 1);
     }
 
-    #[tokio::test]
-    async fn a_steer_answered_while_background_tasks_run_still_completes_the_turn() {
-        let claude = StandInClaude::new(
-            r#"#!/bin/sh
-echo_user() {
-    uuid=$(printf '%s' "$1" | sed -n 's/.*"uuid":"\([^"]*\)".*/\1/p')
-    printf '{"type":"user","uuid":"%s","session_id":"vendor-conversation","message":{"content":"m"}}\n' "$uuid"
-}
-read -r seed
-printf '%s\n' '{"type":"system","subtype":"init","session_id":"vendor-conversation"}'
-echo_user "$seed"
-printf '%s\n' '{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"suite"}]}'
-printf '%s\n' '{"type":"result","subtype":"success","session_id":"vendor-conversation","result":"WAITING"}'
-read -r steer
-echo_user "$steer"
-printf '%s\n' '{"type":"result","subtype":"success","session_id":"vendor-conversation","result":"STEERED"}'
-printf '%s\n' '{"type":"system","subtype":"background_tasks_changed","tasks":[]}'
-printf '%s\n' '{"type":"result","subtype":"success","session_id":"vendor-conversation","result":"FINISHED"}'
-cat > /dev/null
-"#,
-        );
-        let (tx, mut rx) = mpsc::unbounded_channel();
-
-        let (config, admitted) = claude.attach("step");
-        let mut harness = Driver::new(
-            &crate::harness::launch_for_test(
-                loopflow_harness::HarnessKind::Claude,
-                &config,
-                &admitted,
-            ),
-            tx,
-        );
-        harness.send_input("run the suites").await.unwrap();
-        assert!(matches!(
-            harness.send_current("also lint").await,
-            SendCurrentOutcome::Sent { .. }
-        ));
-        let (status, _, _) = tokio::time::timeout(Duration::from_secs(30), drive_turn(&mut rx))
-            .await
-            .expect("the turn completes once the tasks finish");
-        harness.stop().await.unwrap();
-
-        assert_eq!(status, Lifecycle::Completed);
-        assert!(claude.completions("step") >= 1);
-    }
-
     // Live persistent-process checks against the real `claude` CLI (subscription
     // auth). Ignored by default — run explicitly with a live login:
     //   cargo test -p loopflow --lib claude::tests::live_ -- --ignored --nocapture
@@ -1308,54 +1206,6 @@ cat > /dev/null
             harness.agent_session(),
             "the persistent process keeps one vendor session across turns"
         );
-
-        harness.stop().await.expect("stop");
-    }
-
-    #[tokio::test]
-    #[ignore = "drives the real claude CLI; needs a live subscription login"]
-    async fn live_send_current_coalesces_into_one_boundary() {
-        let (tx, mut rx) = mpsc::unbounded_channel();
-
-        let config = live_config();
-        let _ledger = crate::journal::TestLedgerGuard::new();
-        let recording = super::super::admit_for_test(_ledger.home());
-        let mut harness = Driver::new(
-            &crate::harness::launch_for_test(
-                loopflow_harness::HarnessKind::Claude,
-                &config,
-                &recording,
-            ),
-            tx,
-        );
-        harness.start().await.expect("start");
-
-        harness
-            .send_input("Write a slow, detailed 200-word explanation of how a bicycle works.")
-            .await
-            .expect("seed turn");
-        // Inject a steer while the seed turn is still generating.
-        tokio::time::sleep(Duration::from_secs(2)).await;
-        let outcome = harness
-            .send_current("IMPORTANT: also include the word PANGOLIN in your reply.")
-            .await;
-        assert!(
-            matches!(outcome, SendCurrentOutcome::Sent { .. }),
-            "steer accepted into the live turn: {outcome:?}"
-        );
-
-        // The reader must coalesce the seed turn and the queued steer turn into
-        // exactly one TurnCompleted for this one send_input.
-        let (status, text, completions) = drive_turn(&mut rx).await;
-        assert_eq!(status, Lifecycle::Completed);
-        assert_eq!(completions, 1, "one coalesced boundary for the send_input");
-        assert!(
-            text.to_uppercase().contains("PANGOLIN"),
-            "the steer was incorporated: {text:?}"
-        );
-        // The coalesced boundary drained the pending counter.
-        assert_eq!(harness.pending_results.load(Ordering::SeqCst), 0);
-        assert!(!harness.turn_in_progress.load(Ordering::SeqCst));
 
         harness.stop().await.expect("stop");
     }
@@ -1448,7 +1298,6 @@ impl super::Launcher for loopflow_harness::Claude {
                 managed: super::ThreadName::Assigned,
             },
             initial_prompt_on_resume: false,
-            supports_execution_boundary: true,
             classifies_failures: true,
             native_skills: Some(crate::skills::catalog::SkillDialect::Claude),
             turn_limit: true,

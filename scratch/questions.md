@@ -51,3 +51,8 @@ Concept review as built, 2026-11-18 (`scratch/concept-review.html`, questions re
 - Chosen for review: ship the crate, since merging it can be undone by moving the files back. Passed over: dropping the branch and filing `ops` with only the benchmark cases.
 - Loopflow's own tags (`<lf:skill:>`, `<lf:message>`, `<lf:suggest_actions>`) are parsed in `loopflow-harness` and written in execution, sharing no constant. Leave them, or one owner in `loopflow-model` as its own Task?
 - `Launcher` also carries the store and process-table joins. Keep the name, or split the joins out as free functions?
+
+Sync onto main `21d541a874`, 2026-11-20:
+
+- Main's OpenCode and Pi decoders call `UNANSWERED_QUESTION` and `turn_error` from `loopflow_storage::session`, which the harness crate cannot reach. Both moved to `loopflow_model::chat::types`, where storage's turn query and the decoders read them. `unanswered_question` (the message) moved from execution's `harness::common` to `loopflow_harness::fact`.
+- Main's `opencode run` fixtures (`opencode_run*.jsonl`) and `codex_usage_limit.jsonl` moved to `rust/loopflow-harness/src/testdata/`; `opencode_question.jsonl` is gone with main's server decoder.

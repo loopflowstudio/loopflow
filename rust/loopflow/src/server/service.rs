@@ -186,7 +186,10 @@ pub(super) async fn run() -> Result<()> {
     // Held terminals keep running in their holders whether or not this server
     // can host them; without a registry their views wait for the next server.
     let terminals = match Registry::open(&executable_sha256) {
-        Ok(terminals) => Some(terminals),
+        Ok(terminals) => {
+            super::recovery::start(terminals.clone());
+            Some(terminals)
+        }
         Err(error) => {
             tracing::error!(%instance, %error, "Held terminals are not hosted by this server");
             None
@@ -980,7 +983,7 @@ async fn start_held(
 /// What `session.continue` starts: `lf session resume` of exactly this
 /// Session, in its directory, with this server's environment and its own
 /// `LF_HOME` and `LF_BIN`.
-fn continuing(
+pub(super) fn continuing(
     session: loopflow_model::id::LfSessionId,
     request: String,
     rows: u16,
@@ -1954,12 +1957,12 @@ mod tests {
                 // The fixture's repository has no checkout here, so the hold fails and is logged.
                 let answer = client.receive().await.unwrap();
                 assert!(
-                    matches!(&answer, ServerMessage::Error { id: Some(id), .. } if id == "hold-1"),
+                    matches!(&answer, ServerMessage::Error { id: Some(id), .. } if id == "auto-1"),
                     "{answer:?}"
                 );
             });
         let log = std::fs::read_to_string(loopflow_execution::diagnostic_log::log_path()).unwrap();
-        assert!(log.contains("request=hold-1"), "{log}");
+        assert!(log.contains("request=auto-1"), "{log}");
         assert!(!log.contains("sk-fixture"), "{log}");
     }
 

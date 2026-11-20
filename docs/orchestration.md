@@ -57,7 +57,10 @@ The board read attempts from the wrong row.
 
 The `commit-message` Skill writes it on its own agent, so a cheap model can
 take that job alone: `lf skill customize commit-message`, then set `agent:
-claude:haiku` in its frontmatter.
+claude:haiku` in its frontmatter. To keep [`agents`](config.md#keep-going-when-a-provider-runs-out)
+behind it for when Haiku is refused, set `default_agent:` instead, or
+`lf set --global skill.commit-message.default_agent claude:haiku`. PR titles
+and bodies take the same settings under `pr-message`.
 Without an answer the title is `lf implement: checkpoint`. `lf commit --step
 implement` runs the same thing by hand; plain `lf commit` has no prefix.
 The commit is no step of the Graph: its recorded steps stay the ones it
@@ -85,9 +88,9 @@ including nested Graphs and routers. It is not exported to unrelated child work.
 Personal preferences can target the skill or an authored step ID;
 see [setting precedence](config.md). Use `default_agent:` in either definition
 for a fallback: every applicable `agent:` choice wins before any fallback,
-then source, scope and target decide within each class. A step on a fallback
+then source, scope and target decide within each class. Headless work on a fallback
 moves through [`agents`](config.md#keep-going-when-a-provider-runs-out) when a
-usage limit or unavailable model refuses it; a step with `agent:` stays on its
+usage limit or unavailable model refuses it; work with `agent:` stays on its
 provider and keeps its model when one is named. Builtin skills recommend
 no harness; the application's fallback applies when nothing else selects one.
 
@@ -230,33 +233,39 @@ stands at.
 - loop:
     - loop:
         - graph: build      # code and a published PR
-        - interactive: human-review # you read the page; iterate goes back to build
+        - interactive: ship-review # you read the page; iterate goes back to build
     - graph: deliver        # gate, then land and stay until it merges
     - interactive: verify   # you check it on main; fix forward or finish
 ```
 
 ```bash
-lf graph feature                    # explore and human-review open here with you; the rest runs on its own
-lf -b graph feature                 # every step headless; an agent stands in at explore and human-review
+lf graph feature                    # explore and ship-review open here with you; the rest runs on its own
+lf -b graph feature                 # every step headless; an agent stands in at explore and ship-review
 lf task run LOO-12 feature          # runs up to explore and stops; the Task waits in its conversation
-lf task run LOO-12                  # after you're done there: on to human-review
+lf task run LOO-12                  # after you're done there: on to ship-review
 lf task run LOO-12 --from explore   # back to choosing what to build
 lf -b task run LOO-12               # the rest, straight through to a merged PR
-lf ship LOO-12                      # the same, returning once the Task is shipping
+lf task auto on LOO-12                      # auto on: the rest runs with an agent standing in for you
 ```
 
-At `human-review` you read one page, `scratch/human-review.html`, built from
-what the run already produced: the plan, the concept review, what `qa` saw, each
-step's commit, the open questions and the PR's checks. Ask for more and the
-change goes back to `build` with your words in the plan; otherwise it goes on to
-`deliver`.
+At `ship-review` you read one page, `scratch/ship-review.html`: what ships, in
+your terms, and everything the run left outside the PR, each with a proposal to
+fix it here, give it its own Task, or drop it. It is not a code review; concept
+review and gate already answered whether the change is right. You decide what
+happens to each finding. Ask for more and the change goes back to `build` with
+your words in the plan; otherwise it goes on to `deliver`.
 
 `-i` makes every step of a launch interactive and `-b` every step headless. At an
 interactive step with a loop behind it, you, or the agent standing in, decide
 advance or iterate; blocked there, the Task waits at that step. A step that
 fails is tried again, up to three attempts, starting at that step; the steps
-before it stay done. A run that stops leaves the Task at the step it stopped
-on, `lf task status` names it, and the next `lf task run` starts there:
+before it stay done. A skill step that failed before any agent started (its
+harness is not installed, say) is not tried again, since the next attempt would
+fail the same way: fix the cause and `lf task run`. When a headless OpenCode
+or Pi agent asks a question, the run stops after one attempt and prints the
+question. Answer with `lf steer LOO-12 "…"`, then `lf task run LOO-12`. A run
+that stops leaves the Task at that step. `lf task status` names the step, and
+the next `lf task run` starts there:
 
 ```bash
 lf task status LOO-12               # Graph code: stopped at land --wait-and-fix
@@ -267,27 +276,56 @@ lf task run LOO-12 --from gate      # when gate's work must be redone
 `--from` takes a step's id, its Skill, or the Graph it was composed from;
 starting from an interactive step only puts the Task there. After the last step
 the Task reaches `end`, which requests completion.
-`lf ship` or any run into `end` hands the Task to Auto-Ship, which may land its
-PR. Other Graphs in the Task's worktree never move it. There is no approve command: give feedback in the
-Task's conversation, which knows its step and how to go on. `lf task hold`
-withdraws Auto-Ship, and the stop stands: a later run into `end` no longer
-approves it, and a run that reaches a merging step (`lf land`, `lf pr arm`,
-`pr-land`) waits there instead. Only `lf ship` lifts the stop. A ship whose run
-fails the same way on every attempt withdraws it too, recording the error in the
-Task's history; that is no stop, and `lf ship` or a fixed run resumes it.
+
+### Auto
+
+Auto is a setting on the Task: on, off, or never set. A Task holds it before
+its first run and through every Graph it takes up; reopening the Task clears it. Status says
+what is happening; auto says who takes the interactive steps. While it is on,
+the Task's runs stand in for you at each interactive step they reach and may
+merge the PR. Turning it on means nobody is waited for, so it runs the Task:
+`lf task auto on` and Desktop's **Auto** toggle are one operation.
+It prints what `lf task run` prints and leaves one Graph process:
+
+```bash
+lf task auto on LOO-12                      # LOO-12 · code from ship-review running as Graph run …
+lf task status LOO-12               # LOO-12  moving · auto: on by Maya, Nov 18 09:04
+lf task auto off LOO-12             # LOO-12: auto off
+lf task auto on LOO-12              # on again: the run goes on from where it waits
+```
+
+A Task waiting at an interactive step is stood in for there, and one that
+never ran takes up its Graph and runs. The run reads auto at each interactive
+step, not at launch: turn it on while `build` runs and that run carries on,
+standing in at `ship-review` when it gets there.
+`lf task auto off`, or Desktop's **Auto** toggle, kills nothing. The run carries on to its next interactive step and
+waits there, or reaches a merging step (`lf land`, `lf pr arm`, `pr-land`) and
+waits before it: "Waiting at pr land: auto is off (Maya). `lf task auto on INF-1` lands it."
+Auto-merge that Loopflow armed is disarmed. Off stands: only `lf task auto on` turns
+it back on, and an `auto: on` in configuration never does. `lf -b task run` stands in at every step for its own run and
+writes no auto, so with auto off it still waits at the landing step. Other Graphs in the Task's worktree never move it. There is no
+approve command: give feedback in the Task's conversation, which knows its step
+and how to go on.
+
+Off takes back the interactive steps and the merge. Never set, a run that
+reaches a merging step lands: `lf task run` after `ship-review` goes through `deliver`, and a Graph
+with no interactive step that ends in `deliver` lands without the setting ever being on. `lf task run` says
+so on its `merges:` line. A failing run leaves auto alone: the Task stops at
+the failed step, and the next `lf task run` stands in again. A PR merged by hand
+is met by the run's own landing step, which sees the merge and goes on.
 
 | Task state | When |
 |---|---|
 | `unstarted` | no checkout yet |
 | `idle` | a checkout, nothing running, not at an interactive step |
 | `active` | at an interactive step, in its Task Session |
-| `moving` | a run carries it, with an interactive step ahead |
-| `shipping` | a run carries it and nothing ahead stops it |
+| `moving` | a run carries it, whatever the auto setting |
 | `done` · `abandoned` | completed, dropped |
 
-Builtins are `feature` (explore, then plan, build, human-review, deliver, verify), `code`
-(the same without explore), `auto` (pursue then deliver, no interactive step: request to merged PR
-without you) and `research` (findings, no PR). To change one, copy it, commit it,
+Builtins are `feature` (explore, then plan, build, ship-review, deliver, verify), `code`
+(the same without explore), `pursue` (plan then build, no interactive step: request to published
+PR) and `research` (findings, no PR). `auto: on` beside `graph:` turns
+auto on for every Task that takes the Graph up. To change one, copy it, commit it,
 and select it for a Wave with `graph: feature` in `.lf/wave/product/config.yaml`:
 
 ```bash

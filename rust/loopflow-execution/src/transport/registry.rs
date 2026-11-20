@@ -375,6 +375,10 @@ impl Registry {
         });
         let mut unsettled = Vec::new();
         let (entries, pending) = registry.adopt(&mut unsettled);
+        // Ends found at startup are recorded before anyone reads the store
+        // through this registry: the recovery pass would otherwise reap the
+        // dead agent first, and its end would read as a move, not a death.
+        unsettled.retain_mut(|exit| !settle(exit));
         *registry.pending.lock().expect("registry lock poisoned") = pending.clone();
         for holder in pending {
             let registry = registry.clone();
@@ -452,7 +456,7 @@ impl Registry {
         };
         meta.write(&self.place, &terminal)?;
         crate::journal::process_ledger()?.create_terminal(&terminal, &self.build)?;
-        let mut client = Client::ensure(&self.place)?;
+        let mut client = Client::ensure(&self.place, &self.build)?;
         let holder = client.hello()?;
         let (rows, cols) = dimensions(start.rows, start.cols);
         let mut env: Vec<(String, String)> = start

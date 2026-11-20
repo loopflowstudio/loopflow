@@ -35,7 +35,6 @@ extension WorkViewPlan.Content {
         if states.contains(.blocked) { return ("Blocked", .warning) }
         if states.contains(.busy) { return ("Running", .running) }
         if states.contains(.available) { return ("Ready", .available) }
-        if states.contains(.shipping) { return ("Shipping", .running) }
         return ("Open", .stopped)
     }
 }

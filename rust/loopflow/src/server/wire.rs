@@ -116,8 +116,10 @@ mod tests {
             include_str!("../../../loopflow-execution/tests/fixtures/dto/server/upload.json"),
             include_str!("../../../loopflow-execution/tests/fixtures/dto/server/ticket.json"),
             include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_run.json"),
-            include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_ship.json"),
-            include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_hold.json"),
+            include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_auto_on.json"),
+            include_str!(
+                "../../../loopflow-execution/tests/fixtures/dto/server/task_auto_off.json"
+            ),
             include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_steer.json"),
             include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_report.json"),
             include_str!(

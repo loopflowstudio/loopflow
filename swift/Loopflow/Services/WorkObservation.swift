@@ -302,7 +302,7 @@ extension WorkFrame {
         case .planning: .planning(nil)
         case .selections: .selections(nil)
         case .taskList: .taskList(nil)
-        case .gitDestinations: .gitDestinations(nil)
+        case .planHome: .planHome(nil)
         case .sessions: .sessions(nil)
         case .task: .task(nil)
         case .workActivity: .workActivity(nil)

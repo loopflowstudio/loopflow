@@ -49,6 +49,7 @@ fn initialize(home: &Path) {
 #[test]
 fn without_a_tracker_the_plan_is_on_this_machine() {
     let repo = TestRepo::new();
+    loopflow_execution::git::git_stdout(repo.path(), &["remote", "remove", "origin"]).unwrap();
     let home = tempfile::tempdir().unwrap();
     initialize(home.path());
     // `provider: git` is the released shape; it reads as no tracker.
@@ -65,7 +66,7 @@ fn without_a_tracker_the_plan_is_on_this_machine() {
         assert_eq!(status["tracker"], Value::Null, "{config:?}");
         assert_eq!(
             status["plan"],
-            serde_json::json!({ "hub": null }),
+            serde_json::json!({ "git": null, "hub": null }),
             "{config:?}"
         );
         assert_eq!(

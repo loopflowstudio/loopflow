@@ -1573,6 +1573,10 @@ fn the_later_change_shows_on_both_machines_through_the_hub() {
     );
 
     // With a hub, a save is on mini when the command returns.
+    let _mini = loopflow_test_support::MachineServer::start(
+        env!("CARGO_BIN_EXE_lf"),
+        &fixture.root.path().join("remote/store"),
+    );
     assert_success(&fixture.run(&["machine", "hub", "mini"]));
     let hub_line = |status: &str| status[status.find("Hub ").expect(status)..].to_owned();
     ok(&["task", "update", &identifier, "--title", "hub smoke"]);

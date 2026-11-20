@@ -71,8 +71,6 @@ pub const MOVED: &[Moved] = &[
     moved(&["planning"], &[], &["repo", "tracker"]),
     moved(&["planning"], &["list"], &["plan", "list"]),
     moved(&["planning"], &["status"], &["repo", "tracker"]),
-    moved(&["planning"], &["key"], &["repo", "tracker", "key"]),
-    moved(&["planning"], &["journal"], &["repo", "tracker", "journal"]),
     moved(&["desktop", "plans"], &[], &["desktop", "view", "list"]),
     moved(
         &["desktop", "view"],

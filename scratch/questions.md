@@ -50,3 +50,7 @@
   settings have permission grants (`permissions`, `grants` keys in the
   binary) that were not explored. The other choice is `yolo` for Task
   conversations on Antigravity.
+- A never-signed-in `agy` reads "The antigravity login was revoked; sign in
+  again on this Machine: run `agy` and sign in". The sentence is the one
+  every harness shares for a credential failure; "revoked" is wrong for a
+  first sign-in. Left as is.

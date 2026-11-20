@@ -67,10 +67,27 @@ Killing only the PTY child leaves a chat's `agy` running: kill it by pid.
   conversation included, takes the first agent.
 - Interrupt: `lf task interrupt <id>` mid-step; `turns.status` is
   `interrupted` and no `agy --input-format` process is left.
-- Not reachable here: a spent quota, a signed-out `agy`, a Machine without
-  `agy` (lf's own PATH adds `~/.local/bin` and `/opt/homebrew/bin`), and an
-  OpenCode balance refusal while the account has credits. lf accepts only
-  `opencode/*` models outside the Claude and Codex families.
+- Signed out: give `lf` an empty `HOME` (`HOME=/tmp/…/fakehome lf -b default
+  '…' -a antigravity`; `LF_HOME` stays set). `agy` answers "authentication
+  failed or timed out" and lf prints the sign-in advice. For the move, `lf set
+  --global agents 'antigravity,opencode:opencode/gemini-4-carbon'` and add
+  `XDG_DATA_HOME=<real home>/.local/share` so OpenCode keeps its login.
+- OpenCode's unserved model: `-a opencode:opencode/no-such-model-xyz`
+  ("Model unavailable: …"); first in `agents`, a Task step goes on under the
+  next entry.
+- `--yolo` in the TUI: `lf default 'Run exactly this one shell command …: lf
+  session list' -a antigravity --yolo` in a worktree under the home directory
+  runs `lf` once; without the flag the screen shows the command twice (the
+  sandboxed failure, then the retry outside).
+- Not reachable here: a spent quota, a Machine without `agy` (lf's own PATH
+  adds `~/.local/bin` and `/opt/homebrew/bin`), and an OpenCode balance
+  refusal while the account has credits. lf accepts only `opencode/*` models
+  outside the Claude and Codex families, and a project `opencode.json` with
+  `provider.opencode.options.baseURL` is read (`opencode debug config`) but
+  OpenCode 2.0.32 still calls its own endpoint, so a local server cannot
+  stand in for the refusal.
 
 Stop the holder's children (`pgrep -P <holder>`), the holder and the server
 by pid when done; check a server's `LF_HOME` with `ps eww -p <pid>` first.
+The holder's environment may not show `LF_HOME`; find it by its binary path
+(`pgrep -f '<Q>/bin/lf holder run'`).

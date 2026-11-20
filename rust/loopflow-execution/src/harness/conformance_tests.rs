@@ -428,7 +428,13 @@ fn each_harness_classifies_its_own_refusals() {
             "Insufficient balance. This request is pay-as-you-go, billed to OpenCode Models credits. Top up at https://opencode.ai/console/billing?credits=1.",
             UsageLimit,
         ),
-        (OpenCode, "opencode_error", "model is not available", ModelUnavailable),
+        // `opencode run -m opencode/no-such-model-xyz`, 2.0.32.
+        (
+            OpenCode,
+            "opencode_error",
+            "Model unavailable: opencode/no-such-model-xyz",
+            ModelUnavailable,
+        ),
         (Pi, "pi_error", "Your refresh token was revoked", CredentialInvalidated),
         // `agy` 1.5.13, signed out and with an unknown `--model`.
         (

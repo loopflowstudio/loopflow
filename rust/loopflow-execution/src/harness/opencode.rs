@@ -357,14 +357,17 @@ impl super::Launcher for loopflow_harness::OpenCode {
     }
     fn classify_failure(&self, code: &str, message: &str) -> Option<crate::agent::AgentFailure> {
         // "Insufficient balance. This request is pay-as-you-go, billed to
-        // OpenCode Models credits." OpenCode retries a transient failure itself.
-        if message
-            .to_ascii_lowercase()
-            .contains("insufficient balance")
-        {
-            return Some(crate::agent::AgentFailure::UsageLimit);
+        // OpenCode Models credits." and, for a model it has no route to,
+        // "Model unavailable: opencode/<name>" (2.0.32). OpenCode retries a
+        // transient failure itself.
+        let words = message.to_ascii_lowercase();
+        if words.contains("insufficient balance") {
+            Some(crate::agent::AgentFailure::UsageLimit)
+        } else if words.contains("model unavailable") {
+            Some(crate::agent::AgentFailure::ModelUnavailable)
+        } else {
+            crate::agent::routing_failure(code, message)
         }
-        crate::agent::routing_failure(code, message)
     }
     fn capabilities(&self) -> super::Capabilities {
         super::Capabilities {

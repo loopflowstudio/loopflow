@@ -369,13 +369,28 @@ The review's doc pass is in (`docs/config.md` "Antigravity",
 `context.rs` and `harness/mod.rs`). `documented_commands::` passes (4 tests,
 2026-11-20, implement).
 
-Not seen live: that `--yolo` in the TUI removes the "Run this command?"
-prompt. The docs say it does because the launch then passes
-`--dangerously-skip-permissions`; check it in the demo.
+QA after compress, real `agy` 1.5.13 and OpenCode 2.0.32 (2026-11-20);
+`scratch/qa.html` has the transcripts:
 
-What remains is the demo on real `agy`, for qa or demo: a Task's work session in the
-TUI; a step whose first agent is `opencode` with no credits moving to the
-next agent.
+- Run again on the compressed per-turn code, all as before: a Task step with
+  a steer and usage, interrupt and rerun, the Task's TUI conversation getting
+  its context block and the steer.
+- A signed-out `agy` (an empty `HOME`): alone, "agent stopped after provider
+  credential invalidated … run `agy` and sign in"; first in `agents`,
+  "antigravity: provider credential invalidated; continuing on
+  opencode:opencode/gemini-4-carbon", then the answer.
+- `--yolo` in the TUI runs `lf` once with no prompt; without it the command
+  fails in the sandbox and runs again outside.
+- Fixed: OpenCode's refusal for a model it does not serve is
+  `{"type":"provider.no-route","message":"Model unavailable: opencode/<name>"}`,
+  which no phrase list matched, so the step stopped. OpenCode's
+  `classify_failure` reads "model unavailable"; a Task step with
+  `agents: [opencode:opencode/no-such-model-xyz, antigravity]` went on under
+  Antigravity and `lf task status` said why. The conformance test's invented
+  "model is not available" line is replaced by the real one.
+- Still not reached: an OpenCode balance refusal (the account has credits and
+  OpenCode ignores a project `baseURL` override for its own provider), a spent
+  Antigravity quota, a Machine without `agy`.
 
 ## Design
 

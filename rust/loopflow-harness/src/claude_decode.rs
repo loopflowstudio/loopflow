@@ -6,15 +6,15 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use anyhow::Result;
 use serde_json::{json, Value};
 
-use super::fact::{self, Decoded, ProviderFact, ProviderTurn, Signal};
-use crate::harness::lf_tag::LfTagParser;
+use crate::fact::{self, Decoded, ProviderFact, ProviderTurn, Signal};
+use crate::lf_tag::LfTagParser;
 use loopflow_model::chat::types::{
     ConversationEvent, ConversationItem, FileEdit, Lifecycle, TurnUsage,
 };
 
 /// One persistent Claude process's stream.
 #[derive(Debug, Default)]
-pub(super) struct ClaudeDecoder {
+pub struct ClaudeDecoder {
     /// Request UUIDs Loopflow wrote that Claude has not yet echoed.
     outbound: HashSet<String>,
     /// Echoed requests whose results are still owed, oldest first.
@@ -26,18 +26,18 @@ pub(super) struct ClaudeDecoder {
 
 impl ClaudeDecoder {
     /// Loopflow wrote a user message carrying `request` as its UUID.
-    pub(super) fn outbound(&mut self, request: &str) {
+    pub fn outbound(&mut self, request: &str) {
         self.outbound.insert(request.to_owned());
     }
 
     /// Tools still in flight when the stream ended without a result.
-    pub(super) fn drain_open_items(&mut self, status: Lifecycle) -> Vec<ConversationItem> {
+    pub fn drain_open_items(&mut self, status: Lifecycle) -> Vec<ConversationItem> {
         self.state.drain_open_items(status)
     }
 
     /// A signal ended lf and Claude with it: every request still owed a
     /// result was interrupted.
-    pub(super) fn interrupt_pending(&mut self) -> Vec<Decoded> {
+    pub fn interrupt_pending(&mut self) -> Vec<Decoded> {
         self.pending
             .drain(..)
             .map(|turn| {
@@ -288,7 +288,7 @@ impl ReaderState {
         let Some(usage) = message.get("usage") else {
             return;
         };
-        let usage = super::claude::usage(usage);
+        let usage = crate::claude::usage(usage);
         let input = usage.input_tokens.unwrap_or(0)
             + usage.cache_read_tokens.unwrap_or(0)
             + usage.cache_write_tokens.unwrap_or(0);
@@ -307,7 +307,7 @@ impl ReaderState {
         if self.assistant_usage.contains_key(id) {
             return None;
         }
-        super::claude::usage(message.get("usage")?).total_input_tokens
+        crate::claude::usage(message.get("usage")?).total_input_tokens
     }
 
     fn observe_assistant_usage(&mut self, value: &Value) -> Option<TurnUsage> {
@@ -319,7 +319,7 @@ impl ReaderState {
                 .get("model")
                 .and_then(Value::as_str)
                 .map(ToString::to_string),
-            ..super::claude::usage(usage)
+            ..crate::claude::usage(usage)
         };
         if !receipt.is_reported() {
             return None;
@@ -589,7 +589,7 @@ fn map_turn_usage(event: &Value, state: &mut ReaderState) -> Option<TurnUsage> {
             .get("cost_usd")
             .or_else(|| event.get("total_cost_usd"))
             .and_then(Value::as_f64),
-        ..super::claude::usage(&event["usage"])
+        ..crate::claude::usage(&event["usage"])
     };
     receipt.is_reported().then_some(receipt)
 }

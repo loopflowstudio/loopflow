@@ -1306,7 +1306,8 @@ fn closed_task_pages_round_trip_plan_rows_and_their_continuation() {
 #[test]
 fn retention_summary_keeps_states_expiries_and_policies_exactly() {
     use loopflow_execution::transcript::summary::{AgeBucket, RetentionSummary};
-    use loopflow_execution::transcript::{ExpiryPolicy, RetentionState};
+    use loopflow_execution::transcript::RetentionState;
+    use loopflow_harness::transcript::ExpiryPolicy;
     let json = include_str!("../../../tests/fixtures/dto/retention_summary.json");
     let summary: RetentionSummary = serde_json::from_str(json).unwrap();
     assert_eq!(summary.groups[1].age, AgeBucket::UnderQuarter);

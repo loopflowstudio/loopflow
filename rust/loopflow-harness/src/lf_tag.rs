@@ -5,14 +5,14 @@ const SUGGEST_ACTIONS_CLOSE: &str = "</lf:suggest_actions>";
 
 /// Streaming parser for `<lf:...>` tag output embedded in text deltas.
 #[derive(Debug, Default)]
-pub(super) struct LfTagParser {
+pub(crate) struct LfTagParser {
     stream_buffer: String,
     in_suggest_actions_tag: bool,
     suggest_actions_payload: String,
 }
 
 impl LfTagParser {
-    pub(super) fn consume_text(&mut self, turn_id: &str, text: &str) -> Vec<ConversationEvent> {
+    pub(crate) fn consume_text(&mut self, turn_id: &str, text: &str) -> Vec<ConversationEvent> {
         if text.is_empty() {
             return Vec::new();
         }
@@ -69,7 +69,7 @@ impl LfTagParser {
         events
     }
 
-    pub(super) fn finish_turn(&mut self, turn_id: &str) -> Vec<ConversationEvent> {
+    pub(crate) fn finish_turn(&mut self, turn_id: &str) -> Vec<ConversationEvent> {
         let mut events = Vec::new();
         let trailing = std::mem::take(&mut self.stream_buffer);
 

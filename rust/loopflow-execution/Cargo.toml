@@ -6,13 +6,14 @@ edition.workspace = true
 license.workspace = true
 
 [features]
-test-support = ["dep:loopflow-test-support", "dep:ctor", "dep:axum", "loopflow-storage/test-support", "loopflow-terminal/test-support"]
+test-support = ["dep:loopflow-test-support", "dep:ctor", "dep:axum", "loopflow-storage/test-support", "loopflow-harness/test-support", "loopflow-terminal/test-support"]
 
 [dependencies]
 loopflow-terminal = { path = "../loopflow-terminal" }
 loopflow-definitions = { path = "../loopflow-definitions" }
 loopflow-storage = { path = "../loopflow-storage" }
 loopflow-model = { path = "../loopflow-model" }
+loopflow-harness = { path = "../loopflow-harness" }
 clap = { version = "4.6", features = ["derive", "env"] }
 dirs = "7"
 ignore = "0.4"
@@ -68,6 +69,7 @@ sha2 = { version = "0.10", features = ["asm"] }
 [dev-dependencies]
 ctrlc = { version = "3", features = ["termination"] }
 loopflow-storage = { path = "../loopflow-storage", features = ["test-support"] }
+loopflow-harness = { path = "../loopflow-harness", features = ["test-support"] }
 loopflow-terminal = { path = "../loopflow-terminal", features = ["test-support"] }
 rcgen = "0.14"
 axum = "0.8"

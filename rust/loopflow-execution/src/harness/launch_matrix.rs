@@ -4,9 +4,10 @@ use std::path::Path;
 
 use crate::agent::{AgentConfig, ProcessConfig};
 use crate::harness::LaunchKind;
-use crate::harness::{HarnessKind, Launch, Mode, Recording, Start};
+use crate::harness::{Launch, Mode, Recording, Start};
 use crate::process::LfProcessRuntime;
 use crate::session_record::{SessionCaptureSpec, SessionGraphMembership, SessionRecorder};
+use loopflow_harness::HarnessKind;
 
 fn executable(path: &Path, source: &str) {
     std::fs::write(path, source).unwrap();
@@ -173,7 +174,7 @@ fn every_harness_runs_all_four_launch_kinds() {
                 config.env.insert("LF_BIN".into(), binary.into());
                 let launch = Launch {
                     config: &config,
-                    harness: harness.harness(),
+                    harness: crate::harness::launcher(harness),
                     kind,
                     recording: &recording,
                     start: Start::New,
@@ -338,7 +339,7 @@ fn held_codex_with_a_saved_empty_thread_sends_its_first_prompt() {
             };
             // Native launch recovers the stored thread even when the entry has no explicit resume token.
             let launch = Launch {
-                harness: HarnessKind::Codex.harness(),
+                harness: crate::harness::launcher(HarnessKind::Codex),
                 config: &config,
                 kind: LaunchKind::WorkSession,
                 recording: &recording,
@@ -381,13 +382,13 @@ fn native_limits_and_schemas_require_a_headless_run() {
             };
             let launch = Launch {
                 config: &config,
-                harness: harness.harness(),
+                harness: crate::harness::launcher(harness),
                 kind: LaunchKind::Batch,
                 recording: &recording,
                 start: Start::New,
                 context_file: None,
             };
-            let error = harness.harness().open(&launch).unwrap_err();
+            let error = crate::harness::launcher(harness).open(&launch).unwrap_err();
             assert!(
                 error.to_string().contains("require a headless Run"),
                 "{harness:?}: {error}"

@@ -28,16 +28,6 @@ impl Drop for TurnInProgressGuard {
     }
 }
 
-/// Why a headless turn failed when its agent asked a person something.
-pub(super) fn unanswered_question(harness: &str, question: &str) -> String {
-    let question = question.trim();
-    if question.is_empty() {
-        format!("{harness} asked a question with nobody there to answer it")
-    } else {
-        format!("{harness} asked a question with nobody there to answer it: {question}")
-    }
-}
-
 pub(super) fn spawn_stderr_logger<R>(
     stderr: R,
     target: &'static str,

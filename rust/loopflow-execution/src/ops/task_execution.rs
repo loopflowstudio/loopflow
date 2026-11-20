@@ -168,7 +168,7 @@ pub async fn execution_of_latest_graph(
             snapshot.reason = line;
             snapshot.died = Some(RunDied {
                 at_step: died.at_step,
-                at: died.at.and_then(crate::transcript::rfc3339),
+                at: died.at.and_then(loopflow_harness::transcript::rfc3339),
             });
             snapshot.outlook = Some(outlook);
         }

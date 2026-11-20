@@ -131,10 +131,6 @@ pub const CLAUDE_MODEL_FAMILIES: [&str; 4] = ["fable", "opus", "sonnet", "haiku"
 /// The family Claude Code runs when a launch names no model.
 pub const CLAUDE_DEFAULT_MODEL_FAMILY: &str = "fable";
 
-/// The models a bare `claude` step falls through to when the one it runs
-/// hits a scoped limit, best first.
-pub const CLAUDE_MODEL_RUNGS: [&str; 3] = ["opus", "sonnet", "haiku"];
-
 /// An explicit invocation-wide choice; definitions and defaults never set it.
 pub const YOLO_OVERRIDE_ENV: &str = "LF_YOLO_OVERRIDE";
 pub const CHROME_OVERRIDE_ENV: &str = "LF_CHROME_OVERRIDE";
@@ -169,16 +165,16 @@ pub(crate) fn resume_choice(provider: &str, model: Option<&str>, selected: Optio
 /// Select automatically only when exactly one supported harness is installed.
 pub fn default_agent() -> Option<&'static str> {
     #[cfg(test)]
-    let is_installed = |agent: &str| agent == crate::harness::HarnessKind::Codex.as_str();
+    let is_installed = |agent: &str| agent == loopflow_harness::HarnessKind::Codex.as_str();
     #[cfg(not(test))]
     let is_installed = check_cli_available;
     installed_agent(is_installed)
 }
 
 fn installed_agent(is_installed: impl Fn(&str) -> bool) -> Option<&'static str> {
-    let mut installed = crate::harness::HarnessKind::ALL
+    let mut installed = loopflow_harness::HarnessKind::ALL
         .into_iter()
-        .map(crate::harness::HarnessKind::as_str)
+        .map(loopflow_harness::HarnessKind::as_str)
         .filter(|agent| is_installed(agent));
     let only = installed.next()?;
     installed.next().is_none().then_some(only)
@@ -564,20 +560,20 @@ pub(crate) fn agent_list(value: &str) -> impl Iterator<Item = &str> {
 /// A selected harness and its provider model.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Agent {
-    pub harness: crate::harness::HarnessKind,
+    pub harness: loopflow_harness::HarnessKind,
     pub model: Option<String>,
 }
 
 impl Agent {
     pub fn parse(value: &str) -> Result<Self, LoadError> {
         let (name, model) = parse_agent(value);
-        let harness = crate::harness::HarnessKind::parse(&name)
+        let harness = loopflow_harness::HarnessKind::parse(&name)
             .ok_or_else(|| LoadError::InvalidAgent(value.to_owned()))?;
         Ok(Self { harness, model })
     }
 
     pub fn with_configured_model(mut self, config: &Config) -> Self {
-        if self.harness == crate::harness::HarnessKind::Claude && self.model.is_none() {
+        if self.harness == loopflow_harness::HarnessKind::Claude && self.model.is_none() {
             self.model = config.claude.model.clone();
         }
         self

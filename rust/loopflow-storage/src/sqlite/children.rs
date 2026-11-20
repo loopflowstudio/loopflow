@@ -103,16 +103,12 @@ pub(super) fn create_task_in(
         (None, Some(wave)) => task_project_in(conn, wave)?,
         (None, None) => None,
     };
-    let project = project_id.as_ref().map(ProjectId::as_str);
-    let wave_id: Option<WaveId> = match (wave, project) {
+    let wave_id = match (wave, &project_id) {
         (Some(wave), _) => Some(wave.clone()),
-        (None, Some(project)) => conn.query_row(
-            "SELECT wave_id FROM projects WHERE id=?1",
-            [project],
-            |row| row.get(0),
-        )?,
+        (None, Some(project)) => project_wave_in(conn, project.as_str())?,
         (None, None) => None,
     };
+    let project = project_id.as_ref().map(ProjectId::as_str);
     let rank: u32 = conn.query_row(
         "SELECT COALESCE(max(planning_rank)+1,0) FROM tasks WHERE repository_id=?1 AND project_id IS ?2",
         params![input.repository_id.as_str(), project], |row| row.get(0),
@@ -1582,11 +1578,11 @@ fn validate_task_project(conn: &Connection, task: &Task) -> StoreResult<()> {
         (None, _) => true,
         (Some(_), None) => false,
         (Some(project), Some(wave)) => {
-            let project_wave: String = conn.query_row(
+            let project_wave: WaveId = conn.query_row(
                 "SELECT p.wave_id FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo WHERE p.id=?1 AND r.id=?2",
                 params![project.as_str(), task.repository_id.as_str()], |row| row.get(0),
             )?;
-            wave_within_in(conn, wave.as_str(), &project_wave)?
+            wave_within_in(conn, wave, &project_wave)?
         }
     };
     if !consistent {
@@ -2391,8 +2387,19 @@ pub(crate) fn task_project_in(conn: &Connection, wave: &WaveId) -> StoreResult<O
         .optional()?)
 }
 
+pub(crate) fn project_wave_in(conn: &Connection, project: &str) -> StoreResult<Option<WaveId>> {
+    Ok(conn
+        .prepare_cached("SELECT wave_id FROM projects WHERE id=?1")?
+        .query_row([project], |row| row.get(0))
+        .optional()?)
+}
+
 /// Whether `wave` is `ancestor` or below it.
-pub(crate) fn wave_within_in(conn: &Connection, wave: &str, ancestor: &str) -> StoreResult<bool> {
+pub(crate) fn wave_within_in(
+    conn: &Connection,
+    wave: &WaveId,
+    ancestor: &WaveId,
+) -> StoreResult<bool> {
     Ok(conn
         .prepare_cached(
             "WITH RECURSIVE line(id) AS (
@@ -2401,7 +2408,7 @@ pub(crate) fn wave_within_in(conn: &Connection, wave: &str, ancestor: &str) -> S
                  WHERE w.parent_wave_id IS NOT NULL)
              SELECT EXISTS(SELECT 1 FROM line WHERE id=?2)",
         )?
-        .query_row([wave, ancestor], |row| row.get(0))?)
+        .query_row([wave.as_str(), ancestor.as_str()], |row| row.get(0))?)
 }
 
 const PROJECT_COLUMNS: &str = "SELECT

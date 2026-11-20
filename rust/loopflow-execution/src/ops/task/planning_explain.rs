@@ -381,7 +381,7 @@ async fn read_creation(
         value: wave.id().to_string(),
         source: "explicit".into(),
     };
-    // A Wave with no open Project gets one when the Task is saved.
+    // The Project the Task joins: its Wave's, else the nearest ancestor's, else none.
     let joined = store.sqlite.new_task_project(wave.id())?;
     if let Some(TaskPlanningAction::Create {
         project: selected, ..

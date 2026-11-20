@@ -75,8 +75,8 @@ impl SqliteStore {
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let task = super::children::task_on(&tx, id)?.ok_or(StoreError::NotFound)?;
         let destination = move_project_in(&tx, &task, wave)?;
-        let current = validate_move(&tx, id, expected_project, destination.as_ref())?;
-        if current.project_id != destination || current.wave_id.as_ref() != wave {
+        validate_move(&tx, &task, expected_project, destination.as_ref())?;
+        if task.project_id != destination || task.wave_id.as_ref() != wave {
             planning_write::local(
                 &tx,
                 &crate::work::edit::WorkEdit::for_target(
@@ -111,7 +111,8 @@ impl SqliteStore {
     ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let snapshot = conn.savepoint()?;
-        validate_move(&snapshot, id, expected_project, destination).map(|_| ())
+        let task = super::children::task_on(&snapshot, id)?.ok_or(StoreError::NotFound)?;
+        validate_move(&snapshot, &task, expected_project, destination)
     }
 
     pub fn validate_task_edit(
@@ -197,13 +198,10 @@ fn move_project_in(
         return Ok(None);
     };
     if let Some(project) = &task.project_id {
-        let project_wave: String = conn.query_row(
-            "SELECT wave_id FROM projects WHERE id=?1",
-            [project.as_str()],
-            |row| row.get(0),
-        )?;
-        if super::children::wave_within_in(conn, wave.as_str(), &project_wave)? {
-            return Ok(Some(project.clone()));
+        if let Some(project_wave) = super::children::project_wave_in(conn, project.as_str())? {
+            if super::children::wave_within_in(conn, wave, &project_wave)? {
+                return Ok(Some(project.clone()));
+            }
         }
     }
     super::children::task_project_in(conn, wave)
@@ -211,14 +209,13 @@ fn move_project_in(
 
 fn validate_move(
     conn: &rusqlite::Connection,
-    id: &TaskId,
+    current: &Task,
     expected_project: Option<&ProjectId>,
     destination: Option<&ProjectId>,
-) -> StoreResult<Task> {
-    let current = super::children::task_on(conn, id)?.ok_or(StoreError::NotFound)?;
-    super::children::require_task_not_deleted(conn, &current)?;
+) -> StoreResult<()> {
+    super::children::require_task_not_deleted(conn, current)?;
     if current.project_id.as_ref() == destination {
-        return Ok(current);
+        return Ok(());
     }
     if current.project_id.as_ref() != expected_project {
         return Err(StoreError::InvalidAuthority(
@@ -236,7 +233,7 @@ fn validate_move(
             ));
         }
     }
-    Ok(current)
+    Ok(())
 }
 
 #[cfg(test)]

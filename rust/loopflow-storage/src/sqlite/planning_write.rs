@@ -7,6 +7,7 @@ use crate::work::edit::{
     CommentContent, Disposition, StampedRecord, StampedValue, WorkEdit, WorkValue,
 };
 use crate::{StoreError, StoreResult};
+use loopflow_model::id::WaveId;
 use rusqlite::{params, Connection, OptionalExtension};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
@@ -477,14 +478,12 @@ fn with_task_waves(conn: &Connection, mut edits: Vec<WorkEdit>) -> StoreResult<V
         if names_wave {
             continue;
         }
-        let Some(project_wave) = conn
-            .prepare_cached("SELECT wave_id FROM projects WHERE id=?1")?
-            .query_row([project], |row| row.get::<_, String>(0))
-            .optional()?
-        else {
+        // A Project made in the same batch is not written yet; its Task's
+        // Wave comes from the batch or stays as it is.
+        let Some(project_wave) = super::children::project_wave_in(conn, project)? else {
             continue;
         };
-        let current: Option<String> = conn
+        let current: Option<WaveId> = conn
             .prepare_cached("SELECT wave_id FROM tasks WHERE id=?1")?
             .query_row([&edit.target], |row| row.get(0))
             .optional()?
@@ -496,7 +495,7 @@ fn with_task_waves(conn: &Connection, mut edits: Vec<WorkEdit>) -> StoreResult<V
         if !within {
             implied.push(WorkEdit {
                 target: edit.target.clone(),
-                change: WorkValue::TaskWave(Some(project_wave)),
+                change: WorkValue::TaskWave(Some(project_wave.to_string())),
             });
         }
     }

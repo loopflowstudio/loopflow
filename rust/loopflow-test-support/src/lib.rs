@@ -20,7 +20,7 @@ pub fn path_without_installed_harnesses(path: &str) -> String {
             entry
                 .canonicalize()
                 .is_ok_and(|entry| entry.starts_with(&stand_ins))
-                || !["claude", "codex", "opencode", "pi"]
+                || !["claude", "codex", "opencode", "pi", "agy"]
                     .iter()
                     .any(|harness| entry.join(harness).exists())
         })

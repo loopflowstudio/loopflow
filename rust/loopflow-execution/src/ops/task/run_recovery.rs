@@ -82,7 +82,7 @@ impl DiedRun {
                 };
                 let outlook = SessionOutlook {
                     kind: SessionOutlookKind::ComingBack,
-                    at: at.and_then(crate::transcript::rfc3339),
+                    at: at.and_then(loopflow_harness::transcript::rfc3339),
                     reason: None,
                     command: None,
                 };

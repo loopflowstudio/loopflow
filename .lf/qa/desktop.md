@@ -108,9 +108,11 @@ Run the app's bundled `lf` with the world's `env.json` variables and
   stand-in. `lf desktop do refresh-session -p session`, `desktop send`/`send-key`
   and `desktop capture --region scrollback` drive and read the pane; a pane's
   `attachment` reads `opening`, `usable` or `failed`. Reuse no markers across runs: scrollback keeps earlier replies.
-- Reinstalling the bundle changes its `lf`: the running private server then
-  answers "uses another executable" and panes lose their surfaces. Restart that
-  server with the new bundled `lf`; held providers survive in the old holder.
+- Reinstalling the bundle changes its `lf`: the running private server stays
+  `ready` and keeps running the old build (`lf server status` gives its
+  `executable_sha256`; compare `shasum -a 256` of the bundled `lf`). Restart
+  that server with the new bundled `lf` to run the new code; held providers
+  survive in the old holder.
 - To see what a pane inherited, compare `lsof -p <app pid>` pipe addresses with
   those of its children and of the PIDs in the world's `processes` table.
 - Quit with `NSRunningApplication(processIdentifier:).terminate()` from a
@@ -155,3 +157,34 @@ Run the app's bundled `lf` with the world's `env.json` variables and
   outage boot out the `server.plist` label, then `lf server run` to recover.
   The world's holder outlives both; stop it and its stand-ins by PID
   (`ps eww` shows `LF_HOME=/private/tmp/…`).
+
+# Dev on a copy of the Machine
+
+`uv run python scripts/loopflow-dev.py run --copy` (every `LF_*` unset, stdin
+closed) builds, copies the store to `~/.lf-copy` and opens Dev there. Read the
+window with the bundled `lf` under `~/.lf-copy/env.json`'s variables plus
+`LF_DESKTOP=com.loopflow.mac.dev`, from `/Users/…/<main checkout>`; quote
+`PATH`, it holds a directory with a space. Record the installed server first
+(`lf server status` instance, `ps -o lstart` of the `com.loopflow.server` job's
+PID) and compare after.
+
+- Changes: served requests on the copy's socket answer the sentence;
+  `plan.list` as a request answers `bulk` with a ticket, so read plans through
+  `lf desktop ls`. Pane commands (`lf session resume <id>`, `lf desktop shell
+  … --create`) and `lf desktop move` on the Dashboard reach the store
+  themselves and print the same sentence.
+- To see the launcher's wire line and the decode Notice in one run, rename one
+  required field in Rust only (`#[serde(rename = …)]` on `RoadmapTask.section`)
+  and run plain `run`: it names the type, opens a copy served by that `lf`, and
+  the unchanged Swift shows the Notice as the window's `reason` in
+  `lf desktop state --json`. Revert and `run` again so the installed Dev bundle
+  is clean.
+- `kill -9` Dev, then `run --world <dir>`: the saved window of the other
+  Machine must not appear (`desktop state` lists one window, the world's).
+- Each `run` after a source change reinstalls the bundle; the next launch's
+  `lf install server` replaces a world's server left by the earlier bundle
+  (new `instance`, `executable_sha256` equal to the bundled `lf`'s).
+- Afterwards boot out the label in `~/.lf-copy/home/server.plist` and the
+  world's; stop the world's holder by PID after checking its `LF_HOME`.
+- An opening receipt in `desktop state` stays `opening` after its window is
+  usable, in the installed app too; do not wait on it.

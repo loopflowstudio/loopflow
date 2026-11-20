@@ -278,7 +278,7 @@ recorded Tasks and every steer, turn and event they wrote. Every agent shares
 one SQLite write lock. Check new queries with `EXPLAIN QUERY PLAN` against a
 store that size.
 
-**Harness, transport and hook code (`rust/loopflow-execution/src/harness/**`, `transport*`):**
+**Harness, transport and hook code (`rust/loopflow-execution/src/harness/**`, `rust/loopflow-harness/**`, `transport*`):**
 lf is a session manager, context adder and hook interjector on top of a
 harness, never a middleman that can break the conversation. It is never in the
 byte path between a person and their provider except as a pass-through that
@@ -290,6 +290,10 @@ gap is one type, `store::RecordingGap` (`note` once per changed failure,
 Session history as a `store-gap` observation when the store answers again.
 Codex clients reach their private app-server directly; lf only observes beside
 them.
+
+A harness's permission and sandbox choices are settled in this order: the
+agent is not handcuffed, then the simplest, then what the other harnesses do.
+Make the choice; don't leave it as a question.
 
 **`*.rs`:**
 - Delete dead code; don't comment it out. Intentionally unused code (FFI, PyO3) gets `#[allow(dead_code)]` with a comment saying why.

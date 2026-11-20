@@ -262,8 +262,10 @@ installation use it so readiness never opens Work or speaks the full protocol;
 `hello` gave and `requests` counts its requests, subscriptions included. The
 `open` and `retained_bytes` fields report current admitted work and retained-byte
 accounting, including pending producers. The
-identity is for diagnostics and grants nothing. Local readiness compares the executable hash with the selected
-installation, an installation check that never applies to a remote client.
+identity is for diagnostics and grants nothing. `ready` means the server answers at a revision the asking build speaks; a
+different executable is not an error, so a branch build reports the installed
+server ready. Installation alone compares `executable_sha256` with the selected
+installation, to decide whether to register again.
 
 After `welcome`, many requests share the connection. A `request` carries an `id`
 (1–128 bytes, unique among the connection's unanswered requests) and an
@@ -1299,7 +1301,7 @@ provider. A lost
 connection alone does not establish process death.
 
 Desktop reconnects to the same held terminal with bounded backoff. See
-[connection loss](../../../../docs/server.md#keep-editing-through-a-connection-loss)
+[connection loss](../../../../docs/server.md#keep-working-through-a-connection-loss)
 for connection status and recovery controls outside terminal bytes.
 
 The Loopflow Session, provider conversation, serving AgentProcess and the

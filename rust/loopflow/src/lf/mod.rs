@@ -671,10 +671,18 @@ pub enum Commands {
         delivery: Option<std::path::PathBuf>,
         #[arg(long, value_enum, default_value = "stop")]
         moment: loopflow_execution::context_block::ContextMoment,
+        /// The harness whose provider sent the callback, when it is not in
+        /// Claude's shape.
+        #[arg(long, value_parser = parse_hook_harness)]
+        harness: Option<loopflow_harness::HarnessKind>,
     },
     /// External: skill/graph name (when no subcommand matches)
     #[command(external_subcommand)]
     External(Vec<String>),
+}
+
+fn parse_hook_harness(name: &str) -> Result<loopflow_harness::HarnessKind, String> {
+    loopflow_harness::HarnessKind::parse(name).ok_or_else(|| format!("unknown harness {name}"))
 }
 
 /// `repository.*`: one repository's planning exchange, releases, CI, people,
@@ -3896,6 +3904,7 @@ mod tests {
             Some(Commands::ContextBlock {
                 delivery: None,
                 moment: loopflow_execution::context_block::ContextMoment::Stop,
+                harness: None,
             })
         ));
     }

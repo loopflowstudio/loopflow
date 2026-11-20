@@ -17,7 +17,6 @@ use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 
 use super::{provider_conversation, session_by_id, session_not_found};
-use crate::harness::HarnessKind;
 use crate::process::Departure;
 use crate::provider_auth::Provider;
 use crate::repository::CanonicalRepo;
@@ -25,7 +24,9 @@ use crate::session::{LfSession, PrimaryScope, TitleSource, WorkSource};
 use crate::store::task_work::TaskGraphRecord;
 use crate::store::ProcessIdentityEvidence;
 use crate::store::SharedStore;
-use crate::transcript::{Located, Source};
+use crate::transcript::Located;
+use loopflow_harness::transcript::Source;
+use loopflow_harness::HarnessKind;
 use loopflow_model::durable::{MachineId, RepositoryId, TaskId, TaskOwnershipEntry, WorkRef};
 use loopflow_model::id::{AgentSessionId, LfSessionId, WaveId};
 use loopflow_storage::graph_process::Execution;
@@ -699,7 +700,7 @@ async fn receive_move(store: &SharedStore, moved: Move) -> Result<Option<LfSessi
         crate::transcript::conversation_home(&store.sqlite, provider, &history.agent_session_id)?
             .unwrap_or_else(|| crate::transcript::native_home(provider));
     let base = match provider {
-        Provider::Claude => crate::transcript::live::claude_project(&home, &cwd),
+        Provider::Claude => loopflow_harness::transcript::live::claude_project(&home, &cwd),
         _ => home,
     };
     for file in &history.files {
@@ -843,7 +844,7 @@ async fn take_in_task(
 /// Machine's reader does not know yields none.
 fn readable(harness: HarnessKind, base: &Path, files: &[MovedFile]) -> bool {
     files.first().is_some_and(|file| {
-        crate::transcript::read(harness, &Source::File(base.join(&file.path)))
+        loopflow_harness::transcript::read(harness, &Source::File(base.join(&file.path)))
             .is_ok_and(|turns| !turns.is_empty())
     })
 }

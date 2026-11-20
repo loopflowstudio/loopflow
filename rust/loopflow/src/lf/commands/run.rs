@@ -710,7 +710,10 @@ fn run_prompt(
         return result
             .and_then(|outcome| {
                 let harness = built.agent_config.agent.harness;
-                let assigned = harness.harness().capabilities().thread.for_kind(kind)
+                let assigned = loopflow_execution::harness::launcher(harness)
+                    .capabilities()
+                    .thread
+                    .for_kind(kind)
                     == loopflow_execution::harness::ThreadName::Assigned;
                 outcome.result(harness, assigned, kind)
             })

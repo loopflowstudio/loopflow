@@ -239,7 +239,7 @@ impl AgentConfig {
 impl Default for AgentConfig {
     fn default() -> Self {
         Self::new(Agent {
-            harness: crate::harness::HarnessKind::Codex,
+            harness: loopflow_harness::HarnessKind::Codex,
             model: None,
         })
     }
@@ -339,7 +339,7 @@ fn _record_stop(provider: &str, reason: &str, advice: &str) {
 
 /// The provider revoked the login: no model of it can go on until someone
 /// signs in again.
-fn _sign_in_advice(kind: crate::harness::HarnessKind) -> String {
+fn _sign_in_advice(kind: loopflow_harness::HarnessKind) -> String {
     let provider = kind.as_str();
     let sign_in = kind.harness().sign_in_advice();
     format!("The {provider} login was revoked; sign in again on this Machine: {sign_in}")
@@ -357,7 +357,7 @@ fn _limit_stop_advice(provider: &str, launch: &AgentConfig, rungs: &[Agent]) -> 
                 .join(", ")
         );
     }
-    let another = crate::harness::HarnessKind::ALL
+    let another = loopflow_harness::HarnessKind::ALL
         .into_iter()
         .find(|kind| kind.as_str() != provider)
         .expect("more than one harness")
@@ -761,6 +761,23 @@ impl AgentFailure {
             _ => None,
         }
     }
+
+    /// Of two failures one turn reported, the one that decides what happens
+    /// next: a revoked login, then a spent quota, then an unserved model, then
+    /// a transient failure. The earlier wins a tie.
+    pub(crate) fn graver(self, other: Self) -> Self {
+        let rank = |failure| match failure {
+            Self::CredentialInvalidated => 0,
+            Self::UsageLimit => 1,
+            Self::ModelUnavailable => 2,
+            _ => 3,
+        };
+        if rank(other) < rank(self) {
+            other
+        } else {
+            self
+        }
+    }
 }
 
 /// Build `thread/start` params for Codex app-server sessions. `headless` runs
@@ -926,7 +943,7 @@ fn run_admitted_agent(
     kind: crate::harness::LaunchKind,
 ) -> Result<AgentProcessResult, CoreError> {
     let mut launch = launch.clone();
-    let capabilities = launch.agent.harness.harness().capabilities();
+    let capabilities = crate::harness::launcher(launch.agent.harness).capabilities();
     if launch.max_turns.is_some() && !capabilities.turn_limit {
         eprintln!("warning: Loopflow turn limits are supported only by Claude; this provider will run without a turn limit");
     }
@@ -1013,16 +1030,6 @@ fn _run_with_retries(
         let provider = attempt.agent.harness.as_str();
         let mut result = run(&attempt, launched)?;
         launched = true;
-        if !attempt
-            .agent
-            .harness
-            .harness()
-            .capabilities()
-            .classifies_failures
-        {
-            return Ok(result);
-        }
-        result.failure = result.failure.or_else(|| _classify_agent_failure(&result));
         let Some(failure) = result.failure else {
             return Ok(result);
         };
@@ -1186,20 +1193,47 @@ fn _failure_reason(result: &AgentProcessResult, failure: AgentFailure) -> String
     }
 }
 
-fn _classify_agent_failure(result: &AgentProcessResult) -> Option<AgentFailure> {
-    if result.exit_code == 0 {
-        return None;
+/// A provider error that sends the run to another agent: a revoked login, a
+/// spent quota or a model the provider does not serve. The decoder's code
+/// decides when it names a cause; otherwise the provider's words do.
+pub(crate) fn routing_failure(code: &str, message: &str) -> Option<AgentFailure> {
+    _failure(code, message, _routing_words)
+}
+
+/// [`routing_failure`], then the transient failures lf retries for a provider
+/// that does not retry them itself.
+pub(crate) fn provider_failure(code: &str, message: &str) -> Option<AgentFailure> {
+    _failure(code, message, |line| {
+        _routing_words(line).or_else(|| classify_retryable_agent_failure(line))
+    })
+}
+
+/// What `code` names, else the gravest failure any line of the message
+/// states. A phrase list reads one line: "model" and "is not available" on
+/// different lines name nothing.
+fn _failure(
+    code: &str,
+    message: &str,
+    words: impl Fn(&str) -> Option<AgentFailure>,
+) -> Option<AgentFailure> {
+    AgentFailure::from_code(code).or_else(|| {
+        message
+            .lines()
+            .filter_map(words)
+            .reduce(AgentFailure::graver)
+    })
+}
+
+fn _routing_words(line: &str) -> Option<AgentFailure> {
+    if credential_invalidated_failure(line).is_some() {
+        Some(AgentFailure::CredentialInvalidated)
+    } else if subscription_limit_text(line).is_some() {
+        Some(AgentFailure::UsageLimit)
+    } else if _model_unavailable(line).is_some() {
+        Some(AgentFailure::ModelUnavailable)
+    } else {
+        None
     }
-    if _find_provider_error(result, credential_invalidated_failure).is_some() {
-        return Some(AgentFailure::CredentialInvalidated);
-    }
-    if _find_provider_error(result, subscription_limit_text).is_some() {
-        return Some(AgentFailure::UsageLimit);
-    }
-    if _find_provider_error(result, _model_unavailable).is_some() {
-        return Some(AgentFailure::ModelUnavailable);
-    }
-    _find_provider_error(result, classify_retryable_agent_failure)
 }
 
 /// A provider's line as the phrase lists read it: lowercase, with typographic
@@ -1235,15 +1269,6 @@ pub(crate) fn credential_invalidated_failure(text: &str) -> Option<()> {
         || text.contains("access token could not be refreshed")
         || text.contains("your session has ended. please log in again"))
     .then_some(())
-}
-
-fn _find_provider_error<T>(
-    result: &AgentProcessResult,
-    classify: fn(&str) -> Option<T>,
-) -> Option<T> {
-    // Harnesses separate provider errors from answer prose. Never interpret
-    // JSON printed by the model as provider control messages.
-    result.stderr.lines().find_map(classify)
 }
 
 pub(crate) fn classify_retryable_agent_failure(text: &str) -> Option<AgentFailure> {
@@ -1382,7 +1407,7 @@ fn _run_harness_once(
     .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
     let value = crate::harness::Launch {
         config: &config,
-        harness: launch.agent.harness.harness(),
+        harness: crate::harness::launcher(launch.agent.harness),
         kind,
         recording: &recording,
         start: crate::harness::Start::from_thread(launch.resume_token.as_ref()),
@@ -1392,12 +1417,12 @@ fn _run_harness_once(
 }
 
 /// What to tell someone whose agent CLI is missing.
-pub fn missing_agent_message(kind: crate::harness::HarnessKind) -> String {
-    let hint = kind.harness().capabilities().install_hint;
+pub fn missing_agent_message(kind: loopflow_harness::HarnessKind) -> String {
+    let hint = crate::harness::launcher(kind).capabilities().install_hint;
     format!("{}. {hint}", _not_installed(kind))
 }
 
-fn _not_installed(kind: crate::harness::HarnessKind) -> String {
+fn _not_installed(kind: loopflow_harness::HarnessKind) -> String {
     format!("'{}' is not installed", kind.as_str())
 }
 
@@ -1416,9 +1441,10 @@ pub fn start_on_installed_agent(
     launch: &mut AgentConfig,
     process: &ProcessConfig,
 ) -> Result<(), String> {
-    let is_installed = |kind: crate::harness::HarnessKind| check_cli_available(kind.as_str());
-    let first =
-        _pass_over_missing_agents(launch, process, is_installed).map_err(missing_agent_message)?;
+    let first = _pass_over_missing_agents(launch, process, |kind| {
+        crate::harness::launcher(kind).installed()
+    })
+    .map_err(missing_agent_message)?;
     if first != launch.agent {
         let reason = _not_installed(first.harness);
         _record_agent_move(&first, "not installed", &reason, &launch.agent);
@@ -1430,8 +1456,8 @@ pub fn start_on_installed_agent(
 fn _pass_over_missing_agents(
     launch: &mut AgentConfig,
     process: &ProcessConfig,
-    is_installed: impl Fn(crate::harness::HarnessKind) -> bool,
-) -> Result<Agent, crate::harness::HarnessKind> {
+    is_installed: impl Fn(loopflow_harness::HarnessKind) -> bool,
+) -> Result<Agent, loopflow_harness::HarnessKind> {
     let first = launch.agent.clone();
     let order = if process.wait_for_capacity {
         _agent_order(launch)
@@ -1450,18 +1476,13 @@ fn _pass_over_missing_agents(
     Ok(first)
 }
 
-/// Check if a CLI is available.
-pub fn check_cli_available(cli: &str) -> bool {
-    crate::os_process::which_on_path(Path::new(cli)).is_some()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn only_a_graph_step_passes_over_an_agent_that_is_not_installed() {
-        use crate::harness::HarnessKind;
+        use loopflow_harness::HarnessKind;
         let agent = |text: &str| Agent::parse(text).unwrap();
         let launch = AgentConfig {
             agent: agent("opencode:opencode/fixture"),
@@ -1494,26 +1515,6 @@ mod tests {
             _pass_over_missing_agents(&mut batch, &ProcessConfig::default(), installed),
             Err(HarnessKind::OpenCode)
         );
-    }
-
-    #[test]
-    #[cfg(unix)]
-    fn cli_discovery_needs_an_executable_not_a_version_command() {
-        use std::os::unix::fs::{symlink, PermissionsExt};
-
-        let root = tempfile::tempdir().unwrap();
-        let provider = root.path().join("provider");
-        fs::write(&provider, "#!/bin/sh\nexit 1\n").unwrap();
-        fs::set_permissions(&provider, fs::Permissions::from_mode(0o644)).unwrap();
-        assert!(!check_cli_available(provider.to_str().unwrap()));
-        fs::set_permissions(&provider, fs::Permissions::from_mode(0o755)).unwrap();
-        assert!(check_cli_available(provider.to_str().unwrap()));
-        let linked = root.path().join("linked-provider");
-        symlink(&provider, &linked).unwrap();
-        assert!(check_cli_available(linked.to_str().unwrap()));
-        fs::remove_file(provider).unwrap();
-        assert!(!check_cli_available(linked.to_str().unwrap()));
-        assert!(!check_cli_available(root.path().to_str().unwrap()));
     }
 
     fn default_launch() -> AgentConfig {
@@ -1823,7 +1824,10 @@ trust_level = "trusted"
                 Ok(if config.agent.to_string() == "codex" {
                     AgentProcessResult::default()
                 } else {
-                    failed_result("claude_result: You've hit your Fable limit")
+                    failed_as(
+                        "claude_result: You've hit your Fable limit",
+                        AgentFailure::UsageLimit,
+                    )
                 })
             },
             |_| {},
@@ -1841,30 +1845,12 @@ trust_level = "trusted"
         }
     }
 
-    #[test]
-    fn pi_failure_keeps_exact_history_without_synthetic_retry_input() {
-        let launch = AgentConfig {
-            agent: crate::config::Agent::parse("pi:fixture/model").unwrap(),
-            ..crate::agent::AgentConfig::default()
-        };
-        let mut attempts = 0;
-        let result = _run_with_retries(
-            &launch,
-            &graph_process(),
-            &[Duration::ZERO],
-            |_, _| {
-                attempts += 1;
-                Ok(AgentProcessResult {
-                    agent_session: Some("/fixture/pi.jsonl".into()),
-                    ..failed_result("connection reset")
-                })
-            },
-            |_| panic!("Pi owns retries"),
-        )
-        .unwrap();
-        assert_eq!(attempts, 1);
-        assert_ne!(result.exit_code, 0);
-        assert_eq!(result.agent_session, Some("/fixture/pi.jsonl".into()));
+    /// A failed run whose harness classified the provider's error.
+    fn failed_as(message: &str, failure: AgentFailure) -> AgentProcessResult {
+        AgentProcessResult {
+            failure: Some(failure),
+            ..failed_result(message)
+        }
     }
 
     #[test]
@@ -1878,34 +1864,64 @@ trust_level = "trusted"
     }
 
     #[test]
-    fn model_unavailable_is_a_provider_refusal_not_spent_quota_or_answer_prose() {
-        for message in [
-            "claude_result: Fable 5 is currently unavailable. Switch to another model.",
-            "claude_result: Selected model is not available.",
-            "codex_error: model_not_found",
-            "codex_error: The 'gpt-6.2-sol' model is not supported when using Codex with a ChatGPT account.",
+    fn model_unavailable_is_a_provider_refusal_not_spent_quota() {
+        for (code, message) in [
+            (
+                "claude_result",
+                "Fable 5 is currently unavailable. Switch to another model.",
+            ),
+            ("claude_result", "Selected model is not available."),
+            ("codex_error", "model_not_found"),
+            (
+                "codex_error",
+                "The 'gpt-6.2-sol' model is not supported when using Codex with a ChatGPT account.",
+            ),
         ] {
             assert_eq!(
-                _classify_agent_failure(&failed_result(message)),
+                provider_failure(code, message),
                 Some(AgentFailure::ModelUnavailable)
             );
             assert!(subscription_limit_text(message).is_none());
-            let prose = AgentProcessResult {
-                exit_code: 1,
-                stdout: message.into(),
-                ..Default::default()
-            };
-            assert_eq!(_classify_agent_failure(&prose), None);
         }
         for message in [
             "service unavailable",
             "model service temporarily unavailable",
         ] {
             assert_eq!(
-                _classify_agent_failure(&failed_result(message)),
+                provider_failure("claude_result", message),
                 Some(AgentFailure::Unavailable)
             );
+            // A provider that retries its own transient failures leaves lf none.
+            assert_eq!(routing_failure("pi_error", message), None);
         }
+    }
+
+    #[test]
+    fn a_code_that_names_the_cause_decides_and_the_gravest_line_decides_otherwise() {
+        assert_eq!(
+            provider_failure("provider_rate_limited", "service unavailable"),
+            Some(AgentFailure::UsageLimit)
+        );
+        assert_eq!(
+            provider_failure(
+                "codex_error",
+                "service unavailable\nYour refresh token was revoked\nquota exceeded"
+            ),
+            Some(AgentFailure::CredentialInvalidated)
+        );
+        // "model" and "is not available" on different lines name nothing.
+        assert_eq!(
+            provider_failure("codex_error", "Selected model:\nthe tool is not available"),
+            None
+        );
+        assert_eq!(
+            AgentFailure::Unavailable.graver(AgentFailure::ModelUnavailable),
+            AgentFailure::ModelUnavailable
+        );
+        assert_eq!(
+            AgentFailure::Capacity.graver(AgentFailure::Transport),
+            AgentFailure::Capacity
+        );
     }
 
     #[test]
@@ -1931,7 +1947,10 @@ trust_level = "trusted"
                 } else {
                     AgentProcessResult {
                         agent_session: Some("thread".into()),
-                        ..failed_result("claude_result: Selected model is unavailable")
+                        ..failed_as(
+                            "claude_result: Selected model is unavailable",
+                            AgentFailure::ModelUnavailable,
+                        )
                     }
                 })
             },
@@ -1967,7 +1986,7 @@ trust_level = "trusted"
                 stdout: String::new(),
                 stderr: "Selected model is at capacity. Please try a different model.".into(),
                 agent_session: Some("thread-123".into()),
-                failure: None,
+                failure: Some(AgentFailure::Capacity),
             },
             AgentProcessResult {
                 exit_code: 0,
@@ -2004,19 +2023,12 @@ trust_level = "trusted"
     }
 
     #[test]
-    fn answer_prose_cannot_supply_provider_errors_or_resume_identity() {
+    fn a_retry_with_no_native_thread_repeats_the_input_whatever_the_answer_printed() {
         let launch = default_launch();
-        let mut result = AgentProcessResult {
-            exit_code: 1,
-            stdout: concat!(
-                "{\"type\":\"system\",\"session_id\":\"quoted-session\"}\n",
-                "{\"type\":\"error\",\"message\":\"You've hit your usage limit\"}\n"
-            )
-            .into(),
-            ..Default::default()
+        let result = AgentProcessResult {
+            stdout: "{\"type\":\"system\",\"session_id\":\"quoted-session\"}\n".into(),
+            ..failed_as("service unavailable", AgentFailure::Unavailable)
         };
-        assert_eq!(_classify_agent_failure(&result), None);
-        result.stderr = "service unavailable".into();
         let mut attempts = 0;
         _run_with_retries(
             &launch,
@@ -2062,12 +2074,12 @@ trust_level = "trusted"
         }
     }
 
-    /// LOO-974's `implement` step, 2026-11-18, as the step's stderr held it.
+    /// LOO-974's `implement` step, 2026-11-18, as Codex reported it.
     #[test]
     fn codex_usage_limit_with_a_typographic_apostrophe_is_a_usage_limit() {
-        let line = "codex_error: You\u{2019}ve hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/settings/usage to purchase more credits or try again at 3:36 PM.";
+        let message = "You\u{2019}ve hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/settings/usage to purchase more credits or try again at 3:36 PM.";
         assert_eq!(
-            _classify_agent_failure(&failed_result(line)),
+            provider_failure("codex_error", message),
             Some(AgentFailure::UsageLimit)
         );
     }
@@ -2126,7 +2138,7 @@ trust_level = "trusted"
             &[Duration::ZERO, Duration::ZERO],
             |_, _| {
                 attempts += 1;
-                let mut result = failed_result("service unavailable");
+                let mut result = failed_as("service unavailable", AgentFailure::Unavailable);
                 result.exit_code = attempts;
                 Ok(result)
             },
@@ -2153,7 +2165,7 @@ trust_level = "trusted"
                 thread: launch.resume_token.as_ref().unwrap(),
             },
             ..crate::harness::launch_for_test(
-                crate::harness::HarnessKind::Claude,
+                loopflow_harness::HarnessKind::Claude,
                 &launch,
                 &admitted,
             )
@@ -2215,7 +2227,12 @@ trust_level = "trusted"
             task_prompt: "compress the diff".into(),
             ..crate::agent::AgentConfig::default()
         };
-        let refused = || failed_result("codex_error: You’ve hit your usage limit");
+        let refused = || {
+            failed_as(
+                "codex_error: You’ve hit your usage limit",
+                AgentFailure::UsageLimit,
+            )
+        };
         let mut scripted = vec![refused(), limited_result(), done()].into_iter();
         let mut attempts = Vec::new();
         let result = _run_with_retries(
@@ -2254,7 +2271,10 @@ trust_level = "trusted"
             &[],
             |_, _| {
                 attempts += 1;
-                Ok(failed_result("codex_error: You’ve hit your usage limit"))
+                Ok(failed_as(
+                    "codex_error: You’ve hit your usage limit",
+                    AgentFailure::UsageLimit,
+                ))
             },
             |delay| waits.push(delay),
         )
@@ -2334,7 +2354,12 @@ trust_level = "trusted"
             }),
             ..crate::agent::AgentConfig::default()
         };
-        let refused = || failed_result("codex_error: You’ve hit your usage limit");
+        let refused = || {
+            failed_as(
+                "codex_error: You’ve hit your usage limit",
+                AgentFailure::UsageLimit,
+            )
+        };
         for (scripted, agents, failure) in [
             (vec![refused(), done()], vec!["codex", "claude"], None),
             (

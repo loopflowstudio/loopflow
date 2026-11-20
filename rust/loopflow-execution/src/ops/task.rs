@@ -68,7 +68,7 @@ use crate::work::wave::Wave;
 use loopflow_model::durable::WorkStatus;
 use loopflow_storage::child::ChildRef;
 use loopflow_storage::planning_sync::LostAnswer;
-use loopflow_storage::sqlite::tracker_actions::ActionPhase;
+use loopflow_storage::sqlite::tracker_actions::{ActionOwner, ActionPhase, TrackerAction};
 use loopflow_storage::sqlite::{SqliteStore, TaskCheckout};
 use loopflow_storage::work::task::{
     GithubPr, Observation, PrMergeMode, PrPhase, PrPublication, Task, TaskEventKind, TaskPr,
@@ -401,6 +401,17 @@ async fn task_store() -> OpsResult<SharedStore> {
         .ok_or_else(|| task_error("no Loopflow registry on this machine; run `lf doctor`"))
 }
 
+/// Where a stack parent's current PR stands.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StackParentPr {
+    Open,
+    Merged,
+    /// Closed without merging, and the parent Task has no PR after it.
+    Closed {
+        number: Option<u64>,
+    },
+}
+
 /// Durable placement for a Task checkout forked from another Task's PR.
 #[derive(Debug, Clone)]
 pub struct StackedSync {
@@ -411,14 +422,42 @@ pub struct StackedSync {
     pub parent_identifier: String,
     /// The parent's PR branch, kept after it merges.
     pub parent_branch: String,
-    pub parent_merged: bool,
+    /// The row the parent resolves to now; differs from the child's recorded
+    /// `parent_pr_id` when the recorded PR closed and the parent reopened.
+    pub parent_pr: TaskPrId,
+    pub parent: StackParentPr,
 }
 
 impl StackedSync {
-    /// The live parent branch, or `None` once the parent has merged.
-    pub fn live_parent_branch(&self) -> Option<&str> {
-        (!self.parent_merged).then_some(self.parent_branch.as_str())
+    /// The parent branch to build on while its PR is open, `None` once it
+    /// merged. A parent that closed with no PR to follow is an error naming
+    /// both ways out.
+    pub fn live_parent_branch(&self, default_branch: &str) -> OpsResult<Option<&str>> {
+        match &self.parent {
+            StackParentPr::Open => Ok(Some(&self.parent_branch)),
+            StackParentPr::Merged => Ok(None),
+            StackParentPr::Closed { number } => {
+                let parent = &self.parent_identifier;
+                let pr = number.map_or("PR".to_string(), |number| format!("PR #{number}"));
+                Err(task_error(format!(
+                    "stack parent {parent}'s {pr} closed without merging; `lf sync {parent}` restacks this Task on its branch, `lf sync {default_branch}` detaches it"
+                )))
+            }
+        }
     }
+}
+
+/// The stack parent's PR as people think of it: the recorded row, unless it
+/// closed without merging; then the parent Task's current row.
+async fn current_parent_pr(store: &SharedStore, recorded: TaskPr) -> OpsResult<TaskPr> {
+    if recorded.abandoned_at.is_none() || recorded.merge_commit.is_some() {
+        return Ok(recorded);
+    }
+    Ok(store
+        .active_task_pr(&recorded.task_id)
+        .await
+        .map_err(task_error)?
+        .unwrap_or(recorded))
 }
 
 /// Resolve a Task's current cross-Task stack from durable ids, consulting
@@ -434,13 +473,13 @@ pub fn task_stack(worktree: &Path) -> OpsResult<Option<StackedSync>> {
         let Some(parent_id) = task.parent_pr_id.clone() else {
             return Ok(None);
         };
-        let parent = store
+        let recorded = store
             .get_task_pr(&parent_id)
             .await
             .map_err(task_error)?
             .ok_or_else(|| task_error(format!("stack parent {parent_id} is missing")))?;
         let mut parent_task = store
-            .get_task(&parent.task_id)
+            .get_task(&recorded.task_id)
             .await
             .map_err(task_error)?
             .ok_or_else(|| task_error("stack parent Task is missing"))?;
@@ -448,25 +487,30 @@ pub fn task_stack(worktree: &Path) -> OpsResult<Option<StackedSync>> {
         // resolution used to enumerate every PR on the branch independently,
         // bypassing both the Task cache and outage-tolerant reconcile.
         reconcile_task_pr(&store, &mut parent_task).await?;
-        let parent = store
+        let recorded = store
             .get_task_pr(&parent_id)
             .await
             .map_err(task_error)?
             .ok_or_else(|| task_error(format!("stack parent {parent_id} disappeared")))?;
-        let merged = parent.merge_commit.is_some();
-        let closed = parent.abandoned_at.is_some();
-        if closed && !merged {
-            return Err(task_error(format!(
-                "stack parent {} closed without merging; re-place the child deliberately",
-                parent.branch
-            )));
-        }
+        let parent = current_parent_pr(&store, recorded).await?;
+        let state = if parent.merge_commit.is_some() {
+            StackParentPr::Merged
+        } else if parent.abandoned_at.is_some() {
+            StackParentPr::Closed {
+                number: parent.github().map(|github| u64::from(github.number)),
+            }
+        } else {
+            StackParentPr::Open
+        };
         // A child rebased onto the default branch after its parent landed holds
         // the parent's work through the merge commit, not the recorded parent
         // tip. That commit is its base now; one missing both is refused later.
         let fork_base = match parent.merge_commit.as_deref() {
             Some(merge) if contains_commit(worktree, merge)? => merge.to_string(),
-            _ if !crate::git::commit_exists(worktree, &task.base_commit)? => {
+            // A closed parent's branch may be gone; its consumers refuse first.
+            _ if !matches!(state, StackParentPr::Closed { .. })
+                && !crate::git::commit_exists(worktree, &task.base_commit)? =>
+            {
                 // Recover from shared Git history without changing placement on
                 // a read. The owned sync records its verified target on success.
                 crate::git::merge_base(worktree, "HEAD", &format!("origin/{}", parent.branch))?
@@ -478,7 +522,8 @@ pub fn task_stack(worktree: &Path) -> OpsResult<Option<StackedSync>> {
             child: *task,
             parent_identifier: parent_task.identifier,
             parent_branch: parent.branch,
-            parent_merged: merged,
+            parent_pr: parent.id,
+            parent: state,
         }))
     })
 }
@@ -522,7 +567,8 @@ fn contains_commit(worktree: &Path, commit: &str) -> OpsResult<bool> {
 pub fn stack_for_landing(worktree: &Path) -> OpsResult<Option<StackedSync>> {
     let stacked = task_stack(worktree)?;
     if let Some(stacked) = &stacked {
-        if let Some(parent) = stacked.live_parent_branch() {
+        let default = crate::git::get_default_branch(worktree)?;
+        if let Some(parent) = stacked.live_parent_branch(&default)? {
             return Err(task_error(format!(
                 "Task PR is stacked on {parent}, which has not merged; land the parent first"
             )));
@@ -531,8 +577,9 @@ pub fn stack_for_landing(worktree: &Path) -> OpsResult<Option<StackedSync>> {
     Ok(stacked)
 }
 
-/// Persist the exact base reached by a successful deterministic sync. Clear
-/// the parent link after landing or an explicitly requested default-branch sync.
+/// Persist the exact base reached by a successful deterministic sync, with the
+/// parent PR it followed. Clear the parent link after landing or an explicitly
+/// requested default-branch sync.
 /// Refuses with an actionable authority error if the registry is not usable, so
 /// a post-sync base is never silently dropped — the sync already pushed, so
 /// the operator must know the durable record did not advance with it.
@@ -561,11 +608,12 @@ pub fn record_stack_sync(
         // The immutable event log preserves the audit trail — the child's
         // `PrStarted` (parent base) and the parent's `PrMerged` remain — so the
         // sync only repoints the mutable row to the post-merge truth.
+        let parent_pr = (!clear_parent).then_some(&stacked.parent_pr);
         store
             .sync_task_placement(
                 &task_id,
                 &new_base,
-                clear_parent,
+                parent_pr,
                 time::OffsetDateTime::now_utc(),
             )
             .await
@@ -2967,24 +3015,29 @@ pub(super) async fn link_pr_to_planning(store: &SharedStore, task: &Task, pr: &m
         else {
             return Ok(None);
         };
-        let owner = loopflow_storage::sqlite::tracker_actions::ActionOwner::Task(task.id.clone());
-        super::tracker::drain::drain_repository(
-            store,
-            &repo.to_string_lossy(),
-            super::tracker::drain::Scope::First(&owner),
-            super::tracker::drain::Bound::PASS,
-        )
-        .await?;
-        let action = store.sqlite.tracker_action(&id).map_err(task_error)?;
-        Ok::<_, OpsError>(match action {
-            Some(action)
-                if matches!(
+        let shown = |action: &Option<TrackerAction>| {
+            action.as_ref().is_some_and(|action| {
+                matches!(
                     action.phase,
                     ActionPhase::Confirmed | ActionPhase::Conflicted
-                ) =>
-            {
-                None
-            }
+                )
+            })
+        };
+        let mut action = store.sqlite.tracker_action(&id).map_err(task_error)?;
+        // The tracker already shows this state: nothing to send.
+        if !shown(&action) {
+            let owner = ActionOwner::Task(task.id.clone());
+            super::tracker::drain::drain_repository(
+                store,
+                &repo.to_string_lossy(),
+                super::tracker::drain::Scope::First(&owner),
+                super::tracker::drain::Bound::PASS,
+            )
+            .await?;
+            action = store.sqlite.tracker_action(&id).map_err(task_error)?;
+        }
+        Ok::<_, OpsError>(match action {
+            action if shown(&action) => None,
             Some(action) => Some(action.error.unwrap_or_else(|| {
                 "PR link is waiting to be sent; `lf repo tracker` lists it".into()
             })),

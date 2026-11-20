@@ -1320,9 +1320,15 @@ fn settle_app_artifacts(artifacts: &PreparedArtifacts) -> Result<()> {
 /// afresh. Callers settle the legacy target. Runs under the promotion lock with
 /// no switch in flight; the install is already committed, so failures are logged.
 fn converge_release_app(target: &Path) {
-    // Nothing in it ends in `.app`, so Launch Services holds none of it.
-    // Inspect each bundle separately: a renamed helper may still own a Session.
+    let registered = in_applications_folder(target);
     let mut stale = sibling_promotion_copies(target);
+    if registered {
+        stale.extend(earlier_release_installs(target));
+        for app in &stale {
+            lsregister(&["-u"], app);
+        }
+    }
+    // The .noindex container holds unregistered copies, some still running.
     match fs::read_dir(install_scratch(target)) {
         Ok(entries) => {
             stale.extend(entries.filter_map(|entry| entry.ok().map(|entry| entry.path())))
@@ -1330,14 +1336,7 @@ fn converge_release_app(target: &Path) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
         Err(error) => tracing::warn!(%error, "superseded app copies could not be read"),
     }
-    let registered = in_applications_folder(target);
-    if registered {
-        stale.extend(earlier_release_installs(target));
-    }
     for app in stale {
-        if registered {
-            lsregister(&["-u"], &app);
-        }
         if let Err(error) = remove_retired_app(&app) {
             tracing::warn!(%error, "superseded app was not removed");
         }
@@ -2932,15 +2931,11 @@ pub fn promote(
     if sync_skills && !preview_only {
         if promoted.is_some() {
             if let Err(error) = crate::lf::commands::ops::run_sync_skills(true, false, false) {
-                eprintln!(
-                    "warning: skill sync failed ({error:#}); binaries installed, skills unchanged"
-                );
+                eprintln!("warning: binaries installed, but skill sync failed ({error:#})");
             }
         }
         install_link_receiver(app_target);
     }
-    // The result goes last: skill sync prints dozens of lines, and the person or
-    // agent installing reads the tail.
     if let Some(promoted) = promoted {
         println!("{}", promoted.summary);
         crate::lf::commands::binaries::report_after_promote(promoted.replaced_app, &promoted.store);

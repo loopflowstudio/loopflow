@@ -4,9 +4,10 @@ use std::path::Path;
 
 use crate::agent::{AgentConfig, ProcessConfig};
 use crate::harness::LaunchKind;
-use crate::harness::{HarnessKind, Launch, Mode, Recording, Start};
+use crate::harness::{Launch, Mode, Recording, Start};
 use crate::process::LfProcessRuntime;
 use crate::session_record::{SessionCaptureSpec, SessionGraphMembership, SessionRecorder};
+use loopflow_harness::HarnessKind;
 
 fn executable(path: &Path, source: &str) {
     std::fs::write(path, source).unwrap();
@@ -76,6 +77,13 @@ if "--mode" not in sys.argv and "LF_PROVIDER_CONTEXT" not in os.environ: sys.exi
 {}
 "#,
             include_str!("testdata/pi_rpc.py")
+        ),
+    );
+    executable(
+        &bin.join("agy"),
+        &format!(
+            "#!/usr/bin/python3\n{record}\n{}",
+            include_str!("../../tests/support/antigravity_cli.py")
         ),
     );
 }
@@ -173,7 +181,7 @@ fn every_harness_runs_all_four_launch_kinds() {
                 config.env.insert("LF_BIN".into(), binary.into());
                 let launch = Launch {
                     config: &config,
-                    harness: harness.harness(),
+                    harness: crate::harness::launcher(harness),
                     kind,
                     recording: &recording,
                     start: Start::New,
@@ -231,9 +239,12 @@ fn every_harness_runs_all_four_launch_kinds() {
                     flag("--chrome") == (harness == HarnessKind::Claude),
                     "{row}: Chrome flag ownership"
                 );
+                // Antigravity's terminal follows the setting; its headless run
+                // always skips, since nobody answers a prompt there.
+                let skips = matches!(harness, HarnessKind::Claude | HarnessKind::Antigravity);
                 anyhow::ensure!(
-                    flag("--dangerously-skip-permissions") == (harness == HarnessKind::Claude),
-                    "{row}: Claude yolo setting"
+                    flag("--dangerously-skip-permissions") == skips,
+                    "{row}: yolo setting"
                 );
                 if harness == HarnessKind::OpenCode {
                     let settings = commands
@@ -338,7 +349,7 @@ fn held_codex_with_a_saved_empty_thread_sends_its_first_prompt() {
             };
             // Native launch recovers the stored thread even when the entry has no explicit resume token.
             let launch = Launch {
-                harness: HarnessKind::Codex.harness(),
+                harness: crate::harness::launcher(HarnessKind::Codex),
                 config: &config,
                 kind: LaunchKind::WorkSession,
                 recording: &recording,
@@ -364,6 +375,114 @@ fn held_codex_with_a_saved_empty_thread_sends_its_first_prompt() {
     .unwrap();
 }
 
+/// `/new` in the terminal continues the same `agy` under another
+/// conversation: that one gets the context block, and it is the one the
+/// Session keeps and the next launch reopens.
+#[test]
+fn antigravity_follows_the_conversation_a_person_switches_to() {
+    let ledger = crate::journal::TestLedgerGuard::new();
+    let _ambient = crate::test_ambient::EnvGuard::new();
+    let home = ledger.home();
+    providers(home);
+    let binary = loopflow_test_support::lf_binary();
+    let _environment = crate::test_ambient::EnvGuard::clear(&["LF_BIN", "PATH"]);
+    std::env::set_var("LF_BIN", binary);
+    std::env::set_var(
+        "PATH",
+        format!("{}:/usr/bin:/bin", home.join("bin").display()),
+    );
+    let _server = loopflow_test_support::MachineServer::start(binary, home);
+    let directory = tempfile::tempdir_in(home).unwrap();
+    let cwd = directory.path();
+    crate::journal::with_runtime(
+        home,
+        &["lf".into(), "matrix".into()],
+        || -> anyhow::Result<()> {
+            let capture = SessionRecorder::begin_at(
+                home,
+                SessionCaptureSpec {
+                    harness: "antigravity".into(),
+                    model: None,
+                    surface: "tui".into(),
+                    cwd: cwd.into(),
+                    repo: None,
+                    worktree: None,
+                    skill: None,
+                    subjects: vec![],
+                    graph: SessionGraphMembership::Independent,
+                    work: None,
+                },
+            )
+            .map(LfProcessRuntime::new)?;
+            capture.claim_session_attachment()?;
+            let recording = Recording::from_runtime(&capture)?;
+            let mut config = AgentConfig {
+                agent: crate::config::Agent::parse("antigravity").unwrap(),
+                cwd: Some(cwd.into()),
+                task_prompt: "say hi".into(),
+                conversation_context: Some(crate::context_block::ContextDelivery {
+                    identity: None,
+                    repository: None,
+                    repo: home.into(),
+                    home: home.into(),
+                    wave: None,
+                    skill_file: None,
+                    submitted_docs: None,
+                    references: vec![],
+                }),
+                env: capture.environment(),
+                ..crate::agent::AgentConfig::default()
+            };
+            config.env.insert("LF_BIN".into(), binary.into());
+            let launch = Launch {
+                config: &config,
+                harness: crate::harness::launcher(HarnessKind::Antigravity),
+                kind: LaunchKind::WorkSession,
+                recording: &recording,
+                start: Start::New,
+                context_file: None,
+            };
+            std::fs::write(home.join("tui-new"), "a second thought")?;
+            let outcome = super::native_session::run(&launch, None, Some(&capture))?;
+            anyhow::ensure!(!outcome.failed(), "{:?}", outcome.status);
+            let heard: serde_json::Value =
+                serde_json::from_slice(&std::fs::read(home.join("tui-heard.json"))?)?;
+            let second = heard[1]["conversation"].as_str().unwrap();
+            assert_ne!(heard[0]["conversation"], heard[1]["conversation"]);
+            for turn in [&heard[0], &heard[1]] {
+                assert!(
+                    turn["context"]
+                        .as_str()
+                        .is_some_and(|text| !text.is_empty()),
+                    "each conversation starts with the context block: {heard}"
+                );
+            }
+            assert_eq!(
+                crate::session_record::read_provider_session(&capture.artifact_dir())?
+                    .map(|session| session.agent_session),
+                Some(second.into())
+            );
+            // `lf resume` reopens the thread the Session keeps.
+            let kept = recording.store.session_thread(&recording.session)?;
+            assert_eq!(kept, Some(second.into()));
+            let reopened = launch.harness.open(&Launch {
+                start: Start::from_thread(kept.as_ref()),
+                ..launch
+            })?;
+            let args: Vec<_> = reopened.process.get_args().collect();
+            let named = args.iter().position(|arg| *arg == "--conversation");
+            assert_eq!(
+                named.map(|at| args[at + 1]),
+                Some(std::ffi::OsStr::new(second)),
+                "{args:?}"
+            );
+            capture.finish("completed")?;
+            Ok(())
+        },
+    )
+    .unwrap();
+}
+
 #[test]
 fn native_limits_and_schemas_require_a_headless_run() {
     let home = tempfile::tempdir().unwrap();
@@ -381,13 +500,13 @@ fn native_limits_and_schemas_require_a_headless_run() {
             };
             let launch = Launch {
                 config: &config,
-                harness: harness.harness(),
+                harness: crate::harness::launcher(harness),
                 kind: LaunchKind::Batch,
                 recording: &recording,
                 start: Start::New,
                 context_file: None,
             };
-            let error = harness.harness().open(&launch).unwrap_err();
+            let error = crate::harness::launcher(harness).open(&launch).unwrap_err();
             assert!(
                 error.to_string().contains("require a headless Run"),
                 "{harness:?}: {error}"

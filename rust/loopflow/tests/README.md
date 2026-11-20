@@ -988,7 +988,7 @@ A locally installed provider must not make an otherwise incomplete fixture pass.
 
 A provider stand-in shows lf's hooks only if it runs them. A fixture that
 copies `loopflow-execution/tests/support/tool_turn.py` into `LF_HOME` gets a
-turn with one tool from the Claude, Codex, OpenCode and Pi stand-ins: the start
+turn with one tool from the Claude, Codex, OpenCode, Pi and Antigravity stand-ins: the start
 hook's block in `hook-context`, `holding` while the tool runs, and after the
 fixture writes `tool-done`, the tool hook's steers in `hook-steer`. lf reads
 usage and final answers from the provider's transcript and skips a turn with

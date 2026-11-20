@@ -1414,15 +1414,16 @@ fn automatic_agent_selection_requires_exactly_one_installed_harness() {
     };
 
     unresolved();
-    for harness in ["claude", "codex", "opencode", "pi"] {
-        install(harness);
+    for harness in loopflow_harness::HarnessKind::ALL {
+        let program = harness.program();
+        install(program);
         let agent = inspect();
-        assert_eq!(agent["value"], harness);
+        assert_eq!(agent["value"], harness.as_str());
         assert_eq!(
             agent["candidates"][0]["locator"],
             "PATH (only installed harness)"
         );
-        fs::remove_file(bin.path().join(harness)).unwrap();
+        fs::remove_file(bin.path().join(program)).unwrap();
     }
     install("claude");
     install("codex");

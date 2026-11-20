@@ -15,6 +15,45 @@ from pathlib import Path
 from typing import Callable
 
 ROOT = Path(__file__).resolve().parents[3]
+CASES = (
+    "warm_root",
+    "command_help",
+    "execution",
+    "task_record",
+    "harness_format",
+    "harness_test",
+)
+# Edit case → the libraries below the application that must recompile, where they exist.
+_DOWNSTREAM = {
+    "warm_root": (),
+    "command_help": (),
+    "execution": ("loopflow_execution",),
+    "task_record": ("loopflow_storage", "loopflow_execution"),
+    "harness_format": ("loopflow_harness", "loopflow_execution"),
+}
+
+
+def _libraries(tree: Path) -> list[str]:
+    """Workspace libraries below the application in this revision."""
+    return sorted(
+        path.name.replace("-", "_")
+        for path in (tree / "rust").glob("loopflow-*")
+        if path.name != "loopflow-test-support" and (path / "Cargo.toml").exists()
+    )
+
+
+def _decoder_owner(tree: Path) -> str:
+    if (tree / "rust/loopflow-harness").is_dir():
+        return "loopflow-harness"
+    return "loopflow-execution"
+
+
+def _command(tree: Path, case: str) -> list[str]:
+    if case == "harness_test":
+        target = ["cargo", "test", "--locked", "-p", _decoder_owner(tree), "--lib", "--no-run"]
+    else:
+        target = ["cargo", "build", "--locked", "-p", "loopflow", "--bin", "lf"]
+    return [*target, "--jobs", "1", "--message-format=json"]
 
 
 def _verify_catalog_refresh(
@@ -118,6 +157,14 @@ def _edit(tree: Path, case: str, cohort: int) -> Path:
             if "pub enum ShipStart" in p.read_text()
         ]
         old = '"no Task exists for {issue:?}"'
+    elif case in ("harness_format", "harness_test"):
+        # Two messages in one decoder: the second edit follows a built test binary.
+        paths = list((tree / "rust").glob("*/src/**/claude_decode.rs"))
+        old = (
+            '"Claude result changed conversation"'
+            if case == "harness_format"
+            else '"Claude turn failed"'
+        )
     else:
         paths = [
             p
@@ -150,7 +197,7 @@ def _timing(log: str) -> dict:
 def _summarize(receipts: list[dict]) -> list[dict]:
     rows = []
     for label in ("base", "candidate"):
-        for case in ("warm_root", "command_help", "execution", "task_record"):
+        for case in CASES:
             samples = [r for r in receipts if r["label"] == label and r["case"] == case]
             if not samples:
                 continue
@@ -170,27 +217,25 @@ def _validate_closure(receipt: dict) -> None:
     case = receipt["case"]
     if case == "cold_seed":
         return
-    expected = {"loopflow"}
-    if receipt["label"] == "candidate":
-        if case in ("execution", "task_record"):
-            expected.add("loopflow_execution")
-        if case == "task_record":
-            expected.add("loopflow_storage")
+    libraries = set(receipt["libraries"])
+    compilers = receipt["workspace_compilers"]
+    if case == "harness_test":
+        owner = receipt["owner"].replace("-", "_")
+        # Cargo passes a unit-test target `--test` and no crate type; an
+        # executable is never cached, so its invocation is the compilation.
+        tests = [c for c in compilers if c["crate"] == owner and c["crate_type"] is None]
+        if len(tests) != 1:
+            raise RuntimeError(f"the owner's test binary did not compile: {compilers}")
+        if owner == "loopflow_harness" and {c["crate"] for c in compilers} != {owner}:
+            raise RuntimeError(f"a decoder test build left its crate: {compilers}")
+        return
+    expected = {"loopflow"} | (set(_DOWNSTREAM[case]) & libraries)
     actual = {
-        c["crate"]
-        for c in receipt["workspace_compilers"]
-        if c["crate_type"] in ("lib", "rlib") and c["cache_misses"]
+        c["crate"] for c in compilers if c["crate_type"] in ("lib", "rlib") and c["cache_misses"]
     }
-    if case == "warm_root" and receipt["label"] == "candidate":
-        expected_hits = {
-            "loopflow_model",
-            "loopflow_definitions",
-            "loopflow_terminal",
-            "loopflow_storage",
-            "loopflow_execution",
-        }
-        hits = {c["crate"] for c in receipt["workspace_compilers"] if c["cache_hits"]}
-        if hits != expected_hits:
+    if case == "warm_root":
+        hits = {c["crate"] for c in compilers if c["cache_hits"]}
+        if hits != libraries:
             raise RuntimeError(f"wrong reusable library closure: {hits}")
     if actual != expected or receipt["rust_cache_misses"] != len(expected):
         raise RuntimeError(f"wrong compiler closure: expected {expected}, got {actual}")
@@ -392,11 +437,7 @@ def main() -> None:
             for label in order:
                 sha, trees = snapshots[label]
                 tree = trees[cohort]
-                cases = (
-                    ("cold_seed",)
-                    if cohort == 0
-                    else ("warm_root", "command_help", "execution", "task_record")
-                )
+                cases = ("cold_seed",) if cohort == 0 else CASES
                 completed = {
                     r["case"] for r in receipts if r["label"] == label and r["cohort"] == cohort
                 }
@@ -419,6 +460,9 @@ def main() -> None:
                             None,
                         )
                         if receipt is None:
+                            if case == "harness_test":
+                                # Dev-dependencies and the first test binary are not the loop.
+                                run(_command(tree, case), tree)
                             source = (
                                 _edit(tree, case, cohort)
                                 if case not in ("cold_seed", "warm_root")
@@ -440,16 +484,7 @@ def main() -> None:
                                         "nice",
                                         "-n",
                                         "10",
-                                        "cargo",
-                                        "build",
-                                        "--locked",
-                                        "-p",
-                                        "loopflow",
-                                        "--bin",
-                                        "lf",
-                                        "--jobs",
-                                        "1",
-                                        "--message-format=json",
+                                        *_command(tree, case),
                                     ],
                                     cwd=tree,
                                     env=env,
@@ -482,6 +517,8 @@ def main() -> None:
                                 "load_before": load,
                                 "load_after": os.getloadavg(),
                                 "edited_source": str(source.relative_to(tree)) if source else None,
+                                "libraries": _libraries(tree),
+                                "owner": _decoder_owner(tree) if case == "harness_test" else None,
                                 "workspace_compilers": compilers,
                                 "nonfresh_libraries": sorted(
                                     {
@@ -533,7 +570,7 @@ def main() -> None:
                         run([str(tree / "target/debug/lf"), "--version"], tree)
                         if case == "warm_root":
                             paths = []
-                            for crate in ("loopflow", "loopflow_execution", "loopflow_storage"):
+                            for crate in ("loopflow", *_libraries(tree)):
                                 for artifact in (tree / "target/debug/deps").glob(
                                     f"lib{crate}-*.rlib"
                                 ):

@@ -1513,7 +1513,10 @@ fn main() -> std::process::ExitCode {
             .downcast_ref::<loopflow_execution::process::CommandExit>()
             .is_none()
         {
-            eprintln!("Error: {error:?}");
+            match loopflow::server::copy::write_refused(&error) {
+                Some(sentence) => eprintln!("{sentence}"),
+                None => eprintln!("Error: {error:?}"),
+            }
         }
     }
     std::process::ExitCode::from(code)
@@ -1913,10 +1916,10 @@ fn run() -> anyhow::Result<()> {
             | ContextMoment::Tool
             | ContextMoment::Steer
             | ContextMoment::Stop),
-        ..
+        harness,
     }) = &cli.command
     {
-        return loopflow::lf::commands::context::emit_block(delivery.as_deref(), *moment);
+        return loopflow::lf::commands::context::emit_block(delivery.as_deref(), *moment, *harness);
     }
     validate_desktop_platform(&cli)?;
     let _selected_repo_cwd = cli
@@ -3153,8 +3156,10 @@ fn execute_command(
             }),
         },
         Some(Commands::ContextBlock {
-            delivery, moment, ..
-        }) => loopflow::lf::commands::context::emit_block(delivery.as_deref(), *moment),
+            delivery,
+            moment,
+            harness,
+        }) => loopflow::lf::commands::context::emit_block(delivery.as_deref(), *moment, *harness),
         Some(Commands::Holder { .. }) => unreachable!("the holder dispatches before any store"),
         Some(Commands::Session { .. } | Commands::Steer { .. }) => {
             unreachable!("Session dispatch precedes Work binding")

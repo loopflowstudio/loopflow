@@ -26,6 +26,22 @@ impl Operation {
             Self::Write(_) | Self::Measured(MeasuredOperation::Write { .. })
         )
     }
+
+    /// Whether this can change the Machine or what runs on it: a write, a
+    /// Session start, a hook's recording, an upload or mobile setup.
+    pub(super) fn changes(&self) -> bool {
+        self.is_write()
+            || matches!(
+                self,
+                Self::Server(
+                    ServerOperation::SessionStart { .. }
+                        | ServerOperation::SessionContinue { .. }
+                        | ServerOperation::SessionBoundary(_)
+                        | ServerOperation::RequestUpload { .. }
+                        | ServerOperation::MobileConfigure { .. }
+                )
+            )
+    }
 }
 
 /// The ordinary operation and its per-request work receipt in one response.

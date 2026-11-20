@@ -8,9 +8,10 @@ use std::path::PathBuf;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
-use super::{conversation_home, scan, ExpiryPolicy, Indexed, RetentionState};
-use crate::harness::HarnessKind;
+use super::{conversation_home, RetentionState};
 use crate::store::ProviderAccountId;
+use loopflow_harness::transcript::{scan, ExpiryPolicy, Indexed};
+use loopflow_harness::HarnessKind;
 use loopflow_storage::sqlite::SqliteStore;
 
 const WEEK: i64 = 7 * 86_400;
@@ -112,7 +113,7 @@ pub fn summarize(store: &SqliteStore, now: i64) -> Result<RetentionSummary> {
             continue;
         };
         let (state, modified, after) = if let Some(thread) = &session.thread {
-            if let Some(provider) = harness.provider() {
+            if let Some(provider) = crate::harness::launcher(harness).provider() {
                 match conversation_home(store, provider, thread)? {
                     None => (RetentionState::Facts, None, None),
                     Some(home) => {
@@ -133,7 +134,8 @@ pub fn summarize(store: &SqliteStore, now: i64) -> Result<RetentionSummary> {
                     }
                 }
             } else {
-                let (state, modified) = harness.harness().transcript_retention(thread);
+                let (state, modified) =
+                    crate::harness::launcher(harness).transcript_retention(thread);
                 (state, modified, None)
             }
         } else {

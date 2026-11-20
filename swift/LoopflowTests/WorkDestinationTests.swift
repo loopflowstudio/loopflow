@@ -2205,6 +2205,21 @@ struct WorkDestinationTests {
         #expect(second == [b])
     }
 
+    @Test func aWindowRestoredFromAnotherMachineIsNotShown() throws {
+        let machine = "/Users/demo/.lf"
+        let saved = try JSONEncoder().encode(RepositoryWorkspace(id: "plan", path: "/src/repo", machine: machine))
+        let restored = try JSONDecoder().decode(RepositoryWorkspace.self, from: saved)
+        #expect(restored.opened(on: machine) == restored)
+        // A world or a copy launched from the same bundle gets none of the Machine's windows.
+        #expect(restored.opened(on: "/tmp/w1/home") == nil)
+        // A copy holds the Machine's plans; its window is still another window.
+        #expect(restored != RepositoryWorkspace(id: "plan", path: "/src/repo", machine: "/Users/demo/.lf-copy/home"))
+        // Windows saved before they named their Machine belong to none.
+        let unnamed = try JSONDecoder().decode(RepositoryWorkspace.self, from: Data(#"{"id":"plan","path":"/src/repo"}"#.utf8))
+        #expect(unnamed.opened(on: machine) == nil)
+        #expect(RepositoryWorkspace(id: "plan", path: "/src/repo").opened() != nil)
+    }
+
     @Test func samePlanReusesItsRetainedWorkspaceRegardlessOfFocusOrLocator() async throws {
         let a = RepositoryWorkspace(id: "plan", path: "/machine-a/repo")
         let b = RepositoryWorkspace(id: "plan", path: "/machine-b/repo")

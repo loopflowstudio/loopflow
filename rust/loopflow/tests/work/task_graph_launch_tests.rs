@@ -1992,6 +1992,13 @@ fn opencode_stand_in() -> String {
         )
 }
 
+fn antigravity_stand_in() -> String {
+    include_str!("../../../loopflow-execution/tests/support/antigravity_cli.py").replace(
+        "Path(__file__).resolve().parent.parent",
+        "Path(os.environ['LF_HOME'])",
+    )
+}
+
 fn pi_stand_in() -> String {
     format!(
         "#!/usr/bin/python3 -I\n{}",
@@ -2018,6 +2025,12 @@ fn a_task_step_runs_as_a_worker_on_every_harness() {
             "Fixture completed.",
         ),
         ("pi", "pi:fixture/model", pi, "answer 1:"),
+        (
+            "antigravity",
+            "antigravity",
+            antigravity_stand_in(),
+            "answer to:",
+        ),
         ("claude", "claude", holding_claude(), "Held."),
         (
             "codex",
@@ -2026,7 +2039,10 @@ fn a_task_step_runs_as_a_worker_on_every_harness() {
             "Worker finished.",
         ),
     ] {
-        let task = GraphTask::with_tools(&[(provider, &script)]);
+        let program = loopflow_harness::HarnessKind::parse(provider)
+            .unwrap()
+            .program();
+        let task = GraphTask::with_tools(&[(program, &script)]);
         define_worker_graph(&task);
         let home = task.home.path();
         fs::write(home.join("release"), "").unwrap();
@@ -2194,9 +2210,22 @@ fn a_worker_stops_on_interrupt_and_the_next_run_starts_its_step_again_on_opencod
     interrupt_a_worker("pi", "pi:fixture/model", &pi_stand_in(), "answer 1:");
 }
 
+#[test]
+fn a_worker_stops_on_interrupt_and_the_next_run_starts_its_step_again_on_antigravity() {
+    interrupt_a_worker(
+        "antigravity",
+        "antigravity",
+        &antigravity_stand_in(),
+        "answer to:",
+    );
+}
+
 fn interrupt_a_worker(provider: &str, agent: &str, script: &str, answer: &str) {
     {
-        let task = GraphTask::with_tools(&[(provider, script)]);
+        let program = loopflow_harness::HarnessKind::parse(provider)
+            .unwrap()
+            .program();
+        let task = GraphTask::with_tools(&[(program, script)]);
         define_worker_graph(&task);
         let home = task.home.path();
         fs::write(home.join("hold-turn"), "").unwrap();
@@ -2599,14 +2628,18 @@ fn completion_is_independent_of_graph_position() {
     task.task_run_ok(&["task", "run", "INF-123", "gated"]);
     assert_eq!(task.graph()["position"], at("review"));
     assert_eq!(task.state(), "active");
-    assert!(!task.task_run(&["task", "run", "INF-123"]).success());
-    assert_eq!(task.graph()["position"]["kind"], "run");
-    assert_eq!(task.state(), "idle");
+    // Wait for the carrier to exit before reading the stopped position.
+    let failed = task.task_run(&["-b", "task", "run", "INF-123"]);
+    assert_eq!(failed.code, Some(1), "{}", failed.text);
+    let status = task.status();
+    let stopped = &status["work"]["graph"];
+    assert_eq!(stopped["position"]["kind"], "run");
+    assert_eq!(stopped["position"]["running"], false);
+    assert_eq!(status["status"], "idle");
     // Completing it leaves it where it stood.
-    let stopped = task.graph();
     task.finish_after_provider_observation(&["task", "complete", "INF-123"]);
     assert_eq!(task.state(), "done");
-    assert_eq!(task.graph(), stopped);
+    assert_eq!(&task.graph(), stopped);
     let text = task.text_status();
     assert!(text.contains("\nINF-123  done\n"), "{text}");
     // The retired completion flags do not return with the alias.

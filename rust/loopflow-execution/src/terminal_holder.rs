@@ -106,8 +106,8 @@ pub enum Served {
 pub fn run() -> Result<()> {
     let build = build()?;
     serve(&Place::of(&build)?, &build, || {
-        // The one line the starting server waits for.
-        let _ = writeln!(io::stdout(), "{}", std::process::id());
+        // The one line the starting server waits for: what it started.
+        let _ = writeln!(io::stdout(), "{} {build}", std::process::id());
         let _ = io::stdout().flush();
     })?;
     Ok(())

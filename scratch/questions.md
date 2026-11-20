@@ -26,6 +26,14 @@ Each choice below was made headless and is reversible before release.
 - **Authored Wave files:** this repository's `.lf/wave/product/GOAL.md`
   "Chapter planning" section and `.lf/wave/intelligence/metrics/*.md` are left
   alone (Wave memory and authored Wave content).
+- **Project run journal (review of the built branch, 2026-11-20):** slice 5
+  deletes `ProjectEventKind`, `ProjectEvent`, `HistoricalFailure` and the five
+  store methods nothing calls, and marks `project_events` leaving. Passed
+  over: a separate cleanup Task. Saved rows (30,536 on one store, newest
+  2026-09-24) stay until the contract.
+- **Which Task is in which Project:** `lf wave status` lists Projects, then
+  Tasks flat. Should Tasks be listed under their Project when a Wave holds
+  more than one? Not built.
 - **Lock directory:** keep `~/.lf/chapter-locks` so running released clients and branch builds lock the same file.
 
 - **Released Project selection:** the staged schema keeps `selected_project_owner_update`. On an upgraded store, a non-null `waves.current_project_id` can still prevent that Project from moving to a different Wave until the contract removes the trigger. It does not prevent moving Tasks or ending a Project.

@@ -34,7 +34,7 @@ description, status, rank, `work_state`, `work_terminal_at`,
 everything that selects one Project of a Wave, activates or rolls it over, or
 hangs KRs and metrics on a Project or a Wave.
 
-## Built (Slices 1–4 + merge with LOO-938)
+## Built (Slices 1–4 + merge with LOO-938; slice 5 is under Remaining work)
 
 - **Waves select no Project (`rust/loopflow-storage/src/sqlite/children.rs`,
   `rust/loopflow-execution/src/ops/wave_lifecycle.rs`, `ops/task.rs`):**
@@ -126,9 +126,77 @@ hangs KRs and metrics on a Project or a Wave.
 - Naming a Task's Project at creation (`--project`), Projects as finishing
   groups, and Wave membership from a tracker link (LOO-980).
 
-## Remaining work (later Graph steps)
+## Remaining work
 
-All implementation slices are complete.
+### Slice 5 — what the review of the built branch found (2026-11-20)
+
+`scratch/concept-review.html` holds the review. Three pieces, deletion and
+docs only; no behavior a person sees changes.
+
+**5a. Delete the Project run journal.** A Project is a row with a name, a
+status and Tasks. The code still models a Project that runs: the brief asks
+to "Look for earlier attempts left behind (unreachable branches, hidden
+commands) and remove those too", and this is the chapter's run loop. On one
+store `project_events` holds 30,536 rows, the newest from 2026-09-24.
+
+- Delete `ProjectEventKind`, `ProjectEvent` and `HistoricalFailure`
+  (`rust/loopflow-storage/src/work/project.rs`).
+- Delete `append_project_event`, `project_events_after`,
+  `latest_project_event_at`, `latest_project_event`, `latest_project_failure`,
+  `insert_project_event_in` and `map_project_event_row`
+  (`rust/loopflow-storage/src/sqlite/children.rs`) and their async wrappers
+  (`rust/loopflow-execution/src/store/children.rs`). None has a caller
+  outside tests.
+- Delete the tests that only seed or read Project events
+  (`rust/loopflow/tests/work/status_tests.rs` near 107 and 503,
+  `rust/loopflow-execution/src/store/children_tests.rs` near 457,
+  `rust/loopflow-execution/src/ops/linear/oauth_tests.rs` near 128,
+  `rust/loopflow-storage/src/sqlite/steers_tests.rs` near 515–542,
+  `rust/loopflow-execution/src/store/mod.rs` near 2148 if it interrupts a
+  Project). Keep what a test checks about Tasks, Waves or steers.
+- `append_interrupt` and `latest_interrupt_id`
+  (`rust/loopflow-storage/src/sqlite/durable.rs`) lose their
+  `WorkRef::Project` arm. Every caller found passes a Task
+  (`ops/task.rs` `task_interrupt`, `ops/human_session/moves.rs`,
+  `ops/task_input.rs`, `lf/commands/graph.rs` 593 and 855); check
+  `graph.rs` 205/243 and `ops/child.rs` 37, which pass a `WorkRef` through.
+  If all are Tasks, take a `TaskId`. If a Project can reach one, keep that
+  arm and write the path in `scratch/questions.md`; delete the rest anyway.
+- `WorkRef::Project`, `ChildRef::Project` and `WorkIdentity` stay: a Task's
+  parent in the Work tree is its Project.
+- `remove_chapters.sql` gains `-- leaving: project_events LOO-995`. The
+  table, its rows and its triggers stay until the contract. Regenerate
+  `SCHEMA.md` (`uv run python scripts/schema_page.py`).
+- Must still work: `lf task interrupt`, a Graph stopping on a Task
+  interrupt, steering a Task and a Wave.
+
+**5b. One definition of an open Project.**
+`work_state='ready' AND status IN ('started','backlog','planned','paused')`
+is written in `new_task_project_in` and again in `joined_project_name`
+(`sqlite/children.rs`). Give it one constant both queries use, so the
+Project a command names is chosen by the rule that placed the Task.
+
+**5c. Architecture docs.**
+- `docs/dev/reference-models.md` near 122: "a Wave's planning binds one
+  Linear Project" becomes a Wave holding Projects that group its Tasks.
+- `docs/dev/reference.md` near 88: `project_transitions` and
+  `project_transition_items` leave the Linear events row and join
+  `project_events` in the "Leaving the store" row near 107.
+- Run `uv run python scripts/check_architecture.py` and compare with the
+  inherited failures in `scratch/questions.md`; add none.
+
+Checks for the slice: `cargo check --all-targets`; focused tests for storage
+Projects, Task interrupt (`cargo test -p loopflow --lib` filtered to the
+interrupt tests in `lf/commands/graph.rs`) and steers
+(`cargo test -p loopflow-storage --lib steers`); `grep -rn
+'ProjectEvent\|project_event' rust --include='*.rs'` matches only migrations
+and `migration_runner.rs`.
+
+### After slice 5
+
+For gate: the Task title still says "a Project is a Wave's optional tracker
+link"; the PR title and body describe what was built (Projects stay real
+records; chapters, KRs and metrics go).
 
 ### Checks recorded and deferred
 

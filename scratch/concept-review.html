@@ -2,144 +2,249 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>43bf9b concept review — Waves, Projects and Tasks without chapters</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOO-995 concept review — the built branch</title>
 <style>
-:root{--bg:#fbfaf7;--fg:#1d1c1a;--mute:#6b675f;--line:#dedad2;--card:#fff;--yes:#2f7d4f;--no:#b3402a;--prop:#2b5fb3;--propbg:#eaf1fc;--code:#f1eee8;--gone:#8a857b}
-@media (prefers-color-scheme:dark){:root{--bg:#161614;--fg:#ecebe6;--mute:#9b978d;--line:#34322e;--card:#1f1e1b;--yes:#6cc38f;--no:#ef8a72;--prop:#8db4ff;--propbg:#1c2638;--code:#26241f;--gone:#7d796f}}
-*{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
-main{max-width:1040px;margin:0 auto;padding:40px 24px 80px}
-h1{font-size:28px;line-height:1.2;margin:0 0 8px}
-h2{font-size:21px;margin:44px 0 12px}
-h3{font-size:16px;margin:0 0 6px}
-p{margin:0 0 12px}
-.lede{color:var(--mute);max-width:760px}
-code,pre{font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--code);border-radius:4px}
-code{padding:1px 5px}
-pre{padding:12px 14px;overflow:auto;margin:0 0 12px}
-table{width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--line);border-radius:8px;overflow:hidden}
-th,td{text-align:left;vertical-align:top;padding:10px 12px;border-bottom:1px solid var(--line);font-size:14.5px}
-th{font-weight:600;background:var(--code)}
-tr:last-child td{border-bottom:0}
-.yes{color:var(--yes);font-weight:700;white-space:nowrap}
-.no{color:var(--no);font-weight:700;white-space:nowrap}
-.prop{background:var(--propbg);border-left:3px solid var(--prop);padding:1px 6px;border-radius:3px}
-.gone{color:var(--gone);text-decoration:line-through}
-.key{display:flex;gap:18px;flex-wrap:wrap;font-size:14px;color:var(--mute);margin:14px 0 0}
-.cols{display:grid;grid-template-columns:1fr 1fr;gap:16px}
-@media (max-width:760px){.cols{grid-template-columns:1fr}}
-.card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:16px}
-.card.proposed{border-color:var(--prop);background:var(--propbg)}
-.big{border:2px solid var(--no);border-radius:10px;padding:18px;background:var(--card)}
-ol.q>li{margin:0 0 18px}
-ol.q ol{list-style:lower-alpha;margin:6px 0 0}
-.chosen{font-weight:600}
-.num{font-variant-numeric:tabular-nums}
-small{color:var(--mute)}
+  :root {
+    color-scheme: light dark;
+    --bg: #fbfaf7; --fg: #1d1c1a; --dim: #6b6862; --line: #dedad2; --card: #ffffff;
+    --yes: #1f7a44; --no: #b3361f; --new: #1d5fb8; --newbg: #eaf1fb; --code: #f1eee8;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #161614; --fg: #e9e6df; --dim: #9a968d; --line: #33312d; --card: #1e1d1b;
+      --yes: #5fc98a; --no: #f0806a; --new: #86b6f5; --newbg: #1a2636; --code: #262522;
+    }
+  }
+  body { background: var(--bg); color: var(--fg); font: 15px/1.55 -apple-system, "Segoe UI", sans-serif;
+    max-width: 1040px; margin: 0 auto; padding: 32px 24px 80px; }
+  h1 { font-size: 26px; margin: 0 0 6px; }
+  h2 { font-size: 19px; margin: 40px 0 10px; }
+  h3 { font-size: 15px; margin: 0 0 6px; }
+  p { margin: 8px 0; }
+  .dim { color: var(--dim); }
+  code, pre { font: 13px/1.5 ui-monospace, Menlo, monospace; background: var(--code); border-radius: 4px; }
+  code { padding: 1px 4px; }
+  pre { padding: 12px 14px; overflow-x: auto; margin: 8px 0; }
+  table { border-collapse: collapse; width: 100%; background: var(--card); }
+  th, td { text-align: left; vertical-align: top; padding: 9px 10px; border: 1px solid var(--line); }
+  th { font-size: 13px; color: var(--dim); font-weight: 600; }
+  .yes { color: var(--yes); font-weight: 700; }
+  .no { color: var(--no); font-weight: 700; }
+  .new { color: var(--new); }
+  .proposed { background: var(--newbg); border-left: 3px solid var(--new); }
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 760px) { .cols { grid-template-columns: 1fr; } }
+  .box { background: var(--card); border: 1px solid var(--line); border-radius: 6px; padding: 14px 16px; }
+  .legend span { margin-right: 18px; }
+  ol.q > li { margin: 14px 0; }
+  ol.q ol { list-style: lower-alpha; margin-top: 4px; }
+  s { color: var(--dim); }
 </style>
 </head>
 <body>
-<main>
-<h1>Waves, Projects and Tasks without chapters</h1>
-<p class="lede">Area reviewed: how work is grouped — a Wave, its Projects, their Tasks — and everything that stood on "the Wave's current Project": selection, activation, the rollover, KRs, metric targets and live metrics, in the CLI, Desktop, agent context and Linear/Asana sync. Nothing is built yet; this reviews the plan in <code>scratch/plan.md</code> against the code on the branch and one saved store.</p>
-<div class="key"><span><span class="yes">yes</span> product and code agree</span><span><span class="no">no</span> they don't</span><span><span class="prop">blue</span> proposed, not built</span><span><span class="gone">struck</span> removed by the plan</span></div>
 
-<h2>One interaction, today and after</h2>
+<h1>Waves, Projects and Tasks without chapters, as built</h1>
+<p><b>Area reviewed:</b> how work is grouped — a Wave, its Projects, their Tasks — with the whole
+LOO-995 change in it, read against its base (LOO-938, <code>c2beea658a</code>): the CLI, the wire, Desktop,
+storage, the docs and what QA walked on private homes. The earlier page reviewed the plan before
+anything was built; this one reviews the code.</p>
+<p class="legend dim">
+  <span><b class="yes">yes</b> product and code agree</span>
+  <span><b class="no">no</b> they don't</span>
+  <span class="new">blue: proposed, not built</span>
+</p>
+
+<h2>One interaction, as it runs on the branch</h2>
 <div class="cols">
-<div class="card">
-<h3>Today (main)</h3>
+<div class="box">
+<h3>Normal path</h3>
 <pre>$ lf wave create billing
-  # makes a Project named "billing", marks it current,
-  # records an "activation" owned by this process,
-  # sends projectCreate to Linear
-$ lf task create --wave billing 'refund flow'
-  # asks waves.current_project_id
-$ lf task run LOO-12
-  # refused unless the Task's Project is the current one
-  # and In Progress</pre>
-<p>Failure: Linear is down during create. The Wave reads "Preparing Project…", then "No Project selected yet"; Tasks cannot be filed in it. Recovery is a retry button in Desktop or <code>lf wave create</code> again, which has to find the unfinished <code>project_transitions</code> row and resume it.</p>
-<p>On the store measured, <span class="num">45 of 62</span> live Waves have no current Project.</p>
+Added Wave billing; committed .lf/wave/billing
+# 0 projects rows, nothing queued for the tracker
+
+$ lf task create --wave billing 'Invoice export'
+Invoice export · d11837
+# one Project "billing", started, made in the save
+
+$ lf wave status billing
+  Project   billing (proj_4bd9…) · started
+  d11837  unstarted — Invoice export</pre>
+<p>With Linear configured the first Task queues two creates, Project then Task. With a second
+started Project in the Wave the command says where the Task went:
+<code>Tax lines · 0cf5d8 in Project Billing v2</code>.</p>
 </div>
-<div class="card proposed">
-<h3>After (plan, as revised by this review)</h3>
-<pre>$ lf wave create billing
-  # a Wave row and .lf/wave/billing/. Nothing else.
-$ lf task create --wave billing 'refund flow'
-  # the Wave has no open Project: one is made, named
-  # "billing", in the same transaction
-$ lf task run LOO-12
-  # runs. No Project check.</pre>
-<p>Failure: Linear is down. The Task and Project are saved; their creates sit in <code>tracker_actions</code> and go out on a later drain, Project first. Nothing is "preparing" and nothing is retried by a person.</p>
-<p>Recovery from the wrong Project: move the Issue in Linear; membership is mirrored back.</p>
+<div class="box">
+<h3>Failure and recovery</h3>
+<p><b>Failure:</b> the save into an empty Wave aborts. The Project is made in the same transaction, so
+nothing is left behind (<code>a_failed_save_into_an_empty_wave_makes_no_project</code>).</p>
+<p><b>Failure:</b> the tracker is down. Task and Project are saved; their creates wait in
+<code>tracker_actions</code>. No "preparing" state, nothing for a person to retry.</p>
+<p><b>Recovery from the wrong Project:</b> move the Issue in Linear. Ending "Billing v2" there sends the
+next Task back to "billing", and a Task left in the ended Project still runs.</p>
+<p><b>Upgrade:</b> a store with a current Project and a KR keeps its Project; the new Task joins it and the
+KR text is no longer shown.</p>
 </div>
 </div>
 
 <h2>Do the concepts line up?</h2>
 <table>
-<tr><th style="width:21%">What a person knows</th><th style="width:31%">What the code has today</th><th style="width:7%">Today</th><th style="width:7%">After</th><th>What is wrong, or what changes</th></tr>
-<tr><td><b>Wave</b><br>a lasting objective; <code>lf wave create</code></td><td><code>waves</code> row, <code>.lf/wave/&lt;name&gt;/</code>, Initiative link</td><td class="no">no</td><td class="yes">yes</td><td>Creating one also creates a Project and writes to the tracker. After: it registers the Wave only.</td></tr>
-<tr><td><b>Project</b><br>a group of Tasks that starts and ends; a Linear or Asana Project</td><td><code>projects</code> row, status, rank, <code>work_state</code>, <code>tracker_projects</code>, <code>tracker_wave_projects</code></td><td class="no">no</td><td class="yes">yes</td><td>One name for two ideas: any Project under the Wave's Initiative, and "the chapter" lf is working through. After: only the first. Status still mirrors the tracker both ways; <code>abandon</code> still ends one locally.</td></tr>
-<tr><td class="gone">The current Project</td><td><code>waves.current_project_id</code>, <code>project_selection.rs</code>, <code>require_selected_project</code>, <code>lf wave plan bind</code>, "current" / "historical" in <code>lf wave status</code></td><td class="no">no</td><td class="yes">gone</td><td>A distinction people learn for no benefit: it gates <code>lf task run</code> and Task creation, and 45 of 62 live Waves don't have one.</td></tr>
-<tr><td class="gone">Activating a Project</td><td>seven <code>waves.project_activation_*</code> columns, <code>ProjectReadiness</code>, <code>RunOwner::ProjectActivation</code>, Desktop's spinner and retry</td><td class="no">no</td><td class="yes">gone</td><td>A whole lifecycle for "a row was inserted and a create was queued". After: the row, and a queued action.</td></tr>
-<tr><td class="gone">Rolling a Wave over to its next Project</td><td><code>project_transitions</code> with <code>predecessor_id</code>, <code>reset_name</code></td><td class="no">no</td><td class="yes">gone</td><td>Already dead: nothing writes those two columns. The table's one live use is marking "this Machine made this Project" for tracker export (below).</td></tr>
-<tr><td><b>Where a new Task in a Wave lands</b></td><td>today the current Project; <span class="prop">after, <code>new_task_project(wave)</code>: newest started, else newest open, else one made then</span></td><td class="yes">yes</td><td class="no">no → <span class="prop">yes</span></td><td>The biggest mismatch in the plan as written. See below.</td></tr>
-<tr><td><b>A Project reaching Linear</b></td><td><code>uncreated</code> exports a local Project only if a <code>project_transitions</code> row names it</td><td class="no">no</td><td class="yes">yes</td><td>An export rule hidden inside the rollover table. <span class="prop">After: the Project's <code>plan_stamps</code> row says which Machine made it.</span> The plan had "queue the create when the Project is made", which would never export a Project made before a tracker was connected.</td></tr>
-<tr><td class="gone">KRs, metric targets</td><td><code>projects.krs</code>, <code>.metric_targets</code>, <code>WorkValue::Krs</code>, Linear Project <code>content</code>, <code>lf wave update-project</code></td><td class="yes">yes</td><td class="yes">gone</td><td>They line up; they are being removed. Not empty: <span class="num">47 of 64</span> saved Projects hold KR text. It stays in Linear's <code>content</code> and the leaving column, shown nowhere in lf.</td></tr>
-<tr><td class="gone">Live metrics</td><td>five metric modules (about 3,300 lines), <code>metric_instruments</code>, <code>metric_observations</code>, the portfolio on the wire and in Desktop</td><td class="yes">yes</td><td class="yes">gone</td><td>4 instruments and 38 observations on the store measured.</td></tr>
-<tr><td><b>A Wave's Projects, listed</b></td><td>Desktop "Project history" sheet; <code>ProjectHistoryView</code></td><td class="no">no</td><td class="prop">yes</td><td>"History" names the succession that is going. <span class="prop">After: "Projects", in the Wave's order, ended ones included.</span> The plan kept the old name.</td></tr>
-<tr><td><b>Editing a Project's name and summary</b></td><td><code>lf wave edit-project</code>, and the tracker</td><td class="yes">yes</td><td class="no">no</td><td>After: the tracker is the only editor. Without one, nothing edits a Project. Left as planned; question 4.</td></tr>
-<tr><td><b>A Wave with no tracker</b><br>the person never made a Project</td><td>a <code>projects</code> row named for the Wave, because a Task reaches its Wave through its Project</td><td class="no">no</td><td class="no">no</td><td>A concept the code has and the person never sees, now made lazily instead of up front. Larger than this work; question 2.</td></tr>
+<tr><th style="width:21%">What a person knows</th><th style="width:27%">What the code has</th><th style="width:6%"></th><th>What is wrong where it is no</th></tr>
+<tr>
+  <td><b>Wave</b><br>a lasting objective; <code>lf wave create</code></td>
+  <td><code>waves</code> row, <code>.lf/wave/&lt;name&gt;/</code>, no Project, no tracker write</td>
+  <td class="yes">yes</td><td></td>
+</tr>
+<tr>
+  <td><b>Project</b><br>a group of a Wave's Tasks with a name and a status; a Linear or Asana Project when connected</td>
+  <td><code>projects</code>, <code>Project</code>, <code>ProjectStatus</code>, <code>tracker_wave_projects.position</code>, <code>ProjectSummary</code> on the wire, <code>WaveProjectsView</code></td>
+  <td class="yes">yes</td><td>One meaning now. "Current", "historical", activation and readiness are gone from the CLI, the wire and Desktop.</td>
+</tr>
+<tr>
+  <td><b>A Project that runs</b><br>nobody runs, steers or interrupts a Project</td>
+  <td><code>project_events</code>, <code>ProjectEventKind</code> (<code>Started</code>, <code>IterationCompleted</code>, <code>Steer</code>, <code>Interrupt</code>, <code>Completed</code>, <code>Failed</code>…), <code>ProjectEvent</code>, <code>HistoricalFailure</code>, five store methods and their async wrappers</td>
+  <td class="no">no</td><td>A concept the code has and the person never sees. The biggest mismatch left; see below.</td>
+</tr>
+<tr>
+  <td><b>Where a new Task lands</b><br>the newest started Project, else the newest open one, else a new one named for the Wave</td>
+  <td><code>new_task_project_in</code>, <code>join_project_in</code>, called from the save and the move; previews in <code>planning_explain</code> ask the same function</td>
+  <td class="yes">yes</td><td>One rule, one owner, inside the write. One wrinkle: "open" is spelled twice (next row).</td>
+</tr>
+<tr>
+  <td><b>An open Project</b><br>one that has not ended</td>
+  <td>the SQL <code>work_state='ready' AND status IN ('started','backlog','planned','paused')</code>, written out in <code>new_task_project_in</code> and again in <code>joined_project_name</code></td>
+  <td class="no">no</td><td>One idea, two spellings. A status added to one and not the other makes the command name a Project by a different rule than the one that chose it.</td>
+</tr>
+<tr>
+  <td><b>Which Project a Task is in</b></td>
+  <td><code>tasks.project_id</code>, <code>project_id</code> on every Task on the wire; printed once, at creation or move, when the Wave has several open</td>
+  <td class="no">no</td><td><code>lf wave status</code> lists Projects, then every Task flat. With two Projects nothing says which Task is in which. New presentation, so not this Task's; question 2.</td>
+</tr>
+<tr>
+  <td><b>Running a Task</b></td>
+  <td><code>require_task_launch</code>: ready and not being abandoned. No Project check.</td>
+  <td class="yes">yes</td><td></td>
+</tr>
+<tr>
+  <td><b>A Project reaching the tracker</b></td>
+  <td><code>uncreated</code> asks <code>plan_stamps</code>: export unless another Machine stamped it</td>
+  <td class="yes">yes</td><td></td>
+</tr>
+<tr>
+  <td><b>KRs, metric targets, live metrics</b><br>gone</td>
+  <td>no type, command, wire field or view; <code>ReleasedKr</code> and <code>released_targets</code> only convert released stores; columns and two tables marked leaving</td>
+  <td class="yes">yes</td><td>47 of 64 saved Projects on the measured store hold KR text. It stays in the leaving column and in Linear until the contract exports it.</td>
+</tr>
+<tr>
+  <td><b>What the architecture docs say</b></td>
+  <td><code>docs/dev/reference-models.md</code>: "a Wave's planning binds one Linear Project". <code>docs/dev/reference.md</code>: <code>project_transitions</code> and <code>project_transition_items</code> listed as records the Linear events domain keeps.</td>
+  <td class="no">no</td><td>Two lines still describe the model that was removed. Nothing in live code reads either table.</td>
+</tr>
+<tr>
+  <td><b>A Wave with no tracker</b><br>the person never made a Project</td>
+  <td>a <code>projects</code> row named for the Wave, made by the first Task, because a Task reaches its Wave through its Project</td>
+  <td class="no">no</td><td>Unchanged from the first review, and ruled out for this Task by the steer. Larger than this work.</td>
+</tr>
+<tr>
+  <td><b>The lock a plan sync holds</b></td>
+  <td><code>~/.lf/chapter-locks</code></td>
+  <td class="no">no</td><td>A removed word in a path. Kept on purpose: released clients and branch builds must lock the same file.</td>
+</tr>
 </table>
 
-<h2>The biggest mismatch: where a new Task lands</h2>
-<div class="big">
-<p>The plan removes the stored, visible, settable "current Project" and replaces it with a computed rule that no surface shows. A Wave connected to an Initiative holds every Project under it, so anyone starting a Project in Linear can change where <code>lf task create --wave</code> files the next Task, and the command says nothing.</p>
+<h2>The biggest mismatch: a Project that runs</h2>
+<p>The branch removed the chapter a Wave works through. The chapter's own run loop is still in the
+code. A Project has an event journal with "started", "iteration completed", "steer", "interrupt" and
+"failed", from when lf ran a Project as an agent. On the store measured, <code>project_events</code>
+holds 30,536 rows (29,107 <code>task_observed</code>, 610 <code>started</code>, 458 <code>failed</code>,
+352 <code>iteration_completed</code>), the newest written 2026-09-24. This branch marks
+<code>projects.iteration</code> leaving "since chapters ended" and keeps
+<code>IterationCompleted { iteration }</code>.</p>
 <div class="cols">
-<div class="card">
-<h3>Plan as written</h3>
-<pre>$ lf task create --wave billing 'refund flow'
-LOO-12 refund flow</pre>
-<p>Which Project? Newest <code>started</code> by local <code>created_at</code>. Not printed, not in <code>lf wave status</code>.</p>
+<div class="box">
+<h3>Built</h3>
+<pre>store.append_project_event(..)      0 callers
+store.project_events_after(..)      0 callers
+store.latest_project_event(..)      0 callers
+store.latest_project_event_at(..)   0 callers
+store.latest_project_failure(..)    0 callers
+   (outside tests, in both store layers)
+
+append_interrupt(WorkRef::Project)  writes a row
+latest_interrupt_id(WorkRef::Project) reads it
+   every caller found passes a Task</pre>
+<p>Tests seed <code>Failed</code>, <code>Steer</code> and <code>IterationCompleted</code> events to
+exercise readers nothing else calls.</p>
 </div>
-<div class="card proposed">
-<h3>Recommended, now in the plan</h3>
-<pre>$ lf task create --wave billing 'refund flow'
-LOO-12 refund flow · in Project Refunds Q1</pre>
-<p>Same rule, one function, and the command names the Project whenever the Wave has more than one open. With one open Project it prints what it prints today.</p>
+<div class="box proposed">
+<h3 class="new">Proposed (plan, slice 5)</h3>
+<pre>ProjectEventKind, ProjectEvent,
+HistoricalFailure                   deleted
+the five store methods, wrappers
+and the tests that only seed them   deleted
+append_interrupt, latest_interrupt_id
+                                    no Project arm
+-- leaving: project_events LOO-995  in remove_chapters.sql</pre>
+<p>A Project is then a row with a name, a status and Tasks, in the code as in the product. The
+table and its saved rows stay until the contract; nothing is dropped here.</p>
 </div>
 </div>
-<p>Why keep the rule and not a stored default: both steers remove "the single current slot on a Wave". Why "newest started": on the store measured it answers the old current Project in <span class="num">17 of 17</span> Waves that have one; "oldest started" answers it in 15. 22 Waves have one open Project, 5 have two, 1 has three.</p>
-<p>Counterexamples kept: a by-name rule ("the Project named for the Wave") breaks when someone renames it in Linear, and the next Task would make a duplicate. "First in the Wave's order" follows the tracker's rank, which says nothing about new Tasks. Refusing when several are open adds a precondition to the most common command.</p>
-</div>
+<p><b>What must survive:</b> interrupting a Task (<code>lf task interrupt</code>, a Graph's interrupt cursor),
+steering a Task or a Wave, and <code>WorkRef::Project</code> as an identity in the Work tree
+(<code>WorkIdentity</code> gives a Task its Project as parent).
+<b>Counterexample that would break it:</b> a path that launches a Graph bound to a Project, so
+<code>latest_interrupt_id</code> is asked about one. None was found; implement checks every
+<code>WorkRef::Project</code> caller before deleting the arm and keeps the arm if one exists.</p>
+<p class="dim">Choice made for review: the brief says "Look for earlier attempts left behind (unreachable
+branches, hidden commands) and remove those too", so this goes in the Task. Passed over: leaving it for a
+separate cleanup, which would ship a branch named "remove chapters" with the chapter's journal API intact.</p>
 
 <h2>What the review changed in the plan</h2>
 <ol>
-<li>Creation and move name the Project joined when the Wave has several open; the rule is one storage function, <code>new_task_project</code>.</li>
-<li>Tracker export of a new Project keeps <code>uncreated</code> and swaps its test from <code>project_transitions</code> to the Project's <code>plan_stamps</code> row. An unstamped Project counts as made here, which also settles the Project the released <code>lf</code> made offline and never exported.</li>
-<li>A section on what starts and ends a Project, checked against the second steer: tracker status both ways and <code>abandon</code> stay; nothing on the removal list ends a Project. Acceptance now completes a Project in the stand-in Linear and checks the next Task goes elsewhere.</li>
-<li>"Project history" becomes "Projects"; the CLI line drops "current" and "historical".</li>
-<li><code>ops/project.rs</code> also holds <code>wave_graph</code>, <code>WaveGraph</code> and <code>GraphDefault</code>, which stay and move beside <code>scope_graph_default</code>.</li>
-<li>The contract's export names <code>projects.krs</code>, since saved Projects hold KR text.</li>
+  <li>Slice 5a: delete the Project run journal's types, API and tests; mark <code>project_events</code> leaving.</li>
+  <li>Slice 5b: one definition of an open Project, used by the rule and by the name the command prints.</li>
+  <li>Slice 5c: the two stale architecture lines; <code>project_transitions</code>,
+      <code>project_transition_items</code> and <code>project_events</code> move to the "Leaving the store" row.</li>
 </ol>
 
 <h2>Larger than this work</h2>
-<p><b>A Wave without a tracker still costs a Project.</b> The brief's complaint is that "a small group of Tasks costs a Project". After this change the cost is silent, not gone: the first Task in a Wave makes a Project named for the Wave, and with Linear connected that sends a <code>projectCreate</code>. Removing it means a Task can belong to a Wave directly (<code>tasks.wave_id</code>), with Project membership optional; every read that walks Task → Project → Wave changes, and so does what an Issue with no Project under an Initiative means in Linear. The first steer rules this out for this Task.</p>
-<p><b>No command completes a Project without a tracker.</b> True on main too. Without Linear or Asana, the Project made for a Wave stays <code>started</code> for good unless abandoned. If Projects that end are wanted without a tracker, that is one command and its docs.</p>
+<p><b>A Task's Project is shown only at the moment it is chosen.</b> Grouping <code>lf wave status</code> by
+Project (or a Project column) is new presentation over data the wire already carries. On the measured
+store 6 of 62 Waves hold more than one open Project.</p>
+<p><b>A Wave without a tracker still costs a Project</b>, and no command ends, adds or renames one there.
+Tasks belonging to a Wave directly would change every read that walks Task → Project → Wave.</p>
+<p><b>The Task title</b> still says "a Project is a Wave's optional tracker link". The steer withdrew that;
+the PR title and body should say what was built.</p>
 
 <h2>Questions</h2>
 <ol class="q">
-<li>A Wave has several open Projects. Where does a new Task go?
-<ol><li class="chosen">The newest started one, and the command names it. (in the plan)</li><li>The first started one in the Wave's order.</li><li>Add <code>--project</code> to <code>lf task create</code> now and require it when several are open.</li></ol></li>
-<li>A Wave with no tracker gets a Project row on its first Task.
-<ol><li class="chosen">Keep: a Task reaches its Wave through its Project. (in the plan, per the steer)</li><li>File a follow-up for Tasks that belong to a Wave directly, Projects only where a person or a tracker made one.</li></ol></li>
-<li>KR text exists in 47 of 64 saved Projects and stops being shown.
-<ol><li class="chosen">Leave it in Linear's <code>content</code> and the leaving column; the contract exports it. (in the plan)</li><li>Append each Project's KR text to its description once, so it stays readable in lf.</li></ol></li>
-<li><code>lf wave edit-project</code> goes with <code>update-project</code> and <code>plan bind</code>, so a Project's name and summary are edited only in the tracker.
-<ol><li class="chosen">Remove all three. (in the plan, as the brief lists them)</li><li>Keep <code>edit-project</code>: it names a Project by id and never depended on the current one.</li></ol></li>
-<li>Ending a Project without a tracker.
-<ol><li class="chosen">Not in this Task. (in the plan)</li><li>Add one command that completes a Project, in this Task.</li><li>File it as its own Task.</li></ol></li>
+  <li>The Project run journal (<code>project_events</code> and its API).
+    <ol>
+      <li>Delete the code in this Task and mark the table leaving. <span class="new">(in the plan)</span></li>
+      <li>Leave it; file its removal as its own Task.</li>
+    </ol>
+  </li>
+  <li>With several Projects in a Wave, where does a person see which Task is in which?
+    <ol>
+      <li>Nowhere beyond the creation line, for now. (as built)</li>
+      <li><code>lf wave status</code> lists Tasks under their Project when the Wave holds more than one.</li>
+      <li>A Project name on each Task line.</li>
+    </ol>
+  </li>
+  <li>Without a tracker, a Wave keeps the one Project its first Task made.
+    <ol>
+      <li>Keep. (as built, per the steer)</li>
+      <li>A follow-up for Tasks that belong to a Wave directly.</li>
+      <li>A follow-up for local commands that add, rename and end a Project.</li>
+    </ol>
+  </li>
+  <li><code>~/.lf/chapter-locks</code>.
+    <ol>
+      <li>Keep the name until released clients have gone. (as built)</li>
+      <li>Rename now and accept that an old and a new client can sync the same Wave at once.</li>
+    </ol>
+  </li>
 </ol>
-</main>
+
 </body>
 </html>

@@ -32,3 +32,12 @@
   every hook would change the declarations Codex asks a person to trust.
 - `agy` is given `hook.sh` in the launch folder, beside `.agents`, not inside
   it: what `agy` does with an unknown file in `.agents` was not checked.
+- Antigravity's `reasoning_tokens` is always 0 in `lf history usage`: the
+  transcript has no thinking count. The stream's `thinking_tokens` could be
+  kept from the driver instead.
+- Text a hook or the system put in front of the model (`SYSTEM_MESSAGE`,
+  lf's context block included) is not shown in `lf history show
+  --transcript` for Antigravity. Other readers show injected text as a
+  request from `injected`.
+- A model call with several tools has its results matched in row order; only
+  single-tool calls were seen.

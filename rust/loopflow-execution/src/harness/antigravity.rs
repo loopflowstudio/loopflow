@@ -555,6 +555,34 @@ impl super::Harness for Antigravity {
     fn transcript_reader(&self) -> fn(&[Value]) -> Vec<crate::transcript::Turn> {
         crate::transcript::antigravity::read
     }
+    fn locate_transcript(
+        &self,
+        _store: &loopflow_storage::sqlite::SqliteStore,
+        id: &AgentSessionId,
+        _cwd: &std::path::Path,
+    ) -> Result<crate::transcript::Located> {
+        let home = self.transcript_home();
+        let path = crate::transcript::antigravity::file(&home, id.as_str());
+        Ok(if path.is_file() {
+            crate::transcript::Located::Found {
+                source: crate::transcript::Source::File(path),
+                home: None,
+            }
+        } else {
+            crate::transcript::Located::Gone(crate::transcript::Gap::FileMissing { home })
+        })
+    }
+    fn direct_transcript(
+        &self,
+        home: &std::path::Path,
+        _cwd: &std::path::Path,
+        id: &str,
+    ) -> Option<PathBuf> {
+        Some(crate::transcript::antigravity::file(home, id))
+    }
+    fn transcript_markers(&self) -> &'static [&'static [u8]] {
+        &[]
+    }
     fn recent_transcripts(
         &self,
         _home: &std::path::Path,

@@ -4,7 +4,7 @@
 //! and what to say when it is gone are derived here when read.
 
 pub mod answer;
-pub mod antigravity;
+pub(crate) mod antigravity;
 pub(crate) mod claude;
 pub(crate) mod codex;
 pub mod facts;
@@ -146,7 +146,10 @@ impl Source {
     fn last_written(&self) -> Option<i64> {
         match self {
             Self::File(path) => json_lines(path)
-                .filter_map(|row| unix_seconds(&row["timestamp"]))
+                .filter_map(|row| {
+                    // Antigravity dates a row `created_at`.
+                    unix_seconds(&row["timestamp"]).or_else(|| unix_seconds(&row["created_at"]))
+                })
                 .last(),
             Self::OpenCode { store, id } => opencode::last_written(store, id),
         }

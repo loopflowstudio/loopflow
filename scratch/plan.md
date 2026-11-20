@@ -106,8 +106,7 @@ What is in the tree:
   `_classify_agent_failure`, the `from_code` call in `drive::run` and
   `check_cli_available` are gone; `HarnessKind::installed()` replaces the last.
 - `harness/antigravity.rs` (driver, `classify_failure`, AGENTS.md launch
-  folder, `open` refuses), `harness/antigravity_decode.rs`,
-  `transcript/antigravity.rs` (reads no turns), the stand-in
+  folder, `open` refuses), `harness/antigravity_decode.rs`, the stand-in
   `tests/support/antigravity_cli.py`, two real traces under
   `harness/testdata/`.
 - `sanitize_error_message` and the `<harness>.stderr.log` opener moved to
@@ -134,8 +133,7 @@ Slice 2, a worker hears lf (2026-11-20):
   step settles, the Graph advances, the thread is recorded, the first model
   call gets "This Session" and its Task, the call after the tool gets the
   steer, and the stand-in fails the run if a subagent's hook is answered with
-  anything. Its final-answer and usage assertions are skipped for Antigravity
-  (`let transcript = provider != "antigravity"`); slice 3 deletes that.
+  anything.
 - The launch matrix's Antigravity Worker cell runs; the skip is now only for
   the two terminal cells (slice 4).
 - Run at realign (2026-11-20), both ok: `cargo test -p loopflow-execution
@@ -188,28 +186,71 @@ What slice 1 taught:
   annotation that failed the matrix's Codex cell on this Machine before any
   Antigravity cell ran. Quoted now.
 
+Slice 3, transcript and usage (2026-11-20):
+
+- Real `agy` 1.5.13, a throwaway repo with its own `LF_HOME`:
+  `lf -b default 'Run the shell command `echo hi`, then reply with exactly:
+  done' -a antigravity` printed `done`. For that Session, `lf history show
+  <session> --final` printed `done`; `lf history usage --days 0 --json`
+  listed turn `step-0` with `input_tokens` 13503, `cache_read_tokens` 9077,
+  `total_input_tokens` 22580, `output_tokens` 273; `lf history show
+  --transcript --json` showed one ended turn, model `gemini-3.8-flash-high`,
+  a request and three agent items.
+- Not run on real `agy`: `lf history usage --task` for a Task step. The
+  stand-in covers it.
+- `a_task_step_runs_as_a_worker_on_every_harness` asserts Antigravity's final
+  answer and usage like the others; the `transcript` guard is gone. The
+  stand-in keeps a `transcript_full.jsonl` under `HOME`, its tool turn as two
+  model calls (12 in / 2 out, 8 / 3) that the turn sums to 20 / 5.
+- Run, all ok: `cargo test -p loopflow-execution --lib --
+  transcript::antigravity harness::antigravity harness::launch_matrix` (16
+  passed), `cargo test -p loopflow --lib
+  task_graph_launch_tests::a_task_step_runs_as_a_worker_on_every_harness`,
+  `cargo clippy -p loopflow-execution --all-targets -- -D warnings`. CI runs
+  the suites after.
+
+What is in the tree for it:
+
+- `transcript/antigravity.rs`: `file(home, id)` and `read`. The harness
+  answers `locate_transcript`, `direct_transcript` and empty
+  `transcript_markers` (every row counts in a tail read).
+- `Source::last_written` reads `created_at` when a row has no `timestamp`,
+  so a turn cut off at exit is completed at Antigravity's last row.
+
+What slice 3 taught (from 25 real transcripts on this Machine):
+
+- `input_tokens` is apart from `cache_read_tokens` (9565 + 0, then 2366 +
+  7526, against the stream's totals 11931 and 7526), so it fits `Calls` as
+  Pi's and OpenCode's do. The transcript has no thinking-token count; the
+  stream's `thinking_tokens` is not kept, and `reasoning_tokens` is 0.
+- `step_index` is contiguous and every tool result seen is `GENERIC`, one
+  per `PLANNER_RESPONSE` (no call with two tools was seen). Results are
+  matched to calls in order. A denied or failed tool is `status: ERROR`; a
+  background one is `RUNNING` and its row is what the model was told.
+- A `PLANNER_RESPONSE` with no `tool_calls` ends the turn, and a later one
+  in the same turn reopens it (`Turns::current`), so a live read says
+  Running exactly while a tool or a model call is outstanding. A
+  `USER_INPUT` that arrives while a tool is unanswered marks the turn
+  interrupted.
+- `each_turn_is_one_run_that_continues_the_conversation_agy_named` took over
+  60 s in that run; not looked into.
+
 ## Left to build
 
-Next is slice 3: `lf history show --final` fails today for an Antigravity
-Session ("the transcript of conversation … is gone"), and usage is absent.
+Next is slice 4.
 
-1. **Transcript and usage (slice 3).** `transcript/antigravity.rs`:
-   `transcript_full.jsonl` to `Turn`s, and `locate_transcript` /
-   `direct_transcript`. Then delete the `transcript` guard in
-   `a_task_step_runs_as_a_worker_on_every_harness` and give the stand-in a
-   transcript and usage.
-2. **The terminal (slice 4).** `open`, the launch matrix's Chat and
+1. **The terminal (slice 4).** `open`, the launch matrix's Chat and
    WorkSession cells (delete the `Mode::Interactive` skip).
    `native_session.rs` already starts `program()`. The bare thread report
    needs no new write: `claim_thread` already puts the conversation id in
    `reported_thread_path` at the launch's first callback.
-3. **Names (slice 5).** Every list of harness names: `error.rs`, `config.rs`
+2. **Names (slice 5).** Every list of harness names: `error.rs`, `config.rs`
    tests, `prompt/process.rs`, `loopflow-test-support/src/lib.rs`,
    `config/catalog.rs` (`yolo`, `chrome` help), `launch_policy_tests.rs`,
    Swift (`WorkspacePanesView.swift`, `SessionProgramStatus.swift`), docs,
    `skills/loopflow`. `harness/README.md`: the launch table and the Task-step
    table with five columns.
-4. **One path through `emit_block` (from reading slice 2).**
+3. **One path through `emit_block` (from reading slice 2).**
    `emit_block(…, harness: Option<HarnessKind>)` branches twice on `None` to
    call `HookCallback::plain` and `plain_reply`, which are also the trait's
    defaults. With an absent `--harness` read as `HarnessKind::Claude`,
@@ -320,8 +361,8 @@ found by id alone (`direct_transcript`). `USER_INPUT` starts a turn (strip the
 the end of the file ends it; `SYSTEM_MESSAGE` is text the system or a hook put
 in mid-turn, never a request; `PLANNER_RESPONSE` is one model call (`input_tokens`,
 `cache_read_tokens`, `output_tokens`, `model`, `content`, `thinking`,
-`tool_calls[]`); the row after a tool call (`GENERIC`, or a named type) is
-its result. A `PLANNER_RESPONSE` with no `tool_calls` does not end the turn:
+`tool_calls[]`); the rows after a tool call (`GENERIC`, or a named type) are
+its results, matched to the calls in order. A `PLANNER_RESPONSE` with no `tool_calls` does not end the turn:
 a subagent's report or a timer arrives as a `SYSTEM_MESSAGE` and the model
 answers again (seen live: steps 9, 10, 11 of one turn). The turn's answer is
 its last `PLANNER_RESPONSE` with `content`. Rows carry no cwd, so
@@ -576,12 +617,12 @@ is unchanged line for line.
    error event on every harness.
 2. **Built (see "Built").** A worker hears lf: launch folder, gate script,
    `hook_callback` / `hook_reply` behind `--harness`.
-3. **Usage.** `transcript/antigravity.rs`, `step-<n>` turn names,
-   `locate_transcript`; `lf history usage --task` shows the step.
+3. **Built (see "Built").** Usage: `transcript/antigravity.rs`, `step-<n>`
+   turn names, `locate_transcript`; `lf history usage --task` shows the step.
 4. **The terminal.** `open` (`-i`, trust setting, resume), bare thread report
    through `reported_thread_path`, `recognizes` (`agy` or `antigravity`),
    launch matrix chat and work-session cells.
-5. **Names.** Every list in "Left to build" 3, and item 4 there.
+5. **Names.** Every list in "Left to build" 2, and item 3 there.
 
 ## Not checked
 

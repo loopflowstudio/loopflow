@@ -35,3 +35,8 @@
 - New's chooser rows lost their step diagram for the menu's line (stops, first sentence); the sheet still draws the chosen workflow's steps.
 - The Task view's "Choose workflow" menu reads the same list, so it no longer offers a Wave's Graph or lists pieces first.
 - The suite is `BacklogViewTests` after the rename, not `BacklogBoardTests`.
+
+## From the second concept review, November 19 (settled the safer way; say so if wrong)
+
+- A started Task nobody holds gets Open, not Continue, in the backlog. Continue from a last stop such as demo reaches `end` and approves Auto-Ship, and the design already says the backlog must not reproduce Continue/Ship. The other reading: keep a one-click Continue in the backlog and warn when it will merge, which needs the run action and its consequence on the wire (`TaskRunControl` carries only a refusal).
+- "Run without stopping" still lists six Graphs (auto, deep-clean, incident, optimize, queue, task-design). Whether the first menu should hold only auto and incident is for the demo to show.

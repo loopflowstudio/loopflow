@@ -1060,7 +1060,8 @@ the Session stays on the new provider
 take precedence. Connecting
 to an already running provider keeps its existing launch settings. Historical
 replay uses captured inputs. Older managed-home transcripts are adopted into the native home on resume,
-without copying credentials. Missing history is reported.
+without copying credentials. A conversation the provider never saved starts
+again from its first request.
 
 Claude turn limits and native JSON schemas require headless mode; terminal
 launches reject them. Other headless providers report unsupported turn limits

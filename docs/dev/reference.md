@@ -196,7 +196,7 @@ their deletion is finished.
 
 | Historical or transitional representation | Target owner |
 | --- | --- |
-| Wave-scoped `wave_chapters` rotation | Linear Project status; a Wave's Project is replaced in place, with no rotation |
+| Wave-scoped `wave_chapters` rotation, `waves.current_project_id` | Projects of a Wave (`projects.wave_id`) with Linear Project status; no Project is selected |
 | Recommended Graph / `graphs.recommended` | Wave or repository default graph |
 | `GraphPosition`, `PinnedTaskGraph`, `task_graph_positions` | The Graph process's in-memory cursor; GraphProcess records the graph and each step's node |
 | `GraphRun`, `graphs/<id>/position.json` | The Graph process and its step processes |
@@ -213,11 +213,8 @@ the tracked source tree.
 ## Authority and failure invariants
 
 - SQLite owns planning with optional Linear synchronization; observed Linear
-  conflicts win while losing intentions remain history. A Wave's planning is one
-  In Progress Linear Project; uncertain delivery stays visible.
-- Wave instruments and observations survive plan changes. Missing target
-  planning is unknown, not proof that an instrument is untargeted; it cannot
-  erase an observed reading.
+  conflicts win while losing intentions remain history. Uncertain delivery stays
+  visible.
 - An agent launch needs no planning parent, but requires writable admission and
   immutable captured input before provider side effects.
 - LfProcess is an actual lf process. LfSession history owns native outcomes and

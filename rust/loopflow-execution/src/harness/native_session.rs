@@ -566,6 +566,12 @@ fn run_client(
     if crate::transport::current().is_some() {
         // Hand the wait to the execution owner and become the provider, or its
         // client: no launcher sits beside the agent holding the heap that built it.
+        // Becoming the provider leaves nobody to say it failed, and the
+        // announcement below tells the viewer, and an `lf open` behind it, that
+        // the provider started. Refuse first what exec would.
+        if crate::os_process::which_command(process).is_none() {
+            return Err(anyhow!(missing_agent_message(launch.harness.kind())));
+        }
         if let Some(capture) = capture {
             capture.observe_provider(agent_session.cloned());
         }

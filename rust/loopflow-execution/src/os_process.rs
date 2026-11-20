@@ -335,12 +335,28 @@ pub fn repair_path() {
     let Some(home) = dirs::home_dir() else {
         return;
     };
-    let path = std::env::var("PATH").unwrap_or_default();
+    let path = match std::env::var("PATH") {
+        Ok(path) if !path.is_empty() => path,
+        // Not ours to rewrite: joining it as text would drop its entries.
+        Err(std::env::VarError::NotUnicode(_)) => return,
+        // With none set the OS searches these; setting one must not lose them.
+        _ => "/usr/bin:/bin".to_owned(),
+    };
     std::env::set_var("PATH", tool_path(&path, &home));
 }
 
 pub fn which_on_path(name: &Path) -> Option<PathBuf> {
     which_in(name, &std::env::var_os("PATH")?)
+}
+
+/// The executable `command` would start, resolved on the `PATH` it will run
+/// with, as spawning it resolves it.
+pub(crate) fn which_command(command: &std::process::Command) -> Option<PathBuf> {
+    let path = match command.get_envs().find(|(name, _)| *name == "PATH") {
+        Some((_, path)) => path.map(std::ffi::OsStr::to_os_string),
+        None => std::env::var_os("PATH"),
+    };
+    which_in(Path::new(command.get_program()), &path?)
 }
 
 fn which_in(name: &Path, path: &std::ffi::OsStr) -> Option<PathBuf> {

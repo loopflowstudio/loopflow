@@ -28,7 +28,7 @@ ol.q li { margin-bottom:14px; } ol.q ol { list-style:lower-alpha; margin-top:6px
 </head>
 <body><main>
 <h1>yolo on by default: do the concepts line up, as built?</h1>
-<p class="lede">Task 4bd948, reviewed at <code>d9037753f4</code> against base <code>660240716b</code>. Area: every place lf decides whether an agent asks permission, on Claude, Codex, OpenCode, Antigravity and Pi, attended and unattended. The earlier page reviewed the plan; this one reviews the code with the whole change in it.</p>
+<p class="lede">Task 4bd948, reviewed at <code>e557f3dc7d</code> against base <code>origin/main</code> (a51ae5e48f, #1998 merged). Area: every place lf decides whether an agent asks permission, on Claude, Codex, OpenCode, Antigravity and Pi, attended and unattended; plus how a person names the Antigravity harness, folded in from Task 4fb4fe. The earlier pages reviewed the plan and then the permission code; this one reviews the branch with both in it.</p>
 
 <h2>What a person sees</h2>
 <table class="grid4">
@@ -53,10 +53,12 @@ ol.q li { margin-bottom:14px; } ol.q ol { list-style:lower-alpha; margin-top:6px
 <tr><td>Worktree access</td><td><code>provider_writable_roots</code> → <code>--add-dir</code></td><td class="yes">yes</td><td>Sent whatever <code>yolo</code> says. Claude's "Adding a new directory" dialog under bypass predates the branch (<code>questions.md</code>).</td></tr>
 <tr><td>lf answering Codex approvals</td><td><code>ApprovalPolicy::{AutoApprove, NativeClient}</code></td><td class="yes">yes</td><td>How lf answers on the wire, not what it asks Codex for. Stays.</td></tr>
 <tr><td>Pi's tools</td><td>untouched</td><td class="yes">yes</td><td></td></tr>
+<tr><td>Naming the Antigravity agent: <code>agy</code></td><td><code>HarnessKind::Antigravity</code>, <code>as_str()</code>/<code>parse</code> = <code>"agy"</code>; <code>program()</code> deleted</td><td class="yes">yes</td><td>The name a person types is the command they run, as with <code>claude</code>, <code>codex</code>, <code>opencode</code>, <code>pi</code>. Type, module and display keep the product name "Antigravity", the same split as <code>claude</code>/Claude. One string per idea: <code>as_str</code> is both the setting value and the program; process recognition matching both <code>agy</code> and <code>antigravity</code> is about what the OS reports, not a second name.</td></tr>
+<tr><td>(none) A launch built in code</td><td><code>AgentConfig::new(agent)</code> sets <code>yolo: false</code></td><td class="no">no, tiny</td><td>The constructor's default is the opposite of the setting's. Every production caller (<code>session.rs</code>, <code>process.rs</code>, <code>commit.rs</code>, <code>replay.rs</code>) overwrites it from config or a recorded request, so nobody meets it; it is a place a future caller could. Not a model change.</td></tr>
 </table>
 
 <h2>Biggest mismatch</h2>
-<div class="callout">None that changes the design. The model the plan chose is the model the code has: one setting, one fact about the launch, one predicate. The only leftover is the recorded-request key name.</div>
+<div class="callout">None that changes the design. The model the plan chose is the model the code has: one setting, one fact about the launch, one predicate. The <code>agy</code> rename fits the same pattern as the other four harnesses. Leftovers are names: the recorded-request key, and <code>AgentConfig::new</code>'s opposite default.</div>
 <div class="cols">
 <div class="panel old"><h3>before this branch</h3>yolo setting · per-harness headless floor reading <code>~/.codex/config.toml</code> and <code>.claude/settings.json</code> · Task-checkout override · commit text forced on. Under <code>yolo: false</code> headless Claude bypassed, headless Codex got <code>workspace-write</code> outside a Task checkout.</div>
 <div class="panel prop"><h3>as built</h3>default on · <code>yolo || Headless</code> asked by every harness · the rest deleted. Lost on purpose: <code>yolo: false</code> no longer sandboxes headless Codex; docs point to a Machine, VM or container.</div>
@@ -77,6 +79,8 @@ ol.q li { margin-bottom:14px; } ol.q ol { list-style:lower-alpha; margin-top:6px
  <ol><li>Leave it (chosen: behavior is right, rename touches capture wire shape).</li><li>Rename to <code>yolo</code> in a separate Task with fixtures and an old-capture reader.</li><li>Record what was sent (<code>skips_permissions(mode)</code>) instead.</li></ol></li>
 <li>Claude's directory dialog under bypass.
  <ol><li>Leave (chosen: predates this branch).</li><li>Drop <code>--add-dir</code> roots when the launch skips permissions, after probing that bypass still reaches the main checkout.</li></ol></li>
+<li><code>AgentConfig::new</code> defaults <code>yolo: false</code>.
+ <ol><li>Leave (chosen: every production caller sets it).</li><li>Default it to <code>true</code> to match the catalog.</li><li>Drop the field from <code>new</code>'s defaults by taking it as an argument.</li></ol></li>
 <li>Sandboxed unattended Codex.
  <ol><li>No lf sandbox; docs point to a Machine, VM or container (chosen).</li><li>File <code>codex.sandbox</code> as its own Task.</li></ol></li>
 </ol>

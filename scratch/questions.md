@@ -42,3 +42,8 @@ shows them with numbered questions.
 - **`lf -a foo` reads "invalid data: invalid graph: CLI: invalid graph:
   unsupported agent harness 'foo'"**: three wrappers on one settings error.
   Older than this branch; the refusal of `antigravity` is where people meet it.
+
+## From concept-review on e557f3dc7d (2026-11-20)
+
+- **`AgentConfig::new` defaults `yolo: false`**, the opposite of the catalog.
+  Every production caller overwrites it; left as is.

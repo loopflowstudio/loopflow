@@ -64,8 +64,8 @@ lf --machine mini -a codex implement
 - **Native logins:** Claude and Codex authenticate on the execution Machine.
   For unattended rentals, opt in to forwarding via `forward.env` and
   `forward.files` ([Remote Machines and rentals](subscriptions.md#remote-machines-and-rentals)).
-  Only variables and home files named in personal `forward` settings are sent;
-  existing destination files are retained.
+  Only variables and home files named in personal `forward` settings are sent.
+  Existing destination files are retained.
 - **Service transfer:** OpenSSH verifies the host key and Loopflow checks the
   saved Machine identity before transfer. Credential bytes travel through SSH
   stdin, never in command arguments or logs, and land with owner-only

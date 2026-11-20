@@ -15,8 +15,13 @@ the Loopflow skill once:
 npx skills add loopflowstudio/loopflow --skill loopflow -g
 ```
 
-That gives your agent the same operating contract so it can create Tasks,
-launch Graphs, steer running work, and inspect status on your behalf.
+An external harness acts on your behalf as a Loopflow **User**, the same caller
+kind as the Mac app. The skill teaches it to inspect status, start Sessions
+you ask for, and work with the Tasks you name.
+
+A Loopflow-launched Wave or Task agent is an internal participant. It receives
+`LOOPFLOW.md` automatically and coordinates through Work observations recorded
+by Loopflow.
 
 ## Delegate work as Tasks
 

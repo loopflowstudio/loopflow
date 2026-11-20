@@ -9,3 +9,12 @@
 - Rank sorts the list across Projects; ⌘↑↓ past a row of another Project writes nothing, since rank is per Project. A Wave whose backlog spans Projects may want grouping (LOO-996).
 - Undo uses the window's `UndoManager`, registered when a write lands; a reorder undone before the Work update arrives restores from the ranks read at the time.
 - The narrowed filter is bracketed in the capture text (`[Mine 1]`); All, the default, is not.
+
+## From the concept review, November 19 (settled the simpler way; say so if wrong)
+
+- Started Tasks nobody holds stay in the backlog list, because `TaskSection` puts them there, and are drawn as started with their own Continue. The other reading: the backlog shows only unstarted Tasks and unowned started work gets its own place.
+- New's sheet gains File (create without running) beside Start. File is not the default button, even when the sheet opens from the backlog.
+- Desktop's word for a Graph is "workflow", as the sheet, the Task view and the Wave menu already say; "flow" in the new strings and docs changes to match.
+- The view part is renamed `board` → `backlog` (`lf desktop capture -p backlog`). `WorkNavigation.Board`, the Wave view's identity, keeps its name; renaming it touches tiles and dashboards.
+- Changing the filter or search drops hidden rows from the selection, as Finder and Mail do, instead of keeping them selected out of sight.
+- incident reads "never stops" and auto "merges without asking", though both approve Auto-Ship at the end. Left as shown in the Start bar page.

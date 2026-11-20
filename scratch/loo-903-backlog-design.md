@@ -159,7 +159,6 @@ CI runs the full suites.
 - Regrouping and nesting rows (LOO-996 territory).
 - A command palette.
 - Post-Start delivery (LOO-434 / #1851).
-- Create-without-run in NewTaskSheet. New keeps today's sheet.
 - Reopening abandoned Tasks.
 - Server-side text search.
 
@@ -173,6 +172,7 @@ Status, November 19: slices 1–4 are built in code; what remains is the demo an
 4. **Capture text and docs — built.** `lf desktop capture -p board` prints counts then rows with ●/○/◌ and › for selected. `docs/orchestration.md`'s `lf graph list` example matches the real output.
 
 Remaining:
+- The seven changes under "Concept review, November 19" below.
 - Demo seed (a scratch Wave with eight Tasks) and the hands-on run in the Dev app: drag feel, key focus, the split Start's menu rendering, toolbar collapse at narrow widths. None of these have been seen in the real app yet.
 - Reorder has no optimistic projection: rows move when the Work update arrives.
 - `PlanBoardTask` stays: `lf plan board` (bin/lf.rs) reads it; Swift `PlanBoard` has only fixture readers.
@@ -181,6 +181,41 @@ Checks (headless, this Machine):
 - `cargo nextest -E 'test(graph::) | test(server::schema::tests::) | test(lf::tests::) | test(cli_discovery::) | test(documented_commands::) | test(dto_fixtures::) | test(graph_discovery_tests::) | test(task_ownership::) | binary(served_reads) | binary(golden_prompt) | test(world_recipes::)'`: pass, except `served_reads::screen_reads_are_compact_passive_and_match_cli`, which fails identically on base 0a31dd3c98 here (compact plan board empty); CI decides.
 - `cargo clippy --all-targets -- -D warnings`: clean.
 - `scripts/test_desktop.sh --filter 'BacklogBoardTests|DTOFixtureTests|TaskHistoryFilterTests|WorkNavigationTests|TaskGraphProofTests|NewTaskTests|DesktopHeadlessTests|WaveLensTests|RegistryQueryTests|WorkModelTests'`: pass after the `wave-backlog` identifier fix in DesktopHeadlessTests.
+
+### Concept review, November 19 — next implement direction
+
+Read against `BacklogBoard.swift`, `WorkModel.swift`, the Graph catalog and the three docs pages at cad30817ef. Nobody has seen any of this; each item is settled from text already in this design or the Task brief, and the assumptions are in `questions.md`. Biggest first.
+
+1. **The list holds started Tasks and calls them unstarted.** `BacklogList` takes `section == .backlog`, and `TaskSection::Backlog` is unstarted *or unowned*: an Idle or Shipping Task nobody holds lands there (`durable.rs:626-629`). Such a row has a checkout, maybe a PR, and reads exactly like an idea. Its button says "Start · feature", the flow menu offers to run it on another Graph, and Abandon removes its PR. The header comment, the empty state and `docs/surfaces.md` all say "unstarted". "Existing mechanisms" above already requires showing a row's execution apart from its owner.
+   - The backlog is work nobody is doing. Copy says "open work nobody is running", never "unstarted".
+   - A started row says where it stands, from what Rust already sends: the step from `nextMove`/`latestGraphProcess`, and the PR number when `pr` is set. The capture text carries the same words.
+   - Its primary action is whatever `runControl` offers, with that label. The flow menu applies to unstarted Tasks only; a started Task keeps its Graph. A selection mixing both starts each its own way and the label counts them apart ("Start 2 · feature · Continue 1").
+   - The Abandon dialog says which Tasks have a PR.
+   - `BacklogBoardTests` gains a started unowned row in the fixture.
+
+2. **Actions reach Tasks you can't see.** `selected` reads `all` while `opened` reads `rows`. Select three, search until one shows: the bar says "Abandon 3…" and the dialog asks "Abandon 3 Tasks?" without naming one. One selected row hidden by Mine leaves Start enabled over an empty-looking list. The common contract says "Batch actions expose exact Tasks and effects before writing".
+   - Changing the filter or the search drops hidden rows from the selection. `selected` reads `rows`; "selected rows a filter hides still count" goes.
+   - The Abandon dialog lists the identifiers (first five, then "and N more").
+
+3. **New can't put anything in the backlog.** The header's New and the empty state's one step ("No unstarted work in this Wave → New") open `NewTaskSheet`, whose only action is Start (`lf task create --run`). Its tooltip says "File a Task". The brief's loop opens with "capture an idea", and the common contract says "Save idea is plain creation with an explicit destination". The exclusion "Create-without-run in NewTaskSheet" contradicts both; nobody asked for it, and it is withdrawn.
+   - The sheet gets a second button, File, which runs `lf task create` without `--run`, closes, and selects the new row in that Wave's backlog. Start ⌘↩ stays as it is. One sheet, the same from ⌘N and from New.
+
+4. **Start offers Graphs you can't start a Task on.** Menu membership is "has a description", but every builtin has one ("4 always have it for built in, not required for customs" was about descriptions, not the menu). So "Run without stopping" lists deliver, queue, refresh and pursue, which are pieces of other Graphs, and vsm-operate, which is a Wave's Graph. `docs/surfaces.md` already shows the intended menu: auto and incident.
+   - A piece is a Graph another Graph includes with `graph:`. Rust knows this when it builds the catalog; the entry says so (`included_by: [String]`, a required key, empty for a Graph you start with). Pieces and undescribed Graphs sit under More ›.
+   - Wave Graphs (`builtins/wave/graph/`, `.lf/wave/*/graphs`) are not offered for a Task at all. The entry names what it runs for (`runs: task | wave`) if the catalog can't already tell; check before adding the field.
+   - `NewTaskSheet`'s `WorkflowChooser` reads the same catalog and lists all 26 by name. It takes the same membership and the same line (description, stop count) from the one projection, `BacklogFlow`, renamed for what it is: `StartFlow`.
+
+5. **One thing, three names.** The CLI and docs say Graph, Desktop says "workflow" in four places (`NewTaskSheet`, `TaskWorkView` "Choose workflow", the Wave menu's "Workflow · feature", `WorkflowChooser`), and this change adds "flow" ("Each Wave's flow", "Reading flows…", the docs heading "Start picks a flow"). Desktop's word is workflow; the new strings and `docs/surfaces.md` use it. The docs sentence becomes "Start runs a Task's Graph, which Desktop calls its workflow".
+
+6. **"Each Wave's flow" names the wrong owner.** A Task's Graph is its own, else its Wave's, else the repository's, and Rust sends the answer as `graph_name`. Repository scope has Tasks with no Wave. The item reads "Each Task's own workflow", and the help text follows.
+   - `flow(task)`'s `?? "code"` goes: the roadmap always sends `graph_name` (`waves.rs:2006`), and a Swift default for Rust's last rung is the drift the DTO rule forbids. The field becomes non-optional on the wire, or the label omits a missing name.
+   - With nothing selected the button reads "Start", disabled. `defaultFlow` goes; over a repository it printed "code" whatever the repository's `graph:` says.
+
+7. **The part is still called `board`.** `lf desktop capture -p board` prints a backlog, and Show… already calls it Backlog. The view part becomes `backlog`: `WaveViewPart.backlog`, the `DesktopViewPart` name and kind, `-p backlog`, `BacklogBoard` → `BacklogView`, the fixtures and the three docs lines. `WorkNavigation.Board` names the Wave view itself and also keys the tiles; it stays (see `questions.md`). The stale comment on `startedTaskCount` ("its board's Working and Autonomous columns") goes.
+
+Left as built: the "merges without asking" tag comes from a Swift match on step labels beginning `land`/`pr land`; incident has no such step and reads "never stops", though reaching the end approves Auto-Ship there too. The tags were shown in the Start bar page and answered "2a"; the section header already says Auto-Ship may merge.
+
+Checked and unchanged: Mine ⊂ Available matches 'filter out claimed by others ("available"?)'. Claim without starting keeps an unstarted Task in the backlog; claiming a started one moves it to Working, which is the section rule doing its job. Rank writes, undo and per-Task outcomes go through the single-Task writers as planned.
 
 Exploration history follows. Explore round 6, November 14, 2026, combined the composed reading workspace, compact rows and a separate full-width repository conversation. Review page: [explore.html](explore.html).
 

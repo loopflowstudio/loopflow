@@ -1144,7 +1144,8 @@ fn cli_destinations_save_the_declaration_used_by_preparation_and_unset() {
     check(None, "codex:project");
     check(Some("product"), "claude:wave");
     check(Some("8ae21a68-8940-4553-a3ab-135133925e35"), "claude:wave");
-    let private = repo.path().join("lf.config.local.yaml");
+    let private = repo.path().join(".lf/config.local.yaml");
+    std::fs::create_dir_all(private.parent().unwrap()).unwrap();
     let before = fs::read(&private).unwrap();
     let rejected = command(&child, home.path(), &["set", "user.name", "Wrong scope"])
         .output()
@@ -1159,7 +1160,7 @@ fn cli_destinations_save_the_declaration_used_by_preparation_and_unset() {
     run(&["unset", "--shared", "agent"]);
     check(None, "codex:global");
     assert_eq!(fs::read(home.path().join("config.yaml")).unwrap(), global);
-    assert!(!child.join("lf.config.local.yaml").exists());
+    assert!(!child.join(".lf/config.local.yaml").exists());
 }
 
 #[test]
@@ -1250,7 +1251,7 @@ fn context_namespace_agrees_across_files_flags_and_preparation() {
         .as_array()
         .unwrap()
         .contains(&serde_json::json!("private.md")));
-    let saved = fs::read_to_string(repo.path().join("lf.config.local.yaml")).unwrap();
+    let saved = fs::read_to_string(repo.path().join(".lf/config.local.yaml")).unwrap();
     assert!(saved.contains("context:") && saved.contains("docs:"));
 }
 

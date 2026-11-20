@@ -47,6 +47,7 @@ public enum ServedRead: Equatable, Sendable, Encodable {
     case taskChanges(issue: String, base: String, head: String?)
     case taskDiff(issue: String, path: String?, base: String, head: String?, draft: String?)
     case taskFile(issue: String, path: String)
+    case taskFiles(issue: String, path: String, cursor: String?, showIgnored: Bool)
     case waveList
     case machineSelf
     case desktopPortfolio
@@ -119,6 +120,9 @@ public enum ServedRead: Equatable, Sendable, Encodable {
                 + (head.map { ["--head", $0] } ?? []) + (draft == nil ? [] : ["--draft"])
         case .taskFile(let issue, let path):
             return ["task", "file", issue, path, "--json"]
+        case .taskFiles(let issue, let path, let cursor, let showIgnored):
+            return ["task", "files", issue, path, "--json"] + argument("--cursor", cursor)
+                + (showIgnored ? ["--show-ignored"] : [])
         case .waveList:
             return ["wave", "list", "--all", "--json"]
         case .machineSelf:
@@ -222,6 +226,8 @@ public enum ServedRead: Equatable, Sendable, Encodable {
             TaggedFields("task.diff", ["issue": issue, "path": path, "base": base, "head": head, "draft": draft])
         case .taskFile(let issue, let path):
             TaggedFields("task.file", ["issue": issue, "path": path])
+        case .taskFiles(let issue, let path, let cursor, let showIgnored):
+            TaggedFields("task.files", ["issue": issue, "path": path, "cursor": cursor, "show_ignored": showIgnored])
         case .waveList: TaggedFields("wave.list")
         case .machineSelf: TaggedFields("machine.self")
         case .viewSelect(let expression):
@@ -1112,6 +1118,13 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(Customized.self, from: await write(.graphCustomize(directory: cwd ?? "/", name: name))).path
     }
 
+    /// `lf -b skill <name>` in `checkout`, started detached: returns once it
+    /// runs, with the log its output goes to.
+    public func runSkill(_ name: String, checkout: String) async throws -> String {
+        struct Launched: Decodable { let log: String }
+        return try Self.decode(Launched.self, from: await write(.skillRun(directory: checkout, name: name, message: nil, agent: nil))).log
+    }
+
     /// Run the Task's graph until its next interactive step; returns once it
     /// runs. `graph` takes up another graph; `from` starts at that step instead,
     /// and an interactive `from` only puts the Task there.
@@ -1183,6 +1196,14 @@ public struct RegistryQuery: Sendable {
     ) async throws -> TaskDiffSnapshot {
         let stdout = try await serve(.taskDiff(issue: issue, path: path, base: base, head: head, draft: draft))
         return try Self.decode(TaskDiffSnapshot.self, from: stdout)
+    }
+
+    /// One page of a checkout directory's immediate entries, directories first;
+    /// `cursor` is the previous page's `nextCursor`. The empty path is the root.
+    public func taskFiles(issue: String, directory: String, cursor: String? = nil) async throws -> TaskDirectory {
+        let stdout = try await serve(.taskFiles(issue: issue, path: directory.isEmpty ? "." : directory,
+                                                cursor: cursor, showIgnored: false))
+        return try Self.decode(TaskDirectory.self, from: stdout)
     }
 
     /// Current contents of one file, constrained to the Task worktree.

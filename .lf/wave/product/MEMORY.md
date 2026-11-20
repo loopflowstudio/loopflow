@@ -189,10 +189,8 @@ against an unseen reopening. LOO-385 overlap does not establish closure.
 
 ## History
 
-- Terminal-host adoption (2026-10-07): Jack Heart authorized landing after cmux/herdr
-  trials without full adoption proof; LOO-421 limits at `27613222eb`, same file.
-- LOO-380 Live Home proof, unresolved LOO-367/366/343/test-Wave findings:
-  `314095b00:wave/product/MEMORY.md`; no cleanup authority.
+- Terminal-host adoption (2026-10-07) and LOO-380 Live Home findings:
+  `2a3b6d11d8:.lf/wave/product/MEMORY.md`, this heading; no cleanup authority.
 
 ## Reactive workspace (2026-10-05)
 
@@ -499,16 +497,10 @@ remain distinct from waited delivery.
 
 ## Skill reduction decisions (2026-09-28)
 
-Jack requested a smaller library, then restored debug as the default in examples.
-Debug investigates and fixes a cause; unbreak restores a workflow. That distinction
-is the implementation interpretation, not Jack's explicit wording. Neither needs
-clipboard input. 5whys remains explicit systemic investigation; reduce and polish
-remain optional surveys, with no accepted removal. Research includes conversational
-codebase questions. Realign reconciles memory; pr-message owns PR authorship.
-
-Historical consolidation: `16e9c950b9:wave/product/MEMORY.md`, this heading.
-Workflow decisions supersede those recipes; missing launch history proves neither
-disuse nor caller authorship.
+Debug investigates and fixes a cause; unbreak restores a workflow (the
+implementation's reading, not Jack's wording). Realign reconciles memory;
+pr-message owns PR authorship. The September library reduction and its
+consolidation history: `2a3b6d11d8:.lf/wave/product/MEMORY.md`, this heading.
 
 Jack requested single S1–S5 skills and identified their sequence as VSM. The
 `vsm-operate` design composes delivery, coordination, capacity, adaptation and
@@ -703,6 +695,26 @@ Mac README and CLI reference.
   provider Home continuity were not individually established by those checks or
   Jack's overall demo approval. A wrapper's returned launch argv must retain its
   Home context; successful initial launch does not prove nested commands do.
+
+## Task Brief, Diff and Files pages (LOO-515, 2026-11-19; PR #1949 unmerged, unseen on screen)
+
+- Brief, Diff and Files are tabs of the one Files tool (Jack, November 18:
+  "why does files show up three times"); Jack named Diff. One renderer reads
+  the PR-equivalent comparison.
+- `lf task diff` stopped at 1 MB in path order; the stream showed no Swift.
+  Jack: "that we felt we couldnt afford to see a full diff". Complete a capped
+  read or say it is cut.
+- Jack: "The diff is really about the underlying worker not the highest-level
+  session."
+- Jack chose comments sent to the session, a sidebar and a reading order:
+  the `tour` skill writes `scratch/tour.yaml`; Desktop has a button.
+  It ends at publish (Jack: "Tour doesnt need to survive").
+- `diff_hidden` adds per layer; `diff_groups` replaces whole (an agent's
+  choice over merging, unreviewed). Jack: "use the existing config parser to
+  get final values": Desktop layers nothing. Jack chose
+  `.lf/config.local.yaml` for private settings.
+- Top-level `diff` in config is `context.diff`'s shorthand. A key the released
+  `lf` doesn't know in `.lf/config.yaml` warns on every command.
 
 ## Accepted calmer workspace (2026-09-25)
 

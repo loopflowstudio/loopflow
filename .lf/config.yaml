@@ -20,3 +20,13 @@ release:
       - run
       - python
       - '{repo}/scripts/publish_release.py'
+diff_groups:
+- title: Docs
+  paths: ['*.md', '*.mdx', '*.rst', '*.txt', '*.adoc', /docs/]
+- title: Data model
+  paths: [rust/loopflow-model/, rust/loopflow-storage/, tests/fixtures/dto/, /migrations/, '*.sql', schema, /models/, '*.proto', dto]
+- rest: Everything else
+- title: Tests
+  paths: [/test/, tests/, /__tests__/, /spec/, /fixtures/, /test_, _test., .test., .spec., tests.]
+- title: Generated and lock files
+  paths: ['*.lock', '*.snap', '*.pbxproj', -lock.json, .lock.json, .min., /generated/, /__generated__/, /__snapshots__/, /vendor/, tests/goldens/]

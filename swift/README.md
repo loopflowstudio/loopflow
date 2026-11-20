@@ -216,8 +216,8 @@ Wave lists, boards and Task pickers keep that relative order after refresh.
 Filtering or opening a Task leaves the order intact. Saved Dashboard arrangements,
 search results and Done's completion-date ordering keep their own order.
 
-Each Work keeps one pane layout and document store. The browser offers Files,
-Changes, Task & workflow, Graph processes and web pages. Rex, Herdr and cmux
+Each Work keeps one pane layout and document store. The browser offers Brief,
+Diff, Files, Task & workflow, Graph processes and web pages. Rex, Herdr and cmux
 open only a Task's conversation and never read Desktop's layouts.
 
 Repository and Wave
@@ -402,21 +402,122 @@ Task workspaces start with the Session on the left and Files on the right,
 at 61.8/38.2. Use **View → Toggle Shell** or **Toggle Files**, or their shortcuts.
 If every pane is hidden, **Show pane** restores the retained pane; **Open conversation**
 remains available when the Work has no conversation open.
-Shell holds retained shell tabs; Files holds documents, **Brief**, **Changes** and
-recorded **Pull request** tabs. Hidden tools keep their clients and drafts. Files starts with its chooser closed. Click the file-browser toggle or press
-Command-P in the file pane to search **scratch** and files changed from the
-branch's recorded parent commit. Selection closes the dropdown; pin it to keep
-the list alongside the document (Control-Command-B). Escape dismisses the dropdown.
-Sidebar selection switches the whole
-Task workspace; selections inside a Task can focus its companion.
+Shell holds retained shell tabs. The Task's pane has one row of tabs: **Brief**,
+**Diff** and **Files** (Option-Command-1/2/3), then anything else open beside
+them. Hidden tools keep their clients and drafts.
+
+**Brief** shows the Task's state, next move and PR state above its text, the
+Tasks the brief names (click one to open it), and an outline when the brief has
+headings or an `Acceptance:` lead. Its scroll position survives page and Task
+switches in this window; a brief that changed since you last read it says so.
+
+**Diff** opens on what is compared and how much changed ("7 changes in 4
+files", then the base branch and commit), with the changed files beside the
+whole comparison as one stream. A comparison over the 1 MB read limit is
+completed one file at a time. A pill in the title says where the work is
+delivered and opens the delivery card. Loopflow's record decides whether there
+is a PR: none, publishing, open, merged or abandoned. GitHub's reading adds
+checks, review and description with its age; a failed, stale (over two minutes)
+or behind-the-checkout reading stays readable but loses its colors, and merged
+never reads as a finished Task.
+
+The files read in the tour's order when the checkout has
+`scratch/tour.yaml`, which the `tour` skill writes (`lf help tour`):
+
+```yaml
+at: 81d3fa5973e63a4394a25357502e635a3baf5d5b
+first:
+  - path: swift/LoopflowMac/TaskFileDocument.swift
+    why: A change over 1 MB no longer loses its last files
+hide:
+  - path: docs/
+    why: Path literal renamed, nothing else
+```
+
+`first` puts those files at the top in that order, each `why` heading its files
+in the stream and the sidebar. Every file it does not name follows **By group**,
+largest change first within each group. Without the file the Diff reads By
+group. The order menu switches between **Tour**, **By group** and **By path**.
+`hide` leaves those paths out for this change only; the sidebar lists each with
+its reason and **Show**, and they never join the hidden paths below.
+
+The groups are the `diff_groups` setting, an ordered list read as `lf`
+resolves it (`lf config explain diff_groups`). The nearest layer that sets it
+wins whole: yours for the repository, then your global one, then the
+repository's `.lf/config.yaml`, then the default. A file goes under the first
+group with a matching pattern; files no group matches go where the list says
+`rest`, or last when it has none:
+
+```yaml
+diff_groups:
+- title: Docs
+  paths: ['*.md', /docs/]
+- title: Data model
+  paths: [/migrations/, '*.sql', schema, /models/, '*.proto', dto]
+- rest: Everything else
+- title: Tests
+  paths: [/test/, tests/, _test., .test., .spec., tests.]
+- title: Generated and lock files
+  paths: ['*.lock', '*.snap', /generated/, /vendor/]
+```
+
+A pattern matches `/` followed by the file's path, ignoring case: anywhere in
+it, or at its end when the pattern starts with `*`. That is the default, a
+little shortened; `lf config catalog` prints it whole.
+
+`at` is the commit the tour was written at. Once a later commit changes a file
+outside `scratch/`, the stream says so ("The tour was written at 81d3fa5 · 3
+files changed since") and the toolbar offers **Update tour**; with no tour it
+offers **Write tour**. Either runs the `tour` skill headless in the Task's
+checkout and reads in Tour when the new file lands. Until then the stream
+shows "Writing the tour…" with the run's log path, and the button stays beside
+it: nothing reports the run ending, so a run that died is started again with a
+click. Files changed since `at` still follow the named ones. Nothing rewrites
+the tour on its own, and a Task on another Machine offers neither button.
+
+The sidebar lists the files in that order: type to narrow the stream, click a
+file to bring it to the top. Under them, **Always hidden** is the `diff_hidden`
+setting, patterns matched the same way. Every layer adds to it (`scratch/` by
+default; `[]` clears the layers below), and each pattern is named by the layer
+that added it. Only yours can be removed or added there; they are saved in the
+repository's `.lf/config.local.yaml`. Hidden files stay in the count: "7
+changes in 4 of 9 files". Below 620 pt the sidebar opens over the stream from
+its button and closes when you choose a file.
+
+The stream follows the comparison live without moving what you are reading. A
+bar above it names the file you are in, with its counts and **Open**. Press `]`
+and `[` (or the arrows around the position) to step through changes across
+files; the change you land on pulses once. **Focus** shows one file and still
+steps into the next. Between hunks the stream says how many lines it skipped
+and which declaration follows; click that row to read the lines in place.
+Edited lines emphasize the changed words. A block moved within a file collapses
+to one row, "Moved here from L12", that expands to its old and new lines.
+**Side by side** needs a stream at least 640 pt wide.
+
+Click a line number (Shift-click extends) to write a comment under those lines;
+Return keeps it there. **Send to conversation** (Command-Return) puts every
+comment into the conversation's unsent input as one line, each naming its file,
+lines and side, and sending stays yours. A comment follows its lines when the
+worker edits above them; when the lines themselves change it says so, keeps its
+place and is still sent. Comments last as long as the window. **Copy** takes
+the selected lines without patch markers, and **Reference in conversation**
+types `path:L4-6 (after, working tree on <sha>)` alone. Files' Diff has the
+same comments, skipped lines and Send.
+
+**Files** holds open documents and their Read, Edit and Diff controls, with the
+Machine, checkout and directory of the selection under them. Files starts with
+its chooser closed. Click the file-browser toggle or press Command-P for
+**scratch** and the Task's checkout tree, read from the Task's Machine as you
+open folders, 500 entries at a time (**Load more** for the rest). `M`, `R` and
+`U` mark files changed from the branch's recorded parent commit; `•` marks the
+folders holding them. ↑/↓ move, → opens a folder, ← closes it, Return opens the
+file. Search matches scratch, the folders you have opened and changed files. A
+folder that can't be read says why under it, with **Retry**. Expanded folders
+and scroll stay put across page and Task switches. Selection closes the dropdown; pin it to keep the list alongside the document
+(Control-Command-B). Escape dismisses the dropdown. Sidebar selection switches
+the whole Task workspace; selections inside a Task can focus its companion.
 Resizing or closing the browser is remembered while the window stays open;
 layouts are not yet restored after quitting the app.
-
-Choose **PR** for a compact GitHub page: status, checks, pending reviewers,
-description and change totals. Expand **Files changed** and individual files to
-read published patches. Refresh updates GitHub data using the signed-in GitHub
-CLI on this Mac. Missing access and omitted large/binary patches are shown inline;
-local uncommitted edits stay in Files.
 
 Open **•••** or press Command-/ for the selected Task’s actions. Row context
 menus use the same actions for the clicked Task. Command-T adds a shell tab. The main Session's menu switches between **Claude**,
@@ -463,16 +564,6 @@ another opens. ⌘T adds a shell tab. The browser's tabs are the Task's Files, i
 Graph processes and http(s) pages. ⌘W closes the selected tab, or hides the pane.
 ⇧⌘T restores the last closed tab's identity and history. Close ends its shell
 and jobs; New Shell starts fresh execution.
-
-**View → Toggle Files** shows a Task's checkout in the browser pane beside the
-retained terminal. Expand folders to read one page of up to 500 entries;
-**Load more** continues the directory and **Show ignored** includes ignored paths.
-Tracked, unchanged and untracked files remain available without an active PR.
-**Changes** optionally compares the worktree with the Task PR's
-recorded base; **HEAD** compares with its current commit. The displayed SHA pins
-the file list and selected diff. A recorded PR links above the file navigator.
-Use ↑/↓ in the navigator to select files; hover a row for its full path.
-Closing the pane keeps its drafts in this window.
 
 **Read** is where documents open: Markdown renders formatted, HTML as a live
 page that runs its scripts but never reaches the network. Links open in the

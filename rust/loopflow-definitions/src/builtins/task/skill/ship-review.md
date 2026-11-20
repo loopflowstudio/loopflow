@@ -18,6 +18,9 @@ whether the change is right. This is not a code review and not a go/no-go.
 - `scratch/questions.md`: what was left open.
 - The PR and its checks.
 
+**Write the reading order.** When `scratch/tour.yaml` is missing or behind,
+write it as `lf help tour` describes.
+
 **Write `scratch/ship-review.html`.** One self-contained file, readable in
 light and dark, in this order:
 

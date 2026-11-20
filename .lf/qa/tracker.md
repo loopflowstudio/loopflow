@@ -8,7 +8,7 @@ tracker is Git on `origin`, so `lf repo tracker`, `lf task create` and
 `git remote add origin <it>`, push `main`, and save once: `git ls-remote origin`
 shows `refs/loopflow/planning/shared/main`.
 
-`lf config get repo.tracker` reads your `lf.config.local.yaml`; pass `--shared`
+`lf config get repo.tracker` reads your `.lf/config.local.yaml`; pass `--shared`
 for the committed `.lf/config.yaml`. A dotted set
 (`lf config set --shared repo.tracker.linear.team T`) writes the released
 `planning: {provider, …}` shape. Quote numeric Asana team IDs (`"'1209'"`):

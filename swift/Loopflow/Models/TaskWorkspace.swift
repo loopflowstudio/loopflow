@@ -8,6 +8,11 @@ public struct TaskFileEntry: Decodable, Sendable, Hashable, Identifiable {
     public var id: String { path }
     public let path: String
     public let kind: TaskFileKind
+
+    public init(path: String, kind: TaskFileKind) {
+        self.path = path
+        self.kind = kind
+    }
 }
 
 public struct TaskDirectory: Decodable, Sendable, Hashable {

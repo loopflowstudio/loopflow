@@ -985,6 +985,7 @@ mod tests {
         .unwrap();
         agent("pi");
         let private = crate::config::files::private_path(&checkout).unwrap();
+        std::fs::create_dir_all(private.parent().unwrap()).unwrap();
         assert_eq!(
             private,
             crate::config::files::private_path(repo.path()).unwrap()

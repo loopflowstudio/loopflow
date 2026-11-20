@@ -6733,6 +6733,42 @@
         },
         {
           "additionalProperties": false,
+          "description": "`lf task files <issue> <path> [--cursor <cursor>] [--show-ignored]`:\none page of a Task checkout directory's immediate entries.",
+          "properties": {
+            "cursor": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "issue": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "task.files",
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            },
+            "show_ignored": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "kind",
+            "issue",
+            "path",
+            "cursor",
+            "show_ignored"
+          ],
+          "type": "object",
+          "x-result": {
+            "$ref": "#/$defs/TaskDirectory"
+          }
+        },
+        {
+          "additionalProperties": false,
           "description": "`lf wave list --all`: every Wave on this Machine that is not removed.",
           "properties": {
             "kind": {
@@ -12193,6 +12229,31 @@
       ],
       "type": "object"
     },
+    "TaskDirectory": {
+      "properties": {
+        "entries": {
+          "items": {
+            "$ref": "#/$defs/TaskFileEntry"
+          },
+          "type": "array"
+        },
+        "next_cursor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "entries",
+        "next_cursor"
+      ],
+      "type": "object"
+    },
     "TaskEdit": {
       "properties": {
         "id": {
@@ -12829,6 +12890,29 @@
           "type": "string"
         }
       ]
+    },
+    "TaskFileEntry": {
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/TaskFileKind"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "kind"
+      ],
+      "type": "object"
+    },
+    "TaskFileKind": {
+      "enum": [
+        "file",
+        "directory",
+        "symlink"
+      ],
+      "type": "string"
     },
     "TaskFileRecovery": {
       "properties": {

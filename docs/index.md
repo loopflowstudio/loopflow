@@ -167,11 +167,11 @@ Each page picks up where the previous one leaves off:
 ```text
 .lf/                      # Committed repo config and extensions
   config.yaml             # Default graph, tracker, context, release targets
+  config.local.yaml       # Your private repo/Wave preferences (auto-excluded from Git)
   skills/                 # Repo Skills (extend or replace builtins)
   graphs/                 # Repo Graphs
   qa/                     # Repo QA playbooks, updated by `qa`
   wave/<name>/            # Wave GOAL.md, MEMORY.md, and config.yaml
-lf.config.local.yaml      # Your private repo/Wave preferences (auto-excluded from Git)
 scratch/                  # Temporary working notes (added files cleared on submit/land)
 ~/.lf/                    # Global config, skills, and local SQLite stores
   loopflow.db             # Active state: Tasks, Sessions, running Processes

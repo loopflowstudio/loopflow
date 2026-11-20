@@ -57,192 +57,179 @@
   ol.q ol { list-style: lower-alpha; margin-top: 6px; }
   .chosen { font-weight: 600; }
   .small { font-size: 14px; color: var(--muted); }
+  .call { border-left: 3px solid var(--part); padding: 10px 14px; background: var(--card); border-radius: 0 8px 8px 0; margin: 0 0 12px; }
 </style>
 </head>
 <body>
 <main>
 
-<h1>Loopflow Dev on real data</h1>
-<p class="lede">Task 343ad5, reviewed before anything is built. The area taken: everything a branch's Desktop build can be pointed at, how it gets pointed there, and what it says when the two sides disagree. That is wider than the kickoff plan's read-only copy; the plan was reviewed as one answer among several, and it changed.</p>
-<p class="small">Solid boxes exist today. Dashed blue boxes are proposed.</p>
+<h1>Loopflow Dev on real data, as built</h1>
+<p class="lede">Task 343ad5, reviewed after the build against its base (c7f2724ab4), as if seen for the first time. The area taken: everything a Desktop build can be pointed at (the Machine, a copy of it, a fake world), who chooses, what each refuses, and what a window and <code>lf server status</code> say when the app and the server are different builds. The earlier page reviewed the plan before any code; this one replaces it.</p>
+<p class="small">Solid boxes are in the branch. Dashed blue boxes are proposed and not built. Outcome: the model holds; nothing sends the work back to the plan.</p>
 
 <h2>One interaction, walked</h2>
 <div class="grid">
   <div class="box">
-    <h3>November 20, as it happened</h3>
-    <p>A branch adds one required field, <code>owned_by_you</code>. <code>loopflow-dev.py run</code> builds and opens Loopflow Dev on the Machine.</p>
-    <div class="window">
-      <div class="bar">Loopflow Dev: loopflow</div>
-      <div class="rows"><span class="empty">No Tasks</span></div>
-      <div class="notice">The Machine is away; showing what was last read</div>
-    </div>
-    <p style="margin-top:10px">The Machine was not away: the server answered <code>config.theme</code>. <code>lf server status</code> from the branch said "uses another executable", which was also not the cause. Both builds speak protocol revision 8. The fake world tried next showed the real repository's restored window, lost its Desktop socket to a 103-byte limit, and had the installed app re-register its server.</p>
-  </div>
-  <div class="box new">
-    <h3>Proposed</h3>
+    <h3>A branch that changes the wire</h3>
 <pre>$ uv run python scripts/loopflow-dev.py run
-This branch changes what the server sends
-(LocalTask, WaveDetail, RoadmapSnapshot).
-Opening a copy of the Machine from 14:02;
-changes are refused there.</pre>
+This branch changes what the server sends (RoadmapTask).
+Opening a copy of the Machine from 02:36; changes
+are refused there.</pre>
     <div class="window">
       <div class="bar">Loopflow Dev: loopflow</div>
       <div class="rows">
+        <div class="row">LOO-515 Make Task PR, file-browser and brief views…</div>
         <div class="row">343ad5 Develop branch Swift UIs…</div>
-        <div class="row">LOO-903 Redesign backlog management</div>
-        <div class="row">…today's real backlog</div>
+        <div class="row">…24 real Tasks</div>
       </div>
-      <div class="notice">After clicking Run: This is a copy of the Machine from 14:02; make changes in Loopflow or with lf.</div>
+      <div class="notice">After Run: This is a copy of the Machine from 02:36; make changes in Loopflow or with lf.</div>
     </div>
-    <p style="margin-top:10px">On a branch that leaves wire and schema alone, the same command prints "Opening the Machine" and works as today, live terminals included.</p>
+    <p style="margin-top:10px" class="small">QA, November 20, read from Dev's control socket; the screen was locked, so no window was seen.</p>
+  </div>
+  <div class="box">
+    <h3>Failure and recovery</h3>
+    <p><b>Failure.</b> <code>task.run</code>, <code>task.interrupt</code>, <code>request.upload</code> on the copy's socket: the sentence, code <code>invalid</code>, no command code. A pane's <code>lf session resume</code> and a shell's <code>lf task create</code>: the same sentence, from <code>lf</code> itself.</p>
+    <p><b>What survived.</b> The installed server kept instance 033984e9 and pid 52280 across four Dev launches; <code>~/.lf/logs/lf.log</code> has no line from the branch build.</p>
+    <p><b>Recovery.</b> <code>run</code> again replaces <code>~/.lf-copy</code> and its one launchd job. Once the branch is installed, the same command prints "Opening the Machine."</p>
+    <p><b>The other failure.</b> An app that meets a reading it can't decode keeps its link and says "This Loopflow (0.16.0+d4fc6901f) can't read what the server (0.16.0+d4fc6901f.dirty) sent. (missing section at body.tasks.items.0)". The other parts stay current.</p>
   </div>
 </div>
 
 <h2>Do the product's concepts and the code's line up?</h2>
 <table>
-  <tr><th style="width:23%">What a person knows</th><th style="width:27%">What the code has</th><th style="width:8%">Match</th><th>What is wrong, and what the plan does</th></tr>
+  <tr><th style="width:22%">What a person knows</th><th style="width:30%">What the code has</th><th style="width:8%">Match</th><th>What is wrong where it is not yes</th></tr>
   <tr>
-    <td>"Can this build talk to that server?"</td>
-    <td>Protocol revision 8 in <code>hello</code>; the server's executable hash; the schema from <code>lf server describe --json</code></td>
-    <td class="no">no</td>
-    <td>One question, three answers that disagree. The revision said yes, the hash said no, and the schema, the only one that was right, is never compared. <span class="tag new">proposed</span> The launcher compares the two builds' schemas before opening anything.</td>
-  </tr>
-  <tr>
-    <td>What Loopflow Dev is looking at</td>
-    <td><code>LF_HOME</code>, inherited from whatever shell ran the launcher, or from <code>--world</code> on one of two commands</td>
-    <td class="no">no</td>
-    <td>The person never chose; an environment variable did. <span class="tag new">proposed</span> Three named things: the Machine, a copy of it, a fake world. The launcher picks and prints which. The inherited <code>LF_HOME</code> pass-through goes.</td>
-  </tr>
-  <tr>
-    <td>The Machine, live</td>
-    <td>Dev's Swift on the installed server; the bundled lf on <code>~/.lf</code></td>
+    <td>What Dev is looking at: the Machine, a copy, a fake world</td>
+    <td><code>_choose_opening</code> in <code>scripts/loopflow-dev.py</code>; it prints one line and sets <code>LF_HOME</code> itself</td>
     <td class="yes">yes</td>
-    <td>Works for branches that change neither wire nor schema. Kickoff removed it; the review keeps it. It is also the rule #1755 set three weeks ago.</td>
+    <td>Three named things, one chooser. The inherited <code>LF_HOME</code> pass-through is gone.</td>
+  </tr>
+  <tr>
+    <td>"Can this build read that server?"</td>
+    <td>Before opening: the two builds' <code>lf server describe --json</code>. While open: each reading, decoded or not (<code>WorkFrame.unread</code>, <code>ServerLink.unreadable</code>). Protocol revision: framing only</td>
+    <td class="yes">yes</td>
+    <td>Two askers, one fact (the shape of what is sent). The launcher asks ahead for Dev; the installed app, which has no launcher, finds out per reading and says which builds disagree.</td>
   </tr>
   <tr>
     <td>A copy of the Machine</td>
-    <td>Nothing today. <code>lf clone</code> (#1549) was this, writable and sandboxed, and #1755 deleted it. machines.md: "Loopflow never copies main data into it"</td>
-    <td class="no">no</td>
-    <td>Kickoff reintroduced copies without that history. <span class="tag new">proposed</span> A read-only copy in a world directory, 2 s for 688 MB where the old one took 265 s for 8.8 GB, with none of the scrub or sandbox because it is never writable.</td>
-  </tr>
-  <tr>
-    <td>"Snapshot"</td>
-    <td>A subscription's frame (<code>roadmap_snapshot</code>), <code>copy::snapshot</code>, and kickoff's "snapshot world"</td>
-    <td class="no">no</td>
-    <td>One name for three ideas; kickoff's own text used two of them in adjacent paragraphs. <span class="tag new">proposed</span> "Copy" wherever a person reads it: <code>lf-world copy</code>, <code>~/.lf-copy</code>, the sentence.</td>
+    <td>A world directory whose stores are sealed: <code>world::copy</code>, <code>copy::seal</code>, <code>copy::sealed_at</code>. The file mode is the one fact</td>
+    <td class="yes">yes</td>
+    <td>No flag, no marker, no DTO. The server reads the mode at each use.</td>
   </tr>
   <tr>
     <td>"You can't change things here"</td>
-    <td>Kickoff: a 0444 file, "the whole containment"; the SQLite error reworded afterwards</td>
+    <td>Two owners. The server: <code>Operation::changes</code> answered at dispatch (<code>server::copy::refusal</code>). An <code>lf</code> beside it: runs until its store write fails, then <code>write_refused</code> recognises SQLite's text "attempt to write a readonly database"</td>
     <td class="part">partly</td>
-    <td>The file stops store writes only. A copied row names a real pid, a real worktree, a tracker id; a command can act on those before its store write fails. <span class="tag new">proposed</span> The server refuses a change at admission, before command code runs. The file mode stays the one fact it derives from, and the test measures the outside: the pid still runs, the worktree is untouched.</td>
+    <td>One action, two owners, and the second knows it is on a copy only after the fact and by matching a string. What keeps that <code>lf</code> from outside effects first is the world's shape (a token key that decrypts nothing, empty provider homes), not a rule. See the biggest mismatch.</td>
   </tr>
   <tr>
-    <td>"The Machine is away"</td>
-    <td><code>PendingChanges.Link.away</code>, shown for a lost link and, on November 20, for reads that would not decode</td>
-    <td class="no">no</td>
-    <td>One sentence for two states. <span class="tag new">proposed</span> A decode failure names both builds. Why it reached the away notice is established first.</td>
+    <td>"A copy from 02:36"</td>
+    <td>The sentence, in Rust (<code>server::copy::sentence</code>). The launcher's line formats the store's mtime again in Python</td>
+    <td class="part">partly</td>
+    <td>The time is derived in two places from one fact. They cannot disagree today (same file, same format). <code>lf-world copy</code> could print the line and the launcher relay it.</td>
   </tr>
   <tr>
     <td>"Is the server ready?"</td>
-    <td><code>lf server status</code>: <code>ready:false</code> when the server runs another executable</td>
-    <td class="no">no</td>
-    <td>The answer to "is it up" carried "is it mine", which only re-registration after an install needs. <span class="tag new">proposed</span> <code>ready</code> means it answers; <code>ensure</code> compares executables itself. Kickoff had the branch lf exec the installed one to answer instead.</td>
+    <td><code>client::status()</code>: <code>ready</code> when it answers at a revision this build speaks; <code>executable_sha256</code> beside it</td>
+    <td class="yes">yes</td>
+    <td>"Is it up" and "is it mine" are now two values. Only <code>installation::server::ensure</code> asks the second.</td>
+  </tr>
+  <tr>
+    <td>"The Machine is away"</td>
+    <td><code>PendingChanges.Link.away</code>, reached only from a lost link; a decode failure fails its part alone</td>
+    <td class="yes">yes</td>
+    <td>One sentence, one state.</td>
   </tr>
   <tr>
     <td>The windows I had open</td>
-    <td>SwiftUI restoration per bundle id of <code>RepositoryWorkspace {id, path}</code></td>
-    <td class="no">no</td>
-    <td>Windows belong to a Machine; they are saved per app. <span class="tag new">proposed</span> A window names its Machine and is not restored on another. Kickoff's launcher flag missed the installed app opened on a world's home, which happened that day.</td>
+    <td><code>RepositoryWorkspace {id, path, machine}</code>; <code>opened()</code> mounts a window only on its own Machine. <code>machine</code> is the home directory</td>
+    <td class="yes">yes</td>
+    <td>The home directory is also where Desktop already keeps everything it saves (<code>WorkCache.homeDirectory</code>, pane layouts), so a window and its saved state name the same thing. A copy carries the Machine's id; nothing Desktop saves is keyed by id outside the home.</td>
   </tr>
   <tr>
     <td>A fake world</td>
-    <td><code>World</code>, <code>lf-world build</code>, <code>env.json</code>, stand-in <code>gh</code>, <code>launchctl</code> and providers</td>
+    <td><code>World</code>, <code>world::prepare</code> shared with <code>copy</code>, <code>WorldEnv::desktop_socket_notice</code></td>
     <td class="yes">yes</td>
-    <td>The copy reuses the directory shape and the stand-ins. One gap: a world in a long directory silently loses Desktop's socket. <span class="tag new">proposed</span> <code>lf-world</code> says so at creation.</td>
+    <td>One setup for both; the too-long directory is said at creation.</td>
+  </tr>
+  <tr>
+    <td>"This is a copy" while I look at it</td>
+    <td>Nothing until a change is refused</td>
+    <td class="no">no</td>
+    <td>A person knows; the window doesn't say. Stated in the plan as outside this work: it needs a new read, since <code>welcome</code> and <code>status</code> reject unknown fields. Question 2.</td>
   </tr>
   <tr>
     <td>Never break a running Session</td>
-    <td>A second server on <code>~/.lf</code> would run <code>wake</code> and <code>recovery</code> on real conversations</td>
+    <td>The copy's server returns before <code>wake</code>, <code>maintenance</code>, recovery, the registry and the mobile listener start; <code>copy_world</code> reads its log for failed writes</td>
     <td class="yes">yes</td>
-    <td>Kickoff found this and closed it; unchanged. On a copy those writers do not start.</td>
+    <td>Planning's <code>git fetch</code> lives in <code>ops/planning_sync.rs</code>, a write; no served read calls it.</td>
   </tr>
 </table>
 
 <h2>The biggest mismatch</h2>
-<p>Nothing in the product answers "what is this Dev build looking at, and can it read it?" before the window opens. Kickoff answered by removing the question: always a copy. That fixes the empty window and takes away the live path that works for Swift-only branches.</p>
+<p class="call">"Changes are refused on a copy" is one promise with two keepers. Through the server it is a rule: refused before any command code. Through an <code>lf</code> process on the copy's home (a Desktop pane, a shell tab, a terminal with the copy's <code>env.json</code>) it is an outcome: the command runs until SQLite stops it.</p>
 <div class="grid">
   <div class="box">
-    <h3>Kickoff's plan</h3>
-    <table>
-      <tr><th>Branch</th><th>Dev opens</th></tr>
-      <tr><td>Swift only</td><td>Read-only copy. No terminals, no changes.</td></tr>
-      <tr><td>Changes wire or schema</td><td>Read-only copy.</td></tr>
-    </table>
-    <p style="margin-top:10px" class="small">One behavior. Terminal work and anything interactive moves to fake worlds for every branch.</p>
+    <h3>Built</h3>
+    <p><code>lf task create</code> on the copy, from its log (November 20, 10:36:48Z): <code>resolve_repository</code>, <code>creation_lock</code>, <code>open_store</code>, <code>check_receipt</code>, then <code>file_task</code> ended after 82 ms. No later step was logged and the home holds no tracker request log. An empty <code>creation-locks/</code> entry stays behind.</p>
+    <p>So this command did nothing outside the copy before it stopped. That is true of the commands tried (<code>session resume</code>, <code>desktop shell</code>, <code>desktop move</code>, <code>task create</code>, <code>-b default</code>), not of every command by construction.</p>
   </div>
   <div class="box new">
-    <h3>After review</h3>
-    <table>
-      <tr><th>Branch</th><th>Dev opens</th></tr>
-      <tr><td>Swift only</td><td>The Machine, as today.</td></tr>
-      <tr><td>Changes wire or schema</td><td>Read-only copy, with the differing types printed.</td></tr>
-      <tr><td><code>--copy</code></td><td>Read-only copy, on request.</td></tr>
-      <tr><td><code>--world dir</code></td><td>A fake world.</td></tr>
-    </table>
-    <p style="margin-top:10px" class="small">Two outcomes from one command, told apart in one printed line. The comparison errs toward the copy.</p>
+    <h3>Not built: one keeper</h3>
+    <p><code>lf</code> asks <code>copy::sealed_at</code> once at start and refuses a command that changes anything, the way the server does. It needs a list of which CLI commands change things; the server has one (<code>Operation::changes</code>) and the CLI does not.</p>
+    <p class="small">Passed over for this work: it adds a classification that exists nowhere, to close a door nothing has been seen to walk through. The world's stand-ins and the sealed store are the backstop, and <code>copy_world</code> asserts the pane's sentence.</p>
   </div>
 </div>
 
 <h2>Tested against three paths</h2>
 <table>
-  <tr><th style="width:18%">Path</th><th>What happens</th><th style="width:30%">What must survive</th></tr>
-  <tr><td>Normal</td><td>Wire-changing branch: copy taken, branch migration applied to the copy, branch server serves it, real backlog on screen.</td><td>Installed server's instance and pid; <code>~/.lf/loopflow.db</code> byte for byte.</td></tr>
-  <tr><td>Failure</td><td>Run, steer, create, start or stop a Session on the copy: one sentence, no command code. A pane launch meets a read-only store and stand-in providers.</td><td>Real Session processes, real worktrees, the tracker.</td></tr>
-  <tr><td>Recovery</td><td><code>run</code> again replaces the copy. After the branch merges and is installed, the same branch opens the Machine.</td><td>Nothing in the copy is worth keeping, by construction.</td></tr>
+  <tr><th style="width:16%">Path</th><th>What the build does</th><th style="width:34%">Seen or only tested</th></tr>
+  <tr><td>Normal</td><td>Wire unchanged: "Opening the Machine." Wire changed: the type named, a copy opened, 24 real Tasks listed.</td><td>The copy: seen through the socket. Dev on the Machine itself: the choice ran, the app was not launched (other Sessions were live).</td></tr>
+  <tr><td>Failure</td><td>Every change through the server answers the sentence; a pane's <code>lf</code> prints it; an undecodable reading names both builds and keeps the link (14 requests, 6 subscriptions, unchanged over 30 s).</td><td>Seen. Clicking Run in the window was not: no <code>lf desktop</code> verb reaches it.</td></tr>
+  <tr><td>Recovery</td><td><code>run</code> again replaces the copy and its server job (pid 57908 to 63838, same label). A window restored from another Machine opens this launch's repository and closes.</td><td>Seen, from logs.</td></tr>
 </table>
-<p style="margin-top:12px">Counterexamples kept: served reads may need to write (observation stamps), which slice 1 exists to find out; a doc-comment change in a wire type opens a copy needlessly; a branch behind main's migrations opens neither and is told to sync; tracker and PR refreshes cannot run in a copy, and how that reads has not been seen.</p>
+<p style="margin-top:12px">Counterexamples kept: a store ahead of the branch opens neither, and the <code>lf sync main</code> line prints only when the copy also fails; a doc-comment change in a wire type opens a copy needlessly; with an undecodable plan the window still lists its 24 Tasks under <code>reading: unavailable</code>, and whether that reads as last known has not been seen; <code>lf server connect</code> and the mobile listener call <code>ensure</code> directly, so from a branch build on <code>~/.lf</code> either replaces the installed server, as it did before this work.</p>
 
 <h2>Outside this work</h2>
-<p>A copy's window does not say it is a copy until a change is refused. A standing label, with change controls off the way they are while the Machine is away, needs the sentence on the wire. <code>welcome</code> and <code>status</code> reject unknown fields, and a field added there breaks the lf inside every running Session at the next install, so it takes a new read instead. Left as question 3.</p>
+<p>A standing "this is a copy" in the window (question 2). The 19 server jobs other worktrees' test homes left loaded. What launched the installed app on a world's home on November 20. <code>ensure</code> without <code>delegate_selected</code> in <code>server/connect.rs</code> and <code>mobile.rs</code>: one line each, a separate Task.</p>
 
 <h2>Questions</h2>
 <ol class="q">
-  <li>What should <code>run</code> open?
+  <li>An <code>lf</code> beside a copy's server:
     <ol>
-      <li class="chosen">The Machine when the branch speaks its wire and schema, a copy otherwise. (in the plan)</li>
-      <li>Always a copy. One behavior; Swift-only branches lose live terminals and real changes in Dev.</li>
-      <li>Always the Machine, stopping with the difference printed. Wire-changing branches get fake data only.</li>
-    </ol>
-  </li>
-  <li>Can the copy be changed?
-    <ol>
-      <li class="chosen">No. Read-only; interactions on a wire-changing branch are tried in a fake world. (in the plan)</li>
-      <li>Yes, and thrown away at the next run. Drags and creates work on the real backlog. It needs what <code>lf clone</code> had: pids, routes and tokens scrubbed and a sandbox around real worktrees.</li>
+      <li class="chosen">Runs until the sealed store stops it and prints the copy's sentence. (built)</li>
+      <li>Refuses a changing command at start, as the server does. Needs the CLI to know which commands change things.</li>
     </ol>
   </li>
   <li>Should a copy's window say so all the time?
     <ol>
-      <li class="chosen">Not in this work; the sentence appears when a change is refused. (in the plan)</li>
-      <li>Yes: a standing notice and disabled change controls, through a new read.</li>
+      <li class="chosen">Not in this work; the sentence appears when a change is refused. (built)</li>
+      <li>Yes: a standing notice and change controls off, through a new read. A separate Task.</li>
     </ol>
   </li>
-  <li>Restored windows from another Machine:
+  <li>What <code>run</code> opens:
     <ol>
-      <li class="chosen">The app drops them; a window names its Machine. Saved windows are lost once. (in the plan)</li>
-      <li>The launcher passes <code>-ApplePersistenceIgnoreState YES</code>; covers launcher starts only.</li>
+      <li class="chosen">The Machine when the branch speaks its wire and schema, a copy otherwise. (built)</li>
+      <li>Always a copy.</li>
+      <li>Always the Machine, stopping with the difference printed.</li>
     </ol>
   </li>
-  <li>The word:
+  <li>The copy:
     <ol>
-      <li class="chosen">Copy. (in the plan)</li>
-      <li>Snapshot.</li>
+      <li class="chosen">Read-only. (built)</li>
+      <li>Writable and thrown away, with the scrub and sandbox <code>lf clone</code> had.</li>
     </ol>
   </li>
-  <li><code>lf server status</code> from a branch build:
+  <li>When the Machine's store is ahead of the branch, <code>run</code> names:
     <ol>
-      <li class="chosen"><code>ready</code> when the server answers; the executable is a fact beside it. (in the plan)</li>
-      <li>Exec the installed lf to answer, as <code>lf install server</code> does.</li>
+      <li class="chosen"><code>lf sync main</code>. (built; in a Task checkout that also undoes a sync onto another Task)</li>
+      <li>"Bring this branch up to main", and no command.</li>
+    </ol>
+  </li>
+  <li>The launcher's "from HH:MM":
+    <ol>
+      <li class="chosen">Formatted in Python from the store's modification time. (built)</li>
+      <li>Printed by <code>lf-world copy</code> from the Rust sentence's own clock, relayed by the launcher.</li>
     </ol>
   </li>
 </ol>

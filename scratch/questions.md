@@ -113,6 +113,9 @@ Not established:
   store refused. In QA the copy's home held no tracker request log after two
   refused creates, and the command left an empty `creation-locks` directory
   there; Linear itself was not checked.
+  The copy's `logs/lf.log` for the 10:36:48Z create shows `resolve_repository`,
+  `creation_lock`, `open_store`, `check_receipt`, then `file_task` ending after
+  82 ms and no step after it.
 - Dev on the Machine itself was not launched in QA (other agents' Sessions were
   live); only the launcher's choice was run, and it printed "Opening the
   Machine."

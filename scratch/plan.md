@@ -558,3 +558,14 @@ Notice writes an array position as a number. Checks:
 - The Swift edit built into the Dev bundle; its test
   (`aReadingThisBuildCannotDecodeNamesBothBuilds`) and clippy were not run.
   Gate and CI.
+
+Concept review after the build, November 20 (`scratch/concept-review.html`):
+the three things Dev opens, the sealed store as the one fact, `ready` apart
+from "the selected installation", and windows named by home directory each
+match one concept in the code. Nothing changes in the plan. Two pairings are
+partial and stay as built:
+
+- A change on a copy has two keepers: the server refuses at dispatch; an `lf`
+  on the copy's home runs until the sealed store stops it. One keeper would
+  need the CLI to know which commands change things, which nothing lists.
+- The launcher formats the copy's time itself; the sentence's is in Rust.

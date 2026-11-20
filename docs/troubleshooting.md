@@ -153,6 +153,18 @@ With multiple harnesses installed and no default set, run
 For OpenCode, install OpenCode 2+ (`npm install -g @opencode/cli`). The
 `antigravity` agent runs the `agy` command: `brew install --cask antigravity-cli`.
 
+## Antigravity asks "Run this command?" for `lf`
+
+In the terminal, `agy` sandboxes commands away from `~/.lf`, so `lf` fails
+inside it with "Operation not permitted" and `agy` asks to run it outside.
+Answer `2` to allow `lf` for the conversation, or launch with `--yolo`:
+
+```bash
+lf -a antigravity --yolo implement
+```
+
+Headless steps (`lf task run`, `lf -b`) are not sandboxed.
+
 ## A steer arrived late or a turn is missing from history
 
 ```bash

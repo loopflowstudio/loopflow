@@ -275,6 +275,12 @@ lf task status LOO-12
 #   implement went on under claude after: antigravity_error: invalid model selection (--model "gemini-9" --effort ""): model gemini-9 is not recognized as a known model or custom model in settings
 ```
 
+In the terminal, `agy` runs commands in its own sandbox, which does not reach
+`~/.lf`. The first `lf` command a conversation runs fails there, and `agy`
+asks "Run this command?" to run it outside: answer `2` to allow `lf` for the
+rest of the conversation. `--yolo` skips the question. A headless step is not
+sandboxed and never asks.
+
 Usage counts the conversation lf started, not its subagents. A plain `agy`
 conversation is not listed in `lf session list`. Native response schemas, turn
 limits and `--effort` are unavailable.

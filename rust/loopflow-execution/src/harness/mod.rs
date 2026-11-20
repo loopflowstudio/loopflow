@@ -446,7 +446,9 @@ pub trait Launcher: Harness {
     /// What a hook callback from this harness's provider means: the moment
     /// it ran at and the conversation it names. `declared` is the moment its
     /// hook declared; `thread_file` is where the launch keeps the
-    /// conversation it owns (`context_block::reported_thread_path`). `None`
+    /// conversation it owns (`context_block::reported_thread_path`), and an
+    /// implementation whose provider names the conversation only here may
+    /// claim that file with the first callback's id. `None`
     /// when the callback is not the launch's conversation: lf answers
     /// nothing, records no boundary and claims no steers. The default reads
     /// a callback that has Claude's shape and ran at the moment its hook

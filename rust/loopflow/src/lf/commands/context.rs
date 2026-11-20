@@ -285,9 +285,11 @@ pub fn emit_block(
         return Ok(());
     };
     let (path, delivery) = load_delivery(delivery, &input)?;
-    // lf asks only a bare Codex launch for its thread, by creating the file
-    // beside its delivery. Writing it opens no store; a failed write only
-    // leaves the conversation unresumable.
+    // A launch whose provider names the conversation keeps it in the thread
+    // file beside its delivery. A bare Codex launch creates the file to ask,
+    // and the start callback fills it here; Antigravity's first callback
+    // claims it in `hook_callback`. Writing it opens no store; a failed write
+    // only leaves the conversation unresumable.
     if moment == ContextMoment::Start {
         let reported = reported_thread_path(&path);
         if let (Some(thread), true) = (input["session_id"].as_str(), reported.exists()) {

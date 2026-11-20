@@ -351,34 +351,17 @@ QA on real `agy` 1.5.13 (2026-11-20), a private Machine with its server;
 
 ## Left to build
 
-From the review of the built change (`scratch/concept-review.html`,
-2026-11-20). One pass, no new behavior:
+The review's doc pass is in (`docs/config.md` "Antigravity",
+`docs/troubleshooting.md` "Antigravity asks \"Run this command?\" for `lf`",
+`harness/README.md` launch row and method table, the thread-file comments in
+`context.rs` and `harness/mod.rs`). `documented_commands::` passes (4 tests,
+2026-11-20, implement).
 
-1. **Say what a Task's conversation on Antigravity meets.** In the terminal
-   `agy` runs commands in its own sandbox, which does not reach `~/.lf`; the
-   first `lf` command fails there and the model asks "Run this command?" to
-   run it outside. A headless step is not sandboxed. Today only
-   `scratch/questions.md` and `.lf/qa/antigravity.md` say so.
-   - `docs/config.md`, "Antigravity": one paragraph. The prompt, the answer
-     that allows `lf` for the conversation, and that `yolo` removes it.
-   - `docs/troubleshooting.md`: one row for "Run this command?" /
-     "Operation not permitted" from `lf` inside `agy`.
-   - `rust/loopflow-execution/src/harness/README.md`: a clause on the
-     Antigravity launch row.
-   - Result: `cargo test -p loopflow --test integration --
-     documented_commands::` still passes.
-2. **One true statement of who writes the thread file.** The comment above
-   the write in `emit_block` (`rust/loopflow/src/lf/commands/context.rs`,
-   "lf asks only a bare Codex launch for its thread") is false since
-   Antigravity: say that a launch whose provider names the conversation keeps
-   it beside its delivery, that Codex's launch creates the file to ask and
-   Antigravity's first callback claims it. `Launcher::hook_callback`'s doc
-   (`harness/mod.rs`) says an implementation may claim the file. Comments
-   only.
-3. **`harness/README.md`'s method table** gains `hook_callback` and
-   `hook_reply` beside `classify_failure`.
+Not seen live: that `--yolo` in the TUI removes the "Run this command?"
+prompt. The docs say it does because the launch then passes
+`--dangerously-skip-permissions`; check it in the demo.
 
-Then the demo on real `agy`, for qa or demo: a Task's work session in the
+What remains is the demo on real `agy`, for qa or demo: a Task's work session in the
 TUI; a step whose first agent is `opencode` with no credits moving to the
 next agent.
 

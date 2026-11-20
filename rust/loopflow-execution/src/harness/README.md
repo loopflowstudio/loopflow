@@ -46,6 +46,8 @@ Each harness file answers the rest:
 |---|---|
 | `capabilities()` | who names the thread, initial prompt on resume, native skills, turn limit, output schema, respawn after crash, install hint |
 | `classify_failure(code, message)` | what an error its decoder reported means for the run: next agent, retry, or nothing lf acts on |
+| `hook_callback(payload, declared, thread_file)` | what a hook callback from its provider means: the moment, and whether the conversation is the launch's own; Antigravity's first callback claims the thread file |
+| `hook_reply(event, text)` | the reply that puts text in front of the model, in the provider's shape |
 | `open(&Launch)` | native interactive client: argv, hook and title flags |
 | `driver(&Launch, events, approval)` | headless stream `Driver`: start, input, interrupt, stop |
 | `recognizes(&OsProcess)` | whether a running process is this client: Claude checks its executable path, Pi its arguments |
@@ -74,7 +76,7 @@ An interactive client may `exec` into a held terminal.
 | Codex chat | `codex`, prompt in argv | provider (start hook) |
 | Codex work session | `codex --remote` after lf opens the app-server thread | provider |
 | OpenCode | `opencode --standalone`, prompt in `--prompt` | lf (`--session ses_…`) |
-| Antigravity | `agy`, prompt in `-i` | provider (first hook callback) |
+| Antigravity | `agy`, prompt in `-i`; its command sandbox does not reach `~/.lf`, so the first `lf` command stops at "Run this command?" unless `yolo` | provider (first hook callback) |
 
 `cargo test -p loopflow-execution --lib harness::launch_matrix -- --nocapture`
 runs every harness as a chat, work session, batch and worker against stand-in provider scripts, and prints each cell's argv, hook ownership, wait mechanism and recorded thread.

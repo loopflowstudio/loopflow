@@ -130,10 +130,6 @@ fn every_harness_runs_all_four_launch_kinds() {
             (LaunchKind::Worker, Mode::Headless, true),
         ] {
             assert_eq!(kind.mode(), mode, "{kind:?}");
-            // Antigravity opens no terminal yet.
-            if harness == HarnessKind::Antigravity && mode == Mode::Interactive {
-                continue;
-            }
             let row = format!("{harness:?} {kind:?}");
             let directory = tempfile::tempdir_in(home).unwrap();
             let cwd = directory.path();
@@ -242,9 +238,9 @@ fn every_harness_runs_all_four_launch_kinds() {
                     flag("--chrome") == (harness == HarnessKind::Claude),
                     "{row}: Chrome flag ownership"
                 );
-                // Nobody answers a headless Antigravity prompt, whatever the setting.
-                let skips = harness == HarnessKind::Claude
-                    || (harness == HarnessKind::Antigravity && mode == Mode::Headless);
+                // Antigravity's terminal follows the setting; its headless run
+                // always skips, since nobody answers a prompt there.
+                let skips = matches!(harness, HarnessKind::Claude | HarnessKind::Antigravity);
                 anyhow::ensure!(
                     flag("--dangerously-skip-permissions") == skips,
                     "{row}: yolo setting"

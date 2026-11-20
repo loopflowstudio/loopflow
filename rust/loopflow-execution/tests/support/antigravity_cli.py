@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Disposable `agy` for fixtures: one headless stream-json turn per process.
+"""Disposable `agy` for fixtures: one headless stream-json turn per process,
+or, with no `--output-format`, a terminal whose person sends `-i` and leaves.
 
 It prints what `agy` 1.5.13 prints and runs the hooks in its `--add-dir`
 folder's `.agents/hooks.json` as that version does. The model `no-such-model`
@@ -108,7 +109,26 @@ def _refuse(error):
     sys.exit(1)
 
 
+def _terminal():
+    """The TUI: the `-i` prompt is one turn, then the person leaves."""
+    prompt = _option("-i") or ""
+    (HOME / "received.json").write_text(
+        json.dumps({"args": sys.argv[1:], "input": prompt, "cwd": str(Path.cwd())})
+    )
+    conversation = _option("--conversation") or str(uuid.uuid4())
+    _hook("PreInvocation", conversation, invocationNum=0, initialNumSteps=1)
+    request = f"<USER_REQUEST>\n{prompt}\n</USER_REQUEST>"
+    rows = [
+        (0, "USER_INPUT", {"source": "USER_EXPLICIT", "content": request}),
+        (1, "PLANNER_RESPONSE", _call(20, 5, content=f"answer to: {prompt}\n")),
+    ]
+    _keep(conversation, rows)
+    _hook("Stop", conversation, executionNum=0, terminationReason="NO_TOOL_CALL")
+
+
 def main():
+    if "--output-format" not in sys.argv:
+        return _terminal()
     line = sys.stdin.readline()
     prompt = json.loads(line)["message"]["content"] if line.strip() else ""
     (HOME / "received.json").write_text(

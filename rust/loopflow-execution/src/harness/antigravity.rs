@@ -1,12 +1,13 @@
 //! Antigravity, whose CLI is `agy`. A headless turn is one
 //! `agy --input-format stream-json --output-format stream-json` process that
 //! reads one message and exits; `agy` names the conversation in its first
-//! line, and the next turn continues it with `--conversation`.
+//! line, and the next turn continues it with `--conversation`. A terminal is
+//! `agy -i <prompt>`, whose first hook callback names the conversation.
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 
-use anyhow::{bail, Result};
+use anyhow::Result;
 use async_trait::async_trait;
 use serde_json::Value;
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -602,9 +603,41 @@ impl super::Harness for Antigravity {
         Box::new(Driver::new(launch, events))
     }
     fn open(&self, launch: &super::Launch<'_>) -> Result<super::native_session::NativeClient> {
-        launch.terminal_input()?;
-        bail!("Antigravity opens no terminal yet; run it headless with `lf -b`")
+        let (mut args, input) = launch.terminal_input()?;
+        let mut client = super::native_session::NativeClient::new(launch)?;
+        args.extend(options(launch.config, client.thread.as_ref(), launch.kind)?);
+        if launch.config.skip_permissions {
+            args.push("--dangerously-skip-permissions".into());
+        }
+        if let Some(trust) = client.process.get_current_dir().and_then(trust) {
+            args.extend(["--settings".into(), trust]);
+        }
+        if let Some(input) = input.filter(|input| !input.is_empty()) {
+            crate::agent::validate_terminal_turn(&input)?;
+            args.extend(["-i".into(), input]);
+        }
+        if let Some(context) = &launch.config.conversation_context {
+            let delivery = context.configure_hooks(&mut client.process)?;
+            if client.thread.is_none() {
+                // The launch's first hook callback names the conversation there.
+                client.reported_thread =
+                    Some(crate::context_block::reported_thread_path(&delivery));
+            }
+        }
+        client.process.args(args);
+        Ok(client)
     }
+}
+
+/// Settings for one session that let the TUI start in a worktree lf created
+/// without asking whether its folder is trusted. Nothing is saved; a main
+/// checkout and a hand-made worktree keep the dialog. `agy` was seen to
+/// accept the folder with both spellings of its path given, so both go.
+fn trust(cwd: &Path) -> Option<String> {
+    crate::git::lf_created_worktree(cwd)?;
+    let mut folders = vec![cwd.to_owned()];
+    folders.extend(cwd.canonicalize().ok().filter(|real| real != cwd));
+    Some(serde_json::json!({"trustedWorkspaces": folders}).to_string())
 }
 
 #[cfg(all(test, unix))]
@@ -760,6 +793,109 @@ mod tests {
         );
         assert_eq!(harness.agent_session(), None, "nothing to resume");
         harness.stop().await.unwrap();
+    }
+
+    fn terminal_args(config: &AgentConfig, recording: &crate::harness::Recording) -> Vec<String> {
+        use crate::harness::Harness;
+        let launch = crate::harness::Launch {
+            kind: crate::harness::LaunchKind::Chat,
+            ..crate::harness::launch_for_test(HarnessKind::Antigravity, config, recording)
+        };
+        let client = super::Antigravity.open(&launch).unwrap();
+        client
+            .process
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect()
+    }
+
+    #[test]
+    fn a_terminal_starts_the_prompt_and_resumes_by_conversation() {
+        let ledger = crate::journal::TestLedgerGuard::new();
+        let recording = super::super::admit_for_test(ledger.home());
+        let cwd = tempfile::tempdir().unwrap();
+        let config = AgentConfig {
+            agent: crate::config::Agent::parse("antigravity:gemini-fixture").unwrap(),
+            task_prompt: "-start here".into(),
+            cwd: Some(cwd.path().to_owned()),
+            ..AgentConfig::default()
+        };
+        // A folder lf did not create keeps the trust dialog, and a person
+        // who did not ask to skip permissions is asked.
+        assert_eq!(
+            terminal_args(&config, &recording),
+            ["--model", "gemini-fixture", "-i", "-start here"]
+        );
+        let resumed = AgentConfig {
+            resume_token: Some("conversation-1".into()),
+            task_prompt: String::new(),
+            skip_permissions: true,
+            ..config
+        };
+        assert_eq!(
+            terminal_args(&resumed, &recording),
+            [
+                "--model",
+                "gemini-fixture",
+                "--conversation",
+                "conversation-1",
+                "--dangerously-skip-permissions"
+            ]
+        );
+    }
+
+    #[test]
+    fn a_terminal_in_a_worktree_lf_created_is_trusted_for_that_session() {
+        let ledger = crate::journal::TestLedgerGuard::new();
+        let recording = super::super::admit_for_test(ledger.home());
+        let root = tempfile::tempdir().unwrap();
+        let repo = root.path().join("kata");
+        std::fs::create_dir(&repo).unwrap();
+        crate::git::git_stdout(&repo, &["init", "-b", "main"]).unwrap();
+        crate::git::git_stdout(
+            &repo,
+            &[
+                "-c",
+                "user.email=lf@example.com",
+                "-c",
+                "user.name=lf",
+                "commit",
+                "--allow-empty",
+                "-m",
+                "init",
+            ],
+        )
+        .unwrap();
+        let worktree = root.path().join("kata.agent-1");
+        crate::git::worktree_add(
+            &repo,
+            &worktree,
+            "agent-1",
+            crate::git::WorktreeBranch::New {
+                start_point: "HEAD",
+            },
+        )
+        .unwrap();
+        let args = |cwd: &std::path::Path| {
+            let config = AgentConfig {
+                agent: crate::config::Agent::parse("antigravity").unwrap(),
+                cwd: Some(cwd.to_owned()),
+                ..AgentConfig::default()
+            };
+            terminal_args(&config, &recording)
+        };
+        // The path as given and as the filesystem resolves it.
+        let folders = [worktree.clone(), worktree.canonicalize().unwrap()];
+        let mut expected = vec![folders[0].clone()];
+        expected.extend((folders[1] != folders[0]).then(|| folders[1].clone()));
+        assert_eq!(
+            args(&worktree),
+            [
+                "--settings".to_string(),
+                serde_json::json!({"trustedWorkspaces": expected}).to_string()
+            ]
+        );
+        assert!(args(&repo).is_empty(), "a main checkout keeps the dialog");
     }
 
     fn callback(

@@ -68,8 +68,9 @@ hangs KRs and metrics on a Project or a Wave.
     `project_events` check are gone.
   - Every interrupt path resolves a `Task`, so `append_interrupt`,
     `latest_interrupt_id` and `observe_interrupt` take `&TaskId`.
-    `WorkRef::Project`, `ChildRef::Project` and `WorkIdentity` stay as a Task's
-    parent in the Work tree.
+    `WorkRef::Project` and `WorkIdentity` stay as a Task's parent in the Work
+    tree. `ChildRef::Project` (`loopflow-storage/src/child.rs`) also stays, built
+    by one test only, as on the base; see Exclusions.
 - **Tracker creation and cross-build plan records
   (`rust/loopflow-storage/src/sqlite/tracker_actions.rs`, `work/edit.rs`):**
   - `uncreated` tests `plan_stamps` (`project_wave`) instead of
@@ -139,6 +140,9 @@ hangs KRs and metrics on a Project or a Wave.
 - Authored `.lf/wave/**` content in this repository, `.lf/chapters/**` in other
   repositories, `release/v*/NOTES.md`, and released migrations and their
   fixtures.
+- Replacing `ChildRef` with a Task id (`work_for_child`, `target_kind`,
+  `target_id`): no caller outside `status_tests.rs` passes a Project, on this
+  branch or its base. About 30 lines; a cleanup Task's.
 - Naming a Task's Project at creation (`--project`), Projects as finishing
   groups, and Wave membership from a tracker link (LOO-980).
 

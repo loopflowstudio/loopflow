@@ -46,9 +46,10 @@
 
 <h1>Waves, Projects and Tasks without chapters, as built</h1>
 <p><b>Area reviewed:</b> how work is grouped — a Wave, its Projects, their Tasks — with the whole
-LOO-995 change in it, read against its base (LOO-938, <code>c2beea658a</code>): the CLI, the wire, Desktop,
-storage, the docs and what QA walked on private homes. The earlier page reviewed the plan before
-anything was built; this one reviews the code.</p>
+LOO-995 change in it at <code>a5e8d9c827</code>, read against its base (LOO-938, <code>c2beea658a</code>):
+the CLI, the wire, Desktop, storage, the docs and what QA walked on private homes. This is the second
+review of the built branch; the first found a Project run journal still in the code, and slice 5 removed it.</p>
+<p><b>Outcome: nothing to build.</b> One small leftover is named below and left out on purpose.</p>
 <p class="legend dim">
   <span><b class="yes">yes</b> product and code agree</span>
   <span><b class="no">no</b> they don't</span>
@@ -71,7 +72,7 @@ $ lf wave status billing
   Project   billing (proj_4bd9…) · started
   d11837  unstarted — Invoice export</pre>
 <p>With Linear configured the first Task queues two creates, Project then Task. With a second
-started Project in the Wave the command says where the Task went:
+open Project in the Wave the command says where the Task went:
 <code>Tax lines · 0cf5d8 in Project Billing v2</code>.</p>
 </div>
 <div class="box">
@@ -79,9 +80,11 @@ started Project in the Wave the command says where the Task went:
 <p><b>Failure:</b> the save into an empty Wave aborts. The Project is made in the same transaction, so
 nothing is left behind (<code>a_failed_save_into_an_empty_wave_makes_no_project</code>).</p>
 <p><b>Failure:</b> the tracker is down. Task and Project are saved; their creates wait in
-<code>tracker_actions</code>. No "preparing" state, nothing for a person to retry.</p>
+<code>tracker_actions</code>. Nothing for a person to retry.</p>
 <p><b>Recovery from the wrong Project:</b> move the Issue in Linear. Ending "Billing v2" there sends the
 next Task back to "billing", and a Task left in the ended Project still runs.</p>
+<p><b>Interrupt:</b> <code>lf task interrupt</code> stops the Task's live Graph; the interrupt is recorded
+against the Task and nothing else (QA pass 2).</p>
 <p><b>Upgrade:</b> a store with a current Project and a KR keeps its Project; the new Task joins it and the
 KR text is no longer shown.</p>
 </div>
@@ -89,36 +92,31 @@ KR text is no longer shown.</p>
 
 <h2>Do the concepts line up?</h2>
 <table>
-<tr><th style="width:21%">What a person knows</th><th style="width:27%">What the code has</th><th style="width:6%"></th><th>What is wrong where it is no</th></tr>
+<tr><th style="width:21%">What a person knows</th><th style="width:29%">What the code has</th><th style="width:6%"></th><th>Note, and what is wrong where it is no</th></tr>
 <tr>
   <td><b>Wave</b><br>a lasting objective; <code>lf wave create</code></td>
   <td><code>waves</code> row, <code>.lf/wave/&lt;name&gt;/</code>, no Project, no tracker write</td>
   <td class="yes">yes</td><td></td>
 </tr>
 <tr>
-  <td><b>Project</b><br>a group of a Wave's Tasks with a name and a status; a Linear or Asana Project when connected</td>
+  <td><b>Project</b><br>a group of a Wave's Tasks with a name and a status, that starts and ends; a Linear or Asana Project when connected</td>
   <td><code>projects</code>, <code>Project</code>, <code>ProjectStatus</code>, <code>tracker_wave_projects.position</code>, <code>ProjectSummary</code> on the wire, <code>WaveProjectsView</code></td>
-  <td class="yes">yes</td><td>One meaning now. "Current", "historical", activation and readiness are gone from the CLI, the wire and Desktop.</td>
+  <td class="yes">yes</td><td>One meaning. No "current", "historical", activation or readiness in the CLI, the wire or Desktop.</td>
 </tr>
 <tr>
   <td><b>A Project that runs</b><br>nobody runs, steers or interrupts a Project</td>
-  <td><code>project_events</code>, <code>ProjectEventKind</code> (<code>Started</code>, <code>IterationCompleted</code>, <code>Steer</code>, <code>Interrupt</code>, <code>Completed</code>, <code>Failed</code>…), <code>ProjectEvent</code>, <code>HistoricalFailure</code>, five store methods and their async wrappers</td>
-  <td class="no">no</td><td>A concept the code has and the person never sees. The biggest mismatch left; see below.</td>
+  <td><s><code>ProjectEventKind</code>, <code>ProjectEvent</code>, <code>HistoricalFailure</code>, five store methods</s> deleted in slice 5; interrupts take a <code>&amp;TaskId</code>; <code>project_events</code> marked leaving</td>
+  <td class="yes">yes</td><td>Was the biggest mismatch in the last review. One arm is left: <code>ChildRef::Project</code>, below.</td>
 </tr>
 <tr>
   <td><b>Where a new Task lands</b><br>the newest started Project, else the newest open one, else a new one named for the Wave</td>
-  <td><code>new_task_project_in</code>, <code>join_project_in</code>, called from the save and the move; previews in <code>planning_explain</code> ask the same function</td>
-  <td class="yes">yes</td><td>One rule, one owner, inside the write. One wrinkle: "open" is spelled twice (next row).</td>
+  <td><code>new_task_project_in</code>, <code>join_project_in</code>, called from the save and the move; previews ask the same function</td>
+  <td class="yes">yes</td><td>One rule, one owner, inside the write.</td>
 </tr>
 <tr>
   <td><b>An open Project</b><br>one that has not ended</td>
-  <td>the SQL <code>work_state='ready' AND status IN ('started','backlog','planned','paused')</code>, written out in <code>new_task_project_in</code> and again in <code>joined_project_name</code></td>
-  <td class="no">no</td><td>One idea, two spellings. A status added to one and not the other makes the command name a Project by a different rule than the one that chose it.</td>
-</tr>
-<tr>
-  <td><b>Which Project a Task is in</b></td>
-  <td><code>tasks.project_id</code>, <code>project_id</code> on every Task on the wire; printed once, at creation or move, when the Wave has several open</td>
-  <td class="no">no</td><td><code>lf wave status</code> lists Projects, then every Task flat. With two Projects nothing says which Task is in which. New presentation, so not this Task's; question 2.</td>
+  <td><code>OPEN_PROJECT</code> in <code>sqlite/children.rs</code>, used by the rule and by the name the command prints</td>
+  <td class="yes">yes</td><td>Was spelled twice; now once.</td>
 </tr>
 <tr>
   <td><b>Running a Task</b></td>
@@ -132,18 +130,28 @@ KR text is no longer shown.</p>
 </tr>
 <tr>
   <td><b>KRs, metric targets, live metrics</b><br>gone</td>
-  <td>no type, command, wire field or view; <code>ReleasedKr</code> and <code>released_targets</code> only convert released stores; columns and two tables marked leaving</td>
+  <td>no type, command, wire field or view; <code>ReleasedKr</code> and <code>released_targets</code> only convert released stores; <code>parse_project_document</code> keeps released sections out of the description</td>
   <td class="yes">yes</td><td>47 of 64 saved Projects on the measured store hold KR text. It stays in the leaving column and in Linear until the contract exports it.</td>
 </tr>
 <tr>
-  <td><b>What the architecture docs say</b></td>
-  <td><code>docs/dev/reference-models.md</code>: "a Wave's planning binds one Linear Project". <code>docs/dev/reference.md</code>: <code>project_transitions</code> and <code>project_transition_items</code> listed as records the Linear events domain keeps.</td>
-  <td class="no">no</td><td>Two lines still describe the model that was removed. Nothing in live code reads either table.</td>
+  <td><b>What the docs say</b></td>
+  <td><code>docs/work.md</code> "Projects", <code>docs/glossary.md</code>, <code>docs/dev/planning.md</code>, <code>reference.md</code> "Leaving the store"</td>
+  <td class="yes">yes</td><td>The two stale architecture lines are fixed; no live doc names a current or selected Project.</td>
+</tr>
+<tr>
+  <td><b>Which Project a Task is in</b></td>
+  <td><code>tasks.project_id</code>, on every Task on the wire; printed once, at creation or move, when the Wave has several open</td>
+  <td class="no">no</td><td><code>lf wave status</code> lists Projects, then every Task flat. New presentation, not this Task's; question 1.</td>
 </tr>
 <tr>
   <td><b>A Wave with no tracker</b><br>the person never made a Project</td>
   <td>a <code>projects</code> row named for the Wave, made by the first Task, because a Task reaches its Wave through its Project</td>
-  <td class="no">no</td><td>Unchanged from the first review, and ruled out for this Task by the steer. Larger than this work.</td>
+  <td class="no">no</td><td>Ruled out for this Task by the steer. Larger than this work; question 2.</td>
+</tr>
+<tr>
+  <td><b>A Project as something you control</b><br>no such action</td>
+  <td><code>ChildRef::Project</code> in <code>loopflow-storage/src/child.rs</code> ("Domain types shared by Project and Task control surfaces"), <code>target_kind()</code>, <code>target_id()</code></td>
+  <td class="no">no</td><td>Built by one test only (<code>status_tests.rs</code>); every other caller passes a Task. The biggest mismatch left, and it is small.</td>
 </tr>
 <tr>
   <td><b>The lock a plan sync holds</b></td>
@@ -152,65 +160,47 @@ KR text is no longer shown.</p>
 </tr>
 </table>
 
-<h2>The biggest mismatch: a Project that runs</h2>
-<p>The branch removed the chapter a Wave works through. The chapter's own run loop is still in the
-code. A Project has an event journal with "started", "iteration completed", "steer", "interrupt" and
-"failed", from when lf ran a Project as an agent. On the store measured, <code>project_events</code>
-holds 30,536 rows (29,107 <code>task_observed</code>, 610 <code>started</code>, 458 <code>failed</code>,
-352 <code>iteration_completed</code>), the newest written 2026-09-24. This branch marks
-<code>projects.iteration</code> leaving "since chapters ended" and keeps
-<code>IterationCompleted { iteration }</code>.</p>
+<h2>The biggest mismatch left: <code>ChildRef</code> has one live arm</h2>
+<p><code>ChildRef</code> is "a Project or a Task that lf controls". Since nothing controls a Project, it is
+a Task. The same was true on the base: <code>c2beea658a</code> builds <code>ChildRef::Project</code> in the
+same one test.</p>
 <div class="cols">
 <div class="box">
 <h3>Built</h3>
-<pre>store.append_project_event(..)      0 callers
-store.project_events_after(..)      0 callers
-store.latest_project_event(..)      0 callers
-store.latest_project_event_at(..)   0 callers
-store.latest_project_failure(..)    0 callers
-   (outside tests, in both store layers)
-
-append_interrupt(WorkRef::Project)  writes a row
-latest_interrupt_id(WorkRef::Project) reads it
-   every caller found passes a Task</pre>
-<p>Tests seed <code>Failed</code>, <code>Steer</code> and <code>IterationCompleted</code> events to
-exercise readers nothing else calls.</p>
+<pre>enum ChildRef { Project(ProjectId), Task(TaskId) }
+store.work_for_child(&amp;ChildRef::Task(id))   6 callers
+store.work_for_child(&amp;ChildRef::Project(id)) 1 test
+ChildRef::target_kind(), target_id()      0 callers</pre>
 </div>
 <div class="box proposed">
-<h3 class="new">Proposed (plan, slice 5)</h3>
-<pre>ProjectEventKind, ProjectEvent,
-HistoricalFailure                   deleted
-the five store methods, wrappers
-and the tests that only seed them   deleted
-append_interrupt, latest_interrupt_id
-                                    no Project arm
--- leaving: project_events LOO-995  in remove_chapters.sql</pre>
-<p>A Project is then a row with a name, a status and Tasks, in the code as in the product. The
-table and its saved rows stay until the contract; nothing is dropped here.</p>
+<h3 class="new">Proposed, not in this Task</h3>
+<pre>ChildRef, target_kind, target_id          deleted
+store.work_for_task(&amp;TaskId) -> WorkRef
+the test abandons WorkRef::Project(id) directly</pre>
+<p><code>WorkRef::Project</code> stays: it is a Task's parent in the Work tree and what
+<code>abandon</code> takes for a Project gone from the tracker.</p>
 </div>
 </div>
-<p><b>What must survive:</b> interrupting a Task (<code>lf task interrupt</code>, a Graph's interrupt cursor),
-steering a Task or a Wave, and <code>WorkRef::Project</code> as an identity in the Work tree
-(<code>WorkIdentity</code> gives a Task its Project as parent).
-<b>Counterexample that would break it:</b> a path that launches a Graph bound to a Project, so
-<code>latest_interrupt_id</code> is asked about one. None was found; implement checks every
-<code>WorkRef::Project</code> caller before deleting the arm and keeps the arm if one exists.</p>
-<p class="dim">Choice made for review: the brief says "Look for earlier attempts left behind (unreachable
-branches, hidden commands) and remove those too", so this goes in the Task. Passed over: leaving it for a
-separate cleanup, which would ship a branch named "remove chapters" with the chapter's journal API intact.</p>
+<p class="dim">Choice made for review: leave it out. It was dead before this branch, it is about 30 lines,
+and another pass through implement, realign, compress and QA over a 170-file branch costs more than it
+returns. Passed over: a sixth slice. The plan's line that said <code>ChildRef::Project</code> stays "as a
+Task's parent in the Work tree" was wrong and is corrected.</p>
 
-<h2>What the review changed in the plan</h2>
-<ol>
-  <li>Slice 5a: delete the Project run journal's types, API and tests; mark <code>project_events</code> leaving.</li>
-  <li>Slice 5b: one definition of an open Project, used by the rule and by the name the command prints.</li>
-  <li>Slice 5c: the two stale architecture lines; <code>project_transitions</code>,
-      <code>project_transition_items</code> and <code>project_events</code> move to the "Leaving the store" row.</li>
-</ol>
+<h2>Compared with the last review</h2>
+<table>
+<tr><th>Planned for slice 5</th><th>Observed at <code>a5e8d9c827</code></th></tr>
+<tr><td>Delete the Project run journal's types, API and tests; mark <code>project_events</code> leaving</td>
+    <td><code>grep -rn 'ProjectEvent\|project_event\|HistoricalFailure' rust</code> matches only <code>migration_runner.rs</code>; <code>remove_chapters.sql</code> and <code>SCHEMA.md</code> carry the mark</td></tr>
+<tr><td>Interrupts with no Project arm</td>
+    <td><code>append_interrupt</code>, <code>latest_interrupt_id</code>, <code>observe_interrupt</code> take <code>&amp;TaskId</code>; QA interrupted a live Task three times</td></tr>
+<tr><td>One definition of an open Project</td><td><code>OPEN_PROJECT</code>, two uses</td></tr>
+<tr><td>Two stale architecture lines</td><td>fixed; the three tables are in "Leaving the store"</td></tr>
+</table>
 
 <h2>Larger than this work</h2>
 <p><b>A Task's Project is shown only at the moment it is chosen.</b> Grouping <code>lf wave status</code> by
-Project (or a Project column) is new presentation over data the wire already carries. On the measured
-store 6 of 62 Waves hold more than one open Project.</p>
+Project is new presentation over data the wire already carries. On the measured store 6 of 62 Waves hold
+more than one open Project.</p>
 <p><b>A Wave without a tracker still costs a Project</b>, and no command ends, adds or renames one there.
 Tasks belonging to a Wave directly would change every read that walks Task → Project → Wave.</p>
 <p><b>The Task title</b> still says "a Project is a Wave's optional tracker link". The steer withdrew that;
@@ -218,12 +208,6 @@ the PR title and body should say what was built.</p>
 
 <h2>Questions</h2>
 <ol class="q">
-  <li>The Project run journal (<code>project_events</code> and its API).
-    <ol>
-      <li>Delete the code in this Task and mark the table leaving. <span class="new">(in the plan)</span></li>
-      <li>Leave it; file its removal as its own Task.</li>
-    </ol>
-  </li>
   <li>With several Projects in a Wave, where does a person see which Task is in which?
     <ol>
       <li>Nowhere beyond the creation line, for now. (as built)</li>
@@ -236,6 +220,12 @@ the PR title and body should say what was built.</p>
       <li>Keep. (as built, per the steer)</li>
       <li>A follow-up for Tasks that belong to a Wave directly.</li>
       <li>A follow-up for local commands that add, rename and end a Project.</li>
+    </ol>
+  </li>
+  <li><code>ChildRef::Project</code>.
+    <ol>
+      <li>Leave it for a cleanup Task. (as chosen)</li>
+      <li>Delete it in this Task before it ships.</li>
     </ol>
   </li>
   <li><code>~/.lf/chapter-locks</code>.

@@ -31,6 +31,9 @@ Each choice below was made headless and is reversible before release.
   store methods nothing calls, and marks `project_events` leaving. Passed
   over: a separate cleanup Task. Saved rows (30,536 on one store, newest
   2026-09-24) stay until the contract.
+- **`ChildRef::Project` (second review of the built branch, 2026-11-20):**
+  left in place. Only `status_tests.rs` builds it, on this branch and on base
+  `c2beea658a`. Passed over: a sixth slice deleting `ChildRef` for a Task id.
 - **Which Task is in which Project:** `lf wave status` lists Projects, then
   Tasks flat. Should Tasks be listed under their Project when a Wave holds
   more than one? Not built.

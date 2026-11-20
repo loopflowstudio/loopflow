@@ -21,3 +21,9 @@ Run notes: `scratch/verify.md`.
   cmux is not installed here; not driven.
 - Still not run from the first verify: Desktop opens; a plain open replayed
   after a moved conversation had ended.
+
+## Concept review, 2026-11-19 (`scratch/concept-review.html`)
+
+Nothing to change in the code. Left for a person, not for this branch:
+"'claude' is not installed" is now sometimes untrue in tmux (installed, but not
+on the server's `PATH`); `--focus` knows one view of several.

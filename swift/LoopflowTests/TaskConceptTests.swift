@@ -124,15 +124,6 @@ struct TaskConceptTests {
             }
             let siblings = try #require(projection.breadcrumb(selection: nil, sessionId: "checkout")?.siblings)
             #expect(Set(siblings.map(\.id)) == ["bound", "checkout", "unknown"])
-            let board = model.standup(phase.tasks, doneDays: 0)
-            for section in [WaveBoardSection.backlog, .working] {
-                #expect(board.rows(section).map(\.id) == phase.tasks.filter { $0.section.rawValue == section.rawValue }.map(\.id))
-            }
-            let row = (board.working + board.backlog).first { $0.id == active.id }
-            if active.section == .working {
-                #expect(row?.session == (active.selectionStates.contains(.available) ? .available
-                    : active.selectionStates.contains(.busy) ? .busy : nil))
-            }
         }
     }
 
@@ -153,9 +144,6 @@ struct TaskConceptTests {
         let phase = try #require(phases().first { $0.name == "reclaimed_available_and_busy" })
         let task = try #require(phase.tasks.first { $0.task.identifier == "FIX-2" })
         let conversation = try #require(phase.sessions.first { $0.id == "bound" })
-        let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Passive rendering") }, repoPath: "/repo")
-        let board = try #require(model.standup(phase.tasks, doneDays: 0).working.first { $0.id == task.id })
-        #expect(board.session == .available)
         #expect(task.selectionStates.contains(.busy))
         let status = SessionProgramStatus(sessions: [conversation], unavailable: nil)
         let row = TaskRowMetadata(id: task.id, task: task, status: status)

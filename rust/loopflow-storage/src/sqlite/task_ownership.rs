@@ -8,7 +8,7 @@
 //! for its Wave. Each entry names the Machine that wrote it. An entry another
 //! Machine wrote never ends this Machine's own open claim; only a later entry
 //! this Machine wrote does.
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use rusqlite::{params, Connection, TransactionBehavior};
 
@@ -316,22 +316,44 @@ fn is_my_machine_in(
     Ok(machine == &local_machine_in(conn)? || me.declared_machines.contains_key(machine))
 }
 
+fn is_mine_in(conn: &Connection, me: &OwnershipFacts, holder: &TaskOwner) -> StoreResult<bool> {
+    let local = local_machine_in(conn)?;
+    Ok(holds(&me.person, holder, |machine| {
+        machine == &local || me.declared_machines.contains_key(machine)
+    }))
+}
+
 /// Whether a holder is you, checked in order: your `people` id; else your
 /// person key (Git `user.email`), even on a Machine you registered; else, for
 /// a keyless entry written before keys, one of your Machines. A different id
 /// alone doesn't mean someone else: connecting Linear moves this Machine from
 /// `journal:<key>` to `linear:<viewer>`, and earlier claims keep the journal
 /// id. Names are display only.
-fn is_mine_in(conn: &Connection, me: &OwnershipFacts, holder: &TaskOwner) -> StoreResult<bool> {
-    if holder.person_id.is_some() && holder.person_id == me.person.id {
-        return Ok(true);
+fn holds(person: &Person, holder: &TaskOwner, is_mine: impl Fn(&MachineId) -> bool) -> bool {
+    if holder.person_id.is_some() && holder.person_id == person.id {
+        return true;
     }
     if let Some(key) = &holder.person_key {
-        return Ok(me.person.key.as_ref() == Some(key));
+        return person.key.as_ref() == Some(key);
     }
-    match &holder.machine.id {
-        Some(machine) => is_my_machine_in(conn, me, machine),
-        None => Ok(false),
+    holder.machine.id.as_ref().is_some_and(is_mine)
+}
+
+/// You, as an ownership reading recognizes you: your person and your
+/// Machines, this one and those registered with `lf machine add`. Read once
+/// per repository, then [`You::holds`] recognizes your claims without a
+/// statement each.
+#[derive(Debug, Clone)]
+pub struct You {
+    pub person: Person,
+    pub machines: HashSet<MachineId>,
+}
+
+impl You {
+    pub fn holds(&self, holder: &TaskOwner) -> bool {
+        holds(&self.person, holder, |machine| {
+            self.machines.contains(machine)
+        })
     }
 }
 

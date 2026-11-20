@@ -62,9 +62,7 @@ struct TaskWorkflowHeader: View {
                     Text(task.graphName.map { "\($0) · \(task.graphSource ?? "")" } ?? "No workflow selected")
                         .foregroundStyle(palette.textSecondary)
                     Menu("Choose workflow") {
-                        ForEach(model.workflowCatalog.value ?? [], id: \.name) { choice in
-                            Button(choice.name) { model.startTaskFromInput(choice.name, task: task) }
-                        }
+                        StartFlowItems(model: model, chosen: task.graphName) { model.startTaskFromInput($0, task: task) }
                     }.task { await model.loadGraphCatalog() }
                     Button("Start") { model.startTaskFromInput(nil, task: task) }
                         .buttonStyle(WorkOutlineButtonStyle())

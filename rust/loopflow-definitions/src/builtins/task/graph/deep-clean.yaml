@@ -1,4 +1,5 @@
-# Delete what an area no longer needs, pass by pass, and publish the smaller result.
+description: Delete what an area no longer needs, pass by pass, and publish the smaller result.
+steps:
 - loop:
     - cmd: sync
     - step: deep-clean      # works the list, deletes, measures; decides: more, or done

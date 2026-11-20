@@ -1,4 +1,5 @@
-# Apply delivery, coordination, capacity, adaptation and identity in one finite pass.
+description: Apply delivery, coordination, capacity, adaptation and identity in one finite pass.
+steps:
 - s1
 - s2
 - s3

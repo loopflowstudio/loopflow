@@ -3348,7 +3348,8 @@ fn auto_off_sticks_through_a_headless_relaunch() {
 
 #[test]
 fn a_run_that_fails_the_same_way_stops_and_keeps_auto_on() {
-    let task = stand_in_task();
+    let task = GraphTask::new();
+    let mark = last_graph(task.home.path());
     // `gate` refuses identically until the repository defines `late`.
     let output = task.run(&[
         "-b", "--task", "INF-123", "task", "auto", "on", "--graph", "gate",
@@ -3359,11 +3360,11 @@ fn a_run_that_fails_the_same_way_stops_and_keeps_auto_on() {
         stderr.contains("failed 3 times with the same error"),
         "{stderr}"
     );
-    // The run stopped on its own, so nothing carries it again; auto is
-    // still on for the next `lf task run`.
-    for _ in 0..3 {
-        task.ok(&["task", "list"]);
-    }
+    // The foreground run finished all three attempts and left auto on.
+    assert_eq!(
+        attempts(task.home.path(), mark),
+        ["failed", "failed", "failed"]
+    );
     assert_eq!(task.state(), "idle");
     assert_eq!(task.status()["auto"]["state"], "on");
     let stopped = task.run(&["--task", "INF-123", "task", "auto", "off"]);

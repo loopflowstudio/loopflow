@@ -128,13 +128,36 @@ pub fn list(repo: &Path, json: bool) -> Result<()> {
         println!("{}", serde_json::to_string(&catalog)?);
         return Ok(());
     }
-    for entry in catalog {
-        match entry.unavailable {
-            Some(reason) => println!("{}  (unavailable: {reason})", entry.name),
-            None => println!("{}", entry.name),
-        }
+    for line in catalog_lines(&catalog) {
+        println!("{line}");
     }
     Ok(())
+}
+
+/// One line per Graph: its name, then its description or why it can't load.
+fn catalog_lines(
+    catalog: &[loopflow_execution::graph::compiled::GraphCatalogEntry],
+) -> Vec<String> {
+    let width = catalog
+        .iter()
+        .map(|entry| entry.name.len())
+        .max()
+        .unwrap_or(0);
+    catalog
+        .iter()
+        .map(|entry| {
+            let detail = match (&entry.unavailable, &entry.description) {
+                (Some(reason), _) => format!("(unavailable: {reason})"),
+                (None, Some(description)) => description.clone(),
+                (None, None) => String::new(),
+            };
+            if detail.is_empty() {
+                entry.name.clone()
+            } else {
+                format!("{:width$}  {detail}", entry.name)
+            }
+        })
+        .collect()
 }
 
 /// How many times one `lf task run` starts its Graph before giving up.

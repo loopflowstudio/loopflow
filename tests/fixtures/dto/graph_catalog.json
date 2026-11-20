@@ -1,6 +1,7 @@
 [
   {
     "name": "feature",
+    "description": "Explore, build, deliver and verify. You choose what to build, try the change and check it on main.",
     "source": null,
     "compiled": {
       "name": "feature",
@@ -132,6 +133,8 @@
       ]
     },
     "unavailable": null,
+    "included_by": [],
+    "runs": "task",
     "composition": {
       "revision": "fixture-feature-composition",
       "items": [
@@ -196,9 +199,12 @@
   },
   {
     "name": "broken",
+    "description": null,
     "source": ".lf/graphs/broken.yaml",
-    "graph": null,
+    "compiled": null,
+    "composition": null,
     "unavailable": "failed to load skill \"missing\": not found",
-    "composition": null
+    "included_by": [],
+    "runs": "task"
   }
 ]

@@ -497,6 +497,8 @@ pub struct RoadmapTask {
     pub run_control: TaskRunControl,
     pub pr: Option<PrSnapshot>,
     pub section: TaskSection,
+    /// Whether its owner is you; `false` when nobody owns it.
+    pub owned_by_you: bool,
     /// The graph step the Task stands at; `None` while a run carries it.
     /// Carried to `lf task status`'s `TaskRow`, not on the wire.
     #[serde(skip)]
@@ -1932,6 +1934,11 @@ struct DetailReads<'a> {
     /// Each repository's checkout, where a Task without a worktree resolves
     /// its agent; read once per repository.
     repositories: HashMap<loopflow_model::durable::RepositoryId, std::path::PathBuf>,
+    /// You in each Task's repository, which recognizes your claims; read once per repository.
+    you: HashMap<
+        loopflow_model::durable::RepositoryId,
+        loopflow_storage::sqlite::task_ownership::You,
+    >,
     /// Each Task's latest Graph and what its execution reads, asked once.
     graphs:
         HashMap<loopflow_model::durable::TaskId, loopflow_storage::graph_process::GraphExecution>,
@@ -1967,6 +1974,7 @@ impl<'a> DetailReads<'a> {
         let mut selections = HashMap::new();
         let mut wave_names = HashMap::new();
         let mut repositories = HashMap::new();
+        let mut you = HashMap::new();
         for task in tasks {
             let selection = match facts.graph_names.get(&task.id) {
                 Some(name) => (name.clone(), None),
@@ -1994,9 +2002,16 @@ impl<'a> DetailReads<'a> {
             if let std::collections::hash_map::Entry::Vacant(entry) =
                 repositories.entry(task.repository_id.clone())
             {
-                entry.insert(loopflow_execution::ops::task::repository_for_task(
-                    store, task,
-                )?);
+                let repo = loopflow_execution::ops::task::repository_for_task(store, task)?;
+                you.insert(
+                    task.repository_id.clone(),
+                    loopflow_execution::store::ownership::you(
+                        &store.sqlite,
+                        &task.repository_id,
+                        &repo,
+                    )?,
+                );
+                entry.insert(repo);
             }
         }
         Ok(Self {
@@ -2007,6 +2022,7 @@ impl<'a> DetailReads<'a> {
             selections,
             wave_names,
             repositories,
+            you,
             graphs,
             execution,
         })
@@ -2204,6 +2220,12 @@ async fn snapshot_task_detail(
         runtime.owner.is_some(),
         task.state.as_deref(),
     );
+    let owned_by_you = runtime.owner.as_ref().is_some_and(|holder| {
+        reads
+            .you
+            .get(&task.repository_id)
+            .is_some_and(|you| you.holds(holder))
+    });
     Ok(RoadmapTask {
         task: task_summary(
             task,
@@ -2247,6 +2269,7 @@ async fn snapshot_task_detail(
             PrSnapshot::new(pr, empty)
         }),
         section,
+        owned_by_you,
         step: facts.steps.get(&task.id).cloned(),
     })
 }

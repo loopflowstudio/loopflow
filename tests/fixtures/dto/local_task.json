@@ -67,6 +67,7 @@
       "work_id": "task_0123456789ab40008000000000000001"
     },
     "section": "backlog",
+    "owned_by_you": false,
     "task": {
       "assignee": null,
       "completed_at": null,

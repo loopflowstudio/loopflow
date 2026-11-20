@@ -134,9 +134,24 @@ Run the app's bundled `lf` with the world's `env.json` variables and
   holder's children by the holder's PID, then unregister the copy with `lsregister -u`.
 - On the Working Tasks Dashboard (`lf desktop working-tasks`),
   `lf desktop move -p <task> --destination <task>` moves a tile and writes the
-  shared `task_orders`; Wave tiles are not enterable there, so the Wave board has
+  shared `task_orders`; Wave tiles are not enterable there, so the Wave backlog has
   no socket route. A locked screen also denies accessibility reads
   (`AXIsProcessTrusted` false), so header text is left to headless view tests.
+- `open` hands the app the caller's environment. From an lf-launched shell,
+  launch with `env -i HOME=$HOME USER=$USER PATH=/usr/bin:/bin open -n --env …`,
+  or the app carries this Session's `LF_AS` and `LF_CAPTURE_KEY`.
+- With the screen locked, accessibility reaches the menu bar but no window
+  content, and events posted with `CGEvent.postToPid` never arrive: nothing in
+  a window can be clicked or typed. Pictures still work: launch with
+  `LOOPFLOW_UI_TEST_MODE=live`, `LOOPFLOW_UI_TEST_SNAPSHOT_PATH=<png>` and
+  `LOOPFLOW_UI_TEST_DELAY=<seconds>`; the app reads the real server, renders
+  itself to the PNG and quits. `LOOPFLOW_UI_TEST_SELECT_BRANCH=<wave name>`
+  shows that Wave, and `LOOPFLOW_UI_TEST_WIDTH`/`_HEIGHT` size the window (820
+  wide leaves the backlog about 310 points). That mode serves no control socket.
+- `LOOPFLOW_UI_TEST_SELECT_BRANCH` alone, without the test mode, opens a normal
+  app on that Wave, so `lf desktop capture -p backlog` reads its backlog over
+  the socket. Change Work with the CLI or the server socket and capture again:
+  the list follows within a second.
 - To delay or break Work reads, SIGSTOP the private server. Desktop registers
   it under launchd, so `kill -9` restarts it within seconds; for a sustained
   outage boot out the `server.plist` label, then `lf server run` to recover.

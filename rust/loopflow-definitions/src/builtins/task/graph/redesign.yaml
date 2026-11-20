@@ -1,3 +1,4 @@
-# Rethink a started Task: you settle the new design, then it is planned, built and published.
+description: Rethink a started Task. You settle the new design, then it is planned, built and published.
+steps:
 - interactive: design
 - graph: pursue

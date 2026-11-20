@@ -2791,8 +2791,26 @@
             }
           ]
         },
+        "description": {
+          "description": "Its `description:` line; `None` when the file has none or does not load.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "included_by": {
+          "description": "The Graphs that include this one with `graph:`, by name. Empty for a\nGraph people start with; a piece of other Graphs names them here.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "name": {
           "type": "string"
+        },
+        "runs": {
+          "$ref": "#/$defs/GraphSubject",
+          "description": "What it runs for: a Task, or a Wave's own operation."
         },
         "source": {
           "description": "The repository file that defines it; `None` for a builtin.",
@@ -2811,10 +2829,13 @@
       },
       "required": [
         "name",
+        "description",
         "source",
         "compiled",
         "composition",
-        "unavailable"
+        "unavailable",
+        "included_by",
+        "runs"
       ],
       "type": "object"
     },
@@ -3240,6 +3261,14 @@
         "error"
       ],
       "type": "object"
+    },
+    "GraphSubject": {
+      "description": "What a Graph is started on.",
+      "enum": [
+        "task",
+        "wave"
+      ],
+      "type": "string"
     },
     "HarnessRetention": {
       "properties": {
@@ -8416,6 +8445,10 @@
         "next_move": {
           "$ref": "#/$defs/NextMove"
         },
+        "owned_by_you": {
+          "description": "Whether its owner is you; `false` when nobody owns it.",
+          "type": "boolean"
+        },
         "pr": {
           "anyOf": [
             {
@@ -8472,7 +8505,8 @@
         "execution",
         "run_control",
         "pr",
-        "section"
+        "section",
+        "owned_by_you"
       ],
       "type": "object"
     },
@@ -15869,7 +15903,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "`lf task edit <issue> --notes=<notes>`.",
+          "description": "`lf task edit <issue> [--notes=<notes>] [--rank=<rank>]`: a new brief,\na new position in its Project, or both.",
           "properties": {
             "directory": {
               "type": "string"
@@ -15882,14 +15916,26 @@
               "type": "string"
             },
             "notes": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "rank": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
             }
           },
           "required": [
             "kind",
             "directory",
             "issue",
-            "notes"
+            "notes",
+            "rank"
           ],
           "type": "object",
           "x-result": {

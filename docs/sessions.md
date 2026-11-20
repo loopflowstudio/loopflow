@@ -456,6 +456,9 @@ never launched. lf reads the end of the provider's own transcript at the
 moment you ask: Claude's under `~/.claude/projects`, Codex's rollout files
 under `~/.codex/sessions`, Pi's session files under `~/.pi/agent/sessions`,
 and OpenCode's store, `~/.local/share/opencode/opencode.db`, opened read-only.
+An Antigravity conversation lf launched is read from
+`~/.gemini/antigravity-cli/brain`; a plain `agy` is not listed, because its
+transcript does not say which directory it ran in.
 Nothing runs between questions, and lf never writes into those directories. The turn is the transcript's last one for a conversation lf
 launched too; when the transcript leaves that turn open and lf recorded its
 end, lf's record closes it.
@@ -542,7 +545,7 @@ even if the server restarted since its last turn. Claude takes the news as a
 message from `loopflow`, Codex as a turn of its own. A comment with direction
 arrives as a steer; other comments arrive as Task updates. A
 conversation in the middle of a turn hears updates at its next boundary.
-Pi and OpenCode hear updates at their next boundary too. Idle update delivery
+Pi, OpenCode and Antigravity hear updates at their next boundary too. Idle update delivery
 needs no watcher or timer per conversation.
 
 A chat you start with `lf <skill>` in a terminal is never woken.

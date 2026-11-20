@@ -34,7 +34,7 @@ first, then the engineering words it borrows.
 | **Installation** | The selected Loopflow build and its registration, updated with `lf install`, including the client server. |
 | **Data directory** | Local Loopflow state in `~/.lf` by default; explicit `LF_HOME` selects a disposable experiment. |
 | **Steer** | A message you send to work that is already running, to change its direction. |
-| **Harness**, **provider** | The AI coding tool Loopflow drives: Claude Code, Codex, OpenCode, or Pi. |
+| **Harness**, **provider** | The AI coding tool Loopflow drives: Claude Code, Codex, OpenCode, Pi, or Antigravity. |
 | **Scratch** | The `scratch/` folder, for working notes. `lf scratch clear` removes added files; existing files and edits remain. |
 
 Work session, worker, chat and batch are kinds of launch. A Session can change

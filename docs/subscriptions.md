@@ -15,6 +15,9 @@ codex login                     # sign in to Codex
 lf -a codex implement
 ```
 
+OpenCode, Pi and Antigravity (`agy`) work the same way: sign in with the
+client, then pass its name to `-a`.
+
 Each launch uses the native client's authentication on the Machine where it
 runs. Claude and Codex own login, logout, credential refresh and subscription
 usage limits. Their API-key configuration also applies. Loopflow adds context,
@@ -62,7 +65,6 @@ model fallthrough and explicit pins.
 | --- | --- |
 | Graph step, with or without a Task | Follow configured model/harness fallbacks |
 | Other headless work (`lf -b <skill>`, commit and PR text, sync conflicts) | Follow the same fallbacks and stop when the order runs out of usage |
-| Pi or OpenCode | Stop with the provider error; neither reports why it refused |
 | Interactive, with or without a Task | Keep the provider, thread and refusal visible; wait for an explicit retry or move |
 | Explicit agent | Keep the harness; bare Claude retains model fallthrough |
 | Explicit model pin | Keep the model; only a Graph step waits on a usage limit |
@@ -70,7 +72,6 @@ model fallthrough and explicit pins.
 | Revoked login | Skip that provider's other models; with no other provider left, stop and say how to sign in again |
 | Order exhausted otherwise, or by a command | Stop with the provider error and a next step |
 | Graph step's agent is not installed | Pass over it to the next entry and record the move; with none left, fail once with the install command |
-| OpenCode or Pi fails | Stop with the provider error; their failures are not read for limits |
 
 ```
 claude: You've hit your limit. Resets 3pm (America/Los_Angeles).

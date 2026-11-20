@@ -9,7 +9,7 @@ npx skills add loopflowstudio/loopflow --skill loopflow -g   # teach your coding
 `lf` is how your agent orchestra conducts itself. It's a task system for coding
 agents: you say what you want, and each Task gets its own conversation, its own
 workflow and its own pull request. Organize Tasks into Waves to give each area of
-work its own defaults. It works with Claude Code, Codex, OpenCode and Pi, on your
+work its own defaults. It works with Claude Code, Codex, OpenCode, Pi and Antigravity, on your
 existing subscriptions, inside whatever terminal, multiplexer and tracker you
 already use.
 
@@ -115,7 +115,7 @@ You want to do something; here's how through `lf`.
 | You want to… | |
 |---|---|
 | run agents in parallel, each Task in its own worktree and branch | `lf task create "…" --run` |
-| run on Claude Code, Codex, OpenCode or Pi, per run or per Skill | `lf -a codex : "…"` |
+| run on Claude Code, Codex, OpenCode, Pi or Antigravity, per run or per Skill | `lf -a codex : "…"` |
 | authenticate GitHub, planning services and OpenCode | `lf account` |
 | open a Task conversation here (a sibling tab from an agent) | `lf open --task <ID>` |
 | keep work already in progress: a dirty checkout, another tool's worktree | `lf task create --worktree . --title "…"` |
@@ -133,7 +133,7 @@ You want to do something; here's how through `lf`.
 | You need | For |
 |---|---|
 | macOS or Linux, `git` | Everything |
-| [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Codex](https://github.com/openai/codex), [OpenCode](https://github.com/anomalyco/opencode) or [Pi](https://github.com/earendil-works/pi) 1.3+, signed in | Every run; each has its own cost |
+| [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Codex](https://github.com/openai/codex), [OpenCode](https://github.com/anomalyco/opencode), [Pi](https://github.com/earendil-works/pi) 1.3+ or [Antigravity](https://antigravity.google/docs/cli/reference), signed in | Every run; each has its own cost |
 | [`gh`](https://cli.github.com), signed in | Pull requests (GitHub is the code host today) |
 | [Linear](https://linear.app) | Optional; the plan syncs through your Git remote by default |
 

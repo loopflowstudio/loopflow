@@ -29,8 +29,10 @@ which have no turn-end hook. Recording is best-effort: a missed turn-end read
 can be caught at the next turn end or exit. Raw conversations lf never launched
 get no usage or completion rows.
 
-Claude and Codex usage rows carry tokens without cost. Pi and OpenCode include
-the turn's reported cost. Claude's live completion keeps `total_cost_usd`, a
+Claude, Codex and Antigravity usage rows carry tokens without cost. Pi and
+OpenCode include the turn's reported cost. An Antigravity row counts the
+conversation lf started; tokens its subagents spent are in their own
+conversations and are not added. Claude's live completion keeps `total_cost_usd`, a
 running process total; it is not a per-turn cost. A bare run in a Task's
 checkout counts toward that Task. Runs outside Task and Wave checkouts also
 record rows today.
@@ -87,7 +89,7 @@ Session's raw input events, native conversation identity and provider outcomes.
 `--instructions` explains which instructions were included and which were left out.
 
 Conversation text stays with its provider: `session history show` reads it from Claude,
-Codex or Pi transcript files or OpenCode's own store, and lf stores none of
+Codex, Pi or Antigravity transcript files or OpenCode's own store, and lf stores none of
 it. Each turn, from what woke the agent until it handed back, prints one line
 and then what was asked and done in it:
 

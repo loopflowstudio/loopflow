@@ -9,7 +9,7 @@ npx skills add loopflowstudio/loopflow --skill loopflow -g   # teach your coding
 `lf` is how your agent orchestra conducts itself. It's a task system for coding
 agents: you say what you want, and each Task gets its own conversation, its own
 workflow and its own pull request. Organize Tasks into Waves to give each area of
-work its own defaults. It works with Claude Code, Codex, OpenCode and Pi, on your
+work its own defaults. It works with Claude Code, Codex, OpenCode, Pi and Antigravity, on your
 existing subscriptions, inside whatever terminal, multiplexer and tracker you
 already use.
 

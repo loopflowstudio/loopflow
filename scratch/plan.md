@@ -378,6 +378,40 @@ is the fullest reference; docs: https://antigravity.google/docs/hooks/,
 https://antigravity.google/docs/cli/headless/,
 https://antigravity.google/docs/cli/reference.
 
+## Docs written ahead of the build
+
+They describe the behavior above as intended; the build reads them as the
+user-facing contract.
+
+- `docs/config.md`: "Antigravity" section (install, sign-in, `-a`, models,
+  steer, usage, launch folder, trust dialog, failover, limits); OpenCode's
+  balance refusal moving on under "Keep going when a provider runs out"; the
+  two "Pi and OpenCode stop there" passages removed; harness list, model
+  strings, `supported_harnesses`, argument cap, `yolo`.
+- `docs/subscriptions.md`: the two "Pi or OpenCode: stop" rows removed.
+- `docs/troubleshooting.md`: `opencode_error:` and `antigravity_error:` in the
+  reason table; the `antigravity` not-installed message.
+- `docs/telemetry.md` (no cost on Antigravity rows; subagent tokens not
+  added), `docs/sessions.md` (plain `agy` not listed; updates at the next
+  boundary), `docs/security.md` (headless floor).
+- Names only: `README.md`, `docs/index.md`, `docs/getting-started.md`,
+  `docs/glossary.md`, `skills/loopflow/README.md`, builtin `init.md`
+  (`command -v … pi agy`).
+- Left for slice 5: `harness/README.md` (its rows name tests that do not
+  exist yet), `swift/README.md`, `docs/dev/*`.
+
+Details the docs settled, for the build to match or correct:
+
+- A moved step's reason keeps the decoder's code and the error's first line:
+  `antigravity_error: invalid model selection (…): model … is not recognized…`
+  without the "Available models:" list; `opencode_error: Insufficient
+  balance. …`.
+- `docs/security.md` says a headless Antigravity run skips permission
+  prompts, i.e. `config.skip_permissions` is set for unattended runs as it is
+  for Claude. Check in slice 1.
+- `docs/config.md` says Antigravity terminal prompts share the 122,880-byte
+  argument cap (`validate_terminal_turn`).
+
 ## Absent and error states
 
 | state | what happens |

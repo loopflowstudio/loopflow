@@ -317,7 +317,7 @@ The first word of the reason is what the provider said went wrong:
 | `provider_model_unavailable:` | The account can't use that model, or there is no such model | Tries the next entry |
 | `provider_credential_invalidated:` | The login was revoked or could not be refreshed | Skips that provider's other models and tries the next provider |
 | `provider_capacity:` | The provider is overloaded | Retries the same conversation |
-| `codex_error:` | Nothing about the cause | Goes by the message; one Loopflow doesn't recognize stops the step |
+| `codex_error:`, `opencode_error:`, `antigravity_error:` | Nothing about the cause | Goes by the message, so OpenCode's "Insufficient balance" or Antigravity's "exhausted your quota" tries the next entry; one Loopflow doesn't recognize stops the step |
 
 ```bash
 lf set --global agents claude,codex
@@ -355,6 +355,14 @@ lf task run LOO-12 -a opencode
 ```
 
 Install it, sign in, and `lf task run LOO-12` again.
+
+Antigravity's agent name and command differ: the agent is `antigravity`, the
+command it installs is `agy`.
+
+```bash
+lf task run LOO-12 -a antigravity
+# 'antigravity' is not installed. Install it with `brew install --cask antigravity-cli`; the command is `agy`.
+```
 
 ## Context too large
 

@@ -85,8 +85,7 @@ Only a Graph step waits for more usage: once every entry has refused on a usage
 limit, it waits 5, 15, 30, then 60 minutes, trying the whole order again after
 each, and then stops. The steps of `lf -b <graph>` are Graph steps and wait
 the same way, which includes a name that is both a skill and a Graph, such as
-`lf -b research`. Other commands stop when the order runs out of usage. Pi and
-OpenCode do not report why they refused, so an entry for either stops there.
+`lf -b research`. Other commands stop when the order runs out of usage.
 Interactive Sessions keep the refusal visible and require an explicit retry or
 move, with or without a Task.
 
@@ -118,12 +117,21 @@ lf task status MTG-328
 A misspelled entry moves on the same way, so read that line when work runs
 somewhere you didn't expect.
 
+Every harness moves on the same three refusals: usage spent, a login revoked,
+a model it can't serve. OpenCode out of credits:
+
+```yaml
+agents: [opencode, claude]
+```
+
+```bash
+lf task status MTG-328
+#   implement went on under claude after: opencode_error: Insufficient balance. This request is pay-as-you-go, billed to OpenCode Models credits. Top up at https://opencode.ai/console/…/billing?credits=1.
+```
+
 When the missing CLI was the only choice (a pin, or the last entry), the step
 fails once with [how to install it](troubleshooting.md#agent-not-found). Chats
 and batches never move: a missing CLI stops them with the same message.
-
-OpenCode and Pi failures are not read for usage limits. A step that fails on
-either stops with the provider's error instead of moving or waiting.
 
 | Setting | Compress tries | Everything else tries |
 | --- | --- | --- |
@@ -639,7 +647,7 @@ gradually, preserving live decisions and evidence; re-query after writing.
 
 The first conversation turn contains the skill, request and explicitly selected
 documents. Codex uses app-server input and Claude uses streamed or file input.
-Pi and OpenCode terminal launches retain their 122,880-byte argument cap and
+Pi, OpenCode and Antigravity terminal launches retain their 122,880-byte argument cap and
 report oversized input before launch. Provider context-window limits still apply;
 Loopflow never retries with shortened documents.
 
@@ -835,7 +843,7 @@ skill:
 See [Keep going when a provider runs out](#keep-going-when-a-provider-runs-out)
 for model ordering, list replacement and `default_agent` precedence.
 
-Harnesses: `claude`, `codex`, `opencode`, `pi`. Use `harness:model` for specific models.
+Harnesses: `claude`, `codex`, `opencode`, `pi`, `antigravity`. Use `harness:model` for specific models.
 
 Built-in skills recommend no harness. With no authored choice, fallback or
 `agents` list, Loopflow selects automatically only when exactly one supported
@@ -863,12 +871,20 @@ agent: opencode:opencode/glm-5.2         # explicit model
 agent: opencode:moonshotai/kimi-k2       # explicit provider/model
 ```
 
-A Task runs on any of the four. `-a` on `lf task run` chooses for every step of
+Antigravity takes a name from `agy models`:
+
+```yaml
+agent: antigravity                         # the model agy is set to
+agent: antigravity:gemini-3.8-flash-high   # explicit model
+```
+
+A Task runs on any of the five. `-a` on `lf task run` chooses for every step of
 that run:
 
 ```bash
 lf task run LOO-12 -a opencode:opencode/gemini-4-carbon
 lf task run LOO-12 -a pi:anthropic/claude-sonnet-4-6
+lf task run LOO-12 -a antigravity
 lf task status LOO-12               # each step's answer, usage and where the Graph stands
 ```
 
@@ -966,11 +982,65 @@ run through the same saved-steer receipts used by other harnesses. An emitted
 receipt means local delivery, not proof the model incorporated it. Idle Sessions
 stay idle. Direct RPC steering reports queued, rejected or uncertain delivery
 independently of the initiating turn's result.
-Automatic subscription-limit recovery, native response schemas,
+Native response schemas,
 turn limits and transferring Pi history to another harness are unavailable.
 Headless extension dialogs fail with an instruction
 to open the Session interactively. Pi's tools use the OS user's permissions;
 project trust and the working directory do not sandbox them.
+
+### Antigravity
+
+```bash
+brew install --cask antigravity-cli     # installs the `agy` command
+agy                                     # sign in
+lf -a antigravity implement             # native interactive Session
+lf -b -a antigravity:gemini-3.8-flash-high implement
+lf task run LOO-12 -a antigravity       # every step of the Task
+lf resume <session-id>                  # reopen its exact Antigravity conversation
+```
+
+The agent is named `antigravity` in `-a`, `agents` and everything lf prints;
+`agy` is only the command it runs, and `-a agy` is not an agent. Bare
+`antigravity` uses the model `agy` is set to; `antigravity:<model>` takes a
+name from `agy models`. Antigravity owns its sign-in and its conversations
+under `~/.gemini/antigravity-cli`. Sign in on each Machine where it runs.
+
+A step gets the Task's context when it starts and hears `lf steer` after its
+next tool, as on the other harnesses:
+
+```bash
+lf steer LOO-12 "keep the old flag as an alias"
+lf history usage --task LOO-12          # the step's tokens
+```
+
+Loopflow gives each launch its instructions and hooks in a folder of its own
+under the checkout's `.lf/prompts/`, kept out of Git. It writes nothing to
+`~/.gemini` and adds no hook file to your project.
+
+In a Task's worktree the terminal opens straight to the prompt. Anywhere else,
+`agy` asks "Do you trust the contents of this project?" the first time it sees
+the folder, as it does without Loopflow.
+
+A spent quota, a signed-out `agy` or a model it does not serve moves a Graph
+step to the next entry in `agents`:
+
+```yaml
+agents: [antigravity:gemini-9, claude]
+```
+
+```bash
+lf task status LOO-12
+#   implement went on under claude after: antigravity_error: invalid model selection (--model "gemini-9" --effort ""): model gemini-9 is not recognized as a known model or custom model in settings
+```
+
+With nothing left in the order, a signed-out `agy` stops the step with "sign in
+again on this Machine: run `agy` and sign in".
+
+Usage counts the conversation lf started. Tokens spent by subagents it invokes
+are not in `lf history usage`. A conversation started with plain `agy` is not
+listed in `lf session list`. A question a headless step asks is not read: the
+step ends on the model's own answer. Native response schemas, turn limits and
+`--effort` are unavailable, and an idle Session hears a steer at its next turn.
 
 ### Supported Harnesses
 
@@ -982,6 +1052,7 @@ supported_harnesses:
   - codex
   - opencode
   - pi
+  - antigravity
 ```
 
 This list is additive across global and repo config.
@@ -1041,7 +1112,8 @@ that are already more permissive are not downgraded. For example, Codex
 `--yolo` or `yolo: true` is the explicit Loopflow bypass: Claude uses
 `--dangerously-skip-permissions`, Codex sends `sandbox: "danger-full-access"`
 and `approvalPolicy: "never"` through its app-server protocol, and OpenCode
-allows every action through `permissions` in `OPENCODE_CONFIG_CONTENT`. Pi has
+allows every action through `permissions` in `OPENCODE_CONFIG_CONTENT`, and
+Antigravity uses `--dangerously-skip-permissions`. Pi has
 no permission prompts or sandbox to skip.
 
 A headless run in its Task's checkout runs as `yolo` on every harness, whatever

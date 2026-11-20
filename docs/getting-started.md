@@ -12,7 +12,7 @@ lf init                          # checks your agent and logins, then names one 
 
 `lf` lands in `~/.local/bin`; set `LF_INSTALL_DIR=/path` to put it elsewhere.
 You need `git`, a project in a git repository, and one of Claude Code, Codex,
-OpenCode or Pi (1.3+) signed in. Pull requests also need `gh`, signed in.
+OpenCode, Pi (1.3+) or Antigravity signed in. Pull requests also need `gh`, signed in.
 
 ## 1. Launch an agent
 
@@ -151,7 +151,7 @@ explains the distinction and what happens during a connection loss.
 | `--docs PATH,…` | Add files, globs or directories |
 | `--diff files` / `--diff patch` | Add changed file bodies / the raw diff |
 | `--context` | Preview the assembled input; launch nothing |
-| `-a HARNESS[:MODEL]` | Run on claude, codex, opencode or pi |
+| `-a HARNESS[:MODEL]` | Run on claude, codex, opencode, pi or antigravity |
 | `-i` / `-b` | Interactive / headless, returning when the work ends |
 
 Next: [Work](work.md): many Tasks, their status, and Waves that keep a longer

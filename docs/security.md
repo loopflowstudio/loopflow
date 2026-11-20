@@ -61,6 +61,7 @@ Loopflow chooses an automation floor for headless work only:
 - Non-interactive OpenCode runs with `--auto`: it approves every permission its
   configuration does not deny.
 - Pi uses its own tool policy and credentials; it provides no built-in sandbox.
+- Non-interactive Antigravity runs skip permission prompts.
 - More-permissive vendor configuration remains more permissive.
 - Less-permissive vendor configuration is raised to this floor; Claude prints a
   warning when that happens.

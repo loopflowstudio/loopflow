@@ -417,15 +417,27 @@ QA after compress, real `agy` 1.5.13 and OpenCode 2.0.32 (2026-11-20);
 
 ## Left to build
 
-Nothing. One check is left for qa on real `agy`, slice 6's: `lf -a antigravity` in an lf-created worktree,
-`/new`, a prompt, quit; `lf resume` reopens the second conversation, and its
-transcript holds the injected context block. Then the same with `/fork` and
-`/resume <id>` (never driven live).
+Nothing.
 
-If a subagent turns up on real `agy` with a non-empty `lastUserInput`, go
-back to the first-id rule and say in `docs/config.md` and
-`docs/troubleshooting.md` that `/new`, `/fork` and `/resume` leave lf with
-the first conversation.
+QA on real `agy` 1.5.13 at c439ab0e34 (2026-11-20), slice 6's live check;
+`scratch/qa.html` scenarios 7 to 10 have the transcripts. No code changed.
+
+- Chat in an lf-created worktree, `/new`, a prompt, quit: the second
+  conversation answered with the Session id from its context block, its
+  transcript holds the injected block, the Session's thread and `captured`
+  event name it, and `lf resume` reopened it.
+- `/fork`: the fork got its own injected block (row 4, after the copied
+  history) and became the Session's thread. `/resume <id>` inside `lf resume`
+  switched back to the original, which got a new block and became the thread
+  again.
+- A subagent in the TUI: its transcript has no injected block and the thread
+  stayed the parent's. The empty-`lastUserInput` rule held, so the first-id
+  fallback is not needed.
+- A Task's conversation: `/new`, a prompt, `lf steer` 13 s in. The new
+  conversation got the block and, at its next model call, `<lf:steers>`;
+  `lf resume --task` reopened it.
+- Not driven: choosing a row in the `/resume` picker, `/fork` into another
+  project.
 
 ## Design
 
@@ -836,7 +848,7 @@ is unchanged line for line.
    resume), the thread reported through `reported_thread_path`, launch
    matrix chat and work-session cells.
 5. **Built (see "Built").** Names.
-6. **Built (see "Built"); its run on real `agy` is qa's (see "Left to build").** lf follows `/new`, `/fork` and `/resume`
+6. **Built (see "Built"); run on real `agy` (see "Left to build").** lf follows `/new`, `/fork` and `/resume`
    in the TUI: a subagent is a callback with no user input, and the thread
    file names the conversation the person is in.
 
@@ -855,9 +867,8 @@ is unchanged line for line.
 - A bare launch in a held terminal (the launcher becomes `agy`, so no lf
   process reads the thread file at exit) is in bare Codex's position. A
   managed one was run and fixed (see QA above).
-- Whether a subagent's `lastUserInput` is empty in every callback and every
-  mode: seen empty in the one subagent run above. Slice 6 depends on it and
-  says what to do if it is not.
+- Whether a subagent's `lastUserInput` is empty in every mode: seen empty
+  headless once, and a TUI subagent moved nothing (QA above).
 - A launch from a subdirectory of an lf-created worktree: the trusted folder
   is the launch cwd, not the worktree root.
 

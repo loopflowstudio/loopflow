@@ -10,7 +10,7 @@ Set up as `.lf/qa/opencode-pi-workers.md` does (repo with a bare origin,
 
 ```bash
 lf task create '<request>' --json < /dev/null
-lf task run <id> -a antigravity < /dev/null
+lf task run <id> -a antigravity < /dev/null   # returns once the Graph registers
 lf steer <id> '<direction>'              # ~15 s in; it lands after the next tool
 lf task wait <id> --until terminal --timeout 150
 lf history usage --task <id>
@@ -56,6 +56,32 @@ Killing only the PTY child leaves a chat's `agy` running: kill it by pid.
   ("Run this command?"). Answer `2` to allow `lf` for the conversation.
 - A Task update arriving with a typed prompt can pull the model off the
   prompt; it still answers.
+
+# Switching conversations in the TUI
+
+In a worktree from `lf wt create`, `lf default '<prompt>' -a antigravity`
+needs no server. Type the command, pause a second, then Enter:
+
+- `/new` (the menu lists it as "/clear (new)"), then a prompt.
+- `/fork` prints "To go back, use: /resume <id>"; typing that line switches
+  back inside the same `agy`. Bare `/resume` opens a picker of every
+  conversation on the Machine; Esc closes it.
+- A subagent: "Use your invoke_subagent tool to start exactly one subagent
+  whose task is: run the shell command `echo sub` and report its output."
+  Its conversation is the newest directory under `brain/` afterwards.
+
+A prompt that asks "which Session id does your loopflow context block name"
+shows on screen that the block arrived; a `SYSTEM_MESSAGE` row holding "This
+Session" in that conversation's transcript shows it was injected there and
+not copied by a fork. After ctrl+c twice, `agy` prints the conversation it
+quit in ("agy --conversation=<id>"); `agent_sessions.provider_thread` and the
+`captured` event should name the same one, and `lf resume <session>` starts
+`agy --conversation <id>`. For a Task's conversation, attach with
+`lf resume --task <id>` and send `lf steer` while a `sleep 25` tool runs.
+
+Wait for an answer by a line of its own (`(?m)^\s+back`), not a word: the
+spinner line prints the model's thinking, which repeats the words of a steer
+before the answer exists.
 
 # Failures on demand
 

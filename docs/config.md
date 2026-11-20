@@ -200,7 +200,7 @@ high as `agents`.
 | Exclude from LF context | — | `context: {exclude: ["*.test.ts", dist]}` |
 | Clipboard | `-c, --clipboard` | `context: {paste: true}` |
 | Claude Chrome tool | `--chrome on` / `--chrome off` | `chrome: true` / `false` |
-| Skip permissions | `--yolo` | `yolo: true` |
+| Permission prompts | `--yolo` (skip) · `--setting yolo=false` (ask) | `yolo: false` (ask when attended; default skips) |
 | Merge method | — | `merge_method: squash` (`merge`, `squash`, `rebase`) |
 | Display name | — | `user.name` (defaults to Git `user.name`) |
 
@@ -262,18 +262,38 @@ supported_harnesses: [claude, codex, opencode, pi]
 
 ## Permissions (`yolo`) and worktree sandboxes
 
-- **Interactive sessions** use each vendor's own permission settings and prompts.
-- **Headless runs** raise the floor so unattended work doesn't hang: Codex gets
-  `workspace-write` + `approval_policy = "never"`, Claude skips permission
-  prompts, OpenCode runs with `--auto` (existing more-permissive vendor configs
-  are never downgraded).
-- **Headless Task runs** (`lf task run`, `lf task auto on`, and `lf -b <skill>` inside
-  a Task worktree) run as `yolo` on every harness so they can build, test, and
-  commit freely. To isolate untrusted work, run it on a dedicated Machine, VM,
-  or container ([Security](security.md#choose-the-execution-boundary-first)).
-- **Worktree access:** Interactive Claude and Codex sessions launched from a
-  Git worktree automatically grant write access to the main repo's `.git`
-  metadata so normal Git operations work.
+Agents act without asking permission. With no `yolo` setting, Claude, Codex,
+OpenCode and Antigravity run every edit and shell command straight through; Pi
+keeps its own tool policy.
+
+```bash
+lf implement                              # no prompts
+lf --setting yolo=false implement         # this conversation asks, as the vendor configures
+lf set yolo false                         # every conversation you attend in this repository asks
+lf --yolo implement                       # no prompts for one launch, over a configured `yolo: false`
+```
+
+`yolo: false` brings back each vendor's own config and prompts in a
+conversation you attend: `lf`, `lf <skill>`, `lf task open`, `lf resume`.
+Unattended runs (`lf -b`, Task steps, `lf task auto on`, commit and PR text)
+never ask, whatever `yolo` says, because nobody is there to answer. A
+`yolo: false` on a skill or Graph step applies when someone opens that step.
+
+| | you attend | unattended |
+|---|---|---|
+| `yolo` unset or `true` | no prompts | no prompts |
+| `yolo: false` | the vendor's own prompts | no prompts |
+
+"No prompts" is Claude's `--dangerously-skip-permissions`, Codex's
+`danger-full-access` sandbox with `approval_policy = "never"`, OpenCode's
+allow-all permissions, and Antigravity's `--dangerously-skip-permissions`. lf
+has no sandbox of its own: an agent can do anything the OS user running `lf`
+can. To contain untrusted work, run it on a dedicated Machine, VM or container
+([Security](security.md#choose-the-execution-boundary-first)).
+
+**Worktree access:** Claude and Codex conversations you attend from a Git
+worktree get write access to the main repo's `.git` metadata, so Git commands
+work under `yolo: false` too.
 
 ## Context budgets and assembly
 

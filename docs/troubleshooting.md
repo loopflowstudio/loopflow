@@ -151,6 +151,21 @@ With multiple harnesses installed and no default set, run
 `lf set --global default_agent claude` (or `lf set --global agents claude,codex`).
 For OpenCode, install OpenCode 2+ (`npm install -g @opencode/cli`).
 
+## Claude refuses to skip permissions
+
+Claude exits at launch with `--dangerously-skip-permissions cannot be used with
+root/sudo privileges`, or says bypass mode is disabled by your organization's
+managed settings. lf asks Claude to skip prompts by default, and Claude refuses
+as root or under a managed `disableBypassPermissionsMode`.
+
+```bash
+lf --setting yolo=false            # this conversation keeps Claude's prompts
+lf set --global yolo false         # every conversation you attend
+```
+
+Unattended runs still skip prompts and meet the same refusal: run them as a
+non-root user, or set `IS_SANDBOX=1` inside a container you trust.
+
 ## A steer arrived late or a turn is missing from history
 
 ```bash

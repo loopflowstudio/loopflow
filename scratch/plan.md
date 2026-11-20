@@ -216,3 +216,13 @@ Antigravity once #1998 is under the branch). `grep -n
 finds nothing.
 
 Review page: `scratch/concept-review.html`.
+
+## Docs written (write-docs)
+
+Intended behavior, in place: `docs/config.md` (permissions section rewritten
+around the attended/unattended table, flag table row), `docs/security.md`
+(effective action policy), `docs/troubleshooting.md` (new "Claude refuses to
+skip permissions" entry), `rust/loopflow-execution/src/harness/README.md`
+(matrix row). They name Antigravity, which lands with #1998. Left to slice 3
+because they are code strings: the catalog description and the `--yolo` help.
+The Claude root refusal text in troubleshooting is from memory, not probed.

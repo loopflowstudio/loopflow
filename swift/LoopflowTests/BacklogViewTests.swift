@@ -200,6 +200,22 @@ struct BacklogViewTests {
         #expect(BacklogList.inverse(list.toTop(["A-3", "A-4"])).map { "\($0.task.id) \($0.rank)" } == ["A-3 2", "A-4 3"])
     }
 
+    @Test func anUndoneReorderThatIsRefusedSaysSo() async throws {
+        let tasks = try tasks().filter { $0.task.waveId == "wave-a" }
+        let writes = Recorder()
+        let model = WorkModel(query: RegistryQuery { args, _ in
+            guard args.starts(with: ["task", "update"]) else { throw RegistryQueryError("passive") }
+            await writes.add(args)
+            if await writes.calls.count > 1 { throw RegistryQueryError("store is locked") }
+            return "{}"
+        }, repoPath: "/repo")
+        let view = WorkNavigation.Board.wave("wave-a")
+        let change = try #require(await model.rankBacklog(list(tasks).nudge(["A-1"], by: 1), in: view))
+        await model.revertBacklog(change, in: view)
+        let notice = try #require(model.navigation.backlogs[view]?.notice)
+        #expect(notice.hasPrefix("Order not saved · A-1"), "\(notice)")
+    }
+
     @Test func claimIsOffForSomeoneElsesTaskAndMineOffersAvailable() throws {
         let tasks = try tasks()
         let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("passive") }, repoPath: "/repo")

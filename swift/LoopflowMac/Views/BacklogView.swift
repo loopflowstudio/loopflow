@@ -453,9 +453,11 @@ extension WorkModel {
         navigation.backlogs[view, default: BacklogState()].notice = notice
     }
 
-    /// Write each rank in turn; the first refusal stops the rest. Returns the inverse when any landed.
+    /// Write each rank in turn; the first refusal stops the rest and says so.
+    /// `landed` is the notice when every write lands. Returns the inverse when any landed.
     @discardableResult
-    func rankBacklog(_ writes: [(task: RoadmapTask, rank: Int)], in view: WorkNavigation.Board) async -> BacklogChange? {
+    func rankBacklog(_ writes: [(task: RoadmapTask, rank: Int)], in view: WorkNavigation.Board,
+                     landed notice: String? = nil) async -> BacklogChange? {
         guard !writes.isEmpty else { return nil }
         var landed: [(task: RoadmapTask, rank: Int)] = []
         for write in writes {
@@ -467,7 +469,7 @@ extension WorkModel {
         }
         if landed.count == writes.count {
             let moved = Set(writes.map(\.task.id)).count
-            backlogNotice(view, moved == 1 ? "Moved \(writes[0].task.task.identifier)" : "Moved \(moved) Tasks")
+            backlogNotice(view, notice ?? (moved == 1 ? "Moved \(writes[0].task.task.identifier)" : "Moved \(moved) Tasks"))
         }
         return landed.isEmpty ? nil : .ranks(BacklogList.inverse(landed))
     }
@@ -534,8 +536,7 @@ extension WorkModel {
     func revertBacklog(_ change: BacklogChange, in view: WorkNavigation.Board) async {
         switch change {
         case .ranks(let writes):
-            await rankBacklog(writes, in: view)
-            backlogNotice(view, "Order restored")
+            await rankBacklog(writes, in: view, landed: "Order restored")
         case .claims(let tasks):
             for task in tasks { assignTask(task, claimed: false) }
             backlogNotice(view, tasks.count == 1 ? "Unclaimed \(tasks[0].task.identifier)" : "Unclaimed \(tasks.count) Tasks")

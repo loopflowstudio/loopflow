@@ -322,6 +322,27 @@ pub struct Auto {
     pub by: crate::process::Starter,
 }
 
+/// Write the Task's mark, replacing or keeping (`on_conflict`) one it holds.
+/// Returns how many rows changed.
+fn write_auto_in(
+    conn: &rusqlite::Connection,
+    task: &TaskId,
+    mark: &Auto,
+    on_conflict: &str,
+) -> StoreResult<usize> {
+    Ok(conn.execute(
+        &format!(
+            "INSERT OR {on_conflict} INTO task_auto(task_id,state,set_at,set_by) VALUES(?1,?2,?3,?4)"
+        ),
+        rusqlite::params![
+            task.as_str(),
+            mark.state.as_str(),
+            mark.at,
+            serde_json::to_string(&mark.by)?
+        ],
+    )?)
+}
+
 pub(super) fn auto_in(conn: &rusqlite::Connection, task: &TaskId) -> StoreResult<Option<Auto>> {
     use rusqlite::OptionalExtension;
     let Some((state, at, by)) = conn
@@ -734,15 +755,7 @@ impl SqliteStore {
     pub fn place_moved_task_auto(&self, task: &TaskId, mark: Option<&Auto>) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         match mark {
-            Some(mark) => conn.execute(
-                "INSERT OR REPLACE INTO task_auto(task_id,state,set_at,set_by) VALUES(?1,?2,?3,?4)",
-                rusqlite::params![
-                    task.as_str(),
-                    mark.state.as_str(),
-                    mark.at,
-                    serde_json::to_string(&mark.by)?
-                ],
-            )?,
+            Some(mark) => write_auto_in(&conn, task, mark, "REPLACE")?,
             None => conn.execute("DELETE FROM task_auto WHERE task_id=?1", [task.as_str()])?,
         };
         Ok(())
@@ -864,22 +877,9 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction()?;
         let before = auto_in(&tx, task)?;
-        let write = if unset_only {
-            "INSERT OR IGNORE INTO task_auto(task_id,state,set_at,set_by) VALUES(?1,?2,?3,?4)"
-        } else {
-            "INSERT OR REPLACE INTO task_auto(task_id,state,set_at,set_by) VALUES(?1,?2,?3,?4)"
-        };
-        let set = tx.execute(
-            write,
-            rusqlite::params![
-                task.as_str(),
-                mark.state.as_str(),
-                mark.at,
-                serde_json::to_string(&mark.by)?
-            ],
-        )?;
-        if set == 0 {
-            return auto_in(&tx, task);
+        let on_conflict = if unset_only { "IGNORE" } else { "REPLACE" };
+        if write_auto_in(&tx, task, mark, on_conflict)? == 0 {
+            return Ok(before);
         }
         if before.as_ref().map(|before| before.state) != Some(mark.state) {
             let summary = format!("auto {}: {}", mark.state.as_str(), mark.by);

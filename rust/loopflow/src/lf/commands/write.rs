@@ -1149,7 +1149,7 @@ impl Write {
     /// elsewhere, with the write naming that Work exactly. `None` runs it here.
     fn remote(&self) -> anyhow::Result<Option<Remote>> {
         use loopflow_execution::machine::task::{remote_ownership_writer, remote_task};
-        // A run or ship starts agents there, which carry what `forward` names.
+        // A run starts agents there, which carry what `forward` names.
         let (route, launching) = match self {
             Self::SessionResume { .. } => return self.remote_session(),
             Self::TaskRun { issue, .. } | Self::TaskAutoOn { issue, .. } => {
@@ -1164,8 +1164,8 @@ impl Write {
         let Some(route) = route else {
             return Ok(None);
         };
-        // A shipped Task's Linear mapping resolves on the destination, whose
-        // own Task ID may differ.
+        // The Task's Linear mapping resolves on the destination, whose own
+        // Task ID may differ.
         let source = match self {
             Self::TaskAutoOn { .. } => tokio::runtime::Runtime::new()?.block_on(
                 loopflow_execution::machine::task::resolve_task_source(
@@ -1430,13 +1430,13 @@ mod tests {
         use loopflow_execution::engine::task::TaskRun;
         use serde_json::json;
 
-        let shipping: serde_json::Value = serde_json::from_str(include_str!(
+        let running: serde_json::Value = serde_json::from_str(include_str!(
             "../../../../loopflow-execution/tests/fixtures/dto/server/task_auto_on_answer.json"
         ))
         .unwrap();
         // `task.auto.on` answers as `task.run` does.
         for expected in [
-            shipping["result"].clone(),
+            running["result"].clone(),
             json!({"state": "ended", "issue": "LOO-1"}),
         ] {
             let result: TaskRun = serde_json::from_value(expected.clone()).unwrap();

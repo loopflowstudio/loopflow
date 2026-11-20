@@ -512,7 +512,7 @@ from `/dev/null` and closed inherited descriptors except release locks and
 worktree leases. Task steps themselves wait inside their Graph's process tree.
 
 `LF_LAUNCHER_FD` carries the admitted LfProcess ID and a `released` message.
-Server launches, landing watchers and ship restarts record the ID and append
+Server launches, landing watchers and run restarts record the ID and append
 output to `logs/detached.log`. A pipe closing without an ID leaves delivery
 unknown; nothing launches again on that uncertainty. Workers report turns and
 read Task steers while running without a PTY, viewer or screen. Their own

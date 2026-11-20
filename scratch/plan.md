@@ -175,6 +175,13 @@ the other launch fixtures say auto, not ship. Run here: `lf::tests::`,
 `adapter_tests::`, `server::schema::tests::`, `write::tests::` (59),
 `documented_commands`, `cli_discovery`, the auto launch fixtures; clippy clean.
 
+Compress 2026-11-19, second pass: nothing structural was left to cut. Gone:
+the last readers of `task_ship_events` (`query_plans`' growing-table list and
+measured stats, which now name `task_auto`, so
+`auto_reads_and_writes_plan_by_index` checks the table it writes; the pid
+queries in test support and `task_create_tests`), and the duplicate mark
+`INSERT` (`write_auto_in`).
+
 QA 2026-11-19, fourth pass at `2c53f20ade` (`scratch/qa.html`): `lf ship` and
 `lf task hold` name nothing; `auto: on` from your own, the repository's and a
 Wave's config turns auto on at take-up and status names the layer; an off

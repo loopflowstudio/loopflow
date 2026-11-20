@@ -98,7 +98,6 @@ Checks nobody has run since the last three commits (`1048cee3cf`,
 - `served_reads`, `machine_commands` (both edited for the auto operations),
   `performance_tests::`, `world_recipes::`, `two_people`, the rest of
   `local_planning`, the website docs check.
-- A released lf reading a config with the new `auto:` key: not tested.
 - Recovery fixtures that time out here with and without this branch's edits
   ("waiting for the restart", "waiting for the Task conversation and Graph
   launches"): `a_restarted_wait_keeps_its_explicit_agent`,
@@ -134,6 +133,21 @@ Compress 2026-11-19: `on` and `off` are Clap subcommands of `lf task auto`
 the other launch fixtures say auto, not ship. Run here: `lf::tests::`,
 `adapter_tests::`, `server::schema::tests::`, `write::tests::` (59),
 `documented_commands`, `cli_discovery`, the auto launch fixtures; clippy clean.
+
+QA 2026-11-19, fourth pass at `2c53f20ade` (`scratch/qa.html`): `lf ship` and
+`lf task hold` name nothing; `auto: on` from your own, the repository's and a
+Wave's config turns auto on at take-up and status names the layer; an off
+outlasts the config, another graph and a person's run; `auto on --graph
+--reason`; `-b` writes no auto and its killed run came back as a plain run; a
+released `graph: auto` reads as `code` + `auto: on`; lf 0.16.0 beside a config
+with `auto: on` warns "skipping auto: unknown setting" on every read and
+carries on. Fixed: `lf wave status` now lists `auto` in a Wave's setup
+(`WaveSetup.auto`, schema and `wave_detail.json`). Run: 60 Rust tests over
+`each_wave_runs_its_own_setup`, `dto_fixtures::`, `server::schema::tests::`;
+Swift `DesktopHeadlessTests|ServerProtocolTests|DTOFixtureTests|TaskStatusTests|TaskRowMetadataTests`,
+107 passed; clippy clean. The Dev app launched on the world and its socket
+read the Task page; the screen was locked, so the toggle and badge are still
+unseen. iOS not compiled.
 
 Shape, for gate's review and ship-review's filing:
 

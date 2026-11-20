@@ -14952,6 +14952,10 @@
         "agent": {
           "$ref": "#/$defs/SetupValue"
         },
+        "auto": {
+          "$ref": "#/$defs/SetupValue",
+          "description": "`on` when the Wave's Tasks turn auto on as they take up their Graph."
+        },
         "graph": {
           "$ref": "#/$defs/SetupValue"
         },
@@ -14973,6 +14977,7 @@
       },
       "required": [
         "graph",
+        "auto",
         "agent",
         "skill_agents",
         "tasks_machine",

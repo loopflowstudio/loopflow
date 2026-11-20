@@ -2668,6 +2668,7 @@ fn print_setup(setup: &loopflow_execution::work::wave::setup::WaveSetup) {
     };
     println!("  setup");
     line("graph", &setup.graph);
+    line("auto", &setup.auto);
     line("agent", &setup.agent);
     for (skill, value) in &setup.skill_agents {
         line(&format!("  {skill}"), value);

@@ -16,6 +16,114 @@ private lf-world Machine (<code>lf-world build task-review /tmp/lfq975/r</code>)
 The world's <code>gh</code> answers reads only, so <code>land</code> succeeds only on a PR merged by hand; a failure there
 still shows the run got past the auto check.</p>
 
+<h2>Fourth pass, 2026-11-19 at <code>2c53f20ade</code></h2>
+<p>What changed since the third pass: <code>lf ship</code> and <code>lf task hold</code> are gone, <code>lf task auto on|off</code>
+are the commands, <code>auto: on</code> is a config key, <code>-b</code> writes no auto, the builtin <code>auto</code> graph is gone.
+Fresh <code>lf-world build task-review /tmp/lfq968d/r</code>, the branch's own server, the marker-file stand-in, graphs
+<code>qaship</code> (<code>implement → interactive: ship-review → cmd: land → interactive: verify</code>) and
+<code>qasafe</code> (the same with <code>cmd: help task</code> for <code>land</code>).</p>
+
+<h3>A. Finding the command <span class="ok">works</span></h3>
+<pre>$ lf ship 534eec
+error: skill or graph not found: ship. Run `lf list skill` or `lf list graph` …      [exit 2]
+$ lf task hold 534eec
+error: unrecognized subcommand 'hold'                                                [exit 2]
+$ lf task auto
+Turn the Task's auto setting on or off: who takes its interactive steps
+  on   Run the Task with nobody waited for: stand in at each interactive step, and merge
+  off  Take the interactive steps and the merge back: the run waits at its next one
+$ lf task auto off 534eec --graph code
+error: unexpected argument '--graph' found                                           [exit 2]
+$ lf task auto off nope      → Error: no Task exists for "nope"                      [exit 1]
+$ lf task auto on nope       → Error: Task "nope" not found in the Git tracker       [exit 1]
+served task.ship / task.hold → "this server has no operation `task.ship`; update the selected installation"
+served task.auto.off c147ab  → {"issue":"c147ab","was_on":false}
+served task.auto.on c147ab   → {"state":"running","run":"qasafe from start","merges":true,…}</pre>
+
+<h3>B. <code>auto: on</code> in config, three layers <span class="ok">works</span></h3>
+<pre>$ lf config set auto on          # yours; then graph qaship the same way
+$ lf task run b3f019             # bare, never-run, PR merged by hand
+b3f019 · qaship from start running as Graph run 34b2a715-…
+  merges: this run may merge the PR; `lf task auto off b3f019` stops it
+b3f019  moving · auto: on by personal config, Nov 19 16:47
+…  b3f019  done · auto: on by personal config        (implement, ship-review, land, verify, nobody waited for)
+
+# committed in .lf/config.yaml
+534eec  moving · auto: on by repository config, Nov 19 16:48
+# committed in .lf/wave/desktop/config.yaml
+249196  done · auto: on by wave config, Nov 19 16:50</pre>
+<p>Wrong values: <code>lf config set auto off</code> → "invalid graph: auto: unknown variant `off`, expected `on`";
+<code>true</code> and <code>null</code> are refused too. "invalid graph:" opens every refused setting (<code>agent 7</code>,
+<code>yolo maybe</code>); base wording.</p>
+
+<h3>C. An off outlasts the config, another graph and a person's run <span class="ok">works</span></h3>
+<pre>$ lf task auto off 534eec --reason "I want to read the diff first"     # stand-in holding implement
+534eec: auto off
+534eec  active · auto: off by Demo            Graph qaship: at ship-review
+$ lf -b task run 534eec
+Waiting at land: auto is off (Demo). `lf task auto on 534eec` lands it.
+$ lf task run 534eec qasafe                   # no "merges:" line; stops at ship-review, still off
+$ lf task auto on 534eec --graph qasafe --reason "ship it, the diff reads fine" --json
+534eec: standing in at ship-review                                              (stderr)
+{"state":"running","issue":"534eec","run":"qasafe from ship-review","merges":true,…}
+534eec  idle · auto: on by Demo, Nov 19 16:49      Graph qasafe: at end</pre>
+<p>Both reasons are on the Task as Demo's comments. <code>--graph</code> naming the graph the Task already stands in
+continues from the waiting step, as <code>lf task run X &lt;graph&gt;</code> does.</p>
+
+<h3>D. <code>-b</code> writes no auto; a killed <code>-b</code> run comes back as a plain run <span class="ok">works</span></h3>
+<pre>$ lf -b task run 4254e3 qasafe       → all four steps, exit 0
+4254e3  done                          `lf task status --json` auto: null
+$ lf -b task run e876ea qasafe       # held at implement; carrier and its claude killed
+e876ea  moving   latest Graph: Run died at implement · starting again
+… 75 s later:    Graph qasafe: at ship-review      (no auto; it waits for a person)</pre>
+
+<h3>E. <code>lf wave status</code> did not list auto <span class="fixed">fixed</span></h3>
+<p>The README pairs <code>auto: on</code> in a Wave's config with "<code>lf wave status infrastructure</code> # each setting
+and where it came from", and the setup block printed graph, agent and the two Machines only. <code>WaveSetup</code> now
+carries <code>auto</code> (schema and <code>wave_detail.json</code> fixture updated;
+<code>each_wave_runs_its_own_setup_and_the_repository_is_the_default</code> asserts it).</p>
+<pre>desktop  ready
+  setup
+  graph            qasafe (repository)
+  auto             on (repository)
+  agent            claude (repository)
+"auto": {"value":"on","source":"repository","scope":"wave","locator":"…/.lf/wave/desktop/config.yaml"}</pre>
+
+<h3>F. Returning: a released config and the released <code>lf</code> <span class="ok">works</span></h3>
+<pre># branch lf, .lf/config.yaml says `graph: auto` (the deleted builtin)
+  auto       on        Shared project
+  graph      code      Shared project
+# installed lf 0.16.0, fresh repository and LF_HOME, .lf/config.yaml says `auto: on`
+warning: …/.lf/config.yaml:3: skipping auto: unknown setting        (once or more per command, 7 times on `lf task create`)
+  agent    claude  Shared project
+  graph    q       Shared project
+1da318 · — · Try the released lf</pre>
+<p>A released <code>lf</code> beside a config with the new key keeps working and never turns auto on; it warns on every read.</p>
+
+<h3>G. Desktop <span class="bad">toggle not seen</span></h3>
+<p><code>loopflow-dev.py run-debug --world /tmp/lfq968d/r</code> built and launched the Dev app on the world.
+<code>lf desktop ls</code> listed the four Working Tasks, <code>lf desktop goto 4</code> opened 89ca14 and
+<code>lf desktop state --json</code> read its page with <code>run_control.unavailable: null</code>, the value that enables the
+toggle. The Mac's screen was locked: <code>screencapture</code> returned black, and no <code>lf desktop</code> verb reaches the
+toggle, so it was neither seen nor clicked. In its place, <code>scripts/test_desktop.sh --filter 'DesktopHeadlessTests|ServerProtocolTests|DTOFixtureTests|TaskStatusTests|TaskRowMetadataTests'</code>: 107 tests in 5 suites passed, the production <code>TaskAutoControl</code> view among them.</p>
+
+<h3>Checks run</h3>
+<p><code>cargo nextest run -p loopflow -E 'test(each_wave_runs_its_own_setup) | test(dto_fixtures::) | test(server::schema::tests::)'</code>:
+60 passed.</p>
+
+<h3>Still wrong, worst first</h3>
+<ol>
+<li><b>Nobody can opt out of a committed <code>auto: on</code> ahead of time.</b> <code>on</code> is the key's only value, so
+<code>lf config set auto off</code> and <code>auto null</code> are refused under a Wave that says on, and
+<code>lf task auto off X</code> before a first run saves nothing ("auto was not on"). The first moment to say no is after
+the run has started. Storing auto on the Task, or an <code>off</code> value for your own layer, would close it. A model choice.</li>
+<li>The landing-wait line and <code>merges:</code> line aside, a Task standing at an interactive step still reads
+"Graph qasafe finished; nothing further is launched" (base).</li>
+<li>A killed run's Graph stays <code>Current</code> and the Task <code>moving</code> at ship-review until prune (base).</li>
+<li><code>lf task auto on|off --help</code> shows <code>[ISSUE]</code> with no description; errors for an unknown ID differ between on and off.</li>
+<li>Not reached: the Desktop toggle and badge on screen, iOS.</li>
+</ol>
+
 <h2>Third pass, 2026-11-19 at <code>8af9576b71</code></h2>
 <p>What changed since the second pass: the landing wait names the issue in the run's own line, and the Task
 conversation's Graph guidance was to print it too. Fresh <code>lf-world build task-review /tmp/q968/w</code>, graph

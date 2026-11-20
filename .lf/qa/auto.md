@@ -33,6 +33,22 @@ checkout). For a run with no interactive step ahead, `- implement` then
 takes no graph, so for it set `graph: qaship` in `.lf/config.yaml` (committed,
 pushed, merged into the checkouts) so a never-run Task takes it up.
 
+`auto: on` in config: `lf config set auto on` writes your own value
+(`lf.config.local.yaml`), or commit it in `.lf/config.yaml` or
+`.lf/wave/<wave>/config.yaml` (push, merge into the checkouts). Read it back with
+`lf config settings`, `lf --wave <wave> config settings` and the `auto` line of
+`lf wave status <wave>`. A bare `lf task run <id>` on a never-run Task then
+prints the `merges:` line and status reads `auto: on by personal config`,
+`by repository config` or `by wave config`. The world's Tasks all sit in Wave
+`desktop`; `lf task create '<words>' --json` makes one outside it. `on` is the
+only value: `off`, `true` and `null` are refused. A released config's
+`graph: auto` is checked by writing the file (`lf config settings` reads
+`graph code`, `auto on`); `lf config set graph auto` refuses it. `lf -b task run
+<id> <graph>` stands in at every step and leaves `auto` null in
+`lf task status <id> --json`. For the released `lf` against the new key, a
+fresh repository and `LF_HOME` with `auto: on` committed: 0.16.0 warns
+"skipping auto: unknown setting" on each read and carries on.
+
 Headless steps: a `claude` ahead of the world's on `PATH` that, for `-p`
 with no terminal, reads one line, waits while a marker file exists, then
 prints `{"type":"result","subtype":"success","result":"done",…}`; otherwise

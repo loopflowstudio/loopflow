@@ -727,6 +727,12 @@
       "scope": null,
       "locator": null
     },
+    "auto": {
+      "value": "on",
+      "source": "repository",
+      "scope": null,
+      "locator": null
+    },
     "agent": {
       "value": "claude",
       "source": "repository",

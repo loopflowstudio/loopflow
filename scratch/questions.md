@@ -95,6 +95,13 @@ Questions 1 and 2 got no written answer in scratch.
   using the store-only write.
 
 ## Open
+- QA 2026-11-19 (fourth pass): nobody can opt out of a committed `auto: on`
+  before a Task's first run. `on` is the key's only value (`lf config set auto
+  off` and `null` are refused), and `lf task auto off` before a first run saves
+  nothing. Storing auto on the Task, or an `off` for your own layer, would
+  close it.
+- QA 2026-11-19 (fourth pass): `WaveSetup` gained `auto` so `lf wave status`
+  prints it. Reverse by dropping the field and the README's pointer.
 - QA 2026-11-19 (third pass): a Task conversation's input carries no Graph
   position at all; the deleted `TaskGraph::guidance` was its only writer and
   reached no provider. Reverse by appending it to `task_input::task_seed`

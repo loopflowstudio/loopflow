@@ -932,7 +932,7 @@ async fn try_start_task_run(
             if crate::store::task_work::carrier_may_run(carrier) =>
         {
             if let Some(graph_process) = auto::running_graph(store, task, &carrier.id).await? {
-                auto::ask(store, task, auto_on)?;
+                auto::turn_on(store, task)?;
                 let at = row.graph.step_name_of(cursor);
                 return Ok(Some(TaskRunStart::Live {
                     run: format!(
@@ -988,7 +988,9 @@ async fn try_start_task_run(
         }
         auto::configured(store, task)?;
     }
-    auto::ask(store, task, auto_on)?;
+    if auto_on {
+        auto::turn_on(store, task)?;
+    }
     // Auto on runs through the interactive steps, standing in at each;
     // off, no run merges.
     let (on, merges) = match store

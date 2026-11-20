@@ -2664,7 +2664,9 @@ fn dispatch_here(
         if matches!(
             &cli.command,
             Some(Commands::Task {
-                cmd: TaskCommand::Auto { issue: None, .. }
+                cmd: TaskCommand::Auto {
+                    cmd: loopflow::lf::AutoCommand::Off { issue: None, .. }
+                }
             })
         ) && cli.task.is_none()
         {
@@ -2720,24 +2722,22 @@ fn dispatch_here(
     if cli.command.as_ref().is_none_or(Commands::changes_work) {
         loopflow_execution::config::remote::receive(Some(&std::env::current_dir()?))?;
     }
-    if matches!(
-        &cli.command,
-        Some(Commands::Task {
-            cmd: TaskCommand::Run { issue: None, .. }
-                | TaskCommand::Checkout { issue: None, .. }
-                | TaskCommand::Auto {
-                    state: loopflow::lf::AutoSetting::On,
-                    ..
-                }
-        })
-    ) && cli.task.is_none()
+    if (cli.turns_auto_on()
+        || matches!(
+            &cli.command,
+            Some(Commands::Task {
+                cmd: TaskCommand::Run { issue: None, .. }
+                    | TaskCommand::Checkout { issue: None, .. }
+            })
+        ))
+        && cli.task.is_none()
     {
         cli.task = Some(
             match checkout_task(&std::env::current_dir()?, cli.wave.as_deref())? {
                 Some(task) => task,
-                // Shipping a branch with no Task first gives it one.
+                // Auto on for a branch with no Task first gives it one.
                 None if cli.turns_auto_on() => {
-                    let task = loopflow_execution::ops::task::auto::ship_branch_task(
+                    let task = loopflow_execution::ops::task::auto::branch_task(
                         &loopflow_execution::repo::working_directory()?,
                         cli.wave.as_deref(),
                     )?;
@@ -2877,11 +2877,13 @@ fn dispatch_here(
     if let Some(Commands::Task {
         cmd:
             TaskCommand::Auto {
-                state: loopflow::lf::AutoSetting::On,
-                graph,
-                reason,
-                json,
-                ..
+                cmd:
+                    loopflow::lf::AutoCommand::On {
+                        graph,
+                        reason,
+                        json,
+                        ..
+                    },
             },
     }) = &cli.command
     {
@@ -2889,9 +2891,8 @@ fn dispatch_here(
         let issue = cli.task.clone().context("No Task selected")?;
         let directory = loopflow_execution::repo::working_directory()?;
         let repo = selected_task_repository(&cli, &directory, Some(&issue))?;
-        // `lf task auto on`: the Task's run, asked for auto. It stands in at
-        // each interactive step because auto is on, not
-        // because of how it was launched.
+        // The Task's run, asked for auto. It stands in at each interactive
+        // step because auto is on, not because of how it was launched.
         return loopflow::lf::commands::graph::carry_task_run(
             &cli,
             &repo,

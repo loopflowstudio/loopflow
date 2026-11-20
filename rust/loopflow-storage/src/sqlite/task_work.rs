@@ -1038,7 +1038,7 @@ mod tests {
     }
 
     #[test]
-    fn an_auto_stop_stands_until_ship_and_survives_reopening_the_store() {
+    fn an_auto_off_stands_until_auto_on() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("db");
         let store = crate::test_fixture::open(&path).unwrap();

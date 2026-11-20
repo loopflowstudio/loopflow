@@ -29,8 +29,9 @@ ship-review`, `- cmd: land`, `- interactive: verify`; commit, push, then
 `git merge origin/main` in each Task checkout (the graph is read from the
 checkout). For a run with no interactive step ahead, `- implement` then
 `- cmd: land`, on a fresh `lf task create '<words>' --json`.
-`lf task auto on` takes no `--graph`: set `graph: qaship` in `.lf/config.yaml`
-(committed, pushed, merged into the checkouts) so a never-run Task takes it up.
+`lf task auto on <id> --graph qaship` takes it up; the served `task.auto.on`
+takes no graph, so for it set `graph: qaship` in `.lf/config.yaml` (committed,
+pushed, merged into the checkouts) so a never-run Task takes it up.
 
 Headless steps: a `claude` ahead of the world's on `PATH` that, for `-p`
 with no terminal, reads one line, waits while a marker file exists, then

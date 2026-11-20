@@ -297,7 +297,7 @@ struct ServerProtocolTests {
         for (name, id, write) in writes {
             do {
                 // `task.auto.on` names itself so a repeat after a lost reply runs once.
-                let requestID = name == "task_ship" ? "5d0f7f5e-1c1a-4a53-9d39-2f7c7a1b0e01" : nil
+                let requestID = name == "task_auto_on" ? "5d0f7f5e-1c1a-4a53-9d39-2f7c7a1b0e01" : nil
                 #expect(try encoded(.request(id: id, operation: .command(write), select: nil, requestID: requestID)) == value(name), "\(name)")
             } catch { Issue.record("\(name): \(error)") }
         }
@@ -308,12 +308,12 @@ struct ServerProtocolTests {
         }
         #expect(running["state"] == .string("running"))
         #expect(running["graph_process"] == .string("85c31c1e-850c-4821-878d-55527b6dba46"))
-        guard case .response(_, _, .object(let ship)) = try answer("task_ship_answer") else {
+        guard case .response(_, _, .object(let autoOn)) = try answer("task_auto_on_answer") else {
             Issue.record("Missing task.auto.on result"); return
         }
         // `task.auto.on` returns the run, as `task.run` does.
-        #expect(ship["state"] == .string("running"))
-        #expect(ship["merges"] == .bool(true))
+        #expect(autoOn["state"] == .string("running"))
+        #expect(autoOn["merges"] == .bool(true))
         guard case .response(_, _, .object(let autoOff)) = try answer("task_auto_off_answer") else {
             Issue.record("Missing task.auto.off result"); return
         }

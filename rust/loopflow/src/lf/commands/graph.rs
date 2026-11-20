@@ -1272,8 +1272,7 @@ impl SkillExecutor for &RunningGraph<'_> {
         // and an interactive step no one stands in at launches the way
         // `lf skill` would: with the person at a terminal, else headless.
         step_cli.interactive = self.launcher.interactive;
-        step_cli.batch = !self.launcher.interactive
-            && (self.launcher.batch || !skill.interactive || standing_in);
+        step_cli.batch = !self.launcher.interactive && (!skill.interactive || standing_in);
         // The child receives this occurrence's captured source, not a later
         // catalog selection. Keep the file alive through every child/readback.
         let mut input = tempfile::NamedTempFile::new()?;

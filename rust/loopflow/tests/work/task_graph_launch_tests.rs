@@ -1877,7 +1877,7 @@ fn a_restarted_wait_with_no_explicit_agent_ignores_the_readers() {
 /// With no stop for a person ahead the run may merge; it is carried again
 /// as `lf task run` all the same.
 #[test]
-fn a_shipping_tasks_restarted_wait_keeps_its_explicit_agent() {
+fn an_auto_tasks_restarted_wait_keeps_its_explicit_agent() {
     assert_eq!(
         restart_of_a_finished_wait("held", Some("claude:opus")),
         "--agent claude:opus task run INF-123||{}"
@@ -2975,7 +2975,7 @@ for line in sys.stdin:
     pass
 "#;
 
-fn shipping_task() -> GraphTask {
+fn stand_in_task() -> GraphTask {
     let task = GraphTask::with_tools(&[("claude", STAND_IN_CLAUDE)]);
 
     loopflow_execution::config::files::update(&task.home.path().join("config.yaml"), |value| {
@@ -3039,7 +3039,7 @@ fn wait_for(what: &str, mut ready: impl FnMut() -> bool) {
 
 #[test]
 fn a_batch_task_run_runs_straight_through_its_interactive_steps_to_the_end() {
-    let task = shipping_task();
+    let task = stand_in_task();
     let output = task.run(&["-b", "task", "run", "INF-123"]);
     assert!(
         output.status.success(),
@@ -3058,8 +3058,8 @@ fn a_batch_task_run_runs_straight_through_its_interactive_steps_to_the_end() {
 }
 
 #[test]
-fn task_ship_runs_every_remaining_step_standing_in_at_each_interactive_step() {
-    let task = shipping_task();
+fn auto_on_runs_every_remaining_step_standing_in_at_each_interactive_step() {
+    let task = stand_in_task();
     let output = task.run(&[
         "-b",
         "--task",
@@ -3084,15 +3084,15 @@ fn task_ship_runs_every_remaining_step_standing_in_at_each_interactive_step() {
     assert_eq!(turns.len(), 1);
     assert!(turns[0].contains("You are standing in for"), "{}", turns[0]);
     assert!(turns[0].contains("at review"), "{}", turns[0]);
-    // Reaching the end completed the Task; nothing remains to ship.
+    // Reaching the end completed the Task; nothing remains to run.
     assert_eq!(task.state(), "done");
     let error = refusal(task.run(&["-b", "--task", "INF-123", "task", "auto", "on"]));
     assert!(error.contains("INF-123 is done"), "{error}");
 }
 
 #[test]
-fn task_ship_stands_in_at_the_step_the_task_waits_at() {
-    let task = shipping_task();
+fn a_waited_auto_on_stands_in_at_the_step_the_task_waits_at() {
+    let task = stand_in_task();
     task.task_run_ok(&["task", "run", "INF-123"]);
     assert_eq!(task.graph()["position"], at("review"));
     let output = task.run(&["-b", "--task", "INF-123", "task", "auto", "on"]);
@@ -3103,35 +3103,15 @@ fn task_ship_stands_in_at_the_step_the_task_waits_at() {
         "{stderr}"
     );
     assert_eq!(task.graph()["position"], at("end"));
-    // Proof is not run again: the ship set out from review.
+    // Proof is not run again: the run set out from review.
     assert_eq!(support::recorded_graphs(task.home.path()).len(), 2);
     assert_eq!(stand_ins(&task).len(), 1);
     assert_eq!(task.state(), "done");
 }
 
 #[test]
-fn a_bare_ship_stands_in_because_auto_is_on() {
-    let task = shipping_task();
-    task.task_run_ok(&["task", "run", "INF-123"]);
-    assert_eq!(task.graph()["position"], at("review"));
-    // Bare, not `-b`: the run stands in at review because auto is on.
-    let shipped = task.task_run(&["--task", "INF-123", "task", "auto", "on"]);
-    assert!(shipped.success(), "{}", shipped.text);
-    assert!(
-        shipped.text.contains("INF-123: standing in at review"),
-        "{}",
-        shipped.text
-    );
-    assert_eq!(task.graph()["position"], at("end"));
-    assert_eq!(stand_ins(&task).len(), 1);
-    let status = task.status();
-    assert_eq!(status["auto"]["state"], "on", "{status}");
-    assert_eq!(status["auto"]["by"]["kind"], "person");
-}
-
-#[test]
 fn auto_on_at_a_waiting_step_stands_in_there_with_one_graph_run() {
-    let task = shipping_task();
+    let task = stand_in_task();
     task.task_run_ok(&["task", "run", "INF-123"]);
     assert_eq!(task.graph()["position"], at("review"));
     let graphs = support::recorded_graphs(task.home.path()).len();
@@ -3149,12 +3129,14 @@ fn auto_on_at_a_waiting_step_stands_in_there_with_one_graph_run() {
     assert_eq!(handoffs(&task).len(), 1);
     // `--reason` is the run's direction: a steer on the Task.
     assert!(steered(&task, "good to go"));
-    assert_eq!(task.status()["auto"]["state"], "on");
+    let status = task.status();
+    assert_eq!(status["auto"]["state"], "on", "{status}");
+    assert_eq!(status["auto"]["by"]["kind"], "person");
 }
 
 #[test]
 fn auto_on_a_task_that_never_ran_leaves_exactly_one_run() {
-    let task = shipping_task();
+    let task = stand_in_task();
     let on = task.task_run(&["task", "auto", "on", "INF-123"]);
     assert!(on.success(), "{}", on.text);
     assert!(on.text.contains("running as Graph run"), "{}", on.text);
@@ -3167,7 +3149,7 @@ fn auto_on_a_task_that_never_ran_leaves_exactly_one_run() {
 
 #[test]
 fn a_waves_auto_on_takes_every_step_of_its_tasks_and_an_off_still_wins() {
-    let task = shipping_task();
+    let task = stand_in_task();
     task.set_wave_setting("auto", "on");
     // A bare run: the Wave's setting, not the command, stands in at review.
     task.task_run_ok(&["task", "run", "INF-123"]);
@@ -3192,8 +3174,8 @@ fn a_waves_auto_on_takes_every_step_of_its_tasks_and_an_off_still_wins() {
 }
 
 #[test]
-fn a_ship_on_a_running_task_reports_its_run_and_starts_nothing() {
-    let task = shipping_task();
+fn auto_on_a_running_task_reports_its_run_and_starts_nothing() {
+    let task = stand_in_task();
     fs::write(task.home.path().join("hold"), "").unwrap();
     let mut first = command(
         task.repo.path(),
@@ -3206,7 +3188,7 @@ fn a_ship_on_a_running_task_reports_its_run_and_starts_nothing() {
     .spawn()
     .unwrap();
     wait_for("the stand-in", || !stand_ins(&task).is_empty());
-    // Off first, so the `on` below is the ship's.
+    // Off first, so the `on` below is the run's.
     task.run(&["--task", "INF-123", "task", "auto", "off"]);
     assert!(
         task.text_status().contains("auto: off by "),
@@ -3235,8 +3217,8 @@ fn a_ship_on_a_running_task_reports_its_run_and_starts_nothing() {
 }
 
 #[test]
-fn a_stopped_ship_kills_nothing_and_its_run_carries_on() {
-    let task = shipping_task();
+fn auto_off_kills_nothing_and_its_run_carries_on() {
+    let task = stand_in_task();
     fs::write(task.home.path().join("hold"), "").unwrap();
     let mut first = command(
         task.repo.path(),
@@ -3278,7 +3260,7 @@ fn a_stopped_ship_kills_nothing_and_its_run_carries_on() {
 
 #[test]
 fn auto_off_sticks_through_a_headless_relaunch() {
-    let task = shipping_task();
+    let task = stand_in_task();
     task.repo.create_file(
         ".lf/graphs/landing.yaml",
         "- graph: proof\n- cmd: pr land\n",
@@ -3330,8 +3312,8 @@ fn auto_off_sticks_through_a_headless_relaunch() {
 }
 
 #[test]
-fn a_ship_whose_run_fails_the_same_way_stops_and_keeps_auto_on() {
-    let task = shipping_task();
+fn a_run_that_fails_the_same_way_stops_and_keeps_auto_on() {
+    let task = stand_in_task();
     // `gate` refuses identically until the repository defines `late`.
     let output = task.run(&[
         "-b", "--task", "INF-123", "task", "auto", "on", "--graph", "gate",
@@ -3355,8 +3337,8 @@ fn a_ship_whose_run_fails_the_same_way_stops_and_keeps_auto_on() {
 }
 
 #[test]
-fn task_ship_completes_when_its_pr_merges_mid_ship() {
-    let task = shipping_task();
+fn an_auto_run_completes_when_its_pr_merges_mid_run() {
+    let task = stand_in_task();
     fs::write(task.home.path().join("hold"), "").unwrap();
     let first = command(
         task.repo.path(),
@@ -3381,8 +3363,8 @@ fn task_ship_completes_when_its_pr_merges_mid_ship() {
 }
 
 #[test]
-fn a_ship_meets_a_hand_merged_pr_at_its_landing_step() {
-    let task = shipping_task();
+fn an_auto_run_meets_a_hand_merged_pr_at_its_landing_step() {
+    let task = stand_in_task();
     task.task_run_ok(&["task", "run", "INF-123", "verified"]);
     assert_eq!(task.graph()["position"], at("review"));
     // Someone merged the PR by hand while the Task waited at review.
@@ -3404,8 +3386,8 @@ fn a_ship_meets_a_hand_merged_pr_at_its_landing_step() {
 }
 
 #[test]
-fn a_ship_whose_carrier_dies_still_reaches_its_end() {
-    let task = shipping_task();
+fn an_auto_run_whose_carrier_dies_still_reaches_its_end() {
+    let task = stand_in_task();
     fs::write(task.home.path().join("hold"), "").unwrap();
     let mut first = command(
         task.repo.path(),
@@ -3494,7 +3476,7 @@ fn kill_a_carried_run(task: &GraphTask, args: &[&str], carrier: bool, before: im
 
 #[test]
 fn a_killed_graph_is_started_again_by_its_carrier() {
-    let task = shipping_task();
+    let task = stand_in_task();
     task.repo.create_file(
         ".lf/graphs/carried.yaml",
         "- demo\n- interactive: {name: demo, id: review}\n",
@@ -3514,7 +3496,7 @@ fn a_killed_graph_is_started_again_by_its_carrier() {
 
 #[test]
 fn a_task_run_whose_carrier_died_is_carried_again_and_gives_up_after_five() {
-    let task = shipping_task();
+    let task = stand_in_task();
     task.repo.create_file(
         ".lf/graphs/carried.yaml",
         "- demo\n- interactive: {name: demo, id: review}\n",
@@ -3573,8 +3555,8 @@ fn a_task_run_whose_carrier_died_is_carried_again_and_gives_up_after_five() {
 }
 
 #[test]
-fn task_ship_unassigned_mid_ship_waits_and_lets_its_running_step_finish() {
-    let task = shipping_task();
+fn an_auto_run_unassigned_mid_run_waits_and_lets_its_running_step_finish() {
+    let task = stand_in_task();
     fs::write(task.home.path().join("hold"), "").unwrap();
     let mut first = command(
         task.repo.path(),
@@ -3599,8 +3581,8 @@ fn task_ship_unassigned_mid_ship_waits_and_lets_its_running_step_finish() {
 }
 
 #[test]
-fn task_ship_runs_new_work_on_a_reopened_task_despite_its_old_merged_pr() {
-    let task = shipping_task();
+fn auto_on_runs_new_work_on_a_reopened_task_despite_its_old_merged_pr() {
+    let task = stand_in_task();
     // The first delivery merged and completed the Task; then it was reopened.
     task.publish(true);
     task.ok(&["task", "complete", "INF-123"]);
@@ -3646,7 +3628,7 @@ for line in sys.stdin:
 "#;
 
 #[test]
-fn task_ship_blocked_at_verification_waits_there_without_building_again() {
+fn an_auto_run_blocked_at_verification_waits_there_without_building_again() {
     let task =
         GraphTask::with_tools(&[("claude", support::claude_stand_in(BLOCKED_CLAUDE).as_str())]);
     loopflow_execution::config::files::update(&task.home.path().join("config.yaml"), |value| {

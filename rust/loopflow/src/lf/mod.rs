@@ -247,8 +247,7 @@ impl Cli {
             &self.command,
             Some(Commands::Task {
                 cmd: TaskCommand::Auto {
-                    state: AutoSetting::On,
-                    ..
+                    cmd: AutoCommand::On { .. }
                 }
             })
         )
@@ -267,8 +266,7 @@ impl Cli {
                 cmd,
                 TaskCommand::Run { .. }
                     | TaskCommand::Auto {
-                        state: AutoSetting::On,
-                        ..
+                        cmd: AutoCommand::On { .. }
                     }
             ),
             Some(Commands::Session { cmd }) => matches!(
@@ -334,27 +332,11 @@ impl Cli {
                 })?;
             }
         }
-        if let Some(Commands::Task {
-            cmd:
-                TaskCommand::Auto {
-                    state: AutoSetting::Off,
-                    graph: Some(_),
-                    ..
-                },
-        }) = &self.command
-        {
-            return Err(clap::Error::raw(
-                clap::error::ErrorKind::ArgumentConflict,
-                "--graph takes a graph up as auto goes on; `lf task auto off` takes none\n",
-            ));
-        }
         // `lf task auto on ISSUE` selects its Task as `--task` does: it runs it.
         if let Some(Commands::Task {
             cmd:
                 TaskCommand::Auto {
-                    state: AutoSetting::On,
-                    issue,
-                    ..
+                    cmd: AutoCommand::On { issue, .. },
                 },
         }) = &mut self.command
         {
@@ -2112,11 +2094,56 @@ pub struct SyncArgs {
     pub json: bool,
 }
 
-/// A Task's auto setting, as `lf task auto` spells it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
-pub enum AutoSetting {
-    On,
-    Off,
+/// `lf task auto on|off`.
+#[derive(Subcommand, Debug)]
+pub enum AutoCommand {
+    /// Run the Task with nobody waited for: stand in at each interactive step, and merge
+    #[command(
+        after_help = "Prints what `lf task run` prints and returns once the run registers (`-b` \
+waits for it). A Task waiting at an interactive step is stood in for there; a Task already running \
+carries on and stands in from its next one. With no ISSUE, the checkout's Task, or a new one for \
+its branch."
+    )]
+    On {
+        issue: Option<String>,
+        /// Take up this graph in place of the Task's remaining steps
+        #[arg(long)]
+        graph: Option<String>,
+        /// Direction for the run, published to the Task
+        #[arg(long)]
+        reason: Option<String>,
+        /// Print the run it started, as `task.auto.on` answers
+        #[arg(long)]
+        json: bool,
+    },
+    /// Take the interactive steps and the merge back: the run waits at its next one
+    #[command(
+        after_help = "Nothing is killed: the run waits at its next interactive step, or before a \
+step that merges, and auto-merge Loopflow armed is disarmed. With no ISSUE, the checkout's Task."
+    )]
+    Off {
+        issue: Option<String>,
+        /// Why, saved as a Task comment
+        #[arg(long)]
+        reason: Option<String>,
+        /// Print the Task and whether auto was on
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+impl AutoCommand {
+    fn issue(&self) -> &Option<String> {
+        match self {
+            Self::On { issue, .. } | Self::Off { issue, .. } => issue,
+        }
+    }
+
+    fn issue_mut(&mut self) -> &mut Option<String> {
+        match self {
+            Self::On { issue, .. } | Self::Off { issue, .. } => issue,
+        }
+    }
 }
 
 #[derive(Subcommand, Debug)]
@@ -2494,27 +2521,9 @@ using lf open's ordinary host selection. Preview and --quote open nothing."
         json: bool,
     },
     /// Turn the Task's auto setting on or off: who takes its interactive steps
-    #[command(
-        after_help = "On: nobody is waited for, so the Task runs, standing in for you at each \
-interactive step, and may merge the PR. It prints what `lf task run` prints and returns once the \
-run registers (`-b` waits for it). A Task waiting at an interactive step is stood in for there; a \
-Task already running carries on and stands in from its next one. With no ISSUE, the checkout's \
-Task, or a new one for its branch. Off, nothing is killed: the run waits at its next interactive \
-step, or before a step that merges, and auto-merge Loopflow armed is disarmed; with no ISSUE, the \
-checkout's Task."
-    )]
     Auto {
-        state: AutoSetting,
-        issue: Option<String>,
-        /// On: take up this graph in place of the Task's remaining steps
-        #[arg(long)]
-        graph: Option<String>,
-        /// On: direction for the run, published to the Task. Off: why, saved as a Task comment
-        #[arg(long)]
-        reason: Option<String>,
-        /// Print the run `on` started, as `task.auto.on` answers, or the Task and whether `off` found auto on
-        #[arg(long)]
-        json: bool,
+        #[command(subcommand)]
+        cmd: AutoCommand,
     },
     /// Stop the Task's running Graph or Task run and its scheduled automation
     Interrupt {
@@ -2542,8 +2551,8 @@ impl TaskCommand {
             | Self::Status { issue, .. }
             | Self::Abandon { issue, .. }
             | Self::Run { issue, .. }
-            | Self::Auto { issue, .. }
             | Self::Checkout { issue, .. } => issue.as_deref(),
+            Self::Auto { cmd } => cmd.issue().as_deref(),
             Self::Detail { issue, .. }
             | Self::Show { issue, .. }
             | Self::WatchFiles { issue, .. }
@@ -2576,8 +2585,8 @@ impl TaskCommand {
             | Self::Status { issue, .. }
             | Self::Abandon { issue, .. }
             | Self::Run { issue, .. }
-            | Self::Auto { issue, .. }
             | Self::Checkout { issue, .. } => issue.as_mut(),
+            Self::Auto { cmd } => cmd.issue_mut().as_mut(),
             Self::Detail { issue, .. }
             | Self::Show { issue, .. }
             | Self::WatchFiles { issue, .. }
@@ -4233,9 +4242,9 @@ mod tests {
         assert_eq!(on.task.as_deref(), Some("LOO-1"));
         assert!(matches!(
             &on.command,
-            Some(Commands::Task { cmd: TaskCommand::Auto {
-                state: AutoSetting::On, issue: None, graph: Some(graph), reason: Some(reason), json: true
-            } }) if reason == "go" && graph == "code"
+            Some(Commands::Task { cmd: TaskCommand::Auto { cmd: AutoCommand::On {
+                issue: None, graph: Some(graph), reason: Some(reason), json: true
+            } } }) if reason == "go" && graph == "code"
         ));
         // `lf ship` is no command of its own: it would name a skill.
         assert!(matches!(
@@ -4244,12 +4253,8 @@ mod tests {
                 .command,
             Some(Commands::External(_))
         ));
-        assert!(
-            Cli::try_parse_from(["lf", "task", "auto", "off", "--graph", "code"])
-                .unwrap()
-                .checked()
-                .is_err()
-        );
+        // A graph is taken up as auto goes on; off takes none.
+        assert!(Cli::try_parse_from(["lf", "task", "auto", "off", "--graph", "code"]).is_err());
         // A Session id beside its Work selects the Session; Task and Wave
         // together stay one selection too many.
         for argv in [

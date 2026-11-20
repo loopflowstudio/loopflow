@@ -100,7 +100,7 @@ pub struct Waited {
 
 /// `task.run`: start the Task's run detached, as `lf [-b] [-a <agent>] task
 /// run <issue> [--from <step>]` does, and return once it is known. `approve`
-/// runs every step headless to `end` and turns auto on, as `-b` does;
+/// runs every step headless to `end`, as `-b` does, and writes no auto;
 /// without it the run stops before the next interactive step. With no
 /// `agent`, each step's harness is the repository's configured default.
 pub fn run(

@@ -69,10 +69,8 @@ fn set(
 }
 
 /// `lf task auto on` turns auto on once the Task has its Graph, lifting an off.
-pub(super) fn ask(store: &SharedStore, task: &Task, auto_on: bool) -> OpsResult<()> {
-    if auto_on {
-        set(store, task, AutoState::On, caller(store, task)?, false)?;
-    }
+pub(super) fn turn_on(store: &SharedStore, task: &Task) -> OpsResult<()> {
+    set(store, task, AutoState::On, caller(store, task)?, false)?;
     Ok(())
 }
 
@@ -165,15 +163,15 @@ pub fn off(issue: &str, reason: Option<&str>) -> OpsResult<Option<bool>> {
     Ok(Some(was_on))
 }
 
-/// Create a Task for the checkout's branch so it can ship: it takes the branch,
-/// its checkout and any PR as its own, and is titled from the branch.
-pub fn ship_branch_task(repo: &std::path::Path, wave: Option<&str>) -> OpsResult<Task> {
+/// Create a Task for the checkout's branch so auto can run it: it takes the
+/// branch, its checkout and any PR as its own, and is titled from the branch.
+pub fn branch_task(repo: &std::path::Path, wave: Option<&str>) -> OpsResult<Task> {
     let branch = crate::git::current_branch(repo)
         .map_err(task_error)?
         .ok_or_else(|| task_error("lf task auto on needs a branch; this checkout is detached"))?;
     if crate::git::get_default_branch(repo).map_err(task_error)? == branch {
         return Err(task_error(format!(
-            "{branch} is the default branch; ship from a Task or a branch of its own"
+            "{branch} is the default branch; turn auto on for a Task or a branch of its own"
         )));
     }
     let title = branch

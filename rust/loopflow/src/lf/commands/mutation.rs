@@ -23,8 +23,7 @@ pub fn accepts(cli: &Cli) -> bool {
                 | TaskCommand::Update { .. }
                 | TaskCommand::Move { .. }
                 | TaskCommand::Auto {
-                    state: crate::lf::AutoSetting::Off,
-                    ..
+                    cmd: crate::lf::AutoCommand::Off { .. }
                 }
         ),
         Some(Commands::Wave { cmd }) => matches!(
@@ -112,11 +111,12 @@ fn local(
         Commands::Task {
             cmd:
                 TaskCommand::Auto {
-                    state: crate::lf::AutoSetting::Off,
-                    issue,
-                    reason,
-                    json,
-                    ..
+                    cmd:
+                        crate::lf::AutoCommand::Off {
+                            issue,
+                            reason,
+                            json,
+                        },
                 },
         } => {
             let issue = issue

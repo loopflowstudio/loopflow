@@ -102,14 +102,14 @@ Checks nobody has run since the last three commits (`1048cee3cf`,
 - Recovery fixtures that time out here with and without this branch's edits
   ("waiting for the restart", "waiting for the Task conversation and Graph
   launches"): `a_restarted_wait_keeps_its_explicit_agent`,
-  `a_shipping_tasks_restarted_wait_keeps_its_explicit_agent`,
+  `an_auto_tasks_restarted_wait_keeps_its_explicit_agent`,
   `a_restarted_wait_with_no_explicit_agent_ignores_the_readers`,
   `a_task_run_takes_its_waves_agent_without_flags`,
   `a_task_run_whose_carrier_died_is_carried_again_and_gives_up_after_five`.
   Gate reads what CI says; a test that fails there is fixed or deleted in this
   change.
-- `a_ship_meets_a_hand_merged_pr_at_its_landing_step` and
-  `a_ship_whose_run_fails_the_same_way_stops_and_keeps_auto_on` failed once on
+- `an_auto_run_meets_a_hand_merged_pr_at_its_landing_step` and
+  `a_run_that_fails_the_same_way_stops_and_keeps_auto_on` failed once on
   "read the fixture's Machine server status" beside a Swift build and passed
   at `-j 2`.
 - Not driven by anyone: the Desktop window (toggle and badge), iOS, an auto on
@@ -123,6 +123,17 @@ Last run here, 2026-11-19 after `fa171df836`: `cargo nextest run -p loopflow
 `config::keys::tests::`, `engine::task::` and the auto/batch/Wave-auto
 `task_graph_launch_tests`: 85 run, 3 failed on stale `lf ship` assertions,
 fixed in `76b2bd214e`, the 9 rerun passed. Clippy clean.
+
+Compress 2026-11-19: `on` and `off` are Clap subcommands of `lf task auto`
+(`AutoCommand`), so `off --graph` is a parse error and each has its own help.
+`ServerProtocolTests` still named the deleted `task_ship` and
+`task_ship_answer` fixtures; fixed, 23 tests pass
+(`scripts/test_desktop.sh --filter ServerProtocolTests`).
+`a_bare_ship_stands_in_because_auto_is_on` repeated
+`auto_on_at_a_waiting_step_stands_in_there_with_one_graph_run` and is deleted;
+the other launch fixtures say auto, not ship. Run here: `lf::tests::`,
+`adapter_tests::`, `server::schema::tests::`, `write::tests::` (59),
+`documented_commands`, `cli_discovery`, the auto launch fixtures; clippy clean.
 
 Shape, for gate's review and ship-review's filing:
 

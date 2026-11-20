@@ -89,9 +89,7 @@ mod operation_spellings {
             parse(task::spell_auto_on("LOO-1")).command,
             Some(Commands::Task {
                 cmd: crate::lf::TaskCommand::Auto {
-                    state: crate::lf::AutoSetting::On,
-                    json: true,
-                    ..
+                    cmd: crate::lf::AutoCommand::On { json: true, .. }
                 }
             })
         ));

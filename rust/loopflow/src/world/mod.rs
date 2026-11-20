@@ -43,19 +43,6 @@ const GITHUB_REPO: &str = "https://github.com/demo/project";
 /// The person whose Machine a World is: their config and their commits.
 const PERSON: &str = "Demo";
 
-/// Directories Desktop prepends to a child's `PATH` when absent
-/// (`GUIProcessEnvironment.enrichedPath` in
-/// `swift/LoopflowMac/Services/ProcessEnvironment.swift`). Listing them after
-/// the World's `bin` leaves Desktop nothing to prepend ahead of its `gh`.
-pub(crate) const DESKTOP_PATH: [&str; 6] = [
-    "~/.local/bin",
-    "/opt/homebrew/bin",
-    "/opt/homebrew/sbin",
-    "/usr/local/bin",
-    "/usr/local/sbin",
-    "~/.cargo/bin",
-];
-
 const GH: &str = r#"#!/bin/sh
 # lf-world's GitHub. Answers the pull-request reads Loopflow makes from files
 # the World's builder wrote under ../github/pulls; refuses everything else, so
@@ -223,10 +210,9 @@ pub struct WorldEnv {
 impl WorldEnv {
     fn new(dir: &Path) -> Self {
         let home = dirs::home_dir().unwrap_or_default();
-        let desktop = DESKTOP_PATH.map(|entry| match entry.strip_prefix("~/") {
-            Some(rest) => home.join(rest).to_string_lossy().into_owned(),
-            None => entry.to_string(),
-        });
+        // Listing the tool directories after the World's `bin` leaves Desktop
+        // and lf nothing to add ahead of its `gh`.
+        let desktop = loopflow_execution::os_process::tool_dirs(&home);
         let path = std::iter::once(dir.join("bin").to_string_lossy().into_owned())
             .chain(desktop)
             .chain(["/usr/bin", "/bin", "/usr/sbin", "/sbin"].map(String::from))

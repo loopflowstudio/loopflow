@@ -210,6 +210,7 @@ pub fn initialize() {
     if let Some(handoff) = Handoff::take() {
         let _ = HANDOFF.set(handoff);
     }
+    take_open_receipt();
 }
 
 /// The held terminal this process runs in, when it took up a held handoff.
@@ -433,6 +434,9 @@ pub fn start_held(
             Some(value) => env.insert(name.to_owned(), value.to_owned()),
             None => env.remove(name),
         };
+    }
+    if let Some(receipt) = open_receipt() {
+        env.insert(OPEN_RECEIPT_ENV.into(), receipt.into());
     }
     let env = env
         .into_iter()
@@ -1379,6 +1383,7 @@ fn relay_with_preview(
         command.args([RELAY_JSON_FLAG, session]);
     }
     crate::journal::carry_across_exec(&mut command)?;
+    pass_open(&mut command);
     let error = command.exec();
     tracing::warn!(%error, "cannot exec the terminal relay; relaying here");
     attach_with_terminal(id, session, terminal)
@@ -2017,8 +2022,10 @@ fn view(
                             .inspect_err(|error| tracing::debug!(%error, "viewer readiness was not delivered"))
                             .is_ok();
                             returning = Some(detach);
+                            // A tab launch succeeds only when this view is attached
+                            // and its Session's native client is ready.
                             if attached && acknowledged {
-                                acknowledge_open();
+                                answer_open("attached");
                             }
                             if let Some(status) = &mut status {
                                 status.native_ready();
@@ -2227,6 +2234,7 @@ fn replace_view(
                     command.args([RELAY_SESSION_FLAG, session.as_str()]);
                 }
                 crate::journal::carry_across_exec(&mut command)?;
+                pass_open(&mut command);
                 command.exec().to_string()
             }
             Err(error) => error.to_string(),
@@ -2270,17 +2278,67 @@ fn discard_reconnect_input(paste: &mut Paste) -> io::Result<()> {
 
 pub const OPEN_RECEIPT_ENV: &str = "LF_OPEN_RECEIPT";
 
-/// A tab launch succeeds only when this view is attached and its Session's
-/// native client is ready. Startup errors before Return leave no success receipt.
-fn acknowledge_open() {
-    let Some(path) = std::env::var_os(OPEN_RECEIPT_ENV) else {
+/// Where this process answers the `lf open` that started it. Only the viewer
+/// and the launcher it starts hold one: it is handed on by name, so nothing
+/// else lf runs can answer for the opening.
+static OPEN_RECEIPT: Mutex<Option<PathBuf>> = Mutex::new(None);
+
+fn take_open_receipt() {
+    let receipt = std::env::var_os(OPEN_RECEIPT_ENV).map(PathBuf::from);
+    std::env::remove_var(OPEN_RECEIPT_ENV);
+    *OPEN_RECEIPT.lock().expect("open receipt lock poisoned") = receipt;
+}
+
+fn open_receipt() -> Option<PathBuf> {
+    OPEN_RECEIPT
+        .lock()
+        .expect("open receipt lock poisoned")
+        .clone()
+}
+
+/// Hand the opening to the lf this process becomes.
+fn pass_open(command: &mut Command) {
+    if let Some(receipt) = open_receipt() {
+        command.env(OPEN_RECEIPT_ENV, receipt);
+    }
+}
+
+/// Answer `lf open`: "attached", or why the opening failed. The first answer
+/// stands: the launcher's own error beats its viewer's.
+fn answer_open(answer: &str) {
+    let Some(path) = OPEN_RECEIPT
+        .lock()
+        .expect("open receipt lock poisoned")
+        .take()
+    else {
         return;
     };
-    std::env::remove_var(OPEN_RECEIPT_ENV);
-    let path = Path::new(&path);
-    let temporary = path.with_extension("ready");
-    if std::fs::write(&temporary, "attached").is_ok() {
-        let _ = std::fs::rename(temporary, path);
+    let temporary = path.with_extension(std::process::id().to_string());
+    if std::fs::write(&temporary, answer).is_ok() {
+        // Fails when another process answered first.
+        let _ = std::fs::hard_link(&temporary, &path);
+        let _ = std::fs::remove_file(&temporary);
+    }
+}
+
+/// Answer an opening this command failed without attaching, with its own
+/// error. The pane waits; the receipt says why. A viewer whose conversation
+/// exited leaves the answer to the launcher, or to the pane's status line.
+pub fn end_open(result: &Result<()>) {
+    let (Err(error), Some(_)) = (result, open_receipt()) else {
+        return;
+    };
+    let reason = format!("{error:#}");
+    tracing::warn!(
+        command = std::env::args().skip(1).collect::<Vec<_>>().join(" "),
+        error = %reason,
+        "conversation opened by lf open failed before attaching"
+    );
+    if error
+        .downcast_ref::<crate::process::CommandExit>()
+        .is_none()
+    {
+        answer_open(&reason);
     }
 }
 
@@ -2530,11 +2588,12 @@ pub fn configure_child(command: &mut Command) {
 }
 
 /// An exec keeps this PID and its parent, so the replacing lf binary is still
-/// the direct child the handoff names.
+/// the direct child the handoff names, and still answers its opening.
 pub(crate) fn carry_across_exec(command: &mut Command) {
     if let Some(handoff) = HANDOFF.get() {
         handoff.pass(command, handoff.parent);
     }
+    pass_open(command);
 }
 
 /// Status travels beside output to the sole writer, never through capture pipes.
@@ -2583,6 +2642,54 @@ pub fn report_exit(code: u8) {
         false,
         None,
     );
+}
+
+#[cfg(test)]
+mod open_receipt_tests {
+    use std::ffi::OsStr;
+    use std::process::Command;
+
+    use super::{
+        answer_open, carry_across_exec, open_receipt, take_open_receipt, OPEN_RECEIPT_ENV,
+    };
+
+    #[test]
+    fn the_first_answer_to_an_opening_stands() {
+        let _env = crate::journal::test_env_lock();
+        let dir = tempfile::tempdir().unwrap();
+        let receipt = dir.path().join("receipt");
+        for answer in ["'claude' is not installed", "a later error", "attached"] {
+            std::env::set_var(OPEN_RECEIPT_ENV, &receipt);
+            take_open_receipt();
+            answer_open(answer);
+            assert!(open_receipt().is_none());
+        }
+        assert_eq!(
+            std::fs::read_to_string(&receipt).unwrap(),
+            "'claude' is not installed"
+        );
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
+
+    /// `lf install server`, a provider and its tools inherit the environment;
+    /// none of them may answer for the opening.
+    #[test]
+    fn only_the_lf_this_one_becomes_inherits_the_opening() {
+        let _env = crate::journal::test_env_lock();
+        std::env::set_var(OPEN_RECEIPT_ENV, "/tmp/receipt");
+        take_open_receipt();
+        assert!(std::env::var_os(OPEN_RECEIPT_ENV).is_none());
+        let mut next = Command::new("lf");
+        carry_across_exec(&mut next);
+        assert_eq!(
+            next.get_envs()
+                .find(|(name, _)| *name == OPEN_RECEIPT_ENV)
+                .and_then(|(_, value)| value),
+            Some(OsStr::new("/tmp/receipt"))
+        );
+        take_open_receipt();
+        assert!(open_receipt().is_none());
+    }
 }
 
 #[cfg(test)]

@@ -650,7 +650,8 @@ fn tmux_opens_a_named_window_after_the_callers() {
     let call = std::fs::read_to_string(log).unwrap();
     assert!(
         call.starts_with(
-            "-S /tmp/tmux-1000/default new-window -a -t %3 -P -F #{pane_id} -n Prove Task PR transitions · INF-123 -c "
+            "-S /tmp/tmux-1000/default display-message -p -t %3 #{window_id}\n\
+             -S /tmp/tmux-1000/default new-window -a -t %7 -P -F #{pane_id} -n Prove Task PR transitions · INF-123 -c "
         ),
         "{call}"
     );

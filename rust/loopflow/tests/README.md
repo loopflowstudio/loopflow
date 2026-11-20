@@ -302,7 +302,13 @@ Application lifecycle checks stay in `linear::events`; supplied-fact SQL
 checks live in `store::sqlite::linear_events`.
 
 CI and the disposable installation runner supply their prepared candidate through
-`LOOPFLOW_TEST_LF`, avoiding Cargo calls in each test process. Only set this to
+`LOOPFLOW_TEST_LF`, avoiding Cargo calls in each test process. Integration test
+binaries under `rust/loopflow/tests/` set it themselves, from the `lf` Cargo
+built beside them, so `cargo test -p loopflow --test session_launch_contract`
+runs no nested build and leaves `target/debug/lf` as Cargo linked it. Lib test
+binaries (`--lib`, which holds `tests/work/`) have no such `lf` and still run the
+nested build; under bare `cargo nextest run` beside integration binaries, set
+`LOOPFLOW_TEST_LF="$PWD/target/debug/lf"`. Only set this to
 the executable built from the current test source and build inputs; never an
 installed CLI. Compiled provenance fields have separate names from build inputs
 so nested Cargo does not invalidate the parent's build.

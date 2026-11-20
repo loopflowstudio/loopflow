@@ -10,9 +10,14 @@ use super::{run_host, viewed_placement, OpenHost, Resolved};
 use loopflow_execution::os_process::which_on_path;
 use loopflow_execution::terminal_host::TmuxLocation;
 
-fn host_command(location: &TmuxLocation) -> Command {
-    let mut command = Command::new("tmux");
-    command.args(["-S", &location.socket]);
+/// A tmux client for the server at `location`, else the default server.
+/// `tmux` is resolved here because `open` runs its client with no `PATH`.
+fn host_command(location: Option<&TmuxLocation>) -> Command {
+    let tmux = which_on_path(Path::new("tmux")).unwrap_or_else(|| "tmux".into());
+    let mut command = Command::new(tmux);
+    if let Some(location) = location {
+        command.args(["-S", &location.socket]);
+    }
     command
 }
 
@@ -29,17 +34,12 @@ pub(super) fn open(target: &Resolved, focus: bool, argv: &[String]) -> Result<St
     };
     // tmux starts a window on the PATH of the client that asked for it. This
     // client has none, so the window starts on the server's, as a pane does
-    // in every other host; `tmux` is found on ours first.
-    let tmux = which_on_path(Path::new("tmux")).unwrap_or_else(|| "tmux".into());
-    let mut command = Command::new(tmux);
-    command.env_remove("PATH");
-    if let Some(location) = &caller {
-        command.args(["-S", &location.socket]);
-    }
-    command.arg("new-window");
+    // in every other host.
+    let mut command = host_command(caller.as_ref());
+    command.env_remove("PATH").arg("new-window");
     if let Some(location) = &caller {
         // `new-window -t` names a window: tmux 3.7 refuses a pane there.
-        let mut lookup = host_command(location);
+        let mut lookup = host_command(Some(location));
         lookup.args([
             "display-message",
             "-p",
@@ -72,7 +72,7 @@ pub(super) fn open(target: &Resolved, focus: bool, argv: &[String]) -> Result<St
 pub(super) fn focus(destination: &str) -> Result<()> {
     let location: TmuxLocation =
         serde_json::from_str(destination).context("Recorded tmux view is unreadable")?;
-    let mut command = host_command(&location);
+    let mut command = host_command(Some(&location));
     command.args([
         "select-window",
         "-t",
@@ -83,7 +83,7 @@ pub(super) fn focus(destination: &str) -> Result<()> {
         &location.pane,
     ]);
     run_host(command, OpenHost::Tmux.label())?;
-    let mut switch = host_command(&location);
+    let mut switch = host_command(Some(&location));
     switch.args(["switch-client", "-t", &location.pane]);
     run_host(switch, OpenHost::Tmux.label()).map(drop)
 }

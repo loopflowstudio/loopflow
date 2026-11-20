@@ -6,9 +6,9 @@ Run notes: `scratch/verify.md`.
 
 ## Exists on this branch (`12a52f6aeb`)
 
-- `rust/loopflow/src/lf/commands/open/tmux.rs` `open` resolves `tmux` on lf's
-  `PATH` and runs the `new-window` client with `PATH` removed, so the window
-  keeps the tmux server's.
+- `rust/loopflow/src/lf/commands/open/tmux.rs` `host_command` resolves `tmux`
+  on lf's `PATH` for every client; `open` runs the `new-window` client with
+  `PATH` removed, so the window keeps the tmux server's.
 - `work_open_tests::tmux_window_does_not_start_on_the_callers_path`: the
   stand-in `tmux` records its client `PATH`; the caller-only directory is absent.
   `cargo test -p loopflow --test integration work_open_tests::tmux`: 2 passed (implement).

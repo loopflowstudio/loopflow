@@ -68,10 +68,10 @@ Open a Wave in the Loopflow Dev app; the demo seeds a scratch Wave with eight Ta
 
 | Check | Expected |
 |---|---|
-| `cargo test -p loopflow --lib graph::` | passes. Includes `every_builtin_graph_has_a_description` and the parse of `description:` + `steps:`. |
+| `cargo test -p loopflow-execution --lib graph::` | passes. Includes `every_builtin_graph_has_a_description` and the parse of `description:` + `steps:`. |
 | `cargo test -p loopflow --test integration dto_fixtures` | `graph_catalog.json` and `roadmap_snapshot.json` round-trip with `description` and `owned_by_you` present. |
 | `lf graph list` | `feature  Explore, build, deliver and verify…`. A custom Graph without a description prints its name alone. |
-| `cd swift && swift test --filter BacklogBoardTests` | passes. |
+| `scripts/test_desktop.sh --filter BacklogBoardTests` | passes. |
 
 `BacklogBoardTests` loads a fixture roadmap with five backlog Tasks: one owned by you, one by someone else, three unclaimed, two Waves whose defaults are feature and code.
 - Filter counts read "All 5 · Mine 1 · Available 4".
@@ -86,25 +86,27 @@ CI runs the full suites.
 
 ### Source of truth
 
-- **Order.** `Task.rank`, per Project. Every write goes through `planning_order::reorder_in` (`store/sqlite/planning_order.rs:102`), which renumbers siblings and queues the Linear `sortOrder` move (`ops/planning_order.rs`). The client never owns an order. It stops using `task_orders`/`desktop.dashboard.move` for this list; Working-Tasks dashboards keep theirs.
-- **Ownership.** The ownership log (`durable.rs:316` `TaskOwnership`). "Yours" is `is_mine_in` (`store/sqlite/task_ownership.rs:344`), which checks people id, then Git `user.email`, then Machine. Swift does not repeat that rule. Rust projects `RoadmapTask.owned_by_you: bool`.
-- **Flows.** The `lf graph list --json` catalog (`graph/compiled.rs:125` `GraphCatalogEntry`), plus each Task's `graph_name`/`graph_source`. The Task's graph is its own, else the Wave default, else the repository's.
+- **Order.** `Task.rank`, per Project. Every write goes through `planning_order::reorder_in` (`rust/loopflow-storage/src/sqlite/planning_order.rs`), which renumbers siblings and queues the Linear `sortOrder` move (`ops/planning_order.rs`). The client never owns an order. It stops using `task_orders`/`desktop.dashboard.move` for this list; Working-Tasks dashboards keep theirs.
+- **Ownership.** The ownership log (`TaskOwnership`, `rust/loopflow-model/src/durable.rs`). "Yours" is `is_mine_in` (`rust/loopflow-storage/src/sqlite/task_ownership.rs`), which checks people id, then Git `user.email`, then Machine. Swift does not repeat that rule. Rust projects `RoadmapTask.owned_by_you: bool` from one `You`, which storage defines and `loopflow_execution::store::ownership::you()` builds, since execution is the crate that reads Git and config.
+- **Flows.** The `lf graph list --json` catalog (`GraphCatalogEntry`, `rust/loopflow-execution/src/graph/compiled.rs`), plus each Task's `graph_name`/`graph_source`. The Task's graph is its own, else the Wave default, else the repository's.
 
 ### Risk findings
 
-- **Graph files are bare YAML lists.** `parse_graph_items` (`graph/mod.rs:861`) already accepts a mapping with a `steps:` key, and ignores any other key. A Graph with a description is therefore `description: …` plus `steps: [...]`. Released `lf` reads such a repository file and skips the description, so there is no shared-file break. Custom Graphs stay valid as bare lists. Builtins move their header comment into the key and delete the comment, so the text lives in one place. `pursue` and `queue` have no header and get new descriptions.
+- **Graph files are bare YAML lists.** `parse_graph_items` (`rust/loopflow-execution/src/graph/mod.rs`) already accepts a mapping with a `steps:` key, and ignores any other key. A Graph with a description is therefore `description: …` plus `steps: [...]`. Released `lf` reads such a repository file and skips the description, so there is no shared-file break. Custom Graphs stay valid as bare lists. Builtins (`rust/loopflow-definitions/src/builtins/`) move their header comment into the key and delete the comment, so the text lives in one place. A description containing `: ` is not valid YAML unquoted; two were reworded for that.
 - **Desktop has no "me".** No Swift identity exists, and `TaskOwner` carries keys only. `owned_by_you` costs one `OwnershipFacts` read per repository per roadmap read, which spawns `git config`. It must be read once per read, never per Task.
 - **The served `task.update` carries only `notes`** (`lf/commands/write.rs:131`; Swift `ServedWrite.taskUpdate`). Add `rank: Option<u32>` to both. The CLI already has `--rank`. Rank is set-position-N, clamped. A multi-row move is a sequence of rank sets in final order, which avoids a new batch op. Each set is one write transaction and one Linear move.
-- **The catalog lists 26 Graphs here,** including composition pieces such as refresh and queue. The menu shows Graphs that have a description. Undescribed custom Graphs go under "More ›", so they stay startable without padding the menu.
+- **The catalog lists builtin, repository and Wave Graphs together,** including pieces other Graphs include. As built, the menu shows every Graph that has a description, and undescribed custom Graphs go under "More ›". Concept review item 4 replaces that membership.
+- **Compiled Graphs are expanded.** A catalog entry's `compiled.steps` holds the steps of every Graph it includes, each node's `sources` naming the Graphs it came through (`tests/fixtures/dto/graph_catalog.json`). Stop counts and the merge tag therefore see through `graph:` includes.
 - **Stops and the merge warning are derived in Swift** from `compiled.steps`.
   - Stops: the count of `interactive` nodes.
-  - "Merges without asking": an `op` node whose label starts with `land` comes before the first interactive node. That is true of auto and deliver today.
+  - "Merges without asking": an `op` node whose label starts with `land` comes before the first interactive node. deliver ends in `cmd: land --wait-and-fix`, so that is true of auto (pursue + deliver) and deliver.
+  - Builtin Task Graphs after main's restructuring, read from the files on November 19: feature 3 stops, code 2, research 1, redesign 1; no stop in auto, incident, deep-clean, optimize, queue, task-design, and in the pieces plan, build, deliver, pursue and refresh.
   - The other zero-stop flows read "never stops". Reaching `end` approves Auto-Ship (`lf/mod.rs:2240`), so the "Run without stopping" header says so.
 - **Search is client-side over the loaded roadmap.** The selection-view read has no text search (`work/selection/query.rs:363`). A Wave's backlog is tens of Tasks, and the roadmap holds every one unless `truncated`. When truncated, the list says "Partial: searching the N loaded" rather than presenting a complete result.
-- **Several selected Tasks starting is N `task run` calls,** run sequentially. Each one claims and registers its Graph, then returns. Failures are reported per Task ("Started 2 of 3 · LOO-x: reason"), and completed ones are never replayed. "Each Wave's flow" passes no graph. Any named flow passes it as the positional `graph`.
+- **Several selected Tasks starting is N `startTask` calls.** Since main's #1960 (`2593c489d7`), Claim, Start, Move and Abandon show in the click and a refusal puts that Task's row back with its own window Notice. The backlog's batch actions loop over those writers, so there is no "Started 2 of 3 · reason" tally; the footer says "Started 3". "Each Wave's flow" passes no graph. Any named flow passes it as the positional `graph`.
 - **Undo** uses SwiftUI's `@Environment(\.undoManager)` and registers inverse operations:
-  - reorder → the prior ranks
-  - claim → unassign
+  - reorder → the prior ranks, registered when the rank writes land
+  - claim → unassign, registered in the click
   - edit → the prior brief, only while the current brief still equals what was written. Otherwise the undo stops with "Brief changed since; not undone".
   - Start and Abandon register nothing.
 - **Repository scope mixes Projects,** and rank is per Project. Reorder, ⌘↑↓ and To top act only in Wave scope. In repository scope they are disabled with "Order lives in each Wave". Search, select, Claim, Start, Move and Abandon work in both scopes.
@@ -120,11 +122,7 @@ CI runs the full suites.
   - Claim, Edit, Move ▾ and Abandon… share one quiet borderless style.
   - `ViewThatFits` drops the position text, then ↑↓, before anything clips.
   - The segmented filter is a custom capsule picker in the palette accent, not `Picker(.segmented)`.
-- `WorkModel` gains:
-  - `reorder(_ ids: [TaskID], to index: Int)`, which writes rank and updates the local projection optimistically.
-  - `claim(_ ids:)` and `start(_ ids:, graph:)`, which loop over the existing single-Task calls and return per-Task results.
-
-  `startTask`, `assignTask`, `moveTask`, `abandonTask` and `updateTaskDirective` stay the single-Task writers.
+- `WorkModel` gains `rankBacklog`, `claimBacklog`, `startBacklog`, `moveBacklog`, `abandonBacklog`, `saveBacklogBrief` and `revertBacklog` (in `BacklogBoard.swift`), each a loop over the single-Task writers `rankTask`, `assignTask`, `startTask`, `moveTask`, `abandonTask` and `updateTaskDirective`. Rank writes are awaited in turn and stop at the first refusal; the others show in the click.
 - `WaveViewRatios.session` default becomes `(1 - golden) * golden` ≈ 0.236 (`WorkProjection.swift:223`).
 - `lf desktop capture -p board` prints the backlog text: the filter counts, then the rows in order with owner marks. It comes from `BacklogList.text`.
 - Rust:
@@ -140,10 +138,10 @@ CI runs the full suites.
 - `WaveBoardSection` and `navigation.boardSections` (`WorkProjection.swift:215/257`).
 - `WorkModel.standup`, `boardSection` and `standupText`.
 - The `section` and `filter` Desktop actions (`DesktopActions.swift:310-333`) and the Done-days default.
-- `WavePlanningNotice` and `WaveViewHeader` move into `BacklogBoard.swift`. `PaneVisibility.swift:157` still uses `WaveViewHeader`.
+- `WaveViewHeader` moved into `BacklogBoard.swift`; `PaneVisibility.swift` still uses it. `WavePlanningNotice` and the backlog's inline "Planning unavailable / Retry" line are deleted: main sends read failures and the out-of-plan notice to the window Notice.
 - Tests: `WaveStandupTests.swift`'s projection tests go. Its view tests for hide/zoom/resize (`wavePartsHideOnHover…`, `wavePartsZoomResize…`) are rewritten against `BacklogBoard`, without `section`. `TaskHistoryFilterTests.waveBoardShowsTheWave…` is updated to match.
-- `githubPeople` / `loadGitHubPeople` go if the board was their only reader. Check before deleting.
-- `PlanBoardTask` (`screens.rs:24`, Swift `ScreenReads.swift:14`, `plan_board.json`) has no Swift reader outside fixtures. Delete it if no CLI path reads it. Check first.
+- `githubPeople` / `loadGitHubPeople`, Swift `RepoPerson` and the `repo.people` Swift read: deleted, the board was their only reader.
+- `PlanBoardTask` (`rust/loopflow/src/lf/commands/screens.rs`) stays: `lf plan board` reads it. Swift `PlanBoard` has only fixture readers.
 - The scratch preview `scratch/native-backlog-preview/` is a reference only. Nothing from it is copied as-is. Its NSEvent key monitor, `PreviewSplit` and fake data stay in scratch.
 
 ### Forbidden outcomes
@@ -164,29 +162,28 @@ CI runs the full suites.
 
 ### Slices
 
-Status, November 19: slices 1–4 are built in code; what remains is the demo and real-app exercise.
+Status, November 19: slices 1–4 are built and merged onto main at `2750c9e0fb` (merge `d02f4c3a58`). None of the concept review's seven changes is built. Nothing has been seen in the real app.
 
-1. **Rust — built.** `description:` on Graph files (builtins converted, header comments removed), `lf graph list` prints it, catalog DTO in both languages, `RoadmapTask.owned_by_you` from one `You` reading per repository (`store/sqlite/task_ownership.rs`, which `OwnershipFacts` now holds), served `task.update` takes `notes` and `rank`. `DesktopViewPart` lost `section`/`done_days`.
+1. **Rust — built.** `description:` on Graph files (builtins converted, header comments removed), `lf graph list` prints it, catalog DTO in both languages, `RoadmapTask.owned_by_you` from one `You` reading per repository, served `task.update` takes `notes` and `rank`. `DesktopViewPart` lost `section`/`done_days`.
 2. **Swift list — built.** `BacklogBoard.swift` replaces `WaveStandupBoard.swift`; `BacklogState` lives in `WorkNavigation.backlogs`; `BacklogList` is the projection (filter, search, selection, Start label, rank moves, capture text, empty states). Default conversation share is 0.236. The `section`/`filter` Desktop actions, `WaveBoardSection`, `githubPeople`, Swift `RepoPerson` and the `repo.people` Swift read are deleted. Show… names the part "Backlog".
-3. **Actions — built.** Toolbar (accent split Start, quiet secondaries, `ViewThatFits` drops position then ↑↓), row menu, keys via `.onKeyPress`, drag, rank reorder, Claim, Edit, Move, Abandon (confirmation dialog), undo through `UndoManager` with `BacklogChange` inverses, per-Task outcome notices.
+3. **Actions — built.** Toolbar (accent split Start, quiet secondaries, `ViewThatFits` drops position then ↑↓), row menu, keys via `.onKeyPress`, drag, rank reorder, Claim, Edit, Move, Abandon (confirmation dialog), undo through `UndoManager` with `BacklogChange` inverses, a footer line per action ("Claimed 3 · 1 already claimed", "Started 3") and the window Notice for refusals.
 4. **Capture text and docs — built.** `lf desktop capture -p board` prints counts then rows with ●/○/◌ and › for selected. `docs/orchestration.md`'s `lf graph list` example matches the real output.
 
 Remaining:
 - The seven changes under "Concept review, November 19" below.
-- Demo seed (a scratch Wave with eight Tasks) and the hands-on run in the Dev app: drag feel, key focus, the split Start's menu rendering, toolbar collapse at narrow widths. None of these have been seen in the real app yet.
-- Reorder has no optimistic projection: rows move when the Work update arrives.
-- `PlanBoardTask` stays: `lf plan board` (bin/lf.rs) reads it; Swift `PlanBoard` has only fixture readers.
+- The demo and the hands-on run in the Dev app: drag feel, key focus, the split Start's menu rendering, toolbar collapse at narrow widths. The seed is a scratch Wave with eight Tasks in a private Machine, built the way `.lf/skills/demo.md` and `.lf/qa/desktop.md` describe. Per that QA note, backlog rows have no `lf desktop` socket route: `lf desktop capture -p board` reads the list, and selecting, dragging and the menus need a person or headless view tests.
+- Reorder has no optimistic projection: rows move when the Work update arrives, while Claim, Start, Move and Abandon now show in the click.
 
 Checks (headless, this Machine):
-- `cargo nextest -E 'test(graph::) | test(server::schema::tests::) | test(lf::tests::) | test(cli_discovery::) | test(documented_commands::) | test(dto_fixtures::) | test(graph_discovery_tests::) | test(task_ownership::) | binary(served_reads) | binary(golden_prompt) | test(world_recipes::)'`: pass, except `served_reads::screen_reads_are_compact_passive_and_match_cli`, which fails identically on base 0a31dd3c98 here (compact plan board empty); CI decides.
-- `cargo clippy --all-targets -- -D warnings`: clean.
-- `scripts/test_desktop.sh --filter 'BacklogBoardTests|DTOFixtureTests|TaskHistoryFilterTests|WorkNavigationTests|TaskGraphProofTests|NewTaskTests|DesktopHeadlessTests|WaveLensTests|RegistryQueryTests|WorkModelTests'`: pass after the `wave-backlog` identifier fix in DesktopHeadlessTests.
+- Before the sync, on `cad30817ef`: `cargo nextest -E 'test(graph::) | test(server::schema::tests::) | test(lf::tests::) | test(cli_discovery::) | test(documented_commands::) | test(dto_fixtures::) | test(graph_discovery_tests::) | test(task_ownership::) | binary(served_reads) | binary(golden_prompt) | test(world_recipes::)'` passed, except `served_reads::screen_reads_are_compact_passive_and_match_cli`, which failed identically on base 0a31dd3c98 (compact plan board empty); not rerun since the sync. `cargo clippy --all-targets -- -D warnings` was clean then and has not run since; gate and CI run it.
+- After the sync, on `d02f4c3a58`: `cargo check` passed; the focused Rust tests (Graph tests, `dto_fixtures`, `waves::`, `task_ownership`) passed; the Swift suites for Backlog, DTOFixture, NewTask, TaskConcept, WorkModel, DesktopHeadless, WorkCLISubscription and TaskHistoryFilter passed.
+- Seen in the sync's full `loopflow-execution store::` run: `task_labels_and_generated_names_follow_local_identity_and_linear_mapping` failed and passed alone. It does not reach code this branch changes. Not diagnosed and nothing filed; gate decides what to do with it.
 
 ### Concept review, November 19 — next implement direction
 
 Read against `BacklogBoard.swift`, `WorkModel.swift`, the Graph catalog and the three docs pages at cad30817ef. Nobody has seen any of this; each item is settled from text already in this design or the Task brief, and the assumptions are in `questions.md`. Biggest first.
 
-1. **The list holds started Tasks and calls them unstarted.** `BacklogList` takes `section == .backlog`, and `TaskSection::Backlog` is unstarted *or unowned*: an Idle or Shipping Task nobody holds lands there (`durable.rs:626-629`). Such a row has a checkout, maybe a PR, and reads exactly like an idea. Its button says "Start · feature", the flow menu offers to run it on another Graph, and Abandon removes its PR. The header comment, the empty state and `docs/surfaces.md` all say "unstarted". "Existing mechanisms" above already requires showing a row's execution apart from its owner.
+1. **The list holds started Tasks and calls them unstarted.** `BacklogList` takes `section == .backlog`, and `TaskSection::Backlog` is unstarted *or unowned*: an Idle or Shipping Task nobody holds lands there (`TaskSection`, `rust/loopflow-storage/src/execution.rs`). Such a row has a checkout, maybe a PR, and reads exactly like an idea. Its button says "Start · feature", the flow menu offers to run it on another Graph, and Abandon removes its PR. The header comment, the empty state and `docs/surfaces.md` all say "unstarted". "Existing mechanisms" above already requires showing a row's execution apart from its owner.
    - The backlog is work nobody is doing. Copy says "open work nobody is running", never "unstarted".
    - A started row says where it stands, from what Rust already sends: the step from `nextMove`/`latestGraphProcess`, and the PR number when `pr` is set. The capture text carries the same words.
    - Its primary action is whatever `runControl` offers, with that label. The flow menu applies to unstarted Tasks only; a started Task keeps its Graph. A selection mixing both starts each its own way and the label counts them apart ("Start 2 · feature · Continue 1").
@@ -196,12 +193,14 @@ Read against `BacklogBoard.swift`, `WorkModel.swift`, the Graph catalog and the 
 2. **Actions reach Tasks you can't see.** `selected` reads `all` while `opened` reads `rows`. Select three, search until one shows: the bar says "Abandon 3…" and the dialog asks "Abandon 3 Tasks?" without naming one. One selected row hidden by Mine leaves Start enabled over an empty-looking list. The common contract says "Batch actions expose exact Tasks and effects before writing".
    - Changing the filter or the search drops hidden rows from the selection. `selected` reads `rows`; "selected rows a filter hides still count" goes.
    - The Abandon dialog lists the identifiers (first five, then "and N more").
+   - "show success/failure per item" in that contract is now main's doing: each refused Task posts its own Notice.
 
 3. **New can't put anything in the backlog.** The header's New and the empty state's one step ("No unstarted work in this Wave → New") open `NewTaskSheet`, whose only action is Start (`lf task create --run`). Its tooltip says "File a Task". The brief's loop opens with "capture an idea", and the common contract says "Save idea is plain creation with an explicit destination". The exclusion "Create-without-run in NewTaskSheet" contradicts both; nobody asked for it, and it is withdrawn.
    - The sheet gets a second button, File, which runs `lf task create` without `--run`, closes, and selects the new row in that Wave's backlog. Start ⌘↩ stays as it is. One sheet, the same from ⌘N and from New.
 
-4. **Start offers Graphs you can't start a Task on.** Menu membership is "has a description", but every builtin has one ("4 always have it for built in, not required for customs" was about descriptions, not the menu). So "Run without stopping" lists deliver, queue, refresh and pursue, which are pieces of other Graphs, and vsm-operate, which is a Wave's Graph. `docs/surfaces.md` already shows the intended menu: auto and incident.
-   - A piece is a Graph another Graph includes with `graph:`. Rust knows this when it builds the catalog; the entry says so (`included_by: [String]`, a required key, empty for a Graph you start with). Pieces and undescribed Graphs sit under More ›.
+4. **Start offers Graphs you can't start a Task on.** Menu membership is "has a description", but every builtin has one ("4 always have it for built in, not required for customs" was about descriptions, not the menu). So "Run without stopping" lists pieces of other Graphs and vsm-operate, which is a Wave's Graph. After main's restructuring the builtin pieces are plan, build, deliver, pursue and refresh; queue is included only by the repository's `finish-queue`. `docs/surfaces.md` shows auto and incident there.
+   - A piece is a Graph another Graph includes with `graph:`. Rust knows this when it builds the catalog (each compiled node's `sources` names the Graphs it came through); the entry says so (`included_by: [String]`, a required key, empty for a Graph you start with). Pieces and undescribed Graphs sit under More ›.
+   - That rule still leaves deep-clean, optimize and task-design beside auto and incident under "Run without stopping", and adds redesign (1 stop) above. The docs menu is redrawn from the real one. Whether those three belong in the first menu is open in `questions.md`.
    - Wave Graphs (`builtins/wave/graph/`, `.lf/wave/*/graphs`) are not offered for a Task at all. The entry names what it runs for (`runs: task | wave`) if the catalog can't already tell; check before adding the field.
    - `NewTaskSheet`'s `WorkflowChooser` reads the same catalog and lists all 26 by name. It takes the same membership and the same line (description, stop count) from the one projection, `BacklogFlow`, renamed for what it is: `StartFlow`.
 
@@ -448,7 +447,7 @@ Prototype: choose a planning question, compare linked real Task excerpts, change
 ## Common contract and implementation constraints
 
 - All three retain existing Task IDs, membership/history and execution owners. No second planning database. Reading or editing never prepares a checkout, launches a provider, claims work or advances a Graph.
-- Save idea is plain creation with an explicit destination. Start uses shared run controls, including ownership and live-run checks. The page only previews that handoff. LOO-906 owns immediate conversation presentation for create-and-start; reuse it.
+- Save idea is plain creation with an explicit destination. Start uses shared run controls, including ownership and live-run checks. The page only previews that handoff. LOO-906 owns immediate conversation presentation for create-and-start; reuse it. Main's #1964 (`b0d867620d`, LOO-932) already starts a new Task straight into its conversation before the checkout exists, and `NewTaskSheet` uses it.
 - Drafts and scroll/selection survive navigation, failed saves and external updates. Report stale or conflicting revisions and let the person reconcile their words; never silently overwrite a changed brief.
 - Loading retains names/last-good rows, unavailable keeps drafts and explains retry, empty offers capture, no matches offers clear search. LOO-905 owns broader loading/name retention repair; consume it.
 - Batch actions expose exact Tasks and effects before writing; show success/failure per item. No implied atomicity across existing single-Task APIs. A failure never invites replay of completed items. Undo must account for newer edits rather than restoring a stale whole record.

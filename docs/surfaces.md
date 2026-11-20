@@ -223,17 +223,17 @@ Pick a flow below "Each Wave's flow" to run all of them on that one. Flows under
 Graphs with no `description:` sit under **More ›**
 ([describe a Graph](orchestration.md#describe-a-graph)).
 
-Starting several runs them one after another. If one fails, the notice says
-which, `Started 2 of 3 · LOO-456: …`, and the ones that started stay started.
-Started Tasks leave the backlog and appear in the sidebar.
+Starting several starts each one in the click. A Task the Machine refuses comes
+back with its own Notice, and the others stay started. Started Tasks leave the
+backlog and appear in the sidebar.
 
 #### When the list is empty
 
 Every empty list says why and offers one step: **Mine** with nothing claimed
 offers **Show available**, a search with no match offers **Clear search**, and
-an empty Wave offers **New**. While the backlog loads or the server is
-unreachable, the last rows you saw stay with a notice and **Retry**. A list
-too large to load at once says `Partial: searching the 200 loaded`.
+an empty Wave offers **New**. When a read fails, the last rows you saw stay and
+a Notice says so. A list too large to load at once says
+`Partial: searching the 200 loaded`.
 
 ### Connection recovery
 

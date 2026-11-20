@@ -18,3 +18,10 @@
 - The view part is renamed `board` → `backlog` (`lf desktop capture -p backlog`). `WorkNavigation.Board`, the Wave view's identity, keeps its name; renaming it touches tiles and dashboards.
 - Changing the filter or search drops hidden rows from the selection, as Finder and Mail do, instead of keeping them selected out of sight.
 - incident reads "never stops" and auto "merges without asking", though both approve Auto-Ship at the end. Left as shown in the Start bar page.
+
+## From the sync onto main, November 19
+
+- Main's #1960 made Claim, Start, Move and Abandon show in the click and report refusals in the window Notice. The backlog's batch actions now loop over those, so the footer says "Claimed 3" and a refused Task posts its own Notice; the "Started 2 of 3 · reason" tally is gone. ⌘Z for Claim is registered in the click, not when the claims land. Reorder still waits for each rank write.
+- The backlog's inline "Planning unavailable / Retry" line and the out-of-plan notice (`WavePlanningNotice`) are gone; main sends both to the window Notice.
+- Builtin Graphs main added (plan, build, redesign, deep-clean) got one-line `description:`s from their header comments, since every builtin needs one.
+- Start's menu after concept review item 4 (pieces under More ›): "Run without stopping" still holds deep-clean, optimize and task-design beside auto and incident. Taken the simpler way: they stay, and the docs example is redrawn to match. The other choice is a first menu of only auto and incident, which needs a way for a Graph to say it is not a first choice.

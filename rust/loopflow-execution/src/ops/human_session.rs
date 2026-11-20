@@ -1317,15 +1317,8 @@ fn saved_thread(
     if !crate::transcript::thread_lost(&store.sqlite, provider, &thread.agent_session)? {
         return Ok(Some(thread));
     }
-    let mut name = provider.chars();
-    let name: String = name
-        .next()
-        .into_iter()
-        .flat_map(char::to_uppercase)
-        .chain(name)
-        .collect();
     crate::journal::request::diagnostic(format_args!(
-        "{name} has no saved copy of this conversation; starting it again from its first request."
+        "This conversation has no saved {provider} transcript; starting it again from its first request."
     ));
     Ok(None)
 }

@@ -60,8 +60,9 @@ It names the thread lf chose; it no longer means "resumable".
    existing "consumed launch without native history" branch: `append_input`
    gives the same Session a new input carrying the original request, and
    `fresh_launch` starts it with `--session-id <new>`. It prints one
-   diagnostic: `Claude has no saved copy of this conversation; starting it
-   again from its first request.` (provider named from the Session). That is
+   diagnostic: `This conversation has no saved claude transcript; starting
+   it again from its first request.` (provider named as the Session records
+   it). That is
    accurate both when the thread never ran and when its transcript was
    deleted.
 2. **Delete `lost_thread`** and its branch in `open` (the `fresh` tuple, the
@@ -133,14 +134,14 @@ Remaining: nothing to build. Gate still owes the acceptance tests in CI.
 
 Kept as built, from the concept review (`scratch/concept-review.html`):
 
-- `saved_thread`'s "no saved copy" line is printed by the held terminal's own
+- `saved_thread`'s "no saved … transcript" line is printed by the held terminal's own
   `lf`, after `delegate_session` and before a view attaches (qa D: present
   only in `$LF_HOME/screens/*.ghostsnp`), so nobody running `lf resume` sees
   it. The docs no longer promise it (52d3183121). *Made for review:* the line
   stays where the decision is; passed over printing from the viewing process
   (a second place deciding, able to disagree with the holder) and deleting
   it (the only trace of why, in the held screen).
-- `new_thread` on a lost thread prints "no saved copy" then "seeded with its
+- `new_thread` on a lost thread prints "no saved … transcript" then "seeded with its
   original request". It runs before the hand-off, both show, and they read
   as one account.
 

@@ -1590,29 +1590,27 @@ fn run() -> anyhow::Result<()> {
     // A terminal relay is exec'd by the process that resolved its connection.
     // The relay avoids the command tree.
     let mut raw_args: Vec<String> = std::env::args().collect();
-    let remote_relay = match raw_args.get(1..) {
-        Some([session, attach, rest @ ..]) if session == "session" && attach == "attach" => {
-            match rest {
-                [sep, argv @ ..] if sep == "--" => Some((argv, false)),
-                [flag, sep, argv @ ..] if flag == "--unfocused" && sep == "--" => {
-                    Some((argv, true))
-                }
-                _ => None,
+    if raw_args
+        .get(1..3)
+        .is_some_and(|args| args == ["session", "attach"])
+    {
+        let args = &raw_args[3..];
+        journal::mark_effect_free_read();
+        ctrlc::set_handler(|| loopflow_execution::agent::exit_on_interrupt())
+            .expect("failed to set Ctrl+C handler");
+        match args {
+            [sep, argv @ ..] if sep == "--" => {
+                return loopflow_execution::transport::relay_over(argv, false);
             }
+            [flag, sep, argv @ ..] if flag == "--unfocused" && sep == "--" => {
+                return loopflow_execution::transport::relay_over(argv, true);
+            }
+            _ => {}
         }
-        _ => None,
-    };
-    if let Some((argv, unfocused)) = remote_relay {
-        journal::mark_effect_free_read();
-        ctrlc::set_handler(|| loopflow_execution::agent::exit_on_interrupt())
-            .expect("failed to set Ctrl+C handler");
-        return loopflow_execution::transport::relay_over(argv, unfocused);
-    }
-    if let Some(relay) = loopflow_execution::transport::relay_args(&raw_args) {
-        journal::mark_effect_free_read();
+        let relay = loopflow_execution::transport::relay_args(args).ok_or_else(|| {
+            anyhow::anyhow!("lf session attach names `--terminal TERMINAL_ID`; got {args:?}")
+        })?;
         journal::continue_after_exec()?;
-        ctrlc::set_handler(|| loopflow_execution::agent::exit_on_interrupt())
-            .expect("failed to set Ctrl+C handler");
         loopflow_execution::transport::relay(
             &relay.terminal,
             relay.session.as_ref(),
@@ -1623,16 +1621,6 @@ fn run() -> anyhow::Result<()> {
             loopflow::lf::commands::session::print_returned(&session)?;
         }
         return Ok(());
-    }
-    // Clap has no `session attach`: a relay that names no valid host stops here.
-    if raw_args
-        .get(1..3)
-        .is_some_and(|args| args == ["session", "attach"])
-    {
-        anyhow::bail!(
-            "lf session attach names `--terminal TERMINAL_ID`; got {:?}",
-            &raw_args[3..]
-        );
     }
     if !raw_args
         .iter()

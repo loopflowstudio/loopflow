@@ -1351,7 +1351,8 @@ fn relay_with_preview(
     terminal: Option<ViewerTerminal>,
     unfocused: bool,
 ) -> Result<()> {
-    let mut command = Command::new(std::env::current_exe()?);
+    let focused = initial_focus(unfocused);
+    let mut command = relay_command(std::env::current_exe()?, id, session, focused);
     if let Some(terminal) = &terminal {
         let state = terminal
             .state
@@ -1369,16 +1370,6 @@ fn relay_with_preview(
             },
         );
     }
-    command
-        .env(
-            RELAY_FOCUSED_ENV,
-            if initial_focus(unfocused) { "1" } else { "0" },
-        )
-        .args(RELAY_COMMAND)
-        .args([RELAY_TERMINAL_FLAG, id.as_str()]);
-    if let Some(session) = session {
-        command.args([RELAY_SESSION_FLAG, session.as_str()]);
-    }
     if let Some(session) = json_session {
         command.args([RELAY_JSON_FLAG, session]);
     }
@@ -1386,12 +1377,7 @@ fn relay_with_preview(
     pass_open(&mut command);
     let error = command.exec();
     tracing::warn!(%error, "cannot exec the terminal relay; relaying here");
-    attach_with_terminal(
-        id,
-        session,
-        terminal,
-        &mut RelayInput::new(initial_focus(unfocused)),
-    )
+    attach_with_terminal(id, session, terminal, &mut RelayInput::new(focused))
 }
 
 const RELAY_FOCUSED_ENV: &str = "LF_RELAY_FOCUSED";
@@ -1406,6 +1392,24 @@ const RELAY_TERMINAL_FLAG: &str = "--terminal";
 const RELAY_SESSION_FLAG: &str = "--session";
 const RELAY_JSON_FLAG: &str = "--session-json";
 
+// Keep the argv readable by older installed relays during a build handoff.
+fn relay_command(
+    lf: PathBuf,
+    terminal: &TerminalId,
+    session: Option<&LfSessionId>,
+    focused: bool,
+) -> Command {
+    let mut command = Command::new(lf);
+    command
+        .env(RELAY_FOCUSED_ENV, if focused { "1" } else { "0" })
+        .args(RELAY_COMMAND)
+        .args([RELAY_TERMINAL_FLAG, terminal.as_str()]);
+    if let Some(session) = session {
+        command.args([RELAY_SESSION_FLAG, session.as_str()]);
+    }
+    command
+}
+
 /// What a relay invocation names: `lf session attach --terminal TERMINAL
 /// [--session SESSION] [--session-json SESSION]`, the exact held terminal and
 /// the Session a server bridge attaches by. Recognized before command parsing.
@@ -1417,13 +1421,7 @@ pub struct Relay {
 }
 
 pub fn relay_args(args: &[String]) -> Option<Relay> {
-    let [_, command, subcommand, rest @ ..] = args else {
-        return None;
-    };
-    if command != RELAY_COMMAND[0] || subcommand != RELAY_COMMAND[1] {
-        return None;
-    }
-    let [flag, terminal, rest @ ..] = rest else {
+    let [flag, terminal, rest @ ..] = args else {
         return None;
     };
     if flag != RELAY_TERMINAL_FLAG {
@@ -2278,15 +2276,8 @@ fn replace_view(
     } else {
         match crate::os_process::resolve_lf_binary() {
             Ok(lf) => {
-                let mut command = Command::new(lf);
-                command
-                    .env(REPLACED_ENV, "1")
-                    .env(RELAY_FOCUSED_ENV, if focused { "1" } else { "0" })
-                    .args(RELAY_COMMAND)
-                    .args([RELAY_TERMINAL_FLAG, terminal.as_str()]);
-                if let Some(session) = session {
-                    command.args([RELAY_SESSION_FLAG, session.as_str()]);
-                }
+                let mut command = relay_command(lf, terminal, session, focused);
+                command.env(REPLACED_ENV, "1");
                 crate::journal::carry_across_exec(&mut command)?;
                 pass_open(&mut command);
                 command.exec().to_string()

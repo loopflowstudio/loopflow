@@ -1748,6 +1748,10 @@ fn creation_retry_reconciles_publication_but_never_repeats_a_stop_or_append() {
         let (record, _) = super::primary::ensure(&store, repo.path(), None)
             .await
             .unwrap();
+        let retry = |request| {
+            super::new_thread(&store, &record.id, None, false, Default::default(), request)
+        };
+        let receipt = |request: &str| store.sqlite.creation_receipt(request).unwrap().unwrap();
         let original = store.session(&record.id).await.unwrap().unwrap();
         let identity = crate::engine::creation::identity(
             "session.new",
@@ -1761,27 +1765,14 @@ fn creation_retry_reconciles_publication_but_never_repeats_a_stop_or_append() {
             .sqlite
             .begin_thread_creation(&identity, &record.id, &artifact)
             .unwrap();
-        let stopped = store
-            .sqlite
-            .creation_receipt("interrupted")
-            .unwrap()
-            .unwrap();
+        let stopped = receipt("interrupted");
         assert_eq!(
             stopped.disposition,
             loopflow_storage::sqlite::creation::RecoveryDisposition::Inspect
         );
         assert_eq!(stopped.explanation, "Conversation change unconfirmed");
         // A crash while stopping is uncertain, even if no provider is live now.
-        let refused = super::new_thread(
-            &store,
-            &record.id,
-            None,
-            false,
-            Default::default(),
-            "interrupted",
-        )
-        .await
-        .unwrap_err();
+        let refused = retry("interrupted").await.unwrap_err();
         assert_eq!(
             refused.downcast_ref::<crate::engine::Error>().unwrap().code,
             crate::engine::ErrorCode::OutcomeUnknown
@@ -1798,81 +1789,31 @@ fn creation_retry_reconciles_publication_but_never_repeats_a_stop_or_append() {
             .replace_session_input(original.captured, next, Some("interrupted".into()))
             .await
             .unwrap();
+        assert_eq!(receipt("interrupted").milestone, "admitted");
         assert_eq!(
-            store
-                .sqlite
-                .creation_receipt("interrupted")
-                .unwrap()
-                .unwrap()
-                .milestone,
-            "admitted"
-        );
-        assert_eq!(
-            store
-                .sqlite
-                .creation_receipt("interrupted")
-                .unwrap()
-                .unwrap()
-                .disposition,
+            receipt("interrupted").disposition,
             loopflow_storage::sqlite::creation::RecoveryDisposition::Continue
         );
         // Simulate app/server death after the atomic append, before publication.
-        let recovered = super::new_thread(
-            &store,
-            &record.id,
-            None,
-            false,
-            Default::default(),
-            "interrupted",
-        )
-        .await
-        .unwrap()
-        .0;
+        let recovered = retry("interrupted").await.unwrap().0;
         assert_eq!(recovered.captured, next.captured);
         assert_eq!(recovered.artifact_key.as_deref(), Some(artifact.as_str()));
         assert!(recovered.input_published);
-        let result = store
-            .sqlite
-            .creation_receipt("interrupted")
-            .unwrap()
-            .unwrap()
-            .result;
+        let result = receipt("interrupted").result;
         assert!(result.is_some());
         assert_eq!(
-            store
-                .sqlite
-                .creation_receipt("interrupted")
-                .unwrap()
-                .unwrap()
-                .disposition,
+            receipt("interrupted").disposition,
             loopflow_storage::sqlite::creation::RecoveryDisposition::Complete
         );
         let mut newer = recovered.clone();
         newer.request = Some("A later independent input".into());
         let newer = super::append_input(&store, newer).await.unwrap();
-        super::new_thread(
-            &store,
-            &record.id,
-            None,
-            false,
-            Default::default(),
-            "interrupted",
-        )
-        .await
-        .unwrap();
+        retry("interrupted").await.unwrap();
         assert_eq!(
             store.session(&record.id).await.unwrap().unwrap().captured,
             newer.captured
         );
-        assert_eq!(
-            store
-                .sqlite
-                .creation_receipt("interrupted")
-                .unwrap()
-                .unwrap()
-                .result,
-            result
-        );
+        assert_eq!(receipt("interrupted").result, result);
 
         let identity = crate::engine::creation::identity(
             "session.new",
@@ -1895,40 +1836,22 @@ fn creation_retry_reconciles_publication_but_never_repeats_a_stop_or_append() {
             .unwrap();
         // A lookup can permit continuation, then newer input wins before retry.
         assert_eq!(
-            store
-                .sqlite
-                .creation_receipt("superseded")
-                .unwrap()
-                .unwrap()
-                .disposition,
+            receipt("superseded").disposition,
             loopflow_storage::sqlite::creation::RecoveryDisposition::Continue
         );
         let newest = super::append_input(&store, pending).await.unwrap();
-        let refused = super::new_thread(
-            &store,
-            &record.id,
-            None,
-            false,
-            Default::default(),
-            "superseded",
-        )
-        .await
-        .unwrap_err();
+        let refused = retry("superseded").await.unwrap_err();
         assert_eq!(
             refused.downcast_ref::<crate::engine::Error>().unwrap().code,
             crate::engine::ErrorCode::OutcomeUnknown
         );
-        let receipt = store
-            .sqlite
-            .creation_receipt("superseded")
-            .unwrap()
-            .unwrap();
+        let superseded = receipt("superseded");
         assert_eq!(
-            receipt.disposition,
+            superseded.disposition,
             loopflow_storage::sqlite::creation::RecoveryDisposition::Inspect
         );
         assert_eq!(
-            receipt.explanation,
+            superseded.explanation,
             "Newer conversation input replaced this change"
         );
         assert_eq!(
@@ -1962,26 +1885,11 @@ fn creation_retry_reconciles_publication_but_never_repeats_a_stop_or_append() {
         )
         .unwrap();
         // Publication succeeded but the result was not recorded before exit.
-        let recovered = super::new_thread(
-            &store,
-            &record.id,
-            None,
-            false,
-            Default::default(),
-            "published",
-        )
-        .await
-        .unwrap()
-        .0;
+        let recovered = retry("published").await.unwrap().0;
         assert_eq!(recovered.captured, published.captured);
         assert!(recovered.input_published);
         assert_eq!(
-            store
-                .sqlite
-                .creation_receipt("published")
-                .unwrap()
-                .unwrap()
-                .disposition,
+            receipt("published").disposition,
             loopflow_storage::sqlite::creation::RecoveryDisposition::Complete
         );
     });

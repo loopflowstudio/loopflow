@@ -79,6 +79,12 @@ attach framing also passed. The wrapper's initial Cargo build lacked this
 shallow checkout's migration order and failed on `graph_process_task`; the
 Swift run used the existing checkout CLI. CI runs the suites.
 
+### Compress checks
+
+- `cargo test -p loopflow --test transport_tests a_resumed_relay_keeps_focus_across_server_restarts` passed. CI repeats it.
+- `cargo test -p loopflow-execution --lib creation_retry_reconciles_publication_but_never_repeats_a_stop_or_append` passed. CI repeats it.
+- A PTY ran `lf session attach [--unfocused] -- <peer>` against a local protocol reader. The first attach frame carried `focused: true` by default and `false` with the flag. Both relays exited on the peer's close frame.
+
 ## Next slice · mounted QA
 
 On a private Machine with the branch CLI and a newly started holder, use a

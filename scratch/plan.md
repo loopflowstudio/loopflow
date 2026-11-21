@@ -52,17 +52,18 @@ JSON prepare-and-view SSH routes pass the same choice to the local relay.
 | `transport::tests::a_held_screen_the_relay_drew_into_is_refreshed_not_continued` | Passed for both focus values on a positioned continuation and a fresh repaint. | CI |
 | `machine_commands::remote_session_open_returns_an_owner_pinned_terminal_command` | Passed. Remote prepare placed the flag on the local relay and kept the SSH command intact. | CI |
 
-### Desktop panes and Dev visits
+### Desktop panes and Dev visits (`81c612cbd2`)
 
 Desktop Session panes add `--unfocused` to the viewer command, before the
 local relay's `--` for prepared SSH commands. A directly opened native
 `OwnerStream` sends `focused: true`.
 
-Dev uses the workspace's last deliberate visit to admit it to terminal
-preparation and mounting. Restoring a selection or selecting the first tile
-when laying out a board does not record a visit. A saved shell has an Open
-shell action before its Work is visited. Release Desktop continues to open
-the warm set. PR #2007 already moved Dev onto the live Machine.
+`recentTasks` includes restored and prefetched Work. Dev instead uses the
+workspace's existing `lastVisit` to admit it to terminal preparation and
+mounting (`SessionsView.swift`, `WorkModel.swift`, `WorkspacePanesView.swift`).
+Restoring a selection or laying out a board does not record a visit. An
+unvisited saved shell shows an Open shell action. Release Desktop keeps the
+warm set. PR #2007 moved Dev onto the live Machine and its installed CLI.
 
 Pinned Ghostty `a60e9e2` sends its current focus when mode 1004 is enabled
 (`src/termio/stream_handler.zig:766`). Desktop's
@@ -78,22 +79,24 @@ attach framing also passed. The wrapper's initial Cargo build lacked this
 shallow checkout's migration order and failed on `graph_process_task`; the
 Swift run used the existing checkout CLI. CI runs the suites.
 
-## Live acceptance at QA
+## Next slice · mounted QA
 
-Use a disposable Session in release Desktop. Open a narrower background
-view with `lf session resume <id> --unfocused` and check that the running
-Session keeps its size and colors. Focus or type in the new view and check
-that it takes the size. Close it and check the original width returns. Check
-that a background relay which reconnects leaves the active size alone.
-Also change pane focus during reconnect. The local relay drains pending
-terminal input again after the attach reply in `transport.rs`. The restart
-fixture changes focus before stopping the server and does not cover this
-interval. Check that Ghostty's focus report after the reply brings the holder
-up to date.
+On a private Machine with the branch CLI and a newly started holder, use a
+disposable Session in Desktop. Open a second Desktop view in the background
+at a narrower width and check that the Session keeps its size, colors and
+focus. Exercise `lf session resume <id> --unfocused` in a background terminal
+too. Focus or type in the new view and check that it takes sizing ownership.
+Close it and check that the original width returns. Reconnect a background
+relay and check that the active size holds. Change pane focus during the
+reconnect and check that the holder catches up. The local relay drains
+pending input after the attach reply (`transport.rs`). The restart fixture
+changes focus before the server stops, so this interval is still unchecked.
 
-Launch Dev beside release Desktop on a disposable repository with a saved
+Launch Dev beside release Desktop with a disposable repository, a saved
 selection and live Sessions. Before interacting, check for both preparations
-and new terminal viewers, including any restored shell. `pgrep -lf 'session resume'`
-alone misses relays that have already exec'd to `session attach`. Deliberately
-open one Task and check that only its terminal starts and can take the size.
-These mounted checks have not run.
+and new terminal viewers, including any restored shell. Count `session attach`
+relays as well as `session resume`. Check this startup behavior against the
+older installed Machine too. For the deliberate-open check, use the branch
+CLI and holder. Open one Task and check that only its terminal starts and can
+take the size. The headless Swift checks cover preparation and the shell view
+hierarchy. These mounted checks have not run.

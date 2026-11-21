@@ -26,16 +26,20 @@ Opening a copy of the Machine from 14:02; changes are refused there.
 
 | Dev opens | With | Data | Changes | Session terminals |
 | --- | --- | --- | --- | --- |
-| The Machine | `run`, when the branch leaves wire and schema alone | Real, live | Work | Live |
+| The Machine | `run`, when the branch leaves wire and schema alone | Real, live | Work | Live, opened on click |
 | A copy of the Machine | `run` on any other branch, or `run --copy` | Real, as of launch | Refused with one sentence | None |
-| A fake world | `run --world <dir>` | The recipe's | Work | Stand-in providers |
+| A fake world | `run --world <dir>` | The recipe's | Work | Stand-in providers, opened on click |
 
 `run-debug` takes the same flags and makes the same choice.
 
 **The Machine.** The installed server serves the window; the app's bundled `lf`
 runs its panes. The store is read and written but never migrated: only an
 install advances its schema (`lf install --dev` for a green main build,
-`lf install` for your stream's release).
+`lf install` for your stream's release). Loopflow Dev starts no terminal and
+resumes no Session on launch or in the background: it opens a conversation only
+when you deliberately click into that Work (a selection restored at launch waits
+behind its placeholder and open action). Running Dev beside release Desktop
+leaves running Sessions untouched.
 
 **A copy.** The branch's own server serves `~/.lf-copy`, a read-only copy of the
 store taken when `run` started; run it again for a newer one. The repository
@@ -234,9 +238,10 @@ Desktop quits. Reopening a known repository shows retained content immediately,
 even while repository resolution waits or fails. Errors remain visible; new Task
 links wait for resolution before delivery. Unknown repositories need an initial lookup.
 
-Every conversation a window can select opens on load, before any selection and
-with no saved recent visits: the repository's, each Wave's and every claimed
-working Task's (idle, active or moving). Selecting any of them shows opening, the
+Every conversation a window can select opens on load in release Desktop, before
+any selection and with no saved recent visits: the repository's, each Wave's and
+every claimed working Task's (idle, active or moving). (Loopflow Dev skips
+opening unvisited Work; see above.) Selecting any of them shows opening, the
 live conversation, or a failure with **Retry**; never a **No session** or **Open** gate. Load opens the
 selected Work first, then visible tiles, then the repository and Waves, then
 recent working Tasks, two preparations at a time; initial rendering does not wait.
@@ -273,8 +278,11 @@ from its history, and a provider running in a native client lf can't share is ta
 over, ending that client. A pane's button carries Rust's label for which it will do
 (**Reconnect**, **Open here**, **Take over**, **Try again**, **Start conversation**).
 A held terminal takes any number of views and every view types, so a draft typed
-in one shows in the others. The view that most recently attached, typed or gained
-focus sets the terminal's size; when it leaves, the next most recent live view does.
+in one shows in the others. Desktop launches every pane with `--unfocused`, so
+warm or background panes never resize a Session another view is using. The view
+you most recently focused or typed in sets the terminal's size and colors
+(Ghostty reports focus when mode 1004 turns on, so a selected pane takes the
+size right away); when it leaves, the next most recent live view takes over.
 Close and eviction discard late opening results.
 
 Finite CLI requests time out after 30 seconds. Canceling preparation ends only

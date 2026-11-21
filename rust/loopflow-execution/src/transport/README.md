@@ -226,11 +226,15 @@ skipped (output the ring dropped before the server read it, or a native
 client's exit text lf replaced); lf's reports and events travel in `aside`
 frames, which it writes and does not count. The server keeps no spool.
 
-A view that reconnects attaches with `from`, the position its screen shows:
+A view that reconnects attaches with `from`, the position its screen shows, and
+`focused`, the focus state it last had:
 
 ```json
-{"id":1,"kind":"attach","rows":40,"cols":120,"name":null,"from":48213}
+{"id":1,"kind":"attach","rows":40,"cols":120,"name":null,"from":48213,"focused":false}
 ```
+
+Sending its last known focus keeps a background terminal that reconnects on its
+own from taking the size away from the view a person moved to.
 
 The server answers a new viewer identity, reads the PTY bytes from `from`
 out of the holder's ring on a connection of its own, and sends them as `out`
@@ -453,7 +457,7 @@ at most 64 KiB; a payload over 4 MiB is a protocol error.
 | `0x12` input | view → server | keystrokes from any attached connection |
 
 ```json
-{"id":1,"kind":"attach","rows":40,"cols":120,"name":"/dev/ttys004","from":null}
+{"id":1,"kind":"attach","rows":40,"cols":120,"name":"/dev/ttys004","from":null,"focused":true}
 {"answers":1,"seq":0,"kind":"attached","viewer":"…","nonce":"…","terminal":true,"owner":"…"}
 {"id":2,"kind":"focus","focused":true}
 ```
@@ -472,16 +476,32 @@ reply carries the `seq` of the last event queued when it was computed. Kinds:
 `return {detach}` and `live`.
 
 Every attached view types; its `input` frames go to the PTY as they arrive.
-Size and colors follow one view, named by `owner` (`held` says whether the
-recipient is it): the view that most recently attached, typed or gained focus.
-When it leaves, the remaining view used most recently takes over. A view may
-report its size (`resize`) and colors (`theme`) at any time; only the sizing
-view's are applied and broadcast, and a view that has not reported colors
-supplies no color override. Focus is DEC mode 1004: every terminal relay turns
-focus reporting on in its own terminal (a Desktop pane runs the same relay in a
-Ghostty surface) and sends `focus {focused}`. A host that reports no focus
-still gets the attach-and-type rule. The agent hears `CSI I`/`CSI O` only if it
-enabled mode 1004 itself.
+Size, colors, query answers and focus-out reports follow one view, named by
+`owner` (`held` says whether the recipient is it): the live view a person most
+recently focused or typed in. `attach` carries optional `focused: bool`: `true`
+(or omitted, for relays from before this field) says a person is at the view
+and takes the size; `false` attaches without taking the size from a live holder,
+owning only when no live view is more recent (ties keep the current owner). The
+`attached` reply's `owner` names the settled sizing owner rather than
+unconditionally naming the joining view. When the sizing view leaves, the
+remaining view used most recently takes over. A view may report its size
+(`resize`) and colors (`theme`) at any time; only the sizing view's are applied
+and broadcast, and a view that has not reported colors supplies no color
+override.
+
+Focus is DEC mode 1004: every terminal relay turns focus reporting on in its own
+terminal (a Desktop pane runs the same relay in a Ghostty surface), keeps its
+view's focus state across reconnects, and sends `focus {focused}`. A relay
+starts focused when stdin is a terminal unless `lf session resume --unfocused`
+was passed; typing also sets it focused. Desktop passes `--unfocused` for every
+pane, selected or warm, and Ghostty reports the pane's current focus when mode
+1004 turns on, so a selected pane takes the size at once while warm panes leave
+active views alone. A host that reports no focus takes the size on a focused
+attach, or on the first typed byte when attached unfocused. The agent hears
+`CSI I`/`CSI O` only if it enabled mode 1004 itself: `focus {focused:true}` from
+any view makes it the sizing owner and forwards `CSI I`; `focus {focused:false}`
+forwards `CSI O` only from the current sizing owner, so background panes never
+report focus-out while a person works in another view.
 
 Only the sizing view's terminal answers the agent's queries. The server drops
 the other views' answers (cursor position, device attributes, OSC color

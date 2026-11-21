@@ -286,3 +286,18 @@ shows no new relay until a Task is clicked in Dev.
 | `scripts/test_desktop.sh --filter …` | not yet written | implement, then CI |
 | two views at different widths, live | not run | qa |
 | Dev beside release Desktop, live | not run | qa |
+
+## Docs
+
+Updated before implementation:
+
+- `docs/sessions.md` — multi-view sizing/colors/focus rule, `lf resume --unfocused`, background/Desktop panes, and reconnect focus persistence
+- `rust/loopflow-execution/src/transport/README.md` — `attach.focused`, settled `attached.owner`, tie-keeping, focus-out filtering, relay focus tracking across reconnects, and `--unfocused`
+- `swift/README.md` — Loopflow Dev lazy Session opening (including restored selection waiting behind its placeholder) and Desktop launching panes with `--unfocused`
+- `docs/dev/server-first.md` — updated sizing and focus-out rules under "Every view types"
+
+### Open question from writing docs
+
+- **What should `lf resume <id> --unfocused` do when typed into an already-focused Ghostty (or Rex) terminal?** The plan relies on Ghostty emitting `CSI I` immediately when the relay turns on mode 1004 so a selected Desktop pane (launched with `--unfocused`) takes the size at once. That same `CSI I` means a person who runs `lf resume <id> --unfocused` in an already-focused Ghostty or Rex window will still immediately take the size before pressing a key, whereas the qa check ("`lf session resume <id> --unfocused` in a narrower terminal → Desktop's pane does not reflow; press a key there → it does") expects it not to reflow until a keypress. Should `--unfocused` mean:
+  1. "Do not assume focus at attach; let the terminal's focus reports decide" (keeps Desktop passing `--unfocused` uniformly, and means CLI `--unfocused` is for unfocused tabs/splits/panes rather than watching from a currently focused Ghostty window), or
+  2. "Stay unfocused until the next focus transition or keypress" (suppressing the initial mode-1004 report when `--unfocused` is passed, which means Desktop would pass `--unfocused` only for warm/unfocused panes or signal focus explicitly for the selected pane)?

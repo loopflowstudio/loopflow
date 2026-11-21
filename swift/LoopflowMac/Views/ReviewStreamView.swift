@@ -30,6 +30,8 @@ struct ReviewStream: View {
         }
         ForEach(files) { unopened in
             let file = store.opened(unopened)
+            // Reading state and notes belong to the whole comparison's per-file reads.
+            let note = reader == .changes ? store.fileNotes[file.path] : nil
             if let heading = headings[file.path] {
                 Text(heading).font(Typography.strong(13)).foregroundStyle(palette.text)
                     .fixedSize(horizontal: false, vertical: true)
@@ -51,7 +53,7 @@ struct ReviewStream: View {
             } else {
                 if file.status == .binary {
                     ReviewNotice(text: "Binary file · no text to compare").id(file.topID)
-                } else if file.blocks.isEmpty, reader != .changes || store.fileNotes[file.path] == nil {
+                } else if file.blocks.isEmpty, note == nil {
                     ReviewNotice(text: file.status == .renamed ? "Renamed without changes" : "No textual changes")
                         .id(file.topID)
                 }
@@ -69,9 +71,7 @@ struct ReviewStream: View {
                     }
                 }
             }
-            if reader == .changes, let note = store.fileNotes[file.path] {
-                ReviewNotice(text: note)
-            }
+            if let note { ReviewNotice(text: note) }
         }
     }
 
@@ -90,7 +90,7 @@ struct ReviewStream: View {
         }
         .buttonStyle(WorkPlainButtonStyle()).font(Typography.caption(11))
         .padding(.horizontal, 12).padding(.vertical, 8)
-        .overlay { if let first = file.blocks.first(where: \.isStop) { currentMark(first.id(in: file.path)) } }
+        .overlay { if let first = file.stops.first { currentMark(first) } }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("changes-long-lines")
     }
@@ -620,18 +620,16 @@ struct ReviewStepper: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            HStack(spacing: 0) {
-                arrow("chevron.up", "Previous change", key: "[", offset: -1)
-                Divider().frame(height: 14)
-                Text(store.position(reader)).font(Typography.caption(11)).foregroundStyle(palette.text)
-                    .monospacedDigit().lineLimit(1).padding(.horizontal, 8).frame(minWidth: 54)
-                    .accessibilityIdentifier("review-position")
-                Divider().frame(height: 14)
-                arrow("chevron.down", "Next change", key: "]", offset: 1)
-            }
-            .background(palette.surface, in: RoundedRectangle(cornerRadius: 6))
-            .overlay { RoundedRectangle(cornerRadius: 6).strokeBorder(palette.border) }
+            arrow("chevron.up", "Previous change", key: "[", offset: -1)
+            Divider().frame(height: 14)
+            Text(store.position(reader)).font(Typography.caption(11)).foregroundStyle(palette.text)
+                .monospacedDigit().lineLimit(1).padding(.horizontal, 8).frame(minWidth: 54)
+                .accessibilityIdentifier("review-position")
+            Divider().frame(height: 14)
+            arrow("chevron.down", "Next change", key: "]", offset: 1)
         }
+        .background(palette.surface, in: RoundedRectangle(cornerRadius: 6))
+        .overlay { RoundedRectangle(cornerRadius: 6).strokeBorder(palette.border) }
         .background {
             HStack {
                 Button("Next change") { go(1) }.keyboardShortcut("]", modifiers: [])

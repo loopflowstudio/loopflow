@@ -40,7 +40,7 @@ struct SyntaxLanguage: Sendable {
         var spans: [Span] = []
         var index = 0
         func starts(_ word: [unichar], at start: Int) -> Bool {
-            start + word.count <= text.count && !word.isEmpty && Array(text[start..<start + word.count]) == word
+            start + word.count <= text.count && !word.isEmpty && text[start..<start + word.count].elementsEqual(word)
         }
         func find(_ word: [unichar], from start: Int) -> Int? {
             guard start <= text.count - word.count else { return nil }

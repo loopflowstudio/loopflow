@@ -688,9 +688,7 @@ final class TaskFilesStore {
                 self.observation?.watch(path)
             }
             // Re-read retained documents even when another file or terminal is visible.
-            for (path, document) in self.documents where changed.contains(where: {
-                $0.isEmpty || $0 == path || path.hasPrefix($0 + "/")
-            }) {
+            for (path, document) in self.documents where Self.touches(changed, path) {
                 do {
                     let revision = document.snapshot?.revision
                     let next = try await self.query.taskFile(issue: self.issue, path: path)
@@ -708,6 +706,11 @@ final class TaskFilesStore {
             if !Task.isCancelled, self.mode == .diff { await self.loadDiff() }
             if !Task.isCancelled, self.page == .changes { await self.loadReview(changed: committed ? nil : visible) }
         }
+    }
+
+    /// Whether a changed path is `path`, a folder above it, or the whole checkout.
+    private static func touches(_ changed: Set<String>, _ path: String) -> Bool {
+        changed.contains { $0.isEmpty || $0 == path || path.hasPrefix($0 + "/") }
     }
 
     /// The paths git ignores in this checkout. When git cannot judge, none are.
@@ -901,10 +904,7 @@ final class TaskFilesStore {
         let paths = Set(changes.files.map(\.path))
         let commits = [changes.baseCommit, changes.headCommit]
         if let changed, commits == readCommits {
-            unread = paths.filter { path in
-                unread.contains(path) || known[path] == nil
-                    || changed.contains { $0.isEmpty || $0 == path || path.hasPrefix($0 + "/") }
-            }
+            unread = paths.filter { unread.contains($0) || known[$0] == nil || Self.touches(changed, $0) }
         } else {
             unread = paths
         }
@@ -986,23 +986,25 @@ final class TaskFilesStore {
     private nonisolated static func readFile(_ changed: TaskChangedFile, query: RegistryQuery, issue: String,
                                              base: String, head: String?) async -> FileReading {
         let path = changed.path
-        func contents() async throws -> (ReviewFile?, TaskFileState) {
-            let file = try await query.taskFile(issue: issue, path: path)
-            return (file.state == .text ? file.content.map { ReviewFile.added(path, content: $0) } : nil, file.state)
+        /// The file as its contents, or why it has none to show.
+        func contents() async throws -> FileReading {
+            let whole = try await query.taskFile(issue: issue, path: path)
+            if whole.state == .text, let content = whole.content {
+                return FileReading(file: .added(path, content: content), note: nil)
+            }
+            let binary = whole.state == .binary
+            return FileReading(file: ReviewFile(path: path, oldPath: nil, status: binary ? .binary : .added, blocks: []),
+                               note: binary ? nil : whole.state.title)
         }
         do {
-            if head == nil, changed.untracked {
-                let (file, state) = try await contents()
-                return FileReading(
-                    file: file ?? ReviewFile(path: path, oldPath: nil, status: state == .binary ? .binary : .added, blocks: []),
-                    note: file != nil || state == .binary ? nil : state.title)
-            }
+            if head == nil, changed.untracked { return try await contents() }
             let next = try await query.taskDiff(issue: issue, path: path, base: base, head: head)
             let parsed = ReviewDiff.parse(next.patch).files
             let file = parsed.first { $0.path == path } ?? parsed.first
                 ?? ReviewFile(path: path, oldPath: changed.oldPath, status: next.binary ? .binary : .modified, blocks: [])
-            if next.truncated, head == nil, file.status == .added, let whole = try? await contents().0 {
-                return FileReading(file: whole, note: nil)
+            if next.truncated, head == nil, file.status == .added,
+               let whole = try? await contents(), whole.note == nil, whole.file?.status == .added {
+                return whole
             }
             return FileReading(file: file, note: next.truncated ? "Cut at 1 MB · the rest of this file is not shown" : nil)
         } catch {
@@ -1327,7 +1329,7 @@ final class TaskFilesStore {
             while let stop = diff.stop(after: current, offset: offset) {
                 current = stop.id
                 // A collapsed file is one stop: its first change, shown as its summary row.
-                if let file = diff.file(stop.path), collapses(file), file.blocks.first(where: \.isStop)?.id(in: file.path) != stop.id { continue }
+                if let file = diff.file(stop.path), collapses(file), file.stops.first != stop.id { continue }
                 self[place: reader].current = stop.id
                 if reader == .changes, focusedPath != nil { focusedPath = stop.path }
                 return stop

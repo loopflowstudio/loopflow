@@ -8,15 +8,7 @@ struct ReviewDiff: Equatable, Sendable {
 
     /// Every change and moved block in reading order, across files.
     var stops: [ReviewStop] {
-        files.flatMap { file in
-            file.blocks.compactMap { block in
-                switch block {
-                case .change(let change): ReviewStop(id: change.id, path: file.path)
-                case .moved(let move): ReviewStop(id: move.id, path: file.path)
-                case .hunk, .context: nil
-                }
-            }
-        }
+        files.flatMap { file in file.stops.map { ReviewStop(id: $0, path: file.path) } }
     }
 
     /// The stop `offset` away from `current`; from nothing, the first or last.
@@ -206,6 +198,9 @@ struct ReviewFile: Equatable, Sendable, Identifiable {
 
     /// The id of the file's first row under its header.
     var topID: String { blocks.first?.id(in: path) ?? "\(path)#empty" }
+
+    /// The ids of the file's changes and moved blocks, in reading order.
+    var stops: [String] { blocks.filter(\.isStop).map { $0.id(in: path) } }
 
     /// Every line the patch shows for this file, context included.
     var lines: [ReviewLine] { Self.lines(blocks) }

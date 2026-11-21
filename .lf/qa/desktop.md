@@ -133,10 +133,10 @@ These steps work with the screen locked, using that bundle ID in `LF_DESKTOP`:
   Count `claude --name <title>` processes to check that no second provider
   started.
 
-On launch, Dev can restore retained workspaces from the Machine's saved layout
-and start `lf session attach` for each. Use a Machine with only disposable
-Sessions if this restoration can attach to personal terminals. Quit Dev when
-the check is done.
+On launch, Dev can restore a selected workspace from the Machine's saved
+layout. Verify that restoration starts zero `lf session attach` relays and
+the first deliberate visit opens only that Session. Use a private Machine
+with disposable Sessions and quit Dev when the check is done.
 
 For a change to the branch server, follow the private setup in
 [served launches](served-launches.md). For mounted app checks, use the

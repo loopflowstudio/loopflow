@@ -150,19 +150,25 @@ actor ServerLocation {
     static let shared = ServerLocation()
     private let query: @Sendable ([String]) async throws -> String
     private var endpoint: Task<String, any Error>?
+    private let preparesServer: Bool
     private var setupError: String?
 
-    init(query: @escaping @Sendable ([String]) async throws -> String = {
-        try await LocalWaveAgentLauncher.queryLf($0, cwd: "/")
-    }) {
+    init(
+        bundledHelper: URL? = Bundle.main.url(forAuxiliaryExecutable: "lf"),
+        privateHome: String? = ProcessInfo.processInfo.environment["LF_HOME"],
+        query: @escaping @Sendable ([String]) async throws -> String = {
+            try await LocalWaveAgentLauncher.queryLf($0, cwd: "/")
+        }
+    ) {
+        preparesServer = bundledHelper != nil || privateHome != nil
         self.query = query
     }
 
     func path() async throws -> String {
         if let endpoint { return try await endpoint.value }
-        // The shared task retains a successful endpoint. A failed initial lookup
-        // retains its diagnosis instead; later lookups only observe status.
-        let prepare = setupError == nil
+        // Keep a successful endpoint. After a failed install, keep its diagnosis
+        // and check status on subsequent attempts.
+        let prepare = preparesServer && setupError == nil
         let previousSetupError = setupError
         let task = Task {
             do {

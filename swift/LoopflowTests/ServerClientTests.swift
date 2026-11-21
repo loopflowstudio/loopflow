@@ -606,7 +606,7 @@ struct ServerClientTests {
         exec "$TEST_LF" "$@"
         """.write(to: installer, atomically: true, encoding: .utf8)
         try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: installer.path)
-        let location = ServerLocation { try await lf.run($0, executable: installer.path) }
+        let location = ServerLocation(privateHome: root.path) { try await lf.run($0, executable: installer.path) }
         let query = ServedRead.planList(directory: root.path, wave: nil, task: nil, all: true)
         do {
             _ = try await ServerClient.read(query, location: location)
@@ -696,8 +696,9 @@ private final class ServerPeer: @unchecked Sendable {
     init() throws {
         let path = "/tmp/lf-peer-\(UUID().uuidString).sock"
         self.path = path
-        location = ServerLocation { _ in
-            String(decoding: try JSONSerialization.data(withJSONObject: ["socket": path, "ready": true]), as: UTF8.self)
+        location = ServerLocation(bundledHelper: nil, privateHome: nil) { args in
+            #expect(args == ["server", "status"])
+            return String(decoding: try JSONSerialization.data(withJSONObject: ["socket": path, "ready": true]), as: UTF8.self)
         }
         listener = socket(AF_UNIX, SOCK_STREAM, 0)
         var address = sockaddr_un()

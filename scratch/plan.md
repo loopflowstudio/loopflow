@@ -56,19 +56,16 @@ repository paths still use bare text.
 - `swift test --package-path swift --filter 'olderPeerKeepsServingCompatibleReadsAndActions|aReadingThisBuildCannotDecodeNamesBothBuilds'` passed. The revision-8 peer refused an unknown write and omitted a required Task page field. The same connection still delivered a Machine identity with an extra field, multiline Session history and a successful Graph customization.
 - `swift test --package-path swift --skip-build --filter 'contentRoutedSessionHistory|aRecordFromAnEarlierRevisionReadsItsReceiptAndNeverResends|bulkAnswersAndOversizeRequestsTravelByTicket'` passed all three checks.
 
+Helper-less Dev now locates the live socket with `lf server status`. A bundled
+helper or explicit private home still prepares its server on first use.
+
+- `swift test --package-path swift --filter olderPeerKeepsServingCompatibleReadsAndActions` passed with the revision-8 fixture accepting only status discovery.
+- `LOOPFLOW_TEST_LF="$HOME/.local/bin/lf" swift test --package-path swift --skip-build --filter failedSetupDoesNotRegisterOnWorkRefresh` passed both private-home recovery cases. The checkout had no built CLI.
+- The installed `lf server status` reported a ready socket. The mounted check remains at QA.
+
 ## Remaining implementation
 
-1. **Next — make Dev discover the running server with a read.**
-   `ServerLocation` in `swift/LoopflowMac/Services/ServerClient.swift` still
-   starts with `lf install server`. `ensure` in
-   `rust/loopflow-execution/src/installation/server.rs` can replace a ready
-   server if its executable hash differs. Helper-less Dev should use
-   `lf server status` and connect to the ready endpoint through the installed
-   entry. Keep setup for the release bundle and explicitly selected private
-   Machines. Exercise the Dev first connection with a ready older peer and
-   assert that it reads status and does not invoke installation. Keep the
-   mounted live check below.
-2. **Retire sealed copies and migrate CLI coverage.** Remove
+1. **Next — retire sealed copies and migrate CLI coverage.** Remove
    `rust/loopflow/src/world/`, the `lf-world` binary and registration,
    `server/copy.rs`, the sealed-store startup and write refusal,
    `Operation::changes`, CLI `write_refused`, the copy-only
@@ -81,7 +78,7 @@ repository paths still use bare text.
    and a stopped run's failed step. Fold Session/status subscriptions into
    `session_list_subscribe.rs`. Existing transport coverage exercises live
    attachment, so drop the world test that exercised only its stub provider.
-3. **Remove world consumers.** Delete the `world:` entries in
+2. **Remove world consumers.** Delete the `world:` entries in
    `scripts/screenshots.yaml` and the builder in `generate_screenshots.py`.
    Keep empty and mock screenshots and website capture. Remove the cycle
    check's `--world` and use `mock-waves` for `--sheet`. Remove
@@ -97,7 +94,7 @@ repository paths still use bare text.
    `LF_DB_PATH` launch setting. Preserve independent private-snapshot
    commands, `RepositoryWorkspace.machine` and Xcode/private-machine helper
    build commands.
-4. **Sweep remaining references and exercise changed automation.** The main
+3. **Sweep remaining references and exercise changed automation.** The main
    Dev and QA docs were updated in `1ba82f64d0`. Check Rust, Swift, scripts,
    tests, CI and current docs again after consumer deletion. Check
    the moved Rust fixtures by name, focused Python automation and Desktop

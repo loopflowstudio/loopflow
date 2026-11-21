@@ -87,8 +87,9 @@ path. If Codex turns out to reject or mis-handle the key, slice 1 finds it and
 the answer is still one rendering, without the line.
 
 **No "has none, because…" variant** — made for review. All five harnesses read a
-directory, the field is required so a new `Launcher` won't compile without it,
-and the conformance test rejects an empty list. A reason variant arrives with the
+directory and the field is required, so a new `Launcher` won't compile without
+it (as built the field is a list and the conformance test rejects an empty one;
+Remaining 1 makes it a single path). A reason variant arrives with the
 first harness that needs one.
 
 **`native_skills` stays `None` for antigravity, opencode and pi** — made for
@@ -203,17 +204,34 @@ Survives: every existing export, marker, collision, prune and symlink test in
 change; in `~/.agents/skills` skill exports are identical and each Graph export
 gains the one line.
 
-## Slices
+## Built
 
-Both slices are built. What is left is gate, then demo and qa on the real binaries.
+- `Capabilities::installed_skills` on all five launchers;
+  `skills::installed_skill_directories` feeds `sync_skills` and the confirmation
+  and refusal text in `run_sync_skills`; `Vendor` is gone;
+  `harness::conformance_tests::every_harness_reads_a_synced_skill`.
+- Docs: `docs/config.md` "Skill and Graph discovery" and the Antigravity
+  sentence, `rust/loopflow/tests/README.md`, `scripts/benchmarks/pi/README.md`.
+  `docs/config.md` names only Claude Code and Pi as honoring
+  `disable-model-invocation`; Codex and Antigravity list the skill, nothing more
+  was checked.
 
-1. **Declaration drives the export** — built. `Capabilities::installed_skills`,
-   `skills::installed_skill_directories`, `Vendor` deleted,
-   `harness::conformance_tests::every_harness_reads_a_synced_skill`.
-2. **Text from the same list** — built. `run_sync_skills` builds its
-   confirmation and refusal from `installed_skill_directories(false)`; the
-   refusal reads "skill sync writes under ~/.claude/skills, ~/.agents/skills and
-   ~/.gemini/config/skills; rerun with --yes to confirm".
+## Remaining
+
+1. **One path per scope, not a list** (implement). Every harness declares
+   exactly one directory per scope, and the plan already says "one directory per
+   scope". `InstalledSkills { global: &'static str, repository: &'static str }`
+   makes an empty declaration unspellable: the `is_empty` assertion and the
+   inner loop in the conformance test go, and so does the inner loop in
+   `installed_skill_directories`. Touches `harness/mod.rs`, the five launcher
+   files, `skills/mod.rs`, `harness/conformance_tests.rs`, and the sentence "a
+   harness that declares nothing fails it" in `rust/loopflow/tests/README.md`
+   (it won't compile instead). Check:
+   `cargo test -p loopflow-execution --lib -- skills::tests every_harness_reads_a_synced_skill`
+   (build needs `LOOPFLOW_MIGRATION_ORDER`, see `questions.md`). A list returns
+   with the first harness that needs two.
+2. Gate, then demo and qa on the real binaries: the interactive confirmation
+   prompt, `/skills reload` in an open agy session.
 
 ## What the real run showed (2026-11-21, branch `lf`, this Machine's home)
 
@@ -236,16 +254,3 @@ Both slices are built. What is left is gate, then demo and qa on the real binari
 - `cargo test -p loopflow-execution --lib -- skills::tests every_harness_reads_a_synced_skill`: 20 passed (implement).
 - `cargo test -p loopflow --test integration documented_commands::`: 4 passed (implement).
 - clippy and the suites: gate and CI.
-
-## Docs written ahead of the code
-
-Slice 2 checks its strings against these; they describe intended behavior.
-
-- `docs/config.md`: "Skill and Graph discovery" (the three-row directory table,
-  reload commands, marker and prune rules, the Graph line) and one sentence
-  under "Antigravity".
-- `rust/loopflow/tests/README.md`: the declaration and the conformance test.
-- `scripts/benchmarks/pi/README.md`: `lf self sync-skills`.
-
-The config text claims only Claude Code and Pi honor
-`disable-model-invocation`; add Codex or Antigravity once slice 1 shows it.

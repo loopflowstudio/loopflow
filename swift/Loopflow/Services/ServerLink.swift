@@ -439,8 +439,7 @@ private final class Expiry: @unchecked Sendable {
 extension ServerLink {
     public func read(_ query: ServedRead, deadline: Duration?) async throws -> ReadOutput {
         let result = try await request(.read(query), deadline: deadline)
-        if case .repoPath = query { return ReadOutput(result.printed, unreadable: unreadable) }
-        return ReadOutput(String(decoding: result.bytes, as: UTF8.self), unreadable: unreadable)
+        return ReadOutput(result, unreadable: unreadable)
     }
 }
 

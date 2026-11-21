@@ -13,7 +13,6 @@ uv run python scripts/benchmarks/desktop-performance/record_live.py record --sec
 uv run python scripts/benchmarks/desktop-performance/record_live.py summarize /tmp/loopflow-live-recording
 
 # Compare native workspace journeys on the same host and build mode.
-cargo build -p loopflow --bin lf
 uv run python scripts/desktop_performance.py run --output /tmp/desktop-baseline
 uv run python scripts/desktop_performance.py run --output /tmp/desktop-after --baseline /tmp/desktop-baseline
 ```

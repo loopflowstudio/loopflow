@@ -58,7 +58,7 @@ DEV_BUNDLE_ID = "com.loopflow.mac.dev"
 DEV_SIGNING_IDENTITY = "Loopflow Dev"
 # The dev app's executable gets its own name so `pgrep -x Loopflow`, Activity
 # Monitor and `ps` address the release app without touching Loopflow Dev.
-DEV_EXECUTABLE = "Loopflow Dev"
+DEV_EXECUTABLE = DEV_APP.stem
 LOGIN_KEYCHAIN = Path.home() / "Library" / "Keychains" / "login.keychain-db"
 ENV_SETUP = REPO_ROOT / "scripts" / "env-setup.sh"
 DEV_LOG_DIR = Path.home() / ".lf" / "logs" / "dev"
@@ -690,13 +690,17 @@ def _install_dev_app() -> None:
         shutil.rmtree(app_dir)
     (app_dir / "Resources").mkdir(parents=True)
 
-    # The dev plist names the executable `Loopflow Dev`, so install against it.
-    shutil.copy(SWIFT_DIR / "LoopflowMac" / "Info.plist", app_dir)
-    _apply_dev_identity(app_dir / "Info.plist")
-    stamp_bundle_version(
-        app_dir / "Info.plist", read_release_version(REPO_ROOT), read_build_revision(REPO_ROOT)
+    plist = app_dir / "Info.plist"
+    info = plistlib.loads((SWIFT_DIR / "LoopflowMac" / "Info.plist").read_bytes())
+    info.update(
+        CFBundleIdentifier=DEV_BUNDLE_ID,
+        CFBundleExecutable=DEV_EXECUTABLE,
+        CFBundleName=DEV_EXECUTABLE,
+        CFBundleDisplayName=DEV_EXECUTABLE,
     )
-    install_app_executable(SWIFT_DIR / ".build" / "debug", app_dir / "Info.plist", app_dir)
+    plist.write_bytes(plistlib.dumps(info))
+    stamp_bundle_version(plist, read_release_version(REPO_ROOT), read_build_revision(REPO_ROOT))
+    install_app_executable(SWIFT_DIR / ".build" / "debug", plist, app_dir)
     shutil.copy(SWIFT_DIR / "LoopflowMac" / "AppIcon.icns", app_dir / "Resources")
 
     run(
@@ -715,14 +719,6 @@ def _install_dev_app() -> None:
         codesign_cmd += ["--entitlements", str(entitlements)]
     codesign_cmd.append(str(DEV_APP))
     run(codesign_cmd)
-
-
-def _apply_dev_identity(plist: Path) -> None:
-    """Give the dev app its own settings domain and process name."""
-    run(["plutil", "-replace", "CFBundleIdentifier", "-string", DEV_BUNDLE_ID, str(plist)])
-    run(["plutil", "-replace", "CFBundleExecutable", "-string", DEV_EXECUTABLE, str(plist)])
-    run(["plutil", "-replace", "CFBundleName", "-string", "Loopflow Dev", str(plist)])
-    run(["plutil", "-replace", "CFBundleDisplayName", "-string", "Loopflow Dev", str(plist)])
 
 
 def _build_lf() -> Path:

@@ -74,6 +74,11 @@ Jack Heart, Task steer 88459687-b71e-4a4f-8638-b4dc2cfe1043:
   needs a live window. Shell syntax was checked. Sheet appearance and cycle
   output await mounted QA.
 
+- Compression checks passed: 51 Swift server, registry and creation tests,
+  the repository-move test, four Dev launcher and screenshot tests, and all
+  five headless cases in `desktop_performance.py verify-fixture`. Mounted
+  checks remain with QA.
+
 ## Next for QA
 
 Follow `.lf/qa/desktop.md`. The shared `~/Applications/Loopflow Dev.app` is

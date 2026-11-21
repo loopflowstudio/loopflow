@@ -1093,7 +1093,6 @@ def _native_command(
     environment.update(HOME=str(app_home), TMPDIR=str(app_home))
     parameters = {
         "HOME": str(output),
-        "RECEIPTS": str(output),
         # The private benchmark checkout already lies under HOME.
         "REPO": environment.get("LF_DESKTOP_TASK_REPO", str(output)),
         "CODE": str(REPO),

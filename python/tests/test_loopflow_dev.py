@@ -56,7 +56,6 @@ def test_run_opens_the_machine(
     assert ("-W" in args) == debug
 
 
-@pytest.mark.skipif(sys.platform != "darwin", reason="plutil rewrites the bundle plist")
 def test_dev_app_runs_under_its_own_executable_name(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -79,12 +78,8 @@ def test_dev_app_runs_under_its_own_executable_name(
     agents.mkdir(parents=True)
     (agents / "server.plist").touch()
 
-    real_run = loopflow_dev.run
-
     def run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess:
         assert "cargo" not in command
-        if command[0] == "plutil":
-            return real_run(command, **kwargs)
         return subprocess.CompletedProcess(command, 0)
 
     monkeypatch.setattr(loopflow_dev, "SWIFT_DIR", swift)

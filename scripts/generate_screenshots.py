@@ -128,7 +128,7 @@ def capture(shot: WaveProofShot) -> Path:
     output = OUTPUT_DIR / f"{shot.name}.png"
     output.parent.mkdir(parents=True, exist_ok=True)
     output.unlink(missing_ok=True)
-    args = [str(APP_EXECUTABLE), "--repo", str(REPO_ROOT), "-ui-test-mode", shot.mode]
+    args = [str(APP_EXECUTABLE), "--repo", str(REPO_ROOT)]
     started = time.monotonic()
     result = subprocess.run(
         args,

@@ -41,9 +41,9 @@ struct ServerClientTests {
         let change = ServedWrite.taskCreate(directory: "/repo", requestID: "creation-one", title: nil,
             request: "A bounded request", wave: nil, graph: nil, session: nil, run: true)
         let payload = try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(change))
-        let result = try await link.request(.submittedCreation(payload)).printed
+        let result = try await link.request(.submittedCreation(payload))
         await link.close()
-        return result
+        return String(decoding: result.bytes, as: UTF8.self)
     }
 
     @Test func admissionBusyWaitsThenCompletesTheWriteOnce() async throws {
@@ -196,7 +196,7 @@ struct ServerClientTests {
             }
             return true
         }
-        #expect(try await ServerClient.read(.repoPath(id: "repo_1"), location: peer.location).text == "/src/again")
+        #expect(try await ServerClient.read(.repoPath(id: "repo_1"), location: peer.location).decode(String.self) == "/src/again")
     }
 
     @Test func disconnectedWatchResumesItsBaselineAndNewestConfirmation() async throws {
@@ -309,7 +309,7 @@ struct ServerClientTests {
             }
             return true
         }
-        #expect(try await ServerClient.read(.repoPath(id: "repo_1"), location: peer.location).text == "/src/after-stall")
+        #expect(try await ServerClient.read(.repoPath(id: "repo_1"), location: peer.location).decode(String.self) == "/src/after-stall")
     }
 
     @Test func delayedBulkReadingKeepsItsPlaceWithoutBlockingOtherRequests() async throws {
@@ -370,7 +370,7 @@ struct ServerClientTests {
             }
             return true
         }
-        #expect(try await ServerClient.read(.repoPath(id: "repo_1"), location: peer.location).text == big)
+        #expect(try await ServerClient.read(.repoPath(id: "repo_1"), location: peer.location).decode(String.self) == big)
         let output = try await ServerClient.configuration(.configTheme(path: "/unused", value: big), location: peer.location)
         #expect(String(decoding: output, as: UTF8.self) == "\(big.utf8.count)")
     }
@@ -571,7 +571,7 @@ struct ServerClientTests {
             #expect(error.localizedDescription == "gone")
         }
         // The connection outlives the subscription.
-        #expect(try await ServerClient.read(.repoPath(id: "repo_1"), location: peer.location).text == "still here")
+        #expect(try await ServerClient.read(.repoPath(id: "repo_1"), location: peer.location).decode(String.self) == "still here")
         await subscription.cancel()
     }
 

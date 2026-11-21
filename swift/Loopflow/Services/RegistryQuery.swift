@@ -5,7 +5,7 @@
 //
 // On macOS the Work subscriptions, `ServedRead` reads and `ServedWrite` writes run
 // through the local server; other commands run the `lf`
-// shipped inside the app.
+// selected for the Machine.
 // Every read decodes shared wire types into app models. There is no HTTP
 // fallback; remote reads use the same CLI with explicit Machine selectors.
 
@@ -728,18 +728,22 @@ struct TaggedFields {
 
 /// The output of one read and, for a server response, the build that supplied it.
 public struct ReadOutput: Sendable {
-    public let text: String
+    private let json: RawJSON
+    public var text: String { String(decoding: json.bytes, as: UTF8.self) }
     private let unreadable: String?
 
-    public init(_ text: String, unreadable: String? = nil) {
-        self.text = text
+    public init(_ text: String) {
+        self.init(RawJSON(Data(text.utf8)))
+    }
+
+    init(_ json: RawJSON, unreadable: String? = nil) {
+        self.json = json
         self.unreadable = unreadable
     }
 
     public func decode<T: Decodable>(_ type: T.Type) throws -> T {
         do {
-            let json = unreadable == nil ? text.trimmingCharacters(in: .whitespacesAndNewlines) : text
-            return try JSONDecoder().decode(type, from: Data(json.utf8))
+            return try json.decode(type)
         } catch {
             if let unreadable, let error = error as? DecodingError {
                 throw RegistryQueryError("\(unreadable) \(error.place)")
@@ -782,11 +786,13 @@ public struct RegistryQuery: Sendable {
         self.serve = serve ?? { query in
             if let input = query.input { return ReadOutput(try await runWithInput(query.argv, query.cwd, input)) }
             let output = try await run(query.argv, query.cwd)
-            // This CLI spelling renders text; the shared read carries a JSON string.
-            if case .sessionHistoryGet = query {
-                return ReadOutput(String(decoding: try JSONEncoder().encode(output), as: UTF8.self))
+            // These CLI commands print bare text. Their served reads return JSON strings.
+            switch query {
+            case .sessionHistoryGet, .repoPath:
+                return ReadOutput(RawJSON(try JSONEncoder().encode(output)))
+            default:
+                return ReadOutput(output)
             }
-            return ReadOutput(output)
         }
         let write = write ?? { change in
             if let input = change.input { return try await runWithInput(change.argv, change.cwd, input) }
@@ -986,7 +992,7 @@ public struct RegistryQuery: Sendable {
     }
 
     public func repositoryPath(id: String) async throws -> String {
-        try await serve(.repoPath(id: id)).text.trimmingCharacters(in: .whitespacesAndNewlines)
+        try await serve(.repoPath(id: id)).decode(String.self).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// Current Waves across the machine. The shared

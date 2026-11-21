@@ -64,15 +64,14 @@ when WindowServer is unavailable.
 
 # Loopflow Dev on the live Machine
 
-With a display, run `uv run python scripts/loopflow-dev.py run` after a visible
-Swift edit. Loopflow Dev opens on the live Machine through the installed server.
-Check that the existing Dev window is idle before replacing it. Address Dev
-explicitly with `LF_DESKTOP=com.loopflow.mac.dev lf desktop state --json`.
+Use a display and an idle Dev window for this check. The launcher replaces
+the shared Loopflow Dev bundle.
 
 1. Record the server instance and executable hash with the installed entry
    (`~/.local/bin/lf server status`) and note the running holders with
    `pgrep -f 'lf holder run'`. Use that same `lf` for the commands below.
-2. Open Dev and check the Swift change over the live backlog.
+2. Make a visible Swift edit, run `uv run python scripts/loopflow-dev.py run`,
+   and check the change over the live backlog.
 3. Create a disposable Task with the installed `lf`. Watch it appear in Dev,
    rename it with `lf task update <id> --title 'Renamed QA Task'`, and check
    the row updates without relaunching. Abandon the Task afterwards.
@@ -83,15 +82,13 @@ explicitly with `LF_DESKTOP=com.loopflow.mac.dev lf desktop state --json`.
 5. Compare the server instance, executable hash and original holder PIDs
    with step 1.
 
-Use only disposable Work for writes and terminal input. If the screen is locked,
-`lf desktop state --json` can still inspect the window's reads, but it cannot
-verify visible rendering or keyboard input. Use headless view tests for those
-checks when a display is unavailable.
+`LF_DESKTOP=com.loopflow.mac.dev lf desktop state --json` inspects Dev's reads
+even with the screen locked. Visible rendering and keyboard input need an
+unlocked display.
 
 For a change to the branch server, follow the private setup in
 [served launches](served-launches.md). For mounted app checks, use the
-packaged app with its signed
-helper or launch a helper-less Dev bundle with explicit `LF_HOME` and `LF_BIN`
+packaged app with its signed helper or launch a Dev bundle with `LF_HOME` and `LF_BIN`
 after clearing inherited `LF_*`. Use the app's bundle ID in `LF_DESKTOP` and
 issue its control commands with that same private home. Stop the private
 server, holders and providers afterwards as described in [resume](resume.md).

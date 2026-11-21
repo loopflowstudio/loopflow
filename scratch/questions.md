@@ -11,11 +11,12 @@
   keeping `run --copy`.
 - **One Dev per Machine, last run wins.** `run` quits the open Dev and
   replaces the bundle. Passed over: a bundle per checkout.
-- **Benchmark fixture.** `desktop_performance.py run / verify-fixture /
-  terminal-feedback` build their one Task and Session by launching the real
-  `lf` against a stand-in `claude` in a private `LF_HOME`. If that needs
-  seeded rows, the three commands and `DesktopNativeSessionFixture` are
-  deleted instead.
+- **Benchmark fixture.** `desktop_performance.py run --snapshot`,
+  `verify-fixture` and `terminal-feedback --mounted` can keep their owned Session if the
+  real `lf` can create and reopen it with a stand-in `claude` in a private
+  `LF_HOME`. If that needs seeded Loopflow rows, remove the dependent
+  scenarios and `DesktopNativeSessionFixture`. The ordinary `run`, snapshot
+  Task opening and headless terminal feedback have independent inputs.
 - **`mock-waves` stays.** It is read as a UI state fixture, not part of the
   fake-world workflow.
 - **`RepositoryWorkspace.machine` stays** while the benchmark launcher opens

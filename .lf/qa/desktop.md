@@ -69,8 +69,9 @@ Swift edit. Loopflow Dev opens on the live Machine through the installed server.
 Check that the existing Dev window is idle before replacing it. Address Dev
 explicitly with `LF_DESKTOP=com.loopflow.mac.dev lf desktop state --json`.
 
-1. Record the server instance and executable hash with `lf server status` and
-   note the running holders with `pgrep -f 'lf holder run'`.
+1. Record the server instance and executable hash with the installed entry
+   (`~/.local/bin/lf server status`) and note the running holders with
+   `pgrep -f 'lf holder run'`. Use that same `lf` for the commands below.
 2. Open Dev and check the Swift change over the live backlog.
 3. Create a disposable Task with the installed `lf`. Watch it appear in Dev,
    rename it with `lf task update <id> --title 'Renamed QA Task'`, and check

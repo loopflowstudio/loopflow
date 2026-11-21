@@ -43,8 +43,10 @@ The copy served lists but could not join a held Session. On the copy at
 revision 8, `lf session resume d566a570… --prepare --json` returned
 “This is a copy of the Machine from 09:32; make changes in Loopflow or with
 lf.” and the same nine holder PIDs remained. The live path attaches through
-the owning server with `session.attach`. The Rust transport test already
-covers input from two views. The mounted Dev workflow is still to be exercised.
+the owning server with `session.attach`. In `rust/loopflow/tests/transport_tests.rs`,
+`every_viewer_starts_with_the_snapshot_and_shares_live_output` exercises replay
+and bidirectional input on one held terminal. The mounted Dev workflow is
+still to be exercised.
 Use a private Machine for branch Rust. There is no replacement for the copy.
 
 The one-shot path now carries the responding build from `ServerLink.swift`
@@ -64,9 +66,10 @@ helper or explicit private home still prepares its server on first use.
 - `LOOPFLOW_TEST_LF="$HOME/.local/bin/lf" swift test --package-path swift --skip-build --filter failedSetupDoesNotRegisterOnWorkRefresh` passed both private-home recovery cases. The checkout had no built CLI.
 - The installed `lf server status` reported a ready socket. The mounted check remains at QA.
 
-The sealed-copy command, server mode, write refusals and storage seal are
-gone. The install and migration paths still use the WAL-aware snapshot.
-The branch's `lf-world --help` lists only build, list and help.
+`a6e084f8bc` removed the sealed-copy command, server mode, write refusals and
+storage seal. The WAL-aware `loopflow-storage/src/copy.rs` snapshot is still
+called by `lf/commands/install.rs` and `migration_runner.rs`. The branch's `lf-world --help`
+lists build, list and help. Desktop automation still calls its builder.
 
 - `cargo test -p loopflow --test integration -- task_list_cli:: session_list_subscribe::`
   passed four tests. The Task reads use a private repository and store with
@@ -87,24 +90,38 @@ The branch's `lf-world --help` lists only build, list and help.
 
 ## Remaining implementation
 
-1. **Next — remove world consumers.** Delete the `world:` entries in
-   `scripts/screenshots.yaml` and the builder in `generate_screenshots.py`.
+1. **Next — resolve the benchmark's Session dependency.** Start with
+   `_prepare_native_fixture` in `scripts/desktop_performance.py`. The current
+   setup discovers Session IDs by querying rows written by the world builder.
+   Try creating the Task and its Session through the branch CLI with a stand-in
+   Claude and private `LF_HOME`. Use `verify-fixture` as the first end-to-end
+   check of discovery, reopen and isolation, then check the retained callers.
+   Remove unconditional fixture setup from ordinary `run`. `_native_command`
+   currently reads the fixture for its sandbox paths, but `measureExperiences`
+   in `swift/LoopflowTests/DesktopPerformanceTests.swift` uses DTO populations
+   and `/bin/cat`. Derive its sandbox paths from those inputs. `run --snapshot`
+   uses the owned fixture in `measureSnapshotTaskOpening` for the Session
+   scenario. If setup requires seeded Loopflow rows, retire the owned Session
+   scenarios and `DesktopNativeSessionFixture`. Keep the snapshot Task-opening
+   scenarios. `terminal-feedback` uses the fixture only under `--mounted`.
+   Keep its headless ANSI input and comparison, snapshot capture, preparation and
+   `write-visible`. Check Python coverage in
+   `python/tests/test_desktop_performance.py`. Mounted benchmark checks remain
+   for QA if a display is unavailable.
+2. **Remove screenshot and cycle-check world inputs.** Delete the `world:`
+   entries in `scripts/screenshots.yaml` and the builder in `generate_screenshots.py`.
    Keep empty and mock screenshots and website capture. Remove the cycle
    check's `--world` and use `mock-waves` for `--sheet`. Remove
    `WaveSurfaceLaunch.world`, `LOOPFLOW_UI_TEST_WORLD`, the unused
    `AppRuntime.isAutomatedTest`, world wording and the `lf-worlds-` cleanup
    prefix and test. Keep mock loading/error states.
-   The benchmark's `run`, `verify-fixture` and `terminal-feedback` still
-   delegate to `lf-world` in `scripts/desktop_performance.py`. Try a private
-   `LF_HOME` with the real branch CLI and a stand-in Claude. Verify the
-   resumable Session through the benchmark's actual entry points. If it
-   requires seeding rows, remove those commands and
-   `DesktopNativeSessionFixture` with their docs. Remove the inert
-   `LF_DB_PATH` launch setting. Preserve independent private-snapshot
-   commands, `RepositoryWorkspace.machine` and Xcode/private-machine helper
-   build commands. Delete `rust/loopflow/src/world/` and the `lf-world`
-   binary registration with their last consumer.
-2. **Sweep remaining references and exercise changed automation.** The main
+   Remove the inert `LF_DB_PATH` setting from
+   `scripts/benchmarks/desktop-performance/launch.py`. Keep
+   `RepositoryWorkspace.machine` and Xcode/private-machine helper build
+   commands. Delete the `lf-world` executable and Cargo registration,
+   `pub mod world` in `rust/loopflow/src/lib.rs` and `rust/loopflow/src/world/`
+   with their last consumer.
+3. **Sweep remaining references and exercise changed automation.** The main
    Dev and QA docs were updated in `1ba82f64d0`. Check Rust, Swift, scripts,
    tests, CI and current docs again after consumer deletion. Check
    the moved Rust fixtures by name, focused Python automation and Desktop
@@ -125,7 +142,7 @@ serve `~/.lf-copy`. Check that the existing Dev is idle before taking over
 the shared path. Any cleanup of that legacy job is a manual step documented
 in the PR. Leave data and running personal Sessions alone.
 
-1. Use the installed `lf server status` to record `instance` and
+1. Use `~/.local/bin/lf server status` to record `instance` and
    `executable_sha256`. Record existing holder PIDs.
 2. Make a temporary visible Swift edit and run
    `uv run python scripts/loopflow-dev.py run`. Check the changed UI over

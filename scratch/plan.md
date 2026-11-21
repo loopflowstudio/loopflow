@@ -49,3 +49,19 @@ an agent.
 `lf : fix the --repo flag` still scans prompt words for flags. Attached short
 values such as `-acodex` and consolidation with the scanners in
 `rust/loopflow/src/lf/navigation.rs` are separate work.
+
+## Concept review of the built change
+
+Reviewed against base `12b66c3e17` on 2026-11-21; nothing to change.
+`FlagValue::separate_value` is the only reading of "this flag's value" in
+`lf.rs`, and it matches Clap. `scratch/concept-review.html` holds the run
+results.
+
+A word written directly after a value-taking flag stays its value even when
+it names a subcommand, as Clap reads it and as the base did. On the branch,
+`lf task --wave create` printed `lf task` usage and exited 2,
+`lf session history --after show id` printed `invalid value 'show' for
+'--after <AFTER>'`, and `lf session --primary list` printed `unexpected
+argument '--primary'` with the tip `'list --primary' exists`. Letting
+subcommand names win was passed over: a Wave named `list` would then need
+`--wave=list`.

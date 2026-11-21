@@ -458,6 +458,7 @@ pub fn start_held(
     if let Some(receipt) = open_receipt() {
         env.insert(OPEN_RECEIPT_ENV.into(), receipt.into());
     }
+    env.remove(std::ffi::OsStr::new(RELAY_FOCUSED_ENV));
     let env = env
         .into_iter()
         .filter_map(|(name, value)| Some((name.into_string().ok()?, value.into_string().ok()?)))
@@ -1383,7 +1384,9 @@ fn relay_with_preview(
 const RELAY_FOCUSED_ENV: &str = "LF_RELAY_FOCUSED";
 
 fn initial_focus(unfocused: bool) -> bool {
-    !unfocused && io::stdin().is_terminal()
+    !unfocused
+        && std::env::var(RELAY_FOCUSED_ENV).as_deref() != Ok("0")
+        && io::stdin().is_terminal()
 }
 
 const RELAY_PREVIEW_ENV: &str = "LF_RELAY_PREVIEW";
@@ -1486,9 +1489,7 @@ pub fn relay(id: &TerminalId, session: Option<&LfSessionId>, json: bool) -> Resu
     } else {
         None
     };
-    let focused = std::env::var(RELAY_FOCUSED_ENV)
-        .map_or_else(|_| io::stdin().is_terminal(), |value| value == "1");
-    let mut input = RelayInput::new(focused);
+    let mut input = RelayInput::new(initial_focus(false));
     std::env::remove_var(RELAY_FOCUSED_ENV);
     attach_with_terminal(id, session, terminal, &mut input)?;
     // A delegated launch that lost to a concurrent opening ends without a

@@ -3385,6 +3385,7 @@ fn a_resumed_relay_keeps_focus_across_server_restarts() {
     let path = fixture.provider(
         r#"#!/bin/bash
 if [ "$1" = --version ]; then echo '2.1.302'; exit; fi
+printf '%s' "${LF_RELAY_FOCUSED+present}" > "$HOME/provider-focus"
 stty raw -echo < /dev/tty
 printf '%s:%s:%s\n' "$$" "$LF_CAPTURE_KEY" "$*" >> "$HOME/launches"
 for marker in blurred typed; do
@@ -3395,13 +3396,17 @@ read -r answer < /dev/tty
 "#,
     );
     let mut launch = fixture.command(&["-a", "claude", "resume"]);
-    launch.env("PATH", &path);
+    launch.env("PATH", &path).env("LF_RELAY_FOCUSED", "0");
     let first = Terminal::spawn_with_placement(launch, Some(true));
     let launched = fixture.launches(1).pop().unwrap();
     let provider: libc::pid_t = launched.split(':').next().unwrap().parse().unwrap();
     let _provider = KillOnDrop(provider);
     let session = session_of(&fixture.sql(), &launched);
     let held = fixture.terminal_of(&session);
+    assert_eq!(
+        std::fs::read(fixture.home.path().join("provider-focus")).unwrap(),
+        b""
+    );
     first.stop();
 
     let wide_view = || fixture.held_attach(&held, json!({"kind":"attach","cols":120,"rows":40}));
@@ -3434,10 +3439,18 @@ read -r answer < /dev/tty
     assert_eq!(owner(120), wide.id);
     piped.stop();
 
+    let mut passive = service.command(&["session", "resume", &session, "--unfocused"]);
+    passive.env("PATH", &path);
+    let mut passive = Terminal::spawn_with_placement(passive, Some(true));
+    passive.wait_text("\x1b[?1004h");
+    assert_eq!(owner(120), wide.id);
+    passive.stop();
+
     let status = ConnectionStatus::new(fixture.home.path().join("connection.sock"));
-    let mut command = service.command(&["session", "resume", &session, "--unfocused"]);
+    let mut command = service.command(&["session", "resume", &session]);
     command
         .env("PATH", &path)
+        .env("LF_RELAY_FOCUSED", "0")
         .env("LF_SERVER", "1")
         .env("LF_SERVER_STATUS", &status.path);
     let mut view = Terminal::spawn_with_placement(command, Some(true));

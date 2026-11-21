@@ -186,7 +186,7 @@ struct WorkCacheTests {
         await spin { store.preparedTaskConversations.count < limit }
         #expect(store.preparedTaskConversations.count == limit)
         #expect(Set(await source.preparedTasks) == Set(expected))
-        #expect(store.sessions.filter { $0.state == .prepared }.allSatisfy { $0.launchArguments == ["lf", "session", "resume", $0.id, "--unfocused"] })
+        #expect(store.sessions.filter { $0.state == .prepared }.allSatisfy { $0.launchArguments == ["lf", "session", "resume", $0.id] })
         model.openWarmConversations()
         #expect(registry.recentTasks.count == SessionsWorkspaceRegistry.warmConversationLimit)
         if closed { #expect(registry.retained(closedKey) == nil) }
@@ -228,7 +228,7 @@ struct WorkCacheTests {
         #expect(await source.preparedTasks == [selected.id])
         #expect(await source.preparedPrimaries.isEmpty)
         #expect(store.sessions.filter { $0.state == .prepared }.map(\.launchArguments) ==
-                [["lf", "session", "resume", "conversation-" + selected.id, "--unfocused"]])
+                [["lf", "session", "resume", "conversation-" + selected.id]])
     }
 
     @Test("A failed load opening shows its failure")
@@ -467,7 +467,7 @@ struct WorkCacheTests {
         let store = registry.sessionStore(repository: repository, repoPath: Self.repo, query: source.query)
         let primaries = ["primary-repository", "primary-wave:wave-1"]
         await spin { store.sessions.filter({ primaries.contains($0.id) && $0.state == .prepared }).count < 2 }
-        #expect(store.sessions.filter { primaries.contains($0.id) }.allSatisfy { $0.state == .prepared && $0.launchArguments == ["lf", "session", "resume", $0.id, "--unfocused"] })
+        #expect(store.sessions.filter { primaries.contains($0.id) }.allSatisfy { $0.state == .prepared && $0.launchArguments == ["lf", "session", "resume", $0.id] })
         for key in [repositoryKey, wave] {
             let workspace = try #require(registry.retained(key))
             #expect(workspace.opensConversationAutomatically)

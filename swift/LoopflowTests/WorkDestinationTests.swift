@@ -118,7 +118,7 @@ struct WorkDestinationTests {
         let item = try #require(store.sessions.first)
         #expect(item.state == .prepared)
         #expect(item.surface != nil)
-        #expect(item.launchArguments == ["lf", "session", "resume", record.id, "--unfocused"])
+        #expect(item.launchArguments == ["lf", "session", "resume", record.id])
         #expect(item.record.action?.label == (occupied ? "Take over" : "Open here"))
     }
 
@@ -554,7 +554,7 @@ struct WorkDestinationTests {
         #expect(model.taskOpening?.status == .opening)
         #expect(store.sessions.first?.state == .prepared)
         #expect(store.sessions.first?.surface?.id == record.id)
-        #expect(store.sessions.first?.launchArguments == ["lf", "session", "resume", record.id, "--unfocused"])
+        #expect(store.sessions.first?.launchArguments == ["lf", "session", "resume", record.id])
         #expect(workspace.multiplexer.focusedPane.sessionId == record.id)
     }
 

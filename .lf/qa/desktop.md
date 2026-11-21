@@ -102,7 +102,8 @@ clearing `LF_*`, and unregister it and delete it afterwards.
 An isolated bundle ID ending in `.dev` gets Dev behavior (terminals wait for
 a visit). With the screen locked, Dev still mounts its window and reads Work,
 so launch-time attaches can be counted: list `pgrep -f 'session attach'`
-children of the app's PID. A Dev pane's relay has `LF_RELAY_FOCUSED=0`;
+children of the app's PID. Session panes start in the background. Check that a
+visited Session opens with the installed CLI as well as the branch CLI.
 Ghostty never reports focus-in while locked. Point it at a private Machine
 with `open -n --env LF_HOME=… --env LF_BIN=… --env PATH=…` (stand-in agents on
 that `PATH`); quit with `osascript -e 'quit app id "<bundle id>"'`, which

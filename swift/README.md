@@ -220,10 +220,10 @@ from its history, and a provider running in a native client lf can't share is ta
 over, ending that client. A pane's button carries Rust's label for which it will do
 (**Reconnect**, **Open here**, **Take over**, **Try again**, **Start conversation**).
 A held terminal takes any number of views and every view types, so a draft typed
-in one shows in the others. Desktop launches Session panes with `--unfocused`.
-This requires an `lf` that accepts the flag. With a holder that honors the
-attach's focus, warm or background panes leave the Session at its current
-size. The view you most recently focused or typed in sets the terminal's size
+in one shows in the others. Desktop opens Session panes with the server’s command and marks them as
+background in the pane environment. Older installed CLIs open the pane as before.
+With a relay and holder that honor initial focus, a background pane leaves the
+Session at its current size. The view you most recently focused or typed in sets the terminal's size
 and colors. Ghostty reports focus when mode 1004 turns on, so a selected pane
 takes the size right away. When it leaves, the next most recent live view takes over.
 Close and eviction discard late opening results.

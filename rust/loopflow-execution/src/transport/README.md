@@ -169,7 +169,8 @@ reports where the conversation moved. A Codex launcher does the same into its cl
 server's lifetime worker checks that client's attachment every two seconds
 and stops it when the conversation moves; a failed store read leaves it
 running, and the byte-handling loop never waits for that read. An OpenCode
-launcher becomes `opencode --standalone` the same way. The server strips `LF_SERVER` and
+launcher becomes `opencode --standalone` the same way. The launcher drops the
+pane’s `LF_RELAY_FOCUSED` before requesting a held terminal. The server strips `LF_SERVER` and
 `LF_SERVER_STATUS` from what the holder starts, so an agent in a Desktop pane
 runs like one opened from a CLI.
 
@@ -493,9 +494,9 @@ override.
 Focus is DEC mode 1004: every terminal relay turns focus reporting on in its own
 terminal (a Desktop pane runs the same relay in a Ghostty surface), keeps its
 view's focus state across reconnects, and sends `focus {focused}`. A relay
-starts focused when stdin is a terminal unless `lf session resume --unfocused`
-was passed; typing also sets it focused. Desktop passes `--unfocused` for every
-pane, selected or warm, and Ghostty reports the pane's current focus when mode
+starts focused on a terminal unless given `--unfocused` or
+`LF_RELAY_FOCUSED=0`. Desktop sets the latter in every Session pane’s
+environment. Ghostty reports the pane's current focus when mode
 1004 turns on, so a selected pane takes the size at once while warm panes leave
 active views alone. A host that reports no focus takes the size on a focused
 attach, or on the first typed byte when attached unfocused. The agent hears

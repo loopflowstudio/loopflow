@@ -21,8 +21,8 @@ A conversation can be open in multiple terminals (and Desktop) at once, and
 every view can type: a draft started in one appears in the others. Size, colors,
 and the agent's focus follow the view you are using: the live view you most
 recently focused or typed in. Running `lf resume` in a terminal takes the size
-right away. Desktop panes, views with piped stdin, and `lf resume --unfocused`
-attach without assuming focus. They take the size when the terminal reports
+right away. Desktop panes start in the background. Views with piped stdin and
+terminals opened with `--unfocused` also attach without assuming focus. They take the size when the terminal reports
 focus, you type, or the current owner leaves and they are next in line.
 Ghostty reports focus on attach if its pane is already focused. A reconnecting
 view uses the last focus it observed. See [Workspaces](workspaces.md) for host

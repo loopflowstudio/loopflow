@@ -1038,15 +1038,7 @@ struct SessionItem: Identifiable, Equatable {
     var presentationProvider: String? { agentOverride ?? record.provider }
 
     var launchArguments: [String] {
-        var argv = record.openArgv
-        let end = argv.firstIndex(of: "--") ?? argv.endIndex
-        let relay = argv[..<end]
-        if let session = relay.firstIndex(of: "session"),
-           let command = relay.dropFirst(session + 1).first,
-           ["attach", "resume", "new"].contains(command), !relay.contains("--unfocused") {
-            argv.insert("--unfocused", at: end)
-        }
-        return argv + (agentOverride.map { ["--agent", $0] } ?? [])
+        record.openArgv + (agentOverride.map { ["--agent", $0] } ?? [])
     }
 
     var surface: SessionRecord? {

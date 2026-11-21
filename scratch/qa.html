@@ -59,13 +59,19 @@ could be symbolized. Two repeats of the same sequence under lldb did not crash. 
 Machine's saved layout. They include other Tasks' conversations. While Dev's pane was attached, the disposable Session ran at Dev's width (120 columns)
 and the 160-column tmux view went stale until it typed. After that, Dev's capture was garbled at the wrong width. Viewing
 personal conversations from a QA Dev can resize them. This is existing Desktop behavior, not this branch's.</li>
-<li>Mounted visuals (the edited UI over the live backlog, a populated Wave's details) were not seen: the screen was locked.
-Everything above comes from <code>lf desktop state/capture/send</code>, process tables and server status.</li>
+<li>Mounted visuals (the edited UI over the live backlog, a populated Wave's details) are still unseen. The first run had a locked screen.
+On the second run (2026-11-20 17:26 local) the screen was unlocked, but someone was typing in Discord and the load average was 14.
+A Swift-only edit (<code>New Task · 9a2459 QA</code>) built and signed into a separate QA bundle in 4.7&nbsp;s, with no Rust step.
+Launched with <code>open -g</code> so it would not take focus, the window stayed off screen on “Opening repository…”. The live server logged
+only a <code>config.theme</code> read and <code>lf desktop state</code> listed no windows: Dev does not open Work until its window is shown.
+Bringing it forward would have taken keystrokes from the person at the keyboard, so the run stopped there. Server instance <code>5f5bc7b3</code>,
+hash <code>aeab8b41</code> and all nine holder PIDs were unchanged. Disposable Task 12e983 was abandoned, and the edit was reverted.
+<img src="qa/dev-hidden-opening.png"></li>
 <li><code>lf desktop capture</code> without <code>--task</code> resolved this checkout's Task and printed an old OpenCode Session of 9a2459.
 That is a footgun, and it's now in the QA notes.</li>
 </ol>
 
 <h2>Left behind</h2>
 <p>Task 467db5 was abandoned (canceled; its Linear writes are queued behind a rate limit). Its worktree and branch were removed.
-The QA bundle was unregistered and deleted, and the tmux server, lldb and QA Dev were stopped. The shared Dev and LOO-515's processes were never touched.</p>
+The QA bundle was unregistered and deleted, and the tmux server, lldb and QA Dev were stopped. The shared Dev and LOO-515's processes were never touched. The second run left nothing behind: its QA bundle was unregistered and deleted, and Task 12e983 was canceled.</p>
 </body></html>

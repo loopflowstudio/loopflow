@@ -82,6 +82,11 @@ the shared Loopflow Dev bundle.
 5. Compare the server instance, executable hash and original holder PIDs
    with step 1.
 
+Dev reads no Work until its window is on screen. With `open -g`, the window
+stays off screen on “Opening repository…”, the server logs only `config.theme`
+and `lf desktop state` lists no windows. A mounted check takes focus, so wait
+until nobody is at the keyboard.
+
 `LF_DESKTOP=com.loopflow.mac.dev lf desktop state --json` inspects Dev's reads
 even with the screen locked. Visible rendering and keyboard input need an
 unlocked display.

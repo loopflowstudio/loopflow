@@ -64,6 +64,7 @@ Jack Heart, Task steer 88459687-b71e-4a4f-8638-b4dc2cfe1043:
   Keep the copy's files and the live Machine's service in place. The code and
   current docs have dropped the sealed-copy and fake-world workflow. The
   WAL-aware snapshot still serves installation and migration.
+- A 2026-11-20 rerun found the screen unlocked but the Machine in use (load 14). Its Dev, launched in the background, stays on “Opening repository…” until shown, so the mounted check still needs an idle display.
 - At mounted QA, use an unlocked, quiet Machine to launch the normal Dev
   command from a visible Swift-only edit and observe the changed UI on the
   live backlog through a disposable Task update. Compare server and holder

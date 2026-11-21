@@ -12,101 +12,67 @@ Jack Heart, Task steer 88459687-b71e-4a4f-8638-b4dc2cfe1043:
 
 > Two explicit design questions to answer and verify. How permissively can a newer Swift Desktop run against the live Machine through the already-installed server, including additive/unrelated wire differences? Exercise an older response with a newer Desktop, retain valid reads and actions, and localize genuinely unsupported features without upgrading the live schema. If evaluating a separate server or clone, prove what using Sessions means: attach a second interactive view to an already-running disposable Session on its owning Machine, see the same terminal output and type into it, detach/reopen while the original survives. Distinguish that from starting an independent new Session or resuming provider history. Explore routing via the existing owner/installed lf and resume --prepare; copied SQLite records do not copy PTYs or holder sockets. Test any retained alternative end-to-end; drop it if it buys nothing. Do not disturb an existing personal conversation.
 
-## Implemented and checked
+## What the runs established
 
-- `scripts/loopflow-dev.py` builds and signs a Swift-only Dev bundle, clears
-  inherited `LF_*` routing and opens with its own app identity.
-  `MacLocalWaveAgentLauncher.swift` uses the account's public
-  `~/.local/bin/lf`. On this Machine it matched the installed app's CLI
-  (`aeab8b41…`), while PATH resolved an older `~/.cargo/bin/lf`
-  (`a527444a…`). LaunchServices had inherited Task and Session routing.
-  `ServerClient.swift` uses `lf server status` from Dev's first lookup.
-  Preparing a server is still available for a bundled helper or private home.
-  The installed entry reported a ready socket. The temporary Dev bundle passed
-  `codesign --verify --deep --strict` and contained only the Swift executable
-  in `Contents/MacOS` and no launch agents. No window was opened.
-- `ServerLink.swift` and `RegistryQuery.swift` carry the responding build and
-  keep typed JSON intact, including the quotes on multiline Session history.
-  The revision-8 test peer returned a Machine identity with an extra field,
-  Session history and a successful Graph customization even after refusing an
-  unknown write and omitting a required Task-page field. The peer fixture
-  also checks that all Dev socket lookups use status. The affected Swift
-  launcher, update, workspace, private-home and receipt checks passed, as did
-  `uv run pytest -q python/tests/test_loopflow_dev.py`.
-- The sealed copy listed Work but could not join a held Session.
-  `lf session resume d566a570… --prepare --json` on the revision-8 copy said
-  “This is a copy of the Machine from 09:32; make changes in Loopflow or with
-  lf.” The same nine holder PIDs remained. The owning server's
-  `session.attach` path has replay and shared input coverage in
-  `every_viewer_starts_with_the_snapshot_and_shares_live_output`
-  (`rust/loopflow/tests/transport_tests.rs`). Dev uses the live owner.
-  An explicit private Machine remains available for branch Rust.
-- `a6e084f8bc` removed the sealed-copy command, server mode, write refusals and
-  storage seal. The WAL-aware snapshot still serves installation and
-  migration. Focused Rust tests passed for that snapshot, CLI backlog and
-  Session lists, Task and Session numbers, Task Graph progress and served
-  configuration edits with an unreadable Work store.
-- `14242e799c` replaced the performance recipe with a Task and Session made
-  by the branch CLI on a private Machine. All five cases passed in
-  `uv run python scripts/desktop_performance.py verify-fixture --lf target/debug/lf`.
-  An empty checkout/config grant had exposed the external canary. The
-  corrected fixture denies it. A closed Session card had a null workspace,
-  while preparation returned the Machine and checkout. The stand-in replied
-  to typed input in a private PTY. Its viewer still displayed its exit
-  message, so reopen waits for closure and releases the viewer. The ordinary
-  benchmark built without a CLI but recorded no timings because preflight
-  measured over 0.1 core of background CPU. Headless terminal feedback
-  generated its ANSI fixture. The three launch benchmark Python tests passed
-  after the retired `LF_DB_PATH` override was removed.
-- `aa9cad208a` removed the five recipe-backed captures, the `lf-world`
-  builder and its remaining consumers. `scripts/screenshots.yaml` keeps six
-  fixture shots (loading, unavailable and empty at 900 and 1440 pixels) and
-  three live website views. The tracked `lf-world` and `.lf-copy` references
-  outside scratch are historical release notes. Four focused Python tests
-  for capture routing, signing and cleanup, five `MockWaveFixtureTests` and
-  `cargo clippy --all-targets -- -D warnings` passed.
-- The mock path returns before the live registry selection finishes.
-  `scripts/check_attributegraph_cycles.sh --sheet` requests the Portfolio
-  window and `WavesView.swift` raises the create sheet from the mounted
-  infrastructure detail. A sheet appearance marker is required, and unified
-  logs are scoped to the test bundle. This covers presentation over the
-  fixture's loading detail. The former populated registry exercise still
-  needs a live window. Shell syntax was checked. Sheet appearance and cycle
-  output await mounted QA.
+- The installed `~/.local/bin/lf` matched the live server's release
+  (`aeab8b41`). The shell resolved an older `~/.cargo/bin/lf` (`a527444a`),
+  and LaunchServices carried Task and Session routing. The Dev launcher
+  clears `LF_*` and the Swift-only bundle uses the installed entry.
+- The revision-8 peer in `swift/LoopflowTests/ServerClientTests.swift` supplied
+  an extra Machine field, multiline Session history and a working Graph
+  customization alongside an unsupported action and a missing required Task
+  field. The compatible operations kept working. The sealed copy listed Work
+  but refused `lf session resume d566a570… --prepare --json` with “This is a
+  copy of the Machine from 09:32; make changes in Loopflow or with lf.” The
+  live owner's socket is where a second viewer can join the held PTY.
+- Live QA used a Swift-only signed bundle under a separate identity because
+  LOO-515 was using the shared Dev bundle. Desktop state reported 22 Working
+  Tasks and reflected a disposable Task's CLI-created tile and rename in
+  place. Both viewers exchanged input on one disposable Session with one
+  provider. After close, `show` said “already shown” and `send` said “no
+  native surface.” `focus -p session` reattached, and the original provider
+  survived. Server instance `5f5bc7b3` and the pre-existing holder PIDs were
+  unchanged. The AttributeGraph sheet appeared and its scoped logs had zero
+  cycle mentions. The locked screen limited the check to Desktop state,
+  captures, input and process inspection. See [QA](qa.html).
+- The implementation following [concept review](concept-review.html)
+  centralized server-start policy in `MachineLf` and removed the obsolete
+  workspace comment. Five focused launcher and server cases passed. The
+  older peer saw only `server status`, the private-home fixture counted one
+  `install server`, and a stopped-server reply produced recovery guidance
+  before the next Dev read connected. A signed probe appeared as
+  `Loopflow Dev` on the live server and exited.
+- The empty fixture decoded again after supplying the required roadmap
+  Tasks field. Adding the repository Task list passed the model test but the
+  narrow screenshot still said “Loading work…”. The mounted view changed the
+  repository reading key after setup. Both empty shots were removed, leaving
+  four loading and unavailable shots in `scripts/screenshots.yaml`.
+  `empty-workspaces` still drives the launch smoke check.
+- All five headless benchmark fixture cases passed with a CLI-created Task
+  and Session on a private Machine. An empty checkout/config sandbox grant
+  had exposed the external canary. The corrected fixture denies it. The
+  closed Session card's workspace was null and preparation supplied the
+  Machine and checkout. The viewer retained its exit message, so reopen
+  waits for closure and releases the viewer.
+  `uv run python scripts/desktop_performance.py verify-fixture --lf target/debug/lf`
+  covers these cases.
 
-- Compression checks passed: 51 Swift server, registry and creation tests,
-  the repository-move test, four Dev launcher and screenshot tests, and all
-  five headless cases in `desktop_performance.py verify-fixture`. Mounted
-  checks remain with QA.
+## Remaining
 
-## QA (2026-11-20, screen locked)
-
-`scratch/qa.html` has the run. Checked on the live Machine with a separate
-QA bundle (the shared Dev was LOO-515's demo): Swift-only build, server
-discovery without installing, live backlog, CLI create and rename updating in
-place, a second view of a running Session sharing output and input with one
-provider, and close then `focus` to reattach. Server instance and holders were unchanged.
-The AttributeGraph sheet check passed. The empty fixture decoded again
-(`WorkFixture.emptyRoadmap`, test added).
-
-## Concept-review pass
-
-- Desktop now selects one Machine lf. Its executable and whether it starts a
-  server travel together. The older peer saw only `server status`, the
-  private-home fixture counted one `install server`, and Dev reported the
-  recovery command for a stopped server before reconnecting on its next read.
-  Five focused launcher and server tests passed, including both private-home
-  setup failures.
-- A temporary signed Dev bundle appeared as `Loopflow Dev` in the installed
-  CLI's `server status` on instance `5f5bc7b3`. The probe exited.
-- Removed the two repository-scoped empty captures. Supplying a Task list
-  through the existing fixture API made the model test pass, but the rendered
-  narrow capture still showed “Loading work…”. The mounted Sessions view
-  confirms a Machine after fixture setup, changing the key for repository
-  readings. The manifest retains loading and unavailable at both widths. The
-  launch smoke check still uses empty-workspaces.
-
-Remaining:
-- Mounted visuals and the benchmark need an unlocked, quiet Machine.
-- One unreproduced Dev crash on first entry into a live Session pane.
-- Document manual cleanup of the legacy `.lf-copy` job in the PR.
+- Carry the live QA results and their limits into the PR. Describe voluntary
+  cleanup of the old `~/.lf-copy` launchd job after its current demo is done.
+  Keep the copy's files and the live Machine's service in place. The code and
+  current docs have dropped the sealed-copy and fake-world workflow. The
+  WAL-aware snapshot still serves installation and migration.
+- At mounted QA, use an unlocked, quiet Machine to launch the normal Dev
+  command from a visible Swift-only edit and observe the changed UI on the
+  live backlog through a disposable Task update. Compare server and holder
+  identities before and after. Use a disposable Session for the attach,
+  input and reopen check. QA saw automatic attachments to other Sessions
+  during workspace warmup, and two views at different widths resized the
+  disposable terminal. Use a live Machine with disposable Sessions only for
+  this check. Changes to shared-terminal sizing are outside this
+  Task. The one first-entry crash was caught by Breakpad, lost before
+  symbolication and did not recur in two attempts under lldb.
+- Run the mounted benchmark on the quiet Machine. The previous preflight
+  found more than 0.1 core of background CPU and recorded no timings.

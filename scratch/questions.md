@@ -15,10 +15,10 @@
   opening and reopen checks. Terminal feedback only needs its ANSI file and
   `/bin/cat`, including when mounted.
 - **`mock-waves` stays.** It is read as a UI state fixture, not part of the
-  fake-world workflow. Keep its loading/error captures and the empty captures.
-  Drop the five recipe-backed images without building replacement fixtures
-  for portfolio or density. Use the existing mock Wave for the sheet check
-  and keep the separate live website capture.
+  fake-world workflow. Keep its loading and unavailable captures. The two
+  repository-scoped empty captures still showed loading after the fixture
+  repair, so they were removed. Use the existing mock Wave for the sheet
+  check and keep the separate live website capture.
 - **`RepositoryWorkspace.machine` stays** while the benchmark launcher opens
   the app on private homes.
 - **Legacy launchd job.** Leave the existing copy's job registered. Document

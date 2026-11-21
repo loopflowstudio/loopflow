@@ -1153,10 +1153,7 @@ pub(super) fn mutate(
             connection.message.is_none(),
             "prepared Sessions do not accept a message"
         );
-        let mut session = prepared(cli, directory)?;
-        if connection.unfocused && !session.open_argv.is_empty() {
-            session.open_argv.push("--unfocused".into());
-        }
+        let session = prepared(cli, directory)?;
         if connection.json || cli.json {
             writeln!(io.output, "{}", serde_json::to_string_pretty(&session)?)?;
         } else {

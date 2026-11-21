@@ -1598,14 +1598,8 @@ fn run() -> anyhow::Result<()> {
         journal::mark_effect_free_read();
         ctrlc::set_handler(|| loopflow_execution::agent::exit_on_interrupt())
             .expect("failed to set Ctrl+C handler");
-        match args {
-            [sep, argv @ ..] if sep == "--" => {
-                return loopflow_execution::transport::relay_over(argv, false);
-            }
-            [flag, sep, argv @ ..] if flag == "--unfocused" && sep == "--" => {
-                return loopflow_execution::transport::relay_over(argv, true);
-            }
-            _ => {}
+        if args.first().is_some_and(|arg| arg == "--") {
+            return loopflow_execution::transport::relay_over(&args[1..], false);
         }
         let relay = loopflow_execution::transport::relay_args(args).ok_or_else(|| {
             anyhow::anyhow!("lf session attach names `--terminal TERMINAL_ID`; got {args:?}")

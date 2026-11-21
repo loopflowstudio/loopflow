@@ -10,35 +10,12 @@ The brief says “Consider an optional passive / second-class viewer flag”.
 The implementation uses one focus rule for all viewers. See
 [questions.md](questions.md) for the choices made during the work.
 
-## Next: delete the prepared-argv focus route
-
-Desktop marks a background pane with `LF_RELAY_FOCUSED=0` and runs the
-prepared argv as given. Nothing passes `--unfocused` with `--prepare` any
-more, and the route that carried it still writes a flag into argv that an
-installed `lf` from before this change rejects. A prepared command's starting
-focus belongs to whoever runs it: its environment and its TTY.
-
-Delete, in one change:
-
-- `rust/loopflow/src/lf/commands/session.rs` (`mutate`): the push of
-  `--unfocused` onto `open_argv`.
-- `rust/loopflow/src/lf/commands/ssh.rs`: the `unfocused` parameter of
-  `prepared_remotely` and the flag it inserts before `--`; its caller in
-  `write.rs`. The strip from the remote command and the two `relay_over`
-  calls stay: they serve a person running `lf --machine … resume --unfocused`.
-- `rust/loopflow/src/bin/lf.rs`: the `session attach --unfocused --` arm.
-  `relay_over` keeps its argument for `ssh.rs`.
-- `rust/loopflow/tests/machine_commands.rs`: the `background` assertions on
-  `["session", "attach", "--unfocused", "--"]`.
-
-Result: starting focus has three spellings, each with one job. `--unfocused`
-on `lf resume` and `lf session new` for a person, `LF_RELAY_FOCUSED` for a
-host and across the relay's exec, `focused` on the wire. Check with
-`cargo test -p loopflow --test machine_commands` on the prepared-argv test
-and `an_unfocused_view_leaves_the_session_with_the_view_in_use`.
-
 ## Built and checked
 
+- **Prepared commands.** Local and SSH preparation leave initial focus to the
+  launching terminal. Desktop sets `LF_RELAY_FOCUSED=0`. Direct Resume and
+  New still accept `--unfocused`, including through SSH. The prepared-command
+  fixture compares the argv returned with and without the flag.
 - **Held terminals.** Three views on one PTY verified the attach reply,
   ownership, absence of a WINCH on background attach, focus filtering and
   fallback. A second equally inactive view also left the live owner in place.
@@ -102,3 +79,6 @@ shallow checkout. The Swift checks used the existing checkout CLI.
 
 - `cargo test -p loopflow-execution --lib -- launch_mode_tests::reopening_ a_view_sizing_the_terminal_during_the_repaint_nudge a_second_views_terminal_answers` passed all four tests. CI repeats them.
 - `cargo test -p loopflow --test transport_tests -- a_resumed_relay_keeps_focus_across_server_restarts an_unfocused_view_leaves_the_session` passed both tests. CI repeats them.
+
+- `cargo test -p loopflow --test integration machine_commands::remote_session_open_returns_an_owner_pinned_terminal_command -- --exact` passed with identical prepared argv for both focus options. CI repeats it.
+- `cargo test -p loopflow --test transport_tests an_unfocused_view_leaves_the_session_with_the_view_in_use` passed after the argv deletion. CI repeats it.

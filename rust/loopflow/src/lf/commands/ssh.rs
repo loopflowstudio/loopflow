@@ -277,7 +277,7 @@ pub(super) fn run_with_io(
             output(&mut io, &String::from_utf8(bytes)?)?;
             return Ok(());
         }
-        let record = prepared_remotely(record, &target, forward_agent, unfocused)?;
+        let record = prepared_remotely(record, &target, forward_agent)?;
         if connection.json || cli.json {
             output(&mut io, &format!("{}\n", serde_json::to_string(&record)?))?;
         } else {
@@ -376,7 +376,6 @@ pub(super) fn prepared_remotely(
     record: SessionRecord,
     target: &Machine,
     forward_agent: bool,
-    unfocused: bool,
 ) -> anyhow::Result<SessionRecord> {
     let mut record = viewed_remotely(record, target, forward_agent)?;
     if !record.open_argv.is_empty() {
@@ -386,10 +385,8 @@ pub(super) fn prepared_remotely(
                 std::env::current_exe()?.to_string_lossy().into_owned(),
                 "session".into(),
                 "attach".into(),
-            ]
-            .into_iter()
-            .chain(unfocused.then(|| "--unfocused".into()))
-            .chain(["--".into()]),
+                "--".into(),
+            ],
         );
     }
     Ok(record)

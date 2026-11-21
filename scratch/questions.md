@@ -24,8 +24,8 @@
 - **SSH initial focus belongs to the relay running beside the viewer's TTY.**
   Prepared remote panes use a local `lf session attach --` prefix. The
   remote command bridges the protocol, so a flag appended to the remote
-  command does not configure the local relay. Use the local prefix for
-  initial focus and keep the optional field on the wire.
+  command does not configure the local relay. The local relay reads
+  `LF_RELAY_FOCUSED` and sends the optional field on the wire.
 - **`owner` keeps both meanings** (Session owner process, sizing view). The
   rename touches events live holders send and would be its own Task.
 - **A focus report takes effect immediately**, including Ghostty's initial

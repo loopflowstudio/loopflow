@@ -86,6 +86,36 @@ the shared Loopflow Dev bundle.
 even with the screen locked. Visible rendering and keyboard input need an
 unlocked display.
 
+When another Task's Dev is open (`pgrep -fl 'Loopflow Dev'`), `run` would
+quit it and replace the bundle its bundled `lf` server and holder run from.
+Build a second bundle instead: import `scripts/loopflow-dev.py`, set
+`DEV_APP` to `~/Applications/Loopflow Dev QA.app` and `DEV_BUNDLE_ID` to an
+ID ending in `.dev`, then call `cmd_build()` and `_install_dev_app()`.
+LaunchServices won't resolve a bundle ID under `/tmp`, so `lf desktop view`
+fails there with `LSCopyApplicationURLsForBundleIdentifier`. Register with
+`lsregister -f`, open it with `LOOPFLOW_DEV_WAVE_REPO` and `--repo` after
+clearing `LF_*`, and unregister it and delete it afterwards.
+
+These steps work with the screen locked, using that bundle ID in `LF_DESKTOP`:
+
+- `lf desktop view 'task:<id>' --repo <repo>` and `lf desktop enter '<title>'`
+  select a Task. Tiles are addressed by title, and `enter nosuchtile` lists
+  them, which is how to watch a rename arrive.
+- `lf --task <id> desktop capture|send -p session` reads and types into the pane.
+  Without `--task`, these commands address the cwd's Task. From this
+  checkout, that is this Task's own Session pane.
+- `lf --task <id> desktop close -p session` leaves the pane `attachment:
+  failed`. `show` says it's already shown. `focus -p session` reattaches it.
+- For the original view, run `lf resume --task <id> -a claude` in a detached tmux
+  (`tmux -L <name>`). First set the Task's notes to say "reply ready and
+  wait", so the agent does nothing. `tmux send-keys -l` types from that side.
+  Count `claude --name <title>` processes to check that no second provider
+  started.
+
+Dev restores every retained workspace from the Machine's saved layout and
+starts a `lf session attach` child for each (about 20 personal Sessions).
+Quit it once the check is done.
+
 For a change to the branch server, follow the private setup in
 [served launches](served-launches.md). For mounted app checks, use the
 packaged app with its signed helper or launch a Dev bundle with `LF_HOME` and `LF_BIN`

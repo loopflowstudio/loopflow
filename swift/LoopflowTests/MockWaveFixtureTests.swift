@@ -28,7 +28,14 @@ struct MockWaveFixtureTests {
         #expect(byName["cadenza"]?.parentWaveId == "wave-1")  // future-ancestry indentation
     }
 
-    // Empty is the `empty-workspaces` mode and indentation is proven above.
+    @Test("the empty-workspaces fixture decodes as current wire types")
+    @MainActor
+    func emptyWorkspacesDecode() throws {
+        #expect(try WorkFixture.emptyRoadmap().waves.isEmpty)
+        #expect(try WorkFixture.emptyWorkActivity().items.isEmpty)
+    }
+
+    // Indentation is proven above.
     // These cover the detail states the mock surface drives with
     // `LOOPFLOW_UI_TEST_DETAIL_STATE`.
 

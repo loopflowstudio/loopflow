@@ -79,34 +79,18 @@ Jack Heart, Task steer 88459687-b71e-4a4f-8638-b4dc2cfe1043:
   five headless cases in `desktop_performance.py verify-fixture`. Mounted
   checks remain with QA.
 
-## Next for QA
+## QA (2026-11-20, screen locked)
 
-Follow `.lf/qa/desktop.md`. The shared `~/Applications/Loopflow Dev.app` is
-replaced by each run. At packaging, another Task's Dev (PID 35920) was using
-its bundled CLI to serve `~/.lf-copy`, so packaging used a temporary bundle.
-Check the shared app is idle before replacement. Leave existing Machine
-data and personal Sessions alone. Document manual legacy-job cleanup in
-the PR.
+`scratch/qa.html` has the run. Checked on the live Machine with a separate
+QA bundle (the shared Dev was LOO-515's demo): Swift-only build, server
+discovery without installing, live backlog, CLI create and rename updating in
+place, a second view of a running Session sharing output and input with one
+provider, and close then `focus` to reattach. Server instance and holders were unchanged.
+The AttributeGraph sheet check passed. The empty fixture decoded again
+(`WorkFixture.emptyRoadmap`, test added).
 
-1. Record live server instance and executable hash with
-   `~/.local/bin/lf server status` and record existing holder PIDs.
-2. Make a temporary visible Swift edit and run
-   `uv run python scripts/loopflow-dev.py run`. Verify the edited UI over
-   the live backlog and confirm the launcher starts no Cargo build.
-3. Create and rename a disposable Task with the installed CLI. Check the
-   row appears and updates in place without relaunching Dev, then abandon
-   the Task.
-4. Open an already-running disposable Session with `lf resume <session>`
-   and open the same Session in Dev. Verify shared output and a line typed
-   in Dev from the original view. Close and reopen the Dev pane and confirm
-   the original Session survives. Compare server identity and original
-   holder PIDs with step 1.
-5. Render and inspect the six fixture images with
-   `uv run python scripts/generate_screenshots.py`. Run
-   `scripts/check_attributegraph_cycles.sh --sheet` and verify the create
-   sheet appears over the infrastructure Wave without cycles. In live Dev,
-   select a populated Wave and verify that its details render.
-6. Check mounted snapshot timing and Ghostty terminal feedback with the
-   benchmark instructions in `scripts/benchmarks/desktop-performance/README.md`.
-
-Mounted checks require a display. Record any that cannot be observed.
+Remaining:
+- The empty fixture shot shows loading (see questions.md).
+- Mounted visuals and the benchmark need an unlocked, quiet Machine.
+- One unreproduced Dev crash on first entry into a live Session pane.
+- Document manual cleanup of the legacy `.lf-copy` job in the PR.

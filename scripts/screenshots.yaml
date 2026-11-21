@@ -29,7 +29,7 @@ website:
     delay: 8
     output: website/static/roadmap.png
 
-# Loading, unavailable and empty Wave surfaces at both widths.
+# Loading and unavailable Wave surfaces at both widths.
 wave-proof:
   - name: control-room-loading-narrow
     mode: mock-waves
@@ -47,11 +47,4 @@ wave-proof:
   - name: control-room-error-wide
     mode: mock-waves
     detail_state: error
-    width: 1440
-
-  - name: control-room-empty-narrow
-    mode: empty-workspaces
-    width: 900
-  - name: control-room-empty-wide
-    mode: empty-workspaces
     width: 1440

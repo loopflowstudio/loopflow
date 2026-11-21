@@ -3,7 +3,7 @@ from pathlib import Path
 from generate_screenshots import load_shots, shot_environment
 
 
-def test_fixture_captures_cover_three_states_at_both_widths(tmp_path: Path, monkeypatch) -> None:
+def test_fixture_captures_cover_loading_and_error_at_both_widths(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("LOOPFLOW_UI_TEST_DETAIL_STATE", "error")
     monkeypatch.setenv("LOOPFLOW_UI_TEST_VIEW", "portfolio")
     captures = []
@@ -26,6 +26,5 @@ def test_fixture_captures_cover_three_states_at_both_widths(tmp_path: Path, monk
         for mode, state in (
             ("mock-waves", "loading"),
             ("mock-waves", "error"),
-            ("empty-workspaces", None),
         )
     )

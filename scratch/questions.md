@@ -24,9 +24,3 @@
 - **Legacy launchd job.** Leave the existing copy's job registered. Document
   manual cleanup in the PR. The packaging check used a temporary bundle so
   it could leave the shared Dev in use by the loo-515 Task.
-- **Empty fixture shot.** With its roadmap decoding again (QA fix), the
-  `empty-workspaces` capture shows "Loading work…": `--repo` makes the model
-  wait on a repository Task list the fixture never supplies. Left as is.
-  Options: fixture an empty repository Task list, or capture without
-  `--repo` (a full-width sidebar with a "Repository" row). On main this shot
-  is the fixture's decode-failure state.

@@ -21,7 +21,8 @@ holder to start the agent on a PTY and keeps everything else: the terminal
 registry, one libghostty-vt terminal per held terminal, views, viewing
 records, queued input, the child's control requests and exit settlement.
 
-Transport selects a `LaunchKind` before `delegate` carries it out. Launches
+`local_session_kind` answers which `LaunchKind` runs in this process;
+`delegate` starts a held terminal for the rest and relays its view. Launches
 are bare or managed, with [four launch names](../../../../docs/glossary.md#loopflows-words).
 Only a work session goes to a held terminal; every other kind runs in its
 caller's process.
@@ -59,11 +60,12 @@ Task it belongs to. Every launch belonging to a Task counts toward its usage
 and receives its steers. Work sessions and workers report turn
 boundaries to the Machine server; chats and batches read their steers directly.
 
-`delegate` returns either a completed delegation or `Here { kind }`. Direct
+A Session reopened in this process runs as the kind `local_session_kind`
+returns; any other goes to a held terminal through `delegate`. Direct
 launches outside a held terminal or worker step choose between a chat and a
 batch. `--batch` selects a batch. Otherwise `--interactive`, a terminal or no
 prompt selects a chat. Reopening a Session with no message reads its binding
-and primary scope once before `delegate`. Chats reopen as chats, and bound and
+and primary scope once to choose its kind. Chats reopen as chats, and bound and
 primary conversations reopen as work sessions. A Desktop pane or a framed
 `lf --machine` viewer is no terminal a chat can own, so a Session it reopens
 is a work session the holder keeps.

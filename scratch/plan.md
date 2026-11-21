@@ -68,8 +68,7 @@ helper or explicit private home still prepares its server on first use.
 
 `a6e084f8bc` removed the sealed-copy command, server mode, write refusals and
 storage seal. The WAL-aware `loopflow-storage/src/copy.rs` snapshot is still
-called by `lf/commands/install.rs` and `migration_runner.rs`. The branch's `lf-world --help`
-lists build, list and help. Desktop automation still calls its builder.
+called by `lf/commands/install.rs` and `migration_runner.rs`.
 
 - `cargo test -p loopflow --test integration -- task_list_cli:: session_list_subscribe::`
   passed four tests. The Task reads use a private repository and store with
@@ -88,15 +87,18 @@ lists build, list and help. Desktop automation still calls its builder.
   writes with an unreadable Work store.
 - `cargo clippy --all-targets -- -D warnings` passed.
 
-The benchmark now creates its private checkout, Task and primary Session through
-Git and the branch CLI. A stand-in Claude writes one native turn on first launch
-and reads it back on resume. Setup and measurement each own their foreground
-server and holder. Ordinary runs and terminal feedback use DTOs or ANSI and
-`/bin/cat` without preparing a Machine.
+`14242e799c` replaced the benchmark's last recipe in
+`scripts/desktop_performance.py`. Git and the branch CLI create the private
+checkout, Task and primary Session. A stand-in Claude writes one native turn on
+first launch and reads it back on resume. Setup and measurement each own their
+foreground server and holder. Ordinary runs use DTO fixtures. Terminal feedback
+uses an ANSI file and `/bin/cat`. Both run without preparing a Machine.
 
-- `verify-fixture --lf target/debug/lf` passed all five headless tests, including
-  three reopens, copied-client refusal, retained file selection and the external
-  canary. An empty checkout/config grant previously let that canary be read.
+- `uv run python scripts/desktop_performance.py verify-fixture --lf target/debug/lf`
+  passed all five headless tests, including three reopens, refusal to prepare a
+  Session from another Machine's snapshot, retained file selection and the
+  external canary. An empty checkout/config grant previously let that canary be
+  read.
 - Four focused Python checks passed for setup receipts, child teardown, ordinary
   runs and private checkout reads. Headless terminal feedback produced its ANSI
   fixture. Ordinary `run --samples 1` built without a CLI and reached preflight;
@@ -107,27 +109,37 @@ server and holder. Ordinary runs and terminal feedback use DTOs or ANSI and
   message, so the reopen benchmark waits for the Session to close and releases
   the viewer. Mounted snapshot timing and
   Ghostty terminal interaction remain for QA.
+- Removed the launch benchmark's retired `LF_DB_PATH` override.
+  `uv run pytest -q python/tests/test_desktop_launch.py` passed all three
+  headless tests.
 
 ## Remaining implementation
 
-1. **Next — remove screenshot and cycle-check world inputs.** Delete the `world:`
-   entries in `scripts/screenshots.yaml` and the builder in `generate_screenshots.py`.
-   Keep empty and mock screenshots and website capture. Remove the cycle
-   check's `--world` and use `mock-waves` for `--sheet`. Remove
-   `WaveSurfaceLaunch.world`, `LOOPFLOW_UI_TEST_WORLD`, the unused
-   `AppRuntime.isAutomatedTest`, world wording and the `lf-worlds-` cleanup
-   prefix and test. Keep mock loading/error states.
-   Remove the inert `LF_DB_PATH` setting from
-   `scripts/benchmarks/desktop-performance/launch.py`. Keep
-   `RepositoryWorkspace.machine` and Xcode/private-machine helper build
-   commands. Delete the `lf-world` executable and Cargo registration,
-   `pub mod world` in `rust/loopflow/src/lib.rs` and `rust/loopflow/src/world/`
-   with their last consumer.
+1. **Next — remove the last world consumers and the builder in one slice.**
+   Delete the five recipe-backed shots in `scripts/screenshots.yaml` and the
+   builder and recipe inputs in `scripts/generate_screenshots.py`. Keep the
+   loading, error and empty shots at both widths. Website capture and the
+   snapshot benchmark still use `AppTestMode.live` with their own inputs.
+   Remove `--world` from `scripts/check_attributegraph_cycles.sh` and run
+   `--sheet` with `mock-waves`. In `swift/LoopflowMac/Views/WavesView.swift`,
+   `syncRepoStates()` returns immediately after seeding the mock Waves. It
+   currently reaches `raiseCaptureSheetIfRequested()` only after a live read.
+   Wire the trigger to the mock path and verify the sheet actually opens over
+   the selected Wave. A clean cycle log by itself would miss a skipped sheet.
+   Remove `WaveSurfaceLaunch.world`, `LOOPFLOW_UI_TEST_WORLD`, the unused
+   `AppRuntime.isAutomatedTest`, stale world wording and the `lf-worlds-`
+   cleanup prefix and test. Delete the `lf-world` executable and Cargo
+   registration, `pub mod world` and `rust/loopflow/src/world/`.
+   Keep `RepositoryWorkspace.machine` and Xcode/private-Machine helper builds.
 2. **Sweep remaining references and exercise changed automation.** The main
    Dev and QA docs were updated in `1ba82f64d0`. Check Rust, Swift, scripts,
    tests, CI and current docs again after consumer deletion. Check
    the moved Rust fixtures by name, focused Python automation and Desktop
-   tests, and run `cargo clippy --all-targets -- -D warnings` at gate.
+   tests. Check that screenshot manifest inputs match the surviving fixture
+   modes and keep the signed app build covered by
+   `test_loopflow_ui_gate_keeps_mac_test_runners_signed`. Use mounted QA for
+   screenshot output and the cycle check's visible sheet. Run
+   `cargo clippy --all-targets -- -D warnings` at gate.
    `git grep -i 'lf-world\|\.lf-copy'` outside scratch should find only
    historical release notes. Implicit draft copies, `lf clone`, the Preview
    capsule and `WorkFrame.copy` were already retired in #1755.

@@ -49,32 +49,42 @@ settings Loopflow doesn't make. What the tree gives up: skills other tools put
 in `~/.agents/skills` (`find-skills`) stay invisible to agy.
 
 **The declaration lives on `Capabilities`** (`rust/loopflow-execution/src/harness/mod.rs`),
-beside `native_skills`:
+beside `native_skills`. It is a list of paths and nothing else:
 
 ```rust
 pub struct InstalledSkills {
-    pub global: &'static [SkillDirectory],      // relative to the home directory
-    pub repository: &'static [SkillDirectory],  // relative to the repository root
-}
-pub struct SkillDirectory {
-    pub path: &'static str,
-    pub dialect: SkillDialect,
+    pub global: &'static [&'static str],      // relative to the home directory
+    pub repository: &'static [&'static str],  // relative to the repository root
 }
 ```
 
 | Harness | global | repository |
 |---|---|---|
-| claude | `.claude/skills` Claude | `.claude/skills` Claude |
-| codex | `.agents/skills` Codex | `.agents/skills` Codex |
-| antigravity | `.gemini/config/skills` Codex | `.agents/skills` Codex |
-| opencode | `.agents/skills` Codex | `.agents/skills` Codex |
-| pi | `.agents/skills` Codex | `.agents/skills` Codex |
+| claude | `.claude/skills` | `.claude/skills` |
+| codex | `.agents/skills` | `.agents/skills` |
+| antigravity | `.gemini/config/skills` | `.agents/skills` |
+| opencode | `.agents/skills` | `.agents/skills` |
+| pi | `.agents/skills` | `.agents/skills` |
 
-opencode declares only `.agents/skills`: it also reads `.claude/skills`, but
-`.agents` wins on a shared name, so that is the copy it shows.
+It names where Loopflow puts skills for the harness, one directory per scope,
+not every directory the harness reads (opencode also reads `.claude/skills`, pi
+`~/.pi/agent/skills`).
 
-`SkillDialect` replaces the private `Vendor` enum. Its only use is
-`render_graph_skill`, where the Claude dialect adds `disable-model-invocation: true`.
+**One rendering for every directory; a directory has no dialect** — made for
+review. `.agents/skills` is read by codex, pi, opencode and, in a repository,
+Antigravity, so no single harness's dialect describes it. The only thing the
+private `Vendor` enum decides is whether a Graph recipe carries
+`disable-model-invocation: true`, and it leaves the line out of `.agents/skills`.
+pi honors that key (`docs/skills.md:53` in its package), so today pi may pick a
+Graph recipe on its own while Claude may not. Every Graph export now carries the
+line; `Vendor` and the `vendor` argument go, and nothing replaces them. agy
+listed a skill carrying the key (probe above). Skill exports copied from a
+Claude-authored source already carry it into `.agents/skills`
+(`chat_recipes_preserve_native_user_only_controls`). Passed over: a
+`SkillDialect` per directory, which would label `~/.gemini/config/skills` and
+pi's directory "Codex" and need a test that two harnesses agree on a shared
+path. If Codex turns out to reject or mis-handle the key, slice 1 finds it and
+the answer is still one rendering, without the line.
 
 **No "has none, because…" variant** — made for review. All five harnesses read a
 directory, the field is required so a new `Launcher` won't compile without it,
@@ -95,8 +105,8 @@ skills make that possible; it is its own change.
 ## Source of truth
 
 `launcher(kind).capabilities().installed_skills` for each `HarnessKind::ALL`.
-`sync_skills` folds those into a deduplicated, ordered list of
-`(directory, dialect)` for the scope it was asked for (`global` without
+`sync_skills` folds those into a deduplicated, ordered list of directories for
+the scope it was asked for (`global` without
 `options.repo`, `repository` with it). One public function in `skills/mod.rs`
 returns that list; `run_sync_skills` builds its confirmation and refusal text
 from it.
@@ -125,8 +135,14 @@ from it.
   skipped, by `writable_target`, as in the other trees.
 - `~/.gemini/config/skills` is a symlink: nothing is written or pruned through
   it (existing rule in `writable_target` and `prune_targets`).
-- Two harnesses declaring one path with different dialects: the conformance test
-  fails; there is no runtime branch for it.
+- A harness moves its directory in a later version (agy 1.5.14's docs and
+  behavior already disagree about `skills.json`): the declaration changes, the
+  new tree is written, and the old tree stays where it was. Nothing records
+  where an earlier `lf` wrote. The files are marked `loopflow: true` and are
+  removed by hand; no retired-directory list is built for this.
+- A Loopflow skill sharing a name with one of agy's seven builtins overrides it
+  (global discovery ranks above builtins). Slice 1 lists the builtin names and
+  compares.
 - agy drops a skill whose frontmatter `name` differs from its folder or lacks
   `description`. `render_skill` and `render_graph_skill` write `name` as the
   export folder name and always a description; the acceptance test asserts both.
@@ -143,8 +159,13 @@ The second is new. It syncs into a temporary home (builtins: `implement`, Graph
 (a repository sync exports only the repository's own), then for every
 `HarnessKind::ALL` and every directory it declares for that scope asserts: the
 list is not empty; the skill's and the Graph's `<dir>/<name>/SKILL.md` exist;
-frontmatter `name` equals the folder name; `description` is a non-empty string. It also asserts one dialect per path
-across harnesses. Break the Antigravity declaration and it fails.
+frontmatter `name` equals the folder name; `description` is a non-empty string;
+the Graph export carries `disable-model-invocation: true`.
+
+What it catches: a harness that declares nothing, and a rendering a harness
+would drop. What it cannot catch: a wrong path. The export writes wherever the
+declaration says and the test reads the same place, so `.gemini/skills` would
+pass. Only the real binary knows where it reads; that is the run below.
 
 Not runnable in CI (needs the real binaries), for demo and qa:
 
@@ -171,22 +192,29 @@ directories.
 
 ## What goes
 
-- `enum Vendor` in `skills/mod.rs`.
+- `enum Vendor` in `skills/mod.rs`, the `vendor` argument of
+  `render_graph_skill`, and the branch that leaves `disable-model-invocation`
+  out of `.agents/skills`.
 - The literal pair in `sync_skills` and the two literal directory strings in
   `run_sync_skills`.
 
 Survives: every existing export, marker, collision, prune and symlink test in
-`skills::tests`; files already in `~/.claude/skills` and `~/.agents/skills` are
-byte-identical after the change.
+`skills::tests`. Files already in `~/.claude/skills` are byte-identical after the
+change; in `~/.agents/skills` skill exports are identical and each Graph export
+gains the one line.
 
 ## Slices
 
 1. **Declaration drives the export.** Add `InstalledSkills` to `Capabilities`
-   with the table above; `sync_skills` derives its targets; delete `Vendor`.
+   with the table above; `sync_skills` derives its targets; delete `Vendor` and
+   render every Graph export with `disable-model-invocation: true`.
    Write `every_harness_reads_a_synced_skill`. Then run the branch `lf` against
    the real home and `agy -p "/skills"`. This is the slice that could prove the
    plan wrong: it shows whether agy accepts all ~95 real exports (long
    descriptions, Graph recipes with input files beside `SKILL.md`), not just the
-   probe skill. If some are dropped, the fix is in rendering, found here.
+   probe skill. If some are dropped, the fix is in rendering, found here. The same run checks
+that Codex still lists the Graph skills (`code`, `pursue`) from
+`~/.agents/skills` with the new line, and that no export shares a name with an
+agy builtin.
 2. **Text from the same list.** `run_sync_skills` confirmation and refusal,
    `docs/config.md`, the two READMEs.

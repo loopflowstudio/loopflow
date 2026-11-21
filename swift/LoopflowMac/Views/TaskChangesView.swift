@@ -335,9 +335,12 @@ struct TaskChangesView: View {
                 Button(action) { Task { await store.writeTour() } }
             }
             Toggle("Focus on one file", isOn: Binding(get: { store.focusedPath != nil }, set: { _ in toggleFocus() }))
-            Toggle("Side by side", isOn: Binding(get: { store.reviewLayout == .split },
-                                                 set: { store.reviewLayout = $0 ? .split : .unified }))
-                .disabled(width < TaskFilesStore.splitWidth)
+            Picker("Layout", selection: $store.reviewLayout) {
+                ForEach(TaskFilesStore.ReviewLayout.allCases, id: \.self) { layout in
+                    Text(layout.rawValue).tag(layout)
+                        .selectionDisabled(layout == .split && width < TaskFilesStore.splitWidth)
+                }
+            }
         } label: {
             Image(systemName: "ellipsis.circle").font(.system(size: 12)).frame(width: 24, height: 20)
         }
@@ -558,9 +561,11 @@ private struct ChangedFilesSidebar: View {
     @ViewBuilder private func groupRow(_ group: ReviewGroup) -> some View {
         if !group.title.isEmpty {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Text(group.title).font(Typography.strong(11))
-                    .foregroundStyle(group.isTour ? palette.text : palette.textSecondary)
-                    .lineLimit(group.isTour ? 3 : 1).fixedSize(horizontal: false, vertical: true)
+                // A tour's reason reads quieter than the files under it.
+                Text(group.title).font(group.isTour ? Typography.caption(11) : Typography.strong(11))
+                    .foregroundStyle(palette.textSecondary)
+                    .lineLimit(group.isTour ? 2 : 1).truncationMode(.tail)
+                    .help(group.title)
                 Spacer(minLength: 4)
                 if group.id.hasPrefix("path:"), group.title.hasSuffix("/") {
                     Button("Hide") { store.hide("/" + group.title) }.buttonStyle(WorkPlainButtonStyle())

@@ -83,6 +83,23 @@ struct ReviewStream: View {
 
     static let gutterWidth: CGFloat = 36
 
+    /// Where new code dropped lines: how many, and the way to read them.
+    private func removalMark(_ count: Int, change: String) -> some View {
+        Button { store.openedRemovals.insert(change) } label: {
+            HStack(spacing: 6) {
+                Rectangle().fill(palette.failureTone.ink).frame(width: 2, height: 12)
+                Text(count == 1 ? "1 old line · Show" : "\(count) old lines · Show")
+            }
+            .font(Typography.caption(11)).foregroundStyle(palette.failureTone.ink)
+            .padding(.leading, Self.gutterWidth + 6).padding(.vertical, 2)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("Show the lines this change removed")
+        .accessibilityIdentifier("changes-old-lines")
+    }
+
     private func fileHeader(_ file: ReviewFile, headed: Bool) -> some View {
         ReviewFileTitle(store: store, file: file, note: file.oldPath.map { "from \($0)" })
             .padding(.vertical, 7)
@@ -108,6 +125,14 @@ struct ReviewStream: View {
                 if split, file.status != .added {
                     ForEach(Array(change.pairs.enumerated()), id: \.offset) { _, pair in
                         pairRow(pair, file: file, context: false)
+                    }
+                } else if store.reviewLayout == .new, !store.openedRemovals.contains(change.id) {
+                    // New code: the added lines, with a mark where lines went.
+                    let pairs = Array(change.pairs.enumerated())
+                    let removed = change.pairs.count { $0.removed != nil }
+                    if removed > 0 { removalMark(removed, change: change.id) }
+                    ForEach(pairs, id: \.offset) { _, pair in
+                        if let line = pair.added { lineRow(line, segments: pair.addedSegments, file: file) }
                     }
                 } else {
                     // Unified: every removed line, then every added line.
@@ -274,8 +299,19 @@ struct ReviewStream: View {
     }
 
     private func gutter(_ number: Int?, line: ReviewLine?, side: ReviewSelection.Side, path: String) -> some View {
-        ReviewGutter(number: number, selected: line.map { isSelected($0, side: side, path: path) } ?? false) {
+        ReviewGutter(number: number, selected: line.map { isSelected($0, side: side, path: path) } ?? false,
+                     tone: line.flatMap { tone(of: $0, in: path) }) {
             if let number { select(number, side: side, path: path) }
+        }
+    }
+
+    /// Added and removed lines carry their color across the gutter and the
+    /// line; a new file reads as its contents, without the marks of a patch.
+    private func tone(of line: ReviewLine, in path: String) -> ThemeTone? {
+        switch line.kind {
+        case .added: files.first { $0.path == path }?.status == .added ? nil : palette.successTone
+        case .removed: palette.failureTone
+        case .context: nil
         }
     }
 
@@ -287,12 +323,7 @@ struct ReviewStream: View {
 
     private func cell(_ line: ReviewLine, segments: [ReviewSegment]?, side: ReviewSelection.Side, file: ReviewFile) -> some View {
         let path = file.path
-        // A new file reads as its contents, without the marks of a patch.
-        let tone: ThemeTone? = switch line.kind {
-        case .added: file.status == .added ? nil : palette.successTone
-        case .removed: palette.failureTone
-        case .context: nil
-        }
+        let tone = tone(of: line, in: path)
         let selected = isSelected(line, side: side, path: path)
         // A line past the readable length shows its start until asked for the rest.
         let cut = line.cut.flatMap { store.openedLongLines.contains(line.id(in: path)) ? nil : $0 }
@@ -319,7 +350,7 @@ struct ReviewStream: View {
         }
         .padding(.vertical, 1).padding(.trailing, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(selected ? palette.accent.opacity(0.16) : tone?.fill.opacity(0.4) ?? .clear)
+        .background(selected ? palette.accent.opacity(0.16) : tone?.fill ?? .clear)
     }
 
     /// The line in its syntax colors; the changed words of an edited line
@@ -398,6 +429,7 @@ struct ReviewFileTitle: View {
 private struct ReviewGutter: View {
     let number: Int?
     let selected: Bool
+    let tone: ThemeTone?
     let select: () -> Void
     @Environment(\.palette) private var palette
     @State private var hovered = false
@@ -405,11 +437,11 @@ private struct ReviewGutter: View {
     var body: some View {
         Text(number.map(String.init) ?? "")
             .font(Typography.code(11)).monospacedDigit()
-            .foregroundStyle(selected || hovered ? palette.text : palette.textTertiary)
+            .foregroundStyle(selected || hovered ? palette.text : tone?.ink.opacity(0.8) ?? palette.textTertiary)
             .frame(width: ReviewStream.gutterWidth, alignment: .trailing)
             .padding(.trailing, 6)
             .frame(maxHeight: .infinity)
-            .background(hovered && number != nil ? palette.surfaceElement : .clear)
+            .background(hovered && number != nil ? palette.surfaceElement : tone?.fill ?? .clear)
             .contentShape(Rectangle())
             .onHover { hovered = $0 }
             .onTapGesture(perform: select)
@@ -659,8 +691,8 @@ extension TaskFilesStore {
     }
 }
 
-/// Unified or side by side. Side by side needs a wide pane; a narrow one says
-/// so and reads unified.
+/// New code, unified or side by side. Side by side needs a wide pane; a
+/// narrow one says so and reads unified.
 struct ReviewLayoutPicker: View {
     @Bindable var store: TaskFilesStore
     let width: CGFloat
@@ -668,6 +700,8 @@ struct ReviewLayoutPicker: View {
 
     var body: some View {
         HStack(spacing: 0) {
+            segment(.new, symbol: "doc.plaintext", help: "New code: the file as it is now, removed lines folded")
+            Divider().frame(height: 14)
             segment(.unified, symbol: "text.justify.left", help: "Unified")
             Divider().frame(height: 14)
             segment(.split, symbol: "rectangle.split.2x1",
@@ -683,7 +717,7 @@ struct ReviewLayoutPicker: View {
 
     private func segment(_ layout: TaskFilesStore.ReviewLayout, symbol: String, help: String) -> some View {
         // What the stream is actually reading, so a narrow pane shows unified as on.
-        let on = (layout == .split) == store.readsSplit(width: width)
+        let on = layout == store.layout(width: width)
         return Button { store.reviewLayout = layout } label: {
             Image(systemName: symbol).font(.system(size: 11))
                 .foregroundStyle(on ? palette.background : palette.text)

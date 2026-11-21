@@ -865,7 +865,9 @@ final class TaskFilesStore {
     @ObservationIgnored private var entering: (path: String, offset: Int)?
     /// When next/previous last moved, so the change it landed on can pulse once.
     @ObservationIgnored private(set) var steppedAt = Date.distantPast
-    var reviewLayout = ReviewLayout.unified
+    var reviewLayout = ReviewLayout.new
+    /// Changes whose removed lines you opened while reading new code.
+    var openedRemovals: Set<String> = []
     /// One file at a time; next/previous still crosses into the next file.
     var focusedPath: String?
     var expandedMoves: Set<String> = []
@@ -874,11 +876,15 @@ final class TaskFilesStore {
     var briefOffset = CGPoint.zero
     var briefShown: Int?
 
-    enum ReviewLayout: String, CaseIterable { case unified = "Unified", split = "Side by side" }
+    /// New code reads the file as it is now: added lines marked, removed
+    /// lines folded to a mark that opens them.
+    enum ReviewLayout: String, CaseIterable { case new = "New code", unified = "Unified", split = "Side by side" }
 
     /// Side by side needs a wide pane; a narrower one reads unified.
     static let splitWidth: CGFloat = 640
     func readsSplit(width: CGFloat) -> Bool { reviewLayout == .split && width >= Self.splitWidth }
+    /// The layout the stream reads in at this width.
+    func layout(width: CGFloat) -> ReviewLayout { reviewLayout == .split && !readsSplit(width: width) ? .unified : reviewLayout }
 
     /// Read the comparison file by file. `lf task changes` names every
     /// changed file at once; each shown file's lines are then read on their

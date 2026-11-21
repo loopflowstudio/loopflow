@@ -1,0 +1,47 @@
+at: da74ea2570d87e75813a0ae1cdc4793e6b3ce21d
+first:
+  - path: swift/README.md
+    why: What the pane does now
+  - path: swift/LoopflowMac/Views/WorkspacePanesView.swift
+    why: Where the pane sits
+  - path: swift/LoopflowMac/DesktopActions.swift
+  - path: swift/LoopflowMac/Views/TaskPullRequestView.swift
+  - path: swift/LoopflowMac/ReviewDiff.swift
+    why: The Diff's model and comments
+  - path: swift/LoopflowMac/ReviewOrder.swift
+    why: Reading order
+  - path: rust/loopflow-execution/src/config/catalog.rs
+    why: diff_hidden and diff_groups settings
+  - path: rust/loopflow-execution/src/config/settings.rs
+  - path: .lf/config.yaml
+  - path: swift/LoopflowMac/TaskFileDocument.swift
+    why: The store behind the pane
+  - path: swift/LoopflowMac/Views/TaskChangesView.swift
+    why: The Diff page
+  - path: swift/LoopflowMac/Views/ReviewStreamView.swift
+  - path: swift/LoopflowMac/SyntaxColors.swift
+  - path: swift/LoopflowMac/Views/TaskFilesView.swift
+    why: Files
+  - path: swift/LoopflowMac/CheckoutTree.swift
+  - path: rust/loopflow/src/lf/commands/read.rs
+  - path: swift/LoopflowMac/Views/TaskBriefView.swift
+    why: Brief
+  - path: rust/loopflow-definitions/src/builtins/task/skill/
+    why: The tour skill
+  - path: rust/loopflow-execution/src/config/files.rs
+    why: Private settings move to .lf/config.local.yaml
+hide:
+  - path: tests/goldens/
+    why: Regenerated skill prompts
+  - path: tests/fixtures/dto/server_schema.json
+    why: Regenerated from the Rust read types
+  - path: rust/loopflow-execution/src/ops/task/directory.rs
+    why: Adds JsonSchema derives, nothing else
+  - path: rust/loopflow-execution/src/engine/config.rs
+    why: Path literal renamed
+  - path: rust/loopflow/tests/machine_commands.rs
+    why: Path literal renamed
+  - path: rust/loopflow/src/lf/mod.rs
+    why: Help text names the new path
+  - path: .lf/qa/
+    why: Path literal renamed

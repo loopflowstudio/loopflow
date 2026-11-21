@@ -135,7 +135,7 @@ snapshots, a lock file. Never hide something a reviewer should judge.
 at: <the full commit `git rev-parse HEAD` printed when you read the diff>
 first:
   - path: <file, or folder ending in />
-    why: <one line on what it holds, for the reader>
+    why: <what it holds, in under ten words>
 hide:
   - path: <file or folder>
     why: <why it is safe to skip>

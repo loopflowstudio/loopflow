@@ -18,6 +18,10 @@ Each run quits the previous **Loopflow Dev** and opens this checkout's build.
 The running server and Sessions keep going. Use `run-debug` to see app
 logs as it runs.
 
+Dev waits until you visit a Task, Wave, or repository to open its terminals.
+On launch, even the restored selection shows a placeholder. Opening Dev beside
+release Desktop leaves the running Session at its current size.
+
 If the branch needs server features that your installation lacks, the affected
 read or action reports the mismatch. The rest of the window keeps working
 when both builds can connect. Test branch changes to `lf` on a
@@ -175,12 +179,12 @@ Desktop quits. Reopening a known repository shows retained content immediately,
 even while repository resolution waits or fails. Errors remain visible; new Task
 links wait for resolution before delivery. Unknown repositories need an initial lookup.
 
-Every conversation a window can select opens on load, before any selection and
-with no saved recent visits: the repository's, each Wave's and every claimed
-working Task's (idle, active or moving). Selecting any of them shows opening, the
-live conversation, or a failure with **Retry**; never a **No session** or **Open** gate. Load opens the
-selected Work first, then visible tiles, then the repository and Waves, then
-recent working Tasks, two preparations at a time; initial rendering does not wait.
+Release Desktop opens conversations on load for the repository, each Wave, and
+every claimed working Task (idle, active or moving), even on a first visit.
+Selecting one shows its opening progress, the live conversation, or a failure
+with **Retry**. Desktop prepares two conversations at a time, starting with the
+selected Work, then visible tiles, the repository and Waves, and recent working
+Tasks. The window renders while they open.
 A prepared conversation starts its provider at once, before any pane shows it;
 selecting the Work shows the running terminal. One **Opening… Input paused**
 reading remains through preparation, attachment and native input readiness. The
@@ -213,9 +217,12 @@ Every opening is `lf resume`: a held terminal gains a view, an ended Session res
 from its history, and a provider running in a native client lf can't share is taken
 over, ending that client. A pane's button carries Rust's label for which it will do
 (**Reconnect**, **Open here**, **Take over**, **Try again**, **Start conversation**).
-A held terminal takes any number of views and every view types, so a draft typed
-in one shows in the others. The view that most recently attached, typed or gained
-focus sets the terminal's size; when it leaves, the next most recent live view does.
+Every view of a held terminal can type into the same draft. Desktop runs the
+server’s command with `LF_RELAY_FOCUSED=0` in the pane environment. Older CLIs
+can run the same command. With a relay and holder that support initial focus,
+a background pane leaves the terminal’s size and colors alone. Typing in a pane
+takes ownership, as does focusing it before the first key. When the owner
+closes, the most recently used live view takes over.
 Close and eviction discard late opening results.
 
 Finite CLI requests time out after 30 seconds. Canceling preparation ends only

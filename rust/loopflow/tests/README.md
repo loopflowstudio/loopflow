@@ -1072,7 +1072,7 @@ cargo test -p loopflow --test served_reads
 cargo test -p loopflow --test transport_tests server_status_does_not_install_or_create_work
 cargo test -p loopflow --test transport_tests server_registration_migrates_old_job_and_respects_disabled_choice -- --ignored
 cargo test -p loopflow --test transport_tests held_session_survives_server_restart
-cargo test -p loopflow --test transport_tests a_held_pane_reads_reconnecting_until_the_next_server_answers
+cargo test -p loopflow --test transport_tests a_resumed_relay_keeps_focus_across_server_restarts
 cargo test -p loopflow --test transport_tests ownership_queues_behind_a_taker_and_tells_the_loser_who_took_it
 ```
 

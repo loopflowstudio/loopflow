@@ -221,7 +221,7 @@ fn snapshot_preview_fixture() {
             ));
         }
     });
-    attach_with_terminal(&terminal, None, preview).unwrap();
+    attach_with_terminal(&terminal, None, preview, &mut super::RelayInput::new(true)).unwrap();
     peer.join().unwrap();
     std::fs::write(
         viewer_cwd,

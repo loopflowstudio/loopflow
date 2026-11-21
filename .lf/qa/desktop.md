@@ -94,16 +94,34 @@ To build the isolated bundle, import `scripts/loopflow-dev.py`, set
 `DEV_APP` to `~/Applications/Loopflow Dev QA.app`, `DEV_EXECUTABLE` to
 `DEV_APP.stem` and `DEV_BUNDLE_ID` to a unique ID ending in `.dev`. Run
 `cmd_build()` and, if it succeeds, `_install_dev_app()`.
+Run that script with `uv run python` from the checkout: the module imports
+`boto3`, which only the project environment has.
 LaunchServices won't resolve a bundle ID under `/tmp`, so `lf desktop view`
 fails there with `LSCopyApplicationURLsForBundleIdentifier`. Register with
 `lsregister -f`, open it with `LOOPFLOW_DEV_WAVE_REPO` and `--repo` after
 clearing `LF_*`, and unregister it and delete it afterwards.
 
+An isolated bundle ID ending in `.dev` gets Dev behavior (terminals wait for
+a visit). With the screen locked, Dev still mounts its window and reads Work,
+so launch-time attaches can be counted: list `pgrep -f 'session attach'`
+children of the app's PID. Session panes start in the background. Check that a
+visited Session opens with the installed CLI as well as the branch CLI.
+Ghostty never reports focus-in while locked. To check a pane opened by the installed CLI,
+make a fresh private Machine whose `bin/lf` is a copy of
+`readlink -f ~/.local/bin/lf` and start its `lf server run` from that copy; a
+branch-built home may be past the installed CLI's schema. Point it at a private Machine
+with `open -n --env LF_HOME=… --env LF_BIN=… --env PATH=…` (stand-in agents on
+that `PATH`); quit with `osascript -e 'quit app id "<bundle id>"'`, which
+reopens the last selected Task on the next launch.
+
 These steps work with the screen locked, using that bundle ID in `LF_DESKTOP`:
 
 - `lf desktop view 'task:<id>' --repo <repo>` and `lf desktop enter '<title>'`
   select a Task. Tiles are addressed by title, and `enter nosuchtile` lists
-  them, which is how to watch a rename arrive.
+  them, which is how to watch a rename arrive. `enter` needs a window showing
+  tiles; from a Task page, `lf desktop back` until it prints `repository`.
+- `lf --task <id> desktop focus -p session` is a deliberate visit: on a
+  restored selection it starts that one Session's relay.
 - `lf --task <id> desktop capture|send -p session` reads and types into the pane.
   Without `--task`, these commands address the cwd's Task. From this
   checkout, that is this Task's own Session pane.
@@ -115,10 +133,10 @@ These steps work with the screen locked, using that bundle ID in `LF_DESKTOP`:
   Count `claude --name <title>` processes to check that no second provider
   started.
 
-On launch, Dev can restore retained workspaces from the Machine's saved layout
-and start `lf session attach` for each. Use a Machine with only disposable
-Sessions if this restoration can attach to personal terminals. Quit Dev when
-the check is done.
+On launch, Dev can restore a selected workspace from the Machine's saved
+layout. Verify that restoration starts zero `lf session attach` relays and
+the first deliberate visit opens only that Session. Use a private Machine
+with disposable Sessions and quit Dev when the check is done.
 
 For a change to the branch server, follow the private setup in
 [served launches](served-launches.md). For mounted app checks, use the

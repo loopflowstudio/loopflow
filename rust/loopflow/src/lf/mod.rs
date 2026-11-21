@@ -1617,6 +1617,9 @@ pub enum GraphCommand {
 /// Shared selection, preparation and next-turn options for `resume` and `session new`.
 #[derive(Args, Debug)]
 pub struct SessionConnectionArgs {
+    /// Attach without taking the terminal size until focus or input
+    #[arg(long)]
+    pub unfocused: bool,
     #[arg(long, conflicts_with = "wave")]
     pub task: Option<String>,
     #[arg(long)]

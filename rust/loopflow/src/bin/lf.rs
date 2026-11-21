@@ -1591,19 +1591,20 @@ fn run() -> anyhow::Result<()> {
     // The relay avoids the command tree.
     let mut raw_args: Vec<String> = std::env::args().collect();
     if raw_args
-        .get(1..4)
-        .is_some_and(|args| args == ["session", "attach", "--"])
+        .get(1..3)
+        .is_some_and(|args| args == ["session", "attach"])
     {
+        let args = &raw_args[3..];
         journal::mark_effect_free_read();
         ctrlc::set_handler(|| loopflow_execution::agent::exit_on_interrupt())
             .expect("failed to set Ctrl+C handler");
-        return loopflow_execution::transport::relay_over(&raw_args[4..]);
-    }
-    if let Some(relay) = loopflow_execution::transport::relay_args(&raw_args) {
-        journal::mark_effect_free_read();
+        if args.first().is_some_and(|arg| arg == "--") {
+            return loopflow_execution::transport::relay_over(&args[1..], false);
+        }
+        let relay = loopflow_execution::transport::relay_args(args).ok_or_else(|| {
+            anyhow::anyhow!("lf session attach names `--terminal TERMINAL_ID`; got {args:?}")
+        })?;
         journal::continue_after_exec()?;
-        ctrlc::set_handler(|| loopflow_execution::agent::exit_on_interrupt())
-            .expect("failed to set Ctrl+C handler");
         loopflow_execution::transport::relay(
             &relay.terminal,
             relay.session.as_ref(),
@@ -1614,16 +1615,6 @@ fn run() -> anyhow::Result<()> {
             loopflow::lf::commands::session::print_returned(&session)?;
         }
         return Ok(());
-    }
-    // Clap has no `session attach`: a relay that names no valid host stops here.
-    if raw_args
-        .get(1..3)
-        .is_some_and(|args| args == ["session", "attach"])
-    {
-        anyhow::bail!(
-            "lf session attach names `--terminal TERMINAL_ID`; got {:?}",
-            &raw_args[3..]
-        );
     }
     if !raw_args
         .iter()

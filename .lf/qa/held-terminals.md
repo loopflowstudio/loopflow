@@ -56,3 +56,37 @@ recovery retains the same held terminal. Use the existing heartbeat checks for
 quiet providers and a lost return path. Desktop status travels over its private
 `LF_SERVER_STATUS` Unix stream; inspect readings and actions there, never files.
 Mounted presentation still needs a display-capable check.
+
+# Sizing ownership between views
+
+A Python stand-in `claude` that logs `TIOCGWINSZ` on every SIGWINCH and every
+input read from `/dev/tty` (raw mode, `ESC[?1004h` to ask for focus reports)
+shows what the agent sees: size changes, focus reports and which terminal's
+color answer reached it. Log with `os.write` on an `O_APPEND` descriptor and
+tag each line with the PID: a SIGWINCH handler that writes to a buffered file
+the main loop is also writing crashes the stand-in with a reentrant-call
+error, the Session closes and recovery relaunches it. Every Task
+conversation killed this way is restarted by the next server's recovery pass,
+so the log fills with other stand-ins' lines.
+
+Drive views from Python `pty.fork()` with `TIOCSWINSZ` widths, writing
+`ESC[I`/`ESC[O` for focus and answering `ESC[5n`, `ESC[6n` and `OSC 11 ;?`
+with a per-view color. Start one view with `lf resume <id>` and another
+at a different width with `lf resume <id> --unfocused`. Check the stand-in's
+size log on attach, focus, typing and departure. A server restart nudges every held terminal
+(one column narrower for 0.4 s), viewed or not; a view's focus change while
+the server is down reaches the new server once the relay reconnects.
+
+# Views over SSH
+
+mini-heart (Tailscale) takes key-only SSH. Copy the branch `lf` and the
+stand-in to a `/tmp` directory there with an env file that sets `HOME`,
+`LF_HOME`, `LF_BIN` and `PATH` to it; start `lf server run` with `nohup`.
+The host's own `~/.local/bin/lf` and `~/.lf` are the real install: never
+replace them. Locally, give a private home an `ssh` wrapper on `PATH` that
+execs `/usr/bin/ssh -F ~/.ssh/config` (with the real `known_hosts` and key)
+and prefixes the last argument, lf's remote command, with `. <remote env>;`.
+`lf machine add <host>` then records the private remote Machine. A
+remote-TTY view is `ssh -tt <host> '<env>; lf resume --task <id>'`; read the
+stand-in's log over SSH. Stop the remote server by `lsof -t` on its store,
+then its `lf holder run`, and delete the directory: that disk is nearly full.

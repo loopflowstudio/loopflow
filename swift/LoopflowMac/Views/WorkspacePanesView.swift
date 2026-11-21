@@ -505,6 +505,7 @@ struct SessionPaneView: View {
                 stripButton("arrow.clockwise", label: "Refresh session", id: "pane-refresh-session",
                     help: "Reconnect this pane to the existing conversation.",
                     disabled: changingSession) {
+                    workspace.visit()
                     changingSession = true
                     Perf.userAction(.reconnect, scenario: "refresh_to_typing", id: item.id,
                                     repository: sessions.repoPath, liveSessions: sessions.sessions.count,
@@ -651,6 +652,7 @@ struct SessionPaneView: View {
     }
 
     private func changeSession(_ session: SessionItem, agent: String?) {
+        workspace.visit()
         changingSession = true
         let notices = model.navigation.notices
         Task { @MainActor in
@@ -773,6 +775,13 @@ struct SessionPaneView: View {
     @ViewBuilder
     private var content: some View {
         switch pane.content {
+        case .session where !workspace.canOpenTerminals:
+            ConversationPlaceholder(workspace: workspace, model: model, sessions: sessions)
+        case .shell where !workspace.canOpenTerminals && pane.content.selectedShell != nil:
+            Button("Open shell") {
+                focusPane()
+                workspace.visit()
+            }
         case .session:
             if let item {
                 if let surface = item.surface {

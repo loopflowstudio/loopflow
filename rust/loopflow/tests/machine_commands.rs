@@ -240,6 +240,7 @@ fn remote_session_open_returns_an_owner_pinned_terminal_command() {
         "session",
         "resume",
         &id,
+        "--unfocused",
         "--prepare",
         "--json",
     ]);

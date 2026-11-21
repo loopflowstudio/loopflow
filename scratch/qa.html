@@ -87,20 +87,69 @@ agent received them because Dev was the only view.</td></tr>
 <li><code>cargo clippy -p loopflow-execution --all-targets -- -D warnings</code>: clean.</li>
 </ul>
 
+
+<h2>5 · Re-run at HEAD 9d15d5272 (after compress and the installed-CLI change)</h2>
+<p>Branch <code>lf</code> rebuilt at HEAD on the same private Machine; log lines filtered to the Session's own stand-in PID
+(recovery restarts the other QA Sessions, whose lines share the log). E is a relay started with
+<code>LF_RELAY_FOCUSED=0</code> in its environment, which is how Desktop now marks a background pane.</p>
+<pre>
+## A starts the Session focused at 80       START 80x30
+## A types a                                IN b'a' 80x30
+## B attaches --unfocused at 120            (agent saw nothing)
+## B resizes to 130 while unfocused         (agent saw nothing)
+## B (not in use) sends focus-out           (agent saw nothing)
+## E attaches with LF_RELAY_FOCUSED=0 at 140 (agent saw nothing)
+## E closes                                 (agent saw nothing)
+## C attaches, ordinary TTY, at 100         WINCH 100x30
+## C closes                                 WINCH 80x30
+## B gains focus                            WINCH 130x30 | IN ESC[I 130x30
+## A types b                                WINCH 80x30 | IN b'b' 80x30
+## B focus-out while A in use               (agent saw nothing)
+## B types x                                WINCH 130x30 | IN b'x' 130x30
+## A focus-out while B in use               (agent saw nothing)
+## A types q (A answers red)                WINCH 80x30 | IN q | IN OSC 11 rgb:aaaa/0000/0000
+## B types q (B answers green)              WINCH 130x30 | WINCH 130x30 | IN q | IN OSC 11 rgb:0000/bbbb/0000
+--- restart (fresh B at 120, A in use at 80)
+## server stopped                           (agent saw nothing)
+## while down: B focus-in, A focus-out      (agent saw nothing)
+## server restarted                         WINCH 79x30 | WINCH 120x30 | WINCH 120x30
+## B types q after reconnect                IN q 120x30 | IN OSC 11 rgb:0000/bbbb/0000 120x30
+## B closes                                 WINCH 80x30 | WINCH 80x30
+## P piped-stdin resume at 60               (agent saw nothing)
+</pre>
+<p class="ok">Same as sections 1–3. The environment marker works the same as <code>--unfocused</code>.</p>
+
+<h2>6 · Dev on a Machine run by the installed CLI</h2>
+<p>A fresh private Machine (<code>/tmp/lfqa2i</code>) whose server, holder and relays are a copy of the installed
+<code>lf 0.16.0+7127b9d0d</code>. Dev QA bundle built at HEAD, launched with <code>LF_BIN</code> pointing at that copy.
+A = <code>lf resume --task a2b447</code> on a PTY at 80. Screen locked.</p>
+<table><tr><th>Scenario</th><th>What I did</th><th>What happened</th></tr>
+<tr><td>Launch</td><td>open Dev; wait 25 s</td><td class="ok">No relay children of the app; agent untouched; repository page lists the Task.</td></tr>
+<tr><td>Visit</td><td><code>lf desktop enter 'Installed QA'</code></td><td class="ok">One relay, parent the Dev app:
+<code>/tmp/lfqa2i/bin/lf session attach --terminal … --session …</code> with <code>LF_RELAY_FOCUSED=0</code>. No argument error; the pane
+renders the agent's output (<code>desktop capture</code>).</td></tr>
+<tr><td></td><td></td><td class="no">The 0.16.0 holder gave the attach the size (WINCH 120x36, twice) and passed Ghostty's focus-out
+to the agent. Expected: the old holder has no focus rule; the plan names this pairing.</td></tr>
+<tr><td>Type both sides</td><td><code>desktop send -p session z</code>, then <code>h</code> from A</td><td class="ok">IN z 120x36, then WINCH 80x30, IN h.</td></tr>
+<tr><td>Relaunch</td><td>quit Dev on the Task page, open again</td><td class="ok">Task restored, no relay, agent untouched.</td></tr>
+<tr><td>First visit after restore</td><td><code>lf --task a2b447 desktop focus -p session</code></td><td>One relay (installed CLI); the old holder resized to 120 again, as above.</td></tr>
+</table>
+<p>Everything (Dev, views, both private servers, holders, stand-ins) stopped afterwards; the QA bundle was unregistered and deleted.</p>
+
 <h2>What works now</h2>
 <p>Background, piped and Dev views leave a running Session's size, focus reports and color answers alone.
 Focus or input moves ownership, departure falls back to the last used view, and a relay that changes
 focus while the server is down keeps that ownership through the restart and its repaint nudge.
-Dev attaches nothing at launch or on restore and opens only Work someone visits.</p>
+Dev attaches nothing at launch or on restore and opens only Work someone visits, with the branch CLI and the installed 0.16.0 CLI alike; with 0.16.0 the visited pane still takes the size, because the old holder has no focus rule.</p>
 
 <h2>Not reached</h2>
 <ul>
-<li>Mounted Ghostty focus: the screen was locked for the whole run, so no window was key. Whether
+<li>Mounted Ghostty focus: the screen was locked for the whole run and for the HEAD re-run, so no window was key. Whether
 clicking a Dev or Desktop pane sends focus-in and takes the size, and how the panes look at the
 owner's width, still need an unlocked display.</li>
 <li>Release Desktop's warm set (a second window opening background panes) was not launched; the
 release bundle ID would warm-attach personal Sessions on the live Machine.</li>
-<li>Dev against the older installed server on the live Machine: skipped. About 40 personal Sessions are
+<li>Dev against the older installed server on the <em>live</em> Machine: skipped (section 6 covers the installed CLI on a private Machine). About 40 personal Sessions are
 live there and another Task's Dev build was running. Dev's wait-for-visit is client-side, so it should
 not depend on the server version.</li>
 <li>SSH relays.</li>

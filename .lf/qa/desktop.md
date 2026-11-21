@@ -94,6 +94,8 @@ To build the isolated bundle, import `scripts/loopflow-dev.py`, set
 `DEV_APP` to `~/Applications/Loopflow Dev QA.app`, `DEV_EXECUTABLE` to
 `DEV_APP.stem` and `DEV_BUNDLE_ID` to a unique ID ending in `.dev`. Run
 `cmd_build()` and, if it succeeds, `_install_dev_app()`.
+Run that script with `uv run python` from the checkout: the module imports
+`boto3`, which only the project environment has.
 LaunchServices won't resolve a bundle ID under `/tmp`, so `lf desktop view`
 fails there with `LSCopyApplicationURLsForBundleIdentifier`. Register with
 `lsregister -f`, open it with `LOOPFLOW_DEV_WAVE_REPO` and `--repo` after
@@ -104,7 +106,10 @@ a visit). With the screen locked, Dev still mounts its window and reads Work,
 so launch-time attaches can be counted: list `pgrep -f 'session attach'`
 children of the app's PID. Session panes start in the background. Check that a
 visited Session opens with the installed CLI as well as the branch CLI.
-Ghostty never reports focus-in while locked. Point it at a private Machine
+Ghostty never reports focus-in while locked. To check a pane opened by the installed CLI,
+make a fresh private Machine whose `bin/lf` is a copy of
+`readlink -f ~/.local/bin/lf` and start its `lf server run` from that copy; a
+branch-built home may be past the installed CLI's schema. Point it at a private Machine
 with `open -n --env LF_HOME=… --env LF_BIN=… --env PATH=…` (stand-in agents on
 that `PATH`); quit with `osascript -e 'quit app id "<bundle id>"'`, which
 reopens the last selected Task on the next launch.

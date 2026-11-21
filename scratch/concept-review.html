@@ -33,152 +33,125 @@
   ol.q > li { margin:14px 0; } ol.q ol { list-style:lower-alpha; margin-top:4px; }
   .call { border-left:4px solid var(--no); padding:4px 0 4px 16px; margin:14px 0; }
 </style>
-
-<h1>Loopflow Dev on the live Machine: do the product's concepts and the code's line up?</h1>
-<p class="mute">Task 9a2459, reviewed before anything is built. The area taken: how a person working on Loopflow
-sees a checkout's Desktop UI, and every place that UI can be pointed at (the Machine, a copy, a fake world,
-a private home), with the launcher, the app's choice of <code>lf</code>, the server and the wire behind it.
-Taken that wide because the Task deletes three of those places and the plan's replacement turned on one line:
-which <code>lf</code> Dev runs.</p>
-<p class="key"><span><b class="tag yes">yes</b> lines up today</span><span><b class="tag no">no</b> mismatch today</span>
-<span><b class="tag new">proposed</b> in the plan, not built</span></p>
+</head><body>
+<h1>Loopflow Dev on the live Machine, as built: do the product's concepts and the code's line up?</h1>
+<p class="mute">Task 9a2459, second review, after the build (base 7127b9d0d5, head 8268c2df1d). The area taken: how a person
+working on Loopflow sees a checkout's Desktop UI over their own Machine, and what stands behind that window: the launcher,
+which <code>lf</code> the app runs, whose server it is, what a part says when the installed server can't supply it, and
+the fixtures that replaced the fake worlds. Taken that wide because the branch deleted three places a Dev window could
+point (copy, world, branch-built helper) and the question is what is left where they were.</p>
+<p class="key"><span><b class="tag yes">yes</b> lines up as built</span><span><b class="tag no">no</b> mismatch as built</span>
+<span><b class="tag new">proposed</b> next pass, not built</span></p>
 
 <h2>One interaction, walked</h2>
-<p>Change a string in the backlog header. Run <code>uv run python scripts/loopflow-dev.py run</code>. See it over today's Tasks.</p>
+<p>Change a string in the backlog header. Run <code>uv run python scripts/loopflow-dev.py run</code>.</p>
 <table>
-<tr><th style="width:17%"></th><th>Today (#1996)</th><th>Plan as written at kickoff</th><th>Plan after this review <b class="tag new">proposed</b></th></tr>
-<tr><td>Normal</td>
- <td>cargo builds a branch <code>lf</code> into the bundle; the launcher compares schema and wire types; opens the Machine, or a sealed copy that refuses writes and cannot show a Session.</td>
- <td>Swift only. The launcher passes <code>LF_BIN=</code> the first <code>lf</code> on the shell's PATH.</td>
- <td>Swift only. The launcher passes nothing. A bundle with no helper runs <code>~/.local/bin/lf</code>, the Machine's installation.</td></tr>
-<tr><td>Failure</td>
- <td>Branch schema differs: you get the copy, at whatever time it was taken.</td>
- <td>PATH finds another <code>lf</code> first. On this Machine <code>which -a lf</code> lists three files, one of them <code>~/.cargo/bin/lf</code> from July with a different sha. Dev's first call is <code>lf install server</code>, which replaces a running server that is not the caller's build. Dev would take down the live server.</td>
- <td>No installation: Dev says "Loopflow is not installed on this Machine (no lf at ~/.local/bin/lf)". A part the installed server can't supply says so on that part; the rest works.</td></tr>
-<tr><td>Recovery</td>
- <td>Rebase, or <code>--copy</code>.</td>
- <td>Reopen Dev from the Dock: the variable is gone and Dev reports a missing helper while Loopflow is installed.</td>
- <td>Reopen from anywhere: same answer. Server down: Dev's call is the one Loopflow makes, and the installation's server comes back.</td></tr>
+<tr><th></th><th>As built</th><th>What a person meets</th></tr>
+<tr><td>Normal</td><td>Swift build (22 s in QA, no Cargo). The bundle holds one executable. The launcher strips <code>LF_*</code>
+and opens it. The app finds <code>~/.local/bin/lf</code>, asks <code>lf server status</code> for the socket and connects.</td>
+<td><b class="tag yes">yes</b> The edited UI over today's 22 Working Tasks; a CLI rename shows within 2 s; a second view
+of a running Session shares output and input with one provider process. Server instance and holders unchanged.</td></tr>
+<tr><td>Failure</td><td>The installed server is not running. Dev only reads status, so it shows
+<code>status.error</code> or "Loopflow server unavailable".</td>
+<td><b class="tag no">no</b> The sentence doesn't say what brings it back. Dev is deliberately not the one who starts a
+server; the person is, and nothing tells them.</td></tr>
+<tr><td>Recovery</td><td>A failed status lookup is not kept; the next read asks again.</td>
+<td><b class="tag yes">yes</b> Open Loopflow (or run <code>lf install server</code>) and Dev fills in without a relaunch.</td></tr>
+<tr><td>Failure</td><td>The installed server is a revision behind the Swift.</td>
+<td><b class="tag yes">yes</b> The part that can't decode names both builds; the rest reads and writes. Covered by the
+revision-8 peer in <code>ServerClientTests</code>.</td></tr>
 </table>
 
 <h2>Concept by concept</h2>
 <table>
-<tr><th style="width:21%">What a person knows</th><th style="width:31%">What the code has</th><th style="width:7%"></th><th>What is wrong, and what the plan does</th></tr>
-<tr><td>The Machine: my Tasks, Sessions, the running server</td>
- <td><code>~/.lf</code>, the server socket, <code>lf server status</code></td><td><b class="tag yes">yes</b></td><td></td></tr>
-<tr><td>Loopflow, the installed app</td>
- <td><code>/Applications/Loopflow.app</code> with its helper; <code>~/.local/bin/lf</code> links to it</td><td><b class="tag yes">yes</b></td><td></td></tr>
-<tr><td>Loopflow Dev: this checkout's UI</td>
- <td>A bundle with its own branch-built <code>lf</code>, its own launch agent, its own holders (one from 02:05 is still running)</td>
- <td><b class="tag no">no</b></td>
- <td>The code has a second installation where the person has a window. <b class="tag new">proposed</b> the bundle carries Swift and nothing else.</td></tr>
-<tr><td>"The installed lf"</td>
- <td>Four answers: the bundle helper, <code>LF_BIN</code>, PATH order, and Rust's <code>installed_app()</code> / Swift's <code>AppUpdates.isInstalled</code>, which both follow <code>~/.local/bin/lf</code></td>
- <td><b class="tag no">no</b></td>
- <td>One idea under four names, and the kickoff plan picked the weakest. <b class="tag new">proposed</b> one Swift resolver: private home, then bundle helper, then the public entry.</td></tr>
-<tr><td>Open Dev</td>
- <td><code>cmd_run</code> → <code>_choose_opening</code> → schema check, wire comparison, Machine or copy or world</td>
- <td><b class="tag no">no</b></td>
- <td>An action with three outcomes the person did not choose. <b class="tag new">proposed</b> build Swift, open.</td></tr>
-<tr><td>Connect to the server</td>
- <td><code>lf install server</code>: make my build the server, replacing another</td>
- <td><b class="tag no">no</b></td>
- <td>The name hides a replacement. Harmless only when the caller is the installation. <b class="tag new">proposed</b> it always is; no new operation.</td></tr>
-<tr><td>(nothing)</td>
- <td>A copy of the Machine: <code>copy::seal</code>, <code>server/copy.rs</code>, <code>Operation::changes</code>, <code>write_refused</code></td>
- <td><b class="tag no">no</b></td>
- <td>A concept only the code has. It lists Sessions it cannot open. <b class="tag new">proposed</b> deleted, no successor.</td></tr>
-<tr><td>(nothing)</td>
- <td>A fake world: <code>lf-world</code>, recipes, <code>WaveSurfaceLaunch.world</code></td>
- <td><b class="tag no">no</b></td>
- <td>Same. <b class="tag new">proposed</b> deleted; its five CLI tests move to suites that seed their own rows.</td></tr>
-<tr><td>An empty Machine for a test or a benchmark</td>
- <td><code>LF_HOME</code> with <code>LF_BIN</code></td><td><b class="tag yes">yes</b></td>
- <td>Stays, and is the one honest "somewhere else": a real Machine, started empty.</td></tr>
-<tr><td>"This part can't be read by this build"</td>
- <td>Subscriptions carry the both-builds sentence (<code>WorkObservation.swift:462</code>); one-shot reads do not</td>
- <td><b class="tag no">no</b></td>
- <td>One situation, two messages. <b class="tag new">proposed</b> one sentence, and one test that plays a server of another build.</td></tr>
-<tr><td>See my branch's Rust on my Machine</td>
- <td>Nothing. The kickoff plan named <code>lf self install</code>, which follows the release stream.</td>
- <td><b class="tag no">no</b></td>
- <td>A named action that does not exist. <b class="tag new">proposed</b> said plainly: a private home now, the live Machine when the branch lands.</td></tr>
-<tr><td>One Dev, many checkouts</td>
- <td>One bundle at <code>~/Applications/Loopflow Dev.app</code>; <code>run</code> quits the open Dev and rewrites it</td>
- <td><b class="tag yes">yes</b></td>
- <td>Last run wins. Once the bundle holds no <code>lf</code>, that costs a window and nothing else.</td></tr>
+<tr><th>What a person knows</th><th>What the code has</th><th></th><th>What is wrong</th></tr>
+<tr><td>The Machine</td><td><code>~/.lf</code>, the server socket, <code>lf server status</code></td><td><b class="tag yes">yes</b></td><td></td></tr>
+<tr><td>Loopflow Dev: this checkout's UI</td><td>A bundle with the Swift executable only; own bundle id and signing identity</td><td><b class="tag yes">yes</b></td><td>Was a second installation at base.</td></tr>
+<tr><td>Open Dev</td><td><code>cmd_run</code>: install the bundle, strip <code>LF_*</code>, <code>open</code></td><td><b class="tag yes">yes</b></td><td>Was three outcomes behind a schema and wire comparison.</td></tr>
+<tr><td>The installed <code>lf</code></td><td><code>LocalWaveAgentLauncher.controlLfPath</code>: private home, bundle helper, <code>publicLfEntry</code>; <code>AppUpdates</code> shares the entry</td><td><b class="tag yes">yes</b></td><td>One resolver for the path.</td></tr>
+<tr><td>Whose server is it: does this app start one, or only look?</td>
+<td>Decided a second time in <code>ServerLocation.init(bundledHelper:privateHome:)</code> as <code>preparesServer</code>, and a third time in <code>GUIProcessEnvironment.enriched</code></td>
+<td><b class="tag no">no</b></td>
+<td>One fact, three derivations with different inputs: the resolver needs <code>LF_HOME</code> and <code>LF_BIN</code> and an executable helper; <code>preparesServer</code> needs <code>LF_HOME</code> alone or a helper URL. The two init parameters exist so a test can choose the answer.</td></tr>
+<tr><td>"The server isn't running"</td><td><code>RegistryQueryError(status.error ?? "Loopflow server unavailable")</code></td><td><b class="tag no">no</b></td>
+<td>For the app that owns the server the setup error is the diagnosis. For Dev the person is the remedy and the sentence doesn't name it.</td></tr>
+<tr><td>Loopflow and Loopflow Dev are two apps</td><td><code>ServerClientIdentity(name: "Loopflow")</code> for both</td><td><b class="tag no">no</b></td>
+<td>Two things under one name. QA told them apart in <code>lf server status</code> by build revision.</td></tr>
+<tr><td>"This part can't be read by this build"</td><td><code>ServerLink</code> and <code>RegistryQuery</code> carry the responding build on subscriptions and one-shot reads</td><td><b class="tag yes">yes</b></td><td></td></tr>
+<tr><td>(nothing)</td><td>The sealed copy and the fake world: deleted, with <code>lf-world</code>, recipes, seal, write refusals</td><td><b class="tag yes">yes</b></td>
+<td>One comment still says "the Machine, copy or world" (<code>RepositoryWorkspace.swift:13</code>).</td></tr>
+<tr><td>An empty Machine for a test or benchmark</td><td><code>LF_HOME</code> with <code>LF_BIN</code>; the benchmark creates its Task and Session with the branch CLI</td><td><b class="tag yes">yes</b></td><td></td></tr>
+<tr><td>The "empty" screenshot</td><td><code>empty-workspaces</code> with <code>--repo</code>: waits on a repository Task list the fixture never supplies</td><td><b class="tag no">no</b></td>
+<td>A capture named empty that shows "Loading work…", next to two captures named loading. On main it showed a decode failure.</td></tr>
+<tr><td>One Dev, many checkouts</td><td>One bundle; <code>run</code> replaces it</td><td><b class="tag yes">yes</b></td><td>Costs a window. QA built a second bundle by hand to leave another Task's Dev alone; chosen and kept.</td></tr>
 </table>
 
-<h2>The biggest mismatch: which <code>lf</code> Dev runs</h2>
-<div class="call">The kickoff plan removed Dev's own <code>lf</code> and handed the choice to the launching shell's PATH.
-The guarantee the whole Task rests on, "the server is left alone", then depends on PATH order.</div>
+<h2>The biggest mismatch: who starts the server is answered three times</h2>
+<div class="call">The branch's promise is "Dev leaves the installed server alone". That promise is one bit, and the code works it
+out in three places from three sets of inputs. They agree on every path the launcher produces today. They are free to
+disagree the next time one of them is edited.</div>
 <div class="cols">
-<div class="box"><h3>Before (kickoff plan)</h3>
-<pre>loopflow-dev.py run
-  LF_BIN=$(first lf on PATH)      # 3 candidates here
-  open "Loopflow Dev.app"
+<div class="box"><h3>As built</h3><pre>controlLfPath(bundled, environment) -> String
+  LF_HOME + LF_BIN        -> LF_BIN
+  executable helper       -> helper
+  ~/.local/bin/lf         -> entry
 
-controlLfPath:
-  LF_HOME + LF_BIN → LF_BIN
-  bundle helper    → helper
-  no helper        → LF_BIN        # second meaning
-enriched: keep LF_BIN if no helper
+ServerLocation.init(bundledHelper, privateHome, query)
+  preparesServer = bundledHelper != nil || privateHome != nil
+  -> "install server" or "server status"
 
-Dev → `$LF_BIN install server`
-  sha ≠ running server → replaces it</pre></div>
-<div class="box proposed"><h3>After <b class="tag new">proposed</b></h3>
-<pre>loopflow-dev.py run
-  open "Loopflow Dev.app"          # no LF_* at all
+GUIProcessEnvironment.enriched
+  try? controlLfPath -> LF_BIN, PATH
+  else if LF_HOME == nil -> drop LF_BIN</pre></div>
+<div class="box proposed"><h3>Proposed</h3><pre>enum MachineLf {            // what this app runs
+  case privateHome(String)  // starts its own server
+  case bundled(String)      // the installation; starts it
+  case installed(String)    // a visitor; only looks
+  var path: String
+  var startsServer: Bool
+}
+LocalWaveAgentLauncher.machineLf(bundled:, environment:)
 
-one resolver (controlLfPath, enriched, isInstalled):
-  LF_HOME + LF_BIN → private Machine
-  bundle helper    → release app
-  ~/.local/bin/lf  → the Machine's installation
-  none             → "Loopflow is not installed…"
-
-Dev → installed lf `install server`
-  = what Loopflow.app itself runs</pre></div>
+ServerLocation.init(startsServer:, query:)
+  shared = machineLf().startsServer
+GUIProcessEnvironment.enriched: reads the same value</pre></div>
 </div>
-<p>Why this and not a new "connect only" call: the public entry is already what both Rust and Swift mean by
-installed, so the fix adds no concept and removes the launcher's part entirely. It also closes a case the
-kickoff wording left open: <code>enriched</code> drops <code>LF_BIN</code> today unless the bundle has a helper,
-so a helper-less Dev opened on a benchmark's private home would have run the installed <code>lf</code> against it.</p>
-<p class="mute">Seen on this Machine, 2026-11-20: server instance <code>5f5bc7b3…</code>, sha <code>aeab8b41…</code>;
-<code>/Applications/Loopflow.app/Contents/MacOS/lf</code> and <code>~/.local/bin/lf</code> have that sha;
-<code>~/.cargo/bin/lf</code> (Jul 16) is <code>a527444a…</code>; the Dev bundle's <code>lf</code> is <code>07aa35fc…</code>
-and is serving <code>~/.lf-copy</code> for another Task's Dev (pid 35920).</p>
+<p>The resolver already makes this three-way choice; it throws the answer away by returning a string. Keeping it removes
+<code>ServerLocation</code>'s two environment parameters and gives the visitor case a place for its own sentence:
+"Loopflow's server isn't running. Open Loopflow, or run <code>lf install server</code>." On the three paths:
+normal (installed → status only, as the peer fixture already asserts), failure (a visitor with no server gets the sentence
+and makes no install attempt), recovery (the next read asks status again and connects).</p>
 
 <h2>What survives, what changes on purpose</h2>
 <table>
-<tr><td style="width:24%">Survives</td><td>The release app's rule (its own helper, nothing else). Private homes for Swift tests and the benchmark. Dev's bundle id, name and signing identity. <code>copy::snapshot</code> for backups. Data on disk: <code>~/.lf-copy</code>, world directories, release notes.</td></tr>
-<tr><td>Changes on purpose</td><td>Dev can no longer show branch Rust on real data. Dev's panes get the installed <code>lf</code> on PATH. Running Dev from a second checkout closes the first one's window.</td></tr>
-<tr><td>Would break it</td><td>A Machine with no installed Loopflow (a contributor who only builds from source): Dev opens to the "not installed" message. A person who presses Run in Xcode still gets a bundle with a branch helper, which is the release app's build path and behaves as an installation.</td></tr>
+<tr><td>Survives</td><td>Everything QA saw. The release app's rule (its own helper starts the server). Private homes for Swift tests and the benchmark. <code>copy::snapshot</code> for installation and migration. Data on disk and release notes.</td></tr>
+<tr><td>Changes on purpose</td><td><code>lf server status</code> lists Dev as "Loopflow Dev". The two empty captures show an empty backlog.</td></tr>
+<tr><td>Would break it</td><td>A fixture that cannot supply an empty repository Task list without reshaping production code. Then the two empty captures are deleted, not left showing loading.</td></tr>
 </table>
 
 <h2>Outside this work</h2>
-<p>The Xcode target always bundles a branch <code>lf</code> (<code>swift/project.yml:74</code>), so Run in Xcode on a
-developer's Machine is still a second installation that asks to be the server. Making that build helper-less
-for debug configurations is a separate outcome: it needs the release and CI builds to keep bundling while
-debug stops, and a check that Swift tests on private homes still find their <code>lf</code>.</p>
+<p>Run in Xcode still bundles a branch <code>lf</code> and launch agents (<code>cmd_bundle_control_tools</code>), so that
+build acts as an installation and asks to be the server. Ending that needs debug builds to stop bundling while release
+and CI keep it.</p>
+<p>Opening any Desktop on the Machine attaches a viewer to each retained workspace's Session, and a narrower viewer
+resizes the shared terminal (QA: a 160-column tmux view went stale at Dev's 120). The release app does the same; a Dev
+window makes it more likely. A view that doesn't size the terminal is its own outcome.</p>
+<p>One unreproduced crash on first entry into a live Session pane, in code this branch doesn't touch.</p>
 
 <h2>Questions</h2>
 <ol class="q">
-<li>Which <code>lf</code> does a Dev bundle run?
- <ol><li>The account's public entry, <code>~/.local/bin/lf</code>, found by the app. <i>(chosen in the plan)</i></li>
- <li><code>LF_BIN</code> passed by the launcher from PATH.</li>
- <li>Ask the running server for its executable path and run that.</li></ol></li>
-<li>A branch that changes Rust and Swift together, before it lands:
- <ol><li>New Swift on the installed server, the changed part saying it can't be read; the new server only on a private home. <i>(chosen)</i></li>
- <li>Keep <code>run --copy</code> for lists only.</li>
- <li>Add a real "install this branch on the Machine" command.</li></ol></li>
-<li>Two checkouts both run Dev:
- <ol><li>One Dev; the last run quits and replaces the other. <i>(chosen; today's behaviour)</i></li>
- <li>A bundle per checkout, each asking for its own permissions.</li></ol></li>
-<li>Run in Xcode on a developer's Machine:
- <ol><li>Leave it bundling a branch <code>lf</code>; file it separately. <i>(chosen)</i></li>
- <li>Make debug builds helper-less in this Task.</li></ol></li>
-<li>The benchmark's one Task and Session, if the real <code>lf</code> with a stand-in <code>claude</code> can't make a resumable Session without seeded rows:
- <ol><li>Delete the three benchmark commands and <code>DesktopNativeSessionFixture</code>. <i>(chosen)</i></li>
- <li>Keep a small seeded fixture for the benchmark alone.</li></ol></li>
+<li>When the installed server is down and Dev is open:
+<ol><li>Dev says so and names the remedy; it never starts a server. (chosen)</li>
+<li>Dev runs the installed <code>lf install server</code>, as Loopflow does, and the server comes back.</li></ol></li>
+<li>The two "empty" captures:
+<ol><li>The fixture supplies an empty repository Task list; the shot is an empty backlog. (chosen)</li>
+<li>Capture without <code>--repo</code>: a full-width sidebar with a "Repository" row.</li>
+<li>Delete them.</li></ol></li>
+<li>Dev's name to the server:
+<ol><li>The bundle's own name, "Loopflow Dev". (chosen)</li>
+<li>"Loopflow" for both, told apart by revision.</li></ol></li>
+<li>Run in Xcode as a second installation:
+<ol><li>Leave it; separate outcome. (chosen)</li>
+<li>Make debug bundles helper-less in this Task.</li></ol></li>
 </ol>
-</html>
+</body></html>

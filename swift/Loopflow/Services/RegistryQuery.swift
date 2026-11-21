@@ -726,13 +726,36 @@ struct TaggedFields {
     }
 }
 
+/// The output of one read and, for a server response, the build that supplied it.
+public struct ReadOutput: Sendable {
+    public let text: String
+    private let unreadable: String?
+
+    public init(_ text: String, unreadable: String? = nil) {
+        self.text = text
+        self.unreadable = unreadable
+    }
+
+    public func decode<T: Decodable>(_ type: T.Type) throws -> T {
+        do {
+            let json = unreadable == nil ? text.trimmingCharacters(in: .whitespacesAndNewlines) : text
+            return try JSONDecoder().decode(type, from: Data(json.utf8))
+        } catch {
+            if let unreadable, let error = error as? DecodingError {
+                throw RegistryQueryError("\(unreadable) \(error.place)")
+            }
+            throw RegistryQueryError("lf query JSON did not decode: \(error)")
+        }
+    }
+}
+
 public struct RegistryQuery: Sendable {
     public private(set) var remoteMachine: String?
     private var run: RegistryRunner
     private var runWithInput: @Sendable ([String], String?, String) async throws -> String
     /// What a `ServedRead`'s `argv` prints: served in the app when the
     /// transport can, else run.
-    private var serve: @Sendable (ServedRead) async throws -> String
+    private var serve: @Sendable (ServedRead) async throws -> ReadOutput
     /// What a `ServedWrite`'s `argv` prints: made in the app when the
     /// transport can, else run.
     private var write: @Sendable (ServedWrite) async throws -> String
@@ -747,7 +770,7 @@ public struct RegistryQuery: Sendable {
         runWithInput: @escaping @Sendable ([String], String?, String) async throws -> String = { _, _, _ in
             throw RegistryQueryError("Draft comparison is unavailable on this transport")
         },
-        serve: (@Sendable (ServedRead) async throws -> String)? = nil,
+        serve: (@Sendable (ServedRead) async throws -> ReadOutput)? = nil,
         write: (@Sendable (ServedWrite) async throws -> String)? = nil,
         change: (@Sendable (ServedWrite, String) async throws -> Revisions?)? = nil,
         watchFiles: (@Sendable ([String], String?) async throws -> TaskFilesObservation)? = nil,
@@ -757,13 +780,13 @@ public struct RegistryQuery: Sendable {
     ) {
         self.runWithInput = runWithInput
         self.serve = serve ?? { query in
-            if let input = query.input { return try await runWithInput(query.argv, query.cwd, input) }
+            if let input = query.input { return ReadOutput(try await runWithInput(query.argv, query.cwd, input)) }
             let output = try await run(query.argv, query.cwd)
             // This CLI spelling renders text; the shared read carries a JSON string.
             if case .sessionHistoryGet = query {
-                return String(decoding: try JSONEncoder().encode(output), as: UTF8.self)
+                return ReadOutput(String(decoding: try JSONEncoder().encode(output), as: UTF8.self))
             }
-            return output
+            return ReadOutput(output)
         }
         let write = write ?? { change in
             if let input = change.input { return try await runWithInput(change.argv, change.cwd, input) }
@@ -781,7 +804,7 @@ public struct RegistryQuery: Sendable {
     }
 
     public func viewPlan(expression: String?, repoPath: String) async throws -> WorkViewPlan {
-        try Self.decode(WorkViewPlan.self, from: await serve(.desktopViewGet(directory: repoPath, expression: expression)))
+        try await serve(.desktopViewGet(directory: repoPath, expression: expression)).decode(WorkViewPlan.self)
     }
 
     public func editDashboardQuery(id: String, expression: String, revision: Int64?, repoPath: String) async throws -> Dashboard {
@@ -828,7 +851,7 @@ public struct RegistryQuery: Sendable {
     }
 
     public func portfolio(_ arguments: [String] = []) async throws -> Portfolio {
-        if arguments.isEmpty { return try Self.decode(Portfolio.self, from: await serve(.desktopPortfolio)) }
+        if arguments.isEmpty { return try await serve(.desktopPortfolio).decode(Portfolio.self) }
         return try Self.decode(Portfolio.self, from: await write(.desktopPortfolioSet(change: arguments)))
     }
 
@@ -945,7 +968,7 @@ public struct RegistryQuery: Sendable {
         }
         query.serve = { [serve] read in
             let stdout = try await serve(read)
-            record(stdout)
+            record(stdout.text)
             return stdout
         }
         query.write = { [write] change in
@@ -963,29 +986,28 @@ public struct RegistryQuery: Sendable {
     }
 
     public func repositoryPath(id: String) async throws -> String {
-        try await serve(.repoPath(id: id)).trimmingCharacters(in: .whitespacesAndNewlines)
+        try await serve(.repoPath(id: id)).text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// Current Waves across the machine. The shared
     /// reader excludes historical registrations; callers only slice by repo.
     public func allWaves() async throws -> [Wave] {
         let stdout = try await serve(.waveList)
-        let snapshots = try Self.decode([WaveSnapshot].self, from: stdout)
+        let snapshots = try stdout.decode([WaveSnapshot].self)
         return snapshots.map { $0.toWave() }
     }
 
     /// One page of a Wave's closed Tasks, most recently closed first. The
     /// Wave's status carries only its open Tasks.
     public func closedTasks(wave: String, after: String? = nil, cwd: String) async throws -> ClosedTaskPage {
-        try Self.decode(ClosedTaskPage.self, from: await serve(.taskList(directory: cwd, wave: wave, after: after)))
+        try await serve(.taskList(directory: cwd, wave: wave, after: after)).decode(ClosedTaskPage.self)
     }
 
     /// One Wave's Project/Task work and recorded execution state.
     public func status(wave: String, cwd: String?) async throws
         -> WaveDetailSnapshot {
         // Without a repository the Wave resolves from `/`, where the app runs.
-        let stdout = try await serve(.wavePlan(directory: cwd ?? "/", wave: wave))
-        return try Self.decode(WaveDetailSnapshot.self, from: stdout)
+        try await serve(.wavePlan(directory: cwd ?? "/", wave: wave)).decode(WaveDetailSnapshot.self)
     }
 
     /// Refresh one Wave's planning from its tracker, or the repository's plan
@@ -1016,14 +1038,14 @@ public struct RegistryQuery: Sendable {
     }
 
     public func roadmap(wave: String? = nil) async throws -> RoadmapSnapshot {
-        try Self.decode(RoadmapSnapshot.self, from: await serve(
-            .planList(directory: "/", wave: wave, task: nil, all: wave == nil)))
+        try await serve(
+            .planList(directory: "/", wave: wave, task: nil, all: wave == nil)).decode(RoadmapSnapshot.self)
     }
 
     /// Resolve a public Work address through Rust's repository and Work owners.
     /// Reads only: no checkout, Session or window is prepared.
     public func workLink(_ url: URL) async throws -> WorkLink {
-        let links = try Self.decode([WorkLink].self, from: await serve(.workResolve(directory: "/", url: url.absoluteString)))
+        let links = try await serve(.workResolve(directory: "/", url: url.absoluteString)).decode([WorkLink].self)
         guard let link = links.first, links.count == 1 else {
             throw RegistryQueryError("The Work link did not resolve to one destination.")
         }
@@ -1032,17 +1054,17 @@ public struct RegistryQuery: Sendable {
 
     /// Without a repository the Task resolves across every repository.
     public func taskDestination(issue: String, repo: String?) async throws -> RoadmapSnapshot {
-        try Self.decode(RoadmapSnapshot.self, from: await serve(
-            .planList(directory: repo ?? "/", wave: nil, task: issue, all: repo == nil)))
+        try await serve(
+            .planList(directory: repo ?? "/", wave: nil, task: issue, all: repo == nil)).decode(RoadmapSnapshot.self)
     }
 
     public func repositoryPlan(cwd: String) async throws -> RepositoryPlan {
-        try Self.decode(RepositoryPlan.self, from: await serve(.repoTracker(directory: cwd)))
+        try await serve(.repoTracker(directory: cwd)).decode(RepositoryPlan.self)
     }
 
     public func localMachineId() async throws -> String {
         struct MachineIdentity: Decodable { let id: String }
-        return try Self.decode(MachineIdentity.self, from: await serve(.machineSelf)).id
+        return try await serve(.machineSelf).decode(MachineIdentity.self).id
     }
 
     /// Whether this transport keeps a workspace current by itself. Without one,
@@ -1065,8 +1087,8 @@ public struct RegistryQuery: Sendable {
         project: String? = nil,
         task: String? = nil
     ) async throws -> WorkActivitySnapshot {
-        try Self.decode(WorkActivitySnapshot.self, from: await serve(
-            .sessionHistory(since: since, limit: limit, wave: wave, project: project, task: task)))
+        try await serve(
+            .sessionHistory(since: since, limit: limit, wave: wave, project: project, task: task)).decode(WorkActivitySnapshot.self)
     }
 
     // Task content reads and saves address the Task by issue and run outside its
@@ -1075,12 +1097,11 @@ public struct RegistryQuery: Sendable {
     /// Files changed by one Task, classified across commits, index, worktree,
     /// and untracked state relative to the Task's recorded base.
     public func taskChanges(issue: String, base: String = "parent", head: String? = nil) async throws -> TaskChangesSnapshot {
-        let stdout = try await serve(.taskChanges(issue: issue, base: base, head: head))
-        return try Self.decode(TaskChangesSnapshot.self, from: stdout)
+        try await serve(.taskChanges(issue: issue, base: base, head: head)).decode(TaskChangesSnapshot.self)
     }
 
     public func sessionHistoryText(id: String) async throws -> String {
-        try Self.decode(String.self, from: await serve(.sessionHistoryGet(id: id)))
+        try await serve(.sessionHistoryGet(id: id)).decode(String.self)
     }
 
     /// One store-driven reading keeps position, readiness and run history together.
@@ -1093,8 +1114,7 @@ public struct RegistryQuery: Sendable {
     /// Every selectable Graph with the topology it would capture, via the shared loader.
     public func graphCatalog(cwd: String?) async throws -> [GraphCatalogEntry] {
         // Without a repository the catalog resolves from `/`, where the app runs.
-        let stdout = try await serve(.graphList(directory: cwd ?? "/"))
-        return try Self.decode([GraphCatalogEntry].self, from: stdout)
+        try await serve(.graphList(directory: cwd ?? "/")).decode([GraphCatalogEntry].self)
     }
 
     public func customizeGraph(_ name: String, cwd: String?) async throws -> String {
@@ -1122,7 +1142,7 @@ public struct RegistryQuery: Sendable {
 
     /// The graph a new Task in `wave`, or the repository when nil, would take up.
     public func waveGraph(wave: String?, cwd: String?) async throws -> WaveGraph {
-        try Self.decode(WaveGraph.self, from: await serve(.waveGraph(directory: cwd ?? "/", wave: wave)))
+        try await serve(.waveGraph(directory: cwd ?? "/", wave: wave)).decode(WaveGraph.self)
     }
 
 
@@ -1135,7 +1155,7 @@ public struct RegistryQuery: Sendable {
 
     /// Your registered Machines. This Machine appears only when a default names it.
     public func machines() async throws -> [Machine] {
-        try Self.decode([Machine].self, from: await serve(.machineList))
+        try await serve(.machineList).decode([Machine].self)
     }
 
     /// Move a Task to `machine` through `lf task move --machine`, or set your
@@ -1157,8 +1177,7 @@ public struct RegistryQuery: Sendable {
     /// What each recorded step's submitted input was made of, oldest first,
     /// with Task totals. Read-only, from retained local captures.
     public func taskContext(task: String) async throws -> ContextReport {
-        let stdout = try await serve(.taskContext(task: task))
-        return try Self.decode(ContextReport.self, from: stdout)
+        try await serve(.taskContext(task: task)).decode(ContextReport.self)
     }
 
     public func updateTaskDirective(id: String, text: String, cwd: String) async throws {
@@ -1179,8 +1198,7 @@ public struct RegistryQuery: Sendable {
         head: String? = nil,
         draft: String? = nil
     ) async throws -> TaskDiffSnapshot {
-        let stdout = try await serve(.taskDiff(issue: issue, path: path, base: base, head: head, draft: draft))
-        return try Self.decode(TaskDiffSnapshot.self, from: stdout)
+        try await serve(.taskDiff(issue: issue, path: path, base: base, head: head, draft: draft)).decode(TaskDiffSnapshot.self)
     }
 
     /// Current contents of one file, constrained to the Task worktree.
@@ -1188,8 +1206,7 @@ public struct RegistryQuery: Sendable {
         issue: String,
         path: String
     ) async throws -> TaskFileSnapshot {
-        let stdout = try await serve(.taskFile(issue: issue, path: path))
-        return try Self.decode(TaskFileSnapshot.self, from: stdout)
+        try await serve(.taskFile(issue: issue, path: path)).decode(TaskFileSnapshot.self)
     }
 
     public func saveTaskFile(issue: String, path: String, revision: String,
@@ -1202,8 +1219,8 @@ public struct RegistryQuery: Sendable {
     /// One bounded page, ordered by stable Session identity.
     public func sessionPage(includingHeadless: Bool = false, after: String? = nil,
                             cwd: String? = nil) async throws -> SessionPage {
-        try Self.decode(SessionPage.self, from: await serve(
-            .sessionList(directory: cwd ?? "/", headless: includingHeadless, after: after, limit: 100, task: nil)))
+        try await serve(
+            .sessionList(directory: cwd ?? "/", headless: includingHeadless, after: after, limit: 100, task: nil)).decode(SessionPage.self)
     }
 
     /// The repository or Wave's retained conversation, created when missing.
@@ -1276,47 +1293,38 @@ public struct RegistryQuery: Sendable {
         project: String? = nil,
         task: String? = nil
     ) async throws -> [SessionHistory] {
-        try Self.decode([SessionHistory].self, from: await serve(
-            .sessionUsage(days: days, wave: wave, project: project, task: task)))
+        try await serve(
+            .sessionUsage(days: days, wave: wave, project: project, task: task)).decode([SessionHistory].self)
     }
 
     /// The codebase on disk, as a tree of directories weighted by tokens.
     /// Mirrors Rust `CodeNode`. Runs in `repoPath` — `lf tokens` measures the
     /// repo it is invoked in.
     public func codebase(repoPath: String) async throws -> CodeNode {
-        try Self.decode(CodeNode.self, from: await serve(.repoTokens(directory: repoPath, days: nil)))
+        try await serve(.repoTokens(directory: repoPath, days: nil)).decode(CodeNode.self)
     }
 
     /// How big the codebase was on each day it changed. Mirrors Rust
     /// `CodeSnapshot`. Blob counts are cached by sha, so only the first walk of
     /// a window pays to tokenize.
     public func codebaseHistory(repoPath: String, days: Int = 30) async throws -> [CodeSnapshot] {
-        try Self.decode([CodeSnapshot].self, from: await serve(.repoTokens(directory: repoPath, days: days)))
+        try await serve(.repoTokens(directory: repoPath, days: days)).decode([CodeSnapshot].self)
     }
 
     /// How much Session history providers still keep, and what they remove next.
     /// Mirrors Rust `RetentionSummary`.
     public func retention() async throws -> RetentionSummary {
-        try Self.decode(RetentionSummary.self, from: await serve(.sessionRetention))
+        try await serve(.sessionRetention).decode(RetentionSummary.self)
     }
 
     /// The ledger's self-audit, including continuity and lineage tripwires.
     public func doctor() async throws -> DoctorReport {
-        try Self.decode(DoctorReport.self, from: await serve(.machineDoctor))
+        try await serve(.machineDoctor).decode(DoctorReport.self)
     }
 
     /// Decode retained wire text through the decoder live reads use.
     public static func decode<T: Decodable>(_ type: T.Type, from stdout: String) throws -> T {
-        // `lf` prints one JSON line; trim any surrounding whitespace/newline.
-        let trimmed = stdout.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let data = trimmed.data(using: .utf8) else {
-            throw RegistryQueryError("lf query returned non-UTF8 output")
-        }
-        do {
-            return try JSONDecoder().decode(T.self, from: data)
-        } catch {
-            throw RegistryQueryError("lf query JSON did not decode: \(error)")
-        }
+        try ReadOutput(stdout).decode(type)
     }
 }
 

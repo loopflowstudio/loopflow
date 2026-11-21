@@ -11,12 +11,12 @@ enum ServerClient {
     /// can give up; writes wait, because their outcome would become unknown.
     static let readDeadline = Duration.seconds(60)
 
-    /// What `lf <read>` prints: bare text for a string value, JSON otherwise.
+    /// Read from the link selected for this location.
     static func read(_ query: ServedRead, location: ServerLocation = .shared,
-                     deadline: Duration = readDeadline) async throws -> String {
+                     deadline: Duration = readDeadline) async throws -> ReadOutput {
         try Task.checkCancellation()
         let link = try await links.link(for: location)
-        return try await link.request(.read(query), deadline: deadline).printed
+        return try await link.read(query, deadline: deadline)
     }
 
     /// What the write returned, as JSON: what `lf <write> --json` prints.

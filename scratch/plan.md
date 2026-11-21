@@ -55,26 +55,17 @@ the owning server with `session.attach`. The Rust transport test already
 covers input from two views. The mounted Dev workflow is still to be exercised.
 Use a private Machine for branch Rust. There is no replacement for the copy.
 
+One-shot reads now carry the responding link's build diagnostic through
+RegistryQuery and creation recovery. The server returns Session history as a
+JSON string. Unquoting it before the typed decoder ran made valid multiline
+history unreadable. Repository paths still return bare text.
+
+- `swift test --package-path swift --filter 'olderPeerKeepsServingCompatibleReadsAndActions|aReadingThisBuildCannotDecodeNamesBothBuilds'` passed. The revision-8 peer refused an unknown write and omitted a required Task page field. The same connection still delivered a Machine identity with an extra field, multiline Session history and a successful Graph customization.
+- `swift test --package-path swift --skip-build --filter 'contentRoutedSessionHistory|aRecordFromAnEarlierRevisionReadsItsReceiptAndNeverResends|bulkAnswersAndOversizeRequestsTravelByTicket'` passed all three checks.
+
 ## Remaining implementation
 
-1. **Next — older server, newer Desktop.** In
-   `swift/LoopflowMac/Services/ServerClient.swift`, one-shot reads return a
-   printed string before the caller decodes it. Give the served read's decoder
-   the diagnostic from the link that supplied the response. Follow
-   `Services/RegistryQueryLocal.swift`, `swift/Loopflow/Services/RegistryQuery.swift`
-   and `CreationSubmissions.swift` to cover the actual decoding callers.
-   Reuse `ServerLink.unreadable` and the decoding-failure formatting already
-   used in `swift/Loopflow/Services/WorkObservation.swift`; keep the DTOs
-   strict and retain CLI and plain-text read behavior. The existing
-   `aReadingThisBuildCannotDecodeNamesBothBuilds` test in
-   `swift/LoopflowTests/ServerClientTests.swift` establishes only the
-   subscription failure. Extend the `ServerPeer` coverage to exercise a peer
-   with an overlapping revision, an extra field that decodes, a missing
-   required field that fails only the affected read with both builds named,
-   and a successful write alongside an unknown-operation refusal. The link
-   and unaffected readings should stay usable. Run the focused server-client
-   tests.
-2. **Retire sealed copies and migrate CLI coverage.** Remove
+1. **Next — retire sealed copies and migrate CLI coverage.** Remove
    `rust/loopflow/src/world/`, the `lf-world` binary and registration,
    `server/copy.rs`, the sealed-store startup and write refusal,
    `Operation::changes`, CLI `write_refused`, the copy-only
@@ -87,7 +78,7 @@ Use a private Machine for branch Rust. There is no replacement for the copy.
    and a stopped run's failed step. Fold Session/status subscriptions into
    `session_list_subscribe.rs`. Existing transport coverage exercises live
    attachment, so drop the world test that exercised only its stub provider.
-3. **Remove world consumers.** Delete the `world:` entries in
+2. **Remove world consumers.** Delete the `world:` entries in
    `scripts/screenshots.yaml` and the builder in `generate_screenshots.py`.
    Keep empty and mock screenshots and website capture. Remove the cycle
    check's `--world` and use `mock-waves` for `--sheet`. Remove
@@ -103,7 +94,7 @@ Use a private Machine for branch Rust. There is no replacement for the copy.
    `LF_DB_PATH` launch setting. Preserve independent private-snapshot
    commands, `RepositoryWorkspace.machine` and Xcode/private-machine helper
    build commands.
-4. **Sweep remaining references and exercise changed automation.** The main
+3. **Sweep remaining references and exercise changed automation.** The main
    Dev and QA docs were updated in `1ba82f64d0`. Check Rust, Swift, scripts,
    tests, CI and current docs again after consumer deletion. Check
    the moved Rust fixtures by name, focused Python automation and Desktop

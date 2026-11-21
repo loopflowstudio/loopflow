@@ -25,7 +25,7 @@ struct ServerClientTests {
             case "creation":
                 try await Self.submission(peer: peer)
             default:
-                try await ServerClient.read(.machineSelf, location: peer.location)
+                try await ServerClient.read(.machineSelf, location: peer.location).text
             }
         }
         #expect(try JSONDecoder().decode(JSONValue.self, from: Data(value.utf8)) == .object(["id": .string("home_fixture")]))
@@ -116,8 +116,8 @@ struct ServerClientTests {
         } catch { #expect(error is CancellationError) }
         // The connection stays open; the dropped late answer does not corrupt it.
         let reading = try await ServerClient.read(.machineSelf, location: peer.location)
-        #expect(reading.contains("home_fixture"))
-        #expect(!reading.contains("late"))
+        #expect(reading.text.contains("home_fixture"))
+        #expect(!reading.text.contains("late"))
     }
 
     @Test func unansweredReadsExpireThenEndAStalledConnection() async throws {
@@ -196,7 +196,7 @@ struct ServerClientTests {
             }
             return true
         }
-        #expect(try await ServerClient.read(.repoPath(id: "repo_1"), location: peer.location) == "/src/again")
+        #expect(try await ServerClient.read(.repoPath(id: "repo_1"), location: peer.location).text == "/src/again")
     }
 
     @Test func disconnectedWatchResumesItsBaselineAndNewestConfirmation() async throws {
@@ -309,7 +309,7 @@ struct ServerClientTests {
             }
             return true
         }
-        #expect(try await ServerClient.read(.repoPath(id: "repo_1"), location: peer.location) == "/src/after-stall")
+        #expect(try await ServerClient.read(.repoPath(id: "repo_1"), location: peer.location).text == "/src/after-stall")
     }
 
     @Test func delayedBulkReadingKeepsItsPlaceWithoutBlockingOtherRequests() async throws {
@@ -339,7 +339,7 @@ struct ServerClientTests {
         let subscription = ServerClient.subscribe(.allPlans, location: peer.location)
         defer { Task { await subscription.cancel() } }
         peer.waitForMessage { $0["type"] as? String == "subscribe" }
-        #expect(try await ServerClient.read(.machineSelf, location: peer.location) == "independent")
+        #expect(try await ServerClient.read(.machineSelf, location: peer.location).decode(String.self) == "independent")
         release.signal()
         var frames = subscription.lines.makeAsyncIterator()
         let first = try await frames.next()
@@ -370,7 +370,7 @@ struct ServerClientTests {
             }
             return true
         }
-        #expect(try await ServerClient.read(.repoPath(id: "repo_1"), location: peer.location) == big)
+        #expect(try await ServerClient.read(.repoPath(id: "repo_1"), location: peer.location).text == big)
         let output = try await ServerClient.configuration(.configTheme(path: "/unused", value: big), location: peer.location)
         #expect(String(decoding: output, as: UTF8.self) == "\(big.utf8.count)")
     }
@@ -457,11 +457,53 @@ struct ServerClientTests {
         } catch {
             #expect(error.localizedDescription.contains("subscribe again"))
         }
-        #expect(try await ServerClient.read(.machineSelf, location: peer.location) == "still here")
+        #expect(try await ServerClient.read(.machineSelf, location: peer.location).decode(String.self) == "still here")
         let fresh = ServerClient.subscribe(.allPlans, location: peer.location)
         var readings = fresh.lines.makeAsyncIterator()
         #expect(try await readings.next() != nil)
         await fresh.cancel()
+    }
+
+    @Test func olderPeerKeepsServingCompatibleReadsAndActions() async throws {
+        let peer = try ServerPeer()
+        peer.serve(revision: 8) { message, respond in
+            guard let id = message["id"], let operation = message["operation"] as? [String: Any],
+                  let kind = operation["kind"] as? String else { return true }
+            let result: Any
+            switch kind {
+            case "machine.self": result = ["id": "home_fixture", "older_field": true] as [String: Any]
+            case "task.list": result = ["next": NSNull()]
+            case "session.history.get": result = "First line\nSecond line"
+            case "graph.customize": result = ["path": "/repo/code.yaml"]
+            default:
+                respond(["type": "error", "id": id, "code": "invalid", "message": "Unknown operation: \(kind)",
+                         "data": ["kind": kind], "revisions": NSNull()])
+                return true
+            }
+            respond(["type": "response", "id": id, "trace_id": "trace", "revisions": NSNull(), "result": result])
+            return true
+        }
+        let query = RegistryQuery(serve: { try await ServerClient.read($0, location: peer.location) },
+                                  write: { try await ServerClient.write($0, location: peer.location) }) { _, _ in
+            throw RegistryQueryError("Unexpected CLI call")
+        }
+        do {
+            _ = try await query.closedTasks(wave: "desktop", cwd: "/repo")
+            Issue.record("A Task page without tasks decoded")
+        } catch {
+            let client = "\(LaunchJournal.appVersion)+\(DesktopLog.sourceRevision)"
+            #expect(error.localizedDescription == "This Loopflow (\(client)) can't read what the server (test) sent. (missing tasks at root)")
+        }
+        do {
+            try await query.rankTask(issue: "task_fixture", rank: 1, cwd: "/repo")
+            Issue.record("The older peer accepted an unknown operation")
+        } catch let error as ServerError {
+            #expect(error.code == .invalid)
+            #expect(error.message.contains("task.update"))
+        }
+        #expect(try await query.localMachineId() == "home_fixture")
+        #expect(try await query.sessionHistoryText(id: "session_fixture") == "First line\nSecond line")
+        #expect(try await query.customizeGraph("code", cwd: "/repo") == "/repo/code.yaml")
     }
 
     @Test("A reading from another build fails its part with a sentence naming both builds")
@@ -529,7 +571,7 @@ struct ServerClientTests {
             #expect(error.localizedDescription == "gone")
         }
         // The connection outlives the subscription.
-        #expect(try await ServerClient.read(.repoPath(id: "repo_1"), location: peer.location) == "still here")
+        #expect(try await ServerClient.read(.repoPath(id: "repo_1"), location: peer.location).text == "still here")
         await subscription.cancel()
     }
 
@@ -607,7 +649,7 @@ struct ServerClientTests {
         do {
             _ = try await server.status()
             let reading = try await ServerClient.read(query, location: location)
-            #expect(reading.contains("Recovered Work"))
+            #expect(reading.text.contains("Recovered Work"))
             let subscription = ServerClient.subscribe(query, location: location)
             do {
                 var frames = subscription.lines.makeAsyncIterator()
@@ -678,7 +720,7 @@ private final class ServerPeer: @unchecked Sendable {
     }
 
     /// `handle` returns false to close the connection after this message.
-    func serve(_ handle: @escaping @Sendable (_ message: [String: Any], _ respond: (_ line: [String: Any]) -> Void) -> Bool) {
+    func serve(revision: Int = ServerProtocol.revision, _ handle: @escaping @Sendable (_ message: [String: Any], _ respond: (_ line: [String: Any]) -> Void) -> Bool) {
         Thread.detachNewThread { [self] in
             let fd = accept(listener, nil, nil)
             guard fd >= 0 else { return }
@@ -687,7 +729,7 @@ private final class ServerPeer: @unchecked Sendable {
             do {
                 _ = try connection.read() // hello
                 try connection.write([
-                    "type": "welcome", "client_id": "fixture-client", "revision": ServerProtocol.revision, "server_revision": ServerProtocol.revision, "min_revision": ServerProtocol.minRevision, "instance": "fixture",
+                    "type": "welcome", "client_id": "fixture-client", "revision": revision, "server_revision": revision, "min_revision": ServerProtocol.minRevision, "instance": "fixture",
                     "build": "test", "executable_sha256": String(repeating: "f", count: 64), "machine": NSNull(),
                     "limits": ["max_message": 1_048_576, "max_connections": 64,"max_open":256,"max_retained_bytes":67108864],
                 ])

@@ -314,10 +314,11 @@ extension WorkFrame {
 
 extension DecodingError {
     /// Where decoding stopped, for the log and the Notice: "(missing owned_by_you at body.tasks.0)".
-    fileprivate var place: String {
+    var place: String {
         // An array position names itself "Index 0"; the path says 0.
         func path(_ context: Context) -> String {
-            context.codingPath.map { $0.intValue.map(String.init) ?? $0.stringValue }.joined(separator: ".")
+            if context.codingPath.isEmpty { return "root" }
+            return context.codingPath.map { $0.intValue.map(String.init) ?? $0.stringValue }.joined(separator: ".")
         }
         return switch self {
         case .keyNotFound(let key, let context): "(missing \(key.stringValue) at \(path(context)))"

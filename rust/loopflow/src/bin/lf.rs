@@ -20,10 +20,10 @@ use loopflow_execution::ops::project::update_project;
 use loopflow_execution::store::planning_sync::LostAnswer;
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-enum Takes {
-    Nothing,
-    OptionalValue,
-    Value,
+enum FlagValue {
+    None,
+    Optional,
+    Required,
 }
 
 #[derive(PartialEq, Eq)]
@@ -33,16 +33,16 @@ enum SeparateValue {
     Missing,
 }
 
-impl Takes {
+impl FlagValue {
     fn separate_value(self, args: &[String], index: usize) -> SeparateValue {
-        if self == Self::Nothing || args[index].contains('=') {
+        if self == Self::None || args[index].contains('=') {
             SeparateValue::None
         } else if args
             .get(index + 1)
             .is_some_and(|next| next == "-" || !next.starts_with('-'))
         {
             SeparateValue::Next
-        } else if self == Self::Value {
+        } else if self == Self::Required {
             SeparateValue::Missing
         } else {
             SeparateValue::None
@@ -50,32 +50,30 @@ impl Takes {
     }
 }
 
-type FlagTables = HashMap<String, Takes>;
-
 struct CommandArgTables {
     /// Flags owned directly by this command.
-    direct: FlagTables,
+    direct: HashMap<String, FlagValue>,
     /// Flags owned here or by any descendant, used only to find the command path.
-    recursive: FlagTables,
+    recursive: HashMap<String, FlagValue>,
     /// Direct subcommands, indexed by canonical name.
     subcommands: HashMap<String, CommandArgTables>,
 }
 
 fn command_arg_tables(command: &clap::Command, inherited: &HashSet<clap::Id>) -> CommandArgTables {
-    let mut direct = FlagTables::default();
+    let mut direct = HashMap::new();
     for arg in command
         .get_arguments()
         .filter(|arg| !inherited.contains(arg.get_id()))
     {
         let takes = if !arg.get_action().takes_values() {
-            Takes::Nothing
+            FlagValue::None
         } else if arg
             .get_num_args()
             .is_some_and(|range| range.min_values() == 0)
         {
-            Takes::OptionalValue
+            FlagValue::Optional
         } else {
-            Takes::Value
+            FlagValue::Required
         };
         if let Some(short) = arg.get_short() {
             direct.insert(format!("-{short}"), takes);
@@ -124,7 +122,7 @@ fn flag_name(arg: &str) -> &str {
 }
 
 fn first_target_index(args: &[String]) -> Option<usize> {
-    let mut index = 0;
+    let mut index = 1;
     while index < args.len() {
         let arg = &args[index];
         if arg == "--" {
@@ -145,37 +143,30 @@ fn first_target_index(args: &[String]) -> Option<usize> {
     None
 }
 
-#[derive(Clone, Copy)]
-struct SelectedCommand<'a> {
+struct SelectedCommand {
     index: usize,
-    args: &'a CommandArgTables,
+    args: &'static CommandArgTables,
 }
 
-fn selected_command_path<'a>(
-    rest: &[String],
-    command_index: usize,
-    command: &'a CommandArgTables,
-) -> Vec<SelectedCommand<'a>> {
+fn selected_command_path(args: &[String], target: usize) -> Vec<SelectedCommand> {
+    // Insert moved root flags after any leading options, just before the target.
+    let root = arg_tables();
     let mut path = vec![SelectedCommand {
-        index: command_index,
-        args: command,
+        index: target - 1,
+        args: root,
     }];
-    let mut index = command_index + 1;
-
-    while index < rest.len() {
-        let arg = &rest[index];
+    let mut current = root;
+    let mut index = target;
+    while index < args.len() {
+        let arg = &args[index];
         if arg == "--" {
             break;
         }
 
-        let current = path.last().expect("command path is never empty").args;
         if arg.starts_with('-') {
             let name = flag_name(arg);
-            let takes = current
-                .recursive
-                .get(name)
-                .max(arg_tables().direct.get(name));
-            if takes.is_some_and(|takes| takes.separate_value(rest, index) == SeparateValue::Next) {
+            let takes = current.recursive.get(name).max(root.direct.get(name));
+            if takes.is_some_and(|takes| takes.separate_value(args, index) == SeparateValue::Next) {
                 index += 1;
             }
             index += 1;
@@ -185,6 +176,7 @@ fn selected_command_path<'a>(
         let Some(child) = current.subcommands.get(arg) else {
             break;
         };
+        current = child;
         path.push(SelectedCommand { index, args: child });
         index += 1;
     }
@@ -192,62 +184,49 @@ fn selected_command_path<'a>(
     path
 }
 
-fn deepest_command_before(path: &[SelectedCommand<'_>], index: usize) -> usize {
-    path.iter()
-        .rposition(|command| command.index < index)
-        .expect("the top-level command precedes its arguments")
-}
-
-fn local_flag_owner(path: &[SelectedCommand<'_>], name: &str, current: usize) -> Option<usize> {
-    if path[current].args.direct.contains_key(name) {
-        return Some(current);
-    }
-    path.iter()
-        .rposition(|command| command.args.direct.contains_key(name))
-}
-
-fn reorder_command_args(
-    program: String,
-    rest: &[String],
-    command_index: usize,
-    command: &CommandArgTables,
-) -> Vec<String> {
-    let path = selected_command_path(rest, command_index, command);
-    let mut moved_globals = Vec::new();
-    let mut moved_locals: HashMap<usize, Vec<String>> = HashMap::new();
-    let mut retained = vec![true; rest.len()];
-    let mut index = command_index + 1;
-
-    while index < rest.len() {
-        let arg = &rest[index];
+/// Accept top-level flags on either side of a target when their meaning is
+/// unambiguous. Local command flags win collisions, and `--` ends reordering.
+fn reorder_args(args: Vec<String>) -> Vec<String> {
+    let Some(target) = first_target_index(&args) else {
+        return args;
+    };
+    let path = selected_command_path(&args, target);
+    let mut moved: HashMap<usize, Vec<String>> = HashMap::new();
+    let mut retained = vec![true; args.len()];
+    let mut index = target + 1;
+    while index < args.len() {
+        let arg = &args[index];
         if arg == "--" {
             break;
         }
-
-        let current = deepest_command_before(&path, index);
         let name = flag_name(arg);
-        let (takes, owner_path, moved) = if let Some(owner) = local_flag_owner(&path, name, current)
+        if path[1..]
+            .iter()
+            .rfind(|command| command.index < index)
+            .is_some_and(|command| command.args.direct.contains_key(name))
         {
-            if owner == current {
-                index += 1;
-                continue;
-            }
-            (
-                path[owner].args.direct[name],
-                &path[..=owner],
-                moved_locals.entry(owner).or_default(),
-            )
-        } else if let Some(&takes) = arg_tables().direct.get(name) {
-            (takes, &path[..0], &mut moved_globals)
-        } else {
+            index += 1;
+            continue;
+        }
+        let Some(depth) = path
+            .iter()
+            .rposition(|command| command.args.direct.contains_key(name))
+        else {
             index += 1;
             continue;
         };
+        let owner = &path[depth];
+        let takes = owner.args.direct[name];
         let start = index;
-        match takes.separate_value(rest, index) {
+        match takes.separate_value(&args, index) {
             SeparateValue::Missing => {
-                let mut result = vec![program];
-                result.extend(owner_path.iter().map(|command| rest[command.index].clone()));
+                // End at the flag so Clap cannot consume a command name as its value.
+                let mut result = vec![args[0].clone()];
+                result.extend(
+                    path[1..=depth]
+                        .iter()
+                        .map(|command| args[command.index].clone()),
+                );
                 result.push(arg.clone());
                 return result;
             }
@@ -255,67 +234,25 @@ fn reorder_command_args(
             SeparateValue::None => {}
         }
         retained[start..=index].fill(false);
-        moved.extend_from_slice(&rest[start..=index]);
+        moved
+            .entry(owner.index)
+            .or_default()
+            .extend_from_slice(&args[start..=index]);
         index += 1;
     }
 
-    let mut result = vec![program];
-    result.extend_from_slice(&rest[..command_index]);
-    result.extend(moved_globals);
-    for (index, arg) in rest.iter().enumerate().skip(command_index) {
+    if moved.is_empty() {
+        return args;
+    }
+    let mut result = Vec::with_capacity(args.len());
+    for (index, arg) in args.into_iter().enumerate() {
         if retained[index] {
-            result.push(arg.clone());
+            result.push(arg);
         }
-        if let Some(owner) = path.iter().position(|command| command.index == index) {
-            if let Some(flags) = moved_locals.remove(&owner) {
-                result.extend(flags);
-            }
+        if let Some(flags) = moved.remove(&index) {
+            result.extend(flags);
         }
     }
-    result
-}
-
-/// Accept top-level flags on either side of a target when their meaning is
-/// unambiguous. Local command flags win collisions, and `--` ends reordering.
-fn reorder_args(args: Vec<String>) -> Vec<String> {
-    if args.len() <= 1 {
-        return args;
-    }
-
-    let program = args[0].clone();
-    let rest = &args[1..];
-
-    let Some(target_index) = first_target_index(rest) else {
-        return args;
-    };
-    if let Some(command) = arg_tables().subcommands.get(rest[target_index].as_str()) {
-        return reorder_command_args(program, rest, target_index, command);
-    }
-
-    let mut result = vec![program];
-    result.extend_from_slice(&rest[..target_index]);
-    let mut skill_and_args = vec![rest[target_index].clone()];
-    let mut index = target_index + 1;
-    while index < rest.len() {
-        let arg = &rest[index];
-        if arg == "--" {
-            skill_and_args.extend_from_slice(&rest[index..]);
-            break;
-        }
-        if let Some(takes) = arg_tables().direct.get(flag_name(arg)) {
-            let start = index;
-            match takes.separate_value(rest, index) {
-                SeparateValue::Missing => return vec![args[0].clone(), arg.clone()],
-                SeparateValue::Next => index += 1,
-                SeparateValue::None => {}
-            }
-            result.extend_from_slice(&rest[start..=index]);
-        } else {
-            skill_and_args.push(arg.clone());
-        }
-        index += 1;
-    }
-    result.extend(skill_and_args);
     result
 }
 
@@ -3770,13 +3707,6 @@ mod tests {
     }
 
     #[test]
-    fn reorder_args_flag_after_skill() {
-        let args = vec!["lf".to_string(), "debug".to_string(), "-c".to_string()];
-        let result = reorder_args(args);
-        assert_eq!(result, vec!["lf", "-c", "debug"]);
-    }
-
-    #[test]
     fn old_serve_surface_is_no_longer_a_builtin_command() {
         let cli = Cli::try_parse_from(["lf", "serve", "goals"]).expect("falls through to external");
         assert!(
@@ -3791,79 +3721,28 @@ mod tests {
         assert!(Cli::try_parse_from(["lf", "--dispatch", "implement", "ship it"]).is_err());
     }
 
-    #[test]
-    fn reorder_args_flag_before_skill() {
-        let args = vec!["lf".to_string(), "-c".to_string(), "debug".to_string()];
-        let result = reorder_args(args);
-        assert_eq!(result, vec!["lf", "-c", "debug"]);
+    fn argv(words: &str) -> Vec<String> {
+        std::iter::once("lf")
+            .chain(words.split_whitespace())
+            .map(String::from)
+            .collect()
     }
 
     #[test]
-    fn reorder_args_value_flag_before_skill() {
-        // lf -a codex implement -> should stay the same (already correct order)
-        let args = vec![
-            "lf".to_string(),
-            "-a".to_string(),
-            "codex".to_string(),
-            "implement".to_string(),
-        ];
-        let result = reorder_args(args);
-        assert_eq!(result, vec!["lf", "-a", "codex", "implement"]);
-    }
-
-    #[test]
-    fn reorder_args_value_flag_after_skill() {
-        let args = vec![
-            "lf".to_string(),
-            "debug".to_string(),
-            "-a".to_string(),
-            "codex".to_string(),
-        ];
-        let result = reorder_args(args);
-        assert_eq!(result, vec!["lf", "-a", "codex", "debug"]);
-    }
-
-    #[test]
-    fn reorder_args_mixed_flags() {
-        let args = vec![
-            "lf".to_string(),
-            "--interactive".to_string(),
-            "implement".to_string(),
-            "-c".to_string(),
-            "-a".to_string(),
-            "claude".to_string(),
-        ];
-        let result = reorder_args(args);
-        assert_eq!(
-            result,
-            vec!["lf", "--interactive", "-c", "-a", "claude", "implement"]
-        );
-    }
-
-    #[test]
-    fn reorder_args_skill_with_args() {
-        let args = vec![
-            "lf".to_string(),
-            "implement:".to_string(),
-            "add".to_string(),
-            "logout".to_string(),
-            "-c".to_string(),
-        ];
-        let result = reorder_args(args);
-        assert_eq!(result, vec!["lf", "-c", "implement:", "add", "logout"]);
-    }
-
-    #[test]
-    fn reorder_args_known_command_unchanged() {
-        let args = vec![
-            "lf".to_string(),
-            "commit".to_string(),
-            "-m".to_string(),
-            "msg".to_string(),
-        ];
-        let result = reorder_args(args);
-        // `-m` is local to commit, so the local meaning wins.
-        assert_eq!(result, vec!["lf", "commit", "-m", "msg"]);
+    fn reorder_args_places_global_flags_before_skills() {
+        for (input, expected) in [
+            ("-c debug", "-c debug"),
+            ("debug -c", "-c debug"),
+            ("-a codex implement", "-a codex implement"),
+            ("debug -a codex", "-a codex debug"),
+            (
+                "--interactive implement -c -a claude",
+                "--interactive -c -a claude implement",
+            ),
+            ("implement: add logout -c", "-c implement: add logout"),
+        ] {
+            assert_eq!(reorder_args(argv(input)), argv(expected), "{input}");
+        }
     }
 
     #[test]
@@ -3902,6 +3781,7 @@ mod tests {
     fn reorder_args_reports_missing_values_at_the_flag_owner() {
         for (input, expected) in [
             ("open --repo", "--repo"),
+            ("-c open --repo", "--repo"),
             ("open --agent", "--agent"),
             ("open --task", "--task"),
             ("task list --repo", "--repo"),
@@ -3914,12 +3794,6 @@ mod tests {
             ("task --wave --title x create", "task create --wave"),
             ("session history show id --after", "session history --after"),
         ] {
-            let argv = |words: &str| {
-                std::iter::once("lf")
-                    .chain(words.split_whitespace())
-                    .map(String::from)
-                    .collect::<Vec<_>>()
-            };
             let reordered = reorder_args(argv(input));
             assert_eq!(reordered, argv(expected), "{input}");
             assert_eq!(reorder_args(reordered.clone()), reordered);
@@ -3940,16 +3814,18 @@ mod tests {
     #[test]
     fn reorder_args_preserves_supplied_and_optional_values() {
         for (input, expected) in [
-            ("lf open --repo=x", "lf --repo=x open"),
-            ("lf open --repo x", "lf --repo x open"),
-            ("lf open --repo -", "lf --repo - open"),
+            ("commit -m msg", "commit -m msg"),
+            ("-c open --repo x", "-c --repo x open"),
+            ("open --repo=x", "--repo=x open"),
+            ("open --repo x", "--repo x open"),
+            ("open --repo -", "--repo - open"),
             (
-                "lf session --primary --json list",
-                "lf session list --primary --json",
+                "session --primary --json list",
+                "session list --primary --json",
             ),
         ] {
-            let reordered = reorder_args(input.split_whitespace().map(String::from).collect());
-            assert_eq!(reordered, expected.split_whitespace().collect::<Vec<_>>());
+            let reordered = reorder_args(argv(input));
+            assert_eq!(reordered, argv(expected), "{input}");
             Cli::try_parse_from(reordered).unwrap();
         }
     }

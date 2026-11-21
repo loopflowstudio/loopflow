@@ -28,8 +28,9 @@ The recorded base still matched `origin/main` at realign.
 
 ## Next
 
-No implementation slice remains. Gate can replay these cases with the
-candidate binary. CI owns the broader parser and navigation suites.
+Compress rebuilt the CLI and replayed all seven cases below from /tmp. Each
+named its missing flag and exited 2. All 10 grouped reorder_args tests passed.
+CI owns the broader parser and navigation suites.
 
 ```zsh
 cargo build -p loopflow --bin lf

@@ -544,7 +544,7 @@ private struct TaskDocumentView: NSViewRepresentable {
             document.scroll.autoresizingMask = [.width, .height]
             host.addSubview(document.scroll)
         }
-        document.editor.applyPalette(palette)
+        document.applyPalette(palette)
         document.editor.recordReadiness()
         document.scroll.backgroundColor = NSColor(palette.background)
     }
@@ -572,13 +572,13 @@ private struct TaskFileDiffView: View {
                     .lineLimit(1).truncationMode(.middle)
                     .accessibilityIdentifier("files-diff-comparison")
                 Spacer(minLength: 4)
-                ReviewCommentsControl(store: store, isFocused: isFocused, addToConversation: addToConversation)
                 ReviewLayoutPicker(store: store, width: width)
             }
             .buttonStyle(.plain)
             .padding(.horizontal, 10)
             .frame(height: TaskFileChrome.headerHeight)
             Divider()
+            ReviewCommentsStrip(store: store, isFocused: isFocused, addToConversation: addToConversation)
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     if review.truncated { ReviewNotice(text: "Diff truncated at 1 MB") }

@@ -240,8 +240,8 @@ struct ReviewDiffTests {
         #expect(DiffGroupSetting.parse(.array([.object(["title": .string("No paths")])])) == nil)
         let byGroup = ReviewGroup.arrange(files, ordering: .groups, tour: tour, groups: groups)
         #expect(byGroup.map(\.title) == ["Docs", "Everything else", "Tests", "Generated"])
-        // Largest change first within a group.
-        #expect(byGroup.flatMap(\.files).map(\.path) == ["README.md", "rust/b.rs", "rust/a.rs", "swift/Store.swift",
+        // By path within a group.
+        #expect(byGroup.flatMap(\.files).map(\.path) == ["README.md", "rust/a.rs", "rust/b.rs", "swift/Store.swift",
                                                           "rust/tests/a.rs", "swift/StoreTests.swift", "Cargo.lock"])
         // A list without a rest puts unmatched files last.
         #expect(ReviewGroup.arrange(files, ordering: .groups, tour: nil, groups: [groups[3]]).map(\.title)
@@ -256,6 +256,30 @@ struct ReviewDiffTests {
         #expect(paths.map(\.title) == ["Top level", "rust/", "swift/"])
         // No tour: the tour order is the group order.
         #expect(ReviewGroup.arrange(files, ordering: .tour, tour: nil, groups: groups) == byGroup)
+    }
+
+    /// A line's comments, strings, numbers and keywords are found by the
+    /// file's language; a block comment carries to the next line, and a file
+    /// of an unknown kind gets no color.
+    @Test func syntaxColorsFollowTheFilesLanguage() throws {
+        func kinds(_ line: String, in path: String, inBlock: inout Bool) -> [String] {
+            let language = SyntaxLanguage.named(path)!
+            return language.spans(line, inBlock: &inBlock).map { span in
+                "\(span.kind):\((line as NSString).substring(with: span.range))"
+            }
+        }
+        var inBlock = false
+        #expect(kinds(#"let count = 42 // "not a string""#, in: "a/Store.swift", inBlock: &inBlock)
+                == ["keyword:let", "number:42", #"comment:// "not a string""#])
+        #expect(kinds(#"print("a \" // b", lets)"#, in: "Store.swift", inBlock: &inBlock) == [#"string:"a \" // b""#])
+        #expect(kinds("fn main() { /* open", in: "main.rs", inBlock: &inBlock) == ["keyword:fn", "comment:/* open"])
+        #expect(inBlock)
+        #expect(kinds("still */ let x: &'a str = 0;", in: "main.rs", inBlock: &inBlock)
+                == ["comment:still */", "keyword:let", "number:0"])
+        #expect(!inBlock)
+        #expect(kinds("echo $# # count", in: "run.sh", inBlock: &inBlock) == ["comment:# count"])
+        #expect(kinds("enabled: true # yes", in: ".lf/config.yaml", inBlock: &inBlock) == ["keyword:true", "comment:# yes"])
+        #expect(SyntaxLanguage.named("notes.md") == nil && SyntaxLanguage.named("Dockerfile") != nil)
     }
 }
 #endif

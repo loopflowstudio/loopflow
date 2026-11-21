@@ -361,8 +361,12 @@ switches in this window; a brief that changed since you last read it says so.
 
 **Diff** opens on what is compared and how much changed ("7 changes in 4
 files", then the base branch and commit), with the changed files beside the
-whole comparison as one stream. A comparison over the 1 MB read limit is
-completed one file at a time. A pill in the title says where the work is
+whole comparison as one stream. Each shown file's lines are read on their own,
+those near the top of the pane first, so a large file never cuts another short
+and a hidden file is never read. A new file reads as its contents. Size alone
+collapses nothing; a file whose lines are too long to read (minified, base64,
+embedded data) starts as one row with **Show** and **Open in Files**. Code is
+in syntax colors, here and in Files. A pill in the title says where the work is
 delivered and opens the delivery card. Loopflow's record decides whether there
 is a PR: none, publishing, open, merged or abandoned. GitHub's reading adds
 checks, review and description with its age; a failed, stale (over two minutes)
@@ -376,7 +380,7 @@ The files read in the tour's order when the checkout has
 at: 81d3fa5973e63a4394a25357502e635a3baf5d5b
 first:
   - path: swift/LoopflowMac/TaskFileDocument.swift
-    why: A change over 1 MB no longer loses its last files
+    why: Each file's lines are read on their own
 hide:
   - path: docs/
     why: Path literal renamed, nothing else
@@ -384,8 +388,7 @@ hide:
 
 `first` puts those files at the top in that order, each `why` heading its files
 in the stream and the sidebar. Every file it does not name follows **By group**,
-largest change first within each group. Without the file the Diff reads By
-group. The order menu switches between **Tour**, **By group** and **By path**.
+by path within each group. Without the file the Diff reads By group. The order menu switches between **Tour**, **By group** and **By path**.
 `hide` leaves those paths out for this change only; the sidebar lists each with
 its reason and **Show**, and they never join the hidden paths below.
 

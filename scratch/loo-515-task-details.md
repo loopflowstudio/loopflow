@@ -8,9 +8,9 @@ Research: `scratch/task-details-research.md`. Pages: `scratch/explore-diff-rival
 The step-by-step account this file replaced: `ade953f915:scratch/loo-515-task-details.md`
 (PR #1949's branch).
 
-Status: built, the tour skill and the two diff settings included; nothing since
-the November 18 first try in the Dev app has been seen on screen. PR #1949 is
-open and mergeable; its head follows this branch.
+Status: built, the tour skill and the two diff settings included. The November
+21 demo's repairs (below) are built and unseen. PR #1949 is open; its head
+follows this branch.
 
 ## What exists
 
@@ -29,8 +29,17 @@ file and a builtin skill.
     live from the file observation. Title `<n> changes in <m> files`, then
     `against <base> at <sha> · includes uncommitted`; base is GitHub's
     `baseRefName` once a PR is read, else "the Task's base".
-  - A comparison past `lf task diff`'s 1 MB is completed with one read per
-    remaining file.
+  - Read file by file (`loadReview`, `readPatches`): `lf task changes` names
+    every file, then each shown file's `lf task diff --path` is read six at a
+    time in stream order, a file near the viewport first. Hidden and
+    filtered-out files are not read until shown. An untracked file, or a new
+    one whose patch is over 1 MB, is read with `lf task file` while the
+    comparison reads the working tree. New files render as contents: no `+`,
+    no fill, one lazy row per line. A file with a line over 1,000 UTF-16
+    units starts as one row (line count, size, Show, Open in Files); size
+    alone collapses nothing. A cut or failed read says so under its file.
+  - Syntax colors (`SyntaxColors.swift`): comments, strings, numbers and
+    keywords by file extension, in the stream and the Files editor.
   - Delivery pill in the title row (none/publishing/open/stale/ahead/
     unavailable/merged/abandoned, "Task still open"); click shows the card with
     every reading and its age.
@@ -39,7 +48,7 @@ file and a builtin skill.
     reasons and Show, "Always hidden" with its add field. Under 620 pt it opens
     over the stream from a toolbar button.
   - **Order** (`DiffTour`, `ReviewGroup.arrange`): the tour's `first:` files,
-    then the rest under the `diff_groups` headings. The menu reads Tour / By
+    then the rest under the `diff_groups` headings, by path within each. The menu reads Tour / By
     group / By path; Tour is the default when `first` has entries. `ReviewKind`
     is deleted.
   - **Tour**: `scratch/tour.yaml` with `at:`, `first:` (files, optional
@@ -70,8 +79,13 @@ file and a builtin skill.
     ignoring case; contained anywhere, or at the end when it starts with `*`.
   - Desktop reads both settings through `config.explain` and layers nothing
     itself; only the tour sits on top.
-  - **File bar** above the stream holds the header of the file under the top
-    edge (`ReviewFileTitle`, the same view as the in-stream header).
+  - **File bar** above the stream names the file whose lines are at the top
+    edge. It is the first file's only header; while another file's own header
+    is the top row the bar still names the file above it, and a sidebar click
+    lands on the file's first row with its header just off screen.
+  - **Width**: the toolbar keeps the sidebar toggle and stepper and gives the
+    rest the widest form that fits (words, symbols, one menu); waiting
+    comments have their own row; the title stacks over the delivery pill.
   - `ReviewStepper` (`]`/`[`, arrows) crosses files; Focus shows one file with
     a strip reading "Only X · N more files"; Unified / Side by side (≥ 640 pt,
     disabled with its reason below); word emphasis; within-file moves collapsed
@@ -80,7 +94,7 @@ file and a builtin skill.
     (`ReviewGap`), read with `lf task file`, only while the comparison reads the
     working tree.
   - **Comments** (`ReviewComment`): written under selected lines, counted in
-    the sidebar, sent together by `ReviewCommentsControl` (⌘↩) into the
+    the sidebar, sent together by `ReviewCommentsStrip` (⌘↩) into the
     conversation's unsent input; cleared only when the text reached the
     terminal. Re-anchored by matching line text; unmatched ones show detached
     and are still sent.
@@ -179,7 +193,16 @@ Chosen while building, not by Jack, reversible before release:
 - A comment on an opened unchanged line detaches when its file's diff changes.
   A repeated short line (`}`) can re-anchor to the wrong identical line.
 - Moves are found only between a pure removal and a pure addition in one file.
-- The file menu and sidebar carry no per-file +/−; file headers do.
+- `lf task changes` carries no line counts or added/deleted kind, so a file's
+  +/− and status appear when its lines arrive, and a committed new file over
+  1 MB costs one cut `lf task diff` read before `lf task file`.
+- `lf task file` stops at 1 MB too: a new file past it shows the first 1 MB of
+  its patch with "Cut at 1 MB".
+- Syntax is read one line at a time. A block comment carries across lines in
+  the editor, not in the stream; Python triple-quoted strings and Markdown get
+  no special reading.
+- The editor recolors the whole buffer after each edit, up to 200,000 UTF-16
+  units; a larger file keeps one color.
 - `lf pr submit` and `lf pr land` clear added `scratch/` files in every
   repository, so `scratch/tour.yaml` ends at publish; after that the Diff
   offers Write tour again. Jack: "Tour doesnt need to survive".
@@ -330,3 +353,24 @@ files:
 - No GitHub patch renderer remains.
 
 Check (November 19): `cargo test -p loopflow-execution --lib config::` → 105 passed (before the conflict-free merge of main `2750c9e0fb`); after the sixth-pass repairs and their compress `scripts/test_desktop.sh --filter 'TaskFilesTests|ReviewDiffTests'` → 51 passed and `cargo test -p loopflow --test golden_prompt` → passed with regenerated goldens; branch `lf config explain diff_groups` selects the repository's list. Gate/CI: clippy, `documented_commands::`, the full swift suite, `global_commands` (PR #1949's suites are skipped at `6d503e2991`). Demo: the pane on screen.
+
+## Demo, November 21 — Diff pane in Loopflow Dev on the live Machine
+
+Jack, on a screenshot of the Diff pane beside the conversation: "still deosnt seent to be workign", then "(1) not aligned right and jumps when i hover back and forth across panes (2) TaskChangesView not showing", then "also, no syntax highlighting".
+
+What the window showed (2560×1600 capture, pane about 600 pt wide):
+- The pane's content is wider than the pane: title, comparison line, file paths and line numbers are clipped on both edges. The toolbar is one fixed `HStack` (sidebar toggle, stepper, order menu, Write tour squeezed to "Wr it…", comment count, a red square, Focus, layout picker), so its minimum width sets the column's.
+- `TaskChangesView.swift` shows twice at the top: in `currentFileBar` and as the file's own header just below it, with the 1 MB notice between them.
+- The 1 MB notice is real: `scratch/task-details-research.html` alone is a 1.28 MB diff.
+- No syntax highlighting in the Diff or Files; none exists in the code yet.
+
+Later the same day, by steer from the Session beside the demo:
+- On the 1 MB notice for a file `diff_hidden` hides: "well we're supposed to be hing that right?"
+- "does that diff need to be 1+ MB? woudl it be better if we handled new files seaparately" (`scratch/task-details-research.html` is 1.28 MB in 239 lines.) The steer asked for the read T3 Code does: stats always, patches fetched by path.
+- On collapsing by size: "Ive always found this annoying, its like, often the largest diffs are the ones that matter the most. [ignoring like generated files, which we are trying to handle a separate way]"
+
+Built for these, unseen: the width, file bar, syntax and per-file read entries under What exists. Chosen while building, not by Jack: files within a group read by path instead of largest first (sizes are unknown until each file is read, and the stream would reorder as they arrive); the 1,000-unit line as "too long to read"; syntax inks are the working, available and warning tones, red and green left to removed and added lines; no highlighting library.
+
+Why the pane jumped, as read from the code and not confirmed on screen: a column wider than its pane is centered and clipped, so any change in its minimum width (the reading icon coming and going) moved everything. Each row now fits 240 pt and the icon keeps its place.
+
+Check (November 21): `swift build --build-tests` → complete; `scripts/test_desktop.sh --skip-build --filter 'TaskFilesTests|ReviewDiffTests|TaskBriefTests|DesktopPolishTests'` → passed. `cargo build -p loopflow --bin lf` fails here in `loopflow-storage/build.rs` ("apply graph_process_task: no such column: is_local"): this clone is shallow and has no `LOOPFLOW_MIGRATION_ORDER`, so `ThemeTests` (needs `target/debug/lf`) did not run. Gate/CI: the full swift suite. Demo: the pane on screen at several widths, hover across panes, a large new file, a minified file.

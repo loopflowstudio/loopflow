@@ -168,20 +168,44 @@ struct ReviewFile: Equatable, Sendable, Identifiable {
     let blocks: [ReviewBlock]
     let additions: Int
     let deletions: Int
+    /// The longest shown line in UTF-16 units, and the size of all of them in bytes.
+    let longestLine: Int
+    let bytes: Int
     var id: String { path }
+
+    /// Past this a line is machine-made: minified, base64 or embedded data.
+    static let readableLine = 1_000
 
     init(path: String, oldPath: String?, status: Status, blocks: [ReviewBlock]) {
         self.path = path
         self.oldPath = oldPath
         self.status = status
         self.blocks = blocks
-        var additions = 0, deletions = 0
+        var additions = 0, deletions = 0, longest = 0, bytes = 0
         for line in Self.lines(blocks) {
             if line.kind == .added { additions += 1 } else if line.kind == .removed { deletions += 1 }
+            longest = max(longest, line.text.utf16.count)
+            bytes += line.text.utf8.count + 1
         }
         self.additions = additions
         self.deletions = deletions
+        longestLine = longest
+        self.bytes = bytes
     }
+
+    /// A new file as its contents: every line, numbered from one.
+    static func added(_ path: String, content: String) -> ReviewFile {
+        var texts = content.components(separatedBy: "\n")
+        if texts.last?.isEmpty == true { texts.removeLast() }
+        let lines = texts.enumerated().map { index, text in
+            ReviewLine(kind: .added, text: text.hasSuffix("\r") ? String(text.dropLast()) : text, old: nil, new: index + 1)
+        }
+        return ReviewFile(path: path, oldPath: nil, status: .added,
+                          blocks: lines.isEmpty ? [] : [.change(ReviewChange(id: "\(path)#n1", removed: [], added: lines))])
+    }
+
+    /// The id of the file's first row under its header.
+    var topID: String { blocks.first?.id(in: path) ?? "\(path)#empty" }
 
     /// Every line the patch shows for this file, context included.
     var lines: [ReviewLine] { Self.lines(blocks) }
@@ -270,6 +294,23 @@ enum ReviewBlock: Equatable, Sendable {
     case context(ReviewLine)
     case change(ReviewChange)
     case moved(ReviewMove)
+
+    /// The block's row in a stream; a change's and a move's are their stops.
+    func id(in path: String) -> String {
+        switch self {
+        case .hunk(let header): "\(path)#\(header)"
+        case .context(let line): "\(path)#c\(line.old ?? 0)-\(line.new ?? 0)"
+        case .change(let change): change.id
+        case .moved(let move): move.id
+        }
+    }
+
+    var isStop: Bool {
+        switch self {
+        case .change, .moved: true
+        case .hunk, .context: false
+        }
+    }
 }
 
 struct ReviewLine: Equatable, Sendable {

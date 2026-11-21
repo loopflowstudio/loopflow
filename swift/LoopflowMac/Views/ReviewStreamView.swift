@@ -15,6 +15,8 @@ struct ReviewStream: View {
     let split: Bool
     /// Words to read above a file, by its path.
     var headings: [String: String] = [:]
+    /// False when the caller names the first file itself, above the stream.
+    var headsFirstFile = true
     let addToConversation: ((String) -> Bool)?
     @Environment(\.palette) private var palette
 
@@ -34,31 +36,63 @@ struct ReviewStream: View {
                     .padding(.horizontal, 12).padding(.top, 22)
                     .accessibilityAddTraits(.isHeader)
             }
-            fileHeader(file, headed: headings[file.path] != nil).id("file:\(file.path)")
+            if headsFirstFile || file.path != files.first?.path {
+                fileHeader(file, headed: headings[file.path] != nil).id("file:\(file.path)")
+            }
             ForEach(store.comments.filter { $0.detached && $0.selection.path == file.path }) { comment in
                 ReviewCommentRow(store: store, comment: comment)
             }
-            if file.status == .binary {
-                ReviewNotice(text: "Binary file · no text to compare")
-            } else if file.blocks.isEmpty {
-                ReviewNotice(text: file.status == .renamed ? "Renamed without changes" : "No textual changes")
+            if reader == .changes, store.isReading(file) {
+                ReviewNotice(text: "Reading…").id(file.topID)
+                    .onAppear { store.setNear(file.path, true) }
+                    .onDisappear { store.setNear(file.path, false) }
+            } else if store.collapses(file) {
+                longLines(file).id(file.topID)
+            } else {
+                if file.status == .binary {
+                    ReviewNotice(text: "Binary file · no text to compare").id(file.topID)
+                } else if file.blocks.isEmpty, reader != .changes || store.fileNotes[file.path] == nil {
+                    ReviewNotice(text: file.status == .renamed ? "Renamed without changes" : "No textual changes")
+                        .id(file.topID)
+                }
+                let gaps = file.gaps
+                ForEach(Array(file.blocks.enumerated()), id: \.offset) { index, block in
+                    if file.status == .added, case .change(let change) = block {
+                        // A new file is its contents: one lazy row per line, however long it is.
+                        ForEach(Array(change.added.enumerated()), id: \.offset) { offset, line in
+                            lineRow(line, segments: nil, file: file)
+                                .overlay { if offset == 0 { currentMark(change.id) } }
+                                .id(offset == 0 ? change.id : "\(change.id)+\(offset)")
+                        }
+                    } else {
+                        blockView(block, gap: gaps[index], file: file).id(block.id(in: file.path))
+                    }
+                }
             }
-            let gaps = file.gaps
-            ForEach(Array(file.blocks.enumerated()), id: \.offset) { index, block in
-                blockView(block, gap: gaps[index], file: file).id(Self.blockID(block, path: file.path))
+            if reader == .changes, let note = store.fileNotes[file.path] {
+                ReviewNotice(text: note)
             }
         }
     }
 
     static let gutterWidth: CGFloat = 36
 
-    static func blockID(_ block: ReviewBlock, path: String) -> String {
-        switch block {
-        case .hunk(let header): "\(path)#\(header)"
-        case .context(let line): "\(path)#c\(line.old ?? 0)-\(line.new ?? 0)"
-        case .change(let change): change.id
-        case .moved(let move): move.id
+    /// In place of lines nobody reads: what the file holds, and the ways to see it.
+    private func longLines(_ file: ReviewFile) -> some View {
+        let lines = file.additions + file.deletions
+        let size = ByteCountFormatter.string(fromByteCount: Int64(file.bytes), countStyle: .file)
+        return HStack(spacing: 10) {
+            Text("Lines too long to read · \(lines == 1 ? "1 changed line" : "\(lines) changed lines") · \(size)")
+                .foregroundStyle(palette.textSecondary).fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 4)
+            Button("Show") { store.openedLongFiles.insert(file.path) }
+            Button("Open in Files") { store.selectFile(file.path, mode: .read) }
         }
+        .buttonStyle(WorkPlainButtonStyle()).font(Typography.caption(11))
+        .padding(.horizontal, 12).padding(.vertical, 8)
+        .overlay { if let first = file.blocks.first(where: \.isStop) { currentMark(first.id(in: file.path)) } }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("changes-long-lines")
     }
 
     private func fileHeader(_ file: ReviewFile, headed: Bool) -> some View {
@@ -83,7 +117,7 @@ struct ReviewStream: View {
                     file: file, context: true)
         case .change(let change):
             VStack(spacing: 0) {
-                if split {
+                if split, file.status != .added {
                     ForEach(Array(change.pairs.enumerated()), id: \.offset) { _, pair in
                         pairRow(pair, file: file, context: false)
                     }
@@ -200,7 +234,7 @@ struct ReviewStream: View {
         return VStack(spacing: 0) {
             HStack(spacing: 0) {
                 gutter(side == .old ? line.old : line.new, line: line, side: side, path: file.path)
-                cell(line, segments: segments, side: side, path: file.path)
+                cell(line, segments: segments, side: side, file: file)
             }
             attachments(old: line.kind == .added ? nil : line.old, new: line.kind == .removed ? nil : line.new, file: file)
         }
@@ -209,18 +243,18 @@ struct ReviewStream: View {
     /// Side by side: before on the left, after on the right. Context repeats on
     /// both sides; a pure addition or removal leaves the other side empty.
     @ViewBuilder private func pairRow(_ pair: ReviewPair, file: ReviewFile, context: Bool) -> some View {
-        if split || !context {
+        if (split && file.status != .added) || !context {
             VStack(spacing: 0) {
                 HStack(spacing: 0) {
                     HStack(spacing: 0) {
                         gutter(pair.removed?.old, line: pair.removed, side: .old, path: file.path)
-                        if let line = pair.removed { cell(line, segments: pair.removedSegments, side: .old, path: file.path) }
+                        if let line = pair.removed { cell(line, segments: pair.removedSegments, side: .old, file: file) }
                         else { empty }
                     }
                     Divider()
                     HStack(spacing: 0) {
                         gutter(pair.added?.new, line: pair.added, side: .new, path: file.path)
-                        if let line = pair.added { cell(line, segments: pair.addedSegments, side: .new, path: file.path) }
+                        if let line = pair.added { cell(line, segments: pair.addedSegments, side: .new, file: file) }
                         else { empty }
                     }
                 }
@@ -263,18 +297,20 @@ struct ReviewStream: View {
         } ?? false
     }
 
-    private func cell(_ line: ReviewLine, segments: [ReviewSegment]?, side: ReviewSelection.Side, path: String) -> some View {
+    private func cell(_ line: ReviewLine, segments: [ReviewSegment]?, side: ReviewSelection.Side, file: ReviewFile) -> some View {
+        let path = file.path
+        // A new file reads as its contents, without the marks of a patch.
         let tone: ThemeTone? = switch line.kind {
-        case .added: palette.successTone
+        case .added: file.status == .added ? nil : palette.successTone
         case .removed: palette.failureTone
         case .context: nil
         }
         let selected = isSelected(line, side: side, path: path)
         return HStack(alignment: .top, spacing: 4) {
             // A marker as well as color: + and − read without hue.
-            Text(line.kind == .added ? "+" : line.kind == .removed ? "−" : " ")
+            Text(tone == nil ? " " : line.kind == .added ? "+" : "−")
                 .foregroundStyle(tone?.ink ?? palette.textSecondary)
-            Text(Self.attributed(line.text, segments: segments, tone: tone))
+            Text(Self.attributed(line.text, segments: segments, tone: tone, path: path, palette: palette))
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -287,17 +323,23 @@ struct ReviewStream: View {
         .accessibilityLabel("\(line.kind == .added ? "Added" : line.kind == .removed ? "Removed" : "Line") \(side == .old ? line.old ?? 0 : line.new ?? 0): \(line.text)")
     }
 
-    /// The changed words of an edited line carry a stronger fill.
-    static func attributed(_ text: String, segments: [ReviewSegment]?, tone: ThemeTone?) -> AttributedString {
-        guard let segments, let tone else { return AttributedString(text.isEmpty ? " " : text) }
+    /// The line in its syntax colors; the changed words of an edited line
+    /// carry a stronger fill.
+    static func attributed(_ text: String, segments: [ReviewSegment]?, tone: ThemeTone?,
+                           path: String, palette: LoopflowPalette) -> AttributedString {
         var result = AttributedString()
-        for segment in segments {
-            var part = AttributedString(segment.text)
-            if segment.changed {
-                part.backgroundColor = tone.ink.opacity(0.26)
+        if let segments, let tone {
+            for segment in segments {
+                var part = AttributedString(segment.text)
+                if segment.changed {
+                    part.backgroundColor = tone.ink.opacity(0.26)
+                }
+                result.append(part)
             }
-            result.append(part)
+        } else {
+            result = AttributedString(text.isEmpty ? " " : text)
         }
+        result.colorSyntax(of: text, path: path, palette: palette)
         return result
     }
 
@@ -340,10 +382,12 @@ struct ReviewFileTitle: View {
                     .lineLimit(1).truncationMode(.tail).help(note)
             }
             Spacer(minLength: 4)
-            Text("+\(file.additions)").foregroundStyle(palette.successTone.ink).font(Typography.code(11))
-            Text("−\(file.deletions)").foregroundStyle(palette.failureTone.ink).font(Typography.code(11))
+            if !store.isReading(file) {
+                Text("+\(file.additions)").foregroundStyle(palette.successTone.ink).font(Typography.code(11)).fixedSize()
+                Text("−\(file.deletions)").foregroundStyle(palette.failureTone.ink).font(Typography.code(11)).fixedSize()
+            }
             Button("Open") { store.selectFile(file.path, mode: .read) }
-                .buttonStyle(.plain).font(Typography.caption(11)).foregroundStyle(palette.textSecondary)
+                .buttonStyle(.plain).font(Typography.caption(11)).foregroundStyle(palette.textSecondary).fixedSize()
                 .help("Read \(file.path) in Files").accessibilityLabel("Read \(file.path) in Files")
         }
         .padding(.horizontal, 12)
@@ -410,28 +454,22 @@ private struct ReviewCommentEditor: View {
                 .focused($focused)
                 .onSubmit { store.addComment(in: file) }
                 .accessibilityIdentifier("changes-comment")
-            HStack(spacing: 8) {
-                Button("Comment") { store.addComment(in: file) }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(store.commentDraft.allSatisfy(\.isWhitespace))
-                    .help("Keep this comment under its lines until you send every comment")
-                Button("Copy") {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(selection.text(in: file), forType: .string)
+            // One row where it fits; a narrow pane stacks the two pairs.
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) {
+                    commentButton
+                    copyButtons
+                    Spacer(minLength: 4)
+                    cancelButton
                 }
-                .buttonStyle(.bordered)
-                Button("Reference in conversation") {
-                    if addToConversation?(selection.reference(revision: store.revision)) == true { store.reviewSelection = nil }
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 8) {
+                        commentButton
+                        Spacer(minLength: 4)
+                        cancelButton
+                    }
+                    HStack(spacing: 8) { copyButtons }
                 }
-                .buttonStyle(.bordered)
-                .disabled(addToConversation == nil)
-                .help(addToConversation == nil ? "Open the Task conversation to refer to these lines"
-                      : "Names these lines in the conversation's unsent input; sending stays yours")
-                .accessibilityIdentifier("changes-ask")
-                Spacer(minLength: 4)
-                Button("Cancel") { store.reviewSelection = nil }
-                    .buttonStyle(.plain).foregroundStyle(palette.textSecondary)
-                    .keyboardShortcut(.cancelAction)
             }
             .controlSize(.small)
             .font(Typography.caption(11))
@@ -441,6 +479,36 @@ private struct ReviewCommentEditor: View {
         .overlay { RoundedRectangle(cornerRadius: 8).strokeBorder(palette.accent.opacity(0.6)) }
         .padding(.leading, ReviewStream.gutterWidth + 6).padding(.trailing, 12).padding(.vertical, 5)
         .onAppear { focused = true }
+    }
+
+    private var commentButton: some View {
+        Button("Comment") { store.addComment(in: file) }
+            .buttonStyle(.borderedProminent)
+            .disabled(store.commentDraft.allSatisfy(\.isWhitespace))
+            .help("Keep this comment under its lines until you send every comment")
+    }
+
+    @ViewBuilder private var copyButtons: some View {
+        Button("Copy") {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(selection.text(in: file), forType: .string)
+        }
+        .buttonStyle(.bordered)
+        Button("Reference in conversation") {
+            if addToConversation?(selection.reference(revision: store.revision)) == true { store.reviewSelection = nil }
+        }
+        .buttonStyle(.bordered)
+        .disabled(addToConversation == nil)
+        .help(addToConversation == nil ? "Open the Task conversation to refer to these lines"
+              : "Names these lines in the conversation's unsent input; sending stays yours")
+        .accessibilityIdentifier("changes-ask")
+    }
+
+    /// Esc is bound once, on the row the pane has room for.
+    private var cancelButton: some View {
+        Button("Cancel") { store.reviewSelection = nil }
+            .buttonStyle(.plain).foregroundStyle(palette.textSecondary)
+            .keyboardShortcut(.cancelAction)
     }
 }
 
@@ -482,9 +550,10 @@ private struct ReviewCommentRow: View {
     }
 }
 
-/// How many comments wait, and the one action that puts them all into the
-/// conversation's unsent input as one message. Sending stays yours.
-struct ReviewCommentsControl: View {
+/// A row under the toolbar while comments wait: how many, and the one action
+/// that puts them all into the conversation's unsent input as one message.
+/// Sending stays yours.
+struct ReviewCommentsStrip: View {
     @Bindable var store: TaskFilesStore
     let isFocused: Bool
     let addToConversation: ((String) -> Bool)?
@@ -493,9 +562,10 @@ struct ReviewCommentsControl: View {
     var body: some View {
         if !store.comments.isEmpty {
             let count = store.comments.count
-            HStack(spacing: 6) {
+            HStack(spacing: 8) {
                 Text(count == 1 ? "1 comment" : "\(count) comments").foregroundStyle(palette.accent)
                     .lineLimit(1).accessibilityIdentifier("changes-comment-count")
+                Spacer(minLength: 4)
                 Button(action: send) {
                     HStack(spacing: 5) {
                         Text("Send to conversation")
@@ -508,16 +578,16 @@ struct ReviewCommentsControl: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .keyboardShortcut(isFocused ? KeyboardShortcut(.return, modifiers: .command) : nil)
                 .disabled(addToConversation == nil)
                 .help(addToConversation == nil ? "Open the Task conversation to send these comments"
                       : "Puts every comment into the conversation's unsent input as one message; sending stays yours")
                 .accessibilityIdentifier("changes-send")
             }
             .font(Typography.caption(11))
-            .background {
-                Button("Send to conversation", action: send).keyboardShortcut(.return, modifiers: .command)
-                    .disabled(!isFocused || addToConversation == nil).hidden().accessibilityHidden(true).frame(width: 0, height: 0)
-            }
+            .padding(.horizontal, 12).padding(.vertical, 5)
+            .background(palette.accent.opacity(0.08))
+            Divider()
         }
     }
 
@@ -549,7 +619,7 @@ struct ReviewStepper: View {
     @Environment(\.palette) private var palette
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 0) {
             HStack(spacing: 0) {
                 arrow("chevron.up", "Previous change", key: "[", offset: -1)
                 Divider().frame(height: 14)
@@ -561,8 +631,6 @@ struct ReviewStepper: View {
             }
             .background(palette.surface, in: RoundedRectangle(cornerRadius: 6))
             .overlay { RoundedRectangle(cornerRadius: 6).strokeBorder(palette.border) }
-            Text("[ ]").font(Typography.code(10)).foregroundStyle(palette.textTertiary)
-                .help("[ previous change · ] next change").accessibilityHidden(true)
         }
         .background {
             HStack {
@@ -583,7 +651,7 @@ struct ReviewStepper: View {
 
     private func go(_ offset: Int) {
         guard let stop = store.step(offset, in: reader) else { return }
-        withAnimation(.easeOut(duration: 0.15)) { store[place: reader].anchor = stop.id }
+        withAnimation(.easeOut(duration: 0.15)) { store[place: reader].anchor = store.row(for: stop, in: reader) }
     }
 }
 

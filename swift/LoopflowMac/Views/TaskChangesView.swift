@@ -37,6 +37,7 @@ struct TaskChangesView: View {
             Divider()
             toolbar
             Divider()
+            ReviewCommentsStrip(store: store, isFocused: isFocused, addToConversation: addToConversation)
             focusStrip
             HStack(spacing: 0) {
                 if showsSidebar, docksSidebar {
@@ -92,20 +93,17 @@ struct TaskChangesView: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .top, spacing: 8) {
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(title).font(Typography.strong(13))
-                        .foregroundStyle(store.changesError == nil ? palette.text : palette.warning)
-                        .lineLimit(2).multilineTextAlignment(.leading)
-                        .accessibilityIdentifier("changes-title")
-                    if let compared = store.comparisonDescription {
-                        Text(compared).font(Typography.caption(11)).foregroundStyle(palette.textSecondary)
-                            .lineLimit(1).truncationMode(.middle).help(compared)
-                            .accessibilityIdentifier("changes-comparison")
-                    }
+            // Side by side where both fit; a narrow pane puts the pill under the title.
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .top, spacing: 8) {
+                    titles
+                    Spacer(minLength: 8)
+                    deliveryPill
                 }
-                Spacer(minLength: 8)
-                deliveryPill
+                VStack(alignment: .leading, spacing: 6) {
+                    titles
+                    deliveryPill
+                }
             }
             if showsDelivery {
                 DeliveryCard(store: store.pullRequest, record: task?.pr, taskOpen: task?.isCompleted == false,
@@ -114,6 +112,20 @@ struct TaskChangesView: View {
             }
         }
         .padding(.horizontal, 12).padding(.vertical, 8)
+    }
+
+    private var titles: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(title).font(Typography.strong(13))
+                .foregroundStyle(store.changesError == nil ? palette.text : palette.warning)
+                .lineLimit(2).multilineTextAlignment(.leading)
+                .accessibilityIdentifier("changes-title")
+            if let compared = store.comparisonDescription {
+                Text(compared).font(Typography.caption(11)).foregroundStyle(palette.textSecondary)
+                    .lineLimit(1).truncationMode(.middle).help(compared)
+                    .accessibilityIdentifier("changes-comparison")
+            }
+        }
     }
 
     // MARK: Hidden paths and groups
@@ -178,7 +190,8 @@ struct TaskChangesView: View {
         let stops = shown.stops.count
         let files = shown.files.count == review.files.count
             ? (all == 1 ? "1 file" : "\(all) files") : "\(shown.files.count) of \(review.files.count) files"
-        return "\(stops == 1 ? "1 change" : "\(stops) changes") in \(files)"
+        let unread = store.unreadShown
+        return "\(stops == 1 ? "1 change" : "\(stops) changes") in \(files)" + (unread == 0 ? "" : " · reading \(unread) more")
     }
 
     /// The delivery headline's first part and a dot for its checks. The dot
@@ -204,7 +217,7 @@ struct TaskChangesView: View {
                 }
                 .font(Typography.caption(11))
                 .padding(.horizontal, 9).padding(.vertical, 3)
-                .frame(maxWidth: 220)
+                .frame(maxWidth: 200)
                 .background(palette.surface, in: Capsule())
                 .overlay { Capsule().strokeBorder(palette.border) }
                 .contentShape(Capsule())
@@ -219,6 +232,8 @@ struct TaskChangesView: View {
 
     // MARK: Toolbar
 
+    /// The stepper always shows. The controls after it take the widest form
+    /// the pane has room for: words, then symbols, then one menu.
     private var toolbar: some View {
         HStack(spacing: 8) {
             Button { store.showsSidebar = !showsSidebar } label: {
@@ -232,28 +247,20 @@ struct TaskChangesView: View {
             .accessibilityValue(showsSidebar ? "Expanded" : "Collapsed")
             .disabled(store.review == nil)
             ReviewStepper(store: store, reader: .changes, isFocused: isFocused)
-            orderMenu
-            tourButton
-            Spacer(minLength: 4)
-            ReviewCommentsControl(store: store, isFocused: isFocused, addToConversation: addToConversation)
-            Button { toggleFocus() } label: {
-                let on = store.focusedPath != nil
-                Text("Focus")
-                    .foregroundStyle(on ? palette.background : palette.text)
-                    .padding(.horizontal, 9).frame(height: 20)
-                    .background(on ? palette.text : palette.surface, in: RoundedRectangle(cornerRadius: 6))
-                    .overlay { RoundedRectangle(cornerRadius: 6).strokeBorder(palette.border) }
-                    .contentShape(Rectangle())
+            ViewThatFits(in: .horizontal) {
+                controls(compact: false)
+                controls(compact: true)
+                HStack(spacing: 0) {
+                    Spacer(minLength: 0)
+                    moreMenu
+                }
             }
-            .help("Show one file at a time; next and previous still cross files")
-            .disabled(store.shownReview?.files.isEmpty ?? true)
-            .accessibilityAddTraits(store.focusedPath != nil ? .isSelected : [])
-            ReviewLayoutPicker(store: store, width: width)
-            if store.reviewError != nil || store.isRefreshingChanges {
-                Image(systemName: store.reviewError != nil ? "exclamationmark.triangle" : "arrow.triangle.2.circlepath")
-                    .foregroundStyle(store.reviewError != nil ? palette.warning : palette.textSecondary)
-                    .help(store.reviewError ?? "Reading changes…")
-            }
+            // Always its width, so a read starting or ending moves nothing.
+            Image(systemName: "arrow.triangle.2.circlepath")
+                .foregroundStyle(palette.textSecondary).frame(width: 14)
+                .opacity(isReading ? 1 : 0)
+                .help(isReading ? "Reading changes…" : "").accessibilityHidden(!isReading)
+                .accessibilityLabel("Reading changes")
         }
         .buttonStyle(.plain)
         .font(Typography.caption(11))
@@ -262,35 +269,84 @@ struct TaskChangesView: View {
         .background(palette.surfaceMuted.opacity(0.5))
     }
 
+    private var isReading: Bool { store.isRefreshingChanges || store.unreadShown > 0 }
+
+    private func controls(compact: Bool) -> some View {
+        HStack(spacing: 8) {
+            orderMenu
+            tourButton(compact: compact)
+            Spacer(minLength: 4)
+            Button { toggleFocus() } label: {
+                let on = store.focusedPath != nil
+                Group {
+                    if compact { Image(systemName: "scope").font(.system(size: 11)) } else { Text("Focus") }
+                }
+                .foregroundStyle(on ? palette.background : palette.text)
+                .padding(.horizontal, compact ? 6 : 9).frame(height: 20)
+                .background(on ? palette.text : palette.surface, in: RoundedRectangle(cornerRadius: 6))
+                .overlay { RoundedRectangle(cornerRadius: 6).strokeBorder(palette.border) }
+                .contentShape(Rectangle())
+            }
+            .help("Show one file at a time; next and previous still cross files")
+            .disabled(store.shownReview?.files.isEmpty ?? true)
+            .accessibilityLabel("Focus")
+            .accessibilityAddTraits(store.focusedPath != nil ? .isSelected : [])
+            ReviewLayoutPicker(store: store, width: width)
+        }
+    }
+
+    @ViewBuilder private var orderChoices: some View {
+        ForEach(ReviewOrdering.allCases.filter { $0 != .tour || store.hasTour }, id: \.self) { ordering in
+            Toggle(ordering.rawValue, isOn: Binding(get: { store.ordering == ordering }, set: { _ in
+                store.orderingChoice = ordering
+                store.noteInteraction()
+            }))
+        }
+    }
+
     /// Tour, By group or By path. Tour is offered when the checkout has one.
     private var orderMenu: some View {
+        Menu { orderChoices } label: { Text(store.ordering.rawValue) }
+            .menuStyle(.borderlessButton).fixedSize()
+            .help(store.hasTour ? "Order of the files. Tour is the checkout's \(DiffTour.path)"
+                  : "Order of the files. \(DiffTour.path) in the checkout adds a tour")
+            .disabled(store.review == nil)
+            .accessibilityIdentifier("changes-order")
+    }
+
+    /// Everything after the stepper, for a pane too narrow to lay it out.
+    private var moreMenu: some View {
         Menu {
-            ForEach(ReviewOrdering.allCases.filter { $0 != .tour || store.hasTour }, id: \.self) { ordering in
-                Toggle(ordering.rawValue, isOn: Binding(get: { store.ordering == ordering }, set: { _ in
-                    store.orderingChoice = ordering
-                    store.noteInteraction()
-                }))
+            Section("Order") { orderChoices }
+            if let action = store.tourAction {
+                Button(action) { Task { await store.writeTour() } }
             }
+            Toggle("Focus on one file", isOn: Binding(get: { store.focusedPath != nil }, set: { _ in toggleFocus() }))
+            Toggle("Side by side", isOn: Binding(get: { store.reviewLayout == .split },
+                                                 set: { store.reviewLayout = $0 ? .split : .unified }))
+                .disabled(width < TaskFilesStore.splitWidth)
         } label: {
-            Text(store.ordering.rawValue)
+            Image(systemName: "ellipsis.circle").font(.system(size: 12)).frame(width: 24, height: 20)
         }
-        .menuStyle(.borderlessButton).fixedSize()
-        .help(store.hasTour ? "Order of the files. Tour is the checkout's \(DiffTour.path)"
-              : "Order of the files. \(DiffTour.path) in the checkout adds a tour")
+        .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+        .help("Order, tour, focus and layout")
         .disabled(store.review == nil)
-        .accessibilityIdentifier("changes-order")
+        .accessibilityLabel("Diff options")
+        .accessibilityIdentifier("changes-more")
     }
 
     /// Write tour or Update tour: the `tour` skill rewrites the tour,
     /// and the Diff reads in it once the file lands. The button comes back
     /// beside the spinner once the run has started, in case it dies.
-    @ViewBuilder private var tourButton: some View {
+    @ViewBuilder private func tourButton(compact: Bool) -> some View {
         if store.tourWriting.isUnderway {
             ProgressView().controlSize(.mini).help(store.tourStatus ?? "")
                 .accessibilityLabel("Writing the tour")
         }
         if let action = store.tourAction {
-            Button(action) { Task { await store.writeTour() } }
+            Button { Task { await store.writeTour() } } label: {
+                if compact { Image(systemName: "signpost.right").accessibilityLabel(action) } else { Text(action).lineLimit(1) }
+            }
                 .buttonStyle(WorkPlainButtonStyle())
                 .help("Run the tour skill in the Task's checkout to write \(DiffTour.path)")
                 .disabled(store.review == nil)
@@ -298,26 +354,35 @@ struct TaskChangesView: View {
         }
     }
 
-    /// The file at the top of the stream: the focused one, else the one the
-    /// reading anchor or the current change is in.
+    /// The file whose lines are at the top of the stream: the focused one,
+    /// else the one the reading anchor or the current change is in. While a
+    /// file's own header is the top row, the file above it is still the one
+    /// you are in, so the bar never names the header under it.
     private var currentPath: String? {
         if let focused = store.focusedPath { return focused }
         let files = store.shownReview?.files ?? []
         let place = store[place: .changes]
         guard let id = place.anchor ?? place.current else { return files.first?.path }
-        if id.hasPrefix("file:") { return String(id.dropFirst("file:".count)) }
+        if id.hasPrefix("file:") {
+            let index = files.firstIndex { $0.path == id.dropFirst("file:".count) } ?? 0
+            return files.isEmpty ? nil : files[max(0, index - 1)].path
+        }
         if id == "footer" { return files.last?.path }
         return files.first { id.hasPrefix($0.path + "#") }?.path ?? files.first?.path
     }
 
     /// The header of the file you are in, fixed above the stream while its
-    /// lines scroll under it.
+    /// lines scroll under it. It is the first file's only header.
     @ViewBuilder private var currentFileBar: some View {
         if let currentPath, let file = store.shownReview?.file(currentPath) {
             let group = store.shownGroups.first { group in group.isTour && group.files.contains { $0.path == file.path } }
-            ReviewFileTitle(store: store, file: file, note: group?.title)
+            ReviewFileTitle(store: store, file: file, note: group?.title ?? file.oldPath.map { "from \($0)" })
                 .frame(height: TaskFileChrome.headerHeight)
                 .background(palette.surfaceMuted)
+                .contextMenu {
+                    Button("Open in Files") { store.selectFile(file.path, mode: .diff) }
+                    Button("Read file") { store.selectFile(file.path, mode: .read) }
+                }
                 .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("changes-current-file")
             Divider()
@@ -357,10 +422,11 @@ struct TaskChangesView: View {
             .frame(width: ChangedFilesSidebar.width)
     }
 
-    /// Bring a file to the top of the stream.
+    /// Bring a file's first lines to the top of the stream, under its name in the bar.
     private func jump(to path: String) {
         if store.focusedPath != nil { store.focusedPath = path }
-        store[place: .changes] = .init(anchor: "file:\(path)", current: store.shownReview?.stops.first { $0.path == path }?.id)
+        store[place: .changes] = .init(anchor: store.shownReview?.file(path)?.topID,
+                                       current: store.shownReview?.stops.first { $0.path == path }?.id)
         // Over a narrow stream the sidebar gives the room back.
         if !docksSidebar { store.showsSidebar = nil }
         store.noteInteraction()
@@ -374,20 +440,11 @@ struct TaskChangesView: View {
             if let tour = store.tourStatus {
                 ReviewNotice(text: tour)
             }
-            if store.reviewTruncated {
-                ReviewNotice(text: "A file is over 1 MB or could not be read · the stream is missing part of it")
-            }
             if review.files.isEmpty, store.review?.files.isEmpty == false {
                 ReviewNotice(text: "Every changed file is hidden or filtered out · the changed files list what is hidden")
             }
-            if let error = store.reviewError {
-                ReviewNotice(text: "Showing the last reading · \(error)")
-            }
             ReviewStream(store: store, reader: .changes, files: files, split: store.readsSplit(width: width),
-                         headings: headings, addToConversation: addToConversation)
-        } else if let error = store.reviewError {
-            ContentUnavailableView("Comparison unavailable", systemImage: "doc", description: Text(error))
-                .padding(.vertical, 24)
+                         headings: headings, headsFirstFile: false, addToConversation: addToConversation)
         } else if store.changesError == nil {
             ProgressView().frame(maxWidth: .infinity).padding(24)
         }
@@ -410,7 +467,7 @@ struct TaskChangesView: View {
             if let first = store.shownReview?.stops.first, store.focusedPath == nil {
                 Text("End of changes").font(Typography.caption(11)).foregroundStyle(palette.textSecondary)
                 Button("Back to the first change") {
-                    store[place: .changes] = .init(anchor: "file:\(first.path)", current: first.id)
+                    store[place: .changes] = .init(anchor: store.shownReview?.file(first.path)?.topID, current: first.id)
                     store.noteInteraction()
                 }
                 .buttonStyle(WorkPlainButtonStyle()).font(.caption)
@@ -503,7 +560,7 @@ private struct ChangedFilesSidebar: View {
                         .foregroundStyle(palette.accent)
                         .accessibilityLabel(comments == 1 ? "1 comment" : "\(comments) comments")
                 }
-                counts(added: file.additions, removed: file.deletions)
+                if !store.isReading(file) { counts(added: file.additions, removed: file.deletions) }
             }
             .padding(.horizontal, 8).padding(.vertical, 3)
             .background(file.path == current ? palette.surfaceElement : .clear)

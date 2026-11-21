@@ -843,41 +843,58 @@ struct TaskFilesTests {
         return store
     }
 
-    /// The whole-comparison read stops at its size limit partway through a file;
-    /// the files past the cut still reach the stream, and hidden paths stay out of it.
-    @Test func aComparisonCutAtTheReadLimitStillShowsEveryFile() async throws {
+    /// Each shown file's lines are read on their own, so one file's size never
+    /// cuts another short, and a hidden file is not read until it is shown. A
+    /// new file is read as its contents; lines too long to read start as one row.
+    @Test func theDiffReadsEachShownFileOnItsOwn() async throws {
         let fixture = try Data(contentsOf: URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
             .appendingPathComponent("tests/fixtures/dto/task_files.json"))
-        let paths = ["a.swift", "scratch/notes.md", "z.swift"]
-        let patch: @Sendable (String) -> String = { path in
-            "diff --git a/\(path) b/\(path)\n--- a/\(path)\n+++ b/\(path)\n@@ -1 +1 @@\n-one\n+uno\n@@ -9 +9 @@\n-nine\n+nueve\n"
-        }
+        let paths = ["a.swift", "data.json", "scratch/notes.md", "z.swift"]
+        let reads = OSAllocatedUnfairLock<[String]>(initialState: [])
         let store = TaskFilesStore(issue: "TEST-1", cwd: "/fixture", query: RegistryQuery { args, _ in
             let root = try JSONSerialization.jsonObject(with: fixture) as! [String: Any]
-            var value = root[args[1] == "changes" ? "changes" : "diff"] as! [String: Any]
-            if args[1] == "changes" {
+            var value = root[args[1]] as! [String: Any]
+            switch args[1] {
+            case "changes":
                 let file = (value["files"] as! [[String: Any]])[0]
-                value["files"] = paths.map { file.merging(["path": $0, "old_path": NSNull()]) { $1 } }
-            } else if args[3].hasPrefix("--") {
-                // Cut inside the second file: its second change and all of z.swift are missing.
-                value["patch"] = patch(paths[0]) + String(patch(paths[1]).dropLast(22))
-                value["truncated"] = true
-            } else {
-                value["patch"] = patch(args[3])
+                value["files"] = paths.map {
+                    file.merging(["path": $0, "old_path": NSNull(), "untracked": $0 == "data.json"]) { $1 }
+                }
+            case "file":
+                guard args[3] == "data.json" else { throw RegistryQueryError("no such file") }
+                reads.withLock { $0.append("file \(args[3])") }
+                value["path"] = args[3]
+                value["content"] = "{\"blob\": \"\(String(repeating: "x", count: 2_000))\"}\nend\n"
+            default:
+                let path = args[3]
+                reads.withLock { $0.append("diff \(path)") }
+                value["patch"] = "diff --git a/\(path) b/\(path)\n--- a/\(path)\n+++ b/\(path)\n@@ -1 +1 @@\n-one\n+uno\n@@ -9 +9 @@\n-nine\n+nueve\n"
+                value["truncated"] = path == "z.swift"
             }
             return String(decoding: try JSONSerialization.data(withJSONObject: value), as: UTF8.self)
         })
         store.autosave = false
         await store.loadReview()
         #expect(store.review?.files.map(\.path) == paths)
-        #expect(store.review?.stops.count == 6)
-        #expect(!store.reviewTruncated)
-        #expect(store.shownReview?.files.map(\.path) == ["a.swift", "z.swift"])
-        #expect(store.position(.changes) == "4 changes")
-        store.hidden = []
-        store.reviewFilter = "NOTES"
-        #expect(store.shownReview?.files.map(\.path) == ["scratch/notes.md"])
+        #expect(Set(reads.withLock { $0 }) == ["diff a.swift", "file data.json", "diff z.swift"])
+        #expect(store.shownReview?.files.map(\.path) == ["a.swift", "data.json", "z.swift"])
+        #expect(store.unreadShown == 0 && store.unread == ["scratch/notes.md"])
+        #expect(store.fileNotes == ["z.swift": "Cut at 1 MB · the rest of this file is not shown"])
+
+        // The untracked file is its two lines, collapsed for the long one and one stop to step over.
+        let data = try #require(store.shownReview?.file("data.json"))
+        #expect(data.status == .added && data.lines.map(\.new) == [1, 2])
+        #expect(store.collapses(data))
+        #expect(store.position(.changes) == "5 changes")
+        #expect((1...5).map { _ in store.step(1, in: .changes)?.path } == ["a.swift", "a.swift", "data.json", "z.swift", "z.swift"])
+        store.openedLongFiles = ["data.json"]
+        #expect(!store.collapses(data))
+
+        store.showsHidden = true
+        await store.loadReview()
+        #expect(reads.withLock { $0 }.contains("diff scratch/notes.md"))
+        #expect(store.unread.isEmpty && store.review?.stops.count == 7)
     }
 
     /// The checkout's `scratch/tour.yaml` orders the Diff and hides what

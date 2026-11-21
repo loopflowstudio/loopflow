@@ -84,7 +84,8 @@ struct DiffTour: Equatable, Sendable {
 enum ReviewOrdering: String, CaseIterable, Sendable {
     /// The tour's files first, in its order; the rest by group.
     case tour = "Tour"
-    /// Under the `diff_groups` headings; largest change first within each.
+    /// Under the `diff_groups` headings, by path within each: an order known
+    /// before any file's lines are read, so nothing moves as they arrive.
     case groups = "By group"
     case path = "By path"
 }
@@ -179,9 +180,7 @@ struct ReviewGroup: Equatable, Sendable, Identifiable {
         }
         return placed.sorted { $0.key < $1.key }.map { index, files in
             ReviewGroup(id: "group:\(index)", title: groups.indices.contains(index) ? groups[index].title : DiffGroupSetting.restTitle,
-                        isTour: false, files: files.sorted {
-                ($1.additions + $1.deletions, $0.path) < ($0.additions + $0.deletions, $1.path)
-            })
+                        isTour: false, files: files.sorted { $0.path < $1.path })
         }
     }
 }

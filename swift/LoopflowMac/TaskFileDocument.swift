@@ -25,6 +25,9 @@ final class TaskFileDocument: NSObject, NSTextViewDelegate, @preconcurrency NSTe
     private(set) var saveFailed = false
     private(set) var readOnlyReason: String?
     var onEdit: (() -> Void)?
+    /// The palette the editor shows, once it has been on screen.
+    @ObservationIgnored private var palette: LoopflowPalette?
+    @ObservationIgnored private var coloringScheduled = false
 
     var canSave: Bool {
         dirty && !saving && external == nil && deferredSnapshot == nil
@@ -146,6 +149,30 @@ final class TaskFileDocument: NSObject, NSTextViewDelegate, @preconcurrency NSTe
         scroll.documentView = editor
     }
 
+    /// The editor's colors, syntax included. Setting the text color clears
+    /// every syntax color, so they are applied again after it.
+    func applyPalette(_ palette: LoopflowPalette) {
+        self.palette = palette
+        editor.applyPalette(palette)
+        colorSyntax()
+    }
+
+    private func colorSyntax() {
+        guard let palette, !editor.hasMarkedText() else { return }
+        editor.textStorage?.colorSyntax(path: path, palette: palette)
+    }
+
+    /// Storage cannot change inside its own editing callback; color after it.
+    private func scheduleSyntaxColors() {
+        guard palette != nil, !coloringScheduled else { return }
+        coloringScheduled = true
+        Task { [weak self] in
+            await Task.yield()
+            self?.coloringScheduled = false
+            self?.colorSyntax()
+        }
+    }
+
     func restore(_ draft: WorkFileDraft, task: String) {
         guard !dirty else { return }
         snapshot = TaskFileSnapshot(recoveries: [], issueIdentifier: task, taskId: task, path: draft.path,
@@ -220,6 +247,7 @@ final class TaskFileDocument: NSObject, NSTextViewDelegate, @preconcurrency NSTe
 
     func textStorage(_ storage: NSTextStorage, didProcessEditing mask: NSTextStorageEditActions,
                      range: NSRange, changeInLength: Int) {
+        if mask.contains(.editedCharacters) { scheduleSyntaxColors() }
         // Undo can change storage without a textDidChange delegate callback.
         guard mask.contains(.editedCharacters), text != storage.string else { return }
         text = storage.string
@@ -636,6 +664,7 @@ final class TaskFilesStore {
             guard let self else { return }
             let changed = self.pendingPaths
             var comparisonChanged = self.pendingComparison
+            let committed = comparisonChanged
             self.pendingPaths.removeAll()
             self.pendingComparison = false
             defer {
@@ -677,7 +706,7 @@ final class TaskFilesStore {
             guard !Task.isCancelled, comparisonChanged else { return }
             await self.refreshChanges()
             if !Task.isCancelled, self.mode == .diff { await self.loadDiff() }
-            if !Task.isCancelled, self.page == .changes { await self.loadReview() }
+            if !Task.isCancelled, self.page == .changes { await self.loadReview(changed: committed ? nil : visible) }
         }
     }
 
@@ -815,8 +844,17 @@ final class TaskFilesStore {
     /// The whole comparison as one stream. A reload replaces it in place; the
     /// reading anchor and current stop are ids, so new evidence never moves them.
     private(set) var review: ReviewDiff? { didSet { arrange() } }
-    private(set) var reviewError: String?
-    private(set) var reviewTruncated = false
+    /// Changed files whose lines are not read yet, or were read before the
+    /// comparison last moved. A hidden file stays here until it is shown.
+    private(set) var unread: Set<String> = []
+    /// Why a file's lines are missing or cut short, by path.
+    private(set) var fileNotes: [String: String] = [:]
+    /// Files with lines too long to read that you opened anyway.
+    var openedLongFiles: Set<String> = []
+    @ObservationIgnored private var reading: Set<String> = []
+    /// The base and head commits the files were last read against.
+    @ObservationIgnored private var readCommits: [String] = []
+    @ObservationIgnored private var nearPaths: Set<String> = []
     private var reviewGeneration = 0
     /// Each reader's place, so switching paths or pages and back lands where you were.
     private var places: [ReviewReader: ReviewPlace] = [:]
@@ -839,67 +877,151 @@ final class TaskFilesStore {
     static let splitWidth: CGFloat = 640
     func readsSplit(width: CGFloat) -> Bool { reviewLayout == .split && width >= Self.splitWidth }
 
-    func loadReview() async {
+    /// Read the comparison file by file. `lf task changes` names every
+    /// changed file at once; each shown file's lines are then read on their
+    /// own, in the stream's order, so no file's size cuts another short. A
+    /// reload keeps the lines it had until their replacement arrives, and
+    /// rereads only the `changed` paths while the comparison's commits stand.
+    func loadReview(changed: Set<String>? = nil) async {
         if changes == nil { await refreshChanges() }
         reviewGeneration += 1
         let generation = reviewGeneration
-        guard let base = changes?.baseCommit else { return }
         let target = comparison
-        do {
-            let next = try await query.taskDiff(issue: issue, path: nil, base: base, head: target.head)
-            var parsed = await Task.detached(priority: .userInitiated) { ReviewDiff.parse(next.patch) }.value
-            var cut = false
-            if next.truncated { (parsed, cut) = await completed(parsed, base: base, head: target.head) }
-            let tour = await readTour()
-            let age = await readTourAge(tour)
-            guard !Task.isCancelled, generation == reviewGeneration, comparison == target else { return }
-            for path in openedGaps.keys where review?.file(path) != parsed.file(path) { openedGaps[path] = nil }
-            comments = comments.map { $0.anchored(in: parsed.file($0.selection.path).map(opened)) }
-            if tourWriting.isUnderway, tour != diffTour {
-                tourWriting = .idle
-                orderingChoice = .tour
+        guard changes != nil else { return }
+        let tour = await readTour()
+        let age = await readTourAge(tour)
+        guard !Task.isCancelled, generation == reviewGeneration, comparison == target, let changes else { return }
+        if tourWriting.isUnderway, tour != diffTour {
+            tourWriting = .idle
+            orderingChoice = .tour
+        }
+        diffTour = tour
+        tourAge = age
+        let known = Dictionary((review?.files ?? []).map { ($0.path, $0) }) { first, _ in first }
+        let paths = Set(changes.files.map(\.path))
+        let commits = [changes.baseCommit, changes.headCommit]
+        if let changed, commits == readCommits {
+            unread = paths.filter { path in
+                unread.contains(path) || known[path] == nil
+                    || changed.contains { $0.isEmpty || $0 == path || path.hasPrefix($0 + "/") }
             }
-            diffTour = tour
-            tourAge = age
-            review = parsed
-            reviewTruncated = cut
-            reviewError = nil
-            if let focusedPath, parsed.file(focusedPath) == nil { self.focusedPath = nil }
-        } catch {
-            guard !Task.isCancelled, generation == reviewGeneration, comparison == target else { return }
-            // Keep the last readable stream; the error says it may be behind.
-            reviewError = error.localizedDescription
+        } else {
+            unread = paths
+        }
+        readCommits = commits
+        reading = []
+        fileNotes = fileNotes.filter { paths.contains($0.key) }
+        for path in openedGaps.keys where !paths.contains(path) { openedGaps[path] = nil }
+        comments = comments.map { paths.contains($0.selection.path) ? $0 : $0.anchored(in: nil) }
+        if let focusedPath, !paths.contains(focusedPath) { self.focusedPath = nil }
+        review = ReviewDiff(files: changes.files.map {
+            known[$0.path] ?? ReviewFile(path: $0.path, oldPath: $0.oldPath, status: .modified, blocks: [])
+        })
+        await readPatches()
+    }
+
+    /// Up to six files at a time, until every shown file has been read.
+    private func readPatches() async {
+        let generation = reviewGeneration
+        guard let changes else { return }
+        let files = Dictionary(changes.files.map { ($0.path, $0) }) { first, _ in first }
+        let query = self.query, issue = self.issue, base = changes.baseCommit, head = comparison.head
+        await withTaskGroup(of: (String, FileReading).self) { group in
+            var running = 0
+            while true {
+                while running < 6, generation == reviewGeneration, !Task.isCancelled,
+                      let path = nextToRead(), let file = files[path] {
+                    reading.insert(path)
+                    running += 1
+                    group.addTask {
+                        (path, await Self.readFile(file, query: query, issue: issue, base: base, head: head))
+                    }
+                }
+                guard let (path, result) = await group.next() else { return }
+                running -= 1
+                // A newer reload reads this file again; its answer replaces this one.
+                guard generation == reviewGeneration else { continue }
+                reading.remove(path)
+                accept(result, for: path)
+            }
         }
     }
 
-    /// A comparison over the read limit arrives cut off partway through a file.
-    /// That file and every changed file after it are read one at a time; the
-    /// flag says a file is still missing or cut short on its own.
-    private func completed(_ partial: ReviewDiff, base: String, head: String?) async -> (ReviewDiff, Bool) {
-        let order = changes?.files.map(\.path) ?? []
-        var files = Dictionary(partial.files.dropLast().map { ($0.path, $0) }) { first, _ in first }
-        var missing = order.filter { files[$0] == nil }[...]
-        var cut = false
-        let query = self.query, issue = self.issue
-        let read: @Sendable (String) async -> (String, ReviewFile?, Bool) = { path in
-            guard let next = try? await query.taskDiff(issue: issue, path: path, base: base, head: head) else {
-                return (path, nil, true)
-            }
-            return (path, ReviewDiff.parse(next.patch).files.first, next.truncated)
+    /// The next shown file without lines: one near the viewport, else the
+    /// first in the stream's order. Hidden files are never read.
+    private func nextToRead() -> String? {
+        let waiting = (shownReview?.files ?? []).map(\.path).filter { unread.contains($0) && !reading.contains($0) }
+        return waiting.first(where: nearPaths.contains) ?? waiting.first
+    }
+
+    /// A file came into or left the viewport before its lines were read.
+    func setNear(_ path: String, _ near: Bool) {
+        if near { nearPaths.insert(path) } else { nearPaths.remove(path) }
+    }
+
+    /// Whether a file's place in the stream is still waiting for its lines.
+    func isReading(_ file: ReviewFile) -> Bool {
+        unread.contains(file.path) && file.blocks.isEmpty && fileNotes[file.path] == nil
+    }
+
+    /// How many shown files are not read yet.
+    var unreadShown: Int { shownReview?.files.count { unread.contains($0.path) } ?? 0 }
+
+    /// A file that becomes shown (unhidden, or no longer filtered out) is read then.
+    private func readShown() {
+        guard nextToRead() != nil else { return }
+        Task { await readPatches() }
+    }
+
+    private struct FileReading: Sendable {
+        /// nil when the read failed; the stream keeps the lines it had.
+        let file: ReviewFile?
+        /// Why lines are missing.
+        let note: String?
+    }
+
+    /// One file's lines. A new file is read as its contents while the
+    /// comparison reads the working tree: an untracked one at once, a
+    /// committed one when its patch is over the read limit.
+    private nonisolated static func readFile(_ changed: TaskChangedFile, query: RegistryQuery, issue: String,
+                                             base: String, head: String?) async -> FileReading {
+        let path = changed.path
+        func contents() async throws -> (ReviewFile?, TaskFileState) {
+            let file = try await query.taskFile(issue: issue, path: path)
+            return (file.state == .text ? file.content.map { ReviewFile.added(path, content: $0) } : nil, file.state)
         }
-        await withTaskGroup(of: (String, ReviewFile?, Bool).self) { group in
-            for path in missing.prefix(6) { group.addTask { await read(path) } }
-            missing = missing.dropFirst(6)
-            for await (path, file, short) in group {
-                files[path] = file
-                cut = cut || short
-                if let path = missing.popFirst() { group.addTask { await read(path) } }
+        do {
+            if head == nil, changed.untracked {
+                let (file, state) = try await contents()
+                return FileReading(
+                    file: file ?? ReviewFile(path: path, oldPath: nil, status: state == .binary ? .binary : .added, blocks: []),
+                    note: file != nil || state == .binary ? nil : state.title)
             }
+            let next = try await query.taskDiff(issue: issue, path: path, base: base, head: head)
+            let parsed = ReviewDiff.parse(next.patch).files
+            let file = parsed.first { $0.path == path } ?? parsed.first
+                ?? ReviewFile(path: path, oldPath: changed.oldPath, status: next.binary ? .binary : .modified, blocks: [])
+            if next.truncated, head == nil, file.status == .added, let whole = try? await contents().0 {
+                return FileReading(file: whole, note: nil)
+            }
+            return FileReading(file: file, note: next.truncated ? "Cut at 1 MB · the rest of this file is not shown" : nil)
+        } catch {
+            return FileReading(file: nil, note: "Could not be read: \(error.localizedDescription)")
         }
-        let place = Dictionary(order.enumerated().map { ($1, $0) }) { first, _ in first }
-        return (ReviewDiff(files: files.values.sorted {
-            (place[$0.path] ?? .max, $0.path) < (place[$1.path] ?? .max, $1.path)
-        }), cut)
+    }
+
+    private func accept(_ result: FileReading, for path: String) {
+        unread.remove(path)
+        fileNotes[path] = result.note
+        guard let review, let index = review.files.firstIndex(where: { $0.path == path }),
+              let file = result.file else { return }
+        if file != review.files[index] {
+            openedGaps[path] = nil
+            var files = review.files
+            files[index] = file
+            self.review = ReviewDiff(files: files)
+        }
+        comments = comments.map { $0.selection.path == path ? $0.anchored(in: opened(file)) : $0 }
     }
 
     // MARK: Hidden paths and order
@@ -915,7 +1037,7 @@ final class TaskFilesStore {
     /// The `diff_hidden` setting as `lf` resolved it, every layer added. Until
     /// the Diff has read it and when that read fails, this copy of its catalog
     /// default (`diff_hidden` in `rust/loopflow-execution/src/config/catalog.rs`).
-    var hidden = [HiddenPattern(pattern: "scratch/", source: "Default")] { didSet { arrange() } }
+    var hidden = [HiddenPattern(pattern: "scratch/", source: "Default")] { didSet { arrange(); readShown() } }
     /// The `diff_groups` setting as `lf` resolved it.
     var diffGroups = DiffGroupSetting.unread { didSet { arrange() } }
 
@@ -953,15 +1075,15 @@ final class TaskFilesStore {
         }
     }
     /// Read the hidden files too, without forgetting what is hidden.
-    var showsHidden = false { didSet { arrange() } }
+    var showsHidden = false { didSet { arrange(); readShown() } }
     /// Narrows the stream to paths containing this text.
-    var reviewFilter = "" { didSet { arrange() } }
+    var reviewFilter = "" { didSet { arrange(); readShown() } }
     /// The checkout's `scratch/tour.yaml`, when it has one.
     private(set) var diffTour: DiffTour? { didSet { if diffTour != oldValue { arrange() } } }
     /// The order you chose; until then the tour when there is one.
     var orderingChoice: ReviewOrdering? { didSet { arrange() } }
     /// Paths the tour hid that you asked to see.
-    var shownTourHides: Set<String> = [] { didSet { arrange() } }
+    var shownTourHides: Set<String> = [] { didSet { arrange(); readShown() } }
     /// The changed files beside the stream: your choice, else open when there is room.
     var showsSidebar: Bool?
 
@@ -1102,6 +1224,19 @@ final class TaskFilesStore {
     /// comparison's newer side only while it reads the working tree.
     var canOpenGaps: Bool { comparison.head == nil }
 
+    /// Lines too long to read (minified, base64, embedded data) start as one
+    /// row with the file's size. Size alone never collapses a file.
+    func collapses(_ file: ReviewFile) -> Bool {
+        file.longestLine > ReviewFile.readableLine && !openedLongFiles.contains(file.path)
+    }
+
+    /// The row that stands for a stop in a reader: the stop itself, or the
+    /// summary row of a collapsed file.
+    func row(for stop: ReviewStop, in reader: ReviewReader) -> String {
+        guard let file = diff(reader)?.file(stop.path), collapses(file) else { return stop.id }
+        return file.topID
+    }
+
     func opened(_ file: ReviewFile) -> ReviewFile {
         openedGaps[file.path].map(file.opening) ?? file
     }
@@ -1187,10 +1322,16 @@ final class TaskFilesStore {
     func step(_ offset: Int, in reader: ReviewReader) -> ReviewStop? {
         noteInteraction()
         steppedAt = .now
-        if let diff = diff(reader), let stop = diff.stop(after: self[place: reader].current, offset: offset) {
-            self[place: reader].current = stop.id
-            if reader == .changes, focusedPath != nil { focusedPath = stop.path }
-            return stop
+        if let diff = diff(reader) {
+            var current = self[place: reader].current
+            while let stop = diff.stop(after: current, offset: offset) {
+                current = stop.id
+                // A collapsed file is one stop: its first change, shown as its summary row.
+                if let file = diff.file(stop.path), collapses(file), file.blocks.first(where: \.isStop)?.id(in: file.path) != stop.id { continue }
+                self[place: reader].current = stop.id
+                if reader == .changes, focusedPath != nil { focusedPath = stop.path }
+                return stop
+            }
         }
         guard case .file(let path) = reader, let next = changedFile(from: path, offset: offset) else { return nil }
         selectFile(next, mode: .diff)

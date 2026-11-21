@@ -32,8 +32,11 @@
   report when mode 1004 turns on. `--unfocused` describes the attach. The
   passive QA pane starts in the background.
 - **Resume and New share the viewer option.** Both commands already use the
-  same viewer for a fresh thread. On either command, `--prepare --unfocused`
-  returns an argv that opens with the requested focus.
+  same viewer for a fresh thread.
+- **A prepared argv carries no focus.** `--prepare --unfocused` no longer
+  writes the flag into `open_argv`; whoever runs the command says so with
+  `LF_RELAY_FOCUSED=0`. Passed over: keeping the argv route for a future host.
+  It has no caller, and its output fails on an `lf` from before the flag.
 - Dev eligibility follows the retained workspace through repository and Task
   ID changes. The existing visit timestamp records a deliberate visit in Dev;
   loading a saved selection or board does not set it.

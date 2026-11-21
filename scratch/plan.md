@@ -10,6 +10,33 @@ The brief says “Consider an optional passive / second-class viewer flag”.
 The implementation uses one focus rule for all viewers. See
 [questions.md](questions.md) for the choices made during the work.
 
+## Next: delete the prepared-argv focus route
+
+Desktop marks a background pane with `LF_RELAY_FOCUSED=0` and runs the
+prepared argv as given. Nothing passes `--unfocused` with `--prepare` any
+more, and the route that carried it still writes a flag into argv that an
+installed `lf` from before this change rejects. A prepared command's starting
+focus belongs to whoever runs it: its environment and its TTY.
+
+Delete, in one change:
+
+- `rust/loopflow/src/lf/commands/session.rs` (`mutate`): the push of
+  `--unfocused` onto `open_argv`.
+- `rust/loopflow/src/lf/commands/ssh.rs`: the `unfocused` parameter of
+  `prepared_remotely` and the flag it inserts before `--`; its caller in
+  `write.rs`. The strip from the remote command and the two `relay_over`
+  calls stay: they serve a person running `lf --machine … resume --unfocused`.
+- `rust/loopflow/src/bin/lf.rs`: the `session attach --unfocused --` arm.
+  `relay_over` keeps its argument for `ssh.rs`.
+- `rust/loopflow/tests/machine_commands.rs`: the `background` assertions on
+  `["session", "attach", "--unfocused", "--"]`.
+
+Result: starting focus has three spellings, each with one job. `--unfocused`
+on `lf resume` and `lf session new` for a person, `LF_RELAY_FOCUSED` for a
+host and across the relay's exec, `focused` on the wire. Check with
+`cargo test -p loopflow --test machine_commands` on the prepared-argv test
+and `an_unfocused_view_leaves_the_session_with_the_view_in_use`.
+
 ## Built and checked
 
 - **Held terminals.** Three views on one PTY verified the attach reply,

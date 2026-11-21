@@ -58,27 +58,26 @@
 <h1>A Session and the view someone is at, as built</h1>
 <p class="lede">Area taken: everything that decides whose terminal a running
 Session is shaped for when several views show it, with the whole branch in it
-(base <code>e804e652f5</code> to <code>a68d682a73</code>): the holder's sizing
+(base <code>e804e652f5</code> to <code>fe01f87c23</code>): the holder's sizing
 rule, the relay, the <code>lf</code> commands that start a view, Desktop's
-panes and Loopflow Dev. Anything marked <span class="proposed">proposed</span>
-is not built; everything else is in the branch.</p>
+panes, Loopflow Dev and the phone. Anything marked
+<span class="proposed">proposed</span> is not built; everything else is in the
+branch.</p>
 
 <h2>The answer</h2>
-<p>The model holds. A person knows one thing, "the Session fits the window I'm
-using", and the code now has one thing for it: <code>Sizing.owner</code>, moved
-only by focus, typing, or the owner leaving. QA's agent log shows it on a
-normal path, on departure and across a server restart.</p>
-<p>One pairing fails, and it fails for the case the Task was filed about.
-Desktop tells the relay "this pane starts in the background" by writing
-<code>--unfocused</code> into a command the server authored, and Loopflow Dev
-runs that command with the installed <code>lf</code>:</p>
+<p>The model holds, and the mismatch the last review found is gone. Desktop
+runs the server's command as given and marks its pane with
+<code>LF_RELAY_FOCUSED=0</code>; QA opened a Dev pane with the installed
+0.16.0 <code>lf</code>, which rendered and took typing.</p>
+<p>What is left is the route that fix replaced. <code>--prepare
+--unfocused</code> still writes the flag into <code>open_argv</code>, the SSH
+prefix still carries it, and <code>lf session attach --unfocused --</code>
+still parses it. Nothing calls it. Its output is the command that failed
+before:</p>
 <pre>$ lf --version
 lf 0.16.0+7127b9d0d
 $ lf session resume &lt;id&gt; --unfocused
 error: unexpected argument '--unfocused' found</pre>
-<p>A Dev build from this branch, beside today's installed Loopflow, cannot open
-a Session pane. QA ran Dev against the branch <code>lf</code> on a private
-Machine and did not meet it.</p>
 
 <h2>Product concepts against code concepts</h2>
 <table>
@@ -87,51 +86,51 @@ Machine and did not meet it.</p>
 <td><code>Hosted</code>, one <code>Viewer</code> per relay</td>
 <td class="yes">yes</td><td>Unchanged.</td></tr>
 <tr><td>"It fits the window I'm using"</td>
-<td><code>Sizing { owner, clock }</code>; <code>touch</code> on input and
+<td><code>Sizing { owner, clock }</code>: <code>touch</code> on input and
 focus-in, <code>settle</code> only when the owner is gone</td>
 <td class="yes">yes</td>
-<td>Smaller than before: the <code>Owner</code> struct and the per-pass
-re-election are gone. Size, colors, query answers and focus-out all read the
-same owner.</td></tr>
+<td>Size, colors, query answers and focus-out read the same owner. The
+restart repaint reads the size when it acts, so a view that takes over
+mid-nudge keeps it.</td></tr>
 <tr><td>"I'm at this window"</td>
-<td><code>Request::Focus</code>, and <code>Attach.focused</code> as its first
-value; <code>RelayInput.focused</code> keeps it across reconnects</td>
+<td><code>Request::Focus</code>; <code>Attach.focused</code> as its first
+value; <code>RelayInput.focused</code> across reconnects</td>
 <td class="yes">yes</td>
-<td>One fact from attach to reconnect. An older relay omits the field and
-takes the size, as it always did.</td></tr>
+<td>One fact from attach to reconnect. A relay that omits the field takes the
+size, as before.</td></tr>
 <tr><td>The agent knows whether I'm looking</td>
 <td><code>CSI O</code> forwarded only from the owner</td>
-<td class="yes">yes</td>
-<td>QA: a background view's focus-out reached the agent zero times.</td></tr>
+<td class="yes">yes</td><td></td></tr>
 <tr><td>Watching without taking over</td>
 <td><code>lf resume --unfocused</code>; piped stdin</td>
 <td class="yes">yes</td>
 <td>Same viewer, different starting focus. Typing still takes the Session.</td></tr>
-<tr><td>Dev is a build I'm trying on my real Machine</td>
-<td><code>opensUnvisitedWork</code> (false when the bundle ID ends
-<code>.dev</code>), <code>canOpenTerminals</code>, <code>visit()</code></td>
+<tr><td>Desktop's tabs are ready and don't disturb the window I'm in</td>
+<td><code>LF_RELAY_FOCUSED=0</code> in the Ghostty Session surface, read by
+<code>initial_focus</code></td>
 <td class="yes">yes</td>
-<td>QA: six live Sessions, Dev launched, zero relays after 25 s; the first
-visit started exactly one.</td></tr>
-<tr><td>Desktop's tabs are ready, and don't disturb the window I'm in</td>
-<td><code>SessionItem.launchArguments</code> finds <code>session
-attach|resume|new</code> in the server's <code>open_argv</code> and inserts
-<code>--unfocused</code> before any <code>--</code></td>
+<td>Was the "no" of the last review. One owner now: the server writes the
+command, the pane says where it stands.</td></tr>
+<tr><td>Dev is a build I'm trying on my real Machine</td>
+<td><code>opensUnvisitedWork</code>, <code>canOpenTerminals</code>,
+<code>visit()</code></td>
+<td class="yes">yes</td>
+<td>Zero relays on launch and restore, one on a visit. This is what protects
+live Sessions while the installed server still gives every attach the
+size.</td></tr>
+<tr><td>Opening the Session on my phone</td>
+<td><code>OwnerStream.attachRequest</code> sends <code>focused: true</code></td>
+<td class="yes">yes</td>
+<td>The phone attaches when the app is in front, so "focused" is true each
+time. Same behavior as before the field existed.</td></tr>
+<tr><td>(nothing: a person never prepares a background command)</td>
+<td><code>--prepare --unfocused</code> pushes the flag onto
+<code>open_argv</code>; <code>prepared_remotely(…, unfocused)</code> inserts
+it before <code>--</code>; <code>lf.rs</code> parses <code>session attach
+--unfocused --</code></td>
 <td class="no">no</td>
-<td>An action with two owners. The server writes the command; Desktop edits
-it, so Desktop has to know <code>lf</code>'s grammar, and whichever
-<code>lf</code> runs the pane has to know the flag. The installed one does
-not.</td></tr>
-<tr><td>(nothing: a person never says this)</td>
-<td>The starting focus under five spellings: <code>--unfocused</code> on
-resume/new, <code>--unfocused</code> on <code>session attach --</code>,
-<code>ViewerOptions.unfocused</code>, <code>LF_RELAY_FOCUSED</code> across the
-relay's exec, <code>focused</code> on the wire</td>
-<td class="no">no</td>
-<td>The first three exist to carry Desktop's choice through argv.
-<code>ssh.rs</code> strips the flag from the remote command and re-adds it to
-the local relay. The variable and the wire field are the two the relay
-needs.</td></tr>
+<td>A concept the code has and nobody uses: the second way to tell a pane's
+relay it starts in the background. Three places and one test keep it.</td></tr>
 <tr><td>(a person never says "owner")</td>
 <td><code>owner</code>: the Session's owner process, and the sizing view</td>
 <td class="no">no</td>
@@ -139,46 +138,37 @@ needs.</td></tr>
 holders already send, so the rename is its own Task.</td></tr>
 </table>
 
-<h2>The biggest mismatch: Desktop edits a command it doesn't own</h2>
+<h2>The biggest mismatch: two ways to say "this pane starts in the background"</h2>
 <div class="cols">
 <div class="card">
 <h3>Before (built)</h3>
 <ol class="steps">
-<li>Server returns <code>open_argv</code>:
-<code>lf session resume S</code>, or <code>lf session attach -- ssh …</code></li>
-<li>Desktop parses it and inserts <code>--unfocused</code></li>
-<li>The pane runs it with the installed <code>lf</code></li>
-<li class="bad">Installed <code>lf</code> predates the flag: usage error, no
-pane. Dev is in this state from the day this merges until the next
-<code>lf install</code>.</li>
+<li>Person: <code>lf resume X --unfocused</code></li>
+<li>Host: <code>LF_RELAY_FOCUSED=0</code> in the pane</li>
+<li class="bad">Host, second way: ask for <code>--prepare --unfocused</code>
+and get an argv with the flag inside, as <code>… resume X --unfocused</code>
+or <code>lf session attach --unfocused -- ssh …</code>. Run by an
+<code>lf</code> from before the flag, it is a usage error and no pane.</li>
+<li>Wire: <code>focused</code></li>
 </ol>
 </div>
 <div class="card after">
 <h3>After <span class="proposed">proposed</span></h3>
 <ol class="steps">
-<li>Server returns <code>open_argv</code>; Desktop runs it as given</li>
-<li>Desktop sets <code>LF_RELAY_FOCUSED=0</code> in the pane's environment,
-beside <code>LF_SERVER_STATUS</code>, which already marks a Desktop pane's
-relay</li>
-<li>The relay reads it in <code>initial_focus</code>, the one place that
-decides starting focus</li>
-<li class="good">An <code>lf</code> from before this change ignores the
-variable. The pane opens as it does today, and Dev still starts nothing for
-Sessions nobody visited.</li>
+<li>Person: <code>lf resume X --unfocused</code></li>
+<li>Host: <code>LF_RELAY_FOCUSED=0</code> in the pane</li>
+<li>Wire: <code>focused</code></li>
+<li class="good">A prepared argv never mentions focus. Whoever runs it says
+where it stands, through its environment and its TTY.</li>
 </ol>
 </div>
 </div>
-<p>The first review passed over a variable because it "doesn't cross
-<code>ssh</code>" and "reaches every child of a pane". The build removed both
-objections. Starting focus turned out to belong to the relay beside the
-viewer's terminal, which for an SSH pane is the local
-<code>lf session attach --</code>, so nothing needs to cross. A Session pane's
-only child is that relay; the one inheritor that matters is the holder, and
-<code>start_held</code> drops the variable so an agent's own <code>lf</code>
-calls never see it.</p>
-<p><code>--unfocused</code> stays for a person at a terminal. What Desktop
-alone used goes: the Swift argv parser and the test expectations that pin
-it.</p>
+<p>What goes: the push in <code>session.rs</code>, the parameter and inserted
+flag in <code>ssh.rs</code> <code>prepared_remotely</code>, the
+<code>--unfocused --</code> arm in <code>lf.rs</code>, and the
+<code>background</code> assertions in <code>machine_commands.rs</code>. What
+stays: <code>lf --machine … resume --unfocused</code> for a person, whose
+local relay reads the flag while the remote command never sees it.</p>
 
 <h2>Normal path, failure, recovery</h2>
 <table>
@@ -186,44 +176,40 @@ it.</p>
 <tr><td>You type in a terminal view at 80; Desktop warms a pane at 120</td>
 <td>Agent sees nothing</td><td>Same</td></tr>
 <tr><td>You click the Desktop pane</td>
-<td>Ghostty reports focus; the Session takes 120 before your first key</td>
-<td>Same</td></tr>
+<td>Ghostty reports focus; the Session takes 120 before your first key (not
+seen on a mounted pane: QA's display was locked)</td><td>Same</td></tr>
 <tr><td>The view in use closes</td>
 <td>The most recently used live view takes over</td><td>Same</td></tr>
 <tr><td>Server restarts while focus moves between views</td>
 <td>Each relay reattaches with the focus it last saw; the repaint nudge keeps
-the new owner's size (QA bug, fixed in <code>a68d682a73</code>)</td>
-<td>Same</td></tr>
+the new owner's size</td><td>Same</td></tr>
 <tr><td>Dev built ahead of the installed <code>lf</code> opens a visited
 Session</td>
-<td class="bad">Pane fails with a usage error</td>
-<td class="good">Pane opens; with an old <code>lf</code> it takes the size on
-attach, which is what a deliberate visit does anyway</td></tr>
-<tr><td>Server restarts and no view is focused (you are in a browser)</td>
-<td>Recency lived in the old server. The first view to reattach owns, so the
-agent may get one resize; your next focus or key takes it back</td>
-<td>Same. Left alone: carrying recency on the wire is more protocol for one
-resize nobody is watching.</td></tr>
+<td>Pane opens; the old holder gives the visit the size</td><td>Same</td></tr>
+<tr><td>A host prepares a background pane and an older <code>lf</code> runs
+it</td>
+<td class="bad">With <code>--prepare --unfocused</code>: usage error</td>
+<td class="good">Only the variable exists; an older <code>lf</code> ignores
+it and the pane opens</td></tr>
+<tr><td>Server restarts and no view is focused</td>
+<td>The first view to reattach owns; your next focus or key takes it
+back</td><td>Same</td></tr>
 </table>
 
 <h2>Not reached</h2>
-<p>Mounted Ghostty focus (clicking a pane, key window changes) needs an
-unlocked display; QA's screen was locked. Release Desktop's warm set and SSH
-relays were not run. These belong to QA after the next build, gate or a
-person.</p>
+<p>Mounted Ghostty focus needs an unlocked display. Release Desktop's warm set
+in a second window and a real SSH Session were not run. These belong to QA,
+gate or a person.</p>
 
 <h2>Questions</h2>
 <ol class="q">
-<li>How Desktop says a pane starts in the background.
-<ol><li>The pane's environment, <code>LF_RELAY_FOCUSED=0</code> (plan).</li>
-<li>Keep <code>--unfocused</code> in argv and accept that Dev needs
-<code>lf install</code> first.</li>
-<li>Have the server put the flag in <code>open_argv</code> when Desktop asks
-for one.</li></ol></li>
-<li><code>--unfocused</code> for people.
-<ol><li>Keep it on <code>lf resume</code> and <code>lf session new</code>
+<li>The prepared-argv focus route.
+<ol><li>Delete it; the variable is how a host says it (plan).</li>
+<li>Keep it for a host that cannot set environment.</li></ol></li>
+<li><code>lf resume X --prepare --unfocused</code> once the route is gone.
+<ol><li>The flag is accepted and has no effect on the printed command
 (plan).</li>
-<li>Remove it; the variable is the only spelling.</li></ol></li>
+<li>Refuse the combination.</li></ol></li>
 <li>A restart with no focused view.
 <ol><li>First to reattach owns until someone focuses (built).</li>
 <li>Relays send their recency on attach so the last-used view keeps the

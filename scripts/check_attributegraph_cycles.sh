@@ -5,8 +5,8 @@
 # interaction matrix.
 #
 # SwiftUI reports dependency cycles to the unified logging system (os_log) and
-# can also print them to the app's stderr, so the capture reads both: `log
-# stream` on the app process and the app's own output share one log.
+# can also print them to the app's stderr. Capture both, including startup,
+# using the test executable's path to exclude the installed app's log events.
 #
 # Usage:
 #   scripts/check_attributegraph_cycles.sh [--repo <path> | --sheet] [--seconds N]
@@ -42,7 +42,9 @@ echo "Building Loopflow.app…"
     CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM= >/dev/null )
 
 LOG="$(mktemp -t lf_attributegraph.XXXXXX.log)"
-/usr/bin/log stream --style compact --process Loopflow >>"$LOG" 2>&1 &
+LOG_PATH=${BIN//\\/\\\\}
+LOG_PATH=${LOG_PATH//\"/\\\"}
+/usr/bin/log stream --style compact --predicate "processImagePath == \"$LOG_PATH\"" >>"$LOG" 2>&1 &
 LOG_PID=$!
 sleep 1.5
 
@@ -72,7 +74,7 @@ COUNT="$(grep -iEc 'cycle detected|AttributeGraph' "$LOG" || true)"
 echo "Captured $(wc -l <"$LOG") log lines; AttributeGraph/cycle mentions: $COUNT"
 if [ "$COUNT" -gt 0 ]; then
   echo "FAIL — AttributeGraph cycles detected:"
-  grep -iE 'cycle detected|AttributeGraph' "$LOG" | head
+  grep -im 10 -E 'cycle detected|AttributeGraph' "$LOG"
   echo "log: $LOG"
   exit 1
 fi

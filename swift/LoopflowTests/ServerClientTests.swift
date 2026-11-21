@@ -575,6 +575,22 @@ struct ServerClientTests {
         await subscription.cancel()
     }
 
+    @Test func visitorReportsStoppedServerAndRecoversOnNextRead() async throws {
+        let attempts = Mutex(0)
+        let location = ServerLocation(startsServer: false) { args in
+            #expect(args == ["server", "status"])
+            return attempts.increment() == 1
+                ? #"{"socket":"/fixture","ready":false,"error":"Connection refused"}"#
+                : #"{"socket":"/fixture","ready":true}"#
+        }
+        await #expect {
+            try await location.path()
+        } throws: { error in
+            error.localizedDescription == "Loopflow's server isn't running. Open Loopflow, or run `lf install server`. Connection refused"
+        }
+        #expect(try await location.path() == "/fixture")
+    }
+
     @Test(arguments: [false, true])
     func failedSetupDoesNotRegisterOnWorkRefresh(unreadyReply: Bool) async throws {
         let root = URL(fileURLWithPath: "/tmp").appendingPathComponent("server-\(UUID().uuidString)")
@@ -606,7 +622,7 @@ struct ServerClientTests {
         exec "$TEST_LF" "$@"
         """.write(to: installer, atomically: true, encoding: .utf8)
         try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: installer.path)
-        let location = ServerLocation(privateHome: root.path) { try await lf.run($0, executable: installer.path) }
+        let location = ServerLocation(startsServer: true) { try await lf.run($0, executable: installer.path) }
         let query = ServedRead.planList(directory: root.path, wave: nil, task: nil, all: true)
         do {
             _ = try await ServerClient.read(query, location: location)
@@ -696,7 +712,7 @@ private final class ServerPeer: @unchecked Sendable {
     init() throws {
         let path = "/tmp/lf-peer-\(UUID().uuidString).sock"
         self.path = path
-        location = ServerLocation(bundledHelper: nil, privateHome: nil) { args in
+        location = ServerLocation(startsServer: false) { args in
             #expect(args == ["server", "status"])
             return String(decoding: try JSONSerialization.data(withJSONObject: ["socket": path, "ready": true]), as: UTF8.self)
         }

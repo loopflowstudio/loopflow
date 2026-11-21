@@ -9,11 +9,41 @@ struct LocalLfError: LocalizedError {
     let errorDescription: String?
 }
 
+enum MachineLf: Equatable {
+    case privateHome(String)
+    case bundled(String)
+    case installed(String)
+
+    var startsServer: Bool {
+        if case .installed = self { return false }
+        return true
+    }
+
+    var path: String {
+        get throws {
+            switch self {
+            case .privateHome(let path):
+                guard FileManager.default.isExecutableFile(atPath: path) else {
+                    throw LocalLfError(errorDescription: "The private Machine’s lf at \(path) is not executable.")
+                }
+                return path
+            case .bundled(let path): return path
+            case .installed(let path):
+                guard FileManager.default.isExecutableFile(atPath: path) else {
+                    throw LocalLfError(errorDescription: "Loopflow is not installed on this Machine (no lf at \(path)). "
+                        + "Install Loopflow, then open Loopflow Dev again.")
+                }
+                return path
+            }
+        }
+    }
+}
+
 enum LocalWaveAgentLauncher {
     /// Ensure Task Work and its checkout without running a Graph; returns
     /// the authoritative worktree.
     static func checkoutTask(repoPath: String, issue: String) async throws -> WorkspaceIdentity {
-        let stdout = try await runCheckedOutput(taskCheckoutCommand(lfPath: try controlLfPath(), issue: issue), cwd: repoPath)
+        let stdout = try await runCheckedOutput(taskCheckoutCommand(lfPath: try machineLf().path, issue: issue), cwd: repoPath)
         return try taskCheckoutWorkspace(stdout)
     }
 
@@ -37,25 +67,15 @@ enum LocalWaveAgentLauncher {
         return directory.appending(path: "lf")
     }
 
-    static func controlLfPath(
+    static func machineLf(
         bundled: URL? = Bundle.main.url(forAuxiliaryExecutable: "lf"),
         environment: [String: String] = ProcessInfo.processInfo.environment
-    ) throws -> String {
-        if environment["LF_HOME"] != nil, let selected = environment["LF_BIN"] {
-            guard FileManager.default.isExecutableFile(atPath: selected) else {
-                throw LocalLfError(errorDescription: "LF_BIN \(selected) is not an executable lf.")
-            }
-            return selected
-        }
-        if let bundled, FileManager.default.isExecutableFile(atPath: bundled.path) {
-            return bundled.path
-        }
-        let entry = publicLfEntry(environment: environment)
-        guard FileManager.default.isExecutableFile(atPath: entry.path) else {
-            throw LocalLfError(errorDescription: "Loopflow is not installed on this Machine (no lf at \(entry.path)). "
-                + "Install Loopflow, then open Loopflow Dev again.")
-        }
-        return entry.path
+    ) -> MachineLf {
+        let privateHome = environment["LF_HOME"] != nil
+        if privateHome, let selected = environment["LF_BIN"] { return .privateHome(selected) }
+        if let bundled, FileManager.default.isExecutableFile(atPath: bundled.path) { return .bundled(bundled.path) }
+        let entry = publicLfEntry(environment: environment).path
+        return privateHome ? .privateHome(entry) : .installed(entry)
     }
 
     /// Run the selected Machine's `lf` and return stdout. Desktop uses this
@@ -64,7 +84,7 @@ enum LocalWaveAgentLauncher {
         let work = InteractionTrace.current?.work
         let counted = work?.cliRead() == true
         defer { if counted { work?.requestFinished() } }
-        let lfPath = try controlLfPath()
+        let lfPath = try machineLf().path
         let result: (status: Int32, stdout: String, stderr: String)
         do {
             result = try await run([lfPath] + subargs, cwd: cwd, input: input)

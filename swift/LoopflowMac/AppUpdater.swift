@@ -55,7 +55,7 @@ enum AppUpdates {
     /// Run the bundled `lf` and throw its own message when it refuses.
     static func runLf(_ arguments: [String]) throws {
         let process = Process()
-        process.executableURL = URL(filePath: try LocalWaveAgentLauncher.controlLfPath())
+        process.executableURL = URL(filePath: try LocalWaveAgentLauncher.machineLf().path)
         process.arguments = arguments
         let errors = Pipe.uninherited()
         process.standardError = errors

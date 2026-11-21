@@ -147,20 +147,19 @@ private actor ServerLinks {
 }
 
 actor ServerLocation {
-    static let shared = ServerLocation()
+    static let shared = ServerLocation(startsServer: LocalWaveAgentLauncher.machineLf().startsServer)
     private let query: @Sendable ([String]) async throws -> String
     private var endpoint: Task<String, any Error>?
-    private let preparesServer: Bool
+    private let startsServer: Bool
     private var setupError: String?
 
     init(
-        bundledHelper: URL? = Bundle.main.url(forAuxiliaryExecutable: "lf"),
-        privateHome: String? = ProcessInfo.processInfo.environment["LF_HOME"],
+        startsServer: Bool,
         query: @escaping @Sendable ([String]) async throws -> String = {
             try await LocalWaveAgentLauncher.queryLf($0, cwd: "/")
         }
     ) {
-        preparesServer = bundledHelper != nil || privateHome != nil
+        self.startsServer = startsServer
         self.query = query
     }
 
@@ -168,7 +167,7 @@ actor ServerLocation {
         if let endpoint { return try await endpoint.value }
         // Keep a successful endpoint. After a failed install, keep its diagnosis
         // and check status on subsequent attempts.
-        let prepare = preparesServer && setupError == nil
+        let prepare = startsServer && setupError == nil
         let previousSetupError = setupError
         let task = Task {
             do {
@@ -179,7 +178,13 @@ actor ServerLocation {
                     let error: String?
                 }
                 let status = try JSONDecoder().decode(Status.self, from: Data(result.utf8))
-                guard status.ready else { throw RegistryQueryError(status.error ?? "Loopflow server unavailable") }
+                guard status.ready else {
+                    if !startsServer {
+                        let guidance = "Loopflow's server isn't running. Open Loopflow, or run `lf install server`."
+                        throw RegistryQueryError([guidance, status.error].compactMap { $0 }.joined(separator: " "))
+                    }
+                    throw RegistryQueryError(status.error ?? "Loopflow server unavailable")
+                }
                 return status.socket
             } catch {
                 // Every concurrent waiter gets the same actionable diagnosis.
@@ -206,7 +211,8 @@ extension ServerEndpoint {
     /// The Machine's server on its private Unix socket.
     static func unix(path: String) -> ServerEndpoint {
         ServerEndpoint(
-            client: ServerClientIdentity(kind: "desktop", platform: "macos", name: "Loopflow",
+            client: ServerClientIdentity(kind: "desktop", platform: "macos",
+                                          name: Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String ?? "Loopflow",
                                           version: "\(LaunchJournal.appVersion)+\(DesktopLog.sourceRevision)"),
             control: { try UnixSocketCarrier(path: path, limit: ServerProtocol.maxMessage) },
             ticketed: { try UnixSocketCarrier(path: path, limit: ServerProtocol.maxBulk) })

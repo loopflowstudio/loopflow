@@ -34,10 +34,11 @@ enum GUIProcessEnvironment {
         var copy = env
         // Launches select this app's protocol, including nested commands.
         copy["PATH"] = enrichedPath(from: env["PATH"])
-        if let helper = try? LocalWaveAgentLauncher.controlLfPath(environment: env) {
+        let lf = LocalWaveAgentLauncher.machineLf(environment: env)
+        if let helper = try? lf.path {
             copy["LF_BIN"] = helper
             copy["PATH"] = URL(filePath: helper).deletingLastPathComponent().path + ":" + (copy["PATH"] ?? "")
-        } else if env["LF_HOME"] == nil {
+        } else if !lf.startsServer {
             copy.removeValue(forKey: "LF_BIN")
         }
         // The GUI is a new human control surface, not a continuation of the

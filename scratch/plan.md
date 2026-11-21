@@ -242,3 +242,4 @@ prompt, `/skills reload` in an open agy session.
 - `cargo test -p loopflow-execution --lib -- skills::tests every_harness_reads_a_synced_skill`: 20 passed, rerun on f5008195ed after the one-path-per-scope change (realign).
 - `cargo test -p loopflow --test integration documented_commands::`: 4 passed (implement).
 - clippy and the suites: gate and CI.
+- compress: same 20 passed after rendering skills once per sync; `cargo check -p loopflow --bin lf` clean.

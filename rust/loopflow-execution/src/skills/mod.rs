@@ -43,7 +43,7 @@ pub struct SkillSyncReport {
     pub skipped: Vec<PathBuf>,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 struct Export {
     content: String,
     inputs: BTreeMap<String, String>,
@@ -112,30 +112,33 @@ pub fn sync_skills(options: &SkillSyncOptions) -> Result<SkillSyncReport, LoadEr
     let mut compiled_graphs = BTreeMap::new();
     let mut targets = Vec::new();
     let mut report = SkillSyncReport::default();
-    // Resolve and validate the entire export set before touching either provider.
+    // Resolve and validate the entire export set before touching any directory.
+    // A skill renders the same everywhere; a Graph recipe names its input files
+    // under the directory it lands in, so Graphs render per directory.
+    let skills = project_names(catalog.entries().map(|skill| skill.name.as_str()));
+    let mut skill_exports = BTreeMap::new();
+    for (name, source) in &skills {
+        let skill = catalog.exact(source).expect("projected source exists");
+        if repo.as_ref().is_some_and(|repo| {
+            !skill
+                .path
+                .as_ref()
+                .is_some_and(|path| path.starts_with(repo))
+        }) {
+            continue;
+        }
+        skill_exports.insert(
+            name.clone(),
+            Export {
+                content: render_skill(skill, name)?,
+                ..Export::default()
+            },
+        );
+    }
     for folder in installed_skill_directories(options.repo.is_some()) {
         let root = base.join(folder);
-        let mut exports = BTreeMap::new();
-        let skills = project_names(catalog.entries().map(|skill| skill.name.as_str()));
+        let mut exports = skill_exports.clone();
         let mut sources = skills.clone();
-        for (name, source) in &skills {
-            let skill = catalog.exact(source).expect("projected source exists");
-            if repo.as_ref().is_some_and(|repo| {
-                !skill
-                    .path
-                    .as_ref()
-                    .is_some_and(|path| path.starts_with(repo))
-            }) {
-                continue;
-            }
-            exports.insert(
-                name.clone(),
-                Export {
-                    content: render_skill(skill, name)?,
-                    ..Export::default()
-                },
-            );
-        }
         for (name, graph) in project_names(graphs.iter().map(String::as_str)) {
             if skills.contains_key(&name) {
                 let path = root.join(&name).join(SKILL_FILE_NAME);
@@ -188,7 +191,7 @@ pub fn sync_skills(options: &SkillSyncOptions) -> Result<SkillSyncReport, LoadEr
     for (root, exports, blocked, _) in &targets {
         write_targets(exports, blocked, root, &mut report)?;
     }
-    // A failed replacement in either provider must not erase working old exports.
+    // A failed replacement in any directory must not erase working old exports.
     if options.prune {
         for (root, exports, _, blocked_sources) in &targets {
             prune_targets(exports, blocked_sources, base, root, &mut report)?;

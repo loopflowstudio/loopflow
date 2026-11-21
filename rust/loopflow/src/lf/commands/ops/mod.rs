@@ -335,11 +335,8 @@ pub fn run_sync_skills(yes: bool, no_prune: bool, repo: bool) -> Result<()> {
         let directories = installed_skill_directories(false)
             .iter()
             .map(|directory| format!("~/{directory}"))
-            .collect::<Vec<_>>();
-        let directories = match directories.split_last() {
-            Some((last, rest)) if !rest.is_empty() => format!("{} and {last}", rest.join(", ")),
-            _ => directories.concat(),
-        };
+            .collect::<Vec<_>>()
+            .join(", ");
         if !std::io::stdin().is_terminal() {
             return Err(anyhow!(
                 "skill sync writes under {directories}; rerun with --yes to confirm"

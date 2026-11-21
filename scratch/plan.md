@@ -34,10 +34,10 @@ The public entry matters on this Machine. The installed app and
 `~/.local/bin/lf` had the same hash (`aeab8b41…`). The older
 `~/.cargo/bin/lf` on PATH had hash `a527444a…`. LaunchServices inherited
 Task and Session routing variables when the previous launcher opened Dev.
-`lf install server` returned the same server instance
+An install probe during planning returned the same instance
 `5f5bc7b3-59a4-4213-b45e-6490a0dd089d` and executable hash when called via
-the installed entry during planning. That CLI probe exercised the matching
-hash case. The actual Dev launch and holder continuity still need QA.
+the installed entry. That result only covered matching executables and left
+the first connection dependent on install behavior.
 
 The copy served lists but could not join a held Session. On the copy at
 revision 8, `lf session resume d566a570… --prepare --json` returned
@@ -56,28 +56,32 @@ repository paths still use bare text.
 - `swift test --package-path swift --filter 'olderPeerKeepsServingCompatibleReadsAndActions|aReadingThisBuildCannotDecodeNamesBothBuilds'` passed. The revision-8 peer refused an unknown write and omitted a required Task page field. The same connection still delivered a Machine identity with an extra field, multiline Session history and a successful Graph customization.
 - `swift test --package-path swift --skip-build --filter 'contentRoutedSessionHistory|aRecordFromAnEarlierRevisionReadsItsReceiptAndNeverResends|bulkAnswersAndOversizeRequestsTravelByTicket'` passed all three checks.
 
-Helper-less Dev now locates the live socket with `lf server status`. A bundled
+`ServerLocation` in `swift/LoopflowMac/Services/ServerClient.swift` now uses
+`lf server status` from the first lookup in helper-less Dev. A bundled
 helper or explicit private home still prepares its server on first use.
 
-- `swift test --package-path swift --filter olderPeerKeepsServingCompatibleReadsAndActions` passed with the revision-8 fixture accepting only status discovery.
+- `swift test --package-path swift --filter olderPeerKeepsServingCompatibleReadsAndActions` passed. The socket fixture in `swift/LoopflowTests/ServerClientTests.swift` checks the CLI arguments on every lookup, so an install call fails the test even if the peer answers correctly.
 - `LOOPFLOW_TEST_LF="$HOME/.local/bin/lf" swift test --package-path swift --skip-build --filter failedSetupDoesNotRegisterOnWorkRefresh` passed both private-home recovery cases. The checkout had no built CLI.
 - The installed `lf server status` reported a ready socket. The mounted check remains at QA.
 
 ## Remaining implementation
 
-1. **Next — retire sealed copies and migrate CLI coverage.** Remove
-   `rust/loopflow/src/world/`, the `lf-world` binary and registration,
-   `server/copy.rs`, the sealed-store startup and write refusal,
-   `Operation::changes`, CLI `write_refused`, the copy-only
-   `installation::server::stop`, and storage `copy::{seal,sealed_at}`.
-   Keep `copy::snapshot` for backup and install validation, and keep server
-   identity and readiness checks. Remove `copy_world` and `world_recipes`
-   only after moving their meaningful CLI checks to minimal isolated fixtures.
-   Cover Done pagination and closed-since, open-only title/identifier filtering,
-   list subscriptions that emit only on change, Task status shape and next step,
-   and a stopped run's failed step. Fold Session/status subscriptions into
+1. **Next — move CLI coverage and retire the sealed copy.** Start in
+   `rust/loopflow/tests/world_recipes.rs` and `copy_world.rs`. Move the task
+   queries to minimal isolated fixtures covering Done pagination and
+   closed-since, open-only title/identifier filtering, list subscriptions that
+   emit only on change, Task status shape and next step, and a stopped run's
+   failed step. Fold Session/status subscriptions into
    `session_list_subscribe.rs`. Existing transport coverage exercises live
    attachment, so drop the world test that exercised only its stub provider.
+   Run the moved fixtures through the normal `lf` entry points.
+   Then delete the sealed copy's `lf-world` entry and its startup and write
+   refusal paths (`server/copy.rs`, `Operation::changes`, CLI `write_refused`,
+   `installation::server::stop`, and storage `copy::{seal,sealed_at}`).
+   Keep `copy::snapshot` and its WAL test for migration backup and install
+   validation. Keep server identity and readiness checks. The recipe builder
+   still has consumers in step 2. Delete `rust/loopflow/src/world/` and the
+   `lf-world` binary registration with the last consumer.
 2. **Remove world consumers.** Delete the `world:` entries in
    `scripts/screenshots.yaml` and the builder in `generate_screenshots.py`.
    Keep empty and mock screenshots and website capture. Remove the cycle

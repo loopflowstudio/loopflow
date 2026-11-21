@@ -58,10 +58,8 @@ enum LocalWaveAgentLauncher {
         return entry.path
     }
 
-    /// Run an `lf` query verb (`list`, `status`, `monitor`, …) and return its
-    /// stdout. Backs `RegistryQuery` on macOS: the wave dashboard reads durable
-    /// facts by shelling the daemonless Machine `lf` over the local store, not
-    /// by streaming a center. Throws on a spawn failure or a non-zero exit.
+    /// Run the selected Machine's `lf` and return stdout. Desktop uses this
+    /// for socket discovery and CLI-only reads. Throws on spawn or command failure.
     static func queryLf(_ subargs: [String], cwd: String?, input: String? = nil) async throws -> String {
         let work = InteractionTrace.current?.work
         let counted = work?.cliRead() == true

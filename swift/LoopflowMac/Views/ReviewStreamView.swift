@@ -295,7 +295,7 @@ struct ReviewStream: View {
         }
         let selected = isSelected(line, side: side, path: path)
         // A line past the readable length shows its start until asked for the rest.
-        let cut = store.openedLongLines.contains(line.id(in: path)) ? nil : line.cut
+        let cut = line.cut.flatMap { store.openedLongLines.contains(line.id(in: path)) ? nil : $0 }
         let text = cut?.shown ?? line.text
         return VStack(alignment: .leading, spacing: 2) {
             HStack(alignment: .top, spacing: 4) {

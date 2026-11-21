@@ -117,9 +117,8 @@ struct ReviewDiff: Equatable, Sendable {
             var blocks: [ReviewBlock] = []
             var removed: [ReviewLine] = [], added: [ReviewLine] = []
             func flush() {
-                guard !removed.isEmpty || !added.isEmpty else { return }
-                let anchor = removed.first.map { "o\($0.old ?? 0)" } ?? "n\(added.first?.new ?? 0)"
-                blocks.append(.change(ReviewChange(id: "\(path)#\(anchor)", removed: removed, added: added)))
+                guard let first = removed.first ?? added.first else { return }
+                blocks.append(.change(ReviewChange(id: first.id(in: path), removed: removed, added: added)))
                 removed = []; added = []
             }
             for item in lines {
@@ -298,6 +297,7 @@ struct ReviewLine: Equatable, Sendable {
     static let readable = 1_000
 
     /// The line within its file: its old number when removed, else its new one.
+    /// A change takes its first line's.
     func id(in path: String) -> String {
         "\(path)#" + (kind == .removed ? "o\(old ?? 0)" : "n\(new ?? 0)")
     }

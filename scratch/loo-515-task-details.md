@@ -281,8 +281,57 @@ the release, and prints the `diff_groups` warning twice per command until the
 first `lf install` after this merges; question 5 below is about Machines on
 the tagged release.
 
+## Concept review, November 21 (eighth pass): next for implement
+
+Read at `cd22a12c29`, over the per-file read, the long-line row and the new-file
+reading. The model holds: `lf task changes` names the files, each shown file is
+read on its own, hidden files are not read. Three repairs, none built. Chosen
+by the review, not by Jack, reversible.
+
+1. **Cut the long line, not the file.** `collapses` turns a whole file into one
+   row when any line passes 1,000 UTF-16 units, on the reading that such a line
+   is machine-made. Counted in this repository's tracked files: the rule
+   catches `docs/dev/reference.md` (three table rows, 1,347 to 2,031),
+   `rust/loopflow-storage/SCHEMA.md` (one list item, 1,421), five migrations
+   and `rust/loopflow/tests/release_lock_tests.rs` (one line, 1,042). Those are
+   Docs and Data model, the first two groups, and the collapse was answering
+   "often the largest diffs are the ones that matter the most. [ignoring like
+   generated files, which we are trying to handle a separate way]". Generated
+   files already have their way: the Generated group and `diff_hidden`.
+   Instead: a line past 1,000 units shows its first 1,000 and "N more
+   characters · Show"; every other line of the file reads as usual. This
+   deletes `collapses`, `row(for:in:)`, `openedLongFiles` (it becomes opened
+   lines), the "collapsed file is one stop" loop in `step`, `ReviewFile.bytes`
+   and the `changes-long-lines` row, and fixes a count it left wrong: the
+   stepper skipped a collapsed file's later changes while `position` and the
+   title still counted them.
+2. **Delete the read that cannot happen.** `readFile` rereads a committed new
+   file with `lf task file` when its patch was cut at 1 MB. Both reads stop at
+   `MAX_FILE_BYTES` (1,000,000, `ops/task/snapshot.rs`), and a new file's patch
+   is its contents plus one byte a line, so the reread succeeds only for a file
+   within a few kilobytes under the limit. The 1.28 MB file that prompted it
+   is past both. Remove the branch; What exists and Limits then say one thing:
+   a new file over 1 MB shows its first 1 MB and "Cut at 1 MB". While there:
+   an untracked file over 1 MB shows only a note today (`whole.state.title`),
+   no lines; if `lf task diff --path` answers for an untracked path, read it
+   that way so tracked and untracked new files end the same. Reading past
+   1 MB is a protocol change and stays with Task 4556d0.
+3. **A failed file read can be tried again.** `accept` takes a failed file out
+   of `unread`, so "Could not be read: …" stays until that file changes, the
+   commits move or the page is reopened; a server restart mid-read leaves
+   every file saying it. The note row gets **Retry** (back into `unread`, then
+   `readShown`), as the Files tree's failed folders have.
+
+Left as is: Files' Diff mode reads its one file with `loadDiff`, not
+`readFile`, because it compares the unsaved draft; both render through
+`ReviewStream`.
+
+No new product choice. The five questions under Remaining are unanswered and
+go to the demo.
+
 ## Remaining
 
+- The three repairs above.
 - Demo/review on screen (below). November 21 showed the tab strip, the Diff
   rename and the stream; nothing was said about them beyond the quotes under
   Decisions. Unseen: the November 21 repairs at several widths and under

@@ -5,9 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>LOO-515 · concept review</title>
 <style>
-  :root { --bg:#fdfcf9; --fg:#1d1d1b; --muted:#6b6a65; --rule:#e4e1d8; --prop:#2f6fb3; --code:#f3f1ea; }
+  :root { --bg:#fdfcf9; --fg:#1d1d1b; --muted:#6b6a65; --rule:#e4e1d8; --prop:#2f6fb3; --code:#f3f1ea; --add:#e6f4e6; }
   @media (prefers-color-scheme: dark) {
-    :root { --bg:#1a1a18; --fg:#ecebe6; --muted:#9a988f; --rule:#34332f; --prop:#7fb2ee; --code:#25241f; }
+    :root { --bg:#1a1a18; --fg:#ecebe6; --muted:#9a988f; --rule:#34332f; --prop:#7fb2ee; --code:#25241f; --add:#1f2e21; }
   }
   body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.6 -apple-system, "Lato", system-ui, sans-serif; }
   main { max-width:44rem; margin:0 auto; padding:3rem 1.25rem 5rem; }
@@ -15,15 +15,20 @@
   h1 { font-size:1.6rem; margin:0 0 .5rem; }
   h2 { font-size:1.15rem; margin:2.6rem 0 .6rem; }
   code { font:13px/1.5 ui-monospace, Menlo, monospace; background:var(--code); padding:0 .25em; border-radius:3px; }
-  pre { background:var(--code); padding:.7rem .9rem; border-radius:6px; overflow-x:auto; font:13px/1.5 ui-monospace, Menlo, monospace; }
   .lede { font-size:1.08rem; border-left:3px solid var(--prop); padding-left:1rem; margin:2rem 0; }
   .proposed { color:var(--prop); }
   .row { display:grid; grid-template-columns:1fr 1fr; gap:1rem; }
   @media (max-width:560px) { .row { grid-template-columns:1fr; } }
-  .panel { border:1px solid var(--rule); border-radius:6px; padding:.8rem 1rem; }
+  .panel { border:1px solid var(--rule); border-radius:6px; padding:.8rem 1rem; min-width:0; }
   .panel.after { border-color:var(--prop); }
   .panel h3 { margin:0 0 .4rem; font-size:.95rem; }
   .panel p { margin:.3rem 0; font-size:.93rem; }
+  .pane { font:12px/1.55 ui-monospace, Menlo, monospace; margin:.5rem 0 0; }
+  .pane div { padding:.1rem .4rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .pane .file { background:var(--code); font-weight:600; }
+  .pane .note { color:var(--muted); white-space:normal; font-family:-apple-system, system-ui, sans-serif; }
+  .pane .add { background:var(--add); }
+  .pane u { text-decoration:none; color:var(--prop); }
   table { border-collapse:collapse; width:100%; font-size:.93rem; }
   th, td { text-align:left; vertical-align:top; padding:.45rem .6rem .45rem 0; border-bottom:1px solid var(--rule); }
   th { color:var(--muted); font-weight:600; }
@@ -34,81 +39,78 @@
 <body>
 <main>
 <header>
-  <h1>The tour has three names, two rules for "behind", and no way back from a dead run.</h1>
-  <p>LOO-515 · concept-review step, sixth pass · 2026-11-19 · through <code>21fc32c91f</code></p>
-  <p>Built from <code>scratch/loo-515-task-details.md</code>, <code>builtins/task/skill/tour.md</code>, <code>human-review.md</code>, <code>compress.md</code>, <code>implement.md</code>, <code>swift/LoopflowMac/ReviewOrder.swift</code>, <code>TaskFileDocument.swift</code>, <code>Views/TaskChangesView.swift</code>, <code>config/catalog.rs</code>, <code>.lf/config.yaml</code>, <code>docs/config.md</code>, <code>swift/README.md</code></p>
+  <h1>"Lines too long to read" collapses the docs and the data model.</h1>
+  <p>LOO-515 · concept-review step, eighth pass · 2026-11-21 · through <code>cd22a12c29</code></p>
+  <p>Built from <code>scratch/loo-515-task-details.md</code>, <code>scratch/questions.md</code>, <code>swift/LoopflowMac/TaskFileDocument.swift</code>, <code>ReviewDiff.swift</code>, <code>Views/ReviewStreamView.swift</code>, <code>Views/TaskChangesView.swift</code>, <code>rust/loopflow-execution/src/ops/task/snapshot.rs</code>, <code>swift/README.md</code></p>
 </header>
 
-<p class="lede">This is the first review of the tour skill and <code>diff_groups</code>. The model holds. Three repairs go to implement, each following from what you already said; <span class="proposed">blue is proposed, not built</span>. Your five demo questions are unchanged at the end.</p>
+<p class="lede">This pass covers what November 21 built: the file-by-file read, new files as contents, and the row for long lines. The read holds. Three repairs go to implement; <span class="proposed">blue is proposed, not built</span>. No new question for you: the five demo questions are unchanged at the end.</p>
 
 <h2>Actions → concepts → APIs</h2>
 <table>
   <tr><th>You do</th><th>Concept</th><th>API</th></tr>
-  <tr><td>Read the change</td><td>One comparison, what <code>lf pr open</code> would show</td><td><code>lf task changes</code>, <code>lf task diff</code></td></tr>
-  <tr><td>Read it in the repository's order</td><td>Groups: ordered headings, with a slot for the rest</td><td><code>diff_groups</code>, nearest layer wins whole</td></tr>
-  <tr><td>Start where this change starts</td><td>The tour: <code>first:</code> and <code>hide:</code>, each with a why, written at a commit</td><td><code>scratch/diff-order.yaml</code> → <span class="proposed"><code>scratch/tour.yaml</code></span></td></tr>
-  <tr><td>Write tour / Update tour</td><td>The <code>tour</code> skill, run in the Task's checkout</td><td>served <code>skill.run</code></td></tr>
-  <tr><td>Never see <code>scratch/</code></td><td>Always hidden: every layer adds</td><td><code>diff_hidden</code>; yours in <code>.lf/config.local.yaml</code></td></tr>
+  <tr><td>Open Diff</td><td>The comparison's file list, whole and at once</td><td><code>lf task changes</code></td></tr>
+  <tr><td>Scroll, unhide, clear the filter</td><td>A shown file's lines, read on their own, near the viewport first</td><td><code>lf task diff --path</code>, six at a time</td></tr>
+  <tr><td>Read a new file</td><td>Its contents: no <code>+</code>, no fill</td><td>the same patch; <code>lf task file</code> when untracked</td></tr>
+  <tr><td>Meet a minified file</td><td>The whole file as one row → <span class="proposed">the long line cut, the file open</span></td><td>none; a rendering rule</td></tr>
+  <tr><td>Meet a failed read</td><td>A note under the file → <span class="proposed">with Retry</span></td><td>the same per-file read</td></tr>
 </table>
 
-<h2>1 · One thing, three names</h2>
+<h2>1 · The rule for machine-made lines catches hand-made files</h2>
+<p>A file collapses to one row when any line passes 1,000 UTF-16 units. Counted in this repository's tracked files, that is:</p>
+<table>
+  <tr><th>File</th><th>The long line</th><th>Group</th></tr>
+  <tr><td><code>docs/dev/reference.md</code></td><td>three table rows, 1,347 to 2,031</td><td>Docs</td></tr>
+  <tr><td><code>rust/loopflow-storage/SCHEMA.md</code></td><td>the <code>tasks</code> column list, 1,421</td><td>Data model</td></tr>
+  <tr><td>five migrations, among them <code>tracker_tables.sql</code></td><td>one trigger or insert each, 1,328 to 1,592</td><td>Data model</td></tr>
+  <tr><td><code>rust/loopflow/tests/release_lock_tests.rs</code></td><td>one fake <code>gh</code> line, 1,042</td><td>Tests</td></tr>
+</table>
+<p>Docs and Data model are the two groups you put first. You said of collapsing by size: "often the largest diffs are the ones that matter the most. [ignoring like generated files, which we are trying to handle a separate way]". Generated files already have their way, the Generated group and <code>diff_hidden</code>. What is left for this rule to guard is one thing: a single line too long to lay out.</p>
 <div class="row">
   <div class="panel">
     <h3>Built</h3>
-    <p><strong>Tour</strong> · the skill, the button, the order menu, the status line</p>
-    <p><strong>diff-order</strong> · <code>scratch/diff-order.yaml</code>, <code>DiffOrder</code></p>
-    <p><strong>the worker's order</strong> · README; the sidebar's "Hidden by the worker for this change"</p>
+    <div class="pane">
+      <div class="file">docs/dev/reference.md</div>
+      <div class="note">Lines too long to read · 14 changed lines · 9 KB &nbsp; Show &nbsp; Open in Files</div>
+    </div>
+    <p>The stepper counts this file as one stop; the title and "3 of 40" count all fourteen.</p>
   </div>
   <div class="panel after">
     <h3 class="proposed">Proposed</h3>
-    <p><code>scratch/tour.yaml</code>, <code>DiffTour</code></p>
-    <p>"Hidden by the tour for this change"</p>
-    <p>"Order" stays the menu's word: Tour / By group / By path.</p>
+    <div class="pane">
+      <div class="file">docs/dev/reference.md</div>
+      <div class="add">## Core models and APIs</div>
+      <div class="add">| **Task graph** — the graph a Task took up… <u>347 more characters · Show</u></div>
+      <div class="add">The full model is below.</div>
+    </div>
+    <p>Every line reads. A line past 1,000 units shows its first 1,000. The stepper and the counts agree again, and the collapsed-file code goes.</p>
   </div>
 </div>
-<p>Your words put the file with the tour: "the tour could live as some sort of simple yaml or something in scratch". You used "diff_Order" for the other thing, the default the tour stacks on. And since Write tour, the writer is whoever ran the skill; in a plain chat no worker wrote it. Nothing reads the old path and no tour file has shipped, so the rename carries no fallback.</p>
+<p class="muted">Both panels are sketches; the 14 lines and 9 KB are made up. Assumed, not measured: cutting a one-line 1 MB file at 1,000 units keeps the stream quick. Show then lays out the whole line, by your choice.</p>
 
-<h2>2 · "Behind" has two rules</h2>
-<div class="row">
-  <div class="panel">
-    <h3>Desktop</h3>
-    <p>A commit after <code>at</code> changed a file outside <code>scratch/</code>. Committing the tour itself leaves it current.</p>
-  </div>
-  <div class="panel">
-    <h3><code>human-review.md</code></h3>
-    <p>"missing or its <code>at:</code> is not the head commit"</p>
-  </div>
-</div>
-<p>Every <code>lf</code> step commits <code>scratch/</code>. The commit that carries the tour moves the head past the <code>at</code> inside it, so by the skill's rule a tour is behind the moment it is committed, and human-review rewrites a current one every run. <span class="proposed">The skill takes Desktop's rule, written once in <code>tour.md</code>.</span></p>
+<h2>2 · A read that cannot happen</h2>
+<p>You asked "does that diff need to be 1+ MB? woudl it be better if we handled new files seaparately". What was built for a committed new file over 1 MB: read its patch, see it cut, then read the file with <code>lf task file</code>. Both reads stop at the same 1,000,000 bytes, and a new file's patch is its contents plus one byte a line. The second read succeeds only for a file a few kilobytes under the limit. <code>scratch/task-details-research.html</code>, at 1.28 MB, is past both.</p>
+<p><span class="proposed">Remove the second read.</span> The pane then says one true thing: a new file over 1 MB shows its first 1 MB and "Cut at 1 MB". Today an untracked one that size shows a note and no lines; <span class="proposed">it reads the way the committed one does, if <code>lf task diff --path</code> answers for an untracked path.</span> Reading past 1 MB is a protocol change and belongs to Task 4556d0.</p>
 
-<h2>3 · A dead run keeps the button</h2>
-<p>Normal: click <strong>Update tour</strong>, the pane reads "Writing the tour… · its output: …/tour.log", the file lands with a new <code>at</code>, the order switches to Tour.</p>
-<p>Failure: the run starts and then dies (no harness selected, a spent limit). The pane reads "Writing the tour…" and offers no button. The store lives as long as the app, so it stays that way until you quit. The same happens when a rewrite lands with the same <code>at</code>, or none.</p>
-<p>No served read reports a launched run ending, so the pane cannot know. <span class="proposed">It stops pretending to: the wait ends when the file's content changes, and once the launch has answered the button is offered again beside the log path.</span> The cost: a second click during a healthy run starts a second run that rewrites the same file.</p>
+<h2>3 · A failed file stays failed</h2>
+<p>Normal: files fill in from the top, the title reads "12 changes in 9 files · reading 4 more", then the count settles.</p>
+<p>Failure: the server restarts mid-read. Each waiting file reads "Could not be read: …" and leaves the list of files to read. Lines already shown stay.</p>
+<p>Recovery today: edit that file, commit, or leave the Diff page and come back. Nothing on screen says so. <span class="proposed">The note carries <strong>Retry</strong>, as a failed folder in Files does.</span></p>
 
 <h2>Holds as built</h2>
-<p><strong>Settings underneath, tour on top.</strong> "the review guides basically stack ontop of the default diff_Order, but we still fall back": <code>first:</code> files lead, everything else falls under the <code>diff_groups</code> headings, and a file added after the tour still appears.</p>
-<p><strong>Two hide lists.</strong> The tour's <code>hide:</code> is per change, a path or folder, with a reason, shown entry by entry. <code>diff_hidden</code> is a setting, a pattern, shown by one toggle. Both stay in the count.</p>
-<p><strong>The same order said twice.</strong> <code>tour.md</code> says "docs and the outcome first, then the data model…" in prose and the default <code>diff_groups</code> says it in config, which is what "roughly suggest similar overall guidance in our default skill, and have it eplicitly codified in our repo config" asked for.</p>
-
-<h2>Seen while reviewing</h2>
-<p>The <code>lf</code> installed on this Machine is <code>0.16.0+f5ff6a6c7</code>, a build of main past the tag. It prints <code>skipping diff_groups: unknown setting</code> twice per command in this checkout. Here that ends at the first <code>lf install</code> after merge; question 5 is about Machines on the tagged release.</p>
+<p><strong>List first, lines after.</strong> The file list is whole from the first read, so the sidebar, the hidden counts and the order never wait on a large file. Hidden files are not read until shown.</p>
+<p><strong>One reload rule.</strong> While the comparison's commits stand, only the files the observation named are read again; a new commit reads all of them, each keeping its old lines until the new ones land.</p>
+<p><strong>Two readers of one file.</strong> Files' Diff mode reads its file apart from the stream because it compares your unsaved draft. Both draw through <code>ReviewStream</code>.</p>
 
 <h2>Questions</h2>
-<p class="muted">None of these blocks the three repairs. 1–5 are the plan's demo questions, unanswered.</p>
+<p class="muted">None blocks the three repairs. These are the plan's demo questions, unanswered; each is about something the screen shows.</p>
 <ol>
-  <li>What is the pane called?
-    <br>a. "Browser", as the menu says on main. b. "Task Details" everywhere. c. The Task itself: the menu toggles "LOO-515" and the pane says the Task's name.</li>
-  <li>Which Task am I viewing: is the identifier on the strip's menu enough?
-    <br>a. Yes. b. The pane shows the Task's name too.</li>
-  <li>Focus, beside a sidebar click, the filter and Files' Diff:
-    <br>a. keeps its button. b. goes.</li>
-  <li>Chosen while building:
-    <br>a. groups replace whole, or merge across layers; b. flat <code>diff_hidden</code> / <code>diff_groups</code>, or a <code>diff:</code> section (taken by <code>context.diff</code>'s shorthand); c. default order Docs, Data model, rest, Tests, Generated.</li>
-  <li>This repository's <code>diff_groups</code> block:
-    <br>a. lands with this PR and the tagged <code>lf</code> warns until the next release. b. lands with that release.</li>
-  <li><span class="proposed">New.</span> The three repairs above:
-    <br>a. as proposed. b. keep <code>diff-order.yaml</code> and "the worker". c. the button stays away while a run might be alive.</li>
+  <li>What is the pane called? It has four names: <strong>Toggle Browser</strong> (View menu, ⇧⌘E), <strong>Show Task Details</strong> (this branch's action), "Files" (<code>swift/README.md</code>) and the Task identifier on its own menu.
+    (a) Files (b) Task Details (c) Browser (d) something else</li>
+  <li>The pane names its Task only by the identifier on the strip's menu, since "why does files show up three times" removed the header row. (a) enough (b) the Task's name belongs somewhere in the pane</li>
+  <li>Focus: with a sidebar click bringing a file to the top and the filter narrowing the stream, does Focus keep its button? (a) keep (b) remove</li>
+  <li>Three choices made while building: (a) groups replace whole across layers, or merge; (b) flat <code>diff_hidden</code> / <code>diff_groups</code>, or a <code>diff:</code> section; (c) the default order Docs, Data model, the rest, Tests, Generated.</li>
+  <li>This repository's <code>diff_groups</code> block makes the released <code>lf</code> print "skipping diff_groups: unknown setting" on every command until a release knows the key. (a) keep the block and take the warning (b) land the block with that release</li>
 </ol>
 </main>
 </body>

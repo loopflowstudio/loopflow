@@ -71,20 +71,18 @@ pub fn customize(name: &str, repo: &Path, full: bool) -> Result<PathBuf, LoadErr
 }
 
 /// Where sync writes, relative to the home directory or, with `repository`,
-/// to the repository root: every directory a harness declares, once each.
+/// to the repository root: each harness's declared directory, once.
 pub fn installed_skill_directories(repository: bool) -> Vec<&'static str> {
     let mut directories = Vec::new();
     for kind in HarnessKind::ALL {
         let installed = launcher(kind).capabilities().installed_skills;
-        let declared = if repository {
+        let directory = if repository {
             installed.repository
         } else {
             installed.global
         };
-        for directory in declared {
-            if !directories.contains(directory) {
-                directories.push(*directory);
-            }
+        if !directories.contains(&directory) {
+            directories.push(directory);
         }
     }
     directories

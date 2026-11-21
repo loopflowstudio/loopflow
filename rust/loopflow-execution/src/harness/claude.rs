@@ -1303,8 +1303,8 @@ impl super::Launcher for loopflow_harness::Claude {
             initial_prompt_on_resume: false,
             native_skills: Some(crate::skills::catalog::SkillDialect::Claude),
             installed_skills: super::InstalledSkills {
-                global: &[".claude/skills"],
-                repository: &[".claude/skills"],
+                global: ".claude/skills",
+                repository: ".claude/skills",
             },
             turn_limit: true,
             output_schema: true,

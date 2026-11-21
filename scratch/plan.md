@@ -49,12 +49,12 @@ settings Loopflow doesn't make. What the tree gives up: skills other tools put
 in `~/.agents/skills` (`find-skills`) stay invisible to agy.
 
 **The declaration lives on `Capabilities`** (`rust/loopflow-execution/src/harness/mod.rs`),
-beside `native_skills`. It is a list of paths and nothing else:
+beside `native_skills`. It is one path per scope and nothing else:
 
 ```rust
 pub struct InstalledSkills {
-    pub global: &'static [&'static str],      // relative to the home directory
-    pub repository: &'static [&'static str],  // relative to the repository root
+    pub global: &'static str,      // relative to the home directory
+    pub repository: &'static str,  // relative to the repository root
 }
 ```
 
@@ -88,8 +88,7 @@ the answer is still one rendering, without the line.
 
 **No "has none, because…" variant** — made for review. All five harnesses read a
 directory and the field is required, so a new `Launcher` won't compile without
-it (as built the field is a list and the conformance test rejects an empty one;
-Remaining 1 makes it a single path). A reason variant arrives with the
+it, and a path can't be left empty the way a list could. A reason variant arrives with the
 first harness that needs one.
 
 **`native_skills` stays `None` for antigravity, opencode and pi** — made for
@@ -158,13 +157,13 @@ cargo test -p loopflow-execution --lib harness::conformance_tests::every_harness
 The second is new. It syncs into a temporary home (builtins: `implement`, Graph
 `code`) and into a temporary repository seeded with one skill and one Graph
 (a repository sync exports only the repository's own), then for every
-`HarnessKind::ALL` and every directory it declares for that scope asserts: the
-list is not empty; the skill's and the Graph's `<dir>/<name>/SKILL.md` exist;
+`HarnessKind::ALL` and the directory it declares for each scope asserts: the
+skill's and the Graph's `<dir>/<name>/SKILL.md` exist;
 frontmatter `name` equals the folder name; `description` is a non-empty string;
 the Graph export carries `disable-model-invocation: true`.
 
-What it catches: a harness that declares nothing, and a rendering a harness
-would drop. What it cannot catch: a wrong path. The export writes wherever the
+What it catches: a rendering a harness would drop. A harness that declares
+nothing doesn't compile. What it cannot catch: a wrong path. The export writes wherever the
 declaration says and the test reads the same place, so `.gemini/skills` would
 pass. Only the real binary knows where it reads; that is the run below.
 
@@ -206,7 +205,8 @@ gains the one line.
 
 ## Built
 
-- `Capabilities::installed_skills` on all five launchers;
+- `Capabilities::installed_skills` on all five launchers, one path per scope
+  (a list returns with the first harness that needs two);
   `skills::installed_skill_directories` feeds `sync_skills` and the confirmation
   and refusal text in `run_sync_skills`; `Vendor` is gone;
   `harness::conformance_tests::every_harness_reads_a_synced_skill`.
@@ -218,20 +218,8 @@ gains the one line.
 
 ## Remaining
 
-1. **One path per scope, not a list** (implement). Every harness declares
-   exactly one directory per scope, and the plan already says "one directory per
-   scope". `InstalledSkills { global: &'static str, repository: &'static str }`
-   makes an empty declaration unspellable: the `is_empty` assertion and the
-   inner loop in the conformance test go, and so does the inner loop in
-   `installed_skill_directories`. Touches `harness/mod.rs`, the five launcher
-   files, `skills/mod.rs`, `harness/conformance_tests.rs`, and the sentence "a
-   harness that declares nothing fails it" in `rust/loopflow/tests/README.md`
-   (it won't compile instead). Check:
-   `cargo test -p loopflow-execution --lib -- skills::tests every_harness_reads_a_synced_skill`
-   (build needs `LOOPFLOW_MIGRATION_ORDER`, see `questions.md`). A list returns
-   with the first harness that needs two.
-2. Gate, then demo and qa on the real binaries: the interactive confirmation
-   prompt, `/skills reload` in an open agy session.
+Gate, then demo and qa on the real binaries: the interactive confirmation
+prompt, `/skills reload` in an open agy session.
 
 ## What the real run showed (2026-11-21, branch `lf`, this Machine's home)
 

@@ -524,40 +524,36 @@ fn every_harness_reads_a_synced_skill() {
 
     for harness in HarnessKind::ALL {
         let installed = super::launcher(harness).capabilities().installed_skills;
-        for (base, directories, skill, graph) in [
+        for (base, directory, skill, graph) in [
             (home.path(), installed.global, "implement", "code"),
             (repo.path(), installed.repository, "audit", "proof"),
         ] {
-            assert!(!directories.is_empty(), "{harness:?} declares no directory");
-            for directory in directories {
-                for name in [skill, graph] {
-                    let path = base.join(directory).join(name).join("SKILL.md");
-                    let content = fs::read_to_string(&path)
-                        .unwrap_or_else(|error| panic!("{harness:?}: {}: {error}", path.display()));
-                    let (frontmatter, _) =
-                        split_frontmatter(&content).expect("export has frontmatter");
-                    let frontmatter: serde_yaml_ng::Value =
-                        serde_yaml_ng::from_str(frontmatter).unwrap();
-                    assert_eq!(
-                        frontmatter["name"].as_str(),
-                        Some(name),
-                        "{}",
-                        path.display()
-                    );
-                    assert!(
-                        frontmatter["description"]
-                            .as_str()
-                            .is_some_and(|description| !description.trim().is_empty()),
-                        "{}",
-                        path.display()
-                    );
-                    assert_eq!(
-                        frontmatter["disable-model-invocation"].as_bool(),
-                        (name == graph).then_some(true),
-                        "{}",
-                        path.display()
-                    );
-                }
+            for name in [skill, graph] {
+                let path = base.join(directory).join(name).join("SKILL.md");
+                let content = fs::read_to_string(&path)
+                    .unwrap_or_else(|error| panic!("{harness:?}: {}: {error}", path.display()));
+                let (frontmatter, _) = split_frontmatter(&content).expect("export has frontmatter");
+                let frontmatter: serde_yaml_ng::Value =
+                    serde_yaml_ng::from_str(frontmatter).unwrap();
+                assert_eq!(
+                    frontmatter["name"].as_str(),
+                    Some(name),
+                    "{}",
+                    path.display()
+                );
+                assert!(
+                    frontmatter["description"]
+                        .as_str()
+                        .is_some_and(|description| !description.trim().is_empty()),
+                    "{}",
+                    path.display()
+                );
+                assert_eq!(
+                    frontmatter["disable-model-invocation"].as_bool(),
+                    (name == graph).then_some(true),
+                    "{}",
+                    path.display()
+                );
             }
         }
     }

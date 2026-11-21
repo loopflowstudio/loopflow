@@ -515,8 +515,9 @@ skills and Graph recipes into the checkout; default sync exports globally.
 
 Each harness declares where it reads installed skills
 (`Capabilities::installed_skills`), and sync writes exactly those directories.
-The conformance test syncs into a temporary home and repository and reads every
-declared directory for every harness; a harness that declares nothing fails it.
+The declaration is one directory per scope, so a harness can't be written
+without it. The conformance test syncs into a temporary home and repository and
+reads each harness's declared directories.
 It cannot catch a wrong path. Only the real binary knows where it reads:
 `lf self sync-skills --yes`, then `agy -p "/skills"`.
 

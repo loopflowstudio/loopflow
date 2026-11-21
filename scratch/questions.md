@@ -13,7 +13,7 @@
 - A harness that moves its skill directory leaves the old generated tree behind;
   removed by hand.
 - No "this harness has no installed-skill location, because…" variant; the
-  conformance test rejects an empty declaration instead.
+  declaration is one required path per scope, so there is no empty form.
 - `native_skills` stays `None` for antigravity, opencode and pi. Possible later
   Task: invoke by name (`/name` in agy print mode, `/skill:name` in pi).
 - agy 1.5.14 ignores `~/`-relative `entries` in the global `skills.json` although

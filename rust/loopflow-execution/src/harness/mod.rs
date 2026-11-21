@@ -347,14 +347,14 @@ impl ThreadNaming {
     }
 }
 
-/// Where `lf self sync-skills` puts skills for a harness to list as its own.
-/// Not every directory the harness reads.
+/// Where `lf self sync-skills` puts skills for a harness to list as its own:
+/// one directory per scope, not every directory the harness reads.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct InstalledSkills {
     /// Relative to the home directory.
-    pub global: &'static [&'static str],
+    pub global: &'static str,
     /// Relative to the repository root.
-    pub repository: &'static [&'static str],
+    pub repository: &'static str,
 }
 
 #[derive(Debug, Clone, Copy)]

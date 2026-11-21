@@ -20,11 +20,6 @@
   fake-world workflow.
 - **`RepositoryWorkspace.machine` stays** while the benchmark launcher opens
   the app on private homes.
-- **Leftover launchd job for `~/.lf-copy`** is left registered; another
-  Task's Dev (pid 35920, from `loopflow.loo-515-make-task-pr`) is using that
-  copy now. Booting it out is a by-hand step named in the PR.
-- **Shared Dev bundle.** The live acceptance run will quit the loo-515 Dev
-  and replace the bundle its copy's server runs from. Check it is idle
-  first.
-
-- For the headless packaging check, used a temporary Dev bundle while the shared Dev still belonged to another Task. The live launch remains with QA.
+- **Legacy launchd job.** Leave the existing copy's job registered. Document
+  manual cleanup in the PR. The packaging check used a temporary bundle so
+  it could leave the shared Dev in use by the loo-515 Task.

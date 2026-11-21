@@ -51,163 +51,173 @@
 </head>
 <body>
 
-<h1>Installed skills: do the concepts line up?</h1>
-<p class="lede">Area taken: everything behind <code>lf self sync-skills</code> — which Loopflow
-skills and Graphs show up in each harness's own skill list, where they are written, and what a
-harness declares about itself. Taken this wide because the plan adds a per-harness declaration,
-and the declaration's shape decides what a "skill directory" is everywhere else. Reviewed before
-any code: the plan in <code>scratch/plan.md</code> against the code on this branch.</p>
+<h1>Installed skills, as built: do the concepts line up?</h1>
+<p class="lede">Area taken: everything behind <code>lf self sync-skills</code> on this branch
+against its base (<code>7127b9d0d5</code>) — which Loopflow skills and Graphs a harness shows in
+its own menu, where they are written, what a harness says about itself, and the neighbouring code
+that also knows about harness skill folders (the skill catalog, native invocation). Taken this
+wide because the change added a per-harness declaration, and the question after the build is
+whether that declaration is now the one place the idea lives. Read as someone seeing it for the
+first time. Outcome: <b>nothing to change in this work</b>; one mismatch remains next door and is
+a separate outcome.</p>
 
-<p class="legend"><span class="tag yes">lines up</span> exists and matches &nbsp;
-<span class="tag no">mismatch</span> exists or planned, and wrong &nbsp;
-<span class="tag new">proposed</span> not built yet</p>
+<p class="legend"><span class="tag yes">yes</span> lines up &nbsp;
+<span class="tag no">no</span> does not &nbsp;
+<span class="tag new">proposed</span> not in the code; everything else on this page exists on the branch</p>
 
 <h2>One interaction, walked</h2>
 <div class="walk">
-  <div><b>Normal</b><code>lf install</code> runs the sync. Open agy, type <code>/skills</code>: <code>implement</code>, <code>kickoff</code>, <code>code</code> sit beside its seven builtins. Same list in Claude, Codex, pi, opencode.</div>
-  <div><b>Failure</b>Someone already has a hand-written <code>~/.gemini/config/skills/implement</code>. Sync keeps it and reports one skipped. Existing rule, unchanged.</div>
-  <div><b>Recovery</b>They delete it and sync again: the Loopflow one is written. Existing rule.</div>
-  <div><b>Counterexample</b>agy 1.6 moves its directory. The declaration changes; the old tree of ~95 marked folders stays behind. Nothing knows it was written.</div>
+  <div><b>Normal</b><code>lf install</code> runs the sync. <code>agy -p "/skills"</code> goes from
+  7 to 116 names; Claude, Codex, Pi and OpenCode list the same 109. Nobody learns a folder.</div>
+  <div><b>Add a skill</b>Write <code>~/.lf/skills/x.md</code>, run
+  <code>lf self sync-skills --yes</code>, then <code>/skills reload</code> in agy:
+  "1 added".</div>
+  <div><b>Failure</b><code>~/.gemini/config/skills</code> not writable:
+  <code>io error: /…/.gemini/config/skills: Permission denied</code>. The two earlier folders are
+  written, nothing is pruned, <code>lf install</code> prints it as a warning and finishes.</div>
+  <div><b>Recovery</b>Fix the folder, run the sync again; it is idempotent. A hand-written skill
+  under a generated name is kept and counted as skipped. A symlinked folder is left alone.</div>
 </div>
+<p>The person's model is one sentence: <em>my Loopflow skills are in every harness's menu</em>.
+The folders are a detail they meet only in the confirmation prompt and in an error, and both now
+name them from the same declaration.</p>
 
 <h2>Product concepts against code concepts</h2>
 <table>
-  <tr><th style="width:27%">What a person knows</th><th style="width:33%">What the code has</th><th style="width:11%"></th><th>Notes</th></tr>
-  <tr>
-    <td>"My Loopflow skills show up in every harness"</td>
-    <td>Today: a literal pair in <code>sync_skills</code>, a second literal pair in the confirmation text.<br>Plan: <code>Capabilities.installed_skills</code>, one derived list.</td>
-    <td><span class="tag new">proposed</span></td>
-    <td>Lines up once built. One list feeds the writer, the prompt and the docs.</td>
-  </tr>
-  <tr>
-    <td>A harness's skill folder (<code>~/.agents/skills</code>)</td>
-    <td>Plan, as written: <code>SkillDirectory { path, dialect }</code></td>
-    <td><span class="tag no">mismatch</span></td>
-    <td>A concept the code has and the person never sees. The folder is shared by four harnesses; it has no dialect. See below.</td>
-  </tr>
-  <tr>
-    <td>A Graph is something I run, not something the model picks</td>
-    <td><code>Vendor::Claude</code> adds <code>disable-model-invocation: true</code>; <code>Vendor::Codex</code> leaves it out</td>
-    <td><span class="tag no">mismatch</span></td>
-    <td>One idea, enforced in one tree out of two. pi reads the other tree and honors the key.</td>
-  </tr>
-  <tr>
-    <td>"A new harness can't skip this"</td>
-    <td>Required field on <code>Capabilities</code>, plus a test that rejects an empty list</td>
-    <td><span class="tag yes">lines up</span></td>
-    <td>The compiler does most of it.</td>
-  </tr>
-  <tr>
-    <td>"It lands where the harness really reads"</td>
-    <td>Plan: <code>every_harness_reads_a_synced_skill</code>, said to fail if the Antigravity declaration breaks</td>
-    <td><span class="tag no">mismatch</span></td>
-    <td>The name promises more than it checks. The export writes where the declaration says and the test reads the same place; a wrong path passes. Only <code>agy -p "/skills"</code> knows.</td>
-  </tr>
-  <tr>
-    <td>Hand-written skills are never overwritten</td>
-    <td><code>writable_target</code>, the <code>loopflow: true</code> marker, prune rules</td>
-    <td><span class="tag yes">lines up</span></td>
-    <td>Untouched, and the new tree inherits all of it.</td>
-  </tr>
-  <tr>
-    <td>Skills I wrote for one harness work in the others</td>
-    <td><code>SkillCatalog::collect_scope</code>: its own list of six source folders, each with a <code>SkillDialect</code></td>
-    <td><span class="tag yes">lines up</span></td>
-    <td>Here a dialect is real: it says how the source was authored. A second list of harness folders, but for reading, and it includes folders nothing is written to. Left alone.</td>
-  </tr>
-  <tr>
-    <td>Asking for a native skill by name (<code>/audit</code>, <code>$audit</code>)</td>
-    <td><code>Capabilities.native_skills</code></td>
-    <td><span class="tag yes">lines up</span></td>
-    <td>Stays <code>None</code> for agy, pi and opencode. A separate outcome; it needs an invocation syntax per harness.</td>
-  </tr>
+<tr><th>What a person knows</th><th>What the code has</th><th></th><th>Notes</th></tr>
+<tr><td>A harness shows Loopflow's skills in its own menu</td>
+    <td><code>Capabilities::installed_skills: InstalledSkills { global, repository }</code>, one per <code>Launcher</code></td>
+    <td><span class="tag yes">yes</span></td>
+    <td>Required field, one path per scope. A sixth harness doesn't compile without it; there is no empty form to write.</td></tr>
+<tr><td>"Sync my skills"</td>
+    <td><code>sync_skills</code> loops <code>installed_skill_directories(repository)</code></td>
+    <td><span class="tag yes">yes</span></td>
+    <td>One owner. The literal pair is gone; the prompt, the refusal and the write loop read one list.</td></tr>
+<tr><td>A skill looks the same in every harness</td>
+    <td>One rendering; <code>Vendor</code> deleted</td>
+    <td><span class="tag yes">yes</span></td>
+    <td>Pays off where two harnesses read two trees: OpenCode reads <code>~/.claude/skills</code> and <code>~/.agents/skills</code> and now finds the same bytes under either.</td></tr>
+<tr><td>A Graph runs only when I name it</td>
+    <td><code>disable-model-invocation: true</code> on every Graph export</td>
+    <td><span class="tag yes">yes</span></td>
+    <td>True where the harness honors the key (Claude Code, Pi). Codex and agy list the skill; whether they honor the key is unchecked, and the docs claim only the two.</td></tr>
+<tr><td>Mine versus Loopflow's</td>
+    <td><code>loopflow: true</code> marker; <code>writable_target</code>, <code>prune_targets</code></td>
+    <td><span class="tag yes">yes</span></td>
+    <td>Unchanged and now covers the third tree with no new code.</td></tr>
+<tr><td>Personal versus this repository</td>
+    <td><code>global</code> / <code>repository</code>; <code>SkillSyncOptions { global_home, repo }</code>; <code>--repo</code></td>
+    <td><span class="tag yes">yes</span></td>
+    <td>Docs say "personal", code says "global". One idea, two words, older than this change and not worth a rename here.</td></tr>
+<tr><td>Something went wrong, where?</td>
+    <td><code>in_directory</code> prefixes io errors with the folder</td>
+    <td><span class="tag yes">yes</span></td>
+    <td>Added in QA: with three tools' folders, a bare "Permission denied" didn't say whose.</td></tr>
+<tr><td>Where a harness keeps skills</td>
+    <td>Written: <code>installed_skills</code> (5 harnesses, 3 folders). Read: <code>SkillCatalog::collect_scope</code>, a literal list of six folders for Claude and Codex, each with a <code>SkillDialect</code></td>
+    <td><span class="tag no">no</span></td>
+    <td>One idea in two lists. Below.</td></tr>
+<tr><td>Run a skill by its name in the harness</td>
+    <td><code>native_skills: Option&lt;SkillDialect&gt;</code>, <code>None</code> for agy, OpenCode, Pi</td>
+    <td><span class="tag no">no</span></td>
+    <td>Sits beside <code>installed_skills</code> and reads as its twin; it answers a different question (can lf hand a Claude- or Codex-authored skill over as <code>/name</code> or <code>$name</code>). Same root as the row above.</td></tr>
+<tr><td>—</td>
+    <td>Test <code>every_harness_reads_a_synced_skill</code></td>
+    <td><span class="tag yes">yes</span></td>
+    <td>The name promises more than a test can know; its doc comment and the tests README both say a wrong path passes and name the real-binary check. Honest enough.</td></tr>
 </table>
 
-<h2>The biggest mismatch: a folder was given a dialect</h2>
+<h2>The biggest mismatch: two lists of harness skill folders</h2>
 <div class="card big">
-<p>The plan's table labels <code>~/.gemini/config/skills</code>, pi's folder and opencode's folder
-"Codex". None of them is Codex. The label exists to carry one bit: whether a Graph recipe gets
-<code>disable-model-invocation: true</code>. And that bit is wrong where it is off. pi's own docs
-(<code>docs/skills.md:53</code>): "Set <code>disable-model-invocation: true</code> in frontmatter when a
-skill should be available only through its explicit command." pi reads <code>~/.agents/skills</code>,
-where the line is left out, so pi may start the <code>code</code> Graph on its own and Claude may not.</p>
-<p>On this Machine: 13 Graph exports in <code>~/.agents/skills</code>, none carrying the key.</p>
+<p>A harness's skill folder is one thing to a person. The code now has it twice. Sync asks each
+harness where to <em>write</em>. The catalog has its own literal list of where to <em>read</em>
+hand-written skills, and that list still stops at Claude and Codex and still gives
+<code>.agents/skills</code> the dialect "Codex", the label this change removed from the write side
+because four harnesses share that folder.</p>
+<p>What a person would notice: a skill they wrote in <code>~/.claude/skills</code> or
+<code>~/.agents/skills</code> is a Loopflow skill (<code>lf list skill</code>, usable in a Graph);
+one they wrote in <code>~/.gemini/config/skills</code> or <code>~/.pi/agent/skills</code> is not,
+though Loopflow now writes into the first of those.</p>
 </div>
-
-<div class="grid" style="margin-top:16px">
+<div class="grid">
   <div class="card">
-    <h3>Before (plan as written)</h3>
-<pre>pub struct InstalledSkills {
-    pub global: &amp;'static [SkillDirectory],
-    pub repository: &amp;'static [SkillDirectory],
-}
-pub struct SkillDirectory {
-    pub path: &amp;'static str,
-    pub dialect: SkillDialect,
-}</pre>
-    <p>antigravity → <code>.gemini/config/skills</code> <b>Codex</b><br>
-       pi → <code>.agents/skills</code> <b>Codex</b></p>
-    <p>Plus a test that two harnesses sharing a path agree on its dialect, and a paragraph on which
-    copy opencode shows when it reads both trees.</p>
+    <h3>Now</h3>
+<pre>// harness/*.rs, per Launcher
+installed_skills: InstalledSkills { global, repository }
+
+// skills/catalog.rs, collect_scope
+(".lf/skills",       Loopflow)
+(".claude/skills",   Claude)
+(".claude/commands", Claude)
+(".agents/skills",   Codex)
+(".codex/skills",    Codex)
+(".codex/prompts",   Codex)</pre>
+    <p>Generated files can't feed back in: the catalog skips <code>loopflow: true</code>.</p>
   </div>
   <div class="card proposed">
-    <h3>After <span class="tag new">proposed</span></h3>
-<pre>pub struct InstalledSkills {
-    pub global: &amp;'static [&amp;'static str],
-    pub repository: &amp;'static [&amp;'static str],
-}</pre>
-    <p>antigravity → <code>.gemini/config/skills</code><br>
-       pi → <code>.agents/skills</code></p>
-    <p>One rendering. Every Graph export carries the line. <code>Vendor</code> is deleted and
-    nothing takes its place; the agreement test and the opencode paragraph have nothing left to say.</p>
+    <h3>Separate outcome <span class="tag new">proposed</span></h3>
+<pre>// each Launcher says what it reads by hand
+// and how a skill found there is invoked;
+// the catalog folds those, as sync does.</pre>
+    <p>It takes: a format for each new folder, which source wins a shared name, and an invocation
+    syntax per harness (<code>/name</code> in agy print mode, <code>/skill:name</code> in Pi), which
+    is what <code>native_skills</code> would then mean for all five.</p>
   </div>
 </div>
+<p>Why it is not this work: the outcome here is that every harness lists Loopflow's skills, and it
+holds without it (agy 7 → 116; Pi 109 over RPC; OpenCode loaded a synced skill). Folding the lists
+changes which skill a name resolves to on Machines that already have hand-written agy or Pi
+skills. That is new behavior with its own failure cases, not a correction to what was built.</p>
 
-<p><b>Tested against three paths.</b> Normal: agy listed a probe skill carrying the key, so the new
-tree is fine. Failure: Codex has not been run with the key on a Graph skill; Claude-authored skill
-exports already carry it into <code>.agents/skills</code>, which suggests it is ignored, and slice 1
-checks <code>code</code> and <code>pursue</code> still list. Recovery if Codex objects: still one
-rendering, without the line everywhere, which is no worse than today for Codex and pi.</p>
-<p><b>What changes on purpose:</b> each Graph export in <code>~/.agents/skills</code> gains one line
-on the next sync. Skill exports and everything in <code>~/.claude/skills</code> stay byte-identical.</p>
-
-<h2>Smaller findings, written into the plan</h2>
+<h2>Counterexamples tried against the build</h2>
 <table>
-  <tr><th style="width:30%">Finding</th><th>What the plan now says</th></tr>
-  <tr><td>The conformance test can't catch a wrong path</td><td>Says so. It guards an empty declaration and a rendering a harness would drop (name ≠ folder, no description). The path is checked by the real <code>agy</code> run in slice 1 and at demo.</td></tr>
-  <tr><td>A harness moves its folder</td><td>Old tree is orphaned and removed by hand. No retired-directory list. agy's docs and behavior already disagree on <code>skills.json</code>, so this is likely to happen once.</td></tr>
-  <tr><td>Global discovery outranks agy's builtins</td><td>Slice 1 compares the seven builtin names against the exports; a shared name would replace agy's own skill.</td></tr>
-  <tr><td>The declaration is "where Loopflow puts them", not "everything the harness reads"</td><td>Stated in one line, so opencode's second folder and <code>~/.pi/agent/skills</code> don't read as omissions.</td></tr>
+<tr><th>Case</th><th>Holds?</th><th>Why</th></tr>
+<tr><td>Does an lf-launched <code>agy</code> still see the global tree?</td><td><span class="tag yes">yes</span></td>
+    <td>The launch adds a folder with <code>--add-dir</code> for instructions and hooks and redirects nothing; <code>~/.gemini/config/skills</code> is read as in a bare <code>agy</code>.</td></tr>
+<tr><td>Does creating <code>~/.gemini</code> make lf think Antigravity is set up?</td><td><span class="tag yes">yes</span></td>
+    <td>Nothing in <code>rust/</code> tests for the directory; its only other use is the transcript path under <code>~/.gemini/antigravity-cli</code>.</td></tr>
+<tr><td>A broken Gemini home on a Machine that never ran agy breaks <code>lf install</code>?</td><td><span class="tag yes">yes</span></td>
+    <td>Install reports sync failure as a warning. <code>~/.gemini</code> as a file: other two trees written, exit 0.</td></tr>
+<tr><td>Two trees, one harness (OpenCode)</td><td><span class="tag yes">yes</span></td>
+    <td>Same rendering in both, so which wins doesn't matter.</td></tr>
+<tr><td>A Loopflow name shadows an agy builtin</td><td><span class="tag yes">yes</span></td>
+    <td>None of the 109 shares a name with the seven. Nothing prevents a future one; a person would see their builtin replaced.</td></tr>
+<tr><td>An unwritable first folder</td><td><span class="tag no">no</span></td>
+    <td><code>~/.claude/skills</code> unwritable stops the run before <code>~/.agents/skills</code> and <code>~/.gemini/config/skills</code> are touched. Three tools' folders fail as one. Older than this change; the error now names the folder, so recovery is one fix and a rerun.</td></tr>
+<tr><td>Going back to the released <code>lf</code></td><td><span class="tag no">no</span></td>
+    <td>0.16.0 doesn't know the third tree and never prunes it. Stale skills stay in agy until removed by hand. Same shape as a harness moving its folder; accepted in the plan.</td></tr>
 </table>
 
-<h2>Kept as the plan had it</h2>
-<p>A generated tree at <code>~/.gemini/config/skills/</code> instead of a <code>skills.json</code>
-entry: agy's docs rank global discovery above builtins and global declared configs below them, and
-the tree needs no write into a provider's config file. Writing the tree whether or not agy is
-installed, as the other two are. No "has none, because…" variant. Slice 1 first: it is the one that
-runs the real binary against ~95 real exports.</p>
-
 <h2>Outside this work</h2>
-<p>Reading hand-written skills from <code>~/.gemini/config/skills</code> or <code>~/.pi/agent/skills</code>
-as Loopflow sources. It would make the catalog's source list and this declaration one list; it takes
-a dialect for each new folder and a decision on which wins a shared name. Native invocation for
-agy, pi and opencode, as above.</p>
+<ul>
+<li>One list of harness skill folders for reading and writing, with <code>native_skills</code>
+folded into it (above).</li>
+<li>Each folder syncing on its own: write every folder that can be written, report the ones that
+couldn't, prune only the ones that wrote. It takes a per-folder result in
+<code>SkillSyncReport</code> and a decision on the exit code.</li>
+<li>The sync as something a person runs. A personal skill added to <code>~/.lf/skills</code>
+isn't in any harness menu until they remember the command. It could run where the skill is
+created (<code>lf skill customize</code>) or at launch; harness sessions started outside lf would
+still need it.</li>
+</ul>
 
 <h2>Questions</h2>
 <ol class="q">
-  <li>Graph recipes in <code>~/.agents/skills</code>:
-    <ol><li>carry <code>disable-model-invocation: true</code> everywhere (chosen)</li>
-        <li>keep today's split, with a dialect per folder</li>
-        <li>drop the line everywhere, Claude included</li></ol></li>
-  <li>When a harness moves its skill folder:
-    <ol><li>leave the old tree, remove by hand (chosen)</li>
-        <li>keep a list of retired folders that sync prunes</li></ol></li>
-  <li>Machines without Antigravity:
-    <ol><li>write <code>~/.gemini/config/skills</code> anyway (chosen, matches the other two)</li>
-        <li>write a harness's global folder only when its home exists</li></ol></li>
-  <li>Third-party bundles in <code>~/.agents/skills</code> (<code>find-skills</code>) in agy:
-    <ol><li>stay invisible (chosen)</li>
-        <li>add an absolute-path <code>skills.json</code> entry as well</li></ol></li>
+<li>The catalog's read list and the harness declaration:
+  <ol><li>leave as two lists (as built)</li>
+      <li>file a Task that makes them one and settles <code>native_skills</code> for agy, Pi and OpenCode</li></ol></li>
+<li>An unwritable folder:
+  <ol><li>stops the sync there (as built, older behavior)</li>
+      <li>each folder on its own, failures reported together</li></ol></li>
+<li>Machines without Antigravity:
+  <ol><li>write <code>~/.gemini/config/skills</code> anyway (as built, matches the other two)</li>
+      <li>write a harness's global folder only when its home exists</li></ol></li>
+<li>Graph recipes carry <code>disable-model-invocation: true</code> in every folder:
+  <ol><li>keep (as built)</li>
+      <li>drop it everywhere if Codex turns out to mis-handle it</li></ol></li>
+<li>Third-party bundles in <code>~/.agents/skills</code> (<code>find-skills</code>) in agy:
+  <ol><li>stay invisible (as built)</li>
+      <li>add an absolute-path <code>skills.json</code> entry as well</li></ol></li>
 </ol>
 
 </body>

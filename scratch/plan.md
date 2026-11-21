@@ -220,6 +220,13 @@ gains the one line.
 
 Gate. QA ran on the real binaries; `scratch/qa.html` has the transcripts.
 
+The concept review after the build changed nothing here
+(`scratch/concept-review.html`). It leaves one mismatch next door as a separate
+outcome: the catalog's literal list of folders it reads hand-written skills from
+(`skills/catalog.rs`, `collect_scope`, Claude and Codex only, each with a
+dialect) and this declaration are two lists of one idea, and `native_skills`
+belongs with whichever replaces them.
+
 ## What the real run showed (2026-11-21, branch `lf`, this Machine's home)
 
 - `lf self sync-skills --yes`: "synced skills (124 written, 0 pruned, 14 skipped)";

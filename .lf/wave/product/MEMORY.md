@@ -704,8 +704,8 @@ establish every scenario, merge or Task completion.
   couldnt afford to see a full diff". Read by file; say what is cut.
 - Size collapses nothing. Jack: "often the largest diffs are the ones that
   matter the most".
-- Jack's November 21 demo, 600 pt pane: clipped, "jumps when i hover", "no
-  syntax highlighting". A fixed toolbar row set the width. Repairs unseen.
+- November 21 demo, 600 pt: clipped, "jumps when i hover". Fit 360 pt.
+- Jack reads new code: "i just read the right side"; New code is default.
 - Jack: "The diff is really about the underlying worker not the highest-level
   session."
 - Jack chose comments sent to the session, a sidebar and a reading order:

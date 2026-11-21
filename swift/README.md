@@ -455,7 +455,9 @@ steps into the next. Between hunks the stream says how many lines it skipped
 and which declaration follows; click that row to read the lines in place.
 Edited lines emphasize the changed words. A block moved within a file collapses
 to one row, "Moved here from L12", that expands to its old and new lines.
-**Side by side** needs a stream at least 640 pt wide.
+The stream opens on **New code**: the file as it is now, removed lines folded
+to "N old lines · Show". **Unified** shows both; **Side by side** needs a
+stream at least 640 pt wide.
 
 Click a line number (Shift-click extends) to write a comment under those lines;
 Return keeps it there. **Send to conversation** (Command-Return) puts every

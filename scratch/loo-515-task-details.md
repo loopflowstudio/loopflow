@@ -12,6 +12,7 @@ Status: built, the tour skill and the two diff settings included. Seen on
 screen November 21, in Loopflow Dev; the repairs for what that showed (width,
 file bar, syntax colors, the per-file read, the long-line cut, Retry, rows
 that take the pane's width) and the polish under "Diff polish" are built and unseen.
+The Diff polish (below) and the New code layout are built and unseen too.
 PR #1949 is open; its head follows this branch.
 
 ## What exists
@@ -99,8 +100,10 @@ file and a builtin skill.
     `theDiffFitsItsPane` measures header, toolbar, file title, comments strip,
     stream and page at 360, 480 and 640 pt.
   - `ReviewStepper` (`]`/`[`, arrows) crosses files; Focus shows one file with
-    a strip reading "Only X · N more files"; Unified / Side by side (≥ 640 pt,
-    disabled with its reason below); word emphasis; within-file moves collapsed
+    a strip reading "Only X · N more files"; New code (default: the file as it
+    is now, removed lines folded to "N old lines · Show") / Unified / Side by
+    side (≥ 640 pt, disabled with its reason below); changed lines tinted
+    fully, gutter too; word emphasis; within-file moves collapsed
     with expand; landing flash; `End of changes`.
   - **Skipped lines**: the row between hunks opens the unchanged lines
     (`ReviewGap`), read with `lf task file`, only while the comparison reads the
@@ -201,6 +204,10 @@ file and a builtin skill.
   asked: fit 360 pt, controls given up by priority, nothing in the toolbar
   sets the column's width, nothing changes size on hover, test at 360, 480
   and 640 pt.
+
+- November 21, Jack: "im realizing i prefer a view that basically only shows the new code. like in a 2col sideby side in github, i just read the right side", "that should be default, maybe a button to show ol dl ine or something", "or sure 3-part button with my version as the perferred". Built by the session: New code / Unified / Side by side, New code default; removed lines fold to "N old lines · Show". Also: "this seems a little hard to read / subtle coloring" (changed lines now full tint, gutter too) and "this is also a little dense" (tour sidebar reasons quieter, two lines; tour skill asks for reasons under ten words).
+- November 21, on the diff polish list: "Diff per agent turn — doesnt fit our model; would be per graph step. could be a nice thing but i mostly dont care." "Viewed checkboxes - yeah this could ok" "real grammar / better highlighting : high priority" "change markers: yeah, medium prii" "copy woithouth +/-: medium pri" "Sticky function headers: low pri but nice" "Rendered diffs for markdown/images/html: highpri" "word-wrap-toggle: low pri".
+- November 21, on filing the polish as separate Tasks: "but do em all unless theres some sort of trouble or conflict", then "no, do the in 515", "what of this could really be that hard", "i also feel like there still could be more syntax highlighting", "maybe diff per agent turn?", "er diff per step?". The seven separate Tasks were abandoned unstarted.
 
 Assumed, not answered: sidebar on the left docking at 620 pt; ⌥⌘1/2/3; the file
 bar outside the scroll view as "headers lock"; several comments as one line.
@@ -342,7 +349,9 @@ tooltip. The five questions under Remaining are unchanged and unanswered.
   a cut long line, Retry on a failed read, the sidebar (narrow too), skipped lines, comments with Send into a
   live conversation, the tour with Write tour / Update tour and its behind
   notice, By group under this repository's `diff_groups`, and Always hidden's
-  layers and save against a running server.
+  layers and save against a running server; New code with its old-line
+  folds, the step menu, change marks, Viewed, the enclosing declaration,
+  copy without markers and Wrap long lines.
 - Open, for the person at the demo:
   1. What is the pane called? It has four names: **Toggle Browser** (View menu
      and ⇧⌘E, on main), **Show Task Details** (this branch's action), "Files"
@@ -374,7 +383,7 @@ tooltip. The five questions under Remaining are unchanged and unanswered.
   one supported harness must be installed"); not run on unmodified code. CI
   decides.
 - Not built: moves inside mixed change runs; drag to select lines.
-- Grammar highlighting and rendered diffs (Markdown, images, HTML) are the v2 Task's.
+- Grammar highlighting and rendered diffs (Markdown, images, HTML) are Task c9fbcb's.
 - Noted, not this Task: a `.changes(comparison:)` browser tab and the Diff page
   are two representations of one view; merging them changes the persisted
   `WorkBrowserTab` shape, which LOO-497/416 own.
@@ -439,15 +448,9 @@ files:
 
 Check (November 21, polish): `swift build --build-tests` then `scripts/test_desktop.sh --skip-build --filter 'TaskFilesTests|ReviewDiffTests'` → 60 tests, 58 passed; `commitInLinkedWorktreeRereadsTheComparison` and `ignoredWritesFromReadsNeverScheduleAnotherRead` (FSEvents) failed with `fseventsd` at 100% CPU, the documented trap — gate reruns them. `DTOFixtureTests|ServerProtocolTests|RegistryQueryTests` → 98 passed. Rust: `cargo test -p loopflow-execution --lib task_files_compare_net_parent_head` ok, `server::schema::tests::` 8 passed, `--test integration dto_fixtures::` 49 passed, `documented_commands::` 4 passed (after `git fetch --unshallow`; the shallow clone could not order migrations). Gate/CI: clippy, the full swift suite, `global_commands`. Demo: the pane on screen.
 
-Jack, November 21: "im realizing i prefer a view that basically only shows the new code. like in a 2col sideby side in github, i just read the right side", "that should be default, maybe a button to show ol dl ine or something", "or sure 3-part button with my version as the perferred". Built by the session: New code / Unified / Side by side, New code default; removed lines fold to "N old lines · Show". Also: "this seems a little hard to read / subtle coloring" (changed lines now full tint, gutter too) and "this is also a little dense" (tour sidebar reasons quieter, two lines; tour skill asks for reasons under ten words).
-
-Jack, on diff polish (November 21): "Diff per agent turn — doesnt fit our model; would be per graph step. could be a nice thing but i mostly dont care." "Viewed checkboxes - yeah this could ok" "real grammar / better highlighting : high priority" "change markers: yeah, medium prii" "copy woithouth +/-: medium pri" "Sticky function headers: low pri but nice" "Rendered diffs for markdown/images/html: highpri" "word-wrap-toggle: low pri". Filed in the product Wave: f6577f grammars, 8faace rendered diffs, fc907c viewed, 07d8c9 scrollbar markers, 72c0ee copy without markers, 268d5a sticky function headers, and word wrap.
-
-Jack, on filing the diff polish as separate Tasks: "but do em all unless theres some sort of trouble or conflict", then "no, do the in 515", "what of this could really be that hard", "i also feel like there still could be more syntax highlighting", "maybe diff per agent turn?", "er diff per step?". The seven separate Tasks were abandoned unstarted.
-
 ## Diff polish, November 21 — built
 
-Steer, November 21: "ok grammar highlighitng and rendered diffs can be a single v2 task"; items 1 and 2 leave LOO-515 for that Task, `SyntaxColors.swift` stays as it is. Built here, unseen on screen:
+Steer, November 21: "ok grammar highlighitng and rendered diffs can be a single v2 task"; items 1 and 2 leave LOO-515 for Task c9fbcb ("Diff v2"), `SyntaxColors.swift` stays as it is. Built here, unseen on screen:
 
 - **Diff per step.** `lf task changes` carries `commits` (`{sha, subject}`, base to head, oldest first; `TaskCommit` in Rust and Swift, fixtures and schema updated). `ReviewStep.steps` reads a run of `lf <step>:` subjects as one step, any other commit alone. A menu under the title ("Whole Task · N steps") picks one; `showStep` compares `.branch(base: parent of its first, head: its last)` and the stream reads anew. Steps come only from the whole Task's read. A pane tab change returns to the whole Task.
 - **Change marks** (`ChangeMarks`, `ReviewDiff.marks`): one mark per change beside the scrollbar, placed by counting the rows the stream draws in the current layout; green added, red removed, accent both, quiet moved; a dot for a file with comments. Click lands on the change.

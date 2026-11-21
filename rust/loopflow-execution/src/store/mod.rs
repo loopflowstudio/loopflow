@@ -34,8 +34,6 @@ pub use loopflow_storage::migration_runner;
 pub use loopflow_storage::migration_schema;
 pub mod migrations;
 pub mod opening;
-pub use loopflow_storage::planning_destination;
-pub use loopflow_storage::planning_exchange;
 pub use loopflow_storage::pr_landing;
 pub use loopflow_storage::process;
 pub use loopflow_storage::profile;
@@ -50,7 +48,6 @@ pub use loopflow_storage::work;
 pub use opening::open_sqlite;
 pub mod ownership;
 pub use loopflow_storage::people;
-pub mod git_tracker;
 pub mod placement;
 mod planning_reads;
 pub use loopflow_storage::planning_sync;
@@ -86,7 +83,6 @@ mod state_without_history_tests;
 mod steer_lifecycle_tests;
 
 pub use error::{StoreError, StoreResult};
-pub use git_tracker::{GitDestination, GitDestinationConflict, PlanningJournal};
 pub use recording_gap::{GapSpan, RecordingGap};
 pub use records::*;
 
@@ -3313,9 +3309,6 @@ mod linear_event_tests;
 
 #[cfg(test)]
 mod settlement_lifecycle_tests;
-
-#[cfg(test)]
-mod planning_exchange_lifecycle_tests;
 
 #[cfg(test)]
 mod session_metadata_tests;

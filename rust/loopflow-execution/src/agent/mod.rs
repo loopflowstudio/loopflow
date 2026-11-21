@@ -8,8 +8,6 @@ pub use session::resolve_session_config;
 
 use loopflow_model::id::AgentSessionId;
 use std::collections::BTreeMap;
-use std::env;
-use std::fs;
 use std::io::{Seek, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -21,6 +19,7 @@ use std::time::{Duration, SystemTime};
 use crate::config::parse_agent;
 use crate::config::Agent;
 use crate::error::CoreError;
+use crate::harness::Mode;
 use crate::process::LfProcessRuntime;
 use crate::prompt::structured_reply::{render_structured_reply_guidance, StructuredReply};
 
@@ -92,12 +91,6 @@ pub struct AgentProcessResult {
     pub agent_session: Option<AgentSessionId>,
     /// Typed provider failure when the process output identifies one.
     pub failure: Option<AgentFailure>,
-}
-
-/// Whether `cwd` is `task`'s own checkout. A headless run there uses the
-/// harness's yolo settings.
-pub fn is_task_checkout(task: &crate::work::task::Task, cwd: &Path) -> anyhow::Result<bool> {
-    Ok(task.worktree()?.canonicalize()? == cwd.canonicalize()?)
 }
 
 /// What a conversation sets in its own shells, lf's markers and its
@@ -187,8 +180,8 @@ pub struct AgentConfig {
     pub resume_token: Option<AgentSessionId>,
     /// Working directory.
     pub cwd: Option<std::path::PathBuf>,
-    /// Skip permission prompts
-    pub skip_permissions: bool,
+    /// The resolved `yolo` setting. Ask `skips_permissions` what a launch sends.
+    pub yolo: bool,
     /// Graph-runner-injected structured replies (rendered via harness prompt guidance).
     pub structured_replies: Vec<StructuredReply>,
     /// Temp file for relaying shell directives back to the invoking shell.
@@ -218,12 +211,18 @@ impl AgentConfig {
             max_turns: None,
             resume_token: None,
             cwd: None,
-            skip_permissions: false,
+            yolo: false,
             structured_replies: Vec::new(),
             directive_relay: None,
             launch_lock: None,
             env: BTreeMap::new(),
         }
+    }
+
+    /// Whether the provider runs without asking permission: `yolo`, or nobody
+    /// is attending to answer a prompt.
+    pub fn skips_permissions(&self, mode: Mode) -> bool {
+        self.yolo || mode == Mode::Headless
     }
 
     pub fn apply_agent_override(&mut self) -> Result<(), crate::error::LoadError> {
@@ -262,7 +261,7 @@ impl std::fmt::Debug for AgentConfig {
             .field("max_turns", &self.max_turns)
             .field("resume_token", &self.resume_token)
             .field("cwd", &self.cwd)
-            .field("skip_permissions", &self.skip_permissions)
+            .field("yolo", &self.yolo)
             .field("structured_replies", &self.structured_replies)
             .field("directive_relay", &self.directive_relay)
             .field("launch_lock", &self.launch_lock.is_some())
@@ -422,247 +421,12 @@ pub struct ProcessConfig {
     pub wait_for_capacity: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-enum CodexSandboxMode {
-    ReadOnly,
-    WorkspaceWrite,
-    DangerFullAccess,
-}
-
-impl CodexSandboxMode {
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::ReadOnly => "read-only",
-            Self::WorkspaceWrite => "workspace-write",
-            Self::DangerFullAccess => "danger-full-access",
-        }
-    }
-
-    fn parse(value: &str) -> Option<Self> {
-        match value {
-            "read-only" => Some(Self::ReadOnly),
-            "workspace-write" => Some(Self::WorkspaceWrite),
-            "danger-full-access" => Some(Self::DangerFullAccess),
-            _ => None,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-enum CodexApprovalPolicy {
-    Untrusted,
-    OnRequest,
-    OnFailure,
-    Never,
-}
-
-impl CodexApprovalPolicy {
-    fn parse(value: &str) -> Option<Self> {
-        match value {
-            "untrusted" => Some(Self::Untrusted),
-            "on-request" => Some(Self::OnRequest),
-            "on-failure" => Some(Self::OnFailure),
-            "never" => Some(Self::Never),
-            _ => None,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-struct CodexPermissionConfig {
-    sandbox: Option<CodexSandboxMode>,
-    approval: Option<CodexApprovalPolicy>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ClaudePermissionMode {
-    AcceptEdits,
-    Auto,
-    BypassPermissions,
-    Manual,
-    DontAsk,
-    Plan,
-}
-
-impl ClaudePermissionMode {
-    fn parse(value: &str) -> Option<Self> {
-        match value {
-            "acceptEdits" => Some(Self::AcceptEdits),
-            "auto" => Some(Self::Auto),
-            "bypassPermissions" => Some(Self::BypassPermissions),
-            "manual" => Some(Self::Manual),
-            "dontAsk" => Some(Self::DontAsk),
-            "plan" => Some(Self::Plan),
-            _ => None,
-        }
-    }
-}
-
-fn read_codex_permission_config(cwd: Option<&Path>) -> CodexPermissionConfig {
-    let mut config = CodexPermissionConfig::default();
-    for path in codex_config_paths(cwd) {
-        let Ok(contents) = fs::read_to_string(&path) else {
-            continue;
-        };
-        config = merge_codex_permission_config(config, parse_codex_permission_config(&contents));
-    }
-    config
-}
-
-fn codex_config_paths(cwd: Option<&Path>) -> Vec<PathBuf> {
-    let mut paths = Vec::new();
-
-    if let Some(home) = env::var_os("CODEX_HOME")
-        .map(PathBuf::from)
-        .or_else(|| dirs::home_dir().map(|home| home.join(".codex")))
-    {
-        paths.push(home.join("config.toml"));
-    }
-
-    if let Some(cwd) = cwd {
-        let mut ancestors: Vec<PathBuf> = cwd.ancestors().map(Path::to_path_buf).collect();
-        ancestors.reverse();
-        for ancestor in ancestors {
-            paths.push(ancestor.join(".codex").join("config.toml"));
-        }
-    }
-
-    paths
-}
-
-fn parse_codex_permission_config(contents: &str) -> CodexPermissionConfig {
-    let mut config = CodexPermissionConfig::default();
-    for line in contents.lines() {
-        let line = line.trim();
-        if line.starts_with('[') {
-            break;
-        }
-        if let Some(value) = parse_toml_string_assignment(line, "sandbox_mode") {
-            config.sandbox = CodexSandboxMode::parse(&value);
-        } else if let Some(value) = parse_toml_string_assignment(line, "approval_policy") {
-            config.approval = CodexApprovalPolicy::parse(&value);
-        }
-    }
-    config
-}
-
-fn parse_toml_string_assignment(line: &str, key: &str) -> Option<String> {
-    let (left, right) = line.split_once('=')?;
-    if left.trim() != key {
-        return None;
-    }
-    let value = right.split('#').next()?.trim();
-    value
-        .strip_prefix('"')
-        .and_then(|value| value.strip_suffix('"'))
-        .map(str::to_string)
-}
-
-fn merge_codex_permission_config(
-    base: CodexPermissionConfig,
-    overlay: CodexPermissionConfig,
-) -> CodexPermissionConfig {
-    CodexPermissionConfig {
-        sandbox: overlay.sandbox.or(base.sandbox),
-        approval: overlay.approval.or(base.approval),
-    }
-}
-
-/// App-server overrides. `None` preserves vendor policy. A headless run must
-/// write to the workspace and has nobody to answer an approval, so it gets at
-/// least `workspace-write` and `never`; an attended Session keeps Codex's own
-/// sandbox and approval configuration unless `yolo` applies.
-fn codex_permission_policy(
-    config: CodexPermissionConfig,
-    launch: &AgentConfig,
-    headless: bool,
-) -> CodexPermissionConfig {
-    if launch.skip_permissions {
-        return CodexPermissionConfig {
-            sandbox: Some(CodexSandboxMode::DangerFullAccess),
-            approval: Some(CodexApprovalPolicy::Never),
-        };
-    }
-    if !headless {
-        return CodexPermissionConfig::default();
-    }
-    CodexPermissionConfig {
-        sandbox: (config.sandbox < Some(CodexSandboxMode::WorkspaceWrite))
-            .then_some(CodexSandboxMode::WorkspaceWrite),
-        approval: (config.approval < Some(CodexApprovalPolicy::Never))
-            .then_some(CodexApprovalPolicy::Never),
-    }
-}
-
-fn read_claude_permission_mode(cwd: Option<&Path>) -> Option<ClaudePermissionMode> {
-    let mut mode = None;
-    for path in claude_settings_paths(cwd) {
-        let Ok(contents) = fs::read_to_string(&path) else {
-            continue;
-        };
-        if let Some(next) = parse_claude_permission_mode(&contents) {
-            mode = Some(next);
-        }
-    }
-    mode
-}
-
-fn claude_settings_paths(cwd: Option<&Path>) -> Vec<PathBuf> {
-    let mut paths = Vec::new();
-
-    if let Some(home) = dirs::home_dir() {
-        paths.push(home.join(".claude").join("settings.json"));
-    }
-
-    if let Some(cwd) = cwd {
-        let mut ancestors: Vec<PathBuf> = cwd.ancestors().map(Path::to_path_buf).collect();
-        ancestors.reverse();
-        for ancestor in ancestors {
-            paths.push(ancestor.join(".claude").join("settings.json"));
-            paths.push(ancestor.join(".claude").join("settings.local.json"));
-        }
-    }
-
-    paths
-}
-
-fn parse_claude_permission_mode(contents: &str) -> Option<ClaudePermissionMode> {
-    let json: serde_json::Value = serde_json::from_str(contents).ok()?;
-    json.get("permissions")
-        .and_then(|permissions| permissions.get("defaultMode"))
-        .and_then(serde_json::Value::as_str)
-        .and_then(ClaudePermissionMode::parse)
-}
-
-/// Explicit `yolo` always bypasses. Otherwise an attended Session keeps
-/// Claude's own permission mode, and only an unattended run bypasses: nobody
-/// is present to answer a prompt, so a prompt would stall the step.
-fn claude_skip_permissions(cwd: Option<&Path>, auto: bool, skip_permissions: bool) -> bool {
-    if skip_permissions {
-        return true;
-    }
-    if !auto {
-        return false;
-    }
-
-    let mode = read_claude_permission_mode(cwd);
-    if mode == Some(ClaudePermissionMode::BypassPermissions) {
-        return false;
-    }
-    if mode.is_some() {
-        eprintln!(
-            "warning: Claude permissions.defaultMode is less permissive than Loopflow's non-interactive default; launching with --dangerously-skip-permissions"
-        );
-    }
-    true
-}
-
 /// Common Claude options shared by terminal and stream-input launches.
 pub(crate) fn claude_options(
     config: &AgentConfig,
     model: Option<&str>,
     context_file: Option<&Path>,
-    stream: bool,
+    mode: Mode,
 ) -> Vec<String> {
     // Driver preferences (Chrome, model) pass through only when a Loopflow
     // setting names them; Claude's own configuration decides the rest.
@@ -689,10 +453,10 @@ pub(crate) fn claude_options(
         args.push("--add-dir".into());
         args.extend(add_dirs.iter().map(|dir| dir.display().to_string()));
     }
-    if claude_skip_permissions(config.cwd.as_deref(), stream, config.skip_permissions) {
+    if config.skips_permissions(mode) {
         args.push("--dangerously-skip-permissions".into());
     }
-    if stream {
+    if mode == Mode::Headless {
         if let Some(max_turns) = config.max_turns {
             args.extend(["--max-turns".into(), max_turns.to_string()]);
         }
@@ -780,11 +544,12 @@ impl AgentFailure {
     }
 }
 
-/// Build `thread/start` params for Codex app-server sessions. `headless` runs
-/// get Loopflow's permission floor; attended Sessions keep Codex's own.
+/// Build `thread/start` params for Codex app-server sessions. A launch that
+/// skips permissions gets full access and no approvals; otherwise Codex's own
+/// configuration decides.
 pub fn build_codex_thread_start_params(
     launch: &AgentConfig,
-    headless: bool,
+    mode: Mode,
 ) -> serde_json::Map<String, serde_json::Value> {
     let mut params = serde_json::Map::new();
     if let Some(tier) = launch.codex_service_tier {
@@ -809,15 +574,8 @@ pub fn build_codex_thread_start_params(
         );
     }
 
-    let policy = codex_permission_policy(
-        read_codex_permission_config(launch.cwd.as_deref()),
-        launch,
-        headless,
-    );
-    if let Some(sandbox) = policy.sandbox {
-        params.insert("sandbox".into(), sandbox.as_str().into());
-    }
-    if policy.approval == Some(CodexApprovalPolicy::Never) {
+    if launch.skips_permissions(mode) {
+        params.insert("sandbox".into(), "danger-full-access".into());
         params.insert("approvalPolicy".into(), "never".into());
     }
 
@@ -831,7 +589,7 @@ pub(crate) fn codex_terminal_options(
     launch: &AgentConfig,
     kind: crate::harness::LaunchKind,
 ) -> anyhow::Result<Vec<String>> {
-    let params = build_codex_thread_start_params(launch, false);
+    let params = build_codex_thread_start_params(launch, kind.mode());
     let mut args = Vec::new();
     if let Some(model) = params.get("model").and_then(serde_json::Value::as_str) {
         args.extend(["--model".into(), model.into()]);
@@ -987,10 +745,6 @@ fn run_admitted_agent(
         Some(cwd) => cwd.clone(),
         None => std::env::current_dir()?,
     };
-    let _planning_sync = crate::ops::planning_sync::PlanningSync::start_for_directory(&directory)
-        .map_err(|error| {
-        CoreError::ExecutionFailed(format!("cannot start planning sync: {error}"))
-    })?;
     let result = _run_with_retries(
         &launch,
         &process,
@@ -1601,87 +1355,39 @@ mod tests {
     }
 
     #[test]
-    fn parse_codex_permission_config_reads_top_level_policy() {
-        let config = parse_codex_permission_config(
-            r#"
-model = "gpt-5.5"
-sandbox_mode = "danger-full-access"
-approval_policy = "never"
-
-[projects."/tmp/repo"]
-trust_level = "trusted"
-"#,
-        );
-
-        assert_eq!(config.sandbox, Some(CodexSandboxMode::DangerFullAccess));
-        assert_eq!(config.approval, Some(CodexApprovalPolicy::Never));
-    }
-
-    #[test]
-    fn codex_policy_preserves_vendor_grants_and_raises_restrictive_defaults() {
-        for sandbox in [
-            None,
-            Some(CodexSandboxMode::ReadOnly),
-            Some(CodexSandboxMode::DangerFullAccess),
+    fn permissions_are_skipped_unless_yolo_is_off_and_someone_attends() {
+        for (yolo, mode, skips) in [
+            (true, Mode::Interactive, true),
+            (true, Mode::Headless, true),
+            (false, Mode::Interactive, false),
+            (false, Mode::Headless, true),
         ] {
-            let policy = codex_permission_policy(
-                CodexPermissionConfig {
-                    sandbox,
-                    approval: None,
-                },
-                &crate::agent::AgentConfig::default(),
-                true,
-            );
+            let launch = AgentConfig {
+                yolo,
+                ..default_launch()
+            };
+            let claude = claude_options(&launch, None, None, mode);
             assert_eq!(
-                policy.sandbox,
-                if sandbox == Some(CodexSandboxMode::DangerFullAccess) {
-                    None
-                } else {
-                    Some(CodexSandboxMode::WorkspaceWrite)
-                }
+                claude.contains(&"--dangerously-skip-permissions".into()),
+                skips,
+                "claude, yolo {yolo}, {mode:?}"
             );
-            assert_eq!(policy.approval, Some(CodexApprovalPolicy::Never));
+            let codex = build_codex_thread_start_params(&launch, mode);
+            assert_eq!(
+                (
+                    codex.get("sandbox").and_then(serde_json::Value::as_str),
+                    codex
+                        .get("approvalPolicy")
+                        .and_then(serde_json::Value::as_str),
+                ),
+                if skips {
+                    (Some("danger-full-access"), Some("never"))
+                } else {
+                    (None, None)
+                },
+                "codex, yolo {yolo}, {mode:?}"
+            );
         }
-        let policy = codex_permission_policy(
-            CodexPermissionConfig {
-                sandbox: Some(CodexSandboxMode::DangerFullAccess),
-                approval: Some(CodexApprovalPolicy::Never),
-            },
-            &crate::agent::AgentConfig::default(),
-            true,
-        );
-        assert_eq!(policy, CodexPermissionConfig::default());
-    }
-
-    #[test]
-    fn attended_codex_keeps_its_own_policy_unless_yolo_or_a_boundary_applies() {
-        let restrictive = CodexPermissionConfig {
-            sandbox: Some(CodexSandboxMode::ReadOnly),
-            approval: Some(CodexApprovalPolicy::OnRequest),
-        };
-        assert_eq!(
-            codex_permission_policy(restrictive, &crate::agent::AgentConfig::default(), false),
-            CodexPermissionConfig::default()
-        );
-        let yolo = AgentConfig {
-            skip_permissions: true,
-            ..crate::agent::AgentConfig::default()
-        };
-        assert_eq!(
-            codex_permission_policy(restrictive, &yolo, false),
-            CodexPermissionConfig {
-                sandbox: Some(CodexSandboxMode::DangerFullAccess),
-                approval: Some(CodexApprovalPolicy::Never),
-            }
-        );
-    }
-
-    #[test]
-    fn parse_claude_permission_mode_reads_default_mode() {
-        assert_eq!(
-            parse_claude_permission_mode(r#"{"permissions":{"defaultMode":"bypassPermissions"}}"#),
-            Some(ClaudePermissionMode::BypassPermissions)
-        );
     }
 
     #[test]
@@ -1709,7 +1415,7 @@ trust_level = "trusted"
             match provider {
                 "claude" => assert_arg_pair(&args, "--append-system-prompt", "Fixed additions."),
                 "codex" => {
-                    let params = build_codex_thread_start_params(&launch, true);
+                    let params = build_codex_thread_start_params(&launch, Mode::Headless);
                     assert_eq!(params["developerInstructions"], "Fixed additions.");
                 }
                 _ => {}
@@ -1725,7 +1431,7 @@ trust_level = "trusted"
             ..default_launch()
         };
 
-        let params = build_codex_thread_start_params(&launch, true);
+        let params = build_codex_thread_start_params(&launch, Mode::Headless);
         assert_eq!(
             params.get("model"),
             Some(&serde_json::Value::String("o3".to_string()))
@@ -1745,7 +1451,7 @@ trust_level = "trusted"
             ..default_launch()
         };
 
-        let params = build_codex_thread_start_params(&launch, true);
+        let params = build_codex_thread_start_params(&launch, Mode::Headless);
         assert!(!params.contains_key("model"));
         assert_eq!(
             params.get("cwd"),
@@ -1760,7 +1466,7 @@ trust_level = "trusted"
             system_prompt: "Keep the complete context.\n".repeat(6_000),
             cwd: Some(home.path().to_path_buf()),
             agent: crate::config::Agent::parse("claude:sonnet").unwrap(),
-            skip_permissions: true,
+            yolo: true,
             max_turns: Some(5),
             structured_replies: vec![StructuredReply {
                 name: "suggest_actions".into(),
@@ -2192,7 +1898,7 @@ trust_level = "trusted"
                 agent: crate::config::Agent::parse(agent)
                     .unwrap()
                     .with_configured_model(&config),
-                skip_permissions: true,
+                yolo: true,
                 ..default_launch()
             };
             for args in [

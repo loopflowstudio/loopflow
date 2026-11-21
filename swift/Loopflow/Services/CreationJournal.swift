@@ -29,13 +29,13 @@ public actor CreationSubmissions {
     private let directory: URL
     private var active: Set<String> = []
     private let currentMachine: @Sendable () async throws -> String
-    private let lookup: @Sendable (String) async throws -> String
+    private let lookup: @Sendable (String) async throws -> ReadOutput
     private let send: @Sendable (Data) async throws -> String
 
     /// `lookup` prints `creation.get` for a request ID; `send` makes a submitted creation.
     public init(directory: URL,
                 machine: @escaping @Sendable () async throws -> String,
-                lookup: @escaping @Sendable (String) async throws -> String,
+                lookup: @escaping @Sendable (String) async throws -> ReadOutput,
                 send: @escaping @Sendable (Data) async throws -> String) {
         self.directory = directory
         self.currentMachine = machine
@@ -121,7 +121,7 @@ public actor CreationSubmissions {
     }
 
     private func receipt(_ id: String) async throws -> CreationLookup? {
-        let receipt = try JSONDecoder().decode(CreationLookup?.self, from: Data(try await lookup(id).utf8))
+        let receipt = try await lookup(id).decode(CreationLookup?.self)
         guard receipt == nil || receipt?.requestId == id else {
             throw RegistryQueryError("The Machine returned the receipt for another creation")
         }

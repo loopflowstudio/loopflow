@@ -739,7 +739,7 @@ fn prepare(
         .planning_transport();
     if matches!(
         planning,
-        loopflow_execution::config::TrackerConfig::Linear { .. }
+        Some(loopflow_execution::config::TrackerConfig::Linear { .. })
     ) {
         runtime.block_on(loopflow_execution::machine::credentials::connect(
             &machine,

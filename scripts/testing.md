@@ -34,9 +34,8 @@ also run `cargo test -p loopflow --test integration documented_commands::`.
 It checks command examples and maintained copy, including design documents;
 include `test(documented_commands::)` in the gate's Rust filter.
 
-Builtin Graph order or loop changes also include `test(world_recipes::)` in the
-gate's Rust filter, alongside `test(graph::)`. These recipes check the steps
-recorded by real Task runs, including the pursuit that stops at demo.
+Builtin Graph order or loop changes include `test(graph::)` in the gate's
+Rust filter.
 
 Embedded skill Markdown also reaches `binary(golden_prompt)`, even when no Rust
 code changes. Follow the [prompt fixture checks](../rust/loopflow/tests/README.md)
@@ -86,9 +85,10 @@ Changes to Task/Graph membership or execution reads also include
 `test(performance_tests::)` in the gate's Rust filter. Its planning and status
 checks catch per-Task and per-Graph SQL growth beyond focused store tests.
 
-Store-wide schema or trigger changes also run `binary(two_people)`,
-`test(transport::)` and `binary(transport_tests)`: shared planning exchanges,
-viewer holds and held-terminal lifetimes exercise writers beyond the changed store module.
+Store-wide schema or trigger changes also run
+`test(machine_commands::the_later_change_shows_on_both_machines_through_the_hub)`,
+`test(transport::)` and `binary(transport_tests)`: hub exchanges, viewer holds and
+held-terminal lifetimes exercise writers beyond the changed store module.
 Task storage changes also run `binary(session_lifecycle_tests)`: creation and
 promotion cover absent checkouts and primary Sessions. When moving nullable
 columns into separate tables, update fixture reads to handle absent rows and
@@ -113,9 +113,8 @@ Include `test(lf::commands::waves::tests::planning_failure_keeps_the_stored_work
 for Task schema or trigger changes: its missing-column fixture checks that a
 planning read failure still leaves the Wave and stored Workflow readable.
 
-Configuration file loading or filtering changes also run `binary(two_people)`:
-it checks that a shared Wave graph choice reaches another person's Task launch.
-Include `test(configuration_changes_reach_an_existing_subscription)`,
+Configuration file loading or filtering changes also run
+`test(configuration_changes_reach_an_existing_subscription)`,
 `test(graph_defaults_follow_task_wave_and_repository)` and
 `test(wave_setup_tests::)` to cover live reload, invalid defaults and Wave scope.
 
@@ -204,14 +203,12 @@ with `transport 'https' not allowed`, run `swift package resolve` in `swift/` on
 and rerun.
 
 ```bash
-uv run python scripts/loopflow-dev.py run          # the branch's Desktop on real data
-cargo test -p loopflow --test integration copy_world   # a copy changes nothing outside itself
+uv run python scripts/loopflow-dev.py run    # open the branch's Swift app on the live Machine
 ```
 
-`run` opens the Machine, or a read-only copy when the branch changes a wire type
-or adds a migration; [Loopflow for macOS](../swift/README.md) says which and
-what each allows. A change to `lf-world copy`, to what a server does on a
-read-only store, or to which requests it admits there runs `copy_world`.
+For a visible Swift change, open Loopflow Dev and check it on the installed
+server. For a change to the CLI or server, run the branch's `lf` on a
+[private Machine](../docs/dev/machines.md#one-main-machine).
 
 `--reuse-passing` returns at once for an identical tree and plan. A later pass
 narrows `--rust-filter` to what changed since the last pass.

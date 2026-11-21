@@ -1,12 +1,30 @@
 ---
 extends: builtin
 ---
-## Starting a Task in an lf-world
+## Desktop
 
-`lf-world build one-task` makes a repository with no Graph file, so a Start
-takes up `code`, whose first step needs a provider login. Before the first
-Start, add `.lf/graphs/qa.yaml` (`- cmd: help task` then `- interactive: demo`),
-set `graph: qa` in `.lf/config.yaml`, commit and push to the world's origin.
+Use the [isolated Dev bundle](../qa/desktop.md#loopflow-dev-on-the-live-machine)
+and disposable Work. Check whether launch can attach to or resize personal
+terminals before opening the live Machine. For visual acceptance, capture the
+changed UI and a real update in the foreground. Report the check as open if
+it cannot run safely.
+
+For Session attachment, join an already-running disposable Session on its
+owning Machine from a second view. Check shared output and input, then close
+and reopen the second view while the original provider keeps running.
+
+When Desktop must work with the installed server, exercise the newer client
+with older responses, including an extra field and an unsupported operation.
+Verify that the failure stays local and supported reads and actions still work.
+Keep the installed server and schema for the live run.
+
+## Starting a Task on a private Machine
+
+For CLI and server changes, use the branch `lf` with a
+[private Machine and repository](../qa/served-launches.md).
+Before the first Start, add `.lf/graphs/qa.yaml` (`- cmd: help task` then
+`- interactive: demo`), set `graph: qa` in `.lf/config.yaml`, and commit and
+push to the disposable repository's origin.
 Then `lf task create '<request>' --run --json` (stdin closed) or a served
 `task.create {run: true}` admits the Task, holds its conversation and starts
 the Graph from setup. Pass the words positionally: `--title` alone records no

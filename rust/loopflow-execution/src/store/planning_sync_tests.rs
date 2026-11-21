@@ -76,166 +76,6 @@ fn disconnected_planning_keeps_sent_and_conflicted_actions() {
 }
 
 #[test]
-fn a_git_title_that_lost_shows_as_conflicted_until_saved_again() {
-    let home = tempfile::tempdir().unwrap();
-    let store = Store {
-        sqlite: crate::store::opening::open_ephemeral(&home.path().join("registry.db")).unwrap(),
-    };
-    let repo = TestRepo::new();
-    let task = task(&store.sqlite, &repo);
-    let record = |id: &str, title: &str, clock: i64, parents: &[&str]| {
-        let mutation = serde_json::json!({
-            "edit": {"target": task.id.as_str(), "change": {"field": "task_title", "value": title}},
-            "clock": clock,
-            "parents": parents,
-        });
-        store
-            .sqlite
-            .conn
-            .lock()
-            .unwrap()
-            .execute(
-                "INSERT INTO git_tracker_changes(id,record_table,mutation) VALUES(?1,'tasks',?2)",
-                rusqlite::params![id, mutation.to_string()],
-            )
-            .unwrap();
-    };
-    // Creation journaled the first title; two Machines then rename the Task
-    // without seeing each other, and the later clock wins.
-    let (created, clock): (String, i64) = store
-        .sqlite
-        .conn
-        .lock()
-        .unwrap()
-        .query_row(
-            "SELECT id,clock FROM git_tracker_changes WHERE object_id=?1 AND field='task_title'",
-            [task.id.as_str()],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
-        .unwrap();
-    assert!(store
-        .task_tracker_sync(&task.id)
-        .unwrap()
-        .actions
-        .is_empty());
-    record(
-        "00000000-0000-4000-8000-00000000000a",
-        "Mine",
-        clock + 1,
-        &[&created],
-    );
-    record(
-        "00000000-0000-4000-8000-00000000000b",
-        "Theirs",
-        clock + 2,
-        &[&created],
-    );
-    let sync = store.task_tracker_sync(&task.id).unwrap();
-    assert_eq!(sync.actions.len(), 1);
-    let lost = &sync.actions[0];
-    assert_eq!(
-        (lost.tracker.as_str(), lost.phase, lost.change.as_str()),
-        ("git", ActionPhase::Conflicted, "title")
-    );
-    assert_eq!(lost.local_value, "Mine");
-    assert_eq!(lost.tracker_value, Some(serde_json::json!("Theirs")));
-    assert_eq!(
-        lost.line(),
-        r#"title · conflicted · lost: "Mine" · git: "Theirs""#
-    );
-
-    record(
-        "00000000-0000-4000-8000-00000000000c",
-        "Mine again",
-        clock + 3,
-        &[
-            "00000000-0000-4000-8000-00000000000a",
-            "00000000-0000-4000-8000-00000000000b",
-        ],
-    );
-    assert!(store
-        .task_tracker_sync(&task.id)
-        .unwrap()
-        .actions
-        .is_empty());
-}
-
-/// Two Machines rename the Task concurrently; "Theirs" wins on clock.
-fn git_rename_conflict(store: &Store, task: &Task) {
-    let conn = store.sqlite.conn.lock().unwrap();
-    let (created, clock): (String, i64) = conn
-        .query_row(
-            "SELECT id,clock FROM git_tracker_changes WHERE object_id=?1 AND field='task_title'",
-            [task.id.as_str()],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
-        .unwrap();
-    for (id, title, at) in [
-        ("00000000-0000-4000-8000-00000000000a", "Mine", clock + 1),
-        ("00000000-0000-4000-8000-00000000000b", "Theirs", clock + 2),
-    ] {
-        let mutation = serde_json::json!({
-            "edit": {"target": task.id.as_str(), "change": {"field": "task_title", "value": title}},
-            "clock": at,
-            "parents": [created],
-        });
-        conn.execute(
-            "INSERT INTO git_tracker_changes(id,record_table,mutation) VALUES(?1,'tasks',?2)",
-            rusqlite::params![id, mutation.to_string()],
-        )
-        .unwrap();
-    }
-    conn.execute(
-        "UPDATE tasks SET issue_title='Theirs' WHERE id=?1",
-        [task.id.as_str()],
-    )
-    .unwrap();
-}
-
-#[test]
-fn a_git_value_that_lost_is_answered_by_keeping_theirs_or_using_mine() {
-    use loopflow_storage::planning_sync::{LostAnswer, TrackerKind};
-    for (answer, title) in [
-        (LostAnswer::KeepTheirs, "Theirs"),
-        (LostAnswer::UseMine, "Mine"),
-    ] {
-        let home = tempfile::tempdir().unwrap();
-        let store = Store {
-            sqlite: crate::store::opening::open_ephemeral(&home.path().join("registry.db"))
-                .unwrap(),
-        };
-        let repo = TestRepo::new();
-        let task = task(&store.sqlite, &repo);
-        git_rename_conflict(&store, &task);
-        let repository = repo.path().to_str().unwrap();
-        assert_eq!(
-            store
-                .sqlite
-                .repository_tracker_actions(repository, TrackerKind::Git)
-                .unwrap()
-                .len(),
-            1
-        );
-        let lost = store
-            .sqlite
-            .repository_tracker_actions(repository, TrackerKind::Git)
-            .unwrap();
-        store.sqlite.answer_lost(&lost, answer).unwrap();
-        assert!(store
-            .task_tracker_sync(&task.id)
-            .unwrap()
-            .actions
-            .is_empty());
-        assert!(store
-            .sqlite
-            .repository_tracker_actions(repository, TrackerKind::Git)
-            .unwrap()
-            .is_empty());
-        assert_eq!(store.sqlite.task(&task.id).unwrap().unwrap().title, title);
-    }
-}
-
-#[test]
 fn planning_receipt_queries_stay_batched_across_repositories() {
     let home = tempfile::tempdir().unwrap();
     let store = crate::store::opening::open_ephemeral(&home.path().join("registry.db")).unwrap();
@@ -275,7 +115,7 @@ fn project(store: &SqliteStore, repo: &str) -> String {
 #[test]
 fn a_project_name_linear_won_is_answered_from_its_line() {
     use loopflow_model::durable::ProjectId;
-    use loopflow_storage::planning_sync::{LostAnswer, TrackerKind};
+    use loopflow_storage::planning_sync::LostAnswer;
     for (answer, name, queued) in [
         (LostAnswer::KeepTheirs, "Theirs", 0),
         (LostAnswer::UseMine, "Mine", 1),
@@ -304,7 +144,7 @@ fn a_project_name_linear_won_is_answered_from_its_line() {
         .unwrap();
         let lines = store
             .sqlite
-            .repository_tracker_actions("/repo-answer", TrackerKind::Linear)
+            .repository_tracker_actions("/repo-answer")
             .unwrap();
         assert_eq!(
             lines.iter().map(|line| line.phase).collect::<Vec<_>>(),
@@ -313,7 +153,7 @@ fn a_project_name_linear_won_is_answered_from_its_line() {
         store.sqlite.answer_lost(&lines[..1], answer).unwrap();
         let open = store
             .sqlite
-            .repository_tracker_actions("/repo-answer", TrackerKind::Linear)
+            .repository_tracker_actions("/repo-answer")
             .unwrap();
         assert!(open.iter().all(|line| line.phase == ActionPhase::Queued));
         assert_eq!(open.len(), queued);
@@ -330,75 +170,4 @@ fn a_project_name_linear_won_is_answered_from_its_line() {
             .unwrap();
         assert_eq!(saved, name);
     }
-}
-
-#[test]
-fn a_git_project_head_that_lost_is_answered_with_a_merge() {
-    use loopflow_storage::planning_sync::{LostAnswer, TrackerKind};
-    let home = tempfile::tempdir().unwrap();
-    let store = Store {
-        sqlite: crate::store::opening::open_ephemeral(&home.path().join("registry.db")).unwrap(),
-    };
-    let project = project(&store.sqlite, "/repo-answer");
-    {
-        let conn = store.sqlite.conn.lock().unwrap();
-        for (id, name, clock, parents) in [
-            ("00000000-0000-4000-8000-0000000000e0", "First", 1, vec![]),
-            (
-                "00000000-0000-4000-8000-0000000000e1",
-                "Mine",
-                2,
-                vec!["00000000-0000-4000-8000-0000000000e0"],
-            ),
-            (
-                "00000000-0000-4000-8000-0000000000e2",
-                "Theirs",
-                3,
-                vec!["00000000-0000-4000-8000-0000000000e0"],
-            ),
-        ] {
-            let mutation = serde_json::json!({
-                "edit": {"target": project, "change": {"field": "project_name", "value": name}},
-                "clock": clock,
-                "parents": parents,
-            });
-            conn.execute(
-                "INSERT INTO git_tracker_changes(id,record_table,mutation) VALUES(?1,'projects',?2)",
-                rusqlite::params![id, mutation.to_string()],
-            )
-            .unwrap();
-        }
-    }
-    let lines = store
-        .sqlite
-        .repository_tracker_actions("/repo-answer", TrackerKind::Git)
-        .unwrap();
-    assert_eq!(
-        lines
-            .iter()
-            .map(|line| line.id.as_str())
-            .collect::<Vec<_>>(),
-        ["00000000-0000-4000-8000-0000000000e1"]
-    );
-    store
-        .sqlite
-        .answer_lost(&lines[..1], LostAnswer::KeepTheirs)
-        .unwrap();
-    assert!(store
-        .sqlite
-        .repository_tracker_actions("/repo-answer", TrackerKind::Git)
-        .unwrap()
-        .is_empty());
-    let merges: i64 = store
-        .sqlite
-        .conn
-        .lock()
-        .unwrap()
-        .query_row(
-            "SELECT count(*) FROM git_tracker_changes WHERE object_id=?1 AND json_array_length(mutation,'$.parents')=2",
-            [project.as_str()],
-            |row| row.get(0),
-        )
-        .unwrap();
-    assert_eq!(merges, 1);
 }

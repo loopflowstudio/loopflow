@@ -41,7 +41,7 @@ impl HarnessKind {
             "claude" => Some(Self::Claude),
             "opencode" => Some(Self::OpenCode),
             "pi" => Some(Self::Pi),
-            "antigravity" => Some(Self::Antigravity),
+            "agy" => Some(Self::Antigravity),
             _ => None,
         }
     }
@@ -52,13 +52,8 @@ impl HarnessKind {
             Self::Claude => "claude",
             Self::OpenCode => "opencode",
             Self::Pi => "pi",
-            Self::Antigravity => "antigravity",
+            Self::Antigravity => "agy",
         }
-    }
-
-    /// The command that starts this harness's CLI.
-    pub fn program(self) -> &'static str {
-        self.harness().program()
     }
 
     pub const ALL: [Self; 5] = [
@@ -110,14 +105,9 @@ fn command_program(command: &str, program: &str) -> bool {
 /// where it keeps transcripts and for how long, its model names and sign-in.
 pub trait Harness: Sync + std::fmt::Debug {
     fn kind(&self) -> HarnessKind;
-    /// The command that starts the client.
-    fn program(&self) -> &'static str {
-        self.kind().as_str()
-    }
-
     /// Whether `command` is this client serving a headless conversation.
     fn recognizes_driver(&self, command: &str) -> bool {
-        command_program(command, self.program())
+        command_program(command, self.kind().as_str())
     }
     fn title_args(&self, _name: &str) -> Vec<String> {
         Vec::new()
@@ -201,9 +191,10 @@ mod tests {
             Some("opencode")
         );
         assert_eq!(
-            HarnessKind::parse("Antigravity").map(HarnessKind::program),
+            HarnessKind::parse(" AGY").map(HarnessKind::as_str),
             Some("agy")
         );
+        assert_eq!(HarnessKind::parse("antigravity"), None);
         assert_eq!(
             HarnessKind::parse("lfharness").map(HarnessKind::as_str),
             None

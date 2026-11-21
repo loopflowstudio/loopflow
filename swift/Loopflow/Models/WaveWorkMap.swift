@@ -265,10 +265,13 @@ public struct RoadmapTask: Decodable, Sendable, Identifiable, Hashable {
     public let runControl: TaskRunControl
     public let pr: PrSnapshot?
     public internal(set) var section: TaskSection
+    /// Whether its owner is you, decided in Rust; false when nobody owns it.
+    public let ownedByYou: Bool
 
     enum CodingKeys: String, CodingKey {
         case task, reference, runtime, condition, actions, execution, section, pr, lifecycle
         case selectionStates = "selection_states"
+        case ownedByYou = "owned_by_you"
         case graphName = "graph_name"
         case graphSource = "graph_source"
         case latestGraphProcess = "latest_graph_process"
@@ -490,6 +493,12 @@ public enum WorkEvidence<Item: Decodable & Sendable & Hashable>: Decodable, Send
     public var unavailableReason: String? {
         if case let .unavailable(reason) = self { return reason }
         return nil
+    }
+
+    /// Whether more items exist than were read.
+    public var truncated: Bool {
+        if case let .available(_, truncated) = self { return truncated }
+        return false
     }
 
     /// The items that pass `isIncluded`; unavailable evidence stays unavailable.

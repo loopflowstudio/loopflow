@@ -47,7 +47,7 @@ lf diff ENG-123 --base parent --difftool  # inspect one Task's changes in your d
 ```
 
 `--workspace` opens an overview of started, unfinished Tasks: Desktop opens its
-board, while Rex, Herdr, and cmux open native Task tabs (one per Task
+backlog, while Rex, Herdr, and cmux open native Task tabs (one per Task
 conversation, in a new Rex session, Herdr workspace, or cmux group). Pass
 `--no-focus` to keep your current tab selected.
 

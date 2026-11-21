@@ -80,6 +80,8 @@ fn composition_items(
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct GraphCatalogEntry {
     pub name: String,
+    /// Its `description:` line; `None` when the file has none or does not load.
+    pub description: Option<String>,
     /// The repository file that defines it; `None` for a builtin.
     pub source: Option<String>,
     /// Topology; `None` for an unusable definition.
@@ -87,19 +89,70 @@ pub struct GraphCatalogEntry {
     pub composition: Option<GraphComposition>,
     /// Why the definition is unusable; set exactly when it has no topology.
     pub unavailable: Option<String>,
+    /// The Graphs that include this one with `graph:`, by name. Empty for a
+    /// Graph people start with; a piece of other Graphs names them here.
+    pub included_by: Vec<String>,
+    /// What it runs for: a Task, or a Wave's own operation.
+    pub runs: GraphSubject,
+}
+
+/// What a Graph is started on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum GraphSubject {
+    Task,
+    Wave,
 }
 
 /// Every Graph available in `repo`, each read through the shared
 /// loader. A file that does not load stays listed with the reason.
 pub fn graph_catalog(repo: &Path) -> Result<Vec<GraphCatalogEntry>, crate::error::LoadError> {
-    crate::graph::available_graph_names(repo)?
+    let mut catalog = crate::graph::available_graph_names(repo)?
         .into_iter()
-        .map(|name| graph_catalog_entry(&name, repo))
-        .collect()
+        .map(|name| load_catalog_entry(&name, repo))
+        .collect::<Result<Vec<_>, _>>()?;
+    // A compiled node's sources name the Graphs it came through, outermost first.
+    let mut included = BTreeMap::<String, std::collections::BTreeSet<String>>::new();
+    for entry in &catalog {
+        let mut pending: Vec<&GraphNode> = entry
+            .compiled
+            .iter()
+            .flat_map(|compiled| &compiled.steps)
+            .collect();
+        while let Some(node) = pending.pop() {
+            for source in node.sources.iter().filter(|source| **source != entry.name) {
+                included
+                    .entry(source.clone())
+                    .or_default()
+                    .insert(entry.name.clone());
+            }
+            pending.extend(node.paths.iter().flat_map(|path| &path.steps));
+        }
+    }
+    for entry in &mut catalog {
+        entry.included_by = included
+            .remove(&entry.name)
+            .map(|names| names.into_iter().collect())
+            .unwrap_or_default();
+    }
+    Ok(catalog)
 }
 
-/// Read only the requested definition; invalid sources retain their diagnostic.
+/// The requested definition as the catalog lists it; an invalid source keeps its diagnostic.
 pub fn graph_catalog_entry(
+    name: &str,
+    repo: &Path,
+) -> Result<GraphCatalogEntry, crate::error::LoadError> {
+    let entry = load_catalog_entry(name, repo)?;
+    Ok(graph_catalog(repo)?
+        .into_iter()
+        .find(|listed| listed.name == entry.name)
+        .unwrap_or(entry))
+}
+
+/// One definition alone; who includes it is known only across the catalog.
+fn load_catalog_entry(
     name: &str,
     repo: &Path,
 ) -> Result<GraphCatalogEntry, crate::error::LoadError> {
@@ -116,18 +169,26 @@ pub fn graph_catalog_entry(
             Ok((
                 crate::graph::compiled::compile(&graph.name, &flatten_resolved(&resolved)),
                 composition,
+                graph.description,
             ))
         }),
     };
-    let (compiled, composition, unavailable) = match compiled {
-        Ok((compiled, composition)) => (Some(compiled), Some(composition), None),
-        Err(error) => (None, None, Some(error.to_string())),
+    let (compiled, composition, description, unavailable) = match compiled {
+        Ok((compiled, composition, description)) => {
+            (Some(compiled), Some(composition), description, None)
+        }
+        Err(error) => (None, None, None, Some(error.to_string())),
+    };
+    let name = compiled
+        .as_ref()
+        .map_or_else(|| name.to_string(), |compiled| compiled.name.clone());
+    let runs = match loopflow_definitions::builtins::builtin_graph_category(&name) {
+        Some("Wave") => GraphSubject::Wave,
+        _ => GraphSubject::Task,
     };
     Ok(GraphCatalogEntry {
-        name: compiled
-            .as_ref()
-            .map_or_else(|| name.to_string(), |compiled| compiled.name.clone()),
-        source: crate::graph::find_graph_source_path(name, repo)?.map(|path| {
+        description,
+        source: crate::graph::find_graph_source_path(&name, repo)?.map(|path| {
             path.strip_prefix(repo)
                 .unwrap_or(&path)
                 .to_string_lossy()
@@ -136,6 +197,9 @@ pub fn graph_catalog_entry(
         compiled,
         composition,
         unavailable,
+        included_by: Vec::new(),
+        runs,
+        name,
     })
 }
 
@@ -589,6 +653,26 @@ mod tests {
             .iter()
             .all(|node| node.kind != GraphNodeKind::Op || node.label == "sync"));
         assert_eq!(compiled.steps[4].sources, ["pursue", "build"]);
+    }
+
+    #[test]
+    fn the_catalog_names_who_includes_a_graph_and_what_it_runs_for() {
+        let repo = tempfile::tempdir().unwrap();
+        let catalog = super::graph_catalog(repo.path()).unwrap();
+        let entry = |name: &str| catalog.iter().find(|entry| entry.name == name).unwrap();
+        // People start a Task on code; build is a piece of the Graphs that include it.
+        assert!(entry("code").included_by.is_empty());
+        let includes_build = &entry("build").included_by;
+        assert!(["code", "feature", "pursue"]
+            .iter()
+            .all(|name| includes_build.contains(&name.to_string())));
+        assert!(!includes_build.contains(&"build".to_string()));
+        assert_eq!(entry("code").runs, super::GraphSubject::Task);
+        assert_eq!(entry("vsm-operate").runs, super::GraphSubject::Wave);
+        assert_eq!(
+            super::graph_catalog_entry("build", repo.path()).unwrap(),
+            *entry("build")
+        );
     }
 
     #[test]

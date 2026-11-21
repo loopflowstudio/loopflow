@@ -118,7 +118,12 @@ final class SessionsWorkspace {
     /// no Session yet. Repository and Wave primaries always do; a Task does while it works.
     var opensConversationAutomatically: Bool
     private var didPrepareTaskPanes = false
-    var lastVisit = Date.distantPast
+    private let opensUnvisitedWork: Bool
+    private(set) var lastVisit = Date.distantPast
+    var canOpenTerminals: Bool { opensUnvisitedWork || lastVisit != .distantPast }
+
+    func visit() { lastVisit = Date() }
+
     var conversationClosed = false
     var requiresLocationValidation = false
     var onConversationClosed: (() -> Void)?
@@ -183,6 +188,7 @@ final class SessionsWorkspace {
                 throw RegistryQueryError("Reopen the remote Task before adding a shell; its location is unavailable.")
             }
         }
+        visit()
         return multiplexer.newShell(command: command ?? [], location: location, execution: execution, focus: focus)
     }
 
@@ -279,7 +285,7 @@ final class SessionsWorkspace {
            case .recorded(let recorded, let checkout) = observed.location, checkout == identity.worktree {
             task = recorded
         } else { task = key.id }
-        return [try LocalWaveAgentLauncher.controlLfPath(), "--machine", identity.machineId,
+        return [try LocalWaveAgentLauncher.machineLf().path, "--machine", identity.machineId,
          "--repo-id", key.repository, "desktop", "shell", task,
          "--checkout", identity.worktree, "--id", tab.id]
     }
@@ -417,7 +423,9 @@ final class SessionsWorkspace {
         return store
     }
 
-    init(key: WorkWorkspaceKey, title: String, location: WorkspaceIdentity?, localMachineId: String?, surfaces: GhosttySurfacePool = GhosttySurfacePool()) {
+    init(key: WorkWorkspaceKey, title: String, location: WorkspaceIdentity?, localMachineId: String?,
+         surfaces: GhosttySurfacePool = GhosttySurfacePool(), opensUnvisitedWork: Bool = true) {
+        self.opensUnvisitedWork = opensUnvisitedWork
         self.key = key
         self.title = title
         self.location = location
@@ -469,6 +477,7 @@ final class SessionsWorkspaceRegistry {
     /// cross-repository bound just evicted.
     private var releasedTasks: Set<WorkWorkspaceKey> = []
     private var warmPersistenceKey: String?
+    private let opensUnvisitedWork: Bool
     private var quitting = false
     private var openings: [WorkWorkspaceKey: Task<Void, Never>] = [:]
     private var sessions: SessionsStore?
@@ -498,7 +507,9 @@ final class SessionsWorkspaceRegistry {
 
     /// `runtime` lets prepared Sessions start their terminals before a pane shows
     /// them; a registry without one retains and shows but never launches.
-    init(localMachineId: String? = nil, runtime: GhosttyManager? = nil) {
+    init(localMachineId: String? = nil, runtime: GhosttyManager? = nil,
+         opensUnvisitedWork: Bool = Bundle.main.bundleIdentifier?.hasSuffix(".dev") != true) {
+        self.opensUnvisitedWork = opensUnvisitedWork
         self.localMachineId = localMachineId
         surfaces = GhosttySurfacePool(runtime: runtime)
     }
@@ -578,7 +589,7 @@ final class SessionsWorkspaceRegistry {
                     if let id = pane.sessionId { sessions?.release(id) }
                 }
             }
-            workspace.present(retained && !workspace.conversationClosed && !workspace.requiresLocationValidation)
+            workspace.present(workspace.canOpenTerminals && retained && !workspace.conversationClosed && !workspace.requiresLocationValidation)
         }
         saveWarmIntent()
         onWarmthChanged?()
@@ -600,7 +611,7 @@ final class SessionsWorkspaceRegistry {
         for key in visibleWork.filter({ $0.kind == .task }) + warmPrimaries + recentTasks where !keys.contains(key) {
             keys.append(key)
         }
-        return keys
+        return keys.filter { workspaces[$0]?.canOpenTerminals == true }
     }
 
     func openWarmConversations(store: SessionsStore) {
@@ -632,6 +643,7 @@ final class SessionsWorkspaceRegistry {
     func openConversation(in workspace: SessionsWorkspace, store: SessionsStore) async {
         let key = workspace.key
         guard openings[key] == nil, !workspace.openingConversation else { return }
+        workspace.visit()
         sessions = store
         if workspace.conversationClosed {
             closedConversations.remove(key)
@@ -811,8 +823,8 @@ final class SessionsWorkspaceRegistry {
         presentationClosed = false
         if selectedWork != key { surfaces.clearFocus() }
         selectedWork = key
-        workspaces[key]?.lastVisit = Date()
         if let terminal = workspaces[key]?.multiplexer.sessionPane?.terminal { surfaces.scrollToBottom(terminal) }
+        if deliberate || opensUnvisitedWork { workspaces[key]?.visit() }
         if deliberate { closedConversations.remove(key) }
         if deliberate, let workspace = workspaces[key], workspace.conversationClosed {
             workspace.conversationClosed = false
@@ -914,7 +926,7 @@ final class SessionsWorkspaceRegistry {
             revealSession(record, in: target)
             target.presentation.selectedSessionId = record.id
             target.presentation.content = .terminals
-            if selectedWork == sourceKey, source.presentation.selectedSessionId == record.id {
+            if source.canOpenTerminals, selectedWork == sourceKey, source.presentation.selectedSessionId == record.id {
                 selection = destination.reference
             }
             source.presentation.selectedSessionId = nil
@@ -988,7 +1000,7 @@ final class SessionsWorkspaceRegistry {
             return existing
         }
         let workspace = SessionsWorkspace(key: key, title: title, location: location,
-            localMachineId: localMachineId, surfaces: surfaces)
+            localMachineId: localMachineId, surfaces: surfaces, opensUnvisitedWork: opensUnvisitedWork)
         workspace.conversationClosed = closedConversations.contains(key)
         workspace.onConversationClosed = { [weak self, weak workspace] in
             guard let workspace else { return }
@@ -1686,7 +1698,7 @@ struct SessionsContentView: View {
     }
 
     private func focusPane(_ pane: String, session: String?, in workspace: SessionsWorkspace) {
-        if currentKey != workspace.key { model.select(workspace.key.reference) }
+        if currentKey != workspace.key || !workspace.canOpenTerminals { model.select(workspace.key.reference) }
         workspace.multiplexer.setFocusedPane(pane)
         // Companion shells retain the current conversation context.
         guard let session, navigation.selectedSessionId != session else { return }
@@ -1732,11 +1744,11 @@ struct SessionsContentView: View {
                 }
             } else if key.kind != .task, active, let view = navigation.waveView {
                 // A Wave view, the repository page included: the conversation and the
-                // standup board share the top band; the Tasks run along the bottom.
+                // backlog share the top band; the Tasks run along the bottom.
                 WaveViewLayout(model: model, view: view, workspace: entry) {
                     conversationPanes(key, entry, isFocused: navigation.palette == nil)
-                } board: {
-                    WaveStandupBoard(model: model, view: view)
+                } backlog: {
+                    BacklogView(model: model, view: view)
                 } tiles: {
                     WaveTiles(model: model, workspaces: workspaces, sessions: store, view: view)
                 }
@@ -1859,10 +1871,11 @@ struct SessionsContentView: View {
             origin.preparedTaskWorktrees[taskId] = checkout
         }
         // The captured entry receives a late preparation reply without changing selection.
-        let lf = try LocalWaveAgentLauncher.controlLfPath()
+        let lf = try LocalWaveAgentLauncher.machineLf().path
         guard checkout.machineId == machineId else { throw RegistryQueryError("Open a conversation on its owning Machine") }
         entry.presentation.content = .terminals
         entry.location = checkout
+        entry.visit()
         if let pane = entry.multiplexer.newShell(command: TaskConversationLaunch(task: issue).arguments(lf: lf), location: checkout),
            let tab = pane.content.selectedShell {
             Perf.retarget(.newConversation, from: taskId, to: tab.id, owner: origin.performanceOwner)

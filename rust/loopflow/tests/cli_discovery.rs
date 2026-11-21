@@ -849,7 +849,6 @@ fn moved_commands_have_one_owner_and_keep_their_short_names() {
     }
     // `lf planning` is the plans namespace; its old repository spellings move.
     for (old, path) in [
-        (vec!["planning", "key"], vec!["repo", "tracker", "key"]),
         (vec!["planning"], vec!["repo", "tracker"]),
         (vec!["desktop", "task"], vec!["task", "show"]),
         (vec!["wave", "status", "--sync"], vec!["wave", "sync"]),
@@ -908,6 +907,7 @@ fn installation_configuration_and_app_commands_have_distinct_owners() {
             "credentials",
             "doctor",
             "end",
+            "hub",
             "list",
             "ondemand",
             "pool",
@@ -1219,19 +1219,11 @@ fn desktop_verbs_take_pane_paths_without_public_lifetime_tokens() {
     assert!(matches!(cli.command, Some(Commands::Desktop {
         cmd: DesktopCommand::Goto { index: 2, target }
     }) if target.json));
-    let cli = Cli::try_parse_from([
-        "lf",
-        "desktop",
-        "do",
-        "section",
-        "-p",
-        "board",
-        "section=done",
-    ])
-    .unwrap();
+    let cli =
+        Cli::try_parse_from(["lf", "desktop", "do", "page", "-p", "tiles", "page=2"]).unwrap();
     assert!(matches!(cli.command, Some(Commands::Desktop {
         cmd: DesktopCommand::Do { action, args, target }
-    }) if action == "section" && args == ["section=done"] && target.pane.as_deref() == Some("board")));
+    }) if action == "page" && args == ["page=2"] && target.pane.as_deref() == Some("tiles")));
     for removed in [
         &["desktop", "text", "hello"][..],
         &["desktop", "read", "--region", "screen"],

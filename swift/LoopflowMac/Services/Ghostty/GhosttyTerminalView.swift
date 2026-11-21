@@ -727,7 +727,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
                 return
             }
             serverConnection = connection
-            let script = "export LF_SERVER_STATUS=\(shellEscape(connection.path)); export LF_SERVER=1; export LF_TERMINAL_ID=\(shellEscape(terminalMarker)); export LF_TERMINAL_TTY=\"$(tty)\"; exec \(command)"
+            let script = "export LF_SERVER_STATUS=\(shellEscape(connection.path)); export LF_SERVER=1; export LF_RELAY_FOCUSED=0; export LF_TERMINAL_ID=\(shellEscape(terminalMarker)); export LF_TERMINAL_TTY=\"$(tty)\"; exec \(command)"
             surfaceCommand = ["/bin/sh", "-c", script].map(shellEscape).joined(separator: " ")
         } else {
             surfaceCommand = command

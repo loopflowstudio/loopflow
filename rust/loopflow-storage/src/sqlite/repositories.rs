@@ -136,10 +136,6 @@ impl SqliteStore {
             "repository_plans",
             "waves",
             "agent_sessions",
-            "git_tracker_destinations",
-            "git_tracker_routes",
-            "git_tracker_imports",
-            "git_tracker_conflicts",
             "tracker_projects",
             "tracker_items",
         ] {
@@ -282,6 +278,24 @@ impl SqliteStore {
     pub fn repository_id(&self, repo: &str) -> StoreResult<Option<RepositoryId>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         repository_id_in(&conn, repo)
+    }
+
+    /// Let `id`, the name another Machine gives this repository, find the
+    /// checkout at `repo` too. The selected identity and every saved row stay.
+    /// `false` when `id` already names another checkout on this Machine.
+    pub fn locate_repository(&self, repo: &str, id: &RepositoryId) -> StoreResult<bool> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "INSERT INTO repository_plans(repo,id,selected) VALUES(?1,?2,0)
+             ON CONFLICT(id) DO NOTHING",
+            params![repo, id.as_str()],
+        )?;
+        let located: String = conn.query_row(
+            "SELECT repo FROM repository_plans WHERE id=?1",
+            [id.as_str()],
+            |row| row.get(0),
+        )?;
+        Ok(located == repo)
     }
 
     pub fn repository_identity(&self, repo: &str) -> StoreResult<Option<RepositoryIdentity>> {

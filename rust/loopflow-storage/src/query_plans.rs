@@ -13,10 +13,8 @@ use rusqlite::OptionalExtension;
 use super::sqlite::SqliteStore;
 
 /// Tables that grow with every Task, Session, turn, steer or Process.
-const GROWING: [&str; 17] = [
+const GROWING: [&str; 15] = [
     "agent_sessions",
-    "git_tracker_changes",
-    "git_tracker_routes",
     "processes",
     "session_activity",
     "session_events",
@@ -34,8 +32,8 @@ const GROWING: [&str; 17] = [
 ];
 
 /// `sqlite_stat1` as `ANALYZE` measured it on a Machine with 17,536
-/// Sessions, 170,688 Processes, 283,304 Session events, 37,512 planning
-/// changes and 3,362 steers (November 13). Indexes newer than that store's
+/// Sessions, 170,688 Processes, 283,304 Session events and 3,362 steers
+/// (November 13). Indexes newer than that store's
 /// schema were built and analyzed on a copy of it; `steer_delivered` is counted
 /// from the rows its migration copies there.
 /// `task_checkouts` retains the November 12 measurement of 838 checkouts;
@@ -57,7 +55,7 @@ const GROWING: [&str; 17] = [
 const MEASURED: &str = "DELETE FROM sqlite_stat1 WHERE tbl IN (
          'agent_sessions','processes','session_events','tasks','steer_delivered',
          'steer_adapters','projects','waves',
-         'git_tracker_changes','git_tracker_routes','repository_plans','steers',
+         'repository_plans','steers',
          'task_retirements','task_checkouts','task_primary_sessions','task_auto',
          'task_ownership','task_update_readings','session_activity');
      INSERT INTO sqlite_stat1(tbl,idx,stat) VALUES
@@ -77,11 +75,6 @@ const MEASURED: &str = "DELETE FROM sqlite_stat1 WHERE tbl IN (
          ('agent_sessions','session_repo_inventory','17206 101 58 1 1 1'),
          ('agent_sessions','sqlite_autoindex_agent_sessions_1','17206 1'),
          ('agent_sessions','sqlite_autoindex_agent_sessions_2','17206 1'),
-         ('git_tracker_changes','git_tracker_changes_clock','37312 1'),
-         ('git_tracker_changes','git_tracker_changes_object','37312 3 2'),
-         ('git_tracker_changes','sqlite_autoindex_git_tracker_changes_1','37312 1'),
-         ('git_tracker_routes','git_tracker_routes_mutation','4220 1'),
-         ('git_tracker_routes','sqlite_autoindex_git_tracker_routes_1','4220 401 267 1'),
          ('processes','agent_process_attachment','17979 4'),
          ('processes','agent_process_unfinished','77 1'),
          ('processes','processes_agent_session','18327 1'),
@@ -611,9 +604,42 @@ mod tests {
         });
         let scans: Vec<_> = growing_scans(&store, &traced)
             .into_iter()
-            .filter(|scan| scan.contains("git_tracker_changes") || scan.contains("SCAN tasks"))
+            .filter(|scan| scan.contains("SCAN tasks"))
             .collect();
         assert!(scans.is_empty(), "{}", scans.join("\n"));
+    }
+
+    #[test]
+    fn stamps_and_unsent_records_are_read_by_index() {
+        let (_home, store, _task) = crate::test_fixture::store_with_task();
+        let conn = store.conn.lock().unwrap();
+        for (sql, index) in [
+            ("SELECT COALESCE(MAX(at),0) FROM plan_stamps", "plan_stamps_at"),
+            (
+                "SELECT field,at,machine_id FROM plan_stamps WHERE owner_id='t'",
+                "PRIMARY KEY",
+            ),
+            (
+                "SELECT COUNT(*) FROM plan_changes WHERE repo='r' AND seq>0",
+                "plan_changes_repo",
+            ),
+            (
+                "SELECT seq,owner_table,owner_id FROM plan_changes WHERE repo='r' AND seq>0 ORDER BY seq",
+                "plan_changes_repo",
+            ),
+        ] {
+            let plan: Vec<String> = conn
+                .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
+                .unwrap()
+                .query_map([], |row| row.get(3))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap();
+            assert!(
+                plan.iter().all(|step| step.contains(index)) && !plan.is_empty(),
+                "{sql}: {plan:?}"
+            );
+        }
     }
 
     #[test]

@@ -23,9 +23,12 @@ other implementation and proof gaps.
 |---|---|---|
 | plan | the shared Waves, Projects and Tasks | |
 | Project | a Wave's current Project: its KRs, targets and Tasks | |
-| tracker | where the plan is mirrored: Git, Linear or Asana; `tracker:` in `.lf/config.yaml`, shown by `lf repo tracker` | bridge, planning provider; provider means the agent's provider |
-| destination | one Git ref the plan is exchanged with, listed by `lf repo tracker` | |
-| action | one outgoing change for Linear or Asana in `tracker_actions`: queued or sent (open), then confirmed, conflicted (lost, until answered) or retired; Git exchanges the journal instead. Prose near Desktop says "tracker action": Desktop's actions are buttons | effect, receipt, delivery, export |
+| tracker | where the plan is mirrored: Linear or Asana; `tracker:` in `.lf/config.yaml`, shown by `lf repo tracker` | bridge, planning provider; provider means the agent's provider |
+| stamp | `(at, machine id)` on one planning field; the newest stamp is the plan | a revision, a clock comparison with a tracker |
+| carrier | what moves stamped records between Machines: Git plan refs, a hub | a tracker; a carrier decides nothing |
+| hub | a Machine others exchange stamped records with over the server connection; `lf machine hub` | the plan's home, a tracker |
+| unsent | a record changed here that a carrier has not taken yet; counted per carrier | open, queued |
+| action | one outgoing change for Linear or Asana in `tracker_actions`, never for a carrier: queued or sent (open), then confirmed, conflicted (lost, until answered) or retired. Prose near Desktop says "tracker action": Desktop's actions are buttons | effect, receipt, delivery, export |
 | event | one incoming change from a tracker | observation, acceptance, acquisition |
 | sync | moving the plan in either direction | |
 | Work | the model's name, in dev docs only | |
@@ -56,7 +59,7 @@ Wave/subtree IDs, captured tracker bindings, and exact pending authored changes.
 The lifecycle saves intent before planning edits, prepares file changes off-checkout,
 and commits saved after-images through a private index. Retries retain unfinished
 effects, exclude replacement identities and preserve later edits. These receipts
-never participate in Git planning exchange; Wave identity and retirement remain
+never travel to another Machine; Wave identity and retirement remain
 planning-writer facts.
 A Wave's default graph is a committed `.lf/graphs/` file or a builtin. A Wave
 records only the selected name, which travels with planning.
@@ -80,7 +83,7 @@ with its local write revision, optional tracker binding and last refresh time.
 Project prose, KRs and metric targets are separate stored fields. Local
 reads and the shared typed writer never parse or regenerate Markdown. Conversion
 reads the released Markdown once inside the migration transaction, preserves
-the last refresh time, and seeds Git history only after conversion. Only the selected
+the last refresh time. Only the selected
 current Project supplies the migrated Wave default graph; Project history
 retains no graph authority.
 Prompt assembly and Linear delivery render at their boundaries; malformed legacy
@@ -102,9 +105,11 @@ flattening records does not make checkout or execution fields synchronizable.
 from `.lf/config.yaml`; `linear/` and `asana/` own tracker requests, responses and
 incoming events. The store never builds tracker input, and no `Linear*` type leaves
 `linear/`: trackers fail with `tracker::TrackerError`.
-`ops/planning_sync.rs` owns foreground exchange, store access and Wave locks for
-both transports. Ordinary Task lookup and comments belong to `ops/task.rs`.
-A Git lookup miss stays a Git lookup miss; it cannot fall through to Linear.
+`ops/planning_sync.rs` owns save delivery, store access and Wave locks;
+`ops/plan_hub.rs` owns the exchange with a hub, `ops/plan_git.rs` the one with
+a remote, and `ops/plan_carriers.rs` when the two run together. Ordinary Task
+lookup and comments belong to `ops/task.rs`. A lookup miss without a tracker
+exchanges once by each carrier; it cannot fall through to Linear.
 Unmapped local Projects remain local during Linear refresh until their export links them.
 
 `loopflow_model::comment::TaskComment` owns shared discussion. `TaskComments` joins
@@ -179,42 +184,132 @@ destination changes neither the revision nor action. Pending refiling allows inb
 events from another Wave to adopt conflicting Linear membership, retain both
 values and advance unrelated fields. It never grants execution or tracker-write authority.
 
-One typed writer, `sqlite/planning_write.rs`, owns planning field persistence and
-Git mutation capture. Local writes and journal mutations carry `WorkEdit`: a target
-identity and a typed `WorkValue`. The value determines its scope and conflict field;
-Git and the local journal retain the same typed mutation, including its causal
-parents. SQLite derives target, field and clock indexes from that value; its table
-routing stays private to the writer. Import uses those values
-directly, with the same record construction as local writes. The caller's transaction includes admission, planning,
-local delivery actions and mutation identity. Execution columns are absent from
-this writer. Local creation attaches machine-specific metadata afterward in the
-same transaction. Import never creates execution placement or tracker attempts.
+One typed writer, `sqlite/planning_write.rs`, owns planning field persistence.
+Local writes, tracker events and records arriving from another Machine all carry `WorkEdit`: a target
+identity and a typed `WorkValue`. The value determines its scope and conflict
+field; table routing stays private to the writer. Imports use those values
+directly, with the same record construction as local writes. The caller's
+transaction includes admission, planning, local delivery actions and the owner's
+change stamp. Execution columns are absent from this writer. Local creation
+attaches machine-specific metadata afterward in the same transaction. Import
+never creates execution placement or tracker attempts.
 
-Repository configuration selects Linear, shared Git (`shared/main` by default) or
-personal Git.
-Repository `tracker` overrides the personal setting as one value. Linear-connected
-machines acquire and deliver independently through their existing local actions.
-An outage buffers changes locally; Git cannot take over. Git transports code in
-both modes. The Git plan carries shared edits. Each Machine keeps its own tracker actions, attempts and confirmations. No designated publisher exists.
+Repository configuration selects Linear, Asana or neither. Repository `tracker`
+overrides the personal setting as one value; the released `provider: git` reads
+as neither. Linear-connected Machines acquire and deliver independently through
+their own actions; an outage buffers changes locally.
 
-Git imports retain immutable mutations before projection. Field causality precedes
-logical clocks and stable mutation-ID ties. All losing values remain inspectable.
-`git_tracker_seen` records only successfully applied heads: a rejected import
-cannot become the causal parent of a later local save. Projection uses per-object
-savepoints so a conflicting parent preserves that object's history while independent
-objects advance. Wave selection follows Project projection. Invalid documents,
-reused mutation IDs and foreign repository ownership roll back the import. Repeated
-imports create no echo edits. Fetch, import and publication have distinct receipts;
-a lost push reply requires readback before publication is reported confirmed.
+### Without a tracker: stamps and carriers
 
-Current Work ownership selects new Git exports. Each exported or imported mutation
-retains its repository and destination in `git_tracker_routes`, independently of
-live Work rows. Switching refs, moving Work or deleting a row cannot erase earlier
-routing or rejected imports. Status derives the active destination from configuration;
-there is no stored selection or per-Work membership inventory. These routes are
-exchange evidence and grant no Task ownership. Ownership entries travel as marked
-Task comments in both modes; with Git planning, each local append sorts after every
-entry its Machine has seen.
+```text
+laptop$ lf task edit 3e1c9a --title one      # stamped (1763474520113, laptop)
+mini$   lf task edit 3e1c9a --title two      # stamped (1763474529870, mini)
+# after any exchange, in any order, by any carrier: "two" on both
+```
+
+Without a tracker, each Machine's store holds the whole plan and one stamp per
+field (`plan_stamps`). The plan a Machine shows is, for each field, the value
+with the newest stamp it has received. Nothing else decides: there is no
+conflict state between Loopflow Machines and no Machine owns the plan.
+
+- **Stamp.** `(at, machine id)`, compared in that order. `at` is
+  `max(wall clock in ms, highest at this Machine has written or seen + 1)`, so
+  an edit made after seeing yours beats yours whatever either clock says, and
+  edits that never saw each other resolve by when they were made. A save stamps
+  every field it changes inside its own transaction. A field with no stamp row
+  reads as `(0, this Machine)`: any save beats it.
+- **Record.** A record's id, its table and every field it has, each with
+  `{value, at, machine}`. `plan.apply`, `plan.changes` and a file in a plan ref
+  carry exactly this, from one serializer.
+- **One way in.** `planning_write` takes stamped records from elsewhere through
+  one function: each field is written (`WriteOrigin::Import`) only when its
+  stamp is newer than the one held, and the clock moves past the highest seen.
+  Applying a record twice, late or from two carriers gives the same plan.
+- **`plan_changes`** is the local order in which records changed. A local save
+  bumps its record; so does an arriving value that wins. An arrival that
+  changes nothing bumps nothing, which is what ends an exchange.
+- **`plan_carriers`** holds one row per repository and carrier (`git`, `hub`):
+  the peer, how far into `plan_changes` the carrier has taken (`sent_seq`), the
+  hub's watermark read to (`seen_seq`), the last error, and how many records
+  its last read brought that this Machine could not write, with why
+  (`not_taken`, `not_taken_reason`). A carrier's
+  unsent records are those past its `sent_seq`. Sending one twice changes nothing, so
+  there is no per-field queue and no sent-but-unconfirmed phase.
+
+Comments, ownership entries and created records only append. Deletion is a
+field. Arriving comments carry ownership entries into the Task's log and steer
+the Task with a person's direction comment, as a local comment would, whichever
+carrier brought them. A claim is first-wins: an ownership entry names the
+entry in effect when it was written and carries its order from its writer's
+plan clock, and a claim whose writer had not seen the claim holding the Task
+loses to it ([ownership](machines.md)). The losing Machine stops its run and
+keeps the work. `lf task claim` and `lf task run` on an
+unowned Task exchange first, briefly, and go ahead if that fails.
+
+**Git.** `refs/loopflow/plan/<machine id>` on the repository's remote holds that
+Machine's whole plan, whoever wrote each field: one canonical-JSON file per
+record (`tasks/<2 hex>/<id>.json`, `waves/<id>.json`, `projects/<id>.json`,
+`comments/<2 hex>/<id>.json`) and `repository`, the repository id. Only the
+owning Machine pushes its ref, so a push is a fast-forward and is never forced.
+One exchange fetches `refs/loopflow/plan/*` into `refs/loopflow/plan-seen/*`,
+reads the files that changed in each other Machine's ref since the tip in
+`plan_refs`, applies them through the one way in, then commits the records
+past `sent_seq` onto its own ref and pushes. It uses no index and no worktree,
+and runs outside any SQLite transaction. A file that does not parse, or a
+field this build does not know, is skipped and logged; the rest applies. A
+record, from either carrier, that cannot be written here, such as a Wave
+whose name another active Wave of the repository already holds, is not
+taken, with its Projects and Tasks, and the rest applies. The import returns
+those records. Git then leaves that ref's tip out of `plan_refs`, the hub
+carrier keeps its `seen_seq`, and a hub answers `plan.apply` with their count
+so the sender keeps its `sent_seq`: each carrier brings them again at every
+exchange until they can be written. `plan_carriers.not_taken` holds their
+count and `not_taken_reason` why the first was not (`wave design from mini
+…`), set and cleared by a read; the exchange fails with both
+(`3 not taken: wave design from mini …`), so `lf task sync` exits 1, and the
+carrier's own `error` stays empty. Each
+clone keeps its own repository id and records the id every fetched ref names
+as a locator of its checkout (`locate_repository`), so a hub or a move that
+names the repository by another Machine's id finds it and no saved Task
+changes repository. A repository with no remote writes no ref. A gone Machine's ref can be deleted once any Machine has fetched it.
+
+**Hub.** A Machine whose `hub:` setting names another sends the records past
+`sent_seq` in `plan.apply` and reads `plan.changes { repository, since }` page
+by page; order does not matter, and the first exchange sends the whole plan
+once. The hub applies the same rule as everyone and reaches the repository
+through its own clone. The carrier is `ssh <hub> lf server connect`
+(`ops/plan_hub.rs`). Clearing the hub deletes its carrier rows and loses
+nothing.
+
+**When they run.** `ops/plan_carriers.rs` has two verbs. `send` follows every
+save, from the CLI or the server: the hub takes the records past its cursor and
+Git pushes this Machine's ref as last fetched, with no fetch, both within five
+seconds. While Git holds something not taken the save fetches and reads as
+well, since the save may be the rename that lets it arrive. A push that fails, runs out of time or is refused (the remote's copy
+of the ref is ahead of the one fetched) leaves its records unsent. `sync` reads
+and sends by each carrier: `lf task sync`, `lf wave status --sync`, before a
+claim, before `lf wave create` or `lf task create --wave` makes a Wave (five
+seconds at most, so a Wave of that name made elsewhere is joined, not made
+twice), on a Task lookup that misses, and after each command the server
+answers, one exchange per repository at a time and at most one every five
+seconds after the last. One server task runs the Git exchange for
+every repository that has a remote and no tracker every 60 s, which is how
+another Machine's change arrives with no hub; with no server it waits for
+`lf task sync`. The first `lf task list` or `lf repo tracker` in a clone the Machine
+has saved nothing in does one exchange before it reads, which registers the
+clone for the server's minute. A served read of such a clone answers with an
+empty plan once and exchanges after its reply. Task creation reads
+nothing first: the send after its save takes in what changed at the hub. A
+provider exit reads the hub only; `lf repo tracker --subscribe` reads the
+store alone. Every
+exchange a command waits on without asking for it (a save, a claim, a first
+read, a read of the hub) is stopped at five seconds: Git is killed and the
+hub's answer is waited for until then, and the next exchange carries the
+rest. `lf task sync` waits as long as the carriers take.
+
+A change costs one small commit per Machine on the remote; sized for about ten
+Machines per repository. Tracker repositories use none of this:
+`tracker_actions` below, per Machine.
 
 ### One outbound queue
 
@@ -225,7 +320,7 @@ transaction that saves it: `create`, `field`, `order`, `state`, `comment`,
 Wave, Project or Task, on the tracker named by `tracker`, set when it is queued
 from the owner's binding or queued creation. `value_json` is a `WorkValue` in
 store words; `linear/actions.rs` and `asana/actions.rs` turn it into a request
-and nothing else does. `WriteOrigin::Local` writes queue; applying tracker events or Git imports queues nothing, so incoming edits never echo. A newer queued value for the same owner and subject
+and nothing else does. `WriteOrigin::Local` writes queue; applying tracker events or another Machine's records queues nothing, so incoming edits never echo. A newer queued value for the same owner and subject
 retires the older one; a sent one stays for its look. An owner with no
 binding and no queued `create` queues nothing.
 
@@ -240,7 +335,7 @@ whose Wave has no Initiative): the block is decided before the send, saves its
 error once and keeps the action queued at no cost to the pass. A pass
 with nothing unconfirmed asks the tracker nothing.
 `lf task sync <id>` drains one owner now, looking for every sent action at
-once; on Git it exchanges the planning ref.
+once; without a tracker it exchanges the repository's plan by Git and with the hub.
 
 `planning::rules::decide` confirms each kind against what the tracker holds,
 for the drain and for inbound events alike, or marks it conflicted: a field
@@ -266,7 +361,7 @@ and confirms the `create`. An unknown creation outcome stays sent until a
 look finds it; a matching title proves nothing.
 Comments retain identity and authorship. Incoming planning completion changes only
 the planning disposition: it neither moves a local Task nor authorizes cleanup.
-Session/Process records and checkout paths never enter the Git document.
+Session/Process records and checkout paths never travel to another Machine.
 
 One view answers "where does my change stand" on every tracker:
 `TrackerActionStatus` (`planning_sync.rs`). An action is open while `queued`
@@ -278,23 +373,20 @@ lost action retires when it is answered: a later save of its subject
 newer revision ("changed again in Linear"), or `answer_lost` over action ids
 of any owner (`lf repo tracker answer <id> --keep-theirs | --use-mine`, served
 as `repo.tracker.answer` for Desktop's Keep / Use mine on every line; `lf task sync
---keep-theirs | --use-mine` answers a Task's whole slice). Git
-has no queue: a field's competing journal heads are its lost values, the
-winner's value as `tracker_value`, until a save names them all as parents;
-an answer records the chosen value with every head as a parent. `lf repo tracker`
-on Git lists its destinations, its fetch and publication receipts and held
-projections, then its lost values. The retained
-mutation journal grows with every edit, so `lf repo tracker journal` reads it on
-request: every change, losing values included, and the ranked candidate IDs, which
-are not applied or published evidence; rejected projections retain their failure reasons.
-Journal read failures fail the status read; Desktop keeps its last reading with the
-error, rather than inventing an empty plan. Foreground CLI, headless Session and Desktop connections own Git exchange
-for their lifetimes; Linear checks run at the boundaries described below. A short save attempts exchange before returning. No resident,
-whole-store callback, scheduler or implicit turn/Graph replay is involved.
+--keep-theirs | --use-mine` answers a Task's whole slice). Without a tracker,
+`lf repo tracker` has one line per carrier, `Plan: Git origin, 2 unsent.` and
+`Hub mini.`, each with its unsent records by identifier, its last error and
+what it brought that was not taken (`Plan: Git origin, 3 not taken.`), or
+`Plan: this Machine.` with no remote and no hub; `--json` carries the same as
+`plan: {git, hub}`, each `{remote | machine, unsent, records, error,
+failing_since, not_taken: {count, reason} | null}` or null; `unsent` counts and `records` names the first twenty. Linear checks run
+at the boundaries described below. A short save attempts delivery after its
+answer. No resident, whole-store callback, scheduler or
+implicit turn/Graph replay is involved.
 
 `--machine` sends portable pushed-code requirements and a Task selector, then the
 target resolves its own configured planning. Linear mappings resolve independently
-retained legacy IDs. Git imports preserve local planning IDs. A source Task awaiting
+retained legacy IDs. Machines without a tracker share every planning ID. A source Task awaiting
 Linear creation is unavailable remotely until publication succeeds. Fetch precedes
 code decisions, including branches without PRs. Repeated dispatch reuses the existing
 Task and checkout; unpushed source work and a target missing the requested commit
@@ -317,7 +409,7 @@ Failed checks keep the prior watermark and local planning.
 Teams without live Tasks are not checked. Locally finished/abandoned identities
 are excluded from refresh. Explicit detail reads remain available. Desktop and
 `--subscribe` alone own a clock: 30–60 seconds initially, backing off to four minutes
-while unchanged. Closing the watcher stops it; idle agents own no Linear timer. Git exchange retains its foreground lifetime.
+while unchanged. Closing the watcher stops it; idle agents own no Linear timer. Hub exchange has no clock of its own; the Git fetch is the server's one 60 s timer.
 Projection functions remain local; command boundaries acquire before projecting.
 
 Linear HTTP 400 rate-limit errors, 429 and exhausted request/endpoint/complexity

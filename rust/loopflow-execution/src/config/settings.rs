@@ -286,7 +286,7 @@ fn validate_agent_policy(agent: &str) -> Result<(), LoadError> {
     let (harness, variant) = super::parse_agent(agent);
     let kind = loopflow_harness::HarnessKind::parse(&harness).ok_or_else(|| {
         invalid(format!(
-            "unsupported agent harness '{harness}': use 'claude', 'codex', 'opencode', 'pi', or 'antigravity'"
+            "unsupported agent harness '{harness}': use 'claude', 'codex', 'opencode', 'pi', or 'agy'"
         ))
     })?;
     if let Some(model) = variant {
@@ -667,11 +667,6 @@ pub(crate) fn resolve_with(
         &mut defaults,
         &["graph"],
         crate::ops::task::DEFAULT_TASK_GRAPH.into(),
-    );
-    insert(
-        &mut defaults,
-        &["planning"],
-        serde_yaml_ng::to_value(super::TrackerConfig::default()).expect("planning serializes"),
     );
     for key in crate::prompt::context_budget::BudgetKey::ALL {
         insert(
@@ -1328,7 +1323,8 @@ mod tests {
                 None,
             )
             .unwrap();
-            assert!(!resolved.config.yolo);
+            // An unreadable `yolo` falls to the default, which is on.
+            assert!(resolved.config.yolo);
             assert!(resolved.config.claude.model.is_none());
             if values.starts_with("context:") {
                 assert_eq!(resolved.config.context.docs, ["README.md"]);

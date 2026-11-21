@@ -275,7 +275,7 @@ fn environment(
     if !settings.is_object() {
         bail!("OPENCODE_CONFIG_CONTENT must be a JSON object");
     }
-    if config.skip_permissions {
+    if config.skips_permissions(kind.mode()) {
         settings["permissions"] =
             serde_json::json!([{ "action":"*", "resource":"*", "effect":"allow" }]);
     }

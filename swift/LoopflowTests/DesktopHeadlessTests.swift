@@ -69,14 +69,12 @@ struct DesktopHeadlessTests {
         #expect(try view.inspect().find(text: "demo · available for review").string() == view.label)
     }
 
-    @Test("The repository roadmap reads Git planning through the ordinary query")
-    func roadmapGitDestinations() async throws {
-        let data = try Data(contentsOf: fixtures.appendingPathComponent("git_destinations.json"))
-        let status = String(decoding: data, as: UTF8.self)
+    @Test("The repository roadmap shows where its plan lives through the ordinary query")
+    func roadmapRepositoryPlan() async throws {
         let roadmap = String(decoding: try Data(contentsOf: fixtures.appendingPathComponent("roadmap_snapshot.json")), as: UTF8.self)
         let model = WorkModel(query: RegistryQuery { args, cwd in
             if args == ["repo", "tracker", "--json"], cwd == "/src/loopflow" {
-                return "{\"destinations\":\(status)}"
+                return #"{"tracker":null,"plan":{"git":null,"hub":{"machine":"mini","unsent":1,"records":["3e1c9a07"],"error":null,"failing_since":null,"not_taken":null}},"actions":[]}"#
             }
             if args.first == "roadmap" { return roadmap }
             if args.first == "wave" { return "[]" }
@@ -84,10 +82,12 @@ struct DesktopHeadlessTests {
             throw RegistryQueryError("Unexpected command: \(args)")
         }, repoPath: "/src/loopflow")
         await model.refresh()
-        #expect(model.gitDestinations.value?.count == 2)
+        #expect(model.repositoryPlan.value?.plan?.hub?.machine == "mini")
         let view = RoadmapView(model: model, onOpenWave: { _ in }, onOpenTask: { _, _ in })
-        let statusView = try view.inspect().find(GitDestinationsView.self)
-        #expect(try statusView.find(text: "Local changes pending").string() == "Local changes pending")
+        let planView = try view.inspect().find(RepositoryPlanView.self)
+        #expect(try planView.find(text: "Plan: this Machine.").string() == "Plan: this Machine.")
+        #expect(try planView.find(text: "Hub mini, 1 unsent.").string() == "Hub mini, 1 unsent.")
+        #expect(try planView.find(text: "3e1c9a07").string() == "3e1c9a07")
     }
 
     @Test("Tracker sync shows queued, sent and conflicted actions, then clears confirmed work")
@@ -650,7 +650,7 @@ struct DesktopHeadlessTests {
         // The clicked row darkens before the selection moves it.
         for _ in 0..<50 where model.selection != .wave(id: wave.id) { try await Task.sleep(for: .milliseconds(20)) }
         #expect(model.selection == .wave(id: wave.id))
-        _ = try view.inspect().find(viewWithAccessibilityIdentifier: "wave-standup-board")
+        _ = try view.inspect().find(viewWithAccessibilityIdentifier: "wave-backlog")
         let title = try view.inspect().find(viewWithAccessibilityIdentifier: "wave-title").text().string()
         #expect(title == "Product")
         let task = try #require(roadmap.waves.first?.tasks.items.first)

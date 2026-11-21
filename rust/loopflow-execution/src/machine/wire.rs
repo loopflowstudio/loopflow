@@ -1,4 +1,4 @@
-//! Carrier-independent server protocol, revision 8: one connection per client,
+//! Carrier-independent server protocol, revision 9: one connection per client,
 //! negotiated revision, requests multiplexed by id. Local admission is
 //! same-user only; the remote carrier admits the Machine owner's other
 //! Tailscale devices. Each carrier delimits messages its own way: the Unix
@@ -11,7 +11,10 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// The newest revision this build speaks.
-pub const REVISION: u32 = 8;
+pub const REVISION: u32 = 9;
+/// The first revision that holds a plan for other Machines (`plan.apply`,
+/// `plan.changes`).
+pub const PLAN_REVISION: u32 = 9;
 /// The oldest revision this build speaks. Revision 8 requires `sender` on
 /// `request` and `subscribe`; it keeps 7's write revisions and request IDs.
 pub const MIN_REVISION: u32 = 8;
@@ -257,6 +260,49 @@ pub enum ServerOperation {
     #[serde(rename = "session.boundary")]
     #[schemars(extend("x-result" = generator.subschema_for::<SessionBoundaryAnswer>()))]
     SessionBoundary(SessionBoundary),
+    /// The hub's side of a plan exchange: take in another Machine's stamped
+    /// records of `repository`'s plan, in one transaction. Each field is
+    /// written only when its stamp is newer than the one held here, so
+    /// repeating it changes nothing.
+    #[serde(rename = "plan.apply")]
+    #[schemars(extend("x-result" = generator.subschema_for::<PlanApplied>()))]
+    PlanApply {
+        repository: loopflow_model::durable::RepositoryId,
+        #[schemars(with = "Vec<Untyped>")]
+        records: Vec<loopflow_storage::work::edit::StampedRecord>,
+    },
+    /// Each Wave, Project, Task and comment of `repository`'s plan here that
+    /// changed after the watermark `since`, whole, every field with its stamp;
+    /// null reads the whole plan.
+    #[serde(rename = "plan.changes")]
+    #[schemars(extend("x-result" = generator.subschema_for::<PlanChanges>()))]
+    PlanChanges {
+        repository: loopflow_model::durable::RepositoryId,
+        #[serde(deserialize_with = "Option::deserialize")]
+        since: Option<i64>,
+    },
+}
+
+/// What `plan.apply` answers.
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PlanApplied {
+    /// How many of the records could not be written here (a Wave whose name
+    /// a Wave here holds, and what hangs from it). The sender keeps them
+    /// unsent and sends them again.
+    pub not_taken: usize,
+}
+
+/// What `plan.changes` answers.
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PlanChanges {
+    #[schemars(with = "Vec<Untyped>")]
+    pub records: Vec<loopflow_storage::work::edit::StampedRecord>,
+    /// The watermark to read from next.
+    pub seq: i64,
+    /// More changes follow `seq`; read again from it.
+    pub more: bool,
 }
 
 /// What a hook says at a turn or tool boundary.

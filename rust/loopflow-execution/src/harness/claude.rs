@@ -748,7 +748,7 @@ mod tests {
                     AgentConfig {
                         agent: crate::config::Agent::parse(settings.agent().unwrap()).unwrap(),
                         chrome: settings.chrome,
-                        skip_permissions: settings.yolo,
+                        yolo: settings.yolo,
                         cwd: Some(home.into()),
                         ..crate::agent::AgentConfig::default()
                     },
@@ -1328,7 +1328,7 @@ impl super::Launcher for loopflow_harness::Claude {
             launch.config,
             model.as_deref(),
             launch.context_file,
-            false,
+            launch.kind.mode(),
         ));
         if let Some(thread) = &client.thread {
             args.extend([
@@ -1387,7 +1387,7 @@ pub fn stream_args(
         config,
         model.as_deref(),
         context_file,
-        true,
+        super::Mode::Headless,
     ));
     if let Some(thread) = thread {
         args.extend(["--resume".into(), thread.to_string()]);

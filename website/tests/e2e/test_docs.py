@@ -59,7 +59,7 @@ def test_docs_security_page_states_resident_login_guarantees(page: Page, base_ur
     assert content.is_visible()
     text = " ".join(content.inner_text().split())
     assert "Only the first is general containment" in text
-    assert "workspace-write" in text
+    assert "never ask, whatever yolo says" in text
     assert "Loopflow checks the saved Machine identity before transfer" in text
     assert "Credential bytes travel through SSH stdin" in text
     assert "Existing destination files are retained" in text

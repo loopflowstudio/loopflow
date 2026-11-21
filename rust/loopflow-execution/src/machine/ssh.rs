@@ -202,7 +202,7 @@ impl Drop for Pipe {
 }
 
 /// `mini runs lf 0.15.2, which cannot take this operation; update it with …`.
-fn outdated(machine: &loopflow_model::durable::Machine) -> String {
+pub(crate) fn outdated(machine: &loopflow_model::durable::Machine) -> String {
     let name = machine.label.as_deref().unwrap_or(machine.route.as_str());
     let update = super::connection::update_command(&machine.route);
     let version = tokio::runtime::Runtime::new()

@@ -464,6 +464,14 @@ fn graph_compositions_round_trip_distinct_compositions_and_required_children() {
     ))
     .unwrap();
     assert!(catalog[0].composition.is_some() && catalog[1].composition.is_none());
+    for field in ["included_by", "runs"] {
+        let mut missing = serde_json::to_value(&catalog[0]).unwrap();
+        missing.as_object_mut().unwrap().remove(field);
+        assert!(
+            serde_json::from_value::<GraphCatalogEntry>(missing).is_err(),
+            "{field}"
+        );
+    }
 }
 
 #[test]
@@ -639,9 +647,17 @@ fn subscribe_frames_carry_each_reads_json_result() {
             "work_activity" => {
                 read::<loopflow::lf::commands::activity::WorkActivitySnapshot>(&body)
             }
-            "git_destinations" => {
-                read::<Vec<loopflow_execution::store::GitDestination>>(&body["destinations"]);
-                assert_eq!(body["tracker"], "git");
+            "plan_home" => {
+                assert_eq!(body["tracker"], serde_json::Value::Null);
+                assert_eq!(body["plan"]["git"]["remote"], "origin");
+                assert_eq!(body["plan"]["hub"]["machine"], "mini");
+                assert_eq!(body["plan"]["hub"]["unsent"], 1);
+                assert_eq!(body["plan"]["git"]["not_taken"]["count"], 3);
+                assert!(body["plan"]["git"]["not_taken"]["reason"]
+                    .as_str()
+                    .unwrap()
+                    .starts_with("wave design from mini "));
+                assert_eq!(body["plan"]["hub"]["not_taken"], serde_json::Value::Null);
             }
             other => panic!("unknown subscription {other}"),
         }
@@ -742,14 +758,10 @@ fn tracker_sync_preserves_sent_actions_and_losing_values() {
     );
     assert!(sync.lines()[3].contains("linear: null"));
     assert_eq!(sync.actions[1].owner_kind, ActionOwnerKind::Project);
-    assert_eq!(sync.actions[5].seq, None);
-    assert_eq!(sync.actions[5].tracker, TrackerKind::Git);
-    assert_eq!(
-        sync.lines()[5],
-        r#"title · conflicted · lost: "Mine" · git: "Peer title""#
-    );
+    assert_eq!(sync.actions[0].tracker, TrackerKind::Linear);
     let mut unknown = value;
-    unknown["actions"][0]["tracker"] = serde_json::json!("notion");
+    // Released Git lines are gone with Git planning.
+    unknown["actions"][0]["tracker"] = serde_json::json!("git");
     assert!(
         serde_json::from_value::<loopflow_execution::store::planning_sync::TrackerSync>(unknown)
             .is_err()
@@ -1010,76 +1022,6 @@ fn session_steers_say_when_each_was_read() {
 }
 
 #[test]
-fn git_destinations_keeps_independent_receipts() {
-    let value: serde_json::Value = serde_json::from_str(include_str!(
-        "../../../tests/fixtures/dto/git_destinations.json"
-    ))
-    .unwrap();
-    let statuses: Vec<loopflow_execution::store::GitDestination> =
-        serde_json::from_value(value.clone()).unwrap();
-    assert_eq!(
-        statuses[0].fetch_error.as_deref(),
-        Some("remote unavailable")
-    );
-    assert!(statuses[0].pending_local);
-    assert_eq!(
-        statuses[0].publication_state.as_deref(),
-        Some("unconfirmed")
-    );
-    assert_eq!(statuses[0].conflicts.len(), 1);
-    assert!(statuses[1].pending_local);
-    assert_eq!(serde_json::to_value(&statuses).unwrap(), value);
-    for field in ["conflicts", "pending_local", "fetch_error"] {
-        let mut missing = value[1].clone();
-        missing.as_object_mut().unwrap().remove(field);
-        assert!(
-            serde_json::from_value::<loopflow_execution::store::GitDestination>(missing).is_err()
-        );
-    }
-}
-
-#[test]
-fn planning_journal_keeps_losing_values_and_its_winners() {
-    let value: serde_json::Value = serde_json::from_str(include_str!(
-        "../../../tests/fixtures/dto/planning_journal.json"
-    ))
-    .unwrap();
-    let journals: Vec<loopflow_execution::store::PlanningJournal> =
-        serde_json::from_value(value.clone()).unwrap();
-    assert_eq!(
-        journals[1].changes["comment-head"]
-            .edit
-            .change
-            .value()
-            .unwrap()["author"],
-        serde_json::json!({"kind": "person", "name": "Maya"})
-    );
-    assert_eq!(
-        journals[1].changes["title-loser"]
-            .edit
-            .change
-            .value()
-            .unwrap(),
-        "Retained title"
-    );
-    assert!(!journals[1].candidates.contains("title-loser"));
-    assert!(journals[1].changes["title-head"]
-        .parents
-        .contains("title-loser"));
-    for journal in &journals {
-        let snapshot = loopflow_execution::planning_exchange::PlanningSnapshot {
-            changes: journal.changes.clone(),
-        };
-        snapshot.validate().unwrap();
-        assert_eq!(
-            journal.candidates,
-            snapshot.winners().map(|(id, _)| id.to_owned()).collect()
-        );
-    }
-    assert_eq!(serde_json::to_value(&journals).unwrap(), value);
-}
-
-#[test]
 fn unplaced_wave_preserves_nullable_machine() {
     let fixture: serde_json::Value = serde_json::from_str(include_str!(
         "../../../tests/fixtures/dto/unplaced_wave.json"
@@ -1266,10 +1208,9 @@ fn desktop_state_retains_outer_and_inner_layouts() {
             .iter()
             .map(|part| part.name.as_str())
             .collect::<Vec<_>>(),
-        ["board", "session", "tiles"]
+        ["backlog", "session", "tiles"]
     );
-    assert_eq!(parts[0].done_days, Some(7));
-    assert_eq!(parts[0].section.as_deref(), Some("backlog"));
+    assert!(parts[0].text.as_deref().unwrap().contains("All 0 · Mine 0"));
     assert_eq!(parts[2].ratio, 0.382);
     assert_eq!(
         parts.iter().map(|part| part.zoomed).collect::<Vec<_>>(),

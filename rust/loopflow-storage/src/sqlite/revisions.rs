@@ -152,8 +152,12 @@ mod tests {
         "planning_peer_imports",
         "planning_peer_observed",
         "planning_peer_routes",
+        // A field's stamp decides which value is kept; views read the value.
+        "plan_stamps",
+        // Which commit of another Machine's plan ref was read; views read the plan.
+        "plan_refs",
         "blob_tokens",
-        // Desktop reads GitHub people once per repository through `lf repo people`.
+        // A lookup cache `lf repo people` fills; no Work projection reads it.
         "github_people",
         // Refresh attempts and watermarks do not change displayed Work.
         "linear_team_checks",
@@ -630,6 +634,8 @@ mod tests {
             "task_changes",
             "task_state_deliveries",
             "tracker_actions",
+            "plan_carriers",
+            "plan_changes",
         ] {
             let trigger: String = conn
                 .query_row(

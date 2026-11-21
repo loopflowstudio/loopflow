@@ -30,8 +30,6 @@ pub mod ops;
 pub mod os_process;
 pub mod output;
 pub mod performance;
-pub mod planning_exchange;
-pub mod planning_git;
 pub mod platform;
 pub mod portfolio;
 pub mod pr_landing;

@@ -34,7 +34,7 @@ impl NativeClient {
             .clone()
             .map(Ok)
             .unwrap_or_else(std::env::current_dir)?;
-        let mut process = Command::new(launch.harness.program());
+        let mut process = Command::new(launch.harness.kind().as_str());
         crate::agent::remove_caller_session_env(&mut process);
         process
             .current_dir(&cwd)
@@ -122,7 +122,7 @@ pub fn resume_session_with_env(
         .session_for_artifact(artifact_key)?
         .ok_or_else(|| anyhow!("Session input {artifact_key} is not recorded"))?;
     let mut config =
-        crate::agent::resolve_session_config(&session, serde_yaml_ng::Value::Null, None, false)?;
+        crate::agent::resolve_session_config(&session, serde_yaml_ng::Value::Null, None)?;
     let harness = super::launcher(config.agent.harness);
     anyhow::ensure!(
         session.provider.as_deref() == Some(harness.kind().as_str()),
@@ -480,13 +480,6 @@ pub fn run(
     launch_lock: Option<File>,
     capture: Option<&LfProcessRuntime>,
 ) -> Result<NativeOutcome> {
-    let cwd = launch
-        .config
-        .cwd
-        .clone()
-        .map(Ok)
-        .unwrap_or_else(std::env::current_dir)?;
-    let _planning_sync = crate::ops::planning_sync::PlanningSync::start_for_directory(&cwd)?;
     let harness = launch.harness;
     let program = harness.kind().as_str();
     let mut progress = crate::startup::Startup::new(format!("Preparing {program}"));

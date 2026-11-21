@@ -191,11 +191,15 @@ Built. A held terminal has no controlling view:
 - **Input.** Every view can type. There is no takeover token or **Move
   here**. Opening a Session whose provider runs in a native client outside a
   held terminal takes it over: lf cannot share that terminal.
-- **Size.** The live view with the latest attach, input or focus sets the
-  terminal size; other views render that grid. When it detaches, the size
-  goes to the remaining view that most recently did one of those. Views
-  report focus through DEC 1004; hosts that don't fall back to attach and
-  typing.
+- **Size and focus.** The live view a person most recently focused or typed in
+  (or attached with `focused: true`, the default for an interactive terminal)
+  sets the terminal size and colors; other views render that grid. Unfocused
+  attaches (`focused: false`, used by Desktop panes and `--unfocused`) leave the
+  current owner alone until focused or typed in, and when the owner detaches,
+  the next most recent live view takes over (ties keep the current owner). Views
+  report focus through DEC 1004 and carry their last known focus on reconnect;
+  hosts that don't report focus fall back to typing (or a focused attach).
+  Focus-out (`CSI O`) reaches the agent only from the sizing view.
 - **Queries.** Only the sizing view's answers to terminal queries reach the
   agent; other views' replies are dropped before the PTY.
 

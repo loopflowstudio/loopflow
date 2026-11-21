@@ -42,7 +42,8 @@ work session). Contributors looking for internal runtime contracts can check
 |---|---|
 | **Worktree** | A separate on-disk checkout of a Git repo on its own branch, so parallel Tasks never overwrite each other. |
 | **Sync** | Merging updates from `main` (or a stack parent) into a feature branch while keeping its commit history. |
-| **Tracker** | Where Tasks and Wave plans sync: a Git ref on `origin` by default, or Linear or Asana. |
+| **Tracker** | Linear or Asana, when a repository shares its Tasks and Wave plans there with coworkers. |
+| **Hub** | An always-on Machine your other Machines exchange the plan with in seconds, for every repository without a tracker. Without one the plan still travels through Git. Set with `lf machine hub`. |
 | **Pull request** (**PR**) | A proposal to merge a branch into `main` (or a stack parent) on GitHub. |
 | **Land** | Merging a PR into its base branch (`lf land --wait-and-fix` repairs CI until it merges). |
 | **CI** | Automated tests and lint checks that run on every PR. |

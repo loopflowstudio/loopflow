@@ -2527,97 +2527,60 @@
       ],
       "type": "object"
     },
-    "GitDestination": {
-      "description": "Local routing and import evidence. Endpoints are deliberately not displayed:\nGit URLs can contain credentials. A checkpoint is not publication evidence.",
+    "GitCarrier": {
+      "description": "Git's line: `Plan: Git origin, failing since Nov 18 14:02, 3 unsent.`",
       "properties": {
-        "active": {
-          "type": "boolean"
+        "error": {
+          "description": "Why the last exchange failed, while it still fails.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
-        "conflicts": {
+        "failing_since": {
+          "description": "When the carrier stopped working (Unix seconds), while it still does not.",
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "not_taken": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NotTaken"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "What the carrier's last read brought that this Machine could not\nwrite, and reads again at each exchange. `null` when it took\neverything."
+        },
+        "records": {
+          "description": "The first of them in change order: a Task's identifier, `wave <name>`,\n`project <name>` or `comment <id>`.",
           "items": {
-            "$ref": "#/$defs/GitDestinationConflict"
+            "type": "string"
           },
           "type": "array"
         },
-        "fetch_error": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "fetched_revision": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "id": {
+        "remote": {
+          "description": "The remote's name.",
           "type": "string"
         },
-        "imported_revision": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "pending_local": {
-          "type": "boolean"
-        },
-        "publication_error": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "publication_revision": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "publication_state": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "reference": {
-          "type": "string"
-        },
-        "selected_records": {
-          "format": "uint64",
+        "unsent": {
+          "description": "How many records changed here the carrier has not taken.",
+          "format": "uint",
           "minimum": 0,
           "type": "integer"
         }
       },
       "required": [
-        "id",
-        "reference",
-        "active",
-        "selected_records",
-        "imported_revision",
-        "fetched_revision",
-        "fetch_error",
-        "publication_revision",
-        "publication_state",
-        "publication_error",
-        "pending_local",
-        "conflicts"
-      ],
-      "type": "object"
-    },
-    "GitDestinationConflict": {
-      "properties": {
-        "reason": {
-          "type": "string"
-        },
-        "target": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "target",
-        "reason"
+        "remote",
+        "unsent",
+        "records",
+        "error",
+        "failing_since",
+        "not_taken"
       ],
       "type": "object"
     },
@@ -2828,8 +2791,26 @@
             }
           ]
         },
+        "description": {
+          "description": "Its `description:` line; `None` when the file has none or does not load.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "included_by": {
+          "description": "The Graphs that include this one with `graph:`, by name. Empty for a\nGraph people start with; a piece of other Graphs names them here.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "name": {
           "type": "string"
+        },
+        "runs": {
+          "$ref": "#/$defs/GraphSubject",
+          "description": "What it runs for: a Task, or a Wave's own operation."
         },
         "source": {
           "description": "The repository file that defines it; `None` for a builtin.",
@@ -2848,10 +2829,13 @@
       },
       "required": [
         "name",
+        "description",
         "source",
         "compiled",
         "composition",
-        "unavailable"
+        "unavailable",
+        "included_by",
+        "runs"
       ],
       "type": "object"
     },
@@ -3278,6 +3262,14 @@
       ],
       "type": "object"
     },
+    "GraphSubject": {
+      "description": "What a Graph is started on.",
+      "enum": [
+        "task",
+        "wave"
+      ],
+      "type": "string"
+    },
     "HarnessRetention": {
       "properties": {
         "facts": {
@@ -3383,6 +3375,63 @@
         "home",
         "policy",
         "transcripts"
+      ],
+      "type": "object"
+    },
+    "HubCarrier": {
+      "description": "The hub's line: `Hub mini, failing since Nov 18 14:02, 2 unsent.`",
+      "properties": {
+        "error": {
+          "description": "Why the last exchange failed, while it still fails.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "failing_since": {
+          "description": "When the carrier stopped working (Unix seconds), while it still does not.",
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "machine": {
+          "description": "The hub's name.",
+          "type": "string"
+        },
+        "not_taken": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NotTaken"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "What the carrier's last read brought that this Machine could not\nwrite, and reads again at each exchange. `null` when it took\neverything."
+        },
+        "records": {
+          "description": "The first of them in change order: a Task's identifier, `wave <name>`,\n`project <name>` or `comment <id>`.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "unsent": {
+          "description": "How many records changed here the carrier has not taken.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "machine",
+        "unsent",
+        "records",
+        "error",
+        "failing_since",
+        "not_taken"
       ],
       "type": "object"
     },
@@ -3945,6 +3994,10 @@
           },
           "type": "array"
         },
+        "hub": {
+          "description": "This Machine exchanges its plan with it (`lf machine hub`).",
+          "type": "boolean"
+        },
         "id": {
           "type": "string"
         },
@@ -3975,6 +4028,7 @@
         "created_at",
         "observed_at",
         "defaults",
+        "hub",
         "tasks"
       ],
       "type": "object"
@@ -4768,6 +4822,25 @@
       ],
       "type": "string"
     },
+    "NotTaken": {
+      "properties": {
+        "count": {
+          "description": "How many records.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "reason": {
+          "description": "Why the first was not, and what to do about it when something can be\ndone: `wave design from mini has the name of a Wave here; …`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "count",
+        "reason"
+      ],
+      "type": "object"
+    },
     "Observation": {
       "description": "Freshness of the GitHub observation behind the Task's returned PR state.\nThe durable attempt metadata lives on `TaskPr`; this derived view tells one\ncaller whether it read GitHub, reused a recent reading, or opened a degraded\ncircuit while preserving the cached PR fields.",
       "oneOf": [
@@ -5178,6 +5251,22 @@
       ],
       "type": "string"
     },
+    "PlanApplied": {
+      "additionalProperties": false,
+      "description": "What `plan.apply` answers.",
+      "properties": {
+        "not_taken": {
+          "description": "How many of the records could not be written here (a Wave whose name\na Wave here holds, and what hangs from it). The sender keeps them\nunsent and sends them again.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "not_taken"
+      ],
+      "type": "object"
+    },
     "PlanBoard": {
       "properties": {
         "generated_at": {
@@ -5239,6 +5328,65 @@
         "state",
         "pr",
         "waiting_on"
+      ],
+      "type": "object"
+    },
+    "PlanCarriers": {
+      "description": "The ways a plan without a tracker reaches other Machines. Every Machine\nholds the whole plan; with none of these it stays on this one.",
+      "properties": {
+        "git": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GitCarrier"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The repository's remote; `null` without one."
+        },
+        "hub": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HubCarrier"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The Machine `lf machine hub` names; `null` without one."
+        }
+      },
+      "required": [
+        "git",
+        "hub"
+      ],
+      "type": "object"
+    },
+    "PlanChanges": {
+      "additionalProperties": false,
+      "description": "What `plan.changes` answers.",
+      "properties": {
+        "more": {
+          "description": "More changes follow `seq`; read again from it.",
+          "type": "boolean"
+        },
+        "records": {
+          "items": {
+            "$ref": "#/$defs/Untyped"
+          },
+          "type": "array"
+        },
+        "seq": {
+          "description": "The watermark to read from next.",
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "records",
+        "seq",
+        "more"
       ],
       "type": "object"
     },
@@ -8333,6 +8481,10 @@
         "next_move": {
           "$ref": "#/$defs/NextMove"
         },
+        "owned_by_you": {
+          "description": "Whether its owner is you; `false` when nobody owns it.",
+          "type": "boolean"
+        },
         "pr": {
           "anyOf": [
             {
@@ -8389,7 +8541,8 @@
         "execution",
         "run_control",
         "pr",
-        "section"
+        "section",
+        "owned_by_you"
       ],
       "type": "object"
     },
@@ -9549,6 +9702,63 @@
             "steers": null,
             "update": null,
             "waiting": false
+          }
+        },
+        {
+          "additionalProperties": false,
+          "description": "The hub's side of a plan exchange: take in another Machine's stamped\nrecords of `repository`'s plan, in one transaction. Each field is\nwritten only when its stamp is newer than the one held here, so\nrepeating it changes nothing.",
+          "properties": {
+            "kind": {
+              "const": "plan.apply",
+              "type": "string"
+            },
+            "records": {
+              "items": {
+                "$ref": "#/$defs/Untyped"
+              },
+              "type": "array"
+            },
+            "repository": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "repository",
+            "records"
+          ],
+          "type": "object",
+          "x-result": {
+            "$ref": "#/$defs/PlanApplied"
+          }
+        },
+        {
+          "additionalProperties": false,
+          "description": "Each Wave, Project, Task and comment of `repository`'s plan here that\nchanged after the watermark `since`, whole, every field with its stamp;\nnull reads the whole plan.",
+          "properties": {
+            "kind": {
+              "const": "plan.changes",
+              "type": "string"
+            },
+            "repository": {
+              "type": "string"
+            },
+            "since": {
+              "format": "int64",
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "repository",
+            "since"
+          ],
+          "type": "object",
+          "x-result": {
+            "$ref": "#/$defs/PlanChanges"
           }
         }
       ]
@@ -13242,6 +13452,14 @@
             "null"
           ]
         },
+        "order": {
+          "description": "Where the entry sorts in the Task's log on every Machine, from its\nwriter's plan clock. Absent with Linear or Asana, whose comment order\ndecides, and from entries written before claims were first-wins.",
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "person": {
           "type": [
             "string",
@@ -13257,6 +13475,13 @@
         },
         "person_key": {
           "description": "The person's stable key; names are display only.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "seen": {
+          "description": "The entry in effect when this one was written, or this entry itself\nwhen there was none. Present exactly when `order` is. A claim whose\nwriter had not seen the claim holding the Task loses to it.",
           "type": [
             "string",
             "null"
@@ -13283,7 +13508,9 @@
         "machine_id",
         "machine_label",
         "writer_machine_id",
-        "at"
+        "at",
+        "order",
+        "seen"
       ],
       "type": "object"
     },
@@ -14378,9 +14605,8 @@
       "type": "object"
     },
     "TrackerKind": {
-      "description": "Where a planning change goes: Git's journal, or a queued tracker.",
+      "description": "The tracker a queued planning change goes to.",
       "enum": [
-        "git",
         "linear",
         "asana"
       ],
@@ -14407,29 +14633,37 @@
       "type": "object"
     },
     "TrackerStatus": {
-      "description": "What `repo.tracker` answers: the tracker, for Git its destinations with\ntheir import and publication evidence, and every open and lost tracker\naction.",
+      "description": "What `repo.tracker` answers: the tracker, or for a repository without\none how its plan travels, and every open and lost tracker action.",
       "properties": {
         "actions": {
-          "description": "What the tracker has yet to confirm (open: `queued`, `sent`), in send\norder, and each value it kept over a local one (lost: `conflicted`)\nuntil it is answered. On Git, only lost values: Git keeps no queue.",
+          "description": "What the tracker has yet to confirm (open: `queued`, `sent`), in send\norder, and each value it kept over a local one (lost: `conflicted`)\nuntil it is answered.",
           "items": {
             "$ref": "#/$defs/TrackerActionStatus"
           },
           "type": "array"
         },
-        "destinations": {
-          "items": {
-            "$ref": "#/$defs/GitDestination"
-          },
-          "type": "array"
+        "plan": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PlanCarriers"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "How a plan without a tracker travels; `null` with a tracker."
         },
         "tracker": {
-          "description": "`git`, `linear` or `asana`.",
-          "type": "string"
+          "description": "`linear` or `asana`; `null` when the plan is in Loopflow's store.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
         "tracker",
-        "destinations",
+        "plan",
         "actions"
       ],
       "type": "object"
@@ -15753,7 +15987,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "`lf task edit <issue> --notes=<notes>`.",
+          "description": "`lf task edit <issue> [--notes=<notes>] [--rank=<rank>]`: a new brief,\na new position in its Project, or both.",
           "properties": {
             "directory": {
               "type": "string"
@@ -15766,14 +16000,26 @@
               "type": "string"
             },
             "notes": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "rank": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
             }
           },
           "required": [
             "kind",
             "directory",
             "issue",
-            "notes"
+            "notes",
+            "rank"
           ],
           "type": "object",
           "x-result": {
@@ -18272,7 +18518,7 @@
   ],
   "title": "Loopflow server protocol",
   "x-min-revision": 8,
-  "x-revision": 8,
+  "x-revision": 9,
   "x-terminal-close": {
     "payload": {
       "$ref": "#/$defs/Close"

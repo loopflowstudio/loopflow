@@ -182,17 +182,9 @@ pub(super) async fn run() -> Result<()> {
     let tickets = Arc::new(Tickets::default());
     let subscriptions = Arc::new(Subscriptions::default());
     let (remote_control, remote_requests) = mpsc::channel(8);
-    if super::copy::taken().is_some() {
-        // No mobile listener: a status request hears that at once.
-        drop(remote_requests);
-        tracing::info!(%instance, socket = %path.display(), "Loopflow server ready on a copy of the Machine");
-        return tokio::select! {
-            _ = tickets.expiring() => unreachable!("ticket expiry runs until shutdown"),
-            result = local(listener, instance, executable_sha256, slots, clients, remote_control, tickets.clone(), subscriptions, None) => result,
-        };
-    }
     super::wake::start();
     super::maintenance::start();
+    super::maintenance::start_plan_exchange();
     // Held terminals keep running in their holders whether or not this server
     // can host them; without a registry their views wait for the next server.
     let terminals = match Registry::open(&executable_sha256) {
@@ -729,13 +721,6 @@ pub(super) async fn session<C: Carrier>(
             send(lines, &busy(&id, "open", MAX_OPEN)).await?;
             continue;
         };
-        if let Some(refusal) = match &start {
-            Start::Request(operation, ..) if operation.changes() => super::copy::refusal(),
-            _ => None,
-        } {
-            send(lines, &ServerMessage::error(Some(id), refusal)).await?;
-            continue;
-        }
         let entry = match start {
             Start::Request(ref operation, Some(_), _)
                 if !matches!(operation, Operation::Read(_)) =>
@@ -1292,6 +1277,11 @@ async fn request(
     #[cfg(test)]
     let completion = tests::take_request_completion(&id);
     let write = operation.is_write();
+    let mut operation = operation;
+    // A command run here is followed by one exchange by each plan carrier.
+    let planned = matches!(origin, Origin::Local)
+        .then(|| operation.directory())
+        .flatten();
     let started = Instant::now();
     let trace_id = loopflow_model::id::TraceId::default();
     let answer = match operation {
@@ -1328,6 +1318,9 @@ async fn request(
             ServerMessage::written_error(Some(id.clone()), refusal, answer.revisions)
         }
     };
+    if let Some(directory) = planned {
+        loopflow_execution::ops::plan_carriers::after_command(directory);
+    }
     // A closed connection drops the answer; the effect stands.
     if let Err(failure) = outgoing.deliver(message, reservation).await {
         let _ = deliver(
@@ -1472,6 +1465,25 @@ async fn served(
         Operation::Server(ServerOperation::SessionBoundary(_)) => {
             unreachable!("request dispatches boundaries")
         }
+        Operation::Server(ServerOperation::PlanApply {
+            repository,
+            records,
+        }) => {
+            plan_here(reservation, move |store| {
+                Ok(serde_json::to_value(
+                    loopflow_execution::ops::plan_hub::apply_here(store, &repository, &records)?,
+                )?)
+            })
+            .await
+        }
+        Operation::Server(ServerOperation::PlanChanges { repository, since }) => {
+            plan_here(reservation, move |store| {
+                Ok(serde_json::to_value(
+                    loopflow_execution::ops::plan_hub::changes_here(store, &repository, since)?,
+                )?)
+            })
+            .await
+        }
         Operation::Write(_) | Operation::Measured(super::wire::MeasuredOperation::Write { .. }) => {
             unreachable!("operate answers writes")
         }
@@ -1516,6 +1528,26 @@ async fn mobile_control(
         .await
         .map_err(|_| Error::new(ErrorCode::Unavailable, "mobile listener is not running"))?;
     Ok(())
+}
+
+/// The hub's answer to another Machine's plan exchange, from this Machine's store.
+async fn plan_here(
+    reservation: Arc<Reservation>,
+    answer: impl FnOnce(&loopflow_execution::store::sqlite::SqliteStore) -> Result<serde_json::Value>
+        + Send
+        + 'static,
+) -> Result<serde_json::Value, Error> {
+    tokio::task::spawn_blocking(move || {
+        let _held = reservation;
+        loopflow_execution::journal::request::isolate(|| {
+            let path = loopflow_execution::store::default_db_path();
+            anyhow::ensure!(path.exists(), "Machine registry is absent");
+            answer(&loopflow_execution::store::open_sqlite(&path)?)
+        })
+    })
+    .await
+    .map_err(unavailable)?
+    .map_err(unavailable)
 }
 
 /// Record a hook's boundary and answer its steers. A `stop`'s planning refresh

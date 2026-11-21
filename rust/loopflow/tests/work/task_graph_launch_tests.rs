@@ -1490,6 +1490,34 @@ fn a_task_takes_up_its_waves_graph_and_keeps_the_one_it_named() {
     assert_eq!(graph["name"], "feature");
     assert_eq!(graph["position"], at("review"));
     assert_eq!(graph["interactive_steps"][0]["skill"], "demo");
+    let output = task.run(&["task", "status", "INF-123", "--json"]);
+    assert!(output.status.success(), "{output:?}");
+    let status: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let mut fields: Vec<_> = status
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(String::as_str)
+        .collect();
+    fields.sort_unstable();
+    assert_eq!(
+        fields,
+        [
+            "auto",
+            "comments",
+            "conversation",
+            "graph_processes",
+            "sessions",
+            "stack_parent",
+            "summary",
+            "task"
+        ]
+    );
+    assert_eq!(
+        status["task"]["graph"],
+        serde_json::json!({"name": "feature", "step": "review"})
+    );
+    assert_eq!(status["task"]["next"], "lf task run INF-123");
     drop(task);
 
     // A Task that named its own keeps it when later runs name nothing.
@@ -1993,7 +2021,7 @@ fn opencode_stand_in() -> String {
 }
 
 fn antigravity_stand_in() -> String {
-    include_str!("../../../loopflow-execution/tests/support/antigravity_cli.py").replace(
+    include_str!("../../../loopflow-execution/tests/support/agy_cli.py").replace(
         "Path(__file__).resolve().parent.parent",
         "Path(os.environ['LF_HOME'])",
     )
@@ -2025,12 +2053,7 @@ fn a_task_step_runs_as_a_worker_on_every_harness() {
             "Fixture completed.",
         ),
         ("pi", "pi:fixture/model", pi, "answer 1:"),
-        (
-            "antigravity",
-            "antigravity",
-            antigravity_stand_in(),
-            "answer to:",
-        ),
+        ("agy", "agy", antigravity_stand_in(), "answer to:"),
         ("claude", "claude", holding_claude(), "Held."),
         (
             "codex",
@@ -2039,10 +2062,7 @@ fn a_task_step_runs_as_a_worker_on_every_harness() {
             "Worker finished.",
         ),
     ] {
-        let program = loopflow_harness::HarnessKind::parse(provider)
-            .unwrap()
-            .program();
-        let task = GraphTask::with_tools(&[(program, &script)]);
+        let task = GraphTask::with_tools(&[(provider, &script)]);
         define_worker_graph(&task);
         let home = task.home.path();
         fs::write(home.join("release"), "").unwrap();
@@ -2212,20 +2232,12 @@ fn a_worker_stops_on_interrupt_and_the_next_run_starts_its_step_again_on_opencod
 
 #[test]
 fn a_worker_stops_on_interrupt_and_the_next_run_starts_its_step_again_on_antigravity() {
-    interrupt_a_worker(
-        "antigravity",
-        "antigravity",
-        &antigravity_stand_in(),
-        "answer to:",
-    );
+    interrupt_a_worker("agy", "agy", &antigravity_stand_in(), "answer to:");
 }
 
 fn interrupt_a_worker(provider: &str, agent: &str, script: &str, answer: &str) {
     {
-        let program = loopflow_harness::HarnessKind::parse(provider)
-            .unwrap()
-            .program();
-        let task = GraphTask::with_tools(&[(program, script)]);
+        let task = GraphTask::with_tools(&[(provider, script)]);
         define_worker_graph(&task);
         let home = task.home.path();
         fs::write(home.join("hold-turn"), "").unwrap();
@@ -3364,7 +3376,8 @@ fn auto_off_sticks_through_a_headless_relaunch() {
 
 #[test]
 fn a_run_that_fails_the_same_way_stops_and_keeps_auto_on() {
-    let task = stand_in_task();
+    let task = GraphTask::new();
+    let mark = last_graph(task.home.path());
     // `gate` refuses identically until the repository defines `late`.
     let output = task.run(&[
         "-b", "--task", "INF-123", "task", "auto", "on", "--graph", "gate",
@@ -3375,11 +3388,11 @@ fn a_run_that_fails_the_same_way_stops_and_keeps_auto_on() {
         stderr.contains("failed 3 times with the same error"),
         "{stderr}"
     );
-    // The run stopped on its own, so nothing carries it again; auto is
-    // still on for the next `lf task run`.
-    for _ in 0..3 {
-        task.ok(&["task", "list"]);
-    }
+    // The foreground run finished all three attempts and left auto on.
+    assert_eq!(
+        attempts(task.home.path(), mark),
+        ["failed", "failed", "failed"]
+    );
     assert_eq!(task.state(), "idle");
     assert_eq!(task.status()["auto"]["state"], "on");
     let stopped = task.run(&["--task", "INF-123", "task", "auto", "off"]);

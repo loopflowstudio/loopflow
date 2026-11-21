@@ -193,7 +193,7 @@ high as `agents`.
 | Setting | CLI flag | Config key |
 |---|---|---|
 | Harness / model | `-a claude:opus` | `agent: claude:opus` · `default_agent` · `agents` |
-| Tracker | — | `tracker: {linear: {team: "<id>"}}`, `{asana: {team: "<gid>"}}`, or `{git: {shared: team}}` |
+| Tracker | — | `tracker: {linear: {team: "<id>"}}` or `{asana: {team: "<gid>"}}`; without one, the plan [travels with the repository](work.md#share-the-plan-with-your-team) |
 | Run mode | `-i` (interactive) / `-b` (headless) | Interactive on direct TTY; headless in Graphs |
 | Include docs | `--docs README.md,docs/` | `context: {docs: [README.md, docs/]}` |
 | Changed file paths | `--diff files` | `context: {diff_files: true}` |
@@ -203,7 +203,7 @@ high as `agents`.
 | Headings of a Task's Diff in Desktop | — | `diff_groups` (replaces as a unit) |
 | Clipboard | `-c, --clipboard` | `context: {paste: true}` |
 | Claude Chrome tool | `--chrome on` / `--chrome off` | `chrome: true` / `false` |
-| Skip permissions | `--yolo` | `yolo: true` |
+| Permission prompts | `--yolo` (skip) · `--setting yolo=false` (ask) | `yolo: false` (ask when attended; default skips) |
 | Merge method | — | `merge_method: squash` (`merge`, `squash`, `rebase`) |
 | Display name | — | `user.name` (defaults to Git `user.name`) |
 
@@ -258,14 +258,13 @@ tools and does not support cross-harness history transfer.
 ```bash
 brew install --cask antigravity-cli     # installs the `agy` command
 agy                                     # sign in
-lf -a antigravity implement
-lf -b -a antigravity:gemini-3.8-flash-high implement
-lf task run LOO-12 -a antigravity       # every step of the Task
+lf -a agy implement
+lf -b -a agy:gemini-3.8-flash-high implement
+lf task run LOO-12 -a agy               # every step of the Task
 ```
 
-The agent is `antigravity` in `-a`, `agents` and everything lf prints; `agy`
-is only the command it runs. Bare `antigravity` uses the model `agy` is set
-to; `antigravity:<model>` takes a name from `agy models`. Antigravity owns its
+Bare `agy` uses the model `agy` is set to; `agy:<model>` takes a name from
+`agy models`. Antigravity owns its
 sign-in and conversations under `~/.gemini/antigravity-cli`; Loopflow gives
 each launch its instructions and hooks in a folder under the checkout's
 `.lf/prompts/` and writes nothing to `~/.gemini`. A step gets the Task's
@@ -274,14 +273,14 @@ context and hears `lf steer` after its next tool. A spent quota, a signed-out
 
 ```bash
 lf task status LOO-12
-#   implement went on under claude after: antigravity_error: invalid model selection (--model "gemini-9" --effort ""): model gemini-9 is not recognized as a known model or custom model in settings
+#   implement went on under claude after: agy_error: invalid model selection (--model "gemini-9" --effort ""): model gemini-9 is not recognized as a known model or custom model in settings
 ```
 
-In the terminal, `agy` runs commands in its own sandbox, which does not reach
-`~/.lf`. The first `lf` command a conversation runs fails there, and `agy`
-asks "Run this command?" to run it outside: answer `2` to allow `lf` for the
-rest of the conversation. `--yolo` skips the question. A headless step is not
-sandboxed and never asks.
+Under `yolo: false`, `agy` runs terminal commands in its own sandbox, which
+does not reach `~/.lf`. The first `lf` command a conversation runs fails
+there, and `agy` asks "Run this command?" to run it outside: answer `2` to
+allow `lf` for the rest of the conversation. With `yolo` on, the default, and
+on every headless step, nothing is sandboxed and nothing asks.
 
 `/new`, `/fork` and `/resume` in the terminal keep the conversation on lf: the
 one you switch to gets the context block and your steers from its first
@@ -297,24 +296,43 @@ Limit which harnesses appear in pickers (additive across global and repo
 config):
 
 ```yaml
-supported_harnesses: [claude, codex, opencode, pi, antigravity]
+supported_harnesses: [claude, codex, opencode, pi, agy]
 ```
 
 ## Permissions (`yolo`) and worktree access
 
-- **Interactive sessions** use each vendor's own permission settings and prompts.
-- **Headless runs** raise the floor so unattended work doesn't hang: Codex gets
-  `workspace-write` + `approval_policy = "never"`, Claude skips permission
-  prompts, OpenCode runs with `--auto`, Antigravity skips permission
-  prompts (existing more-permissive vendor configs
-  are never downgraded).
-- **Headless Task runs** (`lf task run`, `lf task auto on`, and `lf -b <skill>` inside
-  a Task worktree) run as `yolo` on every harness so they can build, test, and
-  commit freely. To isolate untrusted work, run it on a dedicated Machine, VM,
-  or container ([Security](security.md#choose-the-execution-boundary-first)).
-- **Worktree access:** Interactive Claude, Codex and Antigravity sessions
-  launched from a Git worktree automatically grant write access to the main
-  repo's `.git` metadata so normal Git operations work.
+Agents act without asking permission. With no `yolo` setting, Claude, Codex,
+OpenCode and Antigravity run every edit and shell command straight through; Pi
+keeps its own tool policy.
+
+```bash
+lf implement                              # no prompts
+lf --setting yolo=false implement         # this conversation asks, as the vendor configures
+lf set yolo false                         # every conversation you attend in this repository asks
+lf --yolo implement                       # no prompts for one launch, over a configured `yolo: false`
+```
+
+`yolo: false` brings back each vendor's own config and prompts in a
+conversation you attend: `lf`, `lf <skill>`, `lf task open`, `lf resume`.
+Unattended runs (`lf -b`, Task steps, `lf task auto on`, commit and PR text)
+never ask, whatever `yolo` says, because nobody is there to answer. A
+`yolo: false` on a skill or Graph step applies when someone opens that step.
+
+| | you attend | unattended |
+|---|---|---|
+| `yolo` unset or `true` | no prompts | no prompts |
+| `yolo: false` | the vendor's own prompts | no prompts |
+
+"No prompts" is Claude's `--dangerously-skip-permissions`, Codex's
+`danger-full-access` sandbox with `approval_policy = "never"`, OpenCode's
+allow-all permissions, and Antigravity's `--dangerously-skip-permissions`. lf
+has no sandbox of its own: an agent can do anything the OS user running `lf`
+can. To contain untrusted work, run it on a dedicated Machine, VM or container
+([Security](security.md#choose-the-execution-boundary-first)).
+
+**Worktree access:** Claude, Codex and Antigravity conversations you attend
+from a Git worktree get write access to the main repo's `.git` metadata, so
+Git commands work under `yolo: false` too.
 
 ## Context budgets and assembly
 

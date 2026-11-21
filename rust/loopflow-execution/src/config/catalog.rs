@@ -299,7 +299,7 @@ definitions! {
     default_agent: Option<String> = "null", Launch, Replace, Portable, NextLaunch, Agents, "Harness[:model] tried first when no applicable agent choice exists; the rest of agents stays behind it";
     agents: Vec<String> = "[]", Launch, Replace, Portable, NextLaunch, Agents, "Ordered harness[:model] entries Loopflow may pick; headless work refused by a usage limit moves to the next";
     context: ContextConfig = "{}", Launch, Merge, Portable, NextLaunch, Agents, "Files and other inputs supplied to the agent";
-    yolo: bool = "false", Launch, Replace, Portable, NextLaunch, Agents, "Skip agent permission prompts: Claude, Codex, OpenCode and Antigravity; Pi keeps its own tool policy";
+    yolo: bool = "true", Launch, Replace, Portable, NextLaunch, Agents, "Agents act without asking permission; false keeps the vendor's own prompts in conversations you attend. Unattended runs never ask. Pi keeps its own tool policy";
     chrome: Option<bool> = "null", Launch, Replace, HostLocal, NextLaunch, Agents, "Claude Chrome integration; unset leaves Claude's own setting; Codex, OpenCode, Pi and Antigravity have no equivalent";
     codex: CodexConfig = "{}", Launch, Merge, Portable, NextLaunch, Agents, "Codex launch preferences; omitted values inherit provider configuration";
     claude: ClaudeConfig = "{}", Launch, Merge, Portable, NextLaunch, Agents, "Claude launch preferences; omitted values inherit provider configuration";
@@ -317,6 +317,7 @@ definitions! {
     machine: placement::Placement = "{}", PersonalScoped, Merge, Portable, NextLaunch, Machines, "Preferred durable Machine IDs or local capacity; existing Task assignments survive";
     machines: BTreeMap<String, placement::MachineDeclaration> = "{}", Personal, Merge, Portable, NextRead, Machines, "Aliases for durable Machine identities";
     connections: HashMap<loopflow_model::durable::MachineId, String> = "{}", Personal, Merge, HostLocal, NextRead, Machines, "This host's connection address for each durable Machine ID";
+    hub: Option<loopflow_model::durable::MachineId> = "null", Personal, Replace, HostLocal, NextRead, Machines, "The Machine holding the plan of every repository without Linear or Asana; unset keeps it here";
     auth_browsers: BTreeMap<String, placement::AuthBrowsers> = "{}", Personal, Merge, HostLocal, DomainAction, Accounts, "Ordered local browser profiles for authentication; discovered browser identities stay local";
     repo_root: Option<PathBuf> = "null", Personal, Replace, HostLocal, NextRead, Desktop, "Local repository discovery directory";
     theme: Option<String> = "null", Personal, Replace, ReferencedAssets, NextRead, Desktop, "Appearance theme or light:name,dark:name pair";

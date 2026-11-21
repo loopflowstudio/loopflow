@@ -92,7 +92,7 @@ pub struct Cli {
     #[arg(skip)]
     pub resolved_invocation: Option<loopflow_execution::skills::invocation::SkillInvocation>,
 
-    /// Skip permission prompts
+    /// Skip permission prompts in this conversation, over a configured `yolo: false`
     #[arg(long)]
     pub yolo: bool,
 
@@ -689,7 +689,7 @@ fn parse_hook_harness(name: &str) -> Result<loopflow_harness::HarnessKind, Strin
 /// size and checkout.
 #[derive(Subcommand, Debug)]
 pub enum RepoCommand {
-    /// Show the repository tracker, its open and lost actions, and Git destinations
+    /// Show how the repository's plan travels: its tracker and open and lost actions, or its Git remote and hub
     #[command(args_conflicts_with_subcommands = true)]
     Tracker {
         #[command(subcommand)]
@@ -854,8 +854,8 @@ pub enum DesktopCommand {
     /// Perform any registry action by name, as `lf desktop actions` lists them
     #[command(
         after_help = "Arguments are KEY=VALUE pairs. `-p` may name a view part \
-(`board`, `session`, `tiles` on a Wave view), which must accept the action:\n  \
-lf desktop do page -p tiles page=2\n  lf desktop do filter -p board days=14"
+(`backlog`, `session`, `tiles` on a Wave view), which must accept the action:\n  \
+lf desktop do page -p tiles page=2\n  lf desktop do zoom -p backlog on=true"
     )]
     Do {
         /// Action name from `lf desktop actions`
@@ -1338,9 +1338,8 @@ impl RepoCommand {
     pub fn changes_work(&self) -> bool {
         match self {
             Self::Tracker { cmd, .. } => match cmd {
-                Some(RepoTrackerCommand::Key { new, recover }) => *new || recover.is_some(),
                 Some(RepoTrackerCommand::Answer { .. }) => true,
-                Some(RepoTrackerCommand::Journal { .. }) | None => false,
+                None => false,
             },
             Self::Release { cmd } => cmd.changes_work(),
             Self::Path | Self::Ci { .. } | Self::People { .. } | Self::Tokens { .. } => false,
@@ -1453,6 +1452,7 @@ impl MachineCommand {
                 | OndemandCommand::Rent { .. }
                 | OndemandCommand::Remove { .. } => true,
             },
+            Self::Hub { machine, clear } => machine.is_some() || *clear,
             Self::Prune { .. }
             | Self::Connect { .. }
             | Self::Public { .. }
@@ -1502,13 +1502,13 @@ impl SelfCommand {
 }
 
 /// Which part of the view on screen a command acts on. `-p` is a path: a view part
-/// (`board`, `session`, `tiles` on a Wave view), a pane (`session`, `shell`,
+/// (`backlog`, `session`, `tiles` on a Wave view), a pane (`session`, `shell`,
 /// `browser`, `shell:2`), a Dashboard or Wave view tile (`3`, `LOO-519`), or `TILE/PANE`. `query:ID/TILE` and `working-tasks/TILE` name a
 /// saved record's tile by Work key without Desktop. Root `--task`/`--wave` set the
 /// base view; without either, a command acts on the terminal it runs in (`LF_TERMINAL_ID`).
 #[derive(Args, Debug, Clone, Default)]
 pub struct DesktopTargetArgs {
-    /// Pane path: a view part (board), session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix
+    /// Pane path: a view part (backlog), session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix
     #[arg(short = 'p', long = "pane", value_name = "PATH")]
     pub pane: Option<String>,
     /// Desktop window: ID, position or ID suffix
@@ -1617,6 +1617,9 @@ pub enum GraphCommand {
 /// Shared selection, preparation and next-turn options for `resume` and `session new`.
 #[derive(Args, Debug)]
 pub struct SessionConnectionArgs {
+    /// Attach without taking the terminal size until focus or input
+    #[arg(long)]
+    pub unfocused: bool,
     #[arg(long, conflicts_with = "wave")]
     pub task: Option<String>,
     #[arg(long)]
@@ -1898,10 +1901,6 @@ pub enum SessionCommand {
         /// Where a Machine without the repository clones it from
         #[arg(long, requires = "task")]
         origin: Option<String>,
-        /// The sending Machine's planning key, adopted by a Machine with none
-        /// so a personal Git plan reads the same journal
-        #[arg(long, requires = "task")]
-        planning_key: Option<String>,
         /// The Machine the Task moves from, which a retry here asks for it
         #[arg(long, requires = "task")]
         from: Option<loopflow_model::durable::MachineId>,
@@ -2868,18 +2867,6 @@ pub enum PlanCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum RepoTrackerCommand {
-    /// Show, create, or recover the planning user key that names a `personal: true` ref
-    Key {
-        #[arg(long, conflicts_with = "recover")]
-        new: bool,
-        #[arg(long, value_name = "UUID")]
-        recover: Option<String>,
-    },
-    /// Show each destination's retained changes, including losing values, without contacting Git
-    Journal {
-        #[arg(long)]
-        json: bool,
-    },
     /// Answer a lost line: keep the tracker's value, or save yours again and send it
     #[command(group(clap::ArgGroup::new("answer").args(["keep_theirs", "use_mine"]).required(true)))]
     Answer {
@@ -3109,6 +3096,14 @@ pub enum MachineCommand {
         label: Option<String>,
         #[arg(long)]
         json: bool,
+    },
+    /// Exchange this Machine's plan with an added machine, live, for every
+    /// repository without Linear or Asana; bare, show which
+    Hub {
+        machine: Option<String>,
+        /// Stop exchanging with the hub; the plan stays on this Machine
+        #[arg(long, conflicts_with = "machine")]
+        clear: bool,
     },
     /// Change a saved machine's label
     Rename { label: String, name: String },

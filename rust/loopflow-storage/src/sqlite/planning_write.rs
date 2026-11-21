@@ -1,35 +1,36 @@
 //! The planning write boundary shared by local operations, tracker
-//! observations and Git imports. Callers own their transaction; this writer
-//! changes planning columns, journals local and tracker writes for Git peers,
-//! and queues a tracker action for each value a local write changed.
-use crate::planning_exchange::PlanningMutation;
-use crate::work::edit::{CommentContent, Disposition, WorkEdit, WorkValue};
+//! observations and values arriving from other Machines. Callers own their
+//! transaction; this writer changes planning columns, stamps each field a
+//! save here changes, records which record changed last for carriers to send,
+//! and queues each value a local write changed for the tracker.
+use crate::work::edit::{
+    CommentContent, Disposition, StampedRecord, StampedValue, WorkEdit, WorkValue,
+};
 use crate::{StoreError, StoreResult};
 use rusqlite::{params, Connection, OptionalExtension};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 /// Who a planning write comes from, which decides what else it records.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WriteOrigin {
-    /// A person or agent here: journaled, and queued for the tracker.
+    /// A person or agent here: stamped, and queued for the tracker.
     Local,
-    /// A fact the tracker reported: journaled, never echoed back to it.
+    /// A fact the tracker reported: stamped, never echoed back to it.
     Tracker,
-    /// A Git peer's change: already in the journal it came from.
+    /// Another Machine's value, which keeps the stamp it arrived with.
     Import,
 }
 
-const WORK_TABLES: [&str; 4] = ["waves", "projects", "tasks", "task_comments"];
+pub(crate) const WORK_TABLES: [&str; 4] = ["waves", "projects", "tasks", "task_comments"];
 
-// SQL ownership is private to the writer. Git addresses fields by their typed
-// variant and target, without another public object/kind model.
+// SQL ownership is private to the writer. Callers address fields by their
+// typed variant and target, without another public object/kind model.
 pub(crate) fn table(value: &WorkValue) -> &'static str {
     match value {
         WorkValue::WaveName(_)
         | WorkValue::WaveParent(_)
         | WorkValue::WaveRetired(_)
-        | WorkValue::WaveProject(_)
-        | WorkValue::HistoricalWaveWorkflow(_) => "waves",
+        | WorkValue::WaveProject(_) => "waves",
         WorkValue::ProjectWave(_)
         | WorkValue::ProjectLinearId(_)
         | WorkValue::ProjectSlug(_)
@@ -40,7 +41,6 @@ pub(crate) fn table(value: &WorkValue) -> &'static str {
         | WorkValue::ProjectRank(_)
         | WorkValue::ProjectInitiatives(_)
         | WorkValue::ProjectTeams(_)
-        | WorkValue::HistoricalProjectWorkflow(_)
         | WorkValue::Krs(_)
         | WorkValue::MetricTargets(_) => "projects",
         WorkValue::TaskProject(_)
@@ -50,14 +50,11 @@ pub(crate) fn table(value: &WorkValue) -> &'static str {
         | WorkValue::TaskDescription(_)
         | WorkValue::TaskRank(_)
         | WorkValue::TaskAssignee(_)
-        | WorkValue::HistoricalTaskPaused(_)
-        | WorkValue::HistoricalTaskShippedAt(_)
         | WorkValue::TaskDueDate(_)
         | WorkValue::TaskDeletedAt(_)
         | WorkValue::TaskUrl(_)
         | WorkValue::TaskBranch(_)
         | WorkValue::TaskTeam(_)
-        | WorkValue::HistoricalTaskRegressedIn(_)
         | WorkValue::Disposition(_) => "tasks",
         WorkValue::CommentTask(_) | WorkValue::CommentContent(_) => "task_comments",
     }
@@ -69,7 +66,6 @@ fn column(value: &WorkValue) -> &'static str {
         WorkValue::WaveParent(_) => "parent_wave_id",
         WorkValue::WaveRetired(_) => "retired_at",
         WorkValue::WaveProject(_) => "current_project_id",
-        WorkValue::HistoricalWaveWorkflow(_) => "workflow",
         WorkValue::ProjectWave(_) => "wave_id",
         WorkValue::ProjectLinearId(_) => "external_project_id",
         WorkValue::ProjectSlug(_) => "project_slug",
@@ -87,16 +83,12 @@ fn column(value: &WorkValue) -> &'static str {
         WorkValue::TaskDescription(_) => "issue_description",
         WorkValue::TaskRank(_) => "planning_rank",
         WorkValue::TaskAssignee(_) => "planning_assignee",
-        WorkValue::HistoricalTaskPaused(_) => "paused",
-        WorkValue::HistoricalTaskShippedAt(_) => "shipped_at",
         WorkValue::TaskDueDate(_) => "planning_due_date",
         WorkValue::TaskDeletedAt(_) => "planning_deleted_at",
         WorkValue::TaskUrl(_) => "planning_url",
         WorkValue::TaskBranch(_) => "planning_branch_name",
         WorkValue::TaskTeam(_) => "planning_team_id",
-        WorkValue::HistoricalTaskRegressedIn(_) => "regressed_in",
         WorkValue::CommentTask(_) => "task_id",
-        WorkValue::HistoricalProjectWorkflow(_) => "workflow",
         WorkValue::Krs(_) => "krs",
         WorkValue::MetricTargets(_) => "metric_targets",
         WorkValue::Disposition(_) => "disposition",
@@ -105,7 +97,7 @@ fn column(value: &WorkValue) -> &'static str {
 }
 
 pub(crate) fn read(conn: &Connection, table: &str, id: &str) -> StoreResult<Vec<WorkValue>> {
-    let mut values = match table {
+    let values = match table {
         "waves" => read_record(conn, "SELECT name,parent_wave_id,current_project_id,retired_at FROM waves WHERE id=?1", id, |row| {
                     let retired: Option<i64> = row.get(3)?;
                     let project: Option<String> = row.get(2)?;
@@ -173,43 +165,10 @@ pub(crate) fn read(conn: &Connection, table: &str, id: &str) -> StoreResult<Vec<
         }),
         _ => Err(StoreError::InvalidData("unknown Work table".into())),
     }?;
-    // Historical migrations seed their journal before later Task columns exist.
-    if table == "tasks" {
-        if let Some(paused) = optional_task_column(conn, id, "paused")? {
-            values.push(WorkValue::HistoricalTaskPaused(paused));
-        }
-        if let Some(shipped_at) = optional_task_column(conn, id, "shipped_at")? {
-            values.push(WorkValue::HistoricalTaskShippedAt(shipped_at));
-        }
-        if let Some(regressed_in) = optional_task_column(conn, id, "regressed_in")? {
-            values.push(WorkValue::HistoricalTaskRegressedIn(regressed_in));
-        }
-    }
     for value in &values {
         value.validate()?;
     }
     Ok(values)
-}
-
-/// A `tasks` column's value, or `None` before the migration that adds it.
-fn optional_task_column<T: rusqlite::types::FromSql>(
-    conn: &Connection,
-    id: &str,
-    column: &str,
-) -> StoreResult<Option<T>> {
-    let exists: bool = conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('tasks') WHERE name=?1)",
-        [column],
-        |row| row.get(0),
-    )?;
-    if !exists {
-        return Ok(None);
-    }
-    Ok(Some(conn.query_row(
-        &format!("SELECT {column} FROM tasks WHERE id=?1"),
-        [id],
-        |row| row.get(0),
-    )?))
 }
 
 fn read_record(
@@ -238,12 +197,6 @@ fn write_record(
     let mut changes = Vec::new();
     for edit in edits {
         let edit = &edit.change;
-        if matches!(
-            edit,
-            WorkValue::HistoricalProjectWorkflow(_) | WorkValue::HistoricalWaveWorkflow(_)
-        ) {
-            continue;
-        }
         edit.validate()?;
         if let WorkValue::WaveProject(Some(project)) = edit {
             let owner: Option<String> = conn
@@ -300,127 +253,156 @@ fn write_record(
             previous_identifier.as_deref(),
         )?;
     }
+    if origin != WriteOrigin::Import {
+        // A record created here is new in every field it was given.
+        let written: Vec<&str> = if queue {
+            changes.iter().map(|change| change.field()).collect()
+        } else {
+            edits.iter().map(|edit| edit.change.field()).collect()
+        };
+        if !written.is_empty() {
+            let (at, machine) = (next_at(conn)?, local_machine(conn)?);
+            for field in written {
+                stamp(conn, id, field, at, &machine)?;
+            }
+            super::plan_carriers::changed(conn, table, id)?;
+        }
+    }
     if origin == WriteOrigin::Local && queue {
         for change in changes {
             super::tracker_actions::enqueue_local(conn, table, id, change)?;
         }
     }
-    if matches!(origin, WriteOrigin::Local | WriteOrigin::Tracker) {
-        // Initial rows and every subsequent write use this same typed snapshot.
-        capture(conn, table, id)?;
-    }
     Ok(changed)
 }
 
-pub(crate) fn capture(conn: &Connection, table: &str, target: &str) -> StoreResult<()> {
-    for change in read(conn, table, target)? {
-        let edit = WorkEdit {
-            target: target.into(),
-            change,
-        };
-        let saved: Option<String> = conn
-            .query_row(
-                "SELECT mutation FROM git_tracker_changes WHERE object_id=?1 AND field=?2
-             AND id IN (SELECT id FROM git_tracker_seen)
-             ORDER BY clock DESC,id DESC LIMIT 1",
-                params![target, edit.change.field()],
-                |row| row.get(0),
-            )
-            .optional()?;
-        if let Some(saved) = saved {
-            if serde_json::from_str::<PlanningMutation>(&saved)?.edit == edit {
-                continue;
+// ---- Stamps ----
+
+#[cfg(test)]
+thread_local! {
+    /// The wall clock a test sets instead of waiting for one.
+    pub(crate) static CLOCK_MS: std::cell::Cell<Option<i64>> = const { std::cell::Cell::new(None) };
+}
+
+fn wall_clock_ms() -> i64 {
+    #[cfg(test)]
+    if let Some(at) = CLOCK_MS.with(std::cell::Cell::get) {
+        return at;
+    }
+    (time::OffsetDateTime::now_utc().unix_timestamp_nanos() / 1_000_000) as i64
+}
+
+/// The next stamp a save here takes: the wall clock, or one past the highest
+/// stamp this Machine has written or taken in when the clock is behind it.
+pub(crate) fn next_at(conn: &Connection) -> StoreResult<i64> {
+    let highest: i64 = conn
+        .prepare_cached("SELECT COALESCE(MAX(at),0) FROM plan_stamps")?
+        .query_row([], |row| row.get(0))?;
+    Ok(wall_clock_ms().max(highest + 1))
+}
+
+fn local_machine(conn: &Connection) -> StoreResult<String> {
+    Ok(conn
+        .prepare_cached("SELECT id FROM machines WHERE is_local=1")?
+        .query_row([], |row| row.get(0))?)
+}
+
+fn stamp(conn: &Connection, id: &str, field: &str, at: i64, machine: &str) -> StoreResult<()> {
+    conn.prepare_cached(
+        "INSERT INTO plan_stamps(owner_id,field,at,machine_id) VALUES(?1,?2,?3,?4)
+         ON CONFLICT(owner_id,field) DO UPDATE SET at=excluded.at,machine_id=excluded.machine_id",
+    )?
+    .execute(params![id, field, at, machine])?;
+    Ok(())
+}
+
+fn stamps(conn: &Connection, id: &str) -> StoreResult<HashMap<String, (i64, String)>> {
+    let mut query =
+        conn.prepare_cached("SELECT field,at,machine_id FROM plan_stamps WHERE owner_id=?1")?;
+    let held = query
+        .query_map([id], |row| Ok((row.get(0)?, (row.get(1)?, row.get(2)?))))?
+        .collect::<Result<_, _>>()?;
+    Ok(held)
+}
+
+/// A record as it travels: every field it has, each with the stamp held for
+/// it. A field never stamped reads as `(0, this Machine)`.
+pub(crate) fn stamped(conn: &Connection, table: &str, id: &str) -> StoreResult<StampedRecord> {
+    let values = read(conn, table, id)?;
+    let mut held = stamps(conn, id)?;
+    let local = local_machine(conn)?;
+    Ok(StampedRecord {
+        table: table.to_owned(),
+        id: id.to_owned(),
+        fields: values
+            .into_iter()
+            .map(|value| {
+                let (at, machine) = held
+                    .remove(value.field())
+                    .unwrap_or_else(|| (0, local.clone()));
+                StampedValue { value, at, machine }
+            })
+            .collect(),
+    })
+}
+
+/// The one way values from another Machine come in. A field is written only
+/// when its stamp is newer than the one held; a record this Machine lacks is
+/// created from all of its fields. Returns what was written. Applying the
+/// same records again writes nothing and changes no `plan_changes` row.
+pub(crate) fn apply(
+    conn: &Connection,
+    repo: &str,
+    records: &[StampedRecord],
+) -> StoreResult<Vec<WorkEdit>> {
+    let local = local_machine(conn)?;
+    let mut won = Vec::new();
+    for record in records {
+        if !WORK_TABLES.contains(&record.table.as_str()) {
+            return Err(StoreError::InvalidData("unknown Work table".into()));
+        }
+        let mut held = None;
+        for field in &record.fields {
+            if table(&field.value) != record.table {
+                return Err(StoreError::InvalidData(
+                    "a record carries another table's field".into(),
+                ));
+            }
+            let edit = WorkEdit {
+                target: record.id.clone(),
+                change: field.value.clone(),
+            }
+            .canonicalized()?;
+            let (exists, held) = match &held {
+                Some(held) => held,
+                None => {
+                    let exists = conn.query_row(
+                        &format!("SELECT EXISTS(SELECT 1 FROM {} WHERE id=?1)", record.table),
+                        [&edit.target],
+                        |row| row.get::<_, bool>(0),
+                    )?;
+                    held.insert((exists, stamps(conn, &edit.target)?))
+                }
+            };
+            let mine = held
+                .get(edit.change.field())
+                .map_or((0, local.as_str()), |(at, machine)| (*at, machine.as_str()));
+            if !*exists || (field.at, field.machine.as_str()) > mine {
+                won.push((edit, field.at, field.machine.as_str()));
             }
         }
-        let parents = {
-            let mut query = conn.prepare(
-                "SELECT id FROM git_tracker_changes WHERE object_id=?1 AND field=?2
-                 AND id IN (SELECT id FROM git_tracker_seen)",
-            )?;
-            let parents = query
-                .query_map(params![target, edit.change.field()], |row| row.get(0))?
-                .collect::<Result<BTreeSet<String>, _>>()?;
-            parents
-        };
-        record(conn, edit, parents)?;
     }
-    Ok(())
-}
-
-/// Record `edit` with every journal head of its field as a parent, so Git's
-/// competing values resolve to it. Nothing when the field has one head.
-pub(crate) fn settle(conn: &Connection, edit: &WorkEdit) -> StoreResult<()> {
-    let mut query = conn.prepare(
-        "SELECT c.id FROM git_tracker_changes c WHERE c.object_id=?1 AND c.field=?2 AND NOT EXISTS(
-             SELECT 1 FROM git_tracker_changes child,json_each(child.mutation,'$.parents') parent
-             WHERE child.object_id=c.object_id AND child.field=c.field AND parent.value=c.id)",
-    )?;
-    let heads = query
-        .query_map(params![edit.target, edit.change.field()], |row| row.get(0))?
-        .collect::<Result<BTreeSet<String>, _>>()?;
-    if heads.len() < 2 {
-        return Ok(());
+    let edits: Vec<WorkEdit> = won.iter().map(|(edit, ..)| edit.clone()).collect();
+    create(conn, repo, &edits, WriteOrigin::Import)?;
+    let mut changed = BTreeSet::new();
+    for (edit, at, machine) in &won {
+        stamp(conn, &edit.target, edit.change.field(), *at, machine)?;
+        changed.insert((table(&edit.change), edit.target.as_str()));
     }
-    record(conn, edit.clone(), heads)
-}
-
-fn record(conn: &Connection, edit: WorkEdit, parents: BTreeSet<String>) -> StoreResult<()> {
-    let clock = conn.query_row(
-        "SELECT max(CAST(unixepoch('subsec')*1000 AS INTEGER),COALESCE(max(clock)+1,0)) FROM git_tracker_changes",
-        [], |row| row.get(0),
-    )?;
-    let mutation = PlanningMutation {
-        edit,
-        clock,
-        parents,
-    };
-    let id = uuid::Uuid::new_v4().to_string();
-    retain(conn, &id, &mutation)?;
-    observe(conn, &mutation.edit, std::iter::once(id.as_str()))
-}
-
-pub(crate) fn retain(conn: &Connection, id: &str, change: &PlanningMutation) -> StoreResult<()> {
-    // An import retains thousands of changes under the write lock; preparing
-    // an insert compiles the table's triggers, so prepare each statement once.
-    let existing: Option<String> = conn
-        .prepare_cached("SELECT mutation FROM git_tracker_changes WHERE id=?1")?
-        .query_row([id], |row| row.get(0))
-        .optional()?;
-    if let Some(existing) = existing {
-        if serde_json::from_str::<PlanningMutation>(&existing)? != *change {
-            return Err(StoreError::InvalidData(
-                "planning mutation identity was reused".into(),
-            ));
-        }
-        return Ok(());
+    for (table, id) in changed {
+        super::plan_carriers::changed(conn, table, id)?;
     }
-    conn.prepare_cached(
-        "INSERT INTO git_tracker_changes(id,record_table,mutation) VALUES(?1,?2,?3)",
-    )?
-    .execute(params![
-        id,
-        table(&change.edit.change),
-        serde_json::to_string(change)?
-    ])?;
-    Ok(())
-}
-
-pub(crate) fn observe<'a>(
-    conn: &Connection,
-    edit: &WorkEdit,
-    ids: impl IntoIterator<Item = &'a str>,
-) -> StoreResult<()> {
-    conn.prepare_cached(
-        "DELETE FROM git_tracker_seen WHERE id IN
-         (SELECT id FROM git_tracker_changes WHERE object_id=?1 AND field=?2)",
-    )?
-    .execute(params![edit.target, edit.change.field()])?;
-    let mut insert =
-        conn.prepare_cached("INSERT OR IGNORE INTO git_tracker_seen(id) VALUES(?1)")?;
-    for id in ids {
-        insert.execute([id])?;
-    }
-    Ok(())
+    Ok(edits)
 }
 
 /// Registration is acquired by the application before the command transaction.
@@ -447,99 +429,45 @@ pub(crate) fn ensure_record(
         return Ok(false);
     }
     let missing = || StoreError::InvalidData("required planning identity is missing".into());
+    // The value the edits leave a field with.
+    macro_rules! last {
+        ($field:ident) => {
+            edits.iter().rev().find_map(|edit| match &edit.change {
+                WorkValue::$field(value) => Some(value),
+                _ => None,
+            })
+        };
+    }
     match table {
         "waves" => {
             loopflow_model::id::WaveId::parse(id)
                 .map_err(|e| StoreError::InvalidData(e.to_string()))?;
             registered_repository_in(conn, repo)?;
-            let name = edits
-                .iter()
-                .rev()
-                .find_map(|edit| match &edit.change {
-                    WorkValue::WaveName(name) => Some(name),
-                    _ => None,
-                })
-                .ok_or_else(missing)?;
-            let parent = edits
-                .iter()
-                .rev()
-                .find_map(|edit| match &edit.change {
-                    WorkValue::WaveParent(parent) => Some(parent),
-                    _ => None,
-                })
-                .and_then(Option::as_deref);
+            let name = last!(WaveName).ok_or_else(missing)?;
+            let parent = last!(WaveParent).and_then(Option::as_deref);
             conn.execute("INSERT INTO waves(id,name,repo,created_at,parent_wave_id) VALUES(?1,?2,?3,unixepoch(),?4)",params![id,name,repo,parent])?;
         }
         "projects" => {
-            let wave = edits
-                .iter()
-                .rev()
-                .find_map(|edit| match &edit.change {
-                    WorkValue::ProjectWave(wave) => Some(wave),
-                    _ => None,
-                })
-                .ok_or_else(missing)?;
+            let wave = last!(ProjectWave).ok_or_else(missing)?;
             conn.execute(
                 "INSERT INTO projects(id,wave_id,created_at,updated_at,description) VALUES(?1,?2,unixepoch(),unixepoch(),'')",
                 params![id, wave],
             )?;
         }
         "tasks" => {
-            let project = edits
-                .iter()
-                .rev()
-                .find_map(|edit| match &edit.change {
-                    WorkValue::TaskProject(project) => Some(project),
-                    _ => None,
-                })
-                .ok_or_else(missing)?;
-            let identifier = edits
-                .iter()
-                .rev()
-                .find_map(|edit| match &edit.change {
-                    WorkValue::TaskIdentifier(identifier) => Some(identifier),
-                    _ => None,
-                })
-                .ok_or_else(missing)?;
+            let project = last!(TaskProject).ok_or_else(missing)?;
+            let identifier = last!(TaskIdentifier).ok_or_else(missing)?;
             let repository = registered_repository_in(conn, repo)?;
             conn.execute("INSERT INTO tasks(id,project_id,issue_identifier,created_at,updated_at,workspace_slug,repository_id) VALUES(?1,?2,?3,unixepoch(),unixepoch(),'',?4)",params![id,project,identifier,repository.as_str()])?;
         }
         "task_comments" => {
-            let task = edits
-                .iter()
-                .rev()
-                .find_map(|edit| match &edit.change {
-                    WorkValue::CommentTask(task) => Some(task),
-                    _ => None,
-                })
-                .ok_or_else(missing)?;
-            let content = edits
-                .iter()
-                .rev()
-                .find_map(|edit| match &edit.change {
-                    WorkValue::CommentContent(content) => Some(content),
-                    _ => None,
-                })
-                .ok_or_else(missing)?;
+            let task = last!(CommentTask).ok_or_else(missing)?;
+            let content = last!(CommentContent).ok_or_else(missing)?;
             conn.execute("INSERT INTO task_comments(id,task_id,body,author,created_at) VALUES(?1,?2,?3,?4,?5)",params![id,task,content.body,serde_json::to_string(&content.author)?,content.created_at])?;
         }
         _ => return Err(StoreError::InvalidData("unknown Work table".into())),
     }
     Ok(true)
-}
-
-/// Seed released planning once, in the migration's transaction.
-pub(crate) fn seed(conn: &Connection) -> StoreResult<()> {
-    for table in WORK_TABLES {
-        let mut query = conn.prepare(&format!("SELECT id FROM {table}"))?;
-        let ids = query
-            .query_map([], |row| row.get::<_, String>(0))?
-            .collect::<Result<Vec<_>, _>>()?;
-        for id in ids {
-            capture(conn, table, &id)?;
-        }
-    }
-    Ok(())
 }
 
 pub(crate) fn grouped(edits: &[WorkEdit]) -> BTreeMap<(&str, &str), Vec<WorkEdit>> {
@@ -569,8 +497,8 @@ pub(crate) fn write(
     Ok(changed)
 }
 
-/// Save local Work in the caller's transaction, including its causal identity
-/// and the tracker actions it asks for.
+/// Save local Work in the caller's transaction, with the tracker actions it
+/// asks for.
 pub(crate) fn local(conn: &Connection, edits: &[WorkEdit]) -> StoreResult<bool> {
     write(conn, edits, WriteOrigin::Local)
 }
@@ -593,7 +521,7 @@ pub(crate) fn create(
         .collect::<StoreResult<Vec<_>>>()?;
     let records = grouped(&edits);
     // Foreign-key parents exist before children even when the caller's edits
-    // arrive in a different order. Capturing fields still uses the common writer.
+    // arrive in a different order. Fields still go through the common writer.
     let mut created = BTreeSet::new();
     for table in WORK_TABLES {
         for (&(record_table, id), values) in &records {
@@ -625,14 +553,11 @@ pub(crate) fn create(
 #[cfg(test)]
 mod tests {
     use super::{create, local};
-    use crate::planning_destination::PlanningDestination;
     use crate::session::{LfSession, TitleSource};
     use crate::sqlite::{SessionCaller, SqliteStore};
-    use crate::work::edit::{Disposition, WorkEdit, WorkValue, WorkValue as Edit};
+    use crate::work::edit::{Disposition, WorkValue as Edit};
     use crate::work::task::NewTask;
-    use crate::work::task::TaskUpdate;
     use crate::work::wave::Wave;
-    use loopflow_model::comment::{TaskComment, TaskCommentAuthor};
     use loopflow_model::durable::{ProjectId, TaskId};
     use loopflow_model::id::WaveId;
 
@@ -682,7 +607,7 @@ mod tests {
     }
 
     #[test]
-    fn local_task_fields_survive_restart_in_the_planning_journal() {
+    fn local_task_fields_survive_restart() {
         let (_home, store, id) = crate::test_fixture::store_with_task();
         store
             .conn
@@ -726,34 +651,7 @@ mod tests {
         assert_eq!(saved.worktree, before.worktree);
         assert_eq!(saved.branch, before.branch);
         assert_eq!(saved.due_date, before.due_date);
-        let destination = crate::planning_destination::PlanningDestination::new(
-            "/fixture.git",
-            "refs/loopflow/planning/shared/fields",
-        )
-        .unwrap();
-        let route = store.bind_git_destination("/repo", &destination).unwrap();
-        let snapshot = store.export_git_plan("/repo", &route).unwrap();
-        assert!(snapshot
-            .winners()
-            .any(|(_, change)| change.edit.target == id.as_str()
-                && change.edit.change == Edit::TaskRank(7)));
-        assert!(snapshot
-            .winners()
-            .any(|(_, change)| change.edit.target == id.as_str()
-                && change.edit.change == Edit::TaskAssignee(Some("assignee-1".into()))));
-        assert!(snapshot
-            .winners()
-            .any(|(_, change)| change.edit.target == id.as_str()
-                && change.edit.change
-                    == Edit::Disposition(Disposition {
-                        planning_state: Some("completed".into()),
-                        planning_completed: 1,
-                        planning_completed_at: Some("2026-10-10T12:00:00Z".into()),
-                    })));
-        assert!(snapshot
-            .winners()
-            .any(|(_, change)| change.edit.target == id.as_str()
-                && change.edit.change == Edit::TaskDueDate(Some("2026-10-15".into()))));
+        assert_eq!(saved.rank, 7);
     }
 
     #[test]
@@ -823,87 +721,8 @@ mod tests {
     }
 
     #[test]
-    fn a_released_regression_mark_round_trips_the_plan_ref_unread() {
+    fn structured_project_fields_survive_restart_without_markdown() {
         let left = tempfile::tempdir().unwrap();
-        let right = tempfile::tempdir().unwrap();
-        let a = crate::test_fixture::open(&left.path().join("db")).unwrap();
-        let b = crate::test_fixture::open(&right.path().join("db")).unwrap();
-        let route =
-            PlanningDestination::new("/synthetic.git", "refs/loopflow/planning/shared/test")
-                .unwrap();
-        a.bind_git_destination("/repo", &route).unwrap();
-        b.bind_git_destination("/repo", &route).unwrap();
-        let task = plan(&a);
-        let exchanged = |store: &SqliteStore| {
-            store
-                .export_git_plan("/repo", &route.id())
-                .unwrap()
-                .changes
-                .into_values()
-                .filter(|change| change.edit.target == task.as_str())
-                .filter(|change| change.edit.change.field() == "task_regressed_in")
-                .map(|change| change.edit.change)
-                .collect::<Vec<_>>()
-        };
-        // Released peers refuse a Task that arrives without the field.
-        assert_eq!(exchanged(&a), [Edit::HistoricalTaskRegressedIn(None)]);
-
-        let released = Edit::HistoricalTaskRegressedIn(Some("v0.15.3".into()));
-        {
-            let mut conn = a.conn.lock().unwrap();
-            let tx = conn.transaction().unwrap();
-            local(
-                &tx,
-                &WorkEdit::for_target(task.as_str(), std::slice::from_ref(&released)),
-            )
-            .unwrap();
-            tx.commit().unwrap();
-        }
-        let journal = a.export_git_plan("/repo", &route.id()).unwrap();
-        crate::test_fixture::import_saved(&b, "/repo", &route.id(), "first", &journal).unwrap();
-
-        assert_eq!(b.task(&task).unwrap().unwrap().title, "Original");
-        assert!(exchanged(&b).contains(&released));
-    }
-
-    #[test]
-    fn a_stored_released_regression_row_leaves_git_destinations_readable() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = crate::test_fixture::open(&dir.path().join("db")).unwrap();
-        let task = plan(&store);
-        // The bytes every lf since v0.15.1 stores for a new Task.
-        let stored = format!(
-            r#"{{"edit":{{"target":"{task}","change":{{"field":"task_regressed_in","value":null}}}},"clock":1793827427857,"parents":[]}}"#
-        );
-        store
-            .conn
-            .lock()
-            .unwrap()
-            .execute(
-                "UPDATE git_tracker_changes SET mutation=?1 WHERE field='task_regressed_in'",
-                [&stored],
-            )
-            .unwrap();
-        let route =
-            PlanningDestination::new("/synthetic.git", "refs/loopflow/planning/shared/test")
-                .unwrap();
-        store.bind_git_destination("/repo", &route).unwrap();
-
-        let exported = store.export_git_plan("/repo", &route.id()).unwrap();
-
-        assert!(exported
-            .changes
-            .values()
-            .any(|change| change.clock == 1793827427857
-                && change.edit.change == Edit::HistoricalTaskRegressedIn(None)));
-        let status = store.git_destinations("/repo", Some(&route.id())).unwrap();
-        assert_eq!(status.len(), 1);
-    }
-
-    #[test]
-    fn structured_project_fields_survive_restart_and_peer_import_without_markdown() {
-        let left = tempfile::tempdir().unwrap();
-        let right = tempfile::tempdir().unwrap();
         let path = left.path().join("db");
         let a = crate::test_fixture::open(&path).unwrap();
         let task = plan(&a);
@@ -927,358 +746,5 @@ mod tests {
             a.project(project.as_ref().unwrap()).unwrap().unwrap(),
             saved
         );
-        let b = crate::test_fixture::open(&right.path().join("db")).unwrap();
-        let route =
-            PlanningDestination::new("/synthetic.git", "refs/loopflow/planning/shared/test")
-                .unwrap();
-        for store in [&a, &b] {
-            store.bind_git_destination("/repo", &route).unwrap();
-        }
-        {
-            let conn = a.conn.lock().unwrap();
-            local(
-                &conn,
-                &crate::work::edit::WorkEdit::for_target(
-                    project.as_ref().unwrap().as_str(),
-                    &[
-                        Edit::ProjectTeams(vec!["team-1".into(), "team-2".into()]),
-                        Edit::ProjectInitiatives(vec!["initiative-1".into()]),
-                    ],
-                ),
-            )
-            .unwrap();
-        }
-        let journal = a.export_git_plan("/repo", &route.id()).unwrap();
-        crate::test_fixture::import_saved(&b, "/repo", &route.id(), "revision", &journal).unwrap();
-        let received = b.project(project.as_ref().unwrap()).unwrap().unwrap();
-        assert_eq!(received.description, saved.description);
-        assert_eq!(received.krs, saved.krs);
-        assert_eq!(received.metric_targets, saved.metric_targets);
-
-        let conn = b.conn.lock().unwrap();
-        let (teams, initiatives): (String, String) = conn
-            .query_row(
-                "SELECT planning_teams,planning_initiatives FROM projects WHERE id=?1",
-                [project.as_ref().unwrap().as_str()],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .unwrap();
-        assert_eq!(
-            serde_json::from_str::<Vec<String>>(&teams).unwrap(),
-            ["team-1", "team-2"]
-        );
-        assert_eq!(
-            serde_json::from_str::<Vec<String>>(&initiatives).unwrap(),
-            ["initiative-1"]
-        );
-        drop(conn);
-        let current = a.project(project.as_ref().unwrap()).unwrap().unwrap();
-        let pending = a
-            .pending_project_changes(project.as_ref().unwrap())
-            .unwrap();
-        a.conn.lock().unwrap().execute_batch("CREATE TRIGGER fail_project_capture BEFORE INSERT ON git_tracker_changes BEGIN SELECT RAISE(ABORT,'injected failure'); END;").unwrap();
-        assert!(a
-            .edit_project(project.as_ref().unwrap(), Some("Renamed"), None, None)
-            .is_err());
-        assert_eq!(
-            a.project(project.as_ref().unwrap()).unwrap().unwrap(),
-            current
-        );
-        assert_eq!(
-            a.pending_project_changes(project.as_ref().unwrap())
-                .unwrap(),
-            pending
-        );
-    }
-
-    #[test]
-    fn edits_imports_and_failed_saves_share_atomic_planning_without_execution() {
-        let left = tempfile::tempdir().unwrap();
-        let right = tempfile::tempdir().unwrap();
-        let a = crate::test_fixture::open(&left.path().join("db")).unwrap();
-        let b = crate::test_fixture::open(&right.path().join("db")).unwrap();
-        let task = plan(&a);
-        let route =
-            PlanningDestination::new("/synthetic.git", "refs/loopflow/planning/shared/test")
-                .unwrap();
-        for store in [&a, &b] {
-            store.bind_git_destination("/repo", &route).unwrap();
-        }
-        let base = a.export_git_plan("/repo", &route.id()).unwrap();
-        crate::test_fixture::import_saved(&b, "/repo", &route.id(), "base", &base).unwrap();
-        {
-            let conn = b.conn.lock().unwrap();
-            conn.execute(
-                "INSERT INTO task_checkouts(task_id,worktree,branch) VALUES(?1,'/retained','local-branch') ON CONFLICT(task_id) DO UPDATE SET worktree=excluded.worktree,branch=excluded.branch",
-                [task.as_str()],
-            )
-            .unwrap();
-            conn.execute(
-                "INSERT INTO task_graphs(task_id,graph,step,updated_at) VALUES(?1,?2,'review',1)",
-                rusqlite::params![task.as_str(), r#"{"name":"review","steps":[]}"#],
-            )
-            .unwrap();
-        }
-        let local_wave = b.task(&task).unwrap().unwrap().wave_id;
-        {
-            let conn = b.conn.lock().unwrap();
-            conn.execute_batch("INSERT INTO processes(id,trace_id,command,cwd,started_at) VALUES('11111111-1111-4111-8111-111111111111','trace','lf run code','/retained/task',2);").unwrap();
-            conn.execute_batch(
-                &include_str!(concat!(
-                    env!("CARGO_MANIFEST_DIR"),
-                    "/tests/fixtures/migrations/planning_local_sessions.sql"
-                ))
-                .replace(
-                    "UPDATE tasks SET primary_session_id='session-proof' WHERE id='task-proof';",
-                    "INSERT INTO task_primary_sessions(task_id,session_id) VALUES('task-proof','session-proof');",
-                )
-                .replace("task-proof", task.as_str())
-                .replace("wave-proof", local_wave.as_ref().unwrap().as_str()),
-            )
-            .unwrap();
-        }
-        let execution = || {
-            let conn = b.conn.lock().unwrap();
-            [
-                "processes",
-                "agent_sessions",
-                "session_events",
-                "session_activity",
-                "task_graphs",
-                "tracker_actions",
-            ]
-            .into_iter()
-            .map(|table| {
-                let mut query = conn
-                    .prepare(&format!("SELECT * FROM {table} ORDER BY rowid"))
-                    .unwrap();
-                let columns = query.column_count();
-                query
-                    .query_map([], |row| {
-                        (0..columns)
-                            .map(|i| row.get::<_, rusqlite::types::Value>(i))
-                            .collect::<rusqlite::Result<Vec<_>>>()
-                    })
-                    .unwrap()
-                    .collect::<rusqlite::Result<Vec<_>>>()
-                    .unwrap()
-            })
-            .collect::<Vec<_>>()
-        };
-        let retained_execution = execution();
-        let original = a.task(&task).unwrap().unwrap();
-        a.edit_task(
-            &task,
-            original.revision,
-            &TaskUpdate {
-                title: Some("Changed".into()),
-                ..Default::default()
-            },
-        )
-        .unwrap();
-        a.append_task_comment(
-            &task,
-            &TaskComment {
-                id: "comment-proof".into(),
-                body: "Keep this finding".into(),
-                author: TaskCommentAuthor::Person {
-                    name: Some("Maya".into()),
-                },
-                created_at: Some("2026-10-09T10:00:00Z".into()),
-            },
-        )
-        .unwrap();
-        {
-            let mut conn = a.conn.lock().unwrap();
-            let tx = conn.transaction().unwrap();
-            super::super::task_state::decide_in(&tx, &task, "completed").unwrap();
-            tx.commit().unwrap();
-        }
-        let snapshot = a.export_git_plan("/repo", &route.id()).unwrap();
-        assert_eq!(snapshot, a.export_git_plan("/repo", &route.id()).unwrap());
-        crate::test_fixture::import_saved(&b, "/repo", &route.id(), "next", &snapshot).unwrap();
-        let revision = b.revisions().unwrap();
-        crate::test_fixture::import_saved(&b, "/repo", &route.id(), "next", &snapshot).unwrap();
-        assert_eq!(revision, b.revisions().unwrap());
-        assert_eq!(execution(), retained_execution);
-        let received = b.task(&task).unwrap().unwrap();
-        assert_eq!(received.title, "Changed");
-        assert_eq!(received.worktree.unwrap().to_str(), Some("/retained"));
-        assert_eq!(received.branch, "local-branch");
-        let conn = b.conn.lock().unwrap();
-        assert_eq!(
-            conn.query_row(
-                "SELECT step FROM task_graphs WHERE task_id=?1",
-                [task.as_str()],
-                |r| r.get::<_, String>(0)
-            )
-            .unwrap(),
-            "review"
-        );
-        assert!(conn
-            .query_row(
-                "SELECT planning_completed FROM tasks WHERE id=?1",
-                [task.as_str()],
-                |r| r.get::<_, bool>(0)
-            )
-            .unwrap());
-        assert_eq!(
-            conn.query_row(
-                "SELECT body,author FROM task_comments WHERE id='comment-proof'",
-                [],
-                |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
-            )
-            .map(|(body, author)| (
-                body,
-                serde_json::from_str::<TaskCommentAuthor>(&author).unwrap()
-            ))
-            .unwrap(),
-            (
-                "Keep this finding".into(),
-                TaskCommentAuthor::Person {
-                    name: Some("Maya".into())
-                }
-            )
-        );
-        // A Git peer's decision reaches this store through the journal, never
-        // as a tracker action of its own.
-        assert_eq!(
-            conn.query_row("SELECT count(*) FROM tracker_actions", [], |r| r
-                .get::<_, i64>(0))
-                .unwrap(),
-            0
-        );
-        drop(conn);
-        let before = a.export_git_plan("/repo", &route.id()).unwrap();
-        a.conn.lock().unwrap().execute_batch("CREATE TRIGGER fail_capture BEFORE INSERT ON git_tracker_changes BEGIN SELECT RAISE(ABORT,'injected journal failure'); END;").unwrap();
-        let current = a.task(&task).unwrap().unwrap();
-        let pending = a.pending_task_changes(&task).unwrap();
-        assert!(a
-            .edit_task(
-                &task,
-                current.revision,
-                &TaskUpdate {
-                    title: Some("Must roll back".into()),
-                    ..Default::default()
-                }
-            )
-            .is_err());
-        assert_eq!(a.task(&task).unwrap().unwrap().title, current.title);
-        assert_eq!(a.pending_task_changes(&task).unwrap(), pending);
-        assert_eq!(a.export_git_plan("/repo", &route.id()).unwrap(), before);
-    }
-
-    #[test]
-    fn rejected_selection_retains_history_without_becoming_an_observed_parent() {
-        use crate::planning_exchange::PlanningMutation;
-        let home = tempfile::tempdir().unwrap();
-        let store = crate::test_fixture::open(&home.path().join("db")).unwrap();
-        let task = plan(&store);
-        let wave = store.task(&task).unwrap().unwrap().wave_id;
-        let route =
-            PlanningDestination::new("/synthetic.git", "refs/loopflow/planning/shared/test")
-                .unwrap();
-        store.bind_git_destination("/repo", &route).unwrap();
-        let mut incoming = store.export_git_plan("/repo", &route.id()).unwrap();
-        let prior = incoming
-            .winners()
-            .find(|(_, c)| {
-                c.edit.target == wave.as_ref().unwrap().as_str()
-                    && c.edit.change.field() == "wave_project"
-            })
-            .unwrap()
-            .1
-            .edit
-            .change
-            .value()
-            .unwrap();
-        for (id, value) in [
-            (
-                "rejected",
-                WorkValue::WaveProject(Some("project_missing".into())),
-            ),
-            ("rename", WorkValue::WaveName("Renamed".into())),
-        ] {
-            let field = value.field();
-            let parents = incoming
-                .heads()
-                .filter(|(_, c)| {
-                    c.edit.target == wave.as_ref().unwrap().as_str()
-                        && c.edit.change.field() == field
-                })
-                .map(|(id, _)| id.to_owned())
-                .collect();
-            let clock = incoming.changes.values().map(|c| c.clock).max().unwrap() + 1;
-            incoming.changes.insert(
-                id.into(),
-                PlanningMutation {
-                    edit: WorkEdit {
-                        target: wave.as_ref().unwrap().to_string(),
-                        change: value,
-                    },
-                    clock,
-                    parents,
-                },
-            );
-        }
-        crate::test_fixture::import_saved(&store, "/repo", &route.id(), "rejected", &incoming)
-            .unwrap();
-        let exported = store.export_git_plan("/repo", &route.id()).unwrap();
-        assert_eq!(exported.changes["rejected"], incoming.changes["rejected"]);
-        let status = store.git_destinations("/repo", None).unwrap().remove(0);
-        assert_eq!(status.conflicts.len(), 1);
-        let journal = store.git_journal("/repo", None).unwrap().remove(0);
-        assert_eq!(journal.changes, exported.changes);
-        assert!(journal.candidates.contains("rejected"));
-        let mut conn = store.conn.lock().unwrap();
-        let values = super::read(&conn, "waves", wave.as_ref().unwrap().as_str()).unwrap();
-        assert!(values.contains(&Edit::WaveName("Renamed".into())));
-        assert!(values.contains(&Edit::WaveProject(serde_json::from_value(prior).unwrap())));
-        assert_eq!(
-            conn.query_row(
-                "SELECT count(*) FROM git_tracker_seen WHERE id='rejected'",
-                [],
-                |r| r.get::<_, i64>(0)
-            )
-            .unwrap(),
-            0
-        );
-        let tx = conn.transaction().unwrap();
-        local(
-            &tx,
-            &crate::work::edit::WorkEdit::for_target(
-                wave.as_ref().unwrap().as_str(),
-                &[Edit::WaveName("Local edit".into())],
-            ),
-        )
-        .unwrap();
-        tx.commit().unwrap();
-        drop(conn);
-        let local = store.export_git_plan("/repo", &route.id()).unwrap();
-        let (_, name) = local
-            .winners()
-            .find(|(_, c)| {
-                c.edit.target == wave.as_ref().unwrap().as_str()
-                    && c.edit.change.field() == "wave_name"
-            })
-            .unwrap();
-        assert!(name.parents.contains("rename"));
-        assert!(!local
-            .changes
-            .values()
-            .any(|c| c.parents.contains("rejected")));
-        let before = local.clone();
-        let mut reused = incoming;
-        reused.changes.get_mut("rename").unwrap().edit.change =
-            WorkValue::WaveName("Reused identity".into());
-        assert!(crate::test_fixture::import_saved(
-            &store,
-            "/repo",
-            &route.id(),
-            "invalid",
-            &reused
-        )
-        .is_err());
-        assert_eq!(store.export_git_plan("/repo", &route.id()).unwrap(), before);
     }
 }

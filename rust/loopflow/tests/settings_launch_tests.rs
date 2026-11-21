@@ -420,9 +420,9 @@ fn assert_launch_settings(launch: &serde_json::Value, inspected: &serde_json::Va
         settings["chrome"]["value"] == true,
         "{launch}\n{settings}"
     );
-    // Claude's documented headless floor bypasses prompts independently of yolo.
-    // Explicit false is observable here through chrome and cleared documents;
-    // terminal yolo negation has separate native launch/resume coverage.
+    // A headless run never asks, whatever yolo says. Explicit false is
+    // observable here through chrome and cleared documents; attended yolo
+    // negation has separate native launch/resume coverage.
     assert!(args.contains(&serde_json::json!("--dangerously-skip-permissions")));
     let mut expected = settings["context.docs"]["value"]
         .as_array()
@@ -1416,7 +1416,7 @@ fn automatic_agent_selection_requires_exactly_one_installed_harness() {
 
     unresolved();
     for harness in loopflow_harness::HarnessKind::ALL {
-        let program = harness.program();
+        let program = harness.as_str();
         install(program);
         let agent = inspect();
         assert_eq!(agent["value"], harness.as_str());

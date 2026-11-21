@@ -165,7 +165,7 @@ with `lf server status`, or see [Connect clients](server.md).
 | `--docs PATH,…` | Include files, globs, or directories |
 | `--diff files` / `--diff patch` | Reference changed file paths / raw diff |
 | `--context` | Preview assembled input without launching |
-| `-a HARNESS[:MODEL]` | Run on `claude`, `codex`, `opencode`, `pi`, or `antigravity` |
+| `-a HARNESS[:MODEL]` | Run on `claude`, `codex`, `opencode`, `pi`, or `agy` (Antigravity) |
 | `-i` / `-b` | Interactive / headless (waits until finished) |
 
 Next: [Work](work.md): parallel Tasks, steering, stacked PRs, team trackers,

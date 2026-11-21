@@ -21,10 +21,6 @@ path = "src/bin/lf.rs"
 name = "lf-prompt"
 path = "src/bin/lf-prompt.rs"
 
-[[bin]]
-name = "lf-world"
-path = "src/bin/lf-world.rs"
-
 # Keep dedicated proof entrypoints and process-global environment fixtures separate.
 [[test]]
 name = "integration"
@@ -65,10 +61,6 @@ path = "tests/session_lifecycle_tests.rs"
 [[test]]
 name = "discovery_tests"
 path = "tests/discovery_tests.rs"
-
-[[test]]
-name = "two_people"
-path = "tests/two_people.rs"
 
 [[test]]
 name = "golden_prompt"

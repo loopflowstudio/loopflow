@@ -661,14 +661,16 @@ struct DesktopPerformanceTests {
         try journal.write(["event": "memory_phase", "phase": "owned_setup_begin"])
         let model = view.model
         let registry = view.workspaces
-        let record = try #require(try await fixture.records().first)
+        let work = WorkReference.task(id: fixture.taskId)
+        let record = try await query.prepareSession(id: fixture.sessionId, work: work, cwd: fixture.repo)
         try #require(record.taskIds.contains(fixture.taskId))
-        let identity = TerminalIdentity.session(fixture.sessionId, machineId: try #require(record.workspace).machineId)
-        let workspace = fixtureWork(registry, try #require(record.workspace).identity)
-        let store = fixtureWork(registry, WorkspaceIdentity(machineId: try #require(record.workspace).machineId, worktree: fixture.repo))
-            .sessionStore(repoPath: fixture.repo, query: query)
+        let location = try #require(record.workspace).identity
+        let identity = TerminalIdentity.session(fixture.sessionId, machineId: location.machineId)
+        let key = model.workspaceKey(for: work, repository: "fixture-plan")
+        let workspace = registry.workspace(for: key, title: record.title, location: location)
+        let store = workspace.sessionStore(repoPath: fixture.repo, query: query)
         let multiplexer = workspace.multiplexer
-        multiplexer.load(sessionId: fixture.sessionId, location: record.workspace?.identity)
+        multiplexer.load(sessionId: fixture.sessionId, location: location)
         let sessionPane = multiplexer.focusedPaneId
         multiplexer.newShell(location: workspace.location)
         let companion = multiplexer.focusedPaneId
@@ -735,7 +737,7 @@ struct DesktopPerformanceTests {
                 return selected && focused && hasHistory
             }, observation: {
                 ["session_id": fixture.sessionId, "task_id": fixture.taskId, "native_id": fixture.nativeId,
-                 "provider": "lf-world stub claude", "history_preserved": (try? fixture.historyIsPreserved()) == true]
+                 "provider": "benchmark stand-in claude", "history_preserved": (try? fixture.historyIsPreserved()) == true]
             }, input: {
                 let surface = try #require(registry.surfaces.view(for: identity).surface)
                 let message = "reopened-\(round)"
@@ -763,8 +765,13 @@ struct DesktopPerformanceTests {
             }
             try journal.write(["event": "memory_phase", "phase": "navigation_files_complete", "round": round])
             try send(window, "quit\n")
-            try await wait(window) { !registry.surfaces.hasSurface(identity) }
-            registry.surfaces.release(identity)
+            // The provider can quit while its attached viewer still shows the last screen.
+            let deadline = ContinuousClock.now + .seconds(5)
+            while try await fixture.records().first?.state != .closed {
+                try #require(ContinuousClock.now < deadline, "The owned Session did not close")
+                try await Task.sleep(for: .milliseconds(50))
+            }
+            await registry.surfaces.release(identity)?.value
             store.noteSurfaceClosed(identity)
             try journal.write(["event": "memory_phase", "phase": "native_surface_released", "round": round])
             let retained = try await fixture.records()
@@ -1473,7 +1480,10 @@ actor SnapshotReads {
                 let owned = try await fixture.read(["plan", "list", "--all", "--json"])
                 var page = try #require(value as? [String: Any])
                 let extra = try #require(JSONSerialization.jsonObject(with: Data(owned.utf8)) as? [String: Any])
-                page["waves"] = (try #require(page["waves"] as? [Any])) + (try #require(extra["waves"] as? [Any]))
+                var tasks = try #require(page["tasks"] as? [String: Any])
+                let ownedTasks = try #require(extra["tasks"] as? [String: Any])
+                tasks["items"] = (try #require(tasks["items"] as? [Any])) + (try #require(ownedTasks["items"] as? [Any]))
+                page["tasks"] = tasks
                 value = page
             } else if verb == "wave list" {
                 let owned = try await fixture.read(args)
@@ -1537,7 +1547,7 @@ private func snapshotRead(binary: String, home: String, args: [String], cwd: Str
     // Copied launch authority is never exercised. This transport permits only local
     // reads; no network, Session connection, watcher, worker or provider can start.
     let verb = args.prefix(2).joined(separator: " ")
-    guard ["wave show", "wave list", "wave status", "session list", "session card", "session history", "machine self", "task status", "task files", "task diff", "graph list"].contains(verb) else {
+    guard ["plan list", "task show", "task detail", "task changes", "task file", "wave show", "wave list", "wave status", "session list", "session card", "session history", "machine self", "task status", "task files", "task diff", "graph list"].contains(verb) else {
         throw RegistryQueryError("Snapshot does not execute \(verb)")
     }
     let process = Process()

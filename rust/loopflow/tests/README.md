@@ -138,8 +138,7 @@ the Rust suites. Schema construction can pass even when a released migration
 was edited; this check also verifies immutable history against main and tags.
 Include `store::sqlite::revisions::tests::store_revisions_cover_every_table`
 when adding a table: give displayed rows revision triggers and classify operation-only
-receipts as never displayed. Wave lifecycle changes also run `--test two_people`;
-its shared repository publishes authored files that lifecycle operations may already commit.
+receipts as never displayed.
 When settings leave SQLite, search fixture SQL in `src/`, `tests/`, and
 `tests/e2e/` for removed columns and tables. Seed preferences through `lf set`;
 keep runtime observations in SQLite. Run account, Machine, Wave lifecycle, and
@@ -405,27 +404,12 @@ independent acquisition during failed delivery, local buffering and retained exe
 The peer implements team deltas with current revision timestamps. Graph acquisition
 waits for a turn/step boundary; only watchers retry on the 30–240-second clock.
 Run these Linux fixtures when changing Linear fetches, even if macOS checks pass.
-Linear and Git planning run separately; no provider receipt crosses Git.
-`planning_setup_tests` proves configuration selection and personal-key recovery.
-`planning_foreground_tests` exercises disposable custom refs through public CLI and
-Session connections, including offline independent edits, comments, completion and
-unchanged execution. `planning_write` covers atomic local journal capture and import
-through the same typed writer. `task_remote_tests` exercises actual target CLI dispatch
+`planning_setup_tests` proves tracker selection and that the released `provider: git`
+reads as no tracker. `machine_commands::the_later_change_shows_on_both_machines_through_the_hub`
+runs a laptop and its hub over the real `ssh … lf server connect` carrier, through
+an offline edit and a lost `plan.apply` answer; `sqlite::plan_carriers` covers the
+exchange's store half. `task_remote_tests` exercises actual target CLI dispatch
 with simulated SSH/providers; it does not establish configured remote installation.
-
-`tests/e2e/codex_connect.py --codex "$(command -v codex)" --lf target/debug/lf
---planning-peers --output <dir>` composes a real Codex engine with a synthetic
-Responses endpoint and disposable Git planning. It launches with `--task`, then
-imports edits, comments and completion for that same Task during live connect and
-explicit resume, including after killing the fixture's driver. Its historical
-Workflow is seeded; its Session, drivers and checkout are created by public commands.
-Exchange preserves Workflow/placement, live driver, Session/native identity and
-append-only history without starting an engine or provider turn. After imported
-completion, the current client explicitly starts and completes another turn on the
-same engine. The controlled protocol client is headless, not a rendered TUI or
-running Workflow-edge proof. It needs re-authoring before it runs again: it seeds the
-renamed `task_workflows` table and resumes a Run, which `lf resume` refuses. Prepare the script's uv dependencies before
-running it through `scripts/test_network.py`.
 
 Only attempted effects acknowledge; equal-desired provider readback can instead
 retire an unattempted intention without another write. The portable `watch` offline-completion test requires a foreground delivery error
@@ -545,8 +529,8 @@ through composition, live repository skill overrides in global recipes, personal
 file precedence, explicit CLI/environment selection and empty/false/unset values.
 Session/resume fixtures create local Tasks through the CLI and wait for each
 worker before reading its selection. Stand-ins establish launch behavior, not
-configured-provider recovery. Claude's headless permission floor is independent
-of the resolved `yolo` preference; terminal bypass checks own its negation.
+configured-provider recovery. A headless run skips permissions whatever `yolo`
+resolves to; attended terminal checks own its negation.
 Launch and preview fixtures select a harness explicitly or save a fixture-local
 `default_agent`; they must not depend on the developer's installed providers.
 Keep composed launch matrices split into bounded behavioral cases so each stays
@@ -1029,7 +1013,7 @@ Changes to observed definition files or directory traversal also run
 must remain available when a local catalog path is not a directory.
 
 When changing Session activity or Waiting, run `session_cli_tests` and
-`world_recipes` (its `--watch` cases) together. Direct SQL fixtures must carry both the attachment
+`session_list_subscribe` together. Direct SQL fixtures must carry both the attachment
 token and the AgentProcess id, matching the production activity writer. Rebuild both SwiftPM and
 the Xcode test targets after shared model renames; Foundation types such as
 `Foundation.Process` need explicit qualification where names overlap.
@@ -1088,7 +1072,7 @@ cargo test -p loopflow --test served_reads
 cargo test -p loopflow --test transport_tests server_status_does_not_install_or_create_work
 cargo test -p loopflow --test transport_tests server_registration_migrates_old_job_and_respects_disabled_choice -- --ignored
 cargo test -p loopflow --test transport_tests held_session_survives_server_restart
-cargo test -p loopflow --test transport_tests a_held_pane_reads_reconnecting_until_the_next_server_answers
+cargo test -p loopflow --test transport_tests a_resumed_relay_keeps_focus_across_server_restarts
 cargo test -p loopflow --test transport_tests ownership_queues_behind_a_taker_and_tells_the_loser_who_took_it
 ```
 

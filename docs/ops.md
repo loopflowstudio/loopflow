@@ -197,11 +197,14 @@ ssh mini                                         # sign in with Claude/Codex on 
 lf --machine mini task list                      # run any lf command on mini
 lf task move LOO-12 --machine mini               # move a Task and its Session to mini
 lf --wave product set machine mini               # default new Tasks in `product` to mini
+lf machine hub mini                              # exchange this Machine's plan with mini, live
 ```
 
 `--machine` runs the entire command on the target host in its saved repository.
 `lf machine remove mini` forgets the connection without stopping work running
-there.
+there. Machines that clone the same repository share its plan through Git; a
+hub makes that take seconds. See
+[Share the plan](work.md#share-the-plan-with-your-team).
 
 Group owned machines into a pool and fall back to on-demand rentals when none
 are free:

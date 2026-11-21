@@ -920,9 +920,9 @@ mod tests {
                 .unwrap()
                 .unwrap()
                 .planning_transport(),
-            crate::config::TrackerConfig::Linear {
+            Some(crate::config::TrackerConfig::Linear {
                 team: Some("typed".into())
-            }
+            })
         );
         let saved = crate::engine::config::set(&shared, "skills.design.agent", "claude").unwrap();
         assert_eq!(saved.key, "skill.design.agent");

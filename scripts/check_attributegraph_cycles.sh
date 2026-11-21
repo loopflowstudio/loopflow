@@ -5,38 +5,26 @@
 # interaction matrix.
 #
 # SwiftUI reports dependency cycles to the unified logging system (os_log) and
-# can also print them to the app's stderr, so the capture reads both: `log
-# stream` on the app process and the app's own output share one log.
+# can also print them to the app's stderr. Capture both, including startup,
+# using the test executable's path to exclude the installed app's log events.
 #
 # Usage:
-#   scripts/check_attributegraph_cycles.sh [--repo <path> | --world | --sheet] [--seconds N]
+#   scripts/check_attributegraph_cycles.sh [--repo <path> | --sheet] [--seconds N]
 #
-# Cold launch, repository switch, refresh, and Chat-in-the-default-pane are all
-# exercised by the RoadmapView default surface that renders at launch. To cover
-# Wave selection, WaveChat selection, and sheet/dialog presentation, interact
-# with the window while the capture runs (the script prints a countdown).
+# With --sheet the app opens Portfolio, selects the infrastructure fixture Wave
+# and presents the create sheet. Otherwise exercise the window during capture.
 set -euo pipefail
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 SECONDS_TO_CAPTURE=15
 TARGET_REPO="$REPO"
-WORLD=0
 SHEET=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --repo) TARGET_REPO="$2"; shift 2 ;;
     --seconds) SECONDS_TO_CAPTURE="$2"; shift 2 ;;
-    # --world builds an `lf-world portfolio` world and opens it in `live` mode
-    # with a populated Wave auto-selected into its full detail hierarchy, so the
-    # WaveDetailPane selection + Chat-render path (the
-    # @StateObject->@ObservedObject fix site) runs at cold launch through the
-    # real registry — no interaction needed.
-    --world) WORLD=1; shift ;;
-    # --sheet implies --world and additionally raises the create sheet over the
-    # settled populated surface (~1.5s in), so the sheet/dialog-presentation leg
-    # of the zero-cycle matrix is captured headlessly too — no click required.
-    --sheet) WORLD=1; SHEET=1; shift ;;
+    --sheet) SHEET=1; shift ;;
     *) echo "unknown arg: $1"; exit 2 ;;
   esac
 done
@@ -54,35 +42,23 @@ echo "Building Loopflow.app…"
     CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM= >/dev/null )
 
 LOG="$(mktemp -t lf_attributegraph.XXXXXX.log)"
-/usr/bin/log stream --style compact --process Loopflow >"$LOG" 2>&1 &
+LOG_PATH=${BIN//\\/\\\\}
+LOG_PATH=${LOG_PATH//\"/\\\"}
+/usr/bin/log stream --style compact --predicate "processImagePath == \"$LOG_PATH\"" >>"$LOG" 2>&1 &
 LOG_PID=$!
 sleep 1.5
 
-if [ "$WORLD" -eq 1 ]; then
-  ( cd "$REPO" && cargo build -p loopflow --bin lf-world >/dev/null 2>&1 )
-  WORLD_DIR="$(mktemp -d -t lf_world)/portfolio"
-  "$REPO/target/debug/lf-world" build portfolio "$WORLD_DIR" </dev/null >/dev/null
-  WORLD_ENV=()
-  while IFS= read -r pair; do WORLD_ENV+=("$pair"); done < <(
-    python3 -c 'import json,sys; [print(f"{k}={v}") for k, v in json.load(open(sys.argv[1])).items()]' \
-      "$WORLD_DIR/env.json")
-  if [ "$SHEET" -eq 1 ]; then WORLD_ENV+=("LOOPFLOW_UI_TEST_PRESENT_SHEET=1"); fi
-  env "${WORLD_ENV[@]}" LOOPFLOW_UI_TEST_SELECT_BRANCH=desktop \
-    "$BIN" -ui-test-mode live --repo "$WORLD_DIR/repo" >>"$LOG" 2>&1 &
+if [ "$SHEET" -eq 1 ]; then
+  LOOPFLOW_UI_TEST_VIEW=portfolio LOOPFLOW_UI_TEST_PRESENT_SHEET=1 \
+    LOOPFLOW_UI_TEST_SELECT_BRANCH=infrastructure \
+    "$BIN" -ui-test-mode mock-waves >>"$LOG" 2>&1 &
 else
   "$BIN" --repo "$TARGET_REPO" >>"$LOG" 2>&1 &
 fi
 APP_PID=$!
 
 if [ "$SHEET" -eq 1 ]; then
-  echo "App launched (pid $APP_PID) on a built world with auto-sheet — a"
-  echo "populated Wave is auto-selected, then the create sheet is raised over it"
-  echo "~1.5s in. Cold launch + Wave selection + Chat render + sheet presentation"
-  echo "are all captured with no interaction."
-elif [ "$WORLD" -eq 1 ]; then
-  echo "App launched (pid $APP_PID) on a built world — a populated Wave is"
-  echo "auto-selected, so cold launch + Wave selection + Chat render are captured"
-  echo "with no interaction. Use --sheet to also cover sheet presentation."
+  echo "Checking sheet presentation over the infrastructure Wave."
 else
   echo "App launched (pid $APP_PID). Exercise the matrix now:"
   echo "  cold launch · repo switch · Wave select · refresh · Chat select · open a sheet/dialog"
@@ -98,8 +74,12 @@ COUNT="$(grep -iEc 'cycle detected|AttributeGraph' "$LOG" || true)"
 echo "Captured $(wc -l <"$LOG") log lines; AttributeGraph/cycle mentions: $COUNT"
 if [ "$COUNT" -gt 0 ]; then
   echo "FAIL — AttributeGraph cycles detected:"
-  grep -iE 'cycle detected|AttributeGraph' "$LOG" | head
+  grep -im 10 -E 'cycle detected|AttributeGraph' "$LOG"
   echo "log: $LOG"
+  exit 1
+fi
+if [ "$SHEET" -eq 1 ] && ! grep -Fxq "Create sheet appeared over infrastructure" "$LOG"; then
+  echo "FAIL — create sheet did not appear over the selected Wave. See $LOG"
   exit 1
 fi
 echo "PASS — zero AttributeGraph cycles across the captured window."

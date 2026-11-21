@@ -27,20 +27,13 @@ impl Operation {
         )
     }
 
-    /// Whether this can change the Machine or what runs on it: a write, a
-    /// Session start, a hook's recording, an upload or mobile setup.
-    pub(super) fn changes(&self) -> bool {
-        self.is_write()
-            || matches!(
-                self,
-                Self::Server(
-                    ServerOperation::SessionStart { .. }
-                        | ServerOperation::SessionContinue { .. }
-                        | ServerOperation::SessionBoundary(_)
-                        | ServerOperation::RequestUpload { .. }
-                        | ServerOperation::MobileConfigure { .. }
-                )
-            )
+    /// The directory a command names, whose repository it reads or changes.
+    pub(super) fn directory(&mut self) -> Option<std::path::PathBuf> {
+        match self {
+            Self::Read(read) => read.directory_mut().cloned(),
+            Self::Write(write) => write.directory_mut().cloned(),
+            Self::Server(_) | Self::Measured(_) => None,
+        }
     }
 }
 

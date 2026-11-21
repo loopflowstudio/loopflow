@@ -22,8 +22,7 @@ then runs model and production-view checks with WindowServer access denied.
 Unset inherited `LF_*` and close stdin as described in `scripts/testing.md`.
 `DesktopHeadlessTests/workStates` checks loading, unavailable, empty and selected
 Work and taps the production navigation button. Report these as automated
-checks, not a live-window walkthrough. Hosted window checks remain optional;
-record what was not seen. With a display, `uv run python scripts/loopflow-dev.py
+checks. With a display, `uv run python scripts/loopflow-dev.py
 run-debug` builds and launches the development app; use `lf desktop state --json`
 and the commands in `docs/surfaces.md` to inspect and drive it.
 
@@ -62,114 +61,86 @@ when WindowServer is unavailable.
 - `scripts/release-loopflow.py` parses no flags. Even `--help` starts a full
   release build.
 
-For a live window on private data, build a world and launch the Dev app on it:
-`target/debug/lf-world build one-task /tmp/lf-qa-<name>/world`, then
-`uv run python scripts/loopflow-dev.py run-debug --world <world>`. It installs
-`~/Applications/Loopflow Dev.app` and stays in the foreground until the app quits.
-Run the app's bundled `lf` with the world's `env.json` variables and
-`LF_DESKTOP=com.loopflow.mac.dev`; the control socket is under the world's
-`LF_HOME`, so `lf desktop state --json` reads only that app.
+# Loopflow Dev on the live Machine
 
-- Check the screen first: `ioreg -n Root -d1 -a | grep -c CGSSessionScreenIsLocked`
-  prints 1 when it is locked, and then `screencapture` returns a black frame
-  ("could not create image from window" for `-l <id>`). The app still launches
-  and answers its socket, so say which checks were socket reads and which were seen.
-- The app registers `com.loopflow.server.<hash>` for the world's home with the
-  real `launchctl` (the world's refusing one is not used). After quitting it,
-  stop the world as `.lf/qa/auto.md` describes.
-- The Auto toggle, Claim, Unassign and Abandon have no `lf desktop` verb:
-  `lf desktop state --json` shows the Task page's `run_control`, and the views
-  are covered by `DesktopHeadlessTests`.
-- Drive it over the socket: `lf desktop ls`, `lf desktop goto 1`,
-  `lf desktop run --task <id> '<line>'`. Do not use `lf desktop view` or
-  `lf open` there: they open a `loopflow://` URL, and when
-  `/Applications/Loopflow.app` carries the same bundle ID macOS starts that app
-  on the world instead. It then owns the socket, and its panes run the installed
-  `lf`.
-- `lf desktop enter <tile>` reaches only the shown Working tiles; Backlog Tasks
-  have no socket route, so their pages need a person or headless view tests.
-  `lf desktop move -p <task> --destination <task>` writes the shared Task order;
-  `lf desktop do working-tasks` and `do back` navigate.
-- Look at the window with `screencapture -x -o -l <id>`; list window IDs with a
-  `swift` script over `CGWindowListCopyWindowInfo` (owner `Loopflow Dev`).
-- `lf desktop send` refuses control characters. To make a held conversation
-  report activity, write `ESC]7501;state=working:app=claude-code ESC\` (or
-  `state=idle`) to its stand-in's tty (`ps -o tty` of the `bin/claude` child of
-  the world's holder); `lf task list --json` then shows `busy`/`available`.
-- Wait for the app with `pgrep -x "Loopflow Dev"`: `pgrep -f` with the bundle
-  path matches the waiting shell's own command line. The first `run-debug`
-  builds the bundled `lf` in its own target directory (28 minutes on a loaded Machine).
-- An install that fails with "Third-party inputs changed" means `Cargo.lock`
-  changed: `uv run python scripts/third_party.py refresh`, and commit the result.
-- Desktop puts `~/.local/bin` ahead of the world's `bin` on its panes' `PATH`,
-  so a provider Desktop starts is the real `claude` (check `lsof -p <pid>` txt).
-  Start the Task's conversation first from a PTY running the prepared
-  `open_argv` under the world's `PATH`; Desktop's panes then attach to that
-  stand-in. `lf desktop do refresh-session -p session`, `desktop send`/`send-key`
-  and `desktop capture --region scrollback` drive and read the pane; a pane's
-  `attachment` reads `opening`, `usable` or `failed`. Reuse no markers across runs: scrollback keeps earlier replies.
-- Reinstalling the bundle changes its `lf`: the running private server stays
-  `ready` and keeps running the old build (`lf server status` gives its
-  `executable_sha256`; compare `shasum -a 256` of the bundled `lf`). Restart
-  that server with the new bundled `lf` to run the new code; held providers
-  survive in the old holder.
-- To see what a pane inherited, compare `lsof -p <app pid>` pipe addresses with
-  those of its children and of the PIDs in the world's `processes` table.
-- Quit with `NSRunningApplication(processIdentifier:).terminate()` from a
-  `swift` script; both apps answer to one bundle ID. Then end the world's owners
-  by PID (check `LF_HOME` in `ps eww`) and boot out the label in its
-  `server.plist`.
-- `scripts/loopflow-dev.py install` builds and installs without launching; then
-  `open -n --env …` the bundle yourself to control launch timing. While the
-  screen is locked (`CGSSessionScreenIsLocked`), `screencapture` is black and
-  `-l <window>` fails: sample `lf desktop ls --json` instead. Its `reading`/
-  `reason` are the window's work status and `list` the sidebar rows.
-- To run beside another QA app, copy the installed bundle, set its own
-  `CFBundleIdentifier` with `plutil -replace`, `codesign -f --deep -s -`, and
-  `open -n --env …` it with `LF_DESKTOP` set to that ID. Conversations the app
-  opens run the account's real `claude` (with the world's `CLAUDE_CONFIG_DIR`, so
-  at sign-in) even when you start the copy's bundled `lf server run` first; a CLI
-  `lf checkout` keeps the world's stand-in. OSC 7501 reports written to the
-  conversation's tty still drive activity; avoid Graph runs there. Stop the
-  holder's children by the holder's PID, then unregister the copy with `lsregister -u`.
-- On the Working Tasks Dashboard (`lf desktop working-tasks`),
-  `lf desktop move -p <task> --destination <task>` moves a tile and writes the
-  shared `task_orders`; Wave tiles are not enterable there, so the Wave board has
-  no socket route. A locked screen also denies accessibility reads
-  (`AXIsProcessTrusted` false), so header text is left to headless view tests.
-- To delay or break Work reads, SIGSTOP the private server. Desktop registers
-  it under launchd, so `kill -9` restarts it within seconds; for a sustained
-  outage boot out the `server.plist` label, then `lf server run` to recover.
-  The world's holder outlives both; stop it and its stand-ins by PID
-  (`ps eww` shows `LF_HOME=/private/tmp/…`).
+Use an unlocked, idle display. Set up the isolated Dev bundle below before
+launch. The normal launcher replaces the shared Loopflow Dev bundle.
 
-# Dev on a copy of the Machine
+1. Record the server instance and executable hash with the installed entry
+   (`~/.local/bin/lf server status`) and note the running holders with
+   `pgrep -f 'lf holder run'`. Use that same `lf` for the commands below.
+2. Make a visible Swift edit, build and open the isolated bundle as described
+   below, and check the change over the live backlog.
+3. Create a disposable Task with the installed `lf`. Watch it appear in Dev,
+   rename it with `lf task update <id> --title 'Renamed QA Task'`, and check
+   the row updates without relaunching. Abandon the Task afterwards.
+4. Attach to a disposable running Session with `lf resume <session>` and open
+   that same Session in Dev. Check that both views show the same output and
+   that a line typed in Dev appears in the terminal view. Close and reopen
+   the Dev pane and verify the Session is still running.
+5. Compare the server instance, executable hash and original holder PIDs
+   with step 1.
 
-`uv run python scripts/loopflow-dev.py run --copy` (every `LF_*` unset, stdin
-closed) builds, copies the store to `~/.lf-copy` and opens Dev there. Read the
-window with the bundled `lf` under `~/.lf-copy/env.json`'s variables plus
-`LF_DESKTOP=com.loopflow.mac.dev`, from `/Users/…/<main checkout>`; quote
-`PATH`, it holds a directory with a space. Record the installed server first
-(`lf server status` instance, `ps -o lstart` of the `com.loopflow.server` job's
-PID) and compare after.
+Dev reads no Work until its window is on screen. With `open -g`, the window
+stays off screen on “Opening repository…”, the server logs only `config.theme`
+and `lf desktop state` lists no windows. A mounted check takes focus, so wait
+until nobody is at the keyboard.
 
-- Changes: served requests on the copy's socket answer the sentence;
-  `plan.list` as a request answers `bulk` with a ticket, so read plans through
-  `lf desktop ls`. Pane commands (`lf session resume <id>`, `lf desktop shell
-  … --create`) and `lf desktop move` on the Dashboard reach the store
-  themselves and print the same sentence.
-- To see the launcher's wire line and the decode Notice in one run, rename one
-  required field in Rust only (`#[serde(rename = …)]` on `RoadmapTask.section`)
-  and run plain `run`: it names the type, opens a copy served by that `lf`, and
-  the unchanged Swift shows the Notice as the window's `reason` in
-  `lf desktop state --json`. Revert and `run` again so the installed Dev bundle
-  is clean.
-- `kill -9` Dev, then `run --world <dir>`: the saved window of the other
-  Machine must not appear (`desktop state` lists one window, the world's).
-- Each `run` after a source change reinstalls the bundle; the next launch's
-  `lf install server` replaces a world's server left by the earlier bundle
-  (new `instance`, `executable_sha256` equal to the bundled `lf`'s).
-- Afterwards boot out the label in `~/.lf-copy/home/server.plist` and the
-  world's; stop the world's holder by PID after checking its `LF_HOME`.
-- An opening receipt in `desktop state` stays `opening` after its window is
-  usable, in the installed app too; do not wait on it.
+`LF_DESKTOP=com.loopflow.mac.dev lf desktop state --json` inspects Dev's reads
+even with the screen locked. Visible rendering and keyboard input need an
+unlocked display.
+
+To build the isolated bundle, import `scripts/loopflow-dev.py`, set
+`DEV_APP` to `~/Applications/Loopflow Dev QA.app`, `DEV_EXECUTABLE` to
+`DEV_APP.stem` and `DEV_BUNDLE_ID` to a unique ID ending in `.dev`. Run
+`cmd_build()` and, if it succeeds, `_install_dev_app()`.
+Run that script with `uv run python` from the checkout: the module imports
+`boto3`, which only the project environment has.
+LaunchServices won't resolve a bundle ID under `/tmp`, so `lf desktop view`
+fails there with `LSCopyApplicationURLsForBundleIdentifier`. Register with
+`lsregister -f`, open it with `LOOPFLOW_DEV_WAVE_REPO` and `--repo` after
+clearing `LF_*`, and unregister it and delete it afterwards.
+
+An isolated bundle ID ending in `.dev` gets Dev behavior (terminals wait for
+a visit). With the screen locked, Dev still mounts its window and reads Work,
+so launch-time attaches can be counted: list `pgrep -f 'session attach'`
+children of the app's PID. Session panes start in the background. Check that a
+visited Session opens with the installed CLI as well as the branch CLI.
+Ghostty never reports focus-in while locked. To check a pane opened by the installed CLI,
+make a fresh private Machine whose `bin/lf` is a copy of
+`readlink -f ~/.local/bin/lf` and start its `lf server run` from that copy; a
+branch-built home may be past the installed CLI's schema. Point it at a private Machine
+with `open -n --env LF_HOME=… --env LF_BIN=… --env PATH=…` (stand-in agents on
+that `PATH`); quit with `osascript -e 'quit app id "<bundle id>"'`, which
+reopens the last selected Task on the next launch.
+
+These steps work with the screen locked, using that bundle ID in `LF_DESKTOP`:
+
+- `lf desktop view 'task:<id>' --repo <repo>` and `lf desktop enter '<title>'`
+  select a Task. Tiles are addressed by title, and `enter nosuchtile` lists
+  them, which is how to watch a rename arrive. `enter` needs a window showing
+  tiles; from a Task page, `lf desktop back` until it prints `repository`.
+- `lf --task <id> desktop focus -p session` is a deliberate visit: on a
+  restored selection it starts that one Session's relay.
+- `lf --task <id> desktop capture|send -p session` reads and types into the pane.
+  Without `--task`, these commands address the cwd's Task. From this
+  checkout, that is this Task's own Session pane.
+- `lf --task <id> desktop close -p session` leaves the pane `attachment:
+  failed`. `show` says it's already shown. `focus -p session` reattaches it.
+- For the original view, run `lf resume --task <id> -a claude` in a detached tmux
+  (`tmux -L <name>`). First set the Task's notes to say "reply ready and
+  wait", so the agent does nothing. `tmux send-keys -l` types from that side.
+  Count `claude --name <title>` processes to check that no second provider
+  started.
+
+On launch, Dev can restore a selected workspace from the Machine's saved
+layout. Verify that restoration starts zero `lf session attach` relays and
+the first deliberate visit opens only that Session. Use a private Machine
+with disposable Sessions and quit Dev when the check is done.
+
+For a change to the branch server, follow the private setup in
+[served launches](served-launches.md). For mounted app checks, use the
+packaged app with its signed helper or launch a Dev bundle with `LF_HOME` and `LF_BIN`
+after clearing inherited `LF_*`. Use the app's bundle ID in `LF_DESKTOP` and
+issue its control commands with that same private home. Stop the private
+server, holders and providers afterwards as described in [resume](resume.md).

@@ -92,7 +92,7 @@ pub fn run(args: &ShellRequest) -> Result<()> {
         None => false,
     };
     match receipt.terminal {
-        Some(terminal) if running => crate::transport::attach(&terminal, None, None),
+        Some(terminal) if running => crate::transport::attach(&terminal, None, Default::default()),
         terminal => {
             if let Some(terminal) = &terminal {
                 crate::transport::shell_history(terminal)?;

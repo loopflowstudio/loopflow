@@ -48,7 +48,7 @@ to one. `uv run python scripts/due_removals.py` prints when each may drop.
 - `task_ship_events` — **leaving → LOO-971, task_auto**: id, task_id, kind, at, lf_process_id, person, pid, os_started_at, ended_at, exit_code, error, caller_session_id
 - `task_state_deliveries`: seq, id, task_id, target, base_revision, base_state, attempted, settled, error, conflict_json
 - `task_summaries`: task_id, ended, ended_at, graph, loop_passes, ~~ship_events~~ (leaving → LOO-971, task_auto), wall_seconds, reflect, auto
-- `tasks`: id, repository_id, project_id, external_issue_id, issue_identifier, created_at, issue_title, issue_description, pm_snapshot_synced_at, ~~worktree~~ (leaving → LOO-954, unused_store_members), workspace_slug, abandon_reason, updated_at, abandoned_at, ~~primary_session_id~~ (leaving → LOO-954, unused_store_members), planning_revision, planning_rank, planning_assignee, planning_state, planning_completed_at, planning_provider_revision, planning_url, planning_branch_name, planning_team_id, planning_completed, planning_deleted_at, ~~branch~~ (leaving → LOO-954, unused_store_members), ~~base_commit~~ (leaving → LOO-954, unused_store_members), ~~parent_pr_id~~ (leaving → LOO-954, unused_store_members), completion_request, completion_error, planning_due_date, ~~checkout_machine_id~~ (leaving → LOO-954, unused_store_members), paused, ~~shipped_at~~ (leaving → LOO-971, task_auto), ~~ship_lf_process_id~~ (leaving → LOO-954, unused_store_members), ~~ship_restarts~~ (leaving → LOO-954, unused_store_members), ~~ship_approved_lf_process_id~~ (leaving → LOO-954, unused_store_members), ~~ship_stopped_at~~ (leaving → LOO-954, unused_store_members), ~~ship_stopped_lf_process_id~~ (leaving → LOO-954, unused_store_members), ~~regressed_in~~ (leaving → LOO-730, unused_store_members), ~~ship_stopped_person~~ (leaving → LOO-954, unused_store_members)
+- `tasks`: id, repository_id, project_id, external_issue_id, issue_identifier, created_at, issue_title, issue_description, pm_snapshot_synced_at, ~~worktree~~ (leaving → LOO-954, unused_store_members), workspace_slug, abandon_reason, updated_at, abandoned_at, ~~primary_session_id~~ (leaving → LOO-954, unused_store_members), planning_revision, planning_rank, planning_assignee, planning_state, planning_completed_at, planning_provider_revision, planning_url, planning_branch_name, planning_team_id, planning_completed, planning_deleted_at, ~~branch~~ (leaving → LOO-954, unused_store_members), ~~base_commit~~ (leaving → LOO-954, unused_store_members), ~~parent_pr_id~~ (leaving → LOO-954, unused_store_members), completion_request, completion_error, planning_due_date, ~~checkout_machine_id~~ (leaving → LOO-954, unused_store_members), ~~paused~~ (leaving → LOO-938, plan_hub), ~~shipped_at~~ (leaving → LOO-971, task_auto), ~~ship_lf_process_id~~ (leaving → LOO-954, unused_store_members), ~~ship_restarts~~ (leaving → LOO-954, unused_store_members), ~~ship_approved_lf_process_id~~ (leaving → LOO-954, unused_store_members), ~~ship_stopped_at~~ (leaving → LOO-954, unused_store_members), ~~ship_stopped_lf_process_id~~ (leaving → LOO-954, unused_store_members), ~~regressed_in~~ (leaving → LOO-730, unused_store_members), ~~ship_stopped_person~~ (leaving → LOO-954, unused_store_members)
 - `tracker_actions`: seq, id, wave_id, project_id, task_id, subject, kind, value_json, base_json, conflict_json, phase, tracker, remote_id, confirmed_revision, error, sent_at, looked_at
 
 ## PR landing
@@ -74,21 +74,12 @@ to one. `uv run python scripts/due_removals.py` prints when each may drop.
 - `tracker_wave_projects`: wave_id, project_id, position
 - `tracker_wave_sync`: wave_id, tracker, initiative, synced_at
 
-## Git tracker
+## Shared plan
 
-- `git_tracker_changes`: id, record_table, mutation, object_id, field, clock
-- `git_tracker_conflicts`: repo, kind, object_id, reason, active
-- `git_tracker_destinations`: repo, id, endpoint, reference, fetched_revision, fetch_error, publication_revision, publication_state, publication_digest, publication_error
-- `git_tracker_imports`: repo, destination, revision
-- `git_tracker_routes`: mutation_id, repo, destination
-- `git_tracker_seen`: id
-- `planning_destinations`: repo, id, endpoint, reference, fetched_revision, acquisition_error, publication_revision, publication_state, publication_digest, publication_error
-- `planning_peer_changes`: id, record_table, mutation, object_id, field, clock
-- `planning_peer_conflicts`: repo, kind, object_id, reason, active
-- `planning_peer_imports`: repo, destination, revision
-- `planning_peer_observed`: id
-- `planning_peer_routes`: mutation_id, repo, destination
-- `planning_user`: singleton, user_key
+- `plan_carriers`: repo, carrier, peer, sent_seq, seen_seq, error, failing_since, not_taken, not_taken_reason
+- `plan_changes`: seq, repo, owner_table, owner_id
+- `plan_refs`: repo, machine_id, tip
+- `plan_stamps`: owner_id, field, at, machine_id
 - `repository_plans`: id, repo, selected
 
 ## Steer
@@ -144,7 +135,20 @@ to one. `uv run python scripts/due_removals.py` prints when each may drop.
 
 ## Leaving the store
 
+- `git_tracker_changes` — **leaving → LOO-938, plan_hub**: id, record_table, mutation, object_id, field, clock
+- `git_tracker_conflicts` — **leaving → LOO-938, plan_hub**: repo, kind, object_id, reason, active
+- `git_tracker_destinations` — **leaving → LOO-938, plan_hub**: repo, id, endpoint, reference, fetched_revision, fetch_error, publication_revision, publication_state, publication_digest, publication_error
+- `git_tracker_imports` — **leaving → LOO-938, plan_hub**: repo, destination, revision
+- `git_tracker_routes` — **leaving → LOO-938, plan_hub**: mutation_id, repo, destination
+- `git_tracker_seen` — **leaving → LOO-938, plan_hub**: id
 - `ondemands` — **leaving → LOO-954, unused_store_members**: name, created_at
+- `planning_destinations` — **leaving → LOO-938, plan_hub**: repo, id, endpoint, reference, fetched_revision, acquisition_error, publication_revision, publication_state, publication_digest, publication_error
+- `planning_peer_changes` — **leaving → LOO-938, plan_hub**: id, record_table, mutation, object_id, field, clock
+- `planning_peer_conflicts` — **leaving → LOO-938, plan_hub**: repo, kind, object_id, reason, active
+- `planning_peer_imports` — **leaving → LOO-938, plan_hub**: repo, destination, revision
+- `planning_peer_observed` — **leaving → LOO-938, plan_hub**: id
+- `planning_peer_routes` — **leaving → LOO-938, plan_hub**: mutation_id, repo, destination
+- `planning_user` — **leaving → LOO-938, plan_hub**: singleton, user_key
 - `pools` — **leaving → LOO-954, unused_store_members**: name, created_at
 - `session_steers` — **leaving → LOO-954, unused_store_members**: session_id, steer_id, attempt, applicable
 - `steer_batches` — **leaving → LOO-954, unused_store_members**: id, session_id, agent_process_id, provider_thread, attachment_token, boundary, payload_hash, evidence, created_at
@@ -170,7 +174,7 @@ to one. `uv run python scripts/due_removals.py` prints when each may drop.
 ## Task ownership
 
 - `people`: id, name
-- `task_ownership`: id, task_id, kind, person, machine_id, at, ordered_at, ~~written_here~~ (leaving → LOO-954, unused_store_members), person_key, machine_label, writer_machine_id, person_id
+- `task_ownership`: id, task_id, kind, person, machine_id, at, ordered_at, ~~written_here~~ (leaving → LOO-954, unused_store_members), person_key, machine_label, writer_machine_id, person_id, seen
 
 ## Desktop workspace
 

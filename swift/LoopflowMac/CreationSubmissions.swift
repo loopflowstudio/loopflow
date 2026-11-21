@@ -12,8 +12,7 @@ extension CreationSubmissions {
         send: { try await ServerClient.submittedCreation($0) })
 
     static func localMachine() async throws -> String {
-        struct Identity: Decodable { let id: String }
-        return try JSONDecoder().decode(Identity.self, from: Data(try await ServerClient.read(.machineSelf).utf8)).id
+        try await RegistryQueryLocal.shared.localMachineId()
     }
 }
 
@@ -195,7 +194,7 @@ private struct RecoveredCreationInspector: View {
                 }
                 if let task = resource.task {
                     let value = try await ServerClient.read(.taskGet(directory: resource.directory, issue: task))
-                    let reading = try JSONDecoder().decode(WorkFrame.TaskStatusReading.self, from: Data(value.utf8))
+                    let reading = try value.decode(WorkFrame.TaskStatusReading.self)
                     guard let row = reading.row else {
                         throw RegistryQueryError("The recovered Task is no longer available on its original Machine.")
                     }
@@ -209,7 +208,7 @@ private struct RecoveredCreationInspector: View {
                     }
                     detail = .success(lines.filter { !$0.isEmpty }.joined(separator: "\n\n"))
                 } else if let session = resource.session {
-                    detail = .success(try JSONDecoder().decode(String.self, from: Data(try await ServerClient.read(.sessionHistoryGet(id: session)).utf8)))
+                    detail = .success(try await RegistryQueryLocal.shared.sessionHistoryText(id: session))
                 }
             } catch { detail = .failure(error) }
         }

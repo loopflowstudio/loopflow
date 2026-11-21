@@ -556,8 +556,11 @@ fn screen_reads_are_compact_passive_and_match_cli() {
     let _env = EnvGuard::with_home(&[], Some(home.path()));
     std::env::set_var("LF_HOME", home.path().canonicalize().unwrap());
     let repo = TestRepo::new();
+    // A served reply schedules an independent plan exchange when a carrier exists.
+    loopflow_execution::git::git_stdout(repo.path(), &["remote", "remove", "origin"]).unwrap();
     repo.create_file(".lf/config.yaml", "default_agent: claude\n");
-    let mut registered = register_task_with_pr(home.path(), repo.path(), "main", &repo.head_sha());
+    let directory = repo.path().canonicalize().unwrap();
+    let mut registered = register_task_with_pr(home.path(), &directory, "main", &repo.head_sha());
     let store = loopflow_execution::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
     store
         .create_task(&loopflow_execution::work::task::NewTask {
@@ -577,7 +580,7 @@ fn screen_reads_are_compact_passive_and_match_cli() {
             artifact_key: None,
             caller_artifact_key: None,
             input_published: false,
-            cwd: repo.path().into(),
+            cwd: directory.clone(),
             skill: None,
             provider: None,
             model: None,
@@ -589,7 +592,7 @@ fn screen_reads_are_compact_passive_and_match_cli() {
             work_source: None,
             bound_at: None,
             interactive: true,
-            repo: Some(repo.path().display().to_string()),
+            repo: Some(directory.display().to_string()),
             title: "Recorded conversation".into(),
             title_source: loopflow_execution::session::TitleSource::Generated,
             request: None,
@@ -599,9 +602,8 @@ fn screen_reads_are_compact_passive_and_match_cli() {
         None,
     )
     .unwrap();
-    let _server = Server::start(repo.path(), home.path());
+    let _server = Server::start(&directory, home.path());
     let mut connection = loopflow_execution::machine::client::Connection::open().unwrap();
-    let directory = repo.path().to_owned();
     let board = Read::PlanBoard {
         directory: directory.clone(),
         wave: None,
@@ -624,7 +626,7 @@ fn screen_reads_are_compact_passive_and_match_cli() {
             .result;
         let argv = operation.argv();
         let printed: Value = serde_json::from_str(&read(
-            repo.path(),
+            &directory,
             home.path(),
             &argv.iter().map(String::as_str).collect::<Vec<_>>(),
             None,
@@ -1314,7 +1316,8 @@ fn server_operations_match_their_lf_commands() {
                 Write::TaskUpdate {
                     directory: directory.clone(),
                     issue: "INF-123".into(),
-                    notes: "Served from the app".into(),
+                    notes: Some("Served from the app".into()),
+                    rank: Some(1),
                 },
                 Write::TaskMove {
                     machine: None,
@@ -2043,10 +2046,14 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             directory,
             issue,
             notes,
-        } => (
-            path(directory),
-            words(&["task", "edit", issue, &format!("--notes={notes}"), "--json"]),
-        ),
+            rank,
+        } => {
+            let mut args = words(&["task", "edit", issue]);
+            args.extend(notes.iter().map(|notes| format!("--notes={notes}")));
+            args.extend(rank.iter().map(|rank| format!("--rank={rank}")));
+            args.push("--json".into());
+            (path(directory), args)
+        }
         Write::TaskAbandon { directory, issue } => (
             path(directory),
             words(&["task", "abandon", issue, "--json"]),

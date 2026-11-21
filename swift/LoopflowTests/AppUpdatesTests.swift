@@ -17,6 +17,7 @@ struct AppUpdatesTests {
     @Test func onlyTheInstalledAppUpdatesItself() {
         let home = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         #expect(AppUpdates.isInstalled(URL(filePath: "/Applications/Loopflow.app"), environment: [:], home: home))
+        #expect(!AppUpdates.isInstalled(home.appending(path: "Applications/Loopflow Dev.app"), environment: [:], home: home))
         #expect(!AppUpdates.isInstalled(URL(filePath: "/src/loopflow/local-bin/app.noindex/Loopflow.app"), environment: [:], home: home))
         #expect(AppUpdates.isInstalled(URL(filePath: "/tmp/apps/Loopflow.app"),
                                        environment: ["LF_APPLICATIONS_DIR": "/tmp/apps"], home: home))

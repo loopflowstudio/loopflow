@@ -236,39 +236,6 @@ fn register(home: &Path, executable: &Path, replace: bool) -> Result<()> {
     Ok(())
 }
 
-/// Stop the server a supervisor keeps for the private Machine at `home`, so
-/// the home can be replaced. A home no supervisor serves is left alone.
-#[cfg(target_os = "macos")]
-pub fn stop(home: &Path) -> Result<()> {
-    // SAFETY: geteuid has no preconditions.
-    let target = format!(
-        "gui/{}/{}",
-        unsafe { libc::geteuid() },
-        label(home, "server")
-    );
-    let loaded = Command::new("/bin/launchctl")
-        .args(["print", &target])
-        .output()?
-        .status
-        .success();
-    if loaded {
-        checked(Command::new("/bin/launchctl").args(["bootout", &target]))?;
-    }
-    Ok(())
-}
-
-/// Stop the server a supervisor keeps for the private Machine at `home`, so
-/// the home can be replaced. A home no supervisor serves is left alone.
-#[cfg(target_os = "linux")]
-pub fn stop(home: &Path) -> Result<()> {
-    let unit = format!("{}.service", label(home, "server"));
-    let directory = crate::installation::account_home()?.join(".config/systemd/user");
-    if directory.join(&unit).exists() {
-        checked(Command::new("systemctl").args(["--user", "stop", &unit]))?;
-    }
-    Ok(())
-}
-
 fn checked(command: &mut Command) -> Result<()> {
     let output = command.output().context("start Server supervisor")?;
     anyhow::ensure!(

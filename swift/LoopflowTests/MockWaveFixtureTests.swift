@@ -4,9 +4,6 @@ import Testing
 @testable import Loopflow
 @testable import LoopflowMac
 
-/// The `mock-waves` UI-test fixture renders the states no data can produce —
-/// loading and error — over the stable list. Populated states render from an
-/// `lf-world` world in `live` mode.
 @Suite("Mock wave fixture")
 struct MockWaveFixtureTests {
     @Test("live UI-test mode keeps production registry reads")
@@ -31,9 +28,19 @@ struct MockWaveFixtureTests {
         #expect(byName["cadenza"]?.parentWaveId == "wave-1")  // future-ancestry indentation
     }
 
-    // Empty is the `empty-workspaces` mode and indentation is proven above.
-    // These cover the detail states the mock surface drives with
-    // `LOOPFLOW_UI_TEST_DETAIL_STATE`.
+    @Test("the empty-workspaces fixture decodes as current wire types")
+    @MainActor
+    func emptyWorkspacesDecode() throws {
+        #expect(try WorkFixture.emptyRoadmap().waves.isEmpty)
+        #expect(try WorkFixture.emptyWorkActivity().items.isEmpty)
+    }
+
+    @Test("the infrastructure plan keeps its current Project when live detail is unavailable")
+    func infrastructurePlan() {
+        let plan = MockWaveFixture.plans["wave-1"]
+        #expect(plan?.currentProject?.slug == "release-feedback")
+        #expect(plan?.currentProject?.krs.first?.text == "Every failed run has an owner")
+    }
 
     @Test("the loading detail state withholds the snapshot and keeps the loading affordance")
     func loadingDetailState() {

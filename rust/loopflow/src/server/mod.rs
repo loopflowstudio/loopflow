@@ -2,7 +2,6 @@
 mod answers;
 pub(crate) mod boundary;
 pub mod connect;
-pub mod copy;
 mod maintenance;
 pub mod mobile;
 mod outbox;

@@ -57,7 +57,18 @@ Jack Heart, Task steer 88459687-b71e-4a4f-8638-b4dc2cfe1043:
   `uv run python scripts/desktop_performance.py verify-fixture --lf target/debug/lf`
   covers these cases.
 
+- The third [concept review](concept-review.html), at head `6a9783980b`
+  against the base, found nothing to change in the model: `MachineLf` is the
+  one answer to which `lf` runs and who starts the server, Dev names itself
+  to the server, and no copy or world mention is left outside release notes.
+  The release-launch benchmark's own SQLite backup
+  (`scripts/benchmarks/desktop-performance/launch.py`) stays as a
+  measurement input with its own caller.
+
 ## Remaining
+
+Nothing here returns to implement. The first item is PR text; the rest need a
+display.
 
 - Carry the live QA results and their limits into the PR. Describe voluntary
   cleanup of the old `~/.lf-copy` launchd job after its current demo is done.

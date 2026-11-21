@@ -88,27 +88,29 @@ lists build, list and help. Desktop automation still calls its builder.
   writes with an unreadable Work store.
 - `cargo clippy --all-targets -- -D warnings` passed.
 
+The benchmark now creates its private checkout, Task and primary Session through
+Git and the branch CLI. A stand-in Claude writes one native turn on first launch
+and reads it back on resume. Setup and measurement each own their foreground
+server and holder. Ordinary runs and terminal feedback use DTOs or ANSI and
+`/bin/cat` without preparing a Machine.
+
+- `verify-fixture --lf target/debug/lf` passed all five headless tests, including
+  three reopens, copied-client refusal, retained file selection and the external
+  canary. An empty checkout/config grant previously let that canary be read.
+- Four focused Python checks passed for setup receipts, child teardown, ordinary
+  runs and private checkout reads. Headless terminal feedback produced its ANSI
+  fixture. Ordinary `run --samples 1` built without a CLI and reached preflight;
+  background CPU exceeded 0.1 core, so it recorded no timings.
+- The Session card for this closed conversation had a null workspace. Prepared
+  Session data carried the Machine and checkout. In a private PTY the stand-in
+  replied to typed input and quit. Its attached viewer kept displaying the exit
+  message, so the reopen benchmark waits for the Session to close and releases
+  the viewer. Mounted snapshot timing and
+  Ghostty terminal interaction remain for QA.
+
 ## Remaining implementation
 
-1. **Next — resolve the benchmark's Session dependency.** Start with
-   `_prepare_native_fixture` in `scripts/desktop_performance.py`. The current
-   setup discovers Session IDs by querying rows written by the world builder.
-   Try creating the Task and its Session through the branch CLI with a stand-in
-   Claude and private `LF_HOME`. Use `verify-fixture` as the first end-to-end
-   check of discovery, reopen and isolation, then check the retained callers.
-   Remove unconditional fixture setup from ordinary `run`. `_native_command`
-   currently reads the fixture for its sandbox paths, but `measureExperiences`
-   in `swift/LoopflowTests/DesktopPerformanceTests.swift` uses DTO populations
-   and `/bin/cat`. Derive its sandbox paths from those inputs. `run --snapshot`
-   uses the owned fixture in `measureSnapshotTaskOpening` for the Session
-   scenario. If setup requires seeded Loopflow rows, retire the owned Session
-   scenarios and `DesktopNativeSessionFixture`. Keep the snapshot Task-opening
-   scenarios. `terminal-feedback` uses the fixture only under `--mounted`.
-   Keep its headless ANSI input and comparison, snapshot capture, preparation and
-   `write-visible`. Check Python coverage in
-   `python/tests/test_desktop_performance.py`. Mounted benchmark checks remain
-   for QA if a display is unavailable.
-2. **Remove screenshot and cycle-check world inputs.** Delete the `world:`
+1. **Next — remove screenshot and cycle-check world inputs.** Delete the `world:`
    entries in `scripts/screenshots.yaml` and the builder in `generate_screenshots.py`.
    Keep empty and mock screenshots and website capture. Remove the cycle
    check's `--world` and use `mock-waves` for `--sheet`. Remove
@@ -121,7 +123,7 @@ lists build, list and help. Desktop automation still calls its builder.
    commands. Delete the `lf-world` executable and Cargo registration,
    `pub mod world` in `rust/loopflow/src/lib.rs` and `rust/loopflow/src/world/`
    with their last consumer.
-3. **Sweep remaining references and exercise changed automation.** The main
+2. **Sweep remaining references and exercise changed automation.** The main
    Dev and QA docs were updated in `1ba82f64d0`. Check Rust, Swift, scripts,
    tests, CI and current docs again after consumer deletion. Check
    the moved Rust fixtures by name, focused Python automation and Desktop

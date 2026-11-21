@@ -14,7 +14,7 @@ uv run python scripts/check_architecture.py            # architecture owners and
 uv run python scripts/due_removals.py                  # leaving store members and their drop dates
 uv run python scripts/test.py --list                   # affected-suite plan
 uv run python scripts/test.py --reuse-passing          # affected suites once per exact tree
-uv run python scripts/desktop_performance.py run --cli target/debug/lf --output /tmp/desktop-check --samples 1
+uv run python scripts/desktop_performance.py run --output /tmp/desktop-check --samples 1
 lf telemetry-daily                                     # maintainer report
 ```
 

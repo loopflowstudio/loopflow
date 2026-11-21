@@ -14,8 +14,8 @@ uv run python scripts/benchmarks/desktop-performance/record_live.py summarize /t
 
 # Compare native workspace journeys on the same host and build mode.
 cargo build -p loopflow --bin lf
-uv run python scripts/desktop_performance.py run --cli target/debug/lf --output /tmp/desktop-baseline
-uv run python scripts/desktop_performance.py run --cli target/debug/lf --output /tmp/desktop-after --baseline /tmp/desktop-baseline
+uv run python scripts/desktop_performance.py run --output /tmp/desktop-baseline
+uv run python scripts/desktop_performance.py run --output /tmp/desktop-after --baseline /tmp/desktop-baseline
 ```
 
 Keep recordings, snapshots and reports outside the checkout. Snapshots contain
@@ -197,7 +197,8 @@ startup reads against copied state. `--built` reuses its bundle; `--home` select
 a prior private fixture. Native launches need a display host. `startup.py`
 replays captured reader responses without a display and makes no rendering claim.
 
-The benchmark uses the supplied `lf` to create a Task and a resumable Session
+The ordinary run uses DTO fixtures and `/bin/cat`. Snapshot runs and
+`verify-fixture` use the supplied `lf` to create a Task and a resumable Session
 in a private `LF_HOME`. A stand-in `claude` echoes input without an account or
 network access.
 
@@ -234,9 +235,9 @@ the checkout. Different application/CLI source builds are expected; changing the
 measurement contract requires collecting both sides again.
 
 ```sh
-uv run python scripts/desktop_performance.py run --optimized --samples 21 --cli target/debug/lf --output /tmp/reactivity-parent
+uv run python scripts/desktop_performance.py run --optimized --samples 21 --output /tmp/reactivity-parent
 # Check out and build the candidate, retaining the same harness and fixtures.
-uv run python scripts/desktop_performance.py run --optimized --samples 21 --cli target/debug/lf --output /tmp/reactivity-candidate --baseline /tmp/reactivity-parent
+uv run python scripts/desktop_performance.py run --optimized --samples 21 --output /tmp/reactivity-candidate --baseline /tmp/reactivity-parent
 uv run python scripts/desktop_performance.py report /tmp/reactivity-candidate --baseline /tmp/reactivity-parent
 ```
 

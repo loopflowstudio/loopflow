@@ -70,3 +70,8 @@ pane. The [Desktop QA steps](../.lf/qa/desktop.md) describe the private
 Machine setup. CI repeats the headless Rust and Swift checks. The earlier
 Desktop test wrapper's Cargo build failed on `graph_process_task` in this
 shallow checkout. The Swift checks used the existing checkout CLI.
+
+## Compression checks
+
+- `cargo test -p loopflow-execution --lib -- launch_mode_tests::reopening_ a_view_sizing_the_terminal_during_the_repaint_nudge a_second_views_terminal_answers` passed all four tests. CI repeats them.
+- `cargo test -p loopflow --test transport_tests -- a_resumed_relay_keeps_focus_across_server_restarts an_unfocused_view_leaves_the_session` passed both tests. CI repeats them.

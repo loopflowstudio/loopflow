@@ -477,33 +477,22 @@ reply carries the `seq` of the last event queued when it was computed. Kinds:
 `owner {viewer,name,held}`, `child_exited {code}`, `detached`, `hint {text}`,
 `return {detach}` and `live`.
 
-Every attached view types; its `input` frames go to the PTY as they arrive.
-Size, colors, query answers and focus-out reports follow one view, named by
-`owner` (`held` says whether the recipient is it): the live view a person most
-recently focused or typed in. `attach` carries optional `focused: bool`: `true`
-(or omitted, for relays from before this field) says a person is at the view
-and takes the size; `false` attaches without taking the size from a live holder,
-owning only when no live view is more recent (ties keep the current owner). The
-`attached` reply's `owner` names the settled sizing owner rather than
-unconditionally naming the joining view. When the sizing view leaves, the
-remaining view used most recently takes over. A view may report its size
-(`resize`) and colors (`theme`) at any time; only the sizing view's are applied
-and broadcast, and a view that has not reported colors supplies no color
-override.
+Every attached view can type. The sizing view supplies the PTY size and
+colors. The `attached` reply names it in `owner`, and the `owner` event's
+`held` field tells each recipient whether it owns the size. A view without
+reported colors supplies no color override.
 
-Focus is DEC mode 1004: every terminal relay turns focus reporting on in its own
-terminal (a Desktop pane runs the same relay in a Ghostty surface), keeps its
-view's focus state across reconnects, and sends `focus {focused}`. A relay
-starts focused on a terminal unless given `--unfocused` or
-`LF_RELAY_FOCUSED=0`. Desktop sets the latter in every Session pane’s
-environment. Ghostty reports the pane's current focus when mode
-1004 turns on, so a selected pane takes the size at once while warm panes leave
-active views alone. A host that reports no focus takes the size on a focused
-attach, or on the first typed byte when attached unfocused. The agent hears
-`CSI I`/`CSI O` only if it enabled mode 1004 itself: `focus {focused:true}` from
-any view makes it the sizing owner and forwards `CSI I`; `focus {focused:false}`
-forwards `CSI O` only from the current sizing owner, so background panes never
-report focus-out while a person works in another view.
+A focused attach, focus-in or typing takes the size. An unfocused attach
+takes it only when there is no owner. When the owner leaves, the most
+recently used live view takes over. Older relays omit `focused` on attach,
+which counts as a focused attach.
+
+A relay starts focused when stdin is a terminal unless given `--unfocused`
+or `LF_RELAY_FOCUSED=0`. Desktop sets the variable in every Session pane.
+The relay enables DEC mode 1004 to track focus across reconnects. Ghostty
+reports its current focus when the mode turns on, so a focused pane takes
+the size before the first key. The agent receives focus reports only when
+it enables mode 1004 itself. Focus-out reaches it only from the sizing view.
 
 Only the sizing view's terminal answers the agent's queries. The server drops
 the other views' answers (cursor position, device attributes, OSC color

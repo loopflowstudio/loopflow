@@ -226,13 +226,6 @@ pub fn held_in() -> Option<TerminalId> {
         .and_then(|id| TerminalId::parse(&id).ok())
 }
 
-/// Whether this process runs the launch or handed it to its owner.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Delegation {
-    Delegated,
-    Here { kind: crate::harness::LaunchKind },
-}
-
 /// Inputs that select the native client or stream driver before delegation.
 #[derive(Debug, Clone, Copy)]
 pub struct LaunchInput {
@@ -318,8 +311,7 @@ pub(crate) fn delegate_session(
     preview: bool,
     launch_lock: File,
 ) -> Result<Option<(crate::harness::LaunchKind, File)>> {
-    let kind = session_kind(id);
-    if runs_here(kind) {
+    if let Some(kind) = local_session_kind(id) {
         return Ok(Some((kind, launch_lock)));
     }
     drop(launch_lock);
@@ -328,26 +320,26 @@ pub(crate) fn delegate_session(
         // The viewer owns this continuation, including an early detach.
         argv.retain(|arg| arg != "--json");
     }
-    delegate(
-        kind,
-        viewer.json.then_some(id),
-        preview.then_some(id),
-        viewer.unfocused,
-        argv,
-    )?;
+    delegate(id, viewer, preview, argv)?;
     Ok(None)
 }
 
 /// Open the resulting Session after a fork or thread replacement, without
 /// repeating the command that prepared it.
-pub(crate) fn delegate_prepared_session(id: &str, viewer: ViewerOptions) -> Result<Delegation> {
+pub(crate) fn delegate_prepared_session(
+    id: &str,
+    viewer: ViewerOptions,
+) -> Result<Option<crate::harness::LaunchKind>> {
+    if let Some(kind) = local_session_kind(id) {
+        return Ok(Some(kind));
+    }
     delegate(
-        session_kind(id),
-        viewer.json.then_some(id),
-        Some(id),
-        viewer.unfocused,
+        id,
+        viewer,
+        true,
         vec![String::new(), "session".into(), "resume".into(), id.into()],
-    )
+    )?;
+    Ok(None)
 }
 
 /// Chats reopen as chats; bound and primary Sessions as work sessions. A held
@@ -382,18 +374,9 @@ fn session_kind(id: &str) -> crate::harness::LaunchKind {
     }
 }
 
-/// Carry out the selected launch kind before admission or provider effects.
-/// A work session runs in a held terminal; every other kind runs here.
-fn delegate(
-    kind: crate::harness::LaunchKind,
-    json_session: Option<&str>,
-    preview_session: Option<&str>,
-    unfocused: bool,
-    mut argv: Vec<String>,
-) -> Result<Delegation> {
-    if runs_here(kind) {
-        return Ok(Delegation::Here { kind });
-    }
+/// Launch the Session in a held terminal and relay its view here.
+fn delegate(id: &str, viewer: ViewerOptions, preview: bool, mut argv: Vec<String>) -> Result<()> {
+    let preview_session = preview.then_some(id);
     let cwd = admit_current(&mut argv)?;
     let preview = if std::env::var_os(STREAM_ENV).is_some() {
         if let Some(screen) = preview_session.and_then(snapshot::last_screen) {
@@ -408,20 +391,20 @@ fn delegate(
     relay_with_preview(
         &terminal,
         session.as_ref(),
-        json_session,
+        viewer.json.then_some(id),
         preview,
-        unfocused,
-    )?;
-    Ok(Delegation::Delegated)
+        viewer.unfocused,
+    )
 }
 
-/// Whether a launch of `kind` runs in this process: everything but a work
-/// session, and a work session already inside its held terminal or detached.
-fn runs_here(kind: crate::harness::LaunchKind) -> bool {
-    cfg!(test)
+/// Only a work Session outside a holder or detached process needs delegation.
+fn local_session_kind(id: &str) -> Option<crate::harness::LaunchKind> {
+    let kind = session_kind(id);
+    (cfg!(test)
         || current().is_some()
         || crate::os_process::detached::launched()
-        || kind != crate::harness::LaunchKind::WorkSession
+        || kind != crate::harness::LaunchKind::WorkSession)
+        .then_some(kind)
 }
 
 /// Admit this invocation before another process takes over its work, and point
@@ -804,11 +787,11 @@ impl Viewer {
         wire::encode(Tag::Reply, &json, &mut self.output);
     }
 
-    fn attached_reply(&self, owner: Option<&str>, terminal: bool) -> Reply {
+    fn attached_reply(&self, owner: Option<&str>) -> Reply {
         Reply::Attached {
             viewer: self.id.clone(),
             nonce: self.nonce.clone(),
-            terminal,
+            terminal: true,
             owner: owner.map(str::to_owned),
         }
     }
@@ -1336,13 +1319,14 @@ pub(crate) fn tty_name(fd: RawFd) -> Option<String> {
 /// The process that resolved the connection built it with a store, a command
 /// tree and often a runtime; none of that serves a relay. It carries its
 /// Process receipt into the relay, which opens no store until it returns.
-pub fn attach(
-    id: &TerminalId,
-    session: Option<&LfSessionId>,
-    json_session: Option<&str>,
-    unfocused: bool,
-) -> Result<()> {
-    relay_with_preview(id, session, json_session, None, unfocused)
+pub fn attach(id: &TerminalId, session: Option<&LfSessionId>, viewer: ViewerOptions) -> Result<()> {
+    relay_with_preview(
+        id,
+        session,
+        session.filter(|_| viewer.json).map(LfSessionId::as_str),
+        None,
+        viewer.unfocused,
+    )
 }
 
 fn relay_with_preview(
@@ -1634,7 +1618,7 @@ impl RelayInput {
     }
 
     fn observe_keys(&mut self, bytes: &[u8]) {
-        if !self.focused && !input::without_reports(bytes).is_empty() {
+        if !self.focused && input::keys(bytes).next().is_some() {
             self.focused = true;
         }
     }
@@ -3135,7 +3119,7 @@ mod launch_mode_tests {
                 assert_eq!(
                     super::delegate_prepared_session(session.id.as_str(), Default::default())
                         .unwrap(),
-                    super::Delegation::Here { kind: expected },
+                    Some(expected),
                     "prepared: source={source:?}, bound={bound}, primary={primary}",
                 );
                 // A Desktop pane or framed remote viewer has no terminal for
@@ -3166,9 +3150,7 @@ mod launch_mode_tests {
         ledger.set_db_path(database);
         assert_eq!(
             super::delegate_prepared_session("unreadable-session", Default::default()).unwrap(),
-            super::Delegation::Here {
-                kind: crate::harness::LaunchKind::WorkSession
-            }
+            Some(crate::harness::LaunchKind::WorkSession)
         );
     }
 }

@@ -71,9 +71,8 @@ so the log fills with other stand-ins' lines.
 
 Drive views from Python `pty.fork()` with `TIOCSWINSZ` widths, writing
 `ESC[I`/`ESC[O` for focus and answering `ESC[5n`, `ESC[6n` and `OSC 11 ;?`
-with a per-view color. `lf session resume <id> [--unfocused]` execs into
-`lf session attach --terminal … --session …`: the focus rides in
-`LF_RELAY_FOCUSED` (read it with `ps eww`), not in argv, and the relay's env
-says `LF_HOME=/private/tmp/…`. A server restart nudges every held terminal
+with a per-view color. Start one view with `lf resume <id>` and another
+at a different width with `lf resume <id> --unfocused`. Check the stand-in's
+size log on attach, focus, typing and departure. A server restart nudges every held terminal
 (one column narrower for 0.4 s), viewed or not; a view's focus change while
 the server is down reaches the new server once the relay reconnects.

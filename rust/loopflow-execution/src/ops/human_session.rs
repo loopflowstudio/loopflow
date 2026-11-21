@@ -1277,12 +1277,7 @@ pub async fn open(
                             .as_deref(),
                     )?;
                 }
-                crate::transport::attach(
-                    &terminal,
-                    Some(&session.id),
-                    viewer.json.then_some(session.id.as_str()),
-                    viewer.unfocused,
-                )?;
+                crate::transport::attach(&terminal, Some(&session.id), viewer)?;
             }
             return surface(store, &session).await.map(Opening::Done);
         }
@@ -1434,8 +1429,8 @@ async fn open_prepared(
     viewer: crate::transport::ViewerOptions,
 ) -> Result<Option<ConversationLaunch>> {
     match crate::transport::delegate_prepared_session(id, viewer)? {
-        crate::transport::Delegation::Delegated => Ok(None),
-        crate::transport::Delegation::Here { kind } => open_waiting(store, id, kind).await,
+        None => Ok(None),
+        Some(kind) => open_waiting(store, id, kind).await,
     }
 }
 

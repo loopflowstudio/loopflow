@@ -555,9 +555,7 @@ fn a_view_sizing_the_terminal_during_the_repaint_nudge_keeps_its_size() {
     wide.wait_for("size:24 120");
     std::thread::sleep(super::NUDGE * 3);
     wide.type_in(b"\n");
-    wide.wait_for("now:");
-    let seen = String::from_utf8_lossy(&wide.seen).into_owned();
-    assert!(seen.contains("now:24 120"), "{seen:?}");
+    wide.wait_for("now:24 120");
     second.close();
     kill(&place, &terminal);
 }

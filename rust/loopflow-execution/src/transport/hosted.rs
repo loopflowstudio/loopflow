@@ -273,7 +273,7 @@ impl Hosted {
                                 let typed = if sizing.held_by(viewer) {
                                     payload
                                 } else {
-                                    input::without_reports(&payload)
+                                    input::keys(&payload).collect()
                                 };
                                 if typed.is_empty() {
                                     continue;
@@ -414,7 +414,7 @@ impl Hosted {
                                 viewer.heartbeat_at = Instant::now();
                                 attaching.push(viewer.id.clone());
                                 sizing.attach(viewer, focused.unwrap_or(true));
-                                viewer.reply(answers, viewer.attached_reply(sizing.id(), true));
+                                viewer.reply(answers, viewer.attached_reply(sizing.id()));
                                 // Binding selects a directory for later connections;
                                 // the running provider keeps its own.
                                 if let Some(cwd) = exit_record

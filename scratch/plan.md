@@ -258,22 +258,20 @@ primaries prefetched prepares no Session until one is deliberately focused; a
 default registry prepares them as before, each with `--unfocused` in its argv.
 
 Live, by a person or at qa: Desktop open on a disposable Session, then
-`lf session resume <id> --unfocused` in a narrower terminal → Desktop's pane
+`lf session resume <id> --unfocused` in a narrower background pane → Desktop's pane
 does not reflow; press a key there → it does. Then
 `uv run python scripts/loopflow-dev.py run` → `pgrep -lf 'session resume'`
 shows no new relay until a Task is clicked in Dev.
 
 ## Slices
 
-1. **The server rule, end to end over the wire.** `focused` on `Attach`, the
-   attach arm, `settle` ties, the reply's owner, the focus-out rule, and the
-   acceptance test above. This is where the model holds or doesn't: three raw
-   views and a child that listens.
-2. **The relay and the flag.** The relay's focus value on first attach and
-   reconnect, `--unfocused`, Desktop's launch argv, `OwnerStream`, README and
-   doc comments, the rewritten unit test. One live look: a warm pane's relay
-   sends `focus {focused:false}` after attach and a selected pane sends
-   `true`.
+1. **Built — server ownership.** Focus-in or typed input takes ownership before
+   the next frame is read. The attach reply names the current owner and an
+   unfocused view inherits the terminal when the last more recent view leaves.
+2. **Next — the relay and the flag.** The relay's focus value on first attach and
+   reconnect, `--unfocused`, Desktop's launch argv and `OwnerStream`. Check that a
+   warm pane sends `focus {focused:false}` after attach and a selected pane
+   sends `true`.
 3. **Dev opens lazily.** `opensUnvisitedWork`, the Swift tests, the live
    check with release Desktop and Dev side by side.
 
@@ -281,7 +279,8 @@ shows no new relay until a Task is clicked in Dev.
 
 | Command | Result | Who runs it |
 | --- | --- | --- |
-| acceptance Rust filter above | not yet written | implement, then CI |
+| `cargo test -p loopflow --test transport_tests an_unfocused_view_leaves_the_session_with_the_view_in_use` | passed with three viewers and a held PTY | CI |
+| `cargo test -p loopflow-execution --lib equally_inactive_views_keep_the_live_owner` | passed | CI |
 | relay focus unit test | not yet written | implement, then CI |
 | `scripts/test_desktop.sh --filter …` | not yet written | implement, then CI |
 | two views at different widths, live | not run | qa |
@@ -296,8 +295,8 @@ Updated before implementation:
 - `swift/README.md` — Loopflow Dev lazy Session opening (including restored selection waiting behind its placeholder) and Desktop launching panes with `--unfocused`
 - `docs/dev/server-first.md` — updated sizing and focus-out rules under "Every view types"
 
-### Open question from writing docs
+### Focus when mode 1004 turns on
 
-- **What should `lf resume <id> --unfocused` do when typed into an already-focused Ghostty (or Rex) terminal?** The plan relies on Ghostty emitting `CSI I` immediately when the relay turns on mode 1004 so a selected Desktop pane (launched with `--unfocused`) takes the size at once. That same `CSI I` means a person who runs `lf resume <id> --unfocused` in an already-focused Ghostty or Rex window will still immediately take the size before pressing a key, whereas the qa check ("`lf session resume <id> --unfocused` in a narrower terminal → Desktop's pane does not reflow; press a key there → it does") expects it not to reflow until a keypress. Should `--unfocused` mean:
-  1. "Do not assume focus at attach; let the terminal's focus reports decide" (keeps Desktop passing `--unfocused` uniformly, and means CLI `--unfocused` is for unfocused tabs/splits/panes rather than watching from a currently focused Ghostty window), or
-  2. "Stay unfocused until the next focus transition or keypress" (suppressing the initial mode-1004 report when `--unfocused` is passed, which means Desktop would pass `--unfocused` only for warm/unfocused panes or signal focus explicitly for the selected pane)?
+`--unfocused` describes the attach. A terminal reporting that it already has
+focus takes the size on that report. Exercise the passive attach in a
+background pane, then focus it or type in it.

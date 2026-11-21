@@ -265,6 +265,9 @@ user-facing behavior changes.
 plan, code and memory and keeps open findings with the work.
 
 **SQLite schema:**
+- Shallow checkouts lack first-parent migration history. For local builds set
+  `LOOPFLOW_MIGRATION_ORDER` to the merged slugs in first-parent order for
+  the checkout's base. Check that the packaged list covers that base.
 - One migration per Task: `uv run python scripts/new_migration.py <name>` creates `migrations/<name>.sql` or prints the branch's existing one.
 - Edit it in place until it merges; `build.rs` orders it by origin/main's first-parent history. Once on origin/main it is immutable: fix forward.
 - Destructive change is staged: a new migration is additive against origin/main's schema, or a contract (`-- expand: <migration>`, `-- exports: <where>`) that drops only what its expand step superseded once that step has been on origin/main for the window `check_migrations.py` measures (`STAGING_DAYS`), exporting the data first. A rebuild that keeps every column is additive. CI measures; nothing at runtime refuses.

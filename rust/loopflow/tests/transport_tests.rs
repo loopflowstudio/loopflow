@@ -1683,8 +1683,7 @@ fn resize_reaches_every_viewer_as_its_own_event_and_program_bytes_do_not() {
     sizer.finish();
 }
 
-/// Size and colors follow the view that most recently attached, typed or
-/// gained focus; when it leaves, the remaining view used most recently.
+/// Legacy attaches, input and focus take the size and colors.
 #[test]
 fn the_latest_view_used_sizes_the_terminal_and_hands_size_back_as_it_leaves() {
     let fixture = Fixture::new();
@@ -1763,6 +1762,68 @@ fn the_latest_view_used_sizes_the_terminal_and_hands_size_back_as_it_leaves() {
     assert_eq!(reply["seq"], owner["seq"]);
     third.input("size\n");
     until_out(&mut third, "40 120");
+    third.input("done\n");
+    third.finish();
+}
+
+#[test]
+fn an_unfocused_view_leaves_the_session_with_the_view_in_use() {
+    let fixture = Fixture::new();
+    let _server = fixture.machine_server();
+    let child = r#"
+stty -echo
+printf '\033[?1004hready\n'
+read -r start
+trap 'touch "$HOME/winch"' WINCH
+printf 'watching\n'
+while IFS= read -r line; do
+    printf '%s\n' "$line" >> "$HOME/lines"
+    stty size
+    [ "$line" = done ] && exit 0
+done
+"#;
+    let held = fixture.start_held(&["/bin/bash", "-c", child]);
+    let mut first = fixture.held_attach(&held, json!({"kind":"attach","rows":40,"cols":120}));
+    until_out(&mut first, "ready");
+    first.input("start\n");
+    until_out(&mut first, "watching");
+
+    let background = json!({"kind":"attach","rows":24,"cols":80,"focused":false});
+    let (socket, _) = fixture.held_entrance(&held);
+    let mut second = Viewer::new(socket);
+    second.request(background.clone());
+    let reply = second.until_reply();
+    assert_eq!(reply["owner"], first.id);
+    second.accept(&reply);
+    let items = until_owner(&mut second, &first.id);
+    assert_eq!(events(&items, "owner")[0]["held"], false);
+    assert_eq!(events(&items, "resize")[0]["cols"], 120);
+    second.request(json!({"kind":"focus","focused":false}));
+    second.request(json!({"kind":"controlled"}));
+    second.until_reply();
+    first.input("first\n");
+    until_out(&mut first, "40 120");
+    assert!(!fixture.home.path().join("winch").exists());
+
+    second.request(json!({"kind":"focus","focused":true}));
+    until_owner(&mut first, &second.id);
+    first.request(json!({"kind":"focus","focused":false}));
+    first.request(json!({"kind":"controlled"}));
+    first.until_reply();
+    second.request(json!({"kind":"focus","focused":false}));
+    second.input("second\n");
+    until_out(&mut second, "24 80");
+    assert_eq!(fixture.wait_file("lines"), "first\n\x1b[I\x1b[Osecond\n");
+
+    let mut third = fixture.held_attach(&held, background);
+    until_owner(&mut third, &second.id);
+    drop(second);
+    let items = until_owner(&mut third, &first.id);
+    assert_eq!(events(&items, "resize")[0]["cols"], 120);
+    drop(first);
+    let id = third.id.clone();
+    let items = until_owner(&mut third, &id);
+    assert_eq!(events(&items, "resize")[0]["cols"], 80);
     third.input("done\n");
     third.finish();
 }

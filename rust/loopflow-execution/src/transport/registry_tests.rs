@@ -64,6 +64,7 @@ impl View {
         let attach = Incoming {
             id: 1,
             request: Request::Attach {
+                focused: None,
                 rows: 24,
                 cols: 80,
                 name: None,

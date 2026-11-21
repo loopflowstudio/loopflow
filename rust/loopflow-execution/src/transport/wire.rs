@@ -162,11 +162,14 @@ pub struct Incoming {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Request {
-    /// Every attached view may type. The view that most recently attached,
-    /// typed or gained focus sizes and colors the terminal.
+    /// Every attached view may type. The view that most recently received
+    /// focus or input sizes and colors the terminal.
     Attach {
         rows: u16,
         cols: u16,
+        /// Omitted by older viewers, whose attach takes the size.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        focused: Option<bool>,
         /// How this viewer is named to others when it sizes the terminal.
         name: Option<String>,
         /// A held terminal's PTY position this viewer's screen already shows.

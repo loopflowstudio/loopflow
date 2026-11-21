@@ -664,7 +664,7 @@ struct Viewer {
     /// Tags this viewer's events; a program printing the same bytes lacks it.
     nonce: String,
     attached: bool,
-    /// When this view last attached, typed or gained focus, on its terminal's
+    /// When this view last received input or focus, on its terminal's
     /// clock; the most recent live view sizes the terminal.
     active: u64,
     /// The controls are still to be shown to this view.
@@ -848,63 +848,53 @@ fn lost(error: &io::Error) -> bool {
 }
 
 /// Whose size and colors the terminal takes: the live view that most recently
-/// attached, typed or gained focus. When it leaves, the next most recent does.
+/// received input or focus. When it leaves, the next most recent does.
 #[derive(Debug, Default)]
 struct Sizing {
-    owner: Option<Owner>,
+    owner: Option<String>,
     clock: u64,
-}
-
-#[derive(Debug, Clone)]
-struct Owner {
-    id: String,
-    name: Option<String>,
-}
-
-impl Owner {
-    fn of(viewer: &Viewer) -> Self {
-        Self {
-            id: viewer.id.clone(),
-            name: viewer.name.clone(),
-        }
-    }
 }
 
 impl Sizing {
     fn id(&self) -> Option<&str> {
-        self.owner.as_ref().map(|owner| owner.id.as_str())
+        self.owner.as_deref()
     }
 
     fn held_by(&self, viewer: &Viewer) -> bool {
         self.id() == Some(&viewer.id)
     }
 
-    /// `viewer` attached, typed or gained focus just now.
+    fn attach(&mut self, viewer: &mut Viewer, focused: bool) {
+        if focused {
+            self.touch(viewer);
+        } else if self.owner.is_none() {
+            self.owner = Some(viewer.id.clone());
+        }
+    }
+
+    /// Input or focus makes this view the owner immediately, including for the next frame.
     fn touch(&mut self, viewer: &mut Viewer) {
         self.clock += 1;
         viewer.active = self.clock;
+        if !self.held_by(viewer) {
+            self.owner = Some(viewer.id.clone());
+        }
     }
 
-    /// Follow the most recent live view; whether the owner changed.
-    fn settle(&mut self, viewers: &[Viewer]) -> bool {
-        let next = viewers
+    /// A live owner keeps the terminal until another view is used or this one leaves.
+    fn settle(&mut self, viewers: &[Viewer]) {
+        if viewers
             .iter()
+            .any(|viewer| viewer.live() && self.held_by(viewer))
+        {
+            return;
+        }
+        self.owner = viewers
+            .iter()
+            .rev()
             .filter(|viewer| viewer.live())
             .max_by_key(|viewer| viewer.active)
-            .map(Owner::of);
-        let changed =
-            next.as_ref().map(|owner| &owner.id) != self.owner.as_ref().map(|owner| &owner.id);
-        self.owner = next;
-        changed
-    }
-
-    /// What `viewer` is told about who owns.
-    fn event(&self, viewer: &Viewer) -> Event {
-        Event::Owner {
-            viewer: self.owner.as_ref().map(|owner| owner.id.clone()),
-            name: self.owner.as_ref().and_then(|owner| owner.name.clone()),
-            held: self.held_by(viewer),
-        }
+            .map(|viewer| viewer.id.clone());
     }
 }
 
@@ -1537,6 +1527,7 @@ impl RelayOutput {
         Request::Attach {
             rows,
             cols,
+            focused: None,
             name: tty_name(libc::STDIN_FILENO),
             from,
         }
@@ -2827,26 +2818,23 @@ mod tests {
     }
 
     #[test]
-    fn the_latest_view_sizes_the_terminal_and_hands_back_when_it_leaves() {
+    fn equally_inactive_views_keep_the_live_owner() {
         let (first, _first_peer) = UnixStream::pair().unwrap();
         let (second, _second_peer) = UnixStream::pair().unwrap();
         let mut viewers = vec![Viewer::new(first), Viewer::new(second)];
         let mut sizing = Sizing::default();
-        for viewer in &mut viewers {
-            viewer.attached = true;
-            sizing.touch(viewer);
-        }
-        assert!(sizing.settle(&viewers));
-        assert!(sizing.held_by(&viewers[1]), "the newest view sizes it");
-        // Typing or focusing in the older view takes the size back.
-        sizing.touch(&mut viewers[0]);
-        assert!(sizing.settle(&viewers));
+        viewers[0].attached = true;
+        sizing.attach(&mut viewers[0], false);
+        viewers[1].attached = true;
+        sizing.attach(&mut viewers[1], false);
+        sizing.settle(&viewers);
         assert!(sizing.held_by(&viewers[0]));
-        // Closing it gives the size to the view used most recently before it.
-        viewers[0].leaving = true;
-        assert!(sizing.settle(&viewers));
+        sizing.touch(&mut viewers[1]);
         assert!(sizing.held_by(&viewers[1]));
         viewers[1].leaving = true;
+        sizing.settle(&viewers);
+        assert!(sizing.held_by(&viewers[0]));
+        viewers[0].leaving = true;
         sizing.settle(&viewers);
         assert_eq!(sizing.id(), None);
     }

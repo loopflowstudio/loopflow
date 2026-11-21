@@ -25,3 +25,6 @@
   usage error; nothing detects the version first.
 - **`owner` keeps both meanings** (Session owner process, sizing view). The
   rename touches events live holders send and would be its own Task.
+- **A focus report takes effect immediately**, including Ghostty's initial
+  report when mode 1004 turns on. `--unfocused` describes the attach. The
+  passive QA pane starts in the background.

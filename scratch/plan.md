@@ -279,7 +279,7 @@ CI. Passed over: keeping `lf-world` for the benchmark alone.
 
 ## Slices
 
-1. **Dev on the Machine's installation.** One resolver behind
+1. **Built — Dev on the Machine's installation.** One resolver behind
    `controlLfPath`, `enriched` and `isInstalled`; the launcher stops
    building and bundling `lf` and the launch agent, passes no `LF_BIN`,
    clears `LF_*`, prints "Opening the Machine."; `--world` and `--copy` and
@@ -290,7 +290,14 @@ CI. Passed over: keeping `lf-world` for the benchmark alone.
    path. Shows whether anything in the app assumed a bundled helper
    (signing, panes' PATH, `install adopt`), and whether the acceptance
    steps 1–3 and 5 hold. This is the slice that could prove the plan wrong.
-2. **Older server, newer Desktop.** The `ServerPeer` test and the one-shot
+   - `uv run pytest -q python/tests/test_loopflow_dev.py` passed all three cases.
+   - `swift test --package-path swift --filter 'devUsesInstalledLf|privateHomeSelectsExplicitHelper|onlyTheInstalledAppUpdatesItself'` passed all three tests.
+   - Packaged this checkout's Swift build in a temporary Dev bundle.
+     `codesign --verify --deep --strict` passed. Its only executable under
+     Contents/MacOS was Loopflow Dev, and it contained no launch agents.
+   - Live window, Task edits, shared Session input and server/holder continuity
+     remain for QA. Another checkout's Dev was still running (pid 35920).
+2. **Next — older server, newer Desktop.** The `ServerPeer` test and the one-shot
    read sentence.
 3. **Rust deletion.** Sealed copy, `lf-world`, recipes; the moved tests land
    in the same commit that removes `world_recipes`.

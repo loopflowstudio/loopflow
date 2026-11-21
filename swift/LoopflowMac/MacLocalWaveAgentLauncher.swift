@@ -31,7 +31,12 @@ enum LocalWaveAgentLauncher {
         }
     }
 
-    /// Use the app's bundled CLI, or the explicit `LF_BIN` a private `LF_HOME` selects.
+    static func publicLfEntry(environment: [String: String], home: URL = FileManager.default.homeDirectoryForCurrentUser) -> URL {
+        let directory = environment["LF_INSTALL_DIR"].map { URL(filePath: $0) }
+            ?? home.appending(path: ".local/bin")
+        return directory.appending(path: "lf")
+    }
+
     static func controlLfPath(
         bundled: URL? = Bundle.main.url(forAuxiliaryExecutable: "lf"),
         environment: [String: String] = ProcessInfo.processInfo.environment
@@ -42,13 +47,15 @@ enum LocalWaveAgentLauncher {
             }
             return selected
         }
-        guard let bundled, FileManager.default.isExecutableFile(atPath: bundled.path) else {
-            throw LocalLfError(
-                errorDescription: "Loopflow.app is missing its executable bundled lf helper at Contents/MacOS/lf. "
-                    + "Rebuild or reinstall Loopflow; PATH fallback is disabled."
-            )
+        if let bundled, FileManager.default.isExecutableFile(atPath: bundled.path) {
+            return bundled.path
         }
-        return bundled.path
+        let entry = publicLfEntry(environment: environment)
+        guard FileManager.default.isExecutableFile(atPath: entry.path) else {
+            throw LocalLfError(errorDescription: "Loopflow is not installed on this Machine (no lf at \(entry.path)). "
+                + "Install Loopflow, then open Loopflow Dev again.")
+        }
+        return entry.path
     }
 
     /// Run an `lf` query verb (`list`, `status`, `monitor`, …) and return its

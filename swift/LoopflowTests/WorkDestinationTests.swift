@@ -817,8 +817,6 @@ struct WorkDestinationTests {
             let helper = host.appendingPathComponent("lf")
             try "#!/bin/sh\nexit 93\n".write(to: helper, atomically: true, encoding: .utf8)
             try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: helper.path)
-            try JSONSerialization.data(withJSONObject: ["lf_path": helper.path])
-                .write(to: host.appendingPathComponent("LoopflowDevControl.json"))
             let process = Process()
             process.executableURL = owned
             process.arguments = ["--test-bundle-path", try #require(Bundle(for: RemoteCompanionBundleMarker.self).executablePath),

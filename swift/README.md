@@ -804,9 +804,9 @@ offline. Matching source and rebuild instructions ship inside the app under
 
 The launcher builds with Swift Package Manager and uses a stable bundle at
 `~/Applications/Loopflow Dev.app` so macOS permissions survive rebuilds.
-It uses the installation's public `lf` entry at `~/.local/bin/lf`
-(`$LF_INSTALL_DIR/lf` for a custom installation). Swift edits need only a
-Swift build.
+The launcher clears the calling shell's `LF_*` variables. Dev looks up
+`~/.local/bin/lf`, or `$LF_INSTALL_DIR/lf` when the app itself has a custom
+installation directory in its environment. Swift edits need only a Swift build.
 
 The installed app updates itself (`AppUpdater`, Sparkle), including a custom
 location reached by the public `lf` entry or selected by `LF_APPLICATIONS_DIR`. It

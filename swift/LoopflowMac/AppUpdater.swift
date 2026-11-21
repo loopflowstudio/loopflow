@@ -34,9 +34,7 @@ enum AppUpdates {
         if let applications = environment["LF_APPLICATIONS_DIR"], !applications.isEmpty {
             installed = URL(filePath: applications).appending(path: "Loopflow.app")
         } else {
-            let directory = environment["LF_INSTALL_DIR"].map { URL(filePath: $0) }
-                ?? home.appending(path: ".local/bin")
-            let helper = directory.appending(path: "lf").resolvingSymlinksInPath()
+            let helper = LocalWaveAgentLauncher.publicLfEntry(environment: environment, home: home).resolvingSymlinksInPath()
             let app = helper.deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
             installed = app.lastPathComponent == "Loopflow.app" ? app : URL(filePath: "/Applications/Loopflow.app")
         }

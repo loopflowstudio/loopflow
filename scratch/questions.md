@@ -26,3 +26,5 @@
 - **Shared Dev bundle.** The live acceptance run will quit the loo-515 Dev
   and replace the bundle its copy's server runs from. Check it is idle
   first.
+
+- For the headless packaging check, used a temporary Dev bundle while the shared Dev still belonged to another Task. The live launch remains with QA.

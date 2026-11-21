@@ -218,8 +218,7 @@ gains the one line.
 
 ## Remaining
 
-Gate, then demo and qa on the real binaries: the interactive confirmation
-prompt, `/skills reload` in an open agy session.
+Gate. QA ran on the real binaries; `scratch/qa.html` has the transcripts.
 
 ## What the real run showed (2026-11-21, branch `lf`, this Machine's home)
 
@@ -243,3 +242,4 @@ prompt, `/skills reload` in an open agy session.
 - `cargo test -p loopflow --test integration documented_commands::`: 4 passed (implement).
 - clippy and the suites: gate and CI.
 - compress: same 20 passed after rendering skills once per sync; `cargo check -p loopflow --bin lf` clean.
+- qa: fresh, returning and obstructed homes; PTY prompt; agy `/skills` and `/skills reload`; `--repo` in agy, opencode, pi. Same 20 tests passed after naming the directory in sync io errors; `cargo clippy -p loopflow-execution --all-targets -- -D warnings` clean. Pi answering from a skill not run here (no working Pi model login); a person with one runs `pi -p --approve '<ask>'` in a synced repository.

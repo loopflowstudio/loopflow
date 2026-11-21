@@ -388,7 +388,9 @@ agy -p "/skills" | cut -f1    # implement, kickoff, code, … beside Antigravity
 
 All three home directories are written whichever harnesses are installed. A
 session that was already open picks up the change with `/skills reload` in
-Antigravity or `/reload` in Pi.
+Antigravity or `/reload` in Pi. Pi loads a repository's `.agents/skills` only
+in a project you trust: answer its prompt or run `/trust`; `pi -p` needs
+`--approve`.
 
 Generated files carry `loopflow: true` in their frontmatter. Sync replaces and
 prunes only those (`--no-prune` keeps the stale ones); a skill you or another

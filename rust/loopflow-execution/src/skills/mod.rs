@@ -189,18 +189,28 @@ pub fn sync_skills(options: &SkillSyncOptions) -> Result<SkillSyncReport, LoadEr
         targets.push((root, exports, blocked, blocked_sources));
     }
     for (root, exports, blocked, _) in &targets {
-        write_targets(exports, blocked, root, &mut report)?;
+        write_targets(exports, blocked, root, &mut report)
+            .map_err(|error| in_directory(root, error))?;
     }
     // A failed replacement in any directory must not erase working old exports.
     if options.prune {
         for (root, exports, _, blocked_sources) in &targets {
-            prune_targets(exports, blocked_sources, base, root, &mut report)?;
+            prune_targets(exports, blocked_sources, base, root, &mut report)
+                .map_err(|error| in_directory(root, error))?;
         }
     }
     report.written.sort();
     report.pruned.sort();
     report.skipped.sort();
     Ok(report)
+}
+
+/// Sync writes several tools' directories; a failure says which one.
+fn in_directory(root: &Path, error: LoadError) -> LoadError {
+    match error {
+        LoadError::Io(message) => LoadError::Io(format!("{}: {message}", root.display())),
+        other => other,
+    }
 }
 
 /// One portable export per source; exact names keep priority over flattened names.

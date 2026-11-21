@@ -27,3 +27,9 @@
   `LOOPFLOW_MIGRATION_ORDER` set to an order read with `GIT_SHALLOW_FILE`
   pointing at an empty file. `git fetch --unshallow origin` would repair it for
   everyone; not run here because the cause is unknown.
+- Pi loads a repository's `.agents/skills` only after project trust, and lf's
+  headless Pi launch passes no `--approve` (`harness/pi.rs:142`). Left as is and
+  documented; passing `--approve` on lf-launched steps is a permission choice.
+- QA answered "Yes, I trust this folder" for agy in `/tmp/lf-qa-skills/probe`,
+  a throwaway directory.
+

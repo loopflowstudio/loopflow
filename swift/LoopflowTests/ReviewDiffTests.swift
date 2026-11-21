@@ -1,5 +1,6 @@
 #if os(macOS)
 import Foundation
+@testable import Loopflow
 import Testing
 @testable import LoopflowMac
 
@@ -256,6 +257,63 @@ struct ReviewDiffTests {
         #expect(paths.map(\.title) == ["Top level", "rust/", "swift/"])
         // No tour: the tour order is the group order.
         #expect(ReviewGroup.arrange(files, ordering: .tour, tour: nil, groups: groups) == byGroup)
+    }
+
+    /// Each change has a mark at its row among the rows the stream draws; a
+    /// collapsed file draws only its header and has none.
+    @Test func changeMarksFollowTheRowsTheStreamDraws() {
+        let review = ReviewDiff.parse(Self.patch)
+        let marks = review.marks(layout: .unified, collapsed: { _ in false })
+        #expect(marks.map(\.kind) == [.moved, .changed, .moved, .added])
+        #expect(marks.map(\.position) == marks.map(\.position).sorted())
+        #expect(marks.allSatisfy { (0..<1).contains($0.position) })
+        let folded = review.marks(layout: .unified, collapsed: { $0.path == "a.swift" })
+        #expect(folded.map(\.path) == ["b.swift"])
+        #expect(folded[0].position < marks[3].position)
+    }
+
+    /// The bar under the file's name reads the declaration the top line is
+    /// in: the nearest line above that opens one, else the hunk's.
+    @Test func theEnclosingDeclarationIsTheNearestAbove() throws {
+        let patch = """
+        diff --git a/s.rs b/s.rs
+        --- a/s.rs
+        +++ b/s.rs
+        @@ -10,6 +10,6 @@ impl Store {
+             let a = 1;
+        -    let b = 2;
+        +    let b = 3;
+         pub(crate) async fn read(&self) -> u8 {
+             let c = 4;
+        -    c
+        +    c + 1
+        """
+        let file = try #require(ReviewDiff.parse(patch).files.first)
+        let stops = file.stops
+        #expect(file.enclosing(stops[0]) == "impl Store {")
+        #expect(file.enclosing(stops[1]) == "pub(crate) async fn read(&self) -> u8 {")
+        #expect(ReviewLine(kind: .context, text: "## Remaining", old: 1, new: 1).declaration(markdown: true) == "## Remaining")
+        #expect(ReviewLine(kind: .context, text: "# a comment", old: 1, new: 1).declaration(markdown: false) == nil)
+        #expect(ReviewLine(kind: .context, text: "let function = 1", old: 1, new: 1).declaration(markdown: false) == nil)
+    }
+
+    /// Commits whose subjects share `lf <step>:` in a run read as one step;
+    /// any other commit stands alone; each step starts where the last ended.
+    @Test func commitsReadAsGraphSteps() {
+        let commits = ["lf implement: a", "lf implement: b", "Merge main", "lf implement: c", "lf gate: d"]
+            .enumerated().map { TaskCommit(sha: "\($0.offset)", subject: $0.element) }
+        let steps = ReviewStep.steps(commits, base: "base")
+        #expect(steps.map(\.title) == ["implement · 2 commits", "Merge main", "implement", "gate"])
+        #expect(steps.map(\.base) == ["base", "1", "2", "3"])
+        #expect(steps.map(\.head) == ["1", "2", "3", "4"])
+    }
+
+    /// A file stays viewed only while its lines read the same.
+    @Test func aFilesFingerprintFollowsItsLines() {
+        let one = ReviewDiff.parse(Self.patch).files[1]
+        let again = ReviewDiff.parse(Self.patch).files[1]
+        let edited = ReviewDiff.parse(Self.patch.replacingOccurrences(of: "+let c = 2", with: "+let c = 3")).files[1]
+        #expect(one.fingerprint == again.fingerprint && one.fingerprint != edited.fingerprint)
     }
 
     /// A line's comments, strings, numbers and keywords are found by the

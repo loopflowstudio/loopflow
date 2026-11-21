@@ -44,7 +44,9 @@ struct ReviewStream: View {
             ForEach(store.comments.filter { $0.detached && $0.selection.path == file.path }) { comment in
                 ReviewCommentRow(store: store, comment: comment)
             }
-            if reader == .changes, store.isReading(file) {
+            if reader == .changes, store.isViewed(file) {
+                // Viewed: folded to its header until you clear it or its lines change.
+            } else if reader == .changes, store.isReading(file) {
                 ReviewNotice(text: "Reading…").id(file.topID)
                     .onAppear { store.setNear(file.path, true) }
                     .onDisappear { store.setNear(file.path, false) }
@@ -101,7 +103,7 @@ struct ReviewStream: View {
     }
 
     private func fileHeader(_ file: ReviewFile, headed: Bool) -> some View {
-        ReviewFileTitle(store: store, file: file, note: file.oldPath.map { "from \($0)" })
+        ReviewFileTitle(store: store, file: file, note: file.oldPath.map { "from \($0)" }, viewable: reader == .changes)
             .padding(.vertical, 7)
             .background(palette.surfaceMuted)
             .overlay(alignment: .top) { Divider() }
@@ -331,14 +333,17 @@ struct ReviewStream: View {
         return VStack(alignment: .leading, spacing: 2) {
             HStack(alignment: .top, spacing: 4) {
                 // A marker as well as color: + and − read without hue.
+                // Selecting and copying takes the code only.
                 Text(tone == nil ? " " : line.kind == .added ? "+" : "−")
                     .foregroundStyle(tone?.ink ?? palette.textSecondary)
+                    .textSelection(.disabled)
                 Text(Self.attributed(text, segments: cut == nil ? segments : nil, tone: tone, path: path, palette: palette))
+                    .lineLimit(store.wrapsLines ? nil : 1)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
             }
             .font(Typography.code(12))
-            .textSelection(.enabled)
             .accessibilityElement(children: .combine)
             .accessibilityLabel("\(line.kind == .added ? "Added" : line.kind == .removed ? "Removed" : "Line") \(side == .old ? line.old ?? 0 : line.new ?? 0): \(text)")
             if let cut {
@@ -351,6 +356,24 @@ struct ReviewStream: View {
         .padding(.vertical, 1).padding(.trailing, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(selected ? palette.accent.opacity(0.16) : tone?.fill ?? .clear)
+        .contextMenu { copyMenu(line, side: side, file: file) }
+    }
+
+    /// Copies code without the patch's + and − or the line numbers.
+    @ViewBuilder private func copyMenu(_ line: ReviewLine, side: ReviewSelection.Side, file: ReviewFile) -> some View {
+        Button("Copy line") { Self.copy(line.text) }
+        if let selection = store.reviewSelection, selection.path == file.path, selection.side == side,
+           selection.first != selection.last, isSelected(line, side: side, path: file.path) {
+            Button("Copy \(selection.last - selection.first + 1) selected lines") { Self.copy(selection.text(in: file)) }
+        }
+        Button(side == .old ? "Copy the removed lines shown" : "Copy the new code shown") {
+            Self.copy(ReviewSelection.side(side, of: file))
+        }
+    }
+
+    static func copy(_ text: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
     }
 
     /// The line in its syntax colors; the changed words of an edited line
@@ -391,6 +414,8 @@ struct ReviewFileTitle: View {
     let store: TaskFilesStore
     let file: ReviewFile
     let note: String?
+    /// Offers Viewed, which folds the file in the whole comparison.
+    var viewable = false
     @Environment(\.palette) private var palette
 
     var body: some View {
@@ -419,6 +444,12 @@ struct ReviewFileTitle: View {
             Button("Open") { store.selectFile(file.path, mode: .read) }
                 .buttonStyle(.plain).font(Typography.caption(11)).foregroundStyle(palette.textSecondary).fixedSize()
                 .help("Read \(file.path) in Files").accessibilityLabel("Read \(file.path) in Files")
+            if viewable, !store.isReading(file) {
+                Toggle("Viewed", isOn: Binding(get: { store.isViewed(file) }, set: { store.setViewed(file, $0) }))
+                    .toggleStyle(.checkbox).controlSize(.small).font(Typography.caption(11)).fixedSize()
+                    .help("Fold this file until its lines change")
+                    .accessibilityIdentifier("changes-viewed")
+            }
         }
         .padding(.horizontal, 12)
         .help(file.path)
@@ -520,11 +551,9 @@ private struct ReviewCommentEditor: View {
     }
 
     @ViewBuilder private var copyButtons: some View {
-        Button("Copy") {
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(selection.text(in: file), forType: .string)
-        }
-        .buttonStyle(.bordered)
+        Button("Copy") { ReviewStream.copy(selection.text(in: file)) }
+            .buttonStyle(.bordered)
+            .help("Copies the code without + and − or line numbers")
         Button("Reference in conversation") {
             if addToConversation?(selection.reference(revision: store.revision)) == true { store.reviewSelection = nil }
         }

@@ -4,8 +4,8 @@ use super::{
     block_on_task, comparison_context, completion_pending, completion_refusal, file_context,
     file_save, file_store, owning_wave, repository_for_task, resolve_task_agent,
     task_configuration_refusal, task_error, task_event_process_refusal, task_store,
-    task_worktree_blocker, TaskChangedFile, TaskChangesSnapshot, TaskComparison, TaskDiffSnapshot,
-    TaskFileSnapshot, TaskFileState, TaskSnapshot, TaskWorkspace,
+    task_worktree_blocker, TaskChangedFile, TaskChangesSnapshot, TaskCommit, TaskComparison,
+    TaskDiffSnapshot, TaskFileSnapshot, TaskFileState, TaskSnapshot, TaskWorkspace,
 };
 use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};
@@ -244,6 +244,22 @@ pub(super) fn changes_snapshot(workspace: TaskComparison<'_>) -> OpsResult<TaskC
     )?
     .trim()
     .to_string();
+    let commits = git_output(
+        workspace.checkout.worktree,
+        &[
+            "log",
+            "--reverse",
+            "--format=%H%x1f%s",
+            &format!("{}..{head_commit}", workspace.base_commit),
+        ],
+    )?
+    .lines()
+    .filter_map(|line| line.split_once('\u{1f}'))
+    .map(|(sha, subject)| TaskCommit {
+        sha: sha.to_string(),
+        subject: subject.to_string(),
+    })
+    .collect();
     let net = net_changed_paths(workspace)?;
     files.retain(|path, file| {
         file.old_path = net.get(path).cloned().flatten();
@@ -263,6 +279,7 @@ pub(super) fn changes_snapshot(workspace: TaskComparison<'_>) -> OpsResult<TaskC
         task_id: workspace.checkout.task_id.to_string(),
         base_commit: workspace.base_commit.to_string(),
         head_commit,
+        commits,
         files: files.into_values().collect(),
         scratch,
         scratch_truncated,

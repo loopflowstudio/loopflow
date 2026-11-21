@@ -49,19 +49,28 @@ public struct TaskChangedFile: Decodable, Sendable, Identifiable, Hashable {
     }
 }
 
+/// One commit in a Task's comparison. A Graph step's commits share the
+/// subject prefix `lf <step>:`.
+public struct TaskCommit: Decodable, Sendable, Hashable {
+    public let sha: String
+    public let subject: String
+}
+
 public struct TaskChangesSnapshot: Decodable, Sendable, Hashable {
     public let recoveryDirectory: String?
     public let issueIdentifier: String
     public let taskId: String
     public let baseCommit: String
     public let headCommit: String
+    /// Base to head, oldest first.
+    public let commits: [TaskCommit]
     public let files: [TaskChangedFile]
     public let scratch: [String]
     public let scratchTruncated: Bool
 
     enum CodingKeys: String, CodingKey {
         case recoveryDirectory = "recovery_directory"
-        case files, scratch
+        case commits, files, scratch
         case scratchTruncated = "scratch_truncated"
         case issueIdentifier = "issue_identifier"
         case taskId = "task_id"

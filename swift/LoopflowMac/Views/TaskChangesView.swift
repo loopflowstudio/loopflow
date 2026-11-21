@@ -57,6 +57,9 @@ struct TaskChangesView: View {
                     .scrollPosition(id: store.anchor(.changes), anchor: .top)
                     .onScrollPhaseChange { _, phase in if phase == .interacting { store.noteInteraction() } }
                     .onGeometryChange(for: CGFloat.self, of: \.size.width) { width = $0 }
+                    // Over the stream, so showing or hiding it moves no line.
+                    .overlay(alignment: .top) { enclosingBar }
+                    .overlay(alignment: .trailing) { ChangeMarks(store: store, layout: store.layout(width: width), jump: land) }
                 }
             }
             .overlay(alignment: .leading) {
@@ -126,6 +129,28 @@ struct TaskChangesView: View {
                     .lineLimit(1).truncationMode(.middle).help(compared)
                     .accessibilityIdentifier("changes-comparison")
             }
+            stepMenu
+        }
+    }
+
+    /// The whole Task, or one Graph step's commits: the branch's commits since
+    /// its base, a run sharing `lf <step>:` read as one step.
+    @ViewBuilder private var stepMenu: some View {
+        if store.steps.count > 1 || store.step != nil {
+            Menu {
+                Toggle("Whole Task", isOn: Binding(get: { store.step == nil }, set: { _ in store.showStep(nil) }))
+                Divider()
+                ForEach(Array(store.steps.enumerated()), id: \.element.id) { index, step in
+                    Toggle("\(index + 1). \(step.title)", isOn: Binding(get: { store.step == step }, set: { _ in store.showStep(step) }))
+                }
+            } label: {
+                Text(store.step.map { "Step: \($0.title)" } ?? "Whole Task · \(store.steps.count) steps")
+                    .lineLimit(1).truncationMode(.tail)
+            }
+            .menuStyle(.borderlessButton).fixedSize(horizontal: false, vertical: true)
+            .font(Typography.caption(11))
+            .help("Compare one Graph step's commits, or the whole Task")
+            .accessibilityIdentifier("changes-step")
         }
     }
 
@@ -255,11 +280,9 @@ struct TaskChangesView: View {
                 controls(compact: true)
                 controls(compact: true, layout: false)
                 controls(compact: true, order: false, layout: false)
-                HStack(spacing: 0) {
-                    Spacer(minLength: 0)
-                    moreMenu
-                }
+                Spacer(minLength: 0)
             }
+            moreMenu
             // Always its width, so a read starting or ending moves nothing.
             Image(systemName: "arrow.triangle.2.circlepath")
                 .foregroundStyle(palette.textSecondary).frame(width: 14)
@@ -304,7 +327,7 @@ struct TaskChangesView: View {
             .disabled(store.shownReview?.files.isEmpty ?? true)
             .accessibilityLabel("Focus")
             .accessibilityAddTraits(store.focusedPath != nil ? .isSelected : [])
-            if layout { ReviewLayoutPicker(store: store, width: width) } else { moreMenu }
+            if layout { ReviewLayoutPicker(store: store, width: width) }
         }
     }
 
@@ -341,11 +364,12 @@ struct TaskChangesView: View {
                         .selectionDisabled(layout == .split && width < TaskFilesStore.splitWidth)
                 }
             }
+            Toggle("Wrap long lines", isOn: $store.wrapsLines)
         } label: {
             Image(systemName: "ellipsis.circle").font(.system(size: 12)).frame(width: 24, height: 20)
         }
         .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
-        .help("Order, tour, focus and layout")
+        .help("Order, tour, focus, layout and wrapping")
         .disabled(store.review == nil)
         .accessibilityLabel("Diff options")
         .accessibilityIdentifier("changes-more")
@@ -392,7 +416,7 @@ struct TaskChangesView: View {
     @ViewBuilder private var currentFileBar: some View {
         if let currentPath, let file = store.shownReview?.file(currentPath) {
             let group = store.shownGroups.first { group in group.isTour && group.files.contains { $0.path == file.path } }
-            ReviewFileTitle(store: store, file: file, note: group?.title ?? file.oldPath.map { "from \($0)" })
+            ReviewFileTitle(store: store, file: file, note: group?.title ?? file.oldPath.map { "from \($0)" }, viewable: true)
                 .fillsPane()
                 .frame(height: TaskFileChrome.headerHeight)
                 .background(palette.surfaceMuted)
@@ -404,6 +428,31 @@ struct TaskChangesView: View {
                 .accessibilityIdentifier("changes-current-file")
             Divider()
         }
+    }
+
+    /// The function, type or heading the top line sits in, under the file's
+    /// name, while the file's own lines are at the top.
+    @ViewBuilder private var enclosingBar: some View {
+        if let path = currentPath, let file = store.shownReview?.file(path),
+           let id = store[place: .changes].anchor, id.hasPrefix(path + "#"),
+           let declaration = store.opened(file).enclosing(id) {
+            Text(declaration).font(Typography.code(11)).foregroundStyle(palette.textSecondary)
+                .lineLimit(1).truncationMode(.tail)
+                .padding(.leading, ReviewStream.gutterWidth + 18).padding(.trailing, 12).padding(.vertical, 3)
+                .fillsPane()
+                .background(palette.background.opacity(0.94))
+                .overlay(alignment: .bottom) { Divider() }
+                .help(declaration)
+                .allowsHitTesting(false)
+                .accessibilityIdentifier("changes-enclosing")
+        }
+    }
+
+    /// Land on a change a mark beside the scrollbar names.
+    private func land(_ mark: ReviewMark) {
+        if store.focusedPath != nil { store.focusedPath = mark.path }
+        withAnimation(.easeOut(duration: 0.15)) { store[place: .changes] = .init(anchor: mark.id, current: mark.id) }
+        store.noteInteraction()
     }
 
     private func toggleFocus() {
@@ -499,6 +548,56 @@ struct TaskChangesView: View {
     }
 }
 
+/// A mark beside the scrollbar for every change in the stream, at its place
+/// counted in rows: green added, red removed, the accent for both, quiet for a
+/// move; comments add a dot. Click one to land on its change.
+private struct ChangeMarks: View {
+    let store: TaskFilesStore
+    let layout: TaskFilesStore.ReviewLayout
+    let jump: (ReviewMark) -> Void
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        if let review = store.shownReview {
+            let files = store.focusedPath.map { path in review.files.filter { $0.path == path } } ?? review.files
+            let marks = ReviewDiff(files: files).marks(layout: layout, collapsed: store.isViewed)
+            let commented = Set(store.comments.map(\.selection.path))
+            // Each commented file's dot sits on its first mark.
+            var seen = Set<String>()
+            let dotted = Set(marks.filter { commented.contains($0.path) && seen.insert($0.path).inserted }.map(\.id))
+            GeometryReader { proxy in
+                ForEach(marks, id: \.id) { mark in
+                    Button { jump(mark) } label: {
+                        RoundedRectangle(cornerRadius: 1).fill(color(mark.kind))
+                            .frame(width: 4, height: 3)
+                            .frame(width: 10, height: 7)
+                            .overlay(alignment: .leading) {
+                                if dotted.contains(mark.id) {
+                                    Circle().fill(palette.accent).frame(width: 3, height: 3)
+                                }
+                            }
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help((mark.path as NSString).lastPathComponent)
+                    .position(x: proxy.size.width - 5, y: 4 + mark.position * max(proxy.size.height - 8, 0))
+                }
+            }
+            .frame(width: 10)
+            .accessibilityHidden(true)
+        }
+    }
+
+    private func color(_ kind: ReviewMark.Kind) -> Color {
+        switch kind {
+        case .added: palette.successTone.ink
+        case .removed: palette.failureTone.ink
+        case .changed: palette.accent
+        case .moved: palette.textTertiary
+        }
+    }
+}
+
 private extension View {
     /// Exactly the width the pane offers, whatever the content asks for, with
     /// the content at the leading edge. A row that takes its content's width
@@ -534,6 +633,11 @@ private struct ChangedFilesSidebar: View {
             Divider()
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
+                    if store.viewedCount > 0, let shown = store.shownReview?.files.count {
+                        Text("\(store.viewedCount) / \(shown) viewed").foregroundStyle(palette.textSecondary)
+                            .padding(.horizontal, 8).padding(.top, 8)
+                            .accessibilityIdentifier("changes-viewed-count")
+                    }
                     ForEach(store.shownGroups) { group in
                         groupRow(group)
                         ForEach(group.files) { file in fileRow(file, in: group) }
@@ -579,10 +683,16 @@ private struct ChangedFilesSidebar: View {
     private func fileRow(_ file: ReviewFile, in group: ReviewGroup) -> some View {
         let folder = group.id.hasPrefix("path:") && group.title.hasSuffix("/") ? group.title.count : nil
         let comments = store.comments.count { $0.selection.path == file.path }
+        let viewed = store.isViewed(file)
         return Button { jump(file.path) } label: {
             HStack(spacing: 6) {
                 Text(folder.map { String(file.path.dropFirst($0)) } ?? (file.path as NSString).lastPathComponent)
                     .font(Typography.code(11)).lineLimit(1).truncationMode(.head)
+                    .foregroundStyle(viewed ? palette.textTertiary : palette.text)
+                if viewed {
+                    Image(systemName: "checkmark").font(.system(size: 8, weight: .bold))
+                        .foregroundStyle(palette.textTertiary).accessibilityLabel("Viewed")
+                }
                 Spacer(minLength: 4)
                 if comments > 0 {
                     Label("\(comments)", systemImage: "text.bubble").labelStyle(.titleAndIcon)

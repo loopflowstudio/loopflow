@@ -816,7 +816,9 @@ struct TaskFilesTests {
     }
 
     /// A store over two changed files, each with two separate changes.
-    private func twoFileStore(failingOnce: String? = nil) throws -> TaskFilesStore {
+    /// `word` is the first hunk's new line, read on every file read.
+    private func twoFileStore(failingOnce: String? = nil,
+                              word: OSAllocatedUnfairLock<String> = .init(initialState: "uno")) throws -> TaskFilesStore {
         let failed = OSAllocatedUnfairLock(initialState: false)
         let fixture = try Data(contentsOf: URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
@@ -837,7 +839,7 @@ struct TaskFilesTests {
                 let paths = args[3].hasPrefix("--") ? ["a.swift", "b.swift"] : [args[3]]
                 value["patch"] = paths.map { path in
                     "diff --git a/\(path) b/\(path)\n--- a/\(path)\n+++ b/\(path)\n"
-                        + "@@ -1 +1 @@\n-one\n+uno\n@@ -9 +9 @@\n-nine\n+nueve\n"
+                        + "@@ -1 +1 @@\n-one\n+\(word.withLock { $0 })\n@@ -9 +9 @@\n-nine\n+nueve\n"
                 }.joined()
             }
             return String(decoding: try JSONSerialization.data(withJSONObject: value), as: UTF8.self)
@@ -915,6 +917,63 @@ struct TaskFilesTests {
         await store.retryFile("b.swift")
         #expect(store.fileNotes.isEmpty && store.unread.isEmpty)
         #expect(store.review?.file("b.swift")?.stops.count == 2)
+    }
+
+    /// A file marked viewed folds to its header and stepping passes over it,
+    /// until its lines change.
+    @Test func aViewedFileFoldsUntilItsLinesChange() async throws {
+        let word = OSAllocatedUnfairLock(initialState: "uno")
+        let store = try twoFileStore(word: word)
+        await store.loadReview()
+        let a = try #require(store.shownReview?.file("a.swift"))
+        store.setViewed(a, true)
+        #expect(store.viewedCount == 1 && store.position(.changes) == "2 changes")
+        #expect((1...3).map { _ in store.step(1, in: .changes)?.path } == ["b.swift", "b.swift", nil])
+        #expect(store.shownReview?.files.count == 2)
+
+        word.withLock { $0 = "eins" }
+        await store.loadReview(changed: ["a.swift"])
+        #expect(store.viewedCount == 0 && store.position(.changes).hasSuffix("of 4"))
+    }
+
+    /// The Task's commits read as Graph steps; picking one compares its first
+    /// commit's parent with its last, and the whole Task comes back after.
+    @Test func aGraphStepComparesItsOwnCommits() async throws {
+        let fixture = try Data(contentsOf: URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("tests/fixtures/dto/task_files.json"))
+        let sha: @Sendable (Int) -> String = { String(repeating: "\($0)", count: 40) }
+        let base = String(repeating: "a", count: 40)
+        let subjects = ["lf implement: parse", "lf implement: render", "fix a typo", "lf compress: fold"]
+        let reads = OSAllocatedUnfairLock<[[String]]>(initialState: [])
+        let store = TaskFilesStore(issue: "TEST-1", cwd: "/fixture", query: RegistryQuery { args, _ in
+            let root = try JSONSerialization.jsonObject(with: fixture) as! [String: Any]
+            var value = root[args[1] == "changes" ? "changes" : "diff"] as! [String: Any]
+            if args[1] == "changes" {
+                reads.withLock { $0.append(args) }
+                let whole = !args.contains("--head")
+                value["base_commit"] = base
+                value["commits"] = subjects.enumerated().filter { whole || $0.offset < 2 }
+                    .map { ["sha": sha($0.offset + 1), "subject": $0.element] }
+            } else {
+                value["patch"] = ""
+            }
+            return String(decoding: try JSONSerialization.data(withJSONObject: value), as: UTF8.self)
+        })
+        store.autosave = false
+        await store.loadReview()
+        #expect(store.steps.map(\.title) == ["implement · 2 commits", "fix a typo", "compress"])
+        #expect(store.steps.map(\.base) == [base, sha(2), sha(3)])
+
+        store.showStep(store.steps[0])
+        await store.loadReview()
+        #expect(store.comparison == .branch(base: base, head: sha(2)))
+        #expect(reads.withLock { $0.last }?.contains(sha(2)) == true)
+        #expect(store.steps.count == 3 && store.comparisonDescription?.hasPrefix("Step implement · 2 commits") == true)
+
+        store.showStep(nil)
+        await store.loadReview()
+        #expect(store.comparison == .workingTree(base: "parent") && store.step == nil)
     }
 
     /// The Diff fits the pane it is given. No row asks for more than a narrow

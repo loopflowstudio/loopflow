@@ -239,6 +239,16 @@ pub struct TaskChangedFile {
     pub untracked: bool,
 }
 
+/// One commit in a Task's comparison. A Graph step's commits share the subject
+/// prefix `lf <step>:`.
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+pub struct TaskCommit {
+    pub sha: String,
+    pub subject: String,
+}
+
 #[derive(
     Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
 )]
@@ -248,6 +258,8 @@ pub struct TaskChangesSnapshot {
     pub task_id: String,
     pub base_commit: String,
     pub head_commit: String,
+    /// The commits from base to head, oldest first.
+    pub commits: Vec<TaskCommit>,
     pub files: Vec<TaskChangedFile>,
     pub scratch: Vec<String>,
     pub scratch_truncated: bool,

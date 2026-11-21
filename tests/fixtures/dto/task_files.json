@@ -4,6 +4,9 @@
     "task_id": "task-files",
     "base_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     "head_commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "commits": [
+      { "sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "subject": "lf implement: parse the old name" }
+    ],
     "files": [
       {
         "path": "new.txt",

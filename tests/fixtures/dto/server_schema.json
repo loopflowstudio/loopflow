@@ -12007,6 +12007,13 @@
         "base_commit": {
           "type": "string"
         },
+        "commits": {
+          "description": "The commits from base to head, oldest first.",
+          "items": {
+            "$ref": "#/$defs/TaskCommit"
+          },
+          "type": "array"
+        },
         "files": {
           "items": {
             "$ref": "#/$defs/TaskChangedFile"
@@ -12044,6 +12051,7 @@
         "task_id",
         "base_commit",
         "head_commit",
+        "commits",
         "files",
         "scratch",
         "scratch_truncated"
@@ -12200,6 +12208,22 @@
         "pending_sync",
         "conflicts",
         "refresh_error"
+      ],
+      "type": "object"
+    },
+    "TaskCommit": {
+      "description": "One commit in a Task's comparison. A Graph step's commits share the subject\nprefix `lf <step>:`.",
+      "properties": {
+        "sha": {
+          "type": "string"
+        },
+        "subject": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sha",
+        "subject"
       ],
       "type": "object"
     },

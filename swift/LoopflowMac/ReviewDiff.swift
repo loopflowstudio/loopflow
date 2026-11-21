@@ -1,5 +1,6 @@
 #if os(macOS)
 import Foundation
+import Loopflow
 
 /// A Task's whole comparison read as one review: every file, its hunks, and the
 /// changes a reader steps through. Parsed from the patch `lf task diff` returns.
@@ -150,6 +151,89 @@ struct ReviewStop: Equatable, Sendable {
     let path: String
 }
 
+/// Where a change sits along the stream, for the marks beside its scrollbar.
+struct ReviewMark: Equatable, Sendable {
+    enum Kind: Sendable { case added, removed, changed, moved }
+    let id: String
+    let path: String
+    let kind: Kind
+    /// 0 at the top of the stream, 1 at its end, counted in rows.
+    let position: Double
+}
+
+extension ReviewDiff {
+    /// A mark for every change, placed by counting the rows the stream draws
+    /// for each file in `layout`. A collapsed file draws only its header.
+    func marks(layout: TaskFilesStore.ReviewLayout, collapsed: (ReviewFile) -> Bool) -> [ReviewMark] {
+        var rows = 0
+        var marks: [(ReviewMark.Kind, String, String, Int)] = []
+        for file in files {
+            rows += 1
+            if collapsed(file) { continue }
+            if file.blocks.isEmpty { rows += 1 }
+            for block in file.blocks {
+                switch block {
+                case .hunk, .context: rows += 1
+                case .moved(let move):
+                    marks.append((.moved, move.id, file.path, rows))
+                    rows += 1
+                case .change(let change):
+                    let kind: ReviewMark.Kind = change.removed.isEmpty ? .added : change.added.isEmpty ? .removed : .changed
+                    marks.append((kind, change.id, file.path, rows))
+                    let drawn = switch layout {
+                    case _ where file.status == .added: change.added.count
+                    case .new: change.added.count + (change.removed.isEmpty ? 0 : 1)
+                    case .unified: change.removed.count + change.added.count
+                    case .split: max(change.removed.count, change.added.count)
+                    }
+                    rows += drawn
+                }
+            }
+        }
+        let total = Double(max(rows, 1))
+        return marks.map { ReviewMark(id: $0.1, path: $0.2, kind: $0.0, position: Double($0.3) / total) }
+    }
+}
+
+/// One Graph step's commits: a run of commits whose subjects start
+/// `lf <step>:`. A commit without that prefix is a step of its own.
+struct ReviewStep: Equatable, Sendable, Identifiable {
+    /// The step's name, or the subject of a commit standing alone.
+    let name: String
+    /// The commit before the step's first.
+    let base: String
+    let commits: [TaskCommit]
+    /// A step's last commit, which no other step shares.
+    let head: String
+    var id: String { head }
+
+    /// "implement · 3 commits".
+    var title: String { commits.count == 1 ? name : "\(name) · \(commits.count) commits" }
+
+    static func steps(_ commits: [TaskCommit], base: String) -> [ReviewStep] {
+        var steps: [ReviewStep] = []
+        var before = base
+        for commit in commits {
+            let name = Self.name(commit.subject)
+            if let name, let last = steps.last, last.name == name, Self.name(last.commits[0].subject) != nil {
+                steps[steps.count - 1] = ReviewStep(name: name, base: last.base, commits: last.commits + [commit], head: commit.sha)
+            } else {
+                steps.append(ReviewStep(name: name ?? commit.subject, base: before, commits: [commit], head: commit.sha))
+            }
+            before = commit.sha
+        }
+        return steps
+    }
+
+    /// `implement` from `lf implement: parse the old name`.
+    private static func name(_ subject: String) -> String? {
+        guard subject.hasPrefix("lf "), let colon = subject.firstIndex(of: ":") else { return nil }
+        let name = subject[subject.index(subject.startIndex, offsetBy: 3)..<colon]
+        guard !name.isEmpty, name.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" }) else { return nil }
+        return String(name)
+    }
+}
+
 struct ReviewFile: Equatable, Sendable, Identifiable {
     enum Status: String, Sendable { case modified, added, deleted, renamed, binary }
 
@@ -159,6 +243,9 @@ struct ReviewFile: Equatable, Sendable, Identifiable {
     let blocks: [ReviewBlock]
     let additions: Int
     let deletions: Int
+    /// The file's lines as this patch reads them; a file marked viewed stays
+    /// viewed until this changes. Equal only within one run of the app.
+    let fingerprint: Int
     var id: String { path }
 
     init(path: String, oldPath: String?, status: Status, blocks: [ReviewBlock]) {
@@ -167,11 +254,16 @@ struct ReviewFile: Equatable, Sendable, Identifiable {
         self.status = status
         self.blocks = blocks
         var additions = 0, deletions = 0
+        var hasher = Hasher()
+        hasher.combine(status)
         for line in Self.lines(blocks) {
             if line.kind == .added { additions += 1 } else if line.kind == .removed { deletions += 1 }
+            hasher.combine(line.kind)
+            hasher.combine(line.text)
         }
         self.additions = additions
         self.deletions = deletions
+        fingerprint = hasher.finalize()
     }
 
     /// The id of the file's first row under its header.
@@ -192,6 +284,36 @@ struct ReviewFile: Equatable, Sendable, Identifiable {
             case .hunk: []
             }
         }
+    }
+
+    /// The declaration the row `id` sits in: the nearest line above it that
+    /// opens a function, type or heading, else the one git names for its hunk.
+    func enclosing(_ id: String) -> String? {
+        let markdown = ["md", "markdown"].contains((path as NSString).pathExtension.lowercased())
+        var found: String?
+        for block in blocks {
+            if case .hunk(let header) = block {
+                let named = ReviewGap(header, after: 0).declaration
+                if !named.isEmpty { found = named }
+            }
+            let ids: [String] = switch block {
+            case .change(let change) where status == .added:
+                change.added.indices.map { $0 == 0 ? change.id : "\(change.id)+\($0)" }
+            default: [block.id(in: path)]
+            }
+            let lines: [ReviewLine] = switch block {
+            case .context(let line): [line]
+            case .change(let change): change.added
+            case .moved(let move): move.end == .destination ? move.lines : []
+            case .hunk: []
+            }
+            if ids.count == 1, ids[0] == id { return found }
+            for (offset, line) in lines.enumerated() {
+                if ids.count > 1, ids[offset] == id { return found }
+                if let declaration = line.declaration(markdown: markdown) { found = declaration }
+            }
+        }
+        return nil
     }
 
     /// What each hunk header skips, by block index: the unchanged lines between
@@ -301,6 +423,26 @@ struct ReviewLine: Equatable, Sendable {
     func id(in path: String) -> String {
         "\(path)#" + (kind == .removed ? "o\(old ?? 0)" : "n\(new ?? 0)")
     }
+
+    /// The line itself when it opens a function or type, or in Markdown a
+    /// heading: `pub(crate) async fn read(` or `## Remaining`.
+    func declaration(markdown: Bool) -> String? {
+        let trimmed = text.trimmingCharacters(in: .whitespaces)
+        if markdown { return trimmed.hasPrefix("#") && trimmed.drop { $0 == "#" }.first == " " ? trimmed : nil }
+        var words = trimmed.split(separator: " ", maxSplits: 8).map { $0.split(separator: "(").first.map(String.init) ?? "" }
+        while let first = words.first, Self.modifiers.contains(first) || first.hasPrefix("@") { words.removeFirst() }
+        guard let first = words.first, Self.openers.contains(first), words.count > 1 else { return nil }
+        return trimmed
+    }
+
+    private static let modifiers: Set<String> = [
+        "pub", "public", "private", "fileprivate", "internal", "open", "static", "final", "override", "async",
+        "unsafe", "const", "export", "default", "abstract", "nonisolated", "mutating", "extern", "inline", "protected",
+    ]
+    private static let openers: Set<String> = [
+        "func", "fn", "def", "class", "struct", "enum", "protocol", "extension", "actor", "impl", "trait", "mod",
+        "interface", "function", "init", "macro_rules!",
+    ]
 
     /// The start of a line past `readable`, and how many UTF-16 units follow.
     var cut: (shown: String, more: Int)? {
@@ -518,6 +660,11 @@ struct ReviewSelection: Equatable, Sendable {
     func text(in file: ReviewFile) -> String {
         let lines = numbered(in: file)
         return (first...last).compactMap { lines[$0] }.joined(separator: "\n")
+    }
+
+    /// Every line on one side of a file, in order: the new code, or what was removed.
+    static func side(_ side: Side, of file: ReviewFile) -> String {
+        file.lines.filter { side == .new ? $0.kind != .removed : $0.kind == .removed }.map(\.text).joined(separator: "\n")
     }
 
     /// This side's lines of a file by number.

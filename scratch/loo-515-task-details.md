@@ -11,7 +11,7 @@ The step-by-step account this file replaced: `ade953f915:scratch/loo-515-task-de
 Status: built, the tour skill and the two diff settings included. Seen on
 screen November 21, in Loopflow Dev; the repairs for what that showed (width,
 file bar, syntax colors, the per-file read, the long-line cut, Retry, rows
-that take the pane's width) are built and unseen.
+that take the pane's width) and the polish under "Diff polish" are built and unseen.
 PR #1949 is open; its head follows this branch.
 
 ## What exists
@@ -374,6 +374,7 @@ tooltip. The five questions under Remaining are unchanged and unanswered.
   one supported harness must be installed"); not run on unmodified code. CI
   decides.
 - Not built: moves inside mixed change runs; drag to select lines.
+- Grammar highlighting and rendered diffs (Markdown, images, HTML) are the v2 Task's.
 - Noted, not this Task: a `.changes(comparison:)` browser tab and the Diff page
   are two representations of one view; merging them changes the persisted
   `WorkBrowserTab` shape, which LOO-497/416 own.
@@ -436,7 +437,7 @@ files:
   page and Task switches.
 - No GitHub patch renderer remains.
 
-Check (November 21): `swift build --build-tests --package-path swift`, then `scripts/test_desktop.sh --skip-build --filter 'TaskFilesTests|ReviewDiffTests'` → 54 passed (`--skip-build` runs the last built tests, so build first). Not run: `ThemeTests` (needs `target/debug/lf`; `cargo build -p loopflow --bin lf` stops in `loopflow-storage/build.rs`, "apply graph_process_task: no such column: is_local", in this shallow clone with no `LOOPFLOW_MIGRATION_ORDER`). This branch's own Rust is unchanged since November 19: `cargo test -p loopflow-execution --lib config::` → 105 passed and `cargo test -p loopflow --test golden_prompt` → passed. Gate/CI: clippy, `documented_commands::`, the full swift suite, `global_commands`. Demo: the pane on screen.
+Check (November 21, polish): `swift build --build-tests` then `scripts/test_desktop.sh --skip-build --filter 'TaskFilesTests|ReviewDiffTests'` → 60 tests, 58 passed; `commitInLinkedWorktreeRereadsTheComparison` and `ignoredWritesFromReadsNeverScheduleAnotherRead` (FSEvents) failed with `fseventsd` at 100% CPU, the documented trap — gate reruns them. `DTOFixtureTests|ServerProtocolTests|RegistryQueryTests` → 98 passed. Rust: `cargo test -p loopflow-execution --lib task_files_compare_net_parent_head` ok, `server::schema::tests::` 8 passed, `--test integration dto_fixtures::` 49 passed, `documented_commands::` 4 passed (after `git fetch --unshallow`; the shallow clone could not order migrations). Gate/CI: clippy, the full swift suite, `global_commands`. Demo: the pane on screen.
 
 Jack, November 21: "im realizing i prefer a view that basically only shows the new code. like in a 2col sideby side in github, i just read the right side", "that should be default, maybe a button to show ol dl ine or something", "or sure 3-part button with my version as the perferred". Built by the session: New code / Unified / Side by side, New code default; removed lines fold to "N old lines · Show". Also: "this seems a little hard to read / subtle coloring" (changed lines now full tint, gutter too) and "this is also a little dense" (tour sidebar reasons quieter, two lines; tour skill asks for reasons under ten words).
 
@@ -444,14 +445,15 @@ Jack, on diff polish (November 21): "Diff per agent turn — doesnt fit our mode
 
 Jack, on filing the diff polish as separate Tasks: "but do em all unless theres some sort of trouble or conflict", then "no, do the in 515", "what of this could really be that hard", "i also feel like there still could be more syntax highlighting", "maybe diff per agent turn?", "er diff per step?". The seven separate Tasks were abandoned unstarted.
 
-## Next for implement — Diff polish, November 21
+## Diff polish, November 21 — built
 
-In LOO-515, in this order (Jack's priorities in the section above):
-1. Real grammar highlighting in the Diff and Files (tree-sitter or an equivalent grammar engine), replacing SyntaxColors.swift. More of the code colored: keys, types, functions, Markdown structure.
-2. Rendered diffs: Markdown rendered with changes marked, images before/after, HTML rendered; source one click away.
-3. Diff per Graph step, from git log alone: each step commits with a subject starting `lf <step>:`, so the branch's commits since its base, grouped by that prefix (other commits stand alone), are the steps. Pick one (or the whole Task) and the Diff compares its parent with it; task.diff already takes base and head. Jack: "steps do commits, so we can just use the git logs", "or at least they shoul".
-4. Change markers along the scrollbar; click to jump.
-5. Copying lines gives code without + and − markers.
-6. Viewed per file: collapses it, sidebar counts "12 / 60 viewed", clears when the file changes.
-7. Sticky enclosing-function header under the fixed file bar.
-8. Word-wrap toggle.
+Steer, November 21: "ok grammar highlighitng and rendered diffs can be a single v2 task"; items 1 and 2 leave LOO-515 for that Task, `SyntaxColors.swift` stays as it is. Built here, unseen on screen:
+
+- **Diff per step.** `lf task changes` carries `commits` (`{sha, subject}`, base to head, oldest first; `TaskCommit` in Rust and Swift, fixtures and schema updated). `ReviewStep.steps` reads a run of `lf <step>:` subjects as one step, any other commit alone. A menu under the title ("Whole Task · N steps") picks one; `showStep` compares `.branch(base: parent of its first, head: its last)` and the stream reads anew. Steps come only from the whole Task's read. A pane tab change returns to the whole Task.
+- **Change marks** (`ChangeMarks`, `ReviewDiff.marks`): one mark per change beside the scrollbar, placed by counting the rows the stream draws in the current layout; green added, red removed, accent both, quiet moved; a dot for a file with comments. Click lands on the change.
+- **Copy without + and −.** The marker is not selectable; each line's context menu copies the line, the selected lines, or the side's shown code (`ReviewSelection.side`).
+- **Viewed** per file: checkbox in the file title and bar; folds the file to its header, sidebar "12 / 60 viewed" and a check per row, stepping passes over it; `ReviewFile.fingerprint` clears it when the file's lines change. In memory only.
+- **Enclosing declaration** under the file bar, overlaid on the stream (`ReviewFile.enclosing`): the nearest shown line above the top row that opens a function or type (or a Markdown heading), else git's hunk declaration.
+- **Wrap long lines** in the … menu, which is now always shown; off, each line keeps one row and ends in "…".
+
+Chosen while building, reversible: steps are consecutive runs (a second `implement` after `gate` is a second step); wrap off truncates instead of scrolling sideways (the November 21 width repairs ruled out a row wider than the pane); marks count rows, not measured heights, so wrapped lines and comments put them slightly off; viewed does not outlive the app.

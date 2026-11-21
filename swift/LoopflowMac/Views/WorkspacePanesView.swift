@@ -886,6 +886,8 @@ struct SessionPaneView: View {
                         TaskFilesView(store: files, checkoutBase: task?.reference.workspace?.baseCommit, task: task,
                             isFocused: isFocused, addToConversation: conversationInput())
                             .task(id: pane.content.selectedBrowserTab?.id) {
+                                // A tab names its own comparison, never one Graph step's.
+                                files.showStep(nil)
                                 if case .changes(let comparison) = pane.content.selectedBrowserTab {
                                     files.comparison = comparison
                                     files.page = .changes

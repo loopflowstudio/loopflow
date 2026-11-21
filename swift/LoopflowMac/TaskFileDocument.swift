@@ -808,9 +808,12 @@ final class TaskFilesStore {
         isRefreshingChanges = true
         defer { if generation == refreshGeneration { isRefreshingChanges = false } }
         do {
-            let changes = try await query.taskChanges(issue: issue, base: comparison.base, head: comparison.head)
-            guard !Task.isCancelled, generation == refreshGeneration else { return }
+            let target = comparison
+            let changes = try await query.taskChanges(issue: issue, base: target.base, head: target.head)
+            guard !Task.isCancelled, generation == refreshGeneration, comparison == target else { return }
             self.changes = changes
+            // A step's own read holds only its commits; the steps come from the whole Task's.
+            if step == nil { steps = ReviewStep.steps(changes.commits, base: changes.baseCommit) }
             if selection == nil, let first = changes.scratch.first ?? changes.files.first?.path {
                 selection = first
                 autoSelected = true
@@ -866,6 +869,10 @@ final class TaskFilesStore {
     /// When next/previous last moved, so the change it landed on can pulse once.
     @ObservationIgnored private(set) var steppedAt = Date.distantPast
     var reviewLayout = ReviewLayout.new
+    /// Long lines wrap; off, each line keeps one row and is cut at the pane's edge.
+    var wrapsLines = true
+    /// Files you marked viewed, by path, with the lines they had then.
+    private var viewed: [String: Int] = [:]
     /// Changes whose removed lines you opened while reading new code.
     var openedRemovals: Set<String> = []
     /// One file at a time; next/previous still crosses into the next file.
@@ -885,6 +892,42 @@ final class TaskFilesStore {
     func readsSplit(width: CGFloat) -> Bool { reviewLayout == .split && width >= Self.splitWidth }
     /// The layout the stream reads in at this width.
     func layout(width: CGFloat) -> ReviewLayout { reviewLayout == .split && !readsSplit(width: width) ? .unified : reviewLayout }
+
+    // MARK: Steps and viewed files
+
+    /// The Graph steps in the Task's commits, oldest first, from the last read
+    /// of the whole Task's comparison.
+    private(set) var steps: [ReviewStep] = []
+    /// The step the Diff compares, its first commit's parent with its last;
+    /// nil for the whole Task.
+    private(set) var step: ReviewStep?
+    @ObservationIgnored private var taskComparison: ChangeComparison?
+
+    /// Compare one step, or the whole Task again with nil. The stream is read
+    /// anew, since the same path holds different lines in another comparison;
+    /// the Diff reloads when its comparison changes.
+    func showStep(_ next: ReviewStep?) {
+        guard next != step else { return }
+        if step == nil { taskComparison = comparison }
+        step = next
+        comparison = next.map { .branch(base: $0.base, head: $0.head) } ?? taskComparison ?? .workingTree(base: "parent")
+        changes = nil
+        review = nil
+        openedGaps = [:]
+        places[.changes] = nil
+        noteInteraction()
+    }
+
+    /// A file you marked viewed and whose lines have not changed since.
+    func isViewed(_ file: ReviewFile) -> Bool { viewed[file.path] == file.fingerprint && !isReading(file) }
+
+    func setViewed(_ file: ReviewFile, _ on: Bool) {
+        viewed[file.path] = on ? file.fingerprint : nil
+        noteInteraction()
+    }
+
+    /// "12 / 60 viewed" over the files shown.
+    var viewedCount: Int { shownReview?.files.count(where: isViewed) ?? 0 }
 
     /// Read the comparison file by file. `lf task changes` names every
     /// changed file at once; each shown file's lines are then read on their
@@ -1296,7 +1339,8 @@ final class TaskFilesStore {
     /// The diff a reader shows, once it has been read.
     func diff(_ reader: ReviewReader) -> ReviewDiff? {
         switch reader {
-        case .changes: shownReview
+        // A viewed file is folded to its header, so stepping passes over it.
+        case .changes: shownReview.map { ReviewDiff(files: $0.files.filter { !isViewed($0) }) }
         case .file(let path): fileReview?.path == path ? fileReview?.diff : nil
         }
     }
@@ -1345,6 +1389,7 @@ final class TaskFilesStore {
     /// commit, then the head. Footer and conversation references share it.
     var comparisonDescription: String? {
         guard let changes else { return nil }
+        if let step { return "Step \(step.title) · \(changes.baseCommit.prefix(10))..\(changes.headCommit.prefix(10))" }
         let branch = pullRequest.pullRequest?.baseRefName ?? "the Task's base"
         let compared = "Compared with \(branch) at \(changes.baseCommit.prefix(10))"
         return comparison.head == nil ? "\(compared) · includes uncommitted changes"

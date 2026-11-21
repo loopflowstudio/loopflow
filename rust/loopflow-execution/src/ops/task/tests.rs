@@ -1083,6 +1083,13 @@ fn task_files_compare_net_parent_head_and_revisioned_drafts() {
         ..workspace
     };
     let committed_files = super::snapshot::changes_snapshot(committed).unwrap();
+    assert_eq!(
+        committed_files.commits,
+        [super::TaskCommit {
+            sha: head.clone(),
+            subject: "fixture".to_string()
+        }]
+    );
     assert!(committed_files
         .files
         .iter()

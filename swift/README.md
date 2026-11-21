@@ -368,8 +368,12 @@ collapses nothing: a line past 1,000 characters shows its start and **N more
 characters · Show**, a file past 1 MB shows its first 1 MB and says it was cut,
 and a file that could not be read offers **Retry**. Code is in syntax colors,
 here and in Files. The page fits a pane 360 pt wide: the toolbar keeps the
-sidebar toggle and the stepper and moves what has no room into its **…** menu,
-layout first, then order and tour, then Focus. A pill in the title says where the work is
+sidebar toggle, the stepper and the **…** menu, which holds what has no room,
+layout first, then order and tour, then Focus, and **Wrap long lines**. Under
+the title, **Whole Task** opens a menu of the Graph steps in the branch's
+commits since its base: a run of commits whose subjects start `lf implement:`
+is one step, any other commit stands alone, and picking one compares that
+step's commits. A pill in the title says where the work is
 delivered and opens the delivery card. Loopflow's record decides whether there
 is a PR: none, publishing, open, merged or abandoned. GitHub's reading adds
 checks, review and description with its age; a failed, stale (over two minutes)
@@ -439,7 +443,12 @@ changes in 4 of 9 files". Below 620 pt the sidebar opens over the stream from
 its button and closes when you choose a file.
 
 The stream follows the comparison live without moving what you are reading. A
-bar above it names the file you are in, with its counts and **Open**. Press `]`
+bar above it names the file you are in, with its counts, **Open** and
+**Viewed**, and under it the function, type or Markdown heading the top line
+sits in. **Viewed** folds a file to its header until its lines change; the
+sidebar counts "12 / 60 viewed" and stepping passes over it. Marks beside the
+scrollbar place every change, green added, red removed, accent for both; click
+one to land there. Press `]`
 and `[` (or the arrows around the position) to step through changes across
 files; the change you land on pulses once. **Focus** shows one file and still
 steps into the next. Between hunks the stream says how many lines it skipped
@@ -454,8 +463,10 @@ comment into the conversation's unsent input as one line, each naming its file,
 lines and side, and sending stays yours. A comment follows its lines when the
 worker edits above them; when the lines themselves change it says so, keeps its
 place and is still sent. Comments last as long as the window. **Copy** takes
-the selected lines without patch markers, and **Reference in conversation**
-types `path:L4-6 (after, working tree on <sha>)` alone. Files' Diff has the
+the selected lines without patch markers, as does a line's context menu, which
+also copies the selection or the new code shown; selecting text never takes
+the + and −. **Reference in conversation** types
+`path:L4-6 (after, working tree on <sha>)` alone. Files' Diff has the
 same comments, skipped lines and Send.
 
 **Files** holds open documents and their Read, Edit and Diff controls, with the

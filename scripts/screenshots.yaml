@@ -29,39 +29,8 @@ website:
     delay: 8
     output: website/static/roadmap.png
 
-# Stable Wave-surface proof at both widths. Populated states read an
-# `lf-world` world through the real registry; loading and error are the
-# `mock-waves` states no data can produce.
+# Loading, unavailable and empty Wave surfaces at both widths.
 wave-proof:
-  - name: metrics-portfolio-wide
-    mode: live
-    world: portfolio
-    view: portfolio
-    wave: desktop
-    width: 1440
-
-  - name: control-room-selected-narrow
-    mode: live
-    world: portfolio
-    wave: desktop
-    width: 900
-  - name: control-room-selected-wide
-    mode: live
-    world: portfolio
-    wave: desktop
-    width: 1440
-
-  - name: density-wide
-    mode: live
-    world: density
-    wave: product
-    width: 1440
-  - name: density-narrow
-    mode: live
-    world: density
-    wave: product
-    width: 1100
-
   - name: control-room-loading-narrow
     mode: mock-waves
     detail_state: loading

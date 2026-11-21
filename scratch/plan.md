@@ -113,40 +113,29 @@ uses an ANSI file and `/bin/cat`. Both run without preparing a Machine.
   `uv run pytest -q python/tests/test_desktop_launch.py` passed all three
   headless tests.
 
-## Remaining implementation
+The screenshot manifest now has six fixture shots (loading, unavailable and
+empty at 900 and 1440 pixels). Website capture still has its three live views.
+Removed the recipe builder, its Rust binary and the remaining launch and
+cleanup inputs. A tracked-file sweep for `lf-world` and `.lf-copy` outside
+scratch found only historical release notes.
 
-1. **Next — remove the last world consumers and the builder in one slice.**
-   Delete the five recipe-backed shots in `scripts/screenshots.yaml` and the
-   builder and recipe inputs in `scripts/generate_screenshots.py`. Keep the
-   loading, error and empty shots at both widths. Website capture and the
-   snapshot benchmark still use `AppTestMode.live` with their own inputs.
-   Remove `--world` from `scripts/check_attributegraph_cycles.sh` and run
-   `--sheet` with `mock-waves`. In `swift/LoopflowMac/Views/WavesView.swift`,
-   `syncRepoStates()` returns immediately after seeding the mock Waves. It
-   currently reaches `raiseCaptureSheetIfRequested()` only after a live read.
-   Wire the trigger to the mock path and verify the sheet actually opens over
-   the selected Wave. A clean cycle log by itself would miss a skipped sheet.
-   Remove `WaveSurfaceLaunch.world`, `LOOPFLOW_UI_TEST_WORLD`, the unused
-   `AppRuntime.isAutomatedTest`, stale world wording and the `lf-worlds-`
-   cleanup prefix and test. Delete the `lf-world` executable and Cargo
-   registration, `pub mod world` and `rust/loopflow/src/world/`.
-   Keep `RepositoryWorkspace.machine` and Xcode/private-Machine helper builds.
-2. **Sweep remaining references and exercise changed automation.** The main
-   Dev and QA docs were updated in `1ba82f64d0`. Check Rust, Swift, scripts,
-   tests, CI and current docs again after consumer deletion. Check
-   the moved Rust fixtures by name, focused Python automation and Desktop
-   tests. Check that screenshot manifest inputs match the surviving fixture
-   modes and keep the signed app build covered by
-   `test_loopflow_ui_gate_keeps_mac_test_runners_signed`. Use mounted QA for
-   screenshot output and the cycle check's visible sheet. Run
-   `cargo clippy --all-targets -- -D warnings` at gate.
-   `git grep -i 'lf-world\|\.lf-copy'` outside scratch should find only
-   historical release notes. Implicit draft copies, `lf clone`, the Preview
-   capsule and `WorkFrame.copy` were already retired in #1755.
-   Use the Task's history anchors for the sweep, from explicit live-ledger
-   opt-in (44657d3f5c) and removal of the production DB escape hatch (#964)
-   through worlds (#1612, #1614, #1617, #1619, #1622), Preview (#1620, #1645)
-   and sealed copies (#1996).
+The sheet check needs the Portfolio window: mock launches open a repository
+window by default. `--sheet` requests Portfolio, selects the infrastructure
+Wave and presents the create sheet from the mounted detail pane. The script
+requires the sheet's appearance marker as well as a clean cycle log.
+
+- Four focused Python tests passed for the fixture capture environments,
+  website manifest, signing settings and temporary-directory cleanup.
+- `swift test --package-path swift --filter MockWaveFixtureTests` passed
+  five tests. `bash -n scripts/check_attributegraph_cycles.sh` passed.
+- `cargo clippy --all-targets -- -D warnings` passed after removing the builder.
+
+## Mounted capture checks at QA
+
+- Run `uv run python scripts/generate_screenshots.py` and inspect the six
+  fixture images at both widths.
+- Run `scripts/check_attributegraph_cycles.sh --sheet` and verify the create
+  sheet opens over the infrastructure Wave without AttributeGraph cycles.
 
 ## Live acceptance at QA
 

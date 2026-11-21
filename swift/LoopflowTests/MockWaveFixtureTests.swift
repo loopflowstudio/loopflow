@@ -4,9 +4,6 @@ import Testing
 @testable import Loopflow
 @testable import LoopflowMac
 
-/// The `mock-waves` UI-test fixture renders the states no data can produce —
-/// loading and error — over the stable list. Populated states render from an
-/// `lf-world` world in `live` mode.
 @Suite("Mock wave fixture")
 struct MockWaveFixtureTests {
     @Test("live UI-test mode keeps production registry reads")

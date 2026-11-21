@@ -3,13 +3,6 @@ import Foundation
 import Loopflow
 
 /// Fixture data for the `mock-waves` UI-test mode (`AppTestMode.mockWaves`).
-///
-/// It bypasses the `lf` registry so the two states no data can produce render
-/// deterministically: `loading` (before the first read) and `error` (a failed
-/// read under the cached plan). Populated states, metrics included, render
-/// from an `lf-world` world through the real registry in `live` mode.
-///
-/// Never referenced outside `AppTestMode`; production reads only `lf`.
 enum MockWaveFixture {
     /// A path that need not exist: `mock-waves` gates off the on-disk authored
     /// scan, so nothing reads this directory.

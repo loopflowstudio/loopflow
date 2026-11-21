@@ -655,10 +655,9 @@ Undo (`536b0fd56:scratch/compress-pane-state.md`), not just visible controls.
 
 LOO-327's demo feedback, approval wording and original navigation design remain at
 `611ed031a031e6798652a15b5d250ba0f132a4e8:scratch/{file-browser-demo-approval,file-browser-demo-feedback,file-browser}.md`.
-The detailed implementation account is at
+Implementation account:
 `446c59eb0:.lf/wave/product/MEMORY.md`, this heading. Overall approval did not
-establish every scenario, merge or Task completion. Current usage lives in the
-Mac README and CLI reference.
+establish every scenario, merge or Task completion.
 
 - Task placement owns Files and the retained conversation. One document per
   Task/path shares draft, selection and Undo across File/Diff, sheets and Sessions.
@@ -683,7 +682,7 @@ Mac README and CLI reference.
   ordinary content reads and typing. Preserve complete UTF-8/BOM/line endings
   within the 1 MB bound; previews never authorize Save. No arbitrary-writer
   exclusion, extended-attribute or power-loss guarantee follows from this design.
-- Historical warm-cache file timings, unexplained failures and optimization limits:
+- Historical file timings, failures and optimization limits:
   `27613222eb:.lf/wave/product/MEMORY.md`, this heading. Measure first selection
   without pre-reading; these AppKit endpoints prove no physical-click/compositor p95.
 - **Native primitives and overall approval have separate evidence.** TextKit
@@ -696,25 +695,26 @@ Mac README and CLI reference.
   Jack's overall demo approval. A wrapper's returned launch argv must retain its
   Home context; successful initial launch does not prove nested commands do.
 
-## Task Brief, Diff and Files pages (LOO-515, 2026-11-19; PR #1949 unmerged, unseen on screen)
+## Task Brief, Diff and Files pages (LOO-515, 2026-11-21; PR #1949 unmerged)
 
 - Brief, Diff and Files are tabs of the one Files tool (Jack, November 18:
   "why does files show up three times"); Jack named Diff. One renderer reads
   the PR-equivalent comparison.
-- `lf task diff` stopped at 1 MB in path order; the stream showed no Swift.
-  Jack: "that we felt we couldnt afford to see a full diff". Complete a capped
-  read or say it is cut.
+- One `lf task diff` capped at 1 MB hid the Swift. Jack: "that we felt we
+  couldnt afford to see a full diff". Read by file; say what is cut.
+- Size collapses nothing. Jack: "often the largest diffs are the ones that
+  matter the most".
+- Jack's November 21 demo, 600 pt pane: clipped, "jumps when i hover", "no
+  syntax highlighting". A fixed toolbar row set the width. Repairs unseen.
 - Jack: "The diff is really about the underlying worker not the highest-level
   session."
 - Jack chose comments sent to the session, a sidebar and a reading order:
-  the `tour` skill writes `scratch/tour.yaml`; Desktop has a button.
-  It ends at publish (Jack: "Tour doesnt need to survive").
+  the `tour` skill writes `scratch/tour.yaml`; it ends at publish.
 - `diff_hidden` adds per layer; `diff_groups` replaces whole (an agent's
-  choice over merging, unreviewed). Jack: "use the existing config parser to
-  get final values": Desktop layers nothing. Jack chose
-  `.lf/config.local.yaml` for private settings.
-- Top-level `diff` in config is `context.diff`'s shorthand. A key the released
-  `lf` doesn't know in `.lf/config.yaml` warns on every command.
+  choice, unreviewed). Desktop reads final values from the config parser.
+  Private settings: `.lf/config.local.yaml` (Jack).
+- Top-level `diff` is `context.diff`'s shorthand. A key the released `lf`
+  doesn't know in `.lf/config.yaml` warns on every command.
 
 ## Accepted calmer workspace (2026-09-25)
 

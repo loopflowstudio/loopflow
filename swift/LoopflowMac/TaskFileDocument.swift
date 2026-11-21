@@ -1164,7 +1164,7 @@ final class TaskFilesStore {
     }
     private(set) var tourWriting = TourWriting.idle
 
-    /// A tour is stale when it names no commit, or when a commit after the one
+    /// A tour is behind when it names no commit, or when a commit after the one
     /// it names changed a file outside `scratch/`. Committing the tour itself
     /// leaves it current.
     private func readTourAge(_ tour: DiffTour?) async -> TourAge? {

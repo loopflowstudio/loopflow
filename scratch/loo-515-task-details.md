@@ -8,9 +8,10 @@ Research: `scratch/task-details-research.md`. Pages: `scratch/explore-diff-rival
 The step-by-step account this file replaced: `ade953f915:scratch/loo-515-task-details.md`
 (PR #1949's branch).
 
-Status: built, the tour skill and the two diff settings included. The November
-21 demo's repairs (below) are built and unseen. PR #1949 is open; its head
-follows this branch.
+Status: built, the tour skill and the two diff settings included. Seen on
+screen once, November 21, in Loopflow Dev; the repairs for what that showed
+(width, file bar, syntax colors, the per-file read) are built and unseen.
+PR #1949 is open; its head follows this branch.
 
 ## What exists
 
@@ -165,6 +166,21 @@ file and a builtin skill.
 - November 19, layering: "For this we should use the existing config parser to
   get final values"; "a little complicated on what do on how to combine groups
   from multiple config files (and/or the represetnation from scratch)".
+- November 21, on the Diff pane in Loopflow Dev (about 600 pt wide): "still
+  deosnt seent to be workign"; "(1) not aligned right and jumps when i hover
+  back and forth across panes (2) TaskChangesView not showing"; "also, no
+  syntax highlighting". The window showed content wider than the pane, clipped
+  on both edges (one fixed toolbar `HStack` set the column's width, "Write
+  tour" squeezed to "Wr it…"), and `TaskChangesView.swift` named twice, in the
+  file bar and its own header, with the 1 MB notice between.
+- November 21, by steer: on the 1 MB notice for a file `diff_hidden` hides,
+  "well we're supposed to be hing that right?"; "does that diff need to be 1+
+  MB? woudl it be better if we handled new files seaparately"
+  (`scratch/task-details-research.html` is 1.28 MB in 239 lines; the steer
+  asked for the read T3 Code does: stats always, patches by path); on
+  collapsing by size, "Ive always found this annoying, its like, often the
+  largest diffs are the ones that matter the most. [ignoring like generated
+  files, which we are trying to handle a separate way]".
 
 Assumed, not answered: sidebar on the left docking at 620 pt; ⌥⌘1/2/3; the file
 bar outside the scroll view as "headers lock"; several comments as one line.
@@ -180,6 +196,14 @@ Chosen while building, not by Jack, reversible before release:
   context.diff: invalid value".
 - "Docs up top, then data model" read as the default order Docs, Data model,
   rest, Tests, Generated.
+- November 21: files within a group by path, not largest first (sizes are
+  unknown until each file is read, and the stream would reorder as they
+  arrive); a line over 1,000 UTF-16 units as "too long to read"; "near the
+  viewport first" is a priority, so every shown file is read in the end and
+  the change count stays whole; syntax inks are the working, available and
+  warning tones, red and green left to removed and added lines; no
+  highlighting library; the `[ ]` key hint is gone to fit 240 pt (the arrows'
+  tooltips name the keys).
 
 ## Limits found
 
@@ -195,7 +219,12 @@ Chosen while building, not by Jack, reversible before release:
 - Moves are found only between a pure removal and a pure addition in one file.
 - `lf task changes` carries no line counts or added/deleted kind, so a file's
   +/− and status appear when its lines arrive, and a committed new file over
-  1 MB costs one cut `lf task diff` read before `lf task file`.
+  1 MB costs one cut `lf task diff` read before `lf task file`. Adding them is
+  a protocol change the November 21 steer ruled out for that pass.
+- Why the pane jumped is read from the code, not confirmed on screen: a column
+  wider than its pane is centered and clipped, so a change in its minimum
+  width (the reading icon coming and going) moved everything. Each row now
+  fits 240 pt and the icon keeps its place.
 - `lf task file` stops at 1 MB too: a new file past it shows the first 1 MB of
   its patch with "Cut at 1 MB".
 - Syntax is read one line at a time. A block comment carries across lines in
@@ -243,9 +272,7 @@ Seventh pass, November 19, over the repairs as built: nothing to change. Read
 at `b8b0f0484f`: no `diff-order`, `DiffOrder` or "worker's order" outside
 `scratch/`; `tour.md` states the behind rule and `human-review.md` defers to
 it; `TourWriting` is idle, launching, launched, failed, and the button returns
-at launched. One word for whoever next edits `TaskFileDocument.swift`: the
-comment on `readTourAge` says "stale" where every other place says "behind".
-The five questions under Remaining are product choices no accepted decision
+at launched. The five questions under Remaining are product choices no accepted decision
 settles; each is about something only the screen shows, so they go to the demo
 unanswered.
 
@@ -256,11 +283,14 @@ the tagged release.
 
 ## Remaining
 
-- Demo/review on screen (below). Unseen so far: the tab strip, the Diff
-  rename, the completed comparison, sidebar (narrow too), file bar, skipped
-  lines, comments with Send into a live conversation, the tour with Write tour
-  / Update tour and its behind notice, By group under this repository's
-  `diff_groups`, and Always hidden's layers and save against a running server.
+- Demo/review on screen (below). November 21 showed the tab strip, the Diff
+  rename and the stream; nothing was said about them beyond the quotes under
+  Decisions. Unseen: the November 21 repairs at several widths and under
+  hover across panes, a large new file read as contents, a long-line file's
+  one row, the sidebar (narrow too), skipped lines, comments with Send into a
+  live conversation, the tour with Write tour / Update tour and its behind
+  notice, By group under this repository's `diff_groups`, and Always hidden's
+  layers and save against a running server.
 - Open, for the person at the demo:
   1. What is the pane called? It has four names: **Toggle Browser** (View menu
      and ⇧⌘E, on main), **Show Task Details** (this branch's action), "Files"
@@ -280,8 +310,9 @@ the tagged release.
      Keep the block and take the warning, or land the block with that release.
      The block is what "eplicitly codified in our repo config" asked for.
 - Answered: the tour does not outlive publish.
-- The parts shown on the explore pages and not named (read marks, syntax
-  colors, pause, depth slider, folded renames, hunk grouping) stay out.
+- The parts shown on the explore pages and not named (read marks, pause,
+  depth slider, folded renames, hunk grouping) stay out. Syntax colors came in
+  on November 21.
 - The released `lf` reads private settings at `lf.config.local.yaml`; once a
   branch build moves the file, the released one stops seeing them until it
   ships. Task b108f6 removes the former-path move in `config/files.rs` (filed
@@ -314,8 +345,9 @@ files:
 4. Ask in the conversation; switch to another Task and back: tree, scroll and
    comments are where they were.
 5. Edge cases: no-PR Task, `gh` offline (`GitHub unavailable · last read …`),
-   merged PR on an open Task, a 20k-word brief, a comparison over 1 MB, a
-   `node_modules`-scale folder, a deleted file, a remote Task.
+   merged PR on an open Task, a 20k-word brief, a new file over 1 MB, a
+   minified file, the pane at 600 pt and narrower with the pointer moving
+   across panes, a `node_modules`-scale folder, a deleted file, a remote Task.
 
 ## Forbidden outcomes
 
@@ -352,25 +384,4 @@ files:
   page and Task switches.
 - No GitHub patch renderer remains.
 
-Check (November 19): `cargo test -p loopflow-execution --lib config::` → 105 passed (before the conflict-free merge of main `2750c9e0fb`); after the sixth-pass repairs and their compress `scripts/test_desktop.sh --filter 'TaskFilesTests|ReviewDiffTests'` → 51 passed and `cargo test -p loopflow --test golden_prompt` → passed with regenerated goldens; branch `lf config explain diff_groups` selects the repository's list. Gate/CI: clippy, `documented_commands::`, the full swift suite, `global_commands` (PR #1949's suites are skipped at `6d503e2991`). Demo: the pane on screen.
-
-## Demo, November 21 — Diff pane in Loopflow Dev on the live Machine
-
-Jack, on a screenshot of the Diff pane beside the conversation: "still deosnt seent to be workign", then "(1) not aligned right and jumps when i hover back and forth across panes (2) TaskChangesView not showing", then "also, no syntax highlighting".
-
-What the window showed (2560×1600 capture, pane about 600 pt wide):
-- The pane's content is wider than the pane: title, comparison line, file paths and line numbers are clipped on both edges. The toolbar is one fixed `HStack` (sidebar toggle, stepper, order menu, Write tour squeezed to "Wr it…", comment count, a red square, Focus, layout picker), so its minimum width sets the column's.
-- `TaskChangesView.swift` shows twice at the top: in `currentFileBar` and as the file's own header just below it, with the 1 MB notice between them.
-- The 1 MB notice is real: `scratch/task-details-research.html` alone is a 1.28 MB diff.
-- No syntax highlighting in the Diff or Files; none exists in the code yet.
-
-Later the same day, by steer from the Session beside the demo:
-- On the 1 MB notice for a file `diff_hidden` hides: "well we're supposed to be hing that right?"
-- "does that diff need to be 1+ MB? woudl it be better if we handled new files seaparately" (`scratch/task-details-research.html` is 1.28 MB in 239 lines.) The steer asked for the read T3 Code does: stats always, patches fetched by path.
-- On collapsing by size: "Ive always found this annoying, its like, often the largest diffs are the ones that matter the most. [ignoring like generated files, which we are trying to handle a separate way]"
-
-Built for these, unseen: the width, file bar, syntax and per-file read entries under What exists. Chosen while building, not by Jack: files within a group read by path instead of largest first (sizes are unknown until each file is read, and the stream would reorder as they arrive); the 1,000-unit line as "too long to read"; syntax inks are the working, available and warning tones, red and green left to removed and added lines; no highlighting library.
-
-Why the pane jumped, as read from the code and not confirmed on screen: a column wider than its pane is centered and clipped, so any change in its minimum width (the reading icon coming and going) moved everything. Each row now fits 240 pt and the icon keeps its place.
-
-Check (November 21): `swift build --build-tests` → complete; `scripts/test_desktop.sh --skip-build --filter 'TaskFilesTests|ReviewDiffTests|TaskBriefTests|DesktopPolishTests'` → passed. After compress: `scripts/test_desktop.sh --skip-build --filter 'TaskFilesTests|ReviewDiffTests'` → 52 passed. `cargo build -p loopflow --bin lf` fails here in `loopflow-storage/build.rs` ("apply graph_process_task: no such column: is_local"): this clone is shallow and has no `LOOPFLOW_MIGRATION_ORDER`, so `ThemeTests` (needs `target/debug/lf`) did not run. Gate/CI: the full swift suite. Demo: the pane on screen at several widths, hover across panes, a large new file, a minified file.
+Check (November 21): `scripts/test_desktop.sh --skip-build --filter 'TaskFilesTests|ReviewDiffTests'` → 52 passed after compress; `swift build --build-tests` → complete. Not run: `ThemeTests` (needs `target/debug/lf`; `cargo build -p loopflow --bin lf` stops in `loopflow-storage/build.rs`, "apply graph_process_task: no such column: is_local", in this shallow clone with no `LOOPFLOW_MIGRATION_ORDER`). This branch's own Rust is unchanged since November 19 (main merged since, conflict-free, at `12b66c3e17`): `cargo test -p loopflow-execution --lib config::` → 105 passed and `cargo test -p loopflow --test golden_prompt` → passed. Gate/CI: clippy, `documented_commands::`, the full swift suite, `global_commands` (PR #1949's suites are skipped at `5885adf40e`). Demo: the pane on screen.

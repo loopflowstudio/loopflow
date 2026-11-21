@@ -37,3 +37,10 @@
 - Dev eligibility follows the retained workspace through repository and Task
   ID changes. The existing visit timestamp records a deliberate visit in Dev;
   loading a saved selection or board does not set it.
+- **Desktop marks a background pane in its environment, not in argv.**
+  Passed over: keeping `--unfocused` in Desktop's argv (an installed `lf`
+  from before the flag rejects it, and Desktop has to parse `lf`'s grammar
+  to place it), and asking the CLI its version first (a precondition). The
+  earlier objections to a variable were that it doesn't cross `ssh` and
+  reaches every child of a pane; initial focus turned out to belong to the
+  local relay, and the holder drops the variable.

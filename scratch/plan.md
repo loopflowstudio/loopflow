@@ -11,6 +11,40 @@ The Task brief says â€œConsider an optional passive / second-class viewer flagâ€
 The design uses a single focus rule for all viewers. The choices made for
 review and the version-skew limits are in [questions.md](questions.md).
 
+## Next: Desktop says "background" in the pane's environment
+
+Desktop builds from this change run every Session pane as
+`lf session resume <id> --unfocused`. Loopflow Dev runs the installed `lf`
+(`swift/README.md`), and the installed `lf` 0.16.0 answers
+`error: unexpected argument '--unfocused' found`, so every pane Dev opens
+fails until `lf install`. QA missed it by running Dev against the branch `lf`.
+
+Desktop stops editing the server's `open_argv`. It sets `LF_RELAY_FOCUSED=0`
+in the pane's environment, beside `LF_SERVER_STATUS`, which already marks a
+Desktop pane's relay. An older `lf` ignores the variable and opens the pane
+as it always has; Dev's wait-for-visit still keeps it off unvisited Sessions.
+
+- Swift: `SessionItem.launchArguments` goes back to `record.openArgv` plus
+  `--agent`. The pane's surface `env` carries `LF_RELAY_FOCUSED=0` for
+  Session panes, local and SSH (the SSH pane's local `lf session attach --`
+  relay inherits it). Test expectations lose `--unfocused` and one test
+  asserts the pane's environment.
+- Rust: `transport::initial_focus` is the one reader: focused unless
+  `--unfocused`, `LF_RELAY_FOCUSED=0`, or stdin is not a terminal. `relay()`
+  uses it. `start_held` drops the variable from the holder's environment, so
+  an agent's own `lf` calls never inherit it.
+- `--unfocused` stays on `lf resume`, `lf session new` and
+  `lf session attach --` for a person. Remove what only Desktop used if
+  nothing else calls it.
+- Docs: `transport/README.md`, `swift/README.md`, `docs/sessions.md` and
+  `.lf/qa/desktop.md` say Desktop panes start in the background, without
+  naming the flag.
+
+Checks: a PTY `lf session resume` with `LF_RELAY_FOCUSED=0` sends
+`focused:false` on its first attach and leaves a focused view's size alone;
+the held agent's environment has no `LF_RELAY_FOCUSED`; the Swift launch
+tests pass with plain argv.
+
 ## Built
 
 Commit `0c7f81d2ba` implemented the holder side. `Request::Attach.focused`
@@ -55,8 +89,9 @@ JSON prepare-and-view SSH routes pass the same choice to the local relay.
 ### Desktop panes and Dev visits (`81c612cbd2`)
 
 Desktop Session panes add `--unfocused` to the viewer command, before the
-local relay's `--` for prepared SSH commands. A directly opened native
-`OwnerStream` sends `focused: true`.
+local relay's `--` for prepared SSH commands; the section above replaces this
+with the pane's environment. A directly opened native `OwnerStream` sends
+`focused: true`.
 
 `recentTasks` includes restored and prefetched Work. Dev instead uses the
 workspace's existing `lastVisit` to admit it to terminal preparation and

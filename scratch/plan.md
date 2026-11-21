@@ -218,3 +218,16 @@ that Codex still lists the Graph skills (`code`, `pursue`) from
 agy builtin.
 2. **Text from the same list.** `run_sync_skills` confirmation and refusal,
    `docs/config.md`, the two READMEs.
+
+## Docs written ahead of the code
+
+Slice 2 checks its strings against these; they describe intended behavior.
+
+- `docs/config.md`: "Skill and Graph discovery" (the three-row directory table,
+  reload commands, marker and prune rules, the Graph line) and one sentence
+  under "Antigravity".
+- `rust/loopflow/tests/README.md`: the declaration and the conformance test.
+- `scripts/benchmarks/pi/README.md`: `lf self sync-skills`.
+
+The config text claims only Claude Code and Pi honor
+`disable-model-invocation`; add Codex or Antigravity once slice 1 shows it.

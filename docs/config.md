@@ -261,6 +261,9 @@ lf -b -a agy:gemini-3.8-flash-high implement
 lf task run LOO-12 -a agy               # every step of the Task
 ```
 
+Loopflow's skills and Graphs appear in `agy`'s `/skills` after `lf install`
+([Skill and Graph discovery](#skill-and-graph-discovery)).
+
 Bare `agy` uses the model `agy` is set to; `agy:<model>` takes a name from
 `agy models`. Antigravity owns its
 sign-in and conversations under `~/.gemini/antigravity-cli`; Loopflow gives
@@ -368,12 +371,30 @@ builtins**. Within each scope, Loopflow checks `.lf/skills`, `.claude/skills`,
 (supporting both single `.md` files and `<name>/SKILL.md` bundles). Inspect
 resolution with `lf list skill` and `lf help <skill>`.
 
-Export Loopflow skills and Graphs into native Claude/Codex skill directories:
+Every harness also lists Loopflow's skills and Graphs in its own skill menu.
+`lf install` writes them; run the sync yourself after adding a personal skill:
 
 ```bash
-lf self sync-skills --yes   # personal + builtins → ~/.claude/skills and ~/.agents/skills
-lf self sync-skills --repo  # repo skills + Graphs → checkout directories
+lf self sync-skills --yes
+# synced skills (1 written, 0 pruned, 0 skipped)
+agy -p "/skills" | cut -f1    # implement, kickoff, code, … beside Antigravity's own
 ```
+
+| Harness | Personal skills and builtins | `--repo`: this repository's skills and Graphs |
+|---|---|---|
+| Claude Code | `~/.claude/skills` | `.claude/skills` |
+| Codex, OpenCode, Pi | `~/.agents/skills` | `.agents/skills` |
+| Antigravity | `~/.gemini/config/skills` | `.agents/skills` |
+
+All three home directories are written whichever harnesses are installed. A
+session that was already open picks up the change with `/skills reload` in
+Antigravity or `/reload` in Pi.
+
+Generated files carry `loopflow: true` in their frontmatter. Sync replaces and
+prunes only those (`--no-prune` keeps the stale ones); a skill you or another
+tool put under the same name is kept and counted as skipped. Graph exports
+carry `disable-model-invocation: true`, so a harness that honors the key
+(Claude Code, Pi) runs a Graph only when you name it.
 
 ## Remote work
 

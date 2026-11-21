@@ -513,8 +513,16 @@ Skill export tests use isolated homes and cover builtin/global definitions,
 personal agent directories and pruning. `sync-skills --repo` exports repository
 skills and Graph recipes into the checkout; default sync exports globally.
 
+Each harness declares where it reads installed skills
+(`Capabilities::installed_skills`), and sync writes exactly those directories.
+The conformance test syncs into a temporary home and repository and reads every
+declared directory for every harness; a harness that declares nothing fails it.
+It cannot catch a wrong path. Only the real binary knows where it reads:
+`lf self sync-skills --yes`, then `agy -p "/skills"`.
+
 ```bash
 cargo test -p loopflow-execution --lib skills::tests
+cargo test -p loopflow-execution --lib harness::conformance_tests::every_harness_reads_a_synced_skill
 ```
 
 Settings and recipe changes also run the provider-boundary matrix:

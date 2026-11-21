@@ -13,3 +13,6 @@ shows them.
    keep root-flag words literally? Not changed here.
 3. `lf.rs` and `navigation.rs` each keep a reading of "does this flag take a
    value". Merging the scanners is left as its own Task.
+4. Built the root and nested flag cases together since the same relocation
+   branch reads both. The CLI's native missing-value diagnostic ends with
+   `For more information, try '--help'.`

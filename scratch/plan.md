@@ -1,5 +1,16 @@
 # 15232c: a flag missing its value says so
 
+## Implementation
+
+Both slices share the command relocation path and were built together. The
+branch CLI exited 2 in all seven acceptance cases. It also named the missing
+`--wave <WAVE>` for `task --wave --title x create` and `--after <AFTER>`
+for `session history show id --after`. Clap prints a help hint without a
+usage line. The test checks the owning command in the reordered argv.
+
+`cargo test -p loopflow --bin lf reorder_args` passed all 16 tests. Gate
+and CI own the remaining parser and navigation suites.
+
 ## Outcome
 
 A flag works on either side of the command it belongs to. When it needs a
@@ -94,9 +105,8 @@ else:
 | `lf task --wave --title x create` | `lf task create --wave` |
 
 `lf`, then the command words through the flag's owner (none for a root flag),
-then the flag as written. Clap prints the missing-value error with the owner's
-usage line. Everything else is dropped because the parse cannot succeed and
-nothing reads it: every caller hands the result to `Cli::try_parse_from`
+then the flag as written. Clap names the owner's flag and prints its help hint.
+Everything else is dropped because the parse cannot succeed and nothing reads it: every caller hands the result to `Cli::try_parse_from`
 (`lf.rs` 1624, 1765, 1826; 1786 through `ssh::parse_remote_command`, which
 returns Clap's error before anything is sent to another Machine). The returned
 argv does not depend on what else was moved, so it is the same from both
@@ -138,8 +148,8 @@ not.
    missing-value error for `lf --repo` reached this way, and that no agent
    starts.
 2. **Flags owned elsewhere on the path.** `task --wave --title x create`
-   returns `lf task create --wave`; check the usage line names
-   `lf task create`. This depends on slice 1's function in
+   returns `lf task create --wave`; check the diagnostic names
+   `--wave <WAVE>`. This depends on slice 1's function in
    `selected_command_path`, or `create` is never found.
 
 Done when the acceptance loop prints seven missing-value errors and the

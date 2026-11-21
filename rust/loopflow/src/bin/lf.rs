@@ -19,42 +19,41 @@ use loopflow_execution::journal::{self, with_runtime, LfEventFields, LfEventType
 use loopflow_execution::ops::project::update_project;
 use loopflow_execution::store::planning_sync::LostAnswer;
 
-#[derive(Clone, Default)]
-struct FlagTables {
-    /// Flags that take a value (the next arg belongs to them).
-    value: HashSet<String>,
-    /// Boolean flags (no value).
-    boolean: HashSet<String>,
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Takes {
+    Nothing,
+    OptionalValue,
+    Value,
 }
 
-impl FlagTables {
-    fn insert(&mut self, arg: &clap::Arg) {
-        let flags = if arg.get_action().takes_values() {
-            &mut self.value
+#[derive(PartialEq, Eq)]
+enum FlagValue {
+    None,
+    Inline,
+    Next,
+    Missing,
+}
+
+impl Takes {
+    fn read(self, args: &[String], index: usize) -> FlagValue {
+        if args[index].contains('=') {
+            FlagValue::Inline
+        } else if self == Self::Nothing {
+            FlagValue::None
+        } else if args
+            .get(index + 1)
+            .is_some_and(|next| next == "-" || !next.starts_with('-'))
+        {
+            FlagValue::Next
+        } else if self == Self::Value {
+            FlagValue::Missing
         } else {
-            &mut self.boolean
-        };
-        if let Some(short) = arg.get_short() {
-            flags.insert(format!("-{short}"));
+            FlagValue::None
         }
-        if let Some(long) = arg.get_long() {
-            flags.insert(format!("--{long}"));
-        }
-    }
-
-    fn contains(&self, arg: &str) -> bool {
-        self.boolean.contains(flag_name(arg)) || self.takes_value(arg)
-    }
-
-    fn takes_value(&self, arg: &str) -> bool {
-        self.value.contains(flag_name(arg))
-    }
-
-    fn extend(&mut self, other: &Self) {
-        self.value.extend(other.value.iter().cloned());
-        self.boolean.extend(other.boolean.iter().cloned());
     }
 }
+
+type FlagTables = HashMap<String, Takes>;
 
 struct CommandArgTables {
     /// Flags owned directly by this command.
@@ -71,7 +70,22 @@ fn command_arg_tables(command: &clap::Command, inherited: &HashSet<clap::Id>) ->
         .get_arguments()
         .filter(|arg| !inherited.contains(arg.get_id()))
     {
-        direct.insert(arg);
+        let takes = if !arg.get_action().takes_values() {
+            Takes::Nothing
+        } else if arg
+            .get_num_args()
+            .is_some_and(|range| range.min_values() == 0)
+        {
+            Takes::OptionalValue
+        } else {
+            Takes::Value
+        };
+        if let Some(short) = arg.get_short() {
+            direct.insert(format!("-{short}"), takes);
+        }
+        if let Some(long) = arg.get_long() {
+            direct.insert(format!("--{long}"), takes);
+        }
     }
 
     let mut recursive = direct.clone();
@@ -85,7 +99,11 @@ fn command_arg_tables(command: &clap::Command, inherited: &HashSet<clap::Id>) ->
     );
     for subcommand in command.get_subcommands() {
         let child = command_arg_tables(subcommand, &inherited);
-        recursive.extend(&child.recursive);
+        // During path discovery a spelling may still belong to several descendants.
+        for (flag, &takes) in &child.recursive {
+            let entry = recursive.entry(flag.clone()).or_insert(takes);
+            *entry = (*entry).max(takes);
+        }
         subcommands.insert(subcommand.get_name().to_string(), child);
     }
 
@@ -108,26 +126,6 @@ fn flag_name(arg: &str) -> &str {
     arg.split_once('=').map_or(arg, |(name, _)| name)
 }
 
-fn has_inline_value(arg: &str) -> bool {
-    arg.starts_with('-') && arg.contains('=')
-}
-
-fn is_value_flag(arg: &str) -> bool {
-    arg_tables().direct.takes_value(arg)
-}
-
-fn is_known_flag(arg: &str) -> bool {
-    arg_tables().direct.contains(arg)
-}
-
-fn push_flag(args: &[String], output: &mut Vec<String>, index: &mut usize, takes_value: bool) {
-    output.push(args[*index].clone());
-    if takes_value && !has_inline_value(&args[*index]) && *index + 1 < args.len() {
-        *index += 1;
-        output.push(args[*index].clone());
-    }
-}
-
 fn first_target_index(args: &[String]) -> Option<usize> {
     let mut index = 0;
     while index < args.len() {
@@ -138,7 +136,11 @@ fn first_target_index(args: &[String]) -> Option<usize> {
         if !arg.starts_with('-') {
             return Some(index);
         }
-        if is_value_flag(arg) && !has_inline_value(arg) {
+        if arg_tables()
+            .direct
+            .get(flag_name(arg))
+            .is_some_and(|takes| takes.read(args, index) == FlagValue::Next)
+        {
             index += 1;
         }
         index += 1;
@@ -171,9 +173,12 @@ fn selected_command_path<'a>(
 
         let current = path.last().expect("command path is never empty").args;
         if arg.starts_with('-') {
-            let recognized = current.recursive.contains(arg) || is_known_flag(arg);
-            let takes_value = current.recursive.takes_value(arg) || is_value_flag(arg);
-            if recognized && takes_value && !has_inline_value(arg) && index + 1 < rest.len() {
+            let name = flag_name(arg);
+            let takes = current
+                .recursive
+                .get(name)
+                .max(arg_tables().direct.get(name));
+            if takes.is_some_and(|takes| takes.read(rest, index) == FlagValue::Next) {
                 index += 1;
             }
             index += 1;
@@ -196,12 +201,12 @@ fn deepest_command_before(path: &[SelectedCommand<'_>], index: usize) -> usize {
         .expect("the top-level command precedes its arguments")
 }
 
-fn local_flag_owner(path: &[SelectedCommand<'_>], arg: &str, current: usize) -> Option<usize> {
-    if path[current].args.direct.contains(arg) {
+fn local_flag_owner(path: &[SelectedCommand<'_>], name: &str, current: usize) -> Option<usize> {
+    if path[current].args.direct.contains_key(name) {
         return Some(current);
     }
     path.iter()
-        .rposition(|command| command.args.direct.contains(arg))
+        .rposition(|command| command.args.direct.contains_key(name))
 }
 
 fn reorder_command_args(
@@ -223,33 +228,37 @@ fn reorder_command_args(
         }
 
         let current = deepest_command_before(&path, index);
-        let local_owner = local_flag_owner(&path, arg, current);
-        let destination = if let Some(owner) = local_owner {
-            (owner != current).then_some(Some(owner))
-        } else if is_known_flag(arg) {
-            Some(None)
+        let name = flag_name(arg);
+        let (takes, owner_path, moved) = if let Some(owner) = local_flag_owner(&path, name, current)
+        {
+            if owner == current {
+                index += 1;
+                continue;
+            }
+            (
+                path[owner].args.direct[name],
+                &path[..=owner],
+                moved_locals.entry(owner).or_default(),
+            )
+        } else if let Some(&takes) = arg_tables().direct.get(name) {
+            (takes, &path[..0], &mut moved_globals)
         } else {
-            None
-        };
-
-        let Some(destination) = destination else {
             index += 1;
             continue;
         };
-
-        let takes_value = destination.map_or_else(
-            || is_value_flag(arg),
-            |owner| path[owner].args.direct.takes_value(arg),
-        );
-        let mut moved = Vec::new();
-        push_flag(rest, &mut moved, &mut index, takes_value);
-        let moved_start = index + 1 - moved.len();
-        retained[moved_start..=index].fill(false);
-        if let Some(owner) = destination {
-            moved_locals.entry(owner).or_default().extend(moved);
-        } else {
-            moved_globals.extend(moved);
+        let start = index;
+        match takes.read(rest, index) {
+            FlagValue::Missing => {
+                let mut result = vec![program];
+                result.extend(owner_path.iter().map(|command| rest[command.index].clone()));
+                result.push(arg.clone());
+                return result;
+            }
+            FlagValue::Next => index += 1,
+            FlagValue::None | FlagValue::Inline => {}
         }
+        retained[start..=index].fill(false);
+        moved.extend_from_slice(&rest[start..=index]);
         index += 1;
     }
 
@@ -296,8 +305,14 @@ fn reorder_args(args: Vec<String>) -> Vec<String> {
             skill_and_args.extend_from_slice(&rest[index..]);
             break;
         }
-        if is_known_flag(arg) {
-            push_flag(rest, &mut result, &mut index, is_value_flag(arg));
+        if let Some(takes) = arg_tables().direct.get(flag_name(arg)) {
+            let start = index;
+            match takes.read(rest, index) {
+                FlagValue::Missing => return vec![args[0].clone(), arg.clone()],
+                FlagValue::Next => index += 1,
+                FlagValue::None | FlagValue::Inline => {}
+            }
+            result.extend_from_slice(&rest[start..=index]);
         } else {
             skill_and_args.push(arg.clone());
         }
@@ -3884,6 +3899,58 @@ mod tests {
             reorder_args(loopflow::lf::navigation::normalize_args(args).unwrap()),
             vec!["lf", "--wave", "goals", "commit", "-m", "ship it"]
         );
+    }
+
+    #[test]
+    fn reorder_args_reports_missing_values_at_the_flag_owner() {
+        for (input, expected) in [
+            ("open --repo", "--repo"),
+            ("open --agent", "--agent"),
+            ("open --task", "--task"),
+            ("task list --repo", "--repo"),
+            ("steer session_1 m --repo", "--repo"),
+            ("implement --repo", "--repo"),
+            ("implement: fix it -a", "-a"),
+            ("open --repo --tab", "--repo"),
+            ("open --repo -c", "--repo"),
+            ("implement --repo --", "--repo"),
+            ("task --wave --title x create", "task create --wave"),
+            ("session history show id --after", "session history --after"),
+        ] {
+            let argv = |words: &str| {
+                std::iter::once("lf")
+                    .chain(words.split_whitespace())
+                    .map(String::from)
+                    .collect::<Vec<_>>()
+            };
+            let reordered = reorder_args(argv(input));
+            assert_eq!(reordered, argv(expected), "{input}");
+            assert_eq!(reorder_args(reordered.clone()), reordered);
+            let error = Cli::try_parse_from(reordered).unwrap_err();
+            assert_eq!(error.kind(), clap::error::ErrorKind::InvalidValue);
+            assert_eq!(error.exit_code(), 2);
+            assert!(
+                error.to_string().contains("but none was supplied"),
+                "{input}: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn reorder_args_preserves_supplied_and_optional_values() {
+        for (input, expected) in [
+            ("lf open --repo=x", "lf --repo=x open"),
+            ("lf open --repo x", "lf --repo x open"),
+            ("lf open --repo -", "lf --repo - open"),
+            (
+                "lf session --primary --json list",
+                "lf session list --primary --json",
+            ),
+        ] {
+            let reordered = reorder_args(input.split_whitespace().map(String::from).collect());
+            assert_eq!(reordered, expected.split_whitespace().collect::<Vec<_>>());
+            Cli::try_parse_from(reordered).unwrap();
+        }
     }
 
     #[test]

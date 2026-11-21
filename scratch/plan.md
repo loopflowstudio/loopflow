@@ -205,19 +205,37 @@ gains the one line.
 
 ## Slices
 
-1. **Declaration drives the export.** Add `InstalledSkills` to `Capabilities`
-   with the table above; `sync_skills` derives its targets; delete `Vendor` and
-   render every Graph export with `disable-model-invocation: true`.
-   Write `every_harness_reads_a_synced_skill`. Then run the branch `lf` against
-   the real home and `agy -p "/skills"`. This is the slice that could prove the
-   plan wrong: it shows whether agy accepts all ~95 real exports (long
-   descriptions, Graph recipes with input files beside `SKILL.md`), not just the
-   probe skill. If some are dropped, the fix is in rendering, found here. The same run checks
-that Codex still lists the Graph skills (`code`, `pursue`) from
-`~/.agents/skills` with the new line, and that no export shares a name with an
-agy builtin.
-2. **Text from the same list.** `run_sync_skills` confirmation and refusal,
-   `docs/config.md`, the two READMEs.
+Both slices are built. What is left is gate, then demo and qa on the real binaries.
+
+1. **Declaration drives the export** — built. `Capabilities::installed_skills`,
+   `skills::installed_skill_directories`, `Vendor` deleted,
+   `harness::conformance_tests::every_harness_reads_a_synced_skill`.
+2. **Text from the same list** — built. `run_sync_skills` builds its
+   confirmation and refusal from `installed_skill_directories(false)`; the
+   refusal reads "skill sync writes under ~/.claude/skills, ~/.agents/skills and
+   ~/.gemini/config/skills; rerun with --yes to confirm".
+
+## What the real run showed (2026-11-21, branch `lf`, this Machine's home)
+
+- `lf self sync-skills --yes`: "synced skills (124 written, 0 pruned, 14 skipped)";
+  `~/.gemini/config/skills` holds 109 exports.
+- `agy -p "/skills"` (1.5.14): 7 before, 116 after. Every one of the 109
+  exports is listed, Graph recipes with input files included; no export shares a
+  name with a builtin (`agy-customizations`, `antigravity-guide`, `automation`,
+  `migrate-agent-settings`, `migrate-workflows`, `run-workflow`, `swarm`).
+- Codex 0.170.0, app-server `skills/list`: 124 skills, 0 errors; `code` and
+  `pursue` from `~/.agents/skills` are `enabled: true` with
+  `disable-model-invocation: true` in their frontmatter. Listing is all this
+  shows; whether Codex honors the key is unchecked, so `docs/config.md` still
+  names only Claude Code and Pi.
+- Not run: the interactive confirmation prompt (needs a terminal), `/skills
+  reload` in an open agy session, opencode and pi listings.
+
+## Checks
+
+- `cargo test -p loopflow-execution --lib -- skills::tests every_harness_reads_a_synced_skill`: 20 passed (implement).
+- `cargo test -p loopflow --test integration documented_commands::`: 4 passed (implement).
+- clippy and the suites: gate and CI.
 
 ## Docs written ahead of the code
 

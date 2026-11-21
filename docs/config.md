@@ -268,7 +268,7 @@ Bare `agy` uses the model `agy` is set to; `agy:<model>` takes a name from
 `agy models`. Antigravity owns its
 sign-in and conversations under `~/.gemini/antigravity-cli`; Loopflow gives
 each launch its instructions and hooks in a folder under the checkout's
-`.lf/prompts/` and writes nothing to `~/.gemini`. A step gets the Task's
+`.lf/prompts/`; a launch writes nothing to `~/.gemini`. A step gets the Task's
 context and hears `lf steer` after its next tool. A spent quota, a signed-out
 `agy` or an unserved model moves a Graph step to the next `agents` entry:
 
@@ -376,7 +376,7 @@ Every harness also lists Loopflow's skills and Graphs in its own skill menu.
 
 ```bash
 lf self sync-skills --yes
-# synced skills (1 written, 0 pruned, 0 skipped)
+# synced skills (3 written, 0 pruned, 0 skipped)
 agy -p "/skills" | cut -f1    # implement, kickoff, code, … beside Antigravity's own
 ```
 

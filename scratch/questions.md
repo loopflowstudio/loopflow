@@ -10,3 +10,10 @@
 - Should a subcommand name written directly after a value-taking flag win
   over the value? `lf task --wave create` reads the Wave as `create` and
   prints `lf task` usage. Kept Clap's reading.
+
+## Headless ship review
+
+- Advance with Clap's existing reading of adjacent words and the new
+  missing-value diagnostic when a moved flag has no value.
+- Track flag-shaped prompt prose in d5bcf2. Leave attached short values
+  and remote scanner consolidation unfiled until a failing use case is known.

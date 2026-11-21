@@ -363,10 +363,13 @@ switches in this window; a brief that changed since you last read it says so.
 files", then the base branch and commit), with the changed files beside the
 whole comparison as one stream. Each shown file's lines are read on their own,
 those near the top of the pane first, so a large file never cuts another short
-and a hidden file is never read. A new file reads as its contents. Size alone
-collapses nothing; a file whose lines are too long to read (minified, base64,
-embedded data) starts as one row with **Show** and **Open in Files**. Code is
-in syntax colors, here and in Files. A pill in the title says where the work is
+and a hidden file is never read. A new file reads as its contents. Size
+collapses nothing: a line past 1,000 characters shows its start and **N more
+characters · Show**, a file past 1 MB shows its first 1 MB and says it was cut,
+and a file that could not be read offers **Retry**. Code is in syntax colors,
+here and in Files. The page fits a pane 360 pt wide: the toolbar keeps the
+sidebar toggle and the stepper and moves what has no room into its **…** menu,
+layout first, then order and tour, then Focus. A pill in the title says where the work is
 delivered and opens the delivery card. Loopflow's record decides whether there
 is a PR: none, publishing, open, merged or abandoned. GitHub's reading adds
 checks, review and description with its age; a failed, stale (over two minutes)
@@ -1317,7 +1320,10 @@ which reads the event stream and ends the whole run, naming the test, when one
 test function outlives 300 s. Swift Testing's `.timeLimit` only records an
 issue; a test blocked on a child process still holds the run.
 CI passes `--skip-build` after its separate Rust and Swift builds so compilation
-does not consume the test deadline.
+does not consume the test deadline. With `--skip-build` the script runs the
+tests as last built: after an edit, run `swift build --build-tests
+--package-path swift` first, or a new test is silently absent and an old
+binary passes.
 
 On a pull request CI runs two complementary groups after the build: transport/CLI
 fixtures and the remaining model/view tests. Each gets six minutes; main keeps a

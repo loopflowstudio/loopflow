@@ -816,7 +816,8 @@ struct TaskFilesTests {
     }
 
     /// A store over two changed files, each with two separate changes.
-    private func twoFileStore() throws -> TaskFilesStore {
+    private func twoFileStore(failingOnce: String? = nil) throws -> TaskFilesStore {
+        let failed = OSAllocatedUnfairLock(initialState: false)
         let fixture = try Data(contentsOf: URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
             .appendingPathComponent("tests/fixtures/dto/task_files.json"))
@@ -829,6 +830,9 @@ struct TaskFilesTests {
                     file.merging(["path": path, "old_path": NSNull()]) { $1 }
                 }
             } else {
+                if args[3] == failingOnce, !failed.withLock({ let was = $0; $0 = true; return was }) {
+                    throw RegistryQueryError("the server restarted")
+                }
                 // No path argument is the whole comparison.
                 let paths = args[3].hasPrefix("--") ? ["a.swift", "b.swift"] : [args[3]]
                 value["patch"] = paths.map { path in
@@ -845,7 +849,8 @@ struct TaskFilesTests {
 
     /// Each shown file's lines are read on their own, so one file's size never
     /// cuts another short, and a hidden file is not read until it is shown. A
-    /// new file is read as its contents; lines too long to read start as one row.
+    /// new file, untracked or not, is read as its patch; a line too long to
+    /// read is cut where it stands and its file keeps every stop.
     @Test func theDiffReadsEachShownFileOnItsOwn() async throws {
         let fixture = try Data(contentsOf: URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
@@ -862,14 +867,14 @@ struct TaskFilesTests {
                     file.merging(["path": $0, "old_path": NSNull(), "untracked": $0 == "data.json"]) { $1 }
                 }
             case "file":
-                guard args[3] == "data.json" else { throw RegistryQueryError("no such file") }
-                reads.withLock { $0.append("file \(args[3])") }
-                value["path"] = args[3]
-                value["content"] = "{\"blob\": \"\(String(repeating: "x", count: 2_000))\"}\nend\n"
+                throw RegistryQueryError("a new file is read as its patch")
             default:
                 let path = args[3]
                 reads.withLock { $0.append("diff \(path)") }
-                value["patch"] = "diff --git a/\(path) b/\(path)\n--- a/\(path)\n+++ b/\(path)\n@@ -1 +1 @@\n-one\n+uno\n@@ -9 +9 @@\n-nine\n+nueve\n"
+                let uno = path == "a.swift" ? String(repeating: "x", count: 2_000) : "uno"
+                value["patch"] = path == "data.json"
+                    ? "diff --git a/\(path) b/\(path)\nnew file mode 100644\n--- /dev/null\n+++ b/\(path)\n@@ -0,0 +1,2 @@\n+{}\n+end\n"
+                    : "diff --git a/\(path) b/\(path)\n--- a/\(path)\n+++ b/\(path)\n@@ -1 +1 @@\n-one\n+\(uno)\n@@ -9 +9 @@\n-nine\n+nueve\n"
                 value["truncated"] = path == "z.swift"
             }
             return String(decoding: try JSONSerialization.data(withJSONObject: value), as: UTF8.self)
@@ -877,24 +882,75 @@ struct TaskFilesTests {
         store.autosave = false
         await store.loadReview()
         #expect(store.review?.files.map(\.path) == paths)
-        #expect(Set(reads.withLock { $0 }) == ["diff a.swift", "file data.json", "diff z.swift"])
+        #expect(Set(reads.withLock { $0 }) == ["diff a.swift", "diff data.json", "diff z.swift"])
         #expect(store.shownReview?.files.map(\.path) == ["a.swift", "data.json", "z.swift"])
         #expect(store.unreadShown == 0 && store.unread == ["scratch/notes.md"])
-        #expect(store.fileNotes == ["z.swift": "Cut at 1 MB · the rest of this file is not shown"])
+        #expect(store.fileNotes == ["z.swift": .cut])
 
-        // The untracked file is its two lines, collapsed for the long one and one stop to step over.
+        // The untracked file is its two lines.
         let data = try #require(store.shownReview?.file("data.json"))
         #expect(data.status == .added && data.lines.map(\.new) == [1, 2])
-        #expect(store.collapses(data))
+        // The long line shows its first 1,000 units; the stepper still reaches every change it counts.
+        let long = try #require(store.shownReview?.file("a.swift")?.lines.first { $0.kind == .added })
+        #expect(long.cut?.shown.utf16.count == 1_000 && long.cut?.more == 1_000)
+        #expect(data.lines.allSatisfy { $0.cut == nil })
         #expect(store.position(.changes) == "5 changes")
-        #expect((1...5).map { _ in store.step(1, in: .changes)?.path } == ["a.swift", "a.swift", "data.json", "z.swift", "z.swift"])
-        store.openedLongFiles = ["data.json"]
-        #expect(!store.collapses(data))
+        #expect((1...6).map { _ in store.step(1, in: .changes)?.path } == ["a.swift", "a.swift", "data.json", "z.swift", "z.swift", nil])
+        #expect(store.position(.changes) == "5 of 5")
 
         store.showsHidden = true
         await store.loadReview()
         #expect(reads.withLock { $0 }.contains("diff scratch/notes.md"))
         #expect(store.unread.isEmpty && store.review?.stops.count == 7)
+    }
+
+    /// A file whose read failed says so and keeps its place; Retry reads it again.
+    @Test func aFailedFileReadCanBeRetried() async throws {
+        let store = try twoFileStore(failingOnce: "b.swift")
+        await store.loadReview()
+        guard case .failed = store.fileNotes["b.swift"] else { Issue.record("b.swift should have failed"); return }
+        #expect(store.review?.file("a.swift")?.stops.count == 2 && store.review?.file("b.swift")?.blocks.isEmpty == true)
+        #expect(store.unreadShown == 0)
+
+        await store.retryFile("b.swift")
+        #expect(store.fileNotes.isEmpty && store.unread.isEmpty)
+        #expect(store.review?.file("b.swift")?.stops.count == 2)
+    }
+
+    /// The Diff fits the pane it is given. No row asks for more than a narrow
+    /// pane offers, so nothing widens the column or is clipped, and the page
+    /// takes exactly the pane's width.
+    @Test(arguments: [360, 480, 640] as [CGFloat]) func theDiffFitsItsPane(width: CGFloat) async throws {
+        let store = try twoFileStore()
+        await store.loadReview()
+        let first = try #require(store.shownReview?.files.first)
+        store.reviewSelection = ReviewSelection(path: first.path, side: .new, first: 1, last: 1)
+        store.commentDraft = "why"
+        store.addComment(in: first)
+        store.reviewSelection = ReviewSelection(path: first.path, side: .new, first: 9, last: 9)
+        let path = "swift/LoopflowMac/Views/ADirectoryWithALongName/AnotherOne/TaskChangesViewWithALongName.swift"
+        let long = ReviewFile(path: path, oldPath: path + ".old", status: .renamed, blocks: [
+            .change(ReviewChange(id: "\(path)#n1", removed: [], added: [
+                ReviewLine(kind: .added, text: String(repeating: "x", count: 2_000), old: nil, new: 1),
+            ])),
+        ])
+
+        func taken<V: View>(_ view: V) -> CGFloat {
+            let host = NSHostingController(rootView: view)
+            host.view.frame = CGRect(x: 0, y: 0, width: width, height: 600)
+            host.view.layoutSubtreeIfNeeded()
+            return host.sizeThatFits(in: CGSize(width: width, height: 600)).width
+        }
+        let page = TaskChangesView(store: store, task: nil, isFocused: true, addToConversation: nil)
+        #expect(taken(page) == width)
+        #expect(taken(page.header) <= width)
+        #expect(taken(page.toolbar) <= width)
+        #expect(taken(ReviewFileTitle(store: store, file: long, note: "from \(path).old")) <= width)
+        #expect(taken(VStack(spacing: 0) { ReviewCommentsStrip(store: store, isFocused: true, addToConversation: nil) }) <= width)
+        #expect(taken(VStack(spacing: 0) {
+            ReviewStream(store: store, reader: .changes, files: (store.shownReview?.files ?? []) + [long],
+                         split: false, addToConversation: nil)
+        }) <= width)
     }
 
     /// The checkout's `scratch/tour.yaml` orders the Diff and hides what

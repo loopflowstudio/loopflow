@@ -48,8 +48,6 @@ struct ReviewStream: View {
                 ReviewNotice(text: "Reading…").id(file.topID)
                     .onAppear { store.setNear(file.path, true) }
                     .onDisappear { store.setNear(file.path, false) }
-            } else if store.collapses(file) {
-                longLines(file).id(file.topID)
             } else {
                 if file.status == .binary {
                     ReviewNotice(text: "Binary file · no text to compare").id(file.topID)
@@ -71,29 +69,19 @@ struct ReviewStream: View {
                     }
                 }
             }
-            if let note { ReviewNotice(text: note) }
+            if let note {
+                HStack(spacing: 0) {
+                    ReviewNotice(text: note.text)
+                    if case .failed = note {
+                        Button("Retry") { Task { await store.retryFile(file.path) } }
+                            .buttonStyle(WorkPlainButtonStyle()).font(Typography.caption(11))
+                    }
+                }
+            }
         }
     }
 
     static let gutterWidth: CGFloat = 36
-
-    /// In place of lines nobody reads: what the file holds, and the ways to see it.
-    private func longLines(_ file: ReviewFile) -> some View {
-        let lines = file.additions + file.deletions
-        let size = ByteCountFormatter.string(fromByteCount: Int64(file.bytes), countStyle: .file)
-        return HStack(spacing: 10) {
-            Text("Lines too long to read · \(lines == 1 ? "1 changed line" : "\(lines) changed lines") · \(size)")
-                .foregroundStyle(palette.textSecondary).fixedSize(horizontal: false, vertical: true)
-            Spacer(minLength: 4)
-            Button("Show") { store.openedLongFiles.insert(file.path) }
-            Button("Open in Files") { store.selectFile(file.path, mode: .read) }
-        }
-        .buttonStyle(WorkPlainButtonStyle()).font(Typography.caption(11))
-        .padding(.horizontal, 12).padding(.vertical, 8)
-        .overlay { if let first = file.stops.first { currentMark(first) } }
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("changes-long-lines")
-    }
 
     private func fileHeader(_ file: ReviewFile, headed: Bool) -> some View {
         ReviewFileTitle(store: store, file: file, note: file.oldPath.map { "from \($0)" })
@@ -306,21 +294,32 @@ struct ReviewStream: View {
         case .context: nil
         }
         let selected = isSelected(line, side: side, path: path)
-        return HStack(alignment: .top, spacing: 4) {
-            // A marker as well as color: + and − read without hue.
-            Text(tone == nil ? " " : line.kind == .added ? "+" : "−")
-                .foregroundStyle(tone?.ink ?? palette.textSecondary)
-            Text(Self.attributed(line.text, segments: segments, tone: tone, path: path, palette: palette))
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .fixedSize(horizontal: false, vertical: true)
+        // A line past the readable length shows its start until asked for the rest.
+        let cut = store.openedLongLines.contains(line.id(in: path)) ? nil : line.cut
+        let text = cut?.shown ?? line.text
+        return VStack(alignment: .leading, spacing: 2) {
+            HStack(alignment: .top, spacing: 4) {
+                // A marker as well as color: + and − read without hue.
+                Text(tone == nil ? " " : line.kind == .added ? "+" : "−")
+                    .foregroundStyle(tone?.ink ?? palette.textSecondary)
+                Text(Self.attributed(text, segments: cut == nil ? segments : nil, tone: tone, path: path, palette: palette))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .font(Typography.code(12))
+            .textSelection(.enabled)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("\(line.kind == .added ? "Added" : line.kind == .removed ? "Removed" : "Line") \(side == .old ? line.old ?? 0 : line.new ?? 0): \(text)")
+            if let cut {
+                Button("\(cut.more.formatted()) more characters · Show") { store.openedLongLines.insert(line.id(in: path)) }
+                    .buttonStyle(WorkPlainButtonStyle()).font(Typography.caption(11))
+                    .padding(.leading, 12)
+                    .accessibilityIdentifier("changes-long-line")
+            }
         }
-        .font(Typography.code(12))
         .padding(.vertical, 1).padding(.trailing, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(selected ? palette.accent.opacity(0.16) : tone?.fill.opacity(0.4) ?? .clear)
-        .textSelection(.enabled)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(line.kind == .added ? "Added" : line.kind == .removed ? "Removed" : "Line") \(side == .old ? line.old ?? 0 : line.new ?? 0): \(line.text)")
     }
 
     /// The line in its syntax colors; the changed words of an edited line
@@ -649,7 +648,7 @@ struct ReviewStepper: View {
 
     private func go(_ offset: Int) {
         guard let stop = store.step(offset, in: reader) else { return }
-        withAnimation(.easeOut(duration: 0.15)) { store[place: reader].anchor = store.row(for: stop, in: reader) }
+        withAnimation(.easeOut(duration: 0.15)) { store[place: reader].anchor = stop.id }
     }
 }
 

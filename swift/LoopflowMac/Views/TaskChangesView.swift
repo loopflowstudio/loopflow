@@ -33,9 +33,9 @@ struct TaskChangesView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            header
+            header.fillsPane()
             Divider()
-            toolbar
+            toolbar.fillsPane()
             Divider()
             ReviewCommentsStrip(store: store, isFocused: isFocused, addToConversation: addToConversation)
             focusStrip
@@ -52,6 +52,7 @@ struct TaskChangesView: View {
                             footer.id("footer")
                         }
                         .scrollTargetLayout()
+                        .fillsPane()
                     }
                     .scrollPosition(id: store.anchor(.changes), anchor: .top)
                     .onScrollPhaseChange { _, phase in if phase == .interacting { store.noteInteraction() } }
@@ -91,7 +92,7 @@ struct TaskChangesView: View {
 
     // MARK: Header
 
-    private var header: some View {
+    var header: some View {
         VStack(alignment: .leading, spacing: 8) {
             // Side by side where both fit; a narrow pane puts the pill under the title.
             ViewThatFits(in: .horizontal) {
@@ -190,8 +191,7 @@ struct TaskChangesView: View {
         let stops = shown.stops.count
         let files = shown.files.count == review.files.count
             ? (all == 1 ? "1 file" : "\(all) files") : "\(shown.files.count) of \(review.files.count) files"
-        let unread = store.unreadShown
-        return "\(stops == 1 ? "1 change" : "\(stops) changes") in \(files)" + (unread == 0 ? "" : " · reading \(unread) more")
+        return "\(stops == 1 ? "1 change" : "\(stops) changes") in \(files)"
     }
 
     /// The delivery headline's first part and a dot for its checks. The dot
@@ -232,9 +232,12 @@ struct TaskChangesView: View {
 
     // MARK: Toolbar
 
-    /// The stepper always shows. The controls after it take the widest form
-    /// the pane has room for: words, then symbols, then one menu.
-    private var toolbar: some View {
+    /// The sidebar toggle and stepper always show. The controls after them
+    /// take the widest form the pane has room for and are given up in order:
+    /// words become symbols, then the layout picker goes (side by side needs
+    /// a wide pane anyway), then order and tour, then Focus. What is given up
+    /// is in the … menu.
+    var toolbar: some View {
         HStack(spacing: 8) {
             Button { store.showsSidebar = !showsSidebar } label: {
                 Image(systemName: "sidebar.left").font(.system(size: 12))
@@ -250,6 +253,8 @@ struct TaskChangesView: View {
             ViewThatFits(in: .horizontal) {
                 controls(compact: false)
                 controls(compact: true)
+                controls(compact: true, layout: false)
+                controls(compact: true, order: false, layout: false)
                 HStack(spacing: 0) {
                     Spacer(minLength: 0)
                     moreMenu
@@ -259,8 +264,8 @@ struct TaskChangesView: View {
             Image(systemName: "arrow.triangle.2.circlepath")
                 .foregroundStyle(palette.textSecondary).frame(width: 14)
                 .opacity(isReading ? 1 : 0)
-                .help(isReading ? "Reading changes…" : "").accessibilityHidden(!isReading)
-                .accessibilityLabel("Reading changes")
+                .help(isReading ? reading : "").accessibilityHidden(!isReading)
+                .accessibilityLabel(reading)
         }
         .buttonStyle(.plain)
         .font(Typography.caption(11))
@@ -271,10 +276,18 @@ struct TaskChangesView: View {
 
     private var isReading: Bool { store.isRefreshingChanges || store.unreadShown > 0 }
 
-    private func controls(compact: Bool) -> some View {
+    /// The title counts what has been read; this says how much has not.
+    private var reading: String {
+        let unread = store.unreadShown
+        return unread == 0 ? "Reading changes…" : unread == 1 ? "Reading 1 more file…" : "Reading \(unread) more files…"
+    }
+
+    private func controls(compact: Bool, order: Bool = true, layout: Bool = true) -> some View {
         HStack(spacing: 8) {
-            orderMenu
-            tourButton(compact: compact)
+            if order {
+                orderMenu
+                tourButton(compact: compact)
+            }
             Spacer(minLength: 4)
             Button { toggleFocus() } label: {
                 let on = store.focusedPath != nil
@@ -291,7 +304,7 @@ struct TaskChangesView: View {
             .disabled(store.shownReview?.files.isEmpty ?? true)
             .accessibilityLabel("Focus")
             .accessibilityAddTraits(store.focusedPath != nil ? .isSelected : [])
-            ReviewLayoutPicker(store: store, width: width)
+            if layout { ReviewLayoutPicker(store: store, width: width) } else { moreMenu }
         }
     }
 
@@ -314,7 +327,7 @@ struct TaskChangesView: View {
             .accessibilityIdentifier("changes-order")
     }
 
-    /// Everything after the stepper, for a pane too narrow to lay it out.
+    /// Everything after the stepper, for what a narrow pane has no room to lay out.
     private var moreMenu: some View {
         Menu {
             Section("Order") { orderChoices }
@@ -377,6 +390,7 @@ struct TaskChangesView: View {
         if let currentPath, let file = store.shownReview?.file(currentPath) {
             let group = store.shownGroups.first { group in group.isTour && group.files.contains { $0.path == file.path } }
             ReviewFileTitle(store: store, file: file, note: group?.title ?? file.oldPath.map { "from \($0)" })
+                .fillsPane()
                 .frame(height: TaskFileChrome.headerHeight)
                 .background(palette.surfaceMuted)
                 .contextMenu {
@@ -479,6 +493,16 @@ struct TaskChangesView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 24)
+    }
+}
+
+private extension View {
+    /// Exactly the width the pane offers, whatever the content asks for, with
+    /// the content at the leading edge. A row that takes its content's width
+    /// is centered in the column and moves when the content changes; one that
+    /// asks for more than the pane widens the column past it.
+    func fillsPane() -> some View {
+        frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
     }
 }
 

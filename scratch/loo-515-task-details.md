@@ -9,8 +9,9 @@ The step-by-step account this file replaced: `ade953f915:scratch/loo-515-task-de
 (PR #1949's branch).
 
 Status: built, the tour skill and the two diff settings included. Seen on
-screen once, November 21, in Loopflow Dev; the repairs for what that showed
-(width, file bar, syntax colors, the per-file read) are built and unseen.
+screen November 21, in Loopflow Dev; the repairs for what that showed (width,
+file bar, syntax colors, the per-file read, the long-line cut, Retry, rows
+that take the pane's width) are built and unseen.
 PR #1949 is open; its head follows this branch.
 
 ## What exists
@@ -33,12 +34,14 @@ file and a builtin skill.
   - Read file by file (`loadReview`, `readPatches`): `lf task changes` names
     every file, then each shown file's `lf task diff --path` is read six at a
     time in stream order, a file near the viewport first. Hidden and
-    filtered-out files are not read until shown. An untracked file, or a new
-    one whose patch is over 1 MB, is read with `lf task file` while the
-    comparison reads the working tree. New files render as contents: no `+`,
-    no fill, one lazy row per line. A file with a line over 1,000 UTF-16
-    units starts as one row (line count, size, Show, Open in Files); size
-    alone collapses nothing. A cut or failed read says so under its file.
+    filtered-out files are not read until shown. `lf task diff --path` is the
+    one read, untracked files included (`diff_snapshot` adds their `--no-index`
+    patch). New files render as contents: no `+`, no fill, one lazy row per
+    line. A line over 1,000 UTF-16 units shows its first 1,000 and "N more
+    characters · Show" (`ReviewLine.cut`, `openedLongLines`); no file
+    collapses. A file past 1 MB shows its first 1 MB and "Cut at 1 MB"; a
+    failed read says "Could not be read: …" with Retry (`FileNote`,
+    `retryFile`).
   - Syntax colors (`SyntaxColors.swift`): comments, strings, numbers and
     keywords by file extension, in the stream and the Files editor.
   - Delivery pill in the title row (none/publishing/open/stale/ahead/
@@ -84,9 +87,17 @@ file and a builtin skill.
     edge. It is the first file's only header; while another file's own header
     is the top row the bar still names the file above it, and a sidebar click
     lands on the file's first row with its header just off screen.
-  - **Width**: the toolbar keeps the sidebar toggle and stepper and gives the
-    rest the widest form that fits (words, symbols, one menu); waiting
-    comments have their own row; the title stacks over the delivery pill.
+  - **Width**: built for 360 pt. Header, toolbar, file bar and stream each
+    take exactly the pane's width with content at the leading edge
+    (`fillsPane`), so no row can widen the column or sit centered in it. The
+    toolbar keeps the sidebar toggle and stepper and gives the rest up in
+    order: words become symbols, then the layout picker goes, then order and
+    tour, then Focus; what is given up is in the … menu. Waiting comments
+    have their own row; the title stacks over the delivery pill. The title
+    no longer says "reading N more" (the toolbar's reading mark does, in its
+    tooltip), so a reload changes no row's height or width.
+    `theDiffFitsItsPane` measures header, toolbar, file title, comments strip,
+    stream and page at 360, 480 and 640 pt.
   - `ReviewStepper` (`]`/`[`, arrows) crosses files; Focus shows one file with
     a strip reading "Only X · N more files"; Unified / Side by side (≥ 640 pt,
     disabled with its reason below); word emphasis; within-file moves collapsed
@@ -182,6 +193,15 @@ file and a builtin skill.
   largest diffs are the ones that matter the most. [ignoring like generated
   files, which we are trying to handle a separate way]".
 
+- November 21, after the width repairs, by steer: "still jittery, still not
+  fitting in the pane"; "does t3code have a minimum pane width bc it seems
+  like we need a quite wide pane for this to work". The steer's reading of T3
+  Code: its diff panel is `w-[42vw] min-w-[360px] max-w-[560px]`, the header
+  hides secondary controls under 30rem, every label truncates, code wraps;
+  asked: fit 360 pt, controls given up by priority, nothing in the toolbar
+  sets the column's width, nothing changes size on hover, test at 360, 480
+  and 640 pt.
+
 Assumed, not answered: sidebar on the left docking at 620 pt; ⌥⌘1/2/3; the file
 bar outside the scroll view as "headers lock"; several comments as one line.
 
@@ -200,7 +220,9 @@ Chosen while building, not by Jack, reversible before release:
   unknown until each file is read, and the stream would reorder as they
   arrive); a line over 1,000 UTF-16 units as "too long to read"; "near the
   viewport first" is a priority, so every shown file is read in the end and
-  the change count stays whole; syntax inks are the working, available and
+  the change count stays whole; the toolbar gives up the layout picker
+  first, then order and tour, then Focus; the title drops "reading N more";
+  syntax inks are the working, available and
   warning tones, red and green left to removed and added lines; no
   highlighting library; the `[ ]` key hint is gone to fit 240 pt (the arrows'
   tooltips name the keys).
@@ -218,15 +240,22 @@ Chosen while building, not by Jack, reversible before release:
   A repeated short line (`}`) can re-anchor to the wrong identical line.
 - Moves are found only between a pure removal and a pure addition in one file.
 - `lf task changes` carries no line counts or added/deleted kind, so a file's
-  +/− and status appear when its lines arrive, and a committed new file over
-  1 MB costs one cut `lf task diff` read before `lf task file`. Adding them is
-  a protocol change the November 21 steer ruled out for that pass.
-- Why the pane jumped is read from the code, not confirmed on screen: a column
-  wider than its pane is centered and clipped, so a change in its minimum
-  width (the reading icon coming and going) moved everything. Each row now
-  fits 240 pt and the icon keeps its place.
-- `lf task file` stops at 1 MB too: a new file past it shows the first 1 MB of
-  its patch with "Cut at 1 MB".
+  +/− and status appear when its lines arrive. Adding them is a protocol
+  change the November 21 steer ruled out for that pass.
+- Why the pane jumped is measured headless, not confirmed on screen. Measured
+  with `NSHostingController.sizeThatFits` before the second repair: toolbar
+  minimum 211 pt, stream and file title under 240 pt (this branch's own diff
+  included), and the header 399 pt wide in a 480 pt pane, 355 in 360: stacked,
+  it took its text's width and sat centered in the column, so it was off the
+  left edge and moved whenever the title changed ("· reading N more" on every
+  reload). Nothing found in the Diff changes size on hover; in the pane strip
+  (main's code) Close tab appears with focus, inside the hover-revealed
+  buttons.
+- Any read stops at 1 MB (`MAX_FILE_BYTES`): a file past it shows the first
+  1 MB of its patch with "Cut at 1 MB". Reading past it is Task 4556d0's.
+- A cut long line loses its word emphasis and syntax colors run on the shown
+  part only; a line's opened state is kept by path and line number, so it
+  follows that number if lines above change.
 - Syntax is read one line at a time. A block comment carries across lines in
   the editor, not in the stream; Python triple-quoted strings and Markdown get
   no special reading.
@@ -281,62 +310,24 @@ the release, and prints the `diff_groups` warning twice per command until the
 first `lf install` after this merges; question 5 below is about Machines on
 the tagged release.
 
-## Concept review, November 21 (eighth pass): next for implement
+## Concept review, November 21 (eighth pass)
 
-Read at `cd22a12c29`, over the per-file read, the long-line row and the new-file
-reading. The model holds: `lf task changes` names the files, each shown file is
-read on its own, hidden files are not read. Three repairs, none built. Chosen
-by the review, not by Jack, reversible.
-
-1. **Cut the long line, not the file.** `collapses` turns a whole file into one
-   row when any line passes 1,000 UTF-16 units, on the reading that such a line
-   is machine-made. Counted in this repository's tracked files: the rule
-   catches `docs/dev/reference.md` (three table rows, 1,347 to 2,031),
-   `rust/loopflow-storage/SCHEMA.md` (one list item, 1,421), five migrations
-   and `rust/loopflow/tests/release_lock_tests.rs` (one line, 1,042). Those are
-   Docs and Data model, the first two groups, and the collapse was answering
-   "often the largest diffs are the ones that matter the most. [ignoring like
-   generated files, which we are trying to handle a separate way]". Generated
-   files already have their way: the Generated group and `diff_hidden`.
-   Instead: a line past 1,000 units shows its first 1,000 and "N more
-   characters · Show"; every other line of the file reads as usual. This
-   deletes `collapses`, `row(for:in:)`, `openedLongFiles` (it becomes opened
-   lines), the "collapsed file is one stop" loop in `step`, `ReviewFile.bytes`
-   and the `changes-long-lines` row, and fixes a count it left wrong: the
-   stepper skipped a collapsed file's later changes while `position` and the
-   title still counted them.
-2. **Delete the read that cannot happen.** `readFile` rereads a committed new
-   file with `lf task file` when its patch was cut at 1 MB. Both reads stop at
-   `MAX_FILE_BYTES` (1,000,000, `ops/task/snapshot.rs`), and a new file's patch
-   is its contents plus one byte a line, so the reread succeeds only for a file
-   within a few kilobytes under the limit. The 1.28 MB file that prompted it
-   is past both. Remove the branch; What exists and Limits then say one thing:
-   a new file over 1 MB shows its first 1 MB and "Cut at 1 MB". While there:
-   an untracked file over 1 MB shows only a note today (`whole.state.title`),
-   no lines; if `lf task diff --path` answers for an untracked path, read it
-   that way so tracked and untracked new files end the same. Reading past
-   1 MB is a protocol change and stays with Task 4556d0.
-3. **A failed file read can be tried again.** `accept` takes a failed file out
-   of `unread`, so "Could not be read: …" stays until that file changes, the
-   commits move or the page is reopened; a server restart mid-read leaves
-   every file saying it. The note row gets **Retry** (back into `unread`, then
-   `readShown`), as the Files tree's failed folders have.
-
-Left as is: Files' Diff mode reads its one file with `loadDiff`, not
-`readFile`, because it compares the unsaved draft; both render through
-`ReviewStream`.
-
-No new product choice. The five questions under Remaining are unanswered and
-go to the demo.
+Read at `cd22a12c29`; its three repairs are built and described above: the
+long line is cut instead of its file collapsing (`collapses`, `row(for:in:)`,
+`openedLongFiles`, `ReviewFile.bytes`/`longestLine`, the `changes-long-lines`
+row and the stepper's skip are gone, so the stepper reaches every change the
+title counts), the `lf task file` reread and `ReviewFile.added(_:content:)`
+are deleted, and a failed file read has Retry. Chosen by the review, not by
+Jack, reversible. Left as is: Files' Diff mode reads its one file with
+`loadDiff`, because it compares the unsaved draft.
 
 ## Remaining
 
-- The three repairs above.
 - Demo/review on screen (below). November 21 showed the tab strip, the Diff
   rename and the stream; nothing was said about them beyond the quotes under
   Decisions. Unseen: the November 21 repairs at several widths and under
-  hover across panes, a large new file read as contents, a long-line file's
-  one row, the sidebar (narrow too), skipped lines, comments with Send into a
+  hover across panes (360, 480, 640 pt), a large new file read as contents,
+  a cut long line, Retry on a failed read, the sidebar (narrow too), skipped lines, comments with Send into a
   live conversation, the tour with Write tour / Update tour and its behind
   notice, By group under this repository's `diff_groups`, and Always hidden's
   layers and save against a running server.
@@ -433,4 +424,4 @@ files:
   page and Task switches.
 - No GitHub patch renderer remains.
 
-Check (November 21): `scripts/test_desktop.sh --skip-build --filter 'TaskFilesTests|ReviewDiffTests'` → 52 passed after compress; `swift build --build-tests` → complete. Not run: `ThemeTests` (needs `target/debug/lf`; `cargo build -p loopflow --bin lf` stops in `loopflow-storage/build.rs`, "apply graph_process_task: no such column: is_local", in this shallow clone with no `LOOPFLOW_MIGRATION_ORDER`). This branch's own Rust is unchanged since November 19 (main merged since, conflict-free, at `12b66c3e17`): `cargo test -p loopflow-execution --lib config::` → 105 passed and `cargo test -p loopflow --test golden_prompt` → passed. Gate/CI: clippy, `documented_commands::`, the full swift suite, `global_commands` (PR #1949's suites are skipped at `5885adf40e`). Demo: the pane on screen.
+Check (November 21): `swift build --build-tests --package-path swift`, then `scripts/test_desktop.sh --skip-build --filter 'TaskFilesTests|ReviewDiffTests'` → 54 passed (`--skip-build` runs the last built tests, so build first). Not run: `ThemeTests` (needs `target/debug/lf`; `cargo build -p loopflow --bin lf` stops in `loopflow-storage/build.rs`, "apply graph_process_task: no such column: is_local", in this shallow clone with no `LOOPFLOW_MIGRATION_ORDER`). This branch's own Rust is unchanged since November 19: `cargo test -p loopflow-execution --lib config::` → 105 passed and `cargo test -p loopflow --test golden_prompt` → passed. Gate/CI: clippy, `documented_commands::`, the full swift suite, `global_commands`. Demo: the pane on screen.

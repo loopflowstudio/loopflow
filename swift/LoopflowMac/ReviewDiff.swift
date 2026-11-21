@@ -160,40 +160,19 @@ struct ReviewFile: Equatable, Sendable, Identifiable {
     let blocks: [ReviewBlock]
     let additions: Int
     let deletions: Int
-    /// The longest shown line in UTF-16 units, and the size of all of them in bytes.
-    let longestLine: Int
-    let bytes: Int
     var id: String { path }
-
-    /// Past this a line is machine-made: minified, base64 or embedded data.
-    static let readableLine = 1_000
 
     init(path: String, oldPath: String?, status: Status, blocks: [ReviewBlock]) {
         self.path = path
         self.oldPath = oldPath
         self.status = status
         self.blocks = blocks
-        var additions = 0, deletions = 0, longest = 0, bytes = 0
+        var additions = 0, deletions = 0
         for line in Self.lines(blocks) {
             if line.kind == .added { additions += 1 } else if line.kind == .removed { deletions += 1 }
-            longest = max(longest, line.text.utf16.count)
-            bytes += line.text.utf8.count + 1
         }
         self.additions = additions
         self.deletions = deletions
-        longestLine = longest
-        self.bytes = bytes
-    }
-
-    /// A new file as its contents: every line, numbered from one.
-    static func added(_ path: String, content: String) -> ReviewFile {
-        var texts = content.components(separatedBy: "\n")
-        if texts.last?.isEmpty == true { texts.removeLast() }
-        let lines = texts.enumerated().map { index, text in
-            ReviewLine(kind: .added, text: text.hasSuffix("\r") ? String(text.dropLast()) : text, old: nil, new: index + 1)
-        }
-        return ReviewFile(path: path, oldPath: nil, status: .added,
-                          blocks: lines.isEmpty ? [] : [.change(ReviewChange(id: "\(path)#n1", removed: [], added: lines))])
     }
 
     /// The id of the file's first row under its header.
@@ -314,6 +293,23 @@ struct ReviewLine: Equatable, Sendable {
     let text: String
     let old: Int?
     let new: Int?
+
+    /// Past this many UTF-16 units a line is cut until you ask for the rest.
+    static let readable = 1_000
+
+    /// The line within its file: its old number when removed, else its new one.
+    func id(in path: String) -> String {
+        "\(path)#" + (kind == .removed ? "o\(old ?? 0)" : "n\(new ?? 0)")
+    }
+
+    /// The start of a line past `readable`, and how many UTF-16 units follow.
+    var cut: (shown: String, more: Int)? {
+        let units = text.utf16
+        guard units.count > Self.readable else { return nil }
+        let end = text.rangeOfComposedCharacterSequence(at: units.index(units.startIndex, offsetBy: Self.readable)).lowerBound
+        let shown = String(text[..<end])
+        return (shown, units.count - shown.utf16.count)
+    }
 }
 
 /// One run of removed lines followed by the lines that replaced them.

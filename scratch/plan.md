@@ -14,17 +14,10 @@ Jack Heart, Task steer 88459687-b71e-4a4f-8638-b4dc2cfe1043:
 
 ## Built and checked
 
-Commit `0087397318` removes `--world`, `--copy` and the pre-launch wire
-comparison from `scripts/loopflow-dev.py`. The Dev bundle includes the Swift
-app and leaves the CLI and launch agents to the installation. Both launcher modes
-clear inherited `LF_*` and print “Opening the Machine.” Swift's
-`LocalWaveAgentLauncher.controlLfPath` handles direct commands and
-`GUIProcessEnvironment.enriched` uses its answer for child processes. Resolution
-is explicit `LF_HOME` with `LF_BIN` for a private Machine, the bundled helper
-for the release app, then the account's public entry for helper-less Dev.
-`AppUpdates.isInstalled` uses the same public-entry path. An override through
-`LF_INSTALL_DIR` applies when it is in the app's own environment. The launcher
-clears shell overrides along with Task and Session routing.
+`scripts/loopflow-dev.py` builds a Swift-only Dev bundle, clears inherited
+`LF_*` routing and uses the installed `lf` through
+`swift/LoopflowMac/MacLocalWaveAgentLauncher.swift`. The launcher has removed
+`--world`, `--copy` and the pre-launch wire comparison.
 
 - `uv run pytest -q python/tests/test_loopflow_dev.py` passed three tests,
   including environment cleanup and the Swift-only build path.
@@ -41,11 +34,10 @@ The public entry matters on this Machine. The installed app and
 `~/.local/bin/lf` had the same hash (`aeab8b41…`). The older
 `~/.cargo/bin/lf` on PATH had hash `a527444a…`. LaunchServices inherited
 Task and Session routing variables when the previous launcher opened Dev.
-`ServerLocation` starts with `lf install server`, which can replace a
-server whose hash differs from the helper's. When called via the installed
-entry during planning, it returned the same server instance
-`5f5bc7b3-59a4-4213-b45e-6490a0dd089d` and executable hash. That was a CLI
-check. The actual Dev launch and holder continuity still need QA.
+`lf install server` returned the same server instance
+`5f5bc7b3-59a4-4213-b45e-6490a0dd089d` and executable hash when called via
+the installed entry during planning. That CLI probe exercised the matching
+hash case. The actual Dev launch and holder continuity still need QA.
 
 The copy served lists but could not join a held Session. On the copy at
 revision 8, `lf session resume d566a570… --prepare --json` returned
@@ -55,17 +47,28 @@ the owning server with `session.attach`. The Rust transport test already
 covers input from two views. The mounted Dev workflow is still to be exercised.
 Use a private Machine for branch Rust. There is no replacement for the copy.
 
-One-shot reads now carry the responding link's build diagnostic through
-RegistryQuery and creation recovery. The server returns Session history as a
-JSON string. Unquoting it before the typed decoder ran made valid multiline
-history unreadable. Repository paths still return bare text.
+The one-shot path now carries the responding build from `ServerLink.swift`
+through `RegistryQuery.swift` and creation recovery. The previous assumption
+that every read could use CLI-printed text failed for Session history. The
+server returns a JSON string and the typed decoder needs the quotes. Only
+repository paths still use bare text.
 
 - `swift test --package-path swift --filter 'olderPeerKeepsServingCompatibleReadsAndActions|aReadingThisBuildCannotDecodeNamesBothBuilds'` passed. The revision-8 peer refused an unknown write and omitted a required Task page field. The same connection still delivered a Machine identity with an extra field, multiline Session history and a successful Graph customization.
 - `swift test --package-path swift --skip-build --filter 'contentRoutedSessionHistory|aRecordFromAnEarlierRevisionReadsItsReceiptAndNeverResends|bulkAnswersAndOversizeRequestsTravelByTicket'` passed all three checks.
 
 ## Remaining implementation
 
-1. **Next — retire sealed copies and migrate CLI coverage.** Remove
+1. **Next — make Dev discover the running server with a read.**
+   `ServerLocation` in `swift/LoopflowMac/Services/ServerClient.swift` still
+   starts with `lf install server`. `ensure` in
+   `rust/loopflow-execution/src/installation/server.rs` can replace a ready
+   server if its executable hash differs. Helper-less Dev should use
+   `lf server status` and connect to the ready endpoint through the installed
+   entry. Keep setup for the release bundle and explicitly selected private
+   Machines. Exercise the Dev first connection with a ready older peer and
+   assert that it reads status and does not invoke installation. Keep the
+   mounted live check below.
+2. **Retire sealed copies and migrate CLI coverage.** Remove
    `rust/loopflow/src/world/`, the `lf-world` binary and registration,
    `server/copy.rs`, the sealed-store startup and write refusal,
    `Operation::changes`, CLI `write_refused`, the copy-only
@@ -78,7 +81,7 @@ history unreadable. Repository paths still return bare text.
    and a stopped run's failed step. Fold Session/status subscriptions into
    `session_list_subscribe.rs`. Existing transport coverage exercises live
    attachment, so drop the world test that exercised only its stub provider.
-2. **Remove world consumers.** Delete the `world:` entries in
+3. **Remove world consumers.** Delete the `world:` entries in
    `scripts/screenshots.yaml` and the builder in `generate_screenshots.py`.
    Keep empty and mock screenshots and website capture. Remove the cycle
    check's `--world` and use `mock-waves` for `--sheet`. Remove
@@ -94,7 +97,7 @@ history unreadable. Repository paths still return bare text.
    `LF_DB_PATH` launch setting. Preserve independent private-snapshot
    commands, `RepositoryWorkspace.machine` and Xcode/private-machine helper
    build commands.
-3. **Sweep remaining references and exercise changed automation.** The main
+4. **Sweep remaining references and exercise changed automation.** The main
    Dev and QA docs were updated in `1ba82f64d0`. Check Rust, Swift, scripts,
    tests, CI and current docs again after consumer deletion. Check
    the moved Rust fixtures by name, focused Python automation and Desktop

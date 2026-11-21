@@ -1083,6 +1083,10 @@ impl super::Launcher for loopflow_harness::Codex {
             },
             initial_prompt_on_resume: true,
             native_skills: Some(crate::skills::catalog::SkillDialect::Codex),
+            installed_skills: super::InstalledSkills {
+                global: &[".agents/skills"],
+                repository: &[".agents/skills"],
+            },
             turn_limit: false,
             output_schema: false,
             respawns_after_crash: false,

@@ -10,9 +10,11 @@ use sha2::{Digest, Sha256};
 use crate::error::LoadError;
 use crate::graph::instructions::render_graph_instructions;
 use crate::graph::{compile_graph_with_catalog, DefinitionLoader};
+use crate::harness::launcher;
 use crate::skills::catalog::{is_generated, SkillCatalog, SkillDialect, SkillSource};
 use loopflow_definitions::name::portable_name;
 use loopflow_definitions::text::{skill_description, split_frontmatter};
+use loopflow_harness::HarnessKind;
 
 const SKILL_FILE_NAME: &str = "SKILL.md";
 const LOOPFLOW_MARKER: &str = "loopflow: true";
@@ -39,12 +41,6 @@ pub struct SkillSyncReport {
     pub written: Vec<PathBuf>,
     pub pruned: Vec<PathBuf>,
     pub skipped: Vec<PathBuf>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Vendor {
-    Claude,
-    Codex,
 }
 
 #[derive(Debug, Default)]
@@ -74,6 +70,26 @@ pub fn customize(name: &str, repo: &Path, full: bool) -> Result<PathBuf, LoadErr
     Ok(path)
 }
 
+/// Where sync writes, relative to the home directory or, with `repository`,
+/// to the repository root: every directory a harness declares, once each.
+pub fn installed_skill_directories(repository: bool) -> Vec<&'static str> {
+    let mut directories = Vec::new();
+    for kind in HarnessKind::ALL {
+        let installed = launcher(kind).capabilities().installed_skills;
+        let declared = if repository {
+            installed.repository
+        } else {
+            installed.global
+        };
+        for directory in declared {
+            if !directories.contains(directory) {
+                directories.push(*directory);
+            }
+        }
+    }
+    directories
+}
+
 /// Export global or repository definitions without replacing third-party bundles.
 pub fn sync_skills(options: &SkillSyncOptions) -> Result<SkillSyncReport, LoadError> {
     let home = options.global_home.clone().or_else(dirs::home_dir);
@@ -99,10 +115,7 @@ pub fn sync_skills(options: &SkillSyncOptions) -> Result<SkillSyncReport, LoadEr
     let mut targets = Vec::new();
     let mut report = SkillSyncReport::default();
     // Resolve and validate the entire export set before touching either provider.
-    for (folder, vendor) in [
-        (".claude/skills", Vendor::Claude),
-        (".agents/skills", Vendor::Codex),
-    ] {
+    for folder in installed_skill_directories(options.repo.is_some()) {
         let root = base.join(folder);
         let mut exports = BTreeMap::new();
         let skills = project_names(catalog.entries().map(|skill| skill.name.as_str()));
@@ -161,7 +174,7 @@ pub fn sync_skills(options: &SkillSyncOptions) -> Result<SkillSyncReport, LoadEr
             exports.insert(
                 name.clone(),
                 Export {
-                    content: render_graph_skill(&graph, &name, vendor, &recipe, &inputs),
+                    content: render_graph_skill(&graph, &name, &recipe, &inputs),
                     inputs,
                 },
             );
@@ -299,16 +312,10 @@ fn writable_target(
 fn render_graph_skill(
     graph: &str,
     name: &str,
-    vendor: Vendor,
     recipe: &str,
     inputs: &BTreeMap<String, String>,
 ) -> String {
-    let user_only = if vendor == Vendor::Claude {
-        "disable-model-invocation: true\n"
-    } else {
-        ""
-    };
-    format!("---\nname: {name}\ndescription: Follow the {name} Graph in this conversation.\nloopflow: true\nloopflow-kind: graph\nloopflow-graph: {}\nloopflow-inputs: {}\n{user_only}---\n{recipe}", yaml_string(graph), serde_json::to_string(&inputs.keys().collect::<Vec<_>>()).expect("input names serialize"))
+    format!("---\nname: {name}\ndescription: Follow the {name} Graph in this conversation.\nloopflow: true\nloopflow-kind: graph\nloopflow-graph: {}\nloopflow-inputs: {}\ndisable-model-invocation: true\n---\n{recipe}", yaml_string(graph), serde_json::to_string(&inputs.keys().collect::<Vec<_>>()).expect("input names serialize"))
 }
 
 fn write_targets(

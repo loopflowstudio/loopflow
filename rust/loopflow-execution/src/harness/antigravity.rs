@@ -347,6 +347,10 @@ impl super::Launcher for loopflow_harness::Antigravity {
             },
             initial_prompt_on_resume: false,
             native_skills: None,
+            installed_skills: super::InstalledSkills {
+                global: &[".gemini/config/skills"],
+                repository: &[".agents/skills"],
+            },
             turn_limit: false,
             output_schema: false,
             respawns_after_crash: false,

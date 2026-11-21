@@ -63,10 +63,10 @@ test in `GhosttyTerminalInputTests.swift`. The pinned Ghostty build reports
 current focus when mode 1004 turns on, but the QA display stayed locked.
 
 Repeat background attach and focus or typing through a real SSH Session.
-The prepared-command tests cover the local relay argv only. Use the
-installed CLI as well as the branch CLI for a visited Dev pane. The
-installed-CLI run reached the provider in a PTY. It did not mount a Dev
-pane. The [Desktop QA steps](../.lf/qa/desktop.md) describe the private
+The prepared-command tests cover the local relay argv only. A Dev pane
+visited on a Machine run by the installed 0.16.0 CLI opened, rendered and
+took typing; its old holder gave the visit the size, as expected
+([QA section 6](qa.html)). The [Desktop QA steps](../.lf/qa/desktop.md) describe the private
 Machine setup. CI repeats the headless Rust and Swift checks. The earlier
 Desktop test wrapper's Cargo build failed on `graph_process_task` in this
 shallow checkout. The Swift checks used the existing checkout CLI.

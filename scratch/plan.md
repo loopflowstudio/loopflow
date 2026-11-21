@@ -53,19 +53,22 @@ The implementation uses one focus rule for all viewers. The choices are in
   across restart. `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings`
   passed. CI repeats these checks.
 
+- **Real SSH.** On mini-heart, under a private home, a remote-TTY view
+  owned the Session at 80. Background attaches left it alone: a local
+  `lf --machine … session resume --unfocused` at 120, and a prepared argv
+  run with `LF_RELAY_FOCUSED=0` at 100. Focus or typing took the size,
+  focus-out from a view not in use was dropped, and each departure handed
+  the size to the most recent live view. [QA transcript, section 7](qa.html)
+
 ## Next at QA or gate
 
-1. On an unlocked display, use a disposable Session on a private Machine
-   with two views at different widths. Open a second release Desktop
-   window and verify that warm panes leave the active width, colors and
-   agent focus alone. Focus a mounted pane and verify it takes ownership
-   before the first key. Run the mounted environment assertion in
-   `swift/LoopflowTests/GhosttyTerminalInputTests.swift`. The display
-   stayed locked during the earlier runs.
-   [Desktop QA setup](../.lf/qa/desktop.md)
-2. Repeat background attach and ownership transfer by focus or typing
-   through a real SSH Session. The Machine-command fixture exercises the
-   prepared local relay command with a stand-in for SSH.
-   [Held terminal QA setup](../.lf/qa/held-terminals.md)
+On an unlocked display, use a disposable Session on a private Machine
+with two views at different widths. Open a second release Desktop
+window and verify that warm panes leave the active width, colors and
+agent focus alone. Focus a mounted pane and verify it takes ownership
+before the first key. Run the mounted environment assertion in
+`swift/LoopflowTests/GhosttyTerminalInputTests.swift`. The display
+stayed locked during every run so far, including the SSH run.
+[Desktop QA setup](../.lf/qa/desktop.md)
 
 CI repeats the headless Rust and Swift checks.

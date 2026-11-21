@@ -76,3 +76,17 @@ at a different width with `lf resume <id> --unfocused`. Check the stand-in's
 size log on attach, focus, typing and departure. A server restart nudges every held terminal
 (one column narrower for 0.4 s), viewed or not; a view's focus change while
 the server is down reaches the new server once the relay reconnects.
+
+# Views over SSH
+
+mini-heart (Tailscale) takes key-only SSH. Copy the branch `lf` and the
+stand-in to a `/tmp` directory there with an env file that sets `HOME`,
+`LF_HOME`, `LF_BIN` and `PATH` to it; start `lf server run` with `nohup`.
+The host's own `~/.local/bin/lf` and `~/.lf` are the real install: never
+replace them. Locally, give a private home an `ssh` wrapper on `PATH` that
+execs `/usr/bin/ssh -F ~/.ssh/config` (with the real `known_hosts` and key)
+and prefixes the last argument, lf's remote command, with `. <remote env>;`.
+`lf machine add <host>` then records the private remote Machine. A
+remote-TTY view is `ssh -tt <host> '<env>; lf resume --task <id>'`; read the
+stand-in's log over SSH. Stop the remote server by `lsof -t` on its store,
+then its `lf holder run`, and delete the directory: that disk is nearly full.

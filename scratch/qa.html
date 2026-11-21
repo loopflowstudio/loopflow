@@ -136,6 +136,30 @@ to the agent. Expected: the old holder has no focus rule; the plan names this pa
 </table>
 <p>Everything (Dev, views, both private servers, holders, stand-ins) stopped afterwards; the QA bundle was unregistered and deleted.</p>
 
+<h2>7 · Views over real SSH (HEAD 44454542d)</h2>
+<p>Branch <code>lf</code> copied to mini-heart (macOS 15.5, Tailscale) under a private <code>/tmp</code> home with its own server;
+the host's installed <code>lf</code> and <code>~/.lf</code> untouched. Locally a private home ran <code>lf machine add mini-heart</code>; a
+<code>ssh</code> wrapper on its <code>PATH</code> calls the real <code>/usr/bin/ssh</code> and sources the remote QA environment before lf's remote command.
+Stand-in <code>claude</code> on the remote logs what the agent sees.
+A = <code>ssh -tt mini-heart … lf resume --task 893fba</code> (a remote TTY), B = local <code>lf --machine mini-heart session resume &lt;S&gt; --unfocused</code>,
+C = the argv from <code>lf --machine mini-heart session resume &lt;S&gt; --prepare --json</code> run with <code>LF_RELAY_FOCUSED=0</code>.</p>
+<pre>## A (remote TTY over ssh -tt) starts Session at 80 START 80x24 | WINCH 80x30
+## A types a                                        IN b'a' 80x30
+## B: local lf --machine resume --unfocused at 120  (agent saw nothing)
+## A types a                                        IN b'a' 80x30
+## B focus-in                                       WINCH 120x30 | IN b'\x1b[I' 120x30
+## A types a (A takes back)                         WINCH 80x30 | IN b'a' 80x30
+## B focus-out (not in use: dropped)                (agent saw nothing)
+## B types b                                        WINCH 120x30 | IN b'b' 120x30
+prepared argv head ['/tmp/lfqa2s/lbin/lf', 'session', 'attach', '--'] mentions --unfocused: False
+## C: prepared argv, LF_RELAY_FOCUSED=0 at 100      (agent saw nothing)
+## C types c                                        WINCH 100x30 | WINCH 100x30 | IN b'c' 100x30
+## C closes (B most recent live view)               WINCH 120x30
+## B closes (A takes over)                          WINCH 80x30
+## A sends Ctrl-D                                   IN b'\x04' 80x30 | EXIT</pre>
+<p class="ok">Background attach, focus and typing ownership, dropped focus-out, and fallback on departure all hold across the SSH hop,
+for both the direct <code>--unfocused</code> resume and the prepared argv. Remote server, holder and directory removed afterwards.</p>
+
 <h2>What works now</h2>
 <p>Background, piped and Dev views leave a running Session's size, focus reports and color answers alone.
 Focus or input moves ownership, departure falls back to the last used view, and a relay that changes
@@ -152,7 +176,6 @@ release bundle ID would warm-attach personal Sessions on the live Machine.</li>
 <li>Dev against the older installed server on the <em>live</em> Machine: skipped (section 6 covers the installed CLI on a private Machine). About 40 personal Sessions are
 live there and another Task's Dev build was running. Dev's wait-for-visit is client-side, so it should
 not depend on the server version.</li>
-<li>SSH relays.</li>
 </ul>
 
 <h2>Still wrong or rough, worst first</h2>
@@ -161,7 +184,9 @@ not depend on the server version.</li>
 with no view, so each running agent repaints twice. This is the designed repaint nudge and predates
 this change. It is still a disturbance to Sessions nobody is looking at.</li>
 <li>Ghostty's initial focus report arrives two or three times when an agent enables mode 1004.</li>
-<li>One ownership change often reaches the agent as two SIGWINCHes at the same size.</li>
+<li>One ownership change often reaches the agent as two SIGWINCHes at the same size (section 7, view C). The held terminal's
+<code>resize_foreground</code> (<code>terminal_holder.rs</code>, unchanged here) signals the foreground group after TIOCSWINSZ, which already signals on a change;
+the two merge only when the first is still pending.</li>
 <li><code>rust/loopflow-storage/migration-order.txt</code> is missing 11 merged slugs, so a build from a source
 snapshot without Git would fail the same way this shallow checkout did.</li>
 </ol>

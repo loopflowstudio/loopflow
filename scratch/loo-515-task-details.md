@@ -340,6 +340,31 @@ Noticed, left as chosen: while files are still being read the title counts
 only the changes read so far, and the number waiting is in the reading mark's
 tooltip. The five questions under Remaining are unchanged and unanswered.
 
+Tenth pass, November 21, over the Diff polish at `9fdfc72f79`: one repair
+for implement. A step is a Graph step's own commits (Jack: "steps do commits,
+so we can just use the git logs"), but `changes_snapshot` lists `git log
+base..head`, every commit reachable, merges included. On this branch the menu
+would offer 54 entries, 10 of them `Merge <sha>`; picking `Merge a0548bfe28`
+compares 1,624 files (+128,835 −136,735) of main's work as this Task's step.
+After `lf sync <another Task>`, that Task's commits would join the list, and
+`ReviewStep.steps` takes each entry's base from the entry before it, which is
+then not its parent.
+
+Next for implement:
+- `lf task changes` walks `--first-parent --no-merges`, and `TaskCommit`
+  carries `parent` (its first parent). A step's base is its first commit's
+  parent; a commit joins the step before it only when its parent is that
+  step's head, so a merge between two `lf implement:` runs keeps them two
+  steps and no step's range holds a merge. `ReviewStep.steps` drops its
+  `before` walk. Fixture, schema and both fixture tests gain `parent`; the
+  Rust test covers a branch with a merge from its base.
+
+Left as chosen while building: a step also sets what Files' Diff and the
+tree's badges read, as a `.changes(comparison:)` tab already does; under a step
+Files' Diff compares commits, not the draft. Every non-`lf` commit stands
+alone, so this branch would still offer 44 entries; whether those runs fold
+together is for the screen, not settled by any decision.
+
 ## Remaining
 
 - Demo/review on screen (below). November 21 showed the tab strip, the Diff

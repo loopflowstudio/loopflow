@@ -1,0 +1,77 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>9a2459 QA — Loopflow Dev on the live Machine</title>
+<style>
+body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:980px;margin:2rem auto;padding:0 1rem;color:#222}
+h1{font-size:1.5rem} h2{font-size:1.15rem;margin-top:2rem;border-bottom:1px solid #ddd}
+pre{background:#f5f3ef;padding:.6rem;overflow:auto;font-size:12px}
+table{border-collapse:collapse;width:100%} td,th{border:1px solid #ddd;padding:.35rem .5rem;vertical-align:top;text-align:left}
+.ok{color:#176b2c;font-weight:600}.bad{color:#a12;font-weight:600}.na{color:#8a6d00;font-weight:600}
+img{max-width:100%;border:1px solid #ccc;margin:.4rem 0}
+</style></head><body>
+<h1>9a2459 QA: Loopflow Dev on the live Machine</h1>
+<p>Run 2026-11-20, 16:50–17:15, headless. The screen was locked the whole time
+(<code>CGSSessionScreenIsLocked = true</code>). The shared <code>~/Applications/Loopflow Dev.app</code>
+was serving <code>~/.lf-copy</code> for LOO-515, which is at its demo step, so it was left alone.
+The branch app ran as a second bundle, <code>~/Applications/Loopflow Dev QA.app</code>
+(<code>com.loopflow.mac.qa9a2459.dev</code>), built by the launcher's own build and install functions.</p>
+
+<h2>Results</h2>
+<table>
+<tr><th>Scenario</th><th>Result</th><th>What was seen</th></tr>
+<tr><td>Swift-only build</td><td class="ok">works</td><td>A Swift build took 22 s; no Cargo process ran. The bundle has only <code>Contents/MacOS/Loopflow Dev</code>, no LaunchAgents, and passes <code>codesign --verify --deep --strict</code>.</td></tr>
+<tr><td>Finds the installed server without installing</td><td class="ok">works</td><td><code>lf server status</code> listed client <code>Loopflow 0.16.0+00f9185b5</code> on instance <code>5f5bc7b3</code>, revision 9, sha <code>aeab8b41</code>. It was the same instance before and after.</td></tr>
+<tr><td>Live backlog</td><td class="ok">works</td><td><code>lf desktop ls</code> listed 22 Working Tasks from the real Machine.</td></tr>
+<tr><td>Task created by the CLI shows up</td><td class="ok">works</td><td><code>lf task create</code> → <code>lf desktop view task:467db5</code> resolved it as the view's only member, and its tile carried the title.</td></tr>
+<tr><td>Rename updates in place</td><td class="ok">works</td><td><code>lf task update --title 'Renamed QA Task'</code>; within 2 s the running Dev's tile list read <code>Renamed QA Task</code>, with no relaunch.</td></tr>
+<tr><td>Second view on a running Session</td><td class="ok">works</td><td>The original view was <code>lf resume --task 467db5 -a claude</code> in tmux. Dev's pane attached the same terminal (<code>lf session attach --terminal e015397d … --session 0f140df7</code> in both process lists). There was one <code>claude</code> (PID 14809) throughout, so no second provider started and no history was resumed. Text typed in Dev appeared in the original view, and text typed in tmux appeared in Dev.</td></tr>
+<tr><td>Close and reopen the Dev pane</td><td class="na">works, with a rough edge</td><td><code>close -p session</code> left the pane <code>attachment: failed</code>. Then <code>show</code> answered "already shown" and <code>send</code> answered "no native surface". <code>focus -p session</code> reattached it (new surface, attach PID 39402) and shared input worked again. Claude 14809 kept running across all of it.</td></tr>
+<tr><td>Server and holders untouched</td><td class="ok">works</td><td>Holders before and after: <code>706 2052 23818 25807 33575 56377 70570 84595 84987</code>. Server instance and executable unchanged.</td></tr>
+<tr><td>Restored selection that's gone</td><td class="ok">works</td><td>A fresh window restored completed Task 4bd948 and reported "Selected Task is not available in the current planning reading" instead of failing.</td></tr>
+<tr><td>Fixture screenshots (6)</td><td class="bad">fixed one; one still wrong</td><td>See below.</td></tr>
+<tr><td>AttributeGraph <code>--sheet</code></td><td class="ok">passes</td><td>Sheet over the infrastructure Wave: 136 log lines, 0 cycle mentions, PASS.</td></tr>
+<tr><td>Mounted benchmark</td><td class="na">not run</td><td>Load average was 17 with about 2.6 cores busy from other worktrees' builds; preflight requires under 0.1 core.</td></tr>
+</table>
+
+<h2>Fixed: the "empty" fixture never decoded</h2>
+<p>The <code>empty-workspaces</code> fixture's roadmap JSON had no <code>tasks</code> key, which
+<code>RoadmapSnapshot</code> now requires. The fixture caught the error and rendered its failure state.
+That looked like an empty backlog, apart from the toast "Activity couldn't be read: The data couldn't be read because it is missing."
+The same failure is on main, because <code>WorkFixture.swift</code> was untouched by this branch.
+The fix adds <code>"tasks":{"state":"ok","truncated":false,"items":[]}</code> and moves the payload into
+<code>WorkFixture.emptyRoadmap()</code>. A new test, <code>MockWaveFixtureTests/emptyWorkspacesDecode</code>, decodes both fixture
+payloads. It failed with <code>keyNotFound(tasks…truncated)</code> before the fix and passes after
+(6/6 in <code>swift test --filter MockWaveFixtureTests</code>).</p>
+
+<h2>Still wrong: the "empty" shots now show loading</h2>
+<p>Now that the fixture decodes, the pipeline still passes <code>--repo</code>. The model then waits forever for a repository Task
+list that the fixture doesn't supply, so the screen stays on "Loading work…" with a spinner. Without <code>--repo</code>, it shows only a full-width
+sidebar with a "Repository" row. Which screen the empty shot should show is a product decision; it's recorded in questions.md.</p>
+<p>Empty, wide, after the fix:</p><img src="qa/control-room-empty-wide.png">
+<p>Empty, without <code>--repo</code>:</p><img src="qa/empty-without-repo.png">
+<p>Loading and error, both fine:</p><img src="qa/control-room-loading-wide.png"><img src="qa/control-room-error-wide.png">
+
+<h2>Not reached, and other observations, worst first</h2>
+<ol>
+<li><b>Dev crashed once</b> on the first <code>lf desktop enter 'Renamed QA Task'</code>, which mounted the Session pane while
+the tmux view was live. Ghostty's Breakpad caught it at 00:58:34Z. The envelope was consumed on the next launch before it
+could be symbolized. Two repeats of the same sequence under lldb did not crash. This is in session-pane code that the branch doesn't touch.</li>
+<li><b>Dev attaches about 20 personal Sessions on launch</b>: one <code>lf session attach</code> child for each retained workspace in the
+Machine's saved layout. They include other Tasks' conversations. While Dev's pane was attached, the disposable Session ran at Dev's width (120 columns)
+and the 160-column tmux view went stale until it typed. After that, Dev's capture was garbled at the wrong width. Viewing
+personal conversations from a QA Dev can resize them. This is existing Desktop behavior, not this branch's.</li>
+<li>Mounted visuals (the edited UI over the live backlog, a populated Wave's details) are still unseen. The first run had a locked screen.
+On the second run (2026-11-20 17:26 local) the screen was unlocked, but someone was typing in Discord and the load average was 14.
+A Swift-only edit (<code>New Task · 9a2459 QA</code>) built and signed into a separate QA bundle in 4.7&nbsp;s, with no Rust step.
+Launched with <code>open -g</code> so it would not take focus, the window stayed off screen on “Opening repository…”. The live server logged
+only a <code>config.theme</code> read and <code>lf desktop state</code> listed no windows: Dev does not open Work until its window is shown.
+Bringing it forward would have taken keystrokes from the person at the keyboard, so the run stopped there. Server instance <code>5f5bc7b3</code>,
+hash <code>aeab8b41</code> and all nine holder PIDs were unchanged. Disposable Task 12e983 was abandoned, and the edit was reverted.
+<img src="qa/dev-hidden-opening.png"></li>
+<li><code>lf desktop capture</code> without <code>--task</code> resolved this checkout's Task and printed an old OpenCode Session of 9a2459.
+That is a footgun, and it's now in the QA notes.</li>
+</ol>
+
+<h2>Left behind</h2>
+<p>Task 467db5 was abandoned (canceled; its Linear writes are queued behind a rate limit). Its worktree and branch were removed.
+The QA bundle was unregistered and deleted, and the tmux server, lldb and QA Dev were stopped. The shared Dev and LOO-515's processes were never touched. The second run left nothing behind: its QA bundle was unregistered and deleted, and Task 12e983 was canceled.</p>
+</body></html>

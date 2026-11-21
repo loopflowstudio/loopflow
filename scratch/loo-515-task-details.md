@@ -441,3 +441,17 @@ Check (November 21): `swift build --build-tests --package-path swift`, then `scr
 Jack, November 21: "im realizing i prefer a view that basically only shows the new code. like in a 2col sideby side in github, i just read the right side", "that should be default, maybe a button to show ol dl ine or something", "or sure 3-part button with my version as the perferred". Built by the session: New code / Unified / Side by side, New code default; removed lines fold to "N old lines · Show". Also: "this seems a little hard to read / subtle coloring" (changed lines now full tint, gutter too) and "this is also a little dense" (tour sidebar reasons quieter, two lines; tour skill asks for reasons under ten words).
 
 Jack, on diff polish (November 21): "Diff per agent turn — doesnt fit our model; would be per graph step. could be a nice thing but i mostly dont care." "Viewed checkboxes - yeah this could ok" "real grammar / better highlighting : high priority" "change markers: yeah, medium prii" "copy woithouth +/-: medium pri" "Sticky function headers: low pri but nice" "Rendered diffs for markdown/images/html: highpri" "word-wrap-toggle: low pri". Filed in the product Wave: f6577f grammars, 8faace rendered diffs, fc907c viewed, 07d8c9 scrollbar markers, 72c0ee copy without markers, 268d5a sticky function headers, and word wrap.
+
+Jack, on filing the diff polish as separate Tasks: "but do em all unless theres some sort of trouble or conflict", then "no, do the in 515", "what of this could really be that hard", "i also feel like there still could be more syntax highlighting", "maybe diff per agent turn?", "er diff per step?". The seven separate Tasks were abandoned unstarted.
+
+## Next for implement — Diff polish, November 21
+
+In LOO-515, in this order (Jack's priorities in the section above):
+1. Real grammar highlighting in the Diff and Files (tree-sitter or an equivalent grammar engine), replacing SyntaxColors.swift. More of the code colored: keys, types, functions, Markdown structure.
+2. Rendered diffs: Markdown rendered with changes marked, images before/after, HTML rendered; source one click away.
+3. Diff per Graph step: pick a step (or "whole Task") and the Diff compares that step's start and end commits; task.diff already takes base and head.
+4. Change markers along the scrollbar; click to jump.
+5. Copying lines gives code without + and − markers.
+6. Viewed per file: collapses it, sidebar counts "12 / 60 viewed", clears when the file changes.
+7. Sticky enclosing-function header under the fixed file bar.
+8. Word-wrap toggle.

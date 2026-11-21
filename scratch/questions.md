@@ -24,3 +24,6 @@
 - **Legacy launchd job.** Leave the existing copy's job registered. Document
   manual cleanup in the PR. The packaging check used a temporary bundle so
   it could leave the shared Dev in use by the loo-515 Task.
+- The optional distinct-image check uses the same loading and unavailable
+  states as the screenshot manifest. Its former populated launch selected
+  loading by default. The empty-workspaces launch smoke remains separate.

@@ -52,9 +52,8 @@ class WaveProofShot:
     """One fixture-rendered control-room state at one width."""
 
     name: str
-    mode: str
     width: int
-    detail_state: str | None = None
+    detail_state: str
 
 
 def load_shots(path: Path = MANIFEST_PATH) -> list[WaveProofShot]:
@@ -63,17 +62,15 @@ def load_shots(path: Path = MANIFEST_PATH) -> list[WaveProofShot]:
 
 
 def shot_environment(shot: WaveProofShot, output: Path) -> dict[str, str]:
-    env = {
+    return {
         **{k: v for k, v in os.environ.items() if not k.startswith("LOOPFLOW_UI_TEST_")},
-        "LOOPFLOW_UI_TEST_MODE": shot.mode,
+        "LOOPFLOW_UI_TEST_MODE": "mock-waves",
+        "LOOPFLOW_UI_TEST_DETAIL_STATE": shot.detail_state,
         "LOOPFLOW_UI_TEST_WIDTH": str(shot.width),
         "LOOPFLOW_UI_TEST_HEIGHT": str(HEIGHT),
         "LOOPFLOW_UI_TEST_DELAY": str(DELAY),
         "LOOPFLOW_UI_TEST_SNAPSHOT_PATH": str(output),
     }
-    if shot.detail_state:
-        env["LOOPFLOW_UI_TEST_DETAIL_STATE"] = shot.detail_state
-    return env
 
 
 def _write_log(

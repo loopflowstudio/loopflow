@@ -35,9 +35,12 @@ struct MockWaveFixtureTests {
         #expect(try WorkFixture.emptyWorkActivity().items.isEmpty)
     }
 
-    // Indentation is proven above.
-    // These cover the detail states the mock surface drives with
-    // `LOOPFLOW_UI_TEST_DETAIL_STATE`.
+    @Test("the infrastructure plan keeps its current Project when live detail is unavailable")
+    func infrastructurePlan() {
+        let plan = MockWaveFixture.plans["wave-1"]
+        #expect(plan?.currentProject?.slug == "release-feedback")
+        #expect(plan?.currentProject?.krs.first?.text == "Every failed run has an owner")
+    }
 
     @Test("the loading detail state withholds the snapshot and keeps the loading affordance")
     func loadingDetailState() {

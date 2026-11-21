@@ -32,19 +32,15 @@ website:
 # Loading and unavailable Wave surfaces at both widths.
 wave-proof:
   - name: control-room-loading-narrow
-    mode: mock-waves
     detail_state: loading
     width: 900
   - name: control-room-loading-wide
-    mode: mock-waves
     detail_state: loading
     width: 1440
 
   - name: control-room-error-narrow
-    mode: mock-waves
     detail_state: error
     width: 900
   - name: control-room-error-wide
-    mode: mock-waves
     detail_state: error
     width: 1440

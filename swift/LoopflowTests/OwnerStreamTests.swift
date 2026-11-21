@@ -122,7 +122,7 @@ struct OwnerStreamTests {
         let request = try OwnerStream.attachRequest(id: 7, columns: 80, rows: 24, name: "Loopflow iPhone")
         #expect(try JSONDecoder().decode(JSONValue.self, from: Data(request.dropFirst(5))) == .object([
             "id": .integer(7), "kind": .string("attach"), "rows": .integer(24), "cols": .integer(80),
-            "name": .string("Loopflow iPhone"),
+            "name": .string("Loopflow iPhone"), "focused": .bool(true),
         ]))
     }
 

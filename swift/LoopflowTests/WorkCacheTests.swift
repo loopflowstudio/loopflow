@@ -186,11 +186,49 @@ struct WorkCacheTests {
         await spin { store.preparedTaskConversations.count < limit }
         #expect(store.preparedTaskConversations.count == limit)
         #expect(Set(await source.preparedTasks) == Set(expected))
-        #expect(store.sessions.filter { $0.state == .prepared }.allSatisfy { $0.launchArguments == ["lf", "session", "resume", $0.id] })
+        #expect(store.sessions.filter { $0.state == .prepared }.allSatisfy { $0.launchArguments == ["lf", "session", "resume", $0.id, "--unfocused"] })
         model.openWarmConversations()
         #expect(registry.recentTasks.count == SessionsWorkspaceRegistry.warmConversationLimit)
         if closed { #expect(registry.retained(closedKey) == nil) }
         registry.prepareForQuit()
+    }
+
+    @Test("Restoring Dev Work waits for a visit, then prepares only that Task")
+    func devRestoresWithoutOpeningTerminals() async throws {
+        let source = try Source()
+        let cache = WorkCache(directory: try temporaryDirectory())
+        let previous = WorkModel(query: source.query, repoPath: Self.repo, cache: cache)
+        previous.confirmMachine("home-a")
+        await previous.refresh()
+        previous.select(.task(id: "issue-review"))
+        cache.flush()
+
+        let repository = "repo_" + UUID().uuidString.lowercased()
+        defer { UserDefaults.standard.removeObject(forKey: "warm-conversations-home-a-\(repository)") }
+        let model = WorkModel(query: source.query, repoPath: Self.repo, cache: cache)
+        model.confirmMachine("home-a")
+        let registry = SessionsWorkspaceRegistry(localMachineId: "home-a", opensUnvisitedWork: false)
+        defer { registry.prepareForQuit() }
+        model.bindWorkspaces(registry, repository: repository)
+        await source.setLocationFailure(nil)
+        await model.refresh()
+        let selected = try #require(registry.selectedWork)
+        let workspace = try #require(registry.retained(selected))
+        #expect(selected.kind == .task)
+        #expect(registry.recentTasks.count > 1)
+        #expect(registry.warmPrimaries.count > 1)
+        #expect(!model.conversationIsOpening(workspace))
+        #expect(registry.preparationCount == 0)
+        #expect(await source.preparedTasks.isEmpty)
+        #expect(await source.preparedPrimaries.isEmpty)
+
+        model.select(.task(id: "issue-review"))
+        let store = registry.sessionStore(repository: repository, repoPath: Self.repo, query: source.query)
+        await spin { registry.preparationCount > 0 }
+        #expect(await source.preparedTasks == [selected.id])
+        #expect(await source.preparedPrimaries.isEmpty)
+        #expect(store.sessions.filter { $0.state == .prepared }.map(\.launchArguments) ==
+                [["lf", "session", "resume", "conversation-" + selected.id, "--unfocused"]])
     }
 
     @Test("A failed load opening shows its failure")
@@ -429,7 +467,7 @@ struct WorkCacheTests {
         let store = registry.sessionStore(repository: repository, repoPath: Self.repo, query: source.query)
         let primaries = ["primary-repository", "primary-wave:wave-1"]
         await spin { store.sessions.filter({ primaries.contains($0.id) && $0.state == .prepared }).count < 2 }
-        #expect(store.sessions.filter { primaries.contains($0.id) }.allSatisfy { $0.state == .prepared && $0.launchArguments == ["lf", "session", "resume", $0.id] })
+        #expect(store.sessions.filter { primaries.contains($0.id) }.allSatisfy { $0.state == .prepared && $0.launchArguments == ["lf", "session", "resume", $0.id, "--unfocused"] })
         for key in [repositoryKey, wave] {
             let workspace = try #require(registry.retained(key))
             #expect(workspace.opensConversationAutomatically)

@@ -34,3 +34,6 @@
 - **Resume and New share the viewer option.** Both commands already use the
   same viewer for a fresh thread. On either command, `--prepare --unfocused`
   returns an argv that opens with the requested focus.
+- Dev eligibility follows the retained workspace through repository and Task
+  ID changes. The existing visit timestamp records a deliberate visit in Dev;
+  loading a saved selection or board does not set it.

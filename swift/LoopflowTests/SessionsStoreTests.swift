@@ -9,6 +9,16 @@ import ViewInspector
 @Suite("Sessions store")
 @MainActor
 struct SessionsStoreTests {
+    @Test("Prepared SSH panes attach unfocused through the local relay")
+    func sshPaneAttachesUnfocused() throws {
+        var record = try #require(records([session(id: "remote", state: "closed")]).first)
+        let ssh = ["--", "ssh", "peer", "lf session attach remote"]
+        record.openArgv = ["/bin/lf", "session", "attach"] + ssh
+        let store = SessionsStore(repoPath: "/tmp/repo", query: RegistryQuery { _, _ in "" })
+        store.reconcile([record])
+        #expect(item(store, "remote")?.launchArguments == ["/bin/lf", "session", "attach", "--unfocused"] + ssh)
+    }
+
     @Test("Provider switching keeps the Session and prepares an explicit provider launch", arguments: ["claude", "codex", "opencode", "pi", "agy"])
     func switchingProviderKeepsSession(agent: String) async throws {
         let store = SessionsStore(repoPath: "/tmp/repo", query: RegistryQuery { _, _ in
@@ -22,7 +32,7 @@ struct SessionsStoreTests {
         #expect(prepared.id == previous.id)
         #expect(prepared.record.title == previous.record.title)
         #expect(prepared.launchId != previous.launchId)
-        #expect(prepared.launchArguments == ["lf", "session", "resume", "main", "--agent", agent])
+        #expect(prepared.launchArguments == ["lf", "session", "resume", "main", "--unfocused", "--agent", agent])
         #expect(prepared.presentationProvider == agent)
         #expect(item(store, "other")?.state == .pending)
     }
@@ -159,7 +169,7 @@ struct SessionsStoreTests {
         #expect(restarted.id == "main")
         #expect(item(store, "main")?.state == .prepared)
         #expect(item(store, "main")?.launchId != previous.launchId)
-        #expect(item(store, "main")?.launchArguments == ["lf", "session", "resume", "main"])
+        #expect(item(store, "main")?.launchArguments == ["lf", "session", "resume", "main", "--unfocused"])
         #expect(item(store, "other")?.state == .pending)
         let requestID = try #require(submitted.withLock { $0 })
         #expect(CreationRecovery.shared.requests(for: .session("main")).contains(requestID))
@@ -428,7 +438,7 @@ struct WorkspaceSessionLifecycleTests {
         for id in ids { await store.select(id) }
         let prepared = store.sessions
         #expect(prepared.allSatisfy { $0.state == .prepared })
-        #expect(prepared.allSatisfy { $0.launchArguments == ["lf", "session", "resume", $0.id] })
+        #expect(prepared.allSatisfy { $0.launchArguments == ["lf", "session", "resume", $0.id, "--unfocused"] })
         for _ in 0..<20 {
             for id in ids.reversed() { await store.select(id) }
         }
@@ -447,7 +457,7 @@ struct WorkspaceSessionLifecycleTests {
         store.adoptPreparation(ensured)
         await store.select(ensured.id)
         #expect(store.sessions.first?.state == .prepared)
-        #expect(store.sessions.first?.launchArguments == ["lf", "session", "resume", "primary"])
+        #expect(store.sessions.first?.launchArguments == ["lf", "session", "resume", "primary", "--unfocused"])
     }
 
     @Test("Showing a pane opens it whatever its client is doing", arguments: ["detached", "active", "closed"])

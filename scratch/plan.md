@@ -52,61 +52,31 @@ JSON prepare-and-view SSH routes pass the same choice to the local relay.
 | `transport::tests::a_held_screen_the_relay_drew_into_is_refreshed_not_continued` | Passed for both focus values on a positioned continuation and a fresh repaint. | CI |
 | `machine_commands::remote_session_open_returns_an_owner_pinned_terminal_command` | Passed. Remote prepare placed the flag on the local relay and kept the SSH command intact. | CI |
 
-## Remaining
+### Desktop panes and Dev visits
 
-### Desktop pane launch
+Desktop Session panes add `--unfocused` to the viewer command, before the
+local relay's `--` for prepared SSH commands. A directly opened native
+`OwnerStream` sends `focused: true`.
 
-Have `SessionItem.launchArguments` in `swift/LoopflowMac/Views/SessionsView.swift`
-pass `--unfocused` for selected and warm panes. For prepared SSH commands,
-place it before the local `--` separator. Keep a directly opened native
-`OwnerStream` in `swift/Loopflow/Services/OwnerProtocol.swift` explicitly
-focused. Check the argv and wire assertions in `WorkCacheTests`,
-`WorkDestinationTests`, `SessionsStoreTests` and `OwnerStreamTests`.
+Dev uses the workspace's last deliberate visit to admit it to terminal
+preparation and mounting. Restoring a selection or selecting the first tile
+when laying out a board does not record a visit. A saved shell has an Open
+shell action before its Work is visited. Release Desktop continues to open
+the warm set. PR #2007 already moved Dev onto the live Machine.
 
 Pinned Ghostty `a60e9e2` sends its current focus when mode 1004 is enabled
-(`src/termio/stream_handler.zig:766`). Its initial terminal focus is true
-(`src/terminal/Terminal.zig:132`). Desktop's `GhosttyTerminalView.syncSurfaceFocus`
-sets focus from the key window and first responder when creating a surface.
-The source inspection establishes the mechanism. The mounted behavior is a
-QA check.
+(`src/termio/stream_handler.zig:766`). Desktop's
+`GhosttyTerminalView.syncSurfaceFocus` sets focus from the key window and
+first responder when creating a surface. Mounted behavior is a QA check.
 
-### Dev opens only visited Work
-
-PR #2007 is now merged into this checkout. `scripts/loopflow-dev.py run`
-launches on the live Machine directly. The old description-based Machine
-copy path is gone. There is no launcher change in this Task.
-
-Set the existing workspace registry to open unvisited Work only in release
-Desktop. In Dev, use the same deliberate visit to decide which Work may
-prepare a conversation and whether its placeholder is waiting for an opening.
-`openSelectedWorkspace(deliberate: false)` handles restored selection.
-Prefetch can still build workspaces and read saved layouts. Release Desktop
-keeps its saved warm tabs and worktree retention.
-
-- Follow both `SessionsWorkspaceRegistry.openWarmConversations` and
-  `WorkModel.openWarmConversations`. The latter presents known Sessions
-  before the registry starts preparation. `conversationIsOpening` also
-  predicts an opening and can hide the open action. A guard in the
-  preparation loop alone leaves an unvisited pane displaying a spinner.
-  Use the same decision for the placeholder and background preparation.
-- Record deliberate visits for the life of the registry. `recentTasks`
-  already includes prefetched Tasks and Tasks selected by
-  `focus(deliberate: false)`, so it cannot answer whether someone visited.
-- Exercise a restored board and saved pane layout. `presentView` can select
-  a tile without a deliberate visit, and `WorkspacePanesView` can mount a
-  retained shell from saved intent without going through Session
-  preparation. Check that either startup path starts no terminal before
-  the first deliberate visit.
-- Add a focused Swift regression covering prefetched Tasks and primaries,
-  restored selection, and the first deliberate open. Check that the release
-  registry still warms the same Work. Run
-  `scripts/test_desktop.sh --filter 'WorkspaceRetentionTests|WorkspacePanesTests|SessionsStoreTests|WorkCacheTests|WorkDestinationTests|OwnerStreamTests'`.
-  No Swift changes or checks for this Task's behavior have run yet.
-
-The user-facing text in `docs/sessions.md`,
-`rust/loopflow-execution/src/transport/README.md`, `docs/dev/server-first.md`
-and `swift/README.md` was drafted before the implementation. Confirm the
-flag and Dev behavior it describes when those paths land.
+`swift build --build-tests --package-path swift` passed. Seven focused tests
+passed with `scripts/test_desktop.sh --skip-build`: Dev restored a selected
+Task without preparing any Session, its first visit prepared just that Task,
+and a restored board shell rendered its open action without a Ghostty view.
+Release prefetch, sidebar opening, provider switching, SSH argv and native
+attach framing also passed. The wrapper's initial Cargo build lacked this
+shallow checkout's migration order and failed on `graph_process_task`; the
+Swift run used the existing checkout CLI. CI runs the suites.
 
 ## Live acceptance at QA
 
@@ -127,6 +97,3 @@ and new terminal viewers, including any restored shell. `pgrep -lf 'session resu
 alone misses relays that have already exec'd to `session attach`. Deliberately
 open one Task and check that only its terminal starts and can take the size.
 These mounted checks have not run.
-
-Next wire Desktop's pane launch and Dev's deliberate-open rule together, then
-verify that the first deliberate visit opens one pane with the expected argv.

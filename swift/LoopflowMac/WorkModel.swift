@@ -312,6 +312,7 @@ final class WorkModel {
     /// before its Sessions read lands. Close, a failure or a missing location leaves
     /// a person something to do instead.
     func conversationIsOpening(_ workspace: SessionsWorkspace) -> Bool {
+        guard workspace.canOpenTerminals else { return false }
         if workspace.openingConversation { return true }
         guard !workspace.conversationClosed, !showsSavedWork,
               workspace.conversationError == nil,

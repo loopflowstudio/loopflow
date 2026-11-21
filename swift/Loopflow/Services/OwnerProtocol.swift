@@ -12,7 +12,7 @@ public enum TerminalEvent: Sendable {
     case snapshot(Data)
     case output(Data)
     /// Whether this view sizes the terminal. Every attached view may type;
-    /// the one that most recently attached, typed or gained focus sizes it.
+    /// a focused attachment, input or focus-in takes the size.
     case sizing(Bool)
     case programStatus(ProgramStatusRecords)
     case ended
@@ -179,7 +179,7 @@ public struct OwnerStream: Sendable {
     /// Attach at `rows` × `columns`; attaching makes this view size the terminal.
     public static func attachRequest(id: UInt64, columns: Int, rows: Int, name: String) throws -> Data {
         try frame(.request, body: JSONEncoder().encode(AttachRequest(
-            id: id, kind: "attach", rows: rows, cols: columns, name: name)))
+            id: id, kind: "attach", rows: rows, cols: columns, name: name, focused: true)))
     }
 
     public static func resizeRequest(id: UInt64, columns: Int, rows: Int) throws -> Data {
@@ -195,6 +195,7 @@ private struct AttachRequest: Encodable {
     let rows: Int
     let cols: Int
     let name: String
+    let focused: Bool
 }
 
 private struct ResizeRequest: Encodable {

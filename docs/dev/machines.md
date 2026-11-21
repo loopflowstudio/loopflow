@@ -596,27 +596,8 @@ migrates itself on open, including a branch's unmerged migration; editing that
 migration afterwards needs a fresh `LF_HOME`. Nothing in a private Home is
 promoted to the main Machine.
 
-```bash
-target/debug/lf-world copy ~/.lf-copy    # a read-only copy of this Machine's store
-```
-
-`lf-world copy <dir>` replaces `<dir>` with a world whose `loopflow.db` and
-`history.db` are read-only copies of the main Machine's, with the branch's
-migrations applied, and prints its `env.json` as `lf-world build` does. It
-copies the Machine its shell is on (`LF_HOME`, else `~/.lf`) and that
-Machine's `config.yaml`, and replaces `<dir>` only when it is absent or
-already a world. The directory is private to the account (0700): it holds the
-whole store. With no `~/.lf/loopflow.db` it says there is no Machine to copy
-and names `lf-world build`.
-
-A server whose store is read-only serves reads and subscriptions and starts no
-wake, recovery or maintenance pass, held terminal or mobile listener. It
-refuses every change, Session start and upload before any command code runs: "This is a copy of the Machine from 14:02;
-make changes in Loopflow or with lf." The time is when the copy was taken. The
-copied rows still name real pids, worktrees, Task IDs and PRs; nothing in a copy
-signals, edits or publishes to them. `scripts/loopflow-dev.py run` makes and
-opens one when a branch can't read the Machine
-([Loopflow for macOS](../../swift/README.md)).
+Loopflow Dev opens the main Machine through the installed server and CLI,
+using the Swift app from the current checkout. See [Loopflow for macOS](../../swift/README.md).
 
 Published installation verifies immutable artifacts, validates the candidate on
 a temporary database snapshot, and advances only the main database under the
@@ -656,7 +637,6 @@ install command implementation under [`lf/commands/`](../../rust/loopflow/src/lf
 - Promotion owns artifact selection and app replacement, not conversation
   lifecycle.
 - Published preview uses a temporary snapshot; all ordinary writers share the main Machine.
-- A copy of the Machine is read-only and never a second live Machine.
 
 ## Next
 

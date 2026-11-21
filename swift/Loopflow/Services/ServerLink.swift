@@ -436,12 +436,19 @@ private final class Expiry: @unchecked Sendable {
     func fire() { lock.withLock { value = true } }
 }
 
+extension ServerLink {
+    public func read(_ query: ServedRead, deadline: Duration?) async throws -> ReadOutput {
+        let result = try await request(.read(query), deadline: deadline)
+        return ReadOutput(result, unreadable: unreadable)
+    }
+}
+
 extension RegistryQuery {
     /// Typed reads and writes over the server `link` returns; nothing runs `lf`.
     /// A read or write unanswered within `deadline` is cancelled and reported.
     public static func served(deadline: Duration?, link: @escaping @Sendable () async throws -> ServerLink) -> RegistryQuery {
         RegistryQuery(serve: { read in
-            try await link().request(.read(read), deadline: deadline).printed
+            try await link().read(read, deadline: deadline)
         }, write: { change in
             String(decoding: try await link().request(.command(change), deadline: deadline).bytes, as: UTF8.self)
         }, change: { change, requestID in

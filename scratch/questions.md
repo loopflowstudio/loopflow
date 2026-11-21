@@ -15,8 +15,8 @@
 - **Old holders stay exposed to release Desktop's warm attaches** until their
   Sessions restart; nothing migrates or restarts them.
 - **Focus-out from a view that isn't in use is dropped** before the agent.
-  Today any view's `CSI O` reaches an agent that asked for focus reports; a
-  warm pane sends one the moment it attaches.
+  Before this change, a warm pane could send `CSI O` to an agent that asked
+  for focus reports as soon as it attached.
 - **The relay sends its last known focus on reconnect**, not "a person is
   here". A terminal that never reports focus still reconnects as focused.
 - **`--unfocused` is an ordinary flag** on `lf session resume`, usable by a

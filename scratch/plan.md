@@ -34,18 +34,21 @@ Holder checks from the first slice:
 | `cargo test -p loopflow --test transport_tests an_unfocused_view_leaves_the_session_with_the_view_in_use` | Passed. Three views on one held PTY covered the attach reply, size, absence of a WINCH marker, focus filtering and fallback on departure. | CI |
 | `cargo test -p loopflow-execution --lib equally_inactive_views_keep_the_live_owner` | Passed. A second unused view leaves the first in charge. | CI |
 
-The local and SSH relays now attach with the viewer's focus. Terminal stdin
-starts focused unless the command carries `--unfocused`. A pipe starts
-unfocused. Keys and focus reports update the relay in arrival order, even when
-a write fails and causes an immediate reconnect. The next attach carries that
-focus whether the screen continues from a known position or repaints.
+Commit `87437bbe01` carried focus through first attach and local reconnect.
+Both local and SSH relays start focused for a TTY unless given `--unfocused`.
+Piped relay stdin starts unfocused. The relay observes keys and focus reports
+in arrival order, including the rest of a read after a write fails. A focus-out
+following typing in that read needs to win over the typing when reattaching.
+A local reconnect sends the last observed focus on both continuation and
+repaint. The restart test covers the local relay.
 
-SSH prepare returns `lf session attach --unfocused -- ssh …` when requested.
-Direct and JSON prepare-and-view SSH routes pass focus to the local relay.
+In `rust/loopflow/src/lf/commands/ssh.rs`, prepared SSH commands put
+`--unfocused` on the local `lf session attach` before `-- ssh …`. Direct and
+JSON prepare-and-view SSH routes pass the same choice to the local relay.
 
 | Relay check | Result | Runs again |
 | --- | --- | --- |
-| `transport_tests a_resumed_relay_keeps_focus_across_server_restarts` | Passed on a private Machine. Ordinary TTY resume took 80 columns. Piped and unfocused resume kept 120. After two server restarts the same relay kept 120 after focus-out and took 80 after typing. | CI |
+| `cargo test -p loopflow --test transport_tests a_resumed_relay_keeps_focus_across_server_restarts` | Passed on a private Machine. Ordinary TTY resume took 80 columns. Piped and unfocused resume kept 120. After two server restarts the same relay kept 120 after focus-out and took 80 after typing. | CI |
 | `transport::tests::a_held_screen_the_relay_drew_into_is_refreshed_not_continued` | Passed for both focus values on a positioned continuation and a fresh repaint. | CI |
 | `machine_commands::remote_session_open_returns_an_owner_pinned_terminal_command` | Passed. Remote prepare placed the flag on the local relay and kept the SSH command intact. | CI |
 
@@ -53,9 +56,10 @@ Direct and JSON prepare-and-view SSH routes pass focus to the local relay.
 
 ### Desktop pane launch
 
-Have Desktop's `SessionItem.launchArguments` pass `--unfocused` for
-selected and warm panes. For prepared SSH commands, place it before the local
-`--` separator. Keep a directly opened native `OwnerStream` explicitly
+Have `SessionItem.launchArguments` in `swift/LoopflowMac/Views/SessionsView.swift`
+pass `--unfocused` for selected and warm panes. For prepared SSH commands,
+place it before the local `--` separator. Keep a directly opened native
+`OwnerStream` in `swift/Loopflow/Services/OwnerProtocol.swift` explicitly
 focused. Check the argv and wire assertions in `WorkCacheTests`,
 `WorkDestinationTests`, `SessionsStoreTests` and `OwnerStreamTests`.
 
@@ -85,6 +89,9 @@ keeps its saved warm tabs and worktree retention.
   predicts an opening and can hide the open action. A guard in the
   preparation loop alone leaves an unvisited pane displaying a spinner.
   Use the same decision for the placeholder and background preparation.
+- Record deliberate visits for the life of the registry. `recentTasks`
+  already includes prefetched Tasks and Tasks selected by
+  `focus(deliberate: false)`, so it cannot answer whether someone visited.
 - Exercise a restored board and saved pane layout. `presentView` can select
   a tile without a deliberate visit, and `WorkspacePanesView` can mount a
   retained shell from saved intent without going through Session
@@ -93,7 +100,7 @@ keeps its saved warm tabs and worktree retention.
 - Add a focused Swift regression covering prefetched Tasks and primaries,
   restored selection, and the first deliberate open. Check that the release
   registry still warms the same Work. Run
-  `scripts/test_desktop.sh --filter 'WorkspaceRetentionTests|SessionsStoreTests|WorkCacheTests|OwnerStreamTests'`.
+  `scripts/test_desktop.sh --filter 'WorkspaceRetentionTests|WorkspacePanesTests|SessionsStoreTests|WorkCacheTests|WorkDestinationTests|OwnerStreamTests'`.
   No Swift changes or checks for this Task's behavior have run yet.
 
 The user-facing text in `docs/sessions.md`,
@@ -108,6 +115,11 @@ view with `lf session resume <id> --unfocused` and check that the running
 Session keeps its size and colors. Focus or type in the new view and check
 that it takes the size. Close it and check the original width returns. Check
 that a background relay which reconnects leaves the active size alone.
+Also change pane focus during reconnect. The local relay drains pending
+terminal input again after the attach reply in `transport.rs`. The restart
+fixture changes focus before stopping the server and does not cover this
+interval. Check that Ghostty's focus report after the reply brings the holder
+up to date.
 
 Launch Dev beside release Desktop on a disposable repository with a saved
 selection and live Sessions. Before interacting, check for both preparations
@@ -116,4 +128,5 @@ alone misses relays that have already exec'd to `session attach`. Deliberately
 open one Task and check that only its terminal starts and can take the size.
 These mounted checks have not run.
 
-Next implement Desktop pane launch and Dev’s deliberate-open behavior.
+Next wire Desktop's pane launch and Dev's deliberate-open rule together, then
+verify that the first deliberate visit opens one pane with the expected argv.

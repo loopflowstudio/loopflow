@@ -22,8 +22,7 @@ then runs model and production-view checks with WindowServer access denied.
 Unset inherited `LF_*` and close stdin as described in `scripts/testing.md`.
 `DesktopHeadlessTests/workStates` checks loading, unavailable, empty and selected
 Work and taps the production navigation button. Report these as automated
-checks, not a live-window walkthrough. Hosted window checks remain optional;
-record what was not seen. With a display, `uv run python scripts/loopflow-dev.py
+checks. With a display, `uv run python scripts/loopflow-dev.py
 run-debug` builds and launches the development app; use `lf desktop state --json`
 and the commands in `docs/surfaces.md` to inspect and drive it.
 
@@ -64,14 +63,14 @@ when WindowServer is unavailable.
 
 # Loopflow Dev on the live Machine
 
-Use a display and an idle Dev window for this check. The launcher replaces
-the shared Loopflow Dev bundle.
+Use an unlocked, idle display. Set up the isolated Dev bundle below before
+launch. The normal launcher replaces the shared Loopflow Dev bundle.
 
 1. Record the server instance and executable hash with the installed entry
    (`~/.local/bin/lf server status`) and note the running holders with
    `pgrep -f 'lf holder run'`. Use that same `lf` for the commands below.
-2. Make a visible Swift edit, run `uv run python scripts/loopflow-dev.py run`,
-   and check the change over the live backlog.
+2. Make a visible Swift edit, build and open the isolated bundle as described
+   below, and check the change over the live backlog.
 3. Create a disposable Task with the installed `lf`. Watch it appear in Dev,
    rename it with `lf task update <id> --title 'Renamed QA Task'`, and check
    the row updates without relaunching. Abandon the Task afterwards.
@@ -91,11 +90,10 @@ until nobody is at the keyboard.
 even with the screen locked. Visible rendering and keyboard input need an
 unlocked display.
 
-When another Task's Dev is open (`pgrep -fl 'Loopflow Dev'`), `run` would
-quit it and replace the bundle its bundled `lf` server and holder run from.
-Build a second bundle instead: import `scripts/loopflow-dev.py`, set
-`DEV_APP` to `~/Applications/Loopflow Dev QA.app` and `DEV_BUNDLE_ID` to an
-ID ending in `.dev`, then call `cmd_build()` and `_install_dev_app()`.
+To build the isolated bundle, import `scripts/loopflow-dev.py`, set
+`DEV_APP` to `~/Applications/Loopflow Dev QA.app`, `DEV_EXECUTABLE` to
+`DEV_APP.stem` and `DEV_BUNDLE_ID` to a unique ID ending in `.dev`. Run
+`cmd_build()` and, if it succeeds, `_install_dev_app()`.
 LaunchServices won't resolve a bundle ID under `/tmp`, so `lf desktop view`
 fails there with `LSCopyApplicationURLsForBundleIdentifier`. Register with
 `lsregister -f`, open it with `LOOPFLOW_DEV_WAVE_REPO` and `--repo` after
@@ -117,9 +115,10 @@ These steps work with the screen locked, using that bundle ID in `LF_DESKTOP`:
   Count `claude --name <title>` processes to check that no second provider
   started.
 
-Dev restores every retained workspace from the Machine's saved layout and
-starts a `lf session attach` child for each (about 20 personal Sessions).
-Quit it once the check is done.
+On launch, Dev can restore retained workspaces from the Machine's saved layout
+and start `lf session attach` for each. Use a Machine with only disposable
+Sessions if this restoration can attach to personal terminals. Quit Dev when
+the check is done.
 
 For a change to the branch server, follow the private setup in
 [served launches](served-launches.md). For mounted app checks, use the

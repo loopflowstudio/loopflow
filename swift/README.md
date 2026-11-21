@@ -1,86 +1,27 @@
 # Loopflow for macOS
 
-```bash
-uv run python scripts/loopflow-dev.py run          # build and launch
-uv run python scripts/loopflow-dev.py install      # install without launching
-uv run python scripts/loopflow-dev.py run-debug    # launch with logs visible
-uv run python scripts/loopflow-dev.py test         # run Swift tests
-```
-
-`run` opens Loopflow Dev on your real Waves, Tasks and Sessions from any branch,
-and says what it opened:
+With [Loopflow installed](../docs/getting-started.md#install), run this from
+the repository root after a Swift edit.
 
 ```console
 $ uv run python scripts/loopflow-dev.py run
 Opening the Machine.
 ```
 
-On a branch that changes a wire type or adds a migration, the installed server
-and this build can't share the Machine, so Dev opens a copy of it:
+The command builds the checkout's Swift app and opens
+**Loopflow Dev** beside Loopflow, using the installed server and `lf`. Both
+apps show your live Waves, Tasks and Sessions. A Task edited in either app
+updates in the other. Open the same running Session in a terminal and in Dev
+to see its output and type into it from either view.
 
-```console
-$ uv run python scripts/loopflow-dev.py run
-This branch changes what the server sends (GraphCatalogEntry, GraphSubject, RoadmapTask, Write).
-Opening a copy of the Machine from 14:02; changes are refused there.
-```
+Each run quits the previous **Loopflow Dev** and opens this checkout's build.
+The running server and Sessions keep going. Use `run-debug` to see app
+logs as it runs.
 
-| Dev opens | With | Data | Changes | Session terminals |
-| --- | --- | --- | --- | --- |
-| The Machine | `run`, when the branch leaves wire and schema alone | Real, live | Work | Live |
-| A copy of the Machine | `run` on any other branch, or `run --copy` | Real, as of launch | Refused with one sentence | None |
-| A fake world | `run --world <dir>` | The recipe's | Work | Stand-in providers |
-
-`run-debug` takes the same flags and makes the same choice.
-
-**The Machine.** The installed server serves the window; the app's bundled `lf`
-runs its panes. The store is read and written but never migrated: only an
-install advances its schema (`lf install --dev` for a green main build,
-`lf install` for your stream's release).
-
-**A copy.** The branch's own server serves `~/.lf-copy`, a read-only copy of the
-store taken when `run` started; run it again for a newer one. The repository
-window shows the real backlog, Waves, Sessions and history. Clicking Run,
-steering, creating a Task or starting a Session answers with a Notice and does
-nothing:
-
-```
-This is a copy of the Machine from 14:02; make changes in Loopflow or with lf.
-```
-
-The window does not otherwise say it is a copy. Session rows show whether their
-processes are alive now; their panes have no terminal, and a pane or shell tab
-that tries to start one prints the same sentence, as any `lf` command that
-writes does there. Tracker and PR rows show
-what the store last recorded. The installed server, `~/.lf` and every running
-Session are untouched: `lf server status` reports the same `instance` before,
-during and after. For terminals or changes on a branch like this, use a fake
-world.
-
-`run` opens a copy when the bundled `lf` can't open the store, or when its
-`lf server describe --json` differs from the installed `lf`'s, and prints the
-store's refusal or the names of the types that differ. With no installed `lf` to
-compare with, it opens a copy and says so. When the store has a migration the
-branch lacks, neither opens: `run` prints the store's refusal and names
-`lf sync main`.
-
-**A fake world.** Build one, then open it:
-
-```bash
-cargo build -p loopflow --bin lf --bin lf-world
-target/debug/lf-world build one-task /tmp/w1
-uv run python scripts/loopflow-dev.py run --world /tmp/w1
-```
-
-`lf-world list` names the recipes. Keep the directory short: when
-`home/run/desktop/com.loopflow.mac.dev.sock` would pass the 103-byte socket
-limit, Dev opens the world without `lf desktop`, and `lf-world` says so when it
-builds, naming both lengths.
-
-A window belongs to the Machine it was opened on. A launch shows the windows
-saved for the Machine, copy or world it opens and none from another, so a world
-never shows your real repository's window. A window saved for another one opens
-the launch's repository instead. Only these flags choose what Dev
-opens; an `LF_HOME` in the launching shell does not.
+If the branch needs server features that your installation lacks, the affected
+read or action reports the mismatch. The rest of the window keeps working
+when both builds can connect. Test branch changes to `lf` on a
+[private Machine](../docs/dev/machines.md#one-main-machine).
 
 Repository selectors list only Git main checkouts. Linked worktrees stay visible
 only through the Task Work that owns them.
@@ -861,16 +802,11 @@ offline. Matching source and rebuild instructions ship inside the app under
 
 ## Build system
 
-`./dev` uses Swift Package Manager and installs to a stable application path
-so macOS permissions survive rebuilds. The app queries `lf` directly and starts
-only the selected Wave's `lf wave` process; it has no machine-wide service or
-remote-connection mode.
-
-The dev app supplies its bundled helper through `LF_BIN` and embedded shell PATH.
-Existing providers keep their environment when reattached. What `run` and
-`run-debug` open (the Machine, a copy of it or a fake world) is chosen after the
-build, as [the opening section](#loopflow-for-macos) describes; a copy
-also needs `lf-world`, which the launcher builds beside `lf`.
+The launcher builds with Swift Package Manager and uses a stable bundle at
+`~/Applications/Loopflow Dev.app` so macOS permissions survive rebuilds.
+It uses the installation's public `lf` entry at `~/.local/bin/lf`
+(`$LF_INSTALL_DIR/lf` for a custom installation). Swift edits need only a
+Swift build.
 
 The installed app updates itself (`AppUpdater`, Sparkle), including a custom
 location reached by the public `lf` entry or selected by `LF_APPLICATIONS_DIR`. It
@@ -880,11 +816,9 @@ appcast), never check for updates.
 
 | Command | What it does |
 | --- | --- |
-| `uv run python scripts/loopflow-dev.py run` | Build and launch on the Machine, or a copy when the branch can't read it |
-| `uv run python scripts/loopflow-dev.py run --copy` | Build and launch on a copy of the Machine |
-| `uv run python scripts/loopflow-dev.py run --world <dir>` | Build and launch on a fake world |
-| `uv run python scripts/loopflow-dev.py install` | Build and install without launching |
-| `uv run python scripts/loopflow-dev.py run-debug` | The same choice as `run`, with stdout |
+| `uv run python scripts/loopflow-dev.py run` | Build and open Loopflow Dev on the live Machine |
+| `uv run python scripts/loopflow-dev.py install` | Build and install Loopflow Dev without launching |
+| `uv run python scripts/loopflow-dev.py run-debug` | Build and open Loopflow Dev with logs visible |
 | `uv run python scripts/loopflow-dev.py build` | Build only |
 | `uv run python scripts/loopflow-dev.py ghostty-build` | Rebuild the pinned patched GhosttyKit and emit its SwiftPM artifact/checksum |
 | `uv run python scripts/loopflow-dev.py test` | Run unit tests |

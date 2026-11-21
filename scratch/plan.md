@@ -298,6 +298,21 @@ CI. Passed over: keeping `lf-world` for the benchmark alone.
    fixture (or its removal).
 5. **Docs and QA notes**, then the live run of all five acceptance steps.
 
+## Docs to read during implementation
+
+- Launch workflow and Machine selection: `swift/README.md`,
+  `docs/dev/machines.md`, `docs/dev/reference.md`, `docs/dev/codebase.md`.
+- Developer commands and fixtures: `scripts/README.md`, `scripts/testing.md`,
+  `scripts/benchmarks/desktop-performance/README.md`, `scripts/disk-cleanup.md`,
+  `rust/loopflow/tests/README.md`.
+- QA and verification: `.lf/qa/desktop.md`, `.lf/qa/auto.md`,
+  `.lf/qa/hooks.md`, `.lf/qa/resume.md`, `.lf/qa/session-reads.md`,
+  `.lf/qa/task-conversations.md`, `.lf/skills/qa.md`, `.lf/skills/verify.md`.
+- Dashboard launch note: `.lf/wave/intelligence/MEMORY.md`.
+
+The benchmark docs assume the private fixture in slice 4 succeeds. If that
+slice removes the native journey commands, remove their examples too.
+
 ## Done when
 
 `loopflow-dev.py run` on a Swift-only branch opens Dev on the live backlog

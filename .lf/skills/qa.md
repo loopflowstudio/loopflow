@@ -1,12 +1,14 @@
 ---
 extends: builtin
 ---
-## Starting a Task in an lf-world
+## Starting a Task on a private Machine
 
-`lf-world build one-task` makes a repository with no Graph file, so a Start
-takes up `code`, whose first step needs a provider login. Before the first
-Start, add `.lf/graphs/qa.yaml` (`- cmd: help task` then `- interactive: demo`),
-set `graph: qa` in `.lf/config.yaml`, commit and push to the world's origin.
+For a Swift UI change, open [Loopflow Dev](../../swift/README.md) on the live
+Machine and use disposable Work. For CLI and server changes, use the branch
+`lf` with a [private Machine and repository](../qa/served-launches.md).
+Before the first Start, add `.lf/graphs/qa.yaml` (`- cmd: help task` then
+`- interactive: demo`), set `graph: qa` in `.lf/config.yaml`, and commit and
+push to the disposable repository's origin.
 Then `lf task create '<request>' --run --json` (stdin closed) or a served
 `task.create {run: true}` admits the Task, holds its conversation and starts
 the Graph from setup. Pass the words positionally: `--title` alone records no

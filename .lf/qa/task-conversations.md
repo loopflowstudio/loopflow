@@ -1,16 +1,16 @@
-Read when the change touches a Task's conversations or headless Work, using lf-world.
+Read when the change touches a Task's conversations or headless Work.
 
 # Task conversation lifetime
 
-`cargo build -p loopflow --bin lf-world`, then `lf-world build one-task <dir>`
-writes a private Machine whose `bin/claude` stand-in echoes each line; its
-printed environment holds `LF_HOME`, the provider homes and `PATH`. Under an
-isolated `HOME`, give that home a Git `user.email` first or the build fails at
-claiming. Copy `lf` and `lf-world` out of `target/` before a long walkthrough so
-a rebuild can't change the binary under its owners; to refresh the copy, `rm` it
-before `cp`: overwriting it in place gets the next exec killed (exit 137). `lf task checkout <task>`
-warms the Task's conversation detached; `lf session list --json` maps it to its
-Session. Bare `lf task retire` runs one pass over every pending Task. Attach the
+Set up a [private Machine and repository](served-launches.md) with the branch
+`lf`. Before starting the server, put a stand-in `claude` first on the
+private `PATH` that reads the opening turn and echoes lines from the terminal.
+Copy the branch `lf` out of
+`target/` before a long walkthrough so a rebuild cannot change the binary
+under its owners. Create a disposable Task with `lf task create '<words>'`.
+`lf task checkout <task>` warms the Task's conversation detached. Look up its
+Session with `lf session list --json`. Bare `lf task retire` runs one pass
+over every pending Task. Attach the
 Task's Session in a PTY with `lf session resume <session>`, type a line without
 Enter as a draft, and close the PTY: the holder keeps it running. Nothing
 schedules checkout cleanup in a private home; call `lf task retire <task>` to
@@ -35,11 +35,9 @@ wait for text only the new provider prints.
 
 # Headless Work and earlier-build owners
 
-lf-world's `launchctl` stub refuses `bootstrap`, so start the branch's
-`lf server run` (stdin closed) before any Task launch there. The Graph is
-positional: `lf task run <task> <graph> --json`. Headless steps need the fixture
-account above. For a headless step that waits, put a `claude` ahead of the
-world's on `PATH` that, when neither stdin nor stdout is a terminal, reads one
+Start the branch's `lf server run` with stdin closed before running
+`lf task run <task> <graph> --json`. For a headless step that waits, use
+a stand-in `claude` that, when neither stdin nor stdout is a terminal, reads one
 line (stdin stays open for steers, so never `cat` it), waits for a marker
 file, then prints a stream-json `result` line. A detached launch shows as
 `lf task run …` with parent 1 and its stdout on `logs/graph-<id>.log`; `-b` at
@@ -72,7 +70,7 @@ grep Conversation` once a second: `died … · starting again`, then `running
 (started again …, attempt n)`. To see the `starting` between them (about
 150 ms), read `status_line` from `lf task status <task> --json` in a loop. A second kill with no finished turn waits the
 backoff; `outlook.at` in `--json` says when, and the start lands on that
-second. The world stand-in finishes no turns, so the count never resets: five
+second. The stand-in finishes no turns, so the count never resets: five
 kills give up with "started 5 times". Type `quit` through `lf resume --task` in
 a PTY for exit 0; Ctrl+] steps away and leaves it running. A reboot is SIGKILL
 to the server, every `lf holder run` and every provider, then a new server.
@@ -88,9 +86,8 @@ read `died … (exit 137)`; a `quit` there means an end was settled after the
 pass reaped its agent. A shutdown is `kill -TERM -<holder pgid>` and the server.
 
 Replace a binary a server or holder runs with `rm` then `cp`: `cp` over it
-breaks its macOS signature and every next exec dies with 137. When the
-branch's own migration changed, rebuild and copy `lf-world` too and build a
-new world: the old home fails with "checksum does not match this lf build".
+breaks its macOS signature and every next exec dies with 137. If the branch's
+draft migration changed, use a fresh private home.
 
 For a provider that is missing, start the server from a wrapper whose `PATH`
 has no `claude` (starts run with the server's environment, not the CLI's):
@@ -103,8 +100,8 @@ To skip the 15 minutes of backoff before the five-start give-up, set
 `starts_since_turn=4,last_started_at=unixepoch()-3600` on the Session's
 `agent_sessions` row, then kill twice.
 
-A returning user: in a fresh `LF_HOME` with the world's `launchctl` and
-`claude` stand-ins first on `PATH`, run the installed
+A returning user: in a fresh `LF_HOME` with the provider stand-in first on
+the private `PATH`, run the installed
 `/Applications/Loopflow.app/Contents/MacOS/lf server run` detached, then its
 `task create` and `task checkout` (the installed lf starts the conversation
 itself). Call it by that path: through a symlink of another name, checkout
@@ -113,7 +110,7 @@ same home: the dead one resumes, the live one keeps its provider. The
 installed build's `lf holder run` has no QA path in its argv; find it with
 `lsof -c lf | grep <home>` and stop that pid.
 
-The world stand-in writes no transcript, so every thread it starts reads as
+The stand-in writes no transcript, so every thread it starts reads as
 lost: the next start (the pass's or `lf resume`'s) opens a fresh thread
 (`--session-id <new>`) and prints "This conversation has no saved claude
 transcript; starting it again from its first request." To check a plain resume (`--resume
@@ -126,10 +123,10 @@ resume` shows it, a viewer attaching to the pass's terminal later does not.
 
 A Task run: add `.lf/graphs/qarun.yaml` (`- implement` then `- interactive:
 ship-review`), commit it, and `lf task run <task> qarun`. Its headless step
-needs a `claude` ahead of the world's on both the server's and the CLI's
-`PATH` that, for `-p`, reads one line, waits for a marker file, prints a
-stream-json `result` line, and otherwise execs the world's. Kill the carrier's
-process group (`kill -9 -<pid of lf task run>`) and the step's provider: the
+needs a stand-in `claude` first on both the server's and the CLI's
+private `PATH` that, for `-p`, reads one line, waits for a marker file, prints a
+stream-json `result` line, and otherwise reads and echoes terminal input. Kill
+the carrier's process group (`kill -9 -<pid of lf task run>`) and the step's provider: the
 run reads `Run died at implement; the server's next pass carries it again`,
 then a new `lf task run <task>` (parent: the server) continues at `implement`.
 Killing only the carrier leaves the Graph running; it arrives by itself.

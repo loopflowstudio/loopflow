@@ -14,7 +14,7 @@ uv run python scripts/check_architecture.py            # architecture owners and
 uv run python scripts/due_removals.py                  # leaving store members and their drop dates
 uv run python scripts/test.py --list                   # affected-suite plan
 uv run python scripts/test.py --reuse-passing          # affected suites once per exact tree
-uv run python scripts/desktop_performance.py run --cli target/debug/lf --output /tmp/desktop-check --samples 1  # needs lf-world built beside lf
+uv run python scripts/desktop_performance.py run --cli target/debug/lf --output /tmp/desktop-check --samples 1
 lf telemetry-daily                                     # maintainer report
 ```
 
@@ -342,7 +342,7 @@ tree: stale inventory fails both Python tests and Desktop packaging.
 `scripts/` contains runnable validation and demo scripts. Use these for branch validation and manual UI walkthroughs.
 
 ```bash
-uv run python scripts/loopflow-dev.py run-debug     # build and launch Loopflow (macOS)
+uv run python scripts/loopflow-dev.py run-debug     # open Loopflow Dev on the live Machine with logs (macOS)
 uv run python scripts/check_swift_multiplatform_boundaries.py  # Stage 01 boundary guardrails
 ```
 

@@ -1,9 +1,7 @@
 //! Consistent copies of a live store: the install switch's backup and the
-//! candidate's isolated executable check both start from one. A copy that is
-//! sealed stays as it was taken: its file mode is how a server knows it.
+//! candidate's isolated executable check both start from one.
 
 use std::path::{Path, PathBuf};
-use std::time::SystemTime;
 
 use rusqlite::{Connection, OpenFlags};
 
@@ -31,34 +29,6 @@ pub fn snapshot(source: &Path, destination: &Path) -> StoreResult<()> {
         None,
     )?;
     Ok(())
-}
-
-/// Make the copy at `store` read-only as of now: fold its WAL into the file,
-/// stamp the file with the time and take every write bit off it.
-pub fn seal(store: &Path) -> StoreResult<()> {
-    Connection::open(store)?.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()))?;
-    let io = |error: std::io::Error| {
-        super::StoreError::InvalidData(format!("seal {}: {error}", store.display()))
-    };
-    let file = std::fs::File::options()
-        .write(true)
-        .open(store)
-        .map_err(io)?;
-    file.set_modified(SystemTime::now()).map_err(io)?;
-    let mut permissions = file.metadata().map_err(io)?.permissions();
-    permissions.set_readonly(true);
-    file.set_permissions(permissions).map_err(io)
-}
-
-/// When the sealed copy at `store` was taken; `None` for a store that can be
-/// written, or that is absent.
-pub fn sealed_at(store: &Path) -> Option<SystemTime> {
-    let metadata = std::fs::metadata(store).ok()?;
-    metadata
-        .permissions()
-        .readonly()
-        .then(|| metadata.modified().ok())
-        .flatten()
 }
 
 fn wal_path(db: &Path) -> PathBuf {
@@ -89,32 +59,8 @@ fn clone_file(_source: &Path, _destination: &Path) -> std::io::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{seal, sealed_at, snapshot};
+    use super::snapshot;
     use rusqlite::Connection;
-
-    #[test]
-    fn a_sealed_copy_reads_and_refuses_writes() {
-        let dir = tempfile::tempdir().unwrap();
-        let source = dir.path().join("live.db");
-        Connection::open(&source)
-            .unwrap()
-            .execute_batch(
-                "PRAGMA journal_mode=WAL; CREATE TABLE t(v INTEGER); INSERT INTO t VALUES(1);",
-            )
-            .unwrap();
-        let copy = dir.path().join("copy.db");
-        snapshot(&source, &copy).unwrap();
-        assert_eq!(sealed_at(&copy), None);
-        let before = std::time::SystemTime::now() - std::time::Duration::from_secs(2);
-        seal(&copy).unwrap();
-        assert!(sealed_at(&copy).unwrap() >= before);
-        let reader = Connection::open(&copy).unwrap();
-        let rows: i64 = reader
-            .query_row("SELECT count(*) FROM t", [], |row| row.get(0))
-            .unwrap();
-        assert_eq!(rows, 1);
-        assert!(reader.execute("INSERT INTO t VALUES(2)", []).is_err());
-    }
 
     #[test]
     fn snapshot_keeps_rows_committed_only_to_the_wal() {

@@ -182,15 +182,6 @@ pub(super) async fn run() -> Result<()> {
     let tickets = Arc::new(Tickets::default());
     let subscriptions = Arc::new(Subscriptions::default());
     let (remote_control, remote_requests) = mpsc::channel(8);
-    if super::copy::taken().is_some() {
-        // No mobile listener: a status request hears that at once.
-        drop(remote_requests);
-        tracing::info!(%instance, socket = %path.display(), "Loopflow server ready on a copy of the Machine");
-        return tokio::select! {
-            _ = tickets.expiring() => unreachable!("ticket expiry runs until shutdown"),
-            result = local(listener, instance, executable_sha256, slots, clients, remote_control, tickets.clone(), subscriptions, None) => result,
-        };
-    }
     super::wake::start();
     super::maintenance::start();
     super::maintenance::start_plan_exchange();
@@ -730,13 +721,6 @@ pub(super) async fn session<C: Carrier>(
             send(lines, &busy(&id, "open", MAX_OPEN)).await?;
             continue;
         };
-        if let Some(refusal) = match &start {
-            Start::Request(operation, ..) if operation.changes() => super::copy::refusal(),
-            _ => None,
-        } {
-            send(lines, &ServerMessage::error(Some(id), refusal)).await?;
-            continue;
-        }
         let entry = match start {
             Start::Request(ref operation, Some(_), _)
                 if !matches!(operation, Operation::Read(_)) =>

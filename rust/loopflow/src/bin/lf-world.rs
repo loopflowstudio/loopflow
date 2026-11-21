@@ -6,7 +6,7 @@ use loopflow::world::{recipes, World, WorldEnv};
 
 #[derive(Parser, Debug)]
 #[command(name = "lf-world")]
-#[command(about = "Build fake Loopflow worlds for demos and tests, or copy the Machine read-only")]
+#[command(about = "Build fake Loopflow worlds for demos and tests")]
 struct Args {
     #[command(subcommand)]
     command: Command,
@@ -16,8 +16,6 @@ struct Args {
 enum Command {
     /// Build a recipe into a new directory and print its environment
     Build { recipe: String, dir: PathBuf },
-    /// Replace a world with a read-only copy of this Machine's store and print its environment
-    Copy { dir: PathBuf },
     /// List recipes with their rung and what each demos
     List,
 }
@@ -32,7 +30,6 @@ fn main() -> Result<()> {
             (recipe.build)(&world)?;
             describe(&world.finish()?)?;
         }
-        Command::Copy { dir } => describe(&loopflow::world::copy(&dir)?)?,
         Command::List => {
             for recipe in recipes::RECIPES {
                 println!(

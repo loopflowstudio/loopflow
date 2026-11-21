@@ -64,25 +64,30 @@ helper or explicit private home still prepares its server on first use.
 - `LOOPFLOW_TEST_LF="$HOME/.local/bin/lf" swift test --package-path swift --skip-build --filter failedSetupDoesNotRegisterOnWorkRefresh` passed both private-home recovery cases. The checkout had no built CLI.
 - The installed `lf server status` reported a ready socket. The mounted check remains at QA.
 
+The sealed-copy command, server mode, write refusals and storage seal are
+gone. The install and migration paths still use the WAL-aware snapshot.
+The branch's `lf-world --help` lists only build, list and help.
+
+- `cargo test -p loopflow --test integration -- task_list_cli:: session_list_subscribe::`
+  passed four tests. The Task reads use a private repository and store with
+  Tasks created through the production writer. Open search, Done pagination
+  and age filtering, a rename on the list stream, and numbered Task and
+  Session requests run through the branch CLI. The numbered-request test
+  shares the Task fixture so it also runs on Linux. The provider-lifetime
+  fixture in `session_list_subscribe.rs` runs on macOS.
+- `cargo test -p loopflow --lib -- a_task_takes_up_its_waves_graph_and_keeps_the_one_it_named mechanical_failure_retains_earlier_step_success`
+  passed both tests. A Task at review advertised its next command. A stopped
+  Graph reported the failed command after its successful step.
+- `cargo test -p loopflow-storage --lib snapshot_keeps_rows_committed_only_to_the_wal`
+  passed for the snapshot used by installation and migration.
+- `cargo test -p loopflow --test served_reads configuration_edits_use_the_server_without_work_processes`
+  passed. The server reported ready and handled configuration reads and
+  writes with an unreadable Work store.
+- `cargo clippy --all-targets -- -D warnings` passed.
+
 ## Remaining implementation
 
-1. **Next — move CLI coverage and retire the sealed copy.** Start in
-   `rust/loopflow/tests/world_recipes.rs` and `copy_world.rs`. Move the task
-   queries to minimal isolated fixtures covering Done pagination and
-   closed-since, open-only title/identifier filtering, list subscriptions that
-   emit only on change, Task status shape and next step, and a stopped run's
-   failed step. Fold Session/status subscriptions into
-   `session_list_subscribe.rs`. Existing transport coverage exercises live
-   attachment, so drop the world test that exercised only its stub provider.
-   Run the moved fixtures through the normal `lf` entry points.
-   Then delete the sealed copy's `lf-world` entry and its startup and write
-   refusal paths (`server/copy.rs`, `Operation::changes`, CLI `write_refused`,
-   `installation::server::stop`, and storage `copy::{seal,sealed_at}`).
-   Keep `copy::snapshot` and its WAL test for migration backup and install
-   validation. Keep server identity and readiness checks. The recipe builder
-   still has consumers in step 2. Delete `rust/loopflow/src/world/` and the
-   `lf-world` binary registration with the last consumer.
-2. **Remove world consumers.** Delete the `world:` entries in
+1. **Next — remove world consumers.** Delete the `world:` entries in
    `scripts/screenshots.yaml` and the builder in `generate_screenshots.py`.
    Keep empty and mock screenshots and website capture. Remove the cycle
    check's `--world` and use `mock-waves` for `--sheet`. Remove
@@ -97,8 +102,9 @@ helper or explicit private home still prepares its server on first use.
    `DesktopNativeSessionFixture` with their docs. Remove the inert
    `LF_DB_PATH` launch setting. Preserve independent private-snapshot
    commands, `RepositoryWorkspace.machine` and Xcode/private-machine helper
-   build commands.
-3. **Sweep remaining references and exercise changed automation.** The main
+   build commands. Delete `rust/loopflow/src/world/` and the `lf-world`
+   binary registration with their last consumer.
+2. **Sweep remaining references and exercise changed automation.** The main
    Dev and QA docs were updated in `1ba82f64d0`. Check Rust, Swift, scripts,
    tests, CI and current docs again after consumer deletion. Check
    the moved Rust fixtures by name, focused Python automation and Desktop

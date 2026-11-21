@@ -11,9 +11,6 @@
 //! without an account or network; a `gh` answers pull-request reads from files
 //! under `github/pulls/` and refuses everything else, so nothing run inside a
 //! World reaches GitHub; a `launchctl` records launchd jobs instead of loading them.
-//!
-//! [`copy`] makes a World with no recipe: its store is a read-only copy of the
-//! Machine's, which its server serves and refuses to change.
 
 pub mod recipes;
 
@@ -1128,83 +1125,9 @@ impl World {
     }
 }
 
-/// Replace `dir` with a world holding a read-only copy of this Machine's
-/// store, migrated to this build's schema, and return its environment. The
-/// Machine is the one this process is on: `LF_HOME`, else `~/.lf`. Its store
-/// is read under one read transaction and never written.
-///
-/// # Errors
-/// When the Machine has no store, `dir` holds something other than a world,
-/// or this build cannot migrate the copy.
-pub fn copy(dir: &Path) -> Result<WorldEnv> {
-    let machine = loopflow_execution::store::lf_home_dir();
-    let source = machine.join("loopflow.db");
-    if !source.exists() {
-        bail!(
-            "there is no Machine to copy: {} is absent; `lf-world build <recipe> <dir>` makes a fake world",
-            source.display()
-        );
-    }
-    if dir.exists() {
-        if !dir.join("env.json").exists() {
-            bail!(
-                "{} exists and is not a world; a copy replaces only a world",
-                dir.display()
-            );
-        }
-        if let Ok(home) = dir.join("home").canonicalize() {
-            if home == machine.canonicalize()? {
-                bail!("{} is the Machine being copied", dir.display());
-            }
-            loopflow_execution::installation::server::stop(&home)?;
-        }
-        std::fs::remove_dir_all(dir)?;
-    }
-    let (dir, env) = prepare(dir)?;
-    // Written first, so a copy that was interrupted is still a world the next
-    // one replaces.
-    std::fs::write(
-        dir.join("env.json"),
-        serde_json::to_string_pretty(&env)? + "\n",
-    )?;
-    if let Err(error) = fill(&machine, &env) {
-        // A store that was copied and never sealed is not left behind.
-        let _ = std::fs::remove_dir_all(&dir);
-        return Err(error);
-    }
-    Ok(env)
-}
-
-/// Copy the Machine's stores and configuration into the world at `env`,
-/// migrate them to this build's schema and seal them.
-fn fill(machine: &Path, env: &WorldEnv) -> Result<()> {
-    // The person's name and which repositories the Machine shows.
-    if machine.join("config.yaml").exists() {
-        std::fs::copy(machine.join("config.yaml"), env.lf_home.join("config.yaml"))?;
-    }
-    let stores = ["loopflow.db", "history.db"]
-        .map(|name| (machine.join(name), env.lf_home.join(name)))
-        .into_iter()
-        .filter(|(source, _)| source.exists())
-        .collect::<Vec<_>>();
-    for (source, destination) in &stores {
-        loopflow_storage::copy::snapshot(source, destination)?;
-    }
-    // A private home migrates itself: this open applies the branch's schema.
-    env.enter();
-    drop(loopflow_execution::store::open_sqlite(
-        &env.lf_home.join("loopflow.db"),
-    )?);
-    for (_, destination) in &stores {
-        loopflow_storage::copy::seal(destination)?;
-    }
-    Ok(())
-}
-
 /// Create `dir`, which must not exist, with what every World has: its home,
 /// empty provider homes and the stand-ins in `bin/`. Returns the canonical
-/// directory and its environment. The directory is private to the account: a
-/// copy holds the whole store.
+/// directory and its environment.
 fn prepare(dir: &Path) -> Result<(PathBuf, WorldEnv)> {
     use std::os::unix::fs::DirBuilderExt;
     std::fs::DirBuilder::new()

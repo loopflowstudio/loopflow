@@ -12,7 +12,7 @@ running through an update, and what comes back after a crash.
 lf resume                          # this checkout's ongoing conversation (Task, Wave, or repo)
 lf resume LOO-12                   # a Task's conversation, from anywhere
 lf resume <session>                # an exact Session or provider conversation ID
-lf resume LOO-12 --unfocused       # attach without resizing the view already using it
+lf resume LOO-12 --unfocused       # attach without assuming this terminal has focus
 lf open --task LOO-12 --tab        # attach a second view in a sibling tab
 lf open --task LOO-12 --focus      # reveal an existing view without opening a new one
 ```
@@ -21,12 +21,12 @@ A conversation can be open in multiple terminals (and Desktop) at once, and
 every view can type: a draft started in one appears in the others. Size, colors,
 and the agent's focus follow the view you are using: the live view you most
 recently focused or typed in. Running `lf resume` in a terminal takes the size
-right away; opening a second Desktop window, background tabs, a non-terminal
-stdin attach, or `lf resume --unfocused` leaves the active view untouched until
-you focus the new view, type in it, or close the active one. A view that
-reconnects on its own keeps the focus it last had, so a background terminal
-never steals the size after a disconnect. See [Workspaces](workspaces.md) for
-host support (`desktop`, `rex`, `cmux`, `herdr`, `tmux`, `terminal`).
+right away. Desktop panes, views with piped stdin, and `lf resume --unfocused`
+attach without assuming focus. They take the size when the terminal reports
+focus, you type, or the current owner leaves and they are next in line.
+Ghostty reports focus on attach if its pane is already focused. A reconnecting
+view uses the last focus it observed. See [Workspaces](workspaces.md) for host
+support (`desktop`, `rex`, `cmux`, `herdr`, `tmux`, `terminal`).
 
 | If the conversation is… | `lf resume` does… |
 |---|---|

@@ -21,8 +21,11 @@
   here". A terminal that never reports focus still reconnects as focused.
 - **`--unfocused` is an ordinary flag** on `lf session resume`, usable by a
   person who wants to watch without taking the size.
-- **A remote `lf` from before `--unfocused` fails the pane** with its own
-  usage error; nothing detects the version first.
+- **SSH initial focus belongs to the relay running beside the viewer's TTY.**
+  Prepared remote panes use a local `lf session attach --` prefix. The
+  remote command bridges the protocol, so a flag appended to the remote
+  command does not configure the local relay. Use the local prefix for
+  initial focus and keep the optional field on the wire.
 - **`owner` keeps both meanings** (Session owner process, sizing view). The
   rename touches events live holders send and would be its own Task.
 - **A focus report takes effect immediately**, including Ghostty's initial

@@ -1110,6 +1110,7 @@ fn take_controlling_terminal(command: &mut Command) {
 /// in the background so the viewer never blocks on it; its stdin stays open.
 struct Terminal {
     child: Child,
+    keyboard: Option<std::fs::File>,
     screen: std::sync::Arc<std::sync::Mutex<Vec<u8>>>,
 }
 impl Terminal {
@@ -1130,7 +1131,11 @@ impl Terminal {
                 written.lock().unwrap().extend_from_slice(&buffer[..read]);
             }
         });
-        Self { child, screen }
+        Self {
+            child,
+            screen,
+            keyboard: None,
+        }
     }
 
     fn spawn(command: Command) -> Self {
@@ -1157,6 +1162,7 @@ impl Terminal {
         let mut master = unsafe { std::fs::File::from_raw_fd(master) };
         // SAFETY: the fresh slave descriptor is owned only by this File.
         let slave = unsafe { std::fs::File::from_raw_fd(slave) };
+        let keyboard = placement.map(|_| master.try_clone().unwrap());
         if let Some(valid) = placement {
             // SAFETY: slave is a live PTY; ttyname returns a terminated name.
             let tty = unsafe { std::ffi::CStr::from_ptr(libc::ttyname(slave.as_raw_fd())) }
@@ -1184,7 +1190,11 @@ impl Terminal {
                 written.lock().unwrap().extend_from_slice(&buffer[..read]);
             }
         });
-        Self { child, screen }
+        Self {
+            child,
+            screen,
+            keyboard,
+        }
     }
     /// Panics with the screen when the viewer has left the conversation.
     fn assert_viewing(&mut self, what: &str) {
@@ -3369,10 +3379,21 @@ done
 }
 
 #[test]
-fn a_held_pane_reads_reconnecting_until_the_next_server_answers() {
+fn a_resumed_relay_keeps_focus_across_server_restarts() {
     let fixture = Fixture::new();
     let mut service = ServerProof::start(&fixture, false);
-    let path = fixture.waiting_provider();
+    let path = fixture.provider(
+        r#"#!/bin/bash
+if [ "$1" = --version ]; then echo '2.1.302'; exit; fi
+stty raw -echo < /dev/tty
+printf '%s:%s:%s\n' "$$" "$LF_CAPTURE_KEY" "$*" >> "$HOME/launches"
+for marker in blurred typed; do
+    IFS= read -r -d R answer < /dev/tty
+    printf 'observed-%s' "$marker"
+done
+read -r answer < /dev/tty
+"#,
+    );
     let mut launch = fixture.command(&["-a", "claude", "resume"]);
     launch.env("PATH", &path);
     let first = Terminal::spawn_with_placement(launch, Some(true));
@@ -3382,21 +3403,44 @@ fn a_held_pane_reads_reconnecting_until_the_next_server_answers() {
     let session = session_of(&fixture.sql(), &launched);
     let held = fixture.terminal_of(&session);
     first.stop();
-    // Desktop's pane: the Session's held terminal, with a native status row.
+
+    let wide_view = || fixture.held_attach(&held, json!({"kind":"attach","cols":120,"rows":40}));
+    let owner = |cols: u64| {
+        let (socket, _) = fixture.held_entrance(&held);
+        let mut probe = Viewer::new(socket);
+        probe.request(json!({"kind":"attach","focused":false,"cols":40,"rows":20}));
+        let reply = probe.until_reply();
+        probe.accept(&reply);
+        let items = probe.until_event("owner");
+        assert_eq!(events(&items, "resize")[0]["cols"], cols);
+        reply["owner"].as_str().unwrap().to_owned()
+    };
+    let mut wide = wide_view();
+    let mut regular = service.command(&["session", "resume", &session]);
+    regular.env("PATH", &path);
+    let mut regular = Terminal::spawn_with_placement(regular, Some(true));
+    regular.wait_text("\x1b[?1004h");
+    let regular_id = owner(80);
+    assert_ne!(regular_id, wide.id);
+    until_owner(&mut wide, &regular_id);
+    regular.stop();
+    let wide_id = wide.id.clone();
+    until_owner(&mut wide, &wide_id);
+
+    let mut piped = service.command(&["session", "resume", &session]);
+    piped.env("PATH", &path);
+    let mut piped = Terminal::spawn(piped);
+    piped.wait_text("\x1b[?1004h");
+    assert_eq!(owner(120), wide.id);
+    piped.stop();
+
     let status = ConnectionStatus::new(fixture.home.path().join("connection.sock"));
-    let mut command = service.command(&[
-        "session",
-        "attach",
-        "--terminal",
-        &held,
-        "--session",
-        &session,
-    ]);
+    let mut command = service.command(&["session", "resume", &session, "--unfocused"]);
     command
         .env("PATH", &path)
         .env("LF_SERVER", "1")
         .env("LF_SERVER_STATUS", &status.path);
-    let mut view = Terminal::spawn(command);
+    let mut view = Terminal::spawn_with_placement(command, Some(true));
     let ready = |after: u64| {
         let deadline = Instant::now() + Duration::from_secs(30);
         loop {
@@ -3412,13 +3456,36 @@ fn a_held_pane_reads_reconnecting_until_the_next_server_answers() {
             std::thread::sleep(Duration::from_millis(20));
         }
     };
-    let generation = ready(0);
-    service.stop();
-    wait_server_status(&status, "reconnecting", generation + 1);
-    service.child = Some(service.launch());
-    service.ready();
-    ready(generation);
-    view.assert_viewing("the held pane");
+    let mut generation = ready(0);
+    assert_eq!(owner(120), wide.id);
+    for (keys, marker, focused) in [
+        (b"x\x1b[O\x1b[1;1R".as_slice(), "observed-blurred", false),
+        (b"yR".as_slice(), "observed-typed", true),
+    ] {
+        view.keyboard.as_mut().unwrap().write_all(keys).unwrap();
+        view.wait_text(marker);
+        service.stop();
+        wait_server_status(&status, "reconnecting", generation + 1);
+        // Give the new server a sizing view before allowing the relay to reconnect.
+        let pid = view.child.id() as libc::pid_t;
+        // SAFETY: this fixture owns the live viewer process.
+        assert_eq!(unsafe { libc::kill(pid, libc::SIGSTOP) }, 0);
+        service.child = Some(service.launch());
+        service.ready();
+        wide = wide_view();
+        // SAFETY: resume the same viewer after its replacement peer is attached.
+        assert_eq!(unsafe { libc::kill(pid, libc::SIGCONT) }, 0);
+        generation = ready(generation);
+        assert_eq!(owner(if focused { 80 } else { 120 }) != wide.id, focused);
+        if !focused {
+            view.wait_text("\x1b[5n");
+            view.keyboard
+                .as_mut()
+                .unwrap()
+                .write_all(b"\x1b[0n")
+                .unwrap();
+        }
+    }
     view.stop();
     // SAFETY: the pid the fixture's provider recorded for itself.
     unsafe { libc::kill(provider, libc::SIGKILL) };

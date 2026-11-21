@@ -234,6 +234,11 @@ pub(super) fn run_with_io(
         }) if !preview => Some(connection),
         _ => None,
     };
+    let unfocused = connection.is_some_and(|connection| connection.unfocused);
+    if unfocused {
+        // The destination bridges bytes. The local relay owns this option.
+        cmd.retain(|arg| arg != "--unfocused");
+    }
     // Only a person at a terminal views the remote Session; scripts and pipes
     // keep the plain SSH command, whose stdin reaches the provider directly.
     let attended = !cli.batch && std::io::stdin().is_terminal();
@@ -255,7 +260,7 @@ pub(super) fn run_with_io(
                 !record.open_argv.is_empty(),
                 "Session has no viewer launch command"
             );
-            loopflow_execution::transport::relay_over(&record.open_argv)?;
+            loopflow_execution::transport::relay_over(&record.open_argv, unfocused)?;
             // Read the returned Session without repeating New/fork or starting
             // another provider. JSON belongs after the terminal has returned.
             let bytes = runtime.block_on(request(
@@ -272,7 +277,7 @@ pub(super) fn run_with_io(
             output(&mut io, &String::from_utf8(bytes)?)?;
             return Ok(());
         }
-        let record = prepared_remotely(record, &target, forward_agent)?;
+        let record = prepared_remotely(record, &target, forward_agent, unfocused)?;
         if connection.json || cli.json {
             output(&mut io, &format!("{}\n", serde_json::to_string(&record)?))?;
         } else {
@@ -332,11 +337,10 @@ pub(super) fn run_with_io(
                 io,
             )
         }
-        None if viewer => loopflow_execution::transport::relay_over(&ssh_argv(
-            &target.route,
-            forward_agent,
-            &preamble,
-        )?),
+        None if viewer => loopflow_execution::transport::relay_over(
+            &ssh_argv(&target.route, forward_agent, &preamble)?,
+            unfocused,
+        ),
         None => run_ssh(&target.route, forward_agent, &preamble),
     }
 }
@@ -372,6 +376,7 @@ pub(super) fn prepared_remotely(
     record: SessionRecord,
     target: &Machine,
     forward_agent: bool,
+    unfocused: bool,
 ) -> anyhow::Result<SessionRecord> {
     let mut record = viewed_remotely(record, target, forward_agent)?;
     if !record.open_argv.is_empty() {
@@ -381,8 +386,10 @@ pub(super) fn prepared_remotely(
                 std::env::current_exe()?.to_string_lossy().into_owned(),
                 "session".into(),
                 "attach".into(),
-                "--".into(),
-            ],
+            ]
+            .into_iter()
+            .chain(unfocused.then(|| "--unfocused".into()))
+            .chain(["--".into()]),
         );
     }
     Ok(record)

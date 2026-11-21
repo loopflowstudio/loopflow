@@ -268,6 +268,18 @@ fn remote_session_open_returns_an_owner_pinned_terminal_command() {
         assert_eq!(fixture.json(&arguments)["open_argv"], opened["open_argv"]);
     }
     assert_eq!(&argv[1..4], &["session", "attach", "--"]);
+    let background = fixture.json(&[
+        "--machine",
+        "mini",
+        "resume",
+        &id,
+        "--prepare",
+        "--json",
+        "--unfocused",
+    ]);
+    let args = background["open_argv"].as_array().unwrap();
+    assert_eq!(&args[1..5], &["session", "attach", "--unfocused", "--"]);
+    assert_eq!(&args[5..], &opened["open_argv"].as_array().unwrap()[4..]);
     let script = argv.last().unwrap();
     assert!(script.contains("LF_VIEWER_STREAM='1'"), "{script}");
     assert!(script.contains("/remote/private home"), "{script}");

@@ -301,6 +301,12 @@ pub fn detach_current() -> Result<bool> {
     Ok(true)
 }
 
+#[derive(Clone, Copy, Debug, Default)]
+pub struct ViewerOptions {
+    pub json: bool,
+    pub unfocused: bool,
+}
+
 /// Reopen a recorded Session as a chat or a work session. Only an interactive
 /// Session has a last screen to preview. A held terminal decides again under
 /// its own launch lock, so this process releases `launch_lock` before it
@@ -308,7 +314,7 @@ pub fn detach_current() -> Result<bool> {
 /// when a held terminal took it.
 pub(crate) fn delegate_session(
     id: &str,
-    json: bool,
+    viewer: ViewerOptions,
     preview: bool,
     launch_lock: File,
 ) -> Result<Option<(crate::harness::LaunchKind, File)>> {
@@ -318,21 +324,28 @@ pub(crate) fn delegate_session(
     }
     drop(launch_lock);
     let mut argv: Vec<String> = std::env::args().collect();
-    if json {
+    if viewer.json {
         // The viewer owns this continuation, including an early detach.
         argv.retain(|arg| arg != "--json");
     }
-    delegate(kind, json.then_some(id), preview.then_some(id), argv)?;
+    delegate(
+        kind,
+        viewer.json.then_some(id),
+        preview.then_some(id),
+        viewer.unfocused,
+        argv,
+    )?;
     Ok(None)
 }
 
 /// Open the resulting Session after a fork or thread replacement, without
 /// repeating the command that prepared it.
-pub(crate) fn delegate_prepared_session(id: &str, json: bool) -> Result<Delegation> {
+pub(crate) fn delegate_prepared_session(id: &str, viewer: ViewerOptions) -> Result<Delegation> {
     delegate(
         session_kind(id),
-        json.then_some(id),
+        viewer.json.then_some(id),
         Some(id),
+        viewer.unfocused,
         vec![String::new(), "session".into(), "resume".into(), id.into()],
     )
 }
@@ -375,6 +388,7 @@ fn delegate(
     kind: crate::harness::LaunchKind,
     json_session: Option<&str>,
     preview_session: Option<&str>,
+    unfocused: bool,
     mut argv: Vec<String>,
 ) -> Result<Delegation> {
     if runs_here(kind) {
@@ -391,7 +405,13 @@ fn delegate(
     };
     let session = preview_session.map(LfSessionId::from);
     let terminal = start_held(&argv, &cwd, session.as_ref(), &|_| {})?;
-    relay_with_preview(&terminal, session.as_ref(), json_session, preview)?;
+    relay_with_preview(
+        &terminal,
+        session.as_ref(),
+        json_session,
+        preview,
+        unfocused,
+    )?;
     Ok(Delegation::Delegated)
 }
 
@@ -1264,30 +1284,14 @@ fn contains(bytes: &[u8], needle: &[u8]) -> bool {
     bytes.windows(needle.len()).any(|window| window == needle)
 }
 
-/// What a view's terminal sent, without its focus reports, and the focus it
-/// reported last. The server decides whether the agent hears focus.
-fn focus_events(bytes: &[u8]) -> (Vec<u8>, Option<bool>) {
-    let mut kept = Vec::with_capacity(bytes.len());
-    let mut focus = None;
-    let mut at = 0;
-    while at < bytes.len() {
-        match &bytes[at..] {
-            [0x1b, b'[', b'I', ..] => {
-                focus = Some(true);
-                at += 3;
-            }
-            [0x1b, b'[', b'O', ..] => {
-                focus = Some(false);
-                at += 3;
-            }
-            [byte, ..] => {
-                kept.push(*byte);
-                at += 1;
-            }
-            [] => break,
+/// Input on either side of a focus report must reach the holder in that order.
+fn next_focus(bytes: &[u8]) -> (&[u8], Option<(bool, &[u8])>) {
+    for (at, sequence) in bytes.windows(3).enumerate() {
+        if sequence == b"\x1b[I" || sequence == b"\x1b[O" {
+            return (&bytes[..at], Some((sequence[2] == b'I', &bytes[at + 3..])));
         }
     }
-    (kept, focus)
+    (bytes, None)
 }
 
 impl Drop for ViewerTerminal {
@@ -1335,8 +1339,9 @@ pub fn attach(
     id: &TerminalId,
     session: Option<&LfSessionId>,
     json_session: Option<&str>,
+    unfocused: bool,
 ) -> Result<()> {
-    relay_with_preview(id, session, json_session, None)
+    relay_with_preview(id, session, json_session, None, unfocused)
 }
 
 fn relay_with_preview(
@@ -1344,6 +1349,7 @@ fn relay_with_preview(
     session: Option<&LfSessionId>,
     json_session: Option<&str>,
     terminal: Option<ViewerTerminal>,
+    unfocused: bool,
 ) -> Result<()> {
     let mut command = Command::new(std::env::current_exe()?);
     if let Some(terminal) = &terminal {
@@ -1364,6 +1370,10 @@ fn relay_with_preview(
         );
     }
     command
+        .env(
+            RELAY_FOCUSED_ENV,
+            if initial_focus(unfocused) { "1" } else { "0" },
+        )
         .args(RELAY_COMMAND)
         .args([RELAY_TERMINAL_FLAG, id.as_str()]);
     if let Some(session) = session {
@@ -1376,7 +1386,18 @@ fn relay_with_preview(
     pass_open(&mut command);
     let error = command.exec();
     tracing::warn!(%error, "cannot exec the terminal relay; relaying here");
-    attach_with_terminal(id, session, terminal)
+    attach_with_terminal(
+        id,
+        session,
+        terminal,
+        &mut RelayInput::new(initial_focus(unfocused)),
+    )
+}
+
+const RELAY_FOCUSED_ENV: &str = "LF_RELAY_FOCUSED";
+
+fn initial_focus(unfocused: bool) -> bool {
+    !unfocused && io::stdin().is_terminal()
 }
 
 const RELAY_PREVIEW_ENV: &str = "LF_RELAY_PREVIEW";
@@ -1467,7 +1488,11 @@ pub fn relay(id: &TerminalId, session: Option<&LfSessionId>, json: bool) -> Resu
     } else {
         None
     };
-    attach_with_terminal(id, session, terminal)?;
+    let focused = std::env::var(RELAY_FOCUSED_ENV)
+        .map_or_else(|_| io::stdin().is_terminal(), |value| value == "1");
+    let mut input = RelayInput::new(focused);
+    std::env::remove_var(RELAY_FOCUSED_ENV);
+    attach_with_terminal(id, session, terminal, &mut input)?;
     // A delegated launch that lost to a concurrent opening ends without a
     // provider; its view joins the terminal running the Session instead.
     // Desktop's relays report the end and reopen by Session themselves.
@@ -1479,7 +1504,12 @@ pub fn relay(id: &TerminalId, session: Option<&LfSessionId>, json: bool) -> Resu
         .ok()
         .and_then(|store| store.session_terminal(session.as_str()).ok().flatten());
     match running.filter(|running| running != id) {
-        Some(running) => attach_with_terminal(&running, Some(session), None),
+        Some(running) => attach_with_terminal(
+            &running,
+            Some(session),
+            None,
+            &mut RelayInput::new(input.focused),
+        ),
         None => Ok(()),
     }
 }
@@ -1502,32 +1532,19 @@ struct RelayOutput {
 
 impl RelayOutput {
     /// The screen continues from the PTY position it shows, or repaints.
-    fn recover(&mut self) -> Request {
-        if self.positioned {
-            self.continuation()
+    fn attachment(&mut self, focused: bool) -> Request {
+        let from = if self.positioned {
+            self.continuing = true;
+            Some(self.received)
         } else {
-            self.fresh_attachment()
-        }
-    }
-
-    fn fresh_attachment(&mut self) -> Request {
-        *self = Self::default();
-        self.attachment(None)
-    }
-
-    /// Attach as a new viewer whose screen already shows the held terminal
-    /// up to `received`.
-    fn continuation(&mut self) -> Request {
-        self.continuing = true;
-        self.attachment(Some(self.received))
-    }
-
-    fn attachment(&self, from: Option<u64>) -> Request {
+            *self = Self::default();
+            None
+        };
         let (rows, cols) = size();
         Request::Attach {
             rows,
             cols,
-            focused: None,
+            focused: Some(focused),
             name: tty_name(libc::STDIN_FILENO),
             from,
         }
@@ -1604,18 +1621,90 @@ impl CatchingUp {
     }
 }
 
+struct RelayInput {
+    focused: bool,
+    paste: Paste,
+}
+
+impl RelayInput {
+    fn new(focused: bool) -> Self {
+        Self {
+            focused,
+            paste: Paste::default(),
+        }
+    }
+
+    fn observe_keys(&mut self, bytes: &[u8]) {
+        if !self.focused && !input::without_reports(bytes).is_empty() {
+            self.focused = true;
+        }
+    }
+
+    fn discard(&mut self, mut bytes: &[u8]) {
+        self.paste.observe(bytes);
+        loop {
+            let (input, report) = next_focus(bytes);
+            self.observe_keys(input);
+            let Some((state, tail)) = report else { break };
+            self.focused = state;
+            bytes = tail;
+        }
+    }
+
+    fn forward(
+        &mut self,
+        bytes: &[u8],
+        socket: &mut impl Write,
+        catching_up: &mut Option<CatchingUp>,
+        resume_input: &mut bool,
+    ) -> Result<()> {
+        let mut rest = bytes;
+        let mut sent = Ok(());
+        loop {
+            let (input, report) = next_focus(rest);
+            let typed = match catching_up {
+                None => input,
+                Some(catching) => match catching.pass(input) {
+                    Some(tail) => {
+                        *catching_up = None;
+                        tail
+                    }
+                    None => &[],
+                },
+            };
+            self.paste.observe(&input[..input.len() - typed.len()]);
+            if !typed.is_empty() {
+                self.observe_keys(typed);
+                if std::mem::take(resume_input) {
+                    let framing = self.paste.resume();
+                    if !framing.is_empty() {
+                        sent = sent.and_then(|()| send_frame(socket, Tag::Input, &framing));
+                    }
+                }
+                self.paste.observe(typed);
+                sent = sent.and_then(|()| send_frame(socket, Tag::Input, typed));
+            }
+            let Some((report, tail)) = report else { break };
+            self.focused = report;
+            sent = sent.and_then(|()| send(socket, Request::Focus { focused: report }));
+            rest = tail;
+        }
+        sent
+    }
+}
+
 /// A view of a held terminal always outlives its server connection.
 fn attach_with_terminal(
     id: &TerminalId,
     session: Option<&LfSessionId>,
     terminal: Option<ViewerTerminal>,
+    input: &mut RelayInput,
 ) -> Result<()> {
     let mut status = connection::Status::from_env();
     let mut recovering = false;
-    let mut paste = Paste::default();
     let socket = if let Some(status) = &mut status {
         let Some((socket, recovered)) =
-            status.connect(id, bridged_session(session)?, true, &mut paste)?
+            status.connect(id, bridged_session(session)?, true, input)?
         else {
             return Ok(());
         };
@@ -1625,7 +1714,12 @@ fn attach_with_terminal(
         match registry::connect(id) {
             Ok(socket) => socket,
             Err(error) => {
-                return replace_view(id, session, &error.downcast::<registry::OtherRevision>()?)
+                return replace_view(
+                    id,
+                    session,
+                    input.focused,
+                    &error.downcast::<registry::OtherRevision>()?,
+                )
             }
         }
     };
@@ -1636,17 +1730,17 @@ fn attach_with_terminal(
             session,
             status,
             recovering,
-            paste,
         }),
         terminal,
         ATTACH_TIMEOUT,
+        input,
     )
 }
 
 /// View the existing protocol over a command's stdin/stdout, such as SSH.
 /// The destination forwards bytes to its held terminal and creates no
 /// terminal here.
-pub fn relay_over(argv: &[String]) -> Result<()> {
+pub fn relay_over(argv: &[String], unfocused: bool) -> Result<()> {
     let (program, args) = argv
         .split_first()
         .context("Viewer transport command is missing")?;
@@ -1664,7 +1758,14 @@ pub fn relay_over(argv: &[String]) -> Result<()> {
             OwnedFd::from(child.stdout.take().expect("piped transport stdout")).into(),
             OwnedFd::from(child.stdin.take().expect("piped transport stdin")).into(),
         )?;
-        view(stream, None, None, None, COMMAND_ATTACH_TIMEOUT)
+        view(
+            stream,
+            None,
+            None,
+            None,
+            COMMAND_ATTACH_TIMEOUT,
+            &mut RelayInput::new(initial_focus(unfocused)),
+        )
     })();
     // Leave is already written, but SSH must forward it before we stop its
     // process. A failed/unresponsive connection instead uses ordinary absence.
@@ -1683,7 +1784,6 @@ struct RelayRoute<'a> {
     status: Option<connection::Status>,
     /// The first connection already failed once; attach as a recovery.
     recovering: bool,
-    paste: Paste,
 }
 
 /// The server attaches by Session; only Desktop's Session panes bridge through
@@ -1698,22 +1798,18 @@ fn view(
     route: Option<RelayRoute<'_>>,
     mut terminal: Option<ViewerTerminal>,
     attach_timeout: Duration,
+    input: &mut RelayInput,
 ) -> Result<()> {
     let server = route.is_some();
-    let (session, mut status, mut recovering, mut paste) = match route {
-        Some(route) => (route.session, route.status, route.recovering, route.paste),
-        None => (None, None, false, Paste::default()),
+    let (session, mut status, mut recovering) = match route {
+        Some(route) => (route.session, route.status, route.recovering),
+        None => (None, None, false),
     };
     let mut resume_input = true;
     let mut acknowledgement_deadline = Some(Instant::now() + attach_timeout);
     let (rows, cols) = size();
     let mut output = RelayOutput::default();
-    let attachment = if recovering {
-        output.recover()
-    } else {
-        output.fresh_attachment()
-    };
-    let initial = send(&mut socket, attachment);
+    let initial = send(&mut socket, output.attachment(input.focused));
     let mut interrupted = match initial {
         Ok(()) => None,
         Err(error) if server => Some(error.to_string()),
@@ -1743,18 +1839,18 @@ fn view(
             let held = id.context("only a known terminal reconnects")?;
             let next = if let Some(status) = &mut status {
                 status
-                    .connect(held, bridged_session(session)?, false, &mut paste)?
+                    .connect(held, bridged_session(session)?, false, input)?
                     .map(|(socket, _)| socket)
             } else {
                 tracing::debug!(%reason, terminal = %held, "view reconnecting");
-                let next = reconnect_held(held, &mut paste);
+                let next = reconnect_held(held, input);
                 if let Some(skew) = next
                     .as_ref()
                     .err()
                     .and_then(|error| error.downcast_ref::<registry::OtherRevision>())
                 {
                     drop(terminal.take());
-                    return replace_view(held, session, skew);
+                    return replace_view(held, session, input.focused, skew);
                 }
                 // An agent that exited while no server ran ends the view as
                 // its exit would have.
@@ -1784,7 +1880,7 @@ fn view(
             attached = false;
             recovering = true;
             resume_input = true;
-            if let Err(error) = send(&mut socket, output.recover()) {
+            if let Err(error) = send(&mut socket, output.attachment(input.focused)) {
                 interrupted = Some(error.to_string());
                 continue;
             }
@@ -1909,7 +2005,7 @@ fn view(
                                 let continued = output.acknowledged(&nonce);
                                 catching_up = continued.then_some(CatchingUp::Replaying);
                                 if recovered || status.is_some() {
-                                    discard_reconnect_input(&mut paste)?;
+                                    discard_reconnect_input(input)?;
                                     fds[1].revents = 0;
                                 }
                                 // A continued screen shows the agent's output and nothing else.
@@ -2069,7 +2165,7 @@ fn view(
             let n = io::stdin().read(&mut bytes)?;
             if n == 0 {
                 stdin_open = false;
-            } else if terminal.is_some() && paste.detaches(&bytes[..n]) {
+            } else if terminal.is_some() && input.paste.detaches(&bytes[..n]) {
                 // Restore the terminal before saying how to return.
                 drop(terminal.take());
                 let _ = send(&mut socket, Request::Leave);
@@ -2079,47 +2175,12 @@ fn view(
                 }
                 return Ok(());
             } else if attached {
-                let (bytes, focus) = focus_events(&bytes[..n]);
-                let n = bytes.len();
-                if let Some(focused) = focus {
-                    if let Err(error) = send(&mut socket, Request::Focus { focused }) {
-                        if !can_reconnect {
-                            return Err(error);
-                        }
-                        interrupted = Some(error.to_string());
-                        continue;
-                    }
-                }
-                let discarded = match &mut catching_up {
-                    None => 0,
-                    Some(catching) => match catching.pass(&bytes[..n]) {
-                        Some(rest) => {
-                            let discarded = n - rest.len();
-                            catching_up = None;
-                            discarded
-                        }
-                        None => n,
-                    },
-                };
-                paste.observe(&bytes[..discarded]);
-                let typed = &bytes[discarded..n];
-                let framing = if !typed.is_empty() && resume_input {
-                    resume_input = false;
-                    paste.resume()
-                } else {
-                    Vec::new()
-                };
-                paste.observe(typed);
-                let sent = (|| {
-                    if !framing.is_empty() {
-                        send_frame(&mut socket, Tag::Input, &framing)?;
-                    }
-                    match typed {
-                        [] => Ok(()),
-                        typed => send_frame(&mut socket, Tag::Input, typed),
-                    }
-                })();
-                if let Err(error) = sent {
+                if let Err(error) = input.forward(
+                    &bytes[..n],
+                    &mut socket,
+                    &mut catching_up,
+                    &mut resume_input,
+                ) {
                     if !can_reconnect {
                         return Err(error);
                     }
@@ -2128,7 +2189,7 @@ fn view(
                     continue;
                 }
             } else {
-                paste.observe(&bytes[..n]);
+                input.discard(&bytes[..n]);
             }
         }
         let current_size = size();
@@ -2154,12 +2215,12 @@ fn view(
 /// Wait for a server to host the terminal again. Nothing is drawn: the
 /// screen stays as the agent left it, and the server that takes the terminal
 /// up paints its own. What is typed meanwhile is discarded; Ctrl+] closes.
-fn reconnect_held(terminal: &TerminalId, paste: &mut Paste) -> Result<Option<UnixStream>> {
+fn reconnect_held(terminal: &TerminalId, input: &mut RelayInput) -> Result<Option<UnixStream>> {
     let mut wait = Duration::from_millis(100);
     loop {
         match registry::connect(terminal) {
             Ok(socket) => {
-                discard_reconnect_input(paste)?;
+                discard_reconnect_input(input)?;
                 return Ok(Some(socket));
             }
             // A server answered: the terminal has ended, or another build hosts it.
@@ -2185,10 +2246,10 @@ fn reconnect_held(terminal: &TerminalId, paste: &mut Paste) -> Result<Option<Uni
             match io::stdin().read(&mut bytes) {
                 Ok(0) => return Ok(None),
                 Ok(n) => {
-                    if paste.detaches(&bytes[..n]) {
+                    if input.paste.detaches(&bytes[..n]) {
                         return Ok(None);
                     }
-                    paste.observe(&bytes[..n]);
+                    input.discard(&bytes[..n]);
                 }
                 Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
                 Err(e) => return Err(e.into()),
@@ -2209,6 +2270,7 @@ const REPLACED_ENV: &str = "LF_VIEW_REPLACED";
 fn replace_view(
     terminal: &TerminalId,
     session: Option<&LfSessionId>,
+    focused: bool,
     skew: &registry::OtherRevision,
 ) -> Result<()> {
     let failure = if std::env::var_os(REPLACED_ENV).is_some() {
@@ -2219,6 +2281,7 @@ fn replace_view(
                 let mut command = Command::new(lf);
                 command
                     .env(REPLACED_ENV, "1")
+                    .env(RELAY_FOCUSED_ENV, if focused { "1" } else { "0" })
                     .args(RELAY_COMMAND)
                     .args([RELAY_TERMINAL_FLAG, terminal.as_str()]);
                 if let Some(session) = session {
@@ -2245,7 +2308,7 @@ fn ended_exit(error: &anyhow::Error) -> Option<(u8, Option<String>)> {
     Some((code, data["provider"].as_str().map(str::to_owned)))
 }
 
-fn discard_reconnect_input(paste: &mut Paste) -> io::Result<()> {
+fn discard_reconnect_input(input: &mut RelayInput) -> io::Result<()> {
     let mut fd = libc::pollfd {
         fd: 0,
         events: libc::POLLIN,
@@ -2260,7 +2323,7 @@ fn discard_reconnect_input(paste: &mut Paste) -> io::Result<()> {
         }
         let mut bytes = [0; 8192];
         let n = io::stdin().read(&mut bytes)?;
-        paste.observe(&bytes[..n]);
+        input.discard(&bytes[..n]);
         if n == 0 {
             return Ok(());
         }
@@ -2691,7 +2754,7 @@ mod tests {
     use std::time::Duration;
 
     use super::{
-        carry_across_exec, focus_events, output, place_events, wire, CatchingUp, Event, Handoff,
+        carry_across_exec, next_focus, output, place_events, wire, CatchingUp, Event, Handoff,
         RelayOutput, Sizing, Viewer, CONTROL_ENV, HELD_ENV, LIMIT, PARENT_ENV,
     };
     use loopflow_model::id::TerminalId;
@@ -2736,20 +2799,27 @@ mod tests {
 
     #[test]
     fn a_held_screen_the_relay_drew_into_is_refreshed_not_continued() {
-        let from = |request: wire::Request| match request {
-            wire::Request::Attach { from, .. } => from,
+        let attachment = |request: wire::Request| match request {
+            wire::Request::Attach { from, focused, .. } => (from, focused),
             other => panic!("not an attachment: {other:?}"),
         };
-        let mut output = RelayOutput {
-            received: 42,
-            positioned: true,
-            ..RelayOutput::default()
-        };
-        assert_eq!(from(output.recover()), Some(42));
-        output.acknowledged("nonce");
-        // Any line the relay prints leaves the screen at no PTY position.
-        output.drew();
-        assert_eq!(from(output.recover()), None);
+        for focused in [false, true] {
+            let mut output = RelayOutput {
+                received: 42,
+                positioned: true,
+                ..RelayOutput::default()
+            };
+            assert_eq!(
+                attachment(output.attachment(focused)),
+                (Some(42), Some(focused))
+            );
+            output.acknowledged("nonce");
+            output.drew();
+            assert_eq!(
+                attachment(output.attachment(focused)),
+                (None, Some(focused))
+            );
+        }
     }
 
     #[test]
@@ -2840,11 +2910,16 @@ mod tests {
     }
 
     #[test]
-    fn focus_reports_leave_the_typed_bytes_and_say_the_last_focus() {
-        assert_eq!(focus_events(b"ab"), (b"ab".to_vec(), None));
-        assert_eq!(focus_events(b"\x1b[Ia\x1b[O"), (b"a".to_vec(), Some(false)));
-        assert_eq!(focus_events(b"\x1b[O\x1b[I"), (Vec::new(), Some(true)));
-        assert_eq!(focus_events(b"\x1b[A"), (b"\x1b[A".to_vec(), None));
+    fn focus_reports_split_input_in_arrival_order() {
+        let (input, report) = next_focus(b"a\x1b[Ib\x1b[O");
+        assert_eq!(input, b"a");
+        let (focused, tail) = report.unwrap();
+        assert!(focused);
+        assert_eq!(
+            next_focus(tail),
+            (b"b".as_slice(), Some((false, b"".as_slice())))
+        );
+        assert_eq!(next_focus(b"\x1b[A"), (b"\x1b[A".as_slice(), None));
     }
 
     #[test]
@@ -3053,16 +3128,21 @@ mod launch_mode_tests {
                     )
                     .unwrap();
                 let lock = tempfile::tempfile().unwrap();
-                let (kind, _) =
-                    super::delegate_session(&session.id, false, surface == "interactive", lock)
-                        .unwrap()
-                        .unwrap();
+                let (kind, _) = super::delegate_session(
+                    &session.id,
+                    Default::default(),
+                    surface == "interactive",
+                    lock,
+                )
+                .unwrap()
+                .unwrap();
                 assert_eq!(
                     kind, expected,
                     "surface={surface}, source={source:?}, bound={bound}, primary={primary}",
                 );
                 assert_eq!(
-                    super::delegate_prepared_session(session.id.as_str(), false).unwrap(),
+                    super::delegate_prepared_session(session.id.as_str(), Default::default())
+                        .unwrap(),
                     super::Delegation::Here { kind: expected },
                     "prepared: source={source:?}, bound={bound}, primary={primary}",
                 );
@@ -3072,7 +3152,7 @@ mod launch_mode_tests {
                     std::env::set_var(relay, "1");
                     let relayed = super::delegate_session(
                         &session.id,
-                        false,
+                        Default::default(),
                         true,
                         tempfile::tempfile().unwrap(),
                     );
@@ -3093,7 +3173,7 @@ mod launch_mode_tests {
         std::fs::write(&database, "not a database").unwrap();
         ledger.set_db_path(database);
         assert_eq!(
-            super::delegate_prepared_session("unreadable-session", false).unwrap(),
+            super::delegate_prepared_session("unreadable-session", Default::default()).unwrap(),
             super::Delegation::Here {
                 kind: crate::harness::LaunchKind::WorkSession
             }

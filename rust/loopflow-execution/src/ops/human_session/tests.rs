@@ -126,8 +126,8 @@ fn resume_refuses_a_run_and_leaves_its_provider_running() {
                 &crate::harness::Recording { store: store.sqlite.clone(), session: session.id.to_string(), attachment: first.clone() },
                 crate::harness::LaunchKind::Batch,
             )?;
-            let opened = super::open(&store, home, &session.id, None, None, false, true, false).await;
-            let forked = super::open(&store, home, &session.id, None, None, true, true, false).await;
+            let opened = super::open(&store, home, &session.id, None, None, false, true, Default::default()).await;
+            let forked = super::open(&store, home, &session.id, None, None, true, true, Default::default()).await;
             let running = provider.try_wait()?.is_none();
             provider.kill().await?;
             assert!(running, "resume stopped the Run's provider");
@@ -1291,7 +1291,7 @@ fn opening_an_admitted_holder_of_unknown_liveness_takes_it_over() {
             None,
             false,
             true,
-            false,
+            Default::default(),
         )
         .await;
         let message = opened.unwrap_err().to_string();
@@ -1392,9 +1392,18 @@ fn resuming_an_ended_conversation_launches_its_provider_as_the_session() {
                 ),
                 super::SessionResumeIntent::Resume
             );
-            super::open(&store, home, &session.id, None, None, false, true, false)
-                .await
-                .map(|_| ())
+            super::open(
+                &store,
+                home,
+                &session.id,
+                None,
+                None,
+                false,
+                true,
+                Default::default(),
+            )
+            .await
+            .map(|_| ())
         })
     });
     std::env::set_var("PATH", path);
@@ -1422,7 +1431,7 @@ fn preparing_a_consumed_first_launch_offers_try_again_and_changes_nothing() {
             None,
             false,
             false,
-            false,
+            Default::default(),
         )
         .await
         .unwrap()
@@ -1482,7 +1491,7 @@ fn preparing_a_consumed_first_launch_offers_try_again_and_changes_nothing() {
             None,
             false,
             false,
-            false,
+            Default::default(),
         )
         .await
         .unwrap()
@@ -1518,7 +1527,7 @@ fn recovery_refresh_follows_current_holder_and_history() {
             None,
             false,
             false,
-            false,
+            Default::default(),
         )
         .await
         .unwrap()
@@ -1559,7 +1568,7 @@ fn recovery_refresh_follows_current_holder_and_history() {
             None,
             false,
             false,
-            false,
+            Default::default(),
         )
         .await
         .unwrap()
@@ -1614,7 +1623,7 @@ fn recovery_refresh_recognizes_imported_history_before_attachment() {
             None,
             false,
             false,
-            false,
+            Default::default(),
         )
         .await
         .unwrap()
@@ -1638,7 +1647,7 @@ fn recovery_refresh_recognizes_imported_history_before_attachment() {
             None,
             false,
             false,
-            false,
+            Default::default(),
         )
         .await
         .unwrap()
@@ -1763,9 +1772,16 @@ fn creation_retry_reconciles_publication_but_never_repeats_a_stop_or_append() {
         );
         assert_eq!(stopped.explanation, "Conversation change unconfirmed");
         // A crash while stopping is uncertain, even if no provider is live now.
-        let refused = super::new_thread(&store, &record.id, None, false, false, "interrupted")
-            .await
-            .unwrap_err();
+        let refused = super::new_thread(
+            &store,
+            &record.id,
+            None,
+            false,
+            Default::default(),
+            "interrupted",
+        )
+        .await
+        .unwrap_err();
         assert_eq!(
             refused.downcast_ref::<crate::engine::Error>().unwrap().code,
             crate::engine::ErrorCode::OutcomeUnknown
@@ -1801,10 +1817,17 @@ fn creation_retry_reconciles_publication_but_never_repeats_a_stop_or_append() {
             loopflow_storage::sqlite::creation::RecoveryDisposition::Continue
         );
         // Simulate app/server death after the atomic append, before publication.
-        let recovered = super::new_thread(&store, &record.id, None, false, false, "interrupted")
-            .await
-            .unwrap()
-            .0;
+        let recovered = super::new_thread(
+            &store,
+            &record.id,
+            None,
+            false,
+            Default::default(),
+            "interrupted",
+        )
+        .await
+        .unwrap()
+        .0;
         assert_eq!(recovered.captured, next.captured);
         assert_eq!(recovered.artifact_key.as_deref(), Some(artifact.as_str()));
         assert!(recovered.input_published);
@@ -1827,9 +1850,16 @@ fn creation_retry_reconciles_publication_but_never_repeats_a_stop_or_append() {
         let mut newer = recovered.clone();
         newer.request = Some("A later independent input".into());
         let newer = super::append_input(&store, newer).await.unwrap();
-        super::new_thread(&store, &record.id, None, false, false, "interrupted")
-            .await
-            .unwrap();
+        super::new_thread(
+            &store,
+            &record.id,
+            None,
+            false,
+            Default::default(),
+            "interrupted",
+        )
+        .await
+        .unwrap();
         assert_eq!(
             store.session(&record.id).await.unwrap().unwrap().captured,
             newer.captured
@@ -1874,9 +1904,16 @@ fn creation_retry_reconciles_publication_but_never_repeats_a_stop_or_append() {
             loopflow_storage::sqlite::creation::RecoveryDisposition::Continue
         );
         let newest = super::append_input(&store, pending).await.unwrap();
-        let refused = super::new_thread(&store, &record.id, None, false, false, "superseded")
-            .await
-            .unwrap_err();
+        let refused = super::new_thread(
+            &store,
+            &record.id,
+            None,
+            false,
+            Default::default(),
+            "superseded",
+        )
+        .await
+        .unwrap_err();
         assert_eq!(
             refused.downcast_ref::<crate::engine::Error>().unwrap().code,
             crate::engine::ErrorCode::OutcomeUnknown
@@ -1925,10 +1962,17 @@ fn creation_retry_reconciles_publication_but_never_repeats_a_stop_or_append() {
         )
         .unwrap();
         // Publication succeeded but the result was not recorded before exit.
-        let recovered = super::new_thread(&store, &record.id, None, false, false, "published")
-            .await
-            .unwrap()
-            .0;
+        let recovered = super::new_thread(
+            &store,
+            &record.id,
+            None,
+            false,
+            Default::default(),
+            "published",
+        )
+        .await
+        .unwrap()
+        .0;
         assert_eq!(recovered.captured, published.captured);
         assert!(recovered.input_published);
         assert_eq!(
@@ -1953,11 +1997,11 @@ fn new_thread_before_a_first_provider_keeps_the_original_prompt_and_retries_once
         let (record, _) = super::primary::ensure(&store, repo.path(), None)
             .await
             .unwrap();
-        let first = super::new_thread(&store, &record.id, None, false, false, "first")
+        let first = super::new_thread(&store, &record.id, None, false, Default::default(), "first")
             .await
             .unwrap()
             .0;
-        let retry = super::new_thread(&store, &record.id, None, false, false, "first")
+        let retry = super::new_thread(&store, &record.id, None, false, Default::default(), "first")
             .await
             .unwrap()
             .0;

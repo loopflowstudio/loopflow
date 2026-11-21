@@ -1189,7 +1189,7 @@ pub async fn open(
     request_id: Option<&str>,
     fork: bool,
     resume: bool,
-    json: bool,
+    viewer: crate::transport::ViewerOptions,
 ) -> Result<Opening> {
     use SessionResumeIntent::{NewThread, TakeOver, View};
     crate::agent_input_timing::record("connect_begin", session_id);
@@ -1206,7 +1206,7 @@ pub async fn open(
     }
     if fork {
         drop(progress);
-        return self::fork(store, &target, resume, json).await;
+        return self::fork(store, &target, resume, viewer).await;
     }
     if !resume {
         if invocation_intent(&target, &current_summary(store, &target.id)?, false, false)
@@ -1244,7 +1244,7 @@ pub async fn open(
             &session.id,
             handoff_agent(&session).as_deref(),
             true,
-            json,
+            viewer,
             &uuid::Uuid::new_v4().to_string(),
         )
         .await?;
@@ -1280,7 +1280,8 @@ pub async fn open(
                 crate::transport::attach(
                     &terminal,
                     Some(&session.id),
-                    json.then_some(session.id.as_str()),
+                    viewer.json.then_some(session.id.as_str()),
+                    viewer.unfocused,
                 )?;
             }
             return surface(store, &session).await.map(Opening::Done);
@@ -1288,7 +1289,7 @@ pub async fn open(
     }
     let result = surface(store, &session).await?;
     let Some((kind, launch_lock)) =
-        crate::transport::delegate_session(&session.id, json, session.interactive, launch_lock)?
+        crate::transport::delegate_session(&session.id, viewer, session.interactive, launch_lock)?
     else {
         return Ok(Opening::Done(result));
     };
@@ -1370,7 +1371,7 @@ async fn fork(
     store: &SharedStore,
     source: &LfSession,
     launch: bool,
-    json: bool,
+    viewer: crate::transport::ViewerOptions,
 ) -> Result<Opening> {
     let request = conversation_log::continuation(&store.sqlite, source)?;
     let (provider, model) = match crate::config::agent_override() {
@@ -1417,7 +1418,7 @@ async fn fork(
     )?;
     let record = surface(store, &next).await?;
     if launch {
-        if let Some(launch) = open_prepared(store, &next.id, json).await? {
+        if let Some(launch) = open_prepared(store, &next.id, viewer).await? {
             return Ok(Opening::Launch(launch));
         }
     }
@@ -1430,9 +1431,9 @@ async fn fork(
 async fn open_prepared(
     store: &SharedStore,
     id: &str,
-    json: bool,
+    viewer: crate::transport::ViewerOptions,
 ) -> Result<Option<ConversationLaunch>> {
-    match crate::transport::delegate_prepared_session(id, json)? {
+    match crate::transport::delegate_prepared_session(id, viewer)? {
         crate::transport::Delegation::Delegated => Ok(None),
         crate::transport::Delegation::Here { kind } => open_waiting(store, id, kind).await,
     }
@@ -1577,7 +1578,7 @@ pub async fn new_thread(
     id: &str,
     agent: Option<&str>,
     launch: bool,
-    json: bool,
+    viewer: crate::transport::ViewerOptions,
     request_id: &str,
 ) -> Result<(LfSession, Option<ConversationLaunch>)> {
     let identity = crate::engine::creation::identity(
@@ -1676,7 +1677,7 @@ pub async fn new_thread(
     ));
     drop(launch_lock);
     let launch = match launch {
-        true => open_prepared(store, &next.id, json).await?,
+        true => open_prepared(store, &next.id, viewer).await?,
         false => None,
     };
     Ok((next, launch))

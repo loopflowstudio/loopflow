@@ -31,3 +31,6 @@
 - **A focus report takes effect immediately**, including Ghostty's initial
   report when mode 1004 turns on. `--unfocused` describes the attach. The
   passive QA pane starts in the background.
+- **Resume and New share the viewer option.** Both commands already use the
+  same viewer for a fresh thread. On either command, `--prepare --unfocused`
+  returns an argv that opens with the requested focus.

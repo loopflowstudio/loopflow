@@ -908,7 +908,10 @@ async fn reopen(
         request_id,
         fork,
         !connection.prepare,
-        json,
+        loopflow_execution::transport::ViewerOptions {
+            json,
+            unfocused: connection.unfocused,
+        },
     )
     .await
 }
@@ -954,7 +957,7 @@ pub(crate) fn prepared(cli: &crate::lf::Cli, directory: &Path) -> anyhow::Result
                     directory,
                     target,
                     false,
-                    false,
+                    Default::default(),
                     request_id.as_deref(),
                     cli.agent.as_deref(),
                 )
@@ -984,7 +987,10 @@ async fn new_thread(
         &std::env::current_dir()?,
         target,
         true,
-        connection.json || cli.json,
+        loopflow_execution::transport::ViewerOptions {
+            json: connection.json || cli.json,
+            unfocused: connection.unfocused,
+        },
         request_id,
         cli.agent.as_deref(),
     )
@@ -1002,7 +1008,7 @@ async fn restarted(
     directory: &Path,
     target: loopflow_execution::ops::human_session::SessionTarget<'_>,
     launch: bool,
-    json: bool,
+    viewer: loopflow_execution::transport::ViewerOptions,
     request_id: Option<&str>,
     agent: Option<&str>,
 ) -> anyhow::Result<Opening> {
@@ -1016,7 +1022,7 @@ async fn restarted(
         &selected.id,
         agent,
         launch,
-        json,
+        viewer,
         &request_id,
     )
     .await?;
@@ -1147,7 +1153,10 @@ pub(super) fn mutate(
             connection.message.is_none(),
             "prepared Sessions do not accept a message"
         );
-        let session = prepared(cli, directory)?;
+        let mut session = prepared(cli, directory)?;
+        if connection.unfocused && !session.open_argv.is_empty() {
+            session.open_argv.push("--unfocused".into());
+        }
         if connection.json || cli.json {
             writeln!(io.output, "{}", serde_json::to_string_pretty(&session)?)?;
         } else {

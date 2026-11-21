@@ -27,44 +27,37 @@ current owner can send focus-out. Each viewer already carries its recency and
 name, so `Sizing` keeps only the owner's ID and the recency counter. On
 departure it chooses the most recently used survivor.
 
-The preceding implement pass recorded these passes before merging the Dev
-launcher change. This pass reused those results and ran no tests.
+Holder checks from the first slice:
 
 | Command | Result | Runs again |
 | --- | --- | --- |
 | `cargo test -p loopflow --test transport_tests an_unfocused_view_leaves_the_session_with_the_view_in_use` | Passed. Three views on one held PTY covered the attach reply, size, absence of a WINCH marker, focus filtering and fallback on departure. | CI |
 | `cargo test -p loopflow-execution --lib equally_inactive_views_keep_the_live_owner` | Passed. A second unused view leaves the first in charge. | CI |
 
+The local and SSH relays now attach with the viewer's focus. Terminal stdin
+starts focused unless the command carries `--unfocused`. A pipe starts
+unfocused. Keys and focus reports update the relay in arrival order, even when
+a write fails and causes an immediate reconnect. The next attach carries that
+focus whether the screen continues from a known position or repaints.
+
+SSH prepare returns `lf session attach --unfocused -- ssh …` when requested.
+Direct and JSON prepare-and-view SSH routes pass focus to the local relay.
+
+| Relay check | Result | Runs again |
+| --- | --- | --- |
+| `transport_tests a_resumed_relay_keeps_focus_across_server_restarts` | Passed on a private Machine. Ordinary TTY resume took 80 columns. Piped and unfocused resume kept 120. After two server restarts the same relay kept 120 after focus-out and took 80 after typing. | CI |
+| `transport::tests::a_held_screen_the_relay_drew_into_is_refreshed_not_continued` | Passed for both focus values on a positioned continuation and a fresh repaint. | CI |
+| `machine_commands::remote_session_open_returns_an_owner_pinned_terminal_command` | Passed. Remote prepare placed the flag on the local relay and kept the SSH command intact. | CI |
+
 ## Remaining
 
-### Relay and Desktop pane launch
+### Desktop pane launch
 
-The ordinary relay still emits `focused: None`. Carry one focus value from
-`lf session resume --unfocused` to the process that owns terminal stdin. In
-a terminal the default is focused. Piped input starts unfocused. A focus
-report replaces that value and human input sets it to true. Terminal query
-answers and replay fences are not human input.
-
-- Trace the local handoff through `relay_with_preview` and the early
-  `lf session attach` parsing in `rust/loopflow/src/bin/lf.rs`. For SSH, check
-  both the direct viewer route and the JSON prepare-and-view route in
-  `rust/loopflow/src/lf/commands/ssh.rs`. `relay_over` drives the local TTY
-  while the destination bridges bytes. Appending the flag to the command
-  that runs remotely alone cannot set the local viewer's initial focus.
-- Put focus at the lifetime of the relay in `transport.rs`. Both
-  `RelayOutput::continuation` and `fresh_attachment` must use it.
-  `fresh_attachment` resets the output scanner and PTY position, which
-  makes that reset the wrong lifetime for focus. A failed write can trigger
-  reconnect immediately. Keep the observed focus without replaying input.
-- Have Desktop's `SessionItem.launchArguments` pass `--unfocused` for
-  selected and warm panes. Keep a directly opened native `OwnerStream`
-  explicitly focused. Update the argv and wire assertions in
-  `WorkCacheTests`, `SessionsStoreTests` and `OwnerStreamTests`.
-- Cover the relay's first attach from the real CLI and both reconnect paths
-  after focus-out and after input. Confirm that ordinary terminal resume
-  still takes size immediately. An already-focused Ghostty pane takes size
-  on its initial report even with `--unfocused`; use a background pane to
-  check the unfocused case.
+Have Desktop's `SessionItem.launchArguments` pass `--unfocused` for
+selected and warm panes. For prepared SSH commands, place it before the local
+`--` separator. Keep a directly opened native `OwnerStream` explicitly
+focused. Check the argv and wire assertions in `WorkCacheTests`,
+`WorkDestinationTests`, `SessionsStoreTests` and `OwnerStreamTests`.
 
 Pinned Ghostty `a60e9e2` sends its current focus when mode 1004 is enabled
 (`src/termio/stream_handler.zig:766`). Its initial terminal focus is true
@@ -123,6 +116,4 @@ alone misses relays that have already exec'd to `session attach`. Deliberately
 open one Task and check that only its terminal starts and can take the size.
 These mounted checks have not run.
 
-Next implement the relay slice end to end. Start with a real `lf session
-resume --unfocused` attaching to a held terminal another view already sizes,
-then drive focus-out and reconnect through that same relay.
+Next implement Desktop pane launch and Dev’s deliberate-open behavior.

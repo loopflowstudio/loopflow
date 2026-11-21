@@ -585,7 +585,7 @@ private struct TaskFileDiffView: View {
                     if review.diff.files.isEmpty {
                         ReviewNotice(text: "No changes in \(review.path)")
                     }
-                    ReviewStream(store: store, reader: reader, files: review.diff.files, split: store.readsSplit(width: width),
+                    ReviewStream(store: store, reader: reader, files: review.diff.files, split: store.layout(width: width) == .split,
                                  addToConversation: addToConversation)
                 }
                 .scrollTargetLayout()

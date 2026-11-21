@@ -64,7 +64,7 @@ struct ReviewStream: View {
                         ForEach(Array(change.added.enumerated()), id: \.offset) { offset, line in
                             lineRow(line, segments: nil, file: file)
                                 .overlay { if offset == 0 { currentMark(change.id) } }
-                                .id(offset == 0 ? change.id : "\(change.id)+\(offset)")
+                                .id(change.rowID(offset))
                         }
                     } else {
                         blockView(block, gap: gaps[index], file: file).id(block.id(in: file.path))
@@ -128,19 +128,16 @@ struct ReviewStream: View {
                     ForEach(Array(change.pairs.enumerated()), id: \.offset) { _, pair in
                         pairRow(pair, file: file, context: false)
                     }
-                } else if store.reviewLayout == .new, !store.openedRemovals.contains(change.id) {
-                    // New code: the added lines, with a mark where lines went.
-                    let pairs = Array(change.pairs.enumerated())
-                    let removed = change.pairs.count { $0.removed != nil }
-                    if removed > 0 { removalMark(removed, change: change.id) }
-                    ForEach(pairs, id: \.offset) { _, pair in
-                        if let line = pair.added { lineRow(line, segments: pair.addedSegments, file: file) }
-                    }
                 } else {
-                    // Unified: every removed line, then every added line.
+                    // Unified: every removed line, then every added line. New
+                    // code folds the removed lines to a mark that opens them.
                     let pairs = Array(change.pairs.enumerated())
-                    ForEach(pairs, id: \.offset) { _, pair in
-                        if let line = pair.removed { lineRow(line, segments: pair.removedSegments, file: file) }
+                    if store.reviewLayout == .new, !store.openedRemovals.contains(change.id) {
+                        if !change.removed.isEmpty { removalMark(change.removed.count, change: change.id) }
+                    } else {
+                        ForEach(pairs, id: \.offset) { _, pair in
+                            if let line = pair.removed { lineRow(line, segments: pair.removedSegments, file: file) }
+                        }
                     }
                     ForEach(pairs, id: \.offset) { _, pair in
                         if let line = pair.added { lineRow(line, segments: pair.addedSegments, file: file) }
@@ -248,7 +245,7 @@ struct ReviewStream: View {
         let side: ReviewSelection.Side = line.kind == .removed ? .old : .new
         return VStack(spacing: 0) {
             HStack(spacing: 0) {
-                gutter(side == .old ? line.old : line.new, line: line, side: side, path: file.path)
+                gutter(side == .old ? line.old : line.new, line: line, side: side, file: file)
                 cell(line, segments: segments, side: side, file: file)
             }
             attachments(old: line.kind == .added ? nil : line.old, new: line.kind == .removed ? nil : line.new, file: file)
@@ -262,13 +259,13 @@ struct ReviewStream: View {
             VStack(spacing: 0) {
                 HStack(spacing: 0) {
                     HStack(spacing: 0) {
-                        gutter(pair.removed?.old, line: pair.removed, side: .old, path: file.path)
+                        gutter(pair.removed?.old, line: pair.removed, side: .old, file: file)
                         if let line = pair.removed { cell(line, segments: pair.removedSegments, side: .old, file: file) }
                         else { empty }
                     }
                     Divider()
                     HStack(spacing: 0) {
-                        gutter(pair.added?.new, line: pair.added, side: .new, path: file.path)
+                        gutter(pair.added?.new, line: pair.added, side: .new, file: file)
                         if let line = pair.added { cell(line, segments: pair.addedSegments, side: .new, file: file) }
                         else { empty }
                     }
@@ -300,18 +297,18 @@ struct ReviewStream: View {
         palette.surfaceMuted.opacity(0.4).frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private func gutter(_ number: Int?, line: ReviewLine?, side: ReviewSelection.Side, path: String) -> some View {
-        ReviewGutter(number: number, selected: line.map { isSelected($0, side: side, path: path) } ?? false,
-                     tone: line.flatMap { tone(of: $0, in: path) }) {
-            if let number { select(number, side: side, path: path) }
+    private func gutter(_ number: Int?, line: ReviewLine?, side: ReviewSelection.Side, file: ReviewFile) -> some View {
+        ReviewGutter(number: number, selected: line.map { isSelected($0, side: side, path: file.path) } ?? false,
+                     tone: line.flatMap { tone(of: $0, in: file) }) {
+            if let number { select(number, side: side, path: file.path) }
         }
     }
 
     /// Added and removed lines carry their color across the gutter and the
     /// line; a new file reads as its contents, without the marks of a patch.
-    private func tone(of line: ReviewLine, in path: String) -> ThemeTone? {
+    private func tone(of line: ReviewLine, in file: ReviewFile) -> ThemeTone? {
         switch line.kind {
-        case .added: files.first { $0.path == path }?.status == .added ? nil : palette.successTone
+        case .added: file.status == .added ? nil : palette.successTone
         case .removed: palette.failureTone
         case .context: nil
         }
@@ -325,7 +322,7 @@ struct ReviewStream: View {
 
     private func cell(_ line: ReviewLine, segments: [ReviewSegment]?, side: ReviewSelection.Side, file: ReviewFile) -> some View {
         let path = file.path
-        let tone = tone(of: line, in: path)
+        let tone = tone(of: line, in: file)
         let selected = isSelected(line, side: side, path: path)
         // A line past the readable length shows its start until asked for the rest.
         let cut = line.cut.flatMap { store.openedLongLines.contains(line.id(in: path)) ? nil : $0 }

@@ -509,7 +509,7 @@ struct TaskChangesView: View {
             if review.files.isEmpty, store.review?.files.isEmpty == false {
                 ReviewNotice(text: "Every changed file is hidden or filtered out · the changed files list what is hidden")
             }
-            ReviewStream(store: store, reader: .changes, files: files, split: store.readsSplit(width: width),
+            ReviewStream(store: store, reader: .changes, files: files, split: store.layout(width: width) == .split,
                          headings: headings, headsFirstFile: false, addToConversation: addToConversation)
         } else if store.changesError == nil {
             ProgressView().frame(maxWidth: .infinity).padding(24)

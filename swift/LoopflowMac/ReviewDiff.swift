@@ -166,7 +166,7 @@ extension ReviewDiff {
     /// for each file in `layout`. A collapsed file draws only its header.
     func marks(layout: TaskFilesStore.ReviewLayout, collapsed: (ReviewFile) -> Bool) -> [ReviewMark] {
         var rows = 0
-        var marks: [(ReviewMark.Kind, String, String, Int)] = []
+        var marks: [ReviewMark] = []
         for file in files {
             rows += 1
             if collapsed(file) { continue }
@@ -175,11 +175,11 @@ extension ReviewDiff {
                 switch block {
                 case .hunk, .context: rows += 1
                 case .moved(let move):
-                    marks.append((.moved, move.id, file.path, rows))
+                    marks.append(ReviewMark(id: move.id, path: file.path, kind: .moved, position: Double(rows)))
                     rows += 1
                 case .change(let change):
                     let kind: ReviewMark.Kind = change.removed.isEmpty ? .added : change.added.isEmpty ? .removed : .changed
-                    marks.append((kind, change.id, file.path, rows))
+                    marks.append(ReviewMark(id: change.id, path: file.path, kind: kind, position: Double(rows)))
                     let drawn = switch layout {
                     case _ where file.status == .added: change.added.count
                     case .new: change.added.count + (change.removed.isEmpty ? 0 : 1)
@@ -191,7 +191,7 @@ extension ReviewDiff {
             }
         }
         let total = Double(max(rows, 1))
-        return marks.map { ReviewMark(id: $0.1, path: $0.2, kind: $0.0, position: Double($0.3) / total) }
+        return marks.map { ReviewMark(id: $0.id, path: $0.path, kind: $0.kind, position: $0.position / total) }
     }
 }
 
@@ -215,7 +215,7 @@ struct ReviewStep: Equatable, Sendable, Identifiable {
         var before = base
         for commit in commits {
             let name = Self.name(commit.subject)
-            if let name, let last = steps.last, last.name == name, Self.name(last.commits[0].subject) != nil {
+            if let name, let last = steps.last, Self.name(last.commits[0].subject) == name {
                 steps[steps.count - 1] = ReviewStep(name: name, base: last.base, commits: last.commits + [commit], head: commit.sha)
             } else {
                 steps.append(ReviewStep(name: name ?? commit.subject, base: before, commits: [commit], head: commit.sha))
@@ -296,20 +296,22 @@ struct ReviewFile: Equatable, Sendable, Identifiable {
                 let named = ReviewGap(header, after: 0).declaration
                 if !named.isEmpty { found = named }
             }
-            let ids: [String] = switch block {
-            case .change(let change) where status == .added:
-                change.added.indices.map { $0 == 0 ? change.id : "\(change.id)+\($0)" }
-            default: [block.id(in: path)]
+            // A new file's lines are rows of their own; any other block is one row.
+            if status == .added, case .change(let change) = block {
+                for (offset, line) in change.added.enumerated() {
+                    if change.rowID(offset) == id { return found }
+                    if let declaration = line.declaration(markdown: markdown) { found = declaration }
+                }
+                continue
             }
+            if block.id(in: path) == id { return found }
             let lines: [ReviewLine] = switch block {
             case .context(let line): [line]
             case .change(let change): change.added
             case .moved(let move): move.end == .destination ? move.lines : []
             case .hunk: []
             }
-            if ids.count == 1, ids[0] == id { return found }
-            for (offset, line) in lines.enumerated() {
-                if ids.count > 1, ids[offset] == id { return found }
+            for line in lines {
                 if let declaration = line.declaration(markdown: markdown) { found = declaration }
             }
         }
@@ -464,6 +466,9 @@ struct ReviewChange: Equatable, Sendable {
     /// replacement and carries word-level emphasis, a pure addition or removal
     /// stands alone.
     var pairs: [ReviewPair] { ReviewPair.align(removed, added) }
+
+    /// A new file draws each added line as its own row; the first carries the change's id.
+    func rowID(_ offset: Int) -> String { offset == 0 ? id : "\(id)+\(offset)" }
 }
 
 struct ReviewPair: Equatable, Sendable {

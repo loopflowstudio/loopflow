@@ -889,9 +889,8 @@ final class TaskFilesStore {
 
     /// Side by side needs a wide pane; a narrower one reads unified.
     static let splitWidth: CGFloat = 640
-    func readsSplit(width: CGFloat) -> Bool { reviewLayout == .split && width >= Self.splitWidth }
     /// The layout the stream reads in at this width.
-    func layout(width: CGFloat) -> ReviewLayout { reviewLayout == .split && !readsSplit(width: width) ? .unified : reviewLayout }
+    func layout(width: CGFloat) -> ReviewLayout { reviewLayout == .split && width < Self.splitWidth ? .unified : reviewLayout }
 
     // MARK: Steps and viewed files
 
@@ -910,7 +909,7 @@ final class TaskFilesStore {
         guard next != step else { return }
         if step == nil { taskComparison = comparison }
         step = next
-        comparison = next.map { .branch(base: $0.base, head: $0.head) } ?? taskComparison ?? .workingTree(base: "parent")
+        comparison = next.map { .branch(base: $0.base, head: $0.head) } ?? taskComparison ?? comparison
         changes = nil
         review = nil
         openedGaps = [:]

@@ -13,27 +13,44 @@ Everything that existed to give Dev some other world is deleted: `lf-world`,
 its recipes, the sealed copy of the Machine, `--world`, `--copy`, the
 pre-launch wire comparison, and the docs and QA notes built on them.
 
-## The one mechanism: Dev runs the installed `lf`
+## The one mechanism: Dev is a window, not an installation
 
 Today the Dev bundle carries a branch-built `lf` (`_build_tool("lf")`,
-`scripts/loopflow-dev.py:933`) and the app refuses any other
-(`controlLfPath`, `swift/LoopflowMac/MacLocalWaveAgentLauncher.swift:35`:
-"PATH fallback is disabled"). That one fact is why a Swift edit needs cargo,
-and why a branch with schema work could not open the store and got a copy.
+`scripts/loopflow-dev.py:933`) and its own `Library/LaunchAgents`, and the
+app refuses any other `lf` (`controlLfPath`,
+`swift/LoopflowMac/MacLocalWaveAgentLauncher.swift:35`: "PATH fallback is
+disabled"). Dev is a second installation of Loopflow. That one fact is why a
+Swift edit needs cargo, and why a branch with schema work could not open the
+store and got a copy.
 
-The change: the Dev bundle carries no `lf`. The launcher passes
-`LF_BIN=<the lf on the launching shell's PATH>`, and a bundle without a
-helper uses it. The release app is unchanged: it has a helper and uses it.
+The change: the Dev bundle carries no `lf` and no launch agent. A bundle
+with no helper uses **the Machine's installation**: the account's public
+entry, `~/.local/bin/lf` (`LF_INSTALL_DIR/lf` when set). That is already the
+one definition of "installed" on both sides: promotion links it to the
+installed app's helper (`installation::installed_app`,
+`rust/loopflow-execution/src/installation.rs:789`) and
+`AppUpdates.isInstalled` (`swift/LoopflowMac/AppUpdater.swift:31`) follows
+the same link. The launcher passes no `LF_BIN` and chooses nothing.
 
-- `controlLfPath`: a bundle with no helper uses `LF_BIN`; with neither, the
-  error names the fix (`lf self install`). The `LF_HOME`-plus-`LF_BIN` case
-  the Swift tests use (`BuiltLf.swift`) keeps working.
-- `GUIProcessEnvironment.enriched`
-  (`swift/LoopflowMac/Services/ProcessEnvironment.swift:37`) drops `LF_BIN`
-  and re-sets it only from the bundle; without a helper it keeps the given
-  one, so panes and shell tabs get the installed `lf` on PATH.
-- Dev's bundle stops shipping `Library/LaunchAgents`
-  (`_copy_bundled_tools`); it registers no server.
+One Swift resolver answers "which `lf` does this app run", in this order:
+
+1. `LF_HOME` with `LF_BIN`: a private Machine (Swift tests through
+   `BuiltLf.swift`, the benchmark launcher). Unchanged.
+2. The bundle's own helper: the release app. Unchanged.
+3. The public entry: any bundle without a helper, which is Dev.
+4. None: "Loopflow is not installed on this Machine (no lf at
+   ~/.local/bin/lf). Install Loopflow, then open Loopflow Dev again."
+
+- `controlLfPath` and `GUIProcessEnvironment.enriched`
+  (`swift/LoopflowMac/Services/ProcessEnvironment.swift:37`) both call that
+  resolver; `enriched` sets `LF_BIN` and the PATH prefix from its answer
+  instead of probing the bundle itself. Counterexample this closes: today
+  `enriched` drops `LF_BIN` and restores it only from a bundled helper, so a
+  helper-less Dev opened on a private home by the benchmark would lose its
+  `LF_BIN` and run the installed `lf` against that home.
+- `AppUpdates.isInstalled` reads the public entry through the same function.
+- `_copy_bundled_tools` no longer runs for Dev; `_app_environment` shrinks
+  to `LOOPFLOW_DEV_WAVE_REPO` (the installed `lf` reads it for metrics).
 - The launcher runs `open` with `LF_*` cleared. Seen on this Machine: the
   running Dev (pid 35920, launched by another Task's agent) carries
   `LF_AGENT_CALLER`, `LF_BARE_STEER`, `LF_STEER_SESSION`,
@@ -42,19 +59,31 @@ helper uses it. The release app is unchanged: it has a helper and uses it.
   `loopflow-dev.py:117` says otherwise. `_app_shell_environment()` exists
   and is not used for the launch.
 
+Passed over: the launcher passing `LF_BIN=<the lf on the launching shell's
+PATH>`. Seen on this Machine, `which -a lf` gives three files:
+`/Applications/Loopflow.app/Contents/MacOS/lf` and `~/.local/bin/lf` (sha
+`aeab8b41…`, the running server's) and `~/.cargo/bin/lf` from July (sha
+`a527444a…`). Desktop's first socket lookup runs `lf install server`
+(`ServerClient.swift:169`), and `ensure()`
+(`rust/loopflow-execution/src/installation/server.rs:12`) replaces a running
+server whose `executable_sha256` is not the calling `lf`'s. With PATH order
+deciding, a shell that finds the July file first would have Dev replace the
+live server. An environment variable is also lost when Dev is reopened from
+the Dock or Spotlight, and it would give `LF_BIN` a second meaning.
+
 What this was checked against:
 
-- **The server is left alone.** Desktop's first socket lookup runs
-  `lf install server` (`ServerClient.swift:169`). `ensure()`
-  (`rust/loopflow-execution/src/installation/server.rs:12`) returns the
-  running server untouched when its `executable_sha256` is the calling
-  `lf`'s. Run here with the installed `lf`: instance
-  `5f5bc7b3-59a4-4213-b45e-6490a0dd089d`, sha `aeab8b41…`, same before and
-  after.
+- **The server is left alone, and comes back the same way.** With the public
+  entry, Dev's `lf install server` is the call the installed Loopflow makes:
+  it returns the running server untouched when the sha matches. Run here with
+  the installed `lf`: instance `5f5bc7b3-59a4-4213-b45e-6490a0dd089d`, sha
+  `aeab8b41…`, same before and after. When no server answers, the same call
+  registers the installation's server, as it does for Loopflow; that path is
+  read from the code and never exercised on the live Machine.
 - **The store is never opened by branch code.** Every CLI child (task
-  checkout, `session resume --prepare`, shell tabs, `install adopt`) is the
-  installed `lf`. The "installed lf ≥ branch frontier" check before a Dev
-  launch has nothing left to guard.
+  checkout, `session resume --prepare`, shell tabs) is the installed `lf`.
+  The "installed lf ≥ branch frontier" check before a Dev launch has nothing
+  left to guard.
 - **Sessions are the real ones.** A Dev pane asks the installed server for
   `session.attach` and joins the held terminal as another view: "every
   attached view of it types, beside any already there"
@@ -62,10 +91,20 @@ What this was checked against:
   `transport_tests.rs:1436` covers two views typing). Holders belong to the
   installed `lf`, not to a Dev bundle that the next `run` rewrites. Today a
   holder from a Dev bundle is still running from 02:05 (pid 23818).
-- `AppUpdates.adoptIfUpdated` must stay a no-op for Dev (`isInstalled` is
-  false for `~/Applications/Loopflow Dev.app`); slice 1 confirms it.
+- `AppUpdates.adoptIfUpdated` stays a no-op for Dev: `isInstalled` is false
+  for `~/Applications/Loopflow Dev.app`. An existing test covers a
+  non-installed path; slice 1 adds the Dev path to it.
+- **One Dev per Machine.** `cmd_install` quits the running Dev
+  (`_stop_loopflow_app`) and rewrites the one bundle at
+  `~/Applications/Loopflow Dev.app`; the last checkout to run is the one
+  showing. With no `lf`, server or holder inside the bundle, that costs the
+  other checkout a window and nothing else.
 
-## How far a newer Desktop reads an older server
+Three places are left, each a real thing: the Machine through Loopflow, the
+Machine through Loopflow Dev, and a private Machine (`LF_HOME` with
+`LF_BIN`) that tests and the benchmark start empty.
+
+## How far one build of Desktop reads another build's server
 
 No pre-launch comparison. What is true is found where it happens:
 
@@ -90,11 +129,16 @@ Two gaps to close, both in Swift:
    it. `aReadingThisBuildCannotDecodeNamesBothBuilds` covers the second
    case only.
 
+The table holds in both directions: a branch behind `main` is an older
+Desktop on a newer server.
+
 A branch that changes Rust and Swift together sees its new Swift against the
-old server: the changed part says so, the rest works. To see the new server,
-install the branch (`lf self install`); that is a person's choice, never the
-launcher's. DTOs stay strict; a missing field fails its part and no default
-papers over it.
+installed server: the changed part says so, the rest works. No command puts
+a branch's `lf` on the Machine (`lf self install` follows the release
+stream), and the launcher never changes what is installed. The new server
+is seen on a private Machine (`LF_HOME` with the branch `lf`), and on the
+live one when the branch lands and the stream installs it. DTOs stay strict;
+a missing field fails its part and no default papers over it.
 
 ## The copy and the worlds buy nothing that is kept
 
@@ -136,8 +180,9 @@ tests by name, `cargo clippy --all-targets -- -D warnings`. Steps 2–4 need a
 display and a person's Machine: they belong to qa/demo.
 
 `~/Applications/Loopflow Dev.app` is one path shared by every checkout, and
-another Task's Dev is running from it now. The live run checks it is not in
-use before installing over it.
+`run` quits whatever Dev is open before replacing it. Another Task's Dev is
+running from it now, serving `~/.lf-copy` with the bundle's own `lf`. The
+live run checks nobody is using it first.
 
 ## What goes
 
@@ -175,8 +220,8 @@ Scripts and Python
 - `check_attributegraph_cycles.sh --world`; `--sheet` runs on `mock-waves`.
 - `disk_cleanup.py` `lf-worlds-` prefix, its doc line and test case.
 - `test_loopflow_dev.py` copy and world tests; one test stays and grows:
-  `run` launches the Machine with the installed `lf`, clears `LF_*`, and
-  starts no cargo.
+  `run` opens the app with no `LF_*` in its environment, whatever the
+  calling shell holds, and starts no cargo.
 
 Swift
 - `WaveSurfaceLaunch.world`, `LOOPFLOW_UI_TEST_WORLD`, the vestigial
@@ -234,13 +279,17 @@ CI. Passed over: keeping `lf-world` for the benchmark alone.
 
 ## Slices
 
-1. **Dev on the installed `lf`.** `controlLfPath` and `enriched` take
-   `LF_BIN` when the bundle has no helper; the launcher stops building and
-   bundling `lf`, clears `LF_*`, prints "Opening the Machine."; `--world`
-   and `--copy` and everything that chose between them are deleted. Shows
-   whether anything in the app assumed a bundled helper (signing, panes'
-   PATH, `install adopt`), and whether the acceptance steps 1–3 and 5 hold.
-   This is the slice that could prove the plan wrong.
+1. **Dev on the Machine's installation.** One resolver behind
+   `controlLfPath`, `enriched` and `isInstalled`; the launcher stops
+   building and bundling `lf` and the launch agent, passes no `LF_BIN`,
+   clears `LF_*`, prints "Opening the Machine."; `--world` and `--copy` and
+   everything that chose between them are deleted. Swift tests: a
+   helper-less bundle resolves the public entry; `LF_HOME` with `LF_BIN`
+   still wins and reaches children through `enriched`; a bundled helper
+   still wins over the public entry; with none, the error names the missing
+   path. Shows whether anything in the app assumed a bundled helper
+   (signing, panes' PATH, `install adopt`), and whether the acceptance
+   steps 1–3 and 5 hold. This is the slice that could prove the plan wrong.
 2. **Older server, newer Desktop.** The `ServerPeer` test and the one-shot
    read sentence.
 3. **Rust deletion.** Sealed copy, `lf-world`, recipes; the moved tests land

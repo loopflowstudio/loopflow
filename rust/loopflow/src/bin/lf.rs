@@ -27,28 +27,25 @@ enum Takes {
 }
 
 #[derive(PartialEq, Eq)]
-enum FlagValue {
+enum SeparateValue {
     None,
-    Inline,
     Next,
     Missing,
 }
 
 impl Takes {
-    fn read(self, args: &[String], index: usize) -> FlagValue {
-        if args[index].contains('=') {
-            FlagValue::Inline
-        } else if self == Self::Nothing {
-            FlagValue::None
+    fn separate_value(self, args: &[String], index: usize) -> SeparateValue {
+        if self == Self::Nothing || args[index].contains('=') {
+            SeparateValue::None
         } else if args
             .get(index + 1)
             .is_some_and(|next| next == "-" || !next.starts_with('-'))
         {
-            FlagValue::Next
+            SeparateValue::Next
         } else if self == Self::Value {
-            FlagValue::Missing
+            SeparateValue::Missing
         } else {
-            FlagValue::None
+            SeparateValue::None
         }
     }
 }
@@ -139,7 +136,7 @@ fn first_target_index(args: &[String]) -> Option<usize> {
         if arg_tables()
             .direct
             .get(flag_name(arg))
-            .is_some_and(|takes| takes.read(args, index) == FlagValue::Next)
+            .is_some_and(|takes| takes.separate_value(args, index) == SeparateValue::Next)
         {
             index += 1;
         }
@@ -178,7 +175,7 @@ fn selected_command_path<'a>(
                 .recursive
                 .get(name)
                 .max(arg_tables().direct.get(name));
-            if takes.is_some_and(|takes| takes.read(rest, index) == FlagValue::Next) {
+            if takes.is_some_and(|takes| takes.separate_value(rest, index) == SeparateValue::Next) {
                 index += 1;
             }
             index += 1;
@@ -247,15 +244,15 @@ fn reorder_command_args(
             continue;
         };
         let start = index;
-        match takes.read(rest, index) {
-            FlagValue::Missing => {
+        match takes.separate_value(rest, index) {
+            SeparateValue::Missing => {
                 let mut result = vec![program];
                 result.extend(owner_path.iter().map(|command| rest[command.index].clone()));
                 result.push(arg.clone());
                 return result;
             }
-            FlagValue::Next => index += 1,
-            FlagValue::None | FlagValue::Inline => {}
+            SeparateValue::Next => index += 1,
+            SeparateValue::None => {}
         }
         retained[start..=index].fill(false);
         moved.extend_from_slice(&rest[start..=index]);
@@ -307,10 +304,10 @@ fn reorder_args(args: Vec<String>) -> Vec<String> {
         }
         if let Some(takes) = arg_tables().direct.get(flag_name(arg)) {
             let start = index;
-            match takes.read(rest, index) {
-                FlagValue::Missing => return vec![args[0].clone(), arg.clone()],
-                FlagValue::Next => index += 1,
-                FlagValue::None | FlagValue::Inline => {}
+            match takes.separate_value(rest, index) {
+                SeparateValue::Missing => return vec![args[0].clone(), arg.clone()],
+                SeparateValue::Next => index += 1,
+                SeparateValue::None => {}
             }
             result.extend_from_slice(&rest[start..=index]);
         } else {
@@ -3929,8 +3926,12 @@ mod tests {
             let error = Cli::try_parse_from(reordered).unwrap_err();
             assert_eq!(error.kind(), clap::error::ErrorKind::InvalidValue);
             assert_eq!(error.exit_code(), 2);
+            let flag = expected.split_whitespace().last().unwrap();
+            let flag = if flag == "-a" { "--agent" } else { flag };
+            let diagnostic = error.to_string();
             assert!(
-                error.to_string().contains("but none was supplied"),
+                diagnostic.contains(&format!("a value is required for '{flag} "))
+                    && diagnostic.contains("but none was supplied"),
                 "{input}: {error}"
             );
         }

@@ -1022,7 +1022,7 @@ Changes to observed definition files or directory traversal also run
 must remain available when a local catalog path is not a directory.
 
 When changing Session activity or Waiting, run `session_cli_tests` and
-`world_recipes` (its `--watch` cases) together. Direct SQL fixtures must carry both the attachment
+`session_list_subscribe` together. Direct SQL fixtures must carry both the attachment
 token and the AgentProcess id, matching the production activity writer. Rebuild both SwiftPM and
 the Xcode test targets after shared model renames; Foundation types such as
 `Foundation.Process` need explicit qualification where names overlap.

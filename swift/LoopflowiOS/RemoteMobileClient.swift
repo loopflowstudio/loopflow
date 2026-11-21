@@ -38,7 +38,7 @@ final class RemoteMobileClient: MobileTaskCreationClient {
         let directory = URL.applicationSupportDirectory.appending(path: "submissions-\(savedMachine.machineID)")
         let machineID = savedMachine.machineID
         return CreationSubmissions(directory: directory, machine: { machineID }, lookup: { [self] id in
-            try await connection().request(.read(.creationGet(requestID: id)), deadline: Self.requestDeadline).printed
+            try await connection().read(.creationGet(requestID: id), deadline: Self.requestDeadline)
         }, send: { [self] payload in
             let creation = try JSONDecoder().decode(JSONValue.self, from: payload)
             return String(decoding: try await connection().request(.submittedCreation(creation), deadline: Self.requestDeadline).bytes,

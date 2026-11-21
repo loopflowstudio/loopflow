@@ -11,12 +11,12 @@ enum ServerClient {
     /// can give up; writes wait, because their outcome would become unknown.
     static let readDeadline = Duration.seconds(60)
 
-    /// What `lf <read>` prints: bare text for a string value, JSON otherwise.
+    /// Read from the link selected for this location.
     static func read(_ query: ServedRead, location: ServerLocation = .shared,
-                     deadline: Duration = readDeadline) async throws -> String {
+                     deadline: Duration = readDeadline) async throws -> ReadOutput {
         try Task.checkCancellation()
         let link = try await links.link(for: location)
-        return try await link.request(.read(query), deadline: deadline).printed
+        return try await link.read(query, deadline: deadline)
     }
 
     /// What the write returned, as JSON: what `lf <write> --json` prints.
@@ -147,22 +147,27 @@ private actor ServerLinks {
 }
 
 actor ServerLocation {
-    static let shared = ServerLocation()
+    static let shared = ServerLocation(startsServer: LocalWaveAgentLauncher.machineLf().startsServer)
     private let query: @Sendable ([String]) async throws -> String
     private var endpoint: Task<String, any Error>?
+    private let startsServer: Bool
     private var setupError: String?
 
-    init(query: @escaping @Sendable ([String]) async throws -> String = {
-        try await LocalWaveAgentLauncher.queryLf($0, cwd: "/")
-    }) {
+    init(
+        startsServer: Bool,
+        query: @escaping @Sendable ([String]) async throws -> String = {
+            try await LocalWaveAgentLauncher.queryLf($0, cwd: "/")
+        }
+    ) {
+        self.startsServer = startsServer
         self.query = query
     }
 
     func path() async throws -> String {
         if let endpoint { return try await endpoint.value }
-        // The shared task retains a successful endpoint. A failed initial lookup
-        // retains its diagnosis instead; later lookups only observe status.
-        let prepare = setupError == nil
+        // Keep a successful endpoint. After a failed install, keep its diagnosis
+        // and check status on subsequent attempts.
+        let prepare = startsServer && setupError == nil
         let previousSetupError = setupError
         let task = Task {
             do {
@@ -173,7 +178,13 @@ actor ServerLocation {
                     let error: String?
                 }
                 let status = try JSONDecoder().decode(Status.self, from: Data(result.utf8))
-                guard status.ready else { throw RegistryQueryError(status.error ?? "Loopflow server unavailable") }
+                guard status.ready else {
+                    if !startsServer {
+                        let guidance = "Loopflow's server isn't running. Open Loopflow, or run `lf install server`."
+                        throw RegistryQueryError([guidance, status.error].compactMap { $0 }.joined(separator: " "))
+                    }
+                    throw RegistryQueryError(status.error ?? "Loopflow server unavailable")
+                }
                 return status.socket
             } catch {
                 // Every concurrent waiter gets the same actionable diagnosis.
@@ -200,7 +211,8 @@ extension ServerEndpoint {
     /// The Machine's server on its private Unix socket.
     static func unix(path: String) -> ServerEndpoint {
         ServerEndpoint(
-            client: ServerClientIdentity(kind: "desktop", platform: "macos", name: "Loopflow",
+            client: ServerClientIdentity(kind: "desktop", platform: "macos",
+                                          name: Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String ?? "Loopflow",
                                           version: "\(LaunchJournal.appVersion)+\(DesktopLog.sourceRevision)"),
             control: { try UnixSocketCarrier(path: path, limit: ServerProtocol.maxMessage) },
             ticketed: { try UnixSocketCarrier(path: path, limit: ServerProtocol.maxBulk) })

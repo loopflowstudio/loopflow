@@ -277,7 +277,7 @@ final class SessionsWorkspace {
            case .recorded(let recorded, let checkout) = observed.location, checkout == identity.worktree {
             task = recorded
         } else { task = key.id }
-        return [try LocalWaveAgentLauncher.controlLfPath(), "--machine", identity.machineId,
+        return [try LocalWaveAgentLauncher.machineLf().path, "--machine", identity.machineId,
          "--repo-id", key.repository, "desktop", "shell", task,
          "--checkout", identity.worktree, "--id", tab.id]
     }
@@ -1857,7 +1857,7 @@ struct SessionsContentView: View {
             origin.preparedTaskWorktrees[taskId] = checkout
         }
         // The captured entry receives a late preparation reply without changing selection.
-        let lf = try LocalWaveAgentLauncher.controlLfPath()
+        let lf = try LocalWaveAgentLauncher.machineLf().path
         guard checkout.machineId == machineId else { throw RegistryQueryError("Open a conversation on its owning Machine") }
         entry.presentation.content = .terminals
         entry.location = checkout

@@ -34,9 +34,8 @@ also run `cargo test -p loopflow --test integration documented_commands::`.
 It checks command examples and maintained copy, including design documents;
 include `test(documented_commands::)` in the gate's Rust filter.
 
-Builtin Graph order or loop changes also include `test(world_recipes::)` in the
-gate's Rust filter, alongside `test(graph::)`. These recipes check the steps
-recorded by real Task runs, including the pursuit that stops at demo.
+Builtin Graph order or loop changes include `test(graph::)` in the gate's
+Rust filter.
 
 Embedded skill Markdown also reaches `binary(golden_prompt)`, even when no Rust
 code changes. Follow the [prompt fixture checks](../rust/loopflow/tests/README.md)
@@ -204,14 +203,12 @@ with `transport 'https' not allowed`, run `swift package resolve` in `swift/` on
 and rerun.
 
 ```bash
-uv run python scripts/loopflow-dev.py run          # the branch's Desktop on real data
-cargo test -p loopflow --test integration copy_world   # a copy changes nothing outside itself
+uv run python scripts/loopflow-dev.py run    # open the branch's Swift app on the live Machine
 ```
 
-`run` opens the Machine, or a read-only copy when the branch changes a wire type
-or adds a migration; [Loopflow for macOS](../swift/README.md) says which and
-what each allows. A change to `lf-world copy`, to what a server does on a
-read-only store, or to which requests it admits there runs `copy_world`.
+For a visible Swift change, open Loopflow Dev and check it on the installed
+server. For a change to the CLI or server, run the branch's `lf` on a
+[private Machine](../docs/dev/machines.md#one-main-machine).
 
 `--reuse-passing` returns at once for an identical tree and plan. A later pass
 narrows `--rust-filter` to what changed since the last pass.

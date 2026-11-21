@@ -1490,6 +1490,34 @@ fn a_task_takes_up_its_waves_graph_and_keeps_the_one_it_named() {
     assert_eq!(graph["name"], "feature");
     assert_eq!(graph["position"], at("review"));
     assert_eq!(graph["interactive_steps"][0]["skill"], "demo");
+    let output = task.run(&["task", "status", "INF-123", "--json"]);
+    assert!(output.status.success(), "{output:?}");
+    let status: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let mut fields: Vec<_> = status
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(String::as_str)
+        .collect();
+    fields.sort_unstable();
+    assert_eq!(
+        fields,
+        [
+            "auto",
+            "comments",
+            "conversation",
+            "graph_processes",
+            "sessions",
+            "stack_parent",
+            "summary",
+            "task"
+        ]
+    );
+    assert_eq!(
+        status["task"]["graph"],
+        serde_json::json!({"name": "feature", "step": "review"})
+    );
+    assert_eq!(status["task"]["next"], "lf task run INF-123");
     drop(task);
 
     // A Task that named its own keeps it when later runs name nothing.

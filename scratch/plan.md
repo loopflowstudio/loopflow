@@ -46,6 +46,12 @@ The implementation uses one focus rule for all viewers. The choices are in
   local and prepared SSH argv. Swift checks used the existing checkout
   CLI after the Desktop wrapper's Cargo build failed on
   `graph_process_task` in the shallow checkout. [QA transcript](qa.html)
+- **Relay compression.** `cargo test -p loopflow-execution --lib transport::tests::`
+  passed all 11 cases. The focused `transport_tests` cases
+  `a_resumed_relay_keeps_focus_across_server_restarts` and
+  `held_session_survives_server_restart` passed, including uninterrupted output
+  across restart. `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings`
+  passed. CI repeats these checks.
 
 ## Next at QA or gate
 

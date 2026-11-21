@@ -1269,13 +1269,20 @@ fn contains(bytes: &[u8], needle: &[u8]) -> bool {
 }
 
 /// Input on either side of a focus report must reach the holder in that order.
-fn next_focus(bytes: &[u8]) -> (&[u8], Option<(bool, &[u8])>) {
-    for (at, sequence) in bytes.windows(3).enumerate() {
-        if sequence == b"\x1b[I" || sequence == b"\x1b[O" {
-            return (&bytes[..at], Some((sequence[2] == b'I', &bytes[at + 3..])));
+fn focus_reports(mut bytes: &[u8]) -> impl Iterator<Item = (&[u8], Option<bool>)> {
+    std::iter::from_fn(move || {
+        if bytes.is_empty() {
+            return None;
         }
-    }
-    (bytes, None)
+        for (at, sequence) in bytes.windows(3).enumerate() {
+            if sequence == b"\x1b[I" || sequence == b"\x1b[O" {
+                let input = &bytes[..at];
+                bytes = &bytes[at + 3..];
+                return Some((input, Some(sequence[2] == b'I')));
+            }
+        }
+        Some((std::mem::take(&mut bytes), None))
+    })
 }
 
 impl Drop for ViewerTerminal {
@@ -1501,35 +1508,27 @@ pub fn relay(id: &TerminalId, session: Option<&LfSessionId>, json: bool) -> Resu
 /// scanner describe one view. A fresh attachment replaces both together.
 #[derive(Default)]
 struct RelayOutput {
-    /// An earlier attachment of this view was acknowledged.
-    attached: bool,
-    /// The PTY position the screen shows.
-    received: u64,
+    /// The PTY position shown on screen, until the relay draws over it.
+    position: Option<u64>,
     scanner: Option<Scanner>,
-    /// The stream said which PTY position it stands at, and the screen has
-    /// shown nothing since but that stream.
-    positioned: bool,
-    /// The attachment in flight continues the screen from `received`.
+    /// The attachment in flight requested a continuation.
     continuing: bool,
 }
 
 impl RelayOutput {
     /// The screen continues from the PTY position it shows, or repaints.
     fn attachment(&mut self, focused: bool) -> Request {
-        let from = if self.positioned {
-            self.continuing = true;
-            Some(self.received)
-        } else {
-            *self = Self::default();
-            None
-        };
+        self.continuing = self.position.is_some();
+        if !self.continuing {
+            self.scanner = None;
+        }
         let (rows, cols) = size();
         Request::Attach {
             rows,
             cols,
             focused: Some(focused),
             name: tty_name(libc::STDIN_FILENO),
-            from,
+            from: self.position,
         }
     }
 
@@ -1542,14 +1541,13 @@ impl RelayOutput {
             Some(_) => {}
             None => self.scanner = Some(Scanner::new(nonce)),
         }
-        self.attached = true;
         continued
     }
 
     /// The relay drew into the screen itself: it no longer shows a PTY
     /// position, so the next recovery repaints it.
     fn drew(&mut self) {
-        self.positioned = false;
+        self.position = None;
     }
 }
 
@@ -1564,14 +1562,18 @@ const FENCE_WAIT: Duration = Duration::from_secs(1);
 /// answered long ago; its terminal answers them again. Nothing it reads
 /// reaches the agent until that is over.
 #[derive(Debug)]
-enum CatchingUp {
+enum Replay {
+    Live,
     /// Replayed output is still arriving.
     Replaying,
     /// The stream is live; the terminal's answers end with `FENCE_ANSWER`.
-    Fenced { matched: usize, until: Instant },
+    Fenced {
+        matched: usize,
+        until: Instant,
+    },
 }
 
-impl CatchingUp {
+impl Replay {
     fn fenced() -> Self {
         Self::Fenced {
             matched: 0,
@@ -1579,24 +1581,25 @@ impl CatchingUp {
         }
     }
 
-    /// What of `bytes` read from the terminal may reach the agent: nothing
-    /// before the fence's answer, everything after it. `None` while catching
-    /// up continues.
-    fn pass<'a>(&mut self, bytes: &'a [u8]) -> Option<&'a [u8]> {
-        let Self::Fenced { matched, .. } = self else {
-            return None;
+    /// Only input after the replay fence reaches the agent.
+    fn pass<'a>(&mut self, bytes: &'a [u8]) -> &'a [u8] {
+        let matched = match self {
+            Self::Live => return bytes,
+            Self::Replaying => return &[],
+            Self::Fenced { matched, .. } => matched,
         };
         for (i, byte) in bytes.iter().enumerate() {
             if *byte == FENCE_ANSWER[*matched] {
                 *matched += 1;
                 if *matched == FENCE_ANSWER.len() {
-                    return Some(&bytes[i + 1..]);
+                    *self = Self::Live;
+                    return &bytes[i + 1..];
                 }
             } else {
                 *matched = usize::from(*byte == FENCE_ANSWER[0]);
             }
         }
-        None
+        &[]
     }
 
     fn expired(&self) -> bool {
@@ -1623,14 +1626,13 @@ impl RelayInput {
         }
     }
 
-    fn discard(&mut self, mut bytes: &[u8]) {
+    fn discard(&mut self, bytes: &[u8]) {
         self.paste.observe(bytes);
-        loop {
-            let (input, report) = next_focus(bytes);
+        for (input, report) in focus_reports(bytes) {
             self.observe_keys(input);
-            let Some((state, tail)) = report else { break };
-            self.focused = state;
-            bytes = tail;
+            if let Some(focused) = report {
+                self.focused = focused;
+            }
         }
     }
 
@@ -1638,23 +1640,13 @@ impl RelayInput {
         &mut self,
         bytes: &[u8],
         socket: &mut impl Write,
-        catching_up: &mut Option<CatchingUp>,
+        replay: &mut Replay,
         resume_input: &mut bool,
     ) -> Result<()> {
-        let mut rest = bytes;
+        // Keep observing focus and paste framing after a write fails, for reconnect.
         let mut sent = Ok(());
-        loop {
-            let (input, report) = next_focus(rest);
-            let typed = match catching_up {
-                None => input,
-                Some(catching) => match catching.pass(input) {
-                    Some(tail) => {
-                        *catching_up = None;
-                        tail
-                    }
-                    None => &[],
-                },
-            };
+        for (input, report) in focus_reports(bytes) {
+            let typed = replay.pass(input);
             self.paste.observe(&input[..input.len() - typed.len()]);
             if !typed.is_empty() {
                 self.observe_keys(typed);
@@ -1667,10 +1659,10 @@ impl RelayInput {
                 self.paste.observe(typed);
                 sent = sent.and_then(|()| send_frame(socket, Tag::Input, typed));
             }
-            let Some((report, tail)) = report else { break };
-            self.focused = report;
-            sent = sent.and_then(|()| send(socket, Request::Focus { focused: report }));
-            rest = tail;
+            if let Some(focused) = report {
+                self.focused = focused;
+                sent = sent.and_then(|()| send(socket, Request::Focus { focused }));
+            }
         }
         sent
     }
@@ -1807,10 +1799,10 @@ fn view(
     let mut heartbeat = Instant::now() + HEARTBEAT_INTERVAL;
     let mut child_code = 0;
     let mut last_response = Instant::now();
-    let mut catching_up: Option<CatchingUp> = None;
+    let mut replay = Replay::Live;
     loop {
-        if catching_up.as_ref().is_some_and(CatchingUp::expired) {
-            catching_up = None;
+        if replay.expired() {
+            replay = Replay::Live;
         }
         let mut can_reconnect = server;
         if status.as_ref().is_some_and(connection::Status::closed) {
@@ -1935,15 +1927,15 @@ fn view(
                 match tag {
                     Tag::Reply | Tag::Aside | Tag::Close => {}
                     Tag::Position => {
-                        output.received = wire::parse_position(&payload)?;
-                        output.positioned = true;
+                        output.position = Some(wire::parse_position(&payload)?);
                         continue;
                     }
-                    Tag::Snapshot => {
-                        output.received += payload.len() as u64;
-                        output.positioned = false;
+                    Tag::Snapshot => output.drew(),
+                    _ => {
+                        if let Some(position) = &mut output.position {
+                            *position += payload.len() as u64;
+                        }
                     }
-                    _ => output.received += payload.len() as u64,
                 }
                 let pieces = match tag {
                     Tag::Close => {
@@ -1986,7 +1978,11 @@ fn view(
                                 attached = true;
                                 let recovered = std::mem::take(&mut recovering);
                                 let continued = output.acknowledged(&nonce);
-                                catching_up = continued.then_some(CatchingUp::Replaying);
+                                replay = if continued {
+                                    Replay::Replaying
+                                } else {
+                                    Replay::Live
+                                };
                                 if recovered || status.is_some() {
                                     discard_reconnect_input(input)?;
                                     fds[1].revents = 0;
@@ -2109,12 +2105,12 @@ fn view(
                         Event::Live => {
                             // The terminal's answer to the fence comes after
                             // every answer it owes the replayed output.
-                            if matches!(catching_up, Some(CatchingUp::Replaying)) {
-                                catching_up = if terminal.is_some() {
+                            if matches!(replay, Replay::Replaying) {
+                                replay = if terminal.is_some() {
                                     write_output(&mut terminal, 1, FENCE)?;
-                                    Some(CatchingUp::fenced())
+                                    Replay::fenced()
                                 } else {
-                                    None
+                                    Replay::Live
                                 };
                             }
                         }
@@ -2158,12 +2154,9 @@ fn view(
                 }
                 return Ok(());
             } else if attached {
-                if let Err(error) = input.forward(
-                    &bytes[..n],
-                    &mut socket,
-                    &mut catching_up,
-                    &mut resume_input,
-                ) {
+                if let Err(error) =
+                    input.forward(&bytes[..n], &mut socket, &mut replay, &mut resume_input)
+                {
                     if !can_reconnect {
                         return Err(error);
                     }
@@ -2730,8 +2723,8 @@ mod tests {
     use std::time::Duration;
 
     use super::{
-        carry_across_exec, next_focus, output, place_events, wire, CatchingUp, Event, Handoff,
-        RelayOutput, Sizing, Viewer, CONTROL_ENV, HELD_ENV, LIMIT, PARENT_ENV,
+        carry_across_exec, focus_reports, output, place_events, wire, Event, Handoff, RelayOutput,
+        Replay, Sizing, Viewer, CONTROL_ENV, HELD_ENV, LIMIT, PARENT_ENV,
     };
     use loopflow_model::id::TerminalId;
 
@@ -2761,16 +2754,17 @@ mod tests {
     #[test]
     fn a_catching_up_views_terminal_answers_never_reach_the_agent() {
         // Replayed output is still arriving: whatever the terminal says waits.
-        let mut catching = CatchingUp::Replaying;
-        assert_eq!(catching.pass(b"\x1b[12;1R"), None);
+        let mut catching = Replay::Replaying;
+        assert_eq!(catching.pass(b"\x1b[12;1R"), b"");
         // Late answers to replayed queries, then the fence's answer split
         // across reads, then the first key typed after it.
-        let mut catching = CatchingUp::fenced();
-        assert_eq!(catching.pass(b"\x1b[3;1R\x1b[?62;22c\x1b"), None);
-        assert_eq!(catching.pass(b"[0"), None);
-        assert_eq!(catching.pass(b"nls\r"), Some(&b"ls\r"[..]));
-        let mut catching = CatchingUp::fenced();
-        assert_eq!(catching.pass(b"\x1b\x1b[0n"), Some(&b""[..]));
+        let mut catching = Replay::fenced();
+        assert_eq!(catching.pass(b"\x1b[3;1R\x1b[?62;22c\x1b"), b"");
+        assert_eq!(catching.pass(b"[0"), b"");
+        assert_eq!(catching.pass(b"nls\r"), b"ls\r");
+        let mut catching = Replay::fenced();
+        assert_eq!(catching.pass(b"\x1b\x1b[0n"), b"");
+        assert_eq!(catching.pass(b"x"), b"x");
     }
 
     #[test]
@@ -2781,8 +2775,7 @@ mod tests {
         };
         for focused in [false, true] {
             let mut output = RelayOutput {
-                received: 42,
-                positioned: true,
+                position: Some(42),
                 ..RelayOutput::default()
             };
             assert_eq!(
@@ -2887,15 +2880,15 @@ mod tests {
 
     #[test]
     fn focus_reports_split_input_in_arrival_order() {
-        let (input, report) = next_focus(b"a\x1b[Ib\x1b[O");
-        assert_eq!(input, b"a");
-        let (focused, tail) = report.unwrap();
-        assert!(focused);
+        let parts = focus_reports(b"a\x1b[I\x1b[Ob\x1b[A").collect::<Vec<_>>();
         assert_eq!(
-            next_focus(tail),
-            (b"b".as_slice(), Some((false, b"".as_slice())))
+            parts,
+            [
+                (b"a".as_slice(), Some(true)),
+                (b"", Some(false)),
+                (b"b\x1b[A", None)
+            ]
         );
-        assert_eq!(next_focus(b"\x1b[A"), (b"\x1b[A".as_slice(), None));
     }
 
     #[test]

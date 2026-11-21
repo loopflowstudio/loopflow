@@ -321,6 +321,18 @@ are deleted, and a failed file read has Retry. Chosen by the review, not by
 Jack, reversible. Left as is: Files' Diff mode reads its one file with
 `loadDiff`, because it compares the unsaved draft.
 
+Ninth pass, November 21, over those repairs and the 360 pt fit as built:
+nothing to change. Read at `c9c7bc8b93`: no `collapses`, `openedLongFiles`,
+`longestLine` or `changes-long-lines` outside `scratch/`; `readFile` makes one
+read, `lf task diff --path`; `FileNote` is cut or failed and only failed has
+Retry; a change and a long line share one id (`ReviewLine.id(in:)`); the
+toolbar's four forms give up layout, then order and tour, then Focus, as
+`swift/README.md` says. Two things are called cut and stay two: a long line
+(Show brings the rest) and a file past 1 MB (nothing does until Task 4556d0).
+Noticed, left as chosen: while files are still being read the title counts
+only the changes read so far, and the number waiting is in the reading mark's
+tooltip. The five questions under Remaining are unchanged and unanswered.
+
 ## Remaining
 
 - Demo/review on screen (below). November 21 showed the tab strip, the Diff

@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>2ac1ee concept review: the view someone is at</title>
+<style>
+  :root {
+    --bg: #fbfaf7; --fg: #1d1c1a; --muted: #6a665e; --line: #dcd8ce; --card: #ffffff;
+    --yes: #1f7a4a; --yes-bg: #e4f3ea; --no: #b3372c; --no-bg: #fae6e3;
+    --new: #1b5fb8; --new-bg: #e6eefb; --code: #f1eee6;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #17171a; --fg: #e9e6df; --muted: #9c978c; --line: #33333a; --card: #1f1f24;
+      --yes: #6fd09b; --yes-bg: #17301f; --no: #f08a7d; --no-bg: #3a1c19;
+      --new: #8bb8f5; --new-bg: #172a45; --code: #26262c;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+    font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  main { max-width: 980px; margin: 0 auto; padding: 48px 24px 96px; }
+  h1 { font-size: 30px; line-height: 1.2; margin: 0 0 12px; }
+  h2 { font-size: 21px; margin: 56px 0 12px; }
+  h3 { font-size: 16px; margin: 0 0 8px; }
+  p { margin: 0 0 12px; max-width: 72ch; }
+  .lede { font-size: 18px; color: var(--muted); }
+  code { font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+    background: var(--code); padding: 1px 5px; border-radius: 4px; }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0 8px; background: var(--card);
+    border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  th, td { text-align: left; vertical-align: top; padding: 10px 12px; border-bottom: 1px solid var(--line); font-size: 14.5px; }
+  th { font-weight: 600; color: var(--muted); }
+  tr:last-child td { border-bottom: 0; }
+  .pill { display: inline-block; padding: 1px 9px; border-radius: 99px; font-size: 13px; font-weight: 600; white-space: nowrap; }
+  .yes { color: var(--yes); background: var(--yes-bg); }
+  .no { color: var(--no); background: var(--no-bg); }
+  .new { color: var(--new); background: var(--new-bg); }
+  .proposed { border-left: 3px solid var(--new); padding-left: 10px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 760px) { .grid { grid-template-columns: 1fr; } }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 16px; }
+  .card.after { border-color: var(--new); }
+  .tl { list-style: none; margin: 8px 0 0; padding: 0; }
+  .tl li { display: grid; grid-template-columns: 150px 1fr; gap: 10px; padding: 7px 0; border-top: 1px dashed var(--line); font-size: 14.5px; }
+  .tl li:first-child { border-top: 0; }
+  .tl .who { color: var(--muted); }
+  .bad { color: var(--no); font-weight: 600; }
+  .good { color: var(--yes); font-weight: 600; }
+  .screens { display: flex; gap: 14px; align-items: flex-end; margin: 14px 0 4px; flex-wrap: wrap; }
+  .screen { border: 2px solid var(--line); border-radius: 6px; padding: 8px 10px; font-size: 13px; background: var(--card); }
+  .screen.inuse { border-color: var(--yes); }
+  .screen small { display: block; color: var(--muted); }
+  ol.q > li { margin-bottom: 18px; }
+  ol.q ol { list-style: lower-alpha; margin-top: 4px; }
+  .note { color: var(--muted); font-size: 14.5px; }
+</style>
+</head>
+<body>
+<main>
+
+<h1>Do the concepts line up? A Session and the view someone is at</h1>
+<p class="lede">Area taken: everything that decides whose terminal a running Session is shaped for when more than one view shows it. That is the transport's sizing rule, the relay, Desktop's warm panes and Loopflow Dev. The Task names resizing; the same rule also decides colors, who answers the agent's terminal queries and what the agent hears about focus, so the review covers all four.</p>
+<p class="note">Nothing is built yet. Marked <span class="pill new">proposed</span> is what the plan now says; everything else exists today.</p>
+
+<h2>The answer in one picture</h2>
+<p>A person knows one thing: <b>the Session looks right in the window I'm using.</b> The code's version of that is "the view in use". Today the code decides it with three signals, and one of them is wrong.</p>
+<div class="screens">
+  <div class="screen inuse" style="width:230px;height:120px">Desktop pane, 120 cols<small>person typing here → view in use</small></div>
+  <div class="screen" style="width:150px;height:90px">Dev pane, 80 cols<small>warmed at launch, nobody looking</small></div>
+  <div class="screen" style="width:150px;height:70px">lf resume, 100 cols<small>left open in another Space</small></div>
+</div>
+<table>
+  <tr><th>Signal that a view is in use</th><th>Is a person behind it?</th><th>Today</th><th>After</th></tr>
+  <tr><td>typed a byte</td><td>always</td><td>takes the Session</td><td>takes the Session</td></tr>
+  <tr><td>terminal reported focus gained</td><td>always</td><td>takes the Session</td><td>takes the Session</td></tr>
+  <tr><td>attached</td><td>only sometimes: a pressed Enter, yes; a warm pane, a Dev launch, a self-reconnect, a pipe, no</td><td><span class="bad">always takes the Session</span></td><td class="proposed">takes it only when the attach says <code>focused</code></td></tr>
+</table>
+
+<h2>Product concepts against code concepts</h2>
+<table>
+  <tr><th style="width:24%">What a person knows</th><th style="width:30%">What the code has</th><th style="width:9%">Match</th><th>What is wrong, and what the plan does</th></tr>
+  <tr>
+    <td>A Session, shown in one or more windows</td>
+    <td><code>Hosted</code>, <code>Viewer</code>, one relay per view</td>
+    <td><span class="pill yes">yes</span></td><td>One view, one <code>Viewer</code>. Unchanged.</td>
+  </tr>
+  <tr>
+    <td>"It fits the window I'm using"</td>
+    <td><code>Sizing</code>: owner by recency (<code>touch</code>, <code>settle</code>), fed by attach, input, focus</td>
+    <td><span class="pill no">no</span></td>
+    <td>Attaching counts as using. <span class="pill new">proposed</span> An attach touches only when it carries <code>focused</code> true or comes from an older relay; ties among never-used views keep the current owner.</td>
+  </tr>
+  <tr>
+    <td>"I'm at this window" (focus)</td>
+    <td><code>Request::Focus</code>, and nothing at attach; the relay forgets what its terminal last reported</td>
+    <td><span class="pill no">no</span></td>
+    <td>One fact with no value at the moment it matters most. <span class="pill new">proposed</span> <code>Attach.focused</code> is the same fact's starting value; the relay keeps it (launch, then reports, then typing) and sends it with every attach, including a reconnect it makes by itself.</td>
+  </tr>
+  <tr>
+    <td>The agent knows whether I'm looking</td>
+    <td>The focus arm forwards <code>CSI I</code>/<code>CSI O</code> from any view</td>
+    <td><span class="pill no">no</span></td>
+    <td>A background pane reporting "lost focus" tells the agent the person left while they type elsewhere. Query answers already come only from the sizing view. <span class="pill new">proposed</span> Focus-out is forwarded only from the view in use; focus-in from any view, since that view becomes the one in use.</td>
+  </tr>
+  <tr>
+    <td>Colors match the window I'm using</td>
+    <td><code>Request::Theme</code>, applied from the sizing view</td>
+    <td><span class="pill yes">yes</span></td><td>Follows the same owner; fixed by the same change.</td>
+  </tr>
+  <tr>
+    <td>Open tabs are ready when I click (release Desktop)</td>
+    <td><code>SessionsWorkspaceRegistry</code> warmth, <code>openWarmConversations</code>, a relay per warm pane</td>
+    <td><span class="pill yes">yes</span></td>
+    <td>The concept is right; its side effect was the resize. <span class="pill new">proposed</span> Every Desktop pane launches with <code>--unfocused</code> and Ghostty's own focus report says when a person arrives.</td>
+  </tr>
+  <tr>
+    <td>Dev is a build I'm trying, pointed at my real Machine</td>
+    <td>No concept. Dev runs the release registry: up to sixteen <code>session resume</code> writes plus primaries at launch</td>
+    <td><span class="pill no">no</span></td>
+    <td>A trial build acts on the Machine as if it were the Machine's window. Opening is a write: it can resume an ended Session, take one over from a native client, and hold a worktree. <span class="pill new">proposed</span> The registry takes <code>opensUnvisitedWork</code>; Dev passes false and opens what is clicked.</td>
+  </tr>
+  <tr>
+    <td>Watching without taking over</td>
+    <td>Nothing today</td>
+    <td><span class="pill no">no</span></td>
+    <td><span class="pill new">proposed</span> <code>lf session resume &lt;id&gt; --unfocused</code>. It is the flag Desktop uses, not a second kind of viewer: typing or focusing still takes the Session.</td>
+  </tr>
+  <tr>
+    <td>(a person never says "owner")</td>
+    <td><code>owner</code> twice: the Session's owner process (<code>OwnerProtocol</code>, README) and the sizing view (<code>Reply::Attached.owner</code>, <code>Event::Owner</code>)</td>
+    <td><span class="pill no">no</span></td>
+    <td>One name for two ideas. Left alone here: the second is in events that live holders already send. Its own Task.</td>
+  </tr>
+</table>
+
+<h2>The biggest mismatch: attaching is not using</h2>
+<div class="grid">
+  <div class="card">
+    <h3>Before</h3>
+    <ul class="tl">
+      <li><span class="who">You, in Desktop</span><span>typing to an agent at 120 columns</span></li>
+      <li><span class="who">Dev launches</span><span>starts relays for ~20 Sessions; each attaches at Dev's width</span></li>
+      <li><span class="who">Each Session</span><span class="bad">resized, SIGWINCH, colors swapped, agent told "focus lost"</span></li>
+      <li><span class="who">You</span><span>click back into the pane to get your width again, one Session at a time</span></li>
+    </ul>
+  </div>
+  <div class="card after">
+    <h3>After <span class="pill new">proposed</span></h3>
+    <ul class="tl">
+      <li><span class="who">You, in Desktop</span><span>typing to an agent at 120 columns</span></li>
+      <li><span class="who">Dev launches</span><span>shows placeholders; starts nothing</span></li>
+      <li><span class="who">You click a Task in Dev</span><span>its pane attaches <code>focused:false</code>, Ghostty reports focus gained, <span class="good">that one Session takes Dev's size</span></span></li>
+      <li><span class="who">You click back in Desktop</span><span>focus gained there; the Session is yours at 120 again</span></li>
+    </ul>
+  </div>
+</div>
+
+<h2>Failure and recovery</h2>
+<table>
+  <tr><th style="width:30%">What happens</th><th>Plan as it arrived</th><th>Plan now</th></tr>
+  <tr>
+    <td>You leave a terminal <code>lf resume</code> for Desktop; the terminal's relay loses its socket and reconnects by itself</td>
+    <td><span class="bad">Reattaches as <code>focused:true</code></span> (stdin is a terminal) and takes the size from the pane you are in</td>
+    <td>Reattaches with the focus its terminal last reported: false</td>
+  </tr>
+  <tr>
+    <td>Release Desktop relaunches while you type in a terminal view</td>
+    <td>Size holds, but each warm pane's focus-out <span class="bad">reaches the agent</span></td>
+    <td>Size holds and the agent hears nothing</td>
+  </tr>
+  <tr>
+    <td>The holder restarts and every view reattaches</td>
+    <td>Depends on Ghostty reporting again after the attach</td>
+    <td>Each attach carries its own focus; the focused view owns whatever the order</td>
+  </tr>
+  <tr>
+    <td>The view in use closes</td>
+    <td colspan="2">The next most recently used live view takes over; among views never used, the one already holding. Unchanged.</td>
+  </tr>
+  <tr>
+    <td>A terminal that never reports focus, attached <code>--unfocused</code></td>
+    <td colspan="2">Takes the Session on the first typed byte.</td>
+  </tr>
+  <tr>
+    <td>New Desktop, remote Machine with an <code>lf</code> from before the flag</td>
+    <td>not covered</td>
+    <td>The pane fails on the unknown flag and shows that error; upgrading the remote fixes it</td>
+  </tr>
+</table>
+
+<h2>What was checked, so implement doesn't have to</h2>
+<table>
+  <tr><th style="width:42%">Claim the plan leaned on</th><th>What the source shows</th></tr>
+  <tr><td>Ghostty reports current focus when mode 1004 is turned on</td><td>True at the pinned revision <code>a60e9e2</code>: <code>stream_handler.zig:766</code> writes the current <code>flags.focused</code> on every enable. The plan's fallback branch is removed.</td></tr>
+  <tr><td>Adding <code>focused</code> keeps Dev on the real Machine</td><td><code>loopflow-dev.py</code> opens a copy only when <code>lf server describe</code> differs. <code>transport::wire::Request</code> isn't in that schema.</td></tr>
+  <tr><td>Desktop builds the pane's argv</td><td>It doesn't. The server sends <code>open_argv</code>; Desktop appends <code>--agent</code>, and <code>lf ssh</code> wraps it for remote Machines. <code>--unfocused</code> rides the same way.</td></tr>
+  <tr><td>The relay is the only protocol client</td><td><code>OwnerStream</code> in Swift speaks it too and reads <code>attached.owner</code>. It now sends <code>focused: true</code>.</td></tr>
+</table>
+
+<h2>Passed over</h2>
+<table>
+  <tr><th style="width:36%">Alternative</th><th>Why not</th></tr>
+  <tr><td>A second-class viewer that can never take the size</td><td>Typing into a pane laid out for another window's width is a broken screen. Focus and input already answer "who is looking".</td></tr>
+  <tr><td>No wire field: attach never takes the size</td><td><code>lf resume</code> in a terminal that doesn't report focus on enable would sit at another view's width until a keypress.</td></tr>
+  <tr><td>Send <code>focus</code> right after <code>attach</code></td><td>Two frames can land in two server passes: one paint at the old size, then a resize.</td></tr>
+  <tr><td>An environment variable from Desktop</td><td>Doesn't cross <code>ssh</code>; reaches every child of a pane.</td></tr>
+  <tr><td>No warm panes in release Desktop either</td><td>Loses instant tabs, saved-tab restore and worktree retention; once attaches are unfocused the warmth disturbs nobody.</td></tr>
+</table>
+
+<h2>Questions</h2>
+<ol class="q">
+  <li>Dev's restored selection at launch.
+    <ol><li>Waits behind the placeholder until clicked (plan).</li>
+        <li>Opens that one Session; it is on screen and focused, so it takes Dev's size.</li></ol></li>
+  <li>Release Desktop's warm panes.
+    <ol><li>Keep warming, attached unfocused (plan).</li>
+        <li>Lazy everywhere: a pane's relay starts when the pane is first shown.</li></ol></li>
+  <li>A view that isn't in use reports focus lost.
+    <ol><li>Dropped before the agent (plan).</li>
+        <li>Forwarded, as today.</li></ol></li>
+  <li><code>--unfocused</code> on <code>lf session resume</code>.
+    <ol><li>An ordinary documented flag (plan).</li>
+        <li>Hidden; only Desktop passes it.</li></ol></li>
+  <li><code>owner</code> meaning both the Session's process and the sizing view.
+    <ol><li>Leave it; note only (plan).</li>
+        <li>File a Task to rename the sizing view on the wire and in the README.</li></ol></li>
+  <li>A remote <code>lf</code> older than the flag.
+    <ol><li>The pane fails with the remote's usage error (plan).</li>
+        <li>Desktop omits the flag for remote Machines until they report a new enough <code>lf</code>.</li></ol></li>
+</ol>
+
+</main>
+</body>
+</html>

@@ -71,4 +71,14 @@ before the first key. Run the mounted environment assertion in
 stayed locked during every run so far, including the SSH run.
 [Desktop QA setup](../.lf/qa/desktop.md)
 
+At gate, fix two sentences in
+`rust/loopflow-execution/src/transport/README.md` that describe the deleted
+`Delegation` type ("`delegate` returns either a completed delegation or
+`Here { kind }`", and "before `delegate` carries it out"):
+`local_session_kind` now answers which kind runs in this process, and
+`delegate` only starts a held terminal and relays its view.
+
 CI repeats the headless Rust and Swift checks.
+
+The as-built review found the concepts aligned and nothing to rebuild:
+[concept-review.html](concept-review.html).

@@ -449,7 +449,7 @@ Jack, on filing the diff polish as separate Tasks: "but do em all unless theres 
 In LOO-515, in this order (Jack's priorities in the section above):
 1. Real grammar highlighting in the Diff and Files (tree-sitter or an equivalent grammar engine), replacing SyntaxColors.swift. More of the code colored: keys, types, functions, Markdown structure.
 2. Rendered diffs: Markdown rendered with changes marked, images before/after, HTML rendered; source one click away.
-3. Diff per Graph step: pick a step (or "whole Task") and the Diff compares that step's start and end commits; task.diff already takes base and head.
+3. Diff per Graph step, from git log alone: each step commits with a subject starting `lf <step>:`, so the branch's commits since its base, grouped by that prefix (other commits stand alone), are the steps. Pick one (or the whole Task) and the Diff compares its parent with it; task.diff already takes base and head. Jack: "steps do commits, so we can just use the git logs", "or at least they shoul".
 4. Change markers along the scrollbar; click to jump.
 5. Copying lines gives code without + and − markers.
 6. Viewed per file: collapses it, sidebar counts "12 / 60 viewed", clears when the file changes.

@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>15232c concept review: where a flag can sit</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #fbfaf7; --fg: #1c1b19; --muted: #6b6861; --line: #dcd8cf;
+    --card: #ffffff; --yes: #1f7a4a; --no: #b3362b; --new: #2456c9;
+    --newbg: #eaf0fd; --nobg: #fbeceb; --code: #f1eee7;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #161614; --fg: #ebe8e1; --muted: #a09c93; --line: #37352f;
+      --card: #1e1d1a; --yes: #6fcf97; --no: #f08a80; --new: #8fb0ff;
+      --newbg: #1b2540; --nobg: #3a1f1c; --code: #26241f;
+    }
+  }
+  body { background: var(--bg); color: var(--fg); margin: 0;
+    font: 16px/1.55 -apple-system, "Helvetica Neue", sans-serif; }
+  main { max-width: 900px; margin: 0 auto; padding: 40px 24px 80px; }
+  h1 { font-size: 28px; line-height: 1.2; margin: 0 0 8px; }
+  h2 { font-size: 20px; margin: 44px 0 12px; }
+  p { margin: 10px 0; }
+  .lede { color: var(--muted); }
+  code, pre { font: 13.5px/1.5 ui-monospace, "SF Mono", Menlo, monospace; }
+  code { background: var(--code); padding: 1px 5px; border-radius: 4px; }
+  pre { background: var(--code); padding: 12px 14px; border-radius: 8px;
+    overflow-x: auto; margin: 10px 0; }
+  pre code { background: none; padding: 0; }
+  table { border-collapse: collapse; width: 100%; margin: 12px 0;
+    background: var(--card); }
+  th, td { text-align: left; vertical-align: top; padding: 9px 11px;
+    border: 1px solid var(--line); font-size: 14.5px; }
+  th { font-weight: 600; }
+  .yes { color: var(--yes); font-weight: 600; }
+  .no { color: var(--no); font-weight: 600; }
+  .proposed { border-left: 4px solid var(--new); background: var(--newbg);
+    padding: 12px 16px; border-radius: 0 8px 8px 0; margin: 14px 0; }
+  .proposed > b:first-child { color: var(--new); }
+  .big { border: 2px solid var(--no); background: var(--nobg);
+    padding: 14px 18px; border-radius: 8px; margin: 14px 0; }
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  @media (max-width: 700px) { .cols { grid-template-columns: 1fr; } }
+  .cols > div { background: var(--card); border: 1px solid var(--line);
+    border-radius: 8px; padding: 12px 14px; }
+  .cols .after { border-color: var(--new); }
+  .tag { font-size: 13px; font-weight: 600; }
+  .tag.new { color: var(--new); }
+  ol.q > li { margin: 12px 0; }
+  ol.q ol { list-style: lower-alpha; margin-top: 4px; }
+  .muted { color: var(--muted); }
+</style>
+<main>
+
+<h1>Where a flag can sit on an <code>lf</code> command line</h1>
+<p class="lede">Area taken: the whole promise "a flag works on either side of
+the command", and what a person is told when they get one wrong. The Task
+names one failure in <code>reorder_args</code>; the review covers every place
+<code>lf</code> decides which token is a flag's value. Nothing is built yet;
+this reviews the plan. Blue marks what is proposed; everything else exists
+today.</p>
+
+<h2>One interaction, walked</h2>
+<p>Someone means to open a repository and stops typing one word early.</p>
+<div class="cols">
+  <div>
+    <span class="tag">Today</span>
+<pre><code>$ lf open --repo
+Error: resolve repository
+  /Users/jack/src/open
+
+$ lf open --agent
+<span class="muted"># agent is "open"; no command
+# is left; the default agent starts</span></code></pre>
+    <p>The message is about a repository called <code>open</code>. Recovery
+    means guessing that <code>lf</code> rewrote the line to
+    <code>lf --repo open</code>. With <code>--agent</code> there is nothing to
+    recover from: an agent is already running.</p>
+  </div>
+  <div class="after">
+    <span class="tag new">Proposed</span>
+<pre><code>$ lf open --repo
+error: a value is required for
+  '--repo &lt;NAME_OR_PATH&gt;' but none
+  was supplied
+
+$ lf open --agent
+error: a value is required for
+  '--agent &lt;AGENT&gt;' but none was
+  supplied</code></pre>
+    <p>Exit 2, nothing started. The fix is the one the message names. Same
+    text whether the flag came before the command, after it, after a skill
+    name, or beside the wrong command on the path.</p>
+  </div>
+</div>
+
+<h2>Do the product's concepts and the code's line up?</h2>
+<table>
+  <tr><th>What a person knows</th><th>What the code has</th><th>Match</th><th>What is wrong</th></tr>
+  <tr>
+    <td>A flag, and the value that follows it</td>
+    <td><code>push_flag</code>; <code>first_target_index</code>;
+      <code>selected_command_path</code>;
+      <code>navigation::takes_separate_value</code>; Clap</td>
+    <td class="no">no</td>
+    <td>One idea, five readings. The three in <code>lf.rs</code> say "the next
+      token, whatever it is". Clap says "the next token unless it looks like a
+      flag". Where they disagree, the rewritten line means something the
+      person did not type.</td>
+  </tr>
+  <tr>
+    <td>A flag can go before or after the command</td>
+    <td><code>reorder_args</code> rewrites the argv before Clap sees it</td>
+    <td class="no">no</td>
+    <td>The rewrite can put a flag in front of a word it never preceded. The
+      person never sees the rewritten line, only its consequences.</td>
+  </tr>
+  <tr>
+    <td>A flag either takes a value, may take one, or takes none</td>
+    <td><code>FlagTables { value, boolean }</code></td>
+    <td class="no">no</td>
+    <td>Two sets for three cases. <code>session list --primary</code> (value
+      optional) sits in <code>value</code>.</td>
+  </tr>
+  <tr>
+    <td>A flag belongs to <code>lf</code> itself or to one command</td>
+    <td><code>CommandArgTables { direct, recursive, subcommands }</code>,
+      <code>local_flag_owner</code></td>
+    <td class="yes">yes</td>
+    <td>Local flags win collisions (<code>commit -m</code>), which is what
+      people expect.</td>
+  </tr>
+  <tr>
+    <td><code>--</code> means "the rest is literal"</td>
+    <td>Every scanner stops at <code>--</code>; <code>push_flag</code> also
+      takes it as a value</td>
+    <td class="no">no</td>
+    <td><code>lf open --repo --</code> moves <code>--</code> ahead of the
+      command. It errors correctly, by accident.</td>
+  </tr>
+  <tr>
+    <td>What I type after <code>skill:</code> is my prompt</td>
+    <td>The skill branch lifts any root flag out of the prompt words</td>
+    <td class="no">no</td>
+    <td><code>lf implement: fix the --repo flag</code> sets the repository to
+      <code>flag</code> and sends <code>fix the</code>. Outside this Task; see
+      question 2.</td>
+  </tr>
+  <tr>
+    <td>One command line</td>
+    <td><code>normalize_args</code>, <code>machine_invocation</code>,
+      <code>reorder_args</code>, then Clap</td>
+    <td class="no">no</td>
+    <td>Three hand-written passes over the argv before the parser, with two
+      separate tables derived from the same Clap tree. Outside this Task; see
+      question 3.</td>
+  </tr>
+</table>
+
+<h2>The biggest mismatch</h2>
+<div class="big">
+  <b>"This flag's value" has no single owner in <code>lf.rs</code>.</b>
+  The kickoff plan fixed the visible symptom in <code>push_flag</code> and
+  scheduled the other two readings for the last slice. They are the same
+  defect. <code>lf task --wave --title x create</code> shows it:
+  <code>selected_command_path</code> skips <code>--title</code> as
+  <code>--wave</code>'s value, meets <code>x</code>, finds no such subcommand
+  and never reaches <code>create</code>, so the flag's owner is never on the
+  path and it is treated as the root <code>--wave</code>. The nested case in the Task cannot be fixed while the path scanner reads
+  values differently from the mover.
+</div>
+
+<div class="proposed">
+  <b>Proposed.</b> One function answers the question for every caller, using
+  Clap's rule.
+<pre><code>enum Takes     { Nothing, OptionalValue, Value }   // per flag, from the Clap tree
+enum FlagValue { None, Inline, Next, Missing }     // per flag at a position</code></pre>
+  <code>Missing</code>: the flag needs a value and the next token is absent,
+  <code>--</code>, or starts with <code>-</code> (a lone <code>-</code> is a
+  value). <code>push_flag</code> and both <code>index + 1 &lt; len</code>
+  checks are deleted. <code>FlagTables</code> becomes one map of
+  <code>Takes</code>.
+</div>
+
+<h2>What happens when the value is missing</h2>
+<div class="proposed">
+  <b>Proposed.</b> <code>reorder_args</code> returns the shortest argv that
+  reaches the flag at its owner. Clap then writes the error.
+  <table>
+    <tr><th>Written</th><th>Before (rewritten to)</th><th>After (rewritten to)</th></tr>
+    <tr><td><code>lf open --repo</code></td><td><code>lf --repo open</code></td><td><code>lf --repo</code></td></tr>
+    <tr><td><code>lf implement: fix it -a</code></td><td><code>lf -a implement: fix it</code></td><td><code>lf -a</code></td></tr>
+    <tr><td><code>lf open --repo --tab</code></td><td><code>lf --repo --tab open</code></td><td><code>lf --repo</code></td></tr>
+    <tr><td><code>lf task --wave --title x create</code></td><td><code>lf --wave --title task x create</code> <span class="muted">(traced from the code, not run)</span></td><td><code>lf task create --wave</code></td></tr>
+    <tr><td><code>lf open --repo x</code></td><td><code>lf --repo x open</code></td><td>unchanged</td></tr>
+  </table>
+  <p>The rest of the line is dropped because the parse cannot succeed and
+  nothing else reads it: all four callers hand the result straight to Clap.</p>
+</div>
+
+<h2>Tested against counterexamples</h2>
+<table>
+  <tr><th>Case</th><th>Holds?</th><th>Why</th></tr>
+  <tr><td>Normal: <code>lf debug -a codex</code></td><td class="yes">yes</td>
+    <td><code>Next</code>; moved with its value as today.</td></tr>
+  <tr><td>Failure: <code>lf implement --repo</code></td><td class="yes">yes</td>
+    <td><code>lf --repo</code>; no agent starts. Leaving the flag in place
+    would have made it a prompt word and started one.</td></tr>
+  <tr><td>Recovery: add the value and rerun</td><td class="yes">yes</td>
+    <td>No state was written; the error names the flag and its value name.</td></tr>
+  <tr><td>Reordered twice (<code>--machine</code> path)</td><td class="yes">yes</td>
+    <td><code>lf --repo</code> has no target, so the second pass returns it
+    unchanged. <code>lf task create --wave</code>: the flag already sits with
+    its owner.</td></tr>
+  <tr><td>A value that starts with <code>-</code></td><td class="yes">yes</td>
+    <td>Clap already refuses these everywhere: no flag sets
+    <code>allow_hyphen_values</code>. Nothing that parsed before stops
+    parsing.</td></tr>
+  <tr><td><code>session list --primary</code> (value optional)</td><td class="yes">yes</td>
+    <td><code>OptionalValue</code> is never <code>Missing</code>.</td></tr>
+  <tr><td><code>lf --bogus open --repo</code></td><td class="no">changes</td>
+    <td>Reports the missing value, not <code>--bogus</code>. Both are true;
+    the person fixes one and sees the other. Chosen for the simpler rule
+    (question 1).</td></tr>
+  <tr><td><code>lf implement: explain --repo</code></td><td class="no">changes</td>
+    <td>Was a prompt with a word missing and the wrong repository; becomes a
+    missing-value error. More honest, still not what the person meant
+    (question 2).</td></tr>
+</table>
+
+<h2>Changed in the plan</h2>
+<ul>
+  <li>The value function moved from the last slice to the first: it is the
+    mechanism, and the nested case depends on it.</li>
+  <li>Three slices became two.</li>
+  <li><code>FlagTables</code> becomes one <code>Takes</code> map instead of
+    gaining a third "requires a value" set.</li>
+  <li>The returned argv is the shortest one, not "everything written before
+    the flag".</li>
+  <li>Three things are named as separate outcomes: prose scanned for flags,
+    attached short values (<code>-acodex</code>), and the three scanners.</li>
+</ul>
+
+<h2>Questions</h2>
+<ol class="q">
+  <li>When a moved flag is missing its value, what does Clap get to see?
+    <ol>
+      <li><b>Chosen:</b> only the flag at its owner (<code>lf --repo</code>).
+        One rule, same error from every position.</li>
+      <li>Everything written before the flag, then the flag. An earlier error
+        on the line is reported first; the rule depends on what was already
+        moved.</li>
+    </ol>
+  </li>
+  <li>Should prose after <code>skill:</code> be scanned for root flags?
+    <ol>
+      <li><b>Chosen for this Task:</b> leave it. <code>-c</code> after a
+        prompt keeps working; a stray <code>--repo</code> in a sentence is
+        still read as a flag.</li>
+      <li>Lift only flags at the very end of the line.</li>
+      <li>Lift nothing after <code>skill:</code>; flags go before the
+        prompt.</li>
+    </ol>
+  </li>
+  <li>Three argv passes before Clap, two flag tables. Worth its own Task?
+    <ol>
+      <li><b>Chosen:</b> not here. This Task leaves <code>lf.rs</code> with
+        one reading and <code>navigation.rs</code> with its own.</li>
+      <li>One pass that resolves path, owner and placement, replacing
+        <code>CommandArgTables</code>.</li>
+      <li>Clap <code>global = true</code> for root flags, keeping a small
+        lift for skills only. Needs the <code>commit -m</code> collisions
+        settled first.</li>
+    </ol>
+  </li>
+</ol>
+
+</main>
+</html>

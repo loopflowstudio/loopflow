@@ -273,8 +273,9 @@ restart.
 On startup the server greets every `holder-*.sock`, lists it, and hosts each
 running terminal under its existing `TerminalId`. The screen is rebuilt by
 replaying the holder's ring from its start, then one size nudge (one column
-narrower for 0.4 s, and back) asks the agent to repaint what the ring no
-longer holds. The same nudge follows a gap, when the ring passed output the
+narrower for 0.4 s, then back to the size the terminal has by then) asks the
+agent to repaint what the ring no longer holds. A view that takes the size
+during the nudge keeps it. The same nudge follows a gap, when the ring passed output the
 server had not read. Scrollback reaches only as far back as the ring, and a
 terminal mode set before the ring's start is known only if the agent sets it
 again when resized. Replayed output answers none of its queries: they were

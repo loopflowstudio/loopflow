@@ -99,11 +99,23 @@ fails there with `LSCopyApplicationURLsForBundleIdentifier`. Register with
 `lsregister -f`, open it with `LOOPFLOW_DEV_WAVE_REPO` and `--repo` after
 clearing `LF_*`, and unregister it and delete it afterwards.
 
+An isolated bundle ID ending in `.dev` gets Dev behavior (terminals wait for
+a visit). With the screen locked, Dev still mounts its window and reads Work,
+so launch-time attaches can be counted: list `pgrep -f 'session attach'`
+children of the app's PID. A Dev pane's relay has `LF_RELAY_FOCUSED=0`;
+Ghostty never reports focus-in while locked. Point it at a private Machine
+with `open -n --env LF_HOME=… --env LF_BIN=… --env PATH=…` (stand-in agents on
+that `PATH`); quit with `osascript -e 'quit app id "<bundle id>"'`, which
+reopens the last selected Task on the next launch.
+
 These steps work with the screen locked, using that bundle ID in `LF_DESKTOP`:
 
 - `lf desktop view 'task:<id>' --repo <repo>` and `lf desktop enter '<title>'`
   select a Task. Tiles are addressed by title, and `enter nosuchtile` lists
-  them, which is how to watch a rename arrive.
+  them, which is how to watch a rename arrive. `enter` needs a window showing
+  tiles; from a Task page, `lf desktop back` until it prints `repository`.
+- `lf --task <id> desktop focus -p session` is a deliberate visit: on a
+  restored selection it starts that one Session's relay.
 - `lf --task <id> desktop capture|send -p session` reads and types into the pane.
   Without `--task`, these commands address the cwd's Task. From this
   checkout, that is this Task's own Session pane.

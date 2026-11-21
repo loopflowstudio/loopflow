@@ -85,24 +85,15 @@ Swift run used the existing checkout CLI. CI runs the suites.
 - `cargo test -p loopflow-execution --lib creation_retry_reconciles_publication_but_never_repeats_a_stop_or_append` passed. CI repeats it.
 - A PTY ran `lf session attach [--unfocused] -- <peer>` against a local protocol reader. The first attach frame carried `focused: true` by default and `false` with the flag. Both relays exited on the peer's close frame.
 
-## Next slice · mounted QA
+## QA (`scratch/qa.html`)
 
-On a private Machine with the branch CLI and a newly started holder, use a
-disposable Session in Desktop. Open a second Desktop view in the background
-at a narrower width and check that the Session keeps its size, colors and
-focus. Exercise `lf session resume <id> --unfocused` in a background terminal
-too. Focus or type in the new view and check that it takes sizing ownership.
-Close it and check that the original width returns. Reconnect a background
-relay and check that the active size holds. Change pane focus during the
-reconnect and check that the holder catches up. The local relay drains
-pending input after the attach reply (`transport.rs`). The restart fixture
-changes focus before the server stops, so this interval is still unchecked.
+Held-terminal sizing, focus filtering, color answers and Dev's
+wait-for-visit held on a private Machine. QA found that the server's repaint
+nudge after a restart restored the size it took the terminal up at, overriding
+a view that took ownership during those 0.4 s. `Nudge` now reads the current
+size at both steps (`registry.rs`). The test
+`a_view_sizing_the_terminal_during_the_repaint_nudge_keeps_its_size` passed and
+fails when the fix is reverted. CI runs it again.
 
-Launch Dev beside release Desktop with a disposable repository, a saved
-selection and live Sessions. Before interacting, check for both preparations
-and new terminal viewers, including any restored shell. Count `session attach`
-relays as well as `session resume`. Check this startup behavior against the
-older installed Machine too. For the deliberate-open check, use the branch
-CLI and holder. Open one Task and check that only its terminal starts and can
-take the size. The headless Swift checks cover preparation and the shell view
-hierarchy. These mounted checks have not run.
+Mounted Ghostty focus still needs an unlocked display. This run's screen was
+locked throughout. The release Desktop warm set and SSH relays were not run.

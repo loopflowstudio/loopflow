@@ -60,13 +60,17 @@ impl View {
     }
 
     fn attach_from(terminal: &TerminalId, from: Option<u64>) -> Self {
+        Self::attach_sized(terminal, from, 80)
+    }
+
+    fn attach_sized(terminal: &TerminalId, from: Option<u64>, cols: u16) -> Self {
         let mut socket = connect(terminal).unwrap();
         let attach = Incoming {
             id: 1,
             request: Request::Attach {
                 focused: None,
                 rows: 24,
-                cols: 80,
+                cols,
                 name: None,
                 from,
             },
@@ -527,6 +531,33 @@ fn a_view_continues_from_its_position_after_the_server_restarts() {
         view.out,
         ring(&place, &terminal, left, view.position.unwrap())
     );
+    second.close();
+    kill(&place, &terminal);
+}
+
+/// A server taking up a terminal narrows it by a column and widens it back to
+/// ask for a repaint. A view that takes the size meanwhile keeps it.
+#[test]
+fn a_view_sizing_the_terminal_during_the_repaint_nudge_keeps_its_size() {
+    let _ledger = TestLedgerGuard::new();
+    let place = holder();
+    let first = Registry::open(BUILD).unwrap();
+    let script = "trap 'echo size:$(stty size)' WINCH; echo up; \
+                  while :; do read -r line && echo now:$(stty size); done";
+    let terminal = first.start(shell(None, "request-1", script)).unwrap();
+    let mut view = View::attach(&terminal);
+    view.wait_for("up");
+    first.close();
+    drop(view);
+
+    let second = Registry::open(BUILD).unwrap();
+    let mut wide = View::attach_sized(&terminal, None, 120);
+    wide.wait_for("size:24 120");
+    std::thread::sleep(super::NUDGE * 3);
+    wide.type_in(b"\n");
+    wide.wait_for("now:");
+    let seen = String::from_utf8_lossy(&wide.seen).into_owned();
+    assert!(seen.contains("now:24 120"), "{seen:?}");
     second.close();
     kill(&place, &terminal);
 }

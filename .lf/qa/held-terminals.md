@@ -56,3 +56,24 @@ recovery retains the same held terminal. Use the existing heartbeat checks for
 quiet providers and a lost return path. Desktop status travels over its private
 `LF_SERVER_STATUS` Unix stream; inspect readings and actions there, never files.
 Mounted presentation still needs a display-capable check.
+
+# Sizing ownership between views
+
+A Python stand-in `claude` that logs `TIOCGWINSZ` on every SIGWINCH and every
+input read from `/dev/tty` (raw mode, `ESC[?1004h` to ask for focus reports)
+shows what the agent sees: size changes, focus reports and which terminal's
+color answer reached it. Log with `os.write` on an `O_APPEND` descriptor and
+tag each line with the PID: a SIGWINCH handler that writes to a buffered file
+the main loop is also writing crashes the stand-in with a reentrant-call
+error, the Session closes and recovery relaunches it. Every Task
+conversation killed this way is restarted by the next server's recovery pass,
+so the log fills with other stand-ins' lines.
+
+Drive views from Python `pty.fork()` with `TIOCSWINSZ` widths, writing
+`ESC[I`/`ESC[O` for focus and answering `ESC[5n`, `ESC[6n` and `OSC 11 ;?`
+with a per-view color. `lf session resume <id> [--unfocused]` execs into
+`lf session attach --terminal … --session …`: the focus rides in
+`LF_RELAY_FOCUSED` (read it with `ps eww`), not in argv, and the relay's env
+says `LF_HOME=/private/tmp/…`. A server restart nudges every held terminal
+(one column narrower for 0.4 s), viewed or not; a view's focus change while
+the server is down reaches the new server once the relay reconnects.

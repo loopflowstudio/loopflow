@@ -97,99 +97,6 @@ h1, h2, h3 {
     padding: 0 24px;
 }
 
-/* Navigation */
-nav {
-    padding: 20px 0;
-    position: sticky;
-    top: 0;
-    background: rgba(255, 255, 255, 0.95);
-    -webkit-backdrop-filter: blur(10px);
-    backdrop-filter: blur(10px);
-    z-index: 100;
-    border-bottom: 1px solid var(--border);
-}
-@supports not ((-webkit-backdrop-filter: blur(10px)) or (backdrop-filter: blur(10px))) {
-    nav {
-        background: var(--bg);
-    }
-}
-nav .container {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-}
-.nav-logo {
-    display: flex;
-    align-items: center;
-}
-.nav-logo img {
-    width: 28px;
-    height: 28px;
-}
-.nav-brand-group {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-}
-.nav-title {
-    font-family: var(--font-sans);
-    font-weight: 700;
-    font-size: 18px;
-    color: var(--text);
-    text-decoration: none;
-}
-.nav-links {
-    display: flex;
-    align-items: center;
-    gap: 28px;
-    list-style: none;
-}
-.nav-links a {
-    color: var(--text-secondary);
-    text-decoration: none;
-    font-size: 14px;
-    font-weight: 500;
-    transition: color 0.15s;
-    display: inline-flex;
-    align-items: center;
-    min-height: 44px;
-    padding: 8px 6px;
-}
-.nav-links a:hover {
-    color: var(--text);
-}
-.external-link::after {
-    content: "↗";
-    font-size: 12px;
-    margin-left: 6px;
-}
-.nav-links .btn {
-    margin-left: 4px;
-}
-@media (max-width: 768px) {
-    nav .container {
-        flex-wrap: wrap;
-        gap: 12px;
-    }
-    .nav-title {
-        display: none;
-    }
-    .nav-links {
-        gap: 16px;
-        flex-wrap: wrap;
-        justify-content: center;
-    }
-    .nav-links .btn {
-        margin-left: 0;
-    }
-}
-@media (max-width: 480px) {
-    .nav-links {
-        gap: 12px;
-        font-size: 13px;
-    }
-}
-
 /* Skip Link */
 .skip-link {
     position: absolute;
@@ -248,51 +155,7 @@ nav .container {
     margin: 0 auto 20px;
     line-height: 1.5;
 }
-/* Buttons */
-.btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    height: 44px;
-    padding: 0 24px;
-    font-size: 14px;
-    font-weight: 600;
-    text-decoration: none;
-    border-radius: 8px;
-    transition: all 0.15s ease;
-}
-.btn-primary,
-a.btn-primary {
-    background: var(--wine);
-    color: white;
-}
-.btn-primary:hover,
-a.btn-primary:hover {
-    background: var(--wine-hover);
-}
-.btn-secondary {
-    background: transparent;
-    color: var(--text);
-    border: 1px solid var(--border);
-}
-.btn-secondary:hover {
-    border-color: #999;
-}
-.btn:focus-visible {
-    outline: 2px solid var(--burgundy);
-    outline-offset: 2px;
-}
-.btn-primary:focus-visible {
-    outline-color: var(--text);
-}
-.btn-group {
-    display: flex;
-    gap: 16px;
-    justify-content: center;
-}
-
 a:focus-visible,
-.btn:focus-visible,
 .copy-btn:focus-visible {
     outline: 2px solid var(--burgundy);
     outline-offset: 2px;
@@ -355,76 +218,6 @@ a:focus-visible,
     }
 }
 
-@media (max-width: 480px) {
-    .nav-links {
-        gap: 4px;
-    }
-    .nav-links a {
-        padding-inline: 4px;
-        font-size: 12px;
-    }
-    .nav-links .btn {
-        padding-inline: 12px;
-    }
-}
-
-/* Footer */
-footer {
-    padding: 32px 0;
-    border-top: 1px solid var(--border);
-}
-footer .container {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-}
-footer p {
-    color: var(--text-secondary);
-    font-size: 13px;
-}
-.footer-text {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-}
-.built-by {
-    font-size: 12px;
-}
-.built-by a {
-    color: var(--text-secondary);
-    text-decoration: underline;
-    text-decoration-thickness: 1px;
-    text-underline-offset: 2px;
-}
-.built-by a:hover {
-    color: var(--text);
-}
-.built-by a:focus {
-    outline: 2px solid var(--burgundy);
-    outline-offset: 2px;
-}
-.footer-links {
-    display: flex;
-    gap: 20px;
-}
-.footer-links a {
-    color: var(--text-secondary);
-    text-decoration: none;
-    font-size: 13px;
-    transition: color 0.15s;
-    display: inline-flex;
-    align-items: center;
-    min-height: 44px;
-    padding: 8px 4px;
-}
-.footer-links a:hover {
-    color: var(--text);
-}
-.footer-links a:focus {
-    outline: 2px solid var(--burgundy);
-    outline-offset: 2px;
-}
-
 /* Download page */
 .download-hero {
     padding: 80px 0 120px;
@@ -442,6 +235,8 @@ footer p {
     margin-bottom: 8px;
 }
 .install-option {
+    max-width: 420px;
+    margin: 0 auto;
     padding: 24px 26px;
     border-radius: 16px;
     border: 1px solid var(--border);
@@ -516,7 +311,7 @@ footer p {
     --fs-small: 13px;                       /* code, outline, directory text  */
     --fs-label: 12px;                       /* nav headings, table heads      */
 
-    min-height: calc(100vh - 82px);
+    min-height: calc(100vh - 90px);
     padding: 46px 0 104px;
     color: var(--d-body);
     background: var(--d-paper);
@@ -550,13 +345,8 @@ footer p {
 .docs-nav {
     display: block;
     position: sticky;
-    top: 100px;
+    top: var(--space-24);
     align-self: start;
-    z-index: auto;
-    padding: 0;
-    background: transparent;
-    -webkit-backdrop-filter: none;
-    backdrop-filter: none;
 }
 .docs-nav-disclosure,
 .docs-nav-inner {
@@ -1246,13 +1036,52 @@ h3:hover .anchor-link,
     border-bottom: 1px solid var(--border);
 }
 
-.mac-app-option .btn {
+.mac-app-option .button {
     margin-top: 0.75rem;
+}
+
+/* The frame: one bar and one footer on every page, at the homepage's width
+   whatever the content between them runs to. */
+.site-header, .site-footer, .home-page > main { max-width: 1240px; margin: 0 auto; padding: 0 var(--space-48); }
+.site-header, .site-footer { line-height: normal; }
+.site-header a, .site-footer a { color: inherit; text-decoration: none; }
+.site-header a:focus-visible, .site-footer a:focus-visible, .site-header summary:focus-visible { outline: 3px solid var(--wine); outline-offset: 5px; }
+.site-header header { height: 90px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border); }
+.site-header .brand { font-size: var(--t-lede); font-weight: 700; display: flex; align-items: center; gap: var(--space-12); }
+.site-header .brand img { width: 29px; }
+.site-header nav { display: flex; gap: var(--space-24); align-items: center; font-size: var(--t-small); }
+.site-header nav a { display: inline-flex; align-items: center; min-height: 32px; }
+.site-header nav a[aria-current] { color: var(--burgundy); }
+/* Pico, which fast_app loads first, styles details and summary; these undo it. */
+.site-header nav details { position: relative; margin: 0; padding: 0; border: 0; }
+.site-header nav summary { list-style: none; cursor: pointer; display: inline-flex; align-items: center; min-height: 32px; margin: 0; color: inherit; line-height: inherit; }
+.site-header nav summary::-webkit-details-marker { display: none; }
+.site-header nav summary::after { content: "▾"; float: none; width: auto; height: auto; margin-inline-start: var(--space-8); background: none; transform: none; font-size: var(--t-meta); color: var(--text-secondary); }
+.site-header nav .menu { position: absolute; right: 0; top: 100%; z-index: 10; min-width: 190px; display: flex; flex-direction: column; padding: var(--space-8) var(--space-16); background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-md); box-shadow: 0 18px 40px -22px #722f3755; }
+.site-header nav .menu a { min-height: 40px; }
+.site-header nav .button { min-height: 44px; padding: var(--space-12) var(--space-16); }
+.site-footer footer { border-top: 1px solid var(--border); padding: var(--space-32) 0; display: flex; justify-content: space-between; gap: var(--space-20); font-size: var(--t-meta); }
+.site-footer footer a + a { margin-left: var(--space-12); }
+.button { display: inline-flex; align-items: center; min-height: 44px; padding: var(--space-12) var(--space-20); border: 1px solid currentColor; font-size: var(--t-small); text-decoration: none; }
+.button.solid { background: var(--wine); border-color: var(--wine); color: white; }
+.button.solid:hover { background: var(--wine-hover); border-color: var(--wine-hover); }
+@media (max-width: 860px) {
+    .site-header, .site-footer { padding: 0 var(--space-16); }
+    .site-header header { height: 70px; }
+    .site-header nav { gap: var(--space-16); }
+    .site-header nav .optional { display: none; }
+    .site-footer footer { flex-wrap: wrap; }
+}
+@media (max-width: 480px) {
+    .site-header nav { gap: var(--space-12); font-size: var(--t-meta); }
+    .site-header nav .button { padding: var(--space-12); }
+    .site-header .brand { font-size: var(--t-text); gap: var(--space-8); }
+    .site-header .brand img { width: 24px; }
 }
 
 /* Homepage — prototype 05. Scoped to leave docs and download layouts independent. */
 body:has(.home-page), html:has(.home-page) { overflow-x: visible; }
-.home-page { max-width: 1240px; margin: auto; padding: 0 var(--space-48); line-height: normal; }
+.home-page { line-height: normal; }
 .home-page h1, .home-page h2, .home-page h3 { margin-top: 0; }
 .home-page section, .home-page article { margin: 0; }
 .home-page article { background: none; border-radius: 0; box-shadow: none; }
@@ -1266,16 +1095,8 @@ body:has(.home-page), html:has(.home-page) { overflow-x: visible; }
 .home-page h3 { font-size: var(--t-lede); margin: 0 0 1em; }
 .home-page code { font-family: var(--font-mono); }
 .home-page .eyebrow { font-size: var(--t-meta); line-height: 1.6; }
-.home-page header { height: 90px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border); }
-.home-page nav { display: flex; gap: var(--space-24); align-items: center; font-size: var(--t-small); position: static; padding: 0; border: 0; background: none; backdrop-filter: none; }
-.home-page nav a { display: inline-flex; align-items: center; min-height: 32px; }
-.home-page .brand { font-size: var(--t-lede); font-weight: 700; display: flex; align-items: center; gap: var(--space-12); }
-.home-page .brand img { width: 29px; }
 .home-page main { padding-bottom: var(--space-20); }
 .home-page section { scroll-margin-top: var(--space-24); }
-.home-page .button { display: inline-block; min-height: 44px; padding: var(--space-12) var(--space-20); border: 1px solid currentColor; font-size: var(--t-small); }
-.home-page .button.solid { background: var(--wine); border-color: var(--wine); color: white; }
-.home-page .button.solid:hover { background: var(--wine-hover); border-color: var(--wine-hover); }
 
 /* Hero: kicker, headline, one paragraph, the install command. */
 .home-hero { padding: var(--space-96) 0 var(--space-20); }
@@ -1302,12 +1123,6 @@ body:has(.home-page), html:has(.home-page) { overflow-x: visible; }
 }
 @media (max-width: 700px) {
     .home-hero h1:has(.rotating) { white-space: normal; font-size: var(--t-name); }
-}
-@media (max-width: 480px) {
-    .home-page nav { gap: var(--space-12); font-size: var(--t-meta); }
-    .home-page nav .button { padding: var(--space-12) var(--space-12); }
-    .home-page .brand { font-size: var(--t-text); gap: var(--space-8); }
-    .home-page .brand img { width: 24px; }
 }
 .home-page .install-row { display: flex; align-items: stretch; max-width: 680px; background: var(--term-bg); border-radius: var(--radius-md); overflow: hidden; }
 .home-page .install-row .term { flex: 1; min-width: 0; border-radius: 0; padding: var(--space-12) var(--space-16); }
@@ -1337,17 +1152,6 @@ body:has(.home-page), html:has(.home-page) { overflow-x: visible; }
 .home-page .needs a, .home-page .install-links a { text-decoration: underline; }
 .home-page .work-row .term { font-size: var(--t-meta); padding: var(--space-16) var(--space-16); }
 .home-page .work-row > * { min-width: 0; }
-.home-page nav details { position: relative; }
-.home-page nav summary { list-style: none; cursor: pointer; display: inline-flex; align-items: center; min-height: 32px; }
-.home-page nav summary::-webkit-details-marker { display: none; }
-.home-page nav details { margin: 0; padding: 0; border: 0; }
-.home-page nav summary { margin: 0; color: inherit; line-height: inherit; }
-.home-page nav summary::after { content: "▾"; float: none; width: auto; height: auto; margin-inline-start: var(--space-8); background: none; transform: none; font-size: var(--t-meta); color: var(--text-secondary); }
-.home-page nav summary:focus-visible { outline: 3px solid var(--wine); outline-offset: 5px; }
-.home-page nav .menu { position: absolute; right: 0; top: 100%; z-index: 10; min-width: 190px; display: flex; flex-direction: column; padding: var(--space-8) var(--space-16); background: var(--bg, var(--bg)); border: 1px solid var(--border); border-radius: var(--radius-md); box-shadow: 0 18px 40px -22px #722f3755; }
-.home-page nav .menu a { min-height: 40px; }
-.home-page nav a[aria-current] { color: var(--burgundy); }
-.home-page nav .button { min-height: 44px; padding: var(--space-12) var(--space-16); }
 .studio-hero { padding: var(--space-96) 0 var(--space-48); }
 .studio-hero .kicker { color: var(--burgundy); margin-bottom: var(--space-16); }
 .studio-hero h1 { max-width: 900px; margin-bottom: var(--space-24); }
@@ -1360,14 +1164,9 @@ body:has(.home-page), html:has(.home-page) { overflow-x: visible; }
 .home-page .efforts .work-row .eyebrow { font-size: var(--t-meta); color: var(--burgundy); }
 .home-page .efforts .work-row .needs { font-size: var(--t-meta); margin-top: var(--space-12); }
 .home-page .install-links { display: flex; gap: var(--space-12); flex-wrap: wrap; }
-.home-page footer { border-top: 1px solid var(--border); padding: var(--space-32) 0; display: flex; justify-content: space-between; gap: var(--space-20); font-size: var(--t-meta); background: none; margin: 0; }
-.home-page footer a + a { margin-left: var(--space-12); }
 
 @media (max-width: 860px) {
-    .home-page { padding: 0 var(--space-16); }
-    .home-page header { height: 70px; }
-    .home-page nav .optional { display: none; }
-    .home-page nav { gap: var(--space-16); }
+    .home-page > main { padding: 0 var(--space-16); }
     .home-hero { padding: var(--space-48) 0 var(--space-32); }
         .home-page .install-row .term { font-size: var(--t-meta); padding: var(--space-12); }
     .home-page .copy { min-width: 72px; padding: 0 var(--space-12); }
@@ -1375,7 +1174,6 @@ body:has(.home-page), html:has(.home-page) { overflow-x: visible; }
     .home-page .work-row, .home-page .efforts .work-row { grid-template-columns: 1fr; gap: var(--space-12); }
     .studio-hero { padding: var(--space-48) 0 var(--space-32); }
     .studio-hero .intro { font-size: var(--t-lede); }
-    .home-page footer { flex-wrap: wrap; }
 }
 @media (prefers-reduced-motion: reduce) {
     html { scroll-behavior: auto; }
@@ -1490,7 +1288,6 @@ body:has(.home-page), html:has(.home-page) { overflow-x: visible; }
 .appmock .waves li.done b{font-weight:400;color:var(--text-secondary)}
 @media (max-width:1000px){.appmock.duo{grid-template-columns:1fr}}
 @media (max-width:560px){.appmock .runs{grid-template-columns:1fr}.appmock .waves{grid-template-columns:1fr}}
-.appmock.duo .win>header{margin:0;min-height:0;height:auto}
 .appmock.duo header>*{margin-top:0;margin-bottom:0}
 .appmock .runs .ag{white-space:nowrap}
 .appmock .runs .st{overflow:hidden;text-overflow:ellipsis}
@@ -1568,74 +1365,65 @@ body:has(.home-page), html:has(.home-page) { overflow-x: visible; }
 </head>
 <body class="portable-docs">
 <a href="#main-content" class="skip-link">Skip to main content</a>
-<script src="https://loopflow.studio/static/docs.js" defer></script>
-<nav aria-label="Main navigation">
-  <div class="container">
-    <div class="nav-brand-group">
-<a href="https://loopflow.studio/" class="nav-logo"><img src="https://loopflow.studio/static/logo.svg" alt="Loopflow"></a><a href="https://loopflow.studio/" class="nav-title">Loopflow</a>    </div>
-    <ul class="nav-links">
-      <li>
-<a href="https://loopflow.studio/docs/orchestration">Graphs</a>      </li>
-      <li>
-<a href="https://loopflow.studio/docs">Docs</a>      </li>
-      <li>
-<a href="https://github.com/loopflowstudio/loopflow" target="_blank" rel="noopener noreferrer" aria-label="GitHub (opens in new tab)" class="external-link">GitHub</a>      </li>
-      <li>
-<a href="https://loopflow.studio/download" class="btn btn-primary">Install</a>      </li>
-    </ul>
+<div class="docs-page">
+  <div class="site-header">
+    <header>
+<a href="https://loopflow.studio/" class="brand"><img src="https://loopflow.studio/static/logo.svg" alt="">loopflow</a>      <nav aria-label="Main navigation">
+<a href="https://loopflow.studio/#mac" class="optional">For you</a><a href="https://loopflow.studio/docs" aria-current="page">Docs</a><details><summary>Company</summary>          <div class="menu">
+<a href="https://loopflow.studio/studio">Loopflow Studio</a><a href="https://loopflow.studio/etude">Etude</a><a href="https://loopflow.studio/fantasia">Fantasia</a><a href="https://loopflow.studio/about">About</a>          </div>
+</details><a href="https://github.com/loopflowstudio/loopflow" class="optional">GitHub ↗</a><a href="https://loopflow.studio/download" class="button solid">Install</a>      </nav>
+    </header>
   </div>
-</nav>
-
-<main id="main-content">  <section class="docs-hero">
-    <div class="docs-layout">
-      <nav aria-label="Developer architecture" class="docs-nav docs-nav-architecture">
-<details open class="docs-nav-disclosure"><summary><span>Browse architecture</span><span>Architecture</span></summary>          <div class="docs-nav-inner">
-<a href="https://loopflow.studio/architecture" class="docs-nav-home"><span class="docs-nav-wordmark">Loopflow source</span><span class="docs-nav-heading">Developer architecture</span></a>            <div class="docs-nav-area">
-              <p class="docs-nav-area-title">Follow the system</p>
-              <ul>
-                <li>
-<a href="https://loopflow.studio/architecture" aria-current="page" class="active">Architecture</a>                </li>
-                <li class="docs-nav-child">
-<a href="https://loopflow.studio/architecture/execution">Execution</a>                </li>
-                <li class="docs-nav-child">
-<a href="https://loopflow.studio/architecture/planning">Planning</a>                </li>
-                <li class="docs-nav-child">
-<a href="https://loopflow.studio/architecture/delivery">Delivery</a>                </li>
-                <li class="docs-nav-child">
-<a href="https://loopflow.studio/architecture/machines">Machines and processes</a>                </li>
-                <li class="docs-nav-child">
-<a href="https://loopflow.studio/architecture/server">Client API server</a>                </li>
-                <li class="docs-nav-child">
-<a href="https://loopflow.studio/architecture/environment">Environment</a>                </li>
-                <li class="docs-nav-child">
-<a href="https://loopflow.studio/architecture/data">Data and persistence</a>                </li>
-                <li class="docs-nav-child">
-<a href="https://loopflow.studio/architecture/codebase">Codebase map</a>                </li>
-                <li class="docs-nav-child">
-<a href="https://loopflow.studio/architecture/reference">Checked reference</a>                </li>
-                <li class="docs-nav-child">
-<a href="https://loopflow.studio/architecture/reference-cutover">Cutover status</a>                </li>
-                <li class="docs-nav-child">
-<a href="https://loopflow.studio/architecture/reference-models">Models and vocabulary</a>                </li>
-                <li class="docs-nav-child">
-<a href="https://loopflow.studio/architecture/reference-code">Code, persistence and public APIs</a>                </li>
-                <li class="docs-nav-child">
-<a href="https://loopflow.studio/architecture/reference-runtime">Launch, Graphs and delivery</a>                </li>
-                <li class="docs-nav-child">
-<a href="https://loopflow.studio/architecture/reference-processes">Locks, processes and Machines</a>                </li>
-              </ul>
+<main id="main-content">    <section class="docs-hero">
+      <div class="docs-layout">
+        <nav aria-label="Developer architecture" class="docs-nav docs-nav-architecture">
+<details open class="docs-nav-disclosure"><summary><span>Browse architecture</span><span>Architecture</span></summary>            <div class="docs-nav-inner">
+<a href="https://loopflow.studio/architecture" class="docs-nav-home"><span class="docs-nav-wordmark">Loopflow source</span><span class="docs-nav-heading">Developer architecture</span></a>              <div class="docs-nav-area">
+                <p class="docs-nav-area-title">Follow the system</p>
+                <ul>
+                  <li>
+<a href="https://loopflow.studio/architecture" aria-current="page" class="active">Architecture</a>                  </li>
+                  <li class="docs-nav-child">
+<a href="https://loopflow.studio/architecture/execution">Execution</a>                  </li>
+                  <li class="docs-nav-child">
+<a href="https://loopflow.studio/architecture/planning">Planning</a>                  </li>
+                  <li class="docs-nav-child">
+<a href="https://loopflow.studio/architecture/delivery">Delivery</a>                  </li>
+                  <li class="docs-nav-child">
+<a href="https://loopflow.studio/architecture/machines">Machines and processes</a>                  </li>
+                  <li class="docs-nav-child">
+<a href="https://loopflow.studio/architecture/server">Client API server</a>                  </li>
+                  <li class="docs-nav-child">
+<a href="https://loopflow.studio/architecture/environment">Environment</a>                  </li>
+                  <li class="docs-nav-child">
+<a href="https://loopflow.studio/architecture/data">Data and persistence</a>                  </li>
+                  <li class="docs-nav-child">
+<a href="https://loopflow.studio/architecture/codebase">Codebase map</a>                  </li>
+                  <li class="docs-nav-child">
+<a href="https://loopflow.studio/architecture/reference">Checked reference</a>                  </li>
+                  <li class="docs-nav-child">
+<a href="https://loopflow.studio/architecture/reference-cutover">Cutover status</a>                  </li>
+                  <li class="docs-nav-child">
+<a href="https://loopflow.studio/architecture/reference-models">Models and vocabulary</a>                  </li>
+                  <li class="docs-nav-child">
+<a href="https://loopflow.studio/architecture/reference-code">Code, persistence and public APIs</a>                  </li>
+                  <li class="docs-nav-child">
+<a href="https://loopflow.studio/architecture/reference-runtime">Launch, Graphs and delivery</a>                  </li>
+                  <li class="docs-nav-child">
+<a href="https://loopflow.studio/architecture/reference-processes">Locks, processes and Machines</a>                  </li>
+                </ul>
+              </div>
+<a href="https://loopflow.studio/docs" class="docs-nav-public-link">Public user docs ↗</a>            </div>
+</details>        </nav>
+        <article class="docs-content">
+          <header class="docs-page-header">
+            <div class="docs-page-utility">
+              <p class="docs-md-link">
+<a href="https://loopflow.studio/architecture.md" class="md-link" title="This page as raw markdown, for agents and copying">Markdown source</a>              </p>
             </div>
-<a href="https://loopflow.studio/docs" class="docs-nav-public-link">Public user docs ↗</a>          </div>
-</details>      </nav>
-      <article class="docs-content">
-        <header class="docs-page-header">
-          <div class="docs-page-utility">
-            <p class="docs-md-link">
-<a href="https://loopflow.studio/architecture.md" class="md-link" title="This page as raw markdown, for agents and copying">Markdown source</a>            </p>
-          </div>
-          <h1>Architecture</h1>
-          <p class="docs-deck">A developer's path through the whole system</p>
-        </header>
+            <h1>Architecture</h1>
+            <p class="docs-deck">A developer's path through the whole system</p>
+          </header>
 <p>Loopflow records commands, preserves agent conversations, and drives Graphs.
 Process records an lf command and its outcome; LfSession records a conversation; a Graph is one lf process
 and the step processes it starts. <a href="#what-runs-on-a-machine">What runs on a Machine</a>
@@ -2200,44 +1988,40 @@ A successful check covers that inventory, not configured runtime behavior.</p>
 <h2 id="research">Research<a class="anchor-link" href="#research" title="Link to this section">#</a></h2>
 <p><a href="https://github.com/loopflowstudio/loopflow/blob/7232e533e14be764951b8eb35bfef8262086e5a5/docs/dev/research/session-experience.html">Session experience comparison</a> reviews T3 Code,
 Paradev and Paseo commit history and tests, with Loopflow findings and Task handoffs.
-It records source observations from November 2026, not a live product benchmark.</p>        <nav aria-label="Documentation pages" class="docs-pager">
-<a href="https://loopflow.studio/architecture/execution" class="docs-pager-link docs-pager-next"><span class="docs-pager-direction">Next</span><span class="docs-pager-title">Execution</span></a>        </nav>
-      </article>
-      <nav aria-label="On this page" class="docs-outline">
-        <p class="docs-outline-heading">On this page</p>
-        <ol>
-          <li>
-<a href="#run-one-skill">Run one Skill</a>          </li>
-          <li>
-<a href="#add-one-capability-at-a-time">Add one capability at a time</a>          </li>
-          <li>
-<a href="#what-runs-on-a-machine">What runs on a Machine</a>          </li>
-          <li>
-<a href="#the-whole-system">The whole system</a>          </li>
-          <li>
-<a href="#core-models">Core models</a>          </li>
-          <li>
-<a href="#follow-the-common-paths">Follow the common paths</a>          </li>
-          <li>
-<a href="#how-to-read-the-code">How to read the code</a>          </li>
-          <li>
-<a href="#research">Research</a>          </li>
-        </ol>
-      </nav>
-    </div>
-  </section>
-</main>
-<footer>
-  <div class="container">
-    <div class="footer-text">
-      <p>Loopflow, a software instrument.</p>
-      <p class="built-by">
-Built by <a href="https://github.com/loopflowstudio" target="_blank" rel="noopener noreferrer" aria-label="Loopflow Studio (opens in new tab)" class="external-link">Loopflow Studio</a>      </p>
-    </div>
-    <div class="footer-links">
-<a href="https://loopflow.studio/docs">Docs</a><a href="https://github.com/loopflowstudio/loopflow">GitHub</a>    </div>
+It records source observations from November 2026, not a live product benchmark.</p>          <nav aria-label="Documentation pages" class="docs-pager">
+<a href="https://loopflow.studio/architecture/execution" class="docs-pager-link docs-pager-next"><span class="docs-pager-direction">Next</span><span class="docs-pager-title">Execution</span></a>          </nav>
+        </article>
+        <nav aria-label="On this page" class="docs-outline">
+          <p class="docs-outline-heading">On this page</p>
+          <ol>
+            <li>
+<a href="#run-one-skill">Run one Skill</a>            </li>
+            <li>
+<a href="#add-one-capability-at-a-time">Add one capability at a time</a>            </li>
+            <li>
+<a href="#what-runs-on-a-machine">What runs on a Machine</a>            </li>
+            <li>
+<a href="#the-whole-system">The whole system</a>            </li>
+            <li>
+<a href="#core-models">Core models</a>            </li>
+            <li>
+<a href="#follow-the-common-paths">Follow the common paths</a>            </li>
+            <li>
+<a href="#how-to-read-the-code">How to read the code</a>            </li>
+            <li>
+<a href="#research">Research</a>            </li>
+          </ol>
+        </nav>
+      </div>
+    </section>
+</main>  <div class="site-footer">
+    <footer>
+<span>Loopflow · An open-source software instrument.</span>      <div>
+<a href="https://loopflow.studio/studio">Loopflow Studio</a><a href="https://loopflow.studio/docs/getting-started">Get started ↗</a><a href="https://github.com/loopflowstudio/loopflow">Source ↗</a>      </div>
+    </footer>
   </div>
-</footer>
+</div>
 
+<script src="https://loopflow.studio/static/docs.js" defer></script>
 </body>
 </html>

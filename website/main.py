@@ -41,69 +41,6 @@ def SkipLink():
     return A("Skip to main content", href="#main-content", cls="skip-link")
 
 
-def Navbar():
-    return Nav(
-        Div(
-            Div(
-                A(
-                    Img(src="/static/logo.svg", alt="Loopflow"),
-                    href="/",
-                    cls="nav-logo",
-                ),
-                A("Loopflow", href="/", cls="nav-title"),
-                cls="nav-brand-group",
-            ),
-            Ul(
-                Li(A("Graphs", href="/docs/orchestration")),
-                Li(A("Docs", href="/docs")),
-                Li(
-                    A(
-                        "GitHub",
-                        href="https://github.com/loopflowstudio/loopflow",
-                        target="_blank",
-                        rel="noopener noreferrer",
-                        cls="external-link",
-                        **{"aria-label": "GitHub (opens in new tab)"},
-                    )
-                ),
-                Li(A("Install", href="/download", cls="btn btn-primary")),
-                cls="nav-links",
-            ),
-            cls="container",
-        ),
-        **{"aria-label": "Main navigation"},
-    )
-
-
-def SiteFooter():
-    return Footer(
-        Div(
-            Div(
-                P("Loopflow, a software instrument."),
-                P(
-                    "Built by ",
-                    A(
-                        "Loopflow Studio",
-                        href="https://github.com/loopflowstudio",
-                        target="_blank",
-                        rel="noopener noreferrer",
-                        cls="external-link",
-                        **{"aria-label": "Loopflow Studio (opens in new tab)"},
-                    ),
-                    cls="built-by",
-                ),
-                cls="footer-text",
-            ),
-            Div(
-                A("Docs", href="/docs"),
-                A("GitHub", href="https://github.com/loopflowstudio/loopflow"),
-                cls="footer-links",
-            ),
-            cls="container",
-        ),
-    )
-
-
 def CopyButton(text: str):
     return Button(
         NotStr(
@@ -119,7 +56,7 @@ def CopyButton(text: str):
 SITE_CONTENT = yaml.safe_load((Path(__file__).parent / "content.yaml").read_text())
 STUDIO_CONTENT = SITE_CONTENT["studio"]
 HOME_CONTENT = SITE_CONTENT["homepage"]
-INSTALL_CONTENT = HOME_CONTENT["install"]
+INSTALL_CONTENT = SITE_CONTENT["install"]
 # The homepage is drawn, not listed: its mock, cards and copy are one template.
 HOME_HTML = (
     (Path(__file__).parent / "home.html")
@@ -787,8 +724,8 @@ SITEMAP_XML_CONTENT = generate_sitemap_xml()
 # Pages
 
 
-def _topbar(current: str) -> FT:
-    """The one bar on the homepage and studio pages: brand, links, a company menu, install."""
+def SiteHeader(current: str) -> FT:
+    """The one bar on every page: brand, links, a company menu, install."""
 
     def link(item: dict) -> FT:
         return A(
@@ -798,44 +735,59 @@ def _topbar(current: str) -> FT:
             aria_current="page" if item["href"] == current else None,
         )
 
-    install = SITE_CONTENT["install"]
-    return Header(
-        A(Img(src="/static/logo.svg", alt=""), "loopflow", href="/", cls="brand"),
-        Nav(
-            *[
-                Details(
-                    Summary(item["label"]),
-                    Div(*[link(entry) for entry in item["menu"]], cls="menu"),
-                )
-                if "menu" in item
-                else link(item)
-                for item in SITE_CONTENT["navigation"]
-            ],
-            A(install["label"], href=install["href"], cls="button solid"),
-            aria_label="Main navigation",
+    return Div(
+        Header(
+            A(Img(src="/static/logo.svg", alt=""), "loopflow", href="/", cls="brand"),
+            Nav(
+                *[
+                    Details(
+                        Summary(item["label"]),
+                        Div(*[link(entry) for entry in item["menu"]], cls="menu"),
+                    )
+                    if "menu" in item
+                    else link(item)
+                    for item in SITE_CONTENT["navigation"]
+                ],
+                A(INSTALL_CONTENT["label"], href=INSTALL_CONTENT["href"], cls="button solid"),
+                aria_label="Main navigation",
+            ),
         ),
+        cls="site-header",
+    )
+
+
+def SiteFooter() -> FT:
+    footer = SITE_CONTENT["footer"]
+    return Div(
+        Footer(
+            Span(footer["text"]),
+            Div(*[A(link["label"], href=link["href"]) for link in footer["links"]]),
+        ),
+        cls="site-footer",
+    )
+
+
+def SitePage(title: str, current: str, *main, cls: str) -> tuple:
+    """A page on the site: skip link, the bar, its main content, the footer."""
+    return (
+        Title(title),
+        SkipLink(),
+        Div(SiteHeader(current), Main(*main, id="main-content"), SiteFooter(), cls=cls),
     )
 
 
 def _studio_page(current: str, content: dict, *sections) -> tuple:
-    return (
-        Title(content["title"]),
-        SkipLink(),
-        Div(
-            _topbar(current),
-            Main(
-                Section(
-                    P(content["label"], cls="eyebrow kicker") if "label" in content else None,
-                    H1(content["heading"]),
-                    P(content["lede"], cls="intro") if "lede" in content else None,
-                    cls="studio-hero",
-                ),
-                *sections,
-                id="main-content",
-                cls="home",
-            ),
-            cls="home-page",
+    return SitePage(
+        content["title"],
+        current,
+        Section(
+            P(content["label"], cls="eyebrow kicker") if "label" in content else None,
+            H1(content["heading"]),
+            P(content["lede"], cls="intro") if "lede" in content else None,
+            cls="studio-hero",
         ),
+        *sections,
+        cls="home-page",
     )
 
 
@@ -887,30 +839,11 @@ def build_effort_page(slug: str) -> tuple:
     )
 
 
-def _product_page(title: str, current: str, *sections) -> tuple:
-    return (
-        Title(title),
-        SkipLink(),
-        Div(
-            _topbar(current),
-            Main(*sections, id="main-content", cls="home"),
-            Footer(
-                Span(HOME_CONTENT["footer"]["text"]),
-                Div(
-                    *[
-                        A(link["label"], href=link["href"])
-                        for link in HOME_CONTENT["footer"]["links"]
-                    ]
-                ),
-            ),
-            Script(COPY_SCRIPT),
-            cls="home-page",
-        ),
-    )
-
-
 def build_homepage() -> tuple:
-    return _product_page("Loopflow — " + HOME_CONTENT["title"], "/", NotStr(HOME_HTML))
+    return (
+        *SitePage("Loopflow — " + HOME_CONTENT["title"], "/", NotStr(HOME_HTML), cls="home-page"),
+        Script(COPY_SCRIPT),
+    )
 
 
 @rt("/")
@@ -989,12 +922,10 @@ def _docs_page(slug: str, title: str, architecture: bool = False):
     heading, body = _split_doc_source(content)
     page = DOC_PAGE_BY_SLUG.get(slug)
     return (
-        Title(title),
         *((Meta(name="robots", content="noindex,nofollow"),) if architecture else ()),
-        SkipLink(),
-        Script(src="/static/docs.js", defer=True),
-        Navbar(),
-        Main(
+        *SitePage(
+            title,
+            "/docs",
             Section(
                 Div(
                     ArchitectureNav(slug) if architecture else DocsNav(slug),
@@ -1039,9 +970,9 @@ def _docs_page(slug: str, title: str, architecture: bool = False):
                 ),
                 cls="docs-hero",
             ),
-            id="main-content",
+            cls="docs-page",
         ),
-        SiteFooter(),
+        Script(src="/static/docs.js", defer=True),
     )
 
 
@@ -1123,70 +1054,62 @@ def get(request, slug: str):
 
 @rt("/download")
 def get():
-    return (
-        Title("Install Loopflow"),
-        SkipLink(),
-        Navbar(),
-        Main(
-            Section(
+    install_command = INSTALL_CONTENT["install_command"]
+    return SitePage(
+        "Install Loopflow",
+        "/download",
+        Section(
+            Div(
+                Img(src="/static/logo.svg", alt="Loopflow", cls="hero-logo"),
+                H1("Install"),
+                P("Runs on your computer. Nothing to register.", cls="tagline"),
                 Div(
-                    Img(src="/static/logo.svg", alt="Loopflow", cls="hero-logo"),
-                    H1("Install"),
-                    P("Runs on your computer. Nothing to register.", cls="tagline"),
                     Div(
-                        Div(
-                            H2("Mac app"),
-                            P(
-                                "Start here. The app shows your goals, your tasks, and the conversations available to you, "
-                                "and it includes the command line tool.",
-                                cls="install-desc",
-                            ),
-                            A(
-                                "Download for Mac",
-                                href=INSTALL_CONTENT["download_url"],
-                                cls="btn btn-primary",
-                            ),
-                            cls="mac-app-option",
-                        ),
-                        H2("Command line"),
+                        H2("Mac app"),
                         P(
-                            "The same tool without the app, for macOS or Linux. "
-                            "Everything the app does, it does by running these commands.",
+                            "Start here. The app shows your goals, your tasks, and the conversations available to you, "
+                            "and it includes the command line tool.",
                             cls="install-desc",
                         ),
-                        Div(
-                            Pre(
-                                Code("curl -fsSL https://loopflow.studio/install.sh | sh"),
-                                cls="install-code",
-                                tabindex="0",
-                            ),
-                            CopyButton("curl -fsSL https://loopflow.studio/install.sh | sh"),
-                            cls="install-code-wrapper",
+                        A(
+                            "Download for Mac",
+                            href=INSTALL_CONTENT["download_url"],
+                            cls="button solid",
                         ),
-                        Div(
-                            P("Then, inside a project:", cls="next-skill-label"),
-                            Pre(
-                                Code("cd your-project\nlf init"),
-                                cls="install-code next-skills",
-                                tabindex="0",
-                            ),
-                            cls="next-skills-wrapper",
-                        ),
-                        P(
-                            "Before you start: an AI coding tool (Claude Code or Codex), signed in, "
-                            "and a project that uses Git.",
-                            cls="system-req",
-                        ),
-                        cls="install-option",
-                        style="max-width: 420px; margin: 0 auto;",
+                        cls="mac-app-option",
                     ),
-                    cls="container",
+                    H2("Command line"),
+                    P(
+                        "The same tool without the app, for macOS or Linux. "
+                        "Everything the app does, it does by running these commands.",
+                        cls="install-desc",
+                    ),
+                    Div(
+                        Pre(Code(install_command), cls="install-code", tabindex="0"),
+                        CopyButton(install_command),
+                        cls="install-code-wrapper",
+                    ),
+                    Div(
+                        P("Then, inside a project:", cls="next-skill-label"),
+                        Pre(
+                            Code("cd your-project\nlf init"),
+                            cls="install-code next-skills",
+                            tabindex="0",
+                        ),
+                        cls="next-skills-wrapper",
+                    ),
+                    P(
+                        "Before you start: an AI coding tool (Claude Code or Codex), signed in, "
+                        "and a project that uses Git.",
+                        cls="system-req",
+                    ),
+                    cls="install-option",
                 ),
-                cls="hero hero-centered download-hero",
+                cls="container",
             ),
-            id="main-content",
+            cls="hero hero-centered download-hero",
         ),
-        SiteFooter(),
+        cls="download-page",
     )
 
 

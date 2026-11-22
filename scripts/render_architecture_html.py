@@ -24,7 +24,9 @@ def render_html() -> str:
         "Architecture — Loopflow Developer Architecture",
         architecture=True,
     )
-    body = "\n".join(to_xml(fragment) for fragment in fragments[2:])
+    body = "\n".join(
+        to_xml(fragment) for fragment in fragments if fragment.tag not in ("title", "meta")
+    )
     body = re.sub(
         r'(?P<attr>href|src)="/(?!/)',
         rf'\g<attr>="{site.BASE_URL}/',

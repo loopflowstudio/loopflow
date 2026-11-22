@@ -44,3 +44,26 @@ def test_serif_is_display_size_with_fl_apart(
     for text in serif:
         assert text["size"] >= 24, text
         assert "no-common-ligatures" in text["ligatures"], text
+
+
+FRAME_PAGES = ["/", "/studio", "/docs", "/download"]
+
+
+@pytest.mark.parametrize("width", [1440, 390])
+def test_every_page_has_the_same_bar_and_footer(page: Page, base_url: str, width: int) -> None:
+    page.set_viewport_size({"width": width, "height": 900})
+    frames = {}
+    for path in FRAME_PAGES:
+        page.goto(f"{base_url}{path}")
+        frames[path] = {
+            part: (
+                page.locator(part).evaluate(
+                    "el => el.outerHTML.replace(/ aria-current=\"page\"/g, '')"
+                ),
+                {key: page.locator(part).bounding_box()[key] for key in ("x", "width")},
+            )
+            for part in (".site-header", ".site-footer")
+        }
+    home = frames["/"]
+    for path in FRAME_PAGES[1:]:
+        assert frames[path] == home, path

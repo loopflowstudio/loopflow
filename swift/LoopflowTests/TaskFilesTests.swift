@@ -616,7 +616,7 @@ struct TaskFilesTests {
     @Test func changeBadgesMarkFilesAndTheFoldersHoldingThem() {
         func file(_ path: String, old: String? = nil, untracked: Bool = false) throws -> TaskChangedFile {
             let value: [String: Any] = ["path": path, "old_path": old as Any? ?? NSNull(), "committed": !untracked,
-                                        "staged": false, "unstaged": false, "untracked": untracked]
+                                        "staged": false, "unstaged": false, "untracked": untracked, "changes": 1]
             return try JSONDecoder().decode(TaskChangedFile.self, from: JSONSerialization.data(withJSONObject: value))
         }
         let badges = CheckoutChange.badges([try! file("src/lib/mod.rs"), try! file("src/new.rs", untracked: true),
@@ -829,7 +829,7 @@ struct TaskFilesTests {
             if args[1] == "changes" {
                 let file = (value["files"] as! [[String: Any]])[0]
                 value["files"] = ["a.swift", "b.swift"].map { path in
-                    file.merging(["path": path, "old_path": NSNull()]) { $1 }
+                    file.merging(["path": path, "old_path": NSNull(), "changes": 2]) { $1 }
                 }
             } else {
                 if args[3] == failingOnce, !failed.withLock({ let was = $0; $0 = true; return was }) {
@@ -866,7 +866,8 @@ struct TaskFilesTests {
             case "changes":
                 let file = (value["files"] as! [[String: Any]])[0]
                 value["files"] = paths.map {
-                    file.merging(["path": $0, "old_path": NSNull(), "untracked": $0 == "data.json"]) { $1 }
+                    file.merging(["path": $0, "old_path": NSNull(), "untracked": $0 == "data.json",
+                                  "changes": $0 == "data.json" ? 1 : 2]) { $1 }
                 }
             case "file":
                 throw RegistryQueryError("a new file is read as its patch")
@@ -913,10 +914,64 @@ struct TaskFilesTests {
         guard case .failed = store.fileNotes["b.swift"] else { Issue.record("b.swift should have failed"); return }
         #expect(store.review?.file("a.swift")?.stops.count == 2 && store.review?.file("b.swift")?.blocks.isEmpty == true)
         #expect(store.unreadShown == 0)
+        // Its changes still count: the totals come with the file list, not its lines.
+        #expect(store.position(.changes) == "4 changes")
+        store.step(1, in: .changes)
+        store.step(1, in: .changes)
+        #expect(store.position(.changes) == "2 of 4")
 
         await store.retryFile("b.swift")
         #expect(store.fileNotes.isEmpty && store.unread.isEmpty)
         #expect(store.review?.file("b.swift")?.stops.count == 2)
+    }
+
+    /// The Diff draws a window of files, so a jump lands at once however far
+    /// down it goes. A jump far down starts the window at its file, scrolling
+    /// down draws the next files, and showing earlier files keeps the top line.
+    @Test func aFarJumpStartsTheDiffsWindowAtItsFile() async throws {
+        let paths = (0..<6).map { "f\($0).swift" }
+        let fixture = try Data(contentsOf: URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("tests/fixtures/dto/task_files.json"))
+        let store = TaskFilesStore(issue: "TEST-1", cwd: "/fixture", query: RegistryQuery { args, _ in
+            let root = try JSONSerialization.jsonObject(with: fixture) as! [String: Any]
+            var value = root[args[1] == "changes" ? "changes" : "diff"] as! [String: Any]
+            if args[1] == "changes" {
+                let file = (value["files"] as! [[String: Any]])[0]
+                value["files"] = paths.map { file.merging(["path": $0, "old_path": NSNull(), "changes": 1]) { $1 } }
+            } else {
+                // 600 added lines: about 600 rows each.
+                let path = args[3]
+                value["patch"] = "diff --git a/\(path) b/\(path)\n--- a/\(path)\n+++ b/\(path)\n@@ -0,0 +1,600 @@\n"
+                    + (1...600).map { "+line \($0)\n" }.joined()
+            }
+            return String(decoding: try JSONSerialization.data(withJSONObject: value), as: UTF8.self)
+        })
+        store.autosave = false
+        await store.loadReview()
+        let files = try #require(store.shownReview?.files)
+        #expect(store.window == 0..<3)
+
+        // Stepping into the next file stays in the window.
+        store.step(1, in: .changes)
+        let next = try #require(store.step(1, in: .changes))
+        store[place: .changes].anchor = next.id
+        #expect(next.path == "f1.swift" && store.window == 0..<3)
+
+        store[place: .changes] = .init(anchor: files[5].topID, current: files[5].stops.first)
+        #expect(store.window == 5..<6 && store.position(.changes) == "6 of 6")
+
+        // The scroll view's reports never move it.
+        store.scrolled(to: "\(files[5].path)#c0-300", in: .changes)
+        #expect(store.window == 5..<6)
+
+        store.showEarlierFiles()
+        #expect(store.window == 2..<6 && store[place: .changes].anchor == "\(files[5].path)#c0-300")
+
+        store[place: .changes] = .init(anchor: files[0].topID, current: files[0].stops.first)
+        #expect(store.window == 0..<3)
+        store.extendWindow()
+        #expect(store.window == 0..<5)
     }
 
     /// A file marked viewed folds to its header and stepping passes over it,

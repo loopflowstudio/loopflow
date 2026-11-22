@@ -11,8 +11,8 @@ The step-by-step account this file replaced: `ade953f915:scratch/loo-515-task-de
 Status: built, the tour skill and the two diff settings included. Seen on
 screen November 21, in Loopflow Dev; the repairs for what that showed (width,
 file bar, syntax colors, the per-file read, the long-line cut, Retry, rows
-that take the pane's width) and the polish under "Diff polish" are built and unseen.
-The Diff polish (below) and the New code layout are built and unseen too.
+that take the pane's width), the New code layout, the Diff polish (below), the
+count up front and the windowed stream are built and unseen.
 PR #1949 is open; its head follows this branch.
 
 ## What exists
@@ -99,6 +99,22 @@ file and a builtin skill.
     tooltip), so a reload changes no row's height or width.
     `theDiffFitsItsPane` measures header, toolbar, file title, comments strip,
     stream and page at 360, 480 and 640 pt.
+  - **Count up front**: `TaskChangedFile.changes` is each file's runs of
+    changed lines, counted in Rust (`count_changes`) from the same
+    default-context patch the stream parses (`-U0` aligns some blank lines
+    differently: `config/files.rs` read 11 against 12). Title and stepper sum
+    it (`TaskFilesStore.changeCount`); a file's own lines count only where no
+    count came (Files' Diff, drafts).
+  - **Rows and window**: every line of a change is its own lazy row (the
+    first carries the change's id); `ReviewChange.pairs` is found once at
+    parse. The scroll anchor and the current change are observed apart, and
+    the top file (`topPath`) is stored, so scrolling redraws the file bar,
+    sidebar and declaration bar only. The stream draws a window from
+    `windowStart` of about 1,500 rows (`windowBudget`); a jump, step or link
+    to a file outside it or more than a budget down starts it at that file;
+    its end row draws more on appear; "N files above · Show" brings earlier
+    files back with the top line held. Scroll reports (`scrolled(to:in:)`)
+    never move it.
   - `ReviewStepper` (`]`/`[`, arrows) crosses files; Focus shows one file with
     a strip reading "Only X · N more files"; New code (default: the file as it
     is now, removed lines folded to "N old lines · Show") / Unified / Side by
@@ -209,6 +225,8 @@ file and a builtin skill.
 - November 21, on the diff polish list: "Diff per agent turn — doesnt fit our model; would be per graph step. could be a nice thing but i mostly dont care." "Viewed checkboxes - yeah this could ok" "real grammar / better highlighting : high priority" "change markers: yeah, medium prii" "copy woithouth +/-: medium pri" "Sticky function headers: low pri but nice" "Rendered diffs for markdown/images/html: highpri" "word-wrap-toggle: low pri".
 - November 21, on filing the polish as separate Tasks: "but do em all unless theres some sort of trouble or conflict", then "no, do the in 515", "what of this could really be that hard", "i also feel like there still could be more syntax highlighting", "maybe diff per agent turn?", "er diff per step?". The seven separate Tasks were abandoned unstarted.
 
+- November 21 evening, on the branch build: "i dont like how the # of changes increases as it loads more files. it should know up front"; "teh right hand red/green bar is too much, drop it" (dropped in cfc6c89cc5); "scrolling seems choppy, should we be paginating this thing more? its more important that its fast to jump via the siebar than that no pagination". The order pasted for scrolling: profile; draw every line as its own lazy row; "If it's still slow, paginate by file. The stream shows a window of files around where you are, and the sidebar, j/k and the marks jump between windows."
+
 Assumed, not answered: sidebar on the left docking at 620 pt; ⌥⌘1/2/3; the file
 bar outside the scroll view as "headers lock"; several comments as one line.
 
@@ -246,9 +264,9 @@ Chosen while building, not by Jack, reversible before release:
 - A comment on an opened unchanged line detaches when its file's diff changes.
   A repeated short line (`}`) can re-anchor to the wrong identical line.
 - Moves are found only between a pure removal and a pure addition in one file.
-- `lf task changes` carries no line counts or added/deleted kind, so a file's
-  +/− and status appear when its lines arrive. Adding them is a protocol
-  change the November 21 steer ruled out for that pass.
+- `lf task changes` carries each file's change count but no line counts or
+  added/deleted kind, so a file's +/− and status appear when its lines arrive.
+- A file cut at 1 MB counts all its changes and steps through the ones shown.
 - Why the pane jumped is measured headless, not confirmed on screen. Measured
   with `NSHostingController.sizeThatFits` before the second repair: toolbar
   minimum 211 pt, stream and file title under 240 pt (this branch's own diff
@@ -336,9 +354,8 @@ Retry; a change and a long line share one id (`ReviewLine.id(in:)`); the
 toolbar's four forms give up layout, then order and tour, then Focus, as
 `swift/README.md` says. Two things are called cut and stay two: a long line
 (Show brings the rest) and a file past 1 MB (nothing does until Task 4556d0).
-Noticed, left as chosen: while files are still being read the title counts
-only the changes read so far, and the number waiting is in the reading mark's
-tooltip. The five questions under Remaining are unchanged and unanswered.
+Noticed then, replaced since by the count up front: while files were still
+being read the title counted only the changes read so far. The five questions under Remaining are unchanged and unanswered.
 
 Tenth pass, November 21, over the Diff polish at `9fdfc72f79`: one repair
 for implement. A step is a Graph step's own commits (Jack: "steps do commits,
@@ -370,6 +387,28 @@ change. `--no-merges` leaves every listed commit one parent, so `%P` is that
 parent (48 commits here, none with two); a commit after a merge compares
 against the merge, so a step never carries main's or a synced Task's work.
 
+Twelfth pass, November 21, over the count up front and the window at
+`2d2f33f6c1`: one repair for implement. The plan says the count is read "from
+the same default-context patch the stream parses"; it is a second `git diff`
+with its own flags. `change_counts` passes `--find-renames` and
+`--src-prefix=a/ --dst-prefix=b/`; `diff_snapshot`, which serves each file's
+`lf task diff --path`, passes neither, so a Machine with `diff.renames=false`,
+`diff.noprefix` or `diff.mnemonicPrefix` reads a different patch from the one
+counted. A renamed and edited file then counts its edits in the title and
+steps through one whole-file addition, and the stepper never reaches its
+total. Direction: one function builds the comparison's diff arguments and both
+reads use it; a test parses the per-file patch of the count fixture in Swift
+and finds the stops `lf task changes` counted. The stop rule itself agrees:
+both start a change after an unchanged line or a hunk header and on a removal
+after additions, and a move is two stops on each side.
+
+Left as built: the title counts every shown file, Viewed ones included, while
+the stepper's total leaves Viewed files out ("2 of 4" under "6 changes"); a
+file read from a later live update keeps the count from the file list until
+the list is reread. The window's "N files above · Show" button where Jack's
+pasted order said jumps "between windows" is the chosen form; whether
+scrolling up to it reads as a wall is for the screen.
+
 ## Remaining
 
 - Demo/review on screen (below). November 21 showed the tab strip, the Diff
@@ -380,8 +419,9 @@ against the merge, so a step never carries main's or a synced Task's work.
   live conversation, the tour with Write tour / Update tour and its behind
   notice, By group under this repository's `diff_groups`, and Always hidden's
   layers and save against a running server; New code with its old-line
-  folds, the step menu, change marks, Viewed, the enclosing declaration,
-  copy without markers and Wrap long lines.
+  folds, the step menu, Viewed, the enclosing declaration,
+  copy without markers and Wrap long lines; the count whole from the first
+  frame, scrolling and sidebar jumps on this PR's Diff, "N files above · Show".
 - Open, for the person at the demo:
   1. What is the pane called? It has four names: **Toggle Browser** (View menu
      and ⇧⌘E, on main), **Show Task Details** (this branch's action), "Files"
@@ -476,39 +516,18 @@ files:
   page and Task switches.
 - No GitHub patch renderer remains.
 
-Check (November 21, polish): `swift build --build-tests` then `scripts/test_desktop.sh --skip-build --filter 'TaskFilesTests|ReviewDiffTests'` → 60 tests, 58 passed; `commitInLinkedWorktreeRereadsTheComparison` and `ignoredWritesFromReadsNeverScheduleAnotherRead` (FSEvents) failed with `fseventsd` at 100% CPU, the documented trap — gate reruns them. `DTOFixtureTests|ServerProtocolTests|RegistryQueryTests` → 98 passed. Rust: `cargo test -p loopflow-execution --lib task_files_compare_net_parent_head` ok, `server::schema::tests::` 8 passed, `--test integration dto_fixtures::` 49 passed, `documented_commands::` 4 passed (after `git fetch --unshallow`; the shallow clone could not order migrations). Gate/CI: clippy, the full swift suite, `global_commands`. Demo: the pane on screen.
+Measured (November 21 evening, `DiffScrollMeasurement`, this Task's Diff with nothing hidden, 76 files, 600 × 900 pt): before, scroll frames of 40 pt median 4.6 ms, p95 12.1, 5/300 over 16.7 ms, sidebar jumps median 245 ms, max 1,102 ms. Separating anchor from current alone: about the same. Lazy line rows: p95 9.7, 2/300, jumps median 109, max 1,524 (the farthest). With the window: jumps median 92, max 119 ms; "files above" 350 ms; first frame 92 → 51 ms. A per-line syntax span cache was tried and dropped: jumps draw unseen lines, so it never hit. Jumps keep ~90 ms of drawing a new screen of rows; whether that reads as instant is for the screen.
+
+Check (November 21 evening): `cargo test -p loopflow-execution --lib task_changes_` 2, `dto_fixtures::` 49, `server::schema::tests::` 8, `documented_commands::` 4 passed; `scripts/test_desktop.sh --skip-build --filter 'TaskFilesTests|ReviewDiffTests|DTOFixtureTests|RegistryQueryTests'` 135 passed. Gate/CI: clippy, the full Swift suite (the FSEvents tests `commitInLinkedWorktreeRereadsTheComparison` and `ignoredWritesFromReadsNeverScheduleAnotherRead` failed earlier under a busy `fseventsd`), `global_commands`. Demo: scrolling and jumps on screen.
 
 ## Diff polish, November 21 — built
 
 Steer, November 21: "ok grammar highlighitng and rendered diffs can be a single v2 task"; items 1 and 2 leave LOO-515 for Task c9fbcb ("Diff v2"), `SyntaxColors.swift` stays as it is. Built here, unseen on screen:
 
-- **Diff per step.** `lf task changes` carries `commits` (`{sha, subject}`, base to head, oldest first; `TaskCommit` in Rust and Swift, fixtures and schema updated). `ReviewStep.steps` reads a run of `lf <step>:` subjects as one step, any other commit alone. A menu under the title ("Whole Task · N steps") picks one; `showStep` compares `.branch(base: parent of its first, head: its last)` and the stream reads anew. Steps come only from the whole Task's read. A pane tab change returns to the whole Task.
-- **Change marks** (`ChangeMarks`, `ReviewDiff.marks`): one mark per change beside the scrollbar, placed by counting the rows the stream draws in the current layout; green added, red removed, accent both, quiet moved; a dot for a file with comments. Click lands on the change.
+- **Diff per step.** `lf task changes` carries `commits` (`{sha, parent, subject}`, first-parent, no merges, oldest first; `TaskCommit` in Rust and Swift, fixtures and schema updated). `ReviewStep.steps` reads a run of one `lf <step>:` prefix as one step when each commit's parent is the step's head, any other commit alone; a step's base is its first commit's parent. A menu under the title ("Whole Task · N steps") picks one; `showStep` compares `.branch(base: parent of its first, head: its last)` and the stream reads anew. Steps come only from the whole Task's read. A pane tab change returns to the whole Task.
 - **Copy without + and −.** The marker is not selectable; each line's context menu copies the line, the selected lines, or the side's shown code (`ReviewSelection.side`).
 - **Viewed** per file: checkbox in the file title and bar; folds the file to its header, sidebar "12 / 60 viewed" and a check per row, stepping passes over it; `ReviewFile.fingerprint` clears it when the file's lines change. In memory only.
 - **Enclosing declaration** under the file bar, overlaid on the stream (`ReviewFile.enclosing`): the nearest shown line above the top row that opens a function or type (or a Markdown heading), else git's hunk declaration.
 - **Wrap long lines** in the … menu, which is now always shown; off, each line keeps one row and ends in "…".
 
-Chosen while building, reversible: steps are consecutive runs (a second `implement` after `gate` is a second step); wrap off truncates instead of scrolling sideways (the November 21 width repairs ruled out a row wider than the pane); marks count rows, not measured heights, so wrapped lines and comments put them slightly off; viewed does not outlive the app.
-
-## Next for implement — Diff demo, November 21 evening
-
-Jack, on the branch build:
-
-> "i dont like how the # of changes increases as it loads more files. it should know up front"
-
-> "teh right hand red/green bar is too much, drop it" — done in cfc6c89cc5 (marks, `ReviewMark`, test and README line removed).
-
-> "scrolling seems choppy, should we be paginating this thing more? its more important that its fast to jump via the siebar than that no pagination"
-
-1. The change count ("N changes", "2 of N") is right from the first frame and never grows as patches load. `task.changes` already lists every file; carry each file's change count there (one value, computed in Rust from the patch: contiguous runs of changed lines, matching the client's stops, including how moved blocks count) or otherwise know it before the patches arrive.
-2. Scrolling is smooth on a large change (this PR's own Diff is the test). Paginate if that's what it takes: jumping to any file from the sidebar must be instant, and that matters more than one continuous stream.
-
-Order for item 2, as pasted by Jack:
-
-> Pagination would bound both costs. Fixing the first is cheaper and keeps the single stream you read from top to bottom. In order:
-> 1. Profile one slow Task in Instruments to confirm where the time goes.
-> 2. Draw every line as its own lazy row, so a long change is built only as it scrolls into view.
-> 3. If it's still slow, paginate by file. The stream shows a window of files around where you are, and the sidebar, j/k and the marks jump between windows.
-
-(The marks are gone since cfc6c89cc5; the sidebar and stepping are what jump.)
+Chosen while building, reversible: steps are consecutive runs (a second `implement` after `gate` is a second step); wrap off truncates instead of scrolling sideways (the November 21 width repairs ruled out a row wider than the pane); viewed does not outlive the app.

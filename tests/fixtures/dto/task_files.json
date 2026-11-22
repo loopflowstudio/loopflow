@@ -14,7 +14,8 @@
         "committed": true,
         "staged": false,
         "unstaged": false,
-        "untracked": false
+        "untracked": false,
+        "changes": 1
       }
     ],
     "scratch": [

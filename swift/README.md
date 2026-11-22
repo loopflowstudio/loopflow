@@ -395,7 +395,8 @@ changed since you last read it says so above its text.
 **Diff** opens on how much changed ("4 changed files", with the **Whole Task**
 step menu beside it), then what is compared: the base branch and its commit,
 wrapping rather than cut. The changed files sit beside the
-whole comparison as one stream. Each shown file's lines are read on their own,
+whole comparison as one stream. `lf task changes` returns each file’s change count with the list,
+before the pane reads any patches. Each shown file's lines are read on their own,
 those near the top of the pane first, so a large file never cuts another short
 and a hidden file is never read. A new file reads as its contents. Size
 collapses nothing: a line past 1,000 characters shows its start and **N more
@@ -469,7 +470,10 @@ click. Files changed since `at` still follow the named ones. Nothing rewrites
 the tour on its own, and a Task on another Machine offers neither button.
 
 The sidebar lists the files in that order: type to narrow the stream, click a
-file to bring it to the top. Under them, **Always hidden** is the `diff_hidden`
+file to bring it to the top. The stream draws about 1,500 rows from where it
+starts, more as you scroll down, so a jump lands at once however far it goes:
+a jump past that starts the stream at its file, with **N files above · Show**
+over it. Under them, **Always hidden** is the `diff_hidden`
 setting, patterns matched the same way. Every layer adds to it (`scratch/` by
 default; `[]` clears the layers below), and each pattern is named by the layer
 that added it. Only yours can be removed or added there; they are saved in the

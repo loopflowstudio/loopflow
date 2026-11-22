@@ -11970,6 +11970,12 @@
     },
     "TaskChangedFile": {
       "properties": {
+        "changes": {
+          "description": "Runs of changed lines in the file's patch, each the Diff's stop: a run\nends at an unchanged line, a hunk's end, or a removal after additions.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
         "committed": {
           "type": "boolean"
         },
@@ -11998,7 +12004,8 @@
         "committed",
         "staged",
         "unstaged",
-        "untracked"
+        "untracked",
+        "changes"
       ],
       "type": "object"
     },

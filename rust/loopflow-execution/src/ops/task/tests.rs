@@ -1074,6 +1074,79 @@ fn task_changes_offer_first_parent_commits_without_merges() {
 }
 
 #[test]
+fn task_changes_count_each_files_stops_before_any_patch_is_read() {
+    let repo = tempfile::tempdir().unwrap();
+    let git = |args: &[&str]| {
+        super::git_output(repo.path(), args)
+            .unwrap()
+            .trim()
+            .to_string()
+    };
+    let lines = |numbers: &[&str]| numbers.join("\n") + "\n";
+    git(&["init", "-q", "-b", "main"]);
+    git(&["config", "user.name", "Test"]);
+    git(&["config", "user.email", "test@example.com"]);
+    let file = |name: &str, content: &str| std::fs::write(repo.path().join(name), content).unwrap();
+    let ten = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"];
+    file("edited.txt", &lines(&ten));
+    file("with space.txt", &lines(&ten));
+    file("old name.txt", &lines(&ten));
+    file("removed.txt", &lines(&["a", "b"]));
+    git(&["add", "."]);
+    git(&["commit", "-qm", "base"]);
+    let base = git(&["rev-parse", "HEAD"]);
+    // Two runs: the first line, and the last line replaced with one added.
+    file(
+        "edited.txt",
+        &lines(&[
+            "one", "2", "3", "4", "5", "6", "7", "8", "9", "ten", "eleven",
+        ]),
+    );
+    file(
+        "with space.txt",
+        &lines(&["1", "2", "3", "4", "five", "6", "7", "8", "9", "10"]),
+    );
+    git(&["mv", "old name.txt", "renamed.txt"]);
+    git(&["rm", "-q", "removed.txt"]);
+    file("binary.bin", "\0\u{1}\u{2}");
+    git(&["add", "binary.bin"]);
+    file("new.txt", &lines(&["a", "b", "c"]));
+    file("empty.txt", "");
+    let id = TaskId::new();
+    let changes = super::snapshot::changes_snapshot(super::TaskComparison {
+        checkout: super::TaskWorkspace {
+            issue_identifier: "TEST-1",
+            task_id: &id,
+            worktree: repo.path(),
+        },
+        base_commit: &base,
+        head_commit: None,
+    })
+    .unwrap();
+    let counts = changes
+        .files
+        .iter()
+        .map(|file| (file.path.as_str(), file.changes))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    assert_eq!(
+        counts,
+        std::collections::BTreeMap::from([
+            ("binary.bin", 0),
+            ("edited.txt", 2),
+            ("empty.txt", 0),
+            ("new.txt", 1),
+            ("removed.txt", 1),
+            ("renamed.txt", 0),
+            ("with space.txt", 1),
+        ])
+    );
+    let adjacent =
+        b"diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1,2 +1,2 @@\n+new\n-old\n+again\n-more\n";
+    // A removal right after additions starts a new stop, as the Diff reads it.
+    assert_eq!(super::snapshot::count_changes(adjacent)["x"], 3);
+}
+
+#[test]
 fn task_files_compare_net_parent_head_and_revisioned_drafts() {
     let repo = tempfile::tempdir().unwrap();
     let git = |args: &[&str]| {

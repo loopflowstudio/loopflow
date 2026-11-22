@@ -122,13 +122,13 @@ struct StartFlow: Equatable, Identifiable {
 
     /// Nil for a Graph that does not load, or that runs for a Wave and not a Task.
     init?(_ entry: GraphCatalogEntry) {
-        guard entry.runs == .task, let compiled = entry.compiled else { return nil }
+        guard entry.runs == .task, let compiled = entry.compiled, let workflow = entry.workflow else { return nil }
         func nodes(_ steps: [GraphNode]) -> [GraphNode] { steps.flatMap { [$0] + $0.paths.flatMap { nodes($0.steps) } } }
         let all = nodes(compiled.steps)
         let firstStop = all.firstIndex(where: \.interactive) ?? all.count
         name = entry.name
         description = entry.description
-        stops = all.count(where: \.interactive)
+        stops = workflow.interactiveSteps.count
         merges = all[..<firstStop].contains { node in
             node.kind == .op && (node.label.hasPrefix("land") || node.label.hasPrefix("pr land"))
         }

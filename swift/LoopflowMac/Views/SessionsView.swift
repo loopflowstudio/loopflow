@@ -1650,7 +1650,7 @@ struct SessionsContentView: View {
         )) {
             switch navigation.palette {
             case .workflow(let name):
-                WorkflowCatalogInspector(entry: model.workflowCatalog.value?.first { $0.name == name }, model: model)
+                WorkflowCatalogInspector(entry: model.graphCatalog.value?.first { $0.name == name }, model: model)
             case .graph(let name):
                 GraphCatalogInspector(entry: model.graphCatalog.value?.first { $0.name == name }, navigation: navigation, model: model)
             case .search:

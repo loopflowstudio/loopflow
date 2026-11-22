@@ -142,15 +142,7 @@ impl CapturedGraph {
 
     /// Its interactive steps in order, each XOR path's in name order.
     pub fn interactive_steps(&self) -> Vec<(Place, &ConcreteSkill)> {
-        let mut out = Vec::new();
-        walk(&self.steps, &[], &mut |place, step| {
-            if let ConcreteStep::Skill(skill) = step {
-                if skill.interactive {
-                    out.push((place, skill));
-                }
-            }
-        });
-        out
+        interactive_steps(&self.steps)
     }
 
     /// The first step answering to `name`; `start` is the first step.
@@ -283,10 +275,7 @@ impl CapturedGraph {
     /// What a person calls the step at `place`; an operation by the display
     /// name its Graph records it under.
     pub fn step_name(&self, place: &Place) -> String {
-        match self.step_at(place) {
-            ConcreteStep::Command(command) => command.item.display_name(),
-            step => names(step)[0].to_owned(),
-        }
+        step_name(self.step_at(place))
     }
 
     /// What a person calls the step `cursor` stands at, if the graph has it.
@@ -311,45 +300,100 @@ impl CapturedGraph {
     }
 
     pub fn interactive_summary(&self) -> Vec<InteractiveStep> {
-        self.interactive_steps()
-            .into_iter()
-            .map(|(_, skill)| InteractiveStep {
-                name: skill
-                    .interactive_step()
-                    .expect("interactive steps have a name")
-                    .into(),
-                skill: skill.skill.name.clone(),
-                description: skill.skill.content.as_deref().and_then(first_prose_line),
-            })
-            .collect()
+        interactive_summary(&self.steps)
     }
+}
 
-    /// Its top-level steps as a person reads them, consecutive repeats
-    /// collapsed, with the index in them of each top-level place. A composed
-    /// step reads as the graph it came from.
-    fn workflow(&self) -> (Vec<WorkflowStep>, Vec<u32>) {
-        let mut steps: Vec<WorkflowStep> = Vec::new();
-        let mut indices = Vec::with_capacity(self.steps.len());
-        for (index, step) in self.steps.iter().enumerate() {
-            let sources = match step {
-                ConcreteStep::Skill(skill) => &skill.sources,
-                ConcreteStep::Command(command) => &command.sources,
-                ConcreteStep::Xor(branch) => &branch.sources,
-            };
-            let name = sources.get(1).cloned().unwrap_or_else(|| {
-                self.step_name(&Place {
-                    path: Vec::new(),
-                    index,
-                })
-            });
-            let interactive = matches!(step, ConcreteStep::Skill(skill) if skill.interactive);
-            match steps.last_mut() {
-                Some(last) if last.name == name => last.interactive |= interactive,
-                _ => steps.push(WorkflowStep { name, interactive }),
+/// The interactive steps of `steps` in order, each XOR path's in name order.
+fn interactive_steps(steps: &[ConcreteStep]) -> Vec<(Place, &ConcreteSkill)> {
+    let mut out = Vec::new();
+    walk(steps, &[], &mut |place, step| {
+        if let ConcreteStep::Skill(skill) = step {
+            if skill.interactive {
+                out.push((place, skill));
             }
-            indices.push(u32::try_from(steps.len() - 1).expect("a graph has few steps"));
         }
-        (steps, indices)
+    });
+    out
+}
+
+fn interactive_summary(steps: &[ConcreteStep]) -> Vec<InteractiveStep> {
+    interactive_steps(steps)
+        .into_iter()
+        .map(|(_, skill)| InteractiveStep {
+            name: skill
+                .interactive_step()
+                .expect("interactive steps have a name")
+                .into(),
+            skill: skill.skill.name.clone(),
+            description: skill.skill.content.as_deref().and_then(first_prose_line),
+        })
+        .collect()
+}
+
+/// The top-level steps as a person reads them, consecutive repeats collapsed,
+/// with the index in them of each top-level place. A composed step reads as
+/// the graph it came from, and a step is interactive when a person takes part
+/// anywhere inside it.
+fn workflow(steps: &[ConcreteStep]) -> (Vec<WorkflowStep>, Vec<u32>) {
+    let mut line: Vec<WorkflowStep> = Vec::new();
+    let mut indices = Vec::with_capacity(steps.len());
+    for step in steps {
+        let sources = match step {
+            ConcreteStep::Skill(skill) => &skill.sources,
+            ConcreteStep::Command(command) => &command.sources,
+            ConcreteStep::Xor(branch) => &branch.sources,
+        };
+        let name = sources.get(1).cloned().unwrap_or_else(|| step_name(step));
+        let interactive = !interactive_steps(std::slice::from_ref(step)).is_empty();
+        match line.last_mut() {
+            Some(last) if last.name == name => last.interactive |= interactive,
+            _ => line.push(WorkflowStep { name, interactive }),
+        }
+        indices.push(u32::try_from(line.len() - 1).expect("a graph has few steps"));
+    }
+    (line, indices)
+}
+
+/// What a person calls `step`; an operation by the display name its Graph
+/// records it under.
+fn step_name(step: &ConcreteStep) -> String {
+    match step {
+        ConcreteStep::Command(command) => command.item.display_name(),
+        step => names(step)[0].to_owned(),
+    }
+}
+
+/// A Graph as the workflow line shows it before any Task stands on it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct WorkflowOutline {
+    /// The Graph's top-level steps in order, as `TaskGraph.steps` carries them.
+    pub steps: Vec<WorkflowStep>,
+    /// Every step where a person takes part, as `TaskGraph` carries them.
+    pub interactive_steps: Vec<InteractiveStep>,
+    /// "You take part at explore, ship-review and verify." or "Runs on its own."
+    pub sentence: String,
+}
+
+impl WorkflowOutline {
+    pub fn of(steps: &[ConcreteStep]) -> Self {
+        let interactive_steps = interactive_summary(steps);
+        let mut names: Vec<&str> = Vec::new();
+        for step in &interactive_steps {
+            if !names.contains(&step.name.as_str()) {
+                names.push(&step.name);
+            }
+        }
+        let sentence = match names.as_slice() {
+            [] => "Runs on its own.".to_owned(),
+            [only] => format!("You take part at {only}."),
+            [rest @ .., last] => format!("You take part at {} and {last}.", rest.join(", ")),
+        };
+        Self {
+            steps: workflow(steps).0,
+            interactive_steps,
+            sentence,
+        }
     }
 }
 
@@ -383,7 +427,7 @@ pub struct TaskGraph {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct WorkflowStep {
     pub name: String,
-    /// A person takes part in it.
+    /// A person takes part somewhere inside it, XOR paths included.
     pub interactive: bool,
 }
 
@@ -422,7 +466,7 @@ impl TaskGraph {
         run: Option<TaskGraphRun<'_>>,
         auto: Option<AutoState>,
     ) -> Self {
-        let (steps, indices) = graph.workflow();
+        let (steps, indices) = workflow(&graph.steps);
         let top = |place: &Place| {
             let index = place.path.first().map_or(place.index, |(index, _)| *index);
             indices[index]

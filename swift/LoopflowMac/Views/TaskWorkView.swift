@@ -133,11 +133,20 @@ struct TaskWorkflowBar: View {
             if let workflow = work.value?.graph {
                 WorkflowLine(graph: workflow, auto: model.taskExecution[task.id].value?.auto?.state == .on,
                              setup: task.setupPosition)
-            } else {
-                Text(placeholder)
+            } else if work.value == nil {
+                Text(work.isLoading ? task.setupPosition ?? "Reading workflow…" : "")
                     .lineLimit(1).truncationMode(.tail)
                     .foregroundStyle(palette.textSecondary)
                     .accessibilityIdentifier("task-workflow-bar-live")
+            } else if let name = task.graphName {
+                // Not started: the workflow its first run takes up, as the catalog outlines it.
+                if let outline = model.graphCatalog.value?.first(where: { $0.name == name })?.workflow {
+                    WorkflowLine(name: name, outline: outline)
+                } else {
+                    Text(name).font(Typography.mono).fixedSize()
+                        .foregroundStyle(palette.text)
+                        .accessibilityIdentifier("task-workflow-bar-name")
+                }
             }
             Spacer(minLength: 0)
             if let next {
@@ -168,16 +177,10 @@ struct TaskWorkflowBar: View {
         .overlay(alignment: .bottom) { Rectangle().fill(palette.border).frame(height: 1) }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("task-workflow-bar")
-        // "Start with…" in "…" lists the workflows a Task without one can take up.
+        // A Task without a Graph draws its workflow from the catalog, and "Start with…" lists the others.
         .task(id: work.value != nil && work.value?.graph == nil) {
             if work.value != nil, work.value?.graph == nil { await model.loadGraphCatalog() }
         }
-    }
-
-    /// What the bar says before the Task has a Graph.
-    private var placeholder: String {
-        if work.value == nil { return work.isLoading ? task.setupPosition ?? "Reading workflow…" : "" }
-        return task.graphName.map { "Takes up \($0) when it starts" } ?? "No workflow selected"
     }
 
     /// The step that moves the Task from here: Start before it has a Graph,

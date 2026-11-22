@@ -1278,10 +1278,6 @@ final class WorkModel {
     var graphCatalog: Reading<[GraphCatalogEntry]> {
         graphCatalogReadings[graphCatalogKey] ?? .loading
     }
-    /// The same read, each graph seen as a Workflow.
-    var workflowCatalog: Reading<[WorkflowCatalogEntry]> {
-        graphCatalog.map { $0.map(WorkflowCatalogEntry.init) }
-    }
     /// Comment threads, read on demand for the shown Task.
     private(set) var comments = TaskReadings<TaskComments>()
     /// The shown Task's work, from the workspace reader's `task` part.

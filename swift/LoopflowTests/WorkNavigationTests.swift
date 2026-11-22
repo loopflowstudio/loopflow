@@ -975,6 +975,28 @@ struct WorkNavigationTests {
         #expect(workspace.multiplexer.focusedPaneId == pane)
     }
 
+    @Test("An unstarted Task's bar draws the workflow its first run takes up; before the catalog is read, its name alone")
+    func unstartedTaskBarDrawsItsWorkflow() async throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+        let catalog = try String(contentsOf: root.appendingPathComponent("tests/fixtures/dto/graph_catalog.json"), encoding: .utf8)
+        let model = WorkModel(query: RegistryQuery { args, _ in
+            guard args.starts(with: ["graph", "list"]) else { throw RegistryQueryError("The bar only reads the catalog") }
+            return catalog
+        }, repoPath: "/src/loopflow")
+        model.applyFixture(roadmap: .available(try roadmap()), waves: .available([]), workActivity: .loading, repos: [])
+        let task = try #require(model.task(id: "issue-review")).task
+        #expect(task.graphName == "feature")
+        let unstarted = try JSONDecoder().decode(TaskOverview.self, from: Data(#"{"sessions":[],"graph_processes":[],"graph":null}"#.utf8))
+        let bar = TaskWorkflowBar(model: model, task: task, work: .available(unstarted))
+        #expect(try bar.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-bar-name").text().string() == "feature")
+        #expect(throws: (any Error).self) { try bar.inspect().find(text: "pursue") }
+        await model.loadGraphCatalog()
+        #expect(try bar.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-bar-name").text().string() == "feature")
+        #expect(try ["design", "pursue", "xor-route", "queue"].map { try bar.inspect().find(text: $0).string() }.count == 4)
+        _ = try bar.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-start")
+    }
+
     @Test("Workflow loading, absent and failed readings: a failure shows the last good one or nothing")
     func workflowReadingStates() async throws {
         let model = try model()

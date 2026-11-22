@@ -16,6 +16,7 @@ use std::path::Path;
 
 use crate::graph::runner::{ExecutionCursor, NestedCursor};
 use crate::graph::ConcreteStep;
+use crate::task_graph::WorkflowOutline;
 
 pub use loopflow_storage::graph::{
     project_position, CompiledGraph, CompiledGraphPath, GraphNode, GraphNodeKind, GraphReturn,
@@ -87,6 +88,10 @@ pub struct GraphCatalogEntry {
     /// Topology; `None` for an unusable definition.
     pub compiled: Option<CompiledGraph>,
     pub composition: Option<GraphComposition>,
+    /// The Graph as a Task's workflow line draws it; null exactly when
+    /// `compiled` is.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub workflow: Option<WorkflowOutline>,
     /// Why the definition is unusable; set exactly when it has no topology.
     pub unavailable: Option<String>,
     /// The Graphs that include this one with `graph:`, by name. Empty for a
@@ -166,18 +171,24 @@ fn load_catalog_entry(
                 revision: hex::encode(Sha256::digest(bytes)),
                 items: composition_items(&resolved, &mut 0, &mut 0),
             };
+            let steps = flatten_resolved(&resolved);
             Ok((
-                crate::graph::compiled::compile(&graph.name, &flatten_resolved(&resolved)),
+                crate::graph::compiled::compile(&graph.name, &steps),
                 composition,
+                WorkflowOutline::of(&steps),
                 graph.description,
             ))
         }),
     };
-    let (compiled, composition, description, unavailable) = match compiled {
-        Ok((compiled, composition, description)) => {
-            (Some(compiled), Some(composition), description, None)
-        }
-        Err(error) => (None, None, None, Some(error.to_string())),
+    let (compiled, composition, workflow, description, unavailable) = match compiled {
+        Ok((compiled, composition, workflow, description)) => (
+            Some(compiled),
+            Some(composition),
+            Some(workflow),
+            description,
+            None,
+        ),
+        Err(error) => (None, None, None, None, Some(error.to_string())),
     };
     let name = compiled
         .as_ref()
@@ -196,6 +207,7 @@ fn load_catalog_entry(
         }),
         compiled,
         composition,
+        workflow,
         unavailable,
         included_by: Vec::new(),
         runs,
@@ -350,6 +362,74 @@ pub use loopflow_storage::graph::loop_passes;
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_catalog_entry_outlines_the_workflow_a_task_would_show() {
+        use super::graph_catalog;
+        use crate::task_graph::{CapturedGraph, TaskGraph};
+        let repo = tempfile::tempdir().unwrap();
+        let graphs = repo.path().join(".lf/graphs");
+        std::fs::create_dir_all(&graphs).unwrap();
+        // Its only stop is inside an XOR path.
+        std::fs::write(
+            graphs.join("conditional.yaml"),
+            "- implement\n- xor:\n    paths:\n      review:\n        description: Review it\n        steps:\n          - interactive: demo\n      skip:\n        description: Nothing to review\n- gate\n",
+        )
+        .unwrap();
+        std::fs::write(graphs.join("alone.yaml"), "- implement\n- gate\n").unwrap();
+        std::fs::write(graphs.join("broken.yaml"), "- graph: no-such-graph\n").unwrap();
+        let catalog = graph_catalog(repo.path()).unwrap();
+        let outline = |name: &str| {
+            let entry = catalog.iter().find(|entry| entry.name == name).unwrap();
+            assert_eq!(entry.workflow.is_some(), entry.compiled.is_some());
+            entry.workflow.clone()
+        };
+
+        // A composed Graph reads as the Graphs it includes.
+        let code = outline("code").unwrap();
+        let steps: Vec<_> = code
+            .steps
+            .iter()
+            .map(|step| (step.name.as_str(), step.interactive))
+            .collect();
+        assert_eq!(
+            steps,
+            [
+                ("plan", false),
+                ("build", false),
+                ("ship-review", true),
+                ("deliver", false),
+                ("verify", true)
+            ]
+        );
+        assert_eq!(code.sentence, "You take part at ship-review and verify.");
+        assert_eq!(
+            outline("feature").unwrap().sentence,
+            "You take part at explore, ship-review and verify."
+        );
+
+        let conditional = outline("conditional").unwrap();
+        let interactive: Vec<_> = conditional
+            .steps
+            .iter()
+            .filter(|step| step.interactive)
+            .map(|step| step.name.as_str())
+            .collect();
+        assert_eq!(interactive, ["xor-route"]);
+        assert_eq!(conditional.sentence, "You take part at demo.");
+
+        assert_eq!(outline("alone").unwrap().sentence, "Runs on its own.");
+        assert_eq!(outline("broken"), None);
+
+        // A Task that takes the Graph up reads the same steps and stops.
+        for name in ["code", "conditional"] {
+            let captured = CapturedGraph::load(name, repo.path()).unwrap().unwrap();
+            let task = TaskGraph::read(&captured, "start".into(), None, None);
+            let outline = outline(name).unwrap();
+            assert_eq!(task.steps, outline.steps, "{name}");
+            assert_eq!(task.interactive_steps, outline.interactive_steps, "{name}");
+        }
+    }
+
     #[test]
     fn template_resolution_preserves_composition_and_execution() {
         use super::{graph_catalog, GraphCompositionItem};

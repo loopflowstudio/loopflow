@@ -130,10 +130,8 @@ thing, or show nothing. "Coming soon" over a drawing is two problems.
   (`swift/LoopflowiOS/MobileType.swift`) passes its own sizes, 12 to 24.
 
 **Two of the same thing.** One component per job, on every surface.
-- Desktop has two workflow renderers: `WorkflowLine` for a Task and New
-  Task's `WorkflowSteps` (`NewTaskSheet.swift`) for a Graph definition, which
-  has no top-level steps on the wire. It has two Create Wave forms
-  (`WavesView.swift`, `WorkNavigator.swift`).
+- Desktop has two Create Wave forms (`WavesView.swift`,
+  `WorkNavigator.swift`).
 - iPhone repeats one primary button by hand eight times in two shapes.
 
 **Tiny text.** Nothing a person is meant to read is under 11 pt on Desktop,
@@ -252,7 +250,9 @@ Components, in `swift/LoopflowMac/Design/`: `TaskRow`, `StatusMark`,
 `WorkflowLine`, `LoopflowButtonStyle` (`.neutral`, `.accent`, `.destructive`)
 and `TitleBar`. The workflow line's steps, running step and sentence come from
 Rust (`TaskGraph.steps`, `current_step`, `sentence`), so `lf task status`
-prints the same sentence.
+prints the same sentence. Before a Task stands on a Graph, the line draws the
+catalog's `workflow` (`lf graph list --json`): the same steps, and where you
+take part as its sentence.
 
 Website ramp, for every page (`:root` in `website/static/style.css`):
 

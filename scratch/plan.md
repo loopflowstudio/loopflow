@@ -376,24 +376,36 @@ demo: not headless; qa or demo runs it.
 
 ## Slices
 
-1. **The wire and the sheet's step line.** Rust `WorkflowOutline` on the
-   catalog entry, fixture, Swift decode, `WorkflowLine` drawing an outline,
-   the sheet showing it with the sentence, and an unstarted Task's bar
-   drawing it; `WorkflowSteps`, `WorkflowDefinition`, `WorkflowCatalogEntry`
-   and `StartFlow`'s own count go. This is the slice that could prove the
-   plan wrong: it shows whether one `WorkflowLine` reads well in a 34 pt bar
-   and wrapped in a 540 pt sheet, and whether an outline equals a started
-   Task's reading (Rust tests: one composed Graph, one with a stop inside an
-   XOR path).
-2. **The rest of the sheet.** Ramp steps, the two menus, the accent Start,
-   `Spacing` steps, the "Not filed." form, `StartingTaskView`;
-   `WorkflowChooser` goes. Sheet view test.
+1. **The wire and the sheet's step line. Built.** `WorkflowOutline` is on
+   `GraphCatalogEntry.workflow`; `WorkflowLine` draws it in the sheet (steps
+   wrapping, sentence under), the inspector and an unstarted Task's bar (name
+   and steps). `WorkflowSteps`, `WorkflowDefinition`, `WorkflowCatalogEntry`,
+   `model.workflowCatalog`, "Takes up … when it starts" and `StartFlow`'s own
+   stop count are gone. What it taught:
+   - An outline equals a started Task's reading (`graph::compiled::tests::
+     a_catalog_entry_outlines_the_workflow_a_task_would_show`: `code`, and a
+     Graph whose only stop is inside an XOR path).
+   - The sentence names each stop once, so a stop repeated across XOR paths
+     does not read twice; `interactive_steps` keeps every one.
+   - Wrapping needed a small private `Layout` in `WorkflowLine.swift`
+     (`WrappingRow`); SwiftUI has none. ViewInspector reads through it.
+   - Not seen: the line at 34 pt bar height and in the 540 pt sheet in the
+     Dev app. Headless tests cover the content only; qa or demo looks.
+   - `TaskWorkflowHeader` still says "feature · repository" and "No workflow
+     selected" (`TaskWorkView.swift:26`); slice 3's whose-default phrase
+     replaces both.
+2. **The rest of the sheet. Next.** Ramp steps, the two menus, the accent
+   Start, `Spacing` steps, the "Not filed." form, `StartingTaskView`;
+   `WorkflowChooser` goes. Sheet view test: choosing another workflow changes
+   the step names and the sentence (the menu makes this tappable headless).
 3. **`EmptyState` and the drawn states.** Rewrite `PaneEmptyState` into
    `Design/EmptyState.swift`, move its pane sites, then the six prototype
    states, `TaskStartOffer` among them with the one whose-default phrase;
    `SessionSlotOffer` goes. The empty, failed and unstarted view tests.
 4. **Every remaining `ContentUnavailableView`, the plain `Text` empties and
-   inline failures**, then the source scan and `DESIGN.md`.
+   inline failures**, then the source scan and the rest of `DESIGN.md`
+   ("Tokens today" gains `EmptyState`; the ramp rows name the sheet and state
+   titles). The "two workflow renderers" pointer is already gone.
 
 ## Docs written ahead of the build
 

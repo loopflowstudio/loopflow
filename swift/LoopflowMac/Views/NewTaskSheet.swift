@@ -2,7 +2,7 @@ import Loopflow
 import SwiftUI
 
 /// ⌘N: your words, where the Task lives and the workflow it takes up, drawn as
-/// its steps with yours named. Start closes the sheet into the Task's
+/// the line the Task shows later. Start closes the sheet into the Task's
 /// conversation and runs `lf task create REQUEST --run`. File runs it without
 /// `--run`: the Task lands in that backlog, selected, and nothing starts.
 struct NewTaskSheet: View {
@@ -31,12 +31,9 @@ struct NewTaskSheet: View {
     private var reported: WaveGraph.Default? {
         model.graphDefaults[model.graphDefaultKey(wave: wave)]?.value?.default
     }
-    private var catalog: [WorkflowCatalogEntry] {
-        (model.workflowCatalog.value ?? []).filter { $0.workflow != nil }
-    }
     private var chosen: String? { graph ?? reported?.name }
-    private var workflow: WorkflowDefinition? {
-        chosen.flatMap { name in catalog.first { $0.name == name }?.workflow }
+    private var outline: WorkflowOutline? {
+        chosen.flatMap { name in model.graphCatalog.value?.first { $0.name == name }?.workflow }
     }
     private var trimmed: String { request.trimmingCharacters(in: .whitespacesAndNewlines) }
 
@@ -57,8 +54,8 @@ struct NewTaskSheet: View {
                     .focused($focused)
                     .accessibilityIdentifier("new-task-request")
                 selector
-                if let workflow {
-                    WorkflowSteps(workflow: workflow).accessibilityIdentifier("new-task-steps")
+                if let outline {
+                    WorkflowLine(outline: outline).accessibilityIdentifier("new-task-steps")
                 }
             }
             .padding(22)
@@ -180,61 +177,6 @@ struct NewTaskSheet: View {
         case "repository": "\(scope)'s default"
         default: "the default"
         }
-    }
-}
-
-/// A workflow as one line of steps: the runs between unnamed, the steps where
-/// you take part named and marked.
-struct WorkflowSteps: View {
-    let workflow: WorkflowDefinition
-    @Environment(\.palette) private var palette
-
-    private struct Step: Identifiable {
-        let id: Int
-        let you: String?
-    }
-
-    private var steps: [Step] {
-        let columns = [TaskGraph.start] + workflow.steps.map(\.name) + [TaskGraph.end]
-        var out: [Step] = []
-        for index in columns.indices.dropLast() {
-            if workflow.runs.contains(where: { $0.from == columns[index] && $0.to == columns[index + 1] && !$0.name.isEmpty }) {
-                out.append(Step(id: out.count, you: nil))
-            }
-            if index < workflow.steps.count { out.append(Step(id: out.count, you: workflow.steps[index].name)) }
-        }
-        return out
-    }
-
-    var body: some View {
-        let steps = steps
-        HStack(alignment: .top, spacing: 0) {
-            ForEach(steps) { step in
-                VStack(spacing: 5) {
-                    Circle()
-                        .fill(step.you == nil ? palette.surface : palette.accent)
-                        .overlay(Circle().strokeBorder(step.you == nil ? palette.borderActive : .clear, lineWidth: 1.5))
-                        .frame(width: step.you == nil ? 9 : 11, height: step.you == nil ? 9 : 11)
-                        .padding(.top, step.you == nil ? 1 : 0)
-                    Text(step.you ?? " ")
-                        .font(Typography.lede)
-                        .foregroundStyle(palette.emphasisInk)
-                        .fixedSize()
-                }
-                .frame(width: 11)
-                if step.id < steps.count - 1 {
-                    Rectangle().fill(palette.borderStrong).frame(height: 1).frame(maxWidth: .infinity).padding(.top, 5)
-                }
-            }
-        }
-        .padding(.horizontal, 4)
-        .overlay(alignment: .trailing) {
-            if workflow.steps.isEmpty {
-                Text("runs on its own").font(Typography.meta).foregroundStyle(palette.textSecondary).offset(y: 12)
-            }
-        }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(workflow.steps.isEmpty ? "Runs on its own" : "You take part at " + workflow.steps.map(\.name).joined(separator: ", "))
     }
 }
 

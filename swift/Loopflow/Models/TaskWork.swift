@@ -186,7 +186,7 @@ public struct TaskGraph: Codable, Sendable, Equatable {
     /// One top-level step of the Graph, as the workflow line shows it.
     public struct Step: Codable, Sendable, Hashable {
         public let name: String
-        /// A person takes part in it.
+        /// A person takes part somewhere inside it, XOR paths included.
         public let interactive: Bool
     }
 

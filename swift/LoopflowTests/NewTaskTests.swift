@@ -87,7 +87,10 @@ struct NewTaskTests {
         _ = try sheet.find(text: "feature")
         let named = try sheet.find(viewWithAccessibilityIdentifier: "new-task-default").text().string()
         #expect(named == "· loopflow's default")
-        _ = try sheet.find(viewWithAccessibilityIdentifier: "new-task-steps")
+        // The workflow as the Task shows it later, then Rust's sentence for where you take part.
+        let steps = try sheet.find(viewWithAccessibilityIdentifier: "new-task-steps")
+        _ = try steps.find(text: "pursue")
+        _ = try steps.find(text: "You take part at demo.")
         #expect(try sheet.find(viewWithAccessibilityIdentifier: "new-task-create").button().isDisabled())
         #expect(try sheet.find(viewWithAccessibilityIdentifier: "new-task-file").button().isDisabled())
     }

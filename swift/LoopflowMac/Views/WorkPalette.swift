@@ -403,7 +403,7 @@ struct GraphCatalogInspector: View {
 
 struct WorkflowCatalogInspector: View {
     @Environment(\.palette) private var palette
-    let entry: WorkflowCatalogEntry?
+    let entry: GraphCatalogEntry?
     let model: WorkModel
     @State private var sourceError: String?
     @Environment(\.dismiss) private var dismiss
@@ -426,8 +426,8 @@ struct WorkflowCatalogInspector: View {
                 Text(error).foregroundStyle(palette.warning)
             }
             Button("Refresh") { Task { await model.loadGraphCatalog(force: true) } }
-            if let workflow = entry?.workflow {
-                WorkflowSteps(workflow: workflow)
+            if let outline = entry?.workflow {
+                WorkflowLine(outline: outline)
             } else { Text(entry?.unavailable ?? "Refresh the Workflow catalog and try again.") }
             Button("Done") { dismiss() }.keyboardShortcut(.cancelAction)
         }.padding(24).frame(width: 780)

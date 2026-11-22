@@ -125,10 +125,10 @@ struct DesktopHeadlessTests {
             throw RegistryQueryError("Unexpected command: \(args)")
         }, repoPath: "/tmp/repo")
         await model.loadGraphCatalog()
-        let entry = try #require(model.workflowCatalog.value?.first { $0.name == "code" })
+        let entry = try #require(model.graphCatalog.value?.first { $0.name == "code" })
         let view = WorkflowCatalogInspector(entry: entry, model: model)
         #expect(try view.inspect().find(text: "builtin Workflow").string() == "builtin Workflow")
-        _ = try view.inspect().find(text: "demo")
+        _ = try view.inspect().find(text: "You take part at demo.")
         _ = try view.inspect().find(button: "Customize")
     }
 
@@ -319,11 +319,11 @@ struct DesktopHeadlessTests {
         let rows = model.paletteRows.filter { $0.title == "feature" }
         #expect(Set(rows.map(\.id)) == [.graph("feature")])
         model.navigation.palette = .workflow("feature")
-        let retained = model.workflowCatalog.value
+        let retained = model.graphCatalog.value
         await source.fail()
         await model.loadGraphCatalog(force: true)
-        #expect(model.workflowCatalog.value == retained)
-        #expect(model.workflowCatalog.failure == "catalog unreadable")
+        #expect(model.graphCatalog.value == retained)
+        #expect(model.graphCatalog.failure == "catalog unreadable")
         #expect(model.graphCatalog.failure == "catalog unreadable")
         #expect(model.paletteIsStale)
         #expect(model.navigation.palette == .workflow("feature"))
@@ -339,10 +339,11 @@ struct DesktopHeadlessTests {
         let model = WorkModel(query: RegistryQuery { _, _ in catalog })
         await model.loadGraphCatalog()
         func view(_ name: String) -> WorkflowCatalogInspector {
-            WorkflowCatalogInspector(entry: model.workflowCatalog.value?.first { $0.name == name }, model: model)
+            WorkflowCatalogInspector(entry: model.graphCatalog.value?.first { $0.name == name }, model: model)
         }
         let builtin = view("feature")
-        _ = try builtin.inspect().find(text: "demo")
+        _ = try builtin.inspect().find(text: "pursue")
+        _ = try builtin.inspect().find(text: "You take part at demo.")
         _ = try builtin.inspect().find(text: "builtin Workflow")
         _ = try builtin.inspect().find(button: "Customize")
         let invalid = view("broken")
@@ -533,17 +534,6 @@ struct DesktopHeadlessTests {
         try button.tap()
         for _ in 0..<200 where await sent.calls.isEmpty { try await Task.sleep(for: .milliseconds(5)) }
         #expect(await sent.calls.last == ["task", "auto", "off", task.task.identifier, "--json"])
-    }
-
-    @Test("A workflow definition names its interactive steps and the runs between them, a step that returns included")
-    func workflowDefinition() throws {
-        let catalog = try JSONDecoder().decode([GraphCatalogEntry].self,
-            from: Data(contentsOf: fixtures.appendingPathComponent("graph_catalog.json")))
-        let definition = try #require(catalog.first?.compiled.map(WorkflowDefinition.init))
-        #expect(definition.steps.map(\.name) == ["demo"])
-        #expect(definition.runs.map { [$0.from, $0.to, $0.name] } == [
-            ["start", "demo", "task-design"], ["demo", "end", "loop-or-next"], ["demo", "demo", "loop-or-next"],
-        ])
     }
 
     @Test("A Task lists available conversations before working ones, its primary leading each")

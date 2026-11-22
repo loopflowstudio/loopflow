@@ -22,6 +22,12 @@ enum BacklogOwner: Equatable {
     }
 }
 
+/// What the last backlog action did, or what failed with the Machine's message.
+enum BacklogNotice: Equatable {
+    case did(String)
+    case failed(Failure)
+}
+
 /// What a person has done to one view's backlog; it outlives entering a Task.
 struct BacklogState: Equatable {
     var selection: Set<String> = []
@@ -37,8 +43,7 @@ struct BacklogState: Equatable {
     var editing: String?
     var draft = ""
     var showsObjective = false
-    /// What the last action did, or why it didn't.
-    var notice: String?
+    var notice: BacklogNotice?
 
     /// Select one row alone, or clear it when it is the only one selected.
     mutating func select(_ id: String) {
@@ -113,13 +118,13 @@ struct StartFlow: Equatable, Identifiable {
 
     /// Nil for a Graph that does not load, or that runs for a Wave and not a Task.
     init?(_ entry: GraphCatalogEntry) {
-        guard entry.runs == .task, let compiled = entry.compiled else { return nil }
+        guard entry.runs == .task, let compiled = entry.compiled, let workflow = entry.workflow else { return nil }
         func nodes(_ steps: [GraphNode]) -> [GraphNode] { steps.flatMap { [$0] + $0.paths.flatMap { nodes($0.steps) } } }
         let all = nodes(compiled.steps)
         let firstStop = all.firstIndex(where: \.interactive) ?? all.count
         name = entry.name
         description = entry.description
-        stops = all.count(where: \.interactive)
+        stops = workflow.interactiveSteps.count
         merges = all[..<firstStop].contains { node in
             node.kind == .op && (node.label.hasPrefix("land") || node.label.hasPrefix("pr land"))
         }
@@ -146,7 +151,7 @@ struct StartFlow: Equatable, Identifiable {
     }
 }
 
-/// The workflows a Task can start on, as Start's menu and New's chooser lay
+/// The workflows a Task can start on, as Start's menu and New Task's lay
 /// them out: those that stop for you, the pieces and undescribed ones under
 /// More, and those that never stop.
 struct StartFlows: Equatable {
@@ -450,12 +455,12 @@ struct BacklogList {
 
     var empty: (title: String, step: EmptyStep) {
         if !state.query.trimmingCharacters(in: .whitespaces).isEmpty {
-            return ("Nothing in \(state.filter.rawValue) matches “\(state.query)”", .clearSearch)
+            return ("Nothing in \(state.filter.rawValue) matches “\(state.query)”.", .clearSearch)
         }
         switch state.filter {
         case .mine: return ("You haven't claimed anything. \(count(.available)) are available.", .showAvailable)
-        case .available where !all.isEmpty: return ("Everything here is claimed by someone else", .showAll)
-        default: return ("Nothing is waiting in this \(wave == nil ? "repository" : "Wave")", .new)
+        case .available where !all.isEmpty: return ("Everything here is claimed by someone else.", .showAll)
+        default: return ("Nothing is waiting in this \(wave == nil ? "repository" : "Wave").", .new)
         }
     }
 }
@@ -470,8 +475,12 @@ enum BacklogChange: Sendable {
 // MARK: - Actions
 
 extension WorkModel {
-    private func backlogNotice(_ view: WorkNavigation.Board, _ notice: String?) {
-        navigation.backlogs[view, default: BacklogState()].notice = notice
+    private func backlogNotice(_ view: WorkNavigation.Board, _ did: String) {
+        navigation.backlogs[view, default: BacklogState()].notice = .did(did)
+    }
+
+    private func backlogFailure(_ view: WorkNavigation.Board, _ what: String, _ error: any Error) {
+        navigation.backlogs[view, default: BacklogState()].notice = .failed(Failure(what: what, machine: error.localizedDescription))
     }
 
     /// Write each rank in turn; the first refusal stops the rest and says so.
@@ -483,7 +492,7 @@ extension WorkModel {
         var landed: [(task: RoadmapTask, rank: Int)] = []
         for write in writes {
             do { try await rankTask(write.task, rank: write.rank) } catch {
-                backlogNotice(view, "Order not saved. \(write.task.task.identifier): \(error.localizedDescription)")
+                backlogFailure(view, "\(write.task.task.identifier)'s order not saved.", error)
                 break
             }
             landed.append(write)
@@ -548,7 +557,7 @@ extension WorkModel {
             backlogNotice(view, "Saved \(task.task.identifier)'s brief")
             return .brief(task: task, previous: task.task.description, written: text)
         } catch {
-            backlogNotice(view, "Brief not saved. \(error.localizedDescription)")
+            backlogFailure(view, "Brief not saved.", error)
             return nil
         }
     }
@@ -569,7 +578,7 @@ extension WorkModel {
             do {
                 try await updateTaskDirective(task: current, text: previous)
                 backlogNotice(view, "Brief restored")
-            } catch { backlogNotice(view, "Brief not restored. \(error.localizedDescription)") }
+            } catch { backlogFailure(view, "Brief not restored.", error) }
         }
     }
 }
@@ -665,8 +674,7 @@ struct BacklogView: View {
                 .layoutPriority(1).accessibilityIdentifier("wave-title")
             if let roadmap {
                 if let error = roadmap.projects.unavailableReason {
-                    Text("Project unavailable. \(error)").font(Typography.text).foregroundStyle(palette.warning)
-                        .lineLimit(1)
+                    FailureLine("Project unavailable.", machine: error).lineLimit(1)
                 } else if showsProject, let project = roadmap.currentProject {
                     Text(project.name).font(Typography.text).foregroundStyle(palette.textSecondary)
                         .lineLimit(1).accessibilityIdentifier("wave-current-project")
@@ -753,11 +761,18 @@ struct BacklogView: View {
     @ViewBuilder
     private var notices: some View {
         if let notice = list.state.notice {
-            Text(notice).font(Typography.text).foregroundStyle(palette.textSecondary).lineLimit(2)
-                .textSelection(.enabled)
-                .accessibilityIdentifier("backlog-notice")
-                .padding(.horizontal, Spacing.xl)
-                .padding(.vertical, Spacing.sm)
+            Group {
+                switch notice {
+                case .did(let did):
+                    Text(did).font(Typography.text).foregroundStyle(palette.textSecondary).lineLimit(2)
+                        .textSelection(.enabled)
+                case .failed(let failure):
+                    FailureLine(failure)
+                }
+            }
+            .accessibilityIdentifier("backlog-notice")
+            .padding(.horizontal, Spacing.xl)
+            .padding(.vertical, Spacing.sm)
         }
     }
 
@@ -898,8 +913,8 @@ struct BacklogView: View {
     @ViewBuilder
     private func emptyState(_ list: BacklogList) -> some View {
         let empty = list.empty
-        VStack(alignment: .leading, spacing: Spacing.md) {
-            Text(empty.title).font(Typography.textStrong)
+        HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
+            Text(empty.title).emptyLine()
             switch empty.step {
             case .clearSearch: Button("Clear search") { state.wrappedValue.query = "" }
             case .showAvailable: Button("Show available") { state.wrappedValue.filter = .available }
@@ -907,7 +922,7 @@ struct BacklogView: View {
             case .new: Button("New") { model.navigation.palette = .newTask }
             }
         }
-        .buttonStyle(LoopflowButtonStyle(.accent))
+        .buttonStyle(LoopflowButtonStyle())
         .padding(Spacing.xl).frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityIdentifier("backlog-empty")
     }
@@ -969,7 +984,7 @@ struct BacklogView: View {
         case .toTop: reorder(list.toTop(tasks.map(\.id)))
         case .nudge(let offset):
             if list.canReorder { reorder(list.nudge(tasks.map(\.id), by: offset)) }
-            else { state.wrappedValue.notice = "Order lives in each Wave" }
+            else { state.wrappedValue.notice = .did("Order lives in each Wave") }
         case .reorder(let writes): reorder(writes)
         case .move(let wave): model.moveBacklog(tasks, toWave: wave, in: view)
         case .save(let task, let text): Task { register(await model.saveBacklogBrief(task, text: text, in: view), "Edit Brief") }
@@ -1352,7 +1367,7 @@ struct BacklogBrief: View {
                         .keyboardShortcut(.cancelAction)
                 }
             } else if brief.isEmpty {
-                Text("No brief yet.").font(Typography.text).foregroundStyle(palette.textSecondary)
+                Text("No brief yet.").emptyLine()
             } else {
                 Text(Self.markdown(brief)).font(Typography.text).lineSpacing(Spacing.xs).textSelection(.enabled)
                     .lineLimit(long && !state.wrappedValue.showsAll ? 9 : nil)

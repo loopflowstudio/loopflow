@@ -469,7 +469,7 @@ fn graph_compositions_round_trip_distinct_compositions_and_required_children() {
     ))
     .unwrap();
     assert!(catalog[0].composition.is_some() && catalog[1].composition.is_none());
-    for field in ["included_by", "runs"] {
+    for field in ["included_by", "runs", "workflow"] {
         let mut missing = serde_json::to_value(&catalog[0]).unwrap();
         missing.as_object_mut().unwrap().remove(field);
         assert!(

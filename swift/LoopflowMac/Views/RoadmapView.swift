@@ -142,12 +142,7 @@ struct RoadmapView: View {
         } else if snapshot == nil {
             Color.clear
         } else if visibleWaves.isEmpty {
-            ContentUnavailableView(
-                repoPath == nil ? "No planned Work yet" : "No planned Work in this repository",
-                systemImage: "map",
-                description: Text("Waves without readable Projects remain in the Waves sidebar.")
-            )
-            .accessibilityIdentifier("loopflow-work-empty")
+            EmptyState(title: "No planned Work yet").accessibilityIdentifier("loopflow-work-empty")
         } else {
             switch lens {
             case .now: nowContent
@@ -163,11 +158,10 @@ struct RoadmapView: View {
     @ViewBuilder
     private var nowContent: some View {
         if nowSectionsList.isEmpty {
-            ContentUnavailableView(
-                "Nothing needs action",
-                systemImage: "checkmark.circle",
-                description: Text("No live or stopped work across these Waves. Switch to Roadmap for the full plan.")
-            )
+            EmptyState(title: "Nothing needs action", sentence: "No live or stopped work across these Waves.") {
+                Button("Show roadmap") { lens = .roadmap }
+                    .accessibilityIdentifier("work-show-roadmap")
+            }
         } else {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: Spacing.lg) {
@@ -281,9 +275,9 @@ struct RoadmapWaveSection: View {
             if let project = roadmap.currentProject { WaveProjectView(project: project, repo: roadmap.wave.repo) }
             switch roadmap.tasks {
             case .unavailable(let reason):
-                Label(reason, systemImage: "exclamationmark.triangle").foregroundStyle(palette.warning)
+                FailureLine("Tasks did not load.", machine: reason)
             case .available(let tasks, let truncated):
-                if tasks.isEmpty { Text("No Tasks in this Project.").foregroundStyle(palette.textSecondary) }
+                if tasks.isEmpty { Text("No Tasks in this Project.").emptyLine() }
                 ForEach(tasks) { task in
                     PortfolioTaskRow(task: task, onOpen: { onOpenTask(task.id) },
                         onAction: { action in onTaskAction(task, action) }, onOpenWorktree: onOpenWorktree)
@@ -291,7 +285,9 @@ struct RoadmapWaveSection: View {
                 if truncated { Text("Older Tasks are truncated.").foregroundStyle(palette.warning) }
             }
             ForEach(roadmap.unavailableTasks, id: \.taskId) { task in
-                Text("\(task.taskIdentifier): \(task.reason). \(task.recovery)").foregroundStyle(palette.warning)
+                FailureLine("\(task.taskIdentifier) is unavailable.", machine: task.reason) {
+                    Text(task.recovery).font(Typography.text).foregroundStyle(palette.textSecondary)
+                }
             }
         }
         .accessibilityIdentifier("loopflow-wave-\(roadmap.wave.id)")

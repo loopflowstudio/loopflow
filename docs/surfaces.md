@@ -153,11 +153,63 @@ as they are on the Wave's Portfolio page.
 | ⌘⌫ | Abandon… |
 | ⌘↑ ⌘↓ | Move the selection up or down |
 
-#### File without starting
+#### New Task
 
-**New** (⌘N) opens the New Task sheet. **Start** files the Task and runs it.
-**File** runs `lf task create` without `--run`: the Task lands in that Wave's
-backlog, selected, and nothing starts.
+Press ⌘N anywhere, or **New** in a backlog, and say what you want:
+
+```text
+What do you want?
+
+  Let people rebind chords per repository
+
+In Product ▾, running feature ▾, Product's default
+
+☺ explore   plan   build   ☺ ship-review   deliver   ☺ verify
+You take part at explore, ship-review and verify.
+
+                                        Cancel   File   Start ⌘↩
+```
+
+The sheet opens on the Wave you were looking at. The first menu moves the Task
+to another Wave or to the repository; the second picks its workflow, from
+[the same list Start offers](#start-picks-a-workflow). After the comma is whose
+choice the workflow is: the default of the Wave or repository named before it,
+your own default, or "for this Task only" once you pick another. Pick the default again to go back.
+
+Under the sentence is the workflow as the Task will show it later: its steps,
+a person before each one where you take part, then the same thing in words. A
+workflow with no such step reads "Runs on its own." Change the menu and both
+lines change with it.
+
+- **Start** (⌘↩) files the Task and runs it.
+- **File** runs `lf task create` without `--run`: the Task lands in that
+  Wave's backlog, selected, and nothing starts.
+- **Cancel** (Esc) closes the sheet.
+
+If the Task can't be filed, the sheet stays open with what you typed, "Not
+filed." and the Machine's reason. If it is filed and its run doesn't start, the
+request stays on screen with "Not started.", the error, **Try again** and
+**Discard**.
+
+#### A Task that has not started
+
+Open a filed Task and it says what Start will do, in the sheet's words:
+
+```text
+feature   ☺ explore   plan   build   ☺ ship-review   deliver   ☺ verify   Start
+
+Not started
+
+It will run feature, Product's default.
+You take part at explore, ship-review and verify.
+
+[Start]   Start with… ▾
+```
+
+**Start** runs that workflow. **Start with…** lists the others; picking one
+starts the Task on it. When the Machine would refuse the run, Start is off and
+its tooltip says why. The brief beside it names the Task. In a Dashboard tile
+it is one line: "Not started" and **Start**.
 
 #### Start picks a workflow
 
@@ -187,8 +239,9 @@ all of them on that one. Workflows under "Run without stopping" never wait for
 you. **More ›** holds the pieces other
 Graphs include, such as `build` and `deliver`, and Graphs with no
 `description:` ([describe a Graph](orchestration.md#describe-a-graph)). A
-Graph that runs for a Wave is not offered for a Task. The New Task sheet lists
-the same workflows the same way.
+Graph that runs for a Wave is not offered for a Task. The
+[New Task](#new-task) sheet's workflow menu and an unstarted Task's
+**Start with…** are this list.
 
 Start reaches unstarted Tasks only. Select a started Task and the button reads
 `Open`, with no ▾: it goes to the Task, where its step, its PR and what running
@@ -204,11 +257,46 @@ backlog and appear in the sidebar.
 
 #### When the list is empty
 
-Every empty list says why and offers one step: **Mine** with nothing claimed
-offers **Show available**, a search with no match offers **Clear search**, and
-an empty Wave offers **New**. When a read fails, the last rows you saw stay and
+Every empty list says why in one line and offers one step beside it: **Mine**
+with nothing claimed offers **Show available**, a search with no match offers
+**Clear search**, and an empty Wave or repository reads "Nothing is waiting in
+this repository." beside **New**. When a read fails, the last rows you saw stay and
 a Notice says so. A list too large to load at once says
 `Partial: searching the 200 loaded`.
+
+### When nothing is there, or something failed
+
+A pane with nothing to show says what happened in a title, adds one sentence,
+and puts the next step on a button:
+
+| You see | Next step |
+|---|---|
+| **No planned Work in this repository.** Say what you want built, or talk it through first. | **New Task ⌘N**, **Open the repository conversation** |
+| **Conversation not open.** | **Open conversation** |
+| **Choose Work.** Pick a Task or a Wave in the sidebar, or press ⌘K to find one in any repository. | |
+| **Selected Work is unavailable.** The latest plan does not include it. Its workspace and conversations are kept. | **Read the plan again** |
+| **Nothing needs action.** No live or stopped work across these Waves. | **Show roadmap** |
+| **This dashboard is no longer available.** | **Show working Tasks** |
+| **No activity in this window.** Work creation, runs, PRs and steers appear here. | |
+
+A repository with no Waves, no Tasks and no conversation opens on the first
+row alone. **Open the repository conversation** starts the conversation and
+brings the repository's page: the terminal, the backlog and its Tasks.
+
+A failure names what failed, shows the Machine's message as it came, and keeps
+**Retry**:
+
+```text
+This repository did not open
+
+fatal: not a git repository (or any of the parent directories): .git
+
+[Retry]
+```
+
+The message is selectable, so it can be pasted into a conversation. A state gets a button only for something Desktop can do from
+there; one with no next step has none. In a dashboard tile the same state is
+one line: its title and its button.
 
 ## Script Desktop
 

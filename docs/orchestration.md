@@ -260,6 +260,31 @@ Start menu shows it beside the Graph's name, with a stop count taken from its
 bare list of steps, still runs and still lists; Start offers it under
 **More ›**.
 
+`lf graph list --json` adds each Graph as a Task's workflow line draws it,
+before any Task runs it:
+
+```console
+$ lf graph list --json | jq '.[] | select(.name=="code") | .workflow'
+{
+  "steps": [
+    {"name": "plan", "interactive": false},
+    {"name": "build", "interactive": false},
+    {"name": "ship-review", "interactive": true},
+    {"name": "deliver", "interactive": false},
+    {"name": "verify", "interactive": true}
+  ],
+  "interactive_steps": [...],
+  "sentence": "You take part at ship-review and verify."
+}
+```
+
+`steps` are the top-level steps, with a Graph included by `graph:` as one
+step under its name. A step is `interactive` when a person takes part anywhere
+inside it, an `xor:` branch included. `interactive_steps` lists each of those
+stops, and the stop count is its length. `sentence` is what Desktop's
+[New Task](surfaces.md#new-task) sheet shows; a Graph with no stop reads "Runs
+on its own." `workflow` is null for a Graph whose definition does not load.
+
 ### Auto
 
 Auto is a setting on the Task: on, off, or never set. While it is on, the

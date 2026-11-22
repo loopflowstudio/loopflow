@@ -22,7 +22,7 @@ struct TaskChangesView: View {
     @State private var showsDelivery = false
     /// Your hidden patterns as `diff_hidden` last read or saved them; nil until read.
     @State private var savedHidden: [String]?
-    @State private var hiddenNotice: String?
+    @State private var hiddenNotice: Failure?
 
     private var prURL: URL? { task?.pr?.publication?.github?.url }
 
@@ -120,10 +120,15 @@ struct TaskChangesView: View {
     private var titles: some View {
         VStack(alignment: .leading, spacing: Spacing.xxs) {
             HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
-                Text(store.changesTitle).font(Typography.textStrong)
-                    .foregroundStyle(store.changesError == nil ? palette.text : palette.warning)
-                    .fixedSize(horizontal: false, vertical: true).multilineTextAlignment(.leading)
-                    .accessibilityIdentifier("changes-title")
+                Group {
+                    if let reason = store.changesError {
+                        FailureLine("Comparison unavailable.", machine: reason)
+                    } else {
+                        Text(store.changesTitle).font(Typography.textStrong).foregroundStyle(palette.text)
+                            .fixedSize(horizontal: false, vertical: true).multilineTextAlignment(.leading)
+                    }
+                }
+                .accessibilityIdentifier("changes-title")
                 stepMenu
             }
             if let compared = store.comparisonLine {
@@ -191,7 +196,7 @@ struct TaskChangesView: View {
             }
             hiddenNotice = nil
         } catch {
-            hiddenNotice = "Diff settings unavailable: \(error.localizedDescription)"
+            hiddenNotice = Failure(what: "Diff settings did not load.", machine: error.localizedDescription)
         }
     }
 
@@ -209,7 +214,7 @@ struct TaskChangesView: View {
             hiddenNotice = nil
             await readSettings()
         } catch {
-            hiddenNotice = "Hidden paths are not saved: \(error.localizedDescription)"
+            hiddenNotice = Failure(what: "Hidden paths were not saved.", machine: error.localizedDescription)
         }
     }
 
@@ -565,8 +570,8 @@ struct ChangedFilesSidebar: View {
     @Bindable var store: TaskFilesStore
     /// The file at the top of the stream.
     let current: String?
-    /// Why the hidden paths last failed to read or save.
-    let notice: String?
+    /// The read or save of the hidden paths that last failed.
+    let notice: Failure?
     let jump: (String) -> Void
     @Environment(\.palette) private var palette
     @State private var hiding = ""
@@ -590,7 +595,7 @@ struct ChangedFilesSidebar: View {
                         ForEach(group.files) { file in fileRow(file, in: group) }
                     }
                     if store.shownGroups.isEmpty {
-                        Text("No files to show").foregroundStyle(palette.textSecondary).padding(Spacing.sm)
+                        Text("No files to show.").emptyLine().padding(Spacing.sm)
                     }
                     tourHidden
                     alwaysHidden
@@ -751,8 +756,7 @@ struct ChangedFilesSidebar: View {
                 .padding(.horizontal, Spacing.sm)
         }
         if let notice {
-            Text(notice).foregroundStyle(palette.warning).textSelection(.enabled)
-                .fixedSize(horizontal: false, vertical: true).padding(Spacing.sm)
+            FailureLine(notice).padding(Spacing.sm)
         }
     }
 }

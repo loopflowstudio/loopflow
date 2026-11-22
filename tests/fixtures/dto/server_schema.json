@@ -2825,6 +2825,17 @@
             "string",
             "null"
           ]
+        },
+        "workflow": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WorkflowOutline"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The Graph as a Task's workflow line draws it; null exactly when\n`compiled` is."
         }
       },
       "required": [
@@ -2833,6 +2844,7 @@
         "source",
         "compiled",
         "composition",
+        "workflow",
         "unavailable",
         "included_by",
         "runs"
@@ -15903,11 +15915,40 @@
       ],
       "type": "string"
     },
+    "WorkflowOutline": {
+      "description": "A Graph as the workflow line shows it before any Task stands on it.",
+      "properties": {
+        "interactive_steps": {
+          "description": "Every step where a person takes part, as `TaskGraph` carries them.",
+          "items": {
+            "$ref": "#/$defs/InteractiveStep"
+          },
+          "type": "array"
+        },
+        "sentence": {
+          "description": "\"You take part at explore, ship-review and verify.\" or \"Runs on its own.\"",
+          "type": "string"
+        },
+        "steps": {
+          "description": "The Graph's top-level steps in order, as `TaskGraph.steps` carries them.",
+          "items": {
+            "$ref": "#/$defs/WorkflowStep"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "steps",
+        "interactive_steps",
+        "sentence"
+      ],
+      "type": "object"
+    },
     "WorkflowStep": {
       "description": "One top-level step of a Task's Graph.",
       "properties": {
         "interactive": {
-          "description": "A person takes part in it.",
+          "description": "A person takes part somewhere inside it, XOR paths included.",
           "type": "boolean"
         },
         "name": {

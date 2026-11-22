@@ -45,6 +45,14 @@ struct DesignDisciplineTests {
         #expect(violations.isEmpty, "\(violations.joined(separator: "\n"))")
     }
 
+    @Test("LoopflowMac draws every empty or failed pane as EmptyState")
+    func noGreyIconOverACentredTitle() throws {
+        let violations = try Self.violations(in: ["LoopflowMac"], [
+            (#"ContentUnavailableView"#, "a centred icon and title; use EmptyState", false),
+        ])
+        #expect(violations.isEmpty, "\(violations.joined(separator: "\n"))")
+    }
+
     @Test("Loopflow and LoopflowMac take every font size, padding, spacing and radius from the design system")
     func everyMeasureIsNamed() throws {
         let violations = try Self.violations(in: ["Loopflow", "LoopflowMac"], [

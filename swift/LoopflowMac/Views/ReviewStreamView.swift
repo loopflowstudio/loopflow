@@ -21,7 +21,6 @@ struct ReviewStream: View {
     @Environment(\.palette) private var palette
 
     var body: some View {
-        if let error = store.gapError { ReviewNotice(text: error) }
         if reader == .changes {
             // A comment whose file left the comparison still waits to be sent.
             ForEach(store.comments.filter { store.review?.file($0.selection.path) == nil }) { comment in
@@ -51,6 +50,9 @@ struct ReviewStream: View {
                     .onAppear { store.setNear(file.path, true) }
                     .onDisappear { store.setNear(file.path, false) }
             } else {
+                if let machine = store.openedGaps[file.path]?.failure {
+                    FailureLine("Skipped lines did not load.", machine: machine).reviewNoticeInset()
+                }
                 if file.status == .binary {
                     ReviewNotice(text: "Binary file. No text to compare.").id(file.topID)
                 } else if file.blocks.isEmpty, note == nil {
@@ -62,15 +64,7 @@ struct ReviewStream: View {
                     blockView(block, gap: gaps[index], file: file)
                 }
             }
-            if let note {
-                HStack(spacing: 0) {
-                    ReviewNotice(text: note.text)
-                    if case .failed = note {
-                        Button("Retry") { Task { await store.retryFile(file.path) } }
-                            .buttonStyle(WorkPlainButtonStyle()).font(Typography.meta)
-                    }
-                }
-            }
+            if let note { ReviewFileNote(note: note) { Task { await store.retryFile(file.path) } } }
         }
     }
 
@@ -711,7 +705,31 @@ struct ReviewNotice: View {
     var body: some View {
         Text(text).font(Typography.text).foregroundStyle(palette.textSecondary)
             .fixedSize(horizontal: false, vertical: true)
-            .padding(.horizontal, Spacing.md).padding(.vertical, Spacing.xs)
+            .reviewNoticeInset()
+    }
+}
+
+private extension View {
+    /// Where a sentence sits among the stream's rows.
+    func reviewNoticeInset() -> some View { padding(.horizontal, Spacing.md).padding(.vertical, Spacing.xs) }
+}
+
+/// Under a file's lines: why they stop short, or that they were not read,
+/// with the Machine's message and the way to read them again.
+struct ReviewFileNote: View {
+    let note: TaskFilesStore.FileNote
+    let retry: () -> Void
+
+    var body: some View {
+        switch note {
+        case .cut:
+            ReviewNotice(text: "Cut at 1 MB. The rest of this file is not shown.")
+        case .failed(let reason):
+            FailureLine("File not read.", machine: reason) {
+                Button("Retry", action: retry)
+            }
+            .reviewNoticeInset()
+        }
     }
 }
 

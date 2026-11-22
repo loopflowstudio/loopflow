@@ -5,6 +5,34 @@ import AppKit
 import Loopflow
 import SwiftUI
 
+/// A repository with no Waves, no Tasks and no conversation: this stands in
+/// for its page (`WorkModel.repositoryIsEmpty`) and says what to do next.
+struct NoPlannedWork: View {
+    let model: WorkModel
+    /// Opens the repository's conversation in its workspace.
+    let openConversation: () -> Void
+
+    var body: some View {
+        EmptyState(title: "No planned Work in this repository",
+                   sentence: "Say what you want built, or talk it through first.") {
+            Button("New Task ⌘N") { model.navigation.palette = .newTask }
+                .buttonStyle(LoopflowButtonStyle(.accent))
+                .accessibilityIdentifier("loopflow-work-empty-new-task")
+            Button("Open the repository conversation", action: openConversation)
+                .accessibilityIdentifier("loopflow-work-empty-conversation")
+        }
+        .accessibilityIdentifier("loopflow-work-empty")
+    }
+}
+
+/// Nothing is selected in a plan that has Work.
+struct ChooseWork: View {
+    var body: some View {
+        EmptyState(title: "Choose Work",
+                   sentence: "Pick a Task or a Wave in the sidebar, or press ⌘K to find one in any repository.")
+    }
+}
+
 struct WorkSurfaceView: View {
     @Bindable var model: WorkModel
     var onOpenSession: (SessionRecord) -> Void = { _ in }
@@ -39,17 +67,10 @@ struct WorkSurfaceView: View {
                 .accessibilityIdentifier("loopflow-work-loading")
         } else if snapshot == nil {
             Color.clear
-        } else if visibleWaves.isEmpty, model.visibleWaves.isEmpty, model.visibleTasks.isEmpty {
-            ContentUnavailableView(
-                model.repoPath == nil ? "No planned Work yet" : "No planned Work in this repository",
-                systemImage: "map",
-                description: Text("Open the repository conversation to decide what to work on.")
-            )
-            .accessibilityIdentifier("loopflow-work-empty")
         } else {
             switch model.selection?.kind {
             case nil:
-                ContentUnavailableView("Choose Work", systemImage: "list.bullet")
+                ChooseWork()
             case .wave:
                 if let selection = model.selection { BacklogView(model: model, view: .wave(selection.id)) }
             case .project:
@@ -143,7 +164,9 @@ struct WorkSurfaceView: View {
                         .id(task.id)
                 }
                 if let unavailable = found.wave?.unavailableTasks.first(where: { $0.taskId == task.id }) {
-                    evidenceBanner(title: "Retained Task · planning unavailable", detail: unavailable.reason)
+                    FailureLine("Planning is unavailable for this Task.", machine: unavailable.reason)
+                        .padding(.horizontal, Spacing.xl)
+                        .padding(.vertical, Spacing.sm)
                 }
                 TaskHistoryView(model: model, task: task)
                     .id(task.id)
@@ -188,7 +211,7 @@ struct WorkSurfaceView: View {
                     }
                     Group {
                         if task.task.description.isEmpty {
-                            Text("No description recorded.").foregroundStyle(palette.textSecondary)
+                            Text("No description recorded.").emptyLine()
                         } else {
                             MarkdownBlocks(source: task.task.description).equatable()
                         }
@@ -214,31 +237,12 @@ struct WorkSurfaceView: View {
     // MARK: - Shared pieces
 
     private var missingSelection: some View {
-        ContentUnavailableView(
-            "Selected Work is unavailable",
-            systemImage: "questionmark.circle",
-            description: Text("This planning read cannot resolve the selection. Its workspace and conversations remain retained.")
-        )
-    }
-
-    private func evidenceBanner(title: String, detail: String) -> some View {
-        HStack(alignment: .top, spacing: Spacing.sm) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(palette.warning)
-            VStack(alignment: .leading, spacing: Spacing.xxs) {
-                Text(title)
-                    .font(Typography.textStrong)
-                    .foregroundStyle(palette.text)
-                Text(detail)
-                    .font(Typography.meta)
-                    .foregroundStyle(palette.textSecondary)
-                    .textSelection(.enabled)
-            }
-            Spacer()
+        EmptyState(title: "Selected Work is unavailable",
+                   sentence: "The latest plan does not include it. Its workspace and conversations are kept.") {
+            Button("Read the plan again") { model.rescanWork() }
+                .buttonStyle(LoopflowButtonStyle(.accent))
+                .accessibilityIdentifier("loopflow-work-reread")
         }
-        .padding(.horizontal, Spacing.xl)
-        .padding(.vertical, Spacing.sm)
-        .background(palette.warning.opacity(0.12))
     }
 }
 
@@ -270,10 +274,7 @@ struct TaskDirectiveEditor: View {
                 .accessibilityIdentifier("task-directive-draft")
                 .disabled(isSaving)
             if let saveError {
-                Text(saveError)
-                    .font(Typography.text)
-                    .foregroundStyle(palette.warning)
-                    .textSelection(.enabled)
+                FailureLine("Not saved.", machine: saveError)
                     .accessibilityIdentifier("task-directive-error")
             }
             HStack {

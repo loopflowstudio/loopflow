@@ -1017,7 +1017,7 @@ final class TaskFilesStore {
         guard let changes else { return }
         let files = Dictionary(changes.files.map { ($0.path, $0) }) { first, _ in first }
         let query = self.query, issue = self.issue, base = changes.baseCommit, head = comparison.head
-        await withTaskGroup(of: (String, FileReading).self) { group in
+        await withTaskGroup(of: (String, FileReading?).self) { group in
             var running = 0
             while true {
                 while running < 6, generation == reviewGeneration, !Task.isCancelled,
@@ -1033,7 +1033,8 @@ final class TaskFilesStore {
                 // A newer reload reads this file again; its answer replaces this one.
                 guard generation == reviewGeneration else { continue }
                 reading.remove(path)
-                accept(result, for: path)
+                // A read that was called off is no answer: the file stays unread for the next load.
+                if let result { accept(result, for: path) }
             }
         }
     }
@@ -1067,14 +1068,8 @@ final class TaskFilesStore {
     /// Why a file's lines are missing or cut short.
     enum FileNote: Equatable, Sendable {
         case cut
+        /// The Machine's message.
         case failed(String)
-
-        var text: String {
-            switch self {
-            case .cut: "Cut at 1 MB. The rest of this file is not shown."
-            case .failed(let reason): "Could not be read: \(reason.hasSuffix(".") ? reason : reason + ".")"
-            }
-        }
     }
 
     /// Read a file again after its read failed.
@@ -1093,7 +1088,7 @@ final class TaskFilesStore {
     /// One file's lines: its patch, which for a new file, untracked or
     /// committed, is its contents.
     private nonisolated static func readFile(_ changed: TaskChangedFile, query: RegistryQuery, issue: String,
-                                             base: String, head: String?) async -> FileReading {
+                                             base: String, head: String?) async -> FileReading? {
         let path = changed.path
         do {
             let next = try await query.taskDiff(issue: issue, path: path, base: base, head: head)
@@ -1101,6 +1096,8 @@ final class TaskFilesStore {
             let file = parsed.first { $0.path == path } ?? parsed.first
                 ?? ReviewFile(path: path, oldPath: changed.oldPath, status: next.binary ? .binary : .modified, blocks: [])
             return FileReading(file: file, note: next.truncated ? .cut : nil)
+        } catch is CancellationError {
+            return nil
         } catch {
             return FileReading(file: nil, note: .failed(error.localizedDescription))
         }
@@ -1314,16 +1311,23 @@ final class TaskFilesStore {
 
     // MARK: Skipped lines
 
-    /// Unchanged lines you opened between hunks, by file and hunk header.
-    private(set) var openedGaps: [String: [String: [ReviewLine]]] = [:]
-    private(set) var gapError: String?
+    /// What opening a file's skipped lines has given so far.
+    struct OpenedGaps {
+        /// The unchanged lines you opened between hunks, by hunk header.
+        var lines: [String: [ReviewLine]] = [:]
+        /// The Machine's message from the last open that failed.
+        var failure: String?
+    }
+
+    /// By file. A file's record goes whenever its lines are read again.
+    private(set) var openedGaps: [String: OpenedGaps] = [:]
 
     /// The skipped lines are read from the file as it stands, which is the
     /// comparison's newer side only while it reads the working tree.
     var canOpenGaps: Bool { comparison.head == nil }
 
     func opened(_ file: ReviewFile) -> ReviewFile {
-        openedGaps[file.path].map(file.opening) ?? file
+        openedGaps[file.path].map { file.opening($0.lines) } ?? file
     }
 
     /// Show the lines a hunk header skips. Files' Diff of an unsaved draft
@@ -1344,10 +1348,10 @@ final class TaskFilesStore {
             guard let lines = gap.lines(in: content) else {
                 throw RegistryQueryError("the file changed since this comparison was read.")
             }
-            openedGaps[path, default: [:]][header] = lines
-            gapError = nil
+            openedGaps[path, default: OpenedGaps()].lines[header] = lines
+            openedGaps[path]?.failure = nil
         } catch {
-            gapError = "Skipped lines of \(path) unavailable: \(error.localizedDescription)"
+            openedGaps[path, default: OpenedGaps()].failure = error.localizedDescription
         }
     }
 
@@ -1534,10 +1538,10 @@ final class TaskFilesStore {
         comparisonDescription.map { $0.hasSuffix(".") ? String($0.dropLast()) : $0 } ?? comparison.title
     }
 
-    /// "4 changed files", or why there is nothing to count. Hidden files,
-    /// yours and the tour's, stay in the total: "4 of 9 changed files".
+    /// "4 changed files", or why there is nothing to count yet. Hidden files,
+    /// yours and the tour's, stay in the total: "4 of 9 changed files". A
+    /// comparison that failed is `changesError`, which the pane draws in its place.
     var changesTitle: String {
-        if let reason = changesError { return "Comparison unavailable: \(reason)" }
         guard let changes else { return "Reading changes…" }
         guard !changes.files.isEmpty else { return "No changed files" }
         let all = changes.files.count

@@ -53,9 +53,7 @@ struct RenameWaveSheetContent: View {
                     .disabled(phase == .renaming)
                     .accessibilityIdentifier("rename-wave-name")
                 if case .editing(let error?) = phase {
-                    Text(error)
-                        .font(Typography.meta)
-                        .foregroundStyle(palette.failure)
+                    FailureLine("Not renamed.", machine: error)
                         .accessibilityIdentifier("rename-wave-error")
                 }
                 HStack(spacing: Spacing.md) {

@@ -123,10 +123,8 @@ thing, or show nothing. "Coming soon" over a drawing is two problems.
 **Values outside the scale.** See [How the system works](#how-the-system-works).
 
 **Two of the same thing.** One component per job, on every surface.
-- Desktop has two workflow renderers: `WorkflowLine` for a Task and New
-  Task's `WorkflowSteps` (`NewTaskSheet.swift`) for a Graph definition, which
-  has no top-level steps on the wire.
-- Desktop draws each empty and failed state by hand; iPhone uses `StateView`.
+- An empty or failed state is drawn twice: `EmptyState` on the Mac and
+  `StateView` on iPhone, in different inks and spacing.
 
 **Tiny text.** Nothing a person is meant to read is under 11 pt on Desktop,
 12 pt on iPhone or 12 px on the web.
@@ -226,9 +224,9 @@ has one name and a size on each platform, so a shared component that names
 
 | Step | Face | Mac | iPhone | Use |
 |------|------|-----|--------|-----|
-| `display` | Old Standard 400 | 34 | 34 | Wave page title, "What do you want?" on the phone (`.serif(.display)`) |
+| `display` | Old Standard 400 | 34 | 34 | Wave page title, "What do you want?" in New Task (`.serif(.display)`) |
 | `title` | Old Standard 400 | 26 | 26 | Task title in the Brief, a state's title (`.serif(.title)`) |
-| `lede` | Atkinson 600 | 17 | 20 | Wave objective, a document's first heading, what you type in New Task on the phone |
+| `lede` | Atkinson 600 | 17 | 20 | Wave objective, a document's first heading, the request you type in New Task |
 | `text` | Atkinson 400 | 13 | 17 | Everything else |
 | `textStrong` | Atkinson 600 | 13 | 17 | Selected row titles, Session names |
 | `meta` | Atkinson 400 | 11 | 13 | Meta, ranks, a row's second line |
@@ -248,7 +246,7 @@ heights size the controls themselves.
 
 Components, in `swift/Loopflow/Design/`, for both apps: `TaskRow`,
 `StatusMark`, `WorkflowLine`, `LoopflowButtonStyle` (`.neutral`, `.accent`,
-`.destructive`) and `StateView`. `TitleBar` is the Mac's, in
+`.destructive`) and `StateView`. The Mac also has `TitleBar` and `EmptyState` in
 `swift/LoopflowMac/Design/`.
 
 - `TaskRow` takes its status as a `TaskRowStatus`, never a string, so a
@@ -259,16 +257,19 @@ Components, in `swift/Loopflow/Design/`, for both apps: `TaskRow`,
 - `WorkflowLine`'s steps, running step and sentence come from Rust
   (`TaskGraph.steps`, `current_step`, `sentence`), so `lf task status` prints
   the same sentence. Where the steps do not fit, the sentence stands alone and
-  wraps.
+  wraps. Before a Task starts, the line draws the catalog’s workflow steps
+  (`lf graph list --json`). New Task shows where you take part beneath them.
 - `TaskActions` (beside `WorkflowLine`) is what a Task offers: Start or Run,
   Auto-Ship or Stop Auto-Ship, and Rust's reason when a run cannot start. The
   Mac's Workflow bar and the phone's "Task actions" menu draw it; neither
   decides what to offer, and the Notice names an action by its button's words.
 - `LoopflowButtonStyle` is as tall as the platform's control height. On the
   phone the accent button fills the width it is offered; a screen has one.
-- `StateView` is every empty and failed state: left-aligned, a serif title,
-  then a sentence and buttons where the state has them. No icon over a
-  centred title.
+- On iPhone, `StateView` shows a left-aligned serif title, a sentence and
+  any actions. On Mac, `EmptyState` also shows the Machine’s error in mono
+  and fits dashboard slots. An empty list uses `.emptyLine()`, and a failure
+  beside retained content uses `FailureLine`. `DesignDisciplineTests`
+  checks both apps for `ContentUnavailableView`.
 
 Website ramp, for every page (`:root` in `website/static/style.css`):
 

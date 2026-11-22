@@ -11,8 +11,7 @@ struct WorkspaceLaunchView: View {
     var body: some View {
         VStack {
             if let error {
-                Text(error).textSelection(.enabled)
-                Button("Retry") { Task { await launch() } }.buttonStyle(LoopflowButtonStyle())
+                RepositoryDidNotOpen(error: error) { Task { await launch() } }
             } else {
                 ProgressView("Opening repository…")
             }
@@ -90,6 +89,20 @@ struct RepositoryWorkspaceView: View {
     }
 }
 
+/// A repository with nothing to show in its place: the Machine's message and Retry.
+struct RepositoryDidNotOpen: View {
+    let error: String
+    let retry: () -> Void
+
+    var body: some View {
+        EmptyState(title: "This repository did not open", machine: error) {
+            Button("Retry", action: retry)
+                .buttonStyle(LoopflowButtonStyle(.accent))
+                .accessibilityIdentifier("repository-retry")
+        }
+    }
+}
+
 /// Keep the content at one structural position through refresh and failure.
 struct RepositoryWorkspaceContent<Content: View>: View {
     let workspace: RepositoryWorkspace?
@@ -101,14 +114,16 @@ struct RepositoryWorkspaceContent<Content: View>: View {
         VStack(spacing: 0) {
             if let workspace {
                 content(workspace)
-            } else if error == nil {
+                // A retained workspace stays mounted; its failure reads beside it.
+                if let error {
+                    FailureLine("The latest read of this repository failed.", machine: error) {
+                        Button("Retry", action: retry)
+                    }.padding(Spacing.lg)
+                }
+            } else if let error {
+                RepositoryDidNotOpen(error: error, retry: retry)
+            } else {
                 ProgressView("Opening repository…")
-            }
-            if let error {
-                HStack {
-                    Text(error).textSelection(.enabled)
-                    Button("Retry", action: retry).buttonStyle(LoopflowButtonStyle())
-                }.padding()
             }
         }
     }
@@ -122,12 +137,17 @@ struct WorkspaceOpeningFeedback: View {
     var body: some View {
         VStack(alignment: .leading) {
             if let error {
-                Text(error).textSelection(.enabled)
-                Button("OK") { self.error = nil; dismiss() }.buttonStyle(LoopflowButtonStyle())
+                FailureLine("Workspace did not open.", machine: error) {
+                    Button("OK") { self.error = nil; dismiss() }
+                }
             } else {
                 Text("No pending workspace requests")
                 Button("Close") { dismiss() }.buttonStyle(LoopflowButtonStyle())
             }
-        }.padding()
+        }
+        .padding()
+        // The window's smallest size is this view's: without a width the
+        // message wraps to a letter a line and the window opens taller than the screen.
+        .frame(minWidth: 440, maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 }

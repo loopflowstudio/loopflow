@@ -3712,17 +3712,24 @@ fn held_session_survives_server_restart() {
     let fixture = Fixture::new();
     let mut service = ServerProof::start(&fixture, false);
     let home = fixture.home.path();
-    let script = format!(
-        "echo $$ > {home}/agent.pid; i=0; while [ ! -e {home}/stop ]; do i=$((i+1)); printf 'tick:%d\\n' $i; sleep 0.1; done; exit 3",
-        home = home.display()
-    );
+    let script = r#"
+echo $$ > "$HOME/agent.pid"
+printf 'restart:before\n'
+while [ ! -e "$HOME/offline" ]; do sleep 0.05; done
+printf 'restart:offline-one\nrestart:offline-two\n'
+printf 'written' > "$HOME/offline-written"
+while [ ! -e "$HOME/online" ]; do sleep 0.05; done
+printf 'restart:online\n'
+while [ ! -e "$HOME/stop" ]; do sleep 0.05; done
+exit 3
+"#;
     let started = service
         .connect()
         .request(loopflow::server::wire::Operation::Server(
             loopflow::server::wire::ServerOperation::SessionStart {
                 session: None,
                 request: "held-restart".into(),
-                argv: vec!["/bin/sh".into(), "-c".into(), script],
+                argv: vec!["/bin/sh".into(), "-c".into(), script.into()],
                 cwd: home.to_path_buf(),
                 env: vec![
                     ("PATH".into(), "/usr/bin:/bin".into()),
@@ -3735,19 +3742,7 @@ fn held_session_survives_server_restart() {
         ))
         .unwrap();
     let terminal = started.result["terminal_id"].as_str().unwrap().to_owned();
-    let agent: libc::pid_t = {
-        let deadline = Instant::now() + Duration::from_secs(20);
-        loop {
-            if let Some(pid) = std::fs::read_to_string(home.join("agent.pid"))
-                .ok()
-                .and_then(|pid| pid.trim().parse().ok())
-            {
-                break pid;
-            }
-            assert!(Instant::now() < deadline, "the agent never started");
-            std::thread::sleep(Duration::from_millis(20));
-        }
-    };
+    let agent: libc::pid_t = fixture.wait_file("agent.pid").trim().parse().unwrap();
     let _agent = KillOnDrop(agent);
     // The agent's parent is the holder, not the server.
     let (holder, _) = command_line(agent);
@@ -3756,62 +3751,41 @@ fn held_session_survives_server_restart() {
 
     let mut view =
         Terminal::spawn(service.command(&["session", "attach", "--terminal", &terminal]));
-    view.wait_text("tick:3");
+    view.wait_text("restart:before");
 
-    // SIGTERM the server: the agent keeps printing into the holder's ring.
+    // Stop the server before asking the agent to write into the holder's ring.
     let server = service.child.take().unwrap();
     // SAFETY: the fixture's own server process.
     unsafe { libc::kill(server.id() as libc::pid_t, libc::SIGTERM) };
     let mut server = server;
     server.wait().unwrap();
     let stopped = view.screen.lock().unwrap().len();
-    let last_seen = |screen: &[u8]| {
-        String::from_utf8_lossy(screen)
-            .split("tick:")
-            .filter_map(|tick| {
-                tick.split(|c: char| !c.is_ascii_digit())
-                    .next()?
-                    .parse::<u32>()
-                    .ok()
-            })
-            .max()
-            .unwrap_or(0)
-    };
-    let before = last_seen(&view.screen.lock().unwrap());
-    std::thread::sleep(Duration::from_millis(800));
+    std::fs::write(home.join("offline"), "").unwrap();
+    fixture.wait_file("offline-written");
     assert!(alive(agent), "the agent ended with its server");
     view.assert_viewing("the view of a stopped server");
 
-    // A new server: the view continues from its position, with no repaint,
-    // and shows what was printed while no server ran.
     service.child = Some(service.launch());
     service.ready();
-    view.wait_text(&format!("tick:{}", before + 12));
+    // The relay emits this terminal query when it finishes catching up.
+    view.wait_text("\x1b[5n");
+    std::fs::write(home.join("online"), "").unwrap();
+    view.wait_text("restart:online");
     let screen = view.screen.lock().unwrap().clone();
-    let after = &screen[stopped..];
-    let text = String::from_utf8_lossy(after);
+    let text = String::from_utf8_lossy(&screen[stopped..]);
     assert!(
         !text.contains("\x1b[?1047l\x1b[?47l") && !text.contains("\x1b[2J"),
         "the view was repainted: {text:?}"
     );
-    assert!(
-        text.contains("\x1b[5n"),
-        "the view did not continue: {text:?}"
-    );
-    let ticks: Vec<u32> = text
-        .split("tick:")
+    let messages: Vec<_> = text
+        .split("restart:")
         .skip(1)
-        .filter_map(|tick| {
-            tick.split(|c: char| !c.is_ascii_digit())
-                .next()?
-                .parse()
-                .ok()
-        })
+        .map(|message| message.split_whitespace().next().unwrap())
         .collect();
-    assert_eq!(ticks.first(), Some(&(before + 1)), "{text:?}");
-    assert!(
-        ticks.windows(2).all(|pair| pair[1] == pair[0] + 1),
-        "the stream skipped or repeated output: {ticks:?}"
+    assert_eq!(
+        messages,
+        ["offline-one", "offline-two", "online"],
+        "{text:?}"
     );
 
     // The terminal's Session names its provider, as a launch records it.

@@ -749,15 +749,15 @@ struct WorkModelStreamTests {
         await feed.send(try fixture.planningFrame(sequence: 1, answers: nil))
         try await eventually { model.roadmap.value != nil }
         await model.loadGraphCatalog()
-        try await eventually { model.workflowCatalog.value?.isEmpty == false }
+        try await eventually { model.graphCatalog.value?.isEmpty == false }
         let baseline = await catalog.reads
         await catalog.update("[]")
         await feed.send(try fixture.unrelatedFrame(sequence: 2))
         try await Task.sleep(for: .milliseconds(50))
         #expect(await catalog.reads == baseline)
-        #expect(model.workflowCatalog.value?.isEmpty == false)
+        #expect(model.graphCatalog.value?.isEmpty == false)
         await feed.send(try fixture.planningFrame(sequence: 3, answers: nil))
-        try await eventually { model.workflowCatalog.value?.isEmpty == true }
+        try await eventually { model.graphCatalog.value?.isEmpty == true }
         #expect(await catalog.reads == baseline + 1)
         // Both catalogues are one read: returning from an editor rereads it once.
         await model.rereadDefinitions()
@@ -765,8 +765,8 @@ struct WorkModelStreamTests {
         #expect(model.graphCatalog.value?.isEmpty == true)
         await catalog.fail()
         await feed.send(try fixture.planningFrame(sequence: 4, answers: nil))
-        try await eventually { model.workflowCatalog.failure == "catalog unavailable" }
-        #expect(model.workflowCatalog.value?.isEmpty == true)
+        try await eventually { model.graphCatalog.failure == "catalog unavailable" }
+        #expect(model.graphCatalog.value?.isEmpty == true)
     }
 
     @Test("A late catalogue failure cannot replace a newer successful read")
@@ -789,8 +789,8 @@ struct WorkModelStreamTests {
         await model.loadGraphCatalog(force: true)
         await deferred.release("invalid old response")
         await old.value
-        #expect(model.workflowCatalog.value?.isEmpty == true)
-        #expect(model.workflowCatalog.failure == nil)
+        #expect(model.graphCatalog.value?.isEmpty == true)
+        #expect(model.graphCatalog.failure == nil)
     }
 
     @Test("A change shows in the click, then asks its parts for a reading once answered")
@@ -1504,12 +1504,12 @@ struct TaskPlanningReadabilityTests {
         let navigator = WorkNavigator(model: model, onOpenSession: { _ in })
         // A pending list makes no empty claim; the one work status says it is loading.
         #expect(try navigator.inspect().find(text: "Loading work…").string() == "Loading work…")
-        #expect(throws: (any Error).self) { try navigator.inspect().find(text: "No working Tasks in this list") }
+        #expect(throws: (any Error).self) { try navigator.inspect().find(text: "No working Tasks in this list.") }
         model.applyTaskList(nil, wave: nil, reason: "Offline")
-        #expect(throws: (any Error).self) { try navigator.inspect().find(text: "No working Tasks in this list") }
+        #expect(throws: (any Error).self) { try navigator.inspect().find(text: "No working Tasks in this list.") }
         #expect(model.navigation.notices.current?.text == "Tasks couldn't be read: Offline")
         model.applyTaskList(fixtureViewPlan(owner: key, members: []), wave: nil, reason: "")
-        #expect(try navigator.inspect().find(text: "No working Tasks in this list").string() == "No working Tasks in this list")
+        #expect(try navigator.inspect().find(text: "No working Tasks in this list.").string() == "No working Tasks in this list.")
     }
 
     @Test("Saved planning rows never fill the sidebar; only the started list does")

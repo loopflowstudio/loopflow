@@ -22,8 +22,7 @@ struct WorkspacePanesView: View {
             } else if let layout = store.visibleLayout {
                 panes(layout)
             } else {
-                PaneEmptyState(title: "Panes collapsed", systemImage: "rectangle.compress.vertical",
-                               description: "Your panes are retained. Show a pane to continue.") {
+                EmptyState(title: "Panes collapsed", sentence: "Your panes are kept. Show a pane to continue.") {
                     if !workspace.showsConversation(held: Set(sessions.sessions.map(\.id))) {
                         ConversationOpenButton(workspace: workspace, model: model, sessions: sessions)
                     }
@@ -66,7 +65,6 @@ struct ConversationOpenButton: View {
         Button(failed ? "Retry" : "Open conversation") {
             Task { await model.openConversation(in: workspace, store: sessions) }
         }
-        .buttonStyle(LoopflowButtonStyle())
         .help(failed ? "Try opening this conversation again" : "Open this conversation here, starting it if it has none")
         .accessibilityIdentifier("open-conversation")
     }
@@ -75,7 +73,7 @@ struct ConversationOpenButton: View {
 /// The Session slot before any conversation is open here, in a pane or a
 /// Dashboard tile. Every Work opens its own; this says why it has not and
 /// offers the one next action. An unstarted Task has no checkout and so no
-/// conversation: it offers Start.
+/// conversation: it says what Start will run.
 struct ConversationPlaceholder: View {
     @Environment(\.theme) private var theme
     let workspace: SessionsWorkspace
@@ -89,20 +87,32 @@ struct ConversationPlaceholder: View {
         } else if workspace.key.kind == .task, let task = model.task(id: workspace.key.id)?.task, task.awaitsStart {
             TaskStartOffer(model: model, task: task)
         } else {
-            let failed = workspace.conversationError != nil
-            PaneEmptyState(title: failed ? "Conversation failed to open" : "Conversation not open",
-                           systemImage: failed ? "exclamationmark.triangle" : "terminal",
-                           description: note) {
+            let error = workspace.conversationError
+            EmptyState(title: error == nil ? "Conversation not open" : "Conversation failed to open",
+                       sentence: error == nil ? note : nil, machine: error) {
                 ConversationOpenButton(workspace: workspace, model: model, sessions: sessions)
             }
         }
     }
 
-    private var note: String {
-        if let error = workspace.conversationError { return error }
+    private var note: String? {
         if workspace.conversationClosed { return "Closed here. Select it again to reopen the conversation." }
-        if model.showsSavedWork { return WorkCache.savedReason }
-        return "Open the conversation here."
+        return model.showsSavedWork ? WorkCache.savedReason : nil
+    }
+
+    /// Whether a pane on screen draws this workspace's failed opening as its
+    /// own state, so the line above the panes does not say it a second time.
+    @MainActor
+    static func namesFailure(in workspace: SessionsWorkspace, model: WorkModel, sessions: SessionsStore) -> Bool {
+        if model.conversationIsOpening(workspace) { return false }
+        if workspace.key.kind == .task, model.task(id: workspace.key.id)?.task.awaitsStart == true { return false }
+        let store = workspace.multiplexer
+        let panes = store.zoomedPaneId.flatMap { store.layout.pane(for: $0) }.map { [$0] }
+            ?? store.visibleLayout?.allPanes ?? []
+        return panes.contains { pane in
+            guard case .session(let id, _, _) = pane.content else { return false }
+            return !workspace.canOpenTerminals || !sessions.sessions.contains { $0.id == id }
+        }
     }
 }
 
@@ -136,104 +146,6 @@ extension WorkspacePanesView: Equatable {
             lhs.workspace === rhs.workspace && lhs.isFocused == rhs.isFocused && lhs.sessions === rhs.sessions
                 && lhs.model === rhs.model && lhs.face == rhs.face
         }
-    }
-}
-
-/// The Session slot before a conversation runs here: what that means and its
-/// one explicit action, such as an unstarted Task's Start.
-struct SessionSlotOffer<Description: View>: View {
-    let title: String
-    let systemImage: String
-    let action: String
-    let actionImage: String
-    var note: String?
-    var unavailable: String?
-    var help: String
-    var accessibilityLabel: String?
-    let actionIdentifier: String
-    let perform: () -> Void
-    @ViewBuilder let description: Description
-    @Environment(\.theme) private var theme
-    @Environment(\.compactPanes) private var compact
-
-    var body: some View {
-        PaneEmptyState(title: title, systemImage: systemImage, summary: unavailable ?? note) {
-            description
-        } actions: {
-            VStack(spacing: Spacing.sm) {
-                Button(action: perform) { Label(action, systemImage: actionImage) }
-                    .buttonStyle(LoopflowButtonStyle())
-                    .disabled(unavailable != nil)
-                    .help(unavailable ?? help)
-                    .accessibilityLabel(accessibilityLabel ?? action)
-                    .accessibilityIdentifier(actionIdentifier)
-                if !compact, let note = unavailable ?? note {
-                    Text(note)
-                        .font(Typography.meta)
-                        .foregroundStyle(theme.palette.textSecondary)
-                }
-            }
-        }
-        .accessibilityElement(children: .contain)
-    }
-}
-
-extension EnvironmentValues {
-    /// Dashboard slots: a pane's empty state reads as one line sized to the slot.
-    @Entry var compactPanes = false
-}
-
-/// A pane with nothing running in it yet: what that means and its next action.
-/// Full panes explain themselves; a compact pane says the state in one line,
-/// with `summary` as its help.
-struct PaneEmptyState<Description: View, Actions: View>: View {
-    let title: String
-    let systemImage: String
-    let summary: String?
-    @ViewBuilder let description: Description
-    @ViewBuilder let actions: Actions
-    @Environment(\.compactPanes) private var compact
-    @Environment(\.theme) private var theme
-
-    var body: some View {
-        if compact {
-            // A narrow slot keeps the action and the state's icon rather than a clipped title.
-            ViewThatFits(in: .horizontal) {
-                compactRow(Label(title, systemImage: systemImage).fixedSize())
-                compactRow(Label(title, systemImage: systemImage).labelStyle(.iconOnly))
-            }
-            .font(Typography.text)
-            .padding(Spacing.sm)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else {
-            ContentUnavailableView {
-                Label(title, systemImage: systemImage).foregroundStyle(theme.palette.text)
-            } description: {
-                description.foregroundStyle(theme.palette.textSecondary)
-            } actions: { actions }
-        }
-    }
-}
-
-extension PaneEmptyState {
-    fileprivate func compactRow(_ label: some View) -> some View {
-        HStack(spacing: Spacing.sm) {
-            label.foregroundStyle(theme.palette.text).help(summary ?? title)
-            actions.fixedSize()
-        }
-    }
-}
-
-extension PaneEmptyState where Description == Text? {
-    init(title: String, systemImage: String, description: String? = nil, @ViewBuilder actions: () -> Actions) {
-        self.init(title: title, systemImage: systemImage, summary: description,
-                  description: { description.map { Text($0) } }, actions: actions)
-    }
-}
-
-extension PaneEmptyState where Description == Text?, Actions == EmptyView {
-    init(title: String, systemImage: String) {
-        self.init(title: title, systemImage: systemImage) { EmptyView() }
     }
 }
 
@@ -914,7 +826,7 @@ struct SessionPaneView: View {
                             }
                             .simultaneousGesture(TapGesture().onEnded { focusPane() })
                     case .failure(let error):
-                        Text(error.localizedDescription).textSelection(.enabled)
+                        EmptyState(title: "Files did not open", machine: error.localizedDescription)
                     }
                 case .task:
                     if let task = model.task(id: taskId)?.task {
@@ -929,13 +841,12 @@ struct SessionPaneView: View {
                                     execution: execution, query: sessions.query, showsPosition: false)
                             }.padding(Spacing.md)
                         }.textSelection(.enabled)
-                    } else { Text("Task is unavailable") }
+                    } else { EmptyState(title: "Task is unavailable") }
                 case .url(let id, let url):
                     BrowserPageView(pages: workspace.pages, id: id, url: url).id(id)
                         .simultaneousGesture(TapGesture().onEnded { focusPane() })
                 case nil:
-                    PaneEmptyState(title: "Nothing open", systemImage: "globe",
-                                   description: "Open this Task’s Files or Graph processes.") {
+                    EmptyState(title: "Nothing open", sentence: "Open this Task’s Files or Graph processes.") {
                         Button("Files") { workspace.showBrowser(.files, from: pane) }
                     }
                 }
@@ -962,16 +873,14 @@ struct SessionPaneView: View {
                 openButton(item)
             }.padding()
         case .failed(let message):
-            PaneEmptyState(title: "Session failed to open", systemImage: "exclamationmark.triangle",
-                           description: message) {
+            EmptyState(title: "Session failed to open", machine: message) {
                 openButton(item)
             }
         case .pending where model.conversationIsOpening(workspace):
             SessionOpeningView(screen: item.lastScreen)
                 .foregroundStyle(theme.palette.text)
         case .pending, .live:
-            PaneEmptyState(title: "Not running here", systemImage: "terminal",
-                           description: "This Session has no live terminal in this pane yet.") {
+            EmptyState(title: "Not running here", sentence: "This Session has no live terminal in this pane yet.") {
                 openButton(item)
             }
         }
@@ -1019,7 +928,7 @@ struct SessionPaneView: View {
             )
             .id(item.launchId)
         } else {
-            Text("Session location unavailable")
+            EmptyState(title: "Session location unavailable")
         }
     }
 

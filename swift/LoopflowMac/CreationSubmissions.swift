@@ -174,7 +174,7 @@ private struct RecoveredCreationInspector: View {
                 Group {
                     switch detail {
                     case .success(let text): Text(text).task { await presented() }
-                    case .failure(let error): Text(error.localizedDescription)
+                    case .failure(let error): FailureLine("Current work not read.", machine: error.localizedDescription)
                     case nil: Text("Reading current work…")
                     }
                 }

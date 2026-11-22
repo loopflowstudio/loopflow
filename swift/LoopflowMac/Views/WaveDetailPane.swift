@@ -173,7 +173,7 @@ private struct WavePlanView: View {
                 closed.append(page)
             } while !more && closed.next != nil && since.map { !closed.reaches($0) } ?? false
         } catch {
-            closed.error = "Completed Tasks unavailable: \(error.localizedDescription)"
+            closed.error = error.localizedDescription
         }
     }
 
@@ -242,7 +242,7 @@ private struct WavePlanView: View {
                 switch workMap.tasks {
                 case .unavailable(let reason):
                     WorkSectionHeading("Tasks")
-                    Text(reason).foregroundStyle(palette.warning)
+                    FailureLine("Tasks did not load.", machine: reason)
                 case .available(let inventory, let truncated):
                     let tasks = closed.merged(after: inventory).filter {
                         historyFilter.includes($0, now: historyNow)
@@ -252,14 +252,14 @@ private struct WavePlanView: View {
                             .onChange(of: historyFilter) { historyNow = Date() }
                     }
                     if truncated { Text("Planning is partial; more Tasks exist.") }
-                    if tasks.isEmpty { Text("No current Tasks").foregroundStyle(palette.textSecondary) }
+                    if tasks.isEmpty { Text("No current Tasks.").emptyLine() }
                     ForEach(tasks) { task in
                         PortfolioTaskRow(task: task, onOpen: { onOpenTask(task.id) },
                             onAction: { action in onTaskAction(task, action) }, onOpenWorktree: onOpenWorktree)
                     }
                     if historyFilter.showCompleted {
                         if let error = closed.error {
-                            Text(error).foregroundStyle(palette.warning)
+                            FailureLine("Completed Tasks did not load.", machine: error)
                         } else if closed.next != nil {
                             Button("Older completed Tasks") { Task { await loadClosed(more: true) } }
                                 .disabled(closed.isLoading)
@@ -268,7 +268,7 @@ private struct WavePlanView: View {
                 }
             } else {
                 WorkSectionHeading("Tasks")
-                Text("Task status unavailable.").foregroundStyle(palette.textSecondary)
+                Text("Task status unavailable.").emptyLine()
             }
         }.accessibilityIdentifier("wave-tasks")
     }

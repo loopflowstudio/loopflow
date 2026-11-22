@@ -59,9 +59,7 @@ struct TaskHistoryView: View {
         VStack(alignment: .leading, spacing: 0) {
             if history.isEmpty {
                 Text("No Session history recorded for this Task.")
-                    .font(Typography.text)
-                    .foregroundStyle(palette.textSecondary)
-                    .accessibilityIdentifier("task-history-empty")
+                    .accessibilityIdentifier("task-history-empty").emptyLine()
             }
             if let totals = context?.totals, let line = Self.sources(totals) {
                 contextLine("Task context  \(line)", flagged: totals.contains(where: \.overBudget))

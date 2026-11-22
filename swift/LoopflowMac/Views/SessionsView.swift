@@ -1437,7 +1437,7 @@ struct SessionsView: View {
                         WorkNavigator(model: model, onOpenSession: { _ in })
                     }
                     if let error = workspaces.machineError ?? repositoryError {
-                        ContentUnavailableView("Workspace unavailable", systemImage: "folder", description: Text(error))
+                        RepositoryDidNotOpen(error: error) { Task { await readMachine() } }
                             .task(id: taskPage) {
                                 if let request = taskPage { model.finishTaskPage(request, error: error) }
                             }
@@ -1447,15 +1447,20 @@ struct SessionsView: View {
                 }
             }
         }
-        .task {
-            await workspaces.refreshMachine(query: query)
-            if repository == nil {
-                do { resolvedRepository = try await query.repositoryIdentity(cwd: repoPath).id }
-                catch { repositoryError = error.localizedDescription }
-            }
-            if let home = workspaces.localMachineId, workspaces.machineError == nil { model.confirmMachine(home) }
-        }
+        .task { await readMachine() }
         .answeringLostLines(model)
+    }
+
+    /// The Machine and repository this window stands on; Retry reads them again.
+    private func readMachine() async {
+        await workspaces.refreshMachine(query: query)
+        if repository == nil {
+            do {
+                resolvedRepository = try await query.repositoryIdentity(cwd: repoPath).id
+                repositoryError = nil
+            } catch { repositoryError = error.localizedDescription }
+        }
+        if let home = workspaces.localMachineId, workspaces.machineError == nil { model.confirmMachine(home) }
     }
 }
 
@@ -1577,8 +1582,7 @@ struct SessionsContentView: View {
                 .accessibilityIdentifier("work-layout")
                 .transition(.zoom(from: navigation.zoomOrigin))
             } else {
-                ContentUnavailableView("No Work open", systemImage: "rectangle.on.rectangle",
-                    description: Text("Open a repository, Wave or Task from the sidebar."))
+                ChooseWork()
             }
         }
         .coordinateSpace(.named(ZoomFromTile.space))
@@ -1650,7 +1654,7 @@ struct SessionsContentView: View {
         )) {
             switch navigation.palette {
             case .workflow(let name):
-                WorkflowCatalogInspector(entry: model.workflowCatalog.value?.first { $0.name == name }, model: model)
+                WorkflowCatalogInspector(entry: model.graphCatalog.value?.first { $0.name == name }, model: model)
             case .graph(let name):
                 GraphCatalogInspector(entry: model.graphCatalog.value?.first { $0.name == name }, navigation: navigation, model: model)
             case .search:
@@ -1717,9 +1721,8 @@ struct SessionsContentView: View {
         return VStack(spacing: 0) {
             if entry.isRestoringIntent { ProgressView("Restoring workspace") }
             if let error = entry.persistenceError {
-                HStack {
-                    Text("Layout not saved: " + error).foregroundStyle(palette.warning).textSelection(.enabled)
-                    Button("Reload saved intent") { Task { await entry.loadPaneIntent() } }.buttonStyle(LoopflowButtonStyle())
+                FailureLine("Layout not saved.", machine: error) {
+                    Button("Reload saved intent") { Task { await entry.loadPaneIntent() } }
                 }.padding(Spacing.sm)
             }
             if terminals, let task, active {
@@ -1743,6 +1746,8 @@ struct SessionsContentView: View {
                         if navigation.showsActivity { WorkActivityView(model: model).frame(minWidth: 230, maxWidth: 360) }
                     }
                 }
+            } else if active, navigation.waveView == .repository, model.repositoryIsEmpty(entry) {
+                NoPlannedWork(model: model) { Task { await model.openConversation(in: entry, store: store) } }
             } else if key.kind != .task, active, let view = navigation.waveView {
                 // A Wave view, the repository page included: the conversation and the
                 // backlog share the top band; the Tasks run along the bottom.
@@ -1775,18 +1780,18 @@ struct SessionsContentView: View {
         }
     }
 
-    /// A workspace's panes, with a retry when its conversation failed to open.
+    /// A workspace's panes, with a retry above them when its conversation
+    /// failed to open and no pane says so itself.
     private func conversationPanes(_ key: WorkWorkspaceKey, _ entry: SessionsWorkspace, isFocused: Bool) -> some View {
         WorkspacePanesView(workspace: entry, isFocused: isFocused, sessions: store, model: model,
             onFocus: { pane, session in focusPane(pane, session: session, in: entry) })
             .equatable()
             .overlay(alignment: .top) {
-                if let error = entry.conversationError {
-                    HStack {
-                        Text(error).textSelection(.enabled)
-                        Button("Retry") { Task { await model.openConversation(in: entry, store: store) } }.buttonStyle(LoopflowButtonStyle())
-                    }.foregroundStyle(theme.palette.text)
-                        .padding(Spacing.sm).background(theme.terminal.background.color)
+                if let error = entry.conversationError,
+                   !ConversationPlaceholder.namesFailure(in: entry, model: model, sessions: store) {
+                    FailureLine("The conversation did not open.", machine: error) {
+                        Button("Retry") { Task { await model.openConversation(in: entry, store: store) } }
+                    }.padding(Spacing.sm).background(theme.terminal.background.color)
                 }
             }
     }

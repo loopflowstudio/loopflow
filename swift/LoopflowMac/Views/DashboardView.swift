@@ -106,9 +106,12 @@ struct DashboardView: View {
                 // One line: membership may be incomplete; every reason stays in its help.
                 if let first = plan.resolution.unavailable.first {
                     let more = plan.resolution.unavailable.count - 1
-                    Text(more == 0 ? first : "\(first) (+\(more) more)").foregroundStyle(palette.warning).lineLimit(1)
+                    FailureLine("Some Work did not load.", machine: more == 0 ? first : "\(first) (+\(more) more)")
+                        .lineLimit(1)
                         .help(plan.resolution.unavailable.joined(separator: "\n"))
                         .accessibilityIdentifier("dashboard-unavailable")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, Spacing.sm)
                 }
                 // Working Tasks fill in the shared Task order; a saved Dashboard's
                 // visible occurrences fill in its arrangement order.
@@ -134,9 +137,10 @@ struct DashboardView: View {
                     }.font(Typography.meta).buttonStyle(LoopflowButtonStyle()).padding(Spacing.sm)
                 }
             } else {
-                ContentUnavailableView("Dashboard unavailable", systemImage: "exclamationmark.triangle",
-                    description: Text("This Dashboard is no longer available."))
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                EmptyState(title: "This dashboard is no longer available") {
+                    Button("Show working Tasks") { model.selectWorkingTasksDashboard() }
+                        .accessibilityIdentifier("dashboard-show-working-tasks")
+                }
             }
         }.padding(Spacing.sm).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top).background(palette.surfaceMuted)
             .sheet(isPresented: $editing) {
@@ -174,8 +178,12 @@ struct WaveTiles: View {
         if let plan = model.boardPlan(view) {
             let members = model.boardTiles(view)
             if members.isEmpty {
-                Text("No planned or started Tasks").font(Typography.text)
-                    .foregroundStyle(palette.textSecondary).frame(maxWidth: .infinity, maxHeight: .infinity)
+                HStack(spacing: Spacing.sm) {
+                    Text("No planned or started Tasks.").emptyLine()
+                    Button("New Task ⌘N") { model.navigation.palette = .newTask }
+                        .buttonStyle(LoopflowButtonStyle())
+                }.frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .accessibilityElement(children: .contain)
                     .accessibilityIdentifier("wave-tiles-empty")
             } else {
                 DashboardSlotGrid(members: members, focused: nil, layout: plan.slots,
@@ -252,7 +260,7 @@ struct DashboardTile: View {
                 if let task, let workflow = model.taskWork[task.task.id].value?.graph,
                    let line = Self.workflow(workflow, status: status, auto: model.taskExecution[task.task.id].value?.auto?.state == .on,
                                             setup: task.task.setupPosition) {
-                    line.lineLimit(1).truncationMode(.tail).help(line.sentence)
+                    line.lineLimit(1).truncationMode(.tail).help(line.sentence ?? workflow.sentence)
                         .padding(.horizontal, Spacing.md).padding(.bottom, Spacing.sm)
                 }
             }.background(palette.surface)
@@ -270,7 +278,7 @@ struct DashboardTile: View {
             // A pane that cannot shrink to a narrow slot overflows here, so the header keeps the slot's width.
             Group {
             if let entry, let content {
-                if let error = entry.persistenceError { Text(error).foregroundStyle(palette.warning).textSelection(.enabled) }
+                if let error = entry.persistenceError { FailureLine("Layout not saved.", machine: error) }
                 // The plan read in this frame decides; saved planning may still say otherwise.
                 if let task, content.states.contains(.backlog) {
                     TaskStartOffer(model: model, task: task.task)
@@ -289,7 +297,7 @@ struct DashboardTile: View {
                     // Dashboard stays. The zoom control is the way into the Work.
                     ConversationPlaceholder(workspace: entry, model: model, sessions: sessions)
                 }
-            } else { PaneEmptyState(title: "Work unavailable", systemImage: "exclamationmark.triangle") }
+            } else { EmptyState(title: "Work unavailable") }
             }.frame(minWidth: 0, maxWidth: .infinity, alignment: .topLeading)
         }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             // The slot grid clips each tile at its frame.

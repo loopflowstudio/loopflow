@@ -266,7 +266,7 @@ struct TaskLinkView: View {
             Text("Open Task").serif(.title)
             if let result = model.taskLinkReading.value {
                 if result.tasks.items.isEmpty { Text("No exact Task found in available planning.") }
-                if let reason = result.tasks.unavailableReason { Text(reason) }
+                if let reason = result.tasks.unavailableReason { FailureLine("Planning is unavailable.", machine: reason) }
                 ForEach(result.tasks.items) { task in
                     let wave = result.waves.first { $0.wave.id == task.task.waveId }
                     Button("\(task.task.identifier) · \(task.task.name)\n\(task.task.repo)") {
@@ -368,7 +368,6 @@ struct WorkPaletteShortcut: NSViewRepresentable {
 }
 
 struct GraphCatalogInspector: View {
-    @Environment(\.palette) private var palette
     let entry: GraphCatalogEntry?
     @Bindable var navigation: WorkNavigation
     let model: WorkModel
@@ -390,7 +389,7 @@ struct GraphCatalogInspector: View {
                 }
             }
             if let error = sourceError {
-                Text(error).foregroundStyle(palette.warning)
+                FailureLine("The definition did not open.", machine: error)
             }
             Button("Refresh") { Task { await model.loadGraphCatalog(force: true) } }
             if let compiled = entry?.compiled, let composition = entry?.composition {
@@ -403,8 +402,7 @@ struct GraphCatalogInspector: View {
 }
 
 struct WorkflowCatalogInspector: View {
-    @Environment(\.palette) private var palette
-    let entry: WorkflowCatalogEntry?
+    let entry: GraphCatalogEntry?
     let model: WorkModel
     @State private var sourceError: String?
     @Environment(\.dismiss) private var dismiss
@@ -424,11 +422,11 @@ struct WorkflowCatalogInspector: View {
                 }
             }
             if let error = sourceError {
-                Text(error).foregroundStyle(palette.warning)
+                FailureLine("The definition did not open.", machine: error)
             }
             Button("Refresh") { Task { await model.loadGraphCatalog(force: true) } }
-            if let workflow = entry?.workflow {
-                WorkflowSteps(workflow: workflow)
+            if let outline = entry?.workflow {
+                WorkflowLine(outline: outline)
             } else { Text(entry?.unavailable ?? "Refresh the Workflow catalog and try again.") }
             Button("Done") { dismiss() }.keyboardShortcut(.cancelAction)
         }.buttonStyle(LoopflowButtonStyle()).padding(Spacing.xxl).frame(width: 780)

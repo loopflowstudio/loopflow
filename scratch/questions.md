@@ -102,3 +102,7 @@
 ## Concept review, second pass after the build (2026-11-22, headless)
 
 - Nothing more to change in the model. The Brief's repeated "ready." / "Waiting: ready" is Rust's wording plus LOO-515's condition line; it is question 4 on `scratch/concept-review.html`.
+
+## Ship review (2026-11-22, headless)
+
+- Nobody present; no reaction recorded. Page: `scratch/ship-review.html`. Filed Task de46cf (Rust Task reason as a sentence: raw step UUID, bare "ready"). Questions 1–4 on the page stay open.

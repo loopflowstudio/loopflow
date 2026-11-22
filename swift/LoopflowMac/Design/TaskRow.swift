@@ -1,15 +1,14 @@
 import Loopflow
 import SwiftUI
 
-/// The one Task row: the title in full, then the ID and the status word (what
-/// its program reports, else its lifecycle). A row whose program is blocked
-/// adds one line saying what it reported. No
+/// The one Task row: the title in full, then the ID and the status word, and
+/// one line when the Task needs someone. `TaskStanding` decides both. No
 /// stripe, no border, no summary; selection is the host's fill.
 struct TaskRow: View {
     let id: String
     let presentation: WorkModel.TaskPresentation
     let task: RoadmapTask?
-    let status: SessionProgramStatus
+    let standing: TaskStanding
     /// The Task's auto setting is on.
     var auto = false
     var selected = false
@@ -20,6 +19,28 @@ struct TaskRow: View {
     var showsSlotHint = false
     var hover: HoverFlag?
     @Environment(\.palette) private var palette
+
+    init(id: String, presentation: WorkModel.TaskPresentation, task: RoadmapTask?, status: SessionProgramStatus,
+         auto: Bool = false, selected: Bool = false, muted: Bool = false,
+         slotHint: String? = nil, showsSlotHint: Bool = false, hover: HoverFlag? = nil) {
+        self.id = id
+        self.presentation = presentation
+        self.task = task
+        standing = TaskStanding(task: task, status: status)
+        self.auto = auto
+        self.selected = selected
+        self.muted = muted
+        self.slotHint = slotHint
+        self.showsSlotHint = showsSlotHint
+        self.hover = hover
+    }
+
+    /// A row for a host that holds the Task and no Session readings: the Portfolio.
+    init(task: RoadmapTask, context: String? = nil) {
+        self.init(id: task.id,
+                  presentation: .init(title: task.task.name, identifier: task.task.identifier, context: context),
+                  task: task, status: .unknown)
+    }
 
     private var secondary: Color { selected ? palette.workSelectedSecondaryText : palette.textSecondary }
 
@@ -32,20 +53,17 @@ struct TaskRow: View {
                 .allowsHitTesting(false)
             HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
                 identifier
-                if let label = status.label, let tone = status.tone {
-                    Text(verbatim: label)
-                        .fontWeight(selected ? .semibold : nil)
-                        .foregroundStyle(selected ? palette.workSelectedText : tone.ink(in: palette))
-                        .help(Text(verbatim: status.help))
-                        .accessibilityIdentifier("work-program-status-\(id)")
-                } else if case .unavailable = status {
+                if let word = standing.word {
+                    Text(verbatim: word)
+                        .fontWeight(selected && standing.tone != nil ? .semibold : nil)
+                        .foregroundStyle(standing.tone.map { selected ? palette.workSelectedText : $0.ink(in: palette) } ?? secondary)
+                        .help(Text(verbatim: standing.help ?? word))
+                        .accessibilityIdentifier(wordIdentifier)
+                } else if let help = standing.help {
                     Image(systemName: "info.circle")
-                        .help(Text(verbatim: status.help))
-                        .accessibilityLabel(Text(verbatim: status.help))
+                        .help(Text(verbatim: help))
+                        .accessibilityLabel(Text(verbatim: help))
                         .accessibilityIdentifier("work-program-status-unavailable-\(id)")
-                } else if let task {
-                    Text(verbatim: task.lifecycle.label.capitalized)
-                        .accessibilityIdentifier("work-task-lifecycle-\(id)")
                 }
                 if auto {
                     Text("Auto")
@@ -68,8 +86,8 @@ struct TaskRow: View {
             .font(Typography.meta)
             .foregroundStyle(secondary)
             .lineLimit(1)
-            if let ask = status.ask {
-                Text(verbatim: ask)
+            if let line = standing.line {
+                Text(verbatim: line)
                     .font(Typography.text)
                     .foregroundStyle(secondary)
                     .lineLimit(2)
@@ -80,6 +98,24 @@ struct TaskRow: View {
         .padding(.vertical, Spacing.sm)
         .padding(.horizontal, Spacing.md)
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// The whole row opens the Task; the ID's link stays above the target.
+    func opening(_ action: @escaping () -> Void) -> some View {
+        background {
+            Button(action: action) { Color.clear.contentShape(Rectangle()) }
+                .buttonStyle(.plain)
+                .accessibilityLabel(presentation.title)
+                .accessibilityIdentifier("task-row-open-\(id)")
+        }
+    }
+
+    private var wordIdentifier: String {
+        switch standing.source {
+        case .program, .unavailable, .none: "work-program-status-\(id)"
+        case .condition: "work-task-condition-\(id)"
+        case .lifecycle: "work-task-lifecycle-\(id)"
+        }
     }
 
     @ViewBuilder private var identifier: some View {

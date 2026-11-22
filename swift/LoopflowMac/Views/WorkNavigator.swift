@@ -232,8 +232,7 @@ struct WorkNavigator: View {
         let found = model.task(id: id)
         let selected = model.isSelected(.task(id: id))
         let muted = model.selection?.kind == .wave && found?.wave?.wave.id != model.selection?.id
-        let sessions = model.taskSessions(id)
-        let status = SessionProgramStatus(sessions: sessions, unavailable: model.sessions.failure)
+        let status = model.programStatus(task: id)
         let presentation = model.taskPresentation(id: id)
         let title = presentation.title
         // Rows slide under the pointer while scrolling. Only the ⌘N hint reads the

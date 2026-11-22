@@ -414,16 +414,32 @@ or `lf desktop` reads unless its view is deleted.
 
 ## Slices
 
-1. **One standing, one row, every host.** `TaskStanding` with its tests
-   (program report over condition over lifecycle; the line; unknown adds no
-   word), `TaskRow` drawing it, then the row in the title bar, a dashboard
-   tile, the roadmap, the Now list and the Wave page, with the three
-   Portfolio rows, the capsules, the inspector and `TaskHeading` deleted.
-   This is the slice that can fail: one row has to hold in a 240 pt sidebar,
-   a tile a third of the window wide and a full-width roadmap, and a blocked
-   Task has to read as blocked with no Session reading behind it. If the row
-   needs a host-specific switch to pass, the standing is wrong and changes
-   here.
+1. **One standing, one row, every host.** Built. `TaskStanding`
+   (`Design/TaskStanding.swift`) decides the word and the line; `TaskRow`
+   draws it; the sidebar, the title bar, a dashboard tile, the roadmap, the
+   Now list and the Wave page all show it. `PortfolioTaskRow`
+   (`RoadmapView.swift`) is the row plus `TaskActionCluster`, used by the
+   three Portfolio lists. Deleted: `RoadmapTaskRow`, `NowRowView`,
+   `RoadmapTaskView`, `WorkChannelChips`, `WaveWorkInspector`, `PrLink`,
+   `TaskHeading`, `TaskSection.label` and both color extensions,
+   `historyLabel`, `terminalLabel`.
+
+   What it taught:
+   - No host needed a switch. A row opens through `TaskRow.opening(_:)`, a
+     button behind the row so the ID's link stays its own target.
+   - A program that reports Busy does not hide a waiting or blocked
+     condition: the word is the program's, the line is the condition's
+     reason. `TaskRowTests` holds this.
+   - Not looked at on a display. `TaskRow` pads itself 12 pt at the sides, so
+     Portfolio rows sit 12 pt inside their section headings, and a tile's
+     three icon buttons sit beside a wrapping title. Both are for the Dev app
+     look in qa.
+   - The Now list's group headings lost their warning color with the color
+     extension; the rows' words carry it.
+   - Two more places say where a Task stands in other words, outside the
+     seven listed above: `TaskWorkflowHeader` ("Completed", "Canceled" where
+     the row says "Done", "Abandoned") and the jump palette's detail ("Not
+     started", else the lifecycle word). Left; see `scratch/questions.md`.
 2. **The test and the backlog.** Rename the discipline test, add the padding,
    spacing and radius rules, and bring `BacklogView.swift` and
    `Design/WorkStyle.swift` to pass them while rebuilding the backlog to the
@@ -461,7 +477,7 @@ or `lf desktop` reads unless its view is deleted.
 
 | Command | Result | Who runs it |
 |---------|--------|-------------|
-| `scripts/test_desktop.sh --filter TaskStandingTests` | not run; the suite does not exist yet | build |
+| `scripts/test_desktop.sh --skip-build --filter 'TaskStandingTests\|TaskRowTests\|RoadmapViewTests\|TaskConceptTests\|WorkNavigationTests\|TaskBriefTests\|ProjectActivationTests\|NowProjectionTests\|DashboardWorkspaceTests\|WorkModelTests\|DesktopHeadlessTests'` | passed after slice 1 | build; CI runs the rest |
 | `scripts/test_desktop.sh --filter DesignDisciplineTests` | not run; the suite does not exist yet | build |
 | the grep above | 314 lines at base | build |
 | Dev app in light, dark and an imported theme | not run; needs a display | qa, review |

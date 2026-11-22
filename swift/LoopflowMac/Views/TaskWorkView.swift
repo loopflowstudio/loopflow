@@ -207,27 +207,6 @@ struct TaskWorkflowBar: View {
 
 }
 
-/// A Task's identity wherever it heads Work: the window trail and Dashboard tiles.
-/// Its container sets the primary and secondary text styles.
-struct TaskHeading: View {
-    let task: RoadmapTask
-
-    /// The Task's lifecycle, the state Working Tasks list by; Linear's planning
-    /// state never overrides it. What its run is doing now reads in the Workflow bar.
-    var state: String { task.lifecycle.label.capitalized }
-
-    var body: some View {
-        HStack(spacing: 6) {
-            Text(task.task.identifier).font(Typography.mono).fixedSize()
-            // The title truncates first; identifier and state keep their width.
-            Text(task.task.name).lineLimit(1).truncationMode(.tail)
-                .frame(minWidth: 0, alignment: .leading).help(task.task.name)
-            Text(state).foregroundStyle(.secondary).fixedSize()
-                .accessibilityIdentifier("task-heading-state")
-        }
-    }
-}
-
 /// An unstarted Task's Session slot. Showing it starts nothing; Start runs the
 /// Task's Workflow through the same path as `lf task run`.
 struct TaskStartOffer: View {

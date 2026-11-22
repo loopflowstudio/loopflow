@@ -177,7 +177,7 @@ struct RoadmapView: View {
                                 onOpenTask(row.task.task.repo, row.task.id)
                             },
                             onTaskAction: { row, action in
-                                perform(action, task: row.task)
+                                model.perform(action, task: row.task)
                             },
                             onOpenWorktree: model.openWorktree
                         )
@@ -212,7 +212,7 @@ struct RoadmapView: View {
             onOpenWave: { onOpenWave(roadmap.wave) },
             onOpenTask: { onOpenTask(roadmap.wave.repo, $0) },
             onTaskAction: { task, action in
-                perform(action, task: task)
+                model.perform(action, task: task)
             },
             onOpenWorktree: model.openWorktree
         )
@@ -222,15 +222,18 @@ struct RoadmapView: View {
     private func refresh() async {
         await model.refresh()
     }
+}
 
-    private func perform(_ action: RoadmapTaskAction, task: RoadmapTask) {
+extension WorkModel {
+    /// A Portfolio row's one contextual action.
+    func perform(_ action: RoadmapTaskAction, task: RoadmapTask) {
         switch action {
         case .openPr:
             if let github = task.pr?.publication?.github {
                 NSWorkspace.shared.open(github.url)
             }
         case .run:
-            model.startTask(nil, task: task)
+            startTask(nil, task: task)
         }
     }
 }
@@ -280,7 +283,7 @@ private struct RoadmapWaveCard: View {
             case .available(let tasks, let truncated):
                 if tasks.isEmpty { Text("No Tasks in this Project.").foregroundStyle(palette.textSecondary) }
                 ForEach(tasks) { task in
-                    RoadmapTaskRow(task: task, onSelect: { onOpenTask(task.id) },
+                    PortfolioTaskRow(task: task, onOpen: { onOpenTask(task.id) },
                         onAction: { action in onTaskAction(task, action) }, onOpenWorktree: onOpenWorktree)
                 }
                 if truncated { Text("Older Tasks are truncated.").foregroundStyle(palette.warning) }
@@ -300,89 +303,22 @@ private struct RoadmapWaveCard: View {
     }
 }
 
-struct RoadmapTaskRow: View {
+/// A Task on a Portfolio screen: its row, which opens it, with its actions beside it.
+struct PortfolioTaskRow: View {
     let task: RoadmapTask
-    let onSelect: () -> Void
+    /// The Task's Wave, where the list crosses Waves.
+    var context: String?
+    let onOpen: () -> Void
     let onAction: (RoadmapTaskAction) -> Void
     let onOpenWorktree: (TaskWorktreeSnapshot) -> Void
 
-    @Environment(\.palette) private var palette
-
     var body: some View {
         HStack(alignment: .top, spacing: Spacing.sm) {
-            Image(systemName: task.lifecycle == .done ? "checkmark.circle.fill" : "circle")
-                .font(Typography.meta)
-                .foregroundStyle(task.lifecycle == .done ? palette.success : task.section.color(in: palette))
-                .frame(width: 14)
-            VStack(alignment: .leading, spacing: Spacing.xxs) {
-                HStack(alignment: .firstTextBaseline, spacing: Spacing.xs) {
-                    if let issueURL = task.reference.issueUrl {
-                        Link(task.task.identifier, destination: issueURL)
-                            .font(Typography.meta.weight(.semibold))
-                    } else {
-                        Text(task.task.identifier)
-                            .font(Typography.meta.weight(.semibold))
-                            .foregroundStyle(palette.textSecondary)
-                    }
-                    Text(task.task.name)
-                        .font(Typography.text)
-                        .foregroundStyle(palette.text)
-                        .lineLimit(2)
-                    Spacer()
-                    Text(task.section.label)
-                        .font(Typography.meta.weight(.semibold))
-                        .foregroundStyle(task.section.color(in: palette))
-                }
-                Text(task.condition.reason)
-                    .font(Typography.meta)
-                    .foregroundStyle(palette.textSecondary)
-                    .lineLimit(2)
-                    .accessibilityLabel(taskConditionAccessibilityLabel(task))
-                WorkChannelChips(task: task)
-                TaskActionCluster(
-                    task: task,
-                    onAction: onAction,
-                    onOpenWorktree: onOpenWorktree
-                )
-            }
+            TaskRow(task: task, context: context).opening(onOpen)
+            TaskActionCluster(task: task, onAction: onAction, onOpenWorktree: onOpenWorktree)
+                .padding(.top, Spacing.sm)
         }
-        .padding(Spacing.sm)
-        .background(palette.background)
-        .clipShape(RoundedRectangle(cornerRadius: CornerRadius.control))
-        .contentShape(Rectangle())
-        .onTapGesture { onSelect() }
         .accessibilityIdentifier("loopflow-task-\(task.id)")
-    }
-}
-
-/// The shared Task condition, lifecycle and orthogonal planning facts.
-struct WorkChannelChips: View {
-    let task: RoadmapTask
-    @Environment(\.palette) private var palette
-
-    var body: some View {
-        HStack(spacing: Spacing.xs) {
-            channel("Condition", task.condition.state.rawValue, task.condition.state.color(in: palette))
-            channel("PM", task.task.terminalLabel ?? "open",
-                    task.task.isSuccessful ? palette.success : palette.textSecondary)
-            channel("Status", task.lifecycle.label, statusColor(task.lifecycle))
-        }
-    }
-
-    private func channel(_ label: String, _ value: String, _ color: Color) -> some View {
-        HStack(spacing: 2) {
-            Text(label).foregroundStyle(palette.textSecondary)
-            Text(value).foregroundStyle(color)
-        }
-        .font(Typography.meta)
-        .padding(.horizontal, Spacing.xs)
-        .padding(.vertical, 1)
-        .background(palette.surfaceMuted.opacity(0.5))
-        .clipShape(Capsule())
-    }
-
-    private func statusColor(_ status: TaskState) -> Color {
-        status.isTerminal ? palette.textTertiary : palette.working
     }
 }
 
@@ -398,19 +334,16 @@ struct TaskActionCluster: View {
         HStack(spacing: Spacing.xs) {
             if let action = roadmapTaskAction(task) {
                 Button(action.label) { onAction(action) }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
             }
             if let workspace = task.reference.workspace {
                 Button("Worktree") { onOpenWorktree(workspace) }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
             }
             if let github = task.pr?.publication?.github {
                 Link("PR #\(github.number)", destination: github.url)
                     .font(Typography.meta)
             }
         }
+        .buttonStyle(LoopflowButtonStyle())
     }
 }
 
@@ -427,7 +360,7 @@ struct NowSectionView: View {
             HStack(spacing: Spacing.sm) {
                 Text(section.group.title)
                     .font(Typography.lede)
-                    .foregroundStyle(section.group.color(in: palette))
+                    .foregroundStyle(palette.text)
                 Text("\(section.rows.count)")
                     .font(Typography.meta.weight(.semibold))
                     .foregroundStyle(palette.textSecondary)
@@ -438,90 +371,16 @@ struct NowSectionView: View {
                 Spacer()
             }
             ForEach(section.rows) { row in
-                NowRowView(
-                    row: row,
-                    onSelect: { onSelect(row) },
+                PortfolioTaskRow(
+                    task: row.task,
+                    context: row.wave?.name ?? "No Wave",
+                    onOpen: { onSelect(row) },
                     onAction: { action in onTaskAction(row, action) },
                     onOpenWorktree: onOpenWorktree
                 )
             }
         }
         .accessibilityIdentifier("loopflow-now-\(section.group.rawValue)")
-    }
-}
-
-private struct NowRowView: View {
-    let row: NowRow
-    let onSelect: () -> Void
-    let onAction: (RoadmapTaskAction) -> Void
-    let onOpenWorktree: (TaskWorktreeSnapshot) -> Void
-
-    @Environment(\.palette) private var palette
-
-    private var task: RoadmapTask { row.task }
-    var body: some View {
-        VStack(alignment: .leading, spacing: Spacing.xxs) {
-            HStack(alignment: .firstTextBaseline, spacing: Spacing.xs) {
-                if let issueURL = task.reference.issueUrl {
-                    Link(task.task.identifier, destination: issueURL)
-                        .font(Typography.meta.weight(.semibold))
-                } else {
-                    Text(task.task.identifier)
-                        .font(Typography.meta.weight(.semibold))
-                        .foregroundStyle(palette.textSecondary)
-                }
-                Text(task.task.name)
-                    .font(Typography.text)
-                    .foregroundStyle(palette.text)
-                    .lineLimit(2)
-                Spacer()
-                Text(row.wave?.name ?? "No Wave")
-                    .font(Typography.meta)
-                    .foregroundStyle(palette.textSecondary)
-                    .lineLimit(1)
-            }
-            Text(task.condition.reason)
-                .font(Typography.meta)
-                .foregroundStyle(palette.textSecondary)
-                .lineLimit(2)
-                .accessibilityLabel(taskConditionAccessibilityLabel(task))
-            WorkChannelChips(task: task)
-            TaskActionCluster(
-                task: task,
-                onAction: onAction,
-                onOpenWorktree: onOpenWorktree
-            )
-        }
-        .padding(Spacing.sm)
-        .background(palette.surface)
-        .clipShape(RoundedRectangle(cornerRadius: CornerRadius.control))
-        .overlay {
-            RoundedRectangle(cornerRadius: CornerRadius.control)
-                .stroke(palette.border, lineWidth: 1)
-        }
-        .contentShape(Rectangle())
-        .onTapGesture { onSelect() }
-        .accessibilityIdentifier("loopflow-task-\(task.id)")
-    }
-}
-
-extension TaskSection {
-    var label: String { rawValue.capitalized }
-
-    func color(in palette: LoopflowPalette) -> Color {
-        switch self {
-        case .working: palette.accent
-        case .backlog, .done, .abandoned: palette.textTertiary
-        }
-    }
-}
-
-private extension TaskConditionState {
-    func color(in palette: LoopflowPalette) -> Color {
-        switch self {
-        case .blocked, .waiting: palette.warning
-        case .clear, .unknown: palette.textTertiary
-        }
     }
 }
 #endif

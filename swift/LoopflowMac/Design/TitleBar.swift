@@ -59,8 +59,10 @@ struct TitleBar: View {
             if let task = model.breadcrumb?.task {
                 let presentation = model.taskPresentation(id: task.task.id)
                 WorkTaskIdentity(presentation: presentation)
-                if presentation.context == nil {
-                    Text(TaskHeading(task: task.task).state).foregroundStyle(.secondary).fixedSize()
+                // The word its sidebar row shows.
+                if presentation.context == nil,
+                   let word = TaskStanding(task: task.task, status: model.programStatus(task: task.task.id)).word {
+                    Text(verbatim: word).foregroundStyle(.secondary).fixedSize()
                         .accessibilityIdentifier("task-heading-state")
                 }
                 if let workspace = model.shownWorkspace, workspace.key.kind == .task, workspace.key.id == task.task.id {

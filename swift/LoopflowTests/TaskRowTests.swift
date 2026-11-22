@@ -23,9 +23,9 @@ struct TaskRowTests {
         let task = try #require(roadmap().waves.first?.tasks.items[1])
         let view = row(task, status: status)
         #expect(try view.inspect().find(text: label).string() == label)
-        // The ask line says what a blocked program reported, and only then.
+        // The line says what a blocked program asked; otherwise why the waiting Task needs someone.
         let ask = try? view.inspect().find(viewWithAccessibilityIdentifier: "work-task-ask-\(task.id)").text().string()
-        #expect(ask == (state == .blocked ? "**literal**" : nil))
+        #expect(ask == (state == .blocked ? "**literal**" : task.condition.reason))
         let programStatus = try #require(reporting.programStatus)
         let pane = try #require(StatusMark(status: programStatus))
         #expect(try pane.inspect().find(text: "\(label) · **literal**").string() == "\(label) · **literal**")
@@ -143,8 +143,7 @@ struct TaskRowTests {
         let title = try inspected.find(text: task.task.name)
         #expect(throws: (any Error).self) { try title.lineLimit() }
         #expect(try inspected.find(text: task.task.identifier).string() == task.task.identifier)
-        let lifecycle = task.lifecycle.label.capitalized
-        #expect(try inspected.find(viewWithAccessibilityIdentifier: "work-task-lifecycle-\(task.id)").text().string() == lifecycle)
+        #expect(try inspected.find(viewWithAccessibilityIdentifier: "work-task-condition-\(task.id)").text().string() == "Waiting")
         #expect(throws: (any Error).self) { try inspected.find(text: "Unowned") }
     }
 

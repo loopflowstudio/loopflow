@@ -199,25 +199,32 @@ struct DashboardTile: View {
         // Only a saved Dashboard has an arrangement to write.
         let arrangeable = plan.dashboardID != nil
         return VStack(spacing: 0) {
-            HStack(spacing: Spacing.sm) {
-                Button { enter() } label: {
-                    if let task { TaskHeading(task: task.task) }
-                    else { Text(content?.title ?? member.work.id).lineLimit(1) }
-                }.buttonStyle(.plain)
-                Spacer(minLength: 0)
+            HStack(alignment: .top, spacing: Spacing.sm) {
                 if let task {
-                    Menu { TaskActionItems(model: model, task: task.task, wave: task.wave?.wave,
-                                                     work: model.taskWork[task.task.id].value) }
-                        label: { Image(systemName: "ellipsis") }
-                        .menuStyle(.button).buttonStyle(.plain).fixedSize().help("Task actions")
+                    let id = task.task.id
+                    TaskRow(id: id, presentation: model.taskPresentation(id: id), task: task.task,
+                            status: model.programStatus(task: id), auto: task.task.selectionStates.contains(.auto))
+                        .opening { enter() }
+                } else {
+                    Button { enter() } label: { Text(content?.title ?? member.work.id).lineLimit(1) }
+                        .buttonStyle(.plain).padding(Spacing.sm)
+                    Spacer(minLength: 0)
                 }
-                Button { enter() } label: { Image(systemName: "arrow.up.left.and.arrow.down.right") }
-                    .help("Open this Work in full")
-                if arrangeable {
-                    Button { model.setTile(plan, member, hidden: true) } label: { Image(systemName: "eye.slash") }
-                        .help("Hide this occurrence").disabled(model.dashboardSaving)
-                }
-            }.padding(8).background(palette.surface)
+                HStack(spacing: Spacing.sm) {
+                    if let task {
+                        Menu { TaskActionItems(model: model, task: task.task, wave: task.wave?.wave,
+                                                         work: model.taskWork[task.task.id].value) }
+                            label: { Image(systemName: "ellipsis") }
+                            .menuStyle(.button).buttonStyle(.plain).fixedSize().help("Task actions")
+                    }
+                    Button { enter() } label: { Image(systemName: "arrow.up.left.and.arrow.down.right") }
+                        .help("Open this Work in full")
+                    if arrangeable {
+                        Button { model.setTile(plan, member, hidden: true) } label: { Image(systemName: "eye.slash") }
+                            .help("Hide this occurrence").disabled(model.dashboardSaving)
+                    }
+                }.padding([.top, .trailing], Spacing.sm)
+            }.background(palette.surface)
                 .foregroundStyle(palette.text, palette.textSecondary)
                 .draggable(workingTasks ? TaskOrderDrag.token(member.work.id) : member.token)
                 .dropDestination(for: String.self) { values, _ in

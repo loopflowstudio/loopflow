@@ -55,7 +55,6 @@ struct TaskConceptTests {
                 let label = try header.inspect().find(viewWithAccessibilityIdentifier: "task-lifecycle-status").text().string()
                 if task.task.identifier == "FIX-2" {
                     #expect(task.lifecycle == .active)
-                    #expect(TaskHeading(task: task).state == "Active")
                     #expect(label == "Active")
                     #expect(!task.awaitsStart)
                     #expect(!task.isCompleted)
@@ -164,7 +163,7 @@ struct TaskConceptTests {
         let phase = try #require(self.phases().first)
         let projection = WorkProjection(roadmaps: [], inventory: [task], sessions: phase.sessions)
         #expect(Set(projection.standaloneTasks[0].sessions.map(\.id)) == ["bound", "checkout", "unknown"])
-        #expect(TaskHeading(task: task).state == "Active")
+        #expect(task.lifecycle == .active)
         #expect(!task.awaitsStart)
         #expect(!task.isCompleted)
     }

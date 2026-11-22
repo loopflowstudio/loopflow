@@ -31,6 +31,8 @@ struct WaveDetailPane: View {
     let onActivateProject: () -> Void
     let onClose: () -> Void
     let onOpenTask: (String) -> Void
+    let onTaskAction: (RoadmapTask, RoadmapTaskAction) -> Void
+    let onOpenWorktree: (TaskWorktreeSnapshot) -> Void
 
     @Environment(\.palette) private var palette
     @State private var showHistory = false
@@ -50,7 +52,9 @@ struct WaveDetailPane: View {
                     isProjectActivationPending: isProjectActivationPending,
                     transportError: transportError,
                     onActivateProject: onActivateProject,
-                    onOpenTask: onOpenTask
+                    onOpenTask: onOpenTask,
+                    onTaskAction: onTaskAction,
+                    onOpenWorktree: onOpenWorktree
                 )
                 .id("\(repoPath)|\(wave.id)")
                 .frame(minWidth: 230, idealWidth: 320, maxWidth: 440, maxHeight: .infinity)
@@ -97,9 +101,10 @@ private struct WavePlanView: View {
     let transportError: String?
     let onActivateProject: () -> Void
     let onOpenTask: (String) -> Void
+    let onTaskAction: (RoadmapTask, RoadmapTaskAction) -> Void
+    let onOpenWorktree: (TaskWorktreeSnapshot) -> Void
 
     @Environment(\.palette) private var palette
-    @State private var selectedTaskID: String?
     @State private var reading = WaveDetailReading()
     @State private var historyFilter = TaskHistoryFilter()
     @State private var historyNow = Date()
@@ -122,13 +127,6 @@ private struct WavePlanView: View {
                 if let portfolio = reading.snapshot?.metricPortfolio {
                     WaveMetricPortfolioView(
                         portfolio: portfolio
-                    )
-                }
-                if let selectedTaskID, let workMap {
-                    WaveWorkInspector(
-                        selectedTaskID: selectedTaskID,
-                        workMap: workMap,
-                        onOpenTask: onOpenTask
                     )
                 }
             }
@@ -256,7 +254,10 @@ private struct WavePlanView: View {
                     }
                     if truncated { Text("Planning is partial; more Tasks exist.") }
                     if tasks.isEmpty { Text("No current Tasks").foregroundStyle(palette.textSecondary) }
-                    ForEach(tasks) { task in RoadmapTaskView(task: task, selectedTaskID: $selectedTaskID) }
+                    ForEach(tasks) { task in
+                        PortfolioTaskRow(task: task, onOpen: { onOpenTask(task.id) },
+                            onAction: { action in onTaskAction(task, action) }, onOpenWorktree: onOpenWorktree)
+                    }
                     if historyFilter.showCompleted {
                         if let error = closed.error {
                             Text(error).foregroundStyle(palette.warning)
@@ -670,161 +671,6 @@ private extension MetricContractIssue {
             return "\(waveId)/\(metricId) declares \(contractInstrument), but \(registeredInstrument) is registered."
         case let .invalidGraduation(waveId, metricId, _, reason):
             return "\(waveId)/\(metricId) cannot graduate: \(reason)."
-        }
-    }
-}
-
-private struct RoadmapTaskView: View {
-    let task: RoadmapTask
-    @Binding var selectedTaskID: String?
-
-    @Environment(\.palette) private var palette
-
-    /// State, owner when owned, and who moves next.
-    private var statusLine: String {
-        let state = task.historyLabel
-        let owner = task.runtime?.owner.map { " · \($0.summary)" } ?? ""
-        return "\(state)\(owner) · next: \(task.nextMove.owner.rawValue)"
-    }
-
-    var body: some View {
-        HStack(alignment: .top, spacing: Spacing.sm) {
-            StatusMark(lens: WaveLens.forTask(task.condition)).accessibilityIdentifier("task-lens")
-                .frame(width: 14)
-                .padding(.top, 2)
-            VStack(alignment: .leading, spacing: Spacing.xxs) {
-                HStack(alignment: .firstTextBaseline, spacing: Spacing.xs) {
-                    Text(task.task.identifier)
-                        .font(Typography.meta)
-                        .foregroundStyle(palette.textSecondary)
-                    Text(task.task.name)
-                        .font(Typography.text)
-                        .foregroundStyle(palette.text)
-                        .lineLimit(2)
-                }
-                Text(statusLine)
-                    .font(Typography.meta)
-                    .foregroundStyle(palette.textSecondary)
-                if let pr = task.pr {
-                    PrLink(pr: pr)
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(Spacing.sm)
-        .background(palette.background.opacity(0.55))
-        .clipShape(RoundedRectangle(cornerRadius: CornerRadius.control))
-        .overlay {
-            RoundedRectangle(cornerRadius: CornerRadius.control)
-                .stroke(isSelected ? palette.selectionEdge : Color.clear, lineWidth: 1)
-        }
-        .contentShape(Rectangle())
-        .accessibilityIdentifier("wave-task")
-        .onTapGesture {
-            selectedTaskID = task.task.id
-        }
-    }
-
-    private var isSelected: Bool {
-        selectedTaskID == task.task.id
-    }
-}
-
-private struct WaveWorkInspector: View {
-    let selectedTaskID: String
-    let workMap: WaveWorkMap
-    let onOpenTask: (String) -> Void
-
-    @Environment(\.palette) private var palette
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: Spacing.sm) {
-            HStack {
-                Text("Selected work")
-                    .font(Typography.meta)
-                    .foregroundStyle(palette.textSecondary)
-                Spacer()
-            }
-            if let task {
-                Text("\(task.task.identifier) · \(task.task.name)")
-                    .font(Typography.lede)
-                    .foregroundStyle(palette.text)
-                details(
-                    status: task.historyLabel,
-                    reason: task.condition.reason,
-                    provider: task.runtime?.provider,
-                    location: taskLocation,
-                    pr: task.pr
-                )
-                if task.reference.workspace != nil {
-                    Button("Open Task workspace") {
-                        onOpenTask(task.task.id)
-                    }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.small)
-                }
-            }
-        }
-        .padding(Spacing.md)
-        .background(palette.surfaceMuted)
-        .clipShape(RoundedRectangle(cornerRadius: CornerRadius.row))
-    }
-
-    private var task: RoadmapTask? {
-        return workMap.tasks.items
-            .first { $0.task.id == selectedTaskID }
-    }
-
-    private var taskLocation: String? {
-        guard let workspace = task?.reference.workspace else { return nil }
-        guard let branch = workspace.branch else { return workspace.worktree }
-        return "\(workspace.worktree)\n\(branch)"
-    }
-
-    @ViewBuilder
-    private func details(
-        status: String,
-        reason: String,
-        provider: String?,
-        location: String?,
-        pr: PrSnapshot?
-    ) -> some View {
-        Text("\(status) · \(reason)")
-            .font(Typography.meta)
-            .foregroundStyle(palette.textSecondary)
-        if let provider {
-            Text("Provider · \(provider)")
-                .font(Typography.meta)
-                .foregroundStyle(palette.textSecondary)
-        }
-        if let location {
-            Text(location)
-                .font(Typography.mono)
-                .foregroundStyle(palette.textSecondary)
-                .textSelection(.enabled)
-        }
-        if let pr {
-            PrLink(pr: pr)
-        }
-    }
-}
-
-private struct PrLink: View {
-    let pr: PrSnapshot
-
-    @Environment(\.palette) private var palette
-
-    var body: some View {
-        if let github = pr.publication?.github {
-            Link(
-                "PR #\(github.number) · \(pr.phase.rawValue)",
-                destination: github.url
-            )
-            .font(Typography.meta)
-        } else {
-            Text("Pull request · \(pr.phase.rawValue) · \(pr.branch)")
-                .font(Typography.meta)
-                .foregroundStyle(palette.textSecondary)
         }
     }
 }

@@ -381,7 +381,9 @@ struct WavesView: View {
                 onClose: { selectedWaveId = nil },
                 onOpenTask: { id in
                     openTask(waveRepoPath(for: wave), id)
-                }
+                },
+                onTaskAction: { task, action in model.perform(action, task: task) },
+                onOpenWorktree: model.openWorktree
             )
             .id(wave.id)
             .task(id: wave.id) {

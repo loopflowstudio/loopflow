@@ -45,3 +45,10 @@ Each was decided so the work could continue; `scratch/plan.md` has the detail.
 14. **A busy Task's word.** The prototype's tiles and theme sample say
     "Working"; the app's rows say "Busy" today, and the docs keep "Busy".
     Rename the word to "Working"?
+15. **The Task pane and the jump palette keep their own words.**
+    `TaskWorkflowHeader` says "Completed" and "Canceled" where the row says
+    "Done" and "Abandoned"; the palette says "Not started" where the row says
+    "Unstarted". Slice 1 left both. Should they print `TaskStanding`'s word?
+16. **The Wave page's rows no longer name the owner or who moves next.** The
+    old row read "idle · Ana · next: user". The shared row shows neither,
+    as in the sidebar. Put the owner back on Portfolio rows?

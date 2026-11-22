@@ -125,8 +125,10 @@ struct TaskBriefView: View {
             Text("\(lead)\(reason)")
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityIdentifier("brief-state")
-            if task.condition.state != .clear {
-                Text("\(task.condition.state.rawValue.capitalized): \(task.condition.reason)")
+            // The line the Task's row shows, under the word it would show with no program reporting.
+            let standing = TaskStanding(task: task, status: .unknown)
+            if let line = standing.line {
+                Text(verbatim: standing.source == .condition ? "\(standing.word ?? ""): \(line)" : line)
                     .font(Typography.text).foregroundStyle(palette.warning)
                     .fixedSize(horizontal: false, vertical: true)
             }

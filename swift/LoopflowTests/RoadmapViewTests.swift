@@ -46,7 +46,10 @@ struct RoadmapViewTests {
         let view = RoadmapView(model: model, onOpenWave: { _ in }, onOpenTask: { opened = ($0, $1) })
         let section = try view.inspect().find(NowSectionView.self).actualView()
         let row = try #require(section.section.rows.first)
-        try view.inspect().find(viewWithAccessibilityIdentifier: "loopflow-task-\(row.task.id)").callOnTapGesture()
+        try view.inspect().find(viewWithAccessibilityIdentifier: "loopflow-task-\(row.task.id)")
+            .find(ViewType.Button.self, where: { try $0.accessibilityIdentifier() == "task-row-open-\(row.task.id)" }).tap()
+        // The row says why the Task is on the Now list.
+        #expect(try view.inspect().find(text: row.task.condition.reason).string() == row.task.condition.reason)
         #expect(opened?.0 == row.wave!.repo)
         #expect(opened?.1 == row.task.id)
         #expect(model.selection == nil)

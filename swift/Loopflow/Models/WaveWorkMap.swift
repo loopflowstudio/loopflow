@@ -130,14 +130,6 @@ public struct TaskPlanningSnapshot: Decodable, Sendable, Identifiable, Hashable 
         assignee = try values.decode(String?.self, forKey: .assignee)
     }
 
-    public var terminalLabel: String? {
-        switch state {
-        case "canceled": "Canceled"
-        case "duplicate": "Duplicate"
-        default: isSuccessful ? "Completed" : nil
-        }
-    }
-
     public var isSuccessful: Bool { state == "completed" }
 }
 
@@ -297,11 +289,6 @@ public struct RoadmapTask: Decodable, Sendable, Identifiable, Hashable {
     public var setupPosition: String? {
         guard let execution, [.starting, .blocked].contains(execution.state) else { return nil }
         return execution.reason
-    }
-
-    /// Completion dates may be unknown even when the lifecycle is settled.
-    public var historyLabel: String {
-        lifecycle == .done && task.completedAt == nil ? "Done · date unavailable" : lifecycle.label
     }
 
     public var isCompleted: Bool { lifecycle.isTerminal }

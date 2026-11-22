@@ -298,8 +298,8 @@ for each `<name>.req` write `SnapshotService().snapshotWindow(window, …)` to
 - "File not read." in the Diff tab: `echo x > new.txt; chmod 000 new.txt` in
   a started Task's checkout, then open the tab. `chmod 644` and **Retry**
   reads it.
-- "Skipped lines of <path> did not load.": the Task's base needs a long file
-  (commit one to the repository before `lf task create … --run`), two edits
+- "Skipped lines did not load." under a file's header: the Task's base needs
+  a long file (commit one to the repository before `lf task create … --run`), two edits
   far apart in the checkout, then `chmod 000` the file and click an
   "N unchanged lines" row. The stream moves down when "Comparison
   unavailable." arrives, so capture first and take the row's position from

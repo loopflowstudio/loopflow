@@ -825,13 +825,17 @@ struct TaskFilesTests {
             .appendingPathComponent("tests/fixtures/dto/task_files.json"))
         let reply: @Sendable ([String]) throws -> String = { args in
             let root = try JSONSerialization.jsonObject(with: fixture) as! [String: Any]
-            var value = root[args[1] == "changes" ? "changes" : "diff"] as! [String: Any]
-            if args[1] == "changes" {
+            var value = root[args[1]] as! [String: Any]
+            switch args[1] {
+            case "changes":
                 let file = (value["files"] as! [[String: Any]])[0]
                 value["files"] = ["a.swift", "b.swift"].map { path in
                     file.merging(["path": path, "old_path": NSNull(), "changes": 2]) { $1 }
                 }
-            } else {
+            case "file":
+                // No tour. Any other file is the fixture's one line, shorter than a second hunk expects.
+                if args[3] == DiffTour.path { throw RegistryQueryError("no such file") }
+            default:
                 if args[3] == failingOnce, !failed.withLock({ let was = $0; $0 = true; return was }) {
                     if calledOff { throw CancellationError() }
                     throw RegistryQueryError("the server restarted")
@@ -1152,38 +1156,16 @@ struct TaskFilesTests {
     /// Skipped lines that do not load say so under their own file, and the
     /// words go when that file's opened rows go.
     @Test func aFailedSkippedLinesOpenBelongsToItsFile() async throws {
-        let fixture = try Data(contentsOf: URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("tests/fixtures/dto/task_files.json"))
-        let paths = ["a.swift", "z.swift"]
-        let store = TaskFilesStore(issue: "TEST-1", cwd: "/fixture", query: RegistryQuery { args, _ in
-            let root = try JSONSerialization.jsonObject(with: fixture) as! [String: Any]
-            var value = root[args[1]] as! [String: Any]
-            switch args[1] {
-            case "changes":
-                let file = (value["files"] as! [[String: Any]])[0]
-                value["files"] = paths.map { file.merging(["path": $0, "old_path": NSNull()]) { $1 } }
-            case "file":
-                // Shorter than the comparison's second hunk expects.
-                value["path"] = args[3]
-                value["content"] = "one\n"
-            default:
-                value["patch"] = paths.map { path in
-                    "diff --git a/\(path) b/\(path)\n--- a/\(path)\n+++ b/\(path)\n@@ -1 +1 @@\n-uno\n+one\n@@ -9 +9 @@\n-nine\n+nueve\n"
-                }.joined()
-            }
-            return String(decoding: try JSONSerialization.data(withJSONObject: value), as: UTF8.self)
-        })
-        store.autosave = false
+        let store = try twoFileStore()
         await store.loadReview()
-        let file = try #require(store.shownReview?.file("a.swift"))
+        let file = try #require(store.review?.file("a.swift"))
         let (index, header) = try #require(file.blocks.enumerated().compactMap { index, block -> (Int, String)? in
             if case .hunk(let header) = block, index > 0 { return (index, header) }
             return nil
         }.first)
         await store.openGap(header, gap: try #require(file.gaps[index]), path: "a.swift", reader: .changes)
         #expect(store.openedGaps["a.swift"]?.failure?.contains("the file changed since this comparison was read") == true)
-        #expect(store.openedGaps["z.swift"] == nil)
+        #expect(store.openedGaps["b.swift"] == nil)
         #expect(store.opened(file) == file)
 
         store.showStep(ReviewStep(name: "implement", base: "a", commits: [], head: "b"))

@@ -590,7 +590,11 @@ demo: not headless; qa or demo runs it.
      ("Hidden paths are not saved: …") through the same draw site, so it
      is a `HiddenPathsFailure` (what, machine) and the save reads "Hidden
      paths were not saved." (questions 63). The sidebar is 236 pt wide: its
-     line is the one to look at first for wrapping.
+     line is the one to look at first for wrapping: `FailureLine` sets
+     `what` and the message side by side, where the old text ran full width.
+   - For compress: `BacklogNotice.failed` and `HiddenPathsFailure` hold the
+     same pair `FailureLine` takes (what, machine). One value for a failure
+     that the line draws would remove a type; neither site needs it to work.
 
 Outside this change, on the page for whoever wants it: a stopped Graph's
 reason is one string on the wire, so the Machine's part of "kickoff:

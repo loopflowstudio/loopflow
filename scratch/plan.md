@@ -394,3 +394,23 @@ and New Task screens other than the New Task question.
 - The existing iOS tests and the Mac component tests pass.
 - DESIGN.md has the iPhone ramp, no iPhone pointer under "We do these now",
   and "Tokens today" matches the code.
+
+## Docs written ahead of the build
+
+Read these before building; they describe the finished behavior.
+
+- `swift/LoopflowiOS/README.md`: the row and its status words, the workflow
+  sentence, "Task actions" (Start or Run, Auto-Ship, Stop Auto-Ship), empty
+  and failed states, terminal cell height, a new "Look" section.
+- `DESIGN.md`: the Mac and iPhone columns of the app ramp, the components'
+  home, the two iPhone pointers removed, a Desktop pointer added for its
+  hand-made states.
+- `swift/README.md`: the iOS client paragraph, without `--fixture`.
+
+Names the docs settled: the state view is `StateView`; the platform's control
+height is `HitTarget.control`.
+
+Open: the Mac's Notice for the same write reads "LOO-5 Auto on requested ·
+Undo" (`swift/README.md`), and the phone's docs say "LOO-5 Auto-Ship
+requested". Should the Mac's Notice say "Auto-Ship requested" too, or should
+the phone keep "Auto on requested"?

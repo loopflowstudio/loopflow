@@ -42,3 +42,13 @@ Made in concept review with nobody present; each is reversible. The page is
   is optional. "Disconnected" is the one new title.
 - **The row's status written once in Rust** (word, tone, since, ask on the
   list reading) is left as its own Task; not filed.
+
+Made in write-docs with nobody present; each is reversible.
+
+- **The state view is named `StateView`** and the platform's control height
+  `HitTarget.control`; the plan had left both unnamed.
+- **The phone's Notice reads "LOO-5 Auto-Ship requested"** as the plan says,
+  while the Mac's reads "LOO-5 Auto on requested · Undo". Open: which wording
+  both surfaces use.
+- **DESIGN.md gains a Desktop pointer** under "Two of the same thing" for its
+  hand-made empty and failed states, since the phone will use `StateView`.

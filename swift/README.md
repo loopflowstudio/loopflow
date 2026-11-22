@@ -1559,8 +1559,8 @@ xcodegen generate --spec swift/ios.yml
 open swift/LoopflowMobile.xcodeproj
 ```
 
-The **LoopflowiOS** scheme opens an explicitly offline Task → Session fixture.
-Disable its `--fixture` argument to connect a Machine over host Tailscale.
-[Native client and focused input tests](LoopflowiOS/README.md) describe its build,
-renderer choice and remaining device/live-integration proof. Desktop's project
-and package remain unchanged.
+Run the **LoopflowiOS** scheme and connect a Machine over host Tailscale.
+[Loopflow for iOS](LoopflowiOS/README.md) covers its build, screens, terminal
+and tests. It draws with the shared tokens and components in
+`Loopflow/Design/`, on the iPhone sizes of the ramp in
+[DESIGN.md](../DESIGN.md#type).

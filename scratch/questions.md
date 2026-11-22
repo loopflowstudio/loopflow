@@ -23,3 +23,8 @@
 - Concept review round 4: `config.theme` drops `path` so the phone and Desktop ask the Machine the same question. Passed over: an optional `path` (two ways to ask).
 - Concept review round 4: on the phone a single-name `theme:` is that theme whatever the phone's appearance, as on the Mac. Passed over: phone appearance picks, Loopflow default on the unnamed side (the steer summary's reading; Jack's words don't say it).
 - Concept review round 4: the website terminal block becomes Loopflow Light's light terminal. Passed over: a dark block from Loopflow Dark.
+
+- Implement round 5: Desktop no longer computes the config path; it shows what the server's `config.theme` answer names, so Advanced and the unknown-name message wait for the first answer. Passed over: keeping `ThemePaths.config` for display (a second source of the path).
+- Implement round 5: the phone overrides `\.colorScheme` with the theme's own, so a single dark name draws system controls dark in light appearance. Sheets presented by UIKit may still follow the phone's appearance; check on the simulator.
+- Implement round 5: the website's light terminal blocks and docs code take a 1 px `--border`, since Light's terminal background equals the page background and the blocks otherwise vanish. Passed over: `--surface-muted` behind them (no longer Light's terminal).
+- Implement round 5: old `--bg` (white) maps to `--background` for the page and docs hero and `--surface` for cards, buttons and table cells; `--rule-strong` maps to `--border-active` (darker than before).

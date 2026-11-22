@@ -1,0 +1,28 @@
+at: 6fe53188bba6d98811c7dc2462ef2547b3c387b8
+first:
+  - path: DESIGN.md
+    why: the rules, and the Desktop pointers this change removes
+  - path: swift/README.md
+    why: the screens as a person meets them
+  - path: docs/surfaces.md
+  - path: swift/LoopflowMac/Design/TaskStanding.swift
+    why: the one answer to where a Task stands
+  - path: swift/LoopflowMac/Design/TaskRow.swift
+    why: the row every list draws it with
+  - path: swift/LoopflowTests/DesignDisciplineTests.swift
+    why: the scale as a test; explains the mechanical edits
+  - path: swift/LoopflowMac/Views/BacklogView.swift
+    why: the backlog rebuilt to the prototype
+  - path: swift/LoopflowMac/Views/RoadmapView.swift
+    why: Portfolio rows, sections and the contract notice
+  - path: swift/LoopflowMac/Views/WaveDetailPane.swift
+  - path: swift/LoopflowMac/Views/DashboardView.swift
+    why: dashboard header, tiles and pager
+  - path: swift/LoopflowMac/Views/DashboardSlotGrid.swift
+  - path: swift/LoopflowMac/Views/WavesView.swift
+    why: the one New Wave form
+  - path: swift/LoopflowMac/Views/ThemeChooser.swift
+    why: Choose Theme and its sample
+hide:
+  - path: swift/Loopflow/Services/Notice.swift
+    why: four paddings renamed to steps

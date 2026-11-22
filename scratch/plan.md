@@ -535,5 +535,5 @@ or `lf desktop` reads unless its view is deleted.
 | `scripts/test_desktop.sh --filter 'DashboardWorkspaceTests\|RoadmapViewTests\|CreateWaveSheetTests\|WorkflowLineTests\|WorkModelTests\|WorkNavigationTests'` | passed after slice 3 (125 tests; one new assertion corrected, then `CreateWaveSheetTests` rerun, 4 tests) | build |
 | `scripts/test_desktop.sh --filter 'DesignDisciplineTests\|ThemeWorkflowTests\|WorkPaletteTests\|DesktopHeadlessTests\|TaskFilesTests'` | passed after slice 4 (75 tests; two assertions moved to "Built-in Workflow") | build |
 | the grep above | 314 lines at base, 309 after slice 1, 296 after slice 2, 249 after slice 3, none after slice 4 | build |
-| `BacklogViewTests`, `DashboardWorkspaceTests`, `RoadmapViewTests`, `CreateWaveSheetTests`, `TaskRowTests`, `TaskStandingTests`, `WorkflowLineTests`, `WorkNavigationTests`, `WorkModelTests` | not rerun after slice 4's sweep | gate, CI |
+| `scripts/test_desktop.sh --skip-build --filter 'BacklogViewTests\|DashboardWorkspaceTests\|RoadmapViewTests\|CreateWaveSheetTests\|TaskRowTests\|TaskStandingTests\|WorkflowLineTests\|WorkNavigationTests\|WorkModelTests\|WaveDetailReadingTests'` | passed after slice 4 (162 tests) | build; CI runs the rest |
 | Dev app in light, dark and an imported theme | not run; needs a display | qa, review |

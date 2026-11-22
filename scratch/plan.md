@@ -376,8 +376,20 @@ in DESIGN.md "Desktop semantics"; palette contrast.
    shortcuts…" fails on ⌘⌥1 → `details brief`: the binding is in
    `DesktopActions.swift`, which no 3d4350 commit touches (last changed by
    main #1993); gate looks. Not seen in the Dev app.
-5. **Next:** `TaskRow`, `StatusMark`, `LoopflowButtonStyle` (replaces the
-   bar's `WorkOutlineButtonStyle`, so Auto-Ship becomes the 24 pt button the
-   Demo names) and `TitleBar`. Then: Session strip and notice
-   line; Brief/Diff/Files; DESIGN.md once cfadc6 is on main; QA in three
-   themes at the narrowest width.
+5. **Built** (03c2c7403e). In `LoopflowMac/Design/`: `TaskRow` (title wraps,
+   then ID link, status word in `meta` — the report's label, else the
+   lifecycle word — "Auto", the ⌘N hint, and a blocked report's ask line;
+   takes `since: Date?`, nil everywhere), `StatusMark` (8 pt dot + `text`
+   phrase in the tone's ink + optional action; `init?(status:)` for program
+   reports, `init(lens:)` for Wave/Task state via the new
+   `WaveLensColor.tone`), `LoopflowButtonStyle(.neutral|.accent|.destructive)`
+   and `TitleBar` (24 pt targets). Deleted: `TaskRowMetadata`, the row stripe
+   and summary/excerpt line with `SessionProgramStatus.preview(now:)`,
+   `ProgramStatusLabel`, the strip's bare dot, `WaveLensView` with
+   `WaveLensColor.ink/isLit`, the four old button styles, the sidebar
+   selection border. `TaskRowMetadataTests` is `TaskRowTests`. Passed:
+   `scripts/test_desktop.sh --filter 'DesktopHeadlessTests|WorkflowLineTests|TypographyDisciplineTests|WorkPaletteTests|TaskRowTests|WaveRowTests|WaveLensTests|ProgramStatusTests|TaskConceptTests|ConsoleWorkspaceTests|WorkModelTests|WorkNavigationTests|BacklogViewTests'`
+   (184 tests) except the ⌘⌥1 check above. Not seen in the Dev app.
+6. **Next:** Session strip (agent name `textStrong`, no sparkle; the strip's
+   `StatusMark` is in) and the notice line; then Brief/Diff/Files; DESIGN.md
+   once cfadc6 is on main; QA in three themes at the narrowest width.

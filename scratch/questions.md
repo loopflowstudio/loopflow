@@ -107,3 +107,29 @@
 
 - Sync with LOO-515 kept the 3d4350 concept review in this checkout. Each
   Task uses the same scratch filename for its own review.
+
+## Slice 5 (components), choices made headless
+
+- The row's status word is the program's report label (**Busy**, **Blocked ·
+  Auth**, **Available · inferred**) and falls back to the lifecycle word
+  (**Active**) when nothing reports. swift/README.md said "ID and lifecycle
+  word"; it now says both. Alternative: lifecycle word always, report only
+  in the ask line.
+- The sidebar's live-excerpt line ("Summary · …", turn output with its age)
+  went with the summary line, with `SessionProgramStatus.preview(now:)` and
+  its tests. The wire `SessionRecord.preview` now has no Mac reader; iPhone
+  never read it. Follow-up question: drop it from Rust, or show the excerpt
+  somewhere in the Task pane.
+- The Task ID stays a link to the issue (plain text without a URL); the PR
+  link and owner left the row.
+- The ask line shows for a **blocked** report only (`msg`, else `title`);
+  `ProgramStatusState` has no waiting state of its own.
+- `.accent` buttons are filled with the accent (prototype `.btn.primary`);
+  the old `emphasized` outline is gone. Used by the backlog's two primary
+  actions and New Wave's **Create wave**.
+- Sidebar Wave rows lost the selection border too (`SidebarSelectionShape`
+  is shared), so every sidebar selection is fill only.
+- No second title bar exists in code: the backlog's capsule is RepoView's
+  same `TitleBar`; the moon button in the screenshot has no source here.
+- The pane strip shows one `StatusMark` after the agent menu: the report's
+  phrase, or a bare dot from the Session's availability.

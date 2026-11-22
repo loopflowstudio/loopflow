@@ -74,7 +74,7 @@ CoreText. QA looks at Claude's TUI for fallback width and baseline.
 ### Ramp (`Typography`)
 
 `display`, `title` (serif), `lede`, `text`, `textStrong`, `meta` (sans),
-`mono`, `terminal` (mono), plus `serifFamily`/`sansFamily`/`monoFamily`.
+`mono` (mono), `terminalSize` (Ghostty's `font-size` default; Ghostty draws the cells, so no terminal `Font`), plus `serifFamily`/`sansFamily`/`monoFamily`.
 Nothing takes a size. `label`, `heroTitle`, `sectionTitle`, `body`,
 `strong`, `caption`, `code` are deleted.
 
@@ -315,9 +315,11 @@ in DESIGN.md "Desktop semantics"; palette contrast.
    process-registered Spline Sans Mono faces. Not yet seen on screen: the
    Dev app with Claude's TUI (fallback glyph width, box drawing) and
    Atkinson at the narrowest window; that look belongs to QA.
-2. **One ramp, one radius set.** Mechanical migration of every call site,
-   iPhone to `MobileType`, delete the sized helpers and old radius names, add
-   `TypographyDisciplineTests`.
+2. **One ramp, one radius set (next).** Mechanical migration of every call
+   site, iPhone to `MobileType`, delete the sized helpers and old radius
+   names, add `TypographyDisciplineTests`. Counted after slice 1: 356 sized
+   `Typography.*(` calls, 86 `.system(size:)`/`.font(.caption|.body` in
+   `Loopflow/` and `LoopflowMac/`, 25 `CornerRadius.sm/md/lg/xl/full`.
 3. **Workflow line end to end.** Rust `steps` + `sentence`, fixtures, CLI
    text, `WorkflowLine`, delete the three position renderers.
 4. Then: Task row + status mark + button + title bar; Session strip and

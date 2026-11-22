@@ -73,8 +73,6 @@ public enum Typography {
     public static let meta = Font.custom(sansFace, fixedSize: 11)
     /// Inline IDs, paths, commands.
     public static let mono = Font.custom(monoFace, fixedSize: 12)
-    /// Terminal cells.
-    public static let terminal = Font.custom(monoFace, fixedSize: terminalSize)
     /// Ghostty's `font-size` default; the person's configuration replaces it.
     public static let terminalSize: CGFloat = 13
 

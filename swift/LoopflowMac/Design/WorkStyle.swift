@@ -206,23 +206,3 @@ extension ProgramStatusState {
         }
     }
 }
-
-extension View {
-    func workDestinationSelection(_ selected: Bool) -> some View {
-        modifier(WorkDestinationSelection(selected: selected))
-    }
-}
-
-private struct WorkDestinationSelection: ViewModifier {
-    let selected: Bool
-    @Environment(\.palette) private var palette
-    @State private var hovering = false
-    func body(content: Content) -> some View {
-        content
-            .background(selected ? palette.workSelectedFill : (hovering ? palette.actionHover : .clear),
-                        in: RoundedRectangle(cornerRadius: CornerRadius.row))
-            .overlay(RoundedRectangle(cornerRadius: CornerRadius.row).strokeBorder(selected ? palette.selectionEdge : .clear))
-            .onHover { hovering = $0 }
-            .accessibilityAddTraits(selected ? [.isSelected] : [])
-    }
-}

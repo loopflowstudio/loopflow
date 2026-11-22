@@ -1358,7 +1358,7 @@ redirect input. A lost reply is uncertain: do not automatically resend. The nati
 fixture covers cursor insertion and submission but has not run here.
 
 Repository and Wave navigation displays retained conversation entry without
-starting a provider. Waves group their full inventory as Owned and Unowned; rows read "Jack Heart on mini" or "Unowned".
+starting a provider.
 
 
 ## Testing

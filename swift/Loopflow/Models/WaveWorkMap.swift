@@ -190,14 +190,6 @@ public struct TaskOwner: Codable, Sendable, Hashable {
         try container.encode(personId, forKey: .personId)
         try container.encode(machine, forKey: .machine)
     }
-
-    /// "Jack Heart on mini"; "Machine unknown" when the Machine was never recorded.
-    public var summary: String {
-        let person = person ?? personKey ?? "Someone"
-        if let label = machine.label, !label.isEmpty { return "\(person) on \(label)" }
-        if let id = machine.id { return "\(person) on \(id)" }
-        return "\(person) · Machine unknown"
-    }
 }
 
 /// Stable Task references shared by `lf wave status` and `lf wave show`. The issue URL

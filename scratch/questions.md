@@ -117,3 +117,7 @@ Each was decided so the work could continue; `scratch/plan.md` has the detail.
     (`CheckoutTree.swift:159`), in the mono column that holds M, R and U. The
     plan named the unsaved-draft "•" only. Leave it as that column's mark, or
     make it a symbol?
+36. **`WaveLens.forTasks` has no caller.** Compress deleted `forTask`, whose
+    last caller was the Wave page's old row. `forTasks` and `fold` were
+    already unused at the base, with six tests holding them. Left, as outside
+    this change. Delete them and their tests?

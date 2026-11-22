@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// The operating state shared by Wave, Project, and Task rows, drawn as a
+/// The operating state shared by Wave and Project rows, drawn as a
 /// status mark whose color is the shared operating grammar. Green = a live body
 /// is advancing; red = blocked; blue = waiting on another actor; black = off and
 /// clean, nothing expected to run; unknown = evidence could not be read.
@@ -36,8 +36,8 @@ public enum WaveLensColor: String, Sendable, Hashable {
 }
 
 /// A rendered lens value: its color plus the reason it holds. The reason is what
-/// VoiceOver announces, so the state is legible without seeing the color. Wave,
-/// Project, and Task rows all render this one value.
+/// VoiceOver announces, so the state is legible without seeing the color. Wave
+/// and Project rows render this one value.
 public struct WaveLens: Sendable, Hashable {
     public let color: WaveLensColor
     public let reason: String
@@ -45,13 +45,6 @@ public struct WaveLens: Sendable, Hashable {
     public init(color: WaveLensColor, reason: String) {
         self.color = color
         self.reason = reason
-    }
-
-    /// Task lens: the shared condition and reason, verbatim. The API gives Tasks
-    /// a Rust-owned `TaskConditionSnapshot`, so the lens spends it directly
-    /// and invents nothing.
-    public static func forTask(_ condition: TaskConditionSnapshot) -> WaveLens {
-        WaveLens(color: WaveLensColor(condition.state), reason: condition.reason)
     }
 
     /// Project lens: derived only from its Tasks' shared condition evidence. The

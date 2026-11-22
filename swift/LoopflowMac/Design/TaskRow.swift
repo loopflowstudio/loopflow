@@ -8,7 +8,7 @@ struct TaskRow: View {
     let id: String
     let presentation: WorkModel.TaskPresentation
     let task: RoadmapTask?
-    let standing: TaskStanding
+    let status: SessionProgramStatus
     /// The Task's auto setting is on.
     var auto = false
     var selected = false
@@ -20,28 +20,7 @@ struct TaskRow: View {
     var hover: HoverFlag?
     @Environment(\.palette) private var palette
 
-    init(id: String, presentation: WorkModel.TaskPresentation, task: RoadmapTask?, status: SessionProgramStatus,
-         auto: Bool = false, selected: Bool = false, muted: Bool = false,
-         slotHint: String? = nil, showsSlotHint: Bool = false, hover: HoverFlag? = nil) {
-        self.id = id
-        self.presentation = presentation
-        self.task = task
-        standing = TaskStanding(task: task, status: status)
-        self.auto = auto
-        self.selected = selected
-        self.muted = muted
-        self.slotHint = slotHint
-        self.showsSlotHint = showsSlotHint
-        self.hover = hover
-    }
-
-    /// A row for a host that holds the Task and no Session readings: the Portfolio.
-    init(task: RoadmapTask, context: String? = nil) {
-        self.init(id: task.id,
-                  presentation: .init(title: task.task.name, identifier: task.task.identifier, context: context),
-                  task: task, status: .unknown)
-    }
-
+    private var standing: TaskStanding { TaskStanding(task: task, status: status) }
     private var secondary: Color { selected ? palette.workSelectedSecondaryText : palette.textSecondary }
 
     var body: some View {
@@ -135,5 +114,14 @@ struct TaskRow: View {
                     .accessibilityIdentifier("work-task-id-\(id)")
             }
         }
+    }
+}
+
+extension TaskRow {
+    /// A row for a host that holds the Task and no Session readings: the Portfolio.
+    init(task: RoadmapTask, context: String? = nil) {
+        self.init(id: task.id,
+                  presentation: .init(title: task.task.name, identifier: task.task.identifier, context: context),
+                  task: task, status: .unknown)
     }
 }

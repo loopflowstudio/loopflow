@@ -402,7 +402,9 @@ or `lf desktop` reads unless its view is deleted.
    three Portfolio lists. Deleted: `RoadmapTaskRow`, `NowRowView`,
    `RoadmapTaskView`, `WorkChannelChips`, `WaveWorkInspector`, `PrLink`,
    `TaskHeading`, `TaskSection.label` and both color extensions,
-   `historyLabel`, `terminalLabel`.
+   `historyLabel`, `terminalLabel`. Compress took what those left
+   without a caller: `WaveLens.forTask`, `TaskOwner.summary` and
+   `workDestinationSelection`.
 
    What it taught:
    - No host needed a switch. A row opens through `TaskRow.opening(_:)`, a

@@ -127,6 +127,8 @@ Slice 5 also reworked the scrollbar marks; the parent branch then deleted them (
 
 Checks left for gate: `documented_commands::` (swift/README.md's language list changed), CI's Swift build.
 
+QA November 21 (`scratch/qa.html`, `ce178ae48f`): the redline, Side by side, HTML, grammar colors and Files images work in the Dev build; image diffs stacked for any picture wider than half the pane (fixed); the notices inventory was stale (refreshed). Not reached without clicks: the Source and layout buttons, a step's skipped lines. Open product questions are in `questions.md`, From qa.
+
 Remaining: none of the slices. Demo checks for qa: `scratch/plan.md` rendered and redlined in the Dev build, Side by side in two columns, Source showing the line Diff; `scratch/explore.html` as two pages; a step's skipped lines.
 
 ## Docs

@@ -2,12 +2,11 @@
 
 Loopflow for Mac's Task workspace in the three new faces, on one named ramp,
 built from one component each for the Task row, status mark, workflow line,
-button and title bar. Stacked on LOO-515 (#1949): its Brief, Diff and Files
+button and title bar. Built on LOO-515 (#1949, landed and merged in): its Brief, Diff and Files
 views are the base, restyled, never restored to what it deleted.
 
-Reference: `DESIGN.md` and `design/prototypes/` on cfadc6's branch
-`jack-heart/de-slop-fable`, merged to main as #2011 (read at `/Users/jack/src/loopflow.de-slop-fable/`
-until `lf sync` brings it here). Screens: `desktop.html` notes 1–12,
+Reference: root `DESIGN.md` and `design/prototypes/` (cfadc6, #2011, merged
+into this branch at `586aa4b7d4`). Screens: `desktop.html` notes 1–12,
 `desktop-more.html` "The Task pane: Brief and Changes" notes 1–11.
 
 ## Demo
@@ -257,12 +256,6 @@ As the prototype notes say, keeping what the app can show:
   stops (more notes 5–11). No "Run again" for checks: the branch has none.
   Notes 12's check rows in the workspace prototype are stand-ins.
 
-### DESIGN.md
-
-The pointers this change fixes and "Tokens today" are edited in DESIGN.md,
-which came to main with cfadc6 (#2011). That edit is the last slice, after
-`lf sync` brings main in.
-
 ### Docs (written first, 2026-11-21)
 
 `swift/README.md` (sidebar row, workflow bar and its "…" menu, Start from…,
@@ -270,9 +263,7 @@ pane header and notice line, terminal face and how a person's `font-family`
 stacks, Brief, Diff title/counts/layout words/Open on GitHub, Files menu),
 `docs/work.md` (`lf task status` sentence and `graph.steps`/`current_step`/
 `sentence`), `swift/LoopflowiOS/README.md` (terminal face). Implement makes
-the code match these words or changes both. `swift/DESIGN.md` is left alone:
-cfadc6 deletes it for the root `DESIGN.md`, so its Typography and Corner
-Radius snippets stay stale until that lands.
+the code match these words or changes both. Root `DESIGN.md` is slice 8.
 
 ## Exclusions
 
@@ -450,3 +441,11 @@ in DESIGN.md "Desktop semantics"; palette contrast.
    (WorkNavigation's ⌘⌥1 failure is gone after the merge) and
    `cargo test -p loopflow --test integration documented_commands::`.
    QA in three themes at the narrowest width stays for qa.
+
+## Remaining
+
+No slice left. Gate: clippy, the iPhone build (`scripts/test_ios.py`),
+the acceptance checks above, and regenerating `task_lifecycle.json` (edited
+by hand in slice 3). QA: the Demo in Light, Dark and one imported theme at
+the narrowest window, with Claude's TUI for faked bold and box drawing.
+Open for review: the Diff pill's `TaskDelivery` wording (questions.md).

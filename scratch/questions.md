@@ -6,7 +6,6 @@
 - Assumed: sidebar rows show no status start time ("Blocked since 12:07" in the prototype); program status reports carry none. The row accepts one when a later change records it.
 - Assumed: Ghostty's `font-family` loads after the person's config (it appends, so loading it in `loopflowConfig` first would beat their family). They keep theirs first and get Spline Sans Mono as a fallback.
 - Assumed: `GraphCompositionView` stays as the Graph-definition drawing; only renderers of a Task's position merge into the workflow line, and `WorkflowDiagram` is deleted.
-- Open: DESIGN.md exists only on cfadc6's unpublished branch; its pointer and "Tokens today" edits wait for cfadc6 on main. Both branches edit `GhosttyManager.loopflowConfig`.
 - 2026-11-21 concept review (headless), first pass over the 3d4350 plan: three changes, in the plan. Found: `position.at` is a bare step name and `concept-review` is a step of both `plan` and `build` in `code`, so the line's running step comes from a new `TaskGraph.current_step` that `read_task_graph` computes from the cursor. Chosen by the review, reversible: the sentence keeps the concrete step ("build is running concept-review."); the bar's Complete/Claim/Abandon/"Start from…" move into one "…" menu shared with the sidebar's `TaskActionItems`, and the Overview disclosure goes with `WorkflowDiagram`. Page: `scratch/concept-review.html` (LOO-515's sixth-pass page is in git at `9c25f3a21f`).
 - 2026-11-21 write-docs (headless). Assumed, reversible, all in the docs: with auto on the sentence's second clause is "Auto stands in next at ship-review."; the Brief's sentence reads "Active. build is running implement."; Diff's title counts files ("4 changed files") and hidden files read "4 of 9 changed files", with the change count gone from the title; the pane header's notice line shows only when a Task's conversation starts fresh; the Files menu reads "TaskRow.swift · 1 of 3". `swift/DESIGN.md` not edited (cfadc6 deletes it).
 
@@ -67,13 +66,5 @@
   failed". Rewording `TaskDelivery` changes the Brief's PR line and its tests too;
   left for review. Check order in the card (failed, in progress, passed) is also
   GitHub's order, unchanged.
-
-## Slice 8: how main reaches this branch (2026-11-21)
-
-LOO-515's branch (`31fc852dca`) does not contain #2011, so `lf sync` here is a
-no-op. Waiting for LOO-515 to sync main or land keeps this PR's diff to 3d4350's
-own commits; `lf sync main` now would detach and show LOO-515's work in this PR.
-Took the wait. If LOO-515 stays open long, the other choice is to sync LOO-515
-onto main from its own checkout.
 
 - Sync kept this Task’s concept review and notes. Main removed the inherited LOO-515 scratch material.

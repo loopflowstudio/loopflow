@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8">
-<title>Concept review: themes, round 5 — the theme choice across Mac, phone and site, built</title>
+<title>Concept review: themes, round 6 — the theme choice with the notice split built</title>
 <style>
 :root { color-scheme: light dark; --bg:#faf8f5; --fg:#2a2624; --muted:#5f5752; --line:#e6dfd6; --card:#fffdf9; --yes:#31633e; --no:#a02e25; --prop:#24579e; --accent:#722f37; }
 @media (prefers-color-scheme: dark) { :root { --bg:#2b2d30; --fg:#e6e2dc; --muted:#a8a29b; --line:#45474b; --card:#323437; --yes:#8fcf9a; --no:#f0a39a; --prop:#9cc2ee; --accent:#e7a3ad; } }
@@ -19,7 +19,35 @@ pre { background:var(--bg); border:1px solid var(--line); border-radius:6px; pad
 .swatches { display:flex; gap:4px; flex-wrap:wrap; margin:.4rem 0 } .swatches span { width:28px; height:20px; border-radius:3px; border:1px solid var(--line) }
 ol.q li { margin:.6rem 0 }
 </style></head><body>
-<h1>The theme choice, built across three surfaces: do the concepts line up?</h1>
+<h1>The theme choice after round 6: do the concepts line up?</h1>
+<p class="muted">Area taken: the whole theme choice as PR #2020 stands against main (<code>d820b17a6c</code>): catalogue, chooser, <code>theme:</code> as one Machine fact behind <code>config.theme {value}</code>, the phone, the site, now with round 6's notice split and QA round 6's retry (<code>scratch/qa.html</code>, R6). Round 5's review follows below as it was written.</p>
+
+<h2>Round 6: one interaction, walked again</h2>
+<p><b>Failure.</b> Dev app against a 0.16.0 server: the banner reads “The server (0.16.0) can't read what this Loopflow (…) asked. Update the older one.” with no button; Choose Theme still draws its cards (R6, <code>r6-old-server-banner.png</code>).</p>
+<p><b>Recovery.</b> The server is updated: within about a second the store asks again, the banner clears and Fig Leaf applies (12 s in QA, <code>r6-server-updated.png</code>). Nobody has to know about a file change.</p>
+<p><b>Unrelated failure.</b> <code>theme: Verdigris</code> keeps <b>Choose Theme…</b>; R5.10 did not reproduce.</p>
+
+<table>
+<tr><th>Product concept</th><th>Code concept</th><th>Lines up</th><th>Note</th></tr>
+<tr><td>“My theme needs fixing” (Choose Theme helps)</td><td><code>AppearanceStore.notice</code></td><td class="yes">yes</td><td>Library problems and unknown names only.</td></tr>
+<tr><td>“The server didn't answer the theme question”</td><td><code>AppearanceStore.readFailure</code>, set by <code>reload</code>, <code>applyMode</code>, <code>apply</code>; cleared by the next success</td><td class="yes">yes</td><td>Derived from the last request, not stored anywhere else. While set, the 1 s watch asks again, so it ends when the server can answer.</td></tr>
+<tr><td>Two builds disagree</td><td><code>ServerLink.answered</code> (parse refusal) and <code>ServerLink.unreadable</code> (undecodable reply)</td><td class="yes">yes</td><td>Both directions now name both builds, in one type.</td></tr>
+</table>
+
+<div class="big">
+<h2 style="margin-top:.4rem">Biggest mismatch: none left in this area</h2>
+<p>Round 5's one name for two ideas is now two names for two ideas, each with the action that helps it. The retry added no concept: it is the existing watch, which had nothing to watch until the server answered.</p>
+<p class="muted">Seen and left outside this work: a <code>config.yaml</code> that isn't valid YAML answers <code>config.theme</code> with no theme, so Desktop draws the defaults silently. That comes from the shared <code>file_value</code> reader, which main's <code>config.theme</code> used the same way; fixing it is a config-reader change for every key, not a theme one. A failing server is asked once a second per window, with the theme files reread each time; cheap, and it stops on the first answer.</p>
+</div>
+
+<h2>Round 6 questions</h2>
+<ol class="q">
+<li>Broken YAML in <code>config.yaml</code>: (a) leave, as on main; (b) file a Task so <code>file_value</code> refuses unparsable YAML and Desktop shows it as <code>notice</code>.</li>
+</ol>
+
+<hr>
+<h1 style="font-size:1.3rem">Round 5 (as written)</h1>
+The theme choice, built across three surfaces: do the concepts line up?</h1>
 <p class="muted">Area taken: the whole theme choice as PR #2020 now stands against main: the catalogue, the chooser, <code>theme:</code> as one Machine fact read through <code>config.theme {value}</code>, the phone drawing its Machine's theme, and the site generated from Loopflow Light. Round 4's page asked where the choice lives; this page reviews what was built from that answer, with QA round 5 (<code>scratch/qa.html</code>, R5.1–R5.10) in it.</p>
 
 <h2>One interaction, walked</h2>

@@ -315,9 +315,8 @@ independently; System follows macOS using both. System lists both pickers;
 Light or Dark lists only its own. Each picker
 shows built-ins, then **Yours**, ending with a dashed **Import file…** tile.
 
-Beside the pickers, a sample draws the previewed theme where its colors land in
-the app: a title bar with the repository's name, a selected Task row, the
-status words on the sidebar's surface, and a terminal color sample:
+The sample beside the pickers previews the repository title bar, a selected
+Task, sidebar status labels and one line of terminal colors.
 
 ```text
 loopflow
@@ -326,10 +325,8 @@ Working  Available  Blocked  Failed  Passed
 $ lf task status LOO-515
 ```
 
-A theme whose status words are hard to read on the sidebar shows it here,
-before **Apply**. That terminal line previews palette colors only; check font
-weight and glyph rendering in an open shell or Session pane, which keeps your
-terminal font settings while you preview, apply or cancel a theme.
+Check font weight in an open shell or Session pane. Previewing, applying or
+cancelling a theme changes only its colors.
 
 ```yaml
 # ~/.lf/config.yaml
@@ -360,17 +357,14 @@ palette = 4=#7aa2f7
 loopflow-accent = #3d59a1    # optional app roles; the rest derive from ANSI colors
 ```
 
-Files read up to 256 KiB of UTF-8. Six-digit RGB background/foreground are
-required; cursor, selection, `palette = N=#RRGGBB` and `loopflow-` roles are
-optional. Preview explains defaults, repeats and omitted settings. Fonts,
-`font-thicken`, commands, keybindings, includes and theme references are never
-followed; put non-color terminal settings in your
-[Ghostty configuration](https://ghostty.org/docs/config#file-location) and
-reopen Loopflow.
+Theme files can contain up to 256 KiB of UTF-8. Background and foreground
+require six-digit RGB values. Cursor, selection, `palette = N=#RRGGBB` and
+`loopflow-` roles are optional. Preview lists defaults, repeated colors and
+omitted settings such as fonts, commands, keybindings, includes and theme references.
 
-Unreadable app/default/selection/cursor text prevents Apply; ANSI colors keep
-their source values. Personal non-color Ghostty settings still load at launch;
-its `theme =` is ignored and its file never written.
+Unreadable app, default, selection or cursor text prevents Apply. ANSI colors keep
+their source values. Loopflow reads personal non-color settings from your Ghostty
+configuration at launch, ignores its `theme =` setting and leaves the file untouched.
 Source and license notices ship offline with the catalogue.
 
 Under the jump bar, the workflow bar reads where the Task stands:
@@ -792,25 +786,23 @@ current match for 160 ms; hiding a pane cancels the cue. Reduce Motion uses
 Find's persistent match styling. Programs that own selection may show their own
 copy confirmation; terminal feedback describes only a terminal-owned copy.
 
-Terminals draw in Spline Sans Mono 13 at its native stroke weight, with its real
-bold and italic faces and ligatures off; Ghostty draws box drawing, blocks and
-braille itself, so Claude's frames stay continuous. Your
-[Ghostty configuration](https://ghostty.org/docs/config#file-location) (such as
-`~/.config/ghostty/config`) still wins: a `font-family` you set comes first and
-Spline Sans Mono fills the glyphs it lacks, and your `font-size`,
-`adjust-cell-height`, `font-feature`, `font-thicken` or `minimum-contrast`
-replace Loopflow's defaults. Add `font-thicken = true` if you want Ghostty's
-thicker macOS strokes, then reopen Loopflow so Task shells and Session panes
-pick up the change.
+Task shells and Session panes use Spline Sans Mono at 13 points with its native
+stroke weight, bold and italic faces, and ligatures off. Ghostty draws box
+lines, blocks and braille so terminal frames stay continuous.
+
+For thicker strokes, add the `font-thicken` line below to your Ghostty
+configuration and reopen Loopflow. You can also set `font-size`,
+`adjust-cell-height` and `font-feature`. If you choose a `font-family`, Spline
+Sans Mono supplies missing glyphs. [Ghostty configuration locations](https://ghostty.org/docs/config#file-location)
 
 ```ini
-# In your Ghostty configuration (e.g. ~/.config/ghostty/config); reopen Loopflow after editing.
+# ~/.config/ghostty/config
 font-family = Berkeley Mono
 font-thicken = true
 minimum-contrast = 1
 ```
 
-`minimum-contrast` defaults to `3`; set `1` to preserve original colors.
+`minimum-contrast` defaults to `3`. Set it to `1` to keep original colors.
 Correction moves only low-contrast text toward black or white while retaining
 its alpha and channel ordering. It preserves more color than replacing text with
 black or white, but cannot guarantee exact hue or separation of nearly identical

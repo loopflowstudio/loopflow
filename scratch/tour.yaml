@@ -1,9 +1,11 @@
-at: b203eee0564318424c042047da9bc173b1454df1
+at: b26389210669bfcb562754ad6b1ec6224903014c
 first:
   - path: swift/README.md
-    why: Terminal appearance and the personal opt-in
+    why: Native stroke weight and how to change it
   - path: swift/LoopflowMac/Services/Ghostty/GhosttyManager.swift
-    why: Shared shell and Session font defaults
+    why: Shared font defaults and personal theme reset
   - path: swift/LoopflowTests/ThemeTests.swift
-    why: Effective stroke weight across personal settings and themes
+    why: Font settings survive built-in and imported palettes
+  - path: swift/LoopflowTests/GhosttyTerminalInputTests.swift
+    why: Embedded prompt bindings use the same configuration loader
 hide: []

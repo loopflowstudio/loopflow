@@ -379,11 +379,7 @@ struct GhosttyShellBlockTests {
         try #require(GhosttyManager.libraryReady)
         let config = try #require(ghostty_config_new())
         defer { ghostty_config_free(config) }
-        let path = FileManager.default.temporaryDirectory
-            .appendingPathComponent("loopflow-ghostty-\(UUID().uuidString)")
-        try GhosttyManager.embeddedConfig.write(to: path, atomically: true, encoding: .utf8)
-        defer { try? FileManager.default.removeItem(at: path) }
-        path.path.withCString { ghostty_config_load_file(config, $0) }
+        try GhosttyThemeConfiguration.load(GhosttyManager.embeddedConfig, into: config)
         ghostty_config_finalize(config)
         #expect(ghostty_config_diagnostics_count(config) == 0)
 

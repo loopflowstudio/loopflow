@@ -24,7 +24,9 @@ Appearance is the live color preview for the app and its terminals. `AppearanceS
 
 `scripts/test_desktop.sh -Xswiftc -gnone --filter terminalStrokeWeightFollowsGhosttyConfig` failed on the old default with no personal setting in Light, Dark and Light again. After removing the override, all three cases passed. Ghostty read native weight with the setting absent or false and thickened strokes with it true at each theme selection.
 
-The Mac guide describes the personal opt-in, reopening Loopflow and checking typography in a real pane. [Terminal font](../swift/README.md#L773-L789) · [Appearance sample](../swift/README.md#L318-L332)
+The Mac guide describes the personal opt-in, reopening Loopflow and checking typography in a real pane. [Terminal font](../swift/README.md#L789) · [Appearance sample](../swift/README.md#L318)
+
+`scripts/test_desktop.sh -Xswiftc -gnone --filter 'themeOverridesColorsAndKeepsFontSettings|embeddedConfigBindsPromptJumps|defaultConfigurationLoadsAfterInitialAppearance'` passed all three tests headless. The combined theme test read the expected weight for absent, false and true settings across all built-in palettes and two imports.
 
 ## Remaining visual check
 

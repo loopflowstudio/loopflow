@@ -6,3 +6,8 @@
 - Concept review: in a saved custom theme, changing "Button" no longer moves the title bar. Passed over: having the editor leave unstated roles out of the file so the bar keeps following.
 - Changed words in diffs: repaired by moving body text (and headings, which share it) in Catppuccin Latte and Solarized Dark, one value each. Solarized Dark's app text goes from `#9b9e9e` to `#b6b9b9`, lighter than Solarized's own and than its terminal text. Passed over: lowering the changed-word fill (`tone.ink.opacity(0.26)` in `ReviewStreamView`) for every theme, or a per-theme role for it.
 - The title bar rule lightens a bar whose text is black (toward white), which the plan's "darkened" did not spell out; the READMEs say both.
+
+- Theme catalogue beyond this Task: `scratch/theme-audit/explore.html` (built by `explore.py`, families in `families.py`) compares the 24 after this round with 18 generated themes in 9 light/dark families, with popularity data read 2026-11-22. Open: catalogue shape, families vs two pickers, generated built-ins, which families to keep.
+- Round 2: `ThemeSample` is deleted rather than kept beside the cards. What it showed that no card does: a terminal line and the secondary text on the selected row.
+- Round 2: the chosen card is a 2 pt ring in the window's focus color instead of the old selection fill and edge. Passed over: both.
+- Round 2: `ThemeDefinition.retired` has no removal date; it is the sentence a person with an old setting sees, not a file-shape fallback. No removal Task filed.

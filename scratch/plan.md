@@ -1,6 +1,39 @@
 # 50f7f9: review the bundled themes
 
-The audit is done and the direction is chosen. What remains is writing the two default theme files, giving the title bar its own role, and checking both.
+Round 1 (the two defaults and the `loopflow-titlebar` role, below under "Decided" through "Checks") is built and in PR #2020. Round 2, at the top, is built too (2026-11-22): the catalogue is the 13 families and Choose Theme is a grid of cards. What remains is looking at the chooser in the Dev app on an unlocked display.
+
+### Round 2 as built
+
+- `scripts/theme_catalogue.py` writes the 24 generated files and `desktop-themes.js` (Loopflow pair read from their files, then by name); `--check` lists drift, and `python/tests/test_theme_catalogue.py` runs it. Files carry the family's idea as a second header comment.
+- Order needs no list: a family's themes start with its name, so sorting by name after the Loopflow pair keeps light and dark in one order. `ThemeDefinition.builtins` requires 13 and 13.
+- Companions, `Sources.md` and `Licenses/` are deleted; `third_party.py refresh` dropped them from NOTICES and the inventory.
+- `ThemeDefinition.retired` names the 22 with their side; `AppearanceStore.selection(from:)` turns one into Loopflow Light/Dark and adds the sentence to the notice. The config file keeps its words until Apply.
+- `ThemeCard` replaces the tile; `ThemeSample` is deleted (each card shows what it showed, and clicking previews every window). The chosen card is ringed in the window's `keyboardFocus`, 2 pt.
+- Checks: `swift test --filter 'WorkPaletteTests|TerminalColorTests|ThemeTests|ThemeWorkflowTests'` 32 passed; `pytest python/tests/test_theme_catalogue.py` passed; `documented_commands::` 4 passed. All 26 cards rendered offscreen with `ImageRenderer`: `scratch/qa/cards.png`. Not run: the Dev app (gate/ship-review), `test_third_party.py` (gate).
+
+## Round 2: the 13 families and a chooser you scan
+
+Said at ship-review, after `scratch/theme-audit/explore.html`: "i like the 13 damilies", and of the page's cards, "our theme chooser should be more like this so you cab preview and scan", then "jusr put all this stifg in this one task". Earlier: "you can pick for now lets stay higher level." The choices below are picked on that basis.
+
+### What ships
+
+- **The catalogue is 13 families, 26 themes, 13 light and 13 dark.** Loopflow Light and Loopflow Dark stay byte for byte as round 1 wrote them. The other 24 come from `scratch/theme-audit/families.py`: Sorbet, Signal, Harbor, Tannin, Fjord, Folio, Arcade, Graphite, Contrast, Verdigris, Fig, Terracotta, each a light and a dark theme (names in the specs). All 24 pass every audit measurement today (`python3 -I scratch/theme-audit/families.py`: 0 fail, 0 close). Every value is original; no upstream colors.
+- **The 22 companions leave the bundle**: Linen, Hearth, Catppuccin Latte and Mocha, Celadon, Clay, Flexoki Light and Dark, Frost, Gruvbox Light and Dark, Noctis Lilac, Pewter, Sea Glass, Vellum, Aubergine, Moss, Night Owl, Onyx, Phosphor, Rosewood, Solarized Dark. Their `Sources.md` entries and `Licenses/` notices go with them. The open-source ones stay one import away (Ghostty bundles them).
+- **The generator ships, not scratch.** Move `families.py` and the colour helpers it uses from `audit.py`/`proposals.py` to a committed script (for example `scripts/themes/generate.py`) that writes the 24 generated catalogue files and `design/prototypes/desktop-themes.js`. A theme is changed by editing its spec and rerunning; the files are never hand-tuned away from the script. A check proves the committed files equal a fresh run. The app keeps reading full theme files; `GhosttyThemeMapping` (imports) is not changed in this round.
+- **Choose Theme becomes a grid of preview cards**, replacing `tile(_:side:)` in `swift/LoopflowMac/Views/ThemeChooser.swift`. Each card is drawn in its own theme's roles: a strip in `titlebar`; the name in emphasis ink on the background; Busy, Blocked and Error in their status inks; six ANSI dots (1–6); a "Selected row" chip in the Work selection fill and text beside a "Run" button in accent and accent text. The chosen card is ringed in the window's focus color. Cards are ordered by family so each pair sits together (Loopflow first). Clicking previews, as today. Built-in and Yours stay; in System mode, light and dark stay two sections with two pickers (picking a family once is not built). Decide whether `ThemeSample` still earns its 280 pt once every card previews; say which. The audit page's "passes / 3 fail" line is not part of the app.
+- **A setting that names a removed built-in** falls back to Loopflow Light or Loopflow Dark for that side, and Choose Theme says so in one sentence naming the old theme and how to import it. The settings shape does not change, so the released `lf` reads it too.
+
+### Counts and tests that move
+
+`ThemeDefinition.builtins` requires 12 light and 12 dark; it becomes 13 and 13, ordered Loopflow pair first, then by family. `ThemeTests` pins names, order and the 22 companions' heading rule; it moves to the new catalogue. `WorkPaletteTests`, `TerminalColorTests` and `ThemeTests` pass in all 26. The Swift suites also check inks the generator has no name for (`linkInk`, `actionInk`, `selectionEdge`, terminal `readabilityErrors`); if one fails, fix the generator's rule, not a file.
+
+### Demo
+
+Dev app → Settings → Choose Theme: a grid of 26 cards, each in its own colors, pairs side by side; click Fig, the window turns plum with lime; click Fig Leaf for the light half. A settings file naming Gruvbox Dark opens in Loopflow Dark with the sentence saying why.
+
+### Left outside round 2
+
+Import mapping rules (diff tints, file selection, focus on selection for imported themes), separate diff roles, picking a family once, and Rex's accent-coloured cursor for imports. The generated themes already follow those rules; imports do not yet.
 
 ## Decided
 
@@ -81,7 +114,7 @@ A personal theme file without `loopflow-titlebar` gets its bar from its own acce
 
 - The `isDark ? accent.mixed(...)` branch in `LoopflowPalette.titlebarBackground`.
 - `dark_repair`'s standalone use and the A/B1/B3 variants on the page can stay as the record of the choice; nothing in `scratch/` ships.
-- Stays: theme names, order and count (`ThemeTests` pins them), every theme's accent and buttons, user theme files.
+- Round 1 kept theme names, order and count; round 2 replaces them (above). User theme files stay.
 
 ## Checks
 

@@ -150,6 +150,13 @@ open failures (offline, signed out) keep writing, as now.
 which limit it was. Old lines without the fields still parse: serde reads a
 missing `Option` field as `None`.
 
+## Docs
+
+`docs/work.md`: the "Open, land, or abandon its PR" row (one linked PR,
+updated) and a **Rate limited** bullet under "Offline queue and conflict
+resolution". The example uses today's `lf history linear` operation table;
+no new output is promised.
+
 ## Exclusions
 
 - Reordering the drain so creations go before links. With (1), a link 429

@@ -365,6 +365,11 @@ Files' Diff compares commits, not the draft. Every non-`lf` commit stands
 alone, so this branch would still offer 44 entries; whether those runs fold
 together is for the screen, not settled by any decision.
 
+Eleventh pass, November 21, over the repair at `3484509549`: nothing to
+change. `--no-merges` leaves every listed commit one parent, so `%P` is that
+parent (48 commits here, none with two); a commit after a merge compares
+against the merge, so a step never carries main's or a synced Task's work.
+
 ## Remaining
 
 - Demo/review on screen (below). November 21 showed the tab strip, the Diff

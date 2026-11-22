@@ -113,8 +113,8 @@ scan returns the latest confirmed link's `remote_id` for this subject. Then
 - without one, sends `LinkAttachment`. When Linear answers `This URL has
   already been linked with` (a first link whose reply was lost, like seq 722,
   or another Machine linked it), it reads the issue's attachments
-  (`IssueAttachments`, `item_attachment_urls` in `linear/mod.rs`, which starts
-  returning `{id, url}`; its one caller reads `url`) and takes the one whose
+  (`IssueAttachments`, `item_attachments` in `linear/mod.rs`, returning
+  `{id, url}`) and takes the one whose
   `url` is this PR. No match (linked to another issue): the action retires
   with Linear's message (`Sent::Unsupported`); moving a PR between issues is
   not this Task's call.

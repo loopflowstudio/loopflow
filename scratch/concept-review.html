@@ -2,98 +2,147 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<title>c9fbcb · concept review · Diff v2</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LOO-515 · concept review</title>
 <style>
-  :root { --bg:#fdfcf9; --fg:#1d1d1b; --muted:#6b6a65; --rule:#e4e1d8; --prop:#2f6fb3; --code:#f3f1ea; --add:#e6f4e6; }
-  @media (prefers-color-scheme: dark) {
-    :root { --bg:#1a1a18; --fg:#ecebe6; --muted:#9a988f; --rule:#34332f; --prop:#7fb2ee; --code:#25241f; --add:#1f2e21; }
-  }
-  body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.6 -apple-system, "Lato", system-ui, sans-serif; }
-  main { max-width:44rem; margin:0 auto; padding:3rem 1.25rem 5rem; }
-  header p { color:var(--muted); margin:.2rem 0; font-size:.9rem; }
-  h1 { font-size:1.6rem; margin:0 0 .5rem; }
-  h2 { font-size:1.15rem; margin:2.6rem 0 .6rem; }
-  code { font:13px/1.5 ui-monospace, Menlo, monospace; background:var(--code); padding:0 .25em; border-radius:3px; }
-  .lede { font-size:1.08rem; border-left:3px solid var(--prop); padding-left:1rem; margin:2rem 0; }
-  .proposed { color:var(--prop); }
-  .row { display:grid; grid-template-columns:1fr 1fr; gap:1rem; }
-  @media (max-width:560px) { .row { grid-template-columns:1fr; } }
-  .panel { border:1px solid var(--rule); border-radius:6px; padding:.8rem 1rem; min-width:0; }
-  .panel.after { border-color:var(--prop); }
-  .panel h3 { margin:0 0 .4rem; font-size:.95rem; }
-  .panel p { margin:.3rem 0; font-size:.93rem; }
-  .pane { font:12px/1.55 ui-monospace, Menlo, monospace; margin:.5rem 0 0; }
-  .pane div { padding:.1rem .4rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .pane .file { background:var(--code); font-weight:600; }
-  .pane .note { color:var(--muted); white-space:normal; font-family:-apple-system, system-ui, sans-serif; }
-  .pane .add { background:var(--add); }
-  .pane u { text-decoration:none; color:var(--prop); }
-  table { border-collapse:collapse; width:100%; font-size:.93rem; }
-  th, td { text-align:left; vertical-align:top; padding:.45rem .6rem .45rem 0; border-bottom:1px solid var(--rule); }
-  th { color:var(--muted); font-weight:600; }
-  ol li { margin:.7rem 0; }
-  .muted { color:var(--muted); }
+:root{--bg:#fffcf0;--fg:#100f0f;--mut:#6f6e69;--line:#e6e4d9;--card:#f2f0e5;--add:#e5f0d8;--addk:#66800b;--rem:#fbe2df;--remk:#af3029;--prop:#205ea6;--warn:#ad8301;--kw:#a02f6f;--fn:#205ea6;--ty:#ad8301;--str:#24837b}
+@media (prefers-color-scheme:dark){:root{--bg:#100f0f;--fg:#cecdc3;--mut:#878580;--line:#343331;--card:#1c1b1a;--add:#1f2a14;--addk:#879a39;--rem:#3a1a17;--remk:#d14d41;--prop:#4385be;--warn:#d0a215;--kw:#ce5d97;--fn:#4385be;--ty:#d0a215;--str:#3aa99f}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.55 -apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,sans-serif}
+main{max-width:980px;margin:0 auto;padding:40px 24px 80px}
+h1{font-size:26px;margin:0 0 6px}h2{font-size:19px;margin:40px 0 10px}h3{font-size:15px;margin:22px 0 6px}
+p{margin:8px 0}.mut{color:var(--mut)}
+code{font:13px ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--card);padding:1px 4px;border-radius:4px}
+table{border-collapse:collapse;width:100%;font-size:14px;margin:10px 0}
+th,td{text-align:left;padding:7px 9px;border-bottom:1px solid var(--line);vertical-align:top}
+th{color:var(--mut);font-weight:600}
+.yes{color:var(--addk);font-weight:700}.no{color:var(--remk);font-weight:700}
+.prop{border-left:3px solid var(--prop);padding:2px 0 2px 12px;margin:12px 0}
+.prop>b:first-child{color:var(--prop)}
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media (max-width:720px){.cols{grid-template-columns:1fr}}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px}
+.card h3{margin-top:0}
+.pane{border:1px solid var(--line);border-radius:8px;overflow:hidden;font:12.5px/1.5 ui-monospace,Menlo,monospace;background:var(--bg)}
+.bar{display:flex;gap:8px;align-items:center;padding:6px 10px;background:var(--card);border-bottom:1px solid var(--line);font:12px -apple-system,system-ui,sans-serif}
+.bar .sp{flex:1}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.seg span{padding:1px 8px;border-right:1px solid var(--line)}.seg span:last-child{border-right:0}
+.seg .on{background:var(--fg);color:var(--bg)}
+.btn{border:1px solid var(--line);border-radius:6px;padding:1px 8px}
+.bad{outline:2px dashed var(--remk);outline-offset:2px}
+.row{padding:1px 10px;white-space:pre}
+.a{background:var(--add)}.r{background:var(--rem)}
+.kw{color:var(--kw)}.fn{color:var(--fn)}.ty{color:var(--ty)}.st{color:var(--str)}
+.doc{font:14px/1.5 -apple-system,system-ui,sans-serif;padding:10px 14px}
+.doc h4{margin:4px 0;font-size:16px}
+del{color:var(--remk);background:var(--rem)}ins{text-decoration:none;background:var(--add)}
+.flow{display:flex;flex-wrap:wrap;gap:8px;align-items:center;font-size:13px}
+.box{border:1px solid var(--line);border-radius:6px;padding:4px 9px;background:var(--card)}
+.box.p{border-color:var(--prop)}.arrow{color:var(--mut)}
+ol.q>li{margin:12px 0}ol.q ol{list-style:lower-alpha;margin:4px 0}
+.tag{font-size:12px;border-radius:4px;padding:0 5px;border:1px solid var(--prop);color:var(--prop)}
+.tag.ex{border-color:var(--mut);color:var(--mut)}
 </style>
 </head>
-<body>
-<main>
-<header>
-  <h1>Ten of the step menu's 54 entries are merges from main.</h1>
-  <p>LOO-515 · concept-review step, tenth pass · 2026-11-21 · through <code>9fdfc72f79</code></p>
-  <p>Built from <code>scratch/loo-515-task-details.md</code>, <code>scratch/questions.md</code>, <code>rust/loopflow-execution/src/ops/task/snapshot.rs</code>, <code>swift/LoopflowMac/ReviewDiff.swift</code> (<code>ReviewStep</code>), <code>swift/LoopflowMac/TaskFileDocument.swift</code>, and <code>git log</code> on this branch</p>
-</header>
+<body><main>
+<h1>Diff v2 · do the concepts line up?</h1>
+<p class="mut">Task c9fbcb · concept review, headless, November 21 · reviewed against <code>scratch/plan.md</code> as kickoff left it and the LOO-515 Diff it builds on.</p>
 
-<p class="lede">This pass covers the Diff polish built today: steps, change marks, Viewed, the enclosing declaration, copy without markers, Wrap. One repair goes to implement; <span class="proposed">blue is proposed, not built</span>. No new question blocks it; the five demo questions are unchanged.</p>
+<p><b>Area taken:</b> the Diff's reading of one changed file, start to finish: which bytes it reads, how it colors them, how it opens skipped lines, and how it shows a file rendered. Highlighting and rendered diffs both hang off "read this file at this side of the comparison", which is also what skipped lines already do, so the review covers all three rather than the two the Task names. The grammar build (xcframework, queries, inks) is sound as planned and gets one line here.</p>
 
-<h2>Actions → concepts → APIs</h2>
+<h2>One interaction, walked</h2>
+<p>Jack picks the <code>implement</code> step of a Task in the Diff. <code>TaskFileDocument.swift</code> is in it with three hunks, and <code>scratch/plan.md</code> changed.</p>
+<ol>
+<li>The Python docstring hunk colors from the hunk alone, then recolors when the whole file is read. Good.</li>
+<li>He clicks "49 unchanged lines" between hunks. <b>Nothing opens.</b> <code>canOpenGaps</code> is <code>comparison.head == nil</code>: skipped lines read the working tree, and a step has a head. The plan's new <code>--at</code> read of that very file, at that head, sits one store over and isn't used.</li>
+<li><code>plan.md</code> opens rendered with a header control <i>Rendered · Side by side · Source</i>, while the toolbar above already says <i>New code · Unified · Side by side</i>. Two "Side by side" buttons, one per file and one for the stream, can say different things.</li>
+<li>A paragraph got one word changed. The plan matches blocks "by longest common subsequence over each block's plain text", then marks words on "a matched pair whose text differs". An exact-text LCS never matches two blocks that differ, so that paragraph shows as one struck block and one filled block, never as a word edit.</li>
+<li>Failure: the head read fails. Rows keep hunk colors, the rendered reader falls back to Source with Retry. Recovery: Retry reads the side again. Both hold as planned.</li>
+</ol>
+
+<h2>Product concepts and code concepts</h2>
 <table>
-  <tr><th>You do</th><th>Concept</th><th>API</th></tr>
-  <tr><td>Open the step menu</td><td>A Graph step: a run of <code>lf &lt;step&gt;:</code> commits → <span class="proposed">on the first-parent line, merges excluded</span></td><td><code>lf task changes</code> → <code>commits</code> <span class="proposed">with <code>parent</code></span></td></tr>
-  <tr><td>Pick a step</td><td>Its first commit's parent compared with its last</td><td><code>lf task changes/diff --base --head</code></td></tr>
-  <tr><td>Click a scrollbar mark</td><td>A change, placed by row count</td><td>none; drawn from the stream</td></tr>
-  <tr><td>Tick Viewed</td><td>A file folded until its lines change</td><td>none; in memory</td></tr>
+<tr><th>What a person knows</th><th>In the code</th><th></th><th>What's wrong</th></tr>
+<tr><td>A changed file, before and after</td><td>Patch (<code>ReviewFile</code>) + three separate whole-file reads: highlights <code>--at</code>, rendered readers, <code>openGap</code> (working tree)</td><td class="no">no</td><td>One idea, three readers, two of them blind to the comparison's head. <b>Biggest mismatch.</b></td></tr>
+<tr><td>Unchanged lines I can open</td><td><code>ReviewGap</code>, <code>openedGaps</code>, <code>canOpenGaps</code></td><td class="no">no</td><td>A precondition that refuses steps and committed comparisons, because the read assumed a fixed context (the working tree).</td></tr>
+<tr><td>How the Diff is laid out</td><td><code>ReviewLayout</code> (New code · Unified · Side by side) + planned per-file Rendered · Side by side · Source</td><td class="no">no</td><td>One name for two ideas, with no rule for which wins.</td></tr>
+<tr><td>Rendered or source</td><td>planned per-file choice, in memory like Viewed</td><td class="yes">yes</td><td>Once "Side by side" leaves it, it is one toggle: Source.</td></tr>
+<tr><td>A picture</td><td>planned <code>TaskFileState.image</code>, chosen by extension in Rust</td><td class="no">no</td><td>"Is this an image" is the decoder's answer, and the app decodes. An extension list in Rust and another in Swift drift; <code>.tiff</code>, <code>.ico</code>, <code>.heic</code> stay "Binary file" in Files for no reason.</td></tr>
+<tr><td>An edited paragraph</td><td>planned block LCS + "matched pair whose text differs"</td><td class="no">no</td><td>Can't occur under exact matching. Lines already solve this: <code>LongestCommon</code> anchors, <code>ReviewPair.align</code> pairs the runs between, <code>ReviewSegment.edit</code> decides.</td></tr>
+<tr><td>Colored code</td><td><code>Grammar</code>, ink table, <code>FileHighlights {old,new}</code> by line number</td><td class="yes">yes</td><td>Maps 1:1. Line numbers are the shared key between patch rows, skipped lines and whole-file parses.</td></tr>
+<tr><td>A theme's colors</td><td>inks from ANSI 1–6 mixed toward <code>text</code> to 4.5:1</td><td class="yes">yes</td><td></td></tr>
+<tr><td>A file at a commit</td><td><code>lf task file --at</code>, read-only reason</td><td class="yes">yes</td><td><code>--at</code> names the version read; right name.</td></tr>
 </table>
 
-<h2>The mismatch</h2>
-<p>Jack: "steps do commits, so we can just use the git logs". The read is <code>git log base..head</code>, every commit reachable, so merges count as steps. On this branch:</p>
-<div class="row">
-  <div class="panel">
-    <h3>As built</h3>
-    <div class="pane">
-      <div class="file">Whole Task · 54 steps</div>
-      <div>Merge 5fa2786081…</div>
-      <div>Merge 3fe914c022…</div>
-      <div>…</div>
-      <div>Merge a0548bfe28…</div>
-      <div class="note">picking it: 1,624 files, +128,835 −136,735, all main's</div>
-      <div>implement</div>
-      <div>compress</div>
-    </div>
-  </div>
-  <div class="panel after">
-    <h3 class="proposed">Proposed</h3>
-    <div class="pane">
-      <div class="file">Whole Task · 44 steps</div>
-      <div>Checkpoint edits before syncing…</div>
-      <div>…</div>
-      <div class="add">implement</div>
-      <div class="add">compress</div>
-      <div class="note">no merge is offered; a merge between two runs keeps them two steps</div>
-    </div>
-  </div>
+<h2>The biggest mismatch: one file, read three ways</h2>
+<div class="cols">
+<div class="card"><h3>Before <span class="tag ex">plan as kicked off</span></h3>
+<div class="flow"><span class="box">patch</span><span class="arrow">→</span><span class="box">rows</span></div>
+<div class="flow" style="margin-top:8px"><span class="box">--at base / head</span><span class="arrow">→</span><span class="box">FileHighlights</span></div>
+<div class="flow" style="margin-top:8px"><span class="box">rendered reader reads</span><span class="arrow">→</span><span class="box">Markdown / image / HTML</span></div>
+<div class="flow" style="margin-top:8px"><span class="box bad">working tree only</span><span class="arrow">→</span><span class="box">openGap</span><span class="arrow">·</span><span class="mut">off for steps</span></div>
 </div>
-<p>After <code>lf sync &lt;another Task&gt;</code> the other Task's commits would join the list too, and each entry's base is taken from the entry before it, which is then not its parent. <span class="proposed">Walk <code>--first-parent --no-merges</code>; each commit carries its parent; a commit joins the step before only when its parent is that step's head.</span></p>
+<div class="card"><h3>After <span class="tag">proposed</span></h3>
+<div class="flow"><span class="box">patch</span><span class="arrow">→</span><span class="box">rows</span></div>
+<div class="flow" style="margin-top:8px"><span class="box p">FileSides { old, new }</span><span class="mut">read once, when the file nears the view</span></div>
+<div class="flow" style="margin-top:4px;padding-left:24px"><span class="arrow">→</span><span class="box">FileHighlights</span><span class="arrow">→</span><span class="box">skipped lines</span><span class="arrow">→</span><span class="box">rendered readers</span></div>
+<p class="mut" style="margin-top:10px"><code>canOpenGaps</code> deleted. Old side <code>--at base</code> (old path on rename), new side <code>--at head</code> or the working tree. A draft in Files' Diff still reads the draft.</p>
+</div>
+</div>
+<p>The fix removes a precondition instead of adding one: skipped lines stop assuming the working tree, and step comparisons open them for free. Opened lines are new-side lines, so they color from <code>FileHighlights.new</code> like context rows; nothing new is needed to color them.</p>
 
-<h2>Left as built</h2>
-<p>A step also sets what Files' Diff and the tree's badges read, as a <code>.changes</code> tab already does. Change marks count rows, so wrapped lines put them slightly off. Viewed lives in memory.</p>
+<h2>Layout: one picker, one per-file toggle</h2>
+<div class="cols">
+<div class="pane"><div class="bar"><b>Before</b><span class="sp"></span><span class="seg"><span>New</span><span>Unified</span><span class="on">Side by side</span></span></div>
+<div class="bar">scratch/plan.md<span class="sp"></span><span class="seg bad"><span class="on">Rendered</span><span>Side by side</span><span>Source</span></span></div>
+<div class="doc"><h4>Done when</h4>A changed <code>.md</code> opens rendered, <del>redlined; one click</del><ins>redlined in New code</ins>…<p class="mut">Stream says side by side; file says redline.</p></div></div>
+<div class="pane"><div class="bar"><b>After</b> <span class="tag">proposed</span><span class="sp"></span><span class="seg"><span>New</span><span>Unified</span><span class="on">Side by side</span></span></div>
+<div class="bar">scratch/plan.md<span class="sp"></span><span class="btn">Source</span></div>
+<div class="cols" style="gap:0"><div class="doc r" style="border-right:1px solid var(--line)"><h4>Done when</h4>A changed <code>.md</code> opens rendered, <del>redlined; one click</del>…</div><div class="doc a"><h4>Done when</h4>A changed <code>.md</code> opens rendered, <ins>redlined in New code</ins>…</div></div></div>
+</div>
+<table>
+<tr><th>Layout</th><th>Code</th><th>Markdown rendered</th><th>Image, HTML</th></tr>
+<tr><td>New code <span class="mut">(default)</span></td><td>new, removed folded</td><td>redline</td><td>two panes</td></tr>
+<tr><td>Unified</td><td>interleaved</td><td>redline</td><td>two panes</td></tr>
+<tr><td>Side by side</td><td>two columns</td><td>two columns, aligned by pair</td><td>two panes</td></tr>
+<tr><td>under 640 pt</td><td>unified</td><td>redline</td><td>stacked, old above new</td></tr>
+</table>
+<p>Jack's 4c, "redline by default, side by side one click away", holds: the default layout reads redline and Side by side is one click on the picker that already exists. Images (5a) and HTML (6a) stay side by side in every wide layout.</p>
+
+<h2>Markdown blocks pair the way lines do</h2>
+<div class="pane"><div class="bar">MarkdownRedline <span class="tag">proposed</span></div>
+<div class="doc">
+<p class="mut" style="margin:0">anchor (equal kind + text)</p>
+<h4>Decisions</h4>
+<p class="mut" style="margin:0">changed: same kind, <code>ReviewSegment.edit</code> accepts</p>
+<p>Engine: <b>A</b>, native tree-sitter in the app, coloring <del>the Diff</del><ins>both the Diff and the Files editor</ins>.</p>
+<p class="mut" style="margin:0">removed alone · added alone (rewritten past the edit threshold)</p>
+<p><del>Grammars come from SwiftPM.</del></p>
+<p><ins>Grammars ship as one prebuilt xcframework.</ins></p>
+</div></div>
+<p><code>LongestCommon</code> anchors equal blocks; between anchors, the old and new runs align in order as <code>ReviewPair.align</code> aligns lines. Same three outcomes, same threshold, same <code>ReviewSegment</code>; no second diff algorithm.</p>
+
+<h2>Images stay <code>binary</code>, with bytes</h2>
+<div class="cols">
+<div class="card"><h3>Before <span class="tag ex">plan</span></h3><code>state: "image"</code> when Rust sees <code>.png .jpg .jpeg .gif .webp</code>; <code>data</code> only then. Swift keeps its own list to decide which files render.</div>
+<div class="card"><h3>After <span class="tag">proposed</span></h3><code>state: "binary"</code>, <code>data</code> (base64, ≤16 MB, else null), <code>size_bytes</code> as today. The app's extension list picks Diff readers; <code>NSImage(data:)</code> decides what Files Read shows. No new state, no list in Rust.</div>
+</div>
+
+<h2>Checked and left alone</h2>
+<p>The xcframework route, committed queries, the ink table and the off-main parse all map to real things and survive a failed read. The R2 upload still needs a yes before CI can link, as the plan says; nothing in this review changes that. The <code>dmg-background.png</code> acceptance line now expects <code>binary / true</code>.</p>
 
 <h2>Questions</h2>
-<ol>
-  <li>Non-<code>lf</code> commits each stand alone, so this branch still offers 44 entries. (a) keep; (b) fold a run of them into one "other commits" step; (c) offer only <code>lf</code> steps.</li>
-  <li>The five demo questions in the plan's Remaining (pane name, Task identity, Focus, the three building choices, the <code>diff_groups</code> warning) are unchanged and unanswered.</li>
+<ol class="q">
+<li>One read of each side (<code>FileSides</code>) serves highlights, skipped lines and rendered readers; <code>canOpenGaps</code> goes.
+<ol><li>Yes, as written into the plan.</li><li>Keep the reads separate; skipped lines stay working-tree only.</li></ol></li>
+<li>Rendered files follow the Diff's layout picker; each has only a Source toggle.
+<ol><li>Yes: New code and Unified redline, Side by side two columns.</li><li>Back to the per-file Rendered · Side by side · Source control.</li><li>Picker as in (a), but New code shows only the new document with removed blocks folded, like it folds lines.</li></ol></li>
+<li>Images ride on <code>binary</code> with <code>data</code>.
+<ol><li>Yes; any decodable binary shows as an image in Files.</li><li>A distinct <code>image</code> state keyed by extension.</li></ol></li>
+<li>Markdown blocks pair with <code>ReviewPair.align</code>'s rule.
+<ol><li>Yes.</li><li>Match by similarity instead (a moved paragraph would pair across anchors).</li></ol></li>
+<li>R2: upload <code>TreeSitterGrammars.xcframework</code> to the <code>bin</code> bucket beside GhosttyKit once slice 1 links?
+<ol><li>Yes.</li><li>Host it elsewhere (name where).</li></ol></li>
 </ol>
-<p class="muted">Path: <code>scratch/concept-review.html</code></p>
-</main>
-</body>
-</html>
+</main></body></html>

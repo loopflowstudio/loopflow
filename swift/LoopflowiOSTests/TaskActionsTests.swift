@@ -27,11 +27,6 @@ final class TaskActionsTests: XCTestCase {
             execution: nil))
     }
 
-    private func task(session: String?) -> MobileTask {
-        MobileTask(WorkViewPlan.Content(work: .init(repository: "repo", kind: .task, id: "task"), title: "Task",
-            states: [.working], identifier: "W2-144", primarySession: session, location: nil, argv: nil, unavailable: []))
-    }
-
     func testAReadingTheMachineCouldNotMakeShowsNoGraph() throws {
         let frame = RawJSON(Data(#"{"answers":null,"unavailable":"store is busy","body":null,"read_at":null}"#.utf8))
         guard case .failed(let reason) = TaskWorkspaceView.reading(in: frame, task: "LOO-5") else {
@@ -44,14 +39,14 @@ final class TaskActionsTests: XCTestCase {
         var asked: [String] = []
         let begun = try await TaskWorkspaceView.conversation(after: try reading(sessions: true)) { repository in
             asked.append(repository)
-            return self.task(session: "session-1")
+            return "session-1"
         }
         XCTAssertEqual(begun, "session-1")
         XCTAssertEqual(asked, ["/src/loopflow"])
     }
 
     func testARowThatNamesNoConversationYetLeavesTheScreenAsItIs() async throws {
-        let begun = try await TaskWorkspaceView.conversation(after: try reading(sessions: true)) { _ in self.task(session: nil) }
+        let begun = try await TaskWorkspaceView.conversation(after: try reading(sessions: true)) { _ in nil }
         XCTAssertNil(begun)
     }
 

@@ -74,7 +74,7 @@ struct TaskWorkspaceView: View {
         guard task.primarySession == nil, begun == nil else { return }
         do {
             begun = try await Self.conversation(after: reading) { [client, id = task.id] repository in
-                try await client.task(id: id, directory: repository)
+                try await client.task(id: id, directory: repository)?.primarySession
             }
         } catch {
             feed.notices.post(Notice("The conversation couldn’t be opened: \(machineConnectionMessage(error))",
@@ -83,12 +83,12 @@ struct TaskWorkspaceView: View {
     }
 
     /// The conversation to open after `reading`: once it lists a Session, the
-    /// primary one the Task's row names. `row` reads that row in a repository.
+    /// primary one the Task's row names. `primary` reads that row in a repository.
     static func conversation(after reading: Loaded<Reading>,
-                             row: (String) async throws -> MobileTask?) async throws -> String? {
+                             primary: (String) async throws -> String?) async throws -> String? {
         guard case .value(let reading) = reading, !reading.work.sessions.isEmpty,
               let repository = reading.row?.task.repo else { return nil }
-        return try await row(repository)?.primarySession
+        return try await primary(repository)
     }
 
     /// One frame of the Task's reading.

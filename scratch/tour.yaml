@@ -1,4 +1,4 @@
-at: f7e16f26867071ce5c3c204c3baa3ae2929008a4
+at: 23c37a8ae0ecad77061fe0b6f137006542602e0e
 first:
   - path: swift/README.md
     why: What a person gets: families, cards, title bar role
@@ -26,7 +26,11 @@ first:
   - path: swift/Loopflow/Design/ThemeDefinition.swift
     why: Catalogue order and counts
   - path: swift/LoopflowMac/Design/AppearanceStore.swift
-    why: Side from colors; config path from the server
+    why: Side from colors; config path from the server; readFailure vs notice
+  - path: swift/LoopflowMac/LoopflowApp.swift
+    why: The banner drops Choose Theme… after a failed read
+  - path: swift/Loopflow/Services/ServerLink.swift
+    why: A refused parse names both builds
   - path: swift/LoopflowMac/Views/ThemeChooser.swift
     why: The card grid replacing tiles and sample
   - path: swift/LoopflowiOS/README.md
@@ -39,6 +43,7 @@ first:
     why: Every color now a Loopflow Light role
   - path: swift/LoopflowTests/ThemeTests.swift
   - path: swift/LoopflowTests/ThemeWorkflowTests.swift
+  - path: swift/LoopflowTests/AppAppearanceTests.swift
   - path: swift/LoopflowiOSTests/MachineThemeTests.swift
   - path: python/tests/test_theme_catalogue.py
 hide:

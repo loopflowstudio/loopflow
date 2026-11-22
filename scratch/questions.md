@@ -137,3 +137,15 @@ Each was decided so the work could continue; `scratch/plan.md` has the detail.
     this window.** `taskWork` fills from the selected Task's subscription, so
     a tile for a Task never opened shows its row alone. Left as outside this
     change; is the sentence on every tile worth a read per tile?
+40. **The Now list omits Tasks that wait only to be started** (slice 5).
+    It lists a Task when its row says it needs someone. Answers question 37's
+    heading half in Swift; the server's condition is named in the plan as
+    outside this change. Keep them listed under another heading instead?
+41. **A finished Task's page says "Done" or "Abandoned"**, where it said
+    "Completed" or "Canceled", and the jump palette says "Unstarted", where
+    it said "Not started" (slice 5; decides question 15). Keep the older
+    words on the page and move the rows to them instead?
+42. **A parked Task's row still reads "Waiting" over "ready"** after slice 5;
+    only the tile regains its workflow sentence. The line is the server's
+    reason (question 38). Drop the line when it is the bare status word, or
+    wait for the wire to carry the sentence?

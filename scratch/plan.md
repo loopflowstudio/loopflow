@@ -24,6 +24,10 @@ a card or a stripe without a status.
 - A Task reads the same in the sidebar, the title bar, a dashboard tile, the
   roadmap, the Now list and a Wave's page: one status word, and one line when
   it needs someone. One function decides both.
+- The Now list's headings and its rows agree: a Task is listed there when
+  its row says it needs someone, and under that word.
+- A Task's own page says the word its row says: the workflow header and the
+  jump palette print `TaskStanding`'s word.
 - A click on a Task's row opens the Task, on every Portfolio screen.
 - A Wave's backlog shows the Wave's name in serif at the display step, one
   filter control, an action bar of the one button that begins with what is
@@ -66,10 +70,13 @@ look needs a display, so it belongs to qa and review, not to build.
 
 ## What the code is today
 
-All four slices are built. The acceptance grep prints nothing (seen again
+Slices 1 to 4 are built. The acceptance grep prints nothing (seen again
 after slice 4's commit, 6fe53188bb) and the Checks table has
-`DesignDisciplineTests` passing. Nothing remains for build; what is left is
-the Dev app look (qa) and the choices in `scratch/questions.md`.
+`DesignDisciplineTests` passing. Slice 5 remains: the review of the built
+screens (`scratch/concept-review.html`, at 021b28484a) found four places
+that still answer "where does this Task stand, and does it need someone"
+apart from `TaskStanding`. They are listed under "Where a Task stands, said
+once" and in slice 5.
 
 - At the base, 177 lines passed a literal padding and 132 a literal non-zero
   `spacing:`, with off-scale values 1, 3, 5, 6, 7, 9, 10, 14, 15, 17, 18, 22,
@@ -129,9 +136,56 @@ the condition is not clear, which is the rule the Brief already applies
 from a `RoadmapTask`, for hosts that hold one; the sidebar keeps
 `presentation` for a row named before planning answers. `TitleBar` prints
 the same word, and the Brief's "Blocked: reason" line reads `TaskStanding`
-too. Two readers of `lifecycle.label` remain, `TaskWorkflowHeader`
-(`TaskWorkView.swift:17`) and the jump palette (`WorkPalette.swift:129`);
-see slice 1's notes.
+too.
+
+#### Whether a Task needs someone is one predicate (slice 5)
+
+Qa found the server marks an unstarted Task whose next move is Start as
+`waiting`, reason "ready", and `TaskStanding` grew a private rule that does
+not count that as a need. The Now list never learned the rule: it groups by
+the wire's `condition.state` (`nowGroup`, `swift/Loopflow/Models/
+NowProjection.swift`), so "Waiting 9" heads nine rows that read "Unstarted".
+Two deciders on one screen.
+
+- `RoadmapTask.need` (in `WaveWorkMap.swift`, beside `awaitsStart`) returns
+  the condition state when the Task needs someone and nil when it does not:
+  nil for `clear`, nil for `waiting` on an unstarted Task whose recommended
+  action is Start, the state otherwise. It is the rule now inline in
+  `TaskStanding.init`, moved, not changed.
+- `TaskStanding` reads `need`. `nowGroup` returns `need`, so the Now list
+  omits Tasks that wait only to be started; the backlog is where those are
+  listed and started. `NowProjectionTests` gains that case.
+- Choice made for review: the Now list gets shorter. Passed over: keeping
+  every unstarted Task under "Waiting" and renaming the heading, which
+  leaves the list of what needs someone drowned by the backlog.
+
+#### The Task's own page says the row's word (slice 5)
+
+- `TaskWorkflowHeader` (`TaskWorkView.swift`) prints
+  `TaskStanding(task:status:)`'s word and tone, with the program status the
+  title bar passes (`model.programStatus(task:)`). Its private
+  `lifecycleLabel` ("Completed", "Canceled") is deleted, so the page says
+  "Done" and "Abandoned" as every row does. The identifier
+  `task-lifecycle-status` stays. `TaskConceptTests` and
+  `WorkCLISubscriptionTests` move to the row's words.
+- The jump palette's detail (`WorkPalette.swift:129`) prints the same word:
+  "LOO-515 · Unstarted", not "Not started".
+- Choice made for review: "Done" and "Abandoned" win because they are the
+  lifecycle's own words, the ones `lf task status` prints. Passed over:
+  teaching every row "Completed" and "Canceled".
+
+#### A reason is said once, and does not hide the workflow (slice 5)
+
+- A dashboard tile shows its workflow sentence unless its program asks
+  something (`status.ask`), not unless the row has any line
+  (`DashboardView.swift:246`). A Task parked at demo then reads "Waiting" on
+  its row and "You are next needed at demo." under it, where the sentence
+  was replaced by the server's "ready".
+- The Brief's state line already ends with `nextMove.reason`; for a waiting
+  Task the standing's line is the same string, so the page says it twice
+  ("Idle, at demo. ready." then "Waiting: ready"). The Brief prints the
+  standing's line only when it differs from the reason above it
+  (`TaskBriefView.swift:129`).
 
 Choice made for review: the condition's reason shows on the sidebar row as
 well as in the Portfolio, so a sidebar row whose Task is blocked or waiting
@@ -512,6 +566,19 @@ or `lf desktop` reads unless its view is deleted.
    - Not seen on a display: the browser's three bordered icon buttons, the
      review comment box at the `text` step where it was `.controlSize(.small)`
      with `meta`, and every snapped padding.
+5. **One answer, on the remaining four readers.** Next. In this order, each
+   with its test:
+   1. `RoadmapTask.need`; `TaskStanding` and `nowGroup` read it
+      (`TaskStandingTests`, `NowProjectionTests`: an unstarted Task whose
+      next move is Start is in no Now group; one waiting on a merge is).
+   2. `TaskWorkflowHeader` and the palette print `TaskStanding`'s word
+      (`TaskConceptTests`, `WorkCLISubscriptionTests`, `WorkPaletteTests`).
+   3. The tile's sentence yields only to a program's ask
+      (`DashboardWorkspaceTests`); the Brief drops the repeated line
+      (`TaskBriefTests`).
+   Then `swift/README.md` line 148 ("Not started") and `docs/surfaces.md`
+   where they name these words. No Rust. Run
+   `scripts/test_desktop.sh --filter 'TaskStandingTests|NowProjectionTests|TaskConceptTests|WorkCLISubscriptionTests|WorkPaletteTests|DashboardWorkspaceTests|TaskBriefTests|RoadmapViewTests'`.
 
 ## Outside this change
 
@@ -528,6 +595,16 @@ or `lf desktop` reads unless its view is deleted.
   build" where the Task's own page says "build is running. You are next
   needed at human-review." One sentence on both needs the planning wire to
   carry it.
+- **The standing belongs on the wire.** Rust's `task_condition`
+  (`rust/loopflow/src/lf/commands/waves.rs`) calls a Task `waiting` whenever
+  its next move is not its own, an unstarted Task included, and gives the
+  work status's word ("ready") as the reason. Desktop corrects both in
+  Swift: `RoadmapTask.need` and the row's line. The repository's rule is one
+  predicate, written in Rust. That Task: `task_condition` returns `clear`
+  for a Task that only awaits Start, a parked Task's reason is its Graph's
+  sentence, `lf wave show` and the plan board follow, and `RoadmapTask.need`
+  is deleted for `condition.state`. It changes CLI output and DTO fixtures,
+  so it is not a styling change.
 
 ## Checks
 

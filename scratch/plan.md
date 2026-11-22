@@ -47,13 +47,13 @@ Built, in PR #2020: the two defaults and the `loopflow-titlebar` role (round 1),
 
 - 2026-11-22, QA round 6 (`scratch/qa.html`), screen locked: Dev app against a 0.16.0 server shows the both-builds sentence with no button and Choose Theme still draws its cards; swapping to the branch server left the banner stuck until relaunch, fixed by retrying while `readFailure` is set (rerun: cleared in 12 s, Fig Leaf applied). Unknown-name notice keeps Choose Theme…; R5.10 did not reproduce. `swift test … 'AppAppearanceTests|ThemeWorkflowTests'` 8 passed.
 
+- 2026-11-22, implement round 7: `swift test … 'ThemeTests|ThemeWorkflowTests'` 27 passed (before the bottom-bar move), then `ThemeWorkflowTests` 4 passed after it; `theme_catalogue.py --check` and `test_theme_catalogue.py` passed. The runtime 13/13 count precondition in `ThemeDefinition.builtins` is deleted; `catalogueIsTwelveFamiliesWithALightAndADarkTheme` names the list. Not run: `documented_commands::` for the `swift/README.md` edit (gate), the chooser on a display (ship-review: does any row move when a card is chosen?).
+
 ## Demo
 
 Dev app → Settings → Choose Theme: 12 cards per side in their own colors, both sides in System mode. Click Fig and the window turns plum with lime; Fig Leaf is the light half. Import a dark file from the light section in Light mode: the mode switches to Dark and the file previews there.
 
 ## Remaining
-
-- 2026-11-22, implement round 7: `swift test … 'ThemeTests|ThemeWorkflowTests'` 27 passed (before the bottom-bar move), then `ThemeWorkflowTests` 4 passed after it; `theme_catalogue.py --check` and `test_theme_catalogue.py` passed. The runtime 13/13 count precondition in `ThemeDefinition.builtins` is deleted; `catalogueIsTwelveFamiliesWithALightAndADarkTheme` names the list. Not run: `documented_commands::` for the `swift/README.md` edit (gate), the chooser on a display (ship-review: does any row move when a card is chosen?).
 
 
 Concept review round 4 made the theme choice one Machine fact (`theme:` in the serving Machine's `~/.lf/config.yaml`), read through that Machine's server and resolved by one shared parser; the website consumes the Loopflow Light file. Implement built all three pieces:

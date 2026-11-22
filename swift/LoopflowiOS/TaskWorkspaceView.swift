@@ -19,14 +19,28 @@ struct TaskWorkspaceView: View {
     var body: some View {
         VStack(spacing: 0) {
             // While the Machine is away the sentence would be an old one.
-            if case .value(let reading) = reading, let graph = reading.work.graph, feed.pendingChanges.acceptsChanges {
-                WorkflowLine(graph: graph, auto: reading.actions?.auto == .on)
+            if case .value(let reading) = reading, feed.pendingChanges.acceptsChanges {
+                let refusal = reading.actions?.refusal
+                if reading.work.graph != nil || refusal != nil {
+                    VStack(alignment: .leading, spacing: Spacing.xs) {
+                        if let graph = reading.work.graph {
+                            WorkflowLine(graph: graph, auto: reading.actions?.auto == .on)
+                        }
+                        // A menu item holds two lines; Rust's reason says what to restore, so it is set in full.
+                        if let refusal {
+                            Text(refusal)
+                                .font(Typography.meta)
+                                .foregroundStyle(theme.palette.warning)
+                                .accessibilityIdentifier("task-actions-refusal")
+                        }
+                    }
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, Spacing.lg)
                     .padding(.vertical, Spacing.sm)
                     .background(theme.palette.background)
                     .overlay(alignment: .bottom) { Rectangle().fill(theme.palette.border).frame(height: 1) }
+                }
             }
             content
         }
@@ -106,18 +120,18 @@ struct TaskWorkspaceView: View {
     }
 
     /// "Task actions": what `TaskActions` offers, each sending its write from
-    /// the Task's repository. A refused action is disabled over Rust's reason.
+    /// the Task's repository. A refused action is disabled; the reason is under the sentence.
     @ViewBuilder private var actions: some View {
         if case .value(let reading) = reading, let row = reading.row, let actions = reading.actions,
            actions.run != nil || actions.auto != nil {
             let (issue, directory) = (row.task.identifier, row.task.repo)
             Menu("Task actions", systemImage: "ellipsis.circle") {
                 if let run = actions.run {
-                    item(run.label, symbol: "play.fill", refusal: actions.runRefusal, issue: issue,
+                    item(run.label, symbol: "play.fill", disabled: actions.runRefusal != nil, issue: issue,
                          write: .taskRun(directory: directory, issue: issue, graph: nil, from: nil, agent: nil, approve: false))
                 }
                 if let auto = actions.auto {
-                    item(auto.offer, symbol: auto == .on ? "pause.circle" : "paperplane", refusal: actions.autoRefusal, issue: issue,
+                    item(auto.offer, symbol: auto == .on ? "pause.circle" : "paperplane", disabled: actions.autoRefusal != nil, issue: issue,
                          write: auto == .on ? .taskAutoOff(directory: directory, issue: issue)
                              : .taskAutoOn(directory: directory, issue: issue))
                 }
@@ -125,14 +139,13 @@ struct TaskWorkspaceView: View {
         }
     }
 
-    private func item(_ name: String, symbol: String, refusal: String?, issue: String, write: ServedWrite) -> some View {
+    private func item(_ name: String, symbol: String, disabled: Bool, issue: String, write: ServedWrite) -> some View {
         Button {
             feed.request(name, issue: issue, write: write)
         } label: {
             Label(name, systemImage: symbol)
-            if let refusal { Text(refusal) }
         }
-        .disabled(refusal != nil)
+        .disabled(disabled)
     }
 
     @ViewBuilder private var content: some View {

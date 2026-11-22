@@ -69,6 +69,21 @@ To see "This Session is open on another device.", run `lf session resume
 <id>` in a PTY on the Mac (Python `pty.fork`, then `TIOCSWINSZ`) while the
 phone shows the Session; the phone resumes drawing when that view leaves.
 
+To see a refused action, `mv` a started Task's checkout out of the folder
+while its screen shows: Run and Auto-Ship grey and the reason appears under
+the sentence within seconds; `mv` it back to clear it. Auto-Ship on an
+unstarted Task starts it and runs this Graph to its end in under a minute.
+The provider stops at its trust prompt for the new clone; Return from the
+key row answers "No, exit" and ends the conversation.
+
+iPad: the same build installs on any iPad Simulator (`simctl list devices`),
+which pairs the same way and shows the full workflow line. `simctl uninstall`
+and `shutdown` it afterwards; it is not yours to delete. Nothing headless
+rotates a Simulator, so landscape stays unseen.
+
+Do not list processes with `pgrep -fl`: it prints every agent's whole prompt.
+Use `ps -axo pid,command | grep <clone name> | cut -c1-110`.
+
 Clean up: type `/exit` and Return into each conversation through a PTY
 `lf session resume <id>`, `lf task abandon <id>` each Task that is not done,
 delete the clone, its `.<task>` checkouts and `.ready`, then `xcrun simctl

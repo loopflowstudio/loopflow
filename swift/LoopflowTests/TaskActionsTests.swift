@@ -68,6 +68,18 @@ struct TaskActionsTests {
         #expect(on.autoRefusal == nil)
     }
 
+    @Test("The reason is given only while an offered action is disabled")
+    func refusalShown() throws {
+        let waiting: [String: Any] = ["kind": "at", "step": "demo"]
+        let running: [String: Any] = ["kind": "run", "step": "plan", "at": "implement", "lf_process_id": "p", "running": true]
+        let ended: [String: Any] = ["kind": "at", "step": "end"]
+        #expect(try actions(waiting, row(refusal: "worktree is missing")).refusal == "worktree is missing")
+        #expect(try actions(running, row(lifecycle: "active", refusal: "worktree is missing")).refusal == "worktree is missing")
+        #expect(try actions(running, row(lifecycle: "active", auto: true, refusal: "worktree is missing")).refusal == nil)
+        #expect(try actions(ended, row(lifecycle: "done", refusal: "Task is complete")).refusal == nil)
+        #expect(try actions(waiting, row()).refusal == nil)
+    }
+
     @Test("A completed Task offers Auto-Ship only to stop it")
     func completed() throws {
         let ended: [String: Any] = ["kind": "at", "step": "end"]

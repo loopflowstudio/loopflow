@@ -220,6 +220,7 @@ Made in implement (slice 5) with nobody present; each is reversible.
   off until then.
 - **A refused action in the phone's menu is a disabled item with Rust's
   reason as its second line** (`Label` then `Text` in the button's label).
+  Qa's second pass moved the reason under the workflow sentence.
 - **A row read that fails posts "The conversation couldn’t be opened: …"**
   and the next frame asks again.
 - `TaskGraph.runAction` moved beside `TaskActions`; only `TaskActions` and
@@ -239,3 +240,25 @@ Checks (slice 5):
   store; its repository, checkout and Simulator are deleted.
 - Not driven: Run, Auto-Ship and Stop Auto-Ship after the directory change;
   a disabled action with its reason; the Mac's Notice in Loopflow Dev. qa.
+
+Made in qa (second pass) with nobody present; each is reversible.
+
+- **A refused action's reason stands under the workflow sentence, once, in
+  warning ink at `meta`**, and the menu items are greyed with no second
+  line. The menu cut Rust's sentence at two lines, before "is missing;
+  restore that exact path". Passed over: both places, and a shorter sentence
+  from Rust.
+- Open: Backlog shows only "N without a conversation" folds, and a search
+  that matches a folded Task shows the fold, not the Task. Unfold while
+  searching, or never fold Backlog?
+
+Checks (qa, second pass):
+
+- iPhone SE (3rd generation) Simulator, iOS 26.2, installed Machine
+  (lf 0.16.0+0fa6a4e20), AXe: Start, Run, Auto-Ship and Stop Auto-Ship from
+  unstarted and started Tasks; a refusal from a missing checkout, light, dark
+  and accessibility-large; key row Return. iPad mini (A17 Pro): list and a
+  Task. `scratch/qa.html`.
+- `swift test --filter 'TaskActionsTests|WorkflowLineTests|TypographyDisciplineTests|DesktopHeadlessTests|PendingChangesTests'`: 49 tests passed, 2026-11-22. Gate reruns.
+- Disposable Tasks 6f6c98 and cb8466 stay Done in the Machine's store.
+- `uv run python scripts/test_ios.py`: TEST SUCCEEDED, 44 tests, 2026-11-22. CI reruns.

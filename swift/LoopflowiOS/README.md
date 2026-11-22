@@ -82,8 +82,9 @@ Mac. A Task that has not taken up a Graph shows no sentence.
   not completed has one of them.
 
 Each shows a line like "LOO-5 Auto-Ship requested" at the bottom of the
-screen. An action the Machine already knows it would refuse is greyed, with
-the reason under it; any other refusal shows in that line.
+screen. An action the Machine already knows it would refuse is greyed, and
+the reason stands in full under the workflow sentence; any other refusal shows
+in that line.
 
 **Changes** lists the files the Task changed; each opens its diff, and the diff
 opens the whole file. A Task with no conversation opens on its Changes; one

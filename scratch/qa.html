@@ -34,15 +34,29 @@ figcaption{font-size:12px;color:#6b635a}code{font:13px ui-monospace,monospace}li
 <div class="shots"><figure><img src="qa/27-changes-list.png"><figcaption>Changes</figcaption></figure><figure><img src="qa/28-diff.png"><figcaption>before</figcaption></figure><figure><img src="qa/34-diff-fixed.png"><figcaption>after</figcaption></figure><figure><img src="qa/30-binary.png"><figcaption>binary</figcaption></figure></div>
 <h2>Complete</h2><dl><dt>Did</dt><dd>Swiped a row left and tapped Complete.</dd><dt>Saw</dt><dd>The row left at once and <code>lf task status</code> reads done.</dd>
 </dl>
+<h2>Second pass, after slice 5: Task actions from the Task’s repository</h2>
+<p>Same Simulator model and Machine, a new disposable repository with two unstarted Tasks, 2026-11-22. Fresh install, paired by address; a relaunch after reinstalling went straight to the list.</p>
+<dl><dt>Did</dt><dd>On an unstarted Task: Auto-Ship, then Stop Auto-Ship while it ran. On the second: Start, Run, Auto-Ship. Answered the provider’s prompt with the key row’s Return.</dd>
+<dt>Saw</dt><dd>Each write landed (<code>lf task status</code>: “moving · auto: on”, then “auto: off”; “Waiting for you at pause#1.” then “pause#2”, then “At its end.”). The conversation replaced “No changes yet” within two seconds of Start and of Auto-Ship. A done Task with auto off has no Task actions; with auto on it offers only Stop Auto-Ship. Return ended the Session and the screen said “The Session ended.” with “Start it again”.</dd></dl>
+<div class="shots"><figure><img src="qa2/06-unstarted-menu.png"><figcaption>unstarted: Start, Auto-Ship</figcaption></figure><figure><img src="qa2/07-autoship-notice.png"><figcaption>Auto-Ship requested</figcaption></figure><figure><img src="qa2/08-auto-running.png"><figcaption>auto running</figcaption></figure><figure><img src="qa2/10-stop-notice.png"><figcaption>Stop Auto-Ship requested</figcaption></figure><figure><img src="qa2/16-start-notice.png"><figcaption>Start: conversation in place</figcaption></figure><figure><img src="qa2/19-run-notice.png"><figcaption>Run requested</figcaption></figure><figure><img src="qa2/12-after-return.png"><figcaption>Session ended</figcaption></figure></div>
+<h2>An action the Machine refuses</h2>
+<dl><dt>Did</dt><dd>Moved a started Task’s checkout aside while its screen showed, opened Task actions, then moved it back.</dd>
+<dt>Saw</dt><dd>Run and Auto-Ship greyed within seconds, with no reload. The reason under each was cut after two lines at “Task cb8466 worktree /Users/jack/src/qa-e166ff….”, before the words “is missing; restore that exact path”.</dd>
+<dt>Fixed</dt><dd>The reason stands once, in full, under the workflow sentence in the warning ink (<code>TaskActions.refusal</code>, with a test); the menu items are greyed with no second line. It left within three seconds of the checkout returning, and Run worked.</dd></dl>
+<div class="shots"><figure><img src="qa2/20-refused-menu.png"><figcaption>before: reason cut</figcaption></figure><figure><img src="qa2/22-refusal-in-full.png"><figcaption>after</figcaption></figure><figure><img src="qa2/24-refusal-dark.png"><figcaption>dark</figcaption></figure><figure><img src="qa2/25-refusal-ax-large.png"><figcaption>accessibility-large</figcaption></figure></div>
+<h2>iPad</h2>
+<dl><dt>Did</dt><dd>Installed the same build on an iPad mini (A17 Pro) Simulator, paired, read the list, opened a done disposable Task.</dd>
+<dt>Saw</dt><dd>The list and the shared row at full width, search in the bar. The Task shows the whole workflow line: Graph name, steps with a person before each interactive one, then the sentence.</dd></dl>
+<div class="shots"><figure><img src="qa2/31-ipad-list.png"><figcaption>iPad list</figcaption></figure><figure><img src="qa2/32-ipad-task.png"><figcaption>iPad: full workflow line</figcaption></figure><figure><img src="qa2/14-backlog-folds.png"><figcaption>Backlog is folds only</figcaption></figure></div>
 <h2>Where it stands</h2>
-<dl><dt>Works now</dt><dd>Pairing, the list and its filters and search, New Task through Create &amp; start, the conversation with reply and keys, the sentence, Start, Run, Auto-Ship, Stop Auto-Ship, Changes, diff, file, Complete, background and return, a second view, light, dark and large text. 45 phone tests and 51 Mac-side tests pass.</dd>
+<dl><dt>Works now</dt><dd>Pairing, the list and its filters and search, New Task through Create &amp; start, the conversation with reply and keys, the sentence, Start, Run, Auto-Ship and Stop Auto-Ship from unstarted and started Tasks, a refused action with its reason in full, a conversation that begins on the Task’s screen, Changes, diff, file, Complete, background and return, a second view, light, dark and large text, and the list and a Task on an iPad in portrait.</dd>
 <dt>Not reached</dt><dd><ul>
-<li>Landscape and iPad, where the Graph’s steps stand before the sentence: AXe rotates only the Duo and physical devices. A short Graph did show its steps in portrait.</li>
-<li>The QR scanner: a Simulator has no camera.</li>
-<li>A network lost mid-Session: the carrier is the Machine’s one Tailscale endpoint.</li>
-<li>A physical phone, the touch keyboard and dictation.</li></ul></dd>
+<li>The Mac’s “Auto-Ship requested” Notice and its Undo in a mounted Loopflow Dev: the display had been idle 90 minutes with another run’s “Loopflow Dev QA” on it, and the button needs a click on an unlocked screen. <code>DesktopHeadlessTests</code> and <code>PendingChangesTests</code> assert the words and the Undo; the phone showed the same Notice live.</li>
+<li>Landscape: AXe rotates only the Duo and physical devices.</li>
+<li>A row read that fails, the QR scanner, a network lost mid-Session, a physical phone.</li></ul></dd>
 <dt>Still wrong, worst first</dt><dd><ol>
-<li>A Task started from its own screen keeps showing Changes; its conversation opens only after going back to the list.</li>
+<li>Backlog is a list of collapsed “N without a conversation” lines, one per repository, and a search that matches shows only that line until it is tapped. Older than this change; left as it is.</li>
+<li>At accessibility-large text a refusal and the sentence take half an SE’s screen and leave the terminal six rows.</li>
 <li>The Notice covers the Reply field for the seconds it shows.</li>
-<li>In dark, “Available” is nearly the secondary ink, so the tone barely reads. The value is the shared palette’s.</li>
-<li>The disposable repository left five Tasks in the Machine’s store (two Done, three abandoned).</li></ol></dd></dl>
+<li>In dark, “Available” is nearly the secondary ink. The value is the shared palette’s.</li>
+<li>Two more disposable Tasks stay Done in the Machine’s store (6f6c98, cb8466); their repository and checkouts are deleted.</li></ol></dd></dl>

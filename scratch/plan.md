@@ -36,14 +36,13 @@ on an unstarted Task ended in its conversation on the same screen
 
 ## What remains
 
-Nothing to build. Checks nobody has run, for qa or demo:
+Nothing to build. Qa's second pass drove Run, Auto-Ship and Stop Auto-Ship
+after slice 5, a refused action, and an iPad in portrait (`scratch/qa.html`).
+Checks nobody has run, for demo:
 
-- Run, Auto-Ship and Stop Auto-Ship from a started Task after slice 5 moved
-  the phone's writes to the row's `task.repo`.
-- A phone action disabled over Rust's reason (no Task on the Machine had a
-  refusal), and a row read that fails.
-- The Mac's "Auto-Ship requested" Notice and its Undo in Loopflow Dev.
-- Landscape and iPad, the QR scanner, a physical phone (demo).
+- The Mac's "Auto-Ship requested" Notice and its Undo in a mounted Loopflow
+  Dev (asserted headless in `DesktopHeadlessTests`).
+- A row read that fails; landscape; the QR scanner; a physical phone.
 
 Open, a product choice (`scratch/questions.md`): the filter "Working now"
 lists rows that read "Busy", and "Ready for you" lists rows that read
@@ -154,8 +153,9 @@ same thing").
   themselves. The Mac draws exactly what it draws today (the rule is its
   rule, moved). The phone changes to match: Start is offered after any
   reading with no Graph, Auto-Ship on every Task that is not completed, and
-  an action Rust refuses is disabled with the reason as its second line in
-  the menu instead of failing after the tap. `WorkflowLine`'s `auto:` on
+  an action Rust refuses is disabled, with the reason in full under the
+  workflow sentence (a menu item cuts it at two lines), instead of failing
+  after the tap. `WorkflowLine`'s `auto:` on
   both is `TaskActions`' on. Passed over: keeping the phone's rule from
   `states` (two owners for one action, and a refusal only after the tap).
 - **LoopflowButtonStyle** takes its height from the platform's control
@@ -339,7 +339,7 @@ tests' stand-in client only, and the live look moves to demo.
 | Task list | search matches nothing | state view, "Clear search" |
 | Task list | read failed | keeps the last list; the Notice says why (unchanged) |
 | Task | no Graph taken up | no workflow line; "Start" |
-| Task | Rust refuses a run | "Start", "Run" and "Auto-Ship" disabled, the reason under each; "Stop Auto-Ship" stays |
+| Task | Rust refuses a run | "Start", "Run" and "Auto-Ship" disabled, the reason in full under the sentence; "Stop Auto-Ship" stays |
 | Task | started from its screen | the sentence, then its conversation in place of "No changes yet" |
 | Task | started, but its row names no conversation yet | "No changes yet" or Changes, until a later frame's read names one |
 | Task | Task reading failed or the link dropped | no workflow line and no Task actions; terminal unaffected; both return when the link does |

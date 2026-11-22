@@ -51,6 +51,9 @@ public struct TaskActions: Equatable {
 
     /// Why `auto`'s button is disabled; turning auto off is never refused here.
     public var autoRefusal: String? { auto == .on ? nil : runRefusal }
+
+    /// Why an offered action is disabled, said once for both; nil when none is.
+    public var refusal: String? { run != nil || auto == .off ? runRefusal : nil }
 }
 
 public extension TaskGraph {

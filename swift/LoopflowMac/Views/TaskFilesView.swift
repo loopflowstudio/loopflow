@@ -410,6 +410,8 @@ struct TaskFilesView: View {
                     interacted: store.noteInteraction)
             } else if snapshot.state == .text {
                 TaskDocumentView(document: document)
+            } else if let data = snapshot.data, NSImage(data: data) != nil {
+                ScrollView { TaskImage(file: snapshot).padding(16) }
             } else {
                 ContentUnavailableView(snapshot.state.title, systemImage: "doc")
             }

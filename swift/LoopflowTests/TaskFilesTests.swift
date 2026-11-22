@@ -13,6 +13,7 @@ private struct FilesFixture: Decodable {
     let changes: TaskChangesSnapshot
     let diff: TaskDiffSnapshot
     let file: TaskFileSnapshot
+    let image: TaskFileSnapshot
     let save: TaskFileSave
 }
 
@@ -28,7 +29,7 @@ struct TaskFilesTests {
 
     private func snapshot(_ text: String, revision: String? = nil) -> TaskFileSnapshot {
         TaskFileSnapshot(recoveries: [], issueIdentifier: "TEST-1", taskId: "task-files", path: "note.txt",
-                         content: text, state: .text, revision: revision ?? text, readOnlyReason: nil, sizeBytes: UInt64(text.utf8.count))
+                         content: text, data: nil, state: .text, revision: revision ?? text, readOnlyReason: nil, sizeBytes: UInt64(text.utf8.count))
     }
 
     @Test func localFilesKeepTheirContentLocationAndDraftWithoutPlanning() async throws {
@@ -259,7 +260,7 @@ struct TaskFilesTests {
         for (path, text) in [("scratch/explore.html", "<h1>Three visions</h1>"), ("scratch/plan.md", "# Plan")] {
             let document = store.document(path)
             await document.reconcile(TaskFileSnapshot(recoveries: [], issueIdentifier: "TEST-1", taskId: "task-files",
-                path: path, content: text, state: .text, revision: text, readOnlyReason: nil, sizeBytes: UInt64(text.utf8.count)))
+                path: path, content: text, data: nil, state: .text, revision: text, readOnlyReason: nil, sizeBytes: UInt64(text.utf8.count)))
             store.selection = path
             #expect(store.rendersSelection)
         }
@@ -331,7 +332,7 @@ struct TaskFilesTests {
         document.editor.insertText("draft", replacementRange: NSRange(location: 0, length: 8))
         document.editor.setSelectedRange(NSRange(location: 2, length: 1))
         let readOnly = TaskFileSnapshot(recoveries: [], issueIdentifier: original.issueIdentifier,
-            taskId: original.taskId, path: original.path, content: original.content, state: .text,
+            taskId: original.taskId, path: original.path, content: original.content, data: nil, state: .text,
             revision: original.revision, readOnlyReason: "Symlink is read-only", sizeBytes: original.sizeBytes)
         await document.reconcile(readOnly)
         #expect(document.text == "draft")
@@ -758,6 +759,14 @@ struct TaskFilesTests {
         #expect(fixture.file.recoveries.first?.changed == true)
     }
 
+    @Test func taskFileSnapshotCarriesABinaryFilesBytes() throws {
+        let fixture = try fixture()
+        #expect(fixture.file.data == nil)
+        #expect(fixture.image.state == .binary)
+        #expect(fixture.image.readOnlyReason == "A committed version is read-only.")
+        #expect(fixture.image.data == Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]))
+    }
+
     @Test func lateFileReadCannotReplaceAnotherSelection() async throws {
         let source = HeldTaskFileRead()
         let store = TaskFilesStore(issue: "TEST-1", cwd: "/fixture", query: RegistryQuery { args, _ in
@@ -1007,6 +1016,52 @@ struct TaskFilesTests {
         #expect(store.comparison == .workingTree(base: "parent") && store.step == nil)
     }
 
+    /// A step's skipped lines open from its head commit, not the working tree.
+    @Test func aStepOpensSkippedLinesFromItsHeadCommit() async throws {
+        let fixture = try Data(contentsOf: URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("tests/fixtures/dto/task_files.json"))
+        let base = String(repeating: "a", count: 40), head = String(repeating: "1", count: 40)
+        let committed = (1...9).map { $0 == 5 ? "let five = 5" : "let line\($0) = \($0)" }.joined(separator: "\n") + "\n"
+        let reads = OSAllocatedUnfairLock<[[String]]>(initialState: [])
+        let store = TaskFilesStore(issue: "TEST-1", cwd: "/fixture", query: RegistryQuery { args, _ in
+            let root = try JSONSerialization.jsonObject(with: fixture) as! [String: Any]
+            var value = root[args[1]] as! [String: Any]
+            switch args[1] {
+            case "changes":
+                let file = (value["files"] as! [[String: Any]])[0]
+                value["files"] = [file.merging(["path": "a.swift", "old_path": NSNull()]) { $1 }]
+                value["base_commit"] = base
+                value["head_commit"] = args.contains("--head") ? head : String(repeating: "b", count: 40)
+                value["commits"] = [["sha": head, "parent": base, "subject": "lf implement: count"]]
+            case "file":
+                reads.withLock { $0.append(args) }
+                value["path"] = args[3]
+                // The working tree has moved on since the step.
+                value["content"] = args.contains(head) ? committed : "worktree\n"
+            default:
+                value["patch"] = "diff --git a/a.swift b/a.swift\n--- a/a.swift\n+++ b/a.swift\n"
+                    + "@@ -1 +1 @@\n-let line1 = 0\n+let line1 = 1\n@@ -9 +9 @@\n-let line9 = 0\n+let line9 = 9\n"
+            }
+            return String(decoding: try JSONSerialization.data(withJSONObject: value), as: UTF8.self)
+        })
+        store.autosave = false
+        await store.loadReview()
+        store.showStep(try #require(store.steps.first))
+        await store.loadReview()
+        let file = try #require(store.shownReview?.file("a.swift"))
+        let (index, header) = try #require(file.blocks.enumerated().compactMap { index, block -> (Int, String)? in
+            if case .hunk(let header) = block, index > 0 { return (index, header) }
+            return nil
+        }.first)
+        await store.openGap(header, gap: try #require(file.gaps[index]), file: file, reader: .changes)
+        #expect(store.gapError == nil)
+        let opened = store.opened(file)
+        #expect(opened.lines.first { $0.new == 5 }?.text == "let five = 5")
+        #expect(reads.withLock { $0 }.contains { $0.suffix(2) == ["--at", head] })
+        #expect(reads.withLock { $0 }.contains { $0.suffix(2) == ["--at", base] })
+    }
+
     /// The Diff fits the pane it is given. No row asks for more than a narrow
     /// pane offers, so nothing widens the column or is clipped, and the page
     /// takes exactly the pane's width.
@@ -1089,7 +1144,7 @@ struct TaskFilesTests {
             if case .hunk(let header) = block, index > 0 { return (index, header) }
             return nil
         }.first)
-        await store.openGap(header, gap: try #require(file.gaps[index]), path: "a.swift", reader: .changes)
+        await store.openGap(header, gap: try #require(file.gaps[index]), file: file, reader: .changes)
         #expect(store.gapError == nil)
         #expect(store.opened(file).lines.compactMap(\.new).contains(5))
         store.reviewSelection = ReviewSelection(path: "a.swift", side: .new, first: 5, last: 5)
@@ -1394,7 +1449,7 @@ struct TaskFilesTests {
         await document.reconcile(TaskFileSnapshot(recoveries: [TaskFileRecovery(directory: "/recovery", changed: true,
                                                                          message: "Late writer")],
             issueIdentifier: baseline.issueIdentifier, taskId: baseline.taskId, path: baseline.path,
-            content: baseline.content, state: baseline.state, revision: baseline.revision, readOnlyReason: baseline.readOnlyReason, sizeBytes: baseline.sizeBytes))
+            content: baseline.content, data: nil, state: baseline.state, revision: baseline.revision, readOnlyReason: baseline.readOnlyReason, sizeBytes: baseline.sizeBytes))
         #expect(document.editor.undoManager?.canRedo == true)
         #expect(document.recoveries.first?.changed == true)
     }
@@ -1433,7 +1488,7 @@ struct TaskFilesTests {
         #expect(document.saveMessage == "Updated from disk")
         // The Save's own filesystem event rereads content, which carries no history.
         await document.reconcile(TaskFileSnapshot(recoveries: [], issueIdentifier: "TEST-1", taskId: "task-files",
-            path: original.path, content: "external again", state: .text, revision: "again", readOnlyReason: nil, sizeBytes: 14))
+            path: original.path, content: "external again", data: nil, state: .text, revision: "again", readOnlyReason: nil, sizeBytes: 14))
         #expect(document.recoveries.first?.changed == true)
     }
 
@@ -1504,7 +1559,7 @@ struct TaskFilesTests {
         #expect(registry.surfaces.view(for: identity) === terminal)
         #expect(terminal.surface == surface)
         let changed = TaskFileSnapshot(recoveries: [], issueIdentifier: "TEST-1", taskId: "task-files", path: original.path,
-                                       content: "external\n", state: .text, revision: "different", readOnlyReason: nil, sizeBytes: 9)
+                                       content: "external\n", data: nil, state: .text, revision: "different", readOnlyReason: nil, sizeBytes: 9)
         await document.reconcile(changed)
         #expect(document.text == "external\ndraft")
         #expect(document.external == nil)

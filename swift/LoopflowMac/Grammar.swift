@@ -223,6 +223,25 @@ struct FileHighlights: Equatable, Sendable {
         (line.kind == .removed ? line.old.flatMap { old[$0] } : line.new.flatMap { new[$0] }) ?? []
     }
 
+    /// These colors with each side that has text read from a parse of the
+    /// whole file instead, line by line; a side without text keeps its hunks'.
+    func reading(old: String?, new: String?, grammar: Grammar) -> FileHighlights {
+        var result = self
+        if let old { result.old = Self.numbered(old, grammar: grammar) }
+        if let new { result.new = Self.numbered(new, grammar: grammar) }
+        return result
+    }
+
+    private static func numbered(_ text: String, grammar: Grammar) -> [Int: [Grammar.Highlight]] {
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        var result: [Int: [Grammar.Highlight]] = [:]
+        for (index, spans) in Grammar.Highlight.byLine(grammar.highlights(of: text), lines: lines).enumerated()
+        where !spans.isEmpty {
+            result[index + 1] = spans
+        }
+        return result
+    }
+
     /// Each hunk parsed from its own lines: the newer side from its context and
     /// added lines, the older from its context and removed lines. A hunk that
     /// opens inside a comment or string reads its first lines as code.

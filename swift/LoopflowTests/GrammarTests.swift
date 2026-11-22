@@ -81,15 +81,29 @@ struct GrammarTests {
         #expect(Grammar.named("build.gradle.kts")?.name == "kotlin")
     }
 
-    /// A row read from the whole file knows it sits inside a docstring; the
-    /// same row parsed alone, as its hunk shows it, does not.
+    /// A hunk that opens inside a docstring colors as a docstring once the
+    /// whole file is read; parsed from its own lines, it reads as code.
     @Test func aDocstringRowColorsFromTheWholeFile() throws {
-        let grammar = try #require(Grammar.named("tool.py"))
-        let lines = ["def read():", "    \"\"\"", "    inside the docstring", "    \"\"\"", "    return 1"]
-        let whole = Grammar.Highlight.byLine(grammar.highlights(of: lines.joined(separator: "\n")), lines: lines)
-        #expect(whole[2].map(\.ink) == [.string])
-        #expect(whole[2].first?.range == NSRange(location: 0, length: lines[2].utf16.count))
-        #expect(!grammar.highlights(of: lines[2]).contains { $0.ink == .string })
+        let patch = """
+        diff --git a/tool.py b/tool.py
+        --- a/tool.py
+        +++ b/tool.py
+        @@ -3,2 +3,2 @@ def read():
+        -    the old words
+        +    inside the docstring
+             \"\"\"
+        """
+        let file = try #require(ReviewDiff.parse(patch).files.first)
+        let grammar = try #require(Grammar.named(file.path))
+        let added = try #require(file.lines.first { $0.kind == .added })
+        let hunks = FileHighlights.hunks(of: file, grammar: grammar)
+        #expect(!hunks.spans(for: added).contains { $0.ink == .string })
+        let new = ["def read():", "    \"\"\"", "    inside the docstring", "    \"\"\"", "    return 1"]
+        let whole = hunks.reading(old: nil, new: new.joined(separator: "\n"), grammar: grammar)
+        #expect(whole.spans(for: added).map(\.ink) == [.string])
+        #expect(whole.spans(for: added).first?.range == NSRange(location: 0, length: new[2].utf16.count))
+        // The old side had no text read, so removed rows keep their hunk colors.
+        #expect(whole.old == hunks.old)
     }
 
     /// Removed rows take the old side's colors by old line number; added and

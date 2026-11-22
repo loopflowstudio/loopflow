@@ -223,7 +223,7 @@ final class TaskFileDocument: NSObject, NSTextViewDelegate, @preconcurrency NSTe
     func restore(_ draft: WorkFileDraft, task: String) {
         guard !dirty else { return }
         snapshot = TaskFileSnapshot(recoveries: [], issueIdentifier: task, taskId: task, path: draft.path,
-            content: draft.baseContent, state: .text, revision: draft.baseRevision,
+            content: draft.baseContent, data: nil, state: .text, revision: draft.baseRevision,
             readOnlyReason: "Recovered draft; checking the current file", sizeBytes: UInt64(draft.baseContent.utf8.count))
         applyIncoming(draft.text)
         editor.isEditable = false
@@ -960,6 +960,7 @@ final class TaskFilesStore {
         changes = nil
         review = nil
         openedGaps = [:]
+        dropSides()
         places[.changes] = nil
         noteInteraction()
     }
@@ -1002,6 +1003,7 @@ final class TaskFilesStore {
             unread = paths.filter { unread.contains($0) || known[$0] == nil || Self.touches(changed, $0) }
         } else {
             unread = paths
+            dropSides()
         }
         readCommits = commits
         reading = []
@@ -1117,6 +1119,7 @@ final class TaskFilesStore {
               let file = result.file else { return }
         if file != review.files[index] {
             openedGaps[path] = nil
+            dropSides(path)
             var files = review.files
             files[index] = file
             self.review = ReviewDiff(files: files)
@@ -1314,28 +1317,121 @@ final class TaskFilesStore {
         }
     }
 
+    // MARK: Both sides of a file
+
+    /// Both versions of a changed file, read once for the comparison's
+    /// commits: the old at its base (under its old name), the new at its head,
+    /// or in the working tree when the comparison has none. Syntax colors,
+    /// skipped lines and images all read them.
+    struct FileSides: Equatable, Sendable {
+        /// The base commit, and the head commit or "" for the working tree.
+        let commits: [String]
+        /// Nil for an added file.
+        let old: TaskFileSnapshot?
+        /// Nil for a deleted file.
+        let new: TaskFileSnapshot?
+    }
+
+    private(set) var fileSides: [String: FileSides] = [:]
+    private(set) var sideErrors: [String: String] = [:]
+    @ObservationIgnored private var sideReads: [String: Task<FileSides, any Error>] = [:]
+
+    private var sideCommits: [String]? {
+        changes.map { [$0.baseCommit, comparison.head == nil ? "" : $0.headCommit] }
+    }
+
+    /// The file's two sides once read for this comparison; asking starts the read.
+    func sides(of file: ReviewFile) -> FileSides? {
+        guard let commits = sideCommits else { return nil }
+        if let known = fileSides[file.path], known.commits == commits { return known }
+        if sideReads[file.path] == nil, sideErrors[file.path] == nil {
+            Task { _ = try? await readSides(file) }
+        }
+        return nil
+    }
+
+    /// Read again after a failure.
+    func retrySides(_ file: ReviewFile) async {
+        sideErrors[file.path] = nil
+        _ = try? await readSides(file)
+    }
+
+    func readSides(_ file: ReviewFile) async throws -> FileSides {
+        guard let commits = sideCommits else { throw RegistryQueryError("The comparison has not been read yet.") }
+        if let known = fileSides[file.path], known.commits == commits { return known }
+        let read = sideReads[file.path] ?? Task { [query, issue] in
+            func side(_ path: String?, at commit: String?) async throws -> TaskFileSnapshot? {
+                guard let path else { return nil }
+                return try await query.taskFile(issue: issue, path: path, at: commit)
+            }
+            async let old = side(file.status == .added ? nil : file.oldPath ?? file.path, at: commits[0])
+            async let new = side(file.status == .deleted ? nil : file.path, at: commits[1].isEmpty ? nil : commits[1])
+            return FileSides(commits: commits, old: try await old, new: try await new)
+        }
+        sideReads[file.path] = read
+        defer { if sideReads[file.path] == read { sideReads[file.path] = nil } }
+        do {
+            let result = try await read.value
+            if sideCommits == commits {
+                fileSides[file.path] = result
+                sideErrors[file.path] = nil
+            }
+            return result
+        } catch {
+            if sideCommits == commits { sideErrors[file.path] = error.localizedDescription }
+            throw error
+        }
+    }
+
+    /// Forget a file's sides, or every file's, once what they were read for has changed.
+    private func dropSides(_ path: String? = nil) {
+        if let path {
+            fileSides[path] = nil
+            sideErrors[path] = nil
+            sideReads.removeValue(forKey: path)?.cancel()
+        } else {
+            fileSides = [:]
+            sideErrors = [:]
+            for read in sideReads.values { read.cancel() }
+            sideReads = [:]
+        }
+    }
+
     // MARK: Syntax colors
 
-    /// Each file's syntax colors, with the fingerprint of the lines they were
-    /// worked out from. Parsing runs off the main thread.
-    private var highlighted: [String: (fingerprint: Int, highlights: FileHighlights)] = [:]
-    @ObservationIgnored private var highlighting: [String: Int] = [:]
+    struct HighlightSource: Equatable {
+        let fingerprint: Int
+        /// Read from both whole files, rather than each hunk's own lines.
+        let whole: Bool
+    }
 
-    /// The file's syntax colors, worked out from its hunks the first time they
-    /// are asked for. Until they arrive, the colors of the lines it had before,
-    /// which keep their numbers when skipped lines open.
-    func highlights(of file: ReviewFile) -> FileHighlights? {
+    /// Each file's syntax colors, with what they were worked out from.
+    /// Parsing runs off the main thread.
+    private var highlighted: [String: (source: HighlightSource, highlights: FileHighlights)] = [:]
+    @ObservationIgnored private var highlighting: [String: HighlightSource] = [:]
+
+    /// The file's syntax colors: from each hunk's own lines at first, then from
+    /// both whole files once they are read, so a hunk that opens inside a
+    /// docstring colors as one. Files' Diff of an unsaved draft keeps hunk
+    /// colors, since the file on disk is not what it shows. Until new colors
+    /// arrive, the ones before, which keep their numbers when skipped lines open.
+    func highlights(of file: ReviewFile, in reader: ReviewReader) -> FileHighlights? {
+        guard let grammar = Grammar.named(file.path) else { return nil }
+        let draft = reader != .changes && fileReview?.draft == true
+        let sides = draft ? nil : sides(of: file)
+        let source = HighlightSource(fingerprint: file.fingerprint, whole: sides != nil)
         let known = highlighted[file.path]
-        if known?.fingerprint == file.fingerprint { return known?.highlights }
-        if highlighting[file.path] != file.fingerprint {
-            highlighting[file.path] = file.fingerprint
+        if known?.source == source { return known?.highlights }
+        if highlighting[file.path] != source {
+            highlighting[file.path] = source
+            let old = sides?.old?.content, new = sides?.new?.content
             Task { [weak self] in
                 let result = await Task.detached(priority: .userInitiated) {
-                    Grammar.named(file.path).map { FileHighlights.hunks(of: file, grammar: $0) } ?? FileHighlights()
+                    FileHighlights.hunks(of: file, grammar: grammar).reading(old: old, new: new, grammar: grammar)
                 }.value
-                guard let self, self.highlighting[file.path] == file.fingerprint else { return }
+                guard let self, self.highlighting[file.path] == source else { return }
                 self.highlighting[file.path] = nil
-                self.highlighted[file.path] = (file.fingerprint, result)
+                self.highlighted[file.path] = (source, result)
             }
         }
         return known?.highlights
@@ -1347,26 +1443,24 @@ final class TaskFilesStore {
     private(set) var openedGaps: [String: [String: [ReviewLine]]] = [:]
     private(set) var gapError: String?
 
-    /// The skipped lines are read from the file as it stands, which is the
-    /// comparison's newer side only while it reads the working tree.
-    var canOpenGaps: Bool { comparison.head == nil }
-
     func opened(_ file: ReviewFile) -> ReviewFile {
         openedGaps[file.path].map(file.opening) ?? file
     }
 
-    /// Show the lines a hunk header skips. Files' Diff of an unsaved draft
-    /// reads the draft; everything else reads the checkout.
-    func openGap(_ header: String, gap: ReviewGap, path: String, reader: ReviewReader) async {
+    /// Show the lines a hunk header skips, from the comparison's newer side:
+    /// its head commit, or the working tree. Files' Diff of an unsaved draft
+    /// reads the draft.
+    func openGap(_ header: String, gap: ReviewGap, file: ReviewFile, reader: ReviewReader) async {
         noteInteraction()
+        let path = file.path
         do {
             let content: String
             if case .file = reader, fileReview?.draft == true, let draft = documents[path]?.text {
                 content = draft
             } else {
-                let file = try await query.taskFile(issue: issue, path: path)
-                guard file.state == .text, let text = file.content else {
-                    throw RegistryQueryError("\(file.state.title) cannot be shown as text.")
+                let new = try await readSides(file).new
+                guard let new, new.state == .text, let text = new.content else {
+                    throw RegistryQueryError("\((new?.state ?? .missing).title) cannot be shown as text.")
                 }
                 content = text
             }
@@ -1503,7 +1597,11 @@ final class TaskFilesStore {
             let parsed = await Task.detached(priority: .userInitiated) { ReviewDiff.parse(next.patch) }.value
             guard !Task.isCancelled, generation == diffGeneration, selection == path, changes?.baseCommit == base, comparison == target,
                   selectedDocument?.editVersion == version else { return }
-            if let shown = fileReview, shown.diff != parsed { openedGaps[path] = nil }
+            if let shown = fileReview, shown.diff != parsed {
+                openedGaps[path] = nil
+                // A changed comparison of the file on disk means the disk changed.
+                if draft == nil { dropSides(path) }
+            }
             comments = comments.map { $0.selection.path == path ? $0.anchored(in: parsed.files.first.map(opened)) : $0 }
             fileReview = FileReview(path: path, baseCommit: base, diff: parsed, truncated: next.truncated, draft: draft != nil)
             if let entry = entering, entry.path == path {

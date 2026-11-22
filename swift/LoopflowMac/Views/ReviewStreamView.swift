@@ -52,7 +52,9 @@ struct ReviewStream: View {
                     .onAppear { store.setNear(file.path, true) }
                     .onDisappear { store.setNear(file.path, false) }
             } else {
-                if file.status == .binary {
+                if ReviewImages.shows(file) {
+                    ReviewImages(store: store, file: file).id(file.topID)
+                } else if file.status == .binary {
                     ReviewNotice(text: "Binary file · no text to compare").id(file.topID)
                 } else if file.blocks.isEmpty, note == nil {
                     ReviewNotice(text: file.status == .renamed ? "Renamed without changes" : "No textual changes")
@@ -119,7 +121,7 @@ struct ReviewStream: View {
     private func blockView(_ block: ReviewBlock, gap: ReviewGap?, file: ReviewFile) -> some View {
         switch block {
         case .hunk(let header):
-            gapRow(header, gap: gap, path: file.path)
+            gapRow(header, gap: gap, file: file)
         case .context(let line):
             pairRow(ReviewPair(removed: line, added: line, removedSegments: nil, addedSegments: nil),
                     file: file, context: true)
@@ -154,7 +156,7 @@ struct ReviewStream: View {
 
     /// The lines between two hunks: how many, and the declaration git names.
     /// A click reads them from the file and shows them in place.
-    @ViewBuilder private func gapRow(_ header: String, gap: ReviewGap?, path: String) -> some View {
+    @ViewBuilder private func gapRow(_ header: String, gap: ReviewGap?, file: ReviewFile) -> some View {
         let label = gap?.label ?? ""
         let row = HStack(spacing: 8) {
             if !label.isEmpty {
@@ -164,9 +166,9 @@ struct ReviewStream: View {
             Rectangle().fill(palette.border).frame(height: 1)
         }
         .padding(.leading, Self.gutterWidth + 6).padding(.trailing, 12).padding(.vertical, 5)
-        if let gap, !gap.new.isEmpty, store.canOpenGaps {
+        if let gap, !gap.new.isEmpty {
             Button {
-                Task { await store.openGap(header, gap: gap, path: path, reader: reader) }
+                Task { await store.openGap(header, gap: gap, file: file, reader: reader) }
             } label: {
                 row.overlay(alignment: .leading) {
                     Image(systemName: "arrow.up.and.down").font(.system(size: 9, weight: .semibold))
@@ -336,7 +338,7 @@ struct ReviewStream: View {
                     .foregroundStyle(tone?.ink ?? palette.textSecondary)
                     .textSelection(.disabled)
                 Text(Self.attributed(text, segments: cut == nil ? segments : nil, tone: tone,
-                                     highlights: store.highlights(of: file)?.spans(for: line) ?? [],
+                                     highlights: store.highlights(of: file, in: reader)?.spans(for: line) ?? [],
                                      inks: SyntaxInks.of(theme)))
                     .lineLimit(store.wrapsLines ? nil : 1)
                     .frame(maxWidth: .infinity, alignment: .leading)

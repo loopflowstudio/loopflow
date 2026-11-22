@@ -1,8 +1,9 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><title>Concept review: themes, round 2 as built</title>
+<html lang="en"><head><meta charset="utf-8">
+<title>Concept review: themes, round 3 as built</title>
 <style>
-:root { color-scheme: light dark; --bg:#faf8f5; --fg:#2a2624; --muted:#6b625c; --line:#e2dcd5; --card:#fff; --yes:#2f6b3a; --no:#a3392f; --prop:#2d5a8a; --ring:#2d5a8a; }
-@media (prefers-color-scheme: dark) { :root { --bg:#2b2d30; --fg:#e6e2dc; --muted:#a8a29b; --line:#45474b; --card:#323437; --yes:#8fcf9a; --no:#f0a39a; --prop:#9cc2ee; --ring:#9cc2ee; } }
+:root { color-scheme: light dark; --bg:#faf8f5; --fg:#2a2624; --muted:#6b625c; --line:#e2dcd5; --card:#fff; --yes:#2f6b3a; --no:#a3392f; --prop:#2d5a8a; }
+@media (prefers-color-scheme: dark) { :root { --bg:#2b2d30; --fg:#e6e2dc; --muted:#a8a29b; --line:#45474b; --card:#323437; --yes:#8fcf9a; --no:#f0a39a; --prop:#9cc2ee; } }
 body { background:var(--bg); color:var(--fg); font:15px/1.55 -apple-system, system-ui, sans-serif; max-width:980px; margin:2rem auto; padding:0 1.25rem; }
 h1 { font-size:1.6rem; margin-bottom:.25rem } h2 { margin-top:2.2rem; font-size:1.2rem }
 code { font:13px ui-monospace, Menlo, monospace } .muted { color:var(--muted) }
@@ -12,110 +13,67 @@ table { border-collapse:collapse; width:100%; margin:1rem 0 } td, th { border-bo
 .cmp { display:grid; grid-template-columns:1fr 1fr; gap:1rem; margin:1rem 0 }
 .win { border:1px solid var(--line); border-radius:8px; padding:.9rem; background:var(--card) }
 .win h3 { margin:.1rem 0 .6rem; font-size:1rem }
-.row { display:flex; gap:.5rem; align-items:center; flex-wrap:wrap; margin:.4rem 0 }
-.seg { border:1px solid var(--line); border-radius:6px; padding:.1rem .5rem; font-size:13px }
-.btn { border:1px solid var(--line); border-radius:6px; padding:.15rem .6rem; font-size:13px; min-width:110px }
-.btn.on { outline:2px solid var(--ring) } .gone { text-decoration:line-through; opacity:.5 }
-.cards { display:grid; grid-template-columns:repeat(4,1fr); gap:.4rem; margin:.3rem 0 .6rem }
-.c { border-radius:5px; overflow:hidden; font-size:11px; border:1px solid var(--line) }
-.c b { display:block; height:6px } .c span { display:block; padding:.25rem .35rem }
-.c.on { outline:2px solid var(--ring) }
-.imp { border:1px dashed var(--muted); border-radius:5px; font-size:11px; padding:.4rem .35rem; color:var(--muted) }
-.lbl { font-size:12px; color:var(--muted) } .hd { font-weight:600; font-size:13px; margin-top:.3rem }
-.err { color:var(--no); font-size:12px }
-pre { background:var(--card); border:1px solid var(--line); border-radius:6px; padding:.75rem; overflow:auto; font-size:13px }
+pre { background:var(--bg); border:1px solid var(--line); border-radius:6px; padding:.65rem; overflow:auto; font-size:12.5px; margin:.4rem 0 }
+.gone { text-decoration:line-through; opacity:.55 }
 ol.q li { margin:.6rem 0 }
 </style></head><body>
 
-<h1>Themes, round 2 as built: do the concepts line up?</h1>
-<p class="muted">Area taken: Choose Theme and the catalogue behind it, with the whole branch in it against base <code>621fb0926d</code>: 13 families, the card grid, retired names, import, and the title bar role from round 1. The earlier version of this page reviewed round 1 only (title bar role, found nothing to change); that finding still holds and is summarised in the table.</p>
+<h1>Themes, round 3 as built: do the concepts line up?</h1>
+<p class="muted">Area taken: Choose Theme, the store behind it and the catalogue, with the whole branch against base <code>621fb0926d</code>: two defaults, the title bar role, 13 families (Moss in place of Verdigris), the card grid, import by the file's side, removed names as unknown names. Round 2's page asked for three chooser corrections; round 3 built all three (<code>099ee97a81</code>, <code>ec99082800</code>, <code>d62943431e</code>). This pass reads what is left.</p>
 
 <h2>One interaction, walked</h2>
-<p>System mode, Mac dark. A person opens Choose Theme to try Fig.</p>
-<ol>
-<li>They see a mode control, then two buttons, <b>Light theme: Loopflow Light</b> and <b>Dark theme: Loopflow Dark</b>, then a <i>Light themes</i> section of 13 cards and a <i>Dark themes</i> section of 13. The ringed card in each section already says what each side uses. The buttons say it again.</li>
-<li>They click Fig. The window turns plum; Fig is ringed; Customize appears under it. Clicking the Dark button would have done nothing visible except move Customize to whichever dark card is ringed.</li>
-<li><b>Failure.</b> They have a dark Ghostty file and click <i>Import file…</i> under the light section, the one nearest the top. The chooser answers in red: <span class="err">“Midnight” is a dark theme. Import it from the Dark picker.</span> Apply goes grey. There is no thing called the Dark picker on screen; there is a button labelled “Dark theme” and a second Import tile further down. The app read the file, knew it was dark, and refused to put it there.</li>
-<li><b>Recovery.</b> They scroll, find the second tile, import again. Two tries for one file.</li>
-<li><b>Old setting.</b> Their <code>theme:</code> said <code>Linen</code>. The window opens in Loopflow Light with: <span class="err">“Linen” is no longer built in, so Loopflow Light is showing; to keep it, import its Ghostty theme file under Yours in Choose Theme.</span> Linen was Loopflow's own design; no Ghostty file named Linen exists. Clay's upstream was <i>Desert Morning</i>. Even for Gruvbox Dark, the upstream file has none of the app roles the built-in carried, so “keep it” is not what import gives.</li>
-</ol>
+<p><b>Normal.</b> System mode. Headings read “Light themes · Loopflow Light” and “Dark themes · Loopflow Dark”. Click Fig: the window turns plum, Fig is ringed, the dark heading says Fig, Customize appears under it. One place says which theme each side uses.</p>
+<p><b>Failure that used to happen.</b> A dark file from the light section's Import tile: it now lands under Dark → Yours and previews; in Light mode the mode flips to Dark (QA round 3, <code>scratch/qa/r3-import-light-mode.png</code>). No refusal, no sentence naming a control that isn't there.</p>
+<p><b>Recovery.</b> <code>theme: Verdigris</code> in config: “No theme named “Verdigris”: keeping …”, same as any typo. Cancel undoes any preview.</p>
+<p><b>Where the old model still shows.</b> Under the card, the click is two store calls, and the second one doesn't know which side it is for:</p>
+<pre>Button { editing = false; appearance.showPicker(side); appearance.previewTheme(entry.name) }
 
-<h2>Before and after</h2>
-<div class="cmp">
-<div class="win"><h3>Built (System mode)</h3>
-<div class="row"><span class="seg">System · Light · Dark</span></div>
-<div class="row"><span class="lbl">Light theme</span><span class="btn">Loopflow Light</span><span class="lbl">Dark theme</span><span class="btn on">Fig</span></div>
-<div class="hd">Light themes</div><span class="lbl">Built-in</span>
-<div class="cards">
-<div class="c on" style="background:#fbf7f0;color:#3a2a2a"><b style="background:#722f37"></b><span>Loopflow Light</span></div>
-<div class="c" style="background:#f7f0f7;color:#3a2a4a"><b style="background:#a2447a"></b><span>Arcade Day</span></div>
-<div class="c" style="background:#fff;color:#000"><b style="background:#2550a8"></b><span>Contrast Light</span></div>
-<div class="c" style="background:#f3f6ea;color:#4a2a3a"><b style="background:#7a3a5a"></b><span>Fig Leaf</span></div>
-</div>
-<span class="lbl">Yours</span><div class="cards"><div class="imp">Import file…</div></div>
-<div class="hd">Dark themes</div><span class="lbl">Built-in</span>
-<div class="cards">
-<div class="c" style="background:#2b2d30;color:#e6dada"><b style="background:#722f37"></b><span>Loopflow Dark</span></div>
-<div class="c" style="background:#1e1530;color:#eadcf5"><b style="background:#6a2a6a"></b><span>Arcade</span></div>
-<div class="c" style="background:#000;color:#fff"><b style="background:#5a4a00"></b><span>Contrast</span></div>
-<div class="c on" style="background:#3a2230;color:#f3e3ea"><b style="background:#4a5a1a"></b><span>Fig</span></div>
-</div>
-<span class="lbl">Yours</span><div class="cards"><div class="imp">Import file…</div></div>
-<div class="err">“Midnight” is a dark theme. Import it from the Dark picker.</div>
-</div>
-
-<div class="win"><h3><span class="tag">proposed</span> Same screen</h3>
-<div class="row"><span class="seg">System · Light · Dark</span></div>
-<div class="row"><span class="btn gone">Loopflow Light</span><span class="btn gone">Fig</span></div>
-<div class="hd">Light themes · Loopflow Light</div><span class="lbl">Built-in</span>
-<div class="cards">
-<div class="c on" style="background:#fbf7f0;color:#3a2a2a"><b style="background:#722f37"></b><span>Loopflow Light</span></div>
-<div class="c" style="background:#f7f0f7;color:#3a2a4a"><b style="background:#a2447a"></b><span>Arcade Day</span></div>
-<div class="c" style="background:#fff;color:#000"><b style="background:#2550a8"></b><span>Contrast Light</span></div>
-<div class="c" style="background:#f3f6ea;color:#4a2a3a"><b style="background:#7a3a5a"></b><span>Fig Leaf</span></div>
-</div>
-<span class="lbl">Yours</span><div class="cards"><div class="imp">Import file…</div></div>
-<div class="hd">Dark themes · Midnight</div><span class="lbl">Built-in</span>
-<div class="cards">
-<div class="c" style="background:#2b2d30;color:#e6dada"><b style="background:#722f37"></b><span>Loopflow Dark</span></div>
-<div class="c" style="background:#1e1530;color:#eadcf5"><b style="background:#6a2a6a"></b><span>Arcade</span></div>
-<div class="c" style="background:#000;color:#fff"><b style="background:#5a4a00"></b><span>Contrast</span></div>
-<div class="c" style="background:#3a2230;color:#f3e3ea"><b style="background:#4a5a1a"></b><span>Fig</span></div>
-</div>
-<span class="lbl">Yours</span><div class="cards"><div class="c on" style="background:#101010;color:#eee"><b style="background:#333"></b><span>Midnight</span></div><div class="imp">Import file…</div></div>
-<p class="lbl">Either Import tile took the dark file; it landed under Dark → Yours, ringed and previewed. In Light mode the mode control would flip to Dark; Cancel undoes it.</p>
-</div>
-</div>
+func previewTheme(_ name: String) {
+    …
+    draft?.selection.setName(name, dark: picker == .dark)   // side from ambient state
+}</pre>
+<p>Import decides the side from the file's colors. A card decides it from <code>picker</code>, a field named for a per-side list that no longer exists on screen. <code>previewTheme("Folio")</code> while <code>picker == .dark</code> writes a light theme onto the dark side. The UI never calls it that way today; the API still spells it. And the README still describes the deleted refusal: “accepting only the picker's appearance; a dark file in the Light picker explains itself instead” (<code>swift/README.md:355</code>).</p>
 
 <h2>Product concepts and code concepts</h2>
 <table>
 <tr><th>What a person knows</th><th>What the code has</th><th>Match</th><th>Note</th></tr>
-<tr><td>A theme: a name, light or dark, one file</td><td><code>ThemeFile</code>, <code>ThemeDefinition</code></td><td class="yes">yes</td><td></td></tr>
-<tr><td>The title bar</td><td><code>loopflow-titlebar</code>, <code>GhosttyThemeMapping.titlebar</code>, editor row</td><td class="yes">yes</td><td>Round 1's finding stands: a stated role, one fallback rule after stated roles, one check. “White or black on this color” is now one property, <code>ThemeRGB.contrastingText</code> (4c9120dff4).</td></tr>
-<tr><td>Which theme each side uses</td><td><code>AppearanceSelection.light</code>/<code>.dark</code>, shown as the ring on a card</td><td class="no">no, two owners</td><td>Shown twice: the ring and the side buttons. The buttons are the list-per-side chooser's control left behind by the grid.</td></tr>
-<tr><td>“The theme I just clicked” (where Customize shows, what the window paints)</td><td><code>AppearanceStore.picker</code>, set by the side buttons and by every card</td><td class="no">no, a concept the person never sees</td><td>Once the buttons go, <code>picker</code> is just the side of the last card clicked, which is what people already think it is.</td></tr>
-<tr><td>Import a theme file</td><td><code>importTheme(_:)</code> + <code>AppearanceDraft.refusal</code></td><td class="no">no, refuses a context it can resolve</td><td>The file says its side; the store requires the person to have pre-chosen the same one, and the refusal names “the Dark picker”, which is not on screen.</td></tr>
-<tr><td>My old built-in is gone</td><td><code>ThemeDefinition.retired</code> → notice</td><td class="no">no, the sentence</td><td>The mapping is right (side kept, Loopflow's theme shown, setting untouched until Apply). The advice to import “its Ghostty theme file” is false for Linen and Hearth and misleading for the rest.</td></tr>
-<tr><td>A family (Fig and Fig Leaf)</td><td>a name prefix; specs in <code>scripts/theme_catalogue.py</code>; sort order in <code>ThemeDefinition.builtins</code></td><td class="no">no, by design for now</td><td>The app never knows Fig and Fig Leaf belong together; it lines them up because names sort. Enough while the person picks each side separately. Picking a family once needs a family the app can read (a key in the file, or the generator emitting a pairing). Left outside this Task, as the plan says.</td></tr>
-<tr><td>Added and removed lines in a Diff; a selected file</td><td>chip fills; <code>selectionFill</code></td><td class="no">no, for imports</td><td>Generated themes follow the rules; imports don't. Outside this Task (plan, “Left outside”).</td></tr>
+<tr><td>A theme: a name, light or dark, one file</td><td><code>ThemeFile</code>, <code>ThemeDefinition.isDark</code></td><td class="yes">yes</td><td></td></tr>
+<tr><td>The title bar</td><td><code>loopflow-titlebar</code>, <code>GhosttyThemeMapping.titlebar</code>, editor row</td><td class="yes">yes</td><td>Round 1's finding holds.</td></tr>
+<tr><td>Which theme each side uses</td><td><code>AppearanceSelection.light/.dark</code>, ring + section heading</td><td class="yes">yes</td><td>One owner since <code>setName(_:dark:)</code>.</td></tr>
+<tr><td>A built-in that went away</td><td>unknown name</td><td class="yes">yes</td><td><code>ThemeDefinition.retired</code> deleted.</td></tr>
+<tr><td>Import a file</td><td><code>importTheme(_:)</code>, side from <code>file.theme.isDark</code></td><td class="yes">yes</td><td>README not updated: <span class="no">stale doc</span>.</td></tr>
+<tr><td>Click a card</td><td><code>showPicker(side)</code> + <code>previewTheme(name)</code></td><td class="no">no, two calls, side from ambient state</td><td>Same act as import (“put this theme on its side”), different rule for the side.</td></tr>
+<tr><td>“The theme I'm looking at” (where Customize shows)</td><td><code>AppearanceStore.picker</code></td><td class="no">no, one name for two ideas</td><td>“Picker” is also the mode <code>Picker</code>; what it holds is the side being previewed.</td></tr>
+<tr><td>A family (Fig and Fig Leaf)</td><td>a name prefix the generator knows</td><td class="muted">outside</td><td>Left outside this Task, as the plan says.</td></tr>
 </table>
 
 <h2>Biggest mismatch</h2>
-<p>The grid replaced the per-side list, and the per-side list's machinery stayed: the side buttons, the <code>picker</code> they drive, and an import that only works from the side you pre-picked. Each was right for a chooser that showed one side's list at a time. With both sides on screen as rings, they are a second way to say the same thing, and the import refusal is the place where the second way breaks.</p>
-<p><b>Recommendation</b> (in <code>scratch/plan.md</code>, Remaining 1–3): delete the side buttons and put each side's chosen name in its section heading; import files a theme on the side its colors say and previews it there; the retired-name sentence drops the import advice. The store gets smaller (no <code>refusal</code>, no refusal branch in <code>canApply</code>), the view loses a row, nothing a person relies on goes away except seeing the other side's name in Light-only mode.</p>
-<pre>// today
-guard file.theme.isDark == dark else { draft?.refusal = "… Import it from the \(other) picker."; return }
-// proposed
-let dark = file.theme.isDark
-if current.mode != .system { draft?.selection.mode = dark ? .dark : .light }
-picker = dark ? .dark : .light
-stage(file.theme, for: file.theme.name)   // then assign that side, as today</pre>
+<p>Which side a theme belongs to has two rules: import reads the theme's colors, a card click reads <code>picker</code>. The theme already knows its side. <span class="tag">proposed</span> Use that everywhere and the side-selection verb disappears.</p>
+<div class="cmp">
+<div class="win"><h3>Built</h3>
+<pre>// card
+appearance.showPicker(side)
+appearance.previewTheme(entry.name)
+
+<span>func showPicker(_ appearance: AppearanceMode)</span>
+func previewTheme(_ name: String)   // side = picker
+func importTheme(_ url: URL)        // side = file.isDark
+private(set) var picker: AppearanceMode</pre></div>
+<div class="win"><h3>Proposed <span class="tag">proposed</span></h3>
+<pre>// card
+appearance.previewTheme(entry.name)
+
+<span class="gone">func showPicker(_ appearance: AppearanceMode)</span>
+func previewTheme(_ name: String)   // side = theme.isDark
+func importTheme(_ url: URL)        // read file, then the same assignment
+private(set) var previewSide: AppearanceMode</pre></div>
+</div>
+<p>Written into <code>scratch/plan.md</code>, Remaining 1–2. Nothing a person sees changes; the store loses a verb and a way to put a theme on the wrong side, and the README stops describing a refusal that's gone.</p>
 
 <h2>Questions</h2>
 <ol class="q">
-<li>The side buttons. (a) delete, names move into section headings <span class="tag">chosen for review</span>; (b) keep them as read-only labels; (c) keep as built.</li>
-<li>A dark file imported in Light mode. (a) preview switches to Dark mode, Cancel undoes <span class="tag">chosen for review</span>; (b) switch to System; (c) file it under dark Yours without previewing.</li>
-<li>The retired-name sentence. (a) ““Linen” is no longer built in, so Loopflow Light is showing.” <span class="tag">chosen for review</span>; (b) also name the closest new family (“try Tannin Light”), which needs a 22-entry mapping kept by hand.</li>
-<li>Families. (a) stay a naming convention; pick each side <span class="tag">as built</span>; (b) a separate Task makes a family a thing the app reads, so System mode picks once.</li>
+<li>Side of a clicked card. (a) from the theme's own colors, as import does <span class="tag">chosen for review</span>; (b) <code>previewTheme(name, side:)</code> from the card's section; (c) leave the two calls.</li>
+<li>The field's name. (a) <code>previewSide</code> <span class="tag">chosen for review</span>; (b) <code>side</code>; (c) keep <code>picker</code>.</li>
+<li>Families. (a) stay a naming convention for this Task <span class="tag">as built</span>; (b) a separate Task makes a family something the app reads, so System mode picks once.</li>
 </ol>
 </body></html>

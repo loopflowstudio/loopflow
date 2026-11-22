@@ -1,6 +1,6 @@
 # 50f7f9: review the bundled themes
 
-Built, in PR #2020: the two defaults and the `loopflow-titlebar` role (round 1), then the 13 families and a Choose Theme grid of cards (round 2). Round 3 made the concept review's three chooser corrections, swapped Verdigris for Moss and dropped the removed-name fallback. What remains is ship-review's look at the Dev app on an unlocked display.
+Built, in PR #2020: the two defaults and the `loopflow-titlebar` role (round 1), then the 13 families and a Choose Theme grid of cards (round 2). Round 3 made the concept review's three chooser corrections, swapped Verdigris for Moss and dropped the removed-name fallback. The round 3 concept review found two leftovers of the per-side picker (Remaining 1–2); then ship-review's look at the Dev app on an unlocked display.
 
 ## What people said
 
@@ -36,7 +36,9 @@ Dev app → Settings → Choose Theme: 13 cards per side in their own colors, bo
 
 ## Remaining
 
-- Ship-review: the Dev app look above, on an unlocked display, including a dark file imported from the light section.
+1. **A theme lands on the side its own colors say, in one place.** Import already does this; a card click still goes through `showPicker(side)` then `previewTheme(name)`, which writes the name onto whatever side `picker` holds (`previewTheme("Folio")` with `picker == .dark` puts a light theme on the dark side). Make `previewTheme(_ name:)` take the side from `theme.isDark`, share one private assignment with `importTheme` (set the side, switch the mode when not System, stage, update), and delete `showPicker`. The card button becomes one call. Rename `picker` to `previewSide` and `themeName(for picker:)` to `themeName(for side:)`: no per-side picker exists on screen any more, and "picker" also names the mode `Picker`. Tests that used `showPicker(.light)`/`(.dark)` to choose a side preview a theme of that side instead; add one: `previewTheme` of a dark name while previewing light lands on `current.dark`. Check: the `swift test` filter in Checks.
+2. **`swift/README.md` says what import does now.** Lines 354–356 still say import accepts "only the picker's appearance; a dark file in the Light picker explains itself". Replace with: Import file… files a theme with the side its colors say and, in Light or Dark mode, switches the preview to that side. Fix "One appearance's picker" in `ThemeLibrary.swift` the same way.
+3. Ship-review: the Dev app look above, on an unlocked display, including a dark file imported from the light section.
 
 ## Left outside this Task
 

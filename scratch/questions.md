@@ -15,3 +15,5 @@
 
 - Round 3: in System mode an import previews the file on its side even when macOS is on the other side (as a card click does); Light/Dark mode switches the mode instead.
 - Round 3: the Import tile's accessibility identifier is `appearance-import-theme` in both sections (the `-dark` variant went with the side).
+
+- Concept review round 3: a card click takes its side from the theme's own colors, as import does, rather than from a side argument. Passed over: `previewTheme(name, side:)`, which keeps a parameter that can disagree with the theme.

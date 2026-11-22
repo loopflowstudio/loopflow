@@ -113,12 +113,17 @@ What it taught:
 - The queries are written for **the later pattern wins** (toml's `(bare_key) @type` comes before `(pair (bare_key)) @property`; Rust's `@property` before `@function.method`), so `Grammar.highlights` keeps the last pattern for the same text and a language's own query file follows the one it builds on (`c` then `cpp`, `javascript` then `typescript`). Captures without an ink are dropped before precedence, so a broad `@variable` never hides a call. Edited in place: python's attribute pattern moved above its call patterns, toml's pair capture moved onto the key, html colors quoted attribute values.
 - An unclosed `/*` in Swift is a parse error, not a comment; the editor turns code comment-colored once the comment closes.
 
+**Built November 21 (slice 3, `f982c27276` and the commit before it):** `lf task file --at <rev>` (read-only, from `git ls-tree -l` and `cat-file`; served `task.file` takes `at`), `data` on `TaskFileSnapshot` in Rust, Swift and `tests/fixtures/dto/task_files.json` (new `image` case), `TaskFilesStore.FileSides` with `readSides`/`sides(of:)`, rows recolored by `FileHighlights.reading(old:new:)` once both sides are read, `openGap` reading `sides.new` (`canOpenGaps` deleted), `ReviewImages` in the Diff for binary `.png .jpg .jpeg .gif .webp`, `TaskImage` in Files Read for any binary that decodes. The gate's three `lf task file` commands answer as written on this Task; `documented_commands::`, `server::schema::tests::` and the DTO fixture pass; `aStepOpensSkippedLinesFromItsHeadCommit` and `aDocstringRowColorsFromTheWholeFile` pass.
+
+What it taught:
+- A binary file over the 1 MB text limit used to read as `truncated`; it now reads as `binary` (NUL in its first 1 MB) and carries `data` up to 16 MiB, so a large image is still an image.
+- Files' Diff of an unsaved draft keeps hunk colors: the sides are the file on disk, not the draft the rows show.
+
 **Open, outside the slices:** uploading `TreeSitterGrammars.xcframework.zip` to the `bin` R2 bucket needs a yes (`scratch/questions.md`). It blocks CI's Swift and Xcode builds, not slices 3 and 4, which build against `swift/.build/local/`. With the yes: upload, then point `Package.swift`'s `binaryTarget` at the hosted URL and checksum.
 
 Remaining:
 
-3. **Next: `lf task file --at` and `data`.** Rust, served read, both DTOs and fixtures; `FileSides` in the store; Diff rows recolored from whole-file parses; skipped lines read from `sides.new` and `canOpenGaps` deleted; images side by side in the Diff and shown in Files Read. Done when the gate's three `lf task file` commands answer as written, `documented_commands` passes on the `--at` example, and the store test opens a skipped run in a step comparison.
-4. **Markdown redline, then HTML side by side**, with the per-file Source toggle and the layout picker arranging both.
+4. **Next: Markdown redline, then SVG and HTML side by side**, with the per-file Source toggle and the layout picker arranging them. SVG moved here from slice 3: it is `text`, so it needs the Source toggle that shows its line Diff. `ReviewImages`/`TaskImage` render it once its side's `content` becomes `data`-like input to `NSImage`.
 
 ## Docs
 

@@ -56,7 +56,7 @@ struct WorkflowLine: View {
         auto = false
     }
 
-    static func tones(_ graph: TaskGraph) -> [Tone] {
+    private static func tones(_ graph: TaskGraph) -> [Tone] {
         let running = if case .run(_, _, _, true) = graph.position { true } else { false }
         let ended = graph.position == .at(step: TaskGraph.end)
         return graph.steps.indices.map { index in

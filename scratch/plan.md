@@ -231,7 +231,8 @@ appear, and a failure should not move those words to the pane's middle.
 
 The prototype's drawn states are built: `NoPlannedWork` and `ChooseWork`
 (`WorkSurfaceView.swift`; the first stands in for an empty repository's page
-in `SessionsView`'s workspace panel and is the title alone in `RoadmapView`),
+in `SessionsView`'s workspace panel; `RoadmapView` draws its own "No planned
+Work yet" title),
 the missing selection, `RepositoryDidNotOpen` (`RepositoryWorkspaceView.swift:98`),
 `TaskStartOffer` (`TaskWorkView.swift:236`) and the pane sites in
 `WorkspacePanesView.swift`. `docs/surfaces.md` holds their wording.
@@ -501,9 +502,8 @@ demo: not headless; qa or demo runs it.
      step reads the state there. Questions 39.
    - `WorkSurfaceView` no longer draws `NoPlannedWork`: with no selection the
      repository's page takes that place, and a stale selection in an empty
-     plan reads as its own unavailable state. `NoPlannedWork` draws the
-     repository's form when handed the open action and the title alone
-     otherwise (`RoadmapView`).
+     plan reads as its own unavailable state. `NoPlannedWork` is the repository's form only;
+     `RoadmapView` draws a bare `EmptyState` title.
    - `BacklogList.empty.title` also feeds `lf desktop capture -p backlog`,
      so the capture's empty line gained the full stop.
    - Not seen in the Dev app: the state in a repository's window, the

@@ -141,7 +141,7 @@ struct RoadmapView: View {
         } else if snapshot == nil {
             Color.clear
         } else if visibleWaves.isEmpty {
-            NoPlannedWork(model: model)
+            EmptyState(title: "No planned Work yet").accessibilityIdentifier("loopflow-work-empty")
         } else {
             switch lens {
             case .now: nowContent

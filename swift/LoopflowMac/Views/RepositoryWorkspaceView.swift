@@ -114,16 +114,16 @@ struct RepositoryWorkspaceContent<Content: View>: View {
         VStack(spacing: 0) {
             if let workspace {
                 content(workspace)
+                // A retained workspace stays mounted; its failure reads beside it.
+                if let error {
+                    FailureLine("The latest read of this repository failed.", machine: error) {
+                        Button("Retry", action: retry).buttonStyle(LoopflowButtonStyle())
+                    }.padding(Spacing.lg)
+                }
             } else if let error {
                 RepositoryDidNotOpen(error: error, retry: retry)
             } else {
                 ProgressView("Opening repository…")
-            }
-            // A retained workspace stays mounted; its failure reads beside it.
-            if let error, workspace != nil {
-                FailureLine("The latest read of this repository failed.", machine: error) {
-                    Button("Retry", action: retry).buttonStyle(LoopflowButtonStyle())
-                }.padding(Spacing.lg)
             }
         }
     }

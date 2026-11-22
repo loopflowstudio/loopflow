@@ -324,7 +324,6 @@ struct DesktopHeadlessTests {
         await model.loadGraphCatalog(force: true)
         #expect(model.graphCatalog.value == retained)
         #expect(model.graphCatalog.failure == "catalog unreadable")
-        #expect(model.graphCatalog.failure == "catalog unreadable")
         #expect(model.paletteIsStale)
         #expect(model.navigation.palette == .workflow("feature"))
         let view = WorkflowCatalogInspector(entry: retained?.first, model: model)

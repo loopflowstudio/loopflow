@@ -225,3 +225,7 @@ scenarios. On the live Machine after install: `lf task create` during a link
 backlog reaches Linear in under a minute; the stuck link actions confirm on
 the first pass; `lf history linear` shows no `LinkAttachment` for a PR whose
 attachment is recorded.
+
+Concept review after build (2026-11-22, at 26d3346109): nothing to change.
+The concepts line up across cooldown, retry window and PR attachment; page
+`scratch/concept-review.html`.

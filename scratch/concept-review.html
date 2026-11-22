@@ -1,8 +1,7 @@
 <!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<title>b28a8a concept review: Linear pauses and PR links</title>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>b28a8a concept review (after build): Linear pauses and PR links</title>
 <style>
   :root { --bg:#fbfaf7; --fg:#1d1c1a; --mute:#6b675f; --line:#e2ded5; --card:#fff;
           --yes:#1f7a4d; --no:#b3261e; --new:#2457c5; --newbg:#eef3ff; --oldbg:#f6f1ea; }
@@ -28,69 +27,70 @@
   pre { background:var(--card); border:1px solid var(--line); border-radius:6px; padding:.7rem .9rem; overflow:auto; font-size:.86rem }
   ol.q li { margin:.6rem 0 } ol.q ol { list-style:lower-alpha }
 </style>
-</head>
-<body>
-<h1>Do the concepts line up? Linear pauses and PR links</h1>
-<p class="sub">Task b28a8a · reviewed 2026-11-22 against 621fb0926d and the plan in <code>scratch/plan.md</code> · before any code</p>
+</head><body>
+<h1>Do the concepts line up? Linear pauses and PR links, as built</h1>
+<p class="sub">Task b28a8a · reviewed 2026-11-22 at 26d3346109 against base 621fb0926d · second pass, after the build and live QA (<code>scratch/qa.html</code>)</p>
 
-<p><strong>Area taken:</strong> how a queued Linear write gets to Linear. That covers the Home's cooldown (<code>linear/cooldown.rs</code>), the drain and its retry rules (<code>ops/tracker/drain.rs</code>, <code>planning/rules.rs</code>), and the PR link, the write that tripped the limit (<code>linear/actions.rs</code> <code>pr_link</code>). The asked-for change was "one 429 stops pausing everything". The review widens to why that 429 keeps happening.</p>
+<p><b>Area taken:</b> how a queued Linear write reaches Linear: the Home's pauses (<code>linear/cooldown.rs</code>), the drain and its retry rule (<code>ops/tracker/drain.rs</code>, <code>planning/rules.rs</code>), and the PR link (<code>linear/actions.rs</code> <code>pr_link</code> → <code>attach</code> → <code>link_pr</code>). Same area as the first pass, now with the whole diff in it.</p>
+
+<p><b>Outcome: nothing to change.</b> Every mismatch the first pass named is closed in code, and the live run confirmed the two that a stand-in can't: all 15 stuck <code>sent</code> links confirmed (14 by <code>UpdateAttachment</code>, seq 722 by the already-linked recovery), and a probe Task reached Linear 1.5 s after <code>lf task create</code>.</p>
 
 <h2>What a person knows, and what the code holds</h2>
 <table>
-<tr><th>Product concept</th><th>Code concept</th><th>Line up?</th><th>What's wrong</th></tr>
-<tr><td>"Linear is limiting me": writes are held until a time</td><td><code>Cooldown</code>: one deadline file per endpoint</td><td class="no">no</td>
-<td>One name for two ideas. Linear limits the whole account (hourly requests, complexity) <em>or</em> one mutation (<code>x-ratelimit-endpoint-*</code>). The code has only the account-wide pause, and a 429 on one mutation borrows the hourly reset. <span class="tag p">proposed</span> plan §1: a global deadline and one deadline per operation.</td></tr>
-<tr><td>"My PR shows on the issue"</td><td>One <code>Link</code> action per PR state; each sends <code>attachmentLinkURL</code></td><td class="no">no</td>
-<td>The person sees one attachment per PR. The code has no such object: each state change asks Linear to <em>create</em> the link again, trusting a comment that says Linear dedupes. Linear refuses instead. The attachment id is already stored (<code>remote_id</code> on the confirmed link) and nothing reads it. <strong>Biggest mismatch</strong>, below.</td></tr>
-<tr><td>"The PR's comment on the issue"</td><td><code>pr_comment_id(task, url)</code>, a deterministic id, plus <code>comment_id</code></td><td class="yes">yes</td><td>One comment per PR, updated in place. This is the model the attachment should follow.</td></tr>
-<tr><td>"Why hasn't this change reached Linear?"</td><td><code>tracker_actions.error</code></td><td class="no">no</td>
-<td>The column holds two facts: this action's own failure, and the Home's pause, copied onto every queued action by <code>drain_repository</code>. The copy overwrote "This URL has already been linked with LOO-966." on all 13 stuck links, which is why the cause stayed hidden. <span class="tag p">proposed</span> plan §4: a pause stays with the Home.</td></tr>
-<tr><td>"It'll retry on its own"</td><td><code>rules::lost_reply</code> → <code>Resend</code> for idempotent kinds</td><td class="no">no</td>
-<td>"Lost reply" covers a definite GraphQL error on a 200 (<code>Sent::failed</code> → <code>Unknown</code>), and an idempotent one is resent on every pass of every <code>lf</code> command with no wait. <span class="tag p">proposed</span> plan §2: it waits the look window. <span class="tag e">left alone</span>: renaming <code>Unknown</code> for answered errors (question 3).</td></tr>
-<tr><td>Urgent work (creations, PR links) goes first</td><td><code>cooldown::urgent</code>, reserve budget</td><td class="yes">yes</td><td>Untouched. With §1 a link 429 no longer holds creations, so the drain keeps oldest-first order.</td></tr>
+<tr><th>Product concept</th><th>Code concept</th><th>Line up?</th><th>Notes</th></tr>
+<tr><td>"Linear is limiting me": writes held until a time</td>
+<td><code>Cooldown</code>: <code>&lt;key&gt;</code> (Home-wide) and <code>&lt;key&gt;.op/&lt;Operation&gt;</code>; <code>deadlines()</code></td>
+<td class="yes">yes</td>
+<td>Two limits Linear has, two deadlines the code has. The Home-wide one is set only when <code>requests</code>/<code>complexity</code> reports 0 left; a 429 with a healthy hourly allowance holds its own operation until the endpoint reset, else <code>Retry-After</code>, else 60 s. The 1-hour fallback survives only for a spent hourly allowance with a stale reset.</td></tr>
+<tr><td>"My PR shows on the issue"</td>
+<td>The latest confirmed link action's <code>remote_id</code>; <code>attach</code> updates it in place</td>
+<td class="yes">yes</td>
+<td>One attachment per PR, identified the way the comment is (<code>pr_comment_id</code>). <code>LinkAttachment</code>, the endpoint-limited mutation, goes out once per PR. A removed attachment is found by reading <code>IssueAttachments</code> after a failed update, not by error text.</td></tr>
+<tr><td>"The PR's comment on the issue"</td><td><code>pr_comment_id</code>, <code>posted</code></td><td class="yes">yes</td><td>Unchanged. <code>posted</code> and <code>attachment</code> now come from one scan of the subject's earlier actions.</td></tr>
+<tr><td>"It'll retry on its own"</td>
+<td><code>rules::lost_reply</code>: idempotent resend once <code>sent_at</code> is older than the window</td>
+<td class="yes">yes</td>
+<td>Same window as looks: ten minutes on a pass, now on <code>lf task sync</code>. "13 links per <code>lf</code> command" became at most 13 per ten minutes, and with the attachment fix there are none left to fail.</td></tr>
+<tr><td>"Why hasn't this change reached Linear?"</td>
+<td><code>tracker_actions.error</code></td>
+<td class="yes">mostly</td>
+<td>The open-time pause no longer overwrites every queued action's error (<code>drain_repository</code> returns on <code>TrackerError::RateLimited</code>). A send held by its own operation's pause still writes the pause text on that action, which is that action's true reason. Old rows keep the old text until next attempted.</td></tr>
+<tr><td>"The 429 said which limit"</td><td><code>Allowances</code> with <code>endpoint</code>, <code>endpoint_name</code>, <code>retry_after_ms</code>, flattened into the request log</td><td class="yes">yes</td><td>Not yet seen on a real 429; the next one will say.</td></tr>
 </table>
 
-<h2>Biggest mismatch: the PR's attachment</h2>
-<p>Walk it: PR #566 opens, its Task's issue gets an attachment (confirmed, <code>remote_id = att-…</code>). The PR merges and a second <code>Link</code> action is queued.</p>
+<h2>The walk: a PR merges during a link 429</h2>
 <div class="cols">
-<div class="box old"><span class="tag e">existing</span><strong>Every state change links again</strong>
-<pre>LinkAttachment(issue, url)  → 200 + error
-  "This URL has already been linked with LOO-966."
-Sent::Unknown → phase stays 'sent'
-every lf command: resend (no window)
-~26 LinkAttachment in 11 s → 429
-429 takes the hourly reset → every write paused</pre>
-The attachment id sits in the store, unread. The action can never confirm.</div>
-<div class="box new"><span class="tag p">proposed</span><strong>The PR keeps its attachment</strong>
-<pre>recorded = latest confirmed link's remote_id
-UpdateAttachment(recorded, state)  → 200
-update comment                     → 200
-Acknowledged { remote_id: recorded }</pre>
-<code>LinkAttachment</code> goes out only for a first link. If Linear answers "already linked" (a lost first reply, as with seq 722), read <code>IssueAttachments</code> and take the one with this URL. Not on the issue: retire with Linear's message.</div>
+<div class="box old"><span class="tag e">before (621fb09)</span>
+<pre>merge → Link action
+LinkAttachment → 200 + "already linked"
+Sent::Unknown, resent by every lf command
+~26 in 11 s → 429 (9952 of 10000 left)
+429 takes the hourly reset
+every write paused ~1 h
+error column: "rate limit reached" on all</pre></div>
+<div class="box new"><span class="tag p">as built</span>
+<pre>merge → Link action
+recorded att → UpdateAttachment → 200
+comment update → 200 → confirmed
+(a first link 429s elsewhere:)
+LinkAttachment paused to Retry-After/endpoint reset
+DeliverTaskCreation, comments, states: sent
+Task reaches Linear in the same pass</pre></div>
 </div>
-<p>On the live store (2026-11-22) 14 of the 15 <code>sent</code> links have a confirmed predecessor with an attachment id, so all 14 confirm on the first pass after install. The fifteenth goes through the recovery path. With this change, a later link 429 can only hold first links, and §1 makes sure it holds nothing else.</p>
-<p><strong>Plan before:</strong> recover from the "already linked" error by looking up the issue's attachments, on every state change. That costs a refused request on the limited endpoint plus a read each time, and it treats the store's own record as missing. <strong>After:</strong> the recorded id is the attachment's identity, as <code>comment_id</code> is the comment's; the lookup is only for recovery.</p>
+<p>Failure: the recorded attachment was removed in Linear. The update fails, <code>IssueAttachments</code> doesn't list it, <code>LinkAttachment</code> makes a new one, and its id becomes the next record. Recovery from a lost first reply: Linear answers "already linked", the read finds this issue's attachment for the URL, the action confirms. Linked to another issue: the action retires with Linear's message.</p>
 
-<h2>Tested against</h2>
-<table>
-<tr><th>Path</th><th>What happens</th></tr>
-<tr><td>Normal: PR merges</td><td>One <code>UpdateAttachment</code> and one comment update. No <code>LinkAttachment</code>.</td></tr>
-<tr><td>Failure: attachment removed in Linear</td><td><code>UpdateAttachment</code> answers not found, so it links again in the same send. One attachment.</td></tr>
-<tr><td>Failure: first link's reply lost</td><td>Resend after the 10-minute window (§2) answers "already linked", so it reads <code>IssueAttachments</code> and confirms with that id.</td></tr>
-<tr><td>Counterexample: PR linked to a different issue</td><td>No match on this issue. It retires with Linear's message and never loops. Moving it is out of scope.</td></tr>
-<tr><td>Recovery: global exhaustion (<code>requests-remaining: 0</code>)</td><td>The global deadline runs to that reset and everything waits, as today. Action errors keep their own text (§4).</td></tr>
-</table>
+<h2>Small things seen, not worth a pass</h2>
+<ul>
+<li>A send held by its operation's pause is refused before the network but still takes one of the pass's 20 slots (<code>take()</code> runs before <code>tracker.send</code>). Only first links can be held now, so it costs a few slots for a minute.</li>
+<li>No fixture covers §4: the open fails on a rate limit only inside <code>validate_team_claim</code>, behind a process-wide cache. Recorded in the plan.</li>
+<li>Pre-existing and outside this Task (in <code>scratch/questions.md</code>): <code>Sent::failed</code> files a 200-body refusal as "no reply"; <code>lf task create</code> prints "pending Linear sync" on every connected create; <code>lf task sync</code> says "nothing open" right after sending.</li>
+</ul>
 
 <h2>Questions</h2>
 <ol class="q">
-<li>Recorded attachment over error recovery for state changes (plan §3).
-  <ol><li>Keep it as written.</li><li>Go back to recovering from "already linked" every time.</li></ol></li>
-<li>Operation deadline key (plan §1).
-  <ol><li>Our GraphQL operation name, checkable before sending (chosen).</li><li>Linear's <code>x-ratelimit-endpoint-name</code>, known only after a 429.</li></ol></li>
-<li><code>Sent::failed</code> files a GraphQL error on a 200 as <code>Unknown</code> ("no reply").
-  <ol><li>Leave it: §2's window and §3 remove the storm this Task is about (chosen).</li><li>Add an answered-refusal outcome in a follow-up Task, so a definite error is never treated as a lost reply.</li></ol></li>
-<li>Slice order.
-  <ol><li>3 → 1 → 2: the attachment first, because it stops today's burst and shows on the live store within one pass (chosen).</li><li>1 first: the outcome's headline (a creation never waits on a link 429).</li></ol></li>
+<li>Should a send held by a pause stop taking a pass slot?
+  <ol><li>yes: check the pause before <code>take()</code></li><li>no: only first links can be held now; leave it</li></ol></li>
+<li>Should an answered refusal on a 200 get its own outcome instead of <code>Sent::Unknown</code>?
+  <ol><li>yes, as its own Task</li><li>no, the window bounds it</li></ol></li>
 </ol>
-</body>
-</html>
+</body></html>

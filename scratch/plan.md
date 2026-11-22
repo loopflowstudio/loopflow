@@ -30,7 +30,7 @@ vocabulary, held by `TaskStatusTests`. Still to change:
 - 43 lines in `swift/LoopflowiOS` pass a literal padding, spacing or radius
   (`MobileNewTaskView` 18, `SessionView` 10, `MachineConnectionView` 5,
   `TaskWorkspaceView` 6, `MobileRepositoryPicker` 3, `MachineCodeScanner`
-  1; three of them are `spacing: 0`), and 4 in `swift/Loopflow/Services/Notice.swift`.
+  1; four of them are `spacing: 0`), and 4 in `swift/Loopflow/Services/Notice.swift`.
   `TypographyDisciplineTests` does not scan for them yet, though
   `swift/LoopflowiOS/README.md` says it does.
 - The terminal reads `Typography.terminalSize` but lacks the Mac's

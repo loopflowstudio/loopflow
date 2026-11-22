@@ -129,7 +129,7 @@ Checks left for gate: `documented_commands::` (swift/README.md's language list c
 
 QA November 21 (`scratch/qa.html`, `ce178ae48f`): the redline, Side by side, HTML, grammar colors and Files images work in the Dev build; image diffs stacked for any picture wider than half the pane (fixed); the notices inventory was stale (refreshed). Not reached without clicks: the Source and layout buttons, a step's skipped lines. Open product questions are in `questions.md`, From qa.
 
-Remaining: the rendered-file stop repair in "Concept review after the build" below. Demo checks for qa: `scratch/plan.md` rendered and redlined in the Dev build, Side by side in two columns, Source showing the line Diff; `scratch/explore.html` as two pages; a step's skipped lines.
+Remaining: nothing to build; the rendered-file stop repair below is built. Demo checks for qa: `scratch/plan.md` rendered and redlined in the Dev build, Side by side in two columns, Source showing the line Diff; `scratch/explore.html` as two pages; a step's skipped lines.
 
 ## Concept review after the build (November 21, headless)
 
@@ -142,7 +142,9 @@ Page: `scratch/concept-review.html`, over the whole branch as built. Every conce
 
 Across layers: Swift only. `ReviewDiff.stops` / `ReviewFile.stops` stay the patch's; the store gains the one place that turns a shown diff into stops (`stops(_ reader:)`, rendered files collapsed to one) and `position`, `step`, `TaskChangesView.title` and the focus/sidebar lookups read it instead of `diff.stops`/`shownReview.stops`. A binary file's header drops "+0 −0" (it has no lines to count). No Rust, wire or fixture change.
 
-Test (`TaskFilesTests`): a stream of one Swift file with two changes, a changed `.md` with three hunks and a changed `.png` counts "4 changes in 3 files"; stepping visits the Swift stops, then `doc.md#rendered`, then `logo.png#rendered`; turning on the `.md`'s Source makes it 2 + 3 + 1 = 6. Break the feature in your head (stops from the patch again) and the count reads 5, and the image is never visited.
+Built: `TaskFilesStore.stops(of:in:)` / `stops(_:)` and `topID(of:in:)`; `ReviewStop.rendered(path)`; stepping moved to `[ReviewStop].stop(after:offset:)`; binary headers and sidebar rows drop their counts. The title's count is checked through `position` (the title is a private view property). Check: `scripts/test_desktop.sh --filter 'TaskFilesTests/aRenderedFileIsOneChange|ReviewDiffTests'` passed here; qa checks `]` on a rendered README in the Dev build.
+
+Test (`TaskFilesTests/aRenderedFileIsOneChange`): a stream of one Swift file with two changes, a changed `.md` with three hunks and a changed `.png` counts "4 changes in 3 files"; stepping visits the Swift stops, then `doc.md#rendered`, then `logo.png#rendered`; turning on the `.md`'s Source makes it 2 + 3 + 1 = 6. Break the feature in your head (stops from the patch again) and the count reads 5, and the image is never visited.
 
 ## Docs
 

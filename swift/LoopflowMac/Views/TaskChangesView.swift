@@ -212,7 +212,7 @@ struct TaskChangesView: View {
         guard let review = store.review, let shown = store.shownReview else {
             return all == 1 ? "1 file changed" : "\(all) files changed"
         }
-        let stops = shown.stops.count
+        let stops = store.stops(of: shown.files, in: .changes).count
         let files = shown.files.count == review.files.count
             ? (all == 1 ? "1 file" : "\(all) files") : "\(shown.files.count) of \(review.files.count) files"
         return "\(stops == 1 ? "1 change" : "\(stops) changes") in \(files)"
@@ -447,11 +447,14 @@ struct TaskChangesView: View {
         }
     }
 
+    /// Every shown file's changes, viewed ones included.
+    private var shownStops: [ReviewStop] { store.shownReview.map { store.stops(of: $0.files, in: .changes) } ?? [] }
+
     private func toggleFocus() {
         if store.focusedPath != nil {
             store.focusedPath = nil
         } else {
-            let current = store[place: .changes].current.flatMap { id in store.shownReview?.stops.first { $0.id == id }?.path }
+            let current = store[place: .changes].current.flatMap { id in shownStops.first { $0.id == id }?.path }
             store.focusedPath = current ?? currentPath
         }
         store.noteInteraction()
@@ -483,8 +486,8 @@ struct TaskChangesView: View {
     /// Bring a file's first lines to the top of the stream, under its name in the bar.
     private func jump(to path: String) {
         if store.focusedPath != nil { store.focusedPath = path }
-        store[place: .changes] = .init(anchor: store.shownReview?.file(path)?.topID,
-                                       current: store.shownReview?.stops.first { $0.path == path }?.id)
+        store[place: .changes] = .init(anchor: store.shownReview?.file(path).map { store.topID(of: $0, in: .changes) },
+                                       current: shownStops.first { $0.path == path }?.id)
         // Over a narrow stream the sidebar gives the room back.
         if !docksSidebar { store.showsSidebar = nil }
         store.noteInteraction()
@@ -522,10 +525,11 @@ struct TaskChangesView: View {
     /// The stream says where it ends, and offers the way back.
     @ViewBuilder private var footer: some View {
         VStack(spacing: 6) {
-            if let first = store.shownReview?.stops.first, store.focusedPath == nil {
+            if let first = shownStops.first, store.focusedPath == nil {
                 Text("End of changes").font(Typography.caption(11)).foregroundStyle(palette.textSecondary)
                 Button("Back to the first change") {
-                    store[place: .changes] = .init(anchor: store.shownReview?.file(first.path)?.topID, current: first.id)
+                    store[place: .changes] = .init(anchor: store.shownReview?.file(first.path).map { store.topID(of: $0, in: .changes) },
+                                                   current: first.id)
                     store.noteInteraction()
                 }
                 .buttonStyle(WorkPlainButtonStyle()).font(.caption)
@@ -641,7 +645,7 @@ private struct ChangedFilesSidebar: View {
                         .foregroundStyle(palette.accent)
                         .accessibilityLabel(comments == 1 ? "1 comment" : "\(comments) comments")
                 }
-                if !store.isReading(file) { counts(added: file.additions, removed: file.deletions) }
+                if !store.isReading(file), file.status != .binary { counts(added: file.additions, removed: file.deletions) }
             }
             .padding(.horizontal, 8).padding(.vertical, 3)
             .background(file.path == current ? palette.surfaceElement : .clear)

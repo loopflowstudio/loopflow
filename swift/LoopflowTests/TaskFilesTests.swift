@@ -969,6 +969,48 @@ struct TaskFilesTests {
         #expect(store.unread.isEmpty && store.review?.stops.count == 7)
     }
 
+    /// A file the Diff renders is one change, landing on its top: a picture
+    /// counts though it has no lines, and a redline's hunks are not drawn.
+    /// With Source on, the file's hunks are its changes again.
+    @Test func aRenderedFileIsOneChange() async throws {
+        let fixture = try Data(contentsOf: URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("tests/fixtures/dto/task_files.json"))
+        let paths = ["a.swift", "doc.md", "logo.png"]
+        let store = TaskFilesStore(issue: "TEST-1", cwd: "/fixture", query: RegistryQuery { args, _ in
+            let root = try JSONSerialization.jsonObject(with: fixture) as! [String: Any]
+            var value = root[args[1]] as! [String: Any]
+            switch args[1] {
+            case "changes":
+                let file = (value["files"] as! [[String: Any]])[0]
+                value["files"] = paths.map { file.merging(["path": $0, "old_path": NSNull(), "untracked": false]) { $1 } }
+            case "file":
+                throw RegistryQueryError("sides are not read here")
+            default:
+                let path = args[3]
+                let hunks = path == "doc.md" ? [1, 9, 19] : [1, 9]
+                value["patch"] = path == "logo.png"
+                    ? "diff --git a/\(path) b/\(path)\nBinary files a/\(path) and b/\(path) differ\n"
+                    : "diff --git a/\(path) b/\(path)\n--- a/\(path)\n+++ b/\(path)\n"
+                        + hunks.map { "@@ -\($0) +\($0) @@\n-old\n+new\n" }.joined()
+                value["truncated"] = false
+            }
+            return String(decoding: try JSONSerialization.data(withJSONObject: value), as: UTF8.self)
+        })
+        store.autosave = false
+        await store.loadReview()
+        #expect(store.position(.changes) == "4 changes")
+        var visited: [String] = []
+        while let stop = store.step(1, in: .changes) { visited.append(stop.id) }
+        #expect(Array(visited.dropFirst(2)) == ["doc.md#rendered", "logo.png#rendered"])
+        #expect(visited.prefix(2).allSatisfy { $0.hasPrefix("a.swift#") })
+        #expect(store.position(.changes) == "4 of 4")
+
+        store.sourceFiles.insert("doc.md")
+        #expect(store.position(.changes) == "6 of 6")
+        #expect(store.stops(.changes).map(\.path) == ["a.swift", "a.swift", "doc.md", "doc.md", "doc.md", "logo.png"])
+    }
+
     /// A file whose read failed says so and keeps its place; Retry reads it again.
     @Test func aFailedFileReadCanBeRetried() async throws {
         let store = try twoFileStore(failingOnce: "b.swift")

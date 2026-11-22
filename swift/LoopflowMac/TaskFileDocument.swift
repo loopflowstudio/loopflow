@@ -1524,12 +1524,28 @@ final class TaskFilesStore {
         }
     }
 
+    /// The changes a reader steps through, as it shows them: a file the Diff
+    /// renders is one change, read as a document; with Source on, its hunks.
+    func stops(of files: [ReviewFile], in reader: ReviewReader) -> [ReviewStop] {
+        files.flatMap { file in
+            rendering(of: file, in: reader) != nil
+                ? [.rendered(file.path)] : file.stops.map { ReviewStop(id: $0, path: file.path) }
+        }
+    }
+
+    func stops(_ reader: ReviewReader) -> [ReviewStop] { diff(reader).map { stops(of: $0.files, in: reader) } ?? [] }
+
+    /// The id of the first row the reader draws for a file under its header.
+    func topID(of file: ReviewFile, in reader: ReviewReader) -> String {
+        rendering(of: file, in: reader) != nil ? ReviewStop.rendered(file.path).id : file.topID
+    }
+
     /// "2 of 5" once a change is current; the count before. While the
     /// comparison's files are still being read the count would climb, so it
     /// shows how many files are read instead, and "2 of …".
     func position(_ reader: ReviewReader) -> String {
-        guard let diff = diff(reader) else { return "" }
-        let stops = diff.stops
+        guard diff(reader) != nil else { return "" }
+        let stops = stops(reader)
         let unread = reader == .changes ? unreadShown : 0
         let current = self[place: reader].current.flatMap { current in stops.firstIndex { $0.id == current } }
         if unread > 0 {
@@ -1549,7 +1565,7 @@ final class TaskFilesStore {
     func step(_ offset: Int, in reader: ReviewReader) -> ReviewStop? {
         noteInteraction()
         steppedAt = .now
-        if let stop = diff(reader)?.stop(after: self[place: reader].current, offset: offset) {
+        if let stop = stops(reader).stop(after: self[place: reader].current, offset: offset) {
             self[place: reader].current = stop.id
             if reader == .changes, focusedPath != nil { focusedPath = stop.path }
             return stop
@@ -1624,7 +1640,7 @@ final class TaskFilesStore {
             fileReview = FileReview(path: path, baseCommit: base, diff: parsed, truncated: next.truncated, draft: draft != nil)
             if let entry = entering, entry.path == path {
                 entering = nil
-                let stop = parsed.stop(after: nil, offset: entry.offset)
+                let stop = stops(.file(path)).stop(after: nil, offset: entry.offset)
                 places[.file(path)] = ReviewPlace(anchor: stop?.id, current: stop?.id)
             }
             changesError = nil

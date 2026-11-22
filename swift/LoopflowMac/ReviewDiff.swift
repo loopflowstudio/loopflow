@@ -7,20 +7,9 @@ import Loopflow
 struct ReviewDiff: Equatable, Sendable {
     var files: [ReviewFile]
 
-    /// Every change and moved block in reading order, across files.
+    /// Every change and moved block in the patch, in reading order, across files.
     var stops: [ReviewStop] {
         files.flatMap { file in file.stops.map { ReviewStop(id: $0, path: file.path) } }
-    }
-
-    /// The stop `offset` away from `current`; from nothing, the first or last.
-    func stop(after current: String?, offset: Int) -> ReviewStop? {
-        let stops = self.stops
-        guard !stops.isEmpty else { return nil }
-        guard let current, let index = stops.firstIndex(where: { $0.id == current }) else {
-            return offset >= 0 ? stops.first : stops.last
-        }
-        let next = index + offset
-        return stops.indices.contains(next) ? stops[next] : nil
     }
 
     func file(_ path: String) -> ReviewFile? { files.first { $0.path == path } }
@@ -149,6 +138,21 @@ struct ReviewDiff: Equatable, Sendable {
 struct ReviewStop: Equatable, Sendable {
     let id: String
     let path: String
+
+    /// A rendered file reads as one change, landing on its top.
+    static func rendered(_ path: String) -> ReviewStop { ReviewStop(id: "\(path)#rendered", path: path) }
+}
+
+extension [ReviewStop] {
+    /// The stop `offset` away from `current`; from nothing, the first or last.
+    func stop(after current: String?, offset: Int) -> ReviewStop? {
+        guard !isEmpty else { return nil }
+        guard let current, let index = firstIndex(where: { $0.id == current }) else {
+            return offset >= 0 ? first : last
+        }
+        let next = index + offset
+        return indices.contains(next) ? self[next] : nil
+    }
 }
 
 /// One Graph step's commits: a run of commits whose subjects start

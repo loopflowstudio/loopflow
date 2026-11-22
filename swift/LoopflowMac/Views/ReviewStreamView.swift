@@ -56,9 +56,10 @@ struct ReviewStream: View {
                 // A file with Source falls back to its line Diff when its sides don't read.
                 let failed = rendering?.hasSource == true ? store.sideErrors[file.path] : nil
                 if let rendering, failed == nil {
-                    ReviewRendered(store: store, file: file, rendering: rendering, split: split).id(file.topID)
+                    ReviewRendered(store: store, file: file, rendering: rendering, split: split)
+                        .id(ReviewStop.rendered(file.path).id)
                 } else {
-                    if let failed { ReviewSidesFailed(store: store, file: file, error: failed) }
+                    if let failed { ReviewSidesFailed(store: store, file: file, error: failed).id(ReviewStop.rendered(file.path).id) }
                     lines(file, note: note)
                 }
             }
@@ -450,7 +451,7 @@ struct ReviewFileTitle: View {
                     .lineLimit(1).truncationMode(.tail).help(note)
             }
             Spacer(minLength: 4)
-            if !store.isReading(file) {
+            if !store.isReading(file), file.status != .binary {
                 Text("+\(file.additions)").foregroundStyle(palette.successTone.ink).font(Typography.code(11)).fixedSize()
                 Text("−\(file.deletions)").foregroundStyle(palette.failureTone.ink).font(Typography.code(11)).fixedSize()
             }

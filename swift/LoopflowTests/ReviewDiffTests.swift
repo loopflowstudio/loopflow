@@ -56,13 +56,13 @@ struct ReviewDiffTests {
         #expect(stops.map(\.path) == ["a.swift", "a.swift", "a.swift", "b.swift"])
         var current: String?
         var visited: [String] = []
-        while let next = review.stop(after: current, offset: 1) {
+        while let next = stops.stop(after: current, offset: 1) {
             visited.append(next.path)
             current = next.id
         }
         #expect(visited == stops.map(\.path))
-        #expect(review.stop(after: stops[3].id, offset: -1)?.id == stops[2].id)
-        #expect(review.stop(after: nil, offset: -1)?.path == "b.swift")
+        #expect(stops.stop(after: stops[3].id, offset: -1)?.id == stops[2].id)
+        #expect(stops.stop(after: nil, offset: -1)?.path == "b.swift")
     }
 
     @Test func modifiedLineEmphasizesOnlyTheChangedWords() throws {

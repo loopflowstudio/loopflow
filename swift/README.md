@@ -312,22 +312,23 @@ Status labels and shapes retain their meaning across palettes.
 Choose **Settings → Appearance** to preview the whole workspace. Pick
 **System**, **Light** or **Dark**, then set **Light theme** and **Dark theme**
 independently; System follows macOS using both. System lists both pickers;
-Light or Dark lists only its own. Each picker
-shows built-ins, then **Yours**, ending with a dashed **Import file…** tile.
-
-Beside the pickers, a sample draws the previewed theme where its colors land in
-the app: a title bar with the repository's name, a selected Task row, the
-status words on the sidebar's surface, and one terminal line:
+Light or Dark lists only its own. Each picker shows built-ins as cards, then
+**Yours**, ending with a dashed **Import file…** tile. Every card is drawn in its
+own theme: a title bar strip, its name as a heading, Busy, Blocked and Error,
+ANSI 1–6, a selected row and a **Run** button:
 
 ```text
-loopflow
-Selected Work    Blocked since 12:07
-Working  Available  Blocked  Failed  Passed
-$ lf task status LOO-515
+▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔
+Fig
+Busy  Blocked  Error
+● ● ● ● ● ●
+[Selected row] [Run]
 ```
 
-A theme whose status words are hard to read on the sidebar shows it here,
-before **Apply**.
+Families sort by name after Loopflow, so a family's light and dark halves sit in
+the same column. Clicking a card previews it in every window; the chosen card is
+ringed in the window's focus color. A theme with unreadable roles shows why
+under the cards, before **Apply**.
 
 ```yaml
 # ~/.lf/config.yaml

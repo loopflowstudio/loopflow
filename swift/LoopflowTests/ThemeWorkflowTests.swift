@@ -29,21 +29,21 @@ struct ThemeWorkflowTests {
         #expect(appearance.selectedTheme.palette.definition == ThemeDefinition.builtins.first { $0.name == "Folio" }?.palette.definition)
     }
 
-    @Test func theSampleShowsThePreviewedThemeWhereItsColorsLand() throws {
+    @Test func everyCardDrawsItsOwnThemeAndClickingOnePreviewsIt() throws {
         let appearance = AppearanceStore(paths: .temporary(), systemDark: false)
         appearance.beginPreview()
+        appearance.previewMode(.system)
         let chooser = ThemeChooser(appearance: appearance)
-        func sample() throws -> [String] {
-            try chooser.inspect().find(viewWithAccessibilityIdentifier: "appearance-sample")
-                .findAll(ViewType.Text.self).map { try $0.string() }
-        }
-        #expect(try sample() == [
-            "loopflow", "Selected Work", "Blocked since 12:07",
-            "Working", "Available", "Blocked", "Failed", "Passed", "$ lf task status LOO-515",
-        ])
-        #expect(try chooser.inspect().find(ThemeSample.self).actualView().theme.name == "Loopflow Light")
-        try chooser.inspect().find(viewWithAccessibilityIdentifier: "appearance-theme-Folio").button().tap()
-        #expect(try chooser.inspect().find(ThemeSample.self).actualView().theme.name == "Folio")
+        let cards = try chooser.inspect().findAll(ThemeCard.self).map { try $0.actualView().theme.name }
+        // Light then dark, each in family order, so a family's two halves sit in the same column.
+        #expect(cards == ThemeDefinition.builtins.filter { !$0.isDark }.map(\.name) + ThemeDefinition.builtins.filter(\.isDark).map(\.name))
+        let fig = try chooser.inspect().find(viewWithAccessibilityIdentifier: "appearance-theme-Fig")
+        #expect(try fig.find(ThemeCard.self).findAll(ViewType.Text.self).map { try $0.string() }
+            == ["Fig", "Busy", "Blocked", "Error", "Selected row", "Run"])
+        try fig.button().tap()
+        #expect(appearance.selectedTheme.name == "Fig")
+        #expect(appearance.effectiveTheme.name == "Fig")
+        #expect(appearance.current.dark == "Fig")
     }
 
     @Test func chooserFiltersEachPickerToItsAppearanceAndWritesTheChoice() async throws {

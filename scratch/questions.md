@@ -12,3 +12,12 @@
   copy, and merging them is a copy decision.
 - The site has no dark scheme; "dark" checks mean OS dark mode leaves the
   light site intact. Adding one is a separate design.
+
+# Concept review (2026-11-21)
+
+- One footer on every page, the homepage's. The docs/download footer
+  ("Loopflow, a software instrument." / "Built by Loopflow Studio") goes,
+  and studio pages, which had none, gain one. Reversible; existing copy only.
+- The workflow card's `code` line will show two highlighted stops
+  (human-review, verify) under `<small>` copy that begins "One stop." The
+  copy stays word for word; it now contradicts the line beside it.

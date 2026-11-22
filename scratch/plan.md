@@ -5,8 +5,9 @@
 A visitor on `/`, `/studio`, `/fantasia`, `/docs/*`, `/architecture/*` and
 `/download` sees one site: Old Standard headlines (24px and up only, `fl`
 apart, −3% tracking), Atkinson Hyperlegible Next for everything read or
-pressed, Spline Sans Mono for commands. The same bar sits at the top of every
-page: the logo and "loopflow", For you, Docs, Company ▾, GitHub ↗, Install.
+pressed, Spline Sans Mono for commands. Every page is one frame: the same bar at the top
+(the logo and "loopflow", For you, Docs, Company ▾, GitHub ↗, Install) and
+the same footer at the bottom.
 The docs read in the homepage's colors and type steps. The workflow card on
 the homepage shows the step names the builtin Graphs actually run.
 
@@ -62,20 +63,47 @@ folded into the rules the patch appended overrides for (home h1/h2,
 matching DESIGN.md's "up to 54 / up to 38". The mobile hero rule that drops
 h1 to `--t-name` keeps it ≥ 24 (the `test_mobile` hero check).
 
-**One bar.** `_topbar()` becomes the site's only header: rename it
-`SiteHeader(current)`, call it from `_studio_page`, `_product_page`,
-`_docs_page` and `/download`; delete `Navbar()` and its CSS (`nav`, `.nav-*`,
-`.external-link`, the backdrop-blur sticky bar). Its CSS moves from
-`.home-page header`/`.home-page nav` to `.site-header`, unscoped, inside a
-wrapper capped at the homepage's 1240px with its 48/16px padding, so the bar
-is pixel-identical on every page whatever the content width below (docs run
-to 1440). The bar is static, as on the homepage; the docs rail's
-`position: sticky; top: 100px` becomes `top: var(--space-24)`. Install's
-href moves from `/#start` (no such id on the homepage) to `/download` in
-`content.yaml`; the docs bar's "Graphs" link goes with `Navbar` (the docs
+**One frame.** A page on the site is one thing: skip link, bar, main,
+footer. Today four functions build it four ways (`_studio_page`: bar, no
+footer; `_product_page`: bar, homepage footer; `_docs_page` and `/download`:
+`Navbar`, `SiteFooter`). They become one `SitePage(title, current, *main,
+cls)` returning `Title`, `SkipLink`, then `Div(SiteHeader(current),
+Main(*main, id="main-content"), SiteFooter(), cls=cls)`; extra heads
+(`docs.js`, robots `Meta`, `COPY_SCRIPT`) are passed in `main` or appended
+by the caller. `_studio_page` and `_product_page` collapse into it; docs
+pass `cls="docs-page"`, download `cls="download-page"`, home and studio keep
+`cls="home-page"` (their 132 scoped rules stay scoped; only the frame's
+rules leave the scope).
+
+`SiteHeader(current)` is today's `_topbar()` renamed; delete `Navbar()` and
+its CSS (`nav`, `.nav-*`, `.external-link`, the backdrop-blur sticky bar).
+`SiteFooter()` is today's homepage footer (its `text` and `links`); the
+docs' `SiteFooter` ("Loopflow, a software instrument." / "Built by Loopflow
+Studio", `.footer-*`, `.built-by`, global `footer` rules) is deleted, so
+`/studio`, `/etude`, `/fantasia`, `/about` gain a footer and docs and
+download show the homepage's. Choice made for review: the homepage footer
+wins because its copy is already the shared one in `content.yaml`; nothing
+is written new (`questions.md`). Header and footer CSS move from
+`.home-page header`/`nav`/`footer` to `.site-header`/`.site-footer`,
+unscoped, each inside a wrapper capped at the homepage's 1240px with its
+48/16px padding, so both are pixel-identical on every page whatever the
+content width between (docs run to 1440). The bar is static, as on the
+homepage; the docs rail's `position: sticky; top: 100px` becomes `top:
+var(--space-24)`. The docs bar's "Graphs" link goes with `Navbar` (the docs
 sidebar and "For you" remain). Docs keep their own `Documentation` `nav`
 landmark, so two labeled navs remain (the accessibility test checks
 distinct labels).
+
+**One install.** Install lives in three places: top-level `install`
+(label, href `/#start`, which no element carries), `homepage.install`
+(command, download, links) and the `/download` page, which hardcodes the
+command string twice. `content.yaml` keeps one top-level `install` block
+(label, `href: /download`, `install_command`, `links`, `download_url`);
+`homepage.install` goes, `INSTALL_CONTENT = SITE_CONTENT["install"]`, and
+`/download` reads `install_command` and `download_url` from it. The
+homepage `footer` block moves to top level beside `navigation`, since every
+page reads it. `/download` moves onto `.button solid` and loses its inline
+`style=`.
 
 **One palette.** `--d-*` maps onto `:root` roles and is deleted:
 
@@ -134,8 +162,8 @@ The `<small>` lines and the `.cap` sentence stay word for word, including
 ## Exclusions
 
 The rotating headline word, both drawn app windows and their "Coming soon"
-stamps, all written copy, and the footers (homepage footer and docs
-`SiteFooter` differ; unifying them is its own decision). The internal
+stamps, and all written copy (the one footer reuses existing copy; the
+workflow card's `<small>` lines stay word for word). The internal
 `/fonts`, `/design` and `/colors` pages (`internal_pages.py`) keep their
 own Google Fonts links: they compare candidate faces by design. No dark
 scheme: the site has none (`prefers-color-scheme` appears nowhere), so
@@ -145,9 +173,12 @@ site with nothing inverted or unreadable.
 ## What goes
 
 - `main.py`: the Google Fonts `Link`, `Navbar()`, the docs' `.nav-logo`
-  brand; `_topbar` renamed `SiteHeader`.
+  brand, the old `SiteFooter()`, `_studio_page` and `_product_page` (into
+  `SitePage`); `_topbar` renamed `SiteHeader`; the hardcoded install
+  command on `/download`.
+- `content.yaml`: `homepage.install` (merged into `install`).
 - `style.css`: the old `nav`/`.nav-*`/`.external-link` block and its media
-  queries, `--d-*`, `--fs-*`, the Instrument/Inter/JetBrains font stack,
+  queries, the global `footer`/`.footer-*`/`.built-by` rules, `--d-*`, `--fs-*`, the Instrument/Inter/JetBrains font stack,
   every `!important`, every duplicated homepage rule, every raw color below
   `:root`, the old `.btn` styles if the download page stops using them
   (it moves to `.button solid`).
@@ -190,8 +221,9 @@ would notice breaking:
 - Every element whose computed family starts with Old Standard has computed
   font-size ≥ 24px and `font-variant-ligatures` containing
   `no-common-ligatures`, on `/`, `/studio`, `/docs`, `/download`.
-- `.site-header` outerHTML is identical on `/` and `/docs` apart from
-  `aria-current`, and its bounding box matches at 1440 and 390.
+- `.site-header` and `.site-footer` outerHTML are identical on `/`,
+  `/studio`, `/docs` and `/download` apart from `aria-current`, and their
+  bounding boxes' x and width match at 1440 and 390.
 - The workflow card's step words for each Graph equal the steps parsed from
   the builtin YAML (the test reads the YAML, so the next Graph change fails
   it rather than silently drifting).
@@ -209,10 +241,11 @@ Then look at `/`, `/docs`, `/docs/orchestration`, `/download` at 1440 and
    whether Old Standard at the new ramp holds the homepage and docs h1
    without overflow at 390 (the riskiest visual unknown) and whether the
    portable export still renders. Delete the two patch files.
-2. **One bar.** `SiteHeader` on every page, `.site-header` CSS, delete
-   `Navbar` and its CSS, Install → `/download`, docs rail sticky offset, the
-   download page onto `.button`. Update navigation tests; add the
-   identical-header test.
+2. **One frame.** `SitePage` with `SiteHeader` and the homepage
+   `SiteFooter` on every page, `.site-header`/`.site-footer` CSS, delete
+   `Navbar`, the docs footer and their CSS, one `install` block with Install
+   → `/download`, docs rail sticky offset, the download page onto
+   `.button`. Update navigation tests; add the identical-frame test.
 3. **One palette and ramp, no `!important`.** Map `--d-*`/`--fs-*`, snap
    docs/download radii and spacing to steps, tokenize the remaining raw
    colors, merge the homepage's duplicate rules, md-link to sans. Look at

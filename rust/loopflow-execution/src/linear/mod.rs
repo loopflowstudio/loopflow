@@ -802,7 +802,8 @@ impl LinearClient {
         use request_log::{Exchange, RequestOutcome};
         let unanswered = |outcome, error| (Exchange::unanswered(outcome), Err(error));
         let cooldown = cooldown::Cooldown::for_endpoint(&self.base_url);
-        if let Err(error) = cooldown.check().await {
+        let (_, operation) = request_log::operation(request.query);
+        if let Err(error) = cooldown.check(&operation).await {
             return unanswered(RequestOutcome::Paused, error);
         }
         if !urgent {
@@ -838,7 +839,7 @@ impl LinearClient {
                 return (answered(RequestOutcome::Failed), Err(error));
             }
         };
-        match cooldown.observe(status, &headers, &body).await {
+        match cooldown.observe(&operation, status, &headers, &body).await {
             Ok(()) => (answered(RequestOutcome::Sent), Ok((status, body))),
             Err(error @ LinearError::RateLimited { .. }) => {
                 (answered(RequestOutcome::RateLimited), Err(error))

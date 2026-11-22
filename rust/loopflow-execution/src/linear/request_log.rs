@@ -64,6 +64,11 @@ pub struct LinearRequestRecord {
     pub requests: Option<Allowance>,
     pub complexity: Option<Allowance>,
     pub cost: Option<i64>,
+    /// The operation's own limit, when Linear keeps one.
+    pub endpoint: Option<Allowance>,
+    pub endpoint_name: Option<String>,
+    /// How long Linear's `Retry-After` asked to wait.
+    pub retry_after_ms: Option<i64>,
 }
 
 /// Whether this Machine records Linear requests.
@@ -121,6 +126,9 @@ impl PendingRequest {
                 requests: None,
                 complexity: None,
                 cost: None,
+                endpoint: None,
+                endpoint_name: None,
+                retry_after_ms: None,
             },
         })
     }
@@ -132,9 +140,13 @@ impl PendingRequest {
         if exchange.outcome.spent() {
             record.duration_ms = Some(self.started.elapsed().as_millis() as u64);
         }
-        record.requests = exchange.allowances.requests;
-        record.complexity = exchange.allowances.complexity;
-        record.cost = exchange.allowances.cost;
+        let allowances = exchange.allowances;
+        record.requests = allowances.requests;
+        record.complexity = allowances.complexity;
+        record.cost = allowances.cost;
+        record.endpoint = allowances.endpoint;
+        record.endpoint_name = allowances.endpoint_name;
+        record.retry_after_ms = allowances.retry_after_ms;
         if let Err(error) = append(&self.path, record) {
             tracing::debug!(%error, "Linear request log unavailable");
         }
@@ -161,7 +173,7 @@ impl Exchange {
 }
 
 /// `query Name(...)` or `mutation Name(...)`: whether it writes, and its name.
-fn operation(query: &str) -> (bool, String) {
+pub(super) fn operation(query: &str) -> (bool, String) {
     let mut words = query
         .trim_start()
         .split(|c: char| c.is_whitespace() || c == '(' || c == '{')
@@ -338,6 +350,9 @@ mod tests {
             requests: None,
             complexity: None,
             cost: Some(2),
+            endpoint: None,
+            endpoint_name: None,
+            retry_after_ms: None,
         }
     }
 

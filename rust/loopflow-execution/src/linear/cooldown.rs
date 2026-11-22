@@ -73,13 +73,20 @@ pub struct Allowance {
     pub reset_ms: Option<i64>,
 }
 
-/// The request-count and complexity allowances a response reported.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+/// The allowances a response reported: the Home's hourly request and
+/// complexity budgets, and the lower limit Linear keeps on some operations.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Allowances {
     pub requests: Option<Allowance>,
     pub complexity: Option<Allowance>,
     /// This request's complexity, from `x-complexity`.
     pub cost: Option<i64>,
+    /// This operation's own limit, from `x-ratelimit-endpoint-requests-*`.
+    pub endpoint: Option<Allowance>,
+    /// Linear's name for that limit, from `x-ratelimit-endpoint-name`.
+    pub endpoint_name: Option<String>,
+    /// How long `Retry-After` asked to wait.
+    pub retry_after_ms: Option<i64>,
 }
 
 impl Allowances {
@@ -91,10 +98,17 @@ impl Allowances {
                 reset_ms: header_number(headers, &format!("x-ratelimit-{scope}-reset")),
             })
         };
+        let now = now_ms();
         Self {
             requests: allowance("requests"),
             complexity: allowance("complexity"),
             cost: header_number(headers, "x-complexity"),
+            endpoint: allowance("endpoint-requests"),
+            endpoint_name: headers
+                .get("x-ratelimit-endpoint-name")
+                .and_then(|value| value.to_str().ok())
+                .map(str::to_owned),
+            retry_after_ms: retry_at(headers, now).map(|at| at - now),
         }
     }
 }
@@ -202,9 +216,12 @@ pub fn delta_fresh_secs() -> i64 {
     budget.fresh_for_ms(now_ms()) / 1000
 }
 
+/// The Home's pauses for one endpoint: one for every request, set when an
+/// hourly allowance runs out, and one per operation Linear limits on its own.
 #[derive(Debug)]
 pub struct Cooldown {
     path: PathBuf,
+    operations: PathBuf,
     budget: PathBuf,
 }
 
@@ -214,13 +231,22 @@ impl Cooldown {
         let key = endpoint_key(endpoint);
         Self {
             budget: dir.join(format!("{key}.budget")),
+            operations: dir.join(format!("{key}.op")),
             path: dir.join(key),
         }
     }
 
-    pub async fn check(&self) -> LinearResult<()> {
-        let mut file = lock(&self.path).await?;
-        let until = read_deadline(&mut file)?;
+    fn operation_path(&self, operation: &str) -> PathBuf {
+        self.operations.join(operation)
+    }
+
+    /// Whether `operation` may be sent: neither the Home nor it is paused.
+    pub async fn check(&self, operation: &str) -> LinearResult<()> {
+        let mut until = 0;
+        for path in [self.path.clone(), self.operation_path(operation)] {
+            let mut file = lock(&path).await?;
+            until = until.max(read_deadline(&mut file)?);
+        }
         if until > now_ms() {
             return Err(paused(until));
         }
@@ -236,8 +262,10 @@ impl Cooldown {
         admitted.map_err(paused)
     }
 
+    /// Learn from `operation`'s response, pausing what it reports exhausted.
     pub async fn observe(
         &self,
+        operation: &str,
         status: StatusCode,
         headers: &HeaderMap,
         body: &[u8],
@@ -250,51 +278,66 @@ impl Cooldown {
             budget.observe(&allowances);
             write_budget(&mut file, &budget)?;
         }
-        let parsed = serde_json::from_slice::<serde_json::Value>(body).ok();
-        let limited = status == StatusCode::TOO_MANY_REQUESTS
-            || parsed
-                .as_ref()
-                .and_then(|body| body.get("errors"))
-                .and_then(|errors| errors.as_array())
-                .is_some_and(|errors| {
-                    errors.iter().any(|error| {
-                        error["extensions"]["code"] == "RATELIMITED"
-                            || error["message"].as_str().is_some_and(|message| {
-                                message.to_ascii_lowercase().contains("rate limit exceeded")
-                            })
-                    })
-                })
-            || (status == StatusCode::BAD_REQUEST
-                && String::from_utf8_lossy(body)
-                    .to_ascii_lowercase()
-                    .contains("rate limit exceeded"));
-        let Some(until) = reset_at(headers, limited, now) else {
-            return Ok(());
-        };
-        if until <= now {
-            return if limited { Err(paused(until)) } else { Ok(()) };
-        }
-        let mut file = lock(&self.path).await?;
-        let previous = read_deadline(&mut file)?;
-        if until > previous {
-            file.seek(SeekFrom::Start(0)).map_err(io_error)?;
-            file.set_len(0).map_err(io_error)?;
-            write!(file, "{until}").map_err(io_error)?;
-            file.sync_data().map_err(io_error)?;
-        }
-        if previous <= now {
-            tracing::warn!(
-                limit = tripped(headers),
-                reset_epoch_ms = until,
-                "Linear rate limit reached; synchronization paused until reset; pending writes retained"
-            );
+        let limited = is_limited(status, body);
+        let deadlines = deadlines(headers, limited, now);
+        let mut holding = 0;
+        for (path, until) in [
+            (self.path.clone(), deadlines.global),
+            (self.operation_path(operation), deadlines.operation),
+        ] {
+            let Some(until) = until else { continue };
+            let previous = pause(&path, until).await?;
+            holding = holding.max(until.max(previous));
+            if previous <= now {
+                tracing::warn!(
+                    operation,
+                    limit = tripped(headers),
+                    reset_epoch_ms = until,
+                    "Linear rate limit reached; synchronization paused until reset; pending writes retained"
+                );
+            }
         }
         // A successful final request still owns its response and must settle.
         if limited {
-            return Err(paused(until.max(previous)));
+            return Err(paused(holding.max(now)));
         }
         Ok(())
     }
+}
+
+/// Whether Linear refused the request for a rate limit.
+fn is_limited(status: StatusCode, body: &[u8]) -> bool {
+    let parsed = serde_json::from_slice::<serde_json::Value>(body).ok();
+    status == StatusCode::TOO_MANY_REQUESTS
+        || parsed
+            .as_ref()
+            .and_then(|body| body.get("errors"))
+            .and_then(|errors| errors.as_array())
+            .is_some_and(|errors| {
+                errors.iter().any(|error| {
+                    error["extensions"]["code"] == "RATELIMITED"
+                        || error["message"].as_str().is_some_and(|message| {
+                            message.to_ascii_lowercase().contains("rate limit exceeded")
+                        })
+                })
+            })
+        || (status == StatusCode::BAD_REQUEST
+            && String::from_utf8_lossy(body)
+                .to_ascii_lowercase()
+                .contains("rate limit exceeded"))
+}
+
+/// Extend the pause in `path` to `until`; returns the deadline it held.
+async fn pause(path: &Path, until: i64) -> LinearResult<i64> {
+    let mut file = lock(path).await?;
+    let previous = read_deadline(&mut file)?;
+    if until > previous {
+        file.seek(SeekFrom::Start(0)).map_err(io_error)?;
+        file.set_len(0).map_err(io_error)?;
+        write!(file, "{until}").map_err(io_error)?;
+        file.sync_data().map_err(io_error)?;
+    }
+    Ok(previous)
 }
 
 async fn lock(path: &Path) -> LinearResult<File> {
@@ -333,8 +376,11 @@ fn write_budget(file: &mut File, budget: &Budget) -> LinearResult<()> {
         .map_err(|error| io_error(std::io::Error::other(error)))
 }
 
-/// Linear's rate-limit scopes, each with its own `x-ratelimit-<scope>-*` headers.
-const SCOPES: [&str; 3] = ["requests", "endpoint-requests", "complexity"];
+/// The Home's hourly allowances, each with its own `x-ratelimit-<scope>-*` headers.
+const GLOBAL_SCOPES: [&str; 2] = ["requests", "complexity"];
+/// The lower limit Linear keeps on some operations.
+const ENDPOINT_SCOPE: &str = "endpoint-requests";
+const SCOPES: [&str; 3] = ["requests", ENDPOINT_SCOPE, "complexity"];
 
 fn header_number(headers: &HeaderMap, key: &str) -> Option<i64> {
     headers.get(key)?.to_str().ok()?.trim().parse().ok()
@@ -380,53 +426,67 @@ fn read_deadline(file: &mut File) -> LinearResult<i64> {
         .map_err(|_| LinearError::Message("Invalid saved Linear cooldown deadline".into()))
 }
 
-fn reset_at(headers: &HeaderMap, limited: bool, now: i64) -> Option<i64> {
-    let mut reset: Option<i64> = None;
-    let mut any_exhausted = limited;
-    for scope in SCOPES {
-        let empty = exhausted(headers, scope);
-        any_exhausted |= empty;
-        if empty || limited {
-            if let Some(value) = header_number(headers, &format!("x-ratelimit-{scope}-reset"))
-                .filter(|value| *value >= 0)
-            {
-                let value = value.max(now);
-                reset = Some(reset.unwrap_or(value).max(value));
-            }
-        }
-    }
-    if !any_exhausted {
-        return None;
-    }
-    let retry_after = headers
-        .get("retry-after")
-        .and_then(|value| value.to_str().ok());
-    if let Some(value) = retry_after.and_then(|value| {
-        value
-            .parse::<i64>()
-            .ok()
-            .filter(|delay| *delay >= 0)
-            .map(|delay| now.saturating_add(delay.saturating_mul(1000)))
-            .or_else(|| {
-                chrono::DateTime::parse_from_rfc2822(value)
-                    .ok()
-                    .map(|date| date.timestamp_millis().max(now))
-            })
-    }) {
-        reset = Some(reset.unwrap_or(value).max(value));
-    }
-    // An exhausted response with a stale reset or Retry-After: 0 still needs
-    // a cooldown. Otherwise each caller immediately sends another request.
-    Some(
-        reset
-            .filter(|until| *until > now)
-            .unwrap_or(now + 3_600_000),
-    )
+/// What one response pauses: every request until an exhausted hourly
+/// allowance resets, and its own operation when Linear limited that alone.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct Deadlines {
+    global: Option<i64>,
+    operation: Option<i64>,
+}
+
+/// An operation limit that names no reset waits this long.
+const OPERATION_FALLBACK_MS: i64 = 60_000;
+/// An hourly allowance that names no reset waits this long.
+const GLOBAL_FALLBACK_MS: i64 = 3_600_000;
+
+fn deadlines(headers: &HeaderMap, limited: bool, now: i64) -> Deadlines {
+    let future_reset = |scope: &str| {
+        header_number(headers, &format!("x-ratelimit-{scope}-reset")).filter(|reset| *reset > now)
+    };
+    let retry = retry_at(headers, now).filter(|at| *at > now);
+    let exhausted_global: Vec<_> = GLOBAL_SCOPES
+        .into_iter()
+        .filter(|scope| exhausted(headers, scope))
+        .collect();
+    // A stale reset or Retry-After: 0 still needs a pause; otherwise each
+    // caller immediately sends another request.
+    let global = (!exhausted_global.is_empty()).then(|| {
+        exhausted_global
+            .into_iter()
+            .filter_map(future_reset)
+            .max()
+            .or(retry)
+            .unwrap_or(now + GLOBAL_FALLBACK_MS)
+    });
+    let named = headers.contains_key("x-ratelimit-endpoint-name");
+    let operation = (exhausted(headers, ENDPOINT_SCOPE)
+        || (limited && (named || global.is_none())))
+    .then(|| {
+        future_reset(ENDPOINT_SCOPE)
+            .or(retry)
+            .unwrap_or(now + OPERATION_FALLBACK_MS)
+    });
+    Deadlines { global, operation }
+}
+
+/// When `Retry-After` says to try again, as epoch milliseconds.
+fn retry_at(headers: &HeaderMap, now: i64) -> Option<i64> {
+    let value = headers.get("retry-after")?.to_str().ok()?;
+    value
+        .parse::<i64>()
+        .ok()
+        .filter(|delay| *delay >= 0)
+        .map(|delay| now.saturating_add(delay.saturating_mul(1000)))
+        .or_else(|| {
+            chrono::DateTime::parse_from_rfc2822(value)
+                .ok()
+                .map(|date| date.timestamp_millis().max(now))
+        })
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{home, reset_at, urgent, Allowance, Budget, Cooldown};
+    use super::{deadlines, home, urgent, Allowance, Budget, Cooldown, Deadlines};
     use crate::linear::request_log::{self, RequestOutcome};
     use crate::linear::test_server::{self, json_response, QueuedResponse};
     use crate::linear::LinearClient;
@@ -562,7 +622,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn rate_limit_pauses_independent_clients_and_resumes_after_reset() {
+    async fn an_exhausted_hourly_allowance_pauses_independent_clients_until_reset() {
         let reset =
             (time::OffsetDateTime::now_utc().unix_timestamp_nanos() / 1_000_000) + 3_600_000;
         let mut limited = json_response(
@@ -572,6 +632,9 @@ mod tests {
         limited
             .headers
             .push(("x-ratelimit-requests-reset".into(), reset.to_string()));
+        limited
+            .headers
+            .push(("x-ratelimit-requests-remaining".into(), "0".into()));
         let (url, requests) = test_server::spawn(vec![limited,
             json_response(StatusCode::OK, json!({"data":{"initiatives":{"nodes":[],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}))]).await;
         let first = LinearClient::with_base_url("first-token".into(), None, url.clone());
@@ -597,32 +660,183 @@ mod tests {
         assert_eq!(requests.lock().await.len(), 2);
     }
 
+    /// A response carrying `headers` (name, value).
+    fn limited(status: StatusCode, headers: &[(&str, String)]) -> QueuedResponse {
+        let mut response = json_response(
+            status,
+            json!({"errors":[{"message":"Rate limit exceeded", "extensions":{"code":"RATELIMITED"}}]}),
+        );
+        for (name, value) in headers {
+            response.headers.push(((*name).into(), value.clone()));
+        }
+        response
+    }
+
+    fn created() -> QueuedResponse {
+        json_response(
+            StatusCode::OK,
+            json!({"data":{"attachmentLinkURL":{"attachment":{"id":"att-1"}}}}),
+        )
+    }
+
+    const LINK: &str = "mutation LinkAttachment($id: String!) { x }";
+    const CREATE: &str = "mutation DeliverTaskCreation($id: String!) { x }";
+
+    #[tokio::test]
+    async fn a_limited_operation_pauses_itself_and_lets_other_writes_through() {
+        let reset = super::now_ms() + 3_600_000;
+        let endpoint_reset = super::now_ms() + 120_000;
+        let (url, requests) = test_server::spawn(vec![
+            limited(
+                StatusCode::TOO_MANY_REQUESTS,
+                &[
+                    ("x-ratelimit-requests-limit", "10000".into()),
+                    ("x-ratelimit-requests-remaining", "9952".into()),
+                    ("x-ratelimit-requests-reset", reset.to_string()),
+                    ("x-ratelimit-endpoint-name", "attachmentLinkURL".into()),
+                    ("x-ratelimit-endpoint-requests-limit", "20".into()),
+                    ("x-ratelimit-endpoint-requests-remaining", "0".into()),
+                    ("x-ratelimit-endpoint-requests-reset", endpoint_reset.to_string()),
+                ],
+            ),
+            created(),
+        ])
+        .await;
+        turn_on_request_log(&url);
+        let client = LinearClient::with_base_url("token".into(), None, url.clone());
+        let link = || client.graphql::<serde_json::Value>(LINK, json!({"id": "x"}));
+        assert_eq!(
+            link().await.unwrap_err(),
+            crate::linear::LinearError::RateLimited {
+                reset_at_ms: endpoint_reset
+            }
+        );
+        assert_eq!(
+            link().await.unwrap_err(),
+            crate::linear::LinearError::RateLimited {
+                reset_at_ms: endpoint_reset
+            }
+        );
+        client
+            .graphql::<serde_json::Value>(CREATE, json!({"id": "x"}))
+            .await
+            .unwrap();
+        assert_eq!(requests.lock().await.len(), 2);
+        let records = request_log::read_since(&home(&url), 0).unwrap();
+        let outcomes: Vec<_> = records
+            .iter()
+            .map(|record| (record.operation.as_str(), record.outcome))
+            .collect();
+        assert_eq!(
+            outcomes,
+            [
+                ("LinkAttachment", RequestOutcome::RateLimited),
+                ("LinkAttachment", RequestOutcome::Paused),
+                ("DeliverTaskCreation", RequestOutcome::Sent),
+            ]
+        );
+        // The log says which limit Linear applied.
+        assert_eq!(
+            records[0].endpoint_name.as_deref(),
+            Some("attachmentLinkURL")
+        );
+        assert_eq!(
+            records[0].endpoint,
+            Some(Allowance {
+                limit: Some(20),
+                remaining: 0,
+                reset_ms: Some(endpoint_reset),
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn a_limited_operation_with_the_hourly_allowance_spent_pauses_every_write() {
+        let reset = super::now_ms() + 3_600_000;
+        let (url, requests) = test_server::spawn(vec![
+            limited(
+                StatusCode::TOO_MANY_REQUESTS,
+                &[
+                    ("x-ratelimit-requests-remaining", "0".into()),
+                    ("x-ratelimit-requests-reset", reset.to_string()),
+                ],
+            ),
+            created(),
+        ])
+        .await;
+        let client = LinearClient::with_base_url("token".into(), None, url.clone());
+        client
+            .graphql::<serde_json::Value>(LINK, json!({}))
+            .await
+            .unwrap_err();
+        assert_eq!(
+            client
+                .graphql::<serde_json::Value>(CREATE, json!({}))
+                .await
+                .unwrap_err(),
+            crate::linear::LinearError::RateLimited { reset_at_ms: reset }
+        );
+        assert_eq!(requests.lock().await.len(), 1);
+    }
+
     #[test]
-    fn cooldown_uses_reset_milliseconds_retry_after_and_safe_missing_reset() {
-        let mut headers = HeaderMap::new();
-        assert_eq!(reset_at(&headers, false, 1000), None);
-        assert_eq!(reset_at(&headers, true, 1000), Some(3_601_000));
-        headers.insert("retry-after", "2".parse().unwrap());
-        assert_eq!(reset_at(&headers, true, 1000), Some(3000));
-        headers.insert(
-            "x-ratelimit-endpoint-requests-remaining",
-            "0".parse().unwrap(),
+    fn deadlines_follow_the_limit_linear_reported() {
+        let header = |pairs: &[(&'static str, &str)]| {
+            let mut headers = HeaderMap::new();
+            for (name, value) in pairs {
+                headers.insert(*name, value.parse().unwrap());
+            }
+            headers
+        };
+        let pause = |global, operation| Deadlines { global, operation };
+        // A plain response pauses nothing; a bare 429 holds its operation a minute.
+        assert_eq!(deadlines(&header(&[]), false, 1000), pause(None, None));
+        assert_eq!(
+            deadlines(&header(&[]), true, 1000),
+            pause(None, Some(61_000))
         );
-        headers.insert(
-            "x-ratelimit-endpoint-requests-reset",
-            "5000".parse().unwrap(),
+        // Healthy hourly allowance: a 429 borrows Retry-After, never the hourly reset.
+        let healthy = [
+            ("x-ratelimit-requests-remaining", "9952"),
+            ("x-ratelimit-requests-reset", "3600000"),
+            ("retry-after", "2"),
+        ];
+        assert_eq!(
+            deadlines(&header(&healthy), true, 1000),
+            pause(None, Some(3000))
         );
-        assert_eq!(reset_at(&headers, false, 1000), Some(5000));
-        headers.remove("retry-after");
-        assert_eq!(reset_at(&headers, true, 6000), Some(3_606_000));
-        headers.clear();
-        headers.insert("retry-after", "0".parse().unwrap());
-        assert_eq!(reset_at(&headers, true, 6000), Some(3_606_000));
-        headers.clear();
-        headers.insert(
-            "retry-after",
-            "Thu, 01 Jan 1970 00:00:10 GMT".parse().unwrap(),
+        // An exhausted operation scope runs to its own reset, even on a success.
+        let endpoint = [
+            ("x-ratelimit-endpoint-requests-remaining", "0"),
+            ("x-ratelimit-endpoint-requests-reset", "5000"),
+        ];
+        assert_eq!(
+            deadlines(&header(&endpoint), false, 1000),
+            pause(None, Some(5000))
         );
-        assert_eq!(reset_at(&headers, true, 1000), Some(10000));
+        // An exhausted hourly allowance pauses everything until its reset,
+        // or an hour when the reset is stale.
+        let spent = [
+            ("x-ratelimit-requests-remaining", "0"),
+            ("x-ratelimit-requests-reset", "9000"),
+        ];
+        assert_eq!(
+            deadlines(&header(&spent), true, 1000),
+            pause(Some(9000), None)
+        );
+        assert_eq!(
+            deadlines(&header(&spent), true, 10_000),
+            pause(Some(3_610_000), None)
+        );
+        let stale_retry = [("x-ratelimit-complexity-remaining", "0"), ("retry-after", "0")];
+        assert_eq!(
+            deadlines(&header(&stale_retry), true, 6000),
+            pause(Some(3_606_000), None)
+        );
+        let dated = [("retry-after", "Thu, 01 Jan 1970 00:00:10 GMT")];
+        assert_eq!(
+            deadlines(&header(&dated), true, 1000),
+            pause(None, Some(10_000))
+        );
     }
 }

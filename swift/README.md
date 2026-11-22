@@ -446,9 +446,7 @@ The stream follows the comparison live without moving what you are reading. A
 bar above it names the file you are in, with its counts, **Open** and
 **Viewed**, and under it the function, type or Markdown heading the top line
 sits in. **Viewed** folds a file to its header until its lines change; the
-sidebar counts "12 / 60 viewed" and stepping passes over it. Marks beside the
-scrollbar place every change, green added, red removed, accent for both; click
-one to land there. Press `]`
+sidebar counts "12 / 60 viewed" and stepping passes over it. Press `]`
 and `[` (or the arrows around the position) to step through changes across
 files; the change you land on pulses once. **Focus** shows one file and still
 steps into the next. Between hunks the stream says how many lines it skipped

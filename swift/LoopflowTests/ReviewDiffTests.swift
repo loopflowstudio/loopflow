@@ -259,19 +259,6 @@ struct ReviewDiffTests {
         #expect(ReviewGroup.arrange(files, ordering: .tour, tour: nil, groups: groups) == byGroup)
     }
 
-    /// Each change has a mark at its row among the rows the stream draws; a
-    /// collapsed file draws only its header and has none.
-    @Test func changeMarksFollowTheRowsTheStreamDraws() {
-        let review = ReviewDiff.parse(Self.patch)
-        let marks = review.marks(layout: .unified, collapsed: { _ in false })
-        #expect(marks.map(\.kind) == [.moved, .changed, .moved, .added])
-        #expect(marks.map(\.position) == marks.map(\.position).sorted())
-        #expect(marks.allSatisfy { (0..<1).contains($0.position) })
-        let folded = review.marks(layout: .unified, collapsed: { $0.path == "a.swift" })
-        #expect(folded.map(\.path) == ["b.swift"])
-        #expect(folded[0].position < marks[3].position)
-    }
-
     /// The bar under the file's name reads the declaration the top line is
     /// in: the nearest line above that opens one, else the hunk's.
     @Test func theEnclosingDeclarationIsTheNearestAbove() throws {

@@ -35,11 +35,11 @@ struct WaveLensTests {
         #expect(lens.reason == "Waiting for your answer")
     }
 
-    @Test("unknown is a lit lens, distinct from the off black")
+    @Test("unknown is a warning mark, distinct from the quiet off black")
     func unknownIsLit() {
-        #expect(WaveLensColor.unknown.isLit)
-        #expect(!WaveLensColor.black.isLit)
-        #expect(WaveLensColor.unknown.ink(in: .light) != WaveLensColor.black.ink(in: .light))
+        #expect(WaveLensColor.unknown.tone == .warning)
+        #expect(WaveLensColor.black.tone == .neutral)
+        #expect(WaveLensColor.unknown.tone.ink(in: .light) != WaveLensColor.black.tone.ink(in: .light))
     }
 
     // MARK: - Task row (shared condition, verbatim)

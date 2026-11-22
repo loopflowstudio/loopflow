@@ -15,9 +15,7 @@ struct WorkSectionHeading<Trailing: View>: View {
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
             Text(title)
-                .textCase(.uppercase)
-                .font(Typography.label)
-                .tracking(0.66)
+                .font(Typography.textStrong)
                 .foregroundStyle(palette.textTertiary)
             if let count {
                 Text("\(count)")
@@ -59,16 +57,16 @@ struct WorkChip: View {
 
     var body: some View {
         Text(text)
-            .font(Typography.strong(10.5))
+            .font(Typography.textStrong)
             .tracking(0.2)
             .foregroundStyle(tone == .neutral ? tone.ink(in: palette) : tone.text(in: palette))
             .lineLimit(1)
             .padding(.horizontal, 7)
             .padding(.vertical, 1)
-            .background(tone.fill(in: palette), in: RoundedRectangle(cornerRadius: 4))
+            .background(tone.fill(in: palette), in: RoundedRectangle(cornerRadius: CornerRadius.control))
             .overlay {
                 if tone == .neutral {
-                    RoundedRectangle(cornerRadius: 4).strokeBorder(tone.stroke(in: palette), lineWidth: 1)
+                    RoundedRectangle(cornerRadius: CornerRadius.control).strokeBorder(tone.stroke(in: palette), lineWidth: 1)
                 }
             }
     }
@@ -89,40 +87,8 @@ private struct WorkPanel: ViewModifier {
     func body(content: Content) -> some View {
         content
             .padding(padding)
-            .background(palette.surface, in: RoundedRectangle(cornerRadius: CornerRadius.lg))
-            .overlay(RoundedRectangle(cornerRadius: CornerRadius.lg).strokeBorder(palette.border))
-    }
-}
-
-/// Ordinary actions stay neutral; a deliberately emphasized action uses the theme accent.
-struct WorkOutlineButtonStyle: ButtonStyle {
-    var emphasized = false
-    /// Red, for an action that ends the work.
-    var destructive = false
-    @Environment(\.palette) private var palette
-    @Environment(\.isEnabled) private var isEnabled
-
-    @State private var hovering = false
-
-    private var ink: Color { destructive ? palette.failure : (emphasized ? palette.accentInk : palette.actionInk) }
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(Typography.body(12.5))
-            .foregroundStyle(isEnabled ? ink : palette.textTertiary)
-            .padding(.horizontal, 11)
-            .padding(.vertical, 4)
-            .background(
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(configuration.isPressed ? palette.surfaceElement : (hovering ? palette.surfaceMuted : palette.surface))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 6)
-                    .strokeBorder(isEnabled && (emphasized || destructive) ? ink : palette.borderStrong, lineWidth: 1)
-            )
-            .contentShape(RoundedRectangle(cornerRadius: 6))
-            .onHover { hovering = $0 }
-            .workFocusRing()
+            .background(palette.surface, in: RoundedRectangle(cornerRadius: CornerRadius.pane))
+            .overlay(RoundedRectangle(cornerRadius: CornerRadius.pane).strokeBorder(palette.border))
     }
 }
 
@@ -153,12 +119,10 @@ struct WorkDisclosureHeading: View {
             Button(action: toggle) {
                 HStack(alignment: .firstTextBaseline, spacing: Spacing.xs) {
                     Image(systemName: "chevron.right")
-                        .font(.system(size: 9, weight: .bold))
+                        .font(Typography.meta).fontWeight(.bold)
                         .rotationEffect(.degrees(expanded ? 90 : 0))
                     Text(title)
-                        .textCase(.uppercase)
-                        .font(Typography.label)
-                        .tracking(0.66)
+                        .font(Typography.textStrong)
                     if let count {
                         Text("\(count)")
                             .font(Typography.meta)
@@ -183,7 +147,7 @@ struct WorkDisclosureHeading: View {
 private struct WorkFocusRing: ViewModifier {
     @Environment(\.isFocused) private var focused
     func body(content: Content) -> some View {
-        content.keyboardFocusRing(focused, cornerRadius: 4)
+        content.keyboardFocusRing(focused, cornerRadius: CornerRadius.control)
     }
 }
 
@@ -201,7 +165,7 @@ private struct WorkSelection: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .background(selected ? palette.selectionFill : .clear, in: RoundedRectangle(cornerRadius: 6))
+            .background(selected ? palette.selectionFill : .clear, in: RoundedRectangle(cornerRadius: CornerRadius.row))
             .overlay(alignment: .leading) {
                 if selected {
                     RoundedRectangle(cornerRadius: 1).fill(palette.selectionEdge)
@@ -257,8 +221,8 @@ private struct WorkDestinationSelection: ViewModifier {
     func body(content: Content) -> some View {
         content
             .background(selected ? palette.workSelectedFill : (hovering ? palette.actionHover : .clear),
-                        in: RoundedRectangle(cornerRadius: 6))
-            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(selected ? palette.selectionEdge : .clear))
+                        in: RoundedRectangle(cornerRadius: CornerRadius.row))
+            .overlay(RoundedRectangle(cornerRadius: CornerRadius.row).strokeBorder(selected ? palette.selectionEdge : .clear))
             .onHover { hovering = $0 }
             .accessibilityAddTraits(selected ? [.isSelected] : [])
     }

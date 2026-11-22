@@ -811,7 +811,7 @@ struct TaskFilesTests {
         // An edited line pairs its before and after and emphasizes the typed words.
         #expect(change.pairs.first?.added?.text == "typed saved")
         #expect(change.pairs.first?.addedSegments?.filter(\.changed).map(\.text).joined().contains("typed") == true)
-        #expect(store.comparisonDescription?.hasSuffix("· includes uncommitted changes") == true)
+        #expect(store.comparisonDescription?.hasSuffix(". Includes uncommitted changes.") == true)
         #expect(store.comparisonDescription?.hasPrefix("Compared with the Task's base at aaaaaaaaaa") == true)
     }
 
@@ -1065,6 +1065,21 @@ struct TaskFilesTests {
             ReviewStream(store: store, reader: .changes, files: (store.shownReview?.files ?? []) + [long],
                          split: false, addToConversation: nil)
         }) <= width)
+    }
+
+    /// A narrow pane moves a file's counts and Viewed under its name rather
+    /// than clipping either; a wide one keeps the header on one line.
+    @Test func aFileHeaderWrapsInsteadOfClipping() async throws {
+        let store = try twoFileStore()
+        await store.loadReview()
+        let path = "swift/LoopflowMac/Design/TaskChangesViewWithALongName.swift"
+        let file = ReviewFile(path: path, oldPath: nil, status: .added, blocks: [])
+        func height(at width: CGFloat) -> CGFloat {
+            let host = NSHostingController(rootView: ReviewFileTitle(store: store, file: file, note: nil, viewable: true))
+            return host.sizeThatFits(in: CGSize(width: width, height: 600)).height
+        }
+        let wide = height(at: 1_200), narrow = height(at: 360)
+        #expect(narrow > wide * 1.5)
     }
 
     /// The checkout's `scratch/tour.yaml` orders the Diff and hides what
@@ -1536,6 +1551,66 @@ struct TaskFilesTests {
         #expect(document.text == "external\n")
         editor.undoManager?.redo()
         #expect(document.text == "external\ndraft")
+    }
+
+    /// The Diff counts files in words, names its refs as code, and the
+    /// sidebar counts and marks what you have viewed.
+    @Test func theDiffSaysWhatChangedAndWhatYouViewed() async throws {
+        let store = try twoFileStore()
+        await store.loadReview()
+        #expect(store.changesTitle == "2 changed files")
+        let line = try #require(store.comparisonLine)
+        #expect(String(line.characters).hasSuffix(". Includes uncommitted changes."))
+        let named = TaskChangesView.names(line)
+        let mono = named.runs.filter { $0.font == Typography.mono }.map { String(named[$0.range].characters) }
+        #expect(mono == [String(try #require(store.changes).baseCommit.prefix(10))])
+        #expect(!named.runs.contains { $0.inlinePresentationIntent != nil })
+
+        store.hide("b.swift")
+        #expect(store.changesTitle == "1 of 2 changed files")
+        store.unhide("b.swift")
+
+        let sidebar = ChangedFilesSidebar(store: store, current: nil, notice: nil, jump: { _ in })
+        #expect(store.viewedSummary == nil)
+        #expect((try? sidebar.inspect().find(text: "Viewed")) == nil)
+        store.setViewed(try #require(store.shownReview?.files.first), true)
+        #expect(store.viewedSummary == "1 of 2 viewed")
+        _ = try sidebar.inspect().find(text: "1 of 2 viewed")
+        _ = try sidebar.inspect().find(text: "Viewed")
+        #expect(ChangedFilesSidebar.place("swift/LoopflowMac/Views/TaskBriefView.swift", under: nil)
+            == ("TaskBriefView.swift", "swift/LoopflowMac/Views/"))
+        #expect(ChangedFilesSidebar.place("swift/LoopflowMac/Views/TaskBriefView.swift", under: "swift/".count)
+            == ("TaskBriefView.swift", "LoopflowMac/Views/"))
+        #expect(ChangedFilesSidebar.place("README.md", under: nil) == ("README.md", nil))
+    }
+
+    /// Layouts are named in words, and the delivery card's link has no typed arrow.
+    @Test func theDiffNamesItsChoicesInWords() throws {
+        let store = try twoFileStore()
+        let picker = ReviewLayoutPicker(store: store, width: 800)
+        for layout in ["New code", "Unified", "Side by side"] { _ = try picker.inspect().find(text: layout) }
+        let url = try #require(URL(string: "https://github.com/loopflow/loopflow/pull/1949"))
+        let card = DeliveryCard(store: store.pullRequest, record: nil, taskOpen: true, url: url, localHead: nil)
+        #expect(try card.inspect().find(viewWithAccessibilityIdentifier: "changes-open-github").button().labelView().text().string()
+            == "Open on GitHub")
+        _ = try card.inspect().find(button: "Read again")
+    }
+
+    /// Files names the open file with its place among the open ones.
+    @Test func filesNamesTheOpenFileAndItsPlace() throws {
+        let store = TaskFilesStore(issue: "TEST-1", cwd: "/src/loopflow", query: RegistryQuery { _, _ in "{}" })
+        store.page = .files
+        store.selection = "scratch/plan.md"
+        #expect(store.tabPlace == nil)
+        store.selection = "scratch/questions.md"
+        store.selection = "swift/TaskRow.swift"
+        store.selection = "scratch/plan.md"
+        #expect(store.tabPlace == "1 of 3")
+        let view = TaskFilesView(store: store, checkoutBase: nil)
+        _ = try view.inspect().find(text: "1 of 3")
+        _ = try view.inspect().find(text: "plan.md")
+        _ = try view.inspect().find(text: "This Mac")
+        _ = try view.inspect().find(text: "loopflow/scratch")
     }
 }
 private func fileJSON(_ url: URL) throws -> [String: Any] {

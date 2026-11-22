@@ -29,11 +29,11 @@ struct RenameWaveSheetContent: View {
             switch phase {
             case .leftovers(let renamed):
                 Text("Renamed \(renamed.from) → \(renamed.to)")
-                    .font(Typography.sectionTitle(20))
+                    .font(Typography.lede)
                     .foregroundStyle(palette.text)
                 VStack(alignment: .leading, spacing: Spacing.xs) {
                     ForEach(Array(renamed.summary.enumerated()), id: \.offset) { _, line in
-                        Text(line).font(Typography.body()).foregroundStyle(palette.textSecondary)
+                        Text(line).font(Typography.text).foregroundStyle(palette.textSecondary)
                     }
                 }.accessibilityIdentifier("rename-wave-summary")
                 HStack(spacing: Spacing.md) {
@@ -44,7 +44,7 @@ struct RenameWaveSheetContent: View {
                 }
             case .editing, .renaming:
                 Text("Rename \(currentName)")
-                    .font(Typography.sectionTitle(20))
+                    .font(Typography.lede)
                     .foregroundStyle(palette.text)
                 TextField("Wave name", text: $newName)
                     .textFieldStyle(.roundedBorder)
@@ -53,7 +53,7 @@ struct RenameWaveSheetContent: View {
                     .accessibilityIdentifier("rename-wave-name")
                 if case .editing(let error?) = phase {
                     Text(error)
-                        .font(Typography.caption())
+                        .font(Typography.meta)
                         .foregroundStyle(palette.failure)
                         .accessibilityIdentifier("rename-wave-error")
                 }

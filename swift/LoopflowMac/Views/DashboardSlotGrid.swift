@@ -141,7 +141,7 @@ struct DashboardSlotGrid<Tile: View>: View {
                     Button { turn(to: current - 1) } label: { Image(systemName: "chevron.left") }
                         .disabled(current == 0).help("Previous page")
                         .keyboardShortcut(pagerKeys ? KeyboardShortcut(.leftArrow, modifiers: [.command, .option]) : nil)
-                    Text("Page \(current + 1) of \(pages.count)").font(Typography.code(11))
+                    Text("Page \(current + 1) of \(pages.count)").font(Typography.mono)
                         .foregroundStyle(palette.textSecondary)
                         .accessibilityIdentifier("dashboard-page")
                     Button { turn(to: current + 1) } label: { Image(systemName: "chevron.right") }
@@ -193,7 +193,7 @@ struct DashboardSlotGrid<Tile: View>: View {
     /// Drag a slot onto another to exchange their places; split or remove in place.
     private func slotControls(_ index: Int, _ editing: DashboardSlotEditing) -> some View {
         VStack(spacing: 8) {
-            Text("Slot \(index + 1)").font(Typography.strong(13))
+            Text("Slot \(index + 1)").font(Typography.textStrong)
             HStack(spacing: 12) {
                 Button { editing.write(layout.adding(beside: index, axis: .vertical)) } label: {
                     Image(systemName: "rectangle.split.2x1")

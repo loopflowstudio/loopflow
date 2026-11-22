@@ -126,14 +126,13 @@ final class GhosttyManager: ObservableObject {
     // Current preview plus applied candidate; cancel reuses validated config.
     private nonisolated(unsafe) var themeConfigs: [String: (TerminalPalette, ghostty_config_t)] = [:]
     private(set) var theme = ThemeDefinition.light
-    // Defaults a person's own Ghostty config overrides. Ligatures are off so
-    // `->` and `!=` read as the characters an agent printed.
+    /// Scalar defaults, loaded before the person's files so their values win.
     static let loopflowConfig = """
-    font-size = 13
+    font-size = \(Int(Typography.terminalSize))
+    adjust-cell-height = 10%
     font-feature = -calt
     font-feature = -liga
     font-thicken = true
-    adjust-cell-height = 10%
     minimum-contrast = 3
 
     """
@@ -174,7 +173,11 @@ final class GhosttyManager: ObservableObject {
     // is fixed here because block overlays are laid out from the same numbers.
     // Command-Up and Command-Down move between prompts whatever the person's
     // own Ghostty config binds them to.
+    /// Loaded after the person's files. `font-family` is a list that a later line
+    /// extends, so a family they set stays first and Spline Sans Mono fills the
+    /// glyphs it lacks; with none set, Spline Sans Mono is the face.
     static let embeddedConfig = """
+    font-family = \(Typography.monoFamily)
     term = xterm-256color
     macos-login-session = false
     shell-integration = detect

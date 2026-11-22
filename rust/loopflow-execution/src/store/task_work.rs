@@ -1,7 +1,7 @@
 //! Task membership and saved Graph positions, with observed execution state.
 use crate::graph::runner::ExecutionCursor;
 use crate::store::{sqlite::SqliteStore, StoreResult};
-use crate::task_graph::{CapturedGraph, TaskGraph, TaskGraphPosition};
+use crate::task_graph::{CapturedGraph, TaskGraph, TaskGraphRun};
 use crate::task_work::{TaskOverview, TaskWork};
 use loopflow_model::durable::TaskId;
 use loopflow_model::id::LfProcessId;
@@ -64,23 +64,12 @@ pub(crate) fn task_progress(
 }
 
 fn read_task_graph(row: TaskGraphRow) -> TaskGraph {
-    let position = match row.run {
-        None => TaskGraphPosition::At { step: row.step },
-        Some((cursor, process)) => TaskGraphPosition::Run {
-            at: row
-                .graph
-                .step_name_of(&cursor)
-                .unwrap_or_else(|| row.step.clone()),
-            step: row.step,
-            lf_process_id: process.id.to_string(),
-            running: carrier_may_run(&process),
-        },
-    };
-    TaskGraph {
-        name: row.graph.name.clone(),
-        interactive_steps: row.graph.interactive_summary(),
-        position,
-    }
+    let run = row.run.as_ref().map(|(cursor, process)| TaskGraphRun {
+        cursor,
+        lf_process_id: process.id.to_string(),
+        running: carrier_may_run(process),
+    });
+    TaskGraph::read(&row.graph, row.step, run, row.auto)
 }
 
 #[cfg(test)]
@@ -110,6 +99,7 @@ mod tests {
                     died_at: None,
                 },
             )),
+            auto: None,
         };
         let running = |row| match read_task_graph(row).position {
             TaskGraphPosition::Run { running, .. } => running,
@@ -197,6 +187,7 @@ pub struct TaskGraphRow {
     pub graph: CapturedGraph,
     pub step: String,
     pub run: Option<(ExecutionCursor, TaskCarrier)>,
+    pub auto: Option<loopflow_storage::sqlite::AutoState>,
 }
 
 /// A Task's Graph as another Machine takes it up: the graph it took up, the
@@ -218,6 +209,7 @@ fn decode_row(row: super::sqlite::task_work::SavedTaskGraphRow) -> StoreResult<T
             .map(|(cursor, process)| serde_json::from_str(&cursor).map(|cursor| (cursor, process)))
             .transpose()
             .map_err(crate::store::StoreError::from)?,
+        auto: row.auto,
     })
 }
 pub fn task_graph_row(store: &SqliteStore, task: &TaskId) -> StoreResult<Option<TaskGraphRow>> {

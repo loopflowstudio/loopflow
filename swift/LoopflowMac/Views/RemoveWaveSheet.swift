@@ -45,12 +45,12 @@ struct RemoveWaveSheetContent: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.lg) {
             Text(removed ? "\(name) removed" : "Remove \(name)?")
-                .font(Typography.sectionTitle(20))
+                .font(Typography.lede)
                 .foregroundStyle(palette.text)
             if let removal {
                 VStack(alignment: .leading, spacing: Spacing.xs) {
                     ForEach(Array(removal.summary.enumerated()), id: \.offset) { _, line in
-                        Text(line).font(Typography.body()).foregroundStyle(palette.textSecondary)
+                        Text(line).font(Typography.text).foregroundStyle(palette.textSecondary)
                     }
                 }.accessibilityIdentifier("remove-wave-summary")
             } else {
@@ -58,7 +58,7 @@ struct RemoveWaveSheetContent: View {
             }
             if case .failed(_, let message) = phase {
                 Text(message)
-                    .font(Typography.caption())
+                    .font(Typography.meta)
                     .foregroundStyle(palette.failure)
                     .accessibilityIdentifier("remove-wave-error")
             }

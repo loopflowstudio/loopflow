@@ -62,10 +62,10 @@ struct SessionView: View {
     private func card(_ message: String, action: String, perform: @escaping () -> Void) -> some View {
         VStack(spacing: 16) {
             Text(message)
-                .font(Typography.body(16))
+                .font(MobileType.text(16))
                 .multilineTextAlignment(.center)
             Button(action: perform) {
-                Text(action).font(Typography.strong(16)).frame(minWidth: 160, minHeight: 44)
+                Text(action).font(MobileType.strong(16)).frame(minWidth: 160, minHeight: 44)
             }
             .buttonStyle(.borderedProminent)
             .tint(theme.palette.accent)
@@ -100,7 +100,7 @@ struct SessionView: View {
             .accessibilityLabel(showingKeys ? "Hide keys" : "Arrow and menu keys")
             TextField("Reply", text: $draft, axis: .vertical)
                 .lineLimit(1...6)
-                .font(Typography.body(16))
+                .font(MobileType.text(16))
                 .focused($replying)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)

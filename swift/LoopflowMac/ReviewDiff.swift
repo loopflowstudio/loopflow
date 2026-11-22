@@ -716,7 +716,7 @@ struct ReviewComment: Equatable, Sendable, Identifiable {
             return "\(place(comment)): \(words(comment)) (\(revision)) "
         }
         let parts = comments.enumerated().map { "(\($0.offset + 1)) \(place($0.element)): \(words($0.element))" }
-        return "\(comments.count) comments on the diff, \(revision): \(parts.joined(separator: " ")) "
+        return "\(comments.count) comments on the diff (\(revision)): \(parts.joined(separator: " ")) "
     }
 }
 #endif

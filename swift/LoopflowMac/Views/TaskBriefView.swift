@@ -1,5 +1,4 @@
 #if os(macOS)
-import AppKit
 import Loopflow
 import SwiftUI
 
@@ -35,12 +34,40 @@ enum TaskBrief {
         }
         return headings.count >= 2 ? headings : []
     }
+
+    /// "Moving, at build." then why: the state word, the top-level step the
+    /// workflow bar makes strong, the reason in one sentence.
+    static func state(runtime: String?, graph: TaskGraph?, reason: String) -> (lead: String, reason: String) {
+        let word = (runtime ?? "unstarted").capitalized
+        let step = graph.flatMap { graph in graph.currentStep.map { graph.steps[$0].name } }
+        let lead = step.map { "\(word), at \($0)." } ?? "\(word)."
+        let why = reason.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (lead, why.isEmpty || why.hasSuffix(".") ? why : why + ".")
+    }
+
+    /// Names separated by commas, each a link, so a narrow pane wraps the list.
+    static func links(_ items: [(title: String, url: URL)], mono: Bool) -> AttributedString {
+        var result = AttributedString()
+        for (index, item) in items.enumerated() {
+            if index > 0 { result += AttributedString(", ") }
+            var link = AttributedString(item.title)
+            link.link = item.url
+            if mono { link.font = Typography.mono }
+            result += link
+        }
+        return result
+    }
+
+    /// The scheme an outline link carries, so the page scrolls rather than opens.
+    static let outlineScheme = "loopflow-brief"
 }
 
-/// The Brief page: state first, then the Tasks it names, an outline, the text.
+/// The Brief page: the Task's name, its state in a sentence, a small table
+/// of its PR, the Tasks it names and its outline, then the text.
 struct TaskBriefView: View {
     @Bindable var store: TaskFilesStore
     let task: RoadmapTask
+    let graph: TaskGraph?
     @Environment(\.palette) private var palette
     @State private var position = ScrollPosition()
     @State private var updated = false
@@ -51,18 +78,20 @@ struct TaskBriefView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
+                    Text(task.task.name).serif(.title).foregroundStyle(palette.text)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityAddTraits(.isHeader)
+                        .accessibilityIdentifier("brief-title")
                     status
-                    let related = TaskBrief.related(in: description, excluding: task.task.identifier)
-                    if !related.isEmpty { relatedTasks(related) }
-                    let outline = TaskBrief.outline(description)
-                    if !outline.isEmpty { outlineView(outline, proxy: proxy) }
+                    facts
                     if updated {
-                        Text("Brief updated since you last read it").font(.caption).foregroundStyle(palette.warning)
+                        Text("The brief changed since you last read it.").font(Typography.text).foregroundStyle(palette.warning)
+                            .accessibilityIdentifier("brief-changed")
                     }
                     Divider()
                     if description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        Text("No brief recorded · edit with `lf task edit \(task.task.identifier)`")
-                            .font(.caption).foregroundStyle(palette.textSecondary)
+                        Text("No brief recorded. Edit it with `lf task edit \(task.task.identifier)`.")
+                            .font(Typography.text).foregroundStyle(palette.textSecondary)
                     } else {
                         MarkdownBlocks(source: description).equatable()
                             .frame(maxWidth: 680, alignment: .leading)
@@ -73,6 +102,11 @@ struct TaskBriefView: View {
             }
             .scrollPosition($position)
             .onScrollGeometryChange(for: CGPoint.self, of: \.contentOffset) { _, offset in store.briefOffset = offset }
+            .environment(\.openURL, OpenURLAction { url in
+                guard url.scheme == TaskBrief.outlineScheme, let block = url.host.flatMap(Int.init) else { return .systemAction }
+                withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo(MarkdownBlocks.anchor(block), anchor: .top) }
+                return .handled
+            })
         }
         .accessibilityIdentifier("browser-task-overview")
         .onAppear {
@@ -84,60 +118,75 @@ struct TaskBriefView: View {
     }
 
     private var status: some View {
-        let runtime = task.runtime?.status.label ?? "unstarted"
-        let step = task.execution?.step.map { " · \($0)" } ?? ""
+        let state = TaskBrief.state(runtime: task.runtime?.status.label, graph: graph, reason: task.nextMove.reason)
+        return VStack(alignment: .leading, spacing: 4) {
+            let lead = Text(state.lead).font(Typography.textStrong).foregroundStyle(palette.text)
+            let reason = Text(state.reason.isEmpty ? "" : " " + state.reason).font(Typography.text).foregroundStyle(palette.textSecondary)
+            Text("\(lead)\(reason)")
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("brief-state")
+            if task.condition.state != .clear {
+                Text("\(task.condition.state.rawValue.capitalized): \(task.condition.reason)")
+                    .font(Typography.text).foregroundStyle(palette.warning)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    /// Label beside value, every value at `text`, every row wrapping.
+    private var facts: some View {
         let delivery = TaskDelivery.describe(record: task.pr, taskOpen: !task.isCompleted, reading: store.pullRequest.pullRequest,
             error: store.pullRequest.error, readAt: store.pullRequest.readAt, localHead: store.changes?.headCommit)
-        return VStack(alignment: .leading, spacing: 4) {
-            Text("\(runtime.capitalized)\(step)").font(Typography.strong(13))
-                .accessibilityIdentifier("brief-state")
-            Text(task.nextMove.reason).font(Typography.body(12)).foregroundStyle(palette.textSecondary)
-                .fixedSize(horizontal: false, vertical: true)
-            if task.condition.state != .clear {
-                Text("\(task.condition.state.rawValue.capitalized) · \(task.condition.reason)")
-                    .font(.caption).foregroundStyle(palette.warning)
-            }
-            HStack(spacing: 10) {
+        let related = TaskBrief.related(in: description, excluding: task.task.identifier)
+        let outline = TaskBrief.outline(description)
+        return Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 12, verticalSpacing: 6) {
+            GridRow {
+                label("Pull request")
                 Button { store.page = .changes; store.noteInteraction() } label: {
-                    Label(delivery.headline, systemImage: "arrow.triangle.pull").lineLimit(1)
+                    Text(delivery.headline).multilineTextAlignment(.leading).fixedSize(horizontal: false, vertical: true)
                 }
                 .buttonStyle(WorkPlainButtonStyle()).help("Show Diff")
-                if let due = task.task.dueDate { Text("Due \(due)") }
+                .accessibilityIdentifier("brief-delivery")
             }
-            .font(.caption).foregroundStyle(palette.textSecondary)
+            if !related.isEmpty {
+                GridRow {
+                    label("Related")
+                    Text(TaskBrief.links(related.compactMap { identifier in url(identifier).map { (identifier, $0) } }, mono: true))
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("brief-related")
+                }
+            }
+            if !outline.isEmpty {
+                GridRow {
+                    label("In this brief")
+                    Text(TaskBrief.links(outline.compactMap { heading in
+                        URL(string: "\(TaskBrief.outlineScheme)://\(heading.block)").map { (heading.title, $0) }
+                    }, mono: false))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("brief-outline")
+                }
+            }
+            if let due = task.task.dueDate {
+                GridRow {
+                    label("Due")
+                    Text(due)
+                }
+            }
         }
+        .font(Typography.text).foregroundStyle(palette.text)
+        .tint(palette.linkInk)
     }
 
-    private func relatedTasks(_ identifiers: [String]) -> some View {
-        HStack(spacing: 6) {
-            Text("Related").font(.caption).foregroundStyle(palette.textSecondary)
-            ForEach(identifiers, id: \.self) { identifier in
-                Button(identifier) { open(identifier) }
-                    .buttonStyle(.plain)
-                    .font(Typography.code(10))
-                    .padding(.horizontal, 6).padding(.vertical, 2)
-                    .background(palette.surfaceMuted, in: Capsule())
-                    .help("Open \(identifier)")
-            }
-        }
+    private func label(_ text: String) -> some View {
+        Text(text).font(Typography.text).foregroundStyle(palette.textSecondary)
+            .gridColumnAlignment(.leading).fixedSize()
     }
 
-    private func open(_ identifier: String) {
+    private func url(_ identifier: String) -> URL? {
         let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-._~"))
         let repository = URL(fileURLWithPath: task.task.repo).lastPathComponent
             .addingPercentEncoding(withAllowedCharacters: allowed) ?? ""
-        if let url = URL(string: "loopflow://\(repository)/task/\(identifier)") { NSWorkspace.shared.open(url) }
-    }
-
-    private func outlineView(_ outline: [TaskBrief.Heading], proxy: ScrollViewProxy) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            ForEach(outline, id: \.block) { heading in
-                Button(heading.title) {
-                    withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo(MarkdownBlocks.anchor(heading.block), anchor: .top) }
-                }
-                .buttonStyle(WorkPlainButtonStyle()).font(.caption).lineLimit(1)
-            }
-        }
+        return URL(string: "loopflow://\(repository)/task/\(identifier)")
     }
 }
 #endif

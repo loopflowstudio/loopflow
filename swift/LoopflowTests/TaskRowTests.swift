@@ -6,9 +6,9 @@ import ViewInspector
 @testable import Loopflow
 @testable import LoopflowMac
 
-@Suite("Sidebar Task metadata")
+@Suite("Sidebar Task row")
 @MainActor
-struct TaskRowMetadataTests {
+struct TaskRowTests {
     @Test("Validated reports win over runtime inference", arguments: [
         (ProgramStatusState.idle, "Available"), (.working, "Busy"), (.done, "Done"),
         (.blocked, "Blocked"), (.error, "Error"),
@@ -21,9 +21,13 @@ struct TaskRowMetadataTests {
         let status = SessionProgramStatus(sessions: [waiting, reporting], unavailable: nil)
         #expect(status.label == label)
         let task = try #require(roadmap().waves.first?.tasks.items[1])
-        let row = TaskRowMetadata(id: task.id, task: task, status: status)
-        #expect(try row.inspect().find(text: label).string() == label)
-        let pane = ProgramStatusLabel(status: try #require(reporting.programStatus))
+        let view = row(task, status: status)
+        #expect(try view.inspect().find(text: label).string() == label)
+        // The ask line says what a blocked program reported, and only then.
+        let ask = try? view.inspect().find(viewWithAccessibilityIdentifier: "work-task-ask-\(task.id)").text().string()
+        #expect(ask == (state == .blocked ? "**literal**" : nil))
+        let programStatus = try #require(reporting.programStatus)
+        let pane = try #require(StatusMark(status: programStatus))
         #expect(try pane.inspect().find(text: "\(label) · **literal**").string() == "\(label) · **literal**")
         #expect(status.help.contains("reporter"))
         #expect(status.help.contains("**literal**"))
@@ -90,12 +94,12 @@ struct TaskRowMetadataTests {
             let status = SessionProgramStatus(sessions: records, unavailable: nil)
             #expect(status.label == nil)
             #expect(status.tone == nil)
-            let view = TaskRowMetadata(id: task.id, task: task, status: status)
+            let view = row(task, status: status)
             #expect(throws: (any Error).self) {
                 try view.inspect().find(viewWithAccessibilityIdentifier: "work-program-status-\(task.id)")
             }
         }
-        let unavailable = TaskRowMetadata(id: task.id, task: task, status: .unavailable("Offline"))
+        let unavailable = row(task, status: .unavailable("Offline"))
         let icon = try unavailable.inspect().find(viewWithAccessibilityIdentifier: "work-program-status-unavailable-\(task.id)")
         #expect(try icon.accessibilityLabel().string().contains("Offline"))
     }
@@ -107,7 +111,7 @@ struct TaskRowMetadataTests {
                                        app: nil, title: nil, msg: "Build failed")
         let reported = SessionProgramStatus(sessions: [try session("failed", status: .init(seen: true, records: [error]))], unavailable: nil)
         #expect(reported.tone == .failure)
-        let selected = TaskRowMetadata(id: task.id, task: task, status: reported).workSelection(true)
+        let selected = row(task, status: reported).workSelection(true)
         #expect(try selected.inspect().find(text: "Error").string() == "Error")
         let available = SessionProgramStatus(sessions: [try session("available", availability: .available)], unavailable: nil)
         #expect(available.tone == .available)
@@ -117,14 +121,11 @@ struct TaskRowMetadataTests {
         #expect(ProgramStatusState.done.workTone == .done)
     }
 
-    @Test("Rows name the owner and Machine, or say the Task is unowned")
+    @Test("Owners stay in the Task pane; their summaries name the person and Machine")
     func ownerLine() throws {
         let tasks = try roadmap().waves.flatMap(\.tasks.items)
         let owned = try #require(tasks.first { $0.runtime?.owner != nil })
-        let view = TaskRowMetadata(id: owned.id, task: owned, status: .unknown)
-        #expect(try view.inspect().find(text: "Jack Heart on mini").string() == "Jack Heart on mini")
-        let unowned = try #require(tasks.first { $0.runtime != nil && $0.runtime?.owner == nil })
-        #expect(try TaskRowMetadata(id: unowned.id, task: unowned, status: .unknown).inspect().find(text: "Unowned").string() == "Unowned")
+        #expect(throws: (any Error).self) { try row(owned, status: .unknown).inspect().find(text: "Jack Heart on mini") }
         let unknown = try JSONDecoder().decode(TaskOwner.self, from: Data("""
         {"person":null,"person_id":null,"person_key":null,"machine":{"id":null,"label":null}}
         """.utf8))
@@ -135,10 +136,22 @@ struct TaskRowMetadataTests {
         #expect(unnamed.summary == "maya@example.com on maya-mbp")
     }
 
+    @Test("The title wraps in full, then the ID and status word")
+    func titleWraps() throws {
+        let task = try #require(roadmap().waves.first?.tasks.items[1])
+        let inspected = try row(task, status: .unknown).inspect()
+        let title = try inspected.find(text: task.task.name)
+        #expect(throws: (any Error).self) { try title.lineLimit() }
+        #expect(try inspected.find(text: task.task.identifier).string() == task.task.identifier)
+        let lifecycle = task.lifecycle.label.capitalized
+        #expect(try inspected.find(viewWithAccessibilityIdentifier: "work-task-lifecycle-\(task.id)").text().string() == lifecycle)
+        #expect(throws: (any Error).self) { try inspected.find(text: "Unowned") }
+    }
+
     @Test("Task identifiers remain visible without an external issue URL")
     func identifierWithoutLink() throws {
         let task = try #require(roadmap().waves.flatMap(\.tasks.items).first { $0.reference.issueUrl == nil })
-        let view = TaskRowMetadata(id: task.id, task: task, status: .unknown)
+        let view = row(task, status: .unknown)
         #expect(try view.inspect().find(text: task.task.identifier).string() == task.task.identifier)
         #expect(throws: (any Error).self) {
             try view.inspect().find(viewWithAccessibilityIdentifier: "work-task-link-\(task.id)")
@@ -180,14 +193,17 @@ struct TaskRowMetadataTests {
 
         let inspected = try view.inspect()
         var destinations: [URL] = []
-        for kind in ["task", "pr"] {
+        for kind in ["task"] {
             let link = try inspected.find(ViewType.Link.self, where: {
                 try $0.accessibilityIdentifier() == "work-\(kind)-link-\(task.id)"
             })
             destinations.append(try link.url())
             #expect(throws: (any Error).self) { try link.find(ViewType.Button.self, relation: .parent) }
         }
-        #expect(destinations == [try #require(task.reference.issueUrl), try #require(task.pr?.publication?.github?.url)])
+        #expect(destinations == [try #require(task.reference.issueUrl)])
+        #expect(throws: (any Error).self) {
+            try inspected.find(viewWithAccessibilityIdentifier: "work-pr-link-\(task.id)")
+        }
         #expect(!conversationOpened)
         #expect(model.selection == owner.reference)
         #expect(registry.selectedWork == owner)
@@ -213,6 +229,11 @@ struct TaskRowMetadataTests {
         let shell = PaneProgramHeading(provider: nil, title: "vim notes.md", directory: "/src/loopflow", fallback: "Shell")
         #expect(shell.name == "Shell")
         #expect(shell.context == "vim notes.md · loopflow")
+    }
+
+    private func row(_ task: RoadmapTask, status: SessionProgramStatus) -> TaskRow {
+        TaskRow(id: task.id, presentation: .init(title: task.task.name, identifier: task.task.identifier, context: nil),
+                task: task, status: status)
     }
 
     private func roadmap() throws -> RoadmapSnapshot {

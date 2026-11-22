@@ -115,10 +115,10 @@ struct TaskChangesView: View {
                     } label: {
                         VStack(alignment: .leading, spacing: 4) {
                             Text((file.path as NSString).lastPathComponent)
-                                .font(Typography.strong(16))
+                                .font(MobileType.strong(16))
                                 .foregroundStyle(theme.palette.text)
                             Text(detail(file))
-                                .font(Typography.caption(13))
+                                .font(MobileType.text(13))
                                 .foregroundStyle(theme.palette.textSecondary)
                                 .lineLimit(2)
                         }
@@ -216,7 +216,7 @@ struct TaskDiffView: View {
                         }
                         if diff.truncated {
                             Text("The rest of this diff is too long to show.")
-                                .font(Typography.caption(13))
+                                .font(MobileType.text(13))
                                 .foregroundStyle(theme.palette.textSecondary)
                                 .padding(12)
                         }

@@ -13289,6 +13289,15 @@
     "TaskGraph": {
       "description": "One Task's Graph as `lf task status --json` carries it.",
       "properties": {
+        "current_step": {
+          "description": "The index in `steps` of the step the Task stands in; null at `start`\nand at `end`.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "interactive_steps": {
           "items": {
             "$ref": "#/$defs/InteractiveStep"
@@ -13300,12 +13309,26 @@
         },
         "position": {
           "$ref": "#/$defs/TaskGraphPosition"
+        },
+        "sentence": {
+          "description": "Where the Task stands, in one sentence: \"build is running implement.\nYou are next needed at ship-review.\"",
+          "type": "string"
+        },
+        "steps": {
+          "description": "The Graph's top-level steps in order, as the workflow line shows them.",
+          "items": {
+            "$ref": "#/$defs/WorkflowStep"
+          },
+          "type": "array"
         }
       },
       "required": [
         "name",
         "interactive_steps",
-        "position"
+        "position",
+        "steps",
+        "current_step",
+        "sentence"
       ],
       "type": "object"
     },
@@ -15879,6 +15902,23 @@
         "task"
       ],
       "type": "string"
+    },
+    "WorkflowStep": {
+      "description": "One top-level step of a Task's Graph.",
+      "properties": {
+        "interactive": {
+          "description": "A person takes part in it.",
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "interactive"
+      ],
+      "type": "object"
     },
     "Write": {
       "description": "A typed mutation with the same defaults and effects as its CLI spelling.\nOn the wire each write is a resource-named `kind` (`task.complete`);\n`desktop.*` writes are Desktop's own arrangement state.",

@@ -62,13 +62,12 @@ struct TaskConceptTests {
                     #expect(TaskHistoryFilter().includes(task, now: .now))
                     #expect(task.opensConversationAutomatically)
                     #expect(task.isUnassigned == (phase.name == "unassigned_working"))
-                    #expect(throws: (any Error).self) { try header.inspect().find(button: "Reopen") }
                     #expect(throws: (any Error).self) {
-                        try TaskActionItems(model: model, task: task, wave: nil).inspect().find(button: "Reopen Task")
+                        try TaskActionItems(model: model, task: task, wave: nil, work: nil).inspect().find(button: "Reopen Task")
                     }
                 } else if task.isCompleted {
                     #expect(label == (task.lifecycle == .done ? "Completed" : "Canceled"))
-                    _ = try header.inspect().find(button: "Reopen")
+                    _ = try TaskActionItems(model: model, task: task, wave: nil, work: nil).inspect().find(button: "Reopen Task")
                     #expect(!task.awaitsStart)
                     #expect(!task.opensConversationAutomatically)
                 } else if task.lifecycle == .unstarted {
@@ -146,9 +145,11 @@ struct TaskConceptTests {
         let conversation = try #require(phase.sessions.first { $0.id == "bound" })
         #expect(task.selectionStates.contains(.busy))
         let status = SessionProgramStatus(sessions: [conversation], unavailable: nil)
-        let row = TaskRowMetadata(id: task.id, task: task, status: status)
+        let row = TaskRow(id: task.id, presentation: .init(title: task.task.name, identifier: task.task.identifier, context: nil),
+                          task: task, status: status)
         #expect(try row.inspect().find(text: "Blocked").string() == "Blocked")
-        let pane = ProgramStatusLabel(status: try #require(conversation.programStatus))
+        let programStatus = try #require(conversation.programStatus)
+        let pane = try #require(StatusMark(status: programStatus))
         #expect(try pane.inspect().find(text: "Blocked").string() == "Blocked")
         #expect(task.lifecycle == .active)
     }

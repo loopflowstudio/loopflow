@@ -21,7 +21,7 @@ struct RepositoryPlanView: View {
                 Text("Reading how the plan travels…")
             }
         }
-        .font(Typography.body(12))
+        .font(Typography.text)
         .foregroundStyle(palette.textSecondary)
         .textSelection(.enabled)
         .frame(maxWidth: .infinity, alignment: .leading)

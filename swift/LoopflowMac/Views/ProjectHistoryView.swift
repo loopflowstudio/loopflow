@@ -16,7 +16,7 @@ struct ProjectHistoryView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
-                Text("\(wave) · Projects").font(.headline)
+                Text("\(wave) · Projects").font(Typography.textStrong)
                 Spacer()
                 Button("Done") { dismiss() }
             }

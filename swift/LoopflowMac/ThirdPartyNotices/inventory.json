@@ -10,12 +10,15 @@
     "swift/GhosttyKitPatches/0006-ios-external-io.patch": "631c27da22817ec159885c2e12669166d2360ae48ded352b61021c6b520835a9",
     "swift/GhosttyKitPatches/0007-no-libintl-without-i18n.patch": "c3c0c273d01831441895728b00b9106baf64e4f86843b4dc60cffedb1703393b",
     "swift/GhosttyKitPatches/README.md": "17c0d3a5f3889586991adc7b6a5db5fe4fc038475a3454f44eb11bf3d48e8c38",
-    "swift/Loopflow/Fonts/CormorantGaramond-Medium.otf": "bc49bcebc38f68498956f47b9414d6907fe9192e8d3c38d077a095da2e8f2da5",
-    "swift/Loopflow/Fonts/CormorantGaramond-Regular.otf": "d276dd20a536a36c03f0ab6e845cb39260cc6639c0b835b26d1c354c8cb3b2b3",
-    "swift/Loopflow/Fonts/CormorantGaramond-SemiBold.otf": "62363e27dff8453a9577e0801cfde7573ac8af68f57b7d401b0d805b67a0cf11",
-    "swift/Loopflow/Fonts/JetBrainsMono-Regular.ttf": "a0bf60ef0f83c5ed4d7a75d45838548b1f6873372dfac88f71804491898d138f",
-    "swift/Loopflow/Fonts/Lato-Bold.ttf": "bf1b8130069b44b9148eeece35e5423bedac49777ba746615b826b8276574a7b",
-    "swift/Loopflow/Fonts/Lato-Regular.ttf": "6f6940be0835c3ddec9199e5fc42be4cbc61ebcfd58c623fdf719366253f1780",
+    "swift/Loopflow/Fonts/AtkinsonHyperlegibleNext-Italic.ttf": "b7f8f03ceb28ebadb2de2332b2e869a00e8dbfb5c8e00fdbb06385770c8227e7",
+    "swift/Loopflow/Fonts/AtkinsonHyperlegibleNext-Regular.ttf": "88ed5c31a71584c7772963b02d04bef1eb7e3d2e9c8b9cb204339b1f82cf432c",
+    "swift/Loopflow/Fonts/AtkinsonHyperlegibleNext-SemiBold.ttf": "8e2fff779f35ac25239656bb0f3b2bd35959a2009e3dd21a12141c3b9030362b",
+    "swift/Loopflow/Fonts/AtkinsonHyperlegibleNext-SemiBoldItalic.ttf": "81255b975707232b59b1f673e36b8c83e34b64b01d90025b89420e1c6506d7a9",
+    "swift/Loopflow/Fonts/OldStandard-Regular.ttf": "42717a1280b523a506ca2b0285cca380e77fe214b1f6e3d75a8b925005f19eac",
+    "swift/Loopflow/Fonts/SplineSansMono-Bold.ttf": "9d17d41f75c8efdbc592f851ac3c9ed7486b8a472b4047c7ae518212cbd0d093",
+    "swift/Loopflow/Fonts/SplineSansMono-BoldItalic.ttf": "7df76e7881977508b65187a67dfc32d3f9354a143dc3d6ee96f861b6e4b6e6bc",
+    "swift/Loopflow/Fonts/SplineSansMono-Italic.ttf": "f3bfd4cf369064190159a13038c08d9ed50bd21c91235591585f8b506b5debea",
+    "swift/Loopflow/Fonts/SplineSansMono-Regular.ttf": "79384820b543bd4f52dff46c2da4ddca4bb5131ee3bcba4a6d17a5609351a098",
     "swift/Loopflow/Themes/Catalogue/Aubergine": "91e9503cf692d55f5d25302c1b280bbda3aca20a3d70176fd5748b1dae935d19",
     "swift/Loopflow/Themes/Catalogue/Catppuccin Latte": "b633e0361eda1c7803627d7b67e052aee392d94eaf58a48a9c7eb1074434140e",
     "swift/Loopflow/Themes/Catalogue/Catppuccin Mocha": "0ed392c81838631fbb1141907e1c7d929590a8ebc8d7dfe21ecfb426919729cd",
@@ -67,8 +70,8 @@
     "swift/Package.resolved": "3b4687150d10bfa159dd90dac1b81b1977f6b622d69ca5e214fdce206449251f",
     "swift/Package.swift": "57813179473251a2eeda35f34856691bde71a50d04be6156c0fda10e2654bcba",
     "third_party/README.md": "9d2661253b7c6152672de67cab7f676399f71b43eaff8788aa540d4fa9e04f25",
-    "third_party/manifest.json": "e27a444e69d3cb278e09e1ab2bea1505dbf837145a214b3fe2482e87a8a699f0",
-    "third_party/notices/app-fonts.txt": "17b912df78b4ed923a1b2d3a03def226afeb47279cd1e54823c13f3f0964c2e1",
+    "third_party/manifest.json": "ae0b2770f0c75d2e7f1953b8f37b357b491d5eabc6e2b46a9e272d41beda13a7",
+    "third_party/notices/app-fonts.txt": "2e5e411aa76126bd1cfa09c005c22cbfd1e55ae0c89f47e13d5b54275017a0ca",
     "third_party/notices/breakpad-breakpad.txt": "28fd46313ce1f83fa2716c64c5e630296849bf059758023b3df2eb1ae98557b7",
     "third_party/notices/crate-block2.txt": "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54",
     "third_party/notices/crate-dispatch2.txt": "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54",
@@ -431,7 +434,7 @@
       "notices": [
         {
           "path": "third_party/notices/app-fonts.txt",
-          "sha256": "17b912df78b4ed923a1b2d3a03def226afeb47279cd1e54823c13f3f0964c2e1"
+          "sha256": "2e5e411aa76126bd1cfa09c005c22cbfd1e55ae0c89f47e13d5b54275017a0ca"
         }
       ]
     },
@@ -2646,5 +2649,5 @@
       }
     }
   ],
-  "notices_sha256": "74a81d3ed19bc6f4447a57b6f1d00ecf4b368a44709800722313496659e9f128"
+  "notices_sha256": "19b291fe640b56abf5257881ee420bd7b39d1371b085dd4e4cf2a6a006ff11bf"
 }

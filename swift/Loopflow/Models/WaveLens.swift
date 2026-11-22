@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// The operational lens shared by Wave, Project, and Task rows: a small recessed
-/// glass light whose color is the shared operating grammar. Green = a live body
+/// The operating state shared by Wave, Project, and Task rows, drawn as a
+/// status mark whose color is the shared operating grammar. Green = a live body
 /// is advancing; red = blocked; blue = waiting on another actor; black = off and
 /// clean, nothing expected to run; unknown = evidence could not be read.
 public enum WaveLensColor: String, Sendable, Hashable {
@@ -11,22 +11,17 @@ public enum WaveLensColor: String, Sendable, Hashable {
     case black
     case unknown
 
-    /// The lit glass tone. Restrained, not a generic health palette — the HAL
-    /// allusion stays implicit. Black is near-black glass rather than a bright dot;
-    /// unknown is a dim amber so unproven never reads as off.
-    public func ink(in palette: LoopflowPalette) -> Color {
+    /// The status mark's tone. Black is off and clean, so it is the quiet
+    /// neutral; unknown is warning so unproven never reads as off.
+    public var tone: WorkTone {
         switch self {
-        case .green: palette.success
-        case .red: palette.failure
-        case .blue: palette.working
-        case .black: palette.surfaceElement
-        case .unknown: palette.warning
+        case .green: .done
+        case .red: .failure
+        case .blue: .running
+        case .black: .neutral
+        case .unknown: .warning
         }
     }
-
-    /// True when the lens carries an inner glow (green/red/blue/unknown). Only the off
-    /// black lens renders as dark glass with no light.
-    public var isLit: Bool { self != .black }
 
     /// The shared Task condition, mapped 1:1. Rust owns the condition; the lens
     /// renders it and never reconstructs it from status or process flags.

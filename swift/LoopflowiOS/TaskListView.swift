@@ -263,14 +263,14 @@ struct TaskListView: View {
                             DisclosureGroup("\(section.quiet.count) without a conversation") {
                                 ForEach(section.quiet, id: \.work) { link($0) }
                             }
-                            .font(Typography.caption(14))
+                            .font(MobileType.text(14))
                             .foregroundStyle(theme.palette.textSecondary)
                             .listRowBackground(theme.palette.background)
                         }
                     } header: {
                         if shown.isEmpty {
                             Text(name(section.repository))
-                                .font(Typography.strong(14))
+                                .font(MobileType.strong(14))
                                 .foregroundStyle(theme.palette.textSecondary)
                                 .textCase(nil)
                         }
@@ -413,7 +413,7 @@ struct TaskListView: View {
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 6) {
                 Text(task.title)
-                    .font(Typography.strong(17))
+                    .font(MobileType.strong(17))
                     .foregroundStyle(theme.palette.text)
                     .fixedSize(horizontal: false, vertical: true)
                 HStack(spacing: 6) {
@@ -423,7 +423,7 @@ struct TaskListView: View {
                         Text(identifier).foregroundStyle(theme.palette.textSecondary)
                     }
                 }
-                .font(Typography.caption(13))
+                .font(MobileType.text(13))
             }
         }
         .padding(.vertical, 2)

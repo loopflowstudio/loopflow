@@ -428,12 +428,24 @@
         "wave": "product",
         "work": {
           "graph": {
+            "current_step": null,
             "interactive_steps": [],
             "name": "delivery",
             "position": {
               "kind": "at",
               "step": "end"
-            }
+            },
+            "sentence": "At its end.",
+            "steps": [
+              {
+                "interactive": false,
+                "name": "hold"
+              },
+              {
+                "interactive": false,
+                "name": "task complete FIX-1"
+              }
+            ]
           },
           "graph_processes": [
             {
@@ -538,12 +550,24 @@
       ],
       "overview": {
         "graph": {
+          "current_step": null,
           "interactive_steps": [],
           "name": "delivery",
           "position": {
             "kind": "at",
             "step": "end"
-          }
+          },
+          "sentence": "At its end.",
+          "steps": [
+            {
+              "interactive": false,
+              "name": "hold"
+            },
+            {
+              "interactive": false,
+              "name": "task complete FIX-1"
+            }
+          ]
         },
         "graph_processes": [
           {
@@ -1394,6 +1418,7 @@
         "wave": "product",
         "work": {
           "graph": {
+            "current_step": 1,
             "interactive_steps": [],
             "name": "delivery",
             "position": {
@@ -1402,7 +1427,18 @@
               "lf_process_id": "1a6eca5d-1b13-4239-981d-abe5e0713e34",
               "running": true,
               "step": "start"
-            }
+            },
+            "sentence": "task complete FIX-1 is running.",
+            "steps": [
+              {
+                "interactive": false,
+                "name": "hold"
+              },
+              {
+                "interactive": false,
+                "name": "task complete FIX-1"
+              }
+            ]
           },
           "graph_processes": [
             {
@@ -1491,6 +1527,7 @@
       ],
       "overview": {
         "graph": {
+          "current_step": 1,
           "interactive_steps": [],
           "name": "delivery",
           "position": {
@@ -1499,7 +1536,18 @@
             "lf_process_id": "1a6eca5d-1b13-4239-981d-abe5e0713e34",
             "running": true,
             "step": "start"
-          }
+          },
+          "sentence": "task complete FIX-1 is running.",
+          "steps": [
+            {
+              "interactive": false,
+              "name": "hold"
+            },
+            {
+              "interactive": false,
+              "name": "task complete FIX-1"
+            }
+          ]
         },
         "graph_processes": [
           {
@@ -2292,6 +2340,7 @@
         "wave": "product",
         "work": {
           "graph": {
+            "current_step": 1,
             "interactive_steps": [],
             "name": "delivery",
             "position": {
@@ -2300,7 +2349,18 @@
               "lf_process_id": "1a6eca5d-1b13-4239-981d-abe5e0713e34",
               "running": true,
               "step": "start"
-            }
+            },
+            "sentence": "task complete FIX-1 is running.",
+            "steps": [
+              {
+                "interactive": false,
+                "name": "hold"
+              },
+              {
+                "interactive": false,
+                "name": "task complete FIX-1"
+              }
+            ]
           },
           "graph_processes": [
             {
@@ -2389,6 +2449,7 @@
       ],
       "overview": {
         "graph": {
+          "current_step": 1,
           "interactive_steps": [],
           "name": "delivery",
           "position": {
@@ -2397,7 +2458,18 @@
             "lf_process_id": "1a6eca5d-1b13-4239-981d-abe5e0713e34",
             "running": true,
             "step": "start"
-          }
+          },
+          "sentence": "task complete FIX-1 is running.",
+          "steps": [
+            {
+              "interactive": false,
+              "name": "hold"
+            },
+            {
+              "interactive": false,
+              "name": "task complete FIX-1"
+            }
+          ]
         },
         "graph_processes": [
           {

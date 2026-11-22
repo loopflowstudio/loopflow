@@ -58,7 +58,7 @@ struct WaveRow: View {
         .padding(.trailing, Spacing.md)
         .padding(.vertical, 8)
         .background(
-            RoundedRectangle(cornerRadius: CornerRadius.md)
+            RoundedRectangle(cornerRadius: CornerRadius.row)
                 .fill(isHovering ? palette.actionHover : Color.clear)
         )
         .workSelection(isSelected)
@@ -88,14 +88,14 @@ private struct WaveRowLabel: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: Spacing.sm) {
-            WaveLensView(lens: wave.lens)
+            StatusMark(lens: wave.lens)
                 .padding(.top, 3)
                 .accessibilityIdentifier("wave-status")
 
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: Spacing.sm) {
                     Text(wave.displayName)
-                        .font(Typography.sectionTitle(18))
+                        .font(Typography.lede)
                         .fontWeight(.semibold)
                         .foregroundStyle(palette.text)
                         .lineLimit(1)
@@ -103,7 +103,7 @@ private struct WaveRowLabel: View {
 
                     if wave.openTaskCount > 0 {
                         Text("\(wave.openTaskCount)")
-                            .font(Typography.caption(10))
+                            .font(Typography.meta)
                             .fontWeight(.medium)
                             .foregroundStyle(palette.textSecondary)
                             .padding(.horizontal, 5)
@@ -118,7 +118,7 @@ private struct WaveRowLabel: View {
 
                 if let tagline = wave.objectiveTagline {
                     Text(tagline)
-                        .font(Typography.caption())
+                        .font(Typography.meta)
                         .foregroundStyle(palette.textSecondary)
                         .lineLimit(1)
                         .accessibilityIdentifier("wave-objective")

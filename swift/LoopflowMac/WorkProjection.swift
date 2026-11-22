@@ -290,6 +290,8 @@ final class WorkNavigation {
     }
     var renaming: SessionRenameDraft?
     var binding: SessionBindingDraft?
+    /// The Task whose Abandon… waits for its confirmation.
+    var abandoning: String?
     /// The window's one Notice: refusals, requested changes and failed reads.
     let notices = NoticeCenter()
     var startingTaskSessions: Set<String> = []

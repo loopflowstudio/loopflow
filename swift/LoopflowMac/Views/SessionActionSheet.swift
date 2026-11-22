@@ -10,7 +10,7 @@ struct SessionActionSheet: View {
             bindingForm
         } else if let draft = model.navigation.renaming {
             VStack(alignment: .leading, spacing: 12) {
-                Text("Rename Session").font(.headline)
+                Text("Rename Session").font(Typography.textStrong)
                 TextField("Session name", text: Binding(
                     get: { model.navigation.renaming?.text ?? draft.text },
                     set: { model.navigation.renaming?.text = $0 }))
@@ -85,27 +85,4 @@ struct SessionActionSheet: View {
         }
     }
 
-}
-
-/// Report text is always literal; the tooltip exposes the other bounded records.
-struct ProgramStatusLabel: View {
-    let status: ProgramStatusRecords
-    @Environment(\.palette) private var palette
-
-    var body: some View {
-        if let report = status.summary {
-            Text(verbatim: report.displayText)
-                .foregroundStyle(report.state.workTone.ink(in: palette))
-                .font(Typography.code(11))
-                .lineLimit(1)
-                .truncationMode(.tail)
-                .frame(maxWidth: 340, alignment: .leading)
-                .help(Text(verbatim: status.records.map { record in
-                    let source = ProgramStatusReport.displaySafe(record.id ?? "Program")
-                    let app = status.app(for: record).map { " (\(ProgramStatusReport.displaySafe($0)))" } ?? ""
-                    let title = record.title.map { " · \(ProgramStatusReport.displaySafe($0))" } ?? ""
-                    return "\(source)\(app): \(record.displayText)\(title)"
-                }.joined(separator: "\n")))
-        }
-    }
 }

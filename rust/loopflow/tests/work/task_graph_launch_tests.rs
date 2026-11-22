@@ -1506,6 +1506,7 @@ fn a_task_takes_up_its_waves_graph_and_keeps_the_one_it_named() {
             "auto",
             "comments",
             "conversation",
+            "graph",
             "graph_processes",
             "sessions",
             "stack_parent",
@@ -1513,6 +1514,7 @@ fn a_task_takes_up_its_waves_graph_and_keeps_the_one_it_named() {
             "task"
         ]
     );
+    assert_eq!(status["graph"], graph);
     assert_eq!(
         status["task"]["graph"],
         serde_json::json!({"name": "feature", "step": "review"})
@@ -1631,10 +1633,10 @@ fn nothing_after_the_last_interactive_step_reaches_end_without_a_pr() {
     assert_eq!(graph["interactive_steps"][0]["skill"], "research");
     assert_eq!(graph["position"], at("findings"));
     assert_eq!(task.state(), "active");
+    let status = task.text_status();
     assert!(
-        task.text_status().contains("Graph findings: at findings"),
-        "{}",
-        task.text_status()
+        status.contains("Graph findings: Waiting for you at findings."),
+        "{status}"
     );
     assert_eq!(support::recorded_graphs(task.home.path()).len(), 1);
     task.repo
@@ -1657,7 +1659,7 @@ fn nothing_after_the_last_interactive_step_reaches_end_without_a_pr() {
     assert!(task.status()["pr"].is_null());
     let error = refusal(task.run(&["task", "run", "INF-123"]));
     assert!(error.contains("is done"), "{error}");
-    assert!(task.text_status().contains("Graph findings: at end"));
+    assert!(task.text_status().contains("Graph findings: At its end."));
 }
 
 #[test]
@@ -2392,7 +2394,7 @@ fn a_failed_command_step_is_started_again() {
     assert_eq!(stopped["position"]["running"], false);
     let status = task.text_status();
     assert!(
-        status.contains("Graph held-review: stopped at graph show late"),
+        status.contains("Graph held-review: Stopped at graph show late."),
         "{status}"
     );
 }
@@ -2464,10 +2466,7 @@ fn a_stopped_run_is_started_again_at_the_step_that_failed() {
         ["failed", "failed", "failed"]
     );
     let status = task.text_status();
-    assert!(
-        status.contains("Graph gated: stopped at graph show late"),
-        "{status}"
-    );
+    assert!(status.contains("Graph gated: Stopped at gate."), "{status}");
 
     // The cause clears as the third attempt starts: an `lf` that defines
     // `late` the third time the gate asks for it.

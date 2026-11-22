@@ -341,7 +341,7 @@ struct AppAppearance: ViewModifier {
             .safeAreaInset(edge: .top) {
                 if let notice = appearance.notice, !appearance.chooserOpen {
                     HStack {
-                        Text(notice).font(.caption)
+                        Text(notice).font(Typography.meta)
                         Button("Choose Theme…") {
                             appearance.beginPreview()
                             openSettings()

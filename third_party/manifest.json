@@ -330,7 +330,7 @@
       "notices": [
         {
           "path": "third_party/notices/app-fonts.txt",
-          "sha256": "17b912df78b4ed923a1b2d3a03def226afeb47279cd1e54823c13f3f0964c2e1"
+          "sha256": "2e5e411aa76126bd1cfa09c005c22cbfd1e55ae0c89f47e13d5b54275017a0ca"
         }
       ]
     },
@@ -380,13 +380,17 @@
       "url": "https://raw.githubusercontent.com/simdutf/simdutf/v9.0.0/LICENSE-MIT",
       "sha256": "fc8dbc04e03ad4efc08a647ffe7f995b811a95bc04c0e85a56d5277c6593fa5f"
     },
-    "cormorant": {
-      "url": "https://raw.githubusercontent.com/CatharsisFonts/Cormorant/v3.609/OFL.txt",
-      "sha256": "9134ca6996bd33ea2022e109f13f20e29dee1dcd8b2e8878aad576d2ca334e9f"
+    "old-standard": {
+      "url": "https://raw.githubusercontent.com/google/fonts/main/ofl/oldstandardtt/OFL.txt",
+      "sha256": "4faa2d9e2ce0a4b5b37e62ee6fafe474a539b31578f7214ed97cc3503aeb8ebd"
     },
-    "lato": {
-      "url": "https://raw.githubusercontent.com/google/fonts/main/ofl/lato/OFL.txt",
-      "sha256": "74ba064d03f1f1c4a952da936c3eb71866c34404916734de3cae73b34357e59e"
+    "atkinson-hyperlegible-next": {
+      "url": "https://raw.githubusercontent.com/googlefonts/atkinson-hyperlegible-next/main/OFL.txt",
+      "sha256": "aca6a428580965d2297d1b718042dd427c2a9443ece3b0d02d758e161e0c4030"
+    },
+    "spline-sans-mono": {
+      "url": "https://raw.githubusercontent.com/SorkinType/SplineSansMono/main/OFL.txt",
+      "sha256": "4abb88162e4c0c5f9fc6c2f15d7085f7b7e27fd89f541a13488e1bcb829bde3f"
     },
     "cc-by-4.0": {
       "url": "https://creativecommons.org/licenses/by/4.0/legalcode.txt",

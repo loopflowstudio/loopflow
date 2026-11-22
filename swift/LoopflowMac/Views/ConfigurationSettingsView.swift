@@ -18,7 +18,7 @@ struct ConfigurationSettingsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Configuration").font(.title2)
+            Text("Configuration").font(Typography.lede)
             Picker("Save in", selection: $destination) {
                 ForEach(ConfigurationDestination.allCases) { destination in
                     Text(destination.title).tag(destination)
@@ -28,7 +28,7 @@ struct ConfigurationSettingsView: View {
                 TextField("Project checkout", text: $repository)
             }
             if destination.isWave { TextField("Wave name or ID", text: $wave) }
-            if !locator.isEmpty { Text(locator).font(.caption).textSelection(.enabled) }
+            if !locator.isEmpty { Text(locator).font(Typography.meta).textSelection(.enabled) }
             HStack {
                 TextField("Setting key", text: $key)
                 Menu("Browse") {
@@ -42,19 +42,19 @@ struct ConfigurationSettingsView: View {
                 }
             }
             if let definition = catalogue.filter({ definition in ([definition.key] + definition.shorthands).contains { key == $0 || key.hasPrefix($0 + ".") } }).max(by: { $0.key.count < $1.key.count }) {
-                Text(definition.description).font(.callout)
+                Text(definition.description).font(Typography.text)
                 Text("\(definition.applicability) · \(definition.combination) · \(definition.portability)")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(Typography.meta).foregroundStyle(.secondary)
             }
-            TextEditor(text: $value).font(.system(.body, design: .monospaced)).frame(minHeight: 100)
+            TextEditor(text: $value).font(Typography.mono).frame(minHeight: 100)
             HStack {
                 Button("Reload") { Task { await load() } }
                 Button("Apply") { Task { await save(unset: false) } }
                 Button("Unset") { Task { await save(unset: true) } }
             }
             Button("Explain effective value") { Task { await inspect() } }
-            if !notice.isEmpty { Text(notice).font(.callout).textSelection(.enabled) }
-            ScrollView { Text(explanation).font(.caption).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }
+            if !notice.isEmpty { Text(notice).font(Typography.text).textSelection(.enabled) }
+            ScrollView { Text(explanation).font(Typography.meta).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }
         }
         .disabled(saving)
         .padding(24).frame(minWidth: 620, minHeight: 550)

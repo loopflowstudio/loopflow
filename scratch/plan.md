@@ -1,6 +1,6 @@
 # 50f7f9: review the bundled themes
 
-Built, in PR #2020: the two defaults and the `loopflow-titlebar` role (round 1), then the 13 families and a Choose Theme grid of cards (round 2). Round 3 made the concept review's three chooser corrections, swapped Verdigris for Moss and dropped the removed-name fallback. Round 3's concept review found two leftovers of the per-side picker; round 4 removed them: `previewTheme` and `importTheme` share one assignment that takes the side from the theme's own colors, `showPicker` is gone and `picker` is `previewSide`. Round 4 QA passed. Concept review round 4 shaped the steer's iPhone and website pieces (Remaining 1–3); then ship-review.
+Built, in PR #2020: the two defaults and the `loopflow-titlebar` role (round 1), then the 13 families and a Choose Theme grid of cards (round 2). Round 3 made the concept review's three chooser corrections, swapped Verdigris for Moss and dropped the removed-name fallback. Round 3's concept review found two leftovers of the per-side picker; round 4 removed them: `previewTheme` and `importTheme` share one assignment that takes the side from the theme's own colors, `showPicker` is gone and `picker` is `previewSide`. Round 4 QA passed. Concept review round 4 shaped the steer's iPhone and website pieces; implement built them and round 5 QA passed them, with one open Desktop glitch; then ship-review.
 
 ## What people said
 
@@ -38,6 +38,8 @@ Built, in PR #2020: the two defaults and the `loopflow-titlebar` role (round 1),
 
 - 2026-11-22, compress round 5: `swift test … 'ThemeTests|ThemeWorkflowTests|AppAppearanceTests|ServerProtocolTests'` 53 passed; `test_ios.py` `MachineThemeTests` 3 passed; `theme_catalogue.py --check` and `test_theme_catalogue.py` passed.
 
+- 2026-11-22, QA round 5 (`scratch/qa.html`): site crawl, 73 pages, no contrast or Pico-blue failures after fixing the Company focus ring; phone on a simulator paired with a private branch Machine: Fig Leaf/Fig by appearance, single name, unknown name, no name, Machine away, sheets; Desktop on the private Machine, screen locked: launch read, live edit, served write, unknown-name path. Open: light cards missing from Choose Theme while the unknown-name notice is up (R5.10); version skew both ways (R5.7, R5.9).
+
 ## Demo
 
 Dev app → Settings → Choose Theme: 13 cards per side in their own colors, both sides in System mode. Click Fig and the window turns plum with lime; Fig Leaf is the light half. Import a dark file from the light section in Light mode: the mode switches to Dark and the file previews there.
@@ -50,7 +52,7 @@ Concept review round 4 made the theme choice one Machine fact (`theme:` in the s
 - **The phone draws its Machine's theme** (`44d891ba7a`). `MachineTheme` (`swift/LoopflowiOS/MachineTheme.swift`) reads `config.theme` from `TaskListView` on connect and on return to the foreground, keeps each Machine's last answer in UserDefaults (`theme-<machineID>`), and `MachineConnectionView` sets `\.theme`, `\.palette` and `\.colorScheme` once. The views' `theme:` parameters and the three `colorScheme` computations are gone.
 - **loopflow.studio is Loopflow Light** (`f7e16f2686`). `scripts/theme_catalogue.py` writes `website/static/theme.css`; `style.css` has no color of its own. The page background is `--background`, cards `--surface`; the light terminal blocks got a `--border` edge because Light's terminal background is the page background.
 
-Next: **ship-review.** The Dev app on an unlocked display (Import panel, Apply/Cancel, the editor's Title bar row, a key window's bar, a dark import from the light section), the phone in Fig on a simulator against a Machine whose `theme:` is `light:Fig Leaf,dark:Fig`, and the site (`scratch/qa/home.png`, `scratch/qa/docs.png` are headless renders).
+Next: **ship-review.** The Dev app on an unlocked display (Import panel, Apply/Cancel, the editor's Title bar row, a key window's bar, a dark import from the light section, Choose Theme with an unknown-name notice up: are the light cards there?), the phone in Fig on a simulator against a Machine whose `theme:` is `light:Fig Leaf,dark:Fig`, and the site (`scratch/qa/home.png`, `scratch/qa/docs.png` are headless renders).
 
 ## Left outside this Task
 

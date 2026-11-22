@@ -1,6 +1,6 @@
 <!doctype html>
 <meta charset="utf-8">
-<title>QA: bundled themes and the title bar role</title>
+<title>QA: bundled themes, the phone and the site</title>
 <style>
 body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:980px;margin:2rem auto;padding:0 1rem;color:#222}
 h1{font-size:1.6rem}h2{font-size:1.15rem;margin-top:2.2rem}
@@ -9,6 +9,65 @@ code{background:#f3f1ee;padding:0 .25em;border-radius:3px}
 table{border-collapse:collapse}td,th{border:1px solid #ddd;padding:.3rem .6rem;text-align:left}
 .ok{color:#256b2a}.bad{color:#9a2a2a}
 </style>
+<h1>Round 5: one Machine theme on the Mac, the phone and the site</h1>
+<p>Branch <code>lf</code> at 726f6cd735 on a private Machine (<code>LF_HOME</code> under <code>/tmp</code>, <code>theme: "light:Fig Leaf,dark:Fig"</code>, one git repository with two Tasks). Its own mobile listener on the tailnet name with <code>mobile-same-device</code> in that home, paired from a fresh iPhone SE simulator (iOS 26.2). Desktop: isolated bundle with <code>QAHook.swift</code>, screen locked (idle 3.4 h). Website: <code>main.py</code> on port 5077 with Playwright. Run 2026-11-22.</p>
+
+<h2>R5.1 loopflow.studio in Loopflow Light</h2>
+<p class="ok">73 pages crawled from <code>/</code>: all 200, no text under 4.5:1 (3:1 for large text) against its computed background, no Pico blue in color, background, border or outline. Wine <code>#722f37</code> on the warm <code>#faf8f5</code> ground; the install command is now a light terminal block with a 1 px edge. Docs code blocks: Light's terminal ground with the <code>--border</code> edge.</p>
+<img src="qa/r5-site-home.png">
+<p>main for comparison (old pink-wine accent, black command block):</p>
+<img src="qa/r5-site-home-main.png">
+<img src="qa/r5-site-docs-code.png">
+<p class="bad">Tab through the header: "Company" drew Pico's blue focus ring (<code>rgba(2,154,232,.5)</code>), where every other link draws a 3 px wine ring. Pico's <code>details summary:focus-visible:not([role])</code> outranked the header rule. Same on main.</p>
+<p><b>Fix:</b> the header rule is <code>.site-header nav details summary:focus-visible:not([role])</code>; Company now draws the wine ring. <code>docs/dev/index.html</code> regenerated; <code>test_accessibility.py</code> 17 passed, <code>test_portable_architecture.py</code> passed.</p>
+
+<h2>R5.2 The phone, first visit</h2>
+<p class="ok">Before any Machine: Loopflow Light in light appearance, Loopflow Dark in dark.</p>
+<img src="qa/r5-phone-first.png" style="width:300px">
+
+<h2>R5.3 Paired with a Machine whose <code>theme:</code> is <code>light:Fig Leaf,dark:Fig</code></h2>
+<p class="ok">Fig Leaf in light appearance, Fig in dark (switched with <code>simctl ui appearance</code>, no relaunch). Backlog rows and a Task's screen draw in the same roles.</p>
+<img src="qa/r5-phone-fig-leaf.png" style="width:300px"> <img src="qa/r5-phone-fig-dark.png" style="width:300px"> <img src="qa/r5-phone-rows.png" style="width:300px">
+
+<h2>R5.4 The Machine changes to <code>theme: Fig</code> while the phone is light</h2>
+<p class="ok">Back to the foreground: Fig, with white system title text (the theme's own color scheme). The New Task sheet draws Fig too, so the implement note about UIKit sheets following the phone's appearance doesn't hold.</p>
+<img src="qa/r5-phone-single-name.png" style="width:300px"> <img src="qa/r5-phone-sheet.png" style="width:300px">
+
+<h2>R5.5 Names the phone doesn't ship, and no name</h2>
+<p class="ok"><code>theme: "My Own Theme"</code> → Loopflow Light in light appearance. An empty config → Loopflow Dark in dark.</p>
+<img src="qa/r5-phone-unknown.png" style="width:300px"> <img src="qa/r5-phone-none-dark.png" style="width:300px">
+
+<h2>R5.6 Returning with the Machine away</h2>
+<p class="ok">With the Machine's server stopped, a cold launch drew Fig from the remembered answer and said "The Machine is away; showing what was last read". After a restart the phone read Fig again. Forget Machine returned it to Loopflow's pair.</p>
+<img src="qa/r5-phone-offline.png" style="width:300px">
+
+<h2>R5.7 The phone against a released (0.16.0) Machine</h2>
+<p>Paired with the live Machine (<code>theme: Loopflow Light</code>), in dark appearance: Tasks listed normally, the theme drawn was Loopflow Dark. The released server answers the new request with <code>config.theme: missing field `path`</code>; the phone keeps Loopflow's pair and shows nothing. It catches up when the Mac runs this build. No screenshot: the list shows personal Tasks.</p>
+
+<h2>R5.8 Desktop reads the theme through its server</h2>
+<p class="ok">Launch: the server log shows <code>{"kind":"config.theme"}</code> with no path; the window draws Fig Leaf; Choose Theme opens in System mode with "Light themes · Fig Leaf" ringed.</p>
+<img src="qa/r5-desktop-fig-leaf.png">
+<p class="ok">A live file edit to <code>light:Moss Light,dark:Moss</code> reached the running app within a few seconds (the watch follows the path the server named), and Choose Theme showed Moss Light chosen. A <code>config.theme {value: "Fjord Light"}</code> write over the socket (what Apply sends) wrote <code>theme: Fjord Light</code> and the window turned Fjord Light.</p>
+<img src="qa/r5-desktop-moss-live.png">
+<p class="ok"><code>theme: "Verdigris"</code>: "No theme named “Verdigris”: keeping Fig Leaf. Fix theme: in /private/tmp/…/config.yaml …", naming the server's file, not this app's home.</p>
+<img src="qa/r5-desktop-unknown-name.png">
+
+<h2>R5.9 Desktop against a released server</h2>
+<p>A copy of the installed <code>lf</code> (0.16.0) serving the same home: Desktop kept the last good theme and showed <code>config.theme: missing field `path`</code> above the window with Choose Theme…, which can't help. Switching back to the branch server, the next file change cleared it. The reverse also fails: a 0.16.0 client's <code>path</code> gets "unknown field `path`" from this build. Both report revision 9.</p>
+<img src="qa/r5-desktop-old-server.png">
+
+<h2>R5.10 Choose Theme with the unknown-name notice up: light cards missing</h2>
+<p class="bad">With the notice showing, Choose Theme opened with "Light themes · …" and "Built-in" and nothing under them: no cards, no Yours, no dark section, and none in the accessibility tree. It happened on every open while the notice was up. Without the notice (Moss live change) the cards were there. After resizing to 1500×900, the dark grid and Import tile drew, but the light grid drew only Terracotta Light.</p>
+<img src="qa/r5-desktop-blank-grid.png">
+<p>Not fixed. The window is never key and the screen is locked, so this may be the same lazy-grid staleness as R4.5. Round 2 showed cards with a notice in Dark mode. Needs a look on an unlocked display.</p>
+
+<h2>Round 5: what works</h2>
+<p>The site is Loopflow Light on every page with no contrast failures. The phone draws its Machine's theme in both appearances, follows a change on return to the foreground, falls back to Loopflow's pair for unknown names, keeps the last answer while the Machine is away, and themes its sheets. Desktop reads and writes <code>theme:</code> through its server and names the server's file.</p>
+<h2>Round 5: not reached</h2>
+<p>A physical iPhone. Desktop's Advanced disclosure (it ignores hook clicks), Apply/Cancel clicks, the Import panel, a key window's bar, the editor's Title bar row: unlocked display (ship-review).</p>
+<h2>Round 5: still wrong, worst first</h2>
+<p>1. Light cards missing from Choose Theme while the unknown-name notice is up (R5.10), if it shows on screen. 2. Version skew: neither side can read the other's <code>config.theme</code>, and both still say revision 9. The phone goes quiet, and Desktop shows a raw serde message with a Choose Theme… button that can't fix it (R5.7, R5.9). It lasts only until the Mac's server matches the client.</p>
+
 <h1>Round 4: a card's side comes from the theme</h1>
 <p>Isolated bundle <code>com.loopflow.mac.qath4.dev</code>, private Machine <code>/tmp/lfq4</code> on the branch <code>lf server run</code>, a git-planned repository with one Task, production mode, <code>.lf/qa/QAHook.swift</code>. Screen locked (CGSSessionScreenIsLocked true, idle 2.8 h). Run 2026-11-22 at 5e03228191. The captures were lost in cleanup; what each showed is written here.</p>
 <h2>R4.1 Packaging — broken a third time, fixed by removing the cause</h2>

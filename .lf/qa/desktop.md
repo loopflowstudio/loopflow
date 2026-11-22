@@ -266,8 +266,12 @@ them. Nothing here needs WindowServer focus.
   sheet is up), `defaults delete <bundle id>`, relaunch, and use the window
   titled with the repository's name; if none appears in 15 s, open
   `loopflow://<repo>`. Never send a finished Task's link to a relaunched app.
-- A theme set from the CLI reaches the running app, but relaunch before
-  judging Choose Theme: its tiles were blank once after a live change.
+- A theme set from the CLI reaches the running app. With the unknown-name
+  notice up, Choose Theme drew no light cards on every open (nothing in the
+  accessibility tree either); with a valid live change it drew them all.
+  Unresolved whether a key window on screen does the same.
+- `tree <window>` prints the window's accessibility elements with frames;
+  a lazy grid's cards appear there only once drawn.
 - Not reachable: hover, drag, the jump menu (its shortcut needs
   a key window, and setting `navigation.palette = .search` draws nothing),
   popovers and sheets opened from a "+" (New Wave never appeared), file panels

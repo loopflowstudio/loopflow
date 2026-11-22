@@ -28,3 +28,5 @@
 - Implement round 5: the phone overrides `\.colorScheme` with the theme's own, so a single dark name draws system controls dark in light appearance. Sheets presented by UIKit may still follow the phone's appearance; check on the simulator.
 - Implement round 5: the website's light terminal blocks and docs code take a 1 px `--border`, since Light's terminal background equals the page background and the blocks otherwise vanish. Passed over: `--surface-muted` behind them (no longer Light's terminal).
 - Implement round 5: old `--bg` (white) maps to `--background` for the page and docs hero and `--surface` for cards, buttons and table cells; `--rule-strong` maps to `--border-active` (darker than before).
+
+- QA round 5: `config.theme` lost `path` without a protocol revision bump, so a branch client and a 0.16.0 server refuse each other's request (both say revision 9). Left as is: the repo adds and reshapes operations without bumps, the phone falls back quietly and Desktop recovers when the server matches. Passed over: bumping to revision 10 (every new client would refuse every old server), or Desktop naming "update the server" for this error.

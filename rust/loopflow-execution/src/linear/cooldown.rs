@@ -1,5 +1,6 @@
 //! One Linear cooldown and budget per Home, shared by repositories and
-//! refreshed logins. The locks cover only these small files, never network I/O
+//! refreshed logins. A 429 pauses what Linear limited: every request when an
+//! hourly allowance ran out, else only the operation it refused. The locks cover only these small files, never network I/O
 //! or local saves.
 //!
 //! Every response's `x-ratelimit-*` headers update the budget. As the hourly
@@ -696,7 +697,10 @@ mod tests {
                     ("x-ratelimit-endpoint-name", "attachmentLinkURL".into()),
                     ("x-ratelimit-endpoint-requests-limit", "20".into()),
                     ("x-ratelimit-endpoint-requests-remaining", "0".into()),
-                    ("x-ratelimit-endpoint-requests-reset", endpoint_reset.to_string()),
+                    (
+                        "x-ratelimit-endpoint-requests-reset",
+                        endpoint_reset.to_string(),
+                    ),
                 ],
             ),
             created(),
@@ -828,7 +832,10 @@ mod tests {
             deadlines(&header(&spent), true, 10_000),
             pause(Some(3_610_000), None)
         );
-        let stale_retry = [("x-ratelimit-complexity-remaining", "0"), ("retry-after", "0")];
+        let stale_retry = [
+            ("x-ratelimit-complexity-remaining", "0"),
+            ("retry-after", "0"),
+        ];
         assert_eq!(
             deadlines(&header(&stale_retry), true, 6000),
             pause(Some(3_606_000), None)

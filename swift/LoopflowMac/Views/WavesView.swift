@@ -252,7 +252,7 @@ struct WavesView: View {
                 .accessibilityIdentifier("portfolio-mode")
 
                 if selected.mode == .folder {
-                    Text(selected.root).font(Typography.meta).textSelection(.enabled)
+                    Text(selected.root).font(Typography.mono).textSelection(.enabled)
                     Button("Choose Folder…") { choosePortfolioPaths(folder: true) }
                         .accessibilityIdentifier("portfolio-folder")
                     ForEach(selected.repos.filter { $0.error != nil }) { repo in
@@ -294,6 +294,7 @@ struct WavesView: View {
                 if portfolioService.isPending { ProgressView().controlSize(.small) }
             }
         }
+        .buttonStyle(LoopflowButtonStyle())
         .foregroundStyle(palette.text)
         .padding(.horizontal, Spacing.lg)
         .padding(.bottom, Spacing.md)

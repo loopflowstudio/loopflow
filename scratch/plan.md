@@ -67,9 +67,8 @@ look needs a display, so it belongs to qa and review, not to build.
 ## What the code is today
 
 Counts are from `swift/LoopflowMac` at the base commit unless a slice is
-named. After slice 3 the acceptance grep prints 249 lines in 29 files;
-the backlog, the dashboard, the Portfolio's Wave page and roadmap,
-`WavesView.swift`, `WorkNavigator.swift` and `Design/` print none.
+named. After slice 4 the acceptance grep prints nothing and
+`DesignDisciplineTests` passes.
 
 - Font sizes are already on the ramp: `TypographyDisciplineTests` holds it.
   One literal remains, the AppKit field at `WorkPalette.swift:452`
@@ -479,12 +478,37 @@ or `lf desktop` reads unless its view is deleted.
      `WorkTaskIdentity`, mono counts and "⌘N" in `WorkNavigator`, and the
      middle dots in `RoadmapView.swift:293` and `WaveDetailPane`'s metric
      detail.
-4. **Choose Theme, then the sweep.** The sample, then every remaining file
-   to named steps, one button, roles, mono and glyphs, until the test and the
-   grep are clean. The test also reads `swift/Loopflow`, which the grep does
-   not: `Services/Notice.swift` holds four literal paddings and iPhone draws
-   it too (question 21). DESIGN.md's pointers and "Tokens today" change
-   last, from what the code then is.
+4. **Choose Theme, then the sweep.** Built. Choose Theme has a serif title,
+   no "Mode" caption, `ThemeSample` beside the tiles (title bar, selected
+   row, five status words on the sidebar's surface, one terminal line, all
+   read from the previewed theme) and Apply as the accent. Every literal
+   padding, spacing and radius in `swift/LoopflowMac` and
+   `swift/Loopflow/Services/Notice.swift` is a named step, by the snap table.
+   The explicit system button styles are `LoopflowButtonStyle`, and so are
+   the unstyled buttons in Settings, the sheets, the Portfolio controls, the
+   catalog inspectors and the inline Retry and Refresh buttons. `.secondary`
+   is a palette role everywhere. Mono prose, the typed "⚠" and "•", and the
+   uppercase activity label are gone. DESIGN.md lost the five fixed Desktop
+   pointers and "Tokens today" names the test's scope.
+
+   What it taught:
+   - The snap table needed two values it did not list: 26 became `xxl` and a
+     72 pt bottom margin under a scrolling detail became `xxxl`
+     (`WorkSurfaceView.swift`); that one was room to scroll, not an indent.
+   - `Typography.textSize` names the 13 pt step for the one AppKit field
+     that takes a number (`WorkPalette.swift`).
+   - `.secondary` in the title bar was the hierarchical style the bar sets
+     to `titlebarSecondaryText`; it now names that role.
+   - A segmented `Picker` keeps its hidden label in the view tree, so no
+     test can say "no Mode caption"; `ThemeWorkflowTests` holds the sample's
+     words and that it follows the previewed theme.
+   - The sample is 280 pt wide so the five words fit one line, and the
+     chooser's minimum width went from 620 to 700 to keep two tile columns.
+   - Not swept: about 60 middle dots in view strings (see question 28), the
+     count pills (question 22), and buttons inside menus, which AppKit draws.
+   - Not seen on a display: the browser's three bordered icon buttons, the
+     review comment box at the `text` step where it was `.controlSize(.small)`
+     with `meta`, and every snapped padding.
 
 ## Outside this change
 
@@ -509,5 +533,7 @@ or `lf desktop` reads unless its view is deleted.
 | `scripts/test_desktop.sh --skip-build --filter 'TaskStandingTests\|TaskRowTests\|RoadmapViewTests\|TaskConceptTests\|WorkNavigationTests\|TaskBriefTests\|ProjectActivationTests\|NowProjectionTests\|DashboardWorkspaceTests\|WorkModelTests\|DesktopHeadlessTests'` | passed after slice 1 | build; CI runs the rest |
 | `scripts/test_desktop.sh --filter 'BacklogViewTests\|DesignDisciplineTests'` | after slice 2: `BacklogViewTests` passed (12 tests); `DesignDisciplineTests` fails on 301 lines in other files, as planned until slice 4 | build |
 | `scripts/test_desktop.sh --filter 'DashboardWorkspaceTests\|RoadmapViewTests\|CreateWaveSheetTests\|WorkflowLineTests\|WorkModelTests\|WorkNavigationTests'` | passed after slice 3 (125 tests; one new assertion corrected, then `CreateWaveSheetTests` rerun, 4 tests) | build |
-| the grep above | 314 lines at base, 309 after slice 1, 296 after slice 2, 249 after slice 3 | build |
+| `scripts/test_desktop.sh --filter 'DesignDisciplineTests\|ThemeWorkflowTests\|WorkPaletteTests\|DesktopHeadlessTests\|TaskFilesTests'` | passed after slice 4 (75 tests; two assertions moved to "Built-in Workflow") | build |
+| the grep above | 314 lines at base, 309 after slice 1, 296 after slice 2, 249 after slice 3, none after slice 4 | build |
+| `BacklogViewTests`, `DashboardWorkspaceTests`, `RoadmapViewTests`, `CreateWaveSheetTests`, `TaskRowTests`, `TaskStandingTests`, `WorkflowLineTests`, `WorkNavigationTests`, `WorkModelTests` | not rerun after slice 4's sweep | gate, CI |
 | Dev app in light, dark and an imported theme | not run; needs a display | qa, review |

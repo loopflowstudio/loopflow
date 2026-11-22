@@ -34,7 +34,7 @@ struct ProjectReadinessView: View {
                 ProgressView("Preparing Project…")
             } else if let message {
                 Text(message).foregroundStyle(palette.warning).textSelection(.enabled)
-                if readiness?.state != .terminal { Button("Retry Project preparation", action: retry) }
+                if readiness?.state != .terminal { Button("Retry Project preparation", action: retry).buttonStyle(LoopflowButtonStyle()) }
             }
             if let successor = readiness?.pendingSuccessor {
                 Text("Project transition remains unresolved: \(successor)")

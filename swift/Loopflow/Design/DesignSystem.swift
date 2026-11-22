@@ -70,13 +70,15 @@ public enum Typography {
     /// A document's first heading; the text typed in New Task.
     public static let lede = Font.custom(sansStrongFace, fixedSize: 17)
     /// Everything else.
-    public static let text = Font.custom(sansFace, fixedSize: 13)
+    public static let text = Font.custom(sansFace, fixedSize: textSize)
     /// The selected row's title, a pane's name.
-    public static let textStrong = Font.custom(sansStrongFace, fixedSize: 13)
+    public static let textStrong = Font.custom(sansStrongFace, fixedSize: textSize)
     /// Counts, times, secondary facts.
     public static let meta = Font.custom(sansFace, fixedSize: 11)
     /// Inline IDs, paths, commands.
     public static let mono = Font.custom(monoFace, fixedSize: 12)
+    /// The `text` step in points, for AppKit fields that take a number.
+    public static let textSize: CGFloat = 13
     /// Ghostty's `font-size` default; the person's configuration replaces it.
     public static let terminalSize: CGFloat = 13
 }

@@ -290,7 +290,7 @@ struct RoadmapWaveSection: View {
                 if truncated { Text("Older Tasks are truncated.").foregroundStyle(palette.warning) }
             }
             ForEach(roadmap.unavailableTasks, id: \.taskId) { task in
-                Text("\(task.taskIdentifier): \(task.reason) · \(task.recovery)").foregroundStyle(palette.warning)
+                Text("\(task.taskIdentifier): \(task.reason). \(task.recovery)").foregroundStyle(palette.warning)
             }
         }
         .accessibilityIdentifier("loopflow-wave-\(roadmap.wave.id)")

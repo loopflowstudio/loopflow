@@ -69,7 +69,7 @@ struct TaskFilesView: View {
     /// one menu that switches between them; then its controls. Only the Files
     /// page has them.
     private var documentRow: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: Spacing.xs) {
             if let selection = store.selection {
                 Menu {
                     ForEach(store.tabs) { tab in
@@ -83,16 +83,16 @@ struct TaskFilesView: View {
                         Button("Close \((selection as NSString).lastPathComponent)") { store.closeTab(tab.id); store.noteInteraction() }
                     }
                 } label: {
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    HStack(alignment: .firstTextBaseline, spacing: Spacing.xs) {
                         Text((selection as NSString).lastPathComponent).font(Typography.mono).foregroundStyle(palette.text)
-                        if store.documents[selection]?.dirty == true { Text("•").help("Unsaved draft") }
+                        if store.documents[selection]?.dirty == true { UnsavedDraftMark() }
                         if let place = store.tabPlace {
                             Text(place).font(Typography.meta).foregroundStyle(palette.textSecondary)
                         }
                     }
                 }
                 .menuStyle(.borderlessButton).fixedSize()
-                .padding(.horizontal, 10)
+                .padding(.horizontal, Spacing.sm)
                 .help(selection)
                 .accessibilityIdentifier("files-open")
             }
@@ -106,14 +106,14 @@ struct TaskFilesView: View {
     private var location: some View {
         let checkout = URL(fileURLWithPath: store.cwd).lastPathComponent
         let directory = store.selection.map { ($0 as NSString).deletingLastPathComponent } ?? ""
-        return HStack(alignment: .firstTextBaseline, spacing: 8) {
+        return HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
             Text(store.query.remoteMachine ?? "This Mac").font(Typography.meta).fixedSize()
             Text(checkout + (directory.isEmpty ? "" : "/" + directory)).font(Typography.mono)
                 .lineLimit(1).truncationMode(.head)
         }
         .foregroundStyle(palette.textSecondary)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 10).padding(.vertical, 3)
+        .padding(.horizontal, Spacing.sm).padding(.vertical, Spacing.xxs)
         .help(store.cwd)
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("files-location")
@@ -190,11 +190,11 @@ struct TaskFilesView: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel(store.navigator == .pinned ? "Close file navigation" : "Pin file navigation")
                 .accessibilityIdentifier("files-pin-navigator")
-            }.padding(10)
+            }.padding(Spacing.sm)
             Divider()
             ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 2) {
+                    LazyVStack(alignment: .leading, spacing: Spacing.xxs) {
                         sectionHeader("scratch", expanded: $store.showsScratch)
                         if store.showsScratch {
                             ForEach(store.scratchPaths, id: \.self) { path in
@@ -206,7 +206,7 @@ struct TaskFilesView: View {
                         }
                         Text(URL(fileURLWithPath: store.cwd).lastPathComponent)
                             .font(Typography.meta).foregroundStyle(palette.textSecondary)
-                            .padding(.top, 12).padding(.bottom, 2)
+                            .padding(.top, Spacing.md).padding(.bottom, Spacing.xxs)
                             .help(store.cwd)
                         let badges = store.changeBadges
                         ForEach(store.treeRows) { row in treeRow(row, badges: badges) }
@@ -215,7 +215,7 @@ struct TaskFilesView: View {
                         } else if !store.search.isEmpty, store.scratchPaths.isEmpty, store.treeRows.isEmpty {
                             Text("No matching files").font(Typography.meta).foregroundStyle(palette.textSecondary)
                         }
-                    }.padding(10)
+                    }.padding(Spacing.sm)
                 }
                 .scrollPosition($treePosition)
                 .onScrollGeometryChange(for: CGPoint.self, of: \.contentOffset) { _, offset in store.treeOffset = offset }
@@ -261,7 +261,7 @@ struct TaskFilesView: View {
                     read(entry.path)
                 }
             } label: {
-                HStack(spacing: 4) {
+                HStack(spacing: Spacing.xs) {
                     Image(systemName: entry.kind == .directory
                           ? (store.tree.isExpanded(entry.path) ? "chevron.down" : "chevron.right")
                           : entry.kind == .symlink ? "arrow.turn.up.right" : "doc")
@@ -269,7 +269,7 @@ struct TaskFilesView: View {
                         .foregroundStyle(palette.textSecondary)
                     Text(label)
                         .font(Typography.mono).lineLimit(1).truncationMode(.middle)
-                    if store.documents[entry.path]?.dirty == true { Text("•").help("Unsaved draft") }
+                    if store.documents[entry.path]?.dirty == true { UnsavedDraftMark() }
                     Spacer(minLength: 4)
                     if let badge = badges[entry.path] {
                         Text(badge.rawValue).font(Typography.mono)
@@ -277,7 +277,7 @@ struct TaskFilesView: View {
                             .help(badge.help)
                     }
                 }
-                .padding(.leading, indent + 2).padding(.trailing, 4).padding(.vertical, 2)
+                .padding(.leading, indent + 2).padding(.trailing, Spacing.xs).padding(.vertical, Spacing.xxs)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .workSelection(store.tree.selection == entry.path || store.selection == entry.path)
                 .contentShape(Rectangle())
@@ -289,19 +289,19 @@ struct TaskFilesView: View {
             ProgressView().controlSize(.mini).padding(.leading, indent + 16)
         case .more(let directory, _):
             Button("Load more") { Task { await store.readDirectory(directory, more: true) } }
-                .buttonStyle(.link).font(Typography.meta).padding(.leading, indent + 16)
+                .buttonStyle(LoopflowButtonStyle()).padding(.leading, indent + 16)
                 .accessibilityIdentifier("files-load-more")
         case .failed(let directory, let reason, _):
-            HStack(spacing: 6) {
+            HStack(spacing: Spacing.xs) {
                 Text(reason).font(Typography.meta).foregroundStyle(palette.warning).lineLimit(2)
                 Button("Retry") { Task { await store.retryDirectory(directory) } }
-                    .buttonStyle(.link).font(Typography.meta)
+                    .buttonStyle(LoopflowButtonStyle())
             }.padding(.leading, indent + 16)
         }
     }
 
     private var navigationBar: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: Spacing.sm) {
             Button { toggleNavigator() } label: {
                 Image(systemName: "sidebar.left")
                     .frame(width: 24, height: 28).contentShape(Rectangle())
@@ -334,7 +334,7 @@ struct TaskFilesView: View {
             }.pickerStyle(.menu).labelsHidden()
                 .accessibilityLabel("View").frame(width: 70).fixedSize()
         }
-        .font(Typography.meta).padding(.horizontal, 10)
+        .font(Typography.meta).padding(.horizontal, Spacing.sm)
         .frame(height: TaskFileChrome.headerHeight)
         .fixedSize(horizontal: true, vertical: false)
     }
@@ -342,22 +342,22 @@ struct TaskFilesView: View {
     private var documentPane: some View {
         VStack(spacing: 0) {
             if let error = store.error {
-                Text(error).font(Typography.meta).foregroundStyle(palette.warning).padding(8)
+                Text(error).font(Typography.meta).foregroundStyle(palette.warning).padding(Spacing.sm)
             }
             if let reason = store.selectedDocument?.readOnlyReason {
-                Text(reason).font(Typography.meta).padding(8)
+                Text(reason).font(Typography.meta).padding(Spacing.sm)
             }
             if let document = store.selectedDocument, let external = document.external {
                 Text("\(external.state.title) · local draft retained; saving unavailable")
-                    .font(Typography.meta).padding(8)
+                    .font(Typography.meta).padding(Spacing.sm)
             }
             content
             if let document = store.selectedDocument {
                 if let message = document.saveMessage {
-                    Text(message).font(Typography.meta).foregroundStyle(palette.textSecondary).padding(6)
+                    Text(message).font(Typography.meta).foregroundStyle(palette.textSecondary).padding(Spacing.xs)
                 } else if document.dirty {
                     Text(store.autosave && document.canSave ? "Autosave pending · draft retained" : "Unsaved draft · retained in this window")
-                        .font(Typography.meta).foregroundStyle(palette.textSecondary).padding(6)
+                        .font(Typography.meta).foregroundStyle(palette.textSecondary).padding(Spacing.xs)
                 }
                 if !document.recoveries.isEmpty {
                     HStack {
@@ -365,12 +365,18 @@ struct TaskFilesView: View {
                              ? "Recovery needs attention" : "Previous versions retained")
                         Menu("Recovery · \(document.recoveries.count)") {
                             ForEach(Array(document.recoveries.enumerated()), id: \.element.id) { index, recovery in
-                                Button("\(recovery.changed ? "⚠ " : "")Previous version \(index + 1)") {
+                                Button {
                                     NSWorkspace.shared.open(URL(fileURLWithPath: recovery.directory))
+                                } label: {
+                                    if recovery.changed {
+                                        Label("Previous version \(index + 1)", systemImage: "exclamationmark.triangle")
+                                    } else {
+                                        Text("Previous version \(index + 1)")
+                                    }
                                 }.help(recovery.message)
                             }
                         }.fixedSize()
-                    }.font(Typography.meta).padding(6)
+                    }.font(Typography.meta).padding(Spacing.xs)
                 }
             }
         }
@@ -380,12 +386,12 @@ struct TaskFilesView: View {
 
     private func sectionHeader(_ title: String, expanded: Binding<Bool>) -> some View {
         Button { expanded.wrappedValue.toggle() } label: {
-            HStack(spacing: 6) {
+            HStack(spacing: Spacing.xs) {
                 Image(systemName: expanded.wrappedValue ? "chevron.down" : "chevron.right")
                     .font(Typography.meta).fontWeight(.semibold).frame(width: 10)
                 Text(title).font(Typography.meta)
                 Spacer(minLength: 0)
-            }.padding(.vertical, 2).contentShape(Rectangle())
+            }.padding(.vertical, Spacing.xxs).contentShape(Rectangle())
         }
         .buttonStyle(.plain).accessibilityLabel(title)
         .accessibilityValue(expanded.wrappedValue ? "Expanded" : "Collapsed")
@@ -405,10 +411,10 @@ struct TaskFilesView: View {
             HStack {
                 Text(path.dropFirst("scratch/".count))
                     .font(Typography.mono).lineLimit(1).truncationMode(.middle)
-                if store.documents[path]?.dirty == true { Text("•") }
+                if store.documents[path]?.dirty == true { UnsavedDraftMark() }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 4).padding(.vertical, 2)
+            .padding(.horizontal, Spacing.xs).padding(.vertical, Spacing.xxs)
             .workSelection(store.selection == path)
             .contentShape(Rectangle())
         }.buttonStyle(.plain).help(path)
@@ -454,7 +460,7 @@ struct TaskFileReadingView: View {
                 MarkdownBlocks(source: document.text).equatable()
                     .frame(maxWidth: 720, alignment: .leading)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(14).textSelection(.enabled)
+                    .padding(Spacing.md).textSelection(.enabled)
             }
             .onScrollPhaseChange { _, phase in if phase == .interacting { interacted() } }
             .accessibilityIdentifier("files-rendered-markdown")
@@ -586,7 +592,7 @@ private struct TaskFileDiffView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 8) {
+            HStack(spacing: Spacing.sm) {
                 ReviewStepper(store: store, reader: reader, isFocused: isFocused)
                 Text((store.comparisonDescription ?? store.revision) + (review.draft ? " Against the unsaved draft." : ""))
                     .font(Typography.meta).foregroundStyle(palette.textSecondary)
@@ -596,7 +602,7 @@ private struct TaskFileDiffView: View {
                 ReviewLayoutPicker(store: store, width: width)
             }
             .buttonStyle(.plain)
-            .padding(.horizontal, 10)
+            .padding(.horizontal, Spacing.sm)
             .frame(height: TaskFileChrome.headerHeight)
             Divider()
             ReviewCommentsStrip(store: store, isFocused: isFocused, addToConversation: addToConversation)
@@ -620,3 +626,11 @@ private struct TaskFileDiffView: View {
 }
 
 #endif
+
+/// A file with edits not yet saved.
+private struct UnsavedDraftMark: View {
+    var body: some View {
+        Image(systemName: "circle.fill").imageScale(.small).font(Typography.meta)
+            .help("Unsaved draft").accessibilityLabel("Unsaved draft")
+    }
+}

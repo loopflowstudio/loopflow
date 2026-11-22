@@ -66,18 +66,19 @@ struct RemoveWaveSheetContent: View {
                 Spacer()
                 if removed {
                     Button("Done", action: onDone)
+                        .buttonStyle(LoopflowButtonStyle())
                         .keyboardShortcut(.defaultAction)
                         .accessibilityIdentifier("remove-wave-done")
                 } else if case .failed = phase {
-                    Button("Cancel", action: onCancel).buttonStyle(.plain)
-                        .foregroundStyle(palette.textSecondary)
+                    Button("Cancel", action: onCancel).buttonStyle(LoopflowButtonStyle())
                     Button("Retry", action: onRetry)
+                        .buttonStyle(LoopflowButtonStyle(.accent))
                         .keyboardShortcut(.defaultAction)
                         .accessibilityIdentifier("remove-wave-retry")
                 } else {
-                    Button("Cancel", action: onCancel).buttonStyle(.plain)
-                        .foregroundStyle(palette.textSecondary)
+                    Button("Cancel", action: onCancel).buttonStyle(LoopflowButtonStyle())
                     Button("Remove", role: .destructive, action: onRemove)
+                        .buttonStyle(LoopflowButtonStyle(.destructive))
                         .keyboardShortcut(.defaultAction)
                         .disabled(!canRemove)
                         .accessibilityIdentifier("remove-wave-confirm")

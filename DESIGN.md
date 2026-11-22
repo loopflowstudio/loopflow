@@ -105,14 +105,10 @@ map. Remove a pointer when its code is fixed.
 **Small tracked uppercase labels.** No eyebrow above a heading, no caps
 section label, no caps kicker, no caps "or". A section is named by a heading
 in sentence case or not at all. The one allowed use of capitals is an acronym.
-- Desktop: two hand-made variants (`WaveDetailPane.swift`,
-  `WorkActivityView.swift`).
 
 **Monospace as decoration.** Mono is for things a person could paste into a
 terminal: commands, paths, IDs, SHAs, diffs, and numbers in a column. It is
 not for prose, section titles, links, captions or buttons.
-- Desktop: "Page 1 of N" (`DashboardSlotGrid.swift`), "builtin Graph"
-  (`WorkPalette.swift`).
 - Website: agent names and statuses in the homepage's app drawings.
 
 **A stripe down the side of a rounded row.** A colored leading edge means
@@ -125,15 +121,13 @@ thing, or show nothing. "Coming soon" over a drawing is two problems.
   initials circles, a diagonal stripe wash and a rotated dashed stamp.
 
 **Values outside the scale.** See [How the system works](#how-the-system-works).
-- Desktop: 172 literal paddings.
 - iPhone: `Spacing` and `CornerRadius` are never used; `MobileType`
   (`swift/LoopflowiOS/MobileType.swift`) passes its own sizes, 12 to 24.
 
 **Two of the same thing.** One component per job, on every surface.
 - Desktop has two workflow renderers: `WorkflowLine` for a Task and New
   Task's `WorkflowSteps` (`NewTaskSheet.swift`) for a Graph definition, which
-  has no top-level steps on the wire. It has two Create Wave forms
-  (`WavesView.swift`, `WorkNavigator.swift`).
+  has no top-level steps on the wire.
 - iPhone repeats one primary button by hand eight times in two shapes.
 
 **Tiny text.** Nothing a person is meant to read is under 11 pt on Desktop,
@@ -157,8 +151,6 @@ page at most.
 
 **Glyphs as icons.** "⚠", "✓", "✗" and "↗" typed into strings sit beside SF
 Symbols. Use the icon set, or a word.
-- Desktop: "✓"/"✗" before key results (`BacklogView.swift`), "⚠" before a
-  changed previous version (`TaskFilesView.swift`).
 
 ### We don't do these; keep it that way
 
@@ -245,6 +237,11 @@ Desktop ramp (`Typography` in `swift/Loopflow/Design/DesignSystem.swift`):
 
 Serif is set only through `.serif(_:)`, which applies the −3% tracking and
 turns off common ligatures with it. No step takes a size.
+
+`DesignDisciplineTests` reads every Swift file in `swift/Loopflow` and
+`swift/LoopflowMac` and fails on a font outside the ramp, or a padding, a
+non-zero `spacing:` or a corner radius passed as a number. Frame widths and
+heights are sizes of things and are not checked.
 
 iPhone has no ramp of its own yet; `MobileType` keeps 12 to 24 in these faces.
 

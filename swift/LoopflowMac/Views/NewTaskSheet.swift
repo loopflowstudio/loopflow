@@ -42,7 +42,7 @@ struct NewTaskSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: Spacing.md) {
                 Text("What do you want?")
                     .serif(.title)
                     .foregroundStyle(palette.emphasisInk)
@@ -50,7 +50,7 @@ struct NewTaskSheet: View {
                     .lineLimit(4...10)
                     .textFieldStyle(.plain)
                     .font(Typography.text)
-                    .padding(12)
+                    .padding(Spacing.md)
                     .background(RoundedRectangle(cornerRadius: CornerRadius.pane).fill(palette.background))
                     .overlay(RoundedRectangle(cornerRadius: CornerRadius.pane)
                         .strokeBorder(focused ? palette.accent : palette.borderStrong, lineWidth: 1))
@@ -61,9 +61,9 @@ struct NewTaskSheet: View {
                     WorkflowSteps(workflow: workflow).accessibilityIdentifier("new-task-steps")
                 }
             }
-            .padding(22)
+            .padding(Spacing.xl)
             Divider()
-            HStack(spacing: 10) {
+            HStack(spacing: Spacing.sm) {
                 if let fileError {
                     Text("Not filed · \(fileError)").font(Typography.text).foregroundStyle(palette.warning)
                         .lineLimit(2).textSelection(.enabled).accessibilityIdentifier("new-task-file-error")
@@ -80,7 +80,7 @@ struct NewTaskSheet: View {
                 Button { create() } label: {
                     Text("Start  ⌘↩")
                         .font(Typography.textStrong)
-                        .padding(.horizontal, 15).padding(.vertical, 7)
+                        .padding(.horizontal, Spacing.lg).padding(.vertical, Spacing.sm)
                         .foregroundStyle(palette.accentText)
                         .background(Capsule().fill(palette.accent))
                 }
@@ -90,7 +90,7 @@ struct NewTaskSheet: View {
                 .opacity(trimmed.isEmpty ? 0.45 : 1)
                 .accessibilityIdentifier("new-task-create")
             }
-            .padding(.horizontal, 22).padding(.vertical, 12)
+            .padding(.horizontal, Spacing.xl).padding(.vertical, Spacing.md)
         }
         .frame(width: 540)
         .background(palette.surface)
@@ -102,7 +102,7 @@ struct NewTaskSheet: View {
     /// "In myapp, running code · myapp's default": where the Task lives and the
     /// workflow it takes up, which follows that scope unless you choose another.
     private var selector: some View {
-        HStack(alignment: .center, spacing: 4) {
+        HStack(alignment: .center, spacing: Spacing.xs) {
             Text("In")
             Menu {
                 Button(repositoryName) { waveID = nil }
@@ -114,7 +114,7 @@ struct NewTaskSheet: View {
             }
             .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
             .accessibilityIdentifier("new-task-wave")
-            Text(", running").padding(.leading, -4)
+            Text(", running").padding(.leading, -Spacing.xs)
             Button { choosingWorkflow = true } label: {
                 pickerLabel(chosen ?? "…")
             }
@@ -143,7 +143,7 @@ struct NewTaskSheet: View {
     }
 
     private func pickerLabel(_ title: String) -> some View {
-        HStack(spacing: 3) {
+        HStack(spacing: Spacing.xxs) {
             Text(title).font(Typography.textStrong)
             Image(systemName: "chevron.down").font(Typography.meta).fontWeight(.semibold)
         }
@@ -210,7 +210,7 @@ struct WorkflowSteps: View {
         let steps = steps
         HStack(alignment: .top, spacing: 0) {
             ForEach(steps) { step in
-                VStack(spacing: 5) {
+                VStack(spacing: Spacing.xs) {
                     Circle()
                         .fill(step.you == nil ? palette.surface : palette.accent)
                         .overlay(Circle().strokeBorder(step.you == nil ? palette.borderActive : .clear, lineWidth: 1.5))
@@ -223,11 +223,11 @@ struct WorkflowSteps: View {
                 }
                 .frame(width: 11)
                 if step.id < steps.count - 1 {
-                    Rectangle().fill(palette.borderStrong).frame(height: 1).frame(maxWidth: .infinity).padding(.top, 5)
+                    Rectangle().fill(palette.borderStrong).frame(height: 1).frame(maxWidth: .infinity).padding(.top, Spacing.xs)
                 }
             }
         }
-        .padding(.horizontal, 4)
+        .padding(.horizontal, Spacing.xs)
         .overlay(alignment: .trailing) {
             if workflow.steps.isEmpty {
                 Text("runs on its own").font(Typography.meta).foregroundStyle(palette.textSecondary).offset(y: 12)
@@ -264,20 +264,20 @@ private struct WorkflowChooser: View {
                 Text("New Tasks in \(scope) run \(defaultName). Pick another for this Task only.")
                     .font(Typography.text).foregroundStyle(palette.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
-                    .padding(12)
+                    .padding(Spacing.md)
                 Divider()
             }
             TextField("Find a workflow", text: $query)
-                .textFieldStyle(.plain).font(Typography.text).padding(10)
+                .textFieldStyle(.plain).font(Typography.text).padding(Spacing.sm)
                 .onSubmit { if let first = sections.flatMap(\.1).first { choose(first.name) } }
             Divider()
             ScrollView {
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: Spacing.xxs) {
                     ForEach(sections, id: \.0) { title, flows in section(title, flows) }
                     if sections.allSatisfy(\.1.isEmpty) {
-                        Text("No workflow matches").font(Typography.text).foregroundStyle(palette.textSecondary).padding(9)
+                        Text("No workflow matches").font(Typography.text).foregroundStyle(palette.textSecondary).padding(Spacing.sm)
                     }
-                }.padding(4)
+                }.padding(Spacing.xs)
             }
             .frame(maxHeight: 300)
         }
@@ -288,12 +288,12 @@ private struct WorkflowChooser: View {
         if !flows.isEmpty {
             if let title {
                 Text(title).font(Typography.textStrong).foregroundStyle(palette.textSecondary)
-                    .padding(.horizontal, 9).padding(.top, 8).padding(.bottom, 2)
+                    .padding(.horizontal, Spacing.sm).padding(.top, Spacing.sm).padding(.bottom, Spacing.xxs)
             }
             ForEach(flows) { flow in
                 Button { choose(flow.name) } label: {
-                    VStack(alignment: .leading, spacing: 3) {
-                        HStack(spacing: 6) {
+                    VStack(alignment: .leading, spacing: Spacing.xxs) {
+                        HStack(spacing: Spacing.xs) {
                             Text(flow.name).font(Typography.textStrong)
                             Text(flow.consequence).foregroundStyle(palette.textSecondary)
                             if flow.name == defaultName, let defaultPhrase { Text("· \(defaultPhrase)").foregroundStyle(palette.textSecondary) }
@@ -304,7 +304,7 @@ private struct WorkflowChooser: View {
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                     }
-                    .padding(9)
+                    .padding(Spacing.sm)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .contentShape(RoundedRectangle(cornerRadius: CornerRadius.row))
                 }
@@ -339,7 +339,7 @@ struct StartingTaskView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
+        VStack(alignment: .leading, spacing: Spacing.lg) {
             ScrollView {
                 Text(starting.request)
                     .font(Typography.text)
@@ -358,7 +358,7 @@ struct StartingTaskView: View {
             }
             Spacer(minLength: 0)
         }
-        .padding(28)
+        .padding(Spacing.xxl)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(palette.background)
         .accessibilityIdentifier("starting-task-conversation")

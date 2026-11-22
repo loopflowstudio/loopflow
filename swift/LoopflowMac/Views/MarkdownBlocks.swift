@@ -30,6 +30,10 @@ struct MarkdownBlocks: View, Equatable {
     /// Reading copy at about 1.55 line height over the `text` step (13 pt).
     static let lineSpacing: CGFloat = 4.5
 
+    private static func indent(_ block: Block) -> CGFloat {
+        Spacing.lg * CGFloat(max(block.depth - 1, 0))
+    }
+
     var body: some View {
         let blocks = Perf.measure(Perf.markdownParse, "bytes=\(source.utf8.count)") { Self.blocks(source) }
         VStack(alignment: .leading, spacing: Spacing.sm) {
@@ -44,7 +48,7 @@ struct MarkdownBlocks: View, Equatable {
                 }
                 .font(Typography.text)
                 .lineSpacing(block.kind == .code ? 0 : Self.lineSpacing)
-                .padding(.leading, CGFloat(max(block.depth - 1, 0)) * 16)
+                .padding(.leading, Self.indent(block))
                 .id(Self.anchor(index))
             }
         }

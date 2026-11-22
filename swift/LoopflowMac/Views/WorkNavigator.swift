@@ -213,7 +213,7 @@ struct WorkNavigator: View {
                 if let unavailableReason {
                     Image(systemName: "exclamationmark.triangle").help(unavailableReason)
                 } else {
-                    Text("\(count)").font(Typography.mono).help("\(count) working Tasks")
+                    Text("\(count)").font(Typography.meta).monospacedDigit().help("\(count) working Tasks")
                 }
             }.font(Typography.text).padding(Spacing.sm)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -424,7 +424,7 @@ private struct NewTaskRow: View {
                 Image(systemName: "plus")
                 Text("New Task").lineLimit(1)
                 Spacer()
-                Text("⌘N").font(Typography.mono)
+                Text("⌘N").font(Typography.meta)
             }.font(Typography.text).foregroundStyle(palette.textSecondary).padding(Spacing.sm)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(RoundedRectangle(cornerRadius: CornerRadius.row))
@@ -699,6 +699,7 @@ extension TaskOrderDrag {
 /// The name remains useful before the full Task and its metadata arrive.
 struct WorkTaskIdentity: View {
     let presentation: WorkModel.TaskPresentation
+    @Environment(\.palette) private var palette
     var body: some View {
         HStack(spacing: Spacing.xs) {
             if let identifier = presentation.identifier {
@@ -706,7 +707,7 @@ struct WorkTaskIdentity: View {
             }
             Text(presentation.title).font(Typography.textStrong).lineLimit(2).help(presentation.title)
             if let context = presentation.context {
-                Text(context).font(Typography.mono).foregroundStyle(.secondary)
+                Text(context).font(Typography.text).foregroundStyle(palette.titlebarSecondaryText)
             }
         }
     }

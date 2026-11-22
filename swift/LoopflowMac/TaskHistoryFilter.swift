@@ -68,7 +68,7 @@ struct TaskHistoryControls: View {
     @State private var hovered = false
 
     var body: some View {
-        VStack(alignment: .trailing, spacing: 6) {
+        VStack(alignment: .trailing, spacing: Spacing.xs) {
             TaskHistoryInlineControl(filter: $filter, palette: palette)
                 .frame(width: 112, height: 26)
                 .background(hovered ? palette.surfaceMuted : .clear, in: RoundedRectangle(cornerRadius: CornerRadius.control))

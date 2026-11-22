@@ -55,8 +55,8 @@ struct TaskWorkflowHeader: View {
             }
         }
         .font(Typography.text)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
+        .padding(.horizontal, Spacing.md)
+        .padding(.vertical, Spacing.sm)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background {
             palette.background
@@ -161,7 +161,7 @@ struct TaskWorkflowBar: View {
             .accessibilityLabel("Task actions")
             .accessibilityIdentifier("task-actions")
         }
-        .padding(.horizontal, 14)
+        .padding(.horizontal, Spacing.md)
         .frame(height: 34)
         .font(Typography.text)
         .background(palette.background)
@@ -397,11 +397,11 @@ struct GraphProcessLog: View {
                             Text(task?.setupPosition ?? "Reading workflow…")
                         }
                         Spacer()
-                        if let openFiles { Button("Files", action: openFiles) }
-                    }.padding(.vertical, 8)
+                        if let openFiles { Button("Files", action: openFiles).buttonStyle(LoopflowButtonStyle()) }
+                    }.padding(.vertical, Spacing.sm)
                 }
                 if !readsWindow {
-                    Button("Refresh") { refresh += 1 }
+                    Button("Refresh") { refresh += 1 }.buttonStyle(LoopflowButtonStyle())
                 }
                 if let graphs {
                     if let graph = graphs.last {
@@ -416,19 +416,19 @@ struct GraphProcessLog: View {
                                     run: details[graph.id])
                             }
                         }
-                        .padding(.vertical, 8)
+                        .padding(.vertical, Spacing.sm)
                         .accessibilityIdentifier("task-earlier-runs")
                     }
                     if graphs.isEmpty {
-                        Text("No Graph has run.").padding(.vertical, 6)
+                        Text("No Graph has run.").padding(.vertical, Spacing.xs)
                             .accessibilityIdentifier("task-graph-processes-empty")
                     }
                 } else if readError == nil {
-                    Text(task == nil ? "Task unavailable" : "Reading Graph processes…").padding(.vertical, 6)
+                    Text(task == nil ? "Task unavailable" : "Reading Graph processes…").padding(.vertical, Spacing.xs)
                 }
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 8)
+            .padding(.horizontal, Spacing.md)
+            .padding(.vertical, Spacing.sm)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .font(Typography.text)
@@ -506,7 +506,7 @@ struct TaskWorkView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
             WorkSectionHeading(title: "Work") {
-                Button("Refresh") { model.rescanWork() }
+                Button("Refresh") { model.rescanWork() }.buttonStyle(LoopflowButtonStyle())
             }
             if let work = model.taskExecution[task.id].value?.work {
                 ForEach(work.sessions) { session in
@@ -590,9 +590,9 @@ struct GraphProcessView: View {
             .buttonStyle(WorkPlainButtonStyle())
             .accessibilityValue(expanded ? "Expanded" : "Collapsed")
             .accessibilityIdentifier("task-work-\(graph.id)")
-            if expanded { detail.padding(.leading, 18) }
+            if expanded { detail.padding(.leading, Spacing.lg) }
         }
-        .padding(.vertical, 6)
+        .padding(.vertical, Spacing.xs)
     }
 
     private var tone: WorkTone? {

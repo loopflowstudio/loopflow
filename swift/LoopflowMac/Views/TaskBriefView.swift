@@ -77,7 +77,7 @@ struct TaskBriefView: View {
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: Spacing.md) {
                     Text(task.task.name).serif(.title).foregroundStyle(palette.text)
                         .fixedSize(horizontal: false, vertical: true)
                         .accessibilityAddTraits(.isHeader)
@@ -98,7 +98,7 @@ struct TaskBriefView: View {
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(14).textSelection(.enabled)
+                .padding(Spacing.md).textSelection(.enabled)
             }
             .scrollPosition($position)
             .onScrollGeometryChange(for: CGPoint.self, of: \.contentOffset) { _, offset in store.briefOffset = offset }
@@ -119,7 +119,7 @@ struct TaskBriefView: View {
 
     private var status: some View {
         let state = TaskBrief.state(runtime: task.runtime?.status.label, graph: graph, reason: task.nextMove.reason)
-        return VStack(alignment: .leading, spacing: 4) {
+        return VStack(alignment: .leading, spacing: Spacing.xs) {
             let lead = Text(state.lead).font(Typography.textStrong).foregroundStyle(palette.text)
             let reason = Text(state.reason.isEmpty ? "" : " " + state.reason).font(Typography.text).foregroundStyle(palette.textSecondary)
             Text("\(lead)\(reason)")

@@ -65,12 +65,12 @@ struct WorkSurfaceView: View {
         @ViewBuilder body: () -> Body
     ) -> some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 26) {
+            VStack(alignment: .leading, spacing: Spacing.xxl) {
                 body()
             }
-            .padding(.horizontal, 36)
-            .padding(.top, 30)
-            .padding(.bottom, 72)
+            .padding(.horizontal, Spacing.xxxl)
+            .padding(.top, Spacing.xxxl)
+            .padding(.bottom, Spacing.xxxl)
             .frame(maxWidth: 1160, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .center)
         }
@@ -206,7 +206,7 @@ struct WorkSurfaceView: View {
 
     /// A heading and its content, spaced as one unit.
     private func section<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 10) { content() }
+        VStack(alignment: .leading, spacing: Spacing.sm) { content() }
     }
 
     // MARK: - Shared pieces

@@ -56,7 +56,7 @@ struct TaskCommentsView: View {
             .font(Typography.text)
             .foregroundStyle(palette.textSecondary)
             .textSelection(.enabled)
-            .padding(.leading, 17)
+            .padding(.leading, Spacing.lg)
             .accessibilityIdentifier("task-comments-status")
     }
 
@@ -76,7 +76,7 @@ struct TaskCommentsView: View {
                     .accessibilityIdentifier("task-comments-empty")
             }
             ForEach(Array(thread.comments.enumerated()), id: \.element.id) { index, comment in
-                VStack(alignment: .leading, spacing: 3) {
+                VStack(alignment: .leading, spacing: Spacing.xxs) {
                     HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
                         Text(Self.author(comment.author))
                             .font(Typography.textStrong)
@@ -110,7 +110,7 @@ struct TaskCommentsView: View {
                 .accessibilityIdentifier("task-comment-\(comment.id)")
             }
         }
-        .padding(.leading, 17)
+        .padding(.leading, Spacing.lg)
         .frame(maxWidth: 680, alignment: .leading)
         .accessibilityIdentifier("task-comments-thread")
     }

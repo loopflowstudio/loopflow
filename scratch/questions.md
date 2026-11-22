@@ -82,3 +82,25 @@ Each was decided so the work could continue; `scratch/plan.md` has the detail.
     vertical padding (question 22 covers whether the pills go).
 26. **Refresh on the roadmap is the one button** holding an icon, where it
     was a borderless icon.
+27. **Unstyled buttons outside menus are the one button now.** The brief
+    named 22 system button styles; a `Button` with no style is also the
+    system's. Settings, the sheets, the Portfolio controls, the Graph and
+    Workflow inspectors and inline Retry, Refresh and Done got
+    `LoopflowButtonStyle`; Save, Apply, Rename, Retry-after-failure and
+    Comment are each surface's accent, Remove is `.destructive`, and Cancel
+    on the Rename and Remove sheets is neutral where it was plain text.
+28. **Middle dots in view strings stay.** About 60 remain
+    (`WorkPalette` details, `TelemetryDashboardView`, `ReviewStreamView`,
+    `GraphDiagramView`, `ConfigurationSettingsView`, `TaskFilesView`);
+    several have tests and CLI twins. Only the two the plan named changed
+    (the roadmap's unavailable Task line, the metric detail). Sweep the rest
+    in their own Task?
+29. **"Built-in Graph" and "Built-in Workflow"**, in sans, where the
+    inspector said "builtin Graph" in mono; a definition's path stays mono.
+30. **Keyboard shortcuts are sans.** "⌘K" in the shortcuts list and "⌘N" in
+    the sidebar are not something to paste into a terminal.
+31. **The activity label reads "Wave, Product"**, and the pane's scope title
+    still reads "Wave · Product" (question 28).
+32. **The scrolling Task detail's bottom margin is 32 pt**, where it was 72.
+33. **The browser pane's Back, Forward and Reload are bordered icon
+    buttons**, like the roadmap's Refresh (question 26).

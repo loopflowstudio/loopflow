@@ -487,7 +487,7 @@ private struct WaveMetricTableRow: View {
     private func detail(_ presentation: WaveMetricRowPresentation) -> String {
         [presentation.description, presentation.instrumentState, presentation.freshness]
             .filter { !$0.isEmpty }
-            .joined(separator: " · ")
+            .joined(separator: ", ")
     }
 }
 

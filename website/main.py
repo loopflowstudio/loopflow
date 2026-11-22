@@ -1147,9 +1147,12 @@ def _healthz_handler(request):
 
 
 def _font_handler(request):
+    font = STATIC_DIR / "fonts" / request.path_params["name"]
+    if not font.is_file():
+        return PlainTextResponse("Not found", status_code=404)
     # The portable architecture page loads these cross-origin.
     return FileResponse(
-        STATIC_DIR / "fonts" / request.path_params["name"],
+        font,
         headers={
             "Access-Control-Allow-Origin": "*",
             "Cache-Control": "public, max-age=31536000, immutable",
@@ -1157,18 +1160,17 @@ def _font_handler(request):
     )
 
 
-# Insert machine-readable routes at the beginning to avoid the static handler
+def _favicon_handler(request):
+    return FileResponse(STATIC_DIR / "logo.svg", media_type="image/svg+xml")
+
+
+# fast_app's static route answers any path with a file extension; these go first.
+app.routes.insert(0, Route("/favicon.ico", _favicon_handler, methods=["GET"]))
 app.routes.insert(0, Route("/static/fonts/{name}", _font_handler, methods=["GET"]))
 app.routes.insert(0, Route("/llms.txt", _llms_txt_handler, methods=["GET"]))
 app.routes.insert(0, Route("/llms-full.txt", _llms_full_txt_handler, methods=["GET"]))
 app.routes.insert(0, Route("/sitemap.xml", _sitemap_handler, methods=["GET"]))
 app.routes.insert(0, Route("/healthz", _healthz_handler, methods=["GET"]))
-
-
-@rt("/favicon.ico")
-async def favicon():
-    """Serve logo.svg as favicon for browsers that request .ico."""
-    return FileResponse("static/logo.svg", media_type="image/svg+xml")
 
 
 if __name__ == "__main__":

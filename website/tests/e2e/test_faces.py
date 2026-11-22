@@ -112,3 +112,18 @@ def test_os_dark_mode_shows_the_light_site(page: Page, base_url: str, path: str)
     light = page.evaluate(COLORS)
     page.emulate_media(color_scheme="dark")
     assert page.evaluate(COLORS) == light
+
+
+def test_font_files_serve_cross_origin_and_missing_ones_are_not_found(
+    page: Page, base_url: str
+) -> None:
+    font = page.request.get(f"{base_url}/static/fonts/atkinson-next.woff2")
+    assert font.status == 200
+    assert font.headers["access-control-allow-origin"] == "*"
+    assert page.request.get(f"{base_url}/static/fonts/missing.woff2").status == 404
+
+
+def test_favicon_ico_answers_with_the_logo(page: Page, base_url: str) -> None:
+    response = page.request.get(f"{base_url}/favicon.ico")
+    assert response.status == 200
+    assert response.headers["content-type"].startswith("image/svg+xml")

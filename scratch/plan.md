@@ -434,9 +434,15 @@ in DESIGN.md "Desktop semantics"; palette contrast.
    (questions.md). Not seen in the Dev app. Realign checked: no `↗` left in
    `LoopflowMac/`; tests assert each word above; `swift/README.md:388-512`
    already describes Brief, Diff and Files this way.
-8. **Next: DESIGN.md.** cfadc6 merged as #2011 (`4cee2ed182`, origin/main's
+8. **Waiting on LOO-515's sync: DESIGN.md.** cfadc6 merged as #2011 (`4cee2ed182`, origin/main's
    tip on 2026-11-21); LOO-515 (#1949) is still open, so this branch has
-   neither root `DESIGN.md` nor `design/`. Bring main in (`lf sync`, through
+   neither root `DESIGN.md` nor `design/`. Tried 2026-11-21: `lf sync --plan`
+   is `noop` (base is LOO-515's branch at `31fc852dca`, which lacks #2011),
+   and `lf sync origin/main` would detach this Task from LOO-515, putting its
+   commits in this PR. LOO-515 is active with its own agent, so its checkout
+   was left alone. The edit is prepared in `scratch/design-md-slice8.md`
+   (pointer by pointer, with today's file:line); apply it once LOO-515 brings
+   main in or lands. Bring main in (`lf sync`, through
    LOO-515; never `git merge`), resolve the `GhosttyManager` constant (#2011
    adds `font-thicken = true` and the scalar lines: keep both sets, family
    line stays after the default files) and the `swift/DESIGN.md` deletion,

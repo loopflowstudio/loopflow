@@ -139,3 +139,11 @@
   failed". Rewording `TaskDelivery` changes the Brief's PR line and its tests too;
   left for review. Check order in the card (failed, in progress, passed) is also
   GitHub's order, unchanged.
+
+## Slice 8: how main reaches this branch (2026-11-21)
+
+LOO-515's branch (`31fc852dca`) does not contain #2011, so `lf sync` here is a
+no-op. Waiting for LOO-515 to sync main or land keeps this PR's diff to 3d4350's
+own commits; `lf sync main` now would detach and show LOO-515's work in this PR.
+Took the wait. If LOO-515 stays open long, the other choice is to sync LOO-515
+onto main from its own checkout.

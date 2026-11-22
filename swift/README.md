@@ -99,6 +99,10 @@ open their brief beside **Start**, which runs the Task's Workflow; opening alone
 starts nothing. Waves follow Tasks in the same scrolling sidebar, with counts
 from the planning inventory.
 
+**New Wave**, under the sidebar's Waves or in the Portfolio, is one form: a
+name, and a repository picker when there is more than one to choose from.
+**Create** adds the Wave; with no repository, Create is off.
+
 **⌘N** opens New Task. Type what you want and click **Start**: the sheet closes
 in the click and the Task's workspace shows your words in its conversation, with
 the Task already in Working. Setup prints under them as it finishes, then the
@@ -156,10 +160,8 @@ its checkout. Repository and Wave primary conversations keep their own scope,
 even in a Task checkout. The Task's conversation list and breadcrumb Session
 picker use the same membership.
 
-A sidebar row is the Task's whole title, wrapped rather than cut, then its ID
-and status word: what its program reports (**Busy**, **Blocked**), or its
-lifecycle word (**Active**) while nothing reports. A Task whose program is
-blocked adds one line with what the program asked:
+A Task's row is its whole title, wrapped rather than cut, then its ID and one
+status word. A row that needs someone adds one line saying why:
 
 ```text
 Loopflow for Mac's Task workspace matches
@@ -167,6 +169,21 @@ the design prototype
 3d4350  Blocked
 Approve the plan?
 ```
+
+The word is the first of these that applies:
+
+1. What the Task's program reports: **Busy**, **Available**, **Blocked**,
+   **Done**. A blocked program's line is what it asked.
+2. **Blocked** or **Waiting**, when the Task's condition says so and no
+   program reports. The line is the condition's reason, the one
+   `lf plan list` prints.
+3. Its lifecycle word: **Idle**, **Active**, **Done**.
+
+A Task whose condition could not be read adds no word for it. The row is the
+same in the sidebar, the title bar, a Dashboard tile's header, the roadmap,
+the Now list and a Wave's Portfolio page, so a Task never says two things
+about itself. The Portfolio has no program reports, so its rows start at the
+second rule. Click the row on any of them and the Task opens.
 
 The selected row is filled; rows carry no stripe or border. A Wave's count
 beside its name is in the same face as its name.
@@ -271,7 +288,8 @@ or fails while newer work is running.
 
 Task IDs in the sidebar link to the issue when its URL is recorded; otherwise
 they remain plain text. The link opens separately from the Task row. Unknown
-activity and live clients without reports show the lifecycle word. The PR link
+activity and live clients without reports show the Task's condition or
+lifecycle word. The PR link
 and owner are in the Task pane, not the row.
 
 Follow a conversation in the pane and sidebar: Busy for a working report,
@@ -288,10 +306,25 @@ Work selection uses the theme’s selection fill and contrasting text.
 File selection keeps a neutral fill and edge; keyboard focus has a separate outline.
 Ordinary controls and links use text roles; the theme’s accent emphasizes deliberate actions.
 Status labels and shapes retain their meaning across palettes.
-Choose **Settings → Appearance** to preview the whole workspace. Set
-**Light theme** and **Dark theme** independently; **System** follows macOS using
-both. System lists both pickers; Light or Dark lists only its own. Each picker
+Choose **Settings → Appearance** to preview the whole workspace. Pick
+**System**, **Light** or **Dark**, then set **Light theme** and **Dark theme**
+independently; System follows macOS using both. System lists both pickers;
+Light or Dark lists only its own. Each picker
 shows built-ins, then **Yours**, ending with a dashed **Import file…** tile.
+
+Beside the pickers, a sample draws the previewed theme where its colors land in
+the app: a title bar with the repository's name, a selected Task row, the
+status words on the sidebar's surface, and one terminal line:
+
+```text
+loopflow
+Selected Work    Blocked since 12:07
+Working  Available  Blocked  Failed  Passed
+$ lf task status LOO-515
+```
+
+A theme whose status words are hard to read on the sidebar shows it here,
+before **Apply**.
 
 ```yaml
 # ~/.lf/config.yaml
@@ -895,8 +928,13 @@ keeps its open conversations and files.
 `lf desktop portfolio --json` reads this same Machine-local selection. RegistryQuery carries
 all reads and mutations; Swift owns no membership writer or folder scanner.
 
-Portfolio retains the Wave inspectors. Opening a Task there routes to its
+Portfolio retains the Wave inspectors. A click on a Task's row there, on the
+roadmap, the Now list or a Wave's page, opens it in its
 repository window rather than creating another Task workspace in a sheet.
+A Wave on the roadmap is a section under its name, divided from the next by a
+line. A Wave's page shows its name, objective and key results, every Task, then
+its metric table. A metric whose contract has an issue shows a notice above the
+table with the count and each issue's summary; **Copy** copies the summaries.
 Wave Chat loads the active backing's bounded history before SSE, keeps it visible
 through reconnects, and rolls equivalent operational failures into one
 disclosed notice. Cold launch does not start a chat transcript read.
@@ -909,9 +947,10 @@ decisions, deliveries, and actionable failures remain visible. The detail pane
 reads the Wave's plan, Tasks, decisions, PR delivery, and Task conditions
 from `lf wave plan <wave> --json`.
 
-Open a Task from the planning list in its repository window, start its legal Graph,
-or open its PR. **Worktree** opens the recorded checkout in Warp.
-Rows show the shared condition and reason from `lf plan list`; unknown means
+Beside each Task's row, **Start**, **Open PR** and **Worktree** start its
+legal Graph, open its PR, and open the recorded checkout in Warp.
+Rows show the shared condition and reason from `lf plan list` as their status
+word and line; an unknown condition adds no word, because
 the required evidence could not be read.
 
 Open **Go → Telemetry** for token spend, codebase growth, a token-weighted
@@ -1503,6 +1542,21 @@ for Task acceptance. See `release/UI_HOST_GATE.md`.
 lf desktop view 'state:available'             # open an unsaved Dashboard
 lf desktop view 'query:attention'             # open a saved one
 ```
+
+A Dashboard is headed by its name, with its query beside it. Each tile is
+headed by the Task's row, the same one the sidebar shows, with open in full,
+more and hide at its end. Under the row is one sentence for the workflow, or
+what the Task is asking when it needs you:
+
+```text
+Needs you   state:available or state:blocked        Default Slots  Edit Dashboard
+
+Keep interrupted terminal pastes from swallowing Session input
+LOO-912  Busy
+build is running. You are next needed at human-review.
+```
+
+Past one page of tiles, the pager reads "Page 1 of 2".
 
 Dashboards open only through `lf desktop`; the sidebar, Cmd-K and menus offer none.
 Save an open query to name, pin and arrange it. Edit changes only that Dashboard;

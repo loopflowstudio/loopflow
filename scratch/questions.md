@@ -39,3 +39,9 @@ Each was decided so the work could continue; `scratch/plan.md` has the detail.
     does". Left as is. Rename it, or make it mean unclaimed?
 12. **A Wave keeps two pages** (its repository view and the Portfolio's).
     Named in the plan as outside this change.
+13. **Start's label for several Tasks.** The prototype gives only "Start with
+    feature". The docs say `Start 2 with feature` for several on one workflow
+    and `Start 3: feature 2, code 1` when they differ. Different words?
+14. **A busy Task's word.** The prototype's tiles and theme sample say
+    "Working"; the app's rows say "Busy" today, and the docs keep "Busy".
+    Rename the word to "Working"?

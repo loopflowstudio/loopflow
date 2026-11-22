@@ -353,6 +353,24 @@ survives this change. See `scratch/questions.md`.
 `design/prototypes/` stays: `desktop.html` and `desktop-more.html` also hold
 New Task and the empty and failed states, which have not shipped.
 
+## Docs written ahead of the code
+
+`docs/surfaces.md` ("Loopflow Desktop", "The backlog", "Start picks a
+workflow") and `swift/README.md` (the Task row, New Wave, Choose Theme's
+sample, the Portfolio's rows and contract notice, "Dashboards") describe the
+intended screens. Build matches them or changes them in the same slice.
+`DESIGN.md` is untouched until slice 4.
+
+Wording the docs settled, not in the prototype:
+
+- Several Tasks on one workflow: `Start 2 with feature`. Mixed workflows:
+  `Start 3: feature 2, code 1`.
+- A claimed row in another Wave: "Infrastructure, claimed by Ana".
+- The program's status words stay **Busy**, **Available**, **Blocked**,
+  **Done**; the prototype's "Working" is the theme role's name, not a row's
+  word.
+- The backlog's single open brief is closed from its chevron.
+
 ## Absent and error states
 
 - Backlog empty: unchanged words and step, the title in `textStrong`, the

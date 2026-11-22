@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Concept review: one design system (cfadc6)</title>
+<style>
+:root{color-scheme:light dark;--bg:#fff;--fg:#1a1a1a;--dim:#5a5a5a;--rule:#ddd;--yes:#1f7a3a;--no:#a3262f;--prop:#1d5fa8;--propbg:#eef4fb}
+@media (prefers-color-scheme:dark){:root{--bg:#161616;--fg:#e8e8e8;--dim:#a0a0a0;--rule:#333;--yes:#5cc27a;--no:#ff7a7a;--prop:#7fb2ff;--propbg:#18243a}}
+body{background:var(--bg);color:var(--fg);font:15px/1.55 -apple-system,system-ui,sans-serif;max-width:60rem;margin:2rem auto;padding:0 1.25rem}
+h1{font-size:1.6rem;margin-bottom:.25rem}h2{font-size:1.2rem;margin-top:2.2rem}
+code{font:13px ui-monospace,Menlo,monospace}
+table{border-collapse:collapse;width:100%;margin:.75rem 0}td,th{border-bottom:1px solid var(--rule);padding:.45rem .5rem;text-align:left;vertical-align:top}
+th{font-weight:600}.yes{color:var(--yes);font-weight:600}.no{color:var(--no);font-weight:600}
+.prop{border-left:3px solid var(--prop);background:var(--propbg);padding:.6rem .9rem;margin:.75rem 0}
+.prop b:first-child{color:var(--prop)}
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:1rem}@media(max-width:700px){.cols{grid-template-columns:1fr}}
+pre{font:12.5px/1.45 ui-monospace,Menlo,monospace;border:1px solid var(--rule);padding:.6rem .8rem;overflow:auto;margin:0}
+.dim{color:var(--dim)}
+</style></head><body>
+<h1>One design system: do the product's concepts and the code's line up?</h1>
+<p class="dim">Area reviewed: the whole design system as it stands with this branch (base <code>2750c9e0fb</code> to <code>925beb6c52</code>). That covers <code>DESIGN.md</code>, <code>design/</code>, the website's <code>:root</code> tokens, the website pages that still present a design system, and the Swift token source. The Task's outcome is "one design system", so the review asks whether there is now exactly one, with one name for each idea.</p>
+
+<h2>Concepts, paired</h2>
+<table>
+<tr><th>What a person knows</th><th>What the code has</th><th></th><th>What is wrong</th></tr>
+<tr><td>The design system: one place that says what Loopflow looks like</td><td><code>DESIGN.md</code> <b>and</b> <code>website/internal_pages.py</code> served at <code>/design</code>, <code>/colors</code>, <code>/fonts</code> (1,260 lines: Cormorant, Lato, font comparisons)</td><td class="no">no</td><td>Two design systems. The second is served on the public site, linked from nothing, and disagrees with the first. DESIGN.md's own rule 5 ("a second … is a bug") calls it a bug.</td></tr>
+<tr><td>The target language (three voices, the ramp, shape by kind)</td><td><code>DESIGN.md § The language</code></td><td class="yes">yes</td><td></td></tr>
+<tr><td>What ships today</td><td><code>DESIGN.md § Tokens today</code>, <code>swift/Loopflow/Design/</code>, <code>:root</code> in <code>style.css</code></td><td class="yes">yes</td><td>The two-section split is honest and readable.</td></tr>
+<tr><td>A type step (e.g. "lede", "meta")</td><td>Language: 8 steps. Swift: 7 with the same names. Web: 9 <code>--t-*</code>, four of them (<code>name</code>, <code>head</code>, <code>intro</code>, <code>small</code>) new names on this branch</td><td class="no">no</td><td>One idea, two vocabularies. Rule 4 says tokens have "the same names on each" platform, and the web ramp introduced here breaks it. Matching the names needs visible size changes, so this is the stacked website Task's job (see question 3).</td></tr>
+<tr><td>Shape by kind: control 4, row 8, pane 12, floating 16</td><td>Swift <code>CornerRadius.sm…xl</code>; web <code>--radius-sm/md/lg</code> (no 16)</td><td class="no">no</td><td>The language names the kind; both codebases name the size. This is minor and belongs with the stacked Tasks.</td></tr>
+<tr><td>A prototype: a reference page to delete when its screens ship</td><td><code>design/prototypes/</code> <b>and</b> <code>design/homepage-next/</code></td><td class="no">no</td><td>Two homes for one kind of thing. <code>homepage-next</code> is a draft homepage snapshot, which is a prototype by DESIGN.md's definition.</td></tr>
+<tr><td>A prototype</td><td><code>design/prototypes/website-fonts.patch</code></td><td class="no">partly</td><td>A patch is a pending change, not a reference. It applies cleanly today (<code>git apply --check</code>) and rots with each <code>style.css</code> edit. It is the first diff of the stacked website Task, which should apply it and delete it.</td></tr>
+<tr><td>How the Mac app looks (color roles, selection, focus)</td><td><code>DESIGN.md § Desktop semantics</code></td><td class="yes">yes</td><td></td></tr>
+<tr><td>How the Mac sidebar behaves (slot order, Cmd+1–9, dashboards)</td><td><code>DESIGN.md § Work tracking</code>, carried over from <code>swift/DESIGN.md</code></td><td class="no">no</td><td>This is behaviour, not look. In a file that "is the system: what Loopflow looks like", it is a concept the reader never expects there. It belongs in <code>swift/README.md</code> next to the code it specifies.</td></tr>
+<tr><td>Terminal defaults</td><td><code>GhosttyManager.loopflowConfig</code>, described under the ramp's <code>terminal</code> step</td><td class="yes">yes</td><td>The face is still JetBrains Mono until the app bundles Spline Sans Mono. Tokens today says so.</td></tr>
+</table>
+
+<h2>The biggest mismatch: the Task ships "one design system" and the site still serves two</h2>
+<div class="cols">
+<div><b>Before</b><pre>DESIGN.md                 ← the system
+website/internal_pages.py ← /design /colors /fonts
+  Cormorant, Lato, font comparisons
+  served publicly, linked from nothing
+design/prototypes/
+design/homepage-next/     ← also a prototype
+DESIGN.md § Work tracking ← sidebar behaviour</pre></div>
+<div class="prop"><b>Proposed</b> (choice made for review)<pre>DESIGN.md                 ← the only system
+design/prototypes/        ← every prototype
+  homepage-next/
+swift/README.md § Work tracking</pre>
+Delete <code>internal_pages.py</code>, its three routes and import in <code>website/main.py</code>, and its ruff entry in <code>website/pyproject.toml</code>. Move <code>design/homepage-next/</code> to <code>design/prototypes/homepage-next/</code>. Move the Work tracking section into <code>swift/README.md</code>.</div>
+</div>
+<p>Why it's safe to do without asking: nothing links to the pages and git keeps them. The released note in <code>release/v0.15.3/NOTES.md</code> that names <code>design/homepage-next/</code> is a shipped record, so it stays as written. Passed over: keeping the pages as an "internal" style guide. They teach faces that DESIGN.md says neither surface will use, so keeping them leaves a second design system that contradicts the first.</p>
+
+<h2>Normal path, failure, recovery</h2>
+<ul>
+<li><b>Normal:</b> someone adding a website component opens DESIGN.md and finds the step names, then the prototype to match. Today, searching the site for "design" turns up <code>/design</code> first. After the change, nothing else answers.</li>
+<li><b>Failure:</b> a token name that exists only on the web (<code>--t-head</code>) gets copied into Swift as <code>Typography.head</code>. The stacked website Task closes this when it moves the web to the language's names.</li>
+<li><b>Recovery:</b> if <code>/design</code> turns out to be wanted, it comes back with <code>git revert</code>. No data is lost.</li>
+</ul>
+
+<h2>Questions</h2>
+<ol>
+<li>Delete <code>/design</code>, <code>/colors</code>, <code>/fonts</code> and <code>internal_pages.py</code>? (a) yes, as planned (b) keep them, rewritten from DESIGN.md (c) keep them as they are</li>
+<li>Where do prototypes live? (a) only under <code>design/prototypes/</code>, with homepage-next moved there (b) leave <code>design/homepage-next/</code> where it is</li>
+<li>Web type step names: (a) the stacked website Task renames <code>--t-*</code> to the language's eight steps while applying <code>website-fonts.patch</code> (b) rename them in this Task now, sizes unchanged (c) web keeps its own names and rule 4 is relaxed</li>
+<li>Sidebar behaviour spec: (a) move it to <code>swift/README.md</code> (b) keep it in DESIGN.md</li>
+</ol>
+</body></html>

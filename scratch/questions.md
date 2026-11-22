@@ -289,3 +289,12 @@ present; the page is `scratch/concept-review.html`.
     save message, the tour's status and form checks stay as they are.
 74. `ConversationPlaceholder.namesFailure` repeats the placeholder's two
     conditions; left.
+
+Made while building slice 8, with nobody present.
+
+75. The failed file's note is a leaf view, `ReviewFileNote(note:retry:)`,
+    which also draws the "Cut at 1 MB. …" sentence; `FileNote.text` is gone.
+    The stream's lazy rows need a `TaskFilesStore` with a failed read to
+    reach the note any other way.
+76. Neither diff-stream failure was looked at in the Dev app: both need a
+    file read to fail on a live Machine.

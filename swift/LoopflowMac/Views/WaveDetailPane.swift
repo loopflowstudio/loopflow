@@ -176,7 +176,7 @@ private struct WavePlanView: View {
                 closed.append(page)
             } while !more && closed.next != nil && since.map { !closed.reaches($0) } ?? false
         } catch {
-            closed.error = "Completed Tasks unavailable: \(error.localizedDescription)"
+            closed.error = error.localizedDescription
         }
     }
 

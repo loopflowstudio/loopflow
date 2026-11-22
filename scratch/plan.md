@@ -7,9 +7,10 @@ once their screens shipped; `git show fd90d7e6ad:design/prototypes/desktop-more.
 has them, and `docs/surfaces.md` holds the wording now.
 
 Slices 1 to 7 are built and were looked at in the Dev app
-(`scratch/qa.html`, four runs). **Next:** slice 8, the diff stream's two
-failures and one `Failure` value; it is the last. Then the gate checks and
-one look at "Not started." on an unlocked display (questions 48).
+(`scratch/qa.html`, four runs). Slice 8 is built and has not been looked at
+there: a file the diff could not read, and skipped lines that did not load.
+**Next:** the gate checks and one look at "Not started." on an unlocked
+display (questions 48). Nothing is left to build.
 A Task started from New Task opens beside "Files did not open" (Task ea8659,
 outside this change); a demo meets it on the first Start.
 
@@ -602,6 +603,10 @@ demo: not headless; qa or demo runs it.
      passed after it (11 tests in 2 suites).
 
 8. **The diff stream's two failures, and one value for a kept failure.**
+   Built as written below; the file's note is its own leaf view,
+   `ReviewFileNote`, so a view test reads it without a store.
+   `scripts/test_desktop.sh --filter 'EmptyStateTests|TypographyDisciplineTests|BacklogViewTests|TaskFilesTests'`
+   passed after it (71 tests in 4 suites).
    Swift only. The fourth as-built concept review found the one listed site
    slice 6 passed by (`ReviewStreamView:69` in the inline failures above)
    and what sits beside it. Closed list; the sweep ends here.

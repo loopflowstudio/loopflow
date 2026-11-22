@@ -123,6 +123,21 @@ struct EmptyStateTests {
         #expect(retries == 1)
     }
 
+    @Test("A file the diff could not read says so, shows the message and retries")
+    func unreadFileInTheDiffKeepsRetry() throws {
+        let reason = "lf: the checkout is on another Machine"
+        var retries = 0
+        let view = try ReviewFileNote(note: .failed(reason)) { retries += 1 }.inspect()
+        _ = try view.find(text: "File not read.")
+        _ = try view.find(text: reason)
+        try view.find(button: "Retry").tap()
+        #expect(retries == 1)
+        // A file cut short is not a failure: one sentence, nothing to retry.
+        let cut = try ReviewFileNote(note: .cut) {}.inspect()
+        _ = try cut.find(text: "Cut at 1 MB. The rest of this file is not shown.")
+        #expect(throws: (any Error).self) { try cut.find(button: "Retry") }
+    }
+
     @Test("A dashboard tile with nothing to press keeps its title on one line")
     func compactStateWithoutActionsKeepsItsTitle() throws {
         let title = try EmptyState(title: "Work unavailable").environment(\.compactPanes, true)

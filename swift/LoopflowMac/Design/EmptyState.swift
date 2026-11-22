@@ -98,22 +98,30 @@ private struct EmptyLine: ViewModifier {
     }
 }
 
+/// What failed, in a sentence, and the Machine's message as it came.
+struct Failure: Equatable {
+    let what: String
+    let machine: String
+}
+
 /// A failure beside content that stays on screen: what failed, strong in the
 /// failure ink, the Machine's message in mono and selectable, then the way to
 /// try again. One row where it fits; in a narrow pane the message goes under
 /// what failed, so it wraps at the pane's width and not beside it. A caller
 /// that asks for one line keeps the row, cut short.
 struct FailureLine<Actions: View>: View {
-    let what: String
-    let machine: String
+    let failure: Failure
     @ViewBuilder let actions: Actions
     @Environment(\.palette) private var palette
     @Environment(\.lineLimit) private var lineLimit
 
-    init(_ what: String, machine: String, @ViewBuilder actions: () -> Actions) {
-        self.what = what
-        self.machine = machine
+    init(_ failure: Failure, @ViewBuilder actions: () -> Actions) {
+        self.failure = failure
         self.actions = actions()
+    }
+
+    init(_ what: String, machine: String, @ViewBuilder actions: () -> Actions) {
+        self.init(Failure(what: what, machine: machine), actions: actions)
     }
 
     var body: some View {
@@ -133,16 +141,20 @@ struct FailureLine<Actions: View>: View {
 
     @ViewBuilder
     private var parts: some View {
-        Text(what).font(Typography.textStrong).foregroundStyle(palette.failure)
+        Text(failure.what).font(Typography.textStrong).foregroundStyle(palette.failure)
             .fixedSize(horizontal: false, vertical: true)
-        Text(machine).font(Typography.mono).foregroundStyle(palette.textSecondary)
+        Text(failure.machine).font(Typography.mono).foregroundStyle(palette.textSecondary)
             .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
         actions
     }
 }
 
 extension FailureLine where Actions == EmptyView {
+    init(_ failure: Failure) {
+        self.init(failure) { EmptyView() }
+    }
+
     init(_ what: String, machine: String) {
-        self.init(what, machine: machine) { EmptyView() }
+        self.init(Failure(what: what, machine: machine))
     }
 }

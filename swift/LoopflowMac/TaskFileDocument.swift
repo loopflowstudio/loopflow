@@ -1067,14 +1067,8 @@ final class TaskFilesStore {
     /// Why a file's lines are missing or cut short.
     enum FileNote: Equatable, Sendable {
         case cut
+        /// The Machine's message.
         case failed(String)
-
-        var text: String {
-            switch self {
-            case .cut: "Cut at 1 MB. The rest of this file is not shown."
-            case .failed(let reason): "Could not be read: \(reason.hasSuffix(".") ? reason : reason + ".")"
-            }
-        }
     }
 
     /// Read a file again after its read failed.
@@ -1316,7 +1310,7 @@ final class TaskFilesStore {
 
     /// Unchanged lines you opened between hunks, by file and hunk header.
     private(set) var openedGaps: [String: [String: [ReviewLine]]] = [:]
-    private(set) var gapError: String?
+    private(set) var gapError: Failure?
 
     /// The skipped lines are read from the file as it stands, which is the
     /// comparison's newer side only while it reads the working tree.
@@ -1347,7 +1341,7 @@ final class TaskFilesStore {
             openedGaps[path, default: [:]][header] = lines
             gapError = nil
         } catch {
-            gapError = "Skipped lines of \(path) unavailable: \(error.localizedDescription)"
+            gapError = Failure(what: "Skipped lines of \(path) did not load.", machine: error.localizedDescription)
         }
     }
 

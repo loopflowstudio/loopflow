@@ -212,7 +212,7 @@ struct BacklogViewTests {
         let view = WorkNavigation.Board.wave("wave-a")
         let change = try #require(await model.rankBacklog(list(tasks).nudge(["A-1"], by: 1), in: view))
         await model.revertBacklog(change, in: view)
-        #expect(model.navigation.backlogs[view]?.notice == .failed("A-1's order not saved.", machine: "store is locked"))
+        #expect(model.navigation.backlogs[view]?.notice == .failed(Failure(what: "A-1's order not saved.", machine: "store is locked")))
     }
 
     @Test func claimIsOffForSomeoneElsesTaskAndMineOffersAvailable() throws {

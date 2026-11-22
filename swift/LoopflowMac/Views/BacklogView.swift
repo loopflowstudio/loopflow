@@ -34,7 +34,7 @@ enum BacklogOwner: Equatable {
 /// What the last backlog action did, or what failed with the Machine's message.
 enum BacklogNotice: Equatable {
     case did(String)
-    case failed(String, machine: String)
+    case failed(Failure)
 }
 
 /// What a person has done to one view's backlog; it outlives entering a Task.
@@ -459,7 +459,7 @@ extension WorkModel {
     }
 
     private func backlogFailure(_ view: WorkNavigation.Board, _ what: String, _ error: any Error) {
-        navigation.backlogs[view, default: BacklogState()].notice = .failed(what, machine: error.localizedDescription)
+        navigation.backlogs[view, default: BacklogState()].notice = .failed(Failure(what: what, machine: error.localizedDescription))
     }
 
     /// Write each rank in turn; the first refusal stops the rest and says so.
@@ -750,8 +750,8 @@ struct BacklogView: View {
                 case .did(let did):
                     Text(did).font(Typography.text).foregroundStyle(palette.textSecondary).lineLimit(2)
                         .textSelection(.enabled)
-                case .failed(let what, let machine):
-                    FailureLine(what, machine: machine)
+                case .failed(let failure):
+                    FailureLine(failure)
                 }
             }
             .accessibilityIdentifier("backlog-notice")

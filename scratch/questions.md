@@ -176,3 +176,18 @@ Each was decided so the work could continue; `scratch/plan.md` has the detail.
     atlas" in a pane header is mono prose; in sans it truncated to one letter
     and a whole-or-nothing version widened the pane (second qa run, both
     reverted). It needs someone who can watch the strip lay out.
+49. **Awaiting Start means no Graph has run** (slice 6; decides question
+    46). `need` reads `latestGraphProcess == nil` where it read the
+    `unstarted` lifecycle, so a Task someone opened and never started reads
+    "Idle" and is off the Now list. Should a claimed Task with a checkout
+    and no run count as waiting on its owner instead?
+50. **The Brief's lead says the row's word** (slice 6; decides question 45):
+    "Waiting, at demo. ready." where #1949 wrote "Active, at demo. ready."
+    It ignores a program's report, so an open Task whose program is Busy
+    reads "Busy" in its header and the Task's own word in its Brief. Should
+    the lead follow the program too?
+51. **A Portfolio row says "Run" for a Task whose Graph has run** and
+    "Start" before (slice 6; decides question 47), as the Task's page does.
+52. **"ready" is no longer printed for a Task that needs nobody** on the
+    Task detail's line and the activity pane (slice 6). A parked Task still
+    reads "Waiting" over "ready" (question 42).

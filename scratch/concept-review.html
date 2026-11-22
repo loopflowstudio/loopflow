@@ -55,121 +55,113 @@ ul { max-width: 76ch; }
 <body>
 <main>
 <h1>Do the product's concepts and the code's concepts line up?</h1>
-<p class="second">Task 8b92c6, reviewed after it was built, at 021b28484a against its base fd90d7e6ad. The page written before the build is in git at d8fc78a0cc.</p>
+<p class="second">Task 8b92c6, reviewed a second time after it was built, at 7df8f8fcaa against its base fd90d7e6ad. Earlier pages are in git: before the build at d8fc78a0cc, after slices 1 to 4 at 0fbaadb10f.</p>
 
-<p><strong>The area taken:</strong> every Mac screen that says where a Task stands and whether it needs someone: the sidebar, the title bar, the Task's own page and Brief, a dashboard tile, the backlog, the Portfolio's Now list, roadmap and Wave page, and the jump palette. The change is a styling pass over far more files than that, but its one new value, <code>TaskStanding</code>, is a claim about this area, so this is where a wrong concept would be. The spacing sweep, Choose Theme and New Wave were read and their concepts hold.</p>
+<p><strong>The area taken:</strong> every Mac screen that says where a Task stands and whether it needs someone: the sidebar, the title bar, the Task's page, its Brief and its detail, a dashboard tile, the backlog, the Portfolio's Now list, roadmap and Wave page, the jump menu and the activity pane. The change restyles far more than that, but its one new value, <code>TaskStanding</code>, and its one new predicate, <code>RoadmapTask.need</code>, are claims about this area.</p>
 
-<p><strong>Outcome: the plan changed.</strong> The row is right. One function decides a row's word and line, and six hosts draw it. But four readers in the same area still answer the same question on their own, and qa's fix for "Waiting / ready" put a second decider on one screen. The plan gains slice 5, Swift only.</p>
+<p><strong>Outcome: the plan changed.</strong> Slice 5 did what it set out to: the second qa run saw one word per Task on the Now list, the roadmap, a Wave's page, a Task's page and a tile. What is left is smaller and of one kind. The predicate asks the wrong fact, so looking at a Task changes what it says; and three readers still print their own answer. The plan gains slice 6, Swift only.</p>
 
 <h2>One interaction, walked as built</h2>
-<p>A Wave has nine Tasks nobody has started and one, LOO-515, parked at demo. Someone opens the Portfolio's Now list to see what needs them.</p>
+<p>LOO-520 has not been started. Someone clicks its link to read the brief, reads it, and goes back to the Now list.</p>
 
 <div class="grid">
 <div class="shot">
-<h4>Now list, as built</h4>
-<div class="row"><span class="t"><strong>Waiting</strong> <span class="chip">10</span></span></div>
-<div class="row"><span class="t">Read Loopflow docs offline</span><span class="m"><span class="mono">LOO-520</span><span>Unstarted</span><span>Growth</span></span></div>
-<div class="row"><span class="t">Eight more like it</span><span class="m"><span>Unstarted</span></span></div>
-<div class="row"><span class="t">Review a Task's brief beside its conversation</span><span class="m"><span class="mono">LOO-515</span><span class="waiting">Waiting</span><span>Growth</span></span><span class="a">ready</span></div>
+<h4>Before the click</h4>
+<div class="row"><span class="t">Now list: not listed</span></div>
+<div class="row"><span class="t">Read Loopflow docs offline</span><span class="m"><span class="mono">LOO-520</span><span>Unstarted</span></span></div>
 </div>
 <div class="shot">
-<h4>The same Task, opened</h4>
-<div class="row"><span class="t">Title bar: <span class="waiting">Waiting</span></span></div>
-<div class="row"><span class="t">Workflow header: Idle</span><span class="a">make is done. You are next needed at demo.</span></div>
-<div class="row"><span class="t">Brief: <strong>Idle, at demo.</strong> ready.</span><span class="a waiting">Waiting: ready</span></div>
-<div class="row"><span class="t">Dashboard tile: <span class="waiting">Waiting</span></span><span class="a">ready <span class="second">(the sentence is gone)</span></span></div>
+<h4>After the click, as built</h4>
+<div class="row"><span class="t"><strong>Waiting</strong> <span class="chip">1</span></span></div>
+<div class="row"><span class="t">Read Loopflow docs offline <span class="btn">Start</span></span><span class="m"><span class="mono">LOO-520</span><span class="waiting">Waiting</span></span><span class="a">ready</span></div>
 </div>
 </div>
 
-<p><strong>Normal path.</strong> The heading says ten Tasks wait. Nine rows under it say they do not. The one that does is last.</p>
-<p><strong>Failure.</strong> LOO-515's row says "Waiting" and why: "ready". The one sentence that says what to do, "You are next needed at demo", is on the Task's page, and on a tile the row's line pushes it out.</p>
-<p><strong>Recovery.</strong> The click opens the Task (that part works on all three Portfolio lists now). The page then says "Waiting" in the bar and "Idle" in the header, and the Brief says "ready" twice. A finished Task's row says "Done" and its page says "Completed".</p>
+<p><strong>Normal path.</strong> Opening the Task placed a checkout. The server now calls it <code>idle</code>, and <code>need</code> exempts only <code>unstarted</code>. The row says "Waiting" beside a button that says "Start".</p>
+<p><strong>Failure.</strong> LOO-515 is parked at demo. Row and page say "Waiting"; its Brief opens "Active, at demo. ready." Its Portfolio row offers "Start"; its page offers "Run". Same <code>lf task run</code>.</p>
+<p><strong>Recovery.</strong> None for LOO-520 short of starting it: the Now list keeps it. An unstarted Task selected in the sidebar shows "ready" under its title in the detail and the activity pane, though its row says it needs nobody.</p>
 
 <h2>Product concepts against code concepts</h2>
 <table>
 <tr><th>A person knows</th><th>The code has</th><th>Line up?</th><th>What is wrong</th></tr>
-<tr><td>A Task's row</td><td><code>TaskRow</code> drawing one <code>TaskStanding</code>; <code>PortfolioTaskRow</code> adds the verbs</td><td class="yes">Yes</td><td>Five drawings became one. The backlog's row stays a second kind on purpose and takes its word from the same value.</td></tr>
-<tr><td>Open a Task</td><td><code>TaskRow.opening(_:)</code> on every Portfolio list</td><td class="yes">Yes</td><td><code>WaveWorkInspector</code> and its selection are gone.</td></tr>
-<tr><td>Whether a Task needs me</td><td>A private rule inside <code>TaskStanding.init</code>; <code>nowGroup</code> reading the wire's <code>condition.state</code>; Rust's <code>task_condition</code></td><td class="no">No</td><td>One idea, three deciders. Two of them meet on the Now list. The biggest mismatch; below.</td></tr>
-<tr><td>The word for where a Task stands</td><td><code>TaskStanding.word</code>; <code>TaskWorkflowHeader.lifecycleLabel</code>; the palette's "Not started"</td><td class="no">No</td><td>One idea under two names on the Task's own page: the bar and the header print different words about the same Task, an inch apart.</td></tr>
-<tr><td>Why a Task needs me</td><td><code>TaskStanding.line</code>; the Brief's <code>nextMove.reason</code>; <code>TaskGraph.sentence</code></td><td class="no">No</td><td>For a waiting Task the first two are the same string, printed twice in the Brief; on a tile the first hides the third, which is the useful one.</td></tr>
-<tr><td>Status and workflow position as two things</td><td>The row's word; <code>WorkflowLine(sentenceOnly:)</code></td><td class="yes">Yes, with a gap</td><td>A tile has the sentence only for a Task opened in this window (question 39), and list rows carry a step, not the sentence. Needs the wire.</td></tr>
-<tr><td>Backlog actions</td><td><code>BacklogView.Action</code>, one <code>perform</code></td><td class="yes">Yes</td><td>Restyled, unchanged underneath.</td></tr>
-<tr><td>New Wave</td><td><code>CreateWaveSheet</code>, as a sheet and in the sidebar's popover</td><td class="yes">Yes</td><td>One form.</td></tr>
-<tr><td>A Project's key results</td><td><code>WaveProjectView</code></td><td class="yes">Yes</td><td>One drawing.</td></tr>
-<tr><td>The spacing scale</td><td><code>Spacing</code>, held by <code>DesignDisciplineTests</code></td><td class="yes">Yes</td><td>AppKit fonts set by number are not read by the test (question 34).</td></tr>
-<tr><td>A Wave's page</td><td>The repository window's Wave view and <code>WaveDetailPane</code></td><td class="no">No</td><td>Unchanged: one name, two pages, now both with the serif name. Outside this change, as before.</td></tr>
+<tr><td>A Task's row and its word</td><td><code>TaskRow</code> drawing <code>TaskStanding</code>; the title bar, <code>TaskWorkflowHeader</code> and the jump menu print the same word</td><td class="yes">Yes</td><td>Slice 5 closed the page and the menu.</td></tr>
+<tr><td>The Now list</td><td><code>nowSections</code> reading <code>RoadmapTask.need</code></td><td class="yes">Yes</td><td>Headings and rows agree; one decider.</td></tr>
+<tr><td>A Task that only awaits Start</td><td><code>need</code>'s <code>awaitsStart</code>, which is <code>lifecycle == .unstarted</code>, which means "has no checkout"</td><td class="no">No</td><td>One name for two ideas. Having no checkout and never having run are different facts; a click separates them. The biggest mismatch; below.</td></tr>
+<tr><td>Start a Task, or run it on</td><td><code>TaskWorkflowHeader.runAction</code> ("Start", "Run"); <code>RoadmapTaskAction.label</code> ("Start" always)</td><td class="no">No</td><td>One action, two names, decided in two places. The row can tell the two apart from the same fact as above.</td></tr>
+<tr><td>The word in the Brief</td><td><code>TaskBrief.state</code>, from the runtime status</td><td class="no">No</td><td>The page's header says "Waiting", the Brief under it "Active".</td></tr>
+<tr><td>Why a Task needs me</td><td><code>TaskStanding.line</code>; raw <code>condition.reason</code> in <code>WorkSurfaceView</code>, <code>WorkActivityView</code> and the spoken label</td><td class="no">No</td><td>Three readers print a reason for a Task that needs nobody.</td></tr>
+<tr><td>A tile's workflow sentence</td><td><code>DashboardTile.workflow</code></td><td class="yes">Yes, with a gap</td><td>Yields only to an ask now. Still only for a Task opened in this window (question 39).</td></tr>
+<tr><td>Backlog actions, New Wave, key results, the scale</td><td><code>BacklogView.Action</code>, <code>CreateWaveSheet</code>, <code>WaveProjectView</code>, <code>DesignDisciplineTests</code></td><td class="yes">Yes</td><td>As at the last review.</td></tr>
+<tr><td>A Wave's page</td><td>The repository window's Wave view and <code>WaveDetailPane</code></td><td class="no">No</td><td>One name, two pages. Outside this change, as before.</td></tr>
 </table>
 
-<h2>The biggest mismatch: whether a Task needs someone</h2>
+<h2>The biggest mismatch: awaiting Start</h2>
 <div class="grid">
 <div class="was">
 <p><strong>Existing</strong></p>
-<p>Rust calls a Task <code>waiting</code> whenever its next move is not the Task's own. An unstarted Task waits on a person to press Start, so it is <code>waiting</code>, reason "ready".</p>
-<p><code>TaskStanding</code> disagrees, in a rule private to its initializer: waiting counts only when the Task has started or its recommended action is not Start.</p>
-<p><code>nowGroup</code> never heard. It files by the wire. Heading from one decider, rows from the other.</p>
+<p><code>need</code> is nil for a <code>waiting</code> Task when it is <code>unstarted</code> and its recommended action is Start.</p>
+<p><code>unstarted</code> ends when a checkout is placed. A link click places one.</p>
 </div>
 <div class="new">
-<p><span class="tag">Proposed.</span> <code>RoadmapTask.need</code></p>
-<p>The same rule, moved beside <code>awaitsStart</code> in the shared model: the condition state when the Task needs someone, nil when it does not.</p>
-<p><code>TaskStanding</code> reads it. <code>nowGroup</code> returns it. The Now list then lists what its rows say needs someone, under the word they say.</p>
+<p><span class="tag">Proposed.</span> No Graph has run.</p>
+<p><code>latestGraphProcess == nil &amp;&amp; actions.recommended == .run</code>. FIX-2 in <code>task_concepts.json</code>, an active Task that never ran, carries a null process and "No Task Graph has run".</p>
+<p>The row's verb reads the same fact: "Start" before a run, "Run" after.</p>
 </div>
 </div>
 
 <div class="grid">
 <div class="shot">
-<h4>Now list, proposed</h4>
-<div class="row"><span class="t"><strong>Waiting</strong> <span class="chip">1</span></span></div>
-<div class="row"><span class="t">Review a Task's brief beside its conversation</span><span class="m"><span class="mono">LOO-515</span><span class="waiting">Waiting</span><span>Growth</span></span><span class="a">ready</span></div>
+<h4>After the click, proposed</h4>
+<div class="row"><span class="t">Now list: not listed</span></div>
+<div class="row"><span class="t">Read Loopflow docs offline <span class="btn">Start</span></span><span class="m"><span class="mono">LOO-520</span><span>Idle</span></span></div>
 </div>
 <div class="shot">
-<h4>The same Task, opened, proposed</h4>
-<div class="row"><span class="t">Title bar and workflow header: <span class="waiting">Waiting</span></span><span class="a">make is done. You are next needed at demo.</span></div>
-<div class="row"><span class="t">Brief: <strong>Idle, at demo.</strong> ready.</span></div>
-<div class="row"><span class="t">Dashboard tile: <span class="waiting">Waiting</span></span><span class="a">ready</span><span class="a">You are next needed at demo.</span></div>
+<h4>LOO-515, parked at demo, proposed</h4>
+<div class="row"><span class="t">Review a Task's brief <span class="btn">Run</span></span><span class="m"><span class="mono">LOO-515</span><span class="waiting">Waiting</span></span><span class="a">ready</span></div>
+<div class="row"><span class="t">Brief: <strong>Waiting, at demo.</strong> ready.</span></div>
 </div>
 </div>
 
 <h3>Tested on three paths</h3>
 <ul>
-<li><strong>Normal.</strong> A Wave of unstarted Tasks: the Now list is empty and says so; the backlog lists them and starts them. Nothing is lost, because Start was never offered better anywhere else.</li>
-<li><strong>Failure.</strong> A Graph stops: <code>blocked</code> is a need whatever the lifecycle, so the Task is under "Blocked" with its reason, as now.</li>
-<li><strong>Recovery.</strong> Click, and the page's two words are one word; the sentence is under it.</li>
+<li><strong>Normal.</strong> Unstarted, opened or not: off the Now list, Start on its row.</li>
+<li><strong>Failure.</strong> A Graph stops: <code>blocked</code> is a need whatever has run. A parked Task has a Graph process, so it stays "Waiting".</li>
+<li><strong>Recovery.</strong> The moved worktree: "Blocked" with the server's sentence, unchanged.</li>
 </ul>
 
 <h3>Counterexamples kept</h3>
 <ul>
-<li><strong>An unstarted Task waiting on something other than Start</strong> (qa's fixture: a merge it depends on). Its recommended action is not Start, so it stays a need and stays on the Now list. The narrower rule qa landed on is the one kept.</li>
-<li><strong>"ready" is still on the row.</strong> Slice 5 does not fix the wording; it only stops the line from hiding the sentence. Filtering the literal word in Swift would be a second guess at the server's meaning. Question 3.</li>
-<li><strong>Swift still overrides Rust.</strong> The repository's rule is one predicate, in Rust. <code>need</code> is one predicate in Swift, which is better than two and still not that. The Rust change alters <code>lf wave show</code>, the plan board and the DTO fixtures; it is named below as its own outcome.</li>
-<li><strong>"Completed" and "Canceled" have tests.</strong> <code>TaskConceptTests</code> and <code>WorkCLISubscriptionTests</code> assert them, so someone chose those words. The row's words win because they are the lifecycle's own and what <code>lf task status</code> prints. Question 2.</li>
+<li><strong>A claimed Task with a conversation and no run.</strong> It reads "Idle" or "Active", not "Waiting". Someone may be working in it by hand; nothing waits on anyone but its owner pressing Start. Question 1.</li>
+<li><strong>The fact is unverified for a parked Task.</strong> If a parked Task's row also carries a null process, the rule would hide it. Slice 6 tests that first and names the fallback, <code>execution?.step == nil</code>.</li>
+<li><strong>The Brief ignores the program.</strong> A Busy Task reads "Busy" in its header and the Task's own word in its Brief. The Brief describes the Task, as its second line already does. Question 2.</li>
+<li><strong>"Waiting" over "ready" stays.</strong> The reason is the server's; the wire Task replaces it with the Graph's sentence.</li>
+<li><strong>Swift still corrects Rust.</strong> <code>need</code> is one predicate in Swift where the repository wants one in Rust. The wire Task deletes it.</li>
 </ul>
 
 <h2>What changed in the plan</h2>
 <ul>
-<li>"What the code is today" no longer says nothing remains for build.</li>
-<li>Two lines added to "Done when": the Now list's headings agree with its rows, and a Task's own page says its row's word.</li>
-<li>Three subsections under "Where a Task stands, said once": the one predicate, the page's word, and a reason said once.</li>
-<li>Slice 5, in order: <code>RoadmapTask.need</code> with <code>TaskStanding</code> and <code>nowGroup</code> reading it; <code>TaskWorkflowHeader</code> and the palette printing the standing's word; the tile's sentence yielding only to a program's ask, and the Brief dropping the repeated line. Each with its test, then the two docs.</li>
-<li>"The standing belongs on the wire" added to what is outside this change.</li>
+<li>Two lines added to "Done when": looking at a Task changes nothing it says, and the Brief's lead and every printed reason follow the row.</li>
+<li>Two subsections under "Where a Task stands, said once": awaiting Start as a fact about the Graph, and the last three readers.</li>
+<li>Slice 6, in order: <code>need</code> on <code>latestGraphProcess</code>; the row's "Run"; the Brief's lead; the detail, the activity pane and the spoken label; the README. One test command.</li>
+<li>The wire Task under "Outside this change" names the placed Task and the finished Task.</li>
 </ul>
 
 <h2>Outside this change</h2>
 <ul>
-<li><strong>The standing on the wire.</strong> <code>task_condition</code> returns <code>clear</code> for a Task that only awaits Start; a parked Task's reason is its Graph's sentence; <code>lf wave show</code> and the plan board follow; <code>RoadmapTask.need</code> is deleted for <code>condition.state</code>. Rust, CLI output and DTO fixtures.</li>
-<li><strong>One page for a Wave</strong> and <strong>the workflow sentence on a list row</strong>, both as written before the build.</li>
+<li><strong>The standing on the wire</strong>: <code>task_condition</code> in Rust returns <code>clear</code> for a Task that only awaits Start, a parked Task's reason is its Graph's sentence, and <code>RoadmapTask.need</code> is deleted.</li>
+<li><strong>One page for a Wave</strong> and <strong>the workflow sentence on a list row</strong>, as written before the build.</li>
 </ul>
 
 <h2>Questions</h2>
 <ol class="q">
-<li>The Now list and Tasks that wait only to be started. Chosen: (a).
-<ol><li>Omit them; the backlog lists them.</li><li>Keep them, under a heading of their own ("Ready to start").</li><li>Keep "Waiting 9" as it is and accept rows that say otherwise.</li></ol></li>
-<li>A finished Task's word on its own page. Chosen: (a).
-<ol><li>"Done" and "Abandoned", the row's words.</li><li>"Completed" and "Canceled" everywhere, rows included.</li><li>Leave the page and the rows different.</li></ol></li>
-<li>A parked Task's line, "ready". Chosen: (a).
-<ol><li>Leave it until the wire carries the sentence; the tile shows the sentence under it meanwhile.</li><li>Drop a line that is only the status word, in Swift.</li><li>Do the Rust change in this Task.</li></ol></li>
-<li>Should this Task carry the Rust change that makes the server's condition agree? Chosen: (a).
-<ol><li>No; its own Task, named in the plan.</li><li>Yes, before this merges.</li></ol></li>
+<li>A Task with a checkout and no Graph run. Chosen: (a).
+<ol><li>It awaits Start: lifecycle word, off the Now list.</li><li>It waits on its owner: "Waiting", listed.</li><li>Only an unclaimed one awaits Start.</li></ol></li>
+<li>The Brief's lead. Chosen: (a).
+<ol><li>The Task's word with no program: "Waiting, at demo."</li><li>The header's word, program included: "Busy, at demo."</li><li>Leave "Active, at demo."</li></ol></li>
+<li>The Portfolio row's verb for a Task that has run. Chosen: (a).
+<ol><li>"Run", as its page says.</li><li>"Start" on rows and on the page.</li><li>"Continue".</li></ol></li>
+<li>"Waiting" over "ready" on a parked Task. Chosen: (a).
+<ol><li>Leave it until the wire carries the sentence.</li><li>Drop a line that is only the status word, in Swift.</li><li>Do the Rust change in this Task.</li></ol></li>
 </ol>
 </main>
 </body>

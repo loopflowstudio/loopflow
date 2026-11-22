@@ -28,6 +28,10 @@ a card or a stripe without a status.
   its row says it needs someone, and under that word.
 - A Task's own page says the word its row says: the workflow header and the
   jump palette print `TaskStanding`'s word.
+- Looking at a Task changes nothing it says: an unstarted Task opened by its
+  link still reads as one that awaits Start, and stays off the Now list.
+- The Brief's lead says the row's word, and no screen prints a condition's
+  reason for a Task whose row says it needs nobody.
 - A click on a Task's row opens the Task, on every Portfolio screen.
 - A Wave's backlog shows the Wave's name in serif at the display step, one
   filter control, an action bar of the one button that begins with what is
@@ -74,9 +78,12 @@ Slices 1 to 5 are built. The acceptance grep prints nothing (seen again
 after slice 4's commit, 6fe53188bb) and the Checks table has
 `DesignDisciplineTests` passing. Slice 5 moved the four readers the review
 of the built screens found (`scratch/concept-review.html`, at 021b28484a)
-onto `RoadmapTask.need` and `TaskStanding`. Nothing is left to build; what
-remains is the look on an unlocked display and the three Tasks under
-"Outside this change".
+onto `RoadmapTask.need` and `TaskStanding`, and the second qa run saw one
+word per Task on the Now list, the roadmap, a Wave's page, a Task's page and
+a tile. The review after it (`scratch/concept-review.html`, at 7df8f8fcaa)
+found the predicate keyed on the wrong fact and three readers still outside
+it. **Slice 6 is next**, Swift only; after it what remains is the look on an
+unlocked display and the three Tasks under "Outside this change".
 
 - At the base, 177 lines passed a literal padding and 132 a literal non-zero
   `spacing:`, with off-scale values 1, 3, 5, 6, 7, 9, 10, 14, 15, 17, 18, 22,
@@ -149,10 +156,9 @@ Two deciders on one screen.
 
 - `RoadmapTask.need` (in `WaveWorkMap.swift`, beside `awaitsStart`) returns
   the condition state when the Task needs someone and nil when it does not:
-  nil for `clear`, nil for `waiting` on an unstarted Task whose recommended
-  action is Start or on a finished Task, the state otherwise. It is the rule
-  that was inline in `TaskStanding.init`, moved, plus the finished case the
-  build found.
+  nil for `clear`, nil for `waiting` on a finished Task or on one that only
+  awaits Start, the state otherwise. Slice 5 built "awaits Start" as the
+  `unstarted` lifecycle; slice 6 below corrects it to "no Graph has run".
 - `TaskStanding` and `nowSections` read `need`, so the Now list
   omits Tasks that wait only to be started; the backlog is where those are
   listed and started. `NowProjectionTests` gains that case.
@@ -187,6 +193,51 @@ Two deciders on one screen.
   ("Idle, at demo. ready." then "Waiting: ready"). The Brief prints the
   standing's line only when it differs from the reason above it
   (`TaskBriefView.swift:129`).
+
+#### Awaiting Start is a fact about the Graph, not the lifecycle (slice 6)
+
+`need` exempts a `waiting` Task when `lifecycle == .unstarted`. Opening an
+unstarted Task by its link places a checkout, the server then calls it
+`idle`, and the Task reads "Waiting" over "ready" and joins the Now list,
+beside a Start button (second qa run). Nothing about the Task changed; a
+person looked at it.
+
+- `need` returns nil for `waiting` when the Task is finished, or when no
+  Graph has run for it and the recommended action is Start:
+  `latestGraphProcess == nil && actions.recommended == .run`. `awaitsStart`
+  keeps its meaning (no checkout, so the Session slot offers Start) and
+  leaves `need`. A Task parked at demo has a Graph process and stays
+  "Waiting". An unstarted Task whose recommended action is not Start stays a
+  need, as now.
+- The Portfolio row's verb follows the same fact
+  (`RoadmapTaskAction.label`, `RoadmapView.swift`): "Start" when no Graph
+  has run, "Run" otherwise, the words the Task's page uses
+  (`TaskWorkflowHeader.runAction`). The label takes the Task; the case stays
+  `.run`.
+- Choice made for review: a claimed Task with a checkout, a conversation and
+  no Graph run reads "Idle" or "Active", not "Waiting". Passed over: calling
+  it a need because someone opened it.
+
+#### The last three readers (slice 6)
+
+- The Brief's lead (`TaskBrief.state`, `TaskBriefView.swift:40`) prints the
+  runtime status word, so a Task parked at demo reads "Waiting" on its row
+  and page and "Active, at demo. ready." in its Brief. The lead takes
+  `TaskStanding(task:status: .unknown).word`, the word `TaskBrief.need`
+  already uses: "Waiting, at demo. ready." `state` loses its `runtime`
+  parameter. Choice made for review: the Brief ignores the program's report,
+  as its second line does, so it describes the Task and not a Session.
+  Passed over: leaving #1949's sentence, which is the page contradicting
+  its own header.
+- The Task detail's line under the title (`WorkSurfaceView.swift:112`) and
+  the activity pane's summary for a selected Task
+  (`WorkActivityView.swift:161`) print `condition.reason` whatever the
+  condition, so an unstarted Task shows "ready" there and nowhere else. Both
+  print `TaskStanding(task:status: .unknown).line` and draw nothing when it
+  is nil. `taskConditionAccessibilityLabel` (`NowProjection.swift`) speaks
+  `need`'s word and that line, and only the ID and name when there is no
+  need; it moves beside its one caller if `TaskStanding` cannot be reached
+  from `Loopflow`.
 
 Choice made for review: the condition's reason shows on the sidebar row as
 well as in the Portfolio, so a sidebar row whose Task is blocked or waiting
@@ -599,6 +650,26 @@ or `lf desktop` reads unless its view is deleted.
      decides, not of the mounted view: a tile needs a workspace registry and
      a Task work reading no fixture seeds.
 
+6. **Awaiting Start by the Graph, and the last three readers.** Next. In
+   order, each with its test:
+   1. `RoadmapTask.need` reads `latestGraphProcess == nil` in place of
+      `awaitsStart`. `NowProjectionTests` and `TaskStandingTests` gain a
+      Task with lifecycle `idle`, condition `waiting`, recommended `run` and
+      no Graph process: no need, not listed, word "Idle". This is the slice
+      that shows whether the fact holds: if a parked Task's fixture also has
+      a nil `latest_graph_process`, stop and use `execution?.step == nil`
+      with it.
+   2. `RoadmapTaskAction.label` says "Run" once a Graph has run
+      (`RoadmapViewTests`).
+   3. `TaskBrief.state` takes the standing's word (`TaskBriefTests`).
+   4. `WorkSurfaceView` and `WorkActivityView` print the standing's line;
+      the spoken label follows (`NowProjectionTests`' spoken case).
+   5. `swift/README.md` where it describes the Brief's state line and the
+      Portfolio row's verb. Questions 45, 46 and 47 are decided by this
+      slice.
+
+   Run: `scripts/test_desktop.sh --filter 'NowProjectionTests|TaskStandingTests|TaskBriefTests|RoadmapViewTests|TaskConceptTests|TaskRowTests|WorkNavigationTests'`.
+
 ## Outside this change
 
 - **One page for a Wave.** A Wave has two: its view in a repository window
@@ -620,7 +691,8 @@ or `lf desktop` reads unless its view is deleted.
   work status's word ("ready") as the reason. Desktop corrects both in
   Swift: `RoadmapTask.need` and the row's line. The repository's rule is one
   predicate, written in Rust. That Task: `task_condition` returns `clear`
-  for a Task that only awaits Start, a parked Task's reason is its Graph's
+  for a Task that only awaits Start (unstarted, or placed with no Graph run),
+  a finished Task is never `waiting`, a parked Task's reason is its Graph's
   sentence, `lf wave show` and the plan board follow, and `RoadmapTask.need`
   is deleted for `condition.state`. It changes CLI output and DTO fixtures,
   so it is not a styling change.

@@ -32,8 +32,8 @@ struct RemoveWaveSheetTests {
             name: "desktop",
             phase: .failed(preview: try preview(), message: "1 of 2 open Tasks moved; LOO-2 could not"),
             onRemove: {}, onRetry: { retried = true }, onCancel: {}, onDone: {})
-        #expect(try view.inspect().find(viewWithAccessibilityIdentifier: "remove-wave-error").text().string()
-            == "1 of 2 open Tasks moved; LOO-2 could not")
+        #expect(try view.inspect().find(viewWithAccessibilityIdentifier: "remove-wave-error")
+            .find(text: "1 of 2 open Tasks moved; LOO-2 could not").string() == "1 of 2 open Tasks moved; LOO-2 could not")
         #expect(throws: (any Error).self) {
             try view.inspect().find(viewWithAccessibilityIdentifier: "remove-wave-confirm")
         }

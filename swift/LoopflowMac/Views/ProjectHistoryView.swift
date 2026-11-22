@@ -20,9 +20,9 @@ struct ProjectHistoryView: View {
                 Spacer()
                 Button("Done") { dismiss() }
             }
-            if let error { Text(error).foregroundStyle(palette.warning) }
+            if let error { FailureLine("Projects did not load.", machine: error) }
             if !loaded { ProgressView("Reading Projects…") }
-            if loaded && projects.isEmpty && error == nil { Text("No Projects in this Wave.") }
+            if loaded && projects.isEmpty && error == nil { Text("No Projects in this Wave.").emptyLine() }
             Picker("Project", selection: $selected) {
                 ForEach(projects) { project in
                     Text("\(project.name) · \(project.status.rawValue)").tag(Optional(project.id))

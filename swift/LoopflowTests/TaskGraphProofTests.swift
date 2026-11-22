@@ -527,7 +527,7 @@ struct TaskGraphProofTests {
             try press("\r", keyCode: 36, in: window)
             try await settle(window)
             #expect(expanded("empty"))
-            #expect(try find("composition-group-\(prefix)empty").find(text: "No steps").string() == "No steps")
+            #expect(try find("composition-group-\(prefix)empty").find(text: "No steps.").string() == "No steps.")
             try press("\u{f702}", keyCode: 123, in: window)
             try await settle(window)
             #expect(!expanded("empty"))

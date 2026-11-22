@@ -826,7 +826,7 @@ struct SessionPaneView: View {
                                     execution: execution, query: sessions.query, showsPosition: false)
                             }.padding(14)
                         }.textSelection(.enabled)
-                    } else { Text("Task is unavailable") }
+                    } else { EmptyState(title: "Task is unavailable") }
                 case .url(let id, let url):
                     BrowserPageView(pages: workspace.pages, id: id, url: url).id(id)
                         .simultaneousGesture(TapGesture().onEnded { focusPane() })
@@ -915,7 +915,7 @@ struct SessionPaneView: View {
             )
             .id(item.launchId)
         } else {
-            Text("Session location unavailable")
+            EmptyState(title: "Session location unavailable")
         }
     }
 

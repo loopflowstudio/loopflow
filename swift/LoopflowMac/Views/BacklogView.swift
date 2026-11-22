@@ -644,8 +644,7 @@ struct BacklogView: View {
                 .layoutPriority(1).accessibilityIdentifier("wave-title")
             if let roadmap {
                 if let error = roadmap.projects.unavailableReason {
-                    Text("Project unavailable · \(error)").font(Typography.text).foregroundStyle(palette.warning)
-                        .lineLimit(1)
+                    FailureLine("Project unavailable.", machine: error).lineLimit(1)
                 } else if showsProject, let project = roadmap.currentProject {
                     Text(project.name).font(Typography.text).foregroundStyle(palette.textSecondary)
                         .lineLimit(1).accessibilityIdentifier("wave-current-project")
@@ -1241,7 +1240,7 @@ struct StartFlowItems: View {
                 ForEach(flows.unattended) { item($0) }
             }
         } else {
-            Text(model.graphCatalog.failure.map { "Workflows unavailable · \($0)" } ?? "Reading workflows…")
+            Text(model.graphCatalog.failure.map { "Workflows unavailable: \($0)" } ?? "Reading workflows…")
         }
     }
 
@@ -1329,7 +1328,7 @@ struct BacklogBrief: View {
                         .keyboardShortcut(.cancelAction)
                 }
             } else if brief.isEmpty {
-                Text("No brief yet.").foregroundStyle(palette.textTertiary)
+                Text("No brief yet.").emptyLine()
             } else {
                 Text(Self.markdown(brief)).font(Typography.text).lineSpacing(4).textSelection(.enabled)
                     .lineLimit(long && !state.wrappedValue.showsAll ? 9 : nil)

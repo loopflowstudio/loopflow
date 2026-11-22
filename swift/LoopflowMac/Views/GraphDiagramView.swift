@@ -95,7 +95,7 @@ private struct CompositionDisclosures: View {
                     get: { expanded.contains(id) },
                     set: { if $0 { expanded.insert(id) } else { expanded.remove(id) } }
                 )) {
-                    if children.isEmpty { Text("No steps").font(Typography.meta) }
+                    if children.isEmpty { Text("No steps.").emptyLine() }
                     AnyView(CompositionDisclosures(items: children, compiled: compiled, expanded: $expanded))
                 } label: {
                     Text("\(name) · \(item.nodeKeys.count) steps").font(Typography.mono)

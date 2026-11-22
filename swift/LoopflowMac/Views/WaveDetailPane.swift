@@ -255,7 +255,7 @@ private struct WavePlanView: View {
                             .onChange(of: historyFilter) { historyNow = Date() }
                     }
                     if truncated { Text("Planning is partial; more Tasks exist.") }
-                    if tasks.isEmpty { Text("No current Tasks").foregroundStyle(palette.textSecondary) }
+                    if tasks.isEmpty { Text("No current Tasks.").emptyLine() }
                     ForEach(tasks) { task in RoadmapTaskView(task: task, selectedTaskID: $selectedTaskID) }
                     if historyFilter.showCompleted {
                         if let error = closed.error {
@@ -268,7 +268,7 @@ private struct WavePlanView: View {
                 }
             } else {
                 WorkSectionHeading("Tasks")
-                Text("Task status unavailable.").foregroundStyle(palette.textSecondary)
+                Text("Task status unavailable.").emptyLine()
             }
         }.accessibilityIdentifier("wave-tasks")
     }

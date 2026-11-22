@@ -133,7 +133,7 @@ struct TaskDelivery: Equatable {
     static func describe(record: PrSnapshot?, taskOpen: Bool, reading: GitHubPullRequest?, error: String?,
                          readAt: Date?, localHead: String?, now: Date = .now) -> TaskDelivery {
         let stillOpen = taskOpen ? "Task still open" : nil
-        let none = TaskDelivery(headline: "No pull request yet · changes below are local", detail: nil,
+        let none = TaskDelivery(headline: "No pull request yet. Changes below are local.", detail: nil,
                                 warning: false, readingIsCurrent: false)
         guard let record else { return none }
         switch record.phase {

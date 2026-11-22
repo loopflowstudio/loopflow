@@ -268,14 +268,6 @@ struct TaskStartOffer: View {
     }
 }
 
-extension WorkModel {
-    /// The workflow a Task's first run takes up and whose choice it is:
-    /// "feature, loopflow's default".
-    func workflowSelection(_ task: RoadmapTask) -> String? {
-        task.graphName.map { "\($0), \(workflowChoice(source: task.graphSource, wave: self.task(id: task.id)?.wave?.wave))" }
-    }
-}
-
 /// Every Task action: the workflow bar's "…", sidebar context menus,
 /// Dashboard tiles and ⌘/ list the same items.
 struct TaskActionItems: View {
@@ -466,11 +458,20 @@ struct GraphProcessLog: View {
                         .accessibilityIdentifier("task-earlier-runs")
                     }
                     if graphs.isEmpty {
-                        Text("No Graph has run.").padding(.vertical, 6)
-                            .accessibilityIdentifier("task-graph-processes-empty")
+                        HStack(spacing: Spacing.sm) {
+                            Text("No Graph has run.").emptyLine()
+                                .accessibilityIdentifier("task-graph-processes-empty")
+                            if let task, task.awaitsStart {
+                                let refusal = model.runRefusal(task)
+                                Button("Start") { model.startTaskFromInput(nil, task: task) }
+                                    .buttonStyle(LoopflowButtonStyle())
+                                    .disabled(refusal != nil)
+                                    .help(refusal ?? "lf task run \(task.task.identifier)")
+                            }
+                        }.padding(.vertical, 6)
                     }
                 } else if readError == nil {
-                    Text(task == nil ? "Task unavailable" : "Reading Graph processes…").padding(.vertical, 6)
+                    Text(task == nil ? "Task unavailable." : "Reading Graph processes…").emptyLine().padding(.vertical, 6)
                 }
             }
             .padding(.horizontal, 14)
@@ -551,16 +552,20 @@ struct TaskWorkView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
+            let sessions = model.taskExecution[task.id].value?.work.sessions
             WorkSectionHeading(title: "Work") {
-                Button("Refresh") { model.rescanWork() }
+                if sessions?.isEmpty != true { Button("Refresh") { model.rescanWork() } }
             }
-            if let work = model.taskExecution[task.id].value?.work {
-                ForEach(work.sessions) { session in
+            if let sessions {
+                ForEach(sessions) { session in
                     row(session.interactive ? "Session" : "Run", id: session.id, name: session.title,
                         state: session.completedAt == nil ? "open" : "completed")
                 }
-                if work.sessions.isEmpty {
-                    Text("No recorded work.")
+                if sessions.isEmpty {
+                    HStack(spacing: Spacing.sm) {
+                        Text("No recorded work.")
+                        Button("Refresh") { model.rescanWork() }.buttonStyle(LoopflowButtonStyle())
+                    }
                 }
             }
         }

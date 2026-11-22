@@ -124,9 +124,10 @@ struct DashboardView: View {
                     }.font(Typography.meta).padding(8)
                 }
             } else {
-                ContentUnavailableView("Dashboard unavailable", systemImage: "exclamationmark.triangle",
-                    description: Text("This Dashboard is no longer available."))
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                EmptyState(title: "This dashboard is no longer available") {
+                    Button("Show working Tasks") { model.selectWorkingTasksDashboard() }
+                        .accessibilityIdentifier("dashboard-show-working-tasks")
+                }
             }
         }.padding(10).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top).background(palette.surfaceMuted)
             .sheet(isPresented: $editing) {
@@ -163,8 +164,12 @@ struct WaveTiles: View {
         if let plan = model.boardPlan(view) {
             let members = model.boardTiles(view)
             if members.isEmpty {
-                Text("No planned or started Tasks").font(Typography.text)
-                    .foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)
+                HStack(spacing: Spacing.sm) {
+                    Text("No planned or started Tasks.").emptyLine()
+                    Button("New Task ⌘N") { model.navigation.palette = .newTask }
+                        .buttonStyle(LoopflowButtonStyle())
+                }.frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .accessibilityElement(children: .contain)
                     .accessibilityIdentifier("wave-tiles-empty")
             } else {
                 DashboardSlotGrid(members: members, focused: nil, layout: plan.slots,

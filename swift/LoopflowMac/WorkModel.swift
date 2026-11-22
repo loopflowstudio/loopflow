@@ -3660,3 +3660,26 @@ enum TaskOrderDrag {
         token.hasPrefix("task-order:") ? String(token.dropFirst("task-order:".count)) : nil
     }
 }
+
+extension WorkModel {
+    /// The Wave a Task is filed in, else the repository.
+    func scopeName(_ wave: WaveSnapshot?) -> String { wave?.displayName ?? repositoryName }
+
+    /// Whose choice a workflow is, from the layer Rust says chose it: "your
+    /// default", "loopflow's default" for the scope it follows, "the default"
+    /// for the builtin, and "for this Task only" when the Task has its own.
+    func workflowChoice(source: String?, wave: WaveSnapshot?) -> String {
+        switch source {
+        case nil: "for this Task only"
+        case "personal": "your default"
+        case "repository": "\(scopeName(wave))'s default"
+        default: "the default"
+        }
+    }
+
+    /// The workflow a Task's first run takes up and whose choice it is:
+    /// "feature, loopflow's default".
+    func workflowSelection(_ task: RoadmapTask) -> String? {
+        task.graphName.map { "\($0), \(workflowChoice(source: task.graphSource, wave: self.task(id: task.id)?.wave?.wave))" }
+    }
+}

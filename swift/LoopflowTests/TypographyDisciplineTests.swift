@@ -17,21 +17,22 @@ struct TypographyDisciplineTests {
         (#"Typography\.\w+\("#, "a sized Typography call", false),
     ]
 
-    @Test("Loopflow and LoopflowMac set every font from the ramp")
-    func everyFontComesFromTheRamp() throws {
+    /// Every line of code under `directories` that matches a rule, comments left out.
+    private static func violations(in directories: [String],
+                                   rules: [(pattern: String, reason: String, outsideDesignOnly: Bool)]) throws -> [String] {
         var violations: [String] = []
-        for directory in ["Loopflow", "LoopflowMac"] {
-            let root = Self.swiftRoot.appendingPathComponent(directory)
+        for directory in directories {
+            let root = swiftRoot.appendingPathComponent(directory)
             let files = FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil)?
                 .compactMap { $0 as? URL }
                 .filter { $0.pathExtension == "swift" } ?? []
             for file in files {
-                let relative = String(file.path.dropFirst(Self.swiftRoot.path.count + 1))
+                let relative = String(file.path.dropFirst(swiftRoot.path.count + 1))
                 let inDesign = relative.contains("/Design/")
                 let lines = try String(contentsOf: file, encoding: .utf8).components(separatedBy: "\n")
                 for (index, line) in lines.enumerated() {
                     let code = line.components(separatedBy: "//").first ?? line
-                    for rule in Self.rules where !(rule.outsideDesignOnly && inDesign) {
+                    for rule in rules where !(rule.outsideDesignOnly && inDesign) {
                         if code.range(of: rule.pattern, options: .regularExpression) != nil {
                             violations.append("\(relative):\(index + 1): \(rule.reason): \(line.trimmingCharacters(in: .whitespaces))")
                         }
@@ -39,6 +40,20 @@ struct TypographyDisciplineTests {
                 }
             }
         }
+        return violations
+    }
+
+    @Test("Loopflow and LoopflowMac set every font from the ramp")
+    func everyFontComesFromTheRamp() throws {
+        let violations = try Self.violations(in: ["Loopflow", "LoopflowMac"], rules: Self.rules)
+        #expect(violations.isEmpty, "\(violations.joined(separator: "\n"))")
+    }
+
+    @Test("LoopflowMac draws every empty or failed pane as EmptyState")
+    func noGreyIconOverACentredTitle() throws {
+        let violations = try Self.violations(in: ["LoopflowMac"], rules: [
+            (#"ContentUnavailableView"#, "a centred icon and title; use EmptyState", false),
+        ])
         #expect(violations.isEmpty, "\(violations.joined(separator: "\n"))")
     }
 }

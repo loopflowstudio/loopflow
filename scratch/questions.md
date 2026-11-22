@@ -65,3 +65,25 @@ Made while building the states with nobody present.
     with the reason as its tooltip, as `docs/surfaces.md` says.
 18. A failed conversation or Session open shows the error as the machine's
     message in mono, with no sentence above it.
+
+Made while building the remaining states with nobody present.
+
+19. Two small pieces joined `EmptyState.swift` though the brief says "add
+    none": `.emptyLine()` (a list's one-sentence empty) and `FailureLine`
+    (what failed, the message in mono, Retry) for a failure beside content
+    that stays. Each replaced the same three modifiers at 7 to 15 sites.
+20. New Task joined only "No planned or started Tasks." (`WaveTiles` has the
+    model and the sidebar's Wave). "No Tasks in this Project.", "No current
+    Tasks." and "No Projects in this Wave." sit in views with no `WorkModel`
+    and a Wave that may not be the sidebar's, so they got wording only.
+21. "No Graph has run." offers Start only for a Task that awaits its first
+    start, under `runRefusal`; a started Task's empty log has no button.
+22. "This repository did not open" in `SessionsView` gained Retry: the
+    Machine and repository read that ran once on appear is now `readMachine()`.
+23. "Workflows unavailable · …" sits inside a `Menu`, which draws plain text
+    only; it reads "Workflows unavailable: …" with the message in the menu's
+    face.
+24. No "We do these now" pointer in `DESIGN.md` named code this change
+    fixed, so none was removed.
+25. "Task is unavailable" and "Session location unavailable" fill a pane, so
+    they became `EmptyState` titles, not one-line sentences.

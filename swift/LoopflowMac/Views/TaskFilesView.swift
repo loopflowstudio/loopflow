@@ -211,9 +211,9 @@ struct TaskFilesView: View {
                         let badges = store.changeBadges
                         ForEach(store.treeRows) { row in treeRow(row, badges: badges) }
                         if let reason = store.changesError {
-                            Text(reason).font(Typography.meta).foregroundStyle(palette.warning)
+                            FailureLine("Comparison unavailable.", machine: reason)
                         } else if !store.search.isEmpty, store.scratchPaths.isEmpty, store.treeRows.isEmpty {
-                            Text("No matching files").font(Typography.meta).foregroundStyle(palette.textSecondary)
+                            Text("No matching files.").emptyLine()
                         }
                     }.padding(10)
                 }
@@ -292,11 +292,10 @@ struct TaskFilesView: View {
                 .buttonStyle(.link).font(Typography.meta).padding(.leading, indent + 16)
                 .accessibilityIdentifier("files-load-more")
         case .failed(let directory, let reason, _):
-            HStack(spacing: 6) {
-                Text(reason).font(Typography.meta).foregroundStyle(palette.warning).lineLimit(2)
+            FailureLine(what: "Not read.", machine: reason) {
                 Button("Retry") { Task { await store.retryDirectory(directory) } }
-                    .buttonStyle(.link).font(Typography.meta)
-            }.padding(.leading, indent + 16)
+                    .buttonStyle(.link).font(Typography.text)
+            }.lineLimit(2).padding(.leading, indent + 16)
         }
     }
 
@@ -417,12 +416,15 @@ struct TaskFilesView: View {
 
     @ViewBuilder private var content: some View {
         if store.selection == nil {
-            ContentUnavailableView("Select a file", systemImage: "doc.text")
+            EmptyState(title: "Select a file")
         } else if store.mode == .diff {
             if let review = store.fileReview {
                 TaskFileDiffView(store: store, review: review, isFocused: isFocused, addToConversation: addToConversation)
             } else if let reason = store.changesError {
-                ContentUnavailableView("Comparison unavailable", systemImage: "doc", description: Text(reason))
+                EmptyState(title: "Comparison unavailable", machine: reason) {
+                    Button("Retry") { Task { await store.refreshChanges() } }
+                        .accessibilityIdentifier("files-comparison-retry")
+                }
             } else { ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity) }
         } else if let document = store.selectedDocument, let snapshot = document.snapshot {
             if snapshot.state == .text, store.rendersSelection {
@@ -432,7 +434,7 @@ struct TaskFilesView: View {
             } else if snapshot.state == .text {
                 TaskDocumentView(document: document)
             } else {
-                ContentUnavailableView(snapshot.state.title, systemImage: "doc")
+                EmptyState(title: snapshot.state.title)
             }
         } else { ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity) }
     }

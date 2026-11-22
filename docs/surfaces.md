@@ -260,6 +260,7 @@ and puts the next step on a button:
 | **Selected Work is unavailable.** The latest plan does not include it. Its workspace and conversations are kept. | **Read the plan again** |
 | **Nothing needs action.** No live or stopped work across these Waves. | **Show roadmap** |
 | **This dashboard is no longer available.** | **Show working Tasks** |
+| **No activity in this window.** Work creation, runs, PRs and steers appear here. | |
 
 A failure names what failed, shows the Machine's message as it came, and keeps
 **Retry**:

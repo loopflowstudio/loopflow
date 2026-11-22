@@ -590,7 +590,7 @@ struct ChangedFilesSidebar: View {
                         ForEach(group.files) { file in fileRow(file, in: group) }
                     }
                     if store.shownGroups.isEmpty {
-                        Text("No files to show").foregroundStyle(palette.textSecondary).padding(8)
+                        Text("No files to show.").emptyLine().padding(8)
                     }
                     tourHidden
                     alwaysHidden

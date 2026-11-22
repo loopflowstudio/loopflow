@@ -57,9 +57,7 @@ struct RemoveWaveSheetContent: View {
                 ProgressView().controlSize(.small)
             }
             if case .failed(_, let message) = phase {
-                Text(message)
-                    .font(Typography.meta)
-                    .foregroundStyle(palette.failure)
+                FailureLine("Not removed.", machine: message)
                     .accessibilityIdentifier("remove-wave-error")
             }
             HStack(spacing: Spacing.md) {

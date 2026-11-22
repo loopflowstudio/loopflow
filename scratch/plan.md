@@ -167,8 +167,7 @@ A started Task's bar is unchanged.
 Built: `WorkModel.workflowChoice(source:wave:)` ("Product's default", "your
 default", "the default", "for this Task only") and `workflowSelection(_:)`
 for a filed Task's pair. The sheet, the unstarted pane, the status strip and
-the Graph log's position line read them. They sit in `NewTaskSheet.swift` and
-`TaskWorkView.swift`; slice 4 moves both beside `WorkModel`.
+the Graph log's position line read them. They are at the end of `WorkModel.swift`.
 
 **Open choice (questions 13):** saying "the Wave's default" as the prototype
 does needs Rust to send which layer's `graph:` won (a new `ConfigSource` or a
@@ -183,9 +182,10 @@ message in mono and selectable, `LoopflowButtonStyle` buttons. Compact
 (`\.compactPanes`): the title and the buttons on one line, else the buttons
 alone with the sentence or message as help. No `systemImage`.
 
-Remaining in it (slice 4): a compact state with no button drops to nothing
-when its title does not fit ("Work unavailable" in a narrow tile,
-`DashboardView.swift:252`); it should keep its title, truncated.
+A compact state with no button keeps its title, cut short where the slot
+ends. Beside it in the same file: `.emptyLine()` for a list with nothing in
+it, and `FailureLine` (what failed, the message in mono, the way to retry)
+for a failure beside content that stays.
 
 ### New Task sheet
 
@@ -234,7 +234,8 @@ The prototype's drawn states are built: `NoPlannedWork` and `ChooseWork`
   (questions 17). The workflow's name in its sentence is not mono
   (questions 16).
 
-Not drawn; same form, sentence case, next step only where the app has one:
+Not drawn; same form, sentence case, next step only where the app has one.
+All built:
 
 | Site | After |
 |------|-------|
@@ -251,18 +252,19 @@ Plain `Text` empties stay one line (one serif thing per screen): sentence
 case, `Typography.text`, `palette.textSecondary`, full stop, and a button
 beside the sentence where the app has the action.
 
-- Gains a button: "No Tasks in this Project.", "No current Tasks",
-  "No planned or started Tasks", "No Projects in this Wave." (New Task where
-  the scope is known); "No Graph has run." (Start, under the bar's existing
-  refusal rule); "No recorded work." (its existing Refresh, set beside it).
+- Gains a button: "No planned or started Tasks." (New Task); "No Graph has
+  run." (Start, for a Task awaiting its first start, under the bar's refusal
+  rule); "No recorded work." (its Refresh, set beside it). "No Tasks in this
+  Project.", "No current Tasks." and "No Projects in this Wave." have no
+  `WorkModel` to open New Task from: wording only (questions 20).
 - Wording only: "No pull request yet · changes below are local"
   (`PullRequestStore.swift:136`) loses its middle dot, as do
   "Project unavailable · …", "Workflows unavailable · …"; "No comments.",
   "No brief yet.", "No description recorded.", "No Session history recorded
   for this Task.", "No matching files", "No matches", "No files to show",
-  "No steps", "Empty comment", "Task is unavailable", "Session location
-  unavailable", "Task status unavailable." get the face, colour and full stop
-  where they differ.
+  "No steps", "Empty comment", "Task status unavailable." get the face,
+  colour and full stop where they differ. "Task is unavailable" and "Session
+  location unavailable" fill a pane and are `EmptyState` titles.
 - Inline failures (`RepositoryWorkspaceContent`'s error beside a retained
   workspace, "Latest read failed: …", `TaskFilesView:297`,
   `ReviewStreamView:69`, `SessionsView:1787`, `WorkPalette` source errors,
@@ -297,19 +299,14 @@ beside the sentence where the app has the action.
 
 ## What goes
 
-Gone already: `WorkflowSteps`, `WorkflowChooser`, `WorkflowDefinition`,
+Gone: `WorkflowSteps`, `WorkflowChooser`, `WorkflowDefinition`,
 `WorkflowCatalogEntry`, `model.workflowCatalog`, `StartFlow`'s own stop
 count, "Takes up … when it starts", the "· loopflow's default" assertion,
 the `new-task-workflow-<name>` identifiers, `PaneEmptyState`,
-`SessionSlotOffer`, `NewTaskWorkflow.defaultPhrase`, "feature · repository"
-and "No workflow selected". Remaining:
-
-- Every `ContentUnavailableView` left in `swift/LoopflowMac`:
-  `OpenSourceLicenses:51`, `DashboardView:127`, `RoadmapView:160`,
-  `SessionsView:1440`, `WorkActivityView:86`, `TaskFilesView:420`, `:425`,
-  `:435`.
-- In `DESIGN.md`: "Tokens today" gains `EmptyState` in the component list,
-  and the `display`, `title` and `lede` rows name the sheet and state titles.
+`SessionSlotOffer`, `NewTaskWorkflow.defaultPhrase`, "feature · repository",
+"No workflow selected" and every `ContentUnavailableView` in
+`swift/LoopflowMac`. Remaining: the two prototype sections, after the Dev
+app check.
 
 Must survive: File without starting, ⌘↩ and Esc, the sheet opening on the
 sidebar's Wave, the default following the scope, the request kept when
@@ -411,14 +408,25 @@ demo: not headless; qa or demo runs it.
      `finishedOwnedTaskWithoutHistoryShowsRecord`, `reopenDuringResolution`
      and `TypographyDisciplineTests`. `documented_commands::` not run after
      the one-word `docs/surfaces.md` edit; gate runs it.
-4. **Every remaining `ContentUnavailableView` (8, under "What goes"), the
-   plain `Text` empties and inline failures** as "The states" lists them,
-   the compact title fallback, `workflowChoice` and `workflowSelection`
-   moved beside `WorkModel`, then the source scan beside
-   `TypographyDisciplineTests` and the rest of `DESIGN.md` ("Tokens today"
-   gains `EmptyState`; the ramp rows name the sheet and state titles; each
-   "We do these now" pointer this change fixed goes). The "two workflow
-   renderers" pointer is already gone.
+4. **The remaining states. Built.** No `ContentUnavailableView` is left in
+   `swift/LoopflowMac`, and `TypographyDisciplineTests` fails on a new one.
+   List empties read as one sentence (`.emptyLine()`), failures beside
+   content as `FailureLine`; a compact `EmptyState` with no button keeps its
+   title, truncated. `workflowChoice`, `workflowSelection` and `scopeName`
+   are at the end of `WorkModel.swift`. What it taught:
+   - New Task could join only `WaveTiles`' empty line; the Project and Wave
+     lists have no `WorkModel` (questions 20).
+   - `SessionsView`'s failed open had no re-read to call; its `.task` body
+     became `readMachine()` so Retry exists (questions 22).
+   - A `Menu` draws plain text only, so "Workflows unavailable: …" keeps the
+     menu's face (questions 23).
+   - No "We do these now" pointer named code this change fixed.
+   - Not seen in the Dev app: any of these, in either theme. qa or demo
+     looks, then deletes the two prototype sections.
+   - Checks: `scripts/test_desktop.sh --filter 'EmptyStateTests|TypographyDisciplineTests|RemoveWaveSheetTests|PullRequestTests'`
+     passed (14 tests). `TaskGraphProofTests` ("No steps."),
+     `TaskHistoryProofTests` and `documented_commands::` (a `docs/surfaces.md`
+     row) were not run; gate runs them.
 
 ## Docs written ahead of the build
 

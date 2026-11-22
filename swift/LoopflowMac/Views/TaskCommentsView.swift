@@ -63,16 +63,12 @@ struct TaskCommentsView: View {
     private func threadView(_ thread: TaskComments) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             if let reason = thread.refreshError {
-                Text("Latest read failed: \(reason)")
-                    .font(Typography.text)
-                    .foregroundStyle(palette.textSecondary)
-                    .textSelection(.enabled)
+                FailureLine("Latest read failed.", machine: reason)
+                    .accessibilityElement(children: .contain)
                     .accessibilityIdentifier("task-comments-status")
             }
             if thread.comments.isEmpty {
-                Text("No comments.")
-                    .font(Typography.text)
-                    .foregroundStyle(palette.textSecondary)
+                Text("No comments.").emptyLine()
                     .accessibilityIdentifier("task-comments-empty")
             }
             ForEach(Array(thread.comments.enumerated()), id: \.element.id) { index, comment in
@@ -97,7 +93,7 @@ struct TaskCommentsView: View {
                     }
                     let body = Self.readableBody(comment.body)
                     if body.isEmpty {
-                        Text("Empty comment").font(Typography.text).foregroundStyle(palette.textSecondary)
+                        Text("Empty comment.").emptyLine()
                     } else {
                         MarkdownBlocks(source: body).equatable()
                     }

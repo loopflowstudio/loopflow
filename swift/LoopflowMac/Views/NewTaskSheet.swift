@@ -157,23 +157,6 @@ struct NewTaskWorkflow: View {
         }
     }}
 
-extension WorkModel {
-    /// The Wave a Task is filed in, else the repository.
-    func scopeName(_ wave: WaveSnapshot?) -> String { wave?.displayName ?? repositoryName }
-
-    /// Whose choice a workflow is, from the layer Rust says chose it: "your
-    /// default", "loopflow's default" for the scope it follows, "the default"
-    /// for the builtin, and "for this Task only" when the Task has its own.
-    func workflowChoice(source: String?, wave: WaveSnapshot?) -> String {
-        switch source {
-        case nil: "for this Task only"
-        case "personal": "your default"
-        case "repository": "\(scopeName(wave))'s default"
-        default: "the default"
-        }
-    }
-}
-
 /// A New Task between the click and its installed conversation: the words you
 /// typed, and the failure if the request could not be filed.
 struct StartingTaskView: View {

@@ -78,6 +78,31 @@ struct EmptyStateTests {
         #expect(runs.withLock { $0 } == [["task", "run", task.task.identifier, "--json"]])
     }
 
+    @Test("A failure beside a repository that stays open says what failed, shows the message and retries")
+    func failureBesideRetainedRepositoryKeepsRetry() throws {
+        let reason = "lf: the Machine did not answer"
+        var retries = 0
+        let workspace = RepositoryWorkspace(id: "loopflow", path: "/src/loopflow")
+        let view = try RepositoryWorkspaceContent(workspace: workspace, error: reason, retry: { retries += 1 }) { _ in
+            Text("retained")
+        }.inspect()
+        _ = try view.find(text: "retained")
+        _ = try view.find(text: "The latest read of this repository failed.")
+        _ = try view.find(text: reason)
+        try view.find(button: "Retry").tap()
+        #expect(retries == 1)
+    }
+
+    @Test("A dashboard tile with nothing to press keeps its title on one line")
+    func compactStateWithoutActionsKeepsItsTitle() throws {
+        let title = try EmptyState(title: "Work unavailable").environment(\.compactPanes, true)
+            .inspect().find(text: "Work unavailable")
+        #expect(try title.lineLimit() == 1)
+        // With a button the slot may drop the title, so the button is what must be there.
+        let pressed = try EmptyState(title: "Not started") { Button("Start") {} }.environment(\.compactPanes, true).inspect()
+        _ = try pressed.find(button: "Start")
+    }
+
     @Test("A workflow's owner reads the same in the sheet and on a filed Task")
     func workflowChoiceNamesItsOwner() {
         let model = WorkModel(query: RegistryQuery { _, _ in "{}" }, repoPath: "/src/loopflow")

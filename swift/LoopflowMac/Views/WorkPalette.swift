@@ -389,7 +389,7 @@ struct GraphCatalogInspector: View {
                 }
             }
             if let error = sourceError {
-                Text(error).foregroundStyle(palette.warning)
+                FailureLine("The definition did not open.", machine: error)
             }
             Button("Refresh") { Task { await model.loadGraphCatalog(force: true) } }
             if let compiled = entry?.compiled, let composition = entry?.composition {
@@ -423,7 +423,7 @@ struct WorkflowCatalogInspector: View {
                 }
             }
             if let error = sourceError {
-                Text(error).foregroundStyle(palette.warning)
+                FailureLine("The definition did not open.", machine: error)
             }
             Button("Refresh") { Task { await model.loadGraphCatalog(force: true) } }
             if let outline = entry?.workflow {

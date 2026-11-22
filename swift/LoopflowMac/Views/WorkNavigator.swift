@@ -389,7 +389,7 @@ struct WorkJumpMenu: View {
                             }.padding(6).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
                         }.buttonStyle(.plain)
                     }
-                    if rows.isEmpty { Text("No matches").font(Typography.meta).foregroundStyle(palette.textSecondary).padding(6) }
+                    if rows.isEmpty { Text("No matches.").emptyLine().padding(6) }
                 }
             }.frame(maxHeight: 320)
         }

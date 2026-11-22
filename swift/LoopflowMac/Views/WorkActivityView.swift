@@ -83,11 +83,8 @@ struct WorkActivityView: View {
             }
             .accessibilityIdentifier("loopflow-activity-list")
         } else {
-            ContentUnavailableView(
-                "No Activity in this window",
-                systemImage: "clock.arrow.circlepath",
-                description: Text("Work creation, Runs, PRs, and Steers will appear here.")
-            )
+            EmptyState(title: "No activity in this window",
+                       sentence: "Work creation, runs, PRs and steers appear here.")
             .accessibilityIdentifier("loopflow-activity-empty")
         }
     }

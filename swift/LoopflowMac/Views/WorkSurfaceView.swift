@@ -212,7 +212,7 @@ struct WorkSurfaceView: View {
                     }
                     Group {
                         if task.task.description.isEmpty {
-                            Text("No description recorded.").foregroundStyle(palette.textSecondary)
+                            Text("No description recorded.").emptyLine()
                         } else {
                             MarkdownBlocks(source: task.task.description).equatable()
                         }

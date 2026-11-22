@@ -232,9 +232,9 @@ Desktop ramp (`Typography` in `swift/Loopflow/Design/DesignSystem.swift`):
 
 | Step | Face | Size | Use |
 |------|------|------|-----|
-| `display` | Old Standard 400 | 34 | Wave page title (`.serif(.display)`) |
-| `title` | Old Standard 400 | 26 | Task title in the Brief (`.serif(.title)`) |
-| `lede` | Atkinson 600 | 17 | Wave objective, a document's first heading |
+| `display` | Old Standard 400 | 34 | Wave page title, "What do you want?" in New Task (`.serif(.display)`) |
+| `title` | Old Standard 400 | 26 | Task title in the Brief, the title of an empty or failed pane (`.serif(.title)`) |
+| `lede` | Atkinson 600 | 17 | Wave objective, a document's first heading, the request you type in New Task |
 | `text` | Atkinson 400 | 13 | Everything else |
 | `textStrong` | Atkinson 600 | 13 | Selected row titles, Session names |
 | `meta` | Atkinson 400 | 11 | Meta, ranks |
@@ -247,8 +247,11 @@ turns off common ligatures with it. No step takes a size.
 iPhone has no ramp of its own yet; `MobileType` keeps 12 to 24 in these faces.
 
 Components, in `swift/LoopflowMac/Design/`: `TaskRow`, `StatusMark`,
-`WorkflowLine`, `LoopflowButtonStyle` (`.neutral`, `.accent`, `.destructive`)
-and `TitleBar`. The workflow line's steps, running step and sentence come from
+`WorkflowLine`, `LoopflowButtonStyle` (`.neutral`, `.accent`, `.destructive`),
+`TitleBar` and `EmptyState`. `EmptyState` is every pane with nothing to show
+or a failed read; a list with nothing in it is one sentence (`.emptyLine()`),
+and a failure beside content that stays is a `FailureLine`. A source scan in
+`TypographyDisciplineTests` fails on `ContentUnavailableView` in the Mac app. The workflow line's steps, running step and sentence come from
 Rust (`TaskGraph.steps`, `current_step`, `sentence`), so `lf task status`
 prints the same sentence. Before a Task stands on a Graph, the line draws the
 catalog's `workflow` (`lf graph list --json`): the same steps, and where you

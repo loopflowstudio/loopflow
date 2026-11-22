@@ -157,11 +157,10 @@ struct RoadmapView: View {
     @ViewBuilder
     private var nowContent: some View {
         if nowSectionsList.isEmpty {
-            ContentUnavailableView(
-                "Nothing needs action",
-                systemImage: "checkmark.circle",
-                description: Text("No live or stopped work across these Waves. Switch to Roadmap for the full plan.")
-            )
+            EmptyState(title: "Nothing needs action", sentence: "No live or stopped work across these Waves.") {
+                Button("Show roadmap") { lens = .roadmap }
+                    .accessibilityIdentifier("work-show-roadmap")
+            }
         } else {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: Spacing.lg) {
@@ -273,7 +272,7 @@ private struct RoadmapWaveCard: View {
             case .unavailable(let reason):
                 Label(reason, systemImage: "exclamationmark.triangle").foregroundStyle(palette.warning)
             case .available(let tasks, let truncated):
-                if tasks.isEmpty { Text("No Tasks in this Project.").foregroundStyle(palette.textSecondary) }
+                if tasks.isEmpty { Text("No Tasks in this Project.").emptyLine() }
                 ForEach(tasks) { task in
                     RoadmapTaskRow(task: task, onSelect: { onOpenTask(task.id) },
                         onAction: { action in onTaskAction(task, action) }, onOpenWorktree: onOpenWorktree)

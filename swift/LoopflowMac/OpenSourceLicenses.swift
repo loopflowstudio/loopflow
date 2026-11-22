@@ -48,8 +48,8 @@ struct OpenSourceLicensesView: View {
             if let text = try? OpenSourceLicenses.text(in: OpenSourceLicenses.resourceBundle) {
                 LicenseTextView(text: text)
             } else {
-                ContentUnavailableView("Licenses could not be loaded", systemImage: "doc.text",
-                                       description: Text("This app is missing its bundled license notices. Reinstall Loopflow to restore them."))
+                EmptyState(title: "Licenses could not be loaded",
+                           sentence: "This app is missing its bundled license notices. Reinstall Loopflow to restore them.")
             }
         }
         .frame(minWidth: 600, minHeight: 400)

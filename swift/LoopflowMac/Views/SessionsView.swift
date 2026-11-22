@@ -1437,7 +1437,7 @@ struct SessionsView: View {
                         WorkNavigator(model: model, onOpenSession: { _ in })
                     }
                     if let error = workspaces.machineError ?? repositoryError {
-                        ContentUnavailableView("Workspace unavailable", systemImage: "folder", description: Text(error))
+                        RepositoryDidNotOpen(error: error) { Task { await readMachine() } }
                             .task(id: taskPage) {
                                 if let request = taskPage { model.finishTaskPage(request, error: error) }
                             }
@@ -1447,15 +1447,20 @@ struct SessionsView: View {
                 }
             }
         }
-        .task {
-            await workspaces.refreshMachine(query: query)
-            if repository == nil {
-                do { resolvedRepository = try await query.repositoryIdentity(cwd: repoPath).id }
-                catch { repositoryError = error.localizedDescription }
-            }
-            if let home = workspaces.localMachineId, workspaces.machineError == nil { model.confirmMachine(home) }
-        }
+        .task { await readMachine() }
         .answeringLostLines(model)
+    }
+
+    /// The Machine and repository this window stands on; Retry reads them again.
+    private func readMachine() async {
+        await workspaces.refreshMachine(query: query)
+        if repository == nil {
+            do {
+                resolvedRepository = try await query.repositoryIdentity(cwd: repoPath).id
+                repositoryError = nil
+            } catch { repositoryError = error.localizedDescription }
+        }
+        if let home = workspaces.localMachineId, workspaces.machineError == nil { model.confirmMachine(home) }
     }
 }
 
@@ -1781,11 +1786,10 @@ struct SessionsContentView: View {
             .equatable()
             .overlay(alignment: .top) {
                 if let error = entry.conversationError {
-                    HStack {
-                        Text(error).textSelection(.enabled)
+                    FailureLine(what: "The conversation did not open.", machine: error) {
                         Button("Retry") { Task { await model.openConversation(in: entry, store: store) } }
-                    }.foregroundStyle(theme.palette.text)
-                        .padding(8).background(theme.terminal.background.color)
+                            .buttonStyle(LoopflowButtonStyle())
+                    }.padding(Spacing.sm).background(theme.terminal.background.color)
                 }
             }
     }

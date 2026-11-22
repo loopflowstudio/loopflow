@@ -199,7 +199,7 @@ high as `agents`.
 | Changed file paths | `--diff files` | `context: {diff_files: true}` |
 | Raw diff reference | `--diff patch` | `context: {diff: true}` |
 | Exclude from LF context | — | `context: {exclude: ["*.test.ts", dist]}` |
-| Hide from a Task's Diff in Desktop | — | `diff_hidden: ["scratch/**"]` (adds across layers; `[]` clears) |
+| Hide from a Task's Diff in Desktop | — | `diff_hidden: [vendor/]` (path substrings; adds across layers, `[]` clears) |
 | Headings of a Task's Diff in Desktop | — | `diff_groups` (replaces as a unit) |
 | Clipboard | `-c, --clipboard` | `context: {paste: true}` |
 | Claude Chrome tool | `--chrome on` / `--chrome off` | `chrome: true` / `false` |

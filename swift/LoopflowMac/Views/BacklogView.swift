@@ -273,14 +273,14 @@ struct BacklogList {
 
     /// The status word a row shows: a started Task's, and "Blocked" or "Waiting"
     /// on one that has not started. Most rows have never run and show none.
-    static func word(_ task: RoadmapTask) -> TaskRowStatus? {
-        let standing = TaskRowStatus(task: task, status: .unknown)
+    static func status(_ task: RoadmapTask) -> TaskRowStatus? {
+        let standing = TaskRowStatus(task: task)
         return !task.awaitsStart || standing.source == .condition ? standing : nil
     }
 
     /// "Idle, at demo, PR #12": the word the Task's row shows everywhere, then where it is.
     static func standing(_ task: RoadmapTask) -> String? {
-        guard let word = word(task)?.word else { return nil }
+        guard let word = status(task)?.word else { return nil }
         return ([word] + position(task)).joined(separator: ", ")
     }
 
@@ -772,7 +772,7 @@ struct BacklogView: View {
                         let isOpen = list.opened?.id == task.id
                         VStack(alignment: .leading, spacing: 0) {
                             row(task, list)
-                            if let reason = TaskRowStatus(task: task, status: .unknown).line {
+                            if let reason = TaskRowStatus(task: task).line {
                                 BacklogUnderTitle(identifier: task.task.identifier) {
                                     Text(verbatim: reason).font(Typography.text).foregroundStyle(palette.textSecondary)
                                         .lineLimit(2).frame(maxWidth: .infinity, alignment: .leading)
@@ -833,7 +833,7 @@ struct BacklogView: View {
                 if list.state.editing == task.id {
                     Text("draft").font(Typography.meta).foregroundStyle(palette.accentInk)
                 }
-                if let standing = BacklogList.word(task), let word = standing.word {
+                if let standing = BacklogList.status(task), let word = standing.word {
                     Text("\(Text(verbatim: word).foregroundStyle(standing.tone?.ink(in: palette) ?? palette.textSecondary))\(BacklogList.position(task).map { ", \($0)" }.joined())")
                         .font(Typography.meta).foregroundStyle(palette.textSecondary).lineLimit(1)
                         .help(Text(verbatim: standing.detail ?? word))

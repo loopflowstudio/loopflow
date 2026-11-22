@@ -149,8 +149,9 @@ from a `RoadmapTask?` and a `SessionProgramStatus`, in this order:
 
 The line is the program's ask when it has one, else `condition.reason` when
 the condition is not clear, which is the rule the Brief already applies
-(`TaskBriefView.swift:128`). A screen with no Session readings passes
-`.unknown` and gets rules 3 and 4.
+(`TaskBriefView.swift:128`). A screen with no Session readings writes
+`TaskRowStatus(task:)` and gets rules 3 and 4. A status needs a Task: a row
+named before planning answers shows its program's report or nothing.
 
 `TaskRow` draws a `TaskRowStatus` and stops choosing. It gains an initializer
 from a `RoadmapTask`, for hosts that hold one; the sidebar keeps
@@ -236,7 +237,7 @@ person looked at it.
 - The Brief's lead (`TaskBrief.state`, `TaskBriefView.swift:40`) prints the
   runtime status word, so a Task parked at demo reads "Waiting" on its row
   and page and "Active, at demo. ready." in its Brief. The lead takes
-  `TaskRowStatus(task:status: .unknown).word`, the word `TaskBrief.need`
+  `TaskRowStatus(task:).word`, the word `TaskBrief.need`
   already uses: "Waiting, at demo. ready." `state` loses its `runtime`
   parameter. Choice made for review: the Brief ignores the program's report,
   as its second line does, so it describes the Task and not a Session.
@@ -246,7 +247,7 @@ person looked at it.
   the activity pane's summary for a selected Task
   (`WorkActivityView.swift:161`) print `condition.reason` whatever the
   condition, so an unstarted Task shows "ready" there and nowhere else. Both
-  print `TaskRowStatus(task:status: .unknown).line` and draw nothing when it
+  print `TaskRowStatus(task:).line` and draw nothing when it
   is nil. `taskConditionAccessibilityLabel` (`NowProjection.swift`) speaks
   `need`'s word and that line, and only the ID and name when there is no
   need; it moves beside its one caller if `TaskRowStatus` cannot be reached
@@ -745,4 +746,5 @@ or `lf desktop` reads unless its view is deleted.
 | `scripts/test_desktop.sh --filter 'NowProjectionTests\|TaskStandingTests\|TaskBriefTests\|RoadmapViewTests\|TaskConceptTests\|TaskRowTests\|WorkNavigationTests'` | passed after slice 6 (89 tests) | build; CI runs the rest |
 | `scripts/test_desktop.sh --filter 'BacklogViewTests\|WorkCacheTests\|DashboardWorkspaceTests\|WorkPaletteTests\|DesignDisciplineTests\|WorkCLISubscriptionTests'` | passed after slice 6 (65 tests) | build; CI runs the rest |
 | `scripts/test_desktop.sh --filter 'NowProjectionTests\|TaskStandingTests\|TaskBriefTests\|RoadmapViewTests\|TaskConceptTests\|TaskRowTests\|WorkNavigationTests\|DesignDisciplineTests\|TaskActionsTests\|TaskStatusTests'` | passed on the merge with main, 02be411be1 (101 tests); the grep above prints nothing there | realign; CI runs the rest |
+| `scripts/test_desktop.sh --filter 'TaskStandingTests\|TaskRowTests\|BacklogViewTests\|TaskBriefTests\|WorkNavigationTests\|WorkModelTests\|NowProjectionTests\|DesignDisciplineTests'` | passed after compress made `TaskRowStatus(task:program:)` take a Task and dropped `Source.none` (138 tests) | compress; CI runs the rest |
 | Dev app after slice 6 | not run: an opened, never-run Task reading "Idle" off the Now list, "Run" on a parked Task's Portfolio row, and the Brief's "Waiting, at demo." | qa |

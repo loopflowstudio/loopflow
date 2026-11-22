@@ -1,4 +1,4 @@
-at: 02be411be1f8b02c3eadabfcc24514a7b609411c
+at: 5d880e4bd6db851d203caf5f77c0eb7a687c028a
 first:
   - path: DESIGN.md
     why: the rules, and the Desktop pointers this change removes
@@ -12,7 +12,7 @@ first:
   - path: swift/Loopflow/Models/NowProjection.swift
     why: the Now list reads the same predicate
   - path: swift/LoopflowMac/SessionProgramStatus.swift
-    why: where the Mac hands the row a Task's planning and its program's report
+    why: the Mac adds a program's report; the sidebar row may have no Task yet
   - path: swift/LoopflowTests/DesignDisciplineTests.swift
     why: the scale as a test; explains the mechanical edits
   - path: swift/LoopflowTests/TaskStandingFixtures.swift

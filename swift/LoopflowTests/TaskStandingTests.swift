@@ -10,7 +10,7 @@ struct TaskStandingTests {
         ("blocked", "Blocked"), ("waiting", "Waiting"),
     ])
     func conditionNeedsSomeone(state: String, word: String) throws {
-        let standing = TaskRowStatus(task: try roadmapTask(condition: state, reason: "merge the PR on GitHub"), status: .unknown)
+        let standing = TaskRowStatus(task: try roadmapTask(condition: state, reason: "merge the PR on GitHub"))
         #expect(standing.word == word)
         #expect(standing.tone == .warning)
         #expect(standing.line == "merge the PR on GitHub")
@@ -20,25 +20,25 @@ struct TaskStandingTests {
           arguments: [("unstarted", "Unstarted"), ("idle", "Idle")])
     func awaitingItsFirstRunIsNotWaiting(lifecycle: String, word: String) throws {
         let standing = TaskRowStatus(task: try roadmapTask(condition: "waiting", reason: "ready", lifecycle: lifecycle,
-                                                          recommended: "run", graphHasRun: false), status: .unknown)
+                                                          recommended: "run", graphHasRun: false))
         #expect(standing.word == word)
         #expect(standing.tone == nil)
         #expect(standing.line == nil)
         let blocked = TaskRowStatus(task: try roadmapTask(condition: "blocked", reason: "the next launch is misconfigured",
-                                                         lifecycle: lifecycle, graphHasRun: false), status: .unknown)
+                                                         lifecycle: lifecycle, graphHasRun: false))
         #expect(blocked.word == "Blocked" && blocked.line == "the next launch is misconfigured")
     }
 
     @Test("A finished Task waits for nobody, whatever its condition says")
     func finishedIsNotWaiting() throws {
-        let standing = TaskRowStatus(task: try roadmapTask(condition: "waiting", reason: "ready", lifecycle: "abandoned"), status: .unknown)
+        let standing = TaskRowStatus(task: try roadmapTask(condition: "waiting", reason: "ready", lifecycle: "abandoned"))
         #expect(standing.word == "Abandoned")
         #expect(standing.line == nil)
     }
 
     @Test("A clear Task shows its lifecycle word and no line")
     func clearShowsLifecycle() throws {
-        let standing = TaskRowStatus(task: try roadmapTask(condition: "clear", reason: "ready", lifecycle: "idle"), status: .unknown)
+        let standing = TaskRowStatus(task: try roadmapTask(condition: "clear", reason: "ready", lifecycle: "idle"))
         #expect(standing.word == "Idle")
         #expect(standing.tone == nil)
         #expect(standing.line == nil)
@@ -46,15 +46,14 @@ struct TaskStandingTests {
 
     @Test("A condition that could not be read adds no word, and still says why")
     func unknownAddsNoWord() throws {
-        let standing = TaskRowStatus(task: try roadmapTask(condition: "unknown", reason: "checkout unreadable", lifecycle: "active"),
-                                    status: .unknown)
+        let standing = TaskRowStatus(task: try roadmapTask(condition: "unknown", reason: "checkout unreadable", lifecycle: "active"))
         #expect(standing.word == "Active")
         #expect(standing.line == "checkout unreadable")
     }
 
     @Test("A finished Task with no completion date says the date is unavailable")
     func undatedDone() throws {
-        let standing = TaskRowStatus(task: try roadmapTask(condition: "clear", reason: "complete", lifecycle: "done"), status: .unknown)
+        let standing = TaskRowStatus(task: try roadmapTask(condition: "clear", reason: "complete", lifecycle: "done"))
         #expect(standing.word == "Done, date unavailable")
     }
 
@@ -78,13 +77,6 @@ struct TaskStandingTests {
         #expect(standing.word == nil)
         #expect(standing.detail?.contains("Offline") == true)
         #expect(standing.line == "setup failed")
-    }
-
-    @Test("A row named before planning answers says nothing about where it stands")
-    func noTask() {
-        let standing = TaskRowStatus(task: nil, status: .unknown)
-        #expect(standing.word == nil)
-        #expect(standing.line == nil)
     }
 }
 #endif

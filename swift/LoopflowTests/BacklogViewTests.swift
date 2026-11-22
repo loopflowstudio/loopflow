@@ -115,7 +115,7 @@ struct BacklogViewTests {
         model.applyFixture(roadmap: .available(try snapshot()), waves: .available([]), workActivity: .loading, repos: [])
         // An unstarted Task that is blocked still says so, with the reason on its own line.
         #expect(BacklogList.standing(stuck) == "Blocked")
-        #expect(TaskRowStatus(task: stuck, status: .unknown).line == "merge the PR on GitHub")
+        #expect(TaskRowStatus(task: stuck).line == "merge the PR on GitHub")
         // The bar begins with what it acts on.
         let none = BacklogToolbar(model: model, view: view, list: list(try tasks()), perform: { _ in })
         #expect(try none.inspect().find(viewWithAccessibilityIdentifier: "backlog-selected").text().string() == "Nothing selected")

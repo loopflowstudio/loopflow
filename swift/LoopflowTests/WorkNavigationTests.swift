@@ -145,7 +145,7 @@ struct WorkNavigationTests {
     func headingAgreesWithWorkingTasks() throws {
         let tasks = try roadmap().tasks.items
         func word(_ id: String) throws -> String? {
-            TaskRowStatus(task: try #require(tasks.first { $0.id == id }), status: .unknown).word
+            TaskRowStatus(task: try #require(tasks.first { $0.id == id })).word
         }
         #expect(tasks.first { $0.id == "issue-now" }?.task.state == "unstarted")
         #expect(try word("issue-now") == "Moving")

@@ -158,7 +158,7 @@ struct WorkActivityView: View {
             case .project:
                 model.waveForProject(projectId: work.id)?.wave.goal
             case .task:
-                TaskRowStatus(task: model.task(id: work.id)?.task, status: .unknown).line
+                model.task(id: work.id).flatMap { TaskRowStatus(task: $0.task).line }
             }
         }
     }

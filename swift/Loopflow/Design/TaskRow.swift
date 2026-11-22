@@ -4,7 +4,7 @@ import SwiftUI
 /// `ProgramStatusState.label` for what the conversation reports and
 /// `TaskState.label` for the lifecycle.
 public struct TaskRowStatus: Equatable, Sendable {
-    public enum Source: Sendable { case program, condition, lifecycle, none }
+    public enum Source: Sendable { case program, condition, lifecycle }
 
     public let source: Source
     /// Nil draws an info mark that carries `detail`.
@@ -46,25 +46,21 @@ public struct TaskRowStatus: Equatable, Sendable {
 }
 
 extension TaskRowStatus {
-    /// Combine a program reading with planning wherever both are available.
-    public init(task: RoadmapTask?, program: TaskRowStatus?) {
-        let need = task?.need
+    /// Where a Task stands: what its program reports when one does, else what
+    /// it needs, else its lifecycle. Whatever the word, a Task that needs
+    /// someone keeps the reason as its line.
+    public init(task: RoadmapTask, program: TaskRowStatus? = nil) {
+        let need = task.need
         if let program {
             self = program
-        } else if let task, let need, need != .unknown {
+        } else if let need, need != .unknown {
             self.init(source: .condition, word: need.title, tone: .warning, detail: task.condition.reason, ask: nil)
-        } else if let task {
-            if task.lifecycle == .done && task.task.completedAt == nil {
-                self.init(source: .lifecycle, word: "Done, date unavailable", tone: nil, detail: nil, ask: nil)
-            } else {
-                self = .lifecycle(task.lifecycle)
-            }
+        } else if task.lifecycle == .done && task.task.completedAt == nil {
+            self.init(source: .lifecycle, word: "Done, date unavailable", tone: nil, detail: nil, ask: nil)
         } else {
-            self.init(source: .none, word: nil, tone: nil, detail: nil, ask: nil)
+            self = .lifecycle(task.lifecycle)
         }
-        if need != nil, let reason = task?.condition.reason, !reason.isEmpty {
-            self.reason = reason
-        }
+        if need != nil, !task.condition.reason.isEmpty { reason = task.condition.reason }
     }
 }
 
@@ -168,10 +164,8 @@ public struct TaskRow<Trailing: View>: View {
                     .help(Text(verbatim: detail))
                     .accessibilityHint(Text(verbatim: detail))
                     .accessibilityIdentifier(status.source == .condition ? "work-task-condition-\(id)" : "work-program-status-\(id)")
-            case .none:
-                EmptyView()
             }
-        } else if status.detail != nil {
+        } else {
             Image(systemName: "info.circle")
                 .help(Text(verbatim: detail))
                 .accessibilityLabel(Text(verbatim: detail))

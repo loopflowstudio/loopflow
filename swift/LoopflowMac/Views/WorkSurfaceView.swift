@@ -109,7 +109,7 @@ struct WorkSurfaceView: View {
                         }
                     }
                     HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
-                        if let line = TaskRowStatus(task: task, status: .unknown).line {
+                        if let line = TaskRowStatus(task: task).line {
                             Text(line)
                                 .font(Typography.text)
                                 .foregroundStyle(palette.textSecondary)

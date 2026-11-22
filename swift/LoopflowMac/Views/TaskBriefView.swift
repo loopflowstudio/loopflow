@@ -39,7 +39,7 @@ enum TaskBrief {
     /// program reporting, the top-level step the workflow bar makes strong, the
     /// next move's reason in one sentence.
     static func state(_ task: RoadmapTask, graph: TaskGraph?) -> (lead: String, reason: String) {
-        let word = TaskRowStatus(task: task, status: .unknown).word ?? ""
+        let word = TaskRowStatus(task: task).word ?? ""
         let step = graph.flatMap { graph in graph.currentStep.map { graph.steps[$0].name } }
         let lead = step.map { "\(word), at \($0)." } ?? "\(word)."
         let why = task.nextMove.reason.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -50,7 +50,7 @@ enum TaskBrief {
     /// with no program reporting: "Blocked: reason". Nil when the state line
     /// above already ends with that reason.
     static func need(_ task: RoadmapTask) -> String? {
-        let standing = TaskRowStatus(task: task, status: .unknown)
+        let standing = TaskRowStatus(task: task)
         func bare(_ text: String) -> String {
             let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
             return trimmed.hasSuffix(".") ? String(trimmed.dropLast()) : trimmed

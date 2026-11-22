@@ -66,8 +66,9 @@ look needs a display, so it belongs to qa and review, not to build.
 
 ## What the code is today
 
-Counts are from `swift/LoopflowMac` at the base commit; slice 1 changed
-only the rows.
+Counts are from `swift/LoopflowMac` at the base commit unless a slice is
+named. After slice 2 the acceptance grep prints 296 lines in 35 files;
+`BacklogView.swift` and `Design/WorkStyle.swift` print none.
 
 - Font sizes are already on the ramp: `TypographyDisciplineTests` holds it.
   One literal remains, the AppKit field at `WorkPalette.swift:452`
@@ -76,7 +77,6 @@ only the rows.
   Off-scale values in use: 1, 3, 5, 6, 7, 9, 10, 14, 15, 17, 18, 22, 28, 30,
   36, 72, 96. Heaviest files: `TaskChangesView` 22, `WorkNavigator` 18,
   `ReviewStreamView` 18, `TaskFilesView` 17, `NewTaskSheet` 14.
-- One literal radius: the selection edge in `Design/WorkStyle.swift:171`.
 - 29 uses of system button styles (`.borderedProminent`, `.bordered`,
   `.controlSize`) and 11 of `.secondary` or a system color in place of a role.
 - 69 uses of `Typography.mono`; each needs reading against "could a person
@@ -94,12 +94,11 @@ only the rows.
   remains at `TaskFilesView.swift:368`.
 - Task rows and the seven ways of saying where a Task stands are gone since
   slice 1: one `TaskRow` drawing one `TaskStanding`, and a click opens the
-  Task on every Portfolio list. The backlog row still builds its own standing
-  word from `TaskStanding` since slice 2, and its click selects for the
+  Task on every Portfolio list. The backlog row is its own view; since
+  slice 2 its word comes from `TaskStanding`, and its click selects for the
   action bar.
-- A Project's key results are drawn twice: circles in `WaveProjectView`,
-  `Label`s with a check or a cross in the backlog's objective
-  (`BacklogView.swift:723`).
+- A Project's key results are drawn once, by `WaveProjectView`, since
+  slice 2.
 - New Wave exists twice: `CreateWaveSheet` (`WavesView.swift:582`, with a
   repository picker) and `NewWaveRow`'s popover form
   (`WorkNavigator.swift:466`, repository implied). Both end in
@@ -453,13 +452,24 @@ or `lf desktop` reads unless its view is deleted.
    - The test's failures are the list for slices 3 and 4: 301 lines, all
      outside these three files, `swift/Loopflow/Services/Notice.swift`
      among them.
-3. **The rest of the dashboard and the Portfolio, and New Wave.** The tile's
-   sentence, the pager and the dashboard header; cards flattened, the
-   contract-issue notice, the one form.
+3. **The rest of the dashboard and the Portfolio, and New Wave.** Next.
+   `DashboardView.swift` and `DashboardSlotGrid.swift`: the serif header, the
+   tile's workflow as `WorkflowLine`'s sentence, the pager in `text`, the
+   editor's buttons. `WaveDetailPane.swift` and `RoadmapView.swift`: the
+   serif name, `RoadmapWaveCard` without border or fill, the sentence-case
+   metric header, the contract-issue notice with Copy, "Project history" as
+   a button. `CreateWaveSheet` (`WavesView.swift`) as the one form, shown by
+   `NewWaveRow` (`WorkNavigator.swift`) in its popover. Each file touched
+   leaves the discipline test's list (7, 4, 6, 1 and 28 lines today), by the
+   snap table as it stands. Done when `DashboardWorkspaceTests`,
+   `RoadmapViewTests`, `CreateWaveSheetTests` and `WorkflowLineTests` pass
+   and those files print nothing under the grep.
 4. **Choose Theme, then the sweep.** The sample, then every remaining file
    to named steps, one button, roles, mono and glyphs, until the test and the
-   grep are clean. DESIGN.md's pointers and "Tokens today" change last, from
-   what the code then is.
+   grep are clean. The test also reads `swift/Loopflow`, which the grep does
+   not: `Services/Notice.swift` holds four literal paddings and iPhone draws
+   it too (question 21). DESIGN.md's pointers and "Tokens today" change
+   last, from what the code then is.
 
 ## Outside this change
 

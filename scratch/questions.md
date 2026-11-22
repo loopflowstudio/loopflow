@@ -63,3 +63,12 @@ Each was decided so the work could continue; `scratch/plan.md` has the detail.
     you"). Use another separator there?
 20. **Abandon… is a neutral button**, as the prototype draws it, not
     `.destructive`; a dialog still confirms.
+21. **`Notice.swift` is shared with iPhone.** `DesignDisciplineTests` reads
+    `swift/Loopflow`, so its four paddings (14, 10, 8, 18) snap in slice 4
+    and the iPhone notice moves by 2 pt with the Mac's. Exempt the file
+    instead, since iPhone is outside this change?
+22. **Count pills stay.** `WaveRow.swift:112` and `RoadmapView.swift:370`
+    draw a count in a filled capsule, and `TaskChangesView.swift:240`,
+    `TelemetryDashboardView.swift:216` and `NewTaskSheet.swift:85` use one
+    too. The backlog's accent capsule went; no rule or test names the rest.
+    Make them plain counts in the sweep?

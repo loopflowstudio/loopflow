@@ -389,7 +389,7 @@ struct GraphProcessLog: View {
     var execution: TaskLocationObservation? = nil
     var query: RegistryQuery = RegistryQueryLocal.shared
     var openFiles: (() -> Void)? = nil
-    /// The Task page prints the sentence in its workflow header above.
+    /// The Task page prints the sentence in its workflow header above, so its log has no header row.
     var showsPosition = true
     @State private var captured: WorkFrame.TaskPart?
     @State private var error: String?
@@ -408,17 +408,19 @@ struct GraphProcessLog: View {
         let readError = readsWindow ? reading?.failure : error
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                HStack {
-                    if showsPosition, let work {
-                        Text(work.graph?.sentence ?? (readsWindow ? task?.execution : captured?.row?.execution)?.reason
-                             ?? "No workflow selected")
-                            .accessibilityIdentifier("task-run-position")
-                    } else if showsPosition {
-                        Text(task?.setupPosition ?? "Reading workflow…")
-                    }
-                    Spacer()
-                    if let openFiles { Button("Files", action: openFiles) }
-                }.padding(.vertical, 8)
+                if showsPosition {
+                    HStack {
+                        if let work {
+                            Text(work.graph?.sentence ?? (readsWindow ? task?.execution : captured?.row?.execution)?.reason
+                                 ?? "No workflow selected")
+                                .accessibilityIdentifier("task-run-position")
+                        } else {
+                            Text(task?.setupPosition ?? "Reading workflow…")
+                        }
+                        Spacer()
+                        if let openFiles { Button("Files", action: openFiles) }
+                    }.padding(.vertical, 8)
+                }
                 if !readsWindow {
                     Button("Refresh") { refresh += 1 }
                 }

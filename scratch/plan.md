@@ -1,7 +1,8 @@
 # e166ff: Loopflow for iPhone uses the shared design tokens and components
 
-Builds on main at 0fa6a4e202 (#2016 merged; `DESIGN.md` and
-`design/prototypes/` are here). Reference: `DESIGN.md` "The language" and
+Builds on main at fd90d7e6ad, merged after slice 4; that merge touched no
+Swift and no `DESIGN.md` (#2016's `DESIGN.md` and `design/prototypes/` are
+here). Reference: `DESIGN.md` "The language" and
 "What we avoid"; `design/prototypes/desktop-more.html` (states, New Task) and
 `elements.html` (Task row, workflow line).
 
@@ -217,8 +218,8 @@ every row.
   adapter, `TaskWorkflowBar` calling the shared `runAction` and limiting
   the line itself. No visible change on the Mac; its tests are the check.
 - `swift/Loopflow/Services/Notice.swift` already uses `Typography.text`; on
-  the phone it grows from 13 to 17 with the ramp. Its three literal paddings
-  move to `Spacing`.
+  the phone it grows from 13 to 17 with the ramp. Its four literal paddings
+  are on `Spacing`, which moved the Mac's Notice by 2 pt on three sides.
 - `swift/LoopflowiOS/*` views; `swift/LoopflowiOS/README.md` (terminal size
   wording; the Task toolbar paragraph: Start or Run, Auto-Ship, the notice
   line; the workflow sentence); `swift/README.md` (the `--fixture`

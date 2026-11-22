@@ -18,7 +18,7 @@
 - `website/internal_pages.py` and the `/fonts`, `/colors`, `/design` routes are deleted; the site serves one design system.
 - `design/homepage-next/` moved to `design/prototypes/homepage-next/`, listed in `DESIGN.md`; `release/v0.15.3/NOTES.md` keeps the old path (shipped record).
 - `DESIGN.md § Work tracking` moved to `swift/README.md` before `## Code map`.
-- Website suite after the deletion: 73 passed; `ruff check website` clean. `documented_commands::` (DESIGN.md and swift/README.md edits, no command changes): gate runs it.
+- Website suite after the deletion and the dead-selector cut (`.btn-secondary`, `.btn-group`, `.page-hero`, `.next-steps*`): 73 passed; `ruff check website` clean. `documented_commands::` (DESIGN.md and swift/README.md edits, no command changes): gate runs it.
 
 ## Remains
 

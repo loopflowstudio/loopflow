@@ -283,7 +283,7 @@ Website (`:root`): `--burgundy #722f37` for headings; `--wine #9B1A4A` for the
 primary button; `--text #1a1a1a`, `--text-secondary #555555`, `--bg #ffffff`,
 `--border #e5e5e5`; `--paper-warm`, `--border-warm`, `--rule-strong`,
 `--track` and `--ok` for the warm cards; `--term-*` for the terminal block.
-The logo's cyan `#0ab3cc` is `--info`.
+The logo's cyan `#0ab3cc` lives only in the logo files.
 
 ### Space, shape, motion
 

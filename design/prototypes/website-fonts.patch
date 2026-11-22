@@ -34,7 +34,7 @@ index bc4442dfaf..3fcc6efec4 100644
 +.home-page h1 { letter-spacing: -.035em; line-height: 1.08; }
 +.home-page h2, .home-page .belief p { letter-spacing: -.025em; line-height: 1.14; }
 +.home-page h1, .home-page h2 { text-wrap: balance; }
-+.docs-nav-wordmark, .docs-content h1, .hero h1, .page-hero h1, .install-option h2 { letter-spacing: -.03em; }
++.docs-nav-wordmark, .docs-content h1, .hero h1, .install-option h2 { letter-spacing: -.03em; }
 +.appmock.duo h3, .home-page .split h3 { letter-spacing: -.02em; }
 +.appmock .waves h4 { font: 600 var(--t-text) var(--font-sans); }
 +.docs-deck { font-family: var(--font-sans); font-style: normal; }

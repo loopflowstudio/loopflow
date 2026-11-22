@@ -392,8 +392,13 @@ demo: not headless; qa or demo runs it.
    - Not seen: the line at 34 pt bar height and in the 540 pt sheet in the
      Dev app. Headless tests cover the content only; qa or demo looks.
    - `TaskWorkflowHeader` still says "feature · repository" and "No workflow
-     selected" (`TaskWorkView.swift:26`); slice 3's whose-default phrase
-     replaces both.
+     selected" (`TaskWorkView.swift:26`, `:418`), and
+     `WorkNavigationTests.swift:1013` rebuilds that phrase; slice 3's
+     whose-default phrase replaces all three.
+   - Checks: `cargo test -p loopflow-execution --lib graph::compiled::`
+     passed at 00360b36ba (10 tests). The Swift suites
+     (`WorkflowLineTests`, `NewTaskTests`, `WorkNavigationTests`) and
+     `dto_fixtures` have no recorded result; gate runs them.
 2. **The rest of the sheet. Next.** Ramp steps, the two menus, the accent
    Start, `Spacing` steps, the "Not filed." form, `StartingTaskView`;
    `WorkflowChooser` goes. Sheet view test: choosing another workflow changes

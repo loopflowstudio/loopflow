@@ -44,7 +44,10 @@ final class AppearanceStore {
     private(set) var effectiveTheme = ThemeDefinition.light
     private(set) var systemDark: Bool
     private(set) var diagnostics: [String] = []
+    /// What Choose Theme can fix: an unknown name, an unreadable theme file.
     var notice: String?
+    /// The server couldn't read or write `theme:`; choosing again sends the same request.
+    private(set) var readFailure: String?
     @ObservationIgnored private let location: ServerLocation
     private(set) var saving = false
     @ObservationIgnored private var reading = UUID()
@@ -119,8 +122,9 @@ final class AppearanceStore {
         var problems = library.problems
         let raw: String?
         do { raw = try await readChoice() }
-        catch { if reading == generation { notice = error.localizedDescription }; return }
+        catch { if reading == generation { readFailure = error.localizedDescription }; return }
         guard reading == generation else { return }
+        readFailure = nil
         fingerprint = currentFingerprint()
         switch selection(from: raw) {
         case let .success(choice): selection = choice
@@ -285,10 +289,11 @@ final class AppearanceStore {
         choice.mode = mode
         do {
             try await writeChoice(choice.configValue)
-            selection = choice
-            draft = nil
-            update(resolved(selection, in: library))
-        } catch { notice = error.localizedDescription }
+        } catch { readFailure = error.localizedDescription; return }
+        readFailure = nil
+        selection = choice
+        draft = nil
+        update(resolved(selection, in: library))
     }
 
     func apply() async {
@@ -306,8 +311,9 @@ final class AppearanceStore {
                     try FileManager.default.removeItem(at: url)
                 }
             }
-            try await writeChoice(draft.selection.configValue)
         } catch { notice = error.localizedDescription; return }
+        do { try await writeChoice(draft.selection.configValue) }
+        catch { readFailure = error.localizedDescription; return }
         selection = draft.selection
         self.draft = nil
         await reload()

@@ -44,7 +44,9 @@ struct ThemeChooser: View {
                     ForEach(appearance.draftErrors, id: \.self) { Text($0).foregroundStyle(palette.failure) }
                 }.font(Typography.meta).frame(maxWidth: .infinity, alignment: .leading)
             }
-            if let notice = appearance.notice { Text(notice).foregroundStyle(palette.failure).textSelection(.enabled) }
+            ForEach([appearance.readFailure, appearance.notice].compactMap { $0 }, id: \.self) {
+                Text($0).foregroundStyle(palette.failure).textSelection(.enabled)
+            }
             HStack {
                 if editing, appearance.selectedSource == .yours {
                     Button("Done Editing") { editing = false }

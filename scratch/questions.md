@@ -32,3 +32,6 @@
 - QA round 5: `config.theme` lost `path` without a protocol revision bump, so a branch client and a 0.16.0 server refuse each other's request (both say revision 9). Left as is: the repo adds and reshapes operations without bumps, the phone falls back quietly and Desktop recovers when the server matches. Passed over: bumping to revision 10 (every new client would refuse every old server), or Desktop naming "update the server" for this error.
 
 - Concept review round 5: a failed `config.theme` read gets its own banner value without Choose Theme…, and a request the server can't parse names both builds ("Update the older one.") in `ServerLink`. Overrides QA round 5's "left as is" for Desktop only. Passed over: a revision bump (nothing would branch on it without a compat path), naming `lf install` (wrong when the client is the older side). The phone stays quiet.
+
+- Implement round 6: a `config.yaml` that isn't valid YAML (`theme: [unclosed`) answers `config.theme` with no theme rather than an error, so Desktop shows the defaults with no notice. Not changed here; found while writing the read-failure test.
+- Implement round 6: the parse sentence is matched on the refusal's shape (`invalid`, `data.kind`, "<kind>: " prefix) because released servers send no other marker.

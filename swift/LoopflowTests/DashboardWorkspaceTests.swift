@@ -33,15 +33,7 @@ struct DashboardWorkspaceTests {
                               currentStep: 1, sentence: "You are next needed at demo.")
         // No program reporting, whatever the row's own line says: the sentence shows.
         #expect(DashboardTile.workflow(graph, status: .unknown, auto: false, setup: nil)?.sentence == "You are next needed at demo.")
-        let fixtures = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
-            .deletingLastPathComponent().appendingPathComponent("tests/fixtures/dto")
-        var wire = try #require(JSONSerialization.jsonObject(
-            with: Data(contentsOf: fixtures.appendingPathComponent("session.json"))) as? [String: Any])
-        let ask = ProgramStatusReport(state: .blocked, id: nil, kind: nil, progress: nil, app: nil, title: nil, msg: "Approve the plan?")
-        wire["program_status"] = try JSONSerialization.jsonObject(
-            with: JSONEncoder().encode(ProgramStatusRecords(seen: true, records: [ask])))
-        let session = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: wire))
-        let asking = SessionProgramStatus(sessions: [session], unavailable: nil)
+        let asking = try programStatus(reporting: .blocked, msg: "Approve the plan?")
         #expect(asking.ask == "Approve the plan?")
         #expect(DashboardTile.workflow(graph, status: asking, auto: false, setup: nil) == nil)
     }

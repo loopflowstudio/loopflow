@@ -17,23 +17,17 @@ public func taskConditionAccessibilityLabel(_ task: RoadmapTask) -> String {
         + "\(task.condition.reason). Next owner: \(task.nextMove.owner.rawValue)."
 }
 
-/// One flat NOW row: a Task lifted out of the tree, carrying its Wave and
-/// Project only as context, plus the group it landed in.
+/// One flat NOW row: a Task lifted out of the tree, carrying its Wave only as
+/// context.
 public struct NowRow: Identifiable, Sendable, Hashable {
     public let wave: WaveSnapshot?
     public let task: RoadmapTask
-    public let group: TaskConditionState
 
     public var id: String { task.id }
 
-    public init(
-        wave: WaveSnapshot?,
-        task: RoadmapTask,
-        group: TaskConditionState
-    ) {
+    public init(wave: WaveSnapshot?, task: RoadmapTask) {
         self.wave = wave
         self.task = task
-        self.group = group
     }
 }
 
@@ -50,15 +44,15 @@ public struct NowSection: Identifiable, Sendable, Hashable {
 }
 
 /// Flatten the roadmap into the NOW shape: every Task that needs someone
-/// across every visible Wave, bucketed by the word its row says, oldest-first within each bucket, with empty buckets
-/// dropped. Age uses the Work record's `updated_at` (RFC3339, so lexical order
+/// across every visible Wave, bucketed by the word its row says, oldest-first
+/// within each bucket, with empty buckets dropped. Age uses the Work record's `updated_at` (RFC3339, so lexical order
 /// is chronological); NOW rows always have runtime evidence.
 public func nowSections(from tasks: [RoadmapTask], waves: [WaveRoadmap]) -> [NowSection] {
     var rowsByGroup: [TaskConditionState: [NowRow]] = [:]
     for task in tasks {
         guard let group = task.need else { continue }
         let wave = waves.first { $0.wave.id == task.task.waveId }?.wave
-        rowsByGroup[group, default: []].append(NowRow(wave: wave, task: task, group: group))
+        rowsByGroup[group, default: []].append(NowRow(wave: wave, task: task))
     }
     return [TaskConditionState.blocked, .waiting, .unknown].compactMap { group in
         guard let rows = rowsByGroup[group], !rows.isEmpty else { return nil }

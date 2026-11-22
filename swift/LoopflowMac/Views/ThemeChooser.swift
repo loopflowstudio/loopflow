@@ -65,7 +65,7 @@ struct ThemeChooser: View {
                         ForEach(appearance.draftErrors, id: \.self) { Text($0).foregroundStyle(palette.failure) }
                     }.font(Typography.meta).frame(maxWidth: .infinity, alignment: .leading)
                 }
-                ThemeSample(theme: appearance.selectedTheme).frame(width: ThemeSample.width)
+                ThemeSample(theme: appearance.selectedTheme)
             }
             if let refusal = appearance.refusal {
                 Text(refusal).foregroundStyle(palette.failure).accessibilityIdentifier("appearance-import-refusal")
@@ -186,7 +186,6 @@ struct ThemeChooser: View {
 /// terminal line. It reads the theme it is given, not the environment, so it
 /// shows the theme under the pointer's last click before Apply.
 struct ThemeSample: View {
-    static let width: CGFloat = 280
     let theme: ThemeDefinition
 
     var body: some View {
@@ -225,6 +224,8 @@ struct ThemeSample: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(theme.terminal.background.color)
         }
+        // Wide enough for the five status words on one line.
+        .frame(width: 280)
         .clipShape(RoundedRectangle(cornerRadius: CornerRadius.row))
         .overlay(RoundedRectangle(cornerRadius: CornerRadius.row).strokeBorder(palette.border, lineWidth: 1))
         .accessibilityElement(children: .contain)

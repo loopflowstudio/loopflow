@@ -1,4 +1,4 @@
-at: 0eafab16660ce05125e6ced5091969e90437413c
+at: 800708a5ef3becdbfb711bdd340653919632081f
 first:
   - path: DESIGN.md
     why: the rules, and the Desktop pointers this change removes
@@ -15,6 +15,8 @@ first:
     why: the row every list draws it with
   - path: swift/LoopflowTests/DesignDisciplineTests.swift
     why: the scale as a test; explains the mechanical edits
+  - path: swift/LoopflowTests/TaskStandingFixtures.swift
+    why: the Task and program report the standing tests share
   - path: swift/LoopflowMac/Views/BacklogView.swift
     why: the backlog rebuilt to the prototype
   - path: swift/LoopflowMac/Views/RoadmapView.swift

@@ -22,19 +22,8 @@ struct NowProjectionTests {
 
     @Test("A Task that waits only to be started is in no group; one waiting on someone is")
     func awaitingStartIsNotANowRow() throws {
-        let wire = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: fixture("roadmap_snapshot.json"))) as? [String: Any])
-        let items = try #require((wire["tasks"] as? [String: Any])?["items"] as? [[String: Any]])
         func task(lifecycle: String, recommended: String) throws -> RoadmapTask {
-            var row = try #require(items.first)
-            var condition = try #require(row["condition"] as? [String: Any])
-            condition["state"] = "waiting"
-            condition["reason"] = "ready"
-            row["condition"] = condition
-            var actions = try #require(row["actions"] as? [String: Any])
-            actions["recommended"] = recommended
-            row["actions"] = actions
-            row["lifecycle"] = lifecycle
-            return try JSONDecoder().decode(RoadmapTask.self, from: JSONSerialization.data(withJSONObject: row))
+            try roadmapTask(condition: "waiting", reason: "ready", lifecycle: lifecycle, recommended: recommended)
         }
         let unstarted = try task(lifecycle: "unstarted", recommended: "run")
         let parked = try task(lifecycle: "idle", recommended: "run")
@@ -83,16 +72,11 @@ struct NowProjectionTests {
 
     // MARK: - Fixtures
 
-    private func fixture(_ name: String, sourceFile: String = #filePath) -> URL {
-        URL(fileURLWithPath: sourceFile).deletingLastPathComponent().deletingLastPathComponent()
-            .deletingLastPathComponent().appendingPathComponent("tests/fixtures/dto/" + name)
-    }
-
     private func loadRoadmapFixture() throws -> RoadmapSnapshot {
-        try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(contentsOf: fixture("roadmap_snapshot.json")))
+        try JSONDecoder().decode(RoadmapSnapshot.self, from: loadFixtureData("roadmap_snapshot.json"))
     }
 
     private func loadConditionFixture() throws -> [String: RoadmapTask] {
-        try JSONDecoder().decode([String: RoadmapTask].self, from: Data(contentsOf: fixture("task_condition_states.json")))
+        try JSONDecoder().decode([String: RoadmapTask].self, from: loadFixtureData("task_condition_states.json"))
     }
 }

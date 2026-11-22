@@ -263,14 +263,14 @@ struct TaskListView: View {
                             DisclosureGroup("\(section.quiet.count) without a conversation") {
                                 ForEach(section.quiet, id: \.work) { link($0) }
                             }
-                            .font(MobileType.text(14))
+                            .font(Typography.meta)
                             .foregroundStyle(theme.palette.textSecondary)
                             .listRowBackground(theme.palette.background)
                         }
                     } header: {
                         if shown.isEmpty {
                             Text(name(section.repository))
-                                .font(MobileType.strong(14))
+                                .font(Typography.meta)
                                 .foregroundStyle(theme.palette.textSecondary)
                                 .textCase(nil)
                         }
@@ -387,7 +387,11 @@ struct TaskListView: View {
             if task.primarySession != nil { Perf.opening(task.work.id) }
             selectedTask = MobileTask(task)
         } label: {
-            HStack { row(task); Spacer(); Image(systemName: "chevron.right").font(.caption).foregroundStyle(.secondary) }
+            // The list reading carries no issue link: the whole row opens the Task.
+            TaskRow(id: task.work.id, title: task.title, identifier: task.identifier, status: task.status,
+                    auto: task.states.contains(.auto))
+                .contentShape(Rectangle())
+                .accessibilityElement(children: .combine)
         }
             .buttonStyle(.plain)
             .swipeActions(edge: .trailing) {
@@ -395,7 +399,7 @@ struct TaskListView: View {
                     .tint(theme.palette.success)
                     .disabled(!feed.pendingChanges.acceptsChanges)
             }
-            .listRowInsets(EdgeInsets(top: 12, leading: 20, bottom: 12, trailing: 16))
+            .listRowInsets(EdgeInsets(top: Spacing.xs, leading: Spacing.sm, bottom: Spacing.xs, trailing: Spacing.sm))
             .listRowBackground(theme.palette.background)
     }
 
@@ -403,30 +407,5 @@ struct TaskListView: View {
         TaskWorkspaceView(client: client, feed: feed, task: task, theme: theme, draft: Binding(
             get: { drafts[task.id] ?? "" },
             set: { drafts[task.id] = $0 }))
-    }
-
-    private func row(_ task: WorkViewPlan.Content) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            RoundedRectangle(cornerRadius: 2)
-                .fill(task.status.tone.ink(in: theme.palette))
-                .frame(width: 3)
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 6) {
-                Text(task.title)
-                    .font(MobileType.strong(17))
-                    .foregroundStyle(theme.palette.text)
-                    .fixedSize(horizontal: false, vertical: true)
-                HStack(spacing: 6) {
-                    Text(task.status.label)
-                        .foregroundStyle(task.status.tone.ink(in: theme.palette))
-                    if let identifier = task.identifier {
-                        Text(identifier).foregroundStyle(theme.palette.textSecondary)
-                    }
-                }
-                .font(MobileType.text(13))
-            }
-        }
-        .padding(.vertical, 2)
-        .accessibilityElement(children: .combine)
     }
 }

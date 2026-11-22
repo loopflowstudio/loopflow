@@ -86,14 +86,6 @@ struct MachineAddressView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 24) {
                         if replacing == nil && !enteringAddress {
-                            HStack(spacing: 12) {
-                                Image(systemName: "desktopcomputer")
-                                Image(systemName: "arrow.left.arrow.right").font(.system(size: 16))
-                                Image(systemName: "iphone")
-                            }
-                            .font(.system(size: 34, weight: .light))
-                            .foregroundStyle(theme.palette.accentInk)
-                            .accessibilityHidden(true)
                             Text("Your work,\nwithin reach.")
                                 .serif(.display)
                         }
@@ -102,11 +94,11 @@ struct MachineAddressView: View {
                             : replacing == nil
                             ? "Connect to your Loopflow Machine to open Tasks and continue their Sessions."
                             : "Scan the new code in Desktop’s Mobile settings. Your saved connection stays until the new address is verified.")
-                            .font(MobileType.text(17))
+                            .font(Typography.text)
                             .foregroundStyle(theme.palette.textSecondary)
                         if let replacing {
                             Text(replacing.endpoint.absoluteString)
-                                .font(MobileType.text(13))
+                                .font(Typography.meta)
                                 .foregroundStyle(theme.palette.textSecondary)
                                 .textSelection(.enabled)
                         } else if !enteringAddress {
@@ -115,13 +107,13 @@ struct MachineAddressView: View {
                                 Label("On your Mac, open Loopflow → Settings → Mobile.", systemImage: "2.circle")
                                 Label("Enable mobile access, then scan its code here.", systemImage: "3.circle")
                             }
-                            .font(MobileType.text(15))
+                            .font(Typography.text)
                         }
                         if let endpoint, !enteringAddress {
                             Label(endpoint.host ?? "Machine", systemImage: "desktopcomputer")
-                                .font(MobileType.strong(16))
+                                .font(Typography.textStrong)
                             Text(endpoint.absoluteString)
-                                .font(MobileType.text(13))
+                                .font(Typography.meta)
                                 .foregroundStyle(theme.palette.textSecondary)
                                 .textSelection(.enabled)
                             Button {
@@ -168,13 +160,13 @@ struct MachineAddressView: View {
                         }
                         if let error {
                             Text(error)
-                                .font(MobileType.text(14))
+                                .font(Typography.text)
                                 .foregroundStyle(theme.palette.textSecondary)
                                 .accessibilityLabel("Connection issue: \(error)")
                                 .id("machine-connection-error")
                         }
                         Text("Your Sessions run on your Machine. This phone connects through your private Tailscale network.")
-                            .font(MobileType.text(13))
+                            .font(Typography.meta)
                             .foregroundStyle(theme.palette.textSecondary)
                     }
                     .padding(28)

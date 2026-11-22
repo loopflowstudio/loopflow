@@ -255,7 +255,7 @@ Components, in `swift/Loopflow/Design/`, for both apps: `TaskRow`,
 `.destructive`) and `StateView`. `TitleBar` is the Mac's, in
 `swift/LoopflowMac/Design/`.
 
-- `TaskRow` takes its status as a `TaskRow.Status`, never a string, so a
+- `TaskRow` takes its status as a `TaskRowStatus`, never a string, so a
   surface cannot bring its own word. The word is what the Task's conversation
   reports (Blocked, Busy, Available, Done, Error), else its lifecycle word.
 - `WorkflowLine`'s steps, running step and sentence come from Rust

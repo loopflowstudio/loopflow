@@ -52,3 +52,21 @@ Made in write-docs with nobody present; each is reversible.
   both surfaces use.
 - **DESIGN.md gains a Desktop pointer** under "Two of the same thing" for its
   hand-made empty and failed states, since the phone will use `StateView`.
+
+Made in implement (slice 1) with nobody present; each is reversible.
+
+- **The row's status type is `TaskRowStatus`, not `TaskRow.Status`.** The
+  trailing slot makes `TaskRow` generic, and a type nested in a generic is a
+  different type per trailing view.
+- **A status that could not be read keeps the Mac's info mark**
+  (`TaskRowStatus.unread`), separate from the phone's word "Unavailable"
+  (`.unavailable`, a Task whose reading lists reasons). They are two facts:
+  the Mac's is a failed Sessions read, the phone's is the Task's own reading.
+  Passed over: the word on both, which changes every Mac row when Sessions
+  cannot be read.
+- **14 pt calls**: a warning or a sentence the screen depends on went to
+  `text` (17); hints, footers and paths in secondary ink went to `meta` (13).
+- **The reply button's arrow** is `lede` at `imageScale(.large)`, about 26 pt
+  where it was 32; its 44 pt frame is unchanged.
+- **A phone row with neither a conversation state nor a lifecycle state in
+  its reading shows no status word.** The old row said "Open".

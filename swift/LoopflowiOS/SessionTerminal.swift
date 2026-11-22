@@ -165,10 +165,10 @@ final class SessionTerminalController: UIViewController, UIScrollViewDelegate {
         applyAppearance()
     }
 
-    /// Theme colours, and Spline Sans Mono 12 scaled by Dynamic Type.
+    /// Theme colours, and the ramp's terminal size scaled by Dynamic Type.
     private func applyAppearance() {
         guard let theme else { return }
-        let size = UIFontMetrics(forTextStyle: .body).scaledValue(for: 12, compatibleWith: traitCollection)
+        let size = UIFontMetrics(forTextStyle: .body).scaledValue(for: Typography.terminalSize, compatibleWith: traitCollection)
         GhosttyRuntime.shared.apply(theme, fontSize: Double(size))
         guard isViewLoaded else { return }
         view.backgroundColor = UIColor(theme.terminal.background.color)

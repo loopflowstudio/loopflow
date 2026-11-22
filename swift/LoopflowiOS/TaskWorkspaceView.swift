@@ -115,10 +115,10 @@ struct TaskChangesView: View {
                     } label: {
                         VStack(alignment: .leading, spacing: 4) {
                             Text((file.path as NSString).lastPathComponent)
-                                .font(MobileType.strong(16))
+                                .font(Typography.textStrong)
                                 .foregroundStyle(theme.palette.text)
                             Text(detail(file))
-                                .font(MobileType.text(13))
+                                .font(Typography.meta)
                                 .foregroundStyle(theme.palette.textSecondary)
                                 .lineLimit(2)
                         }
@@ -164,7 +164,7 @@ struct TaskFileView: View {
                 if let content = file.content {
                     ScrollView([.vertical, .horizontal]) {
                         Text(content)
-                            .font(.system(size: 12, design: .monospaced))
+                            .font(Typography.mono)
                             .foregroundStyle(theme.palette.text)
                             .textSelection(.enabled)
                             .padding(12)
@@ -208,7 +208,7 @@ struct TaskDiffView: View {
                         let lines = Self.lines(diff.patch)
                         ForEach(lines.indices, id: \.self) { index in
                             Text(lines[index].text.isEmpty ? " " : String(lines[index].text))
-                                .font(.system(size: 12, design: .monospaced))
+                                .font(Typography.mono)
                                 .foregroundStyle(theme.palette.text)
                                 .padding(.horizontal, 12)
                                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -216,7 +216,7 @@ struct TaskDiffView: View {
                         }
                         if diff.truncated {
                             Text("The rest of this diff is too long to show.")
-                                .font(MobileType.text(13))
+                                .font(Typography.meta)
                                 .foregroundStyle(theme.palette.textSecondary)
                                 .padding(12)
                         }

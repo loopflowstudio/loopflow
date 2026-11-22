@@ -1,7 +1,7 @@
 import Foundation
 import Testing
 
-/// Mac text is set on the ramp in `Design/DesignSystem.swift`. A size picked at a
+/// Mac and iPhone text is set on the ramp in `Design/DesignSystem.swift`. A size picked at a
 /// call site, a system text style or a sized helper puts a face on screen the
 /// design does not have.
 @Suite("Typography discipline")
@@ -17,10 +17,10 @@ struct TypographyDisciplineTests {
         (#"Typography\.\w+\("#, "a sized Typography call", false),
     ]
 
-    @Test("Loopflow and LoopflowMac set every font from the ramp")
+    @Test("Loopflow, LoopflowMac and LoopflowiOS set every font from the ramp")
     func everyFontComesFromTheRamp() throws {
         var violations: [String] = []
-        for directory in ["Loopflow", "LoopflowMac"] {
+        for directory in ["Loopflow", "LoopflowMac", "LoopflowiOS"] {
             let root = Self.swiftRoot.appendingPathComponent(directory)
             let files = FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil)?
                 .compactMap { $0 as? URL }

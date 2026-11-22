@@ -1,5 +1,5 @@
-import Foundation
 import Loopflow
+import SwiftUI
 
 /// Presentation of shared Session evidence; never Task completion or graph position.
 enum SessionProgramStatus {
@@ -48,16 +48,19 @@ enum SessionProgramStatus {
         return text
     }
 
-    var label: String? {
+    /// The row's status; nil when nothing reports and the row says its lifecycle.
+    var row: TaskRowStatus? {
         switch self {
         case .reported(_, let report):
-            let kind = report.kind.map { " · \($0.rawValue.capitalized)" } ?? ""
-            let progress = report.progress.map { " · \($0)%" } ?? ""
-            return "\(report.state.label)\(kind)\(progress)"
-        case .available: return "Available · inferred"
-        case .unknown, .unavailable: return nil
+            .program(report.state, kind: report.kind, progress: report.progress, detail: help, ask: ask)
+        case .available: .program(.idle, inferred: true, detail: help)
+        case .unknown: nil
+        case .unavailable: .unread(help)
         }
     }
+
+    var label: String? { row?.word }
+    var tone: WorkTone? { row?.tone }
 
     var help: String {
         switch self {
@@ -68,13 +71,37 @@ enum SessionProgramStatus {
         case .unavailable(let reason): return "Current program status unavailable: \(reason)"
         }
     }
+}
 
-    var tone: WorkTone? {
-        switch self {
-        case .reported(_, let report):
-            report.state.workTone
-        case .available: .available
-        case .unknown, .unavailable: nil
+/// The ⌘N hint at a row's trailing edge: shown while ⌘ is held, else while the row is hovered.
+struct TaskRowSlotHint: View {
+    let hint: String?
+    let shown: Bool
+    let hover: HoverFlag?
+
+    var body: some View {
+        if let hint {
+            if let hover, !shown {
+                HoverRevealed(flag: hover) { Text(hint) }
+            } else {
+                Text(hint)
+            }
+        }
+    }
+}
+
+extension TaskRow where Trailing == TaskRowSlotHint {
+    /// The Mac sidebar's row, from what the Work model and its Sessions hold.
+    init(id: String, presentation: WorkModel.TaskPresentation, task: RoadmapTask?, status: SessionProgramStatus,
+         auto: Bool = false, selected: Bool = false, muted: Bool = false,
+         slotHint: String? = nil, showsSlotHint: Bool = false, hover: HoverFlag? = nil) {
+        self.init(id: id, title: presentation.title, identifier: task?.task.identifier ?? presentation.identifier,
+                  link: task?.reference.issueUrl,
+                  status: status.row ?? task.map { .lifecycle($0.lifecycle) }, auto: auto,
+                  // A row named by its list before planning answers says so.
+                  context: presentation.context ?? (task == nil ? "Loading planning…" : nil),
+                  selected: selected, muted: muted) {
+            TaskRowSlotHint(hint: slotHint, shown: showsSlotHint, hover: hover)
         }
     }
 }

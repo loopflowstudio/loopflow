@@ -359,27 +359,32 @@ and New Task screens other than the New Task question.
 
 ## Slices
 
-1. **The ramp and the row, end to end.** Per-platform `Typography` and
-   control height; move `TaskRow` to the shared library with
-   `TaskRow.Status` and its Mac adapter; rewrite
-   `WorkViewPlan.Content.status` in the one vocabulary, with its test; the
-   phone's Task list uses the row; delete `MobileType` by converting every
-   call to a step. Run the Mac row tests and `scripts/test_ios.py`. This is
-   the slice that could prove the plan wrong: it shows whether one `TaskRow`
-   serves both the Mac sidebar (hover, link, slot hint) and a phone list
-   without a platform switch inside it, whether both rows say the same word
-   for the same Task, and whether 17/13 reads right on the SE. If the row
-   needs more than a trailing-view slot to serve both, stop and reshape
-   before moving the other three components.
-2. **Button and state view.** Move `LoopflowButtonStyle`; add the state
+1. **The ramp and the row, end to end.** Built. `Typography` resolves per
+   platform and `HitTarget.control` exists; `.serif(_:)` scales with Dynamic
+   Type; `TaskRow`, `TaskRowStatus`, `WorkLinkStyle` and
+   `ProgramStatusState.workTone` are in `swift/Loopflow/Design/TaskRow.swift`;
+   the Mac's adapter and its `TaskRowSlotHint` are in
+   `SessionProgramStatus.swift`; the phone's list draws `TaskRow`;
+   `MobileType` is gone and `TypographyDisciplineTests` reads `LoopflowiOS`
+   for fonts. Pulled forward from slice 4 because each was a font call with
+   no step to name: the New Task question ("What do you want?", serif
+   display), the pairing icon row's removal, diff and file text on
+   `Typography.mono`.
+   What it taught: one row serves both with only a trailing-view slot, so
+   the other three components can move the same way. The slot makes the row
+   generic, so the status type cannot nest in it (`TaskRow<A>.Status` and
+   `TaskRow<B>.Status` are different types); it is `TaskRowStatus` beside the
+   row. Not yet looked at on an SE: 17/13 on the row (slice 4's look).
+2. **Button and state view.** Next. Move `LoopflowButtonStyle`; add the state
    view; replace the nine buttons, the ten stock empty views, `LoadFailure`
    and `SessionView.card`. Extend `TypographyDisciplineTests` to the phone.
 3. **Workflow sentence and the step that moves the Task.** Move
    `WorkflowLine` (and `StatusMark`) and `runAction`; the sentence wraps;
    subscribe to the Task in the Task screen; show the line; the "Task
    actions" menu with Start or Run and Auto-Ship.
-4. **New Task, pairing, terminal, spacing sweep.** The serif question, the
-   pairing screen, terminal size and cell height, the remaining literals;
+4. **New Task, pairing, terminal, spacing sweep.** The New Task field in
+   `lede`, the pairing screen's buttons and field, terminal cell height
+   (its size already reads `Typography.terminalSize`), the remaining literals;
    DESIGN.md and the two READMEs; the Simulator look, light and dark.
 
 ## Done when

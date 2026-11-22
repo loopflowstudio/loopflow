@@ -62,10 +62,10 @@ struct SessionView: View {
     private func card(_ message: String, action: String, perform: @escaping () -> Void) -> some View {
         VStack(spacing: 16) {
             Text(message)
-                .font(MobileType.text(16))
+                .font(Typography.text)
                 .multilineTextAlignment(.center)
             Button(action: perform) {
-                Text(action).font(MobileType.strong(16)).frame(minWidth: 160, minHeight: 44)
+                Text(action).font(Typography.textStrong).frame(minWidth: 160, minHeight: 44)
             }
             .buttonStyle(.borderedProminent)
             .tint(theme.palette.accent)
@@ -100,7 +100,7 @@ struct SessionView: View {
             .accessibilityLabel(showingKeys ? "Hide keys" : "Arrow and menu keys")
             TextField("Reply", text: $draft, axis: .vertical)
                 .lineLimit(1...6)
-                .font(MobileType.text(16))
+                .font(Typography.text)
                 .focused($replying)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
@@ -110,7 +110,7 @@ struct SessionView: View {
                 actions.reply(draft)
                 draft = ""
             } label: {
-                Image(systemName: "arrow.up.circle.fill").font(.system(size: 32)).frame(width: 44, height: 44)
+                Image(systemName: "arrow.up.circle.fill").font(Typography.lede).imageScale(.large).frame(width: 44, height: 44)
             }
             .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             .accessibilityLabel("Send reply")

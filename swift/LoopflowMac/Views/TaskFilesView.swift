@@ -439,7 +439,7 @@ struct TaskFilesView: View {
             } else if snapshot.state == .text {
                 TaskDocumentView(document: document)
             } else if let data = snapshot.data, NSImage(data: data) != nil {
-                ScrollView { TaskImage(file: snapshot).padding(16) }
+                ScrollView { TaskImage(file: snapshot).padding(Spacing.lg) }
             } else {
                 EmptyState(title: snapshot.state.title)
             }

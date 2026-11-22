@@ -131,6 +131,8 @@ QA November 21 (`scratch/qa.html`, `ce178ae48f`): the redline, Side by side, HTM
 
 Remaining: nothing to build; the rendered-file stop repair below is built. Demo checks for qa: `scratch/plan.md` rendered and redlined in the Dev build, Side by side in two columns, Source showing the line Diff; `scratch/explore.html` as two pages; a step's skipped lines.
 
+**Compressed November 21:** `FileSides.commits` is `Commits { base, head? }` instead of a two-string array with `""` for the working tree; the stream alone shows `ReviewSidesFailed` for a rendered file; `ThemeDefinition` is `Hashable`, so `SyntaxInks`' cache and the editor's theme check key on it. `scripts/test_desktop.sh --filter 'TaskFilesTests|ReviewDiffTests|GrammarTests|MarkdownRedlineTests'` passed (76 tests).
+
 ## Concept review after the build (November 21, headless)
 
 Page: `scratch/concept-review.html`, over the whole branch as built. Every concept lines up except one, and it is what the qa run's first question touched: **a "change" is still a line hunk, but a rendered file doesn't show its hunks.** The title, the stepper and next/previous count `ReviewDiff.stops`, which come from the patch alone. So:

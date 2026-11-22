@@ -155,8 +155,7 @@ final class TaskFileDocument: NSObject, NSTextViewDelegate, @preconcurrency NSTe
     /// The editor's colors, syntax included. Setting the text color clears
     /// every syntax color, so they are painted again after it.
     func applyTheme(_ theme: ThemeDefinition) {
-        if let shown = self.theme, shown.name == theme.name, shown.palette.definition == theme.palette.definition,
-           shown.terminal == theme.terminal { return }
+        if self.theme == theme { return }
         self.theme = theme
         editor.applyPalette(theme.palette)
         paintSyntax()
@@ -1008,7 +1007,10 @@ final class TaskFilesStore {
     /// read from disk would not show.
     func rendering(of file: ReviewFile, in reader: ReviewReader) -> ReviewRendering? {
         if showsDraft(reader) { return nil }
-        return ReviewRendering.of(file, awaitingPatch: reader == .changes && isReading(file) && changeCounts[file.path] == 0).flatMap { $0.hasSource && sourceFiles.contains(file.path) ? nil : $0 }
+        // Before its patch reads, a file `lf task changes` counted no lines in may be a picture.
+        let awaitingPatch = reader == .changes && isReading(file) && changeCounts[file.path] == 0
+        guard let rendering = ReviewRendering.of(file, awaitingPatch: awaitingPatch) else { return nil }
+        return rendering.hasSource && sourceFiles.contains(file.path) ? nil : rendering
     }
 
     /// Files' Diff of an unsaved draft, whose lines are not the file on disk.
@@ -1375,20 +1377,25 @@ final class TaskFilesStore {
     /// or in the working tree when the comparison has none. Syntax colors,
     /// skipped lines and images all read them.
     struct FileSides: Equatable, Sendable {
-        /// The base commit, and the head commit or "" for the working tree.
-        let commits: [String]
+        let commits: Commits
         /// Nil for an added file.
         let old: TaskFileSnapshot?
         /// Nil for a deleted file.
         let new: TaskFileSnapshot?
+
+        struct Commits: Equatable, Sendable {
+            let base: String
+            /// Nil when the new side is the working tree.
+            let head: String?
+        }
     }
 
     private(set) var fileSides: [String: FileSides] = [:]
     private(set) var sideErrors: [String: String] = [:]
     @ObservationIgnored private var sideReads: [String: Task<FileSides, any Error>] = [:]
 
-    private var sideCommits: [String]? {
-        changes.map { [$0.baseCommit, comparison.head == nil ? "" : $0.headCommit] }
+    private var sideCommits: FileSides.Commits? {
+        changes.map { .init(base: $0.baseCommit, head: comparison.head == nil ? nil : $0.headCommit) }
     }
 
     /// The file's two sides once read for this comparison; asking starts the read.
@@ -1415,8 +1422,8 @@ final class TaskFilesStore {
                 guard let path else { return nil }
                 return try await query.taskFile(issue: issue, path: path, at: commit)
             }
-            async let old = side(file.status == .added ? nil : file.oldPath ?? file.path, at: commits[0])
-            async let new = side(file.status == .deleted ? nil : file.path, at: commits[1].isEmpty ? nil : commits[1])
+            async let old = side(file.status == .added ? nil : file.oldPath ?? file.path, at: commits.base)
+            async let new = side(file.status == .deleted ? nil : file.path, at: commits.head)
             return FileSides(commits: commits, old: try await old, new: try await new)
         }
         sideReads[file.path] = read

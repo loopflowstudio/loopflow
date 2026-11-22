@@ -24,7 +24,8 @@ enum ReviewRendering: Equatable {
     var hasSource: Bool { self != .image }
 }
 
-/// A rendered file in the stream, once both its sides are read. Markdown
+/// A rendered file in the stream, once both its sides are read; the stream
+/// shows `ReviewSidesFailed` instead when they don't. Markdown
 /// follows the layout picker: a redline in New code and Unified, two columns
 /// side by side. A picture or page has no unified form, so every layout shows
 /// both sides, stacked old above new in a pane too narrow for both.
@@ -48,8 +49,6 @@ struct ReviewRendered: View {
                 }
                 .padding(.horizontal, 12).padding(.vertical, 10)
             }
-        } else if let error = store.sideErrors[file.path] {
-            ReviewSidesFailed(store: store, file: file, error: error)
         } else {
             ReviewNotice(text: "Reading…")
         }
@@ -61,7 +60,7 @@ struct ReviewRendered: View {
             page(sides.old, absent: "Added")
             // Relative references resolve in the working tree only when the new
             // side is the working tree of a checkout on this Machine.
-            page(sides.new, absent: "Deleted", baseURL: sides.commits.last == "" && store.query.remoteMachine == nil
+            page(sides.new, absent: "Deleted", baseURL: sides.commits.head == nil && store.query.remoteMachine == nil
                  ? URL(fileURLWithPath: store.cwd).appendingPathComponent(file.path) : nil)
         } else {
             // No ideal width: a picture's natural size must not decide whether the
@@ -217,9 +216,9 @@ struct TaskImage: View {
                         .frame(maxWidth: image.size.width).fixedSize(horizontal: false, vertical: true)
                         .background(palette.surfaceMuted)
                         .accessibilityLabel("\((file.path as NSString).lastPathComponent), \(Self.size(of: image))")
-                    caption("\(Self.size(of: image)) · \(Self.bytes(file.sizeBytes))")
+                    caption("\(Self.size(of: image)) · \(Self.byteCount(file.sizeBytes))")
                 } else if file.state == .truncated || (file.state == .binary && file.data == nil) {
-                    caption("Image too large to show · \(Self.bytes(file.sizeBytes))")
+                    caption("Image too large to show · \(Self.byteCount(file.sizeBytes))")
                 } else {
                     caption("Can't decode this image")
                 }
@@ -230,7 +229,7 @@ struct TaskImage: View {
     }
 
     /// A binary file's bytes; an SVG is text, read as its own bytes.
-    static func bytes(of file: TaskFileSnapshot) -> Data? {
+    private static func bytes(of file: TaskFileSnapshot) -> Data? {
         if let data = file.data { return data }
         guard file.state == .text, (file.path as NSString).pathExtension.lowercased() == "svg" else { return nil }
         return file.content.map { Data($0.utf8) }
@@ -241,13 +240,13 @@ struct TaskImage: View {
     }
 
     /// The image's pixel size, or its point size for a picture without pixels.
-    static func size(of image: NSImage) -> String {
+    private static func size(of image: NSImage) -> String {
         let pixels = image.representations.first.map { CGSize(width: $0.pixelsWide, height: $0.pixelsHigh) }
         let size = pixels.flatMap { $0.width > 0 && $0.height > 0 ? $0 : nil } ?? image.size
         return "\(Int(size.width))×\(Int(size.height))"
     }
 
-    static func bytes(_ count: UInt64) -> String {
+    private static func byteCount(_ count: UInt64) -> String {
         ByteCountFormatter.string(fromByteCount: Int64(clamping: count), countStyle: .file)
     }
 }

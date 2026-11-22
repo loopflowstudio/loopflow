@@ -52,14 +52,16 @@ struct ReviewStream: View {
                     .onAppear { store.setNear(file.path, true) }
                     .onDisappear { store.setNear(file.path, false) }
             } else {
-                let rendering = store.rendering(of: file, in: reader)
-                // A file with Source falls back to its line Diff when its sides don't read.
-                let failed = rendering?.hasSource == true ? store.sideErrors[file.path] : nil
-                if let rendering, failed == nil {
-                    ReviewRendered(store: store, file: file, rendering: rendering, split: split)
-                        .id(ReviewStop.rendered(file.path).id)
+                if let rendering = store.rendering(of: file, in: reader) {
+                    if let error = store.sideErrors[file.path] {
+                        ReviewSidesFailed(store: store, file: file, error: error).id(ReviewStop.rendered(file.path).id)
+                        // A file with Source falls back to its line Diff.
+                        if rendering.hasSource { lines(file, note: note) }
+                    } else {
+                        ReviewRendered(store: store, file: file, rendering: rendering, split: split)
+                            .id(ReviewStop.rendered(file.path).id)
+                    }
                 } else {
-                    if let failed { ReviewSidesFailed(store: store, file: file, error: failed).id(ReviewStop.rendered(file.path).id) }
                     lines(file, note: note)
                 }
             }

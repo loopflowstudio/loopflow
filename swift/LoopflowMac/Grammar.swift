@@ -368,22 +368,13 @@ struct SyntaxInks: Equatable, Sendable {
 
     /// Inks are worked out once per theme, on its first use.
     static func of(_ theme: ThemeDefinition) -> SyntaxInks {
-        let key = Key(name: theme.name, palette: theme.palette.definition, terminal: theme.terminal)
-        if let known = cache.withLock({ $0[key] }) { return known }
+        if let known = cache.withLock({ $0[theme] }) { return known }
         let inks = SyntaxInks(theme)
-        cache.withLock { $0[key] = inks }
+        cache.withLock { $0[theme] = inks }
         return inks
     }
 
-    private struct Key: Hashable {
-        let name: String
-        let palette: PaletteDefinition
-        let terminal: TerminalPalette
-        // The palettes are only Equatable; the name spreads themes well enough.
-        func hash(into hasher: inout Hasher) { hasher.combine(name) }
-    }
-
-    private static let cache = Mutex<[Key: SyntaxInks]>([:])
+    private static let cache = Mutex<[ThemeDefinition: SyntaxInks]>([:])
 }
 
 extension AttributedString {

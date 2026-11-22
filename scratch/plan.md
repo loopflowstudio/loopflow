@@ -66,7 +66,8 @@ look needs a display, so it belongs to qa and review, not to build.
 
 ## What the code is today
 
-Counts are from `swift/LoopflowMac` at the base commit.
+Counts are from `swift/LoopflowMac` at the base commit; slice 1 changed
+only the rows.
 
 - Font sizes are already on the ramp: `TypographyDisciplineTests` holds it.
   One literal remains, the AppKit field at `WorkPalette.swift:452`
@@ -91,30 +92,11 @@ Counts are from `swift/LoopflowMac` at the base commit.
 - DESIGN.md's "✓/✗ before key results (`BacklogView.swift`)" pointer is
   already fixed in code (`Label` with SF Symbols); the pointer is stale. "⚠"
   remains at `TaskFilesView.swift:368`.
-- Task rows exist four ways: `TaskRow`, `RoadmapTaskRow` and `NowRowView`
-  (`RoadmapView.swift`), `RoadmapTaskView` (`WaveDetailPane.swift`), plus
-  `TaskHeading` (`TaskWorkView.swift:212`) heading a dashboard tile.
-- Where a Task stands is said seven ways, from six sources:
-
-  | Where | What it prints | Source |
-  |-------|----------------|--------|
-  | Sidebar `TaskRow` | "Working", else "Idle"; the program's ask | `SessionProgramStatus`, else `lifecycle` |
-  | Title bar, dashboard tile (`TaskHeading`) | "Idle" | `lifecycle` |
-  | Backlog row | "at build · PR #12" | `BacklogList.standing`: `execution.step`, else `nextMove.reason` |
-  | Roadmap row | "Working", a reason, and Condition / PM / Status capsules | `section`, `condition`, `task.terminalLabel`, `lifecycle` |
-  | Now row | a reason and the same capsules | `condition`, `lifecycle` |
-  | Wave page row | a dot, "idle · Ana · next: user" | `condition` as a lens, `historyLabel`, `nextMove.owner` |
-  | Wave page inspector, Brief | "idle · reason"; "Blocked: reason" | `historyLabel`, `condition` |
-
-  Every source is written in Rust; the choice between them is made again in
-  each view. The Portfolio rows hold a `RoadmapTask` and no Session readings,
-  so `TaskRow` as it is (it takes `WorkModel.TaskPresentation` and a
-  `SessionProgramStatus`) would print only "Idle" there and drop the reason a
-  Task is blocked, which is what the Now list exists to show.
-- A click on a Task row does three things: opens the Task (roadmap, Now),
-  selects it and shows `WaveWorkInspector` under the metrics, where "Open
-  Task workspace" appears only if a checkout exists (Wave page), or selects
-  it for the action bar (backlog).
+- Task rows and the seven ways of saying where a Task stands are gone since
+  slice 1: one `TaskRow` drawing one `TaskStanding`, and a click opens the
+  Task on every Portfolio list. The backlog row still builds its own standing
+  (`BacklogList.standing`: `execution.step`, else `nextMove.reason`) and its
+  click selects for the action bar; slice 2 changes the first.
 - A Project's key results are drawn twice: circles in `WaveProjectView`,
   `Label`s with a check or a cross in the backlog's objective
   (`BacklogView.swift:723`).
@@ -149,9 +131,10 @@ the condition is not clear, which is the rule the Brief already applies
 `TaskRow` draws a `TaskStanding` and stops choosing. It gains an initializer
 from a `RoadmapTask`, for hosts that hold one; the sidebar keeps
 `presentation` for a row named before planning answers. `TitleBar` prints
-the same word. Nothing else in `LoopflowMac` reads `lifecycle.label`,
-`section.label`, `historyLabel` or `condition.state` to say where a Task
-stands; the Brief's "Blocked: reason" line reads `TaskStanding` too.
+the same word, and the Brief's "Blocked: reason" line reads `TaskStanding`
+too. Two readers of `lifecycle.label` remain, `TaskWorkflowHeader`
+(`TaskWorkView.swift:17`) and the jump palette (`WorkPalette.swift:129`);
+see slice 1's notes.
 
 Choice made for review: the condition's reason shows on the sidebar row as
 well as in the Portfolio, so a sidebar row whose Task is blocked or waiting
@@ -479,5 +462,5 @@ or `lf desktop` reads unless its view is deleted.
 |---------|--------|-------------|
 | `scripts/test_desktop.sh --skip-build --filter 'TaskStandingTests\|TaskRowTests\|RoadmapViewTests\|TaskConceptTests\|WorkNavigationTests\|TaskBriefTests\|ProjectActivationTests\|NowProjectionTests\|DashboardWorkspaceTests\|WorkModelTests\|DesktopHeadlessTests'` | passed after slice 1 | build; CI runs the rest |
 | `scripts/test_desktop.sh --filter DesignDisciplineTests` | not run; the suite does not exist yet | build |
-| the grep above | 314 lines at base | build |
+| the grep above | 314 lines at base, 309 after slice 1 | build |
 | Dev app in light, dark and an imported theme | not run; needs a display | qa, review |

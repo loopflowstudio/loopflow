@@ -305,8 +305,9 @@ and names the fix. Absent means Loopflow Light/Dark. A repository's
 `.lf/config.yaml` never sets the theme.
 
 Built-ins are 12 light and 12 dark. **Loopflow Light** keeps the original
-cream/burgundy; **Loopflow Dark** is slate with warm bronze; **Linen** and **Hearth**
-are quieter light and charcoal alternatives.
+cream/burgundy; **Loopflow Dark** is blue-grey with rose headings and links, under
+the same burgundy title bar; **Linen** and **Hearth** are quieter light and
+charcoal alternatives.
 
 Your themes are Ghostty theme files in `~/.lf/themes/`; `~/.config/ghostty/themes/`
 is read too, never written. Names resolve to yours, then built-ins, then Ghostty's.
@@ -320,12 +321,19 @@ background = #171924
 foreground = #cad2ef
 palette = 4=#7aa2f7
 loopflow-accent = #3d59a1    # optional app roles; the rest derive from ANSI colors
+loopflow-titlebar = #242f50  # optional; without it the bar follows the accent
 ```
 
 Files read up to 256 KiB of UTF-8. Six-digit RGB background/foreground are
 required; cursor, selection, `palette = N=#RRGGBB` and `loopflow-` roles are
 optional. Preview explains defaults, repeats and omitted settings. Fonts,
 commands, keybindings, includes and theme references are never followed.
+
+The title bar is its own role. A file that leaves it out gets a bar from its
+accent, darkened where needed so the bar's text stays readable; a theme you made
+before the role existed may show a slightly darker bar. **Customize** lists
+**Title bar** under Actions and focus, and saving states it: after that,
+changing **Button** leaves the bar alone.
 
 Unreadable app/default/selection/cursor text prevents Apply; ANSI colors keep
 their source values. Personal non-color Ghostty settings still load; its `theme =` is ignored and its file never written.

@@ -59,6 +59,10 @@ Slices, each run before the next.
 4. **Words and prototype.** `swift/Loopflow/Themes/README.md` ("the original slate with bronze") and `swift/README.md:308` ("slate with warm bronze") describe the old Dark; both gain the title bar role where they list roles. `design/prototypes/desktop-themes.js` carries every theme's values by hand and gets the new ones plus `titlebar`; `desktop.css:83` paints `.titlebar` with `var(--accent)` and moves to the new variable (the prototype never had the dark mix, so its dark bars are wrong today).
 5. `python3 -I scratch/theme-audit/build.py`, so "Now" on the page shows what shipped.
 
+## Docs written ahead
+
+`swift/README.md` (Appearance: Loopflow Dark's description, `loopflow-titlebar` in the theme file example, a paragraph on the title bar role, its fallback and the editor's **Title bar** row) and `swift/Loopflow/Themes/README.md` (Dark's description, the role in the example, the fallback rule). They describe the finished behavior; step 4's README work is checking them against the code, not writing them. The Themes README example now shows Flexoki Light's real pair (`#847032`, `#685827`); if the Swift rule gives a different bar, the example follows the file.
+
 ## Acceptance check at gate
 
 `swift test --package-path swift --filter 'WorkPaletteTests|TerminalColorTests|ThemeTests'` passes, including the new title bar expectation across 24 built-ins. Rebuilt page: Loopflow Light and Loopflow Dark list no text pair under 4.5:1 and no title bar finding in any theme. `scratch/concept-review.html` holds the model review and its four questions.

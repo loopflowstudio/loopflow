@@ -25,7 +25,6 @@ TARGETS = (
 GHOSTTY_SCOPE = "GhosttyKit"
 RESOURCE_DIRS = (
     "swift/Loopflow/Fonts",
-    "swift/Loopflow/Themes",
     "swift/LoopflowMac/GhosttyResources",
     "swift/GhosttyKitPatches",
     "third_party",
@@ -190,18 +189,12 @@ def refresh(root: Path = ROOT) -> None:
         text = "\n\n".join(_reviewed_notice(root, n) for n in component["notices"])
         components.append(component)
         sections.append(f"{component['id']} ({component['scope']})\n" + "-" * 72 + "\n" + text)
-    # Keep existing theme attributions and GPL/MIT script headers, without copying
-    # a second manually maintained list of themes or shell files.
+    # Keep the GPL/MIT shell-integration headers without a second hand-kept list of files.
     resources = []
-    for base in ["swift/Loopflow/Themes", "swift/LoopflowMac/GhosttyResources"]:
-        for path in sorted((root / base).rglob("*")):
-            if path.is_file() and (
-                "Licenses" in path.parts
-                or path.name == "Sources.md"
-                or "shell-integration" in path.parts
-            ):
-                resources.append(str(path.relative_to(root)))
-                sections.append(str(path.relative_to(root)) + "\n\n" + path.read_text())
+    for path in sorted((root / "swift/LoopflowMac/GhosttyResources").rglob("*")):
+        if path.is_file() and "shell-integration" in path.parts:
+            resources.append(str(path.relative_to(root)))
+            sections.append(str(path.relative_to(root)) + "\n\n" + path.read_text())
     components.append({"id": "bundled-resources", "scope": "Desktop", "files": resources})
     sources = _crate_sources(root)
     for package in _crate_packages(root):

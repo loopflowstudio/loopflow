@@ -401,6 +401,21 @@ struct SplitDivider: View {
     }
 }
 
+/// How this Session's conversation relates to the one before it, on its own line above the terminal.
+struct ProviderTransitionRow: View {
+    @Environment(\.theme) private var theme
+    let transition: ProviderTransition
+    var body: some View {
+        Text(transition.explanation)
+            .font(Typography.meta)
+            .foregroundStyle(theme.palette.textSecondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, PaneGeometry.inset)
+            .padding(.vertical, 4)
+            .help("Observed at " + Date(timeIntervalSince1970: TimeInterval(transition.observedAt)).formatted())
+    }
+}
+
 struct SessionPaneView: View {
     @Environment(\.theme) private var theme
     @State private var changingSession = false
@@ -430,6 +445,9 @@ struct SessionPaneView: View {
             if showsStrip {
                 strip
                 Rectangle().fill(theme.palette.border).frame(height: 1)
+            }
+            if let transition = item?.record.transition {
+                ProviderTransitionRow(transition: transition)
             }
             content
                 // Reserve the rounded edge before Ghostty measures its surface.
@@ -489,8 +507,8 @@ struct SessionPaneView: View {
             Menu {
                 paneContentChoices
             } label: {
-                Label(programHeading.name, systemImage: programHeading.symbol)
-                    .font(Typography.meta).fontWeight(.semibold)
+                Text(programHeading.name)
+                    .font(Typography.textStrong)
                     .foregroundStyle(theme.palette.text)
             }
             .menuStyle(.borderlessButton).fixedSize()

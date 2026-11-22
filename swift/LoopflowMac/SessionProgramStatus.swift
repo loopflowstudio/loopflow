@@ -88,21 +88,18 @@ enum SessionProgramStatus {
 /// Existing provider and terminal metadata, with no process-name guessing.
 struct PaneProgramHeading: Equatable {
     let name: String
-    let symbol: String
     let context: String
     let detail: String
 
     init(provider: String?, title: String, directory: String?, fallback: String) {
         switch provider?.lowercased() {
-        case "codex": name = "Codex"; symbol = "terminal"
-        case "claude": name = "Claude"; symbol = "sparkle"
-        case "pi": name = "Pi"; symbol = "terminal"
-        case "opencode": name = "OpenCode"; symbol = "chevron.left.forwardslash.chevron.right"
-        case "agy": name = "Antigravity"; symbol = "terminal"
-        case .some(let value) where !value.isEmpty:
-            name = ProgramStatusReport.displaySafe(value); symbol = "bubble.left"
-        default:
-            name = fallback; symbol = fallback == "Shell" ? "terminal" : "rectangle"
+        case "codex": name = "Codex"
+        case "claude": name = "Claude"
+        case "pi": name = "Pi"
+        case "opencode": name = "OpenCode"
+        case "agy": name = "Antigravity"
+        case .some(let value) where !value.isEmpty: name = ProgramStatusReport.displaySafe(value)
+        default: name = fallback
         }
         let title = ProgramStatusReport.displaySafe(title)
         let folder = directory.map { URL(fileURLWithPath: $0).lastPathComponent }

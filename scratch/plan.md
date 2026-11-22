@@ -392,10 +392,13 @@ in DESIGN.md "Desktop semantics"; palette contrast.
    (184 tests) except the ⌘⌥1 check above. Not seen in the Dev app.
    Realign checked: `git grep` finds none of the replaced styles or views
    outside `swift/DESIGN.md` (cfadc6's to delete).
-6. **Next:** Session strip: agent name `textStrong`, no provider symbol
-   (`SessionProgramStatus.swift:91–105` `symbol`, "sparkle" for Claude; drop
-   the field if nothing else reads it); the strip's `StatusMark` is in. The
-   notice line: `SessionTransition.explanation` (`SessionRecord.swift:186`)
-   is drawn over the terminal at `SessionsView.swift:2116`; it moves to a
-   `meta` line above the terminal. Then Brief/Diff/Files; DESIGN.md once
-   cfadc6 is on main; QA in three themes at the narrowest width.
+6. **Built.** The pane strip's program menu is the agent name alone in
+   `textStrong`; `PaneProgramHeading.symbol` is gone (nothing else read it).
+   `ProviderTransitionRow` moved from above the whole main pane (where it
+   showed the selected Session's transition whichever pane was shown) into
+   `SessionPaneView`, below the strip and above the terminal, for that
+   pane's own Session, `meta` in `textSecondary`. Passed:
+   `scripts/test_desktop.sh --filter 'WorkspacePanesTests|DesktopHeadlessTests|ProgramStatusTests|ConsoleWorkspaceTests|TypographyDisciplineTests|ProviderTransitionTests|TaskRowTests'`
+   (58) with the new `sessionStripAndNotice`. Not seen in the Dev app.
+7. **Next:** Brief/Diff/Files; DESIGN.md once cfadc6 is on main; QA in three
+   themes at the narrowest width.

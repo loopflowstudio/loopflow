@@ -1067,6 +1067,21 @@ struct TaskFilesTests {
         }) <= width)
     }
 
+    /// A narrow pane moves a file's counts and Viewed under its name rather
+    /// than clipping either; a wide one keeps the header on one line.
+    @Test func aFileHeaderWrapsInsteadOfClipping() async throws {
+        let store = try twoFileStore()
+        await store.loadReview()
+        let path = "swift/LoopflowMac/Design/TaskChangesViewWithALongName.swift"
+        let file = ReviewFile(path: path, oldPath: nil, status: .added, blocks: [])
+        func height(at width: CGFloat) -> CGFloat {
+            let host = NSHostingController(rootView: ReviewFileTitle(store: store, file: file, note: nil, viewable: true))
+            return host.sizeThatFits(in: CGSize(width: width, height: 600)).height
+        }
+        let wide = height(at: 1_200), narrow = height(at: 360)
+        #expect(narrow > wide * 1.5)
+    }
+
     /// The checkout's `scratch/tour.yaml` orders the Diff and hides what
     /// the tour named, until you ask for it; your own hidden paths are untouched.
     @Test func aTourFileOrdersTheDiffAndHidesItsPathsUntilShown() async throws {

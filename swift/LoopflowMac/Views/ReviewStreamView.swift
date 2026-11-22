@@ -419,40 +419,68 @@ struct ReviewFileTitle: View {
     @Environment(\.palette) private var palette
 
     var body: some View {
+        // One line when it fits, dropping the directory before anything
+        // else; otherwise the counts and actions go under the name. Nothing
+        // in the row clips.
+        ViewThatFits(in: .horizontal) {
+            line(directory: true)
+            line(directory: false)
+            VStack(alignment: .leading, spacing: 4) {
+                ViewThatFits(in: .horizontal) {
+                    title(directory: true)
+                    title(directory: false)
+                }
+                HStack(spacing: 8) { actions }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.horizontal, 12)
+        .help(file.path)
+    }
+
+    private func line(directory: Bool) -> some View {
+        HStack(spacing: 8) {
+            title(directory: directory)
+            Spacer(minLength: 4)
+            actions
+        }
+    }
+
+    private func title(directory showsDirectory: Bool) -> some View {
         let name = (file.path as NSString).lastPathComponent
         let directory = (file.path as NSString).deletingLastPathComponent
-        HStack(spacing: 8) {
+        return HStack(spacing: 8) {
             HStack(spacing: 0) {
-                if !directory.isEmpty {
+                if showsDirectory, !directory.isEmpty {
                     Text(directory + "/").font(Typography.mono).foregroundStyle(palette.textSecondary)
-                        .lineLimit(1).truncationMode(.head)
                 }
-                Text(name).font(Typography.mono.weight(.semibold)).lineLimit(1).layoutPriority(1)
+                Text(name).font(Typography.mono.weight(.semibold))
             }
+            .fixedSize()
             if file.status != .modified {
-                Text(file.status.rawValue).font(Typography.meta).foregroundStyle(palette.textSecondary)
+                Text(file.status.rawValue).font(Typography.meta).foregroundStyle(palette.textSecondary).fixedSize()
             }
             if let note, !note.isEmpty {
                 Text(note).font(Typography.meta).foregroundStyle(palette.textSecondary)
                     .lineLimit(1).truncationMode(.tail).help(note)
             }
-            Spacer(minLength: 4)
-            if !store.isReading(file) {
-                Text("+\(file.additions)").foregroundStyle(palette.successTone.ink).font(Typography.mono).fixedSize()
-                Text("−\(file.deletions)").foregroundStyle(palette.failureTone.ink).font(Typography.mono).fixedSize()
-            }
-            Button("Open") { store.selectFile(file.path, mode: .read) }
-                .buttonStyle(.plain).font(Typography.meta).foregroundStyle(palette.textSecondary).fixedSize()
-                .help("Read \(file.path) in Files").accessibilityLabel("Read \(file.path) in Files")
-            if viewable, !store.isReading(file) {
-                Toggle("Viewed", isOn: Binding(get: { store.isViewed(file) }, set: { store.setViewed(file, $0) }))
-                    .toggleStyle(.checkbox).controlSize(.small).font(Typography.meta).fixedSize()
-                    .help("Fold this file until its lines change")
-                    .accessibilityIdentifier("changes-viewed")
-            }
         }
-        .padding(.horizontal, 12)
-        .help(file.path)
+    }
+
+    @ViewBuilder private var actions: some View {
+        if !store.isReading(file) {
+            Text("+\(file.additions)").foregroundStyle(palette.successTone.ink).font(Typography.mono).fixedSize()
+            Text("−\(file.deletions)").foregroundStyle(palette.failureTone.ink).font(Typography.mono).fixedSize()
+        }
+        Button("Open") { store.selectFile(file.path, mode: .read) }
+            .buttonStyle(.plain).font(Typography.meta).foregroundStyle(palette.textSecondary).fixedSize()
+            .help("Read \(file.path) in Files").accessibilityLabel("Read \(file.path) in Files")
+        if viewable, !store.isReading(file) {
+            Toggle("Viewed", isOn: Binding(get: { store.isViewed(file) }, set: { store.setViewed(file, $0) }))
+                .toggleStyle(.checkbox).controlSize(.small).font(Typography.meta).fixedSize()
+                .help("Fold this file until its lines change")
+                .accessibilityIdentifier("changes-viewed")
+        }
     }
 }
 
@@ -703,7 +731,7 @@ struct ReviewStepper: View {
             arrow("chevron.up", "Previous change", key: "[", offset: -1)
             Divider().frame(height: 14)
             Text(store.position(reader)).font(Typography.meta).foregroundStyle(palette.text)
-                .monospacedDigit().lineLimit(1).padding(.horizontal, 8).frame(minWidth: 54)
+                .monospacedDigit().fixedSize().padding(.horizontal, 8).frame(minWidth: 54)
                 .accessibilityIdentifier("review-position")
             Divider().frame(height: 14)
             arrow("chevron.down", "Next change", key: "]", offset: 1)

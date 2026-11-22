@@ -713,6 +713,8 @@ final class TaskFilesStore {
                     }
                     await document.reconcile(next)
                     if Self.isScratchPage(path), next.state == .text { self.follow(path) }
+                } catch is CancellationError {
+                    return
                 } catch { self.error = error.localizedDescription }
             }
             guard !Task.isCancelled, comparisonChanged else { return }
@@ -854,7 +856,9 @@ final class TaskFilesStore {
             await document(path).reconcile(next)
             error = nil
         } catch {
-            guard !Task.isCancelled, selection == path, generation == fileGeneration else { return }
+            // A superseded read is not a failure of the file.
+            guard !(error is CancellationError), !Task.isCancelled,
+                  selection == path, generation == fileGeneration else { return }
             self.error = error.localizedDescription
         }
     }

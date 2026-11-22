@@ -87,7 +87,7 @@ struct WorkflowLine: View {
     private func ink(_ tone: Tone) -> Color {
         switch tone {
         case .done: palette.textSecondary
-        case .ahead: palette.text
+        case .ahead: palette.textTertiary
         case .running: auto ? palette.success : palette.working
         case .waiting: palette.warning
         }

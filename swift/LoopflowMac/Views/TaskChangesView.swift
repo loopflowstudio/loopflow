@@ -395,7 +395,8 @@ struct TaskChangesView: View {
             let group = store.shownGroups.first { group in group.isTour && group.files.contains { $0.path == file.path } }
             ReviewFileTitle(store: store, file: file, note: group?.title ?? file.oldPath.map { "from \($0)" }, viewable: true)
                 .fillsPane()
-                .frame(height: TaskFileChrome.headerHeight)
+                .padding(.vertical, 4)
+                .frame(minHeight: TaskFileChrome.headerHeight)
                 .background(palette.surfaceMuted)
                 .contextMenu {
                     Button("Open in Files") { store.selectFile(file.path, mode: .diff) }

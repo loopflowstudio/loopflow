@@ -444,8 +444,14 @@ in DESIGN.md "Desktop semantics"; palette contrast.
 
 ## Remaining
 
-No slice left. Gate: clippy, the iPhone build (`scripts/test_ios.py`),
-the acceptance checks above, and regenerating `task_lifecycle.json` (edited
-by hand in slice 3). QA: the Demo in Light, Dark and one imported theme at
-the narrowest window, with Claude's TUI for faked bold and box drawing.
-Open for review: the Diff pill's `TaskDelivery` wording (questions.md).
+QA ran 2026-11-22 (`scratch/qa.html`): the Demo in Loopflow Light, Dark and
+an imported theme at 760, 1100 and 1500, running and waiting, over a private
+Machine. Fixed there: steps ahead in tertiary ink, Diff file headers wrap
+instead of clipping (`aFileHeaderWrapsInsteadOfClipping`), the stepper's
+count, and a cancelled Files read shown as an error. Not reached with the
+screen locked: the terminal face in Ghostty (bold, italics, box drawing),
+the "…" menu on screen, the Session header dot and notice line; they need an
+unlocked display. Gate: clippy, the iPhone build (`scripts/test_ios.py`), the
+acceptance checks above, and regenerating `task_lifecycle.json` (edited by
+hand in slice 3). Open for review: the Diff pill's `TaskDelivery` wording
+(questions.md).

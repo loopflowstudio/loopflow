@@ -144,3 +144,39 @@ packaged app with its signed helper or launch a Dev bundle with `LF_HOME` and `L
 after clearing inherited `LF_*`. Use the app's bundle ID in `LF_DESKTOP` and
 issue its control commands with that same private home. Stop the private
 server, holders and providers afterwards as described in [resume](resume.md).
+
+# Looking at the Task pane with the screen locked
+
+`-ui-test-mode live` renders through the real registry and, with
+`LOOPFLOW_UI_TEST_SNAPSHOT_PATH`, writes the window with `cacheDisplay`, which
+works while the screen is locked. Pair it with a private Machine (separate
+`HOME`, `LF_HOME`, a disposable repository with `planning: {provider: git,
+personal: true}`, `lf set --global default_agent claude`, a stand-in `claude`
+on `PATH`) running the branch `lf server run`. A repository Graph whose
+`cmd: help graph` step an `LF_BIN` wrapper turns into `sleep 1800` holds the
+Task "running" at that step; killing the `sleep` moves it to the next
+interactive step ("Waiting for you at …").
+
+- Launch the isolated bundle with `env -i HOME=$HOME PATH=/usr/bin:/bin open -n
+  --env LF_HOME=… --env LF_BIN=… --env LOOPFLOW_UI_TEST_MODE=live --env
+  LOOPFLOW_UI_TEST_SNAPSHOT_PATH=… --env LOOPFLOW_UI_TEST_DELAY=14 --env
+  LOOPFLOW_UI_TEST_WIDTH=… "<bundle>" --args --repo <repo>`. Width 760 is
+  where the workflow bar keeps only its sentence.
+- Select the Task with `open -g -b <bundle id> 'loopflow://<repo name>/task/<id>'`
+  (from `lf open --task <id> --link`). `lf desktop view 'task:<id>'` opens a
+  Dashboard named for the expression instead.
+- Test modes serve no Desktop control socket (`LoopflowApp.init` starts
+  `DesktopServer` only when `AppTestMode.current()` is nil). To switch the
+  Task pane's tab, move that `DesktopServer.start()` line out of the `if`
+  for the local build only, then `lf --task <id> desktop do details
+  page=brief|diff` (no `--task` fails with "No Task selected"). Revert
+  before committing.
+- Theme: write `theme: "Loopflow Light"` (or a file name in
+  `$LF_HOME/themes/`, the imported-theme case) to `$LF_HOME/config.yaml`
+  before launch.
+- Not reachable this way: Ghostty panes (they open on a visit, and Ghostty
+  sees no focus-in while locked, so `desktop capture` says "no native
+  surface") and menus. Terminal faces need an unlocked display.
+- Skew: restart the private server from a copy of the installed `lf` on the
+  same `LF_HOME` (no migrations between them) to see the branch app read
+  older responses.

@@ -73,3 +73,15 @@
 
 - Cut `TaskRow.since`: no caller passed it. The change that records a status
   start time adds the parameter with its first caller.
+
+## QA (2026-11-22, headless)
+
+- The branch app over the installed server shows an empty workflow bar with
+  no Run and no reason (TaskGraph's new required fields). Left as is: the
+  packaged app pairs with its bundled server. Alternative: say "This server
+  is older than the app" in the bar.
+- Brief's reason prints Rust's execution reason with a raw step UUID ("Step
+  c9b373a4-… is running help graph."). Not changed; it is shared with `lf
+  task status`.
+- At 760 the pane's tab strip scrolls Files out of view; nothing shows it is
+  there.

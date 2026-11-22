@@ -223,8 +223,29 @@ them. Nothing here needs WindowServer focus.
   "Updating…". Sidebar Wave rows did not answer hook clicks.
 - `lf desktop <tile-or-dashboard>` with `LF_DESKTOP` set to the bundle ID
   works in this mode (`lf desktop working-tasks`, `lf desktop back`).
-- Not reachable: the title bar, hover, drag, popovers and sheets opened from
-  a "+" (New Wave never appeared), file panels and Ghostty faces. The in-process
-  accessibility tree is empty, so there is no finding a control by name.
+- Navigate with `lf desktop goto <n>`, `working-tasks`, `back` and `forward`;
+  `lf --task <id> desktop do details page=brief` switches the Task pane. A tile
+  shows its workflow sentence only after its Task was visited in that window.
+  `lf desktop do new-task` opens the New Task sheet, and `snap` lists a sheet
+  as its own untitled window. Apply in Choose Theme answers a doubled click.
+- Opening a Task changes it: a link to an unstarted Task places its checkout
+  (the server then calls it `idle`), and opening a Task whose worktree was
+  moved away puts the worktree back. Read `lf plan list --json` for what a
+  row is drawn from.
+- Relaunching: a window the app restores is titled with the bundle's name and
+  stays on "Updating…" while the screen is locked; a link then opens a second
+  window on the same repository and the two draw each other's selection. Before
+  quitting, close the Portfolio and leave one repository window on a Task that
+  is not finished. Stop the app by PID (`osascript` quit is refused while a
+  sheet is up), `defaults delete <bundle id>`, relaunch, and use the window
+  titled with the repository's name; if none appears in 15 s, open
+  `loopflow://<repo>`. Never send a finished Task's link to a relaunched app.
+- A theme set from the CLI reaches the running app, but relaunch before
+  judging Choose Theme: its tiles were blank once after a live change.
+- Not reachable: the title bar, hover, drag, the jump menu (its shortcut needs
+  a key window, and setting `navigation.palette = .search` draws nothing),
+  popovers and sheets opened from a "+" (New Wave never appeared), file panels
+  and Ghostty faces. The in-process accessibility tree is empty, so there is no
+  finding a control by name.
 - Stand-in providers exit at once here, so a Session pane shows "Process
   exited" under its opening overlay. That is the stand-in, not the pane.

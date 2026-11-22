@@ -5,6 +5,7 @@
 <style>
   body { font: 15px/1.5 -apple-system, sans-serif; max-width: 1100px; margin: 2rem auto; padding: 0 1rem; color: #1c1c1c; }
   h1 { font: 600 26px Georgia, serif; }
+  h3 { margin-top: 1.8rem; }
   h2 { margin-top: 2.5rem; border-top: 1px solid #ccc; padding-top: 1rem; }
   img { max-width: 100%; border: 1px solid #bbb; margin: .5rem 0 1rem; }
   .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
@@ -21,6 +22,114 @@ repository "atlas" with two Waves (Growth, Infrastructure), ten Tasks, objective
 second person's claims and a held Graph. The screen was locked, so the app was driven by a local
 file-command hook (snapshot, click, menu item) that is not in the commit. Every picture below is the
 real window drawn by the real app from the real server.</p>
+
+<h2>Second run, after slice 5 (at d1355bac0d)</h2>
+
+<p>Same method on a new private Machine: "atlas" with Growth and Infrastructure, ten Tasks. One parked at
+<code>demo</code>, one held running in <code>make</code>, one whose worktree was moved away, one done, one
+abandoned, one claimed by Ana, one by Ben, three untouched. Screen locked throughout. Slice 5 is what this
+run was for: one answer to whether a Task needs someone, on the Now list, the Task's page, the tiles and
+the Brief.</p>
+
+<h3>The Now list lists what its rows say needs someone</h3>
+<div class="pair">
+  <figure><img src="qa/30-now-light.png"><figcaption>Blocked 1, Waiting 1. The four unstarted Tasks and the running one are not listed. Each heading matches the word on its rows.</figcaption></figure>
+  <figure><img src="qa/31-roadmap-light.png"><figcaption>Roadmap: the same Tasks, with "Unstarted" on the ones that only await Start.</figcaption></figure>
+</div>
+
+<h3>A Wave's page</h3>
+<div class="pair">
+  <figure><img src="qa/32-wave-heading-before.png"><figcaption>First look, Completed switched on: the control sat on its own line under "Tasks 6". A done Task reads "Done".</figcaption></figure>
+  <figure><img src="qa/33-wave-heading-after.png"><figcaption>After: the control is on the heading's line.</figcaption></figure>
+</div>
+<p><b>Fixed.</b> <code>WorkSectionHeading</code> aligned its trailing control to the title's text baseline; an
+AppKit control has none, so it dropped a line. The title and count keep their baseline and the trailing
+control centers on them (<code>WorkStyle.swift</code>). The same heading carries Refresh on a Task's page and
+the Metrics control.</p>
+<p>A click on "Invite teammates from the empty state" opened that Task in the repository window.</p>
+
+<h3>A Task's page says its row's word</h3>
+<p>Opened each Task by its link and showed "Task &amp; workflow".</p>
+<div class="pair">
+  <figure><img src="qa/34-task-page-waiting.png"><figcaption>Parked at demo: row "Waiting", page "Waiting", "Waiting for you at demo."</figcaption></figure>
+  <figure><img src="qa/36-task-page-moving.png"><figcaption>Running: row "Moving", page "Moving" with the workflow sentence.</figcaption></figure>
+  <figure><img src="qa/37-task-page-done.png"><figcaption>Done: "Done" in secondary ink on the green tint. Readable.</figcaption></figure>
+  <figure><img src="qa/38-task-page-abandoned.png"><figcaption>Abandoned: "Abandoned" on the red tint, not "Waiting".</figcaption></figure>
+</div>
+<figure><img src="qa/35-task-page-opened-unstarted.png"><figcaption>An unstarted Task, opened by its link. Opening it placed a checkout, so the server calls it <code>idle</code> and <code>waiting</code>, reason "ready". Row and page agree on "Waiting", over a Start button. See "Still wrong".</figcaption></figure>
+
+<h3>A dashboard tile keeps its workflow sentence</h3>
+<figure><img src="qa/40-dashboard-light.png"><figcaption><code>lf desktop working-tasks</code> after visiting three Tasks. Each tile: the Task row, then "Waiting for you at demo." or the running sentence. "Page 1 of 2" in sans.</figcaption></figure>
+
+<h3>The Brief</h3>
+<figure><img src="qa/39-brief-active-ready.png"><figcaption>One state line, "Active, at demo. ready.", and no second "Waiting: ready" line under it.</figcaption></figure>
+
+<h3>Backlog, New Task, Choose Theme</h3>
+<div class="pair">
+  <figure><img src="qa/41-backlog-light.png"><figcaption>One row selected and disclosed: "1 selected", "Start with qa", "claimed by Ben".</figcaption></figure>
+  <figure><img src="qa/44-new-task.png"><figcaption>New Task, opened with <code>lf desktop do new-task</code>. The last step's name hangs past the track's right edge.</figcaption></figure>
+  <figure><img src="qa/42-theme-clay-preview.png"><figcaption>Clicked the Clay tile: the window and the sample follow it.</figcaption></figure>
+  <figure><img src="qa/43-dashboard-clay-applied.png"><figcaption>Clicked Apply: <code>config.yaml</code> got <code>theme: Clay</code> and the open window changed at once. The first run could not reach this.</figcaption></figure>
+</div>
+
+<h3>Loopflow Dark and Dracula</h3>
+<div class="pair">
+  <figure><img src="qa/46-task-page-dark.png"><figcaption>Task page, Loopflow Dark.</figcaption></figure>
+  <figure><img src="qa/47-dashboard-dark.png"><figcaption>Dashboard, Loopflow Dark.</figcaption></figure>
+  <figure><img src="qa/48-wave-page-dark.png"><figcaption>Wave page, Loopflow Dark, heading fixed.</figcaption></figure>
+  <figure><img src="qa/51-wave-page-dracula.png"><figcaption>Wave page, Dracula.</figcaption></figure>
+  <figure><img src="qa/50-dashboard-dracula.png"><figcaption>Dashboard, Dracula.</figcaption></figure>
+  <figure><img src="qa/52-theme-dracula.png"><figcaption>Choose Theme in Dracula after a relaunch.</figcaption></figure>
+</div>
+
+<h3>Tried and taken back</h3>
+<p>A pane hosted outside its own Task's view shows where it belongs in mono ("729776 Weekly digest email ·
+atlas"), which DESIGN.md calls mono prose. In sans it truncated to a single "a" in a narrow pane, and a
+whole-or-nothing version widened the pane past its slot and clipped "Claude" on the left
+(below). Both edits were reverted; the line is as it was at the base.</p>
+<figure><img src="qa/49-backlog-dracula-context-clipped.png"><figcaption>The reverted attempt. Kept for the next person who touches that line.</figcaption></figure>
+
+<h3>Checks run</h3>
+<table>
+<tr><th>Command</th><th>Result</th></tr>
+<tr><td><code>scripts/test_desktop.sh --filter 'RoadmapViewTests|WaveDetailReadingTests|WorkNavigationTests|DesktopHeadlessTests|DesignDisciplineTests'</code></td><td>77 tests in 5 suites passed, after the heading fix and with the reverted edits gone.</td></tr>
+</table>
+
+<h3>What works now</h3>
+<ul>
+<li>The Now list, the roadmap, a Wave's page, a Task's page and a tile say one word for one Task in every state reached: Unstarted, Waiting, Moving, Blocked (row only), Done, Abandoned.</li>
+<li>The Wave page's Completed control sits on its heading.</li>
+<li>Backlog selection and disclosure, dashboard paging text, Choose Theme preview and Apply.</li>
+<li>All of it in Loopflow Light; Task page, dashboard and Wave page in Loopflow Dark and Dracula.</li>
+</ul>
+
+<h3>Not reached, and why</h3>
+<ul>
+<li><b>The jump menu.</b> Its shortcut needs a key window, and setting <code>navigation.palette = .search</code> from a local action drew no sheet with the screen locked. <code>WorkPaletteTests</code> holds its word; nobody has looked at it.</li>
+<li><b>A blocked Task's own page.</b> Opening the Task whose worktree was moved away put the worktree back, so only its sidebar row and Now row were seen as "Blocked".</li>
+<li><b>New Wave</b>, the title bar, menus, hover, drag, terminal faces: an unlocked display, as before.</li>
+<li><b>The Dev app on the live Machine.</b> Screen locked.</li>
+</ul>
+
+<h3>Still wrong, worst first</h3>
+<ol>
+<li><b>The Brief says "Active" where the row and the page say "Waiting".</b> Its lead is the lifecycle word ("Active, at demo. ready."). Slice 5 moved the Brief's second line onto the row's answer and left the lead. Changing the lead changes #1949's sentence, so it is described here, not changed.</li>
+<li><b>A parked Task still reads "Waiting" over "ready"</b>, and on a tile that is three lines saying one thing: "Waiting", "ready", "Waiting for you at demo." The reason is the server's (questions 38 and 42).</li>
+<li><b>A Task that has a checkout and never ran reads "Waiting / ready"</b> and is listed on Now. The server calls it <code>idle</code>, so <code>RoadmapTask.need</code>'s unstarted rule does not cover it. Opening an unstarted Task by its link is enough to get there. Part of the Rust Task under "Outside this change".</li>
+<li><b>One action, two names.</b> A Portfolio row offers "Start" for a Task parked at demo; its own page offers "Run" for the same <code>lf task run</code>. <code>RoadmapTaskAction.label</code> is "Start" for every case.</li>
+<li><b>A narrow tile cuts the running sentence</b> to "make is running help grap…" and loses "You are next needed at demo."</li>
+<li><b>A finished Task opened from outside the list</b> gets the mono context line in both pane headers, which squeezes the Task pane's tabs to "File" and hides "Task &amp; workflow" (done and abandoned pictures above). At the base too.</li>
+<li><b>Seen once: Choose Theme drew no theme tiles</b> after the theme was changed from the CLI while the app ran; a relaunch drew them. With the screen locked there is no telling whether a person would see it.<br><img src="qa/53-theme-dracula-blank.png"></li>
+<li><b>A link to a finished Task, sent to a relaunched app,</b> opened a second repository window stuck on "Updating…" with a sheet reading only "Open Task / Cancel / Retry". Relaunched windows read no Work while the screen is locked, so this may be the harness.<br><img src="qa/45-linked-done-error.png"></li>
+<li>From the first run and unchanged: the link to a Wave shows the repository's backlog; a narrow tile clips "Open conversation"; the sample says "Working" where rows say "Busy" or "Moving".</li>
+</ol>
+
+<h3>What it left behind</h3>
+<p>Nothing running: the app, the private server and the held Graph were stopped by PID, the bundle
+unregistered and deleted, its defaults removed. The private Machine's files are in
+<code>/tmp/lf-qa-8b92c6</code>.</p>
+
+<h2>First run (at 021b28484a)</h2>
 
 <h2>1. A Wave's backlog</h2>
 <p>Opened the repository, then the Growth backlog. Clicked the filter segments, a checkbox, two

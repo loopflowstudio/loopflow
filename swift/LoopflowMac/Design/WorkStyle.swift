@@ -13,15 +13,18 @@ struct WorkSectionHeading<Trailing: View>: View {
     @Environment(\.palette) private var palette
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
-            Text(title)
-                .font(Typography.textStrong)
-                .foregroundStyle(palette.textTertiary)
-            if let count {
-                Text("\(count)")
-                    .font(Typography.meta)
-                    .monospacedDigit()
+        // A trailing control has no text baseline, so it centers on the title's line.
+        HStack(spacing: Spacing.sm) {
+            HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
+                Text(title)
+                    .font(Typography.textStrong)
                     .foregroundStyle(palette.textTertiary)
+                if let count {
+                    Text("\(count)")
+                        .font(Typography.meta)
+                        .monospacedDigit()
+                        .foregroundStyle(palette.textTertiary)
+                }
             }
             Spacer(minLength: Spacing.sm)
             trailing

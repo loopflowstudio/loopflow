@@ -161,3 +161,18 @@ Each was decided so the work could continue; `scratch/plan.md` has the detail.
     "Abandoned" are in secondary ink on the tinted header, where the word
     was green or red. Keep the lifecycle word and its color on the page
     instead?
+45. **The Brief's lead keeps the lifecycle word.** A Task parked at demo
+    reads "Waiting" on its row and its page and "Active, at demo. ready." in
+    its Brief (second qa run). The lead is #1949's sentence; slice 5 moved
+    only the line under it. Should the lead say the row's word?
+46. **A placed Task that never ran reads "Waiting / ready"** and is on the
+    Now list. The server calls it `idle`; `RoadmapTask.need` exempts only
+    `unstarted`. Opening an unstarted Task by its link gets there. Left to
+    the Rust Task under "Outside this change"; widen `need` to `idle` Tasks
+    whose Graph has not run instead?
+47. **A Portfolio row offers "Start" for a parked Task** where its page
+    offers "Run" (`RoadmapTaskAction.label`). At the base too. One word?
+48. **The pane's context line stays mono.** "729776 Weekly digest email ·
+    atlas" in a pane header is mono prose; in sans it truncated to one letter
+    and a whole-or-nothing version widened the pane (second qa run, both
+    reverted). It needs someone who can watch the strip lay out.

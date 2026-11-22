@@ -240,7 +240,8 @@ struct TaskStartOffer: View {
 
     var body: some View {
         let refusal = model.runRefusal(task)
-        EmptyState(title: task.task.name, sentence: sentence) {
+        // A Dashboard tile already names its Task above this line.
+        EmptyState(title: compact ? "Not started" : task.task.name, sentence: sentence) {
             Button("Start") { model.startTaskFromInput(nil, task: task) }
                 .buttonStyle(LoopflowButtonStyle(.accent))
                 .disabled(refusal != nil)

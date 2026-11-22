@@ -194,7 +194,8 @@ You take part at explore, ship-review and verify.
 
 **Start** runs that workflow. **Start with…** lists the others; picking one
 starts the Task on it. When the Machine would refuse the run, Start is off and
-its tooltip says why.
+its tooltip says why. In a Dashboard tile, which already names the Task, it is
+one line: "Not started" and **Start**.
 
 #### Start picks a workflow
 

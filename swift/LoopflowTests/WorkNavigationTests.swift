@@ -377,6 +377,10 @@ struct WorkNavigationTests {
         let start = try offer.inspect().find(viewWithAccessibilityIdentifier: "task-start-issue-review").button()
         #expect(!start.isDisabled())
         #expect(throws: Never.self) { try offer.inspect().find(text: task.task.name) }
+        // A Dashboard tile names the Task in its header; its line does not say it again.
+        let tile = try offer.environment(\.compactPanes, true).inspect()
+        #expect(throws: Never.self) { try tile.find(text: "Not started") }
+        #expect(throws: (any Error).self) { try tile.find(text: task.task.name) }
         #expect(model.navigation.notices.current == nil)
     }
 

@@ -94,3 +94,16 @@ Made at realign after the remaining states with nobody present.
     with a warning icon ("Retained Task · planning unavailable"). It reads
     "Planning is unavailable for this Task." as a `FailureLine` with the
     reason in mono, and has no Retry: the page has no re-read of its own.
+
+Made at qa with nobody present; `scratch/qa.html` has the captures.
+
+27. A Dashboard tile's unstarted line reads "Not started" beside Start, not
+    the Task's title: the tile's header already names the Task.
+28. An empty repository shows the backlog's own empty ("Nothing is waiting in
+    this repository", bold, an accent "New"), not the prototype's "No planned
+    Work in this repository". Left as it is: the prototype's state in the
+    backlog pane would sit beside "Conversation not open", two serif titles.
+    Which should an empty repository show?
+29. The request in New Task is semibold (`Typography.lede`, as `DESIGN.md`
+    lists it); the prototype's textarea is regular. Left as `DESIGN.md` has it.
+30. The two prototype sections stay until 28 and 29 are settled.

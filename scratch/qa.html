@@ -1,0 +1,154 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>QA: New Task and the empty and failed states (923677)</title>
+<style>
+  body { font: 15px/1.5 -apple-system, sans-serif; max-width: 1100px; margin: 40px auto; padding: 0 24px; color: #222; }
+  h1 { font-size: 26px; } h2 { font-size: 20px; margin-top: 48px; } h3 { font-size: 16px; margin-top: 28px; }
+  img { max-width: 100%; border: 1px solid #ccc; border-radius: 6px; display: block; margin: 8px 0 4px; }
+  .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .sheet img { max-width: 540px; }
+  code, pre { font: 12.5px ui-monospace, monospace; } pre { background: #f4f2ee; padding: 10px; overflow-x: auto; }
+  table { border-collapse: collapse; } td, th { border: 1px solid #ccc; padding: 6px 10px; text-align: left; vertical-align: top; }
+  .cap { color: #555; font-size: 13px; margin: 0 0 16px; }
+</style>
+
+<h1>QA: New Task and the empty and failed states</h1>
+<p>Task 923677, branch at 44ed5db269 plus this run's fix. The app is the branch's Loopflow for Mac in an isolated bundle
+(<code>~/Applications/Loopflow Dev QA.app</code>, its own bundle ID), reading a private Machine
+(<code>LF_HOME=/tmp/lfq923/lf</code>, the branch's <code>lf server run</code>, a stand-in <code>claude</code>) with three
+disposable paths: an empty repository, a repository with filed Tasks, and a directory that is not a repository.</p>
+<p>The screen was locked for the whole run. Windows were captured from the app's own rendering
+(<code>cacheDisplay</code>) and driven through <code>lf desktop</code> and a capture loop added to
+<code>LoopflowApp.swift</code> for this run only (typing into the sheet, ⌘↩, Esc, a click at a point); that loop is
+reverted and not committed. Nothing touched the installed app, its server or <code>~/.lf</code>.</p>
+
+<h2>What works now</h2>
+<table>
+<tr><th>Scenario</th><th>Result</th></tr>
+<tr><td>⌘N: the sheet, empty and with a request, Light and Dark</td><td>Matches the prototype's parts and wording. Start is off until there is a request.</td></tr>
+<tr><td>The sheet follows the repository's default workflow</td><td><code>code</code>, "the default" → after <code>graph: feature</code>: <code>feature</code>, "demo's default", the step line and sentence change with it.</td></tr>
+<tr><td>A filed Task that has not started, Light and Dark</td><td>Bar draws the step line; pane reads "Not started. It will run feature, demo's default. You take part at explore, ship-review and verify." with Start and Start with…</td></tr>
+<tr><td>Start from that pane</td><td>The Task starts; the bar becomes the same line with explore current and "Waiting for you at explore."</td></tr>
+<tr><td>A path that is not a repository, Light and Dark</td><td>"This repository did not open", the Machine's message in mono, Retry. After <code>git init</code> there, Retry opens it.</td></tr>
+<tr><td>Dashboard tile of an unstarted Task</td><td>One line. Fixed in this run (below).</td></tr>
+<tr><td>Diff tab with no pull request; Graph log with no run; Files with no selection</td><td>"No pull request yet. Changes below are local.", "No Graph has run.", "Select a file".</td></tr>
+<tr><td><code>lf graph list --json</code>, <code>code</code>'s <code>workflow</code></td><td>plan, build, ship-review, deliver, verify; <code>"sentence": "You take part at ship-review and verify."</code></td></tr>
+</table>
+
+<h2>Fixed in this run</h2>
+<h3>A Dashboard tile said the Task's title twice</h3>
+<p>The tile's header names the Task, and the one-line state under it repeated the title beside Start. The line now
+reads "Not started" (<code>TaskStartOffer</code>, <code>TaskWorkView.swift</code>); <code>unstartedTaskOffersStart</code>
+covers it and <code>docs/surfaces.md</code> says it.</p>
+<div class="pair">
+  <div><img src="qa/dash-light.jpg"><p class="cap">Before.</p></div>
+  <div><img src="qa/dash-dark.jpg"><p class="cap">After, in Loopflow Dark, with a title long enough to cut short in the header.</p></div>
+</div>
+<pre>scripts/test_desktop.sh --filter 'unstartedTaskOffersStart|EmptyStateTests'
+✔ Test run with 7 tests in 2 suites passed</pre>
+
+<h2>Still wrong or open, worst first</h2>
+
+<h3>1. An empty repository does not show the prototype's state</h3>
+<p>The plan's demo step 2 says an empty repository reads "No planned Work in this repository" with "New Task ⌘N" and
+"Open the repository conversation". Opening one shows the repository's two panes instead: "Conversation not open" on
+the left and the backlog's own empty, "Nothing is waiting in this repository" in bold with an accent button reading
+"New". <code>NoPlannedWork</code> is drawn only by <code>WorkSurfaceView</code> and <code>RoadmapView</code> when the
+plan has no Waves and no Tasks, and a repository window with no selection shows <code>BacklogView</code> first.
+The backlog's empty (<code>BacklogView.emptyState</code>) predates this change and was not on its list: it is neither
+a <code>ContentUnavailableView</code> nor one of the listed sentences. Not changed here: putting the prototype's serif
+state in the backlog pane would set two serif titles side by side, and choosing between them is a design call.</p>
+<div class="pair">
+  <div><img src="qa/empty-light.jpg"><p class="cap">An empty repository, Loopflow Light.</p></div>
+  <div><img src="qa/empty-dark.jpg"><p class="cap">Loopflow Dark. (The "Task created" notice is left from the other repository's recovery.)</p></div>
+</div>
+
+<h3>2. The request you type is semibold; the prototype sets it regular</h3>
+<p><code>Typography.lede</code> is Atkinson 600 at 17, and <code>DESIGN.md</code> lists "the text you type in New Task"
+under it. The prototype's textarea is <code>font: 400 var(--lede)</code>, and so is the request in its failed-start
+state. The two references disagree; the app follows <code>DESIGN.md</code>. A paragraph typed in semibold reads heavy.</p>
+
+<h3>3. "Conversation not open" says the same thing three times</h3>
+<p>Title "Conversation not open", sentence "Open the conversation here.", button "Open conversation". In the narrow
+repository pane the title wraps to two lines. The sentence adds nothing the button does not say.</p>
+
+<h3>4. The unstarted Task's screen has its title in serif twice</h3>
+<p>The pane's state and the Task page beside it both set the Task's name in the serif title step, in two inks.
+<code>DESIGN.md</code> asks for one serif thing per screen. The page's title predates this change.</p>
+
+<h3>5. A failed Start was not reachable as "Not started."</h3>
+<p>Two ways of breaking Start both went to creation recovery, which closes the sheet and reports in a notice at the
+bottom of the window; the request's words are not kept on screen. Making <code>.git</code> unwritable gave
+"Creation 3E68…: invalid data: Permission denied (os error 13); inspect the affected work before retrying. It may have
+happened; refresh before retrying." and recovery later filed the Task. A repository default naming a missing workflow
+filed the Task and gave "Creation 15C5…: repository default graph "nosuch" is unavailable: add
+.lf/graphs/nosuch.yaml…", cut off at the window's edge. Both are the recovery path from before this change, not
+<code>StartingTaskView</code>. Its "Not started.", "Try again" and "Discard" were not seen in the app.</p>
+<img src="qa/start-failed-light.jpg">
+<p class="cap">Start with a repository default that does not exist: the Task is filed and Active, the notice carries a request UUID and is cut short.</p>
+
+<h3>6. Smaller things seen</h3>
+<ul>
+<li>In the sheet the chevron sits between a menu's name and the comma after it: "demo ⌄ , running feature ⌄ , demo's default".</li>
+<li>A Task waiting at its first step shows "Waiting for you at explore." and, under it in the Graph log, "No Graph has run."</li>
+<li>"Task created · Show result" stayed on screen through every later capture, in another repository's window too.</li>
+</ul>
+
+<h2>Not reached, and why</h2>
+<ul>
+<li><b>Opening the sheet's two menus and "Start with…".</b> A menu is its own window and tracks the mouse; with the
+screen locked it cannot be opened or captured. The workflow change was seen through the repository default instead,
+and <code>NewTaskTests</code> taps a menu item headless.</li>
+<li><b>Terminal faces, focus, real keyboard input, VoiceOver.</b> They need an unlocked display.</li>
+<li><b>File, and "Not filed."</b> Not pressed in the app.</li>
+<li><b>"Choose Work", "Selected Work is unavailable", "Nothing needs action", "This dashboard is no longer available",
+"Comparison unavailable", the activity window, the retained Task's planning failure.</b> Not reached in this run;
+their view tests are the check so far.</li>
+<li><b>A Wave's default ("Product's default").</b> The private repositories had no Wave.</li>
+<li><b>Imported themes.</b> Only Loopflow Light and Loopflow Dark.</li>
+</ul>
+<p>The two prototype sections are still in <code>design/prototypes/desktop-more.html</code>: items 1 and 2 are
+differences from them that someone should settle before they go.</p>
+
+<h2>The run</h2>
+
+<h3>New Task</h3>
+<p><code>lf desktop do new-task</code> (⌘N's action), then a request typed into the field.</p>
+<div class="pair sheet">
+  <div><img src="qa/newtask-light-sheet.jpg"><p class="cap">Empty repository, no request: Start is off. "the default" because nothing sets <code>graph:</code>.</p></div>
+  <div><img src="qa/nt-feature-light-sheet.jpg"><p class="cap">After <code>graph: feature</code> in the repository's config.</p></div>
+  <div><img src="qa/nt-dark-sheet.jpg"><p class="cap">Loopflow Dark.</p></div>
+  <div><img src="qa/nt-nosuch-light-sheet.jpg"><p class="cap">A default the catalog does not have: the name, no step line.</p></div>
+</div>
+<img src="qa/prototype.jpg" style="max-width:700px">
+<p class="cap">The prototype, rendered headless from <code>design/prototypes/desktop-more.html</code>.</p>
+
+<h3>A Task that has not started</h3>
+<p><code>lf task create 'Stream metrics from rented machines'</code>, then <code>lf desktop view task:ca08c7</code> and
+<code>lf desktop enter</code>. A <code>loopflow://…/task/&lt;id&gt;</code> link opens the Task's conversation, which
+places it, so the link is not a way to see this state.</p>
+<div class="pair">
+  <div><img src="qa/unstarted-light.jpg"><p class="cap">Loopflow Light.</p></div>
+  <div><img src="qa/unstarted-dark.jpg"><p class="cap">Loopflow Dark, a long title.</p></div>
+</div>
+<img src="qa/started-light.jpg">
+<p class="cap">After Start in the pane: explore is current, "Waiting for you at explore." The terminal text is the stand-in provider exiting.</p>
+
+<h3>A repository that would not open</h3>
+<div class="pair">
+  <div><img src="qa/notrepo-light.jpg"><p class="cap"><code>--repo /tmp/lfq923/notrepo</code>, Loopflow Light.</p></div>
+  <div><img src="qa/notrepo-dark.jpg"><p class="cap">Loopflow Dark.</p></div>
+</div>
+<img src="qa/notrepo-retried-light.jpg" style="max-width:700px">
+<p class="cap">After <code>git init</code> in that directory and Retry.</p>
+
+<h3>Sentences in the Task pane</h3>
+<div class="pair">
+  <div><img src="qa/details-diff-dark.jpg"><p class="cap">Diff: "No pull request yet. Changes below are local."</p></div>
+  <div><img src="qa/graphlog-dark.jpg"><p class="cap">Graph processes: "No Graph has run."</p></div>
+</div>
+
+<h2>Left behind</h2>
+<p>The private server is stopped and no holder or provider from <code>/tmp/lfq923</code> is running. The QA bundle is
+deleted, unregistered from LaunchServices, and its defaults removed. <code>/tmp/lfq923</code> itself (repositories,
+store, full-size captures) is still on disk.</p>

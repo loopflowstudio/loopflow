@@ -188,3 +188,38 @@ concrete step. Run the wrapper and `lf` through a script that does
 - Skew: restart the private server from a copy of the installed `lf` on the
   same `LF_HOME` (no migrations between them) to see the branch app read
   older responses.
+
+# Driving sheets and captures with the screen locked
+
+One capture per launch is slow. For a run with many states, add a loop to
+`uiTestSnapshot()` in `LoopflowApp.swift` for the local build only and revert
+it before committing: with an env variable naming a directory, poll it, and
+for each `<name>.req` write `SnapshotService().snapshotWindow(window, …)` to
+`<name>.png` and `window.attachedSheet` to `<name>-sheet.png`. Start
+`DesktopServer` under the same variable so `lf desktop` works in `live` mode.
+
+- Relaunch with `--args -ApplePersistenceIgnoreState YES --repo <path>`. After
+  the first quit the bundle restores "no windows" and a later launch sits with
+  none (`desktop state` lists `"windows": []`, the log shows only
+  `config.theme`).
+- With a sheet open, `osascript … quit` fails with "User canceled"; stop that
+  one PID. `open -n` beside a live instance leaves two; check `pgrep` first.
+- New Task: `lf desktop do new-task` opens the sheet. Type with
+  `(sheet.firstResponder as? NSTextView)?.insertText(…)`; ⌘↩ and Esc work as
+  `sheet.performKeyEquivalent(with:)` on a synthesized key event.
+- A synthesized mouse down and up through `window.sendEvent` presses SwiftUI
+  buttons (Start in a pane, Retry) but not `onTapGesture` rows.
+- Menus cannot be opened or read: an `NSPopUpButton` behind a SwiftUI `Menu`
+  has no items until it tracks. Change the repository's `graph:` to see the
+  sheet on another workflow.
+- With `LF_DESKTOP` set to the QA bundle ID, `lf desktop view 'task:<id>'
+  --repo <repo>` opens its Dashboard in the QA app, and `lf desktop enter
+  '<title>'` then selects the Task without opening a conversation. That is
+  the way to an unstarted Task's pane: a `loopflow://<repo>/task/<id>` link
+  opens its conversation, which claims and places it, and so does
+  `lf open --task <id> --link`.
+- A failed Start is hard to produce: an unwritable `.git` and a repository
+  default naming a missing Graph both end in creation recovery (a notice,
+  and the Task is filed), not in "Not started." on the request.
+- Give the isolated `HOME` a `src/` directory, or the status line shows
+  "Read …/home/src: No such file or directory".

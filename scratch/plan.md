@@ -435,9 +435,13 @@ demo: not headless; qa or demo runs it.
      `documented_commands::` (a `docs/surfaces.md` row) were not run; gate
      runs them.
 
-Nothing remains to build. Left for later steps: the gate checks above, the
-Dev app look in both themes (qa or demo), then deleting the two prototype
-sections. `lf desktop capture -p backlog` still prints "Wave planning
+Nothing remains to build. The Dev app look ran at qa in both themes
+(`scratch/qa.html`): the sheet, the unstarted Task, the failed repository and
+the Task pane's sentences read as designed; a Dashboard tile's unstarted line
+became "Not started". Two differences from the prototype are open
+(questions 28, 29): an empty repository shows the backlog's own empty, and
+the typed request is semibold. Left for later steps: the gate checks above,
+then deleting the two prototype sections once those are settled. `lf desktop capture -p backlog` still prints "Wave planning
 unavailable · …" (`WorkModel.swift:1035`); it is capture text, not a drawn
 state, and was left.
 

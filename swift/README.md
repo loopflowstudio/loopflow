@@ -1557,7 +1557,7 @@ more and hide at its end. Under the row is one sentence for the workflow,
 unless the Task's program is asking something, which the row already prints:
 
 ```text
-Needs you   state:available or state:blocked        Default Slots  Edit Dashboard
+Available and blocked   state:available or state:blocked        Default Slots  Edit Dashboard
 
 Keep interrupted terminal pastes from swallowing Session input
 LOO-912  Busy

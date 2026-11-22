@@ -40,45 +40,35 @@ struct ReviewRendered: View {
             case .markdown:
                 ReviewMarkdown(old: sides.old?.content, new: sides.new?.content, split: split).equatable()
                     .padding(.horizontal, 12).padding(.vertical, 10)
-            case .image, .svg:
+            case .image, .svg, .html:
                 ViewThatFits(in: .horizontal) {
-                    HStack(alignment: .top, spacing: 12) { images(sides) }.frame(minWidth: TaskFilesStore.splitWidth)
-                    VStack(alignment: .leading, spacing: 12) { images(sides) }
-                }
-                .padding(.horizontal, 12).padding(.vertical, 10)
-            case .html:
-                ViewThatFits(in: .horizontal) {
-                    HStack(alignment: .top, spacing: 12) { pages(sides) }.frame(minWidth: TaskFilesStore.splitWidth)
-                    VStack(alignment: .leading, spacing: 12) { pages(sides) }
+                    HStack(alignment: .top, spacing: 12) { both(sides) }.frame(minWidth: TaskFilesStore.splitWidth)
+                    VStack(alignment: .leading, spacing: 12) { both(sides) }
                 }
                 .padding(.horizontal, 12).padding(.vertical, 10)
             }
         } else if let error = store.sideErrors[file.path] {
-            HStack(spacing: 0) {
-                ReviewNotice(text: "Image unavailable: \(error)")
-                Button("Retry") { Task { await store.retrySides(file) } }
-                    .buttonStyle(WorkPlainButtonStyle()).font(Typography.caption(11))
-            }
+            ReviewSidesFailed(store: store, file: file, error: error)
         } else {
             ReviewNotice(text: "Reading…")
         }
     }
 
-    @ViewBuilder private func images(_ sides: TaskFilesStore.FileSides) -> some View {
-        TaskImage(file: sides.old, absent: "Added").frame(maxWidth: .infinity)
-        TaskImage(file: sides.new, absent: "Deleted").frame(maxWidth: .infinity)
+    /// Old then new, as pictures or as pages.
+    @ViewBuilder private func both(_ sides: TaskFilesStore.FileSides) -> some View {
+        if rendering == .html {
+            page(sides.old, absent: "Added")
+            // Relative references resolve in the working tree only when the new
+            // side is the working tree of a checkout on this Machine.
+            page(sides.new, absent: "Deleted", baseURL: sides.commits.last == "" && store.query.remoteMachine == nil
+                 ? URL(fileURLWithPath: store.cwd).appendingPathComponent(file.path) : nil)
+        } else {
+            TaskImage(file: sides.old, absent: "Added").frame(maxWidth: .infinity)
+            TaskImage(file: sides.new, absent: "Deleted").frame(maxWidth: .infinity)
+        }
     }
-
-    @ViewBuilder private func pages(_ sides: TaskFilesStore.FileSides) -> some View {
-        page(sides.old, absent: "Added")
-        // Relative references resolve in the working tree only when the new
-        // side is the working tree of a checkout on this Machine.
-        page(sides.new, absent: "Deleted", baseURL: sides.commits.last == "" && store.query.remoteMachine == nil
-             ? URL(fileURLWithPath: store.cwd).appendingPathComponent(file.path) : nil)
-    }
-
     @ViewBuilder private func page(_ side: TaskFileSnapshot?, absent: String, baseURL: URL? = nil) -> some View {
-        if let html = side?.content, side?.state != .missing {
+        if let html = side?.content {
             TaskHTMLView(html: html, baseURL: baseURL, interacted: store.noteInteraction)
                 .containerRelativeFrame(.vertical)
                 .frame(maxWidth: .infinity)
@@ -87,6 +77,21 @@ struct ReviewRendered: View {
         } else {
             Text(absent).font(Typography.caption(11)).foregroundStyle(palette.textSecondary)
                 .frame(maxWidth: .infinity)
+        }
+    }
+}
+
+/// A file whose sides did not read: why, and a way to read them again.
+struct ReviewSidesFailed: View {
+    let store: TaskFilesStore
+    let file: ReviewFile
+    let error: String
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ReviewNotice(text: "Can't render this file: \(error)")
+            Button("Retry") { Task { await store.retrySides(file) } }
+                .buttonStyle(WorkPlainButtonStyle()).font(Typography.caption(11))
         }
     }
 }
@@ -130,7 +135,7 @@ struct ReviewMarkdown: View, Equatable {
         case .removed(let block): marked(struck(block), tone: palette.failureTone)
         case .added(let block): marked(block, tone: palette.successTone)
         case .changed(let old, let new, let words):
-            MarkdownBlocks.Row(block: text(new, words: words, old: old, new: new, showing: [.same, .removed, .added]))
+            MarkdownBlocks.Row(block: text(words, old: old, new: new, showing: [.same, .removed, .added]))
         }
     }
 
@@ -143,8 +148,7 @@ struct ReviewMarkdown: View, Equatable {
         case .added(let block):
             if kind == .added { marked(block, tone: palette.successTone) } else { Color.clear.frame(height: 1) }
         case .changed(let old, let new, let words):
-            MarkdownBlocks.Row(block: text(kind == .removed ? old : new, words: words, old: old, new: new,
-                                           showing: [.same, kind]))
+            MarkdownBlocks.Row(block: text(words, old: old, new: new, showing: [.same, kind]))
         }
     }
 
@@ -168,10 +172,11 @@ struct ReviewMarkdown: View, Equatable {
         return block
     }
 
-    /// `shape`'s kind and marker with the edit's words: removed ones struck in
-    /// the removed tone, added ones filled in the added tone.
-    private func text(_ shape: MarkdownBlocks.Block, words: [ReviewWords], old: MarkdownBlocks.Block,
-                      new: MarkdownBlocks.Block, showing kinds: Set<ReviewWords.Kind>) -> MarkdownBlocks.Block {
+    /// The changed block with the edit's words: removed ones struck in the
+    /// removed tone, added ones filled in the added tone. It keeps the new
+    /// block's kind and marker unless it shows the old side alone.
+    private func text(_ words: [ReviewWords], old: MarkdownBlocks.Block, new: MarkdownBlocks.Block,
+                      showing kinds: Set<ReviewWords.Kind>) -> MarkdownBlocks.Block {
         var text = AttributedString()
         for (piece, kind) in MarkdownRedline.pieces(words, old: old.text, new: new.text, showing: kinds) {
             var piece = piece
@@ -186,7 +191,7 @@ struct ReviewMarkdown: View, Equatable {
             }
             text += piece
         }
-        var block = shape
+        var block = kinds.contains(.added) ? new : old
         block.cells = [text]
         return block
     }

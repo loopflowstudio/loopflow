@@ -30,7 +30,8 @@ struct MarkdownRedlineTests {
         let heading = try #require(redline.entries.first)
         #expect(Self.words(heading, .added) == ["v2"])
         #expect(Self.words(heading, .removed).isEmpty)
-        #expect(heading.old?.kind == .heading(1) && heading.new?.kind == .heading(1))
+        guard case .changed(let old, let new, _) = heading else { Issue.record("not one changed block"); return }
+        #expect(old.kind == .heading(1) && new.kind == .heading(1))
     }
 
     @Test func anInsertedParagraphStandsAloneBetweenItsNeighbours() {
@@ -42,7 +43,8 @@ struct MarkdownRedlineTests {
         let redline = MarkdownRedline(old: "1. Read\n2. Pair\n3. Render\n", new: "1. Read\n2. Render\n")
         #expect(Self.read(redline) == ["= Read", "- Pair", "= Render"])
         // The surviving item carries its new number.
-        #expect(redline.entries.last?.new?.marker == "2.")
+        guard case .same(let render)? = redline.entries.last else { Issue.record("Render did not anchor"); return }
+        #expect(render.marker == "2.")
     }
 
     @Test func aRewriteSharingTooFewWordsIsStruckAndFilledNotPaired() {

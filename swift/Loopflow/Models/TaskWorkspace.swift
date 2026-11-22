@@ -152,7 +152,7 @@ public struct TaskFileSnapshot: Decodable, Sendable, Hashable {
     public let taskId: String
     public let path: String
     public let content: String?
-    /// A `binary` file's bytes, up to 16 MiB; nil over that and for other states.
+    /// A `binary` file's bytes (base64 on the wire), up to 16 MiB; nil over that and for other states.
     public let data: Data?
     public let state: TaskFileState
     public let revision: String?
@@ -165,28 +165,6 @@ public struct TaskFileSnapshot: Decodable, Sendable, Hashable {
         self.recoveries = recoveries; self.issueIdentifier = issueIdentifier; self.taskId = taskId
         self.path = path; self.content = content; self.data = data; self.state = state; self.revision = revision
         self.readOnlyReason = readOnlyReason; self.sizeBytes = sizeBytes
-    }
-
-    // Nullable keys decode leniently, as the synthesized decoder did: inline
-    // fixtures across the suite omit them.
-    public init(from decoder: any Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        recoveries = try container.decode([TaskFileRecovery].self, forKey: .recoveries)
-        issueIdentifier = try container.decode(String.self, forKey: .issueIdentifier)
-        taskId = try container.decode(String.self, forKey: .taskId)
-        path = try container.decode(String.self, forKey: .path)
-        content = try container.decodeIfPresent(String.self, forKey: .content)
-        data = try container.decodeIfPresent(String.self, forKey: .data).map { encoded in
-            guard let data = Data(base64Encoded: encoded) else {
-                throw DecodingError.dataCorruptedError(forKey: .data, in: container,
-                                                       debugDescription: "data is not base64")
-            }
-            return data
-        }
-        state = try container.decode(TaskFileState.self, forKey: .state)
-        revision = try container.decodeIfPresent(String.self, forKey: .revision)
-        readOnlyReason = try container.decodeIfPresent(String.self, forKey: .readOnlyReason)
-        sizeBytes = try container.decode(UInt64.self, forKey: .sizeBytes)
     }
 
     enum CodingKeys: String, CodingKey {

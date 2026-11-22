@@ -349,7 +349,7 @@ struct SyntaxInks: Equatable, Sendable {
             }
             return color.readable(on: surfaces, dark: theme.isDark)
         }
-        var colors: [SyntaxInk: ThemeRGB] = [
+        colors = [
             .keyword: readable(ansi[5]),
             .function: readable(ansi[4]),
             .type: readable(ansi[3]),
@@ -357,11 +357,10 @@ struct SyntaxInks: Equatable, Sendable {
             .constant: readable(ansi[13]),
             .property: readable(ansi[12]),
             .heading: readable(ansi[4]),
+            .comment: readable(palette.textTertiary),
+            .punctuation: readable(palette.textSecondary),
+            .link: readable(palette.textSecondary),
         ]
-        colors[.comment] = readable(palette.textTertiary)
-        colors[.punctuation] = readable(palette.textSecondary)
-        colors[.link] = readable(palette.textSecondary)
-        self.colors = colors
     }
 
     /// nil for emphasis and strong, which change the font rather than the color.
@@ -380,9 +379,7 @@ struct SyntaxInks: Equatable, Sendable {
         let name: String
         let palette: PaletteDefinition
         let terminal: TerminalPalette
-        static func == (lhs: Key, rhs: Key) -> Bool {
-            lhs.name == rhs.name && lhs.palette == rhs.palette && lhs.terminal == rhs.terminal
-        }
+        // The palettes are only Equatable; the name spreads themes well enough.
         func hash(into hasher: inout Hasher) { hasher.combine(name) }
     }
 

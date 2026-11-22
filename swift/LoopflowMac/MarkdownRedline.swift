@@ -13,22 +13,6 @@ struct MarkdownRedline: Equatable {
         case changed(old: Block, new: Block, words: [ReviewWords])
         case removed(Block)
         case added(Block)
-
-        var old: Block? {
-            switch self {
-            case .same(let block), .removed(let block): block
-            case .changed(let old, _, _): old
-            case .added: nil
-            }
-        }
-
-        var new: Block? {
-            switch self {
-            case .same(let block), .added(let block): block
-            case .changed(_, let new, _): new
-            case .removed: nil
-            }
-        }
     }
 
     let entries: [Entry]

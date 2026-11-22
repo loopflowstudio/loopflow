@@ -971,9 +971,12 @@ final class TaskFilesStore {
     /// its Source, and for Files' Diff of an unsaved draft, which the sides
     /// read from disk would not show.
     func rendering(of file: ReviewFile, in reader: ReviewReader) -> ReviewRendering? {
-        if reader != .changes, fileReview?.draft == true { return nil }
+        if showsDraft(reader) { return nil }
         return ReviewRendering.of(file).flatMap { $0.hasSource && sourceFiles.contains(file.path) ? nil : $0 }
     }
+
+    /// Files' Diff of an unsaved draft, whose lines are not the file on disk.
+    private func showsDraft(_ reader: ReviewReader) -> Bool { reader != .changes && fileReview?.draft == true }
 
     /// A file you marked viewed and whose lines have not changed since.
     func isViewed(_ file: ReviewFile) -> Bool { viewed[file.path] == file.fingerprint && !isReading(file) }
@@ -1427,8 +1430,7 @@ final class TaskFilesStore {
     /// arrive, the ones before, which keep their numbers when skipped lines open.
     func highlights(of file: ReviewFile, in reader: ReviewReader) -> FileHighlights? {
         guard let grammar = Grammar.named(file.path) else { return nil }
-        let draft = reader != .changes && fileReview?.draft == true
-        let sides = draft ? nil : sides(of: file)
+        let sides = showsDraft(reader) ? nil : sides(of: file)
         let source = HighlightSource(fingerprint: file.fingerprint, whole: sides != nil)
         let known = highlighted[file.path]
         if known?.source == source { return known?.highlights }
@@ -1465,7 +1467,7 @@ final class TaskFilesStore {
         let path = file.path
         do {
             let content: String
-            if case .file = reader, fileReview?.draft == true, let draft = documents[path]?.text {
+            if showsDraft(reader), let draft = documents[path]?.text {
                 content = draft
             } else {
                 let new = try await readSides(file).new

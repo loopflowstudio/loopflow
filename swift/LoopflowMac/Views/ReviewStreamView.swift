@@ -53,17 +53,12 @@ struct ReviewStream: View {
                     .onDisappear { store.setNear(file.path, false) }
             } else {
                 let rendering = store.rendering(of: file, in: reader)
-                if let rendering, !(rendering.hasSource && store.sideErrors[file.path] != nil) {
+                // A file with Source falls back to its line Diff when its sides don't read.
+                let failed = rendering?.hasSource == true ? store.sideErrors[file.path] : nil
+                if let rendering, failed == nil {
                     ReviewRendered(store: store, file: file, rendering: rendering, split: split).id(file.topID)
                 } else {
-                    if rendering != nil, let error = store.sideErrors[file.path] {
-                        // The rendered view needs both sides; the line Diff does not.
-                        HStack(spacing: 0) {
-                            ReviewNotice(text: "Can't render this file: \(error)")
-                            Button("Retry") { Task { await store.retrySides(file) } }
-                                .buttonStyle(WorkPlainButtonStyle()).font(Typography.caption(11))
-                        }
-                    }
+                    if let failed { ReviewSidesFailed(store: store, file: file, error: failed) }
                     lines(file, note: note)
                 }
             }

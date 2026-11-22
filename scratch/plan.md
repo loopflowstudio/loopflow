@@ -31,7 +31,6 @@ Dev app → Settings → Choose Theme: 26 cards in their own colors, pairs side 
 ## Remaining
 
 - Ship-review: the Dev app look above.
-- Optional for compress: "white or black on this color" is spelled three times (`PaletteDefinition.titlebarText`, `LoopflowPalette.titlebarColorScheme`, inside `GhosttyThemeMapping.titlebar`). One `ThemeRGB` property would cover all three.
 
 ## Left outside this Task
 

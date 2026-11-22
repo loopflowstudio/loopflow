@@ -7,8 +7,7 @@ public enum GhosttyThemeMapping {
     /// dark themes, then moved away from its text until the second text level reads.
     public static func titlebar(accent: ThemeRGB, background: ThemeRGB, dark: Bool) -> ThemeRGB {
         let bar = dark ? accent.mixed(with: background, amount: 0.65) : accent
-        let lightText = bar.prefersLightText
-        let text = ThemeRGB(lightText ? 0xFFFFFF : 0), end = ThemeRGB(lightText ? 0 : 0xFFFFFF)
+        let text = bar.contrastingText, end = ThemeRGB(text.hex ^ 0xFFFFFF)
         for step in 0...255 {
             let value = bar.mixed(with: end, amount: Double(step) / 255)
             let secondary = value.mixed(with: text, amount: PaletteDefinition.titlebarSecondaryOpacity)
@@ -21,7 +20,7 @@ public enum GhosttyThemeMapping {
     public static func palette(_ terminal: TerminalPalette) -> PaletteDefinition {
         let background = terminal.background
         let dark = background.prefersLightText
-        let textEnd = ThemeRGB(dark ? 0xFFFFFF : 0)
+        let textEnd = background.contrastingText
         func quiet(_ color: ThemeRGB, retaining amount: Double) -> ThemeRGB {
             let channels = color.channels
             let gray = UInt32((channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722) * 255)

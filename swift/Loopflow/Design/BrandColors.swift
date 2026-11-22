@@ -115,8 +115,7 @@ public extension EnvironmentValues {
 extension PaletteDefinition {
     /// The title bar's second text level: its text at this opacity over the bar.
     public static let titlebarSecondaryOpacity = 0.72
-    /// White or black, whichever reads better on the bar.
-    public var titlebarText: ThemeRGB { ThemeRGB(titlebar.prefersLightText ? 0xFFFFFF : 0) }
+    public var titlebarText: ThemeRGB { titlebar.contrastingText }
     public var titlebarSecondaryText: ThemeRGB {
         titlebar.mixed(with: titlebarText, amount: Self.titlebarSecondaryOpacity)
     }

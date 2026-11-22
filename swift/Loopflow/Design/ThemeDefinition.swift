@@ -31,6 +31,8 @@ public struct ThemeRGB: Equatable, Hashable, Sendable {
         return (max(first, second) + 0.05) / (min(first, second) + 0.05)
     }
     var prefersLightText: Bool { contrast(Self(0xFFFFFF)) > contrast(Self(0)) }
+    /// White or black, whichever reads better on this color.
+    public var contrastingText: Self { Self(prefersLightText ? 0xFFFFFF : 0) }
     public func mixed(with other: Self, amount: Double) -> Self {
         let c: [UInt32] = zip(channels, other.channels).map { first, second in
             let blended = first * (1.0 - amount) + second * amount

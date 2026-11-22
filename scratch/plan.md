@@ -366,6 +366,11 @@ tests' stand-in client only, and the live look moves to demo.
 - The phone's filter names ("Ready for you", "Working now") stay; they name
   lists, not a row's status.
 - No iPhone theme chooser; the phone keeps the light and dark Loopflow themes.
+- The list's "N without a conversation" fold stays on every filter. Under
+  Backlog no Task has a conversation, so the list is one collapsed line per
+  repository and a matching search shows that line. Listing rows plainly
+  under Backlog, Done and a search is a change to `TaskListView.sections`
+  and one phone test; it is list behavior, so its own Task.
 
 ## What goes
 

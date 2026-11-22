@@ -262,3 +262,12 @@ Checks (qa, second pass):
 - `swift test --filter 'TaskActionsTests|WorkflowLineTests|TypographyDisciplineTests|DesktopHeadlessTests|PendingChangesTests'`: 49 tests passed, 2026-11-22. Gate reruns.
 - Disposable Tasks 6f6c98 and cb8466 stay Done in the Machine's store.
 - `uv run python scripts/test_ios.py`: TEST SUCCEEDED, 44 tests, 2026-11-22. CI reruns.
+
+Made in concept review after slice 5 with nobody present. The page is
+`scratch/concept-review.html`.
+
+- **Nothing to change in the build.** One Task read live, one `TaskActions`
+  and one action name were read in code and in qa's second pass.
+- **The Backlog fold is left as its own Task**, not filed. Passed over:
+  changing `TaskListView.sections` here, which is list behavior the brief
+  does not ask for.

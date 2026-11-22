@@ -57,195 +57,137 @@
 </style>
 
 <h1>A Task on the phone and on the Mac, as built</h1>
-<p class="soft">Concept review of Task e166ff after slices 1 to 4 and qa, against its base fd90d7e6ad. 2026-11-22.
-The review made before the build is in this file's history (31ba239b9d).</p>
+<p class="soft">Concept review of Task e166ff after slices 1 to 5 and two qa passes, at 3b0d1c9989 against its
+base fd90d7e6ad. 2026-11-22. The earlier reviews are in this file's history (31ba239b9d before the build,
+97e390b985 after slice 4).</p>
 
 <p><b>The area taken.</b> The change gives the iPhone the shared type ramp, Task row, workflow sentence,
-button and state view, and it added Start, Run and Auto-Ship to the phone's Task screen. So the area is one
-Task as a person meets it on either surface: its row, where it stands, what they can do to it, and what
-happens on screen after they do it. The ramp, spacing, state view, pairing and New Task were read as built
-and stand.</p>
+button and state view, and it put Start, Run and Auto-Ship on the phone's Task screen. So the area is one
+Task as a person meets it on either surface: its row, where it stands, what they can do to it, and what the
+screen shows after they do it. Read as someone seeing the branch for the first time, not only the last pass.</p>
 
-<p><b>Outcome.</b> The plan changed: one more slice, three parts, no Rust and no wire change. The drawing
-is shared now. What is not yet shared is the Task behind it on the phone's Task screen, the rule for which
-actions it offers, and one Notice's wording.</p>
+<p><b>Outcome.</b> Nothing to change. The three mismatches the last review found are closed in code and were
+driven on a Simulator. What is left is one wording choice and two separate outcomes, below.</p>
 
 <div class="key">
-  <span><span class="sw old"></span>built today</span>
-  <span><span class="sw nw"></span>proposed, now slice 5 of the plan</span>
+  <span><span class="sw old"></span>built</span>
+  <span><span class="sw nw"></span>not built: a separate outcome</span>
 </div>
 
 <h2>One interaction, walked</h2>
-<p>On the phone: Show → Backlog, open an unstarted Task, Task actions → Start. qa did this on an iPhone SE
-Simulator against the installed Machine.</p>
+<p>Show → Backlog, open an unstarted Task, Task actions → Start. Then its checkout goes missing and comes back.
+qa drove both on an iPhone SE Simulator against the installed Machine (<code>scratch/qa.html</code>).</p>
 
 <div class="pair">
   <div class="box">
-    <div class="tag">Built today</div>
+    <div class="tag">Built: Start</div>
     <div class="phone">
       <div class="bar"><span>‹ Backlog</span><span>⋯</span></div>
-      <div class="sent">code is running implement. You are next needed at ship-review.</div>
-      <div class="body"><div class="title">No changes yet</div></div>
-      <div class="notice">LOO-5 Start requested</div>
+      <div class="sent">qa: Waiting for you at pause#1.</div>
+      <div class="term">● pause<br>Press Return to continue…<br>▍</div>
+      <div class="notice">6f6c98 Start requested</div>
     </div>
-    <p>The sentence says a step is running. The screen never shows the conversation it is running in.
-    Recovery is to go back, change the filter (the Task left Backlog) and tap the Task again.</p>
-    <div class="where"><code>TaskWorkspaceView</code> reads <code>task.primarySession</code> from
-    <code>MobileTask</code>, copied at the tap. Its Graph, states and checkout come from a live
-    <code>Reading</code>. Two holders of one Task, and the conversation is in the frozen one.</div>
+    <p>The conversation took the place of "No changes yet" within two seconds, on the same screen. The menu
+    then read Run, Auto-Ship.</p>
+    <div class="where"><code>TaskWorkspaceView.Reading</code> holds the Task reading's work, row and execution.
+    When a frame lists a Session and the screen has no conversation, it reads <code>task:&lt;id&gt;</code> and
+    opens the primary Session that row names.</div>
   </div>
-  <div class="box new">
-    <div class="tag">Proposed</div>
+  <div class="box">
+    <div class="tag">Built: failure and recovery</div>
     <div class="phone">
-      <div class="bar"><span>‹ Backlog</span><span>⋯</span></div>
-      <div class="sent">code is running implement. You are next needed at ship-review.</div>
-      <div class="term">● implement<br>Reading scratch/plan.md…<br>▍</div>
-      <div class="notice">LOO-5 Start requested</div>
+      <div class="bar"><span>‹ Started</span><span>⋯</span></div>
+      <div class="sent">qa: Waiting for you at pause#2.<br>
+        <span style="color:var(--warn)">Task cb8466 worktree /Users/…/qa-e166ff… is missing; restore that exact path</span></div>
+      <div class="menu"><div class="off">▶ Run</div><div class="off">Auto-Ship</div></div>
     </div>
-    <p>The conversation takes the place of "No changes yet" on the same screen, because the screen follows
-    the Machine for it as it does for the sentence.</p>
-    <div class="where"><code>MobileTask</code> only says which Task was tapped. When a frame of the Task
-    reading lists a Session and the screen has none, it reads the Task's row (<code>task:&lt;id&gt;</code>,
-    the read <code>createdTask</code> already makes) and opens the primary Session the row names.</div>
+    <p>Run and Auto-Ship greyed within seconds with no reload, the reason in full under the sentence. Three
+    seconds after the checkout returned the reason left and Run worked.</p>
+    <div class="where"><code>TaskActions.refusal</code> is Rust's <code>row.runControl.unavailable</code>, said
+    once. Stop Auto-Ship is never disabled by it.</div>
   </div>
 </div>
-<p><b>Failure and recovery.</b> If the row names no conversation yet, the screen stays on Changes and the
-next frame asks again. If the read fails, the Notice says why and nothing else changes. Counterexample kept:
-taking the conversation from the list's row would be less code, and fails in exactly the case above, because
-the Backlog filter stops showing a Task once it starts.</p>
+<p><b>Counterexamples kept.</b> The conversation taken from the list's row fails once the Task leaves the
+Backlog filter. The reason as a menu item's second line is cut before "is missing; restore that exact path".
+Both were tried and replaced.</p>
 
 <h2>Do the product's concepts and the code's line up?</h2>
 <table>
-  <tr><th>What a person knows</th><th>What the code has</th><th>Match</th><th>What is wrong</th></tr>
-  <tr>
-    <td>The Task on screen</td>
-    <td>Phone: <code>MobileTask</code> (copied at the tap) and <code>TaskWorkspaceView.Reading</code> (live), with
-        fallbacks to the list's row for states and directory</td>
-    <td class="no">no</td>
-    <td>One Task held three ways. The conversation is in the copy, so it cannot begin while you watch.
-        <b>The biggest mismatch.</b></td>
-  </tr>
-  <tr>
-    <td>What I can do to a Task (Start, Run, Auto-Ship, Stop Auto-Ship)</td>
-    <td>Phone: <code>TaskWorkspaceView.actions(reading:states:)</code>.<br>
-        Mac: <code>TaskWorkflowBar.next</code>, <code>TaskAutoControl</code>, <code>runRefusal</code></td>
-    <td class="no">no</td>
-    <td>An action with two owners and two rules, from the same reading. The Mac offers Auto-Ship on every Task
-        not completed and shows Rust's refusal before the click; the phone offers it only to a "working" Task
-        and learns of a refusal after the tap.</td>
-  </tr>
-  <tr>
-    <td>The name of the action that lets the run take your steps and land</td>
-    <td>Button: "Auto-Ship" on both. Notice: "Auto-Ship requested" on the phone, "Auto on requested" on the
-        Mac, with Undo help "Auto off"</td>
-    <td class="no">no</td>
-    <td>One action, two names on the Mac alone. The row's "Auto" and Rust's "Auto stands in…" name the
-        setting and stay.</td>
-  </tr>
-  <tr>
-    <td>A Task's status word</td>
-    <td><code>TaskRowStatus</code>, built by the Mac from Session records and by the phone from the list
-        reading's states</td>
+  <tr><th>What a person knows</th><th>What the code has</th><th>Match</th><th>Note</th></tr>
+  <tr><td>The Task on screen</td>
+    <td><code>MobileTask</code> says which Task was tapped and the conversation it had then;
+        <code>Reading</code> is everything else, live</td>
+    <td class="yes">yes</td>
+    <td>Was the biggest mismatch. The list-row fallbacks are gone. The conversation has one rule: the one at
+        the tap, else the one the row names once a Session exists.</td></tr>
+  <tr><td>What I can do to a Task (Start, Run, Auto-Ship, Stop Auto-Ship)</td>
+    <td><code>TaskActions</code>, drawn by the Mac's <code>TaskWorkflowBar</code> and <code>TaskAutoControl</code>
+        and by the phone's menu</td>
+    <td class="yes">yes</td>
+    <td>One owner. <code>TaskWorkflowBar.next</code>, <code>TaskAutoControl.on</code> and the phone's
+        <code>actions(reading:states:)</code> are deleted. Seven tests hold the rule.</td></tr>
+  <tr><td>The name of the action</td>
+    <td><code>TaskActions.Auto.offer</code> names the button, the Notice and the Undo help on both</td>
+    <td class="yes">yes</td>
+    <td>"Auto on" and "Auto off" are gone as action names. The row's "Auto" and Rust's "Auto stands in…" name
+        the setting.</td></tr>
+  <tr><td>Where a Task stands</td>
+    <td>Rust's <code>TaskGraph.sentence</code>, drawn by <code>WorkflowLine</code></td>
+    <td class="yes">yes</td><td>Wraps on the phone; one line with a tooltip in the Mac's bar.</td></tr>
+  <tr><td>The Task row and its status word</td>
+    <td><code>TaskRow</code>, <code>TaskRowStatus</code></td>
     <td class="yes">yes for the word</td>
-    <td>One type, one vocabulary, held by a test. Two derivations remain: the Mac can say "Busy · Agent · 40%",
-        "Error", "Done", and what a blocked Task asks; the phone's reading carries none of those. Outside this
-        work, below.</td>
-  </tr>
-  <tr>
-    <td>"I can't tell you its status"</td>
-    <td><code>TaskRowStatus.unread</code> (Mac: an info mark) and <code>.unavailable</code> (phone: the word
-        "Unavailable")</td>
+    <td>One vocabulary, held by a test. Two derivations remain (Mac from Session records, phone from the list
+        reading), so the phone cannot say "Error", progress or what a blocked Task asks. Separate outcome 1.</td></tr>
+  <tr><td>"I can't tell you its status"</td>
+    <td><code>TaskRowStatus.unread</code> (Mac, an info mark) and <code>.unavailable</code> (phone, a word)</td>
     <td class="no">no, and left</td>
-    <td>Two forms for two different facts (a failed Sessions read; a reading with no state). Rare on both.
-        Goes away with the status written once in Rust.</td>
-  </tr>
-  <tr>
-    <td>Where a Task stands</td>
-    <td><code>TaskGraph.sentence</code> from Rust, drawn by <code>WorkflowLine</code> on both</td>
-    <td class="yes">yes</td>
-    <td>One sentence, one writer, one view. It wraps on the phone and is cut with a tooltip in the Mac's bar.</td>
-  </tr>
-  <tr>
-    <td>The Task row</td>
-    <td><code>TaskRow</code> in the shared library; the Mac's adapter beside its Session code</td>
-    <td class="yes">yes</td>
-    <td>The trailing slot is the only thing the surfaces differ by.</td>
-  </tr>
-  <tr>
-    <td>Type sizes, spacing, the button, "nothing here" and "that failed"</td>
+    <td>Two forms for two facts, both rare. Goes with separate outcome 1.</td></tr>
+  <tr><td>Type sizes, spacing, the button, "nothing here", "that failed"</td>
     <td><code>Typography</code>, <code>Spacing</code>, <code>HitTarget.control</code>,
         <code>LoopflowButtonStyle</code>, <code>StateView</code></td>
-    <td class="yes">yes</td>
-    <td>One source with a size per platform; a source scan fails if a literal comes back.</td>
-  </tr>
-  <tr>
-    <td>The lists "Working now" and "Ready for you"</td>
-    <td><code>TaskList.busy</code>, <code>.available</code>; rows in them read "Busy" and "Available"</td>
+    <td class="yes">yes</td><td>One source, a size per platform; a source scan fails on a literal.</td></tr>
+  <tr><td>The lists "Working now" and "Ready for you"</td>
+    <td><code>TaskList.busy</code>, <code>.available</code>; their rows read "Busy" and "Available"</td>
     <td class="no">no, and left</td>
-    <td>One idea under two names on one screen. A product wording choice; question 3.</td>
-  </tr>
+    <td>One idea under two names on one screen. Wording only; question 1.</td></tr>
+  <tr><td>Backlog</td>
+    <td>The list splits every filter into Tasks with a conversation and a fold, "N without a conversation"</td>
+    <td class="no">no, and left</td>
+    <td><b>The biggest mismatch left.</b> A distinction the person did not ask for: no Backlog Task has a
+        conversation, so Backlog is one collapsed line per repository, and a search that matches shows the line,
+        not the Task. Older than this branch. Separate outcome 2.</td></tr>
 </table>
 
-<h2>The recommendation</h2>
-<h3>1. The phone's Task screen is one Task, read live</h3>
-<p>Shown above. <code>Reading</code> holds the <code>RoadmapTask</code> row the Task reading already carries, in
-place of a copy of its states and its checkout; the fallbacks to the list's row go.</p>
-
-<h3>2. One <code>TaskActions</code>, drawn by both</h3>
+<h2>Separate outcomes, not built here</h2>
 <div class="pair">
-  <div class="box">
-    <div class="tag">Built today, phone, a Task Rust will not run</div>
-    <div class="menu"><div>▶ Run</div></div>
-    <div class="notice">LOO-5 Run couldn't be requested: its checkout is missing</div>
-    <p class="where">Auto-Ship is absent unless the list calls the Task working. Start is absent on a Task with
-    no Graph unless its row is unstarted.</p>
-  </div>
-  <div class="box new">
-    <div class="tag">Proposed, phone, same Task</div>
-    <div class="menu">
-      <div class="off">▶ Run<small>its checkout is missing</small></div>
-      <div class="off">Auto-Ship<small>its checkout is missing</small></div>
-    </div>
-    <p class="where"><code>TaskActions</code> (shared): <code>run</code> from <code>TaskGraph.runAction</code>, else
-    Start; <code>auto</code> from <code>execution.auto</code>; <code>runRefusal</code> from
-    <code>row.runControl.unavailable</code>. The rule is the Mac's, moved. The Mac draws what it draws today.</p>
-  </div>
+  <div class="box new"><div class="tag">1. The row's status written once, in Rust</div>
+    <p>Word, tone, the time it began and the ask on the list reading, printed by both rows;
+    <code>SessionProgramStatus</code>'s label and the Swift mapping deleted. A wire change with DTO fixtures and
+    a Mac migration.</p></div>
+  <div class="box new"><div class="tag">2. The fold only where it sorts something</div>
+    <div class="phone"><div class="bar"><span>Backlog</span><span>+</span></div>
+      <div class="sent">Add a dark theme chooser<br><small>LOO-12 Unstarted</small></div>
+      <div class="sent">Rename the Machine menu<br><small>LOO-14 Unstarted</small></div></div>
+    <p>Rows listed plainly under Backlog and Done and while searching; the fold stays under Started, where it
+    separates Tasks you can reply to. A change to <code>TaskListView.sections</code> and one phone test. It
+    changes list behavior, which this Task's brief (tokens and components) does not ask for.</p></div>
 </div>
 
-<h3>3. The Notice names the button</h3>
-<div class="pair">
-  <div class="box"><div class="tag">Built today, Mac</div><div class="notice">LOO-5 Auto on requested · Undo</div></div>
-  <div class="box new"><div class="tag">Proposed, both</div><div class="notice">LOO-5 Auto-Ship requested · Undo</div>
-  <p class="where">And "LOO-5 Stop Auto-Ship requested". This changes words on the Mac.</p></div>
-</div>
-
-<h2>Tested against three paths</h2>
-<table>
-  <tr><th>Path</th><th>What happens</th><th>What must survive</th></tr>
-  <tr><td>Normal: Start from the Task's screen</td><td>Notice, the sentence, then the conversation in place</td>
-      <td>The draft reply per Task; swipe to Complete; a Task opened with a conversation opens as fast as today</td></tr>
-  <tr><td>Failure: Rust refuses the run</td><td>The action is disabled with the reason; nothing is sent</td>
-      <td>Stop Auto-Ship is never disabled by a run refusal; a refusal Rust did not foresee still posts the Notice</td></tr>
-  <tr><td>Recovery: the link drops and returns</td><td>The sentence and Task actions go and come back with the reading;
-      a conversation already open keeps its own reconnect</td>
-      <td>The Mac's <code>task-workflow-run</code>, <code>task-workflow-start</code>, <code>task-auto</code> identifiers and tests</td></tr>
-</table>
-
-<h2>Outside this work</h2>
-<p><b>The row's status written once, in Rust.</b> Word, tone, the time it began and the ask, on the list
-reading, printed by both rows; <code>SessionProgramStatus</code>'s label and the Swift mapping deleted. It is a
-wire change with DTO fixtures and a Mac migration, so it is its own Task. Until then the phone row cannot say
-"Error", progress, or what a blocked Task is asking.</p>
+<h2>Checks nobody has run</h2>
+<p>The Mac's "Auto-Ship requested" Notice and Undo in a mounted Loopflow Dev (asserted headless in
+<code>DesktopHeadlessTests</code>); a row read that fails; landscape; the QR scanner; a physical phone.</p>
 
 <h2>Questions</h2>
 <ol class="q">
-  <li>The Notice for Auto-Ship.
-    <ol><li>"Auto-Ship requested" on both (chosen).</li><li>"Auto on requested" on both.</li></ol></li>
-  <li>A Task action Rust refuses, on the phone.
-    <ol><li>Disabled, with the reason under it (chosen).</li><li>Enabled; the Notice says why after the tap (built today).</li></ol></li>
   <li>The lists whose rows read "Busy" and "Available".
-    <ol><li>Keep "Working now" and "Ready for you" (built today).</li><li>Name them "Busy" and "Available".</li>
+    <ol><li>Keep "Working now" and "Ready for you" (built).</li><li>Name them "Busy" and "Available".</li>
         <li>Change the row's words to match the lists, on both surfaces.</li></ol></li>
+  <li>Backlog on the phone.
+    <ol><li>File the fold change as its own Task.</li><li>Make it in this Task before it ships.</li>
+        <li>Leave the fold everywhere (built).</li></ol></li>
   <li>The row's status written once in Rust.
     <ol><li>File it as its own Task.</li><li>Leave it.</li></ol></li>
+  <li>The Notice sits over the Reply field for its few seconds.
+    <ol><li>Leave it (built).</li><li>Raise it above the field on the phone.</li></ol></li>
 </ol>

@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>e166ff concept review: a Task on the phone and on the Mac</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #fbfaf8; --ink: #1c1a19; --soft: #5f5a56; --line: #dcd7d1; --panel: #f2efeb;
+    --yes: #23683f; --no: #a3271f; --new: #7a1f3d; --newbg: #f6e9ee;
+    --busy: #2c5fa8; --avail: #23683f; --warn: #8a5a00;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #171514; --ink: #ece8e3; --soft: #a59e97; --line: #3a3532; --panel: #211e1c;
+      --yes: #7fcb9a; --no: #f08a80; --new: #f0a3bd; --newbg: #33202a;
+      --busy: #8db4ee; --avail: #7fcb9a; --warn: #e2b866;
+    }
+  }
+  body { background: var(--bg); color: var(--ink); font: 16px/1.5 -apple-system, "Helvetica Neue", sans-serif;
+         max-width: 980px; margin: 0 auto; padding: 32px 20px 80px; }
+  h1 { font: 400 32px/1.2 Georgia, serif; margin: 0 0 8px; }
+  h2 { font: 600 20px/1.3 inherit; margin: 44px 0 10px; }
+  h3 { font: 600 16px/1.3 inherit; margin: 0 0 8px; }
+  p { margin: 8px 0; max-width: 70ch; }
+  .soft { color: var(--soft); }
+  code { font: 13px/1.4 ui-monospace, Menlo, monospace; }
+  table { border-collapse: collapse; width: 100%; margin: 12px 0; }
+  th, td { text-align: left; vertical-align: top; padding: 9px 10px; border-bottom: 1px solid var(--line); }
+  th { font-weight: 600; color: var(--soft); }
+  .yes { color: var(--yes); font-weight: 600; }
+  .no { color: var(--no); font-weight: 600; }
+  .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 14px 0; }
+  @media (max-width: 720px) { .pair { grid-template-columns: 1fr; } }
+  .box { border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; background: var(--panel); }
+  .box.new { border: 2px dashed var(--new); background: var(--newbg); }
+  .tag { font-weight: 600; color: var(--soft); }
+  .box.new .tag { color: var(--new); }
+  .row { background: var(--bg); border-radius: 8px; padding: 9px 12px; margin: 8px 0; }
+  .row .t { font-size: 15px; }
+  .row .m { font-size: 13px; color: var(--soft); display: flex; gap: 10px; }
+  .busy { color: var(--busy); } .avail { color: var(--avail); } .warn { color: var(--warn); }
+  .where { font-size: 13px; color: var(--soft); margin-top: 10px; }
+  .sent { background: var(--bg); border-radius: 8px; padding: 8px 12px; font-size: 14px; color: var(--soft); margin: 8px 0; }
+  .btn { display: inline-block; border: 1px solid var(--line); border-radius: 4px; padding: 3px 9px; font-size: 13px; background: var(--bg); margin-right: 6px; }
+  ol.q > li { margin: 14px 0; }
+  ol.q ol { list-style: lower-alpha; margin-top: 4px; }
+  .key { display: flex; gap: 18px; flex-wrap: wrap; font-size: 14px; margin: 12px 0; }
+  .sw { display: inline-block; width: 22px; height: 14px; vertical-align: -2px; border-radius: 4px; margin-right: 6px; }
+  .sw.old { border: 1px solid var(--line); background: var(--panel); }
+  .sw.nw { border: 2px dashed var(--new); background: var(--newbg); }
+</style>
+
+<h1>A Task on the phone and on the Mac</h1>
+<p class="soft">Concept review of Task e166ff, before anything is built. 2026-11-22.</p>
+
+<p><b>The area taken.</b> The plan moves the iPhone app to the shared type ramp and the shared Task row,
+workflow line, button and state view. Its outcome is that someone "sees the same Task row, status word,
+workflow sentence" on both. So the area is a Task as a person meets it on either surface: the word on its
+row, the sentence about where it stands, and the action that moves it. The ramp, spacing, pairing and New
+Task parts of the plan were read too and stand as written.</p>
+
+<p><b>Outcome of this review.</b> The plan changed. It would have drawn the same row around different words.
+Four things were added so the row, the sentence and the action agree across surfaces; none needs Rust.</p>
+
+<div class="key">
+  <span><span class="sw old"></span>exists today</span>
+  <span><span class="sw nw"></span>proposed, now in the plan</span>
+</div>
+
+<h2>Do the product's concepts and the code's line up?</h2>
+<table>
+  <tr><th>What a person knows</th><th>What the code has</th><th>Match</th><th>What is wrong</th></tr>
+  <tr>
+    <td>A Task's status word</td>
+    <td>Mac: <code>SessionProgramStatus.label</code>, else <code>TaskState.label</code>.<br>
+        Phone: <code>WorkViewPlan.Content.status</code></td>
+    <td class="no">no</td>
+    <td>One name for two vocabularies. The same Task reads "Busy" on the Mac and "Running" on the phone.</td>
+  </tr>
+  <tr>
+    <td>Letting the run take your steps and land</td>
+    <td>"Auto" (row, Rust's sentence), "Auto-Ship" (Mac button, prototype), "Auto on / Auto off" (phone)</td>
+    <td class="no">no</td>
+    <td>One idea under three names. The phone would show "Auto stands in next…" above a button called "Auto off".</td>
+  </tr>
+  <tr>
+    <td>Moving a Task on (Start, Run)</td>
+    <td>Mac: <code>TaskWorkflowBar.runAction(graph)</code>.<br>Phone: a choice from the list's <code>states</code></td>
+    <td class="no">no</td>
+    <td>An action with two owners. The phone's has no Run, so the new sentence can say "stopped at build" with nothing to press.</td>
+  </tr>
+  <tr>
+    <td>Where a Task stands in its workflow</td>
+    <td><code>TaskGraph.sentence</code>, written in Rust, printed by <code>lf task status</code> and <code>WorkflowLine</code></td>
+    <td class="yes">yes</td>
+    <td>One sentence, one writer. The kickoff plan read it by polling; the phone can subscribe as the Mac does.</td>
+  </tr>
+  <tr>
+    <td>The Task row</td>
+    <td><code>TaskRow</code>, in the Mac target, taking Mac types</td>
+    <td class="yes">yes, after the move</td>
+    <td>The plan's move is right. Its row took the word as a bare string, which is how two vocabularies stay possible.</td>
+  </tr>
+  <tr>
+    <td>Type sizes</td>
+    <td><code>Typography</code> steps; <code>MobileType</code> taking any number</td>
+    <td class="yes">yes, after the plan</td>
+    <td>One set of step names, a size per platform. Nothing to change.</td>
+  </tr>
+  <tr>
+    <td>"Nothing here" and "that failed"</td>
+    <td>Ten <code>ContentUnavailableView</code>s, <code>LoadFailure</code>, <code>SessionView.card</code></td>
+    <td class="yes">yes, after the plan</td>
+    <td>One state view. The plan required a sentence in each, which meant writing copy for states that have one line today.</td>
+  </tr>
+  <tr>
+    <td>The time a status began; what a blocked Task is asking</td>
+    <td>On the Mac only, from Session records the phone's list reading does not carry</td>
+    <td class="no">no, and left so</td>
+    <td>A fact one surface has. Closing it is a wire change. See "Outside this work".</td>
+  </tr>
+</table>
+
+<h2>The biggest mismatch: the status word</h2>
+<p>Walk it. A Task's agent is working. On the Mac its row says <span class="busy">Busy</span>. You pick up
+the phone, and under the plan as kickoff wrote it you see the same row, same faces, same spacing, and the
+word <span class="busy">Running</span>. The agent finishes its turn: the Mac says
+<span class="avail">Available</span>, the phone says <span class="avail">Ready</span>. A Task between runs
+says "Idle" on the Mac and "Open" on the phone. Sharing the view made the difference easier to see, not
+smaller.</p>
+
+<div class="pair">
+  <div class="box">
+    <div class="tag">Before: one row, two vocabularies</div>
+    <div class="row"><div class="t">Review a Task's brief beside its conversation</div>
+      <div class="m"><span>LOO-809</span><span class="busy">Busy</span><span>Auto</span></div></div>
+    <div class="where">Mac. <code>ProgramStatusState.label</code>; with no report, <code>TaskState.label</code> (Idle, Active, Moving).</div>
+    <div class="row"><div class="t">Review a Task's brief beside its conversation</div>
+      <div class="m"><span>LOO-809</span><span class="busy">Running</span></div></div>
+    <div class="where">Phone. <code>WorkViewPlan.Content.status</code> in <code>WorkTone.swift</code>: Blocked, Running, Ready, Open,
+      Unavailable, "No conversation yet". Its comment says "in Desktop's words".</div>
+  </div>
+  <div class="box new">
+    <div class="tag">After: the row takes one status type</div>
+    <div class="row"><div class="t">Review a Task's brief beside its conversation</div>
+      <div class="m"><span>LOO-809</span><span class="busy">Busy</span><span>Auto</span></div></div>
+    <div class="where">Both. The shared row takes <code>TaskRow.Status</code> (word, tone, detail, ask), never a string.
+      The phone's is built from the reading's states with the Mac's two sources: <code>ProgramStatusState.label</code>
+      for blocked, busy and available, <code>TaskState.label</code> otherwise. "Running", "Ready", "Open" and
+      "No conversation yet" are deleted. One test holds the two rows to the same word.</div>
+  </div>
+</div>
+
+<table>
+  <tr><th>The reading says</th><th>Phone today</th><th>Mac today</th><th>Both, proposed</th></tr>
+  <tr><td><code>blocked</code></td><td>Blocked</td><td>Blocked</td><td>Blocked</td></tr>
+  <tr><td><code>busy</code></td><td>Running</td><td>Busy</td><td>Busy</td></tr>
+  <tr><td><code>available</code></td><td>Ready</td><td>Available</td><td>Available</td></tr>
+  <tr><td>none of those, <code>moving</code></td><td>Open</td><td>Moving</td><td>Moving</td></tr>
+  <tr><td>none of those, <code>idle</code></td><td>Open</td><td>Idle</td><td>Idle</td></tr>
+  <tr><td>no conversation</td><td>No conversation yet</td><td>its lifecycle word</td><td>its lifecycle word, under "N without a conversation"</td></tr>
+  <tr><td>reading unavailable</td><td>Unavailable</td><td>an info icon with a tooltip</td><td>phone: Unavailable. Mac: unchanged</td></tr>
+</table>
+
+<p><b>Counterexample kept.</b> The Mac's word can carry more than the phone's: "Blocked · Dialog · 40%", or
+"Available · inferred". Those extras come from Session records the phone's list does not read. The first
+word always matches; the suffix is a Mac fact until the wire carries it.</p>
+
+<h2>The sentence and the action</h2>
+<div class="pair">
+  <div class="box">
+    <div class="tag">Before (plan as kickoff wrote it)</div>
+    <div class="sent">build stopped. Run it again at implem…</div>
+    <p><span class="btn">Auto on</span></p>
+    <div class="where">One truncated line: <code>WorkflowLine</code> cuts the sentence and leaves the rest to a tooltip, which a
+      phone does not have. The toolbar offers Start, Auto on or Auto off from the list's states, so nothing here runs
+      the Task again. The sentence is reread on every list frame.</div>
+  </div>
+  <div class="box new">
+    <div class="tag">After</div>
+    <div class="sent">build stopped. Run it again at implement.<br>You are next needed at ship-review.</div>
+    <p><span class="btn">Run</span><span class="btn">Auto-Ship</span> <span class="soft">in "Task actions"</span></p>
+    <div class="where">The sentence wraps in full; the Mac's 34 pt bar limits it to one line from outside.
+      <code>runAction</code> moves to <code>TaskGraph</code> in the shared library and both surfaces call it.
+      The phone subscribes to the Task over its own link, as the Mac does. The phone says "Auto-Ship" and
+      "Stop Auto-Ship".</div>
+  </div>
+</div>
+<p class="soft">The example sentences here are illustrations of the shape. The one probed on this Task was
+"plan is running kickoff. Auto stands in next at ship-review." (66 characters; about 40 fit an iPhone SE at 17 pt).</p>
+
+<table>
+  <tr><th>Case</th><th>What the phone shows</th></tr>
+  <tr><td>Normal: a run carries the Task</td><td>The sentence. No Start or Run. "Stop Auto-Ship" if Auto is on.</td></tr>
+  <tr><td>Waiting at a step, or stopped</td><td>The sentence and "Run".</td></tr>
+  <tr><td>Failure: the Task reading fails or the link drops</td><td>No line, no Start or Run. Auto-Ship stays, since it needs only the row. The Notice says why. The terminal is untouched.</td></tr>
+  <tr><td>Recovery</td><td>The subscription resumes with the link and the line returns. Nothing is replayed by hand.</td></tr>
+  <tr><td>No Graph yet</td><td>No line. "Start" if the row is unstarted.</td></tr>
+</table>
+
+<h2>The state view</h2>
+<div class="pair">
+  <div class="box">
+    <div class="tag">Before (plan as kickoff wrote it)</div>
+    <p>Every state: a serif title, one sentence, buttons. "No changes yet" "gets its sentence", and so would
+      "The Session ended." and three more that are one line today.</p>
+  </div>
+  <div class="box new">
+    <div class="tag">After</div>
+    <p>The sentence and buttons are optional. A one-line state keeps its line, word for word, as the title.
+      A state with a title and a reason keeps both. "Disconnected" is the only new title, over the reason
+      the link gives.</p>
+  </div>
+</div>
+
+<h2>Outside this work</h2>
+<p><b>The row's status written once, in Rust.</b> The Mac builds its word, the time it began and the ask
+from Session records in Swift; the phone builds its word from the list's states in Swift. After this Task
+they agree by sharing two label tables and a test. The whole fix is for the list reading to carry each
+Task's status (word, tone, since, ask) and for both rows to print it, deleting
+<code>SessionProgramStatus.label</code> and the mapping added here. It takes a wire field, DTO fixtures in
+both languages and a Mac migration. Not filed.</p>
+
+<h2>Questions</h2>
+<ol class="q">
+  <li>The phone's status words.
+    <ol><li>The Mac's: Busy, Available, the lifecycle word. <span class="soft">(chosen)</span></li>
+        <li>Keep Running, Ready, Open on the phone.</li>
+        <li>Move the Mac to the phone's words instead.</li></ol></li>
+  <li>The phone's filter names "Ready for you" and "Working now" now list rows that read "Available" and "Busy".
+    <ol><li>Leave them; they name lists. <span class="soft">(chosen)</span></li>
+        <li>Rename them to match the rows.</li></ol></li>
+  <li>The name of the setting on the phone's button.
+    <ol><li>"Auto-Ship" / "Stop Auto-Ship", as on the Mac. <span class="soft">(chosen)</span></li>
+        <li>Keep "Auto on" / "Auto off", as the CLI spells it.</li></ol></li>
+  <li>Run from the phone.
+    <ol><li>Add it, with Auto-Ship, in a "Task actions" menu. <span class="soft">(chosen)</span></li>
+        <li>Add it as its own toolbar button.</li>
+        <li>Sentence only; moving a waiting Task stays a Mac or CLI action.</li></ol></li>
+  <li>The workflow sentence above the terminal on a small phone.
+    <ol><li>Wraps in full at 17 pt, about two lines. <span class="soft">(chosen)</span></li>
+        <li>Wraps in full at 13 pt.</li>
+        <li>One line, cut.</li></ol></li>
+  <li>The row's status written once in Rust and carried on the list reading.
+    <ol><li>Its own Task, after this one. <span class="soft">(assumed; not filed)</span></li>
+        <li>Part of this Task.</li>
+        <li>Not wanted.</li></ol></li>
+</ol>
+</html>

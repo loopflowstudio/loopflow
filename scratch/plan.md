@@ -12,6 +12,11 @@ workflow sentence, button and state screens as on the Mac, in the same three
 faces, sized for a phone. Nothing on the phone is under 12 pt and every
 control is 44 pt tall.
 
+"The same" means the same words and the same actions, not only the same
+drawing: a Task that reads "Busy" on the Mac reads "Busy" on the phone, the
+action the Mac calls Auto-Ship is called Auto-Ship, and when the sentence
+says the Task waits, the screen offers the Run that moves it.
+
 ## What the code is today
 
 - `swift/LoopflowiOS/MobileType.swift` takes any size: 49 calls at 12, 13,
@@ -41,6 +46,27 @@ control is 44 pt tall.
   each by hand.
 - `swift/README.md` says the LoopflowiOS scheme opens an offline `--fixture`.
   No such argument exists in `swift/LoopflowiOS` or `swift/ios.yml`.
+- The status word has two vocabularies. The Mac row says what the Task's
+  program reports (`ProgramStatusState.label`: Blocked, Busy, Available,
+  Done, Error) and otherwise its lifecycle (Idle, Active, Moving). The phone
+  row says `WorkViewPlan.Content.status` (`WorkTone.swift`): Blocked,
+  Running, Ready, Open, Unavailable, "No conversation yet". Its comment says
+  "in Desktop's words"; they are not. The prototypes use the Mac's.
+- One setting has three names: "Auto" on the row and in Rust's sentence,
+  "Auto-Ship" / "Stop Auto-Ship" on the Mac's button and in the prototype,
+  "Auto on" / "Auto off" on the phone's toolbar.
+- What moves a Task is decided twice. The Mac asks the Graph
+  (`TaskWorkflowBar.runAction`: Start, Run, or nothing while a run carries
+  it). The phone asks the list's states and offers Start, Auto on or Auto
+  off; it has no Run, so a Task stopped or waiting at a step cannot be moved
+  from the phone.
+- `WorkflowLine`'s sentence-alone form is one line, truncated, with the full
+  sentence in a tooltip. A phone has no tooltip, and the probed sentence (66
+  characters) does not fit 375 pt at 17 pt.
+- The phone's link subscribes to any served read
+  (`ServerLink.subscribe(_ query: ServedRead, …)`, which
+  `RemoteTaskObservation` uses for the list), so one Task can be watched the
+  way the Mac watches it (`subscribeTask`, `TaskWorkView.swift:481`).
 
 ## Design
 
@@ -95,25 +121,52 @@ Passed over: a phone copy of each in `LoopflowiOS` (DESIGN.md "Two of the
 same thing").
 
 - **TaskRow** takes what it draws: title, identifier and its optional link,
-  status word and tone, auto, context, the ask line, selected, muted, and a
-  trailing view (the Mac's slot hint). The Mac keeps a small initializer in
-  `LoopflowMac` that builds this from `TaskPresentation`, `RoadmapTask` and
-  `SessionProgramStatus`; accessibility identifiers stay, so `TaskRowTests`,
-  `ProgramStatusTests` and `WorkModelTests` keep passing unchanged. What the
-  row needs from `WorkStyle.swift` (`WorkLinkStyle`) moves with it. The phone
-  builds it from `WorkViewPlan.Content` (`title`, `identifier`,
-  `status.label`, `status.tone`, `.auto` in `states`). The phone passes no
+  one status value, auto, context, selected, muted, and a trailing view (the
+  Mac's slot hint). The status is one type beside the row,
+  `TaskRow.Status`: the word, its tone (none for a lifecycle word), the
+  detail a tooltip or VoiceOver reads, and the ask line. The row never takes
+  a bare string for the word, so a caller cannot bring its own vocabulary.
+  The Mac keeps a small initializer in `LoopflowMac` that builds the row
+  from `TaskPresentation`, `RoadmapTask` and `SessionProgramStatus`;
+  accessibility identifiers stay, so `TaskRowTests`, `ProgramStatusTests`
+  and `WorkModelTests` keep passing unchanged. What the row needs from
+  `WorkStyle.swift` (`WorkLinkStyle`) moves with it. The phone passes no
   identifier link: the whole row is the tap target. The list reading carries
   no time the status began and no ask, so the phone row shows neither; it
   does not invent them.
-- **WorkflowLine** is unchanged in behavior. Its `ViewThatFits` already drops
-  to the sentence alone when the steps do not fit, which is the phone in
-  portrait; landscape and iPad get the full line.
+- **One status vocabulary.** `WorkViewPlan.Content.status` returns a
+  `TaskRow.Status` in the Mac's words, taken from the same two sources the
+  Mac row uses: `ProgramStatusState.label` for what the conversation reports
+  and `TaskState.label` for the lifecycle. From the reading's states:
+  `blocked` → "Blocked" (warning), `busy` → "Busy" (running), `available` →
+  "Available" (available); otherwise the lifecycle state the reading
+  carries (`unstarted`, `idle`, `active`, `moving`, `done`), capitalized, in
+  secondary ink with no tone, exactly the Mac row's fallback. A row whose
+  reading lists `unavailable` says "Unavailable" with the reasons as its
+  detail (the phone has no hover for the Mac's info icon). "Running",
+  "Ready", "Open" and "No conversation yet" are deleted; a Task with no
+  conversation says its lifecycle word, and the list already folds those
+  rows under "N without a conversation". The property moves out of
+  `WorkTone.swift` to sit with `TaskRow.Status`. Passed over: carrying the
+  word, the time it began and the ask from Rust on the list reading, which
+  is the full fix and its own outcome (see Exclusions).
+- **WorkflowLine** sets no line limit on its sentence-alone form. On the
+  phone in portrait the steps do not fit, so the sentence stands alone and
+  wraps in full; nothing is cut and no tooltip is needed. The Mac's
+  `TaskWorkflowBar` is 34 pt high and applies `.lineLimit(1)` and its
+  `.help` from outside, so the Mac looks as it does today. Landscape and
+  iPad get the full line.
+- **The step that moves a Task** is one function of the Graph.
+  `TaskWorkflowBar.runAction` becomes `TaskGraph.runAction(issue:)` in the
+  shared library beside `WorkflowLine` (label "Start" or "Run", the
+  `lf task run` help line, nil while a run carries the Task or at `end`).
+  The Mac's bar and the phone's Task screen both call it.
 - **LoopflowButtonStyle** takes its height from the platform's control
   height. On the phone the `.accent` button fills the width it is offered.
   Hover and the focus ring stay Mac behavior.
 - **New: the empty or failed state**, one view in `swift/Loopflow/Design/`:
-  left-aligned, a serif `title`, one sentence, then buttons. The phone's ten
+  left-aligned, a serif `title`, then a sentence and buttons where the state
+  has them. The phone's ten
   `ContentUnavailableView`s and `LoadFailure` become it. The Mac's hand-made
   states are not migrated here (see Exclusions).
 
@@ -128,19 +181,34 @@ same thing").
   (`ServedRead.taskGet`, decoded as `WorkFrame.TaskStatusReading`;
   `overview.graph.sentence` is Rust's sentence, the same one `lf task status`
   prints). Probed on this Task: `overview.graph.sentence` = "plan is running
-  kickoff. Auto stands in next at ship-review." The screen reads it on
-  opening and again whenever the list's reading advances (`TaskFeed.reading`),
-  so it follows the store without a second subscription. `subscribeTask`
-  exists on `RegistryQuery` but throws "Live Task observation is unavailable
-  on this transport" where no `observeRead` is wired; if the phone's served
-  transport has it, use it instead. A Task with no Graph yet shows no line.
-  A failed Graph read shows no line and leaves the Notice to say why; it
-  never blocks the terminal.
+  kickoff. Auto stands in next at ship-review." The screen subscribes to
+  that read while it is on screen and the app is active, over the phone's
+  own link (`ServerLink.subscribe(.taskGet(…), connect:)`, as the list
+  does), and closes it on leaving; the Mac watches the same read. Rereading
+  on each list frame was passed over: a step can change without the list
+  changing, and each reread is the whole Task answer. A Task with no Graph
+  yet shows no line. A failed or lost Graph reading shows no line and leaves
+  the Notice to say why; it never blocks the terminal, and the subscription
+  resumes with the link.
+  The toolbar's one Task item is a menu, "Task actions", as on the Mac. It
+  lists the step that moves the Task when there is one ("Start" or "Run",
+  from `TaskGraph.runAction`; a Task with no Graph whose row is `unstarted`
+  offers "Start") and "Auto-Ship" or "Stop Auto-Ship" (the row's `auto`
+  state, as today). Each sends the write it sends today (`taskRun`,
+  `taskAutoOn`, `taskAutoOff`) and the Notice names it the same way
+  ("LOO-5 Auto-Ship requested"). "Auto on" and "Auto off" are deleted from
+  the phone. `WorkflowLine`'s `auto:` is the row's `auto` state.
   Session states (elsewhere, ended, not running, disconnected) are the state
   view over the terminal with their one accent button. Changes, diff and file:
-  empty and failed states are the state view ("No changes yet" gets its
-  sentence; a failure keeps "Try again"); diff and file text use
-  `Typography.mono`.
+  empty and failed states are the state view (a failure keeps "Try again");
+  diff and file text use `Typography.mono`.
+  The state view's sentence and buttons are optional, so no copy is invented
+  to fill a slot. A state that has one line today keeps it word for word as
+  the title ("This Session is open on another device.", "The Session ended.",
+  "The Session is saved, but not running.", "No changes yet", "Binary
+  file"). A state that has a title and a reason keeps both ("Couldn’t load"
+  and the message; "No Session here" and the reason). Disconnected has only
+  a reason: its title is "Disconnected" and the reason is the sentence.
 - **New Task.** "What do you want?" in `.serif(.display)`, the field typed in
   `lede`, one accent button ("Create & start", "Check status" or "Open
   Task"), secondary actions neutral. The destination block keeps its content
@@ -160,25 +228,34 @@ same thing").
   `imageScale`; none passes a size.
 
 Choices made here for review: the iPhone ramp values; removing the pairing
-icon row; rereading the Graph on each list reading rather than subscribing;
-`.display` (not the Mac sheet's `.title`) for "What do you want?".
+icon row; `.display` (not the Mac sheet's `.title`) for "What do you want?";
+the phone's status words become the Mac's (Busy, Available, the lifecycle
+word) and "Running", "Ready", "Open" go; the phone says "Auto-Ship" and
+"Stop Auto-Ship"; the phone gains "Run" where the Graph offers it, in a
+"Task actions" menu; state titles keep today's one-line messages instead of
+new title-and-sentence copy.
 
 ## Source of truth
 
 `DESIGN.md` for the system; `swift/Loopflow/Design/DesignSystem.swift` for
-values; Rust's `TaskGraph.sentence` for the workflow sentence.
+values; Rust's `TaskGraph.sentence` for the workflow sentence and
+`TaskGraph.position` for the step that moves a Task;
+`ProgramStatusState.label` and `TaskState.label` for the status word on
+every row.
 
 ## Affected surfaces
 
 - `swift/Loopflow/Design/` (tokens, four moved components, the new state view).
 - `swift/LoopflowMac`: imports of the moved components, the `TaskRow`
-  adapter. No visible change on the Mac; its tests are the check.
+  adapter, `TaskWorkflowBar` calling the shared `runAction` and limiting
+  the line itself. No visible change on the Mac; its tests are the check.
 - `swift/Loopflow/Services/Notice.swift` already uses `Typography.text`; on
   the phone it grows from 13 to 17 with the ramp. Its three literal paddings
   move to `Spacing`.
 - `swift/LoopflowiOS/*` views; `swift/LoopflowiOS/README.md` (terminal size
-  wording); `swift/README.md` (the `--fixture` sentence, which describes
-  nothing that exists).
+  wording; the Task toolbar paragraph: Start or Run, Auto-Ship, the notice
+  line; the workflow sentence); `swift/README.md` (the `--fixture`
+  sentence, which describes nothing that exists).
 - `DESIGN.md`: the iPhone column in the ramp under "The language"; remove the
   iPhone pointers under "Values outside the scale" and "Two of the same
   thing"; "Tokens today" gets the iPhone ramp, the components' new home and
@@ -203,6 +280,12 @@ uv run python scripts/check_swift_multiplatform_boundaries.py
 Mac component tests that must still pass after the move: `TaskRowTests`,
 `WorkflowLineTests`, `ProgramStatusTests`, `WorkPaletteTests`.
 
+One new headless test in `swift/LoopflowTests` holds the vocabulary: for
+each of `blocked`, `busy` and `available`, `WorkViewPlan.Content.status`
+gives the word `ProgramStatusState` gives the Mac row, and a reading with
+none of them gives its lifecycle word. It fails if a surface gets its own
+word again. `runAction`'s existing cases move with it.
+
 ## Looking at it
 
 The brief asks to look at the Task list, a Task, New Task and Machine pairing
@@ -226,8 +309,11 @@ tests' stand-in client only, and the live look moves to demo.
 | Task list | no Tasks under the filter | state view, "New Task" |
 | Task list | search matches nothing | state view, "Clear search" |
 | Task list | read failed | keeps the last list; the Notice says why (unchanged) |
-| Task | no Graph taken up | no workflow line |
-| Task | Graph read failed | no workflow line; terminal unaffected |
+| Task | no Graph taken up | no workflow line; "Start" if the row is unstarted |
+| Task | Graph reading failed or the link dropped | no workflow line and no Start or Run; Auto-Ship stays (it needs only the row); terminal unaffected; the line returns when the link does |
+| Task | a run carries it | the sentence; no Start or Run |
+| Task | stopped or waiting at a step | the sentence; "Run" |
+| Task list | a row's reading is unavailable | the word "Unavailable" |
 | Session | elsewhere / ended / not running / disconnected / unavailable | state view with its one action; "unavailable" offers Changes |
 | Changes, diff, file | loading / failed / empty / binary | progress; state view with "Try again"; state view with its sentence |
 | Repository picker | none on the Machine / no match | state view, "Refresh" / "Clear search" |
@@ -238,7 +324,15 @@ tests' stand-in client only, and the live look moves to demo.
 - The Mac's hand-made empty and failed states do not move to the new state
   view here; that is Desktop work with its own prototype screens.
 - Desktop's 172 literal paddings and its other "We do these now" pointers.
-- No new facts on the wire for the phone row (status time, ask line).
+- No new facts on the wire for the phone row (status time, ask line, the
+  report's kind and progress). The Mac row reads Session records the list
+  reading does not carry. Closing that means Rust writes the row's status
+  once (word, tone, since, ask) on the list reading and both rows print it,
+  with the Mac's `SessionProgramStatus` label and the Swift mapping here
+  deleted. That is a wire change with DTO fixtures and a Mac migration: its
+  own Task.
+- The phone's filter names ("Ready for you", "Working now") stay; they name
+  lists, not a row's status.
 - No iPhone theme chooser; the phone keeps the light and dark Loopflow themes.
 
 ## What goes
@@ -249,6 +343,10 @@ tests' stand-in client only, and the live look moves to demo.
   in `swift/LoopflowiOS`.
 - `SessionView.card`.
 - Nine `.borderedProminent` buttons with their tint and frame modifiers.
+- The phone's status words "Running", "Ready", "Open" and "No conversation
+  yet"; the toolbar's "Auto on" and "Auto off" and its states-only choice of
+  action; `TaskWorkflowBar.runAction` (moved, not copied); the line limit
+  inside `WorkflowLine`.
 - The four component files under `swift/LoopflowMac/Design/` (moved, not
   copied).
 - The pairing screen's icon row.
@@ -262,19 +360,24 @@ and New Task screens other than the New Task question.
 ## Slices
 
 1. **The ramp and the row, end to end.** Per-platform `Typography` and
-   control height; move `TaskRow` to the shared library with its Mac adapter;
-   the phone's Task list uses it; delete `MobileType` by converting every
+   control height; move `TaskRow` to the shared library with
+   `TaskRow.Status` and its Mac adapter; rewrite
+   `WorkViewPlan.Content.status` in the one vocabulary, with its test; the
+   phone's Task list uses the row; delete `MobileType` by converting every
    call to a step. Run the Mac row tests and `scripts/test_ios.py`. This is
    the slice that could prove the plan wrong: it shows whether one `TaskRow`
    serves both the Mac sidebar (hover, link, slot hint) and a phone list
-   without a platform switch inside it, and whether 17/13 reads right on the
-   SE. If the row needs more than a trailing-view slot to serve both, stop
-   and reshape before moving the other three components.
+   without a platform switch inside it, whether both rows say the same word
+   for the same Task, and whether 17/13 reads right on the SE. If the row
+   needs more than a trailing-view slot to serve both, stop and reshape
+   before moving the other three components.
 2. **Button and state view.** Move `LoopflowButtonStyle`; add the state
    view; replace the nine buttons, the ten stock empty views, `LoadFailure`
    and `SessionView.card`. Extend `TypographyDisciplineTests` to the phone.
-3. **Workflow sentence.** Move `WorkflowLine` (and `StatusMark`); read the
-   Graph in the Task screen; show the line.
+3. **Workflow sentence and the step that moves the Task.** Move
+   `WorkflowLine` (and `StatusMark`) and `runAction`; the sentence wraps;
+   subscribe to the Task in the Task screen; show the line; the "Task
+   actions" menu with Start or Run and Auto-Ship.
 4. **New Task, pairing, terminal, spacing sweep.** The serif question, the
    pairing screen, terminal size and cell height, the remaining literals;
    DESIGN.md and the two READMEs; the Simulator look, light and dark.
@@ -282,9 +385,11 @@ and New Task screens other than the New Task question.
 ## Done when
 
 - The phone's Task list, Task, New Task and pairing screens show the shared
-  row, the workflow sentence, "What do you want?" in serif, one accent button
-  each, and left-aligned states with a next step, in light and dark on an
-  iPhone SE.
+  row, the workflow sentence in full, "What do you want?" in serif, one
+  accent button each, and left-aligned states with a next step, in light and
+  dark on an iPhone SE.
+- A Task shows the same status word on the phone's row as on the Mac's, and
+  a Task waiting at a step can be run from the phone.
 - `TypographyDisciplineTests` reads `LoopflowiOS` and finds nothing.
 - The existing iOS tests and the Mac component tests pass.
 - DESIGN.md has the iPhone ramp, no iPhone pointer under "We do these now",

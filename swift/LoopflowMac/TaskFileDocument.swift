@@ -1534,10 +1534,10 @@ final class TaskFilesStore {
         comparisonDescription.map { $0.hasSuffix(".") ? String($0.dropLast()) : $0 } ?? comparison.title
     }
 
-    /// "4 changed files", or why there is nothing to count. Hidden files,
-    /// yours and the tour's, stay in the total: "4 of 9 changed files".
+    /// "4 changed files", or why there is nothing to count yet. Hidden files,
+    /// yours and the tour's, stay in the total: "4 of 9 changed files". A
+    /// comparison that failed is `changesError`, which the pane draws in its place.
     var changesTitle: String {
-        if let reason = changesError { return "Comparison unavailable: \(reason)" }
         guard let changes else { return "Reading changes…" }
         guard !changes.files.isEmpty else { return "No changed files" }
         let all = changes.files.count

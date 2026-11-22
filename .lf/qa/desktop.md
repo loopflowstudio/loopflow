@@ -211,8 +211,13 @@ for each `<name>.req` write `SnapshotService().snapshotWindow(window, …)` to
 - New Task: `lf desktop do new-task` opens the sheet. Type with
   `(sheet.firstResponder as? NSTextView)?.insertText(…)`; ⌘↩ and Esc work as
   `sheet.performKeyEquivalent(with:)` on a synthesized key event.
-- A synthesized mouse down and up through `window.sendEvent` presses SwiftUI
-  buttons (Start in a pane, Retry) but not `onTapGesture` rows.
+- A synthesized click presses SwiftUI buttons, sidebar rows and backlog rows.
+  Post the mouse-up with `NSApp.postEvent` before sending the mouse-down
+  through `window.sendEvent`: a text field or other control that tracks the
+  mouse waits for the up event in the queue, and the app hangs without it.
+- To type into a SwiftUI `TextField`, find its `NSTextField` by placeholder in
+  the content view, `makeFirstResponder` it, then insert into the window's
+  first responder (the field editor) and send Return.
 - Menus cannot be opened or read: an `NSPopUpButton` behind a SwiftUI `Menu`
   has no items until it tracks. Change the repository's `graph:` to see the
   sheet on another workflow.
@@ -266,3 +271,32 @@ for each `<name>.req` write `SnapshotService().snapshotWindow(window, …)` to
   <private dir>` and stop those PIDs, children first.
 - Give the isolated `HOME` a `src/` directory, or the status line shows
   "Read …/home/src: No such file or directory".
+- Launched while the private server is stopped, the app registers a launchd
+  job for that Machine (`launchctl list | grep com.loopflow.server.`, the
+  label ends in the socket directory's hash) and the server comes back on its
+  own. To keep it stopped, `launchctl bootout gui/$(id -u)/<label>`; boot it
+  out at the end too.
+- Do not name the bare origin `<repo>.repo`: the repository conversation's
+  checkout takes that path, and opening it fails with "git worktree add:
+  worktree path already exists". (Useful when a real refusal is wanted.)
+- Failure lines, each with the private server stopped (kill it, wait five
+  seconds) unless said otherwise:
+  - "…'s order not saved.": on a Wave's page (`lf wave create`, two `lf task
+    create --wave`; a repository's backlog cannot reorder), select a row and
+    press the up arrow. A read-only `.git` does not stop a rank.
+  - "Some Work did not load.": server running, `lf desktop view 'wave:<real>
+    or wave:nosuch'`. Three members give two tiles about 185 pt wide.
+  - "Hidden paths were not saved.": a started Task's Diff tab, the sidebar
+    toggle, a pattern typed into the "tests/, *.lock…" field, then stop the
+    server and send Return.
+  - "Diff settings did not load." and "Comparison unavailable.": stop the
+    server, then open the Diff tab (from Files, with the sidebar open).
+    Captures of this state take 20 to 30 seconds each.
+  - "Conversation failed to open": select a repository or Wave whose
+    conversation this launch has not opened, or press **Open conversation**.
+  A broken `.lf/config.yaml` in the Task's checkout fails none of these.
+- `lf desktop do details page=diff` fails with "The Task file location
+  changed" in the window a Task was started in (Task ea8659); quit, relaunch
+  and open the Task by its link first.
+- Stop the run's processes by PID (`ps -axo pid,ppid,command | grep <private
+  dir>`), never by pattern.

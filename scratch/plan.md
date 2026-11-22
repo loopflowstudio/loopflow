@@ -6,10 +6,11 @@ Task 923677. Reference: `DESIGN.md` ("The language", "What we avoid") and the
 once their screens shipped; `git show fd90d7e6ad:design/prototypes/desktop-more.html`
 has them, and `docs/surfaces.md` holds the wording now.
 
-Slices 1 to 7 are built; 1 to 6 were looked at in the Dev app
-(`scratch/qa.html`, three runs) and slice 7's five lines were not (none is
-reachable without breaking the Machine). **Next:** the gate checks and one
-look at "Not started." on an unlocked display (questions 48).
+Slices 1 to 7 are built and were looked at in the Dev app
+(`scratch/qa.html`, four runs); of slice 7's lines the order, Dashboard,
+hidden-paths and diff-settings ones were seen, the brief and roadmap-card
+ones were not. **Next:** the gate checks and one look at "Not started." on
+an unlocked display (questions 48).
 A Task started from New Task opens beside "Files did not open" (Task ea8659,
 outside this change); a demo meets it on the first Start.
 
@@ -646,3 +647,12 @@ now (questions 56). The workspace's "Layout not saved: …" became the same
 `FailureLine` the Dashboard tile draws (questions 57).
 `scripts/test_desktop.sh --filter 'EmptyStateTests|TypographyDisciplineTests|NewTaskTests|WorkNavigationTests|workStates'`
 passed after both (63 tests in 5 suites); qa ran it.
+
+Fourth qa (at 406697d19c): four fixes. `FailureLine` stacks its message
+under what failed when the row does not fit (questions 65); the line above a
+workspace's panes stays away while a pane says the conversation failed
+(66); the Changes pane's failed comparison is a `FailureLine` (67); the
+Dashboard's line is at the leading edge (68). Left on the page: the diff
+stream's "Could not be read: …" note (69).
+`scripts/test_desktop.sh --filter 'EmptyStateTests|TypographyDisciplineTests|NewTaskTests|WorkNavigationTests|BacklogViewTests|TaskFilesTests|workStates|ProjectActivationTests|RenameWaveSheetTests|RemoveWaveSheetTests|PullRequestTests|WorkCacheTests'`
+passed after them (167 tests in 12 suites); qa ran it.

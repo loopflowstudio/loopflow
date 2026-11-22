@@ -48,6 +48,11 @@ struct EmptyStateTests {
         // A conversation that failed, is opening or is attached brings the page back, and so does a Task.
         workspace.conversationError = "Machine unavailable"
         #expect(!model.repositoryIsEmpty(workspace))
+        // Its pane says the failure, so the line above the panes stays away.
+        let sessions = SessionsStore(repoPath: NSTemporaryDirectory())
+        #expect(ConversationPlaceholder.namesFailure(in: workspace, model: model, sessions: sessions))
+        _ = try ConversationPlaceholder(workspace: workspace, model: model, sessions: sessions).inspect()
+            .find(text: "Conversation failed to open")
         workspace.conversationError = nil
         workspace.visit()
         #expect(model.conversationIsOpening(workspace) && !model.repositoryIsEmpty(workspace))

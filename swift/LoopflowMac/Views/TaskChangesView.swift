@@ -120,10 +120,15 @@ struct TaskChangesView: View {
     private var titles: some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(store.changesTitle).font(Typography.textStrong)
-                    .foregroundStyle(store.changesError == nil ? palette.text : palette.warning)
-                    .fixedSize(horizontal: false, vertical: true).multilineTextAlignment(.leading)
-                    .accessibilityIdentifier("changes-title")
+                Group {
+                    if let reason = store.changesError {
+                        FailureLine("Comparison unavailable.", machine: reason)
+                    } else {
+                        Text(store.changesTitle).font(Typography.textStrong).foregroundStyle(palette.text)
+                            .fixedSize(horizontal: false, vertical: true).multilineTextAlignment(.leading)
+                    }
+                }
+                .accessibilityIdentifier("changes-title")
                 stepMenu
             }
             if let compared = store.comparisonLine {

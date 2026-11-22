@@ -100,6 +100,8 @@ struct DashboardView: View {
                         .lineLimit(1)
                         .help(plan.resolution.unavailable.joined(separator: "\n"))
                         .accessibilityIdentifier("dashboard-unavailable")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 10)
                 }
                 // Working Tasks fill in the shared Task order; a saved Dashboard's
                 // visible occurrences fill in its arrangement order.

@@ -13,17 +13,120 @@
 </style>
 
 <h1>QA: New Task and the empty and failed states</h1>
-<p>Task 923677. Three runs are on this page, newest first. The third, on 2026-11-22 at 09351ba8ac plus its two
-fixes, looked at what slice 6 and the compress after it changed (every failure beside content as one line, the empty
-repository's state as the repository's form only) and went through the main path again from a fresh repository.</p>
+<p>Task 923677. Four runs are on this page, newest first. The fourth, on 2026-11-22 at 406697d19c plus its four
+fixes, looked at slice 7's failure lines on a real Machine, went through the main path again from a fresh repository
+and a Wave, and stopped the Machine under an open window to see what each pane says.</p>
 <p>Every run used the branch's Loopflow for Mac in an isolated bundle with its own bundle ID, a private Machine
-(<code>LF_HOME=/tmp/lfq923b/lf</code>, the branch's <code>lf server run</code>, a stand-in <code>claude</code>) and
-<code>git init</code> directories made for the run. The screen was locked throughout: windows were captured from the
-app's own rendering (<code>cacheDisplay</code>) and driven through <code>lf desktop</code> and a capture loop added to
-the app for the run only (type into the sheet, ⌘↩, a click at a point). That loop is removed and not committed.
-Nothing touched the installed app, the shared Loopflow Dev bundle, its server or <code>~/.lf</code>.</p>
+(the branch's <code>lf server run</code>, a stand-in <code>claude</code>; <code>LF_HOME=/tmp/lfq923d/lf</code> in the
+fourth) and <code>git init</code> directories made for the run. The screen was locked throughout: windows were
+captured from the app's own rendering (<code>cacheDisplay</code>) and driven through <code>lf desktop</code> and a
+capture loop added to the app for the run only (type into a field, ⌘↩, a click at a point). That loop is removed and
+not committed. Nothing touched the installed app, the shared Loopflow Dev bundle, its server or <code>~/.lf</code>.</p>
 
-<h2>The third run: what works now</h2>
+<h2>The fourth run: what works now</h2>
+<table>
+<tr><th>Scenario</th><th>Result</th></tr>
+<tr><td>A fresh <code>git init</code> directory, Loopflow Light</td><td>"No planned Work in this repository", its two buttons, "No working Tasks in this list." in the sidebar.</td></tr>
+<tr><td><b>New Task</b>, a request, <b>File</b>, twice</td><td>The sheet as before (<code>code</code>, "the default", five steps, "You take part at ship-review and verify."). Each File brings the page with the Task selected and "Filed 0cf83a" as plain text: <code>BacklogNotice.did</code> reads as it did.</td></tr>
+<tr><td><code>lf wave create product</code> and two <code>lf task create --wave product</code> with the window open</td><td>The Wave and both Tasks appear without a relaunch. The sheet opened from the Wave's page reads "In Product, running code, the default".</td></tr>
+<tr><td>⌘↩ in the sheet</td><td>The Task starts: "plan is running kickoff. You are next needed at ship-review." beside the known "Files did not open" (Task ea8659).</td></tr>
+<tr><td>Move a Task up on the Wave's page</td><td>"Moved e0a568" as text. With the repository's <code>.git</code> read-only it still moves: ranks are not written there.</td></tr>
+<tr><td>The same with the server stopped</td><td><b>"e0a568's order not saved."</b> strong in the failure ink, "Loopflow server unavailable or owned by another account" in mono, on one row. Slice 7, seen.</td></tr>
+<tr><td><code>lf desktop view 'wave:product or wave:nosuch or wave:alsomissing'</code></td><td><b>"Some Work did not load."</b> and "Wave nosuch is unavailable (+1 more)" on one line above the tiles. Slice 7, seen; fixed below.</td></tr>
+<tr><td>A hidden path typed into the Changes sidebar with the server stopped</td><td><b>"Hidden paths were not saved."</b> with the Machine's message. Slice 7, seen; fixed below.</td></tr>
+<tr><td>The Diff tab opened with the server stopped</td><td><b>"Diff settings did not load."</b> in the sidebar and "Comparison unavailable." above the stream. Slice 7, seen; the second fixed below.</td></tr>
+<tr><td>A link to a repository this Machine does not know</td><td>The Open Work window is 480 by 240 pt with the saved frame cleared, after the change to <code>FailureLine</code> below.</td></tr>
+<tr><td>A conversation that cannot open (the Machine away; then a real <code>git worktree add</code> refusal), <b>Retry</b></td><td>"Conversation failed to open", the message in mono, Retry. Retry asks again and shows the new message.</td></tr>
+</table>
+<div class="pair">
+  <div><img src="qa/s7-empty-light.jpg"><p class="cap">Fresh repository.</p></div>
+  <div><img src="qa/s7-started-light.jpg"><p class="cap">After ⌘↩ from the Wave's page.</p></div>
+  <div><img src="qa/s7-order-light.jpg"><p class="cap">"e0a568's order not saved."</p></div>
+  <div><img src="qa/s7-conv-failed-dark.jpg"><p class="cap">A conversation the Machine refused, after the fix below.</p></div>
+</div>
+<div class="sheet"><img src="qa/s7-sheet.jpg"><p class="cap">The sheet at 406697d19c.</p></div>
+
+<h2>The fourth run: fixed</h2>
+<h3>A conversation that did not open said so twice in one pane</h3>
+<p>With the Machine away, a Wave's or a repository's conversation pane drew "The conversation did not open." with the
+message and Retry across its top, and under it "Conversation failed to open" with the same message and a second Retry.
+The line above the panes is for a workspace whose panes are showing something else (a terminal that is still there, a
+Task waiting for Start); it now stays away when a pane on screen is already drawing the failure
+(<code>ConversationPlaceholder.namesFailure</code>). The top line has been there since before this branch as bare
+text; slice 6 gave it words, which made the pane read as two failures.</p>
+<div class="pair">
+  <div><img src="qa/s7-twice-before-dark.jpg"><p class="cap">Before.</p></div>
+  <div><img src="qa/s7-once-after-dark.jpg"><p class="cap">After.</p></div>
+</div>
+<h3>In a narrow pane a failure line set its message one word to a line</h3>
+<p><code>FailureLine</code> was one row: what failed, the message, the button. In the 250 pt conversation pane the
+message got 90 pt and ran twenty lines down over the pane's own title; in the 236 pt Changes sidebar "Hidden paths
+were not saved." wrapped to two lines beside a four-line message. The line is one row where the row fits and otherwise
+puts the message under what failed, at the container's width. A caller that asks for one line (the Dashboard) keeps
+the row. The plan had this sidebar as "the one to look at first for wrapping".</p>
+<div class="pair">
+  <div><img src="qa/s7-squeezed-before-dark.jpg"><p class="cap">Before: the line above a 250 pt pane, a real message.</p></div>
+  <div><img src="qa/s7-hidden-before-dark.jpg"><p class="cap">Before: the Changes sidebar.</p></div>
+  <div><img src="qa/s7-hidden-after-light.jpg"><p class="cap">After: the Changes sidebar.</p></div>
+  <div><img src="qa/s7-openwork-dark.jpg"><p class="cap">After: the Open Work window, still 480 by 240 pt.</p></div>
+</div>
+<p>The line above the panes itself was not seen again after the change: it showed once, when Retry landed just after
+the server came back, and later tries drew the pane's own state.</p>
+<h3>"Comparison unavailable: …" in the Changes pane was still warning text with a colon</h3>
+<p>The Files pane draws the same failure as <code>FailureLine("Comparison unavailable.", …)</code>. The Changes
+pane's title built the sentence in the store (<code>changesTitle</code>), so the sweeps that read the views missed it.
+It is the same line now and the store's title no longer carries the failure.</p>
+<img src="qa/s7-changes-after-light.jpg" style="max-width:800px">
+<p class="cap">After: "Comparison unavailable." above the stream and "Diff settings did not load." in the sidebar.</p>
+<h3>"Some Work did not load." sat centred above the tiles</h3>
+<p>It is at the leading edge under the Dashboard's expression.</p>
+<div class="pair">
+  <div><img src="qa/s7-dash-before-light.jpg"><p class="cap">Before.</p></div>
+  <div><img src="qa/s7-dash-after-dark.jpg"><p class="cap">After.</p></div>
+</div>
+<pre>scripts/test_desktop.sh --filter 'EmptyStateTests|TypographyDisciplineTests|NewTaskTests|WorkNavigationTests|BacklogViewTests|TaskFilesTests|workStates|ProjectActivationTests|RenameWaveSheetTests|RemoveWaveSheetTests|PullRequestTests|WorkCacheTests'
+✔ Test run with 167 tests in 12 suites passed</pre>
+
+<h2>The fourth run: still wrong or open, worst first</h2>
+<h3>1. A Task started from New Task opens beside "Files did not open"</h3>
+<p>Unchanged (Task ea8659). It also blocks the rest of that pane until the app is reopened:
+<code>lf desktop do details page=diff</code> answers "The Task file location changed."</p>
+<h3>2. A file the diff could not read says "Could not be read: …" as a note</h3>
+<p><code>ReviewStreamView.swift:65</code> draws a failed file's note in the secondary ink with a small Retry. The plan
+lists the site among the failures beside content; it was not converted. Seen behind the sidebar in the last capture
+of the Diff tab with the server stopped. Left: the note is one string from the store
+(<code>FileNote.failed</code>), the same shape as the comparison title fixed above.</p>
+<h3>3. Narrow Dashboard tiles cut their header</h3>
+<p>With three members the second and third slots are about 185 pt wide: the tile drops its title and its zoom button
+is cut at the slot's edge (captures above). The tile's content ("Not started" beside Start) fits. This branch did not
+change the tile header.</p>
+<h3>4. Smaller things seen</h3>
+<ul>
+<li>A hidden path that was not saved stays in the list with its count ("*.md 2 files") and hides those files; only
+the line under it says it was not saved.</li>
+<li>With the server stopped the conversation pane's notice runs past the pane: "Session unavailable. Last screen is
+stale. Loopflow server is not running; run lf server status. Check…" is cut at the edge.</li>
+<li>Captures of the Diff tab a few seconds after its comparison failed took 20 to 30 seconds each. The window stayed
+1280 by 820 and no layer was larger than 3,000 pt, so nothing grew; the cause was not found, and it is the capture
+path (<code>cacheDisplay</code>), not something seen on a display.</li>
+</ul>
+
+<h2>The fourth run: not reached, and why</h2>
+<ul>
+<li><b>"Brief not saved.", "Brief not restored."</b> The same draw site as the order line; the brief editor could not
+be typed into. <code>BacklogViewTests</code> reads "Brief not saved." headless.</li>
+<li><b>The roadmap card's "Tasks did not load." and "… is unavailable."</b> The card opens from a menu.</li>
+<li><b>The line above the panes after the fix</b>, as said above.</li>
+<li><b>"Not started." with no Task selected, menus, terminal faces, real keys.</b> An unlocked display.</li>
+</ul>
+
+<h2>The fourth run: left behind</h2>
+<p>The app registered a launchd job for the private Machine when it launched with the server stopped
+(<code>com.loopflow.server.55108a3ca3cc7fac</code>); it is booted out. The server, holder, the Graph run and the
+stand-in providers are stopped, the QA bundle is deleted and unregistered and its defaults removed.
+<code>/tmp/lfq923d</code> is still on disk.</p>
+
+<h2>The third run (at 09351ba8ac): what works now</h2>
 <table>
 <tr><th>Scenario</th><th>Result</th></tr>
 <tr><td>A fresh <code>git init</code> directory, Loopflow Light</td><td>"No planned Work in this repository" with its two buttons. The sidebar reads "No working Tasks in this list." with its full stop.</td></tr>

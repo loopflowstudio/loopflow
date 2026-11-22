@@ -252,3 +252,25 @@ Made while building slice 7, with nobody present.
     alone", as the plan said, would have called a failed save a failed load.
 64. A refused rank reads "A-1's order not saved." with the Machine's message
     in mono. The plan said only that the identifier stays in `what`.
+
+Made at the fourth qa with nobody present; `scratch/qa.html` has the captures.
+
+65. `FailureLine` is one row where the row fits and otherwise sets the
+    Machine's message under what failed. Seen in a 250 pt pane, the row gave
+    the message 90 pt and twenty lines. A caller that sets `lineLimit(1)`
+    (the Dashboard) keeps the row. This adds a second form to the component
+    that 61 left with none; the Open Work window still opens 480 by 240.
+    Passed over: stacking only at the two narrow sites.
+66. A workspace's "The conversation did not open." line above its panes stays
+    away while a pane draws "Conversation failed to open" itself; before, one
+    pane said both with two Retry buttons.
+67. The Changes pane's "Comparison unavailable: …" title is the `FailureLine`
+    the Files pane draws; `changesTitle` no longer carries the failure.
+68. "Some Work did not load." is at the Dashboard's leading edge, not centred.
+69. Left: `ReviewStreamView.swift:65`, a file the diff could not read, is
+    still "Could not be read: …" as a note with a small Retry, though the
+    plan lists it among the failures beside content. Convert it in this
+    change?
+70. Seen, not from this change: Dashboard tiles about 185 pt wide drop their
+    title and cut the zoom button. Its own Task?
+

@@ -1780,13 +1780,15 @@ struct SessionsContentView: View {
         }
     }
 
-    /// A workspace's panes, with a retry when its conversation failed to open.
+    /// A workspace's panes, with a retry above them when its conversation
+    /// failed to open and no pane says so itself.
     private func conversationPanes(_ key: WorkWorkspaceKey, _ entry: SessionsWorkspace, isFocused: Bool) -> some View {
         WorkspacePanesView(workspace: entry, isFocused: isFocused, sessions: store, model: model,
             onFocus: { pane, session in focusPane(pane, session: session, in: entry) })
             .equatable()
             .overlay(alignment: .top) {
-                if let error = entry.conversationError {
+                if let error = entry.conversationError,
+                   !ConversationPlaceholder.namesFailure(in: entry, model: model, sessions: store) {
                     FailureLine("The conversation did not open.", machine: error) {
                         Button("Retry") { Task { await model.openConversation(in: entry, store: store) } }
                             .buttonStyle(LoopflowButtonStyle())

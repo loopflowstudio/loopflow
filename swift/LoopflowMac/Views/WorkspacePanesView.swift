@@ -99,6 +99,21 @@ struct ConversationPlaceholder: View {
         if workspace.conversationClosed { return "Closed here. Select it again to reopen the conversation." }
         return model.showsSavedWork ? WorkCache.savedReason : nil
     }
+
+    /// Whether a pane on screen draws this workspace's failed opening as its
+    /// own state, so the line above the panes does not say it a second time.
+    @MainActor
+    static func namesFailure(in workspace: SessionsWorkspace, model: WorkModel, sessions: SessionsStore) -> Bool {
+        if model.conversationIsOpening(workspace) { return false }
+        if workspace.key.kind == .task, model.task(id: workspace.key.id)?.task.awaitsStart == true { return false }
+        let store = workspace.multiplexer
+        let panes = store.zoomedPaneId.flatMap { store.layout.pane(for: $0) }.map { [$0] }
+            ?? store.visibleLayout?.allPanes ?? []
+        return panes.contains { pane in
+            guard case .session(let id, _, _) = pane.content else { return false }
+            return !workspace.canOpenTerminals || !sessions.sessions.contains { $0.id == id }
+        }
+    }
 }
 
 /// Opening keeps available history readable until the terminal takes its place.

@@ -100,12 +100,15 @@ private struct EmptyLine: ViewModifier {
 
 /// A failure beside content that stays on screen: what failed, strong in the
 /// failure ink, the Machine's message in mono and selectable, then the way to
-/// try again.
+/// try again. One row where it fits; in a narrow pane the message goes under
+/// what failed, so it wraps at the pane's width and not beside it. A caller
+/// that asks for one line keeps the row, cut short.
 struct FailureLine<Actions: View>: View {
     let what: String
     let machine: String
     @ViewBuilder let actions: Actions
     @Environment(\.palette) private var palette
+    @Environment(\.lineLimit) private var lineLimit
 
     init(_ what: String, machine: String, @ViewBuilder actions: () -> Actions) {
         self.what = what
@@ -114,12 +117,27 @@ struct FailureLine<Actions: View>: View {
     }
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
-            Text(what).font(Typography.textStrong).foregroundStyle(palette.failure)
-            Text(machine).font(Typography.mono).foregroundStyle(palette.textSecondary)
-                .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
-            actions
+        if lineLimit == 1 {
+            row
+        } else {
+            ViewThatFits(in: .horizontal) {
+                row
+                VStack(alignment: .leading, spacing: Spacing.xs) { parts }
+            }
         }
+    }
+
+    private var row: some View {
+        HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) { parts }
+    }
+
+    @ViewBuilder
+    private var parts: some View {
+        Text(what).font(Typography.textStrong).foregroundStyle(palette.failure)
+            .fixedSize(horizontal: false, vertical: true)
+        Text(machine).font(Typography.mono).foregroundStyle(palette.textSecondary)
+            .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+        actions
     }
 }
 

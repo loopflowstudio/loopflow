@@ -399,11 +399,28 @@ demo: not headless; qa or demo runs it.
      passed at 00360b36ba (10 tests). The Swift suites
      (`WorkflowLineTests`, `NewTaskTests`, `WorkNavigationTests`) and
      `dto_fixtures` have no recorded result; gate runs them.
-2. **The rest of the sheet. Next.** Ramp steps, the two menus, the accent
-   Start, `Spacing` steps, the "Not filed." form, `StartingTaskView`;
-   `WorkflowChooser` goes. Sheet view test: choosing another workflow changes
-   the step names and the sentence (the menu makes this tappable headless).
-3. **`EmptyState` and the drawn states.** Rewrite `PaneEmptyState` into
+2. **The rest of the sheet. Built.** The question is `.serif(.display)`, the
+   request `Typography.lede`, the sentence two `.borderlessButton` `Menu`s
+   (the workflow one is `StartFlowItems`), Start is the accent
+   `LoopflowButtonStyle` reading "Start ⌘↩", paddings are `Spacing` steps,
+   and "Not filed." and "Not started." are strong in `palette.failure` with
+   the reason in mono. `WorkflowChooser`, the revert arrow, "· not feature",
+   the footer divider and the `new-task-workflow-<name>` identifiers are gone.
+   What it taught:
+   - `@State` does not change in an unhosted ViewInspector view, so the
+     sentence, its menus and the step line are a leaf view, `NewTaskWorkflow`,
+     over bindings to the sheet's Wave and workflow. The test taps a menu
+     item, then reads the view again.
+   - `defaultPhrase` lives on `NewTaskWorkflow` and now also answers "for
+     this Task only"; slice 3 moves it to the one whose-default function.
+   - `StartingTaskView` stays top-leading in a scroll view, not vertically
+     centred as `.app.state` is: before a failure it shows only the request,
+     where the conversation is about to appear. Slice 3 decides whether its
+     failed form becomes an `EmptyState`.
+   - Not seen in the Dev app: the borderless menus' face and baseline beside
+     the sentence, the 540 pt sheet's height without the divider.
+   - Checks: `scripts/test_desktop.sh --filter NewTaskTests` passed (4 tests).
+3. **`EmptyState` and the drawn states. Next.** Rewrite `PaneEmptyState` into
    `Design/EmptyState.swift`, move its pane sites, then the six prototype
    states, `TaskStartOffer` among them with the one whose-default phrase;
    `SessionSlotOffer` goes. The empty, failed and unstarted view tests.

@@ -155,7 +155,7 @@ struct StartFlow: Equatable, Identifiable {
     }
 }
 
-/// The workflows a Task can start on, as Start's menu and New's chooser lay
+/// The workflows a Task can start on, as Start's menu and New Task's lay
 /// them out: those that stop for you, the pieces and undescribed ones under
 /// More, and those that never stop.
 struct StartFlows: Equatable {

@@ -14,7 +14,6 @@ struct NewTaskSheet: View {
     @State private var waveID: String?
     /// A graph other than the scope's default; nil takes up the default.
     @State private var graph: String?
-    @State private var choosingWorkflow = false
     @State private var filing = false
     /// Why File was refused; the sheet stays open with your words.
     @State private var fileError: String?
@@ -25,133 +24,57 @@ struct NewTaskSheet: View {
         _waveID = State(initialValue: model.sidebarWave?.wave.id)
     }
 
-    private var wave: WaveSnapshot? {
-        waveID.flatMap { id in model.visibleRoadmaps.first { $0.wave.id == id }?.wave }
-    }
-    private var reported: WaveGraph.Default? {
-        model.graphDefaults[model.graphDefaultKey(wave: wave)]?.value?.default
-    }
-    private var chosen: String? { graph ?? reported?.name }
-    private var outline: WorkflowOutline? {
-        chosen.flatMap { name in model.graphCatalog.value?.first { $0.name == name }?.workflow }
-    }
+    private var wave: WaveSnapshot? { NewTaskWorkflow.wave(waveID, in: model) }
     private var trimmed: String { request.trimmingCharacters(in: .whitespacesAndNewlines) }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            VStack(alignment: .leading, spacing: 14) {
-                Text("What do you want?")
-                    .serif(.title)
-                    .foregroundStyle(palette.emphasisInk)
-                TextField("", text: $request, axis: .vertical)
-                    .lineLimit(4...10)
-                    .textFieldStyle(.plain)
-                    .font(Typography.text)
-                    .padding(12)
-                    .background(RoundedRectangle(cornerRadius: CornerRadius.pane).fill(palette.background))
-                    .overlay(RoundedRectangle(cornerRadius: CornerRadius.pane)
-                        .strokeBorder(focused ? palette.accent : palette.borderStrong, lineWidth: 1))
-                    .focused($focused)
-                    .accessibilityIdentifier("new-task-request")
-                selector
-                if let outline {
-                    WorkflowLine(outline: outline).accessibilityIdentifier("new-task-steps")
+        VStack(alignment: .leading, spacing: Spacing.lg) {
+            Text("What do you want?")
+                .serif(.display)
+                .foregroundStyle(palette.emphasisInk)
+            TextField("", text: $request, axis: .vertical)
+                .lineLimit(3...10)
+                .textFieldStyle(.plain)
+                .font(Typography.lede)
+                .padding(Spacing.md)
+                .background(RoundedRectangle(cornerRadius: CornerRadius.control).fill(palette.background))
+                .overlay(RoundedRectangle(cornerRadius: CornerRadius.control)
+                    .strokeBorder(focused ? palette.accent : palette.borderStrong, lineWidth: 1))
+                .focused($focused)
+                .accessibilityIdentifier("new-task-request")
+            NewTaskWorkflow(model: model, waveID: $waveID, graph: $graph)
+            if let fileError {
+                HStack(alignment: .firstTextBaseline, spacing: Spacing.xs) {
+                    Text("Not filed.").font(Typography.textStrong).foregroundStyle(palette.failure).fixedSize()
+                    Text(fileError).font(Typography.mono).foregroundStyle(palette.textSecondary)
+                        .textSelection(.enabled).accessibilityIdentifier("new-task-file-error")
                 }
             }
-            .padding(22)
-            Divider()
-            HStack(spacing: 10) {
-                if let fileError {
-                    Text("Not filed · \(fileError)").font(Typography.text).foregroundStyle(palette.warning)
-                        .lineLimit(2).textSelection(.enabled).accessibilityIdentifier("new-task-file-error")
-                }
+            HStack(spacing: Spacing.sm) {
                 Spacer()
                 Button("Cancel") { dismiss() }
-                    .buttonStyle(.plain).foregroundStyle(palette.textSecondary)
+                    .buttonStyle(LoopflowButtonStyle())
                     .keyboardShortcut(.cancelAction)
                 Button(filing ? "Filing…" : "File") { file() }
                     .buttonStyle(LoopflowButtonStyle())
                     .disabled(trimmed.isEmpty || filing)
-                    .help("Put it in \(scopeName)'s backlog without starting it")
+                    .help("Put it in \(NewTaskWorkflow.scopeName(wave, in: model))'s backlog without starting it")
                     .accessibilityIdentifier("new-task-file")
-                Button { create() } label: {
-                    Text("Start  ⌘↩")
-                        .font(Typography.textStrong)
-                        .padding(.horizontal, 15).padding(.vertical, 7)
-                        .foregroundStyle(palette.accentText)
-                        .background(Capsule().fill(palette.accent))
-                }
-                .buttonStyle(.plain)
-                .keyboardShortcut(.return, modifiers: .command)
-                .disabled(trimmed.isEmpty)
-                .opacity(trimmed.isEmpty ? 0.45 : 1)
-                .accessibilityIdentifier("new-task-create")
+                Button("Start ⌘↩") { create() }
+                    .buttonStyle(LoopflowButtonStyle(.accent))
+                    .keyboardShortcut(.return, modifiers: .command)
+                    .disabled(trimmed.isEmpty)
+                    .accessibilityIdentifier("new-task-create")
             }
-            .padding(.horizontal, 22).padding(.vertical, 12)
+            .padding(.top, Spacing.sm)
         }
+        .padding(Spacing.xxl)
         .frame(width: 540)
         .background(palette.surface)
         .onAppear { focused = true }
         .task { await model.loadGraphCatalog() }
         .task(id: waveID) { await model.loadGraphDefault(wave: wave) }
     }
-
-    /// "In myapp, running code · myapp's default": where the Task lives and the
-    /// workflow it takes up, which follows that scope unless you choose another.
-    private var selector: some View {
-        HStack(alignment: .center, spacing: 4) {
-            Text("In")
-            Menu {
-                Button(repositoryName) { waveID = nil }
-                ForEach(model.visibleRoadmaps, id: \.wave.id) { roadmap in
-                    Button(roadmap.wave.displayName) { waveID = roadmap.wave.id }
-                }
-            } label: {
-                pickerLabel(scopeName)
-            }
-            .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
-            .accessibilityIdentifier("new-task-wave")
-            Text(", running").padding(.leading, -4)
-            Button { choosingWorkflow = true } label: {
-                pickerLabel(chosen ?? "…")
-            }
-            .buttonStyle(.plain).fixedSize()
-            .accessibilityIdentifier("new-task-workflow")
-            .popover(isPresented: $choosingWorkflow, arrowEdge: .bottom) {
-                WorkflowChooser(flows: StartFlows(model.graphCatalog.value ?? []), defaultName: reported?.name,
-                                defaultPhrase: reported.map { Self.defaultPhrase($0, scope: scopeName) },
-                                scope: scopeName, chosen: chosen) { name in
-                    graph = name == reported?.name ? nil : name
-                    choosingWorkflow = false
-                }
-            }
-            if let graph, let reported, graph != reported.name {
-                Text("· not \(reported.name)").foregroundStyle(palette.textSecondary)
-                Button { self.graph = nil } label: { Image(systemName: "arrow.uturn.backward") }
-                    .buttonStyle(.plain).foregroundStyle(palette.emphasisInk)
-                    .help("Use \(Self.defaultPhrase(reported, scope: scopeName)), \(reported.name)")
-            } else if let reported {
-                Text("· \(Self.defaultPhrase(reported, scope: scopeName))").foregroundStyle(palette.textSecondary)
-                    .accessibilityIdentifier("new-task-default")
-            }
-        }
-        .font(Typography.text)
-        .foregroundStyle(palette.text)
-    }
-
-    private func pickerLabel(_ title: String) -> some View {
-        HStack(spacing: 3) {
-            Text(title).font(Typography.textStrong)
-            Image(systemName: "chevron.down").font(Typography.meta).fontWeight(.semibold)
-        }
-        .foregroundStyle(palette.text)
-        .contentShape(Rectangle())
-    }
-
-    private var repositoryName: String {
-        model.repoPath.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "repository"
-    }
-    private var scopeName: String { wave?.displayName ?? repositoryName }
 
     private func create() {
         StartingTaskView.start(model: model, request: trimmed, wave: wave, graph: graph)
@@ -169,6 +92,78 @@ struct NewTaskSheet: View {
             filing = false
         }
     }
+}
+
+/// "In myapp, running code, myapp's default": where the Task lives and the
+/// workflow it takes up, which follows that scope unless you choose another,
+/// then that workflow as the Task shows it later.
+struct NewTaskWorkflow: View {
+    let model: WorkModel
+    @Binding var waveID: String?
+    /// A graph other than the scope's default; nil takes up the default.
+    @Binding var graph: String?
+    @Environment(\.palette) private var palette
+
+    static func wave(_ id: String?, in model: WorkModel) -> WaveSnapshot? {
+        id.flatMap { id in model.visibleRoadmaps.first { $0.wave.id == id }?.wave }
+    }
+
+    static func scopeName(_ wave: WaveSnapshot?, in model: WorkModel) -> String {
+        wave?.displayName ?? repositoryName(model)
+    }
+
+    private static func repositoryName(_ model: WorkModel) -> String {
+        model.repoPath.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "repository"
+    }
+
+    private var wave: WaveSnapshot? { Self.wave(waveID, in: model) }
+    private var scopeName: String { Self.scopeName(wave, in: model) }
+    private var reported: WaveGraph.Default? {
+        model.graphDefaults[model.graphDefaultKey(wave: wave)]?.value?.default
+    }
+    private var chosen: String? { graph ?? reported?.name }
+    private var outline: WorkflowOutline? {
+        chosen.flatMap { name in model.graphCatalog.value?.first { $0.name == name }?.workflow }
+    }
+    /// Whose choice the workflow is; nil until the scope's default is read.
+    private var whose: String? {
+        guard let reported else { return graph == nil ? nil : "for this Task only" }
+        return chosen == reported.name ? Self.defaultPhrase(reported, scope: scopeName) : "for this Task only"
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.lg) {
+            HStack(alignment: .firstTextBaseline, spacing: Spacing.xs) {
+                Text("In")
+                Menu(scopeName) {
+                    Button(Self.repositoryName(model)) { waveID = nil }
+                    ForEach(model.visibleRoadmaps, id: \.wave.id) { roadmap in
+                        Button(roadmap.wave.displayName) { waveID = roadmap.wave.id }
+                    }
+                }
+                .menuStyle(.borderlessButton).font(Typography.textStrong).fixedSize()
+                .accessibilityIdentifier("new-task-wave")
+                Text(", running").padding(.leading, -Spacing.xs)
+                Menu(chosen ?? "…") {
+                    StartFlowItems(model: model, chosen: chosen) { name in
+                        graph = name == reported?.name ? nil : name
+                    }
+                }
+                .menuStyle(.borderlessButton).font(Typography.textStrong).fixedSize()
+                .accessibilityIdentifier("new-task-workflow")
+                if let whose {
+                    Text(", \(whose)").padding(.leading, -Spacing.xs)
+                        .foregroundStyle(palette.textSecondary)
+                        .accessibilityIdentifier("new-task-default")
+                }
+            }
+            .font(Typography.text)
+            .foregroundStyle(palette.text)
+            if let outline {
+                WorkflowLine(outline: outline).accessibilityIdentifier("new-task-steps")
+            }
+        }
+    }
 
     /// Whose default the reported workflow is, named for the scope it follows.
     static func defaultPhrase(_ reported: WaveGraph.Default, scope: String) -> String {
@@ -176,83 +171,6 @@ struct NewTaskSheet: View {
         case "personal": "your default"
         case "repository": "\(scope)'s default"
         default: "the default"
-        }
-    }
-}
-
-/// The workflows a Task can start on, searchable, laid out as Start's menu is:
-/// each with what starting it commits you to and its first sentence.
-private struct WorkflowChooser: View {
-    let flows: StartFlows
-    let defaultName: String?
-    let defaultPhrase: String?
-    let scope: String
-    let chosen: String?
-    let choose: (String) -> Void
-    @Environment(\.palette) private var palette
-    @State private var query = ""
-
-    private func matches(_ flows: [StartFlow]) -> [StartFlow] {
-        let needle = query.trimmingCharacters(in: .whitespaces).lowercased()
-        return flows.filter { needle.isEmpty || $0.name.lowercased().contains(needle) }
-            .sorted { ($0.name == defaultName ? 0 : 1, $0.name) < ($1.name == defaultName ? 0 : 1, $1.name) }
-    }
-
-    var body: some View {
-        let sections = [(nil, matches(flows.stopping)), ("Run without stopping", matches(flows.unattended)),
-                        ("More", matches(flows.more))]
-        VStack(alignment: .leading, spacing: 0) {
-            if let defaultName {
-                Text("New Tasks in \(scope) run \(defaultName). Pick another for this Task only.")
-                    .font(Typography.text).foregroundStyle(palette.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(12)
-                Divider()
-            }
-            TextField("Find a workflow", text: $query)
-                .textFieldStyle(.plain).font(Typography.text).padding(10)
-                .onSubmit { if let first = sections.flatMap(\.1).first { choose(first.name) } }
-            Divider()
-            ScrollView {
-                VStack(alignment: .leading, spacing: 2) {
-                    ForEach(sections, id: \.0) { title, flows in section(title, flows) }
-                    if sections.allSatisfy(\.1.isEmpty) {
-                        Text("No workflow matches").font(Typography.text).foregroundStyle(palette.textSecondary).padding(9)
-                    }
-                }.padding(4)
-            }
-            .frame(maxHeight: 300)
-        }
-        .frame(width: 340)
-    }
-
-    @ViewBuilder private func section(_ title: String?, _ flows: [StartFlow]) -> some View {
-        if !flows.isEmpty {
-            if let title {
-                Text(title).font(Typography.textStrong).foregroundStyle(palette.textSecondary)
-                    .padding(.horizontal, 9).padding(.top, 8).padding(.bottom, 2)
-            }
-            ForEach(flows) { flow in
-                Button { choose(flow.name) } label: {
-                    VStack(alignment: .leading, spacing: 3) {
-                        HStack(spacing: 6) {
-                            Text(flow.name).font(Typography.textStrong)
-                            Text(flow.consequence).foregroundStyle(palette.textSecondary)
-                            if flow.name == defaultName, let defaultPhrase { Text("· \(defaultPhrase)").foregroundStyle(palette.textSecondary) }
-                            if flow.name == chosen { Image(systemName: "checkmark").foregroundStyle(palette.emphasisInk) }
-                        }.font(Typography.meta)
-                        if let summary = flow.summary {
-                            Text(summary).font(Typography.meta).foregroundStyle(palette.textSecondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                    }
-                    .padding(9)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(RoundedRectangle(cornerRadius: CornerRadius.row))
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("new-task-workflow-\(flow.name)")
-            }
         }
     }
 }
@@ -281,26 +199,31 @@ struct StartingTaskView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            ScrollView {
+        ScrollView {
+            VStack(alignment: .leading, spacing: Spacing.sm) {
                 Text(starting.request)
-                    .font(Typography.text)
+                    .font(Typography.lede)
                     .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            if let error = starting.error {
-                Text(error).font(Typography.text).foregroundStyle(palette.warning)
-                    .textSelection(.enabled).accessibilityIdentifier("new-task-error")
-                HStack {
-                    Button("Try again") {
-                        Self.start(model: model, request: starting.request, wave: starting.wave, graph: starting.graph)
+                if let error = starting.error {
+                    HStack(alignment: .firstTextBaseline, spacing: Spacing.xs) {
+                        Text("Not started.").font(Typography.textStrong).foregroundStyle(palette.failure).fixedSize()
+                        Text(error).font(Typography.mono).foregroundStyle(palette.textSecondary)
+                            .textSelection(.enabled).accessibilityIdentifier("new-task-error")
                     }
-                    Button("Discard") { model.navigation.startingTask = nil }
+                    HStack(spacing: Spacing.sm) {
+                        Button("Try again") {
+                            Self.start(model: model, request: starting.request, wave: starting.wave, graph: starting.graph)
+                        }
+                        .buttonStyle(LoopflowButtonStyle(.accent))
+                        Button("Discard") { model.navigation.startingTask = nil }
+                            .buttonStyle(LoopflowButtonStyle())
+                    }
+                    .padding(.top, Spacing.sm)
                 }
             }
-            Spacer(minLength: 0)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(Spacing.xxxl)
         }
-        .padding(28)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(palette.background)
         .accessibilityIdentifier("starting-task-conversation")

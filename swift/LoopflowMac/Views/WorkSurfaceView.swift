@@ -90,7 +90,7 @@ struct WorkSurfaceView: View {
                 VStack(alignment: .leading, spacing: Spacing.sm) {
                     HStack(alignment: .firstTextBaseline, spacing: Spacing.md) {
                         Text(task.task.name)
-                            .font(Typography.title)
+                            .serif(.title)
                             .foregroundStyle(palette.text)
                             .textSelection(.enabled)
                             .fixedSize(horizontal: false, vertical: true)

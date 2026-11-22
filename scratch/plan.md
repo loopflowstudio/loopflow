@@ -59,10 +59,12 @@ files google/fonts ships: SwiftUI selects by PostScript name and Ghostty
 finds real bold and italic faces, so nothing is synthesized. Probed with
 CoreText: names above are what `Font.custom` must request; Spline Sans Mono
 reports `traitMonoSpace`. Cormorant, Lato and JetBrains Mono go, with their
-entries in `third_party/manifest.json`, `third_party/notices/app-fonts.txt`,
-`third_party/notices/jetbrains_mono.txt`,
+entries in `third_party/manifest.json` (`notice_provenance`),
+`third_party/notices/app-fonts.txt`,
 `swift/LoopflowMac/ThirdPartyNotices/{inventory.json,NOTICES.txt}` and the
 tests that read them (`OpenSourceLicensesTests`, `python/tests/test_third_party.py`).
+`third_party/notices/jetbrains_mono.txt` stays: it is GhosttyKit's own
+embedded fallback face, not the app's.
 
 Spline Sans Mono has no box drawing, block, braille, `⎿ ❯ ✻ ●` or `→`
 (probed: 0/128 box drawing). Ghostty draws box drawing, blocks and braille
@@ -298,16 +300,24 @@ in DESIGN.md "Desktop semantics"; palette contrast.
 
 ## Slices
 
-1. **Faces in the terminal and one screen (teaches most).** Bundle the nine
-   files, register them, add the ramp steps and `.serif`, point the old
-   helpers at the new faces temporarily, set Ghostty's family as above. Build
-   the Dev app. Shows: Ghostty finds a process-registered face, bold is
-   real, Claude's TUI glyphs fall back cleanly, Atkinson's wider metrics at
-   the narrowest window. If Ghostty cannot see the face, the terminal plan
-   changes before anything else is built.
+1. **Built.** Nine faces bundled and registered; the six old files and
+   their notices are gone (regenerated with `scripts/third_party.py
+   refresh`). `Typography` has the ramp steps, `SerifStep` and `.serif(_:)`;
+   `display`/`title`/`label` statics are gone (`WorkSectionHeading` and
+   `WorkDisclosureHeading` are sentence case `textStrong` now). The sized
+   helpers point at the new faces until slice 2. Ghostty: scalar defaults in
+   `loopflowConfig`, `font-family` first in `embeddedConfig`; iPhone's
+   Ghostty config names the family and turns ligatures off too.
+   `AppBootstrapResourceTests.rampFacesAreBundled` checks every face
+   resolves to the bundled file and the mono's bold, italic and bold italic
+   are real. Risk answered at the CoreText level: a family-name
+   `CTFontCollection` query (Ghostty's discovery path) returns all four
+   process-registered Spline Sans Mono faces. Not yet seen on screen: the
+   Dev app with Claude's TUI (fallback glyph width, box drawing) and
+   Atkinson at the narrowest window; that look belongs to QA.
 2. **One ramp, one radius set.** Mechanical migration of every call site,
    iPhone to `MobileType`, delete the sized helpers and old radius names, add
-   `TypographyDisciplineTests`. Remove old fonts and notices.
+   `TypographyDisciplineTests`.
 3. **Workflow line end to end.** Rust `steps` + `sentence`, fixtures, CLI
    text, `WorkflowLine`, delete the three position renderers.
 4. Then: Task row + status mark + button + title bar; Session strip and

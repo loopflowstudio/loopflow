@@ -15,9 +15,7 @@ struct WorkSectionHeading<Trailing: View>: View {
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
             Text(title)
-                .textCase(.uppercase)
-                .font(Typography.label)
-                .tracking(0.66)
+                .font(Typography.textStrong)
                 .foregroundStyle(palette.textTertiary)
             if let count {
                 Text("\(count)")
@@ -156,9 +154,7 @@ struct WorkDisclosureHeading: View {
                         .font(.system(size: 9, weight: .bold))
                         .rotationEffect(.degrees(expanded ? 90 : 0))
                     Text(title)
-                        .textCase(.uppercase)
-                        .font(Typography.label)
-                        .tracking(0.66)
+                        .font(Typography.textStrong)
                     if let count {
                         Text("\(count)")
                             .font(Typography.meta)

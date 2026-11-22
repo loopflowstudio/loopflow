@@ -95,7 +95,7 @@ struct MachineAddressView: View {
                             .foregroundStyle(theme.palette.accentInk)
                             .accessibilityHidden(true)
                             Text("Your work,\nwithin reach.")
-                                .font(Typography.display)
+                                .serif(.display)
                         }
                         Text(enteringAddress
                             ? "Enter or paste the Tailscale address shown in Desktop’s Mobile settings."

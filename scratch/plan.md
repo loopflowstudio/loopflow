@@ -15,11 +15,17 @@ verify." under it, and one accent button reading "Start ⌘↩". (The prototype
 says "human-review"; step names are whatever Rust reports.)
 
 A Task filed and not yet started says the same thing in the same words: its
-bar draws that step line, and its pane reads "Not started. It will run
-feature, Product's default. You take part at explore, ship-review and
-verify." with Start and "Start with…". (The prototype says "the Wave's
-default"; the wire cannot tell a Wave's `graph:` from the repository's, so the
-pane names the scope as the sheet does. Open choice, questions 13.)
+bar draws that step line, and its pane is titled "Not started" and reads "It
+will run feature, Product's default. You take part at explore, ship-review
+and verify." with Start and "Start with…". (The prototype says "the Wave's
+default"; the pane names the scope as the sheet does: "Product's default" is
+the default of the scope whose new Tasks take it up, true whichever file set
+it.)
+
+A repository with no Waves, no Tasks and no conversation open shows one
+thing: "No planned Work in this repository", "Say what you want built, or
+talk it through first.", "New Task ⌘N" and "Open the repository
+conversation". Either button leads to the ordinary repository page.
 
 Anywhere the app has nothing to show or something failed, the pane is
 left-aligned: a 26 pt serif title saying what happened, one sentence, then
@@ -169,9 +175,9 @@ default", "the default", "for this Task only") and `workflowSelection(_:)`
 for a filed Task's pair. The sheet, the unstarted pane, the status strip and
 the Graph log's position line read them. They are at the end of `WorkModel.swift`.
 
-**Open choice (questions 13):** saying "the Wave's default" as the prototype
-does needs Rust to send which layer's `graph:` won (a new `ConfigSource` or a
-scope field). Until someone asks for it the scope's name stands.
+**Choice made for review:** the scope's name stands and Rust sends no layer.
+"Product's default" says whose new Tasks take the workflow up, which holds
+for a Wave's `graph:` and the repository's alike.
 
 ### `EmptyState`
 
@@ -212,7 +218,8 @@ appear, and a failure should not move those words to the pane's middle.
 
 ### The states
 
-The prototype's drawn states are built: `NoPlannedWork` and `ChooseWork`
+The prototype's drawn states are built, except that `NoPlannedWork` is not
+where an empty repository opens (slice 5): `NoPlannedWork` and `ChooseWork`
 (`WorkSurfaceView.swift:9`, `:32`), the missing selection (`:240`),
 `RepositoryDidNotOpen` (`RepositoryWorkspaceView.swift:98`),
 `TaskStartOffer` (`TaskWorkView.swift:236`) and the pane sites in
@@ -225,7 +232,11 @@ The prototype's drawn states are built: `NoPlannedWork` and `ChooseWork`
   workflow" that stores without starting (a new action).
 - An unstarted Task's full screen has Start twice, neutral in the bar and
   accent in the pane. The bar's stays because it is the one left when the
-  conversation pane is collapsed or another pane is zoomed.
+  conversation pane is collapsed or another pane is zoomed. There is no
+  third: the Graph log's "No Graph has run." has no button (slice 5).
+- The unstarted pane's title is "Not started" in a pane and in a tile, not
+  the Task's name as the prototype draws it alone: the brief beside the pane
+  sets the name in serif already. Passed over: the name twice.
 - "Open another repository…" and "Open its conversations" did not ship: the
   open panel lives in `LoopflowApp`, and neither view reaches it or a
   retained workspace's conversations (questions 8).
@@ -252,9 +263,9 @@ Plain `Text` empties stay one line (one serif thing per screen): sentence
 case, `Typography.text`, `palette.textSecondary`, full stop, and a button
 beside the sentence where the app has the action.
 
-- Gains a button: "No planned or started Tasks." (New Task); "No Graph has
-  run." (Start, for a Task awaiting its first start, under the bar's refusal
-  rule); "No recorded work." (its Refresh, set beside it). "No Tasks in this
+- Gains a button: "No planned or started Tasks." (New Task); "No recorded
+  work." (its Refresh, set beside it). The backlog's empty keeps its four
+  steps and takes this form (slice 5). "No Tasks in this
   Project.", "No current Tasks." and "No Projects in this Wave." have no
   `WorkModel` to open New Task from: wording only (questions 20).
 - Wording only: "No pull request yet · changes below are local"
@@ -306,8 +317,9 @@ count, "Takes up … when it starts", the "· loopflow's default" assertion,
 the `new-task-workflow-<name>` identifiers, `PaneEmptyState`,
 `SessionSlotOffer`, `NewTaskWorkflow.defaultPhrase`, "feature · repository",
 "No workflow selected" and every `ContentUnavailableView` in
-`swift/LoopflowMac`. Remaining: the two prototype sections, after the Dev
-app check.
+`swift/LoopflowMac`. Remaining (slice 5): the backlog's own empty form,
+`TaskStartOffer`'s title branch, the Graph log's Start, "Open the
+conversation here." and the two prototype sections.
 
 Must survive: File without starting, ⌘↩ and Esc, the sheet opening on the
 sidebar's Wave, the default following the scope, the request kept when
@@ -315,8 +327,8 @@ filing is refused, every accessibility identifier tests and `lf` Desktop
 actions use other than the two named above, compact dashboard slots staying
 one line.
 
-The prototype sections stay until the screens are checked against them in
-the Dev app (`DESIGN.md`: "Delete a prototype when its screens ship").
+The Dev app check ran at qa; slice 5 deletes the prototype sections
+(`DESIGN.md`: "Delete a prototype when its screens ship").
 
 ## Acceptance check at gate
 
@@ -337,13 +349,14 @@ View tests (ViewInspector, headless):
 - Rust: a Graph whose only stop is inside an XOR path has that top-level
   step `interactive`, an outline sentence naming the stop, and
   `interactive_steps` equal to a `TaskGraph` read of the same Graph.
-- Unstarted Task: its pane shows the title, the outline's sentence and a
+- Unstarted Task: its pane shows "Not started", the outline's sentence and a
   Start that calls `startTaskFromInput`; its bar shows the step names.
 - Sheet: "What do you want?" found; choosing another workflow changes the
   step names and the take-part sentence; the Start button's label holds
   "⌘↩"; Start and File disabled on an empty request.
-- Empty: `WorkSurfaceView` on a repository with no Work shows the title, the
-  sentence, and a New Task button that sets `navigation.palette == .newTask`.
+- Empty: a repository with no Work and no conversation shows the title, the
+  sentence, a New Task button that sets `navigation.palette == .newTask` and
+  a second button that opens the repository's conversation.
 - Failed: `RepositoryWorkspaceContent` with an error shows the title, the
   error text, and a Retry that calls `retry`.
 - Source scan beside `TypographyDisciplineTests`: no `ContentUnavailableView`
@@ -435,15 +448,78 @@ demo: not headless; qa or demo runs it.
      `documented_commands::` (a `docs/surfaces.md` row) were not run; gate
      runs them.
 
-Nothing remains to build. The Dev app look ran at qa in both themes
-(`scratch/qa.html`): the sheet, the unstarted Task, the failed repository and
-the Task pane's sentences read as designed; a Dashboard tile's unstarted line
-became "Not started". Two differences from the prototype are open
-(questions 28, 29): an empty repository shows the backlog's own empty, and
-the typed request is semibold. Left for later steps: the gate checks above,
-then deleting the two prototype sections once those are settled. `lf desktop capture -p backlog` still prints "Wave planning
-unavailable · …" (`WorkModel.swift:1035`); it is capture text, not a drawn
-state, and was left.
+5. **The empty repository, and what the Dev app showed. To build.** Found at
+   qa (`scratch/qa.html`, items 1, 3, 4) and at the concept review of the
+   built change (`scratch/concept-review.html`). No Rust or wire change.
+   Each is a choice made for review.
+   - **An empty repository opens on `NoPlannedWork` alone.** Today a
+     repository opens on its page (`SessionsView.swift`, the
+     `navigation.waveView` branch near `:1750`: conversation, `BacklogView`,
+     `WaveTiles`), so the person reads "Conversation not open" beside the
+     backlog's bold "Nothing is waiting in this repository" and never the
+     prototype's state. That branch shows `NoPlannedWork` in place of
+     `WaveViewLayout` while all of these hold: the view is the repository's,
+     the plan has been read (`model.roadmap.value != nil`, not saved work),
+     `model.visibleWaves` and `model.visibleTasks` are empty, and the
+     repository's workspace has no conversation attached, opening or failed
+     (`DashboardView.swift:243-245` is the existing test for "a conversation
+     is attached"; `model.conversationIsOpening`; `conversationError`).
+     Anything else shows the page as today. Passed over: the state inside
+     the narrow conversation pane with the backlog beside it (the title
+     wraps to three lines and two empties still share the screen).
+   - **"Open the repository conversation" opens it.** It calls
+     `jump(to: .repository)` today, which is `select(nil)`: on the
+     repository's page it does nothing. It runs what `ConversationOpenButton`
+     runs (`model.openConversation(in:store:)`). If `WorkSurfaceView:74`
+     cannot be reached for a repository once this is in, its
+     `NoPlannedWork` call goes; `RoadmapView:144` (no repository, title
+     only) stays.
+   - **The backlog's empty is the list form.** `BacklogView.emptyState`
+     (`:861`) draws `Typography.textStrong` and an accent button, a fourth
+     form beside `EmptyState`, `.emptyLine()` and `FailureLine`. It becomes
+     the sentence with `.emptyLine()` and a full stop, and its step as a
+     neutral `LoopflowButtonStyle` button beside it. The four steps and
+     `backlog-empty` stay; `BacklogViewTests.swift:232` follows the wording.
+   - **`TaskStartOffer`'s title is "Not started"** at both sizes; the
+     `compact ?` branch goes, and "Not started." leaves the sentence, which
+     reads "It will run feature, demo's default. You take part at …".
+   - **The Start beside "No Graph has run." goes** (`TaskWorkView.swift:457`);
+     the sentence stays.
+   - **"Open the conversation here." goes** (`ConversationPlaceholder.note`,
+     `WorkspacePanesView.swift:101`): the title and the button say it. The
+     closed and saved-work sentences stay.
+   - **The typed request stays `Typography.lede`**, semibold as `DESIGN.md`
+     lists it, where the prototype's textarea is regular.
+   - **The two prototype sections go**, "New Task" and "When nothing is
+     there, and when something fails" in
+     `design/prototypes/desktop-more.html`, with any `DESIGN.md` pointer to
+     them: each difference from them is a choice recorded here.
+   - `docs/surfaces.md` ("A Task that has not started", "When nothing is
+     there, or something failed", "When the list is empty") and
+     `.lf/qa/desktop.md` say the new wording.
+   - Tests: `EmptyStateTests` gains the empty repository (title, New Task
+     sets the palette, the second button calls the open) and loses what it
+     asserted about the Task's name as title; `unstartedTaskOffersStart`
+     and `DesktopHeadlessTests.swift:575-585` follow.
+   - Should show: `uv run python scripts/loopflow-dev.py run` on a fresh
+     `git init` directory reads the prototype's state; "Open the repository
+     conversation" brings the page with a terminal and "Nothing is waiting
+     in this repository." beside New. qa looks, in both themes.
+
+Outside this change, on the page for whoever wants it: a Start the Machine
+refused goes to `CreationRecovery`'s notice (a request UUID, cut off at the
+window's edge) and not to `StartingTaskView`'s "Not started." with Try
+again, which shows only when the request never reached the Machine. Telling
+a refusal from a lost answer is a change to creation recovery, its own Task.
+Seen at qa and left: the chevron between a menu's name and its comma in the
+sheet; "No Graph has run." under "Waiting for you at explore.".
+`lf desktop capture -p backlog` still prints "Wave planning unavailable · …"
+(`WorkModel.swift:1035`); it is capture text, not a drawn state.
+
+Slices 1 to 4 were looked at in the Dev app at qa in both themes
+(`scratch/qa.html`): the sheet, the unstarted Task, the failed repository
+and the Task pane's sentences read as designed. Left for later steps: the
+gate checks above.
 
 ## Docs written ahead of the build
 

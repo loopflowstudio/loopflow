@@ -1,214 +1,244 @@
 <!doctype html>
 <html lang="en">
 <meta charset="utf-8">
-<title>Concept review: before a Task runs (923677)</title>
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Concept review, as built: before a Task runs (923677)</title>
 <style>
-  :root {
-    color-scheme: light dark;
-    --bg: #fbfaf7; --surface: #fff; --ink: #1c1b19; --soft: #66625b; --line: #dcd8cf;
-    --yes: #2f7a4d; --no: #b3402e; --new: #2a5db0; --new-bg: #eaf0fb; --code-bg: #f1eee8;
-  }
+  :root { --bg:#f8f6f1; --ink:#1f1b18; --soft:#6a625b; --line:#d9d2c7; --card:#fffdf9; --accent:#6d2b35;
+          --yes:#2f6b3f; --no:#a23a2a; --new:#8a5a00; --newbg:#fbf1d8; --mono: ui-monospace, Menlo, monospace; }
   @media (prefers-color-scheme: dark) {
-    :root { --bg: #171614; --surface: #1f1e1b; --ink: #ece8e0; --soft: #a39e94; --line: #38352f;
-      --yes: #6cc08d; --no: #f08a76; --new: #8fb4f5; --new-bg: #1d2740; --code-bg: #2a2824; }
+    :root { --bg:#191614; --ink:#ece6dd; --soft:#a39a90; --line:#3a342f; --card:#211d1a; --accent:#e0a3ab;
+            --yes:#7fc391; --no:#ef8f7d; --new:#e5bd62; --newbg:#3a2f14; }
   }
-  * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.55 -apple-system, "Helvetica Neue", sans-serif; }
-  main { max-width: 1040px; margin: 0 auto; padding: 48px 28px 96px; }
-  h1 { font: 400 34px/1.15 Georgia, serif; letter-spacing: -.02em; margin: 0 0 12px; }
-  h2 { font: 400 24px/1.2 Georgia, serif; margin: 56px 0 12px; }
-  h3 { font-size: 15px; font-weight: 600; margin: 0 0 6px; }
-  p { margin: 0 0 12px; max-width: 74ch; }
-  .soft { color: var(--soft); }
-  code, .mono { font: 13px/1.5 ui-monospace, "SF Mono", Menlo, monospace; }
-  code { background: var(--code-bg); padding: 1px 4px; border-radius: 3px; }
-  table { border-collapse: collapse; width: 100%; margin: 16px 0; background: var(--surface); }
-  th, td { text-align: left; vertical-align: top; padding: 10px 12px; border: 1px solid var(--line); }
-  th { font-weight: 600; }
-  .yes { color: var(--yes); font-weight: 600; white-space: nowrap; }
-  .no { color: var(--no); font-weight: 600; white-space: nowrap; }
-  .new { background: var(--new-bg); border-left: 3px solid var(--new); padding: 1px 6px; }
-  .key { display: flex; gap: 20px; margin: 8px 0 0; }
-  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin: 16px 0; }
-  @media (max-width: 800px) { .cols { grid-template-columns: 1fr; } }
-  .card { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 16px 18px; }
-  .card.after { border-color: var(--new); }
-  .screen { border: 1px solid var(--line); border-radius: 6px; margin: 10px 0 0; overflow: hidden; }
-  .bar { display: flex; gap: 12px; align-items: center; padding: 7px 12px; border-bottom: 1px solid var(--line); font-size: 13px; flex-wrap: wrap; }
-  .pane { padding: 22px 24px; }
-  .pane .t { font: 400 22px/1.2 Georgia, serif; margin: 0 0 6px; }
-  .btn { display: inline-block; border: 1px solid var(--line); border-radius: 4px; padding: 2px 9px; font-size: 13px; }
-  .btn.a { background: var(--ink); color: var(--bg); border-color: var(--ink); }
-  .dim { color: var(--soft); }
-  .bad { color: var(--no); }
-  pre { background: var(--code-bg); padding: 12px 14px; border-radius: 6px; overflow-x: auto; margin: 10px 0; }
-  ol.q > li { margin-bottom: 18px; }
-  ol.q ol { list-style: lower-alpha; margin-top: 6px; }
-  .rec { font-weight: 600; }
+  body { background:var(--bg); color:var(--ink); font:16px/1.5 -apple-system, "Helvetica Neue", sans-serif;
+         max-width:1040px; margin:0 auto; padding:40px 28px 80px; }
+  h1 { font:400 34px/1.15 Georgia, serif; margin:0 0 6px; }
+  h2 { font:400 25px/1.2 Georgia, serif; margin:44px 0 10px; }
+  h3 { font:600 16px/1.3 inherit; margin:22px 0 6px; }
+  p { margin:8px 0; max-width:74ch; }
+  .soft { color:var(--soft); }
+  code { font:13px var(--mono); }
+  table { border-collapse:collapse; width:100%; margin:12px 0; }
+  th, td { text-align:left; vertical-align:top; padding:9px 10px; border-top:1px solid var(--line); }
+  th { font-weight:600; border-top:none; }
+  .yes { color:var(--yes); font-weight:600; } .no { color:var(--no); font-weight:600; }
+  .new { background:var(--newbg); color:var(--new); padding:0 5px; border-radius:3px; font-weight:600; }
+  .pair { display:grid; grid-template-columns:1fr 1fr; gap:18px; margin:14px 0; }
+  @media (max-width:760px) { .pair { grid-template-columns:1fr; } }
+  .win { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:0; overflow:hidden; }
+  .win.proposed { border:2px dashed var(--new); }
+  .cap { padding:8px 12px; border-bottom:1px solid var(--line); font-weight:600; }
+  .row { display:flex; min-height:210px; }
+  .pane { padding:16px; border-right:1px solid var(--line); display:flex; flex-direction:column; justify-content:center; }
+  .pane:last-child { border-right:none; }
+  .serif { font:400 22px/1.15 Georgia, serif; color:var(--accent); margin-bottom:6px; }
+  .btn { display:inline-block; border:1px solid var(--line); border-radius:5px; padding:2px 9px; font-size:14px; margin:8px 6px 0 0; }
+  .btn.a { background:var(--accent); color:var(--bg); border-color:var(--accent); font-weight:600; }
+  .bar { padding:6px 12px; border-bottom:1px solid var(--line); font:13px var(--mono); display:flex; gap:10px; align-items:center; }
+  ol.q > li { margin:14px 0; } ol.q ol { list-style:lower-alpha; margin-top:4px; }
+  .taken { color:var(--yes); font-weight:600; }
 </style>
-<main>
 
-<h1>Before a Task runs: do the product's concepts and the code's line up?</h1>
-<p class="soft">Task 923677, reviewed before anything is built, against <code>scratch/plan.md</code> as kickoff left it and main at <code>0fa6a4e2</code>.</p>
+<h1>Before a Task runs, as built: do the product's concepts and the code's line up?</h1>
+<p class="soft">Task 923677. The branch at <code>bfd10c984d</code> against its base <code>fd90d7e6ad</code>, read with
+<code>scratch/qa.html</code>'s Dev app captures. The page written before the build is in git at <code>f1a67a6019</code>.</p>
 
-<p><b>The area taken.</b> The Task names two screens: the New Task sheet and the empty or failed states. Both belong to one part of Loopflow for Mac: what a person sees <em>before work is running</em>. That is the sheet, an unstarted Task, the Start menus, a pane with nothing in it, and a pane whose read failed. The review covers that whole part, because the sheet and the prototype's "A Task that has not started" state show the same thing, and the plan built them from different facts.</p>
+<p><b>The area taken.</b> The same one as before the build: what a person sees in Loopflow for Mac before work is
+running. That is the New Task sheet, a filed Task that has not started, Start wherever it is offered, a pane with
+nothing in it and a pane whose read failed. It is reviewed here as it stands with all four slices in it, as someone
+opening the Dev app for the first time.</p>
 
-<p class="key"><span><span class="yes">yes</span> lines up</span><span><span class="no">no</span> does not</span><span><span class="new">proposed</span> not in the code or the kickoff plan yet</span></p>
+<p><span class="yes">yes</span> lines up &nbsp; <span class="no">no</span> does not &nbsp;
+<span class="new">proposed</span> not in the code yet; dashed boxes are proposed too</p>
 
-<h2>One interaction, walked</h2>
-<p>Someone presses ⌘N, types a request, and reads "In loopflow, running <span class="mono">feature</span>, loopflow's default". They open the workflow menu to compare. Then they press File, open the Task later, and press Start.</p>
+<h2>One interaction, walked in the built app</h2>
+<p>Someone opens a repository Loopflow has never seen, reads what is there, presses ⌘N, files a Task, opens it and
+presses Start.</p>
 <table>
-<tr><th style="width:22%">What they read</th><th style="width:26%">Where</th><th>Where the code gets it, under the kickoff plan</th></tr>
-<tr><td>"feature · 3 stops"</td><td>The workflow menu (<code>StartFlowItems</code>)</td><td>Swift counts every interactive node in the compiled Graph, inside XOR paths and composed Graphs too (<code>StartFlow.init</code>, <code>BacklogView.swift:122</code>).</td></tr>
-<tr><td>explore plan build ship-review deliver verify, a person before three</td><td>The step line in the sheet</td><td>Rust's top-level steps; a step counts as yours only when it is itself an interactive skill (<code>task_graph.rs:345</code>).</td></tr>
-<tr><td>"You take part at explore, ship-review and verify."</td><td>Under the line</td><td>The plan: the interactive entries of those top-level steps.</td></tr>
-<tr><td>"Takes up feature when it starts"</td><td>The filed Task's workflow bar</td><td>Swift, from <code>RoadmapTask.graphName</code>.</td></tr>
-<tr><td>"feature · repository"</td><td>The filed Task's status strip</td><td>Swift, name and raw source (<code>TaskWorkView.swift:26</code>).</td></tr>
-<tr><td>"Not started. It will run feature, the Wave's default, and you take part at…"</td><td>The filed Task's pane (prototype)</td><td>The plan does not say; Swift would join it.</td></tr>
-<tr><td>"build is running. You are next needed at ship-review."</td><td>After Start</td><td>Rust, from the whole Graph's interactive steps (<code>next_interactive</code>).</td></tr>
+  <tr><th>What they see</th><th>Where it comes from</th><th></th></tr>
+  <tr><td>Two panes. Left: “Conversation not open”, “Open the conversation here.”, <i>Open conversation</i>.
+      Right: “Nothing is waiting in this repository” in bold and an accent <i>New</i>.</td>
+      <td><code>ConversationPlaceholder</code> and <code>BacklogView.emptyState</code>. The prototype's state for this
+      screen, <code>NoPlannedWork</code>, is built and tested and is not on this path.</td><td class="no">no</td></tr>
+  <tr><td>⌘N: “What do you want?”, “In demo, running feature, demo's default”, the step line, “You take part at
+      explore, ship-review and verify.”, <i>Start ⌘↩</i>.</td>
+      <td><code>NewTaskWorkflow</code> over <code>GraphCatalogEntry.workflow</code>, Rust's outline and sentence.</td>
+      <td class="yes">yes</td></tr>
+  <tr><td>The filed Task: its bar draws the same step line; its pane says “Not started. It will run feature, demo's
+      default. You take part at explore, ship-review and verify.”</td>
+      <td>The same outline, through <code>workflowOutline</code> and <code>workflowSelection</code>.</td>
+      <td class="yes">yes</td></tr>
+  <tr><td>The Task's name in serif twice, side by side, and a third time under Description.</td>
+      <td><code>TaskStartOffer</code>'s title is the Task's name; the brief beside it already has it.</td>
+      <td class="no">no</td></tr>
+  <tr><td>Start: the line gains a position, “Waiting for you at explore.”</td>
+      <td><code>TaskGraph</code>, the same steps and stops as the outline (a Rust test holds them equal).</td>
+      <td class="yes">yes</td></tr>
 </table>
-<p>For <span class="mono">feature</span> and <span class="mono">code</span> all of these agree. They agree by luck. <b>The counterexample:</b> a repository Graph whose only stop sits inside an XOR path. The menu says "1 stop". The line draws no person. The planned sentence says "Runs on its own." The person starts it, and the bar says "You are next needed at approve." Three readings of one Graph, and the two the plan adds are the wrong ones.</p>
-<p><b>Failure and recovery.</b> File is refused: the sheet stays with the words and says why. Start fails after the sheet closed: the request stays in the pane with "Not started.", the machine's message, Try again and Discard. Both survive the plan unchanged, and both are right.</p>
+<p><b>Failure and recovery.</b> A path that is not a repository: “This repository did not open”, the Machine's message
+in mono, Retry; after <code>git init</code>, Retry opens it. That one is right. A Start that fails is two things in the
+code, and QA only ever met the second: see “A Start that failed” below.</p>
 
 <h2>Product concepts against code concepts</h2>
 <table>
-<tr><th style="width:23%">What a person knows</th><th style="width:30%">In the code, as the kickoff plan leaves it</th><th style="width:7%"></th><th>What is wrong, and the change</th></tr>
-
-<tr><td><b>What a workflow asks of me</b>: its steps, and where I take part</td>
-<td><code>WorkflowStep.interactive</code> (top level), <code>TaskGraph.interactive_steps</code> (whole Graph), <code>StartFlow.stops</code> (Swift walk), the plan's <code>WorkflowOutline.sentence</code></td>
-<td class="no">no</td>
-<td>One idea, three derivations that disagree on a stop inside an XOR path. <span class="new">The outline carries <code>interactive_steps</code>, the same list a started Task carries; its sentence names them; a top-level step is yours when anything inside it stops; <code>StartFlow.stops</code> counts the list.</span></td></tr>
-
-<tr><td><b>The workflow this Task will run, and whose choice that is</b></td>
-<td><code>WaveGraph.Default{name, source}</code> for the sheet; <code>RoadmapTask.graphName/graphSource</code> for a filed Task; phrased four ways in Swift, plus "No workflow selected", a state Rust never sends</td>
-<td class="no">no</td>
-<td>One idea under two records and four phrasings. <span class="new">One Swift phrase for (name, source, scope), used by the sheet, the unstarted state and the status strip. An unstarted Task's bar draws the same step line from the catalog outline, in place of "Takes up feature when it starts".</span></td></tr>
-
-<tr><td><b>An unstarted Task</b>, and Start</td>
-<td><code>TaskStartOffer</code> → <code>SessionSlotOffer</code> → <code>PaneEmptyState</code> in the pane and in dashboard tiles; the bar's own Start; "Start with…" under "…"</td>
-<td class="no">no</td>
-<td>The plan put the prototype's state at "Conversation not open" (<code>WorkspacePanesView:93</code>), which is the branch for Work that is <em>not</em> an unstarted Task. <span class="new"><code>TaskStartOffer</code> is this state. It becomes the prototype's, and <code>SessionSlotOffer</code>, whose only caller it is, goes.</span></td></tr>
-
-<tr><td><b>Choosing another workflow for a filed Task</b></td>
-<td><code>startTaskFromInput(name)</code>: choosing starts the Task. Nothing stores a choice without starting.</td>
-<td class="no">no</td>
-<td>The prototype's button reads "Choose workflow". It starts the Task the moment an item is picked, so the name hides what happens. <span class="new">It reads "Start with…", the name the "…" menu and the backlog row already use for the same items.</span></td></tr>
-
-<tr><td><b>Nothing here, or it failed, and what to do next</b></td>
-<td>12 <code>ContentUnavailableView</code>s, <code>PaneEmptyState</code>, <code>SessionSlotOffer</code>; the plan's one <code>StateView</code></td>
-<td class="yes">yes, after the plan</td>
-<td>One component is right. The name is not: "state" already means a Task's state and <code>PaneState</code> (a pane's layout). <span class="new">It is <code>EmptyState</code>: what a pane shows when it has no content, with <code>machine:</code> when the reason is a failure.</span></td></tr>
-
-<tr><td><b>A workflow in the catalog</b></td>
-<td><code>GraphCatalogEntry</code> on the wire; <code>WorkflowCatalogEntry</code> and <code>model.workflowCatalog</code> wrap it; <code>WorkflowDefinition</code> re-derives steps</td>
-<td class="no">no</td>
-<td>A wrapper the person never sees. The plan removes <code>WorkflowDefinition</code> and leaves the wrapper "if nothing is left". Nothing is. <span class="new">The wrapper and <code>workflowCatalog</code> go; the sheet and the inspector read <code>graphCatalog</code>.</span></td></tr>
-
-<tr><td><b>The steps where I take part, by name</b></td>
-<td>Rust's names: explore, ship-review, verify. The prototype and <code>DESIGN.md</code> say "human-review".</td>
-<td class="no">no</td>
-<td>The plan's Outcome promised the prototype's words. <span class="new">The sentence is whatever Rust writes; the plan and the tests name ship-review.</span></td></tr>
-
-<tr><td><b>File, and Start</b></td>
-<td><code>fileTask</code>, <code>createTask</code> → <code>lf task create [--run]</code></td>
-<td class="yes">yes</td><td>One owner each. "Not filed." and "Not started." name the two failures apart.</td></tr>
-
-<tr><td><b>Workflow</b> (the app's word) and <b>Graph</b> (the CLI's)</td>
-<td><code>WorkflowLine</code>, <code>WorkflowStep</code>, <code>GraphCatalogEntry</code></td>
-<td class="yes">yes</td><td>Two words on purpose, stated in <code>docs/surfaces.md</code>. The new wire type keeps to it: <code>WorkflowOutline</code> on a Graph's entry.</td></tr>
-
-<tr><td><b>A failure</b>: what failed, the machine's words, Retry</td>
-<td>Strings from each read's <code>Reading.failure</code> or thrown error</td>
-<td class="yes">yes</td><td>The plan's form (sans for what failed, mono for the message, Retry kept) fits every site listed.</td></tr>
+  <tr><th style="width:24%">What a person knows</th><th style="width:30%">In the code, as built</th><th style="width:6%"></th><th>What is wrong, and the change</th></tr>
+  <tr><td>What a workflow asks of me: its steps and where I take part</td>
+      <td><code>WorkflowOutline</code> on the catalog; <code>workflow()</code> and <code>interactive_summary()</code> shared with <code>TaskGraph</code></td>
+      <td class="yes">yes</td><td>One derivation. The menu's stop count, the line, the sentence and a started Task agree on a stop inside an XOR path.</td></tr>
+  <tr><td>The workflow this Task will run, and whose choice it is</td>
+      <td><code>workflowChoice</code>, <code>workflowSelection</code>, <code>scopeName</code></td>
+      <td class="yes">yes</td><td>“Product's default” names the scope whose new Tasks take the workflow up, which is true whether the Wave's file or the repository's set it. The earlier open question (should Rust send the layer) is closed: no.</td></tr>
+  <tr><td>An empty repository</td>
+      <td><code>NoPlannedWork</code> (the prototype's, reached only where no Wave view is shown); <code>ConversationPlaceholder</code>; <code>BacklogView.emptyState</code></td>
+      <td class="no">no</td><td>One idea, three views, and the one drawn for it is the one nobody meets. The biggest mismatch; below.</td></tr>
+  <tr><td>A list with nothing in it</td>
+      <td><code>.emptyLine()</code> at 20 sites; <code>BacklogView.emptyState</code> with its own bold title and accent button</td>
+      <td class="no">no</td><td>The backlog's is a fourth form beside <code>EmptyState</code>, <code>.emptyLine()</code> and <code>FailureLine</code>. It keeps its four steps (Clear search, Show available, Show all, New) and is drawn as the line and a neutral button, like “No planned or started Tasks.”</td></tr>
+  <tr><td>A Task that has not started</td>
+      <td><code>TaskStartOffer</code>: title is the Task's name in a pane, “Not started” in a tile</td>
+      <td class="no">no</td><td>The component's title says what happened; here it says the Task's name, which the bar's line and the brief beside it already carry. The title is “Not started” in both sizes and the <code>compact ?</code> branch goes.</td></tr>
+  <tr><td>Start</td>
+      <td>Bar (neutral), pane (accent), “…” and backlog row, and since slice 4 a third on the same screen beside “No Graph has run.”</td>
+      <td class="no">no</td><td>The Graph log sits under the bar that already has Start. The third one goes; the sentence stays.</td></tr>
+  <tr><td>A conversation that is not open here</td>
+      <td><code>ConversationPlaceholder</code>: “Conversation not open”, “Open the conversation here.”, <i>Open conversation</i></td>
+      <td class="no">no</td><td>One fact said three times. The default sentence goes; the two that add something (“Closed here. …”, the saved-work reason) stay.</td></tr>
+  <tr><td>Nothing here, or it failed, and what to do next</td>
+      <td><code>EmptyState</code>, <code>FailureLine</code></td>
+      <td class="yes">yes</td><td>No <code>ContentUnavailableView</code> is left and a test fails on a new one.</td></tr>
+  <tr><td>A Start that failed</td>
+      <td><code>StartingTask.error</code> (“Not started.”, Try again, Discard) when the request never reached the Machine; <code>CreationRecovery</code>'s notice once it did</td>
+      <td class="no">no</td><td>Outside this work; below.</td></tr>
+  <tr><td>File, and Start from the sheet</td><td><code>fileTask</code>, <code>createTask</code></td>
+      <td class="yes">yes</td><td>One owner each.</td></tr>
 </table>
 
-<h2>The biggest mismatch</h2>
-<p>"The workflow this Task is about to run" is one thing to a person. They meet it in the sheet, on a filed Task, and in every Start menu. The kickoff plan fixes the drawing (one <code>WorkflowLine</code>) and leaves the facts in three places, then adds a fourth sentence built from the least complete of them.</p>
+<h2>The biggest mismatch: an empty repository</h2>
+<p>The Task's own demo says: open an empty repository and read “No planned Work in this repository” with <i>New Task ⌘N</i>
+and <i>Open the repository conversation</i>. The view exists and has a test. Opening an empty repository shows something
+else, because a repository opens on its page (conversation, backlog, tiles) and <code>NoPlannedWork</code> is mounted
+only where no Wave view is shown. Its second button calls <code>jump(to: .repository)</code>, which selects the page
+the person would already be on; it opens nothing.</p>
+<p>What the built screen says is the prototype's sentence cut in two. “Say what you want built” is the backlog's
+<i>New</i>; “or talk it through first” is the pane's <i>Open conversation</i>. Neither says the other exists, and the
+first screen of a new repository has two empties in two faces.</p>
 
-<div class="cols">
-<div class="card">
-<h3>Kickoff plan</h3>
-<pre>WorkflowOutline {
-  steps,      // top level
-  sentence,   // from steps[].interactive
-}
-StartFlow.stops        // Swift walks compiled nodes
-TaskGraph.sentence     // Rust walks the whole Graph</pre>
-<div class="screen">
-  <div class="bar"><span class="dim">Takes up feature when it starts</span><span class="btn">Start</span><span class="btn">Auto-Ship</span><span>…</span></div>
-  <div class="pane"><p class="dim" style="text-align:center">▷<br>Not started<br><span class="btn">Start</span><br>Starts this Task's Workflow and its first conversation.</p></div>
+<div class="pair">
+  <div class="win">
+    <div class="cap">Built</div>
+    <div class="row">
+      <div class="pane" style="width:34%">
+        <div class="serif">Conversation not open</div>
+        <div>Open the conversation here.</div>
+        <div><span class="btn">Open conversation</span></div>
+      </div>
+      <div class="pane" style="flex:1; justify-content:flex-start">
+        <div class="soft" style="margin-bottom:14px">All 0 &nbsp; Mine 0 &nbsp; Available 0 &nbsp;&nbsp; Start &nbsp; Claim &nbsp; Edit</div>
+        <div><b>Nothing is waiting in this repository</b></div>
+        <div><span class="btn a">New</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="win proposed">
+    <div class="cap">Proposed: while the plan is empty and no conversation is open</div>
+    <div class="row">
+      <div class="pane" style="flex:1">
+        <div class="serif">No planned Work in this repository</div>
+        <div>Say what you want built, or talk it through first.</div>
+        <div><span class="btn a">New Task ⌘N</span><span class="btn">Open the repository conversation</span></div>
+      </div>
+    </div>
+  </div>
 </div>
-<p class="soft" style="margin-top:10px">The pane above is today's <code>TaskStartOffer</code>, which the plan missed. The prototype's state would have landed in a different branch.</p>
-</div>
-<div class="card after">
-<h3>Proposed</h3>
-<pre>WorkflowOutline {
-  steps,              // same function as TaskGraph.steps
-  interactive_steps,  // same function as TaskGraph's
-  sentence,           // names interactive_steps
-}
-StartFlow.stops = outline.interactive_steps.count</pre>
-<div class="screen">
-  <div class="bar"><span class="mono">feature</span><span class="dim">☻explore plan build ☻ship-review deliver ☻verify</span><span class="btn">Start</span><span class="btn">Auto-Ship</span><span>…</span></div>
-  <div class="pane"><p class="t">Stream metrics from rented machines</p>
-  <p>Not started. It will run <span class="mono">feature</span>, the Wave's default. You take part at explore, ship-review and verify.</p>
-  <p><span class="btn a">Start</span> <span class="btn">Start with… ▾</span></p></div>
-</div>
-<p class="soft" style="margin-top:10px">The second sentence is Rust's, word for word, the one the sheet shows. A dashboard tile shows the title and Start on one line.</p>
-</div>
+<div class="pair">
+  <div class="win proposed">
+    <div class="cap">Proposed: after “Open the repository conversation”</div>
+    <div class="row">
+      <div class="pane soft" style="width:44%; font:13px var(--mono)">the conversation's terminal</div>
+      <div class="pane" style="flex:1; justify-content:flex-start">
+        <div class="soft" style="margin-bottom:14px">All 0 &nbsp; Mine 0 &nbsp; Available 0</div>
+        <div><span class="soft">Nothing is waiting in this repository.</span> <span class="btn" style="margin-top:0">New</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="win proposed">
+    <div class="cap">Proposed: a filed Task, not started</div>
+    <div class="bar"><span>feature</span><span class="soft">☻explore plan build ☻ship-review deliver ☻verify</span><span style="margin-left:auto" class="btn" >Start</span></div>
+    <div class="row" style="min-height:160px">
+      <div class="pane" style="width:60%">
+        <div class="serif">Not started</div>
+        <div>It will run feature, demo's default. You take part at explore, ship-review and verify.</div>
+        <div><span class="btn a">Start</span><span class="btn" style="border-color:transparent">Start with… ⌄</span></div>
+      </div>
+      <div class="pane" style="flex:1; justify-content:flex-start">
+        <div style="font:400 19px/1.15 Georgia, serif">Stream metrics from rented machines</div>
+        <div class="soft">Unstarted &nbsp; feature, demo's default</div>
+      </div>
+    </div>
+  </div>
 </div>
 
-<p><b>Why this and not less.</b> The sheet's workflow menu becomes <code>StartFlowItems</code>, so "3 stops" and "You take part at…" sit an inch apart. They have to come from one list.</p>
-<p><b>Why this and not more.</b> A filed Task could carry a whole <code>TaskGraph</code> at <code>start</code> before its first run, and <code>WorkflowLine</code> would need no second way in. Passed over: <code>graph == nil</code> is how the bar, "…" and Rust tell "has not taken up a Graph, may still choose" from "took one up", and that distinction is real. The outline is the part of a <code>TaskGraph</code> that needs no Task.</p>
+<h3>Traced through the layers</h3>
+<p>No wire or Rust change. <code>SessionsView</code>'s repository-page branch shows <code>NoPlannedWork</code> alone
+while the plan has been read, has no Waves and no Tasks, and the repository's workspace has no conversation attached,
+opening or failed. Its second button runs what <code>ConversationOpenButton</code> runs. From then on the page is the
+ordinary one. <code>BacklogView.emptyState</code> becomes the line and a neutral button. <code>TaskStartOffer</code>
+loses its title branch. <code>docs/surfaces.md</code> follows.</p>
 
-<h2>Tested on three paths</h2>
+<h3>Tested on three paths</h3>
 <table>
-<tr><th style="width:18%">Path</th><th>What happens under the proposal</th></tr>
-<tr><td>Normal</td><td>⌘N, pick <span class="mono">code</span>: the line reads plan build ship-review deliver verify, the sentence "You take part at ship-review and verify.", the menu "code · 2 stops". File it; the Task's bar draws the same line and its pane says the same sentence. Start; the bar's line gains a position and nothing else moves.</td></tr>
-<tr><td>Failure</td><td>The catalog does not load: the sheet shows the sentence with "…" and no line, and Start still works because Rust picks the default. A filed Task's bar shows the workflow's name alone. An entry that does not compile has <code>workflow: null</code> and stays out of the menu.</td></tr>
-<tr><td>Recovery</td><td>Start fails after the sheet closed: the request, "Not started.", the message in mono, Try again. Unchanged from the plan.</td></tr>
-<tr><td>Counterexample kept</td><td>A person icon on an XOR step says "this may stop for you", though only one path does. That is a weaker claim than the icon makes on a plain step. It is still truer than no icon followed by "You are next needed at…".</td></tr>
-<tr><td>Counterexample kept</td><td>An unstarted Task's full screen shows Start twice: neutral in the bar, accent in the pane. Dropping the bar's leaves no Start when the conversation pane is collapsed or another pane is zoomed. See 2.</td></tr>
+  <tr><th style="width:18%">Path</th><th>What happens</th></tr>
+  <tr><td>Normal</td><td>A new repository opens on one title, one sentence and two buttons. <i>New Task ⌘N</i> opens the sheet; filing makes the plan non-empty and the page appears with the Task in its backlog. <i>Open the repository conversation</i> opens it and the page appears with the conversation and an empty backlog that says so in one line.</td></tr>
+  <tr><td>Failure</td><td>The conversation does not open: the workspace has an error, so the page shows with “Conversation failed to open”, the message in mono and Retry, as today. The plan read is still running or failed: the page as today, never this state on a guess.</td></tr>
+  <tr><td>Recovery</td><td>Retry in the pane. Closing the conversation in an empty repository brings the one state back, which is the same offer.</td></tr>
+  <tr><td>Counterexample kept</td><td>The backlog's toolbar (filters, search, Show…) is not on the first screen. With nothing to filter that loses nothing, and the sidebar keeps New Task.</td></tr>
+  <tr><td>Counterexample kept</td><td>A repository with one Wave and no Tasks is not this state: the plan has a Wave, so the page shows and the backlog's line carries New.</td></tr>
+  <tr><td>Counterexample kept</td><td>“One serif thing per screen” still does not hold where an <code>EmptyState</code> pane sits beside a brief (two panes, two titles). It held before this pass too; the change here only stops the two titles saying the same words.</td></tr>
 </table>
 
 <h2>What changed in the plan</h2>
-<p>All of it is written into <code>scratch/plan.md</code>, each as a choice made for review.</p>
+<p><code>scratch/plan.md</code> gains slice 5, each item a choice made for review:</p>
 <ol>
-<li>The outline carries <code>interactive_steps</code>; the sentence names them; a top-level step that contains a stop is marked; a Rust test holds a Graph with a stop inside an XOR path and checks the outline, the menu count and a started Task's reading agree.</li>
-<li><code>TaskStartOffer</code> is the prototype's "not started" state; <code>SessionSlotOffer</code> goes.</li>
-<li>An unstarted Task's bar draws the step line from the outline. "Takes up … when it starts", "feature · repository" and "No workflow selected" go.</li>
-<li>One phrase for whose default a workflow is.</li>
-<li>"Choose workflow" reads "Start with…".</li>
-<li>The component is <code>EmptyState</code>, not <code>StateView</code>.</li>
-<li><code>WorkflowCatalogEntry</code> and <code>model.workflowCatalog</code> go, without the "if".</li>
-<li>Step names in the plan and tests are Rust's (ship-review).</li>
+  <li>An empty repository's page is <code>NoPlannedWork</code> until a conversation opens or a Task exists; its second button opens the conversation.</li>
+  <li>The backlog's empty is the one-line form with a neutral button.</li>
+  <li>An unstarted Task's pane is titled “Not started”.</li>
+  <li>The Start beside “No Graph has run.” goes.</li>
+  <li>“Open the conversation here.” goes.</li>
+  <li>The typed request stays semibold, as <code>DESIGN.md</code>'s <code>lede</code> has it.</li>
+  <li>The two prototype sections are deleted in this slice: every difference from them is now a recorded choice.</li>
 </ol>
-<p>The first slice is still the wire and the sheet's step line. It now also draws the unstarted Task's bar, since that is the second place one outline has to read well, and it carries the agreement test.</p>
 
 <h2>Outside this work</h2>
-<p><b>Choosing a workflow for a filed Task without starting it.</b> The app has no such action; the sheet's choice is stored only because filing stores it. It would take a Task-level "set workflow" in Rust and a place for it in the bar. A separate Task if wanted.</p>
-<p><b>"Merges without asking"</b> is still worked out in Swift from op labels that start with "land" (<code>BacklogView.swift:127</code>). It disagrees with nothing this change shows, so it stays. Moving it onto the outline would be one more field.</p>
+<p><b>A Start that failed after the request reached the Machine.</b> QA broke Start two ways and both times the sheet
+closed, the words left the screen, and a notice at the bottom read “Creation 3E68…: … It may have happened; refresh
+before retrying.”, cut off at the window's edge. The prototype's “Not started.” with Try again was never seen. That is
+<code>CreationRecovery</code>, which exists so a lost answer cannot file a Task twice, and it treats a plain refusal
+from Rust the same as a lost answer. Making it tell the two apart (a refusal keeps the words and Try again; only a lost
+answer goes to recovery), and drawing recovery's notice as a failure with its message readable, would take a change to
+<code>SubmittedCreationError</code>'s cases and the notice. It is a separate outcome with its own risk; nothing in this
+change made it worse. The “Task created · Show result” notice that stayed up across repositories is the same subsystem.</p>
+<p><b>Smaller, seen at QA and left:</b> the chevron between a menu's name and its comma in the sheet; “No Graph has
+run.” under “Waiting for you at explore.”, which is true of Graph processes and reads oddly beside the bar.</p>
 
 <h2>Questions</h2>
 <ol class="q">
-<li>The second button on an unstarted Task.
-  <ol><li class="rec">"Start with…" (taken). It starts the Task on the workflow picked, which is what the menu does today.</li>
-  <li>"Choose workflow", as the prototype draws it, with the same behavior.</li>
-  <li>"Choose workflow" that stores the choice and does not start. New behavior; its own Task.</li></ol></li>
-<li>Start on an unstarted Task's full screen.
-  <ol><li class="rec">Both stay (taken): neutral in the bar, accent in the pane. The bar's is the one that survives a collapsed or zoomed pane.</li>
-  <li>The bar drops Start until the Task has a Graph; the pane's is the only one.</li></ol></li>
-<li>The person icon on a step that only sometimes stops (an XOR path).
-  <ol><li class="rec">Marked (taken): the line, the sentence and the stop count agree.</li>
-  <li>Unmarked, as today, and the sentence names only top-level stops.</li></ol></li>
-<li>The component's name.
-  <ol><li class="rec"><code>EmptyState</code> (taken).</li>
-  <li><code>StateView</code>, as kickoff had it.</li></ol></li>
-<li>The workflow menu in the sheet loses its search field and keeps "More" as a submenu, as kickoff chose. 23 Graphs ship today.
-  <ol><li class="rec">An ordinary menu (taken); typing a letter jumps to an item.</li>
-  <li>Keep the searchable popover behind a menu-shaped button.</li></ol></li>
+  <li>An empty repository's first screen.
+    <ol><li><span class="taken">Taken:</span> the prototype's one state fills the page until a conversation opens or a Task exists.</li>
+        <li>The prototype's state inside the conversation pane, with the backlog beside it saying so in one line.</li>
+        <li>As built: two panes, two empties.</li></ol></li>
+  <li>The title of an unstarted Task's pane.
+    <ol><li><span class="taken">Taken:</span> “Not started”; the brief beside it has the name.</li>
+        <li>The Task's name, as the prototype draws it alone.</li></ol></li>
+  <li>The backlog's empty.
+    <ol><li><span class="taken">Taken:</span> one line in the secondary ink and a neutral button, for all four of its steps.</li>
+        <li>Bold with an accent button, as built.</li></ol></li>
+  <li>The request you type in New Task.
+    <ol><li><span class="taken">Taken:</span> semibold, <code>Typography.lede</code> as <code>DESIGN.md</code> lists it.</li>
+        <li>Regular at 17, as the prototype's textarea; <code>DESIGN.md</code>'s table would change with it.</li></ol></li>
+  <li>The two prototype sections.
+    <ol><li><span class="taken">Taken:</span> deleted in this slice.</li>
+        <li>Kept until someone has looked at the Dev app again.</li></ol></li>
+  <li>A Start the Machine refused.
+    <ol><li><span class="taken">Taken:</span> outside this work; a separate Task if wanted.</li>
+        <li>In this change: a refusal keeps the words and Try again, and only a lost answer goes to recovery.</li></ol></li>
 </ol>
-
-</main>
 </html>

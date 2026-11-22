@@ -107,3 +107,27 @@ Made at qa with nobody present; `scratch/qa.html` has the captures.
 29. The request in New Task is semibold (`Typography.lede`, as `DESIGN.md`
     lists it); the prototype's textarea is regular. Left as `DESIGN.md` has it.
 30. The two prototype sections stay until 28 and 29 are settled.
+
+Made at the concept review of the built change with nobody present; the page
+is `scratch/concept-review.html`, and its questions 1 to 6 are these.
+
+31. Settles 28: an empty repository (no Waves, no Tasks, no conversation
+    open) shows the prototype's one state in place of its page, until a
+    conversation opens or a Task exists. Passed over: the state inside the
+    conversation pane beside the backlog; the two panes as built.
+32. An unstarted Task's pane is titled "Not started", not the Task's name as
+    the prototype draws it: the brief beside it already sets the name in
+    serif.
+33. The backlog's empty takes the list form: one line in the secondary ink
+    and a neutral button, for all four of its steps.
+34. Settles 29: the typed request stays semibold, as `DESIGN.md` lists
+    `lede`.
+35. Settles 30: the two prototype sections are deleted in slice 5.
+36. Settles 13: Rust sends no layer; "Product's default" names the scope
+    whose new Tasks take the workflow up.
+37. The Start added beside "No Graph has run." (21) goes: the bar above it
+    has Start. "Open the conversation here." goes too.
+38. A Start the Machine refused lands in creation recovery's notice, not
+    "Not started." with Try again. Left outside this change; should a
+    refusal keep the words and Try again, with only a lost answer going to
+    recovery?

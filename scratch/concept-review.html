@@ -57,6 +57,9 @@ Delete <code>internal_pages.py</code>, its three routes and import in <code>webs
 <li><b>Recovery:</b> if <code>/design</code> turns out to be wanted, it comes back with <code>git revert</code>. No data is lost.</li>
 </ul>
 
+<h2>After the build (re-review at <code>ae2be3ee9d</code>)</h2>
+<p>Every "no" above is now a "yes": <code>internal_pages.py</code> and its three routes are gone (they 404 and leave the sitemap), <code>homepage-next</code> lives under <code>design/prototypes/</code>, Work tracking sits in <code>swift/README.md</code>, and no path outside <code>scratch/</code> and the shipped v0.15.3 notes names an old location. One mismatch stays on purpose: DESIGN.md carries both <i>The language</i> and <i>Tokens today</i>, and the web still says <code>--t-*</code>. That is the stacked website Task's rename (question 3), labelled as such in the file. Nothing further to change in this Task.</p>
+
 <h2>Questions</h2>
 <ol>
 <li>Delete <code>/design</code>, <code>/colors</code>, <code>/fonts</code> and <code>internal_pages.py</code>? (a) yes, as planned (b) keep them, rewritten from DESIGN.md (c) keep them as they are</li>

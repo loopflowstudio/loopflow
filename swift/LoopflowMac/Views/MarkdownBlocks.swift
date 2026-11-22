@@ -27,7 +27,7 @@ struct MarkdownBlocks: View, Equatable {
     /// Each block's scroll id, for an outline to jump to.
     static func anchor(_ block: Int) -> String { "markdown-block-\(block)" }
 
-    /// Reading copy at 1.55 line height: Lato 13 sets ~15.6 pt natively.
+    /// Reading copy at about 1.55 line height over the `text` step (13 pt).
     static let lineSpacing: CGFloat = 4.5
 
     var body: some View {

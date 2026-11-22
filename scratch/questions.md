@@ -133,3 +133,9 @@
   same `TitleBar`; the moon button in the screenshot has no source here.
 - The pane strip shows one `StatusMark` after the agent menu: the report's
   phrase, or a bare dot from the Session's availability.
+
+- Slice 7 (implement, 2026-11-21): the Diff pill still shows the first part of
+  `TaskDelivery.headline` ("Open #1949"), not the prototype's "#1949 open, 1 check
+  failed". Rewording `TaskDelivery` changes the Brief's PR line and its tests too;
+  left for review. Check order in the card (failed, in progress, passed) is also
+  GitHub's order, unchanged.

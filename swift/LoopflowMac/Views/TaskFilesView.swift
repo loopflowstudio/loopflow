@@ -63,39 +63,58 @@ struct TaskFilesView: View {
         .task(id: diffIdentity) { if store.mode == .diff { await store.loadDiff() } }
     }
 
-    /// Open documents and their controls; only the Files page has them.
+    /// The open document, named in full with its place among the others, as
+    /// one menu that switches between them; then its controls. Only the Files
+    /// page has them.
     private var documentRow: some View {
         HStack(spacing: 4) {
-            ScrollView(.horizontal) {
-                HStack(spacing: 12) {
+            if let selection = store.selection {
+                Menu {
                     ForEach(store.tabs) { tab in
-                        HStack(spacing: 4) {
-                            Button((tab.path as NSString).lastPathComponent) { store.selectFileFromInput(tab.path, mode: .read) }
-                                .fontWeight(store.selection == tab.path ? .semibold : .regular)
-                                .help(tab.path)
-                            if store.documents[tab.path]?.dirty == true { Text("•").help("Unsaved draft") }
-                            Button { store.closeTab(tab.id); store.noteInteraction() } label: { Image(systemName: "xmark") }
-                                .accessibilityLabel("Close \(tab.path)")
+                        Toggle(isOn: Binding(get: { store.selection == tab.path },
+                                             set: { _ in store.selectFileFromInput(tab.path, mode: .read) })) {
+                            Text(store.documents[tab.path]?.dirty == true ? "\(tab.path) (unsaved)" : tab.path)
                         }
                     }
-                }.buttonStyle(.plain).font(Typography.meta).padding(8)
+                    Divider()
+                    if let tab = store.tabs.first(where: { $0.path == selection }) {
+                        Button("Close \((selection as NSString).lastPathComponent)") { store.closeTab(tab.id); store.noteInteraction() }
+                    }
+                } label: {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text((selection as NSString).lastPathComponent).font(Typography.mono).foregroundStyle(palette.text)
+                        if store.documents[selection]?.dirty == true { Text("•").help("Unsaved draft") }
+                        if let place = store.tabPlace {
+                            Text(place).font(Typography.meta).foregroundStyle(palette.textSecondary)
+                        }
+                    }
+                }
+                .menuStyle(.borderlessButton).fixedSize()
+                .padding(.horizontal, 10)
+                .help(selection)
+                .accessibilityIdentifier("files-open")
             }
+            Spacer(minLength: 4)
             navigationBar
         }
     }
 
-    /// Where the selected file lives: Machine, checkout, directory.
+    /// Where the selected file lives: the Machine as a place, then the
+    /// checkout and directory as a path.
     private var location: some View {
-        let machine = store.query.remoteMachine ?? "this Mac"
         let checkout = URL(fileURLWithPath: store.cwd).lastPathComponent
         let directory = store.selection.map { ($0 as NSString).deletingLastPathComponent } ?? ""
-        return Text([machine, checkout + (directory.isEmpty ? "" : "/" + directory)].joined(separator: " · "))
-            .font(Typography.mono).foregroundStyle(palette.textSecondary)
-            .lineLimit(1).truncationMode(.head)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 10).padding(.vertical, 3)
-            .help(store.cwd)
-            .accessibilityIdentifier("files-location")
+        return HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(store.query.remoteMachine ?? "This Mac").font(Typography.meta).fixedSize()
+            Text(checkout + (directory.isEmpty ? "" : "/" + directory)).font(Typography.mono)
+                .lineLimit(1).truncationMode(.head)
+        }
+        .foregroundStyle(palette.textSecondary)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 10).padding(.vertical, 3)
+        .help(store.cwd)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("files-location")
     }
 
     private var filesPage: some View {
@@ -567,7 +586,7 @@ private struct TaskFileDiffView: View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
                 ReviewStepper(store: store, reader: reader, isFocused: isFocused)
-                Text(store.revision + (review.draft ? " · unsaved draft" : ""))
+                Text((store.comparisonDescription ?? store.revision) + (review.draft ? " Against the unsaved draft." : ""))
                     .font(Typography.meta).foregroundStyle(palette.textSecondary)
                     .lineLimit(1).truncationMode(.middle)
                     .accessibilityIdentifier("files-diff-comparison")

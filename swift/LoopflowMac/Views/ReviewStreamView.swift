@@ -52,9 +52,9 @@ struct ReviewStream: View {
                     .onDisappear { store.setNear(file.path, false) }
             } else {
                 if file.status == .binary {
-                    ReviewNotice(text: "Binary file · no text to compare").id(file.topID)
+                    ReviewNotice(text: "Binary file. No text to compare.").id(file.topID)
                 } else if file.blocks.isEmpty, note == nil {
-                    ReviewNotice(text: file.status == .renamed ? "Renamed without changes" : "No textual changes")
+                    ReviewNotice(text: file.status == .renamed ? "Renamed without changes." : "No textual changes.")
                         .id(file.topID)
                 }
                 let gaps = file.gaps
@@ -683,7 +683,8 @@ struct ReviewNotice: View {
     @Environment(\.palette) private var palette
 
     var body: some View {
-        Text(text).font(Typography.meta).foregroundStyle(palette.textSecondary)
+        Text(text).font(Typography.text).foregroundStyle(palette.textSecondary)
+            .fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, 14).padding(.vertical, 6)
     }
 }
@@ -748,11 +749,11 @@ struct ReviewLayoutPicker: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            segment(.new, symbol: "doc.plaintext", help: "New code: the file as it is now, removed lines folded")
+            segment(.new, help: "The file as it is now, removed lines folded")
             Divider().frame(height: 14)
-            segment(.unified, symbol: "text.justify.left", help: "Unified")
+            segment(.unified, help: "Removed and added lines together")
             Divider().frame(height: 14)
-            segment(.split, symbol: "rectangle.split.2x1",
+            segment(.split,
                     help: narrow ? "Side by side needs a pane at least \(Int(TaskFilesStore.splitWidth)) pt wide" : "Side by side")
                 .disabled(narrow)
         }
@@ -763,13 +764,13 @@ struct ReviewLayoutPicker: View {
 
     private var narrow: Bool { width < TaskFilesStore.splitWidth }
 
-    private func segment(_ layout: TaskFilesStore.ReviewLayout, symbol: String, help: String) -> some View {
+    private func segment(_ layout: TaskFilesStore.ReviewLayout, help: String) -> some View {
         // What the stream is actually reading, so a narrow pane shows unified as on.
         let on = layout == store.layout(width: width)
         return Button { store.reviewLayout = layout } label: {
-            Image(systemName: symbol).font(Typography.meta)
+            Text(layout.rawValue).font(Typography.text).lineLimit(1).fixedSize()
                 .foregroundStyle(on ? palette.background : palette.text)
-                .frame(width: 28, height: 20)
+                .padding(.horizontal, 8).frame(height: 20)
                 .background(on ? palette.text : .clear)
                 .contentShape(Rectangle())
         }

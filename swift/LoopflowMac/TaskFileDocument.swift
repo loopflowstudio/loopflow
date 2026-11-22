@@ -543,6 +543,12 @@ final class TaskFilesStore {
         }
     }
 
+    /// "1 of 3": where the open file sits among the open ones, once there are two.
+    var tabPlace: String? {
+        guard tabs.count > 1, let index = tabs.firstIndex(where: { $0.path == selection }) else { return nil }
+        return "\(index + 1) of \(tabs.count)"
+    }
+
     func closeTab(_ id: String) {
         guard let index = tabs.firstIndex(where: { $0.id == id }) else { return }
         let removed = tabs.remove(at: index)
@@ -1061,8 +1067,8 @@ final class TaskFilesStore {
 
         var text: String {
             switch self {
-            case .cut: "Cut at 1 MB · the rest of this file is not shown"
-            case .failed(let reason): "Could not be read: \(reason)"
+            case .cut: "Cut at 1 MB. The rest of this file is not shown."
+            case .failed(let reason): "Could not be read: \(reason.hasSuffix(".") ? reason : reason + ".")"
             }
         }
     }
@@ -1499,17 +1505,48 @@ final class TaskFilesStore {
 
     /// What the stream compares, named as the PR would: its base branch and
     /// commit, then the head. Footer and conversation references share it.
-    var comparisonDescription: String? {
+    /// What is compared, as sentences. Refs and commits are marked as code,
+    /// so the page sets them in mono: "Compared with `main` at `2750c9e0fb`.
+    /// Includes uncommitted changes."
+    var comparisonLine: AttributedString? {
         guard let changes else { return nil }
-        if let step { return "Step \(step.title) · \(changes.baseCommit.prefix(10))..\(changes.headCommit.prefix(10))" }
-        let branch = pullRequest.pullRequest?.baseRefName ?? "the Task's base"
-        let compared = "Compared with \(branch) at \(changes.baseCommit.prefix(10))"
-        return comparison.head == nil ? "\(compared) · includes uncommitted changes"
-            : "\(compared) · \(comparison.title) at \(changes.headCommit.prefix(10))"
+        func code(_ text: some StringProtocol) -> AttributedString {
+            var name = AttributedString(String(text))
+            name.inlinePresentationIntent = .code
+            return name
+        }
+        let base = code(changes.baseCommit.prefix(10)), head = code(changes.headCommit.prefix(10))
+        if let step { return AttributedString("Step \(step.title): ") + base + AttributedString("..") + head + AttributedString(".") }
+        let branch = pullRequest.pullRequest.map { code($0.baseRefName) } ?? AttributedString("the Task's base")
+        let compared = AttributedString("Compared with ") + branch + AttributedString(" at ") + base + AttributedString(".")
+        return comparison.head == nil ? compared + AttributedString(" Includes uncommitted changes.")
+            : compared + AttributedString(" \(comparison.title) at ") + head + AttributedString(".")
     }
 
+    var comparisonDescription: String? { comparisonLine.map { String($0.characters) } }
+
     /// The comparison's name for a line sent to the conversation, before it is read too.
-    var revision: String { comparisonDescription ?? comparison.title }
+    var revision: String {
+        comparisonDescription.map { $0.hasSuffix(".") ? String($0.dropLast()) : $0 } ?? comparison.title
+    }
+
+    /// "4 changed files", or why there is nothing to count. Hidden files,
+    /// yours and the tour's, stay in the total: "4 of 9 changed files".
+    var changesTitle: String {
+        if let reason = changesError { return "Comparison unavailable: \(reason)" }
+        guard let changes else { return "Reading changes…" }
+        guard !changes.files.isEmpty else { return "No changed files" }
+        let all = changes.files.count
+        let noun = all == 1 ? "changed file" : "changed files"
+        guard let review, let shown = shownReview, shown.files.count != review.files.count else { return "\(all) \(noun)" }
+        return "\(shown.files.count) of \(review.files.count) \(noun)"
+    }
+
+    /// "12 of 85 viewed", once one file is.
+    var viewedSummary: String? {
+        guard viewedCount > 0, let shown = shownReview?.files.count else { return nil }
+        return "\(viewedCount) of \(shown) viewed"
+    }
 
     // MARK: One file
 

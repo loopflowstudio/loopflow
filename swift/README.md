@@ -386,7 +386,7 @@ Shell holds retained shell tabs. The Task's pane has one row of tabs: **Brief**,
 them. Hidden tools keep their clients and drafts.
 
 **Brief** opens on the Task's title, then one sentence with its state and why
-("Active. build is running implement."), then its PR, the Tasks the brief names
+("Moving, at build. The loop chose another pass on the concept review."), then its PR, the Tasks the brief names
 (click one to open it) and an outline when the brief has headings or an
 `Acceptance:` lead, as a two-column table that wraps in a narrow pane. Its
 scroll position survives page and Task switches in this window; a brief that
@@ -510,9 +510,9 @@ the + and −. **Reference in conversation** types
 same comments, skipped lines and Send.
 
 **Files** holds open documents and their Read, Edit and Diff controls. One menu
-names the open file and where it sits among them ("TaskRow.swift · 1 of 3")
-and switches between them; under it, the Machine and checkout, then the path
-in mono. Files starts with
+names the open file and, once several are open, where it sits among them
+(**TaskRow.swift** 1 of 3), and switches between them or closes it; under it,
+the Machine as a place (This Mac), then the checkout and folder in mono. Files starts with
 its chooser closed. Click the file-browser toggle or press Command-P for
 **scratch** and the Task's checkout tree, read from the Task's Machine as you
 open folders, 500 entries at a time (**Load more** for the rest). `M`, `R` and

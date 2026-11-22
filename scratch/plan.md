@@ -403,13 +403,35 @@ in DESIGN.md "Desktop semantics"; palette contrast.
    Realign checked: `git grep` finds no `sparkle` or `programHeading.symbol`
    left in `LoopflowMac/` (only Sparkle the updater); `swift/README.md:710`
    already describes the notice line.
-7. **Next: Brief, Diff, Files** (Screens above; prototype `desktop-more.html`
-   notes 1–11, `desktop.html` notes 10–11). Sources:
-   `LoopflowMac/Views/TaskBriefView.swift`, `TaskChangesView.swift`, `ReviewStreamView.swift` (`ReviewStream`, shared
-   with Files), `TaskFilesView.swift`, `MarkdownBlocks.swift`.
-   Expected: their headless tests and `TypographyDisciplineTests` pass, and
-   the words the Screens list names (title "N changed files", "12 of 85
-   viewed", "Viewed", "Open on GitHub" without "↗", Files' "1 of 3") are
-   asserted in tests.
+7. **Built.** Brief: `.serif(.title)` Task name; `TaskBrief.state` writes
+   "Moving, at build." (textStrong) and the reason (text, secondary) as one
+   line; PR, Related, "In this brief" and Due are a `Grid` of `text` label
+   and value, Related and the outline as comma-separated link runs
+   (`TaskBrief.links`) so they wrap; outline links use the `loopflow-brief`
+   scheme, caught by `openURL` to scroll. "The brief changed since you last
+   read it." at `text` in warning. Diff: `TaskFilesStore.changesTitle`
+   ("2 changed files", "1 of 2 changed files" with hidden ones) with the step
+   menu beside it ("Whole Task, 3 steps"); `comparisonLine` is an
+   `AttributedString` whose ref and SHA runs are `.code`, set in mono by
+   `TaskChangesView.names`, wrapping; `comparisonDescription`/`revision` read
+   its characters (revision drops the final full stop, and the
+   many-comment message became "N comments on the diff (revision): …").
+   The pill wraps instead of clipping at 200 pt; the card's actions are a
+   row of `LoopflowButtonStyle` buttons "Read again" and "Open on GitHub";
+   check names mono, rows `text`. Layout picker segments are words. Sidebar
+   rows: name mono, directory under it, "Viewed" as a labelled check, both
+   wrapping; `viewedSummary` "1 of 2 viewed". Per-file notes and stream
+   notices are `text` sentences with full stops. Files: one menu names the
+   open file in mono with `tabPlace` ("1 of 3", from two open files) and
+   closes it; location is "This Mac" sans then checkout/folder mono.
+   `MarkdownBlocks` headings were already `lede`/`textStrong`. Passed:
+   `scripts/test_desktop.sh --filter 'TaskBriefTests|TaskFilesTests|ReviewDiffTests|TypographyDisciplineTests'`
+   (69) with the new `theDiffSaysWhatChangedAndWhatYouViewed`,
+   `theDiffNamesItsChoicesInWords`, `filesNamesTheOpenFileAndItsPlace`,
+   `stateAndReasonAreOneSentence`, `relatedTasksAndOutlineAreCommaSeparatedLinks`;
+   `theDiffFitsItsPane` still passes at 360/480/640. Not changed:
+   `TaskDelivery` headlines ("Open #1949 · …"), so the pill reads "Open
+   #1949" rather than the prototype's "#1949 open, 1 check failed"
+   (questions.md). Not seen in the Dev app.
 8. DESIGN.md once cfadc6 is on main (blocked until then); QA in three themes
    at the narrowest width.

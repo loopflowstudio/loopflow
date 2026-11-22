@@ -118,18 +118,30 @@ struct TaskChangesView: View {
     }
 
     private var titles: some View {
-        VStack(alignment: .leading, spacing: 1) {
-            Text(title).font(Typography.textStrong)
-                .foregroundStyle(store.changesError == nil ? palette.text : palette.warning)
-                .lineLimit(2).multilineTextAlignment(.leading)
-                .accessibilityIdentifier("changes-title")
-            if let compared = store.comparisonDescription {
-                Text(compared).font(Typography.meta).foregroundStyle(palette.textSecondary)
-                    .lineLimit(1).truncationMode(.middle).help(compared)
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(store.changesTitle).font(Typography.textStrong)
+                    .foregroundStyle(store.changesError == nil ? palette.text : palette.warning)
+                    .fixedSize(horizontal: false, vertical: true).multilineTextAlignment(.leading)
+                    .accessibilityIdentifier("changes-title")
+                stepMenu
+            }
+            if let compared = store.comparisonLine {
+                Text(Self.names(compared)).font(Typography.text).foregroundStyle(palette.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("changes-comparison")
             }
-            stepMenu
         }
+    }
+
+    /// Runs marked as code (a ref, a commit) in mono; the rest is the sentence.
+    static func names(_ line: AttributedString) -> AttributedString {
+        var line = line
+        for run in line.runs where run.inlinePresentationIntent?.contains(.code) == true {
+            line[run.range].inlinePresentationIntent = nil
+            line[run.range].font = Typography.mono
+        }
+        return line
     }
 
     /// The whole Task, or one Graph step's commits: the branch's commits since
@@ -143,11 +155,10 @@ struct TaskChangesView: View {
                     Toggle("\(index + 1). \(step.title)", isOn: Binding(get: { store.step == step }, set: { _ in store.showStep(step) }))
                 }
             } label: {
-                Text(store.step.map { "Step: \($0.title)" } ?? "Whole Task · \(store.steps.count) steps")
-                    .lineLimit(1).truncationMode(.tail)
+                Text(store.step.map { "Step: \($0.title)" } ?? "Whole Task, \(store.steps.count) steps")
             }
             .menuStyle(.borderlessButton).fixedSize(horizontal: false, vertical: true)
-            .font(Typography.meta)
+            .font(Typography.text)
             .help("Compare one Graph step's commits, or the whole Task")
             .accessibilityIdentifier("changes-step")
         }
@@ -202,22 +213,6 @@ struct TaskChangesView: View {
         }
     }
 
-    /// "7 changes in 4 files", or why there is nothing to count. Hidden files,
-    /// yours and the tour's, stay in the total: "7 changes in 4 of 9 files".
-    private var title: String {
-        if let reason = store.changesError { return "Comparison unavailable: \(reason)" }
-        guard let changes = store.changes else { return "Reading changes…" }
-        guard !changes.files.isEmpty else { return "No changed files" }
-        let all = changes.files.count
-        guard let review = store.review, let shown = store.shownReview else {
-            return all == 1 ? "1 file changed" : "\(all) files changed"
-        }
-        let stops = shown.files.reduce(0) { $0 + store.changeCount($1) }
-        let files = shown.files.count == review.files.count
-            ? (all == 1 ? "1 file" : "\(all) files") : "\(shown.files.count) of \(review.files.count) files"
-        return "\(stops == 1 ? "1 change" : "\(stops) changes") in \(files)"
-    }
-
     /// The delivery headline's first part and a dot for its checks. The dot
     /// has color only while the reading is current.
     private var deliveryPill: some View {
@@ -235,13 +230,13 @@ struct TaskChangesView: View {
                 HStack(spacing: 5) {
                     Circle().fill(dot).frame(width: 7, height: 7)
                     Text(delivery.headline.components(separatedBy: " · ").first ?? delivery.headline)
-                        .lineLimit(1).truncationMode(.tail)
+                        .fixedSize(horizontal: false, vertical: true).multilineTextAlignment(.leading)
                     Image(systemName: showsDelivery ? "chevron.up" : "chevron.down")
                         .font(Typography.meta).fontWeight(.semibold).foregroundStyle(palette.textSecondary)
                 }
-                .font(Typography.meta)
+                .font(Typography.text)
                 .padding(.horizontal, 9).padding(.vertical, 3)
-                .frame(maxWidth: 200)
+                .frame(minHeight: HitTarget.minimum)
                 .background(palette.surface, in: Capsule())
                 .overlay { Capsule().strokeBorder(palette.border) }
                 .contentShape(Capsule())
@@ -251,7 +246,7 @@ struct TaskChangesView: View {
             .accessibilityIdentifier("changes-delivery-toggle")
             .accessibilityValue(showsDelivery ? "Expanded" : "Collapsed")
         }
-        .fixedSize()
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     // MARK: Toolbar
@@ -469,7 +464,7 @@ struct TaskChangesView: View {
                 ReviewNotice(text: tour)
             }
             if review.files.isEmpty, store.review?.files.isEmpty == false {
-                ReviewNotice(text: "Every changed file is hidden or filtered out · the changed files list what is hidden")
+                ReviewNotice(text: "Every changed file is hidden or filtered out. The changed files list what is hidden.")
             }
             if window.lowerBound > 0 {
                 Button(window.lowerBound == 1 ? "1 file above · Show" : "\(window.lowerBound) files above · Show") {
@@ -508,7 +503,7 @@ struct TaskChangesView: View {
         VStack(spacing: 6) {
             if let first = store.shownReview?.stops.first, store.focusedPath == nil,
                store.window.upperBound == store.shownReview?.files.count {
-                Text("End of changes").font(Typography.meta).foregroundStyle(palette.textSecondary)
+                Text("End of changes.").font(Typography.meta).foregroundStyle(palette.textSecondary)
                 Button("Back to the first change") {
                     store[place: .changes] = .init(anchor: store.shownReview?.file(first.path)?.topID, current: first.id)
                     store.noteInteraction()
@@ -516,7 +511,7 @@ struct TaskChangesView: View {
                 .buttonStyle(WorkPlainButtonStyle()).font(Typography.meta)
             }
             if store.query.remoteMachine == nil, let directory = store.changes?.recoveryDirectory {
-                Button("Open saved versions ↗") { NSWorkspace.shared.open(URL(fileURLWithPath: directory)) }
+                Button("Open saved versions") { NSWorkspace.shared.open(URL(fileURLWithPath: directory)) }
                     .buttonStyle(WorkPlainButtonStyle()).font(Typography.meta)
             }
         }
@@ -563,7 +558,7 @@ private extension View {
 /// Type to narrow the stream and click a file to bring it to the top. Below
 /// them, what the tour hid for this change with its reasons, and the path
 /// text you always hide in this repository.
-private struct ChangedFilesSidebar: View {
+struct ChangedFilesSidebar: View {
     static let width: CGFloat = 236
 
     @Bindable var store: TaskFilesStore
@@ -584,8 +579,8 @@ private struct ChangedFilesSidebar: View {
             Divider()
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
-                    if store.viewedCount > 0, let shown = store.shownReview?.files.count {
-                        Text("\(store.viewedCount) / \(shown) viewed").foregroundStyle(palette.textSecondary)
+                    if let viewed = store.viewedSummary {
+                        Text(viewed).foregroundStyle(palette.textSecondary)
                             .padding(.horizontal, 8).padding(.top, 8)
                             .accessibilityIdentifier("changes-viewed-count")
                     }
@@ -633,31 +628,50 @@ private struct ChangedFilesSidebar: View {
 
     private func fileRow(_ file: ReviewFile, in group: ReviewGroup) -> some View {
         let folder = group.id.hasPrefix("path:") && group.title.hasSuffix("/") ? group.title.count : nil
+        let place = Self.place(file.path, under: folder)
         let comments = store.comments.count { $0.selection.path == file.path }
         let viewed = store.isViewed(file)
         return Button { jump(file.path) } label: {
-            HStack(spacing: 6) {
-                Text(folder.map { String(file.path.dropFirst($0)) } ?? (file.path as NSString).lastPathComponent)
-                    .font(Typography.mono).lineLimit(1).truncationMode(.head)
-                    .foregroundStyle(viewed ? palette.textTertiary : palette.text)
-                if viewed {
-                    Image(systemName: "checkmark").font(Typography.meta).fontWeight(.bold)
-                        .foregroundStyle(palette.textTertiary).accessibilityLabel("Viewed")
+            VStack(alignment: .leading, spacing: 1) {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(place.name).font(Typography.mono)
+                        .foregroundStyle(viewed ? palette.textTertiary : palette.text)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 4)
+                    if comments > 0 {
+                        Label("\(comments)", systemImage: "text.bubble").labelStyle(.titleAndIcon)
+                            .foregroundStyle(palette.accent)
+                            .accessibilityLabel(comments == 1 ? "1 comment" : "\(comments) comments")
+                    }
+                    if !store.isReading(file) { counts(added: file.additions, removed: file.deletions).fixedSize() }
                 }
-                Spacer(minLength: 4)
-                if comments > 0 {
-                    Label("\(comments)", systemImage: "text.bubble").labelStyle(.titleAndIcon)
-                        .foregroundStyle(palette.accent)
-                        .accessibilityLabel(comments == 1 ? "1 comment" : "\(comments) comments")
+                if place.directory != nil || viewed {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        if let directory = place.directory {
+                            Text(directory).font(Typography.mono).foregroundStyle(palette.textSecondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        if viewed {
+                            Label("Viewed", systemImage: "checkmark").labelStyle(.titleAndIcon)
+                                .foregroundStyle(palette.textTertiary)
+                        }
+                    }
                 }
-                if !store.isReading(file) { counts(added: file.additions, removed: file.deletions) }
             }
-            .padding(.horizontal, 8).padding(.vertical, 3)
+            .padding(.horizontal, 8).padding(.vertical, 4)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .background(file.path == current ? palette.surfaceElement : .clear)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain).help(file.path)
         .accessibilityAddTraits(file.path == current ? .isSelected : [])
+    }
+
+    /// A file's name, then its directory under the group's folder, if any.
+    static func place(_ path: String, under folder: Int?) -> (name: String, directory: String?) {
+        let relative = folder.map { String(path.dropFirst($0)) } ?? path
+        let directory = (relative as NSString).deletingLastPathComponent
+        return ((relative as NSString).lastPathComponent, directory.isEmpty ? nil : directory + "/")
     }
 
     private func counts(added: Int, removed: Int) -> some View {
@@ -743,7 +757,7 @@ private struct ChangedFilesSidebar: View {
 }
 
 /// Loopflow's record of the Task's PR, then GitHub's reading with its age.
-private struct DeliveryCard: View {
+struct DeliveryCard: View {
     let store: PullRequestStore
     let record: PrSnapshot?
     let taskOpen: Bool
@@ -765,19 +779,23 @@ private struct DeliveryCard: View {
                         .foregroundStyle(delivery.warning ? palette.warning : palette.text)
                         .fixedSize(horizontal: false, vertical: true)
                         .accessibilityIdentifier("changes-delivery")
-                    Spacer(minLength: 4)
-                    if let url {
-                        Button { Task { await store.refresh(url) } } label: { Image(systemName: "arrow.clockwise") }
-                            .buttonStyle(.plain).disabled(store.refreshing)
-                            .help("Read GitHub again").accessibilityLabel("Refresh pull request")
-                        Link("Open on GitHub ↗", destination: url).font(Typography.meta)
-                    }
                 }
                 if let detail = delivery.detail {
-                    Text(detail).font(Typography.meta).foregroundStyle(palette.textSecondary)
+                    Text(detail.hasSuffix(".") ? detail : detail + ".").font(Typography.text).foregroundStyle(palette.textSecondary)
                 }
                 if let pr = store.pullRequest {
                     reading(pr, current: delivery.readingIsCurrent)
+                }
+                if let url {
+                    HStack(spacing: 8) {
+                        Button("Read again") { Task { await store.refresh(url) } }
+                            .disabled(store.refreshing)
+                            .help("Read GitHub again").accessibilityLabel("Refresh pull request")
+                        Button("Open on GitHub") { NSWorkspace.shared.open(url) }
+                            .help(url.absoluteString)
+                            .accessibilityIdentifier("changes-open-github")
+                    }
+                    .buttonStyle(LoopflowButtonStyle())
                 }
             }
         }
@@ -790,7 +808,7 @@ private struct DeliveryCard: View {
     /// A reading that is not current stays readable but loses its colors.
     private func reading(_ pr: GitHubPullRequest, current: Bool) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(pr.title).font(Typography.text).lineLimit(2)
+            Text(pr.title).font(Typography.text).fixedSize(horizontal: false, vertical: true)
             if let checks = pr.statusCheckRollup, !checks.isEmpty {
                 DisclosureGroup(isExpanded: $showsChecks) {
                     ForEach(Array(checks.enumerated()), id: \.offset) { _, check in
@@ -799,22 +817,25 @@ private struct DeliveryCard: View {
                                 .foregroundStyle(!current ? palette.textSecondary
                                                  : check.failed ? palette.failureTone.ink
                                                  : check.passed ? palette.successTone.ink : palette.textSecondary)
-                            if let link = check.link { Link(check.label, destination: link) } else { Text(check.label) }
+                            Group {
+                                if let link = check.link { Link(check.label, destination: link) } else { Text(check.label) }
+                            }
+                            .font(Typography.mono)
                             Spacer(minLength: 0)
                             Text(check.result.replacingOccurrences(of: "_", with: " ").capitalized)
-                                .foregroundStyle(palette.textSecondary)
-                        }.font(Typography.meta)
+                                .foregroundStyle(palette.textSecondary).fixedSize()
+                        }.font(Typography.text)
                     }
-                } label: { Text(pr.checksSummary).font(Typography.meta) }
+                } label: { Text(pr.checksSummary).font(Typography.text) }
             }
             if !pr.reviewRequests.isEmpty {
-                Text("Waiting on \(pr.reviewRequests.map(\.label).joined(separator: ", "))")
-                    .font(Typography.meta).foregroundStyle(palette.textSecondary)
+                Text("Waiting on \(pr.reviewRequests.map(\.label).joined(separator: ", ")).")
+                    .font(Typography.text).foregroundStyle(palette.textSecondary)
             }
             if !pr.body.isEmpty {
                 DisclosureGroup("Description", isExpanded: $showsDescription) {
                     MarkdownBlocks(source: pr.body).equatable()
-                }.font(Typography.meta)
+                }.font(Typography.text)
             }
         }
         .opacity(current ? 1 : 0.6)

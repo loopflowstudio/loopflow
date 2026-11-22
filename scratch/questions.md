@@ -85,3 +85,12 @@
   task status`.
 - At 760 the pane's tab strip scrolls Files out of view; nothing shows it is
   there.
+
+## Concept review after the build (2026-11-22, headless)
+
+- Chosen: the Brief's "at" names the top-level step from `TaskGraph`
+  (`steps[current_step]`), as the prototype and the bar do. Passed over: the
+  concrete step ("Moving, at implement."), as built, and the whole Rust
+  sentence as the lead (it is already in the bar above).
+- Chosen: the Task page's `GraphProcessLog` drops its position line under
+  `TaskWorkflowHeader`; the standalone Graph-log pane keeps it.

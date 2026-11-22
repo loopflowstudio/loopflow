@@ -73,7 +73,7 @@ struct SessionActionSheet: View {
                 }
                 Text("Creation keeps this conversation in place. Binding sets its directory to the Task worktree immediately. Already-running clients may keep their original directory. Files stay where they are.")
                 if let error = draft.error {
-                    Text(error).foregroundStyle(palette.warning)
+                    FailureLine("Not bound.", machine: error)
                         .accessibilityIdentifier("session-bind-error")
                 }
                 Button("Cancel") { model.cancelSessionBinding() }.disabled(draft.submitting)

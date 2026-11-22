@@ -278,10 +278,7 @@ struct TaskDirectiveEditor: View {
                 .accessibilityIdentifier("task-directive-draft")
                 .disabled(isSaving)
             if let saveError {
-                Text(saveError)
-                    .font(Typography.text)
-                    .foregroundStyle(palette.warning)
-                    .textSelection(.enabled)
+                FailureLine("Not saved.", machine: saveError)
                     .accessibilityIdentifier("task-directive-error")
             }
             HStack {

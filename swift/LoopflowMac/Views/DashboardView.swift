@@ -235,7 +235,7 @@ struct DashboardTile: View {
                     Task { await model.reorderDashboard(id, member: other.work, to: member.work) }; return true
                 }
             if let entry, let content {
-                if let error = entry.persistenceError { Text(error).foregroundStyle(palette.warning).textSelection(.enabled) }
+                if let error = entry.persistenceError { FailureLine("Layout not saved.", machine: error) }
                 // The plan read in this frame decides; saved planning may still say otherwise.
                 if let task, content.states.contains(.backlog) {
                     TaskStartOffer(model: model, task: task.task)

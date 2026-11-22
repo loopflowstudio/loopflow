@@ -36,7 +36,7 @@ struct RepositoryPlanView: View {
         if standing.unsent > standing.records.count {
             Text("and \(standing.unsent - standing.records.count) more")
         }
-        if let error = standing.error { Text(error) }
+        if let error = standing.error { FailureLine("Not sent.", machine: error) }
         if let notTaken = standing.notTaken { Text(notTaken.reason) }
     }
 }

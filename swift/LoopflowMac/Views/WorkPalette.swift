@@ -265,7 +265,7 @@ struct TaskLinkView: View {
             Text("Open Task").serif(.title)
             if let result = model.taskLinkReading.value {
                 if result.tasks.items.isEmpty { Text("No exact Task found in available planning.") }
-                if let reason = result.tasks.unavailableReason { Text(reason) }
+                if let reason = result.tasks.unavailableReason { FailureLine("Planning is unavailable.", machine: reason) }
                 ForEach(result.tasks.items) { task in
                     let wave = result.waves.first { $0.wave.id == task.task.waveId }
                     Button("\(task.task.identifier) · \(task.task.name)\n\(task.task.repo)") {

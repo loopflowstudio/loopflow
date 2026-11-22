@@ -10,10 +10,12 @@ struct ProjectReadinessView: View {
     let transportError: String?
     let retry: () -> Void
 
-    private var message: String? {
-        if let transportError { return transportError }
+    /// What the Machine said when preparation failed.
+    private var failure: String? { transportError ?? readiness?.activation?.error }
+
+    /// Where the Project stands when nothing failed: a sentence, not a message.
+    private var standing: String? {
         guard let readiness else { return nil }
-        if let error = readiness.activation?.error { return error }
         if let activation = readiness.activation {
             // An activation whose lf died unended reads `unknown` with no end.
             if let outcome = activation.outcome, outcome != "succeeded" { return "Project activation \(outcome)." }
@@ -32,9 +34,11 @@ struct ProjectReadinessView: View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
             if isPending {
                 ProgressView("Preparing Project…")
-            } else if let message {
-                Text(message).foregroundStyle(palette.warning).textSelection(.enabled)
-                if readiness?.state != .terminal { Button("Retry Project preparation", action: retry) }
+            } else if let failure {
+                FailureLine("Project not prepared.", machine: failure) { retryButton }
+            } else if let standing {
+                Text(standing).foregroundStyle(palette.warning).textSelection(.enabled)
+                retryButton
             }
             if let successor = readiness?.pendingSuccessor {
                 Text("Project transition remains unresolved: \(successor)")
@@ -42,6 +46,10 @@ struct ProjectReadinessView: View {
             }
         }
         .accessibilityIdentifier("project-readiness")
+    }
+
+    @ViewBuilder private var retryButton: some View {
+        if readiness?.state != .terminal { Button("Retry Project preparation", action: retry) }
     }
 }
 #endif

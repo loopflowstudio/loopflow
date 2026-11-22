@@ -1504,12 +1504,12 @@ struct TaskPlanningReadabilityTests {
         let navigator = WorkNavigator(model: model, onOpenSession: { _ in })
         // A pending list makes no empty claim; the one work status says it is loading.
         #expect(try navigator.inspect().find(text: "Loading work…").string() == "Loading work…")
-        #expect(throws: (any Error).self) { try navigator.inspect().find(text: "No working Tasks in this list") }
+        #expect(throws: (any Error).self) { try navigator.inspect().find(text: "No working Tasks in this list.") }
         model.applyTaskList(nil, wave: nil, reason: "Offline")
-        #expect(throws: (any Error).self) { try navigator.inspect().find(text: "No working Tasks in this list") }
+        #expect(throws: (any Error).self) { try navigator.inspect().find(text: "No working Tasks in this list.") }
         #expect(model.navigation.notices.current?.text == "Tasks couldn't be read: Offline")
         model.applyTaskList(fixtureViewPlan(owner: key, members: []), wave: nil, reason: "")
-        #expect(try navigator.inspect().find(text: "No working Tasks in this list").string() == "No working Tasks in this list")
+        #expect(try navigator.inspect().find(text: "No working Tasks in this list.").string() == "No working Tasks in this list.")
     }
 
     @Test("Saved planning rows never fill the sidebar; only the started list does")

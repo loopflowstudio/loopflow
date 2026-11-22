@@ -7,8 +7,8 @@ once their screens shipped; `git show fd90d7e6ad:design/prototypes/desktop-more.
 has them, and `docs/surfaces.md` holds the wording now.
 
 Slices 1 to 5 are built and were looked at in the Dev app
-(`scratch/qa.html`). Slice 6 is next: the failures beside content that are
-still bare text. After it: the gate checks and one look at "Not started." on
+(`scratch/qa.html`). Slice 6, every failure beside content as a
+`FailureLine`, is built and unseen on screen. Next: the gate checks and one look at "Not started." on
 an unlocked display (questions 48).
 
 ## Outcome
@@ -513,49 +513,32 @@ demo: not headless; qa or demo runs it.
      passed (21 tests in 5 suites). `documented_commands::` after the
      `docs/surfaces.md` and prototype edits was not run; gate runs it.
 
-6. **Every failure beside content is a `FailureLine`. Next.** Swift only.
-   A failure beside content is one thing to a person and two in the code:
-   13 `FailureLine`s and about a dozen bare `Text(error)`s in the warning,
-   secondary or body ink, most without a word for what failed (questions
-   47, 50). Each of these becomes
-   `FailureLine("<what failed>.", machine: <the message>)`, keeping the
-   button it has and every accessibility identifier:
-
-   | Site | What failed |
-   |------|-------------|
-   | `Views/ProjectReadinessView.swift:36` | "Project not prepared." with its "Retry Project preparation" |
-   | `Views/DashboardView.swift:238` | "Layout not saved." |
-   | `Views/WorkSurfaceView.swift:281` | "Not saved." |
-   | `Views/TaskFilesView.swift:344` | "File not read." |
-   | `Views/WaveDetailPane.swift:262` | "Completed Tasks did not load." |
-   | `Views/RepoView.swift:66` | "Repositories did not load." |
-   | `Views/RepositoryPlanView.swift:39` | "Not sent." |
-   | `Views/WorkPalette.swift:268` | "Planning is unavailable." |
-   | `CreationSubmissions.swift:177` | "Current work did not read." |
-   | `Views/RepositoryWorkspaceView.swift:140` | "Workspace did not open." |
-   | `Views/RenameWaveSheet.swift:55` | "Not renamed." (`rename-wave-error` stays) |
-   | `Views/SessionActionSheet.swift:76` | "Not bound." (`session-bind-error` stays) |
-
-   Read each site before wording it: the phrase names what that read or
-   write was, in the form "Not filed." has, and a site whose text turns out
-   to be advice and not a failure stays as it is, noted in
-   `scratch/questions.md`. Not converted: `TaskHistoryFilter.swift:78` (it
-   checks a typed range; nothing failed), `TaskFilesView.swift:347` and
-   `:356` (a read-only reason and a save message are facts about the file),
-   `WorkNavigator.swift:475` and `WavesView` (Create Wave forms),
-   `MobileSettings` and `TelemetryDashboardView` (exclusions).
-
-   With it, three wordings qa saw (`Views/WorkNavigator.swift:43`, `:44`,
-   `:98`): "No working Tasks in this Wave." and "No working Tasks in this
-   list." take the full stop every other one-sentence empty has, and "Show
-   working tasks" reads "Show working Tasks".
-
-   Shows soonest whether it holds: `ProjectReadinessView`, the one with a
-   Retry, and its view test. Checks:
-   `scripts/test_desktop.sh --filter 'EmptyStateTests|TypographyDisciplineTests|RemoveWaveSheetTests|WorkNavigationTests'`,
-   and `grep -rn 'No working Tasks in this\|Show working tasks' swift/`
-   for tests and captures that quote the old wording. None of these sites
-   was reached on screen at qa; qa or demo looks at whichever it can reach.
+6. **Every failure beside content is a `FailureLine`. Built.** Swift only.
+   The twelve listed sites and one found beside them
+   (`Views/WaveDetailPane.swift:248`, "Tasks did not load.") draw
+   `FailureLine("<what failed>.", machine:)` with the button and
+   accessibility identifier each had. The sidebar's three one-sentence
+   empties end in a full stop ("No Tasks in this Dashboard." with them) and
+   the button reads "Show working Tasks".
+   - `ProjectReadinessView` carried two things in one string. A transport or
+     activation error is the failure ("Project not prepared.", the message,
+     Retry inside the line). "No Project selected yet." and the other
+     readiness sentences say where the Project stands; nothing failed, so
+     they stay as text with Retry under them (questions 53).
+   - Wording that differs from the table, after reading the sites: the Files
+     pane's `store.error` is a failed read or a failed file watch, so it
+     reads "Latest read failed." as Task comments do, and the recovered
+     resource reads "Current work not read." (questions 54).
+   - Still bare, as planned: `TaskHistoryFilter.swift:78`,
+     `TaskFilesView.swift:347`/`:356`, `WorkNavigator.swift:475`,
+     `WavesView.swift:290`, `MobileSettings`, `TelemetryDashboardView`, and
+     the metric reason at `WaveDetailPane.swift:459`.
+   - None of these sites was reached on screen. qa or demo looks at
+     whichever it can reach; a `FailureLine` is one `HStack`, so a long
+     message in the 380 pt bind sheet is the one to look at first.
+   - Checks: `scripts/test_desktop.sh --filter 'EmptyStateTests|TypographyDisciplineTests|RemoveWaveSheetTests|RenameWaveSheetTests|WorkNavigationTests|ProjectActivationTests|emptyListStates'`
+     passed (70 tests in 7 suites) before the `WaveDetailPane.swift:248`
+     edit; `swift build` after it.
 
 Outside this change, on the page for whoever wants it: a stopped Graph's
 reason is one string on the wire, so the Machine's part of "kickoff:

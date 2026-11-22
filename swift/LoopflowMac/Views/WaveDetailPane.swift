@@ -245,7 +245,7 @@ private struct WavePlanView: View {
                 switch workMap.tasks {
                 case .unavailable(let reason):
                     WorkSectionHeading("Tasks")
-                    Text(reason).foregroundStyle(palette.warning)
+                    FailureLine("Tasks did not load.", machine: reason)
                 case .available(let inventory, let truncated):
                     let tasks = closed.merged(after: inventory).filter {
                         historyFilter.includes($0, now: historyNow)
@@ -259,7 +259,7 @@ private struct WavePlanView: View {
                     ForEach(tasks) { task in RoadmapTaskView(task: task, selectedTaskID: $selectedTaskID) }
                     if historyFilter.showCompleted {
                         if let error = closed.error {
-                            Text(error).foregroundStyle(palette.warning)
+                            FailureLine("Completed Tasks did not load.", machine: error)
                         } else if closed.next != nil {
                             Button("Older completed Tasks") { Task { await loadClosed(more: true) } }
                                 .disabled(closed.isLoading)

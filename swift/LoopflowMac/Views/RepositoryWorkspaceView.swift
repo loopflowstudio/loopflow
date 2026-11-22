@@ -137,8 +137,9 @@ struct WorkspaceOpeningFeedback: View {
     var body: some View {
         VStack(alignment: .leading) {
             if let error {
-                Text(error).textSelection(.enabled)
-                Button("OK") { self.error = nil; dismiss() }
+                FailureLine("Workspace did not open.", machine: error) {
+                    Button("OK") { self.error = nil; dismiss() }
+                }
             } else {
                 Text("No pending workspace requests")
                 Button("Close") { dismiss() }

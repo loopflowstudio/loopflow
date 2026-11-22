@@ -37,11 +37,11 @@ struct WorkNavigator: View {
     private var emptyListText: String? {
         switch model.navigation.sidebarScope {
         case .dashboard(let id):
-            return model.dashboard(id) == nil ? "This Dashboard is no longer available." : "No Tasks in this Dashboard"
+            return model.dashboard(id) == nil ? "This Dashboard is no longer available." : "No Tasks in this Dashboard."
         case .repository, .wave:
             if model.taskListReading.value == nil { return nil }
-            if case .wave = model.navigation.sidebarScope { return "No working Tasks in this Wave" }
-            return "No working Tasks in this list"
+            if case .wave = model.navigation.sidebarScope { return "No working Tasks in this Wave." }
+            return "No working Tasks in this list."
         }
     }
 
@@ -95,7 +95,7 @@ struct WorkNavigator: View {
                        !taskIDs.contains(where: { model.isSelected(.task(id: $0)) }) {
                         VStack(alignment: .leading, spacing: 5) {
                             Text("Open Task is outside this list")
-                            Button("Show working tasks") {
+                            Button("Show working Tasks") {
                                 Perf.userAction(Perf.hierarchyInteraction, scenario: "sidebar_working", id: "outline:\(WorkNavigation.SidebarFilter.working.rawValue)",
                                                 repository: model.repoPath, liveSessions: model.liveSessionCount, owner: model.navigation.performanceOwner) {
                                     model.navigation.sidebarFilter = .working

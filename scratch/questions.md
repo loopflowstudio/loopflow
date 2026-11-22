@@ -195,3 +195,17 @@ are these.
 52. A stopped Graph's reason stays one sentence in the body face: Rust sends
     it as one string. Setting the Machine's part in mono needs two fields on
     the wire; outside this change.
+
+Made while building slice 6 with nobody present.
+
+53. `ProjectReadinessView` shows "Project not prepared." only for a
+    transport or activation error. "No Project selected yet.", "Project
+    activation failed." and the other readiness sentences stay warning text
+    with Retry under them: they have no Machine message to set in mono.
+    Should an activation outcome with no error also read as a failure?
+54. The Files pane's error reads "Latest read failed.", not the plan's "File
+    not read.": the same string carries "Live file observation unavailable:
+    …". The recovered resource reads "Current work not read." in place of
+    "Current work did not read."
+55. `Views/WaveDetailPane.swift:248`, the Wave page's unavailable Tasks, was
+    not in the plan's list and became "Tasks did not load." with the rest.

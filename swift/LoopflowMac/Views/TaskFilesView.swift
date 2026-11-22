@@ -341,7 +341,7 @@ struct TaskFilesView: View {
     private var documentPane: some View {
         VStack(spacing: 0) {
             if let error = store.error {
-                Text(error).font(Typography.meta).foregroundStyle(palette.warning).padding(8)
+                FailureLine("Latest read failed.", machine: error).padding(8)
             }
             if let reason = store.selectedDocument?.readOnlyReason {
                 Text(reason).font(Typography.meta).padding(8)

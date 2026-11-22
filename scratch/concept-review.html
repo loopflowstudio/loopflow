@@ -2,98 +2,78 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LOO-515 · concept review</title>
+<title>3d4350 concept review: the Task workspace's concepts</title>
 <style>
-  :root { --bg:#fdfcf9; --fg:#1d1d1b; --muted:#6b6a65; --rule:#e4e1d8; --prop:#2f6fb3; --code:#f3f1ea; --add:#e6f4e6; }
-  @media (prefers-color-scheme: dark) {
-    :root { --bg:#1a1a18; --fg:#ecebe6; --muted:#9a988f; --rule:#34332f; --prop:#7fb2ee; --code:#25241f; --add:#1f2e21; }
-  }
-  body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.6 -apple-system, "Lato", system-ui, sans-serif; }
-  main { max-width:44rem; margin:0 auto; padding:3rem 1.25rem 5rem; }
-  header p { color:var(--muted); margin:.2rem 0; font-size:.9rem; }
-  h1 { font-size:1.6rem; margin:0 0 .5rem; }
-  h2 { font-size:1.15rem; margin:2.6rem 0 .6rem; }
-  code { font:13px/1.5 ui-monospace, Menlo, monospace; background:var(--code); padding:0 .25em; border-radius:3px; }
-  .lede { font-size:1.08rem; border-left:3px solid var(--prop); padding-left:1rem; margin:2rem 0; }
-  .proposed { color:var(--prop); }
-  .row { display:grid; grid-template-columns:1fr 1fr; gap:1rem; }
-  @media (max-width:560px) { .row { grid-template-columns:1fr; } }
-  .panel { border:1px solid var(--rule); border-radius:6px; padding:.8rem 1rem; min-width:0; }
-  .panel.after { border-color:var(--prop); }
-  .panel h3 { margin:0 0 .4rem; font-size:.95rem; }
-  .panel p { margin:.3rem 0; font-size:.93rem; }
-  .pane { font:12px/1.55 ui-monospace, Menlo, monospace; margin:.5rem 0 0; }
-  .pane div { padding:.1rem .4rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .pane .file { background:var(--code); font-weight:600; }
-  .pane .note { color:var(--muted); white-space:normal; font-family:-apple-system, system-ui, sans-serif; }
-  .pane .add { background:var(--add); }
-  .pane u { text-decoration:none; color:var(--prop); }
-  table { border-collapse:collapse; width:100%; font-size:.93rem; }
-  th, td { text-align:left; vertical-align:top; padding:.45rem .6rem .45rem 0; border-bottom:1px solid var(--rule); }
-  th { color:var(--muted); font-weight:600; }
-  ol li { margin:.7rem 0; }
-  .muted { color:var(--muted); }
+:root{color-scheme:light dark;--bg:#fbfaf7;--fg:#1d1c1a;--mut:#6b675f;--line:#d9d5cc;--yes:#2f7d4a;--no:#b0412e;--new:#2a5fb0;--card:#f2efe8;--work:#2a5fb0;--wait:#a6670f}
+@media (prefers-color-scheme:dark){:root{--bg:#171716;--fg:#ecebe7;--mut:#a29e95;--line:#3a3834;--yes:#6cc28b;--no:#ec7b66;--new:#7fa8ec;--card:#22211f;--work:#7fa8ec;--wait:#e0a64a}}
+body{background:var(--bg);color:var(--fg);font:15px/1.55 -apple-system,"Atkinson Hyperlegible Next",system-ui,sans-serif;max-width:60rem;margin:3rem auto;padding:0 1.5rem}
+h1,h2{font-family:"Old Standard TT",Georgia,serif;font-weight:400;letter-spacing:-.02em}
+h1{font-size:2rem;margin-bottom:.3rem}h2{font-size:1.45rem;margin-top:2.6rem}
+code,.mono{font:13px/1.4 "Spline Sans Mono",ui-monospace,monospace}
+table{border-collapse:collapse;width:100%;margin:1rem 0}td,th{border-top:1px solid var(--line);padding:.5rem .6rem;vertical-align:top;text-align:left}th{font-weight:600}
+.yes{color:var(--yes);font-weight:600}.no{color:var(--no);font-weight:600}
+.prop{border-left:3px solid var(--new);padding-left:.8rem}.tag{color:var(--new);font-weight:600}
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:1rem}@media(max-width:700px){.cols{grid-template-columns:1fr}}
+.card{background:var(--card);border-radius:12px;padding:1rem 1.1rem}
+.flow{display:flex;flex-wrap:wrap;gap:.6rem;align-items:baseline;background:var(--card);border-radius:8px;padding:.7rem .9rem;margin:.5rem 0}
+.flow .st{color:var(--fg)}.flow .done{color:var(--mut)}.flow .now{color:var(--work);font-weight:700}.flow .bad{outline:2px dashed var(--no);outline-offset:2px}
+.flow .sent{color:var(--mut);flex-basis:100%}
+.btn{border:1px solid var(--line);border-radius:4px;padding:0 .55rem;font-size:13px;line-height:24px;display:inline-block}
+ol.q li{margin:.5rem 0}
 </style>
 </head>
 <body>
-<main>
-<header>
-  <h1>Ten of the step menu's 54 entries are merges from main.</h1>
-  <p>LOO-515 · concept-review step, tenth pass · 2026-11-21 · through <code>9fdfc72f79</code></p>
-  <p>Built from <code>scratch/loo-515-task-details.md</code>, <code>scratch/questions.md</code>, <code>rust/loopflow-execution/src/ops/task/snapshot.rs</code>, <code>swift/LoopflowMac/ReviewDiff.swift</code> (<code>ReviewStep</code>), <code>swift/LoopflowMac/TaskFileDocument.swift</code>, and <code>git log</code> on this branch</p>
-</header>
+<h1>Do the Task workspace's concepts line up with the code's?</h1>
+<p>Area taken: the Task workspace as the 3d4350 plan would leave it — the type ramp, the five shared components, and above all the workflow bar, because it is the one place the plan changes the wire. Plan only; nothing is built yet. Stacked on LOO-515.</p>
 
-<p class="lede">This pass covers the Diff polish built today: steps, change marks, Viewed, the enclosing declaration, copy without markers, Wrap. One repair goes to implement; <span class="proposed">blue is proposed, not built</span>. No new question blocks it; the five demo questions are unchanged.</p>
-
-<h2>Actions → concepts → APIs</h2>
+<h2>Pairings</h2>
 <table>
-  <tr><th>You do</th><th>Concept</th><th>API</th></tr>
-  <tr><td>Open the step menu</td><td>A Graph step: a run of <code>lf &lt;step&gt;:</code> commits → <span class="proposed">on the first-parent line, merges excluded</span></td><td><code>lf task changes</code> → <code>commits</code> <span class="proposed">with <code>parent</code></span></td></tr>
-  <tr><td>Pick a step</td><td>Its first commit's parent compared with its last</td><td><code>lf task changes/diff --base --head</code></td></tr>
-  <tr><td>Click a scrollbar mark</td><td>A change, placed by row count</td><td>none; drawn from the stream</td></tr>
-  <tr><td>Tick Viewed</td><td>A file folded until its lines change</td><td>none; in memory</td></tr>
+<tr><th>What a person sees</th><th>What the code has (after the plan)</th><th></th><th>Note</th></tr>
+<tr><td>A text size / face ("title", "meta")</td><td><code>Typography</code> steps; serif via <code>.serif(.title)</code></td><td class="yes">yes</td><td>Tightened: <code>display</code>/<code>title</code> become a <code>SerifStep</code> enum so serif without its tracking cannot be written as <code>.font(Typography.title)</code>.</td></tr>
+<tr><td>Shape of a thing (control, row, pane, floating)</td><td><code>CornerRadius.control/row/pane/floating</code></td><td class="yes">yes</td><td>Named for the kind, as DESIGN.md says.</td></tr>
+<tr><td>A Task in the sidebar</td><td><code>TaskRow</code> (from <code>WorkNavigator</code> row + <code>TaskRowMetadata</code>)</td><td class="yes">yes</td><td>The status word is the Session program status (<code>SessionProgramStatus</code>), silent when healthy — matches "quiet until it matters".</td></tr>
+<tr><td>A status ("Blocked, a dialog is open" + Go to dialog)</td><td><code>StatusMark</code>, replacing three renderers</td><td class="yes">yes</td><td></td></tr>
+<tr><td>The workflow's steps</td><td>new <code>TaskGraph.steps</code></td><td class="yes">yes</td><td>Rust owns the labels; Swift stops rebuilding a Graph from interactive steps.</td></tr>
+<tr><td><b>Where the Task is in the workflow</b></td><td>plan: "the top-level label containing <code>position.at</code>"</td><td class="no">no</td><td><b>Biggest mismatch.</b> <code>at</code> is a bare step name. In <code>code</code>, <code>concept-review</code> is a step of both <code>plan</code> and <code>build</code>; the name points at two steps. Only the cursor knows which.</td></tr>
+<tr><td>What the run is doing ("plan is running…")</td><td>new <code>TaskGraph.sentence</code></td><td class="no">partly</td><td>As written, "plan is running." drops the concrete step that <code>lf task status</code> prints today ("Graph code: running at concept-review").</td></tr>
+<tr><td>Things you can do to a Task (Complete, Claim, Abandon, Start from…)</td><td>inline buttons in <code>TaskWorkflowHeader.controls</code> <i>and</i> <code>TaskActionItems</code> (sidebar menu)</td><td class="no">no</td><td>One action list under two owners, and the plan's bar (line + Auto-Ship) never says where the inline ones go.</td></tr>
+<tr><td>Stop points with their description</td><td><code>interactive_steps</code></td><td class="yes">yes</td><td>Kept beside <code>steps</code>: finer grain (a sub-Graph label may hold the stop), written by one Rust function.</td></tr>
 </table>
 
-<h2>The mismatch</h2>
-<p>Jack: "steps do commits, so we can just use the git logs". The read is <code>git log base..head</code>, every commit reachable, so merges count as steps. On this branch:</p>
-<div class="row">
-  <div class="panel">
-    <h3>As built</h3>
-    <div class="pane">
-      <div class="file">Whole Task · 54 steps</div>
-      <div>Merge 5fa2786081…</div>
-      <div>Merge 3fe914c022…</div>
-      <div>…</div>
-      <div>Merge a0548bfe28…</div>
-      <div class="note">picking it: 1,624 files, +128,835 −136,735, all main's</div>
-      <div>implement</div>
-      <div>compress</div>
-    </div>
-  </div>
-  <div class="panel after">
-    <h3 class="proposed">Proposed</h3>
-    <div class="pane">
-      <div class="file">Whole Task · 44 steps</div>
-      <div>Checkpoint edits before syncing…</div>
-      <div>…</div>
-      <div class="add">implement</div>
-      <div class="add">compress</div>
-      <div class="note">no merge is offered; a merge between two runs keeps them two steps</div>
-    </div>
-  </div>
+<h2>The biggest mismatch: where the Task stands</h2>
+<p>This Task, right now: Graph <code>code</code>, running <code>concept-review</code>.</p>
+<div class="cols">
+<div class="card"><b>As planned</b>
+<div class="flow"><span class="mono">code</span><span class="st now bad">plan</span><span class="st">build</span><span class="st">👤 ship-review</span><span class="st">deliver</span><span class="st">👤 verify</span><span class="sent">plan is running. You are next needed at ship-review.</span></div>
+<p>Correct here by luck. When <code>build</code>'s own <code>concept-review</code> runs after <code>qa</code>, the same name finds <code>plan</code> first and lights the wrong step. Swift would be choosing a place from a name.</p></div>
+<div class="card prop"><span class="tag">Proposed</span>
+<div class="flow"><span class="mono">code</span><span class="st done">plan</span><span class="st now">build</span><span class="st">👤 ship-review</span><span class="st">deliver</span><span class="st">👤 verify</span><span class="sent">build is running concept-review. You are next needed at ship-review.</span></div>
+<p><code>read_task_graph</code> already holds the cursor. It writes <code>current_step</code> (index into <code>steps</code>, null at start/end) and the sentence from the same <code>place_of(cursor)</code>. Swift draws; it reads no step names to place the Task.</p></div>
 </div>
-<p>After <code>lf sync &lt;another Task&gt;</code> the other Task's commits would join the list too, and each entry's base is taken from the entry before it, which is then not its parent. <span class="proposed">Walk <code>--first-parent --no-merges</code>; each commit carries its parent; a commit joins the step before only when its parent is that step's head.</span></p>
+<p><b>Normal path:</b> running → strong working colour, earlier steps done. <b>Failure:</b> the carrier dies → <code>running:false</code>, the same index in waiting ink, "Stopped at build. <code>lf task run</code> starts it again." <b>Recovery:</b> the next run starts at <code>at</code>; the index is recomputed from the new cursor. <b>Counterexample tried:</b> a cursor whose place no longer exists in the captured Graph → <code>place_of</code> is None → <code>current_step</code> null and the sentence falls back to <code>at</code> by name, which is today's behaviour.</p>
 
-<h2>Left as built</h2>
-<p>A step also sets what Files' Diff and the tree's badges read, as a <code>.changes</code> tab already does. Change marks count rows, so wrapped lines put them slightly off. Viewed lives in memory.</p>
+<h2>The bar's other actions</h2>
+<div class="cols">
+<div class="card"><b>Today</b><br>
+<span class="mono" style="color:var(--mut)">Working · plan → ship-review · … </span><span class="btn">Run</span> <span class="btn">Start from…</span> <span class="btn">Complete</span> <span class="btn">Claim</span> <span class="btn">Abandon…</span> ▸ Overview (diagram)</div>
+<div class="card prop"><span class="tag">Proposed</span><br>
+line · sentence &nbsp; <span class="btn">Run</span> <span class="btn">Auto-Ship</span> <span class="btn">…</span><br><small>"…" = <code>TaskActionItems</code> + Start from… + Abandon…, the same list as the sidebar row's context menu. The Run button appears only when <code>runAction</code> has one.</small></div>
+</div>
+
+<h2>What changed in the plan</h2>
+<ul>
+<li><code>TaskGraph</code> gains <code>current_step</code>; the running step is never derived from <code>at</code> by name.</li>
+<li>The sentence keeps the concrete step when it differs from the label (chosen for review).</li>
+<li>Workflow bar: line, next-step button, Auto-Ship, one "…" menu shared with the sidebar; the Overview disclosure goes with <code>WorkflowDiagram</code> (chosen for review).</li>
+<li>Steps before the current one draw as done, as in the prototype.</li>
+<li><code>SerifStep</code> enum for the serif steps.</li>
+</ul>
 
 <h2>Questions</h2>
-<ol>
-  <li>Non-<code>lf</code> commits each stand alone, so this branch still offers 44 entries. (a) keep; (b) fold a run of them into one "other commits" step; (c) offer only <code>lf</code> steps.</li>
-  <li>The five demo questions in the plan's Remaining (pane name, Task identity, Focus, the three building choices, the <code>diff_groups</code> warning) are unchanged and unanswered.</li>
+<ol class="q">
+<li>Sentence while a sub-step runs: (a) "build is running concept-review." as chosen; (b) the prototype's "build is running." with the concrete step only in the CLI.</li>
+<li>Bar actions: (a) one "…" menu shared with the sidebar, as chosen; (b) keep Complete and Abandon as visible buttons.</li>
+<li>The Overview disclosure with the Graph diagram: (a) gone, as chosen; (b) kept, drawing <code>GraphCompositionView</code> for the Task's Graph.</li>
 </ol>
-<p class="muted">Path: <code>scratch/concept-review.html</code></p>
-</main>
 </body>
 </html>

@@ -19,8 +19,12 @@ Dark, then one imported Ghostty theme, at the narrowest window:
   `3d4350` and its status word. Counts beside Wave names are sans.
 - The workflow bar reads `code` then `plan build ship-review deliver verify` with a
   person icon before `ship-review` and `verify`, the running step strong in
-  the working colour, and "build is running. You are next needed at
-  ship-review." At the narrowest width only the sentence stays.
+  the working colour, steps before it done, and "build is running
+  implement. You are next needed at ship-review." While `concept-review`
+  runs inside `build`, `build` (not `plan`) is the strong step. At the
+  narrowest width only the sentence stays.
+- The bar's other actions are in its "…" menu, the same list as the
+  sidebar row's context menu.
 - Auto-Ship is a plain 24 pt button.
 - The Session header is one dot and a sans phrase; "New conversation;
   earlier one left behind" sits on its own line above the terminal.
@@ -32,7 +36,8 @@ Dark, then one imported Ghostty theme, at the narrowest window:
 ## Acceptance check at gate
 
 1. `lf task status 3d4350 --json | jq '.graph | {steps, sentence}'` lists
-   every top-level step with its `interactive` flag and the sentence;
+   every top-level step with its `interactive` flag, `current_step` and the
+   sentence;
    `lf task status 3d4350` prints the same sentence.
 2. `swift test --filter 'WorkPaletteTests|TypographyDisciplineTests|WorkflowLineTests'`
    passes: palette contrast in every theme, no literal font size or
@@ -71,7 +76,8 @@ CoreText. QA looks at Claude's TUI for fallback width and baseline.
 Nothing takes a size. `label`, `heroTitle`, `sectionTitle`, `body`,
 `strong`, `caption`, `code` are deleted.
 
-Serif is applied only through `.serif(.display | .title)`, a modifier that
+`display` and `title` are cases of a `SerifStep` enum, not `Font` values,
+so `.font(Typography.title)` does not compile. Serif is applied only through `.serif(.display | .title)`, a modifier that
 sets the font (a `CTFont` with common ligatures off, feature type 1
 selector 3) and tracking of −0.03 × size together, so serif without its
 tracking cannot be written. `lede` is sans 600, per DESIGN.md.
@@ -167,23 +173,47 @@ One each, in `swift/LoopflowMac/Design/` beside `WorkStyle.swift`:
 ### Workflow line: Rust owns words and steps
 
 The wire `TaskGraph` carries interactive steps only, so the app cannot name
-"plan" or "build". Rust adds two required fields to `TaskGraph`
-(`rust/loopflow-execution/src/task_graph.rs`):
+"plan" or "build". Rust adds three required fields to `TaskGraph`
+(`rust/loopflow-execution/src/task_graph.rs`), all computed in
+`read_task_graph` (`store/task_work.rs`), which holds the run's cursor:
 
 - `steps: [{ name, interactive }]`: the Graph's top-level steps in walk
   order, consecutive duplicates collapsed. A concrete step's label is
   `sources[1]` (the sub-Graph it came from) or its own name. Probed on
-  `feature`: explore, plan, build, ship-review, deliver, verify.
-- `sentence: String`: "build is running. You are next needed at
-  ship-review." / "Stopped at build. `lf task run` starts it again." /
-  "Waiting for you at ship-review." / "Not started." / "At its end." With
-  auto on, the clause after the first full stop names auto instead of you.
-  `lf task status` text prints it in place of `summary()`.
+  `feature`: explore, plan, build, ship-review, deliver, verify; on `code`:
+  plan, build, ship-review, deliver, verify.
+- `current_step: Option<u32>`: the index in `steps` of the step the Task
+  stands in, from `place_of(cursor)` for a run and the interactive step's
+  place for `At`; null at `start` and `end`. **Concept review:** this cannot
+  be derived from `position.at` by name. `at` is `step_name_of(cursor)`, a
+  bare step name, and `concept-review` is a step of both `plan` and `build`
+  in `code` (this Task runs it in both), so "the label containing `at`"
+  names two steps. The place is known only where the cursor is.
+- `sentence: String`, written beside the index from the same place:
+  "plan is running concept-review. You are next needed at ship-review." /
+  "build is running. …" when the running concrete step is the label itself /
+  "Stopped at build. `lf task run` starts it again." / "Waiting for you at
+  ship-review." / "Not started." / "At its end." With auto on, the clause
+  after the first full stop names auto instead of you. **Concept review,
+  chosen for review:** the concrete step stays in the sentence. `lf task
+  status` prints the sentence in place of `summary()` ("Graph code: running
+  at concept-review"), and dropping the concrete step would make the CLI say
+  less than it does today; the prototype's "build is running." is the case
+  where the two names are one. Passed over: the concrete step only in a
+  tooltip, which the CLI has no place for.
 
-The running step is the top-level label containing `at`. Swift's
-`WorkflowLine(graph:, auto:)` draws mono name, step words, person icon,
-strong working-colour running step, the sentence; `ViewThatFits` drops to
-the sentence alone. It replaces `TaskWorkflowBar.dots/cells/stages/live/position`,
+`interactive_steps` stays: it is the stop points with their skill and
+description (`waitingStep`, the "Start from…" list), at a finer grain than
+the line's labels, and one Rust function writes both.
+
+Swift's `WorkflowLine(graph:, auto:)` draws mono name, step words, a
+person icon before interactive ones, steps before `current_step` as done
+(the prototype's `done` class: secondary ink), `current_step` strong in the
+working colour while running and in waiting ink when stopped or waiting at
+you, then the sentence; `ViewThatFits` drops to the sentence alone. Swift
+reads no step names to place the Task. While setup has not started the run
+(`task.setupPosition`, Rust's execution reason), that reason stands in for
+the "Not started." sentence, as it does today. It replaces `TaskWorkflowBar.dots/cells/stages/live/position`,
 `WorkflowDiagram` (deleted; `WorkPalette`'s preview uses the line built from
 a definition, no position), `TaskRunPosition`, and `positionLabel` in
 `TaskWorkflowHeader`. `GraphCompositionView`/`GraphDiagram` stay: they draw a
@@ -195,7 +225,19 @@ and each language's fixture test.
 
 As the prototype notes say, keeping what the app can show:
 
-- Workflow bar: line, then Auto-Ship as a neutral button (note 6).
+- Workflow bar: line, then the state's next step as one neutral button
+  (Start when unstarted, Run when stopped: `runAction` today), then
+  Auto-Ship as a neutral button (note 6), then one "…" menu. **Concept
+  review, chosen for review:** the bar today also carries the lifecycle word,
+  "Start from…", Complete/Reopen, Claim/Unassign, Abandon… and an Overview
+  disclosure holding `WorkflowDiagram`; the prototype shows none of them and
+  the plan did not say where they go. The "…" menu is `TaskActionItems`
+  (the sidebar's context menu: Complete, Claim, Copy…) with "Start from…"
+  and Abandon… added to it, so both places list the same actions; the
+  lifecycle word is the row's and the Brief's; the Overview disclosure goes
+  with `WorkflowDiagram`. Accessibility identifiers move onto the menu
+  items. Passed over: keeping the buttons in a horizontal scroll, the
+  clutter note 6 is about.
 - Session pane strip: `StatusMark`, agent name in `textStrong`, no sparkle
   symbol; `SessionRecord`'s "New conversation; earlier one left behind" moves
   from the terminal overlay to a `meta` line above the terminal (notes 7–8).
@@ -233,7 +275,9 @@ Fonts: 6 old files and their notices. `Typography.label/heroTitle/sectionTitle/b
 `CornerRadius.sm/md/lg/xl/full`. `WorkOutlineButtonStyle`, `DarkButtonStyle`,
 `GhostButtonStyle`, `DestructiveButtonStyle`. `WaveLensView` and lens-only
 `WaveLens` code. `WorkflowDiagram.swift`. `TaskWorkflowBar.Stage` and its
-dots/cells, `TaskRunPosition`, `positionLabel`. The sidebar stripe and
+dots/cells, `TaskRunPosition`, `positionLabel`. The bar's
+inline Complete/Claim/Abandon/"Start from…" buttons and its Overview
+disclosure (into the "…" menu). The sidebar stripe and
 mono summary lines. `TaskGraph::summary()` once `sentence` replaces it.
 Tests asserting on removed views (`DesktopHeadlessTests` for the bar dots,
 `TaskRunPosition`, `GraphRunStep` where it changes) move to the new

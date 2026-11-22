@@ -358,3 +358,17 @@ Made at the sixth qa, with nobody present; the page is `scratch/qa.html`.
     A real fault in the stream, or the capture's pinned header?
 89. Seen, left: after Try again the page holds only the request for eight
     seconds or more, with nothing saying it is starting. Should it?
+
+Made at the concept review of the built change, sixth pass, with nobody
+present; the page is `scratch/concept-review.html`.
+
+90. Nothing to change. Slice 9 is as planned and every pairing the Mac
+    draws in this area lines up.
+91. On 88, from the code and not a screen: the Changes pane fixes the
+    current file's header above the stream (`currentFileBar`, from
+    `store.topPath`), from before this change. A capture taken before
+    `topPath` follows a scroll shows README.md's header over long.txt's
+    rows. Slice 9 does not touch the bar. Not reproduced.
+92. `runtime.completionPending` (`TaskWorkView.swift:49`) is a sentence in
+    the failure ink, not a `FailureLine`: Rust sends one string, as it does
+    for a stopped Graph's reason. Left with that one, outside this change.

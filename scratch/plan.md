@@ -15,6 +15,8 @@ file's skipped-lines failure sits under that file's header in both themes,
 folds with the file, and does not show in another file's Files Diff
 (settles questions 81). The sixth run also saw "Not started." with no
 Task selected on an unlocked display (settles questions 48).
+The sixth as-built concept review (`scratch/concept-review.html`) found
+nothing to change (questions 90 to 92).
 **Next:** nothing left to build; the gate checks. Not reached at qa: the
 line going after choosing a step's commits (a store test covers it).
 

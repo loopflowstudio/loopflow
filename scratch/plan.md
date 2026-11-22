@@ -19,47 +19,25 @@ says the Task waits, the screen offers the Run that moves it.
 
 ## What the code is today
 
-- `swift/LoopflowiOS/MobileType.swift` takes any size: 49 calls at 12, 13,
-  14, 15, 16, 17 and 24. Seven more calls use `.system(size:)` or `.caption`
-  (SF Symbols, the diff and file text).
-- 54 lines pass a literal padding, spacing or radius (values 2 to 28, radius
-  2, 12, 16, 20). `Spacing` and `CornerRadius` are unused.
-- Nine `.borderedProminent` buttons with their own tint and frame
-  (`MobileNewTaskView`, `MachineConnectionView`, `SessionView`).
-- `TaskListView.row` is its own row, with a colored stripe down the side
-  (DESIGN.md "A stripe down the side of a rounded row").
-- Ten `ContentUnavailableView`s: icon over a centred title, most with no next
-  step.
-- No workflow shown anywhere; the Task screen has only Start / Auto on / Auto
-  off in the toolbar.
-- New Task asks "What would you like to work on?" in sans 24.
-- The terminal already uses the app's mono with ligatures off
-  (`GhosttySurface.swift:26`), at a literal 12 scaled by Dynamic Type
-  (`SessionTerminal.swift:171`), without the Mac's `adjust-cell-height = 10%`
-  (`GhosttyManager.swift:132`). The diff and whole-file views use the system
-  monospace.
-- The "shared" components (`TaskRow`, `StatusMark`, `WorkflowLine`,
-  `LoopflowButtonStyle`) live in `swift/LoopflowMac/Design/`, which the phone
-  target does not compile, and `TaskRow` takes Mac-only types
-  (`WorkModel.TaskPresentation`, `SessionProgramStatus`, `HoverFlag`).
-- No empty or failed state component exists on any surface; the Mac draws
-  each by hand.
-- `swift/README.md` says the LoopflowiOS scheme opens an offline `--fixture`.
-  No such argument exists in `swift/LoopflowiOS` or `swift/ios.yml`.
-- The status word has two vocabularies. The Mac row says what the Task's
-  program reports (`ProgramStatusState.label`: Blocked, Busy, Available,
-  Done, Error) and otherwise its lifecycle (Idle, Active, Moving). The phone
-  row says `WorkViewPlan.Content.status` (`WorkTone.swift`): Blocked,
-  Running, Ready, Open, Unavailable, "No conversation yet". Its comment says
-  "in Desktop's words"; they are not. The prototypes use the Mac's.
-- One setting has three names: "Auto" on the row and in Rust's sentence,
-  "Auto-Ship" / "Stop Auto-Ship" on the Mac's button and in the prototype,
-  "Auto on" / "Auto off" on the phone's toolbar.
-- What moves a Task is decided twice. The Mac asks the Graph
-  (`TaskWorkflowBar.runAction`: Start, Run, or nothing while a run carries
-  it). The phone asks the list's states and offers Start, Auto on or Auto
-  off; it has no Run, so a Task stopped or waiting at a step cannot be moved
-  from the phone.
+After slices 1 and 2 (f29d6f1f31, 258123e89b). Built: the per-platform ramp,
+`HitTarget.control`, `TaskRow` and `TaskRowStatus`, `LoopflowButtonStyle`,
+`StateView`, all in `swift/Loopflow/Design/`; the phone's list, buttons and
+states draw them; one status vocabulary, held by `TaskStatusTests`. Still to
+change:
+
+- 43 lines in `swift/LoopflowiOS` pass a literal padding, spacing or radius
+  (`MobileNewTaskView` 18, `SessionView` 10, `MachineConnectionView` 5,
+  `TaskWorkspaceView` 5, `MobileRepositoryPicker` 3, one each in
+  `TaskListView` and `MachineCodeScanner`), and 4 in
+  `swift/Loopflow/Services/Notice.swift`. `TypographyDisciplineTests` does
+  not scan for them yet, though `swift/LoopflowiOS/README.md` says it does.
+- `WorkflowLine` and `StatusMark` are still in `swift/LoopflowMac/Design/`;
+  the phone shows no workflow.
+- The Task screen's toolbar still says "Auto on" / "Auto off"
+  (`TaskWorkspaceView.swift:32-43`) and has no Run. What moves a Task is
+  still decided twice: the Mac asks the Graph (`TaskWorkflowBar.runAction`:
+  Start, Run, or nothing while a run carries it); the phone asks the list's
+  states.
 - `WorkflowLine`'s sentence-alone form is one line, truncated, with the full
   sentence in a tooltip. A phone has no tooltip, and the probed sentence (66
   characters) does not fit 375 pt at 17 pt.
@@ -67,6 +45,13 @@ says the Task waits, the screen offers the Run that moves it.
   (`ServerLink.subscribe(_ query: ServedRead, …)`, which
   `RemoteTaskObservation` uses for the list), so one Task can be watched the
   way the Mac watches it (`subscribeTask`, `TaskWorkView.swift:481`).
+- The terminal reads `Typography.terminalSize` but lacks the Mac's
+  `adjust-cell-height = 10%` (`GhosttyManager.swift:132`).
+- The Session state "unavailable" has no "Changes" button of its own.
+- Comments still say "Auto on and Auto off" (`TaskListView.swift:86`,
+  `Loopflow/Services/PendingChanges.swift:107`); they follow the Notice
+  wording once the open question below is answered.
+- Nothing has been looked at in the Simulator.
 
 ## Design
 
@@ -123,7 +108,7 @@ same thing").
 - **TaskRow** takes what it draws: title, identifier and its optional link,
   one status value, auto, context, selected, muted, and a trailing view (the
   Mac's slot hint). The status is one type beside the row,
-  `TaskRow.Status`: the word, its tone (none for a lifecycle word), the
+  `TaskRowStatus`: the word, its tone (none for a lifecycle word), the
   detail a tooltip or VoiceOver reads, and the ask line. The row never takes
   a bare string for the word, so a caller cannot bring its own vocabulary.
   The Mac keeps a small initializer in `LoopflowMac` that builds the row
@@ -135,7 +120,7 @@ same thing").
   no time the status began and no ask, so the phone row shows neither; it
   does not invent them.
 - **One status vocabulary.** `WorkViewPlan.Content.status` returns a
-  `TaskRow.Status` in the Mac's words, taken from the same two sources the
+  `TaskRowStatus` in the Mac's words, taken from the same two sources the
   Mac row uses: `ProgramStatusState.label` for what the conversation reports
   and `TaskState.label` for the lifecycle. From the reading's states:
   `blocked` → "Blocked" (warning), `busy` → "Busy" (running), `available` →
@@ -146,8 +131,8 @@ same thing").
   detail (the phone has no hover for the Mac's info icon). "Running",
   "Ready", "Open" and "No conversation yet" are deleted; a Task with no
   conversation says its lifecycle word, and the list already folds those
-  rows under "N without a conversation". The property moves out of
-  `WorkTone.swift` to sit with `TaskRow.Status`. Passed over: carrying the
+  rows under "N without a conversation". The property sits with
+  `TaskRowStatus` in `TaskRow.swift`. Passed over: carrying the
   word, the time it began and the ask from Rust on the list reading, which
   is the full fix and its own outcome (see Exclusions).
 - **WorkflowLine** sets no line limit on its sentence-alone form. On the

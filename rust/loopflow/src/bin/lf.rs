@@ -3329,7 +3329,7 @@ fn execute_command(
         Some(Commands::Context { json, wave, task }) => {
             loopflow::lf::commands::context::run(*json, wave.as_deref(), task.as_deref())
         }
-        Some(Commands::List { .. } | Commands::Help { .. }) => {
+        Some(Commands::List { .. } | Commands::Help { .. } | Commands::Docs { .. }) => {
             unreachable!("inspection returned before execution")
         }
         Some(Commands::Discord {

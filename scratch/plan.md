@@ -1,0 +1,333 @@
+# Wave pages, backlog, dashboards, theme chooser and the remaining Mac views follow DESIGN.md
+
+Task 8b92c6. Builds on main at 0fa6a4e202 (#2016), which shipped the fonts, the
+ramp, `TaskRow`, `StatusMark`, `WorkflowLine`, `LoopflowButtonStyle` and
+`TitleBar`. This change uses them and adds no component.
+
+Reference: `DESIGN.md` ("The language", "What we avoid") and the live
+prototypes `design/prototypes/desktop.html` ("A Wave's backlog") and
+`desktop-more.html` ("A dashboard of Tasks side by side", "Choose Theme").
+Their numbered notes are the spec for wording and layout on those three
+screens.
+
+## Outcome
+
+Someone opening a Wave, a dashboard, Settings or the Portfolio in Loopflow for
+Mac sees the same type, spacing, button and Task row as the Task workspace.
+Nothing on those screens is an uppercase label, mono prose, a typed glyph, a
+card inside a card or a stripe without a status.
+
+## Done when
+
+- A Wave's backlog shows the Wave's name in serif at the display step, one
+  filter control, an action bar of the one button that begins with what is
+  selected, a checkbox and a disclosure before each title, and ownership as a
+  word.
+- A dashboard tile is headed by the Task row; its workflow is the sentence;
+  "Page 1 of N" is sans.
+- Choose Theme has no "Mode" caption, and its sample shows the roles where
+  they sit in the app.
+- The Portfolio's Wave page and roadmap have no card inside a card and no
+  striped warning card; a contract issue is a bordered notice.
+- New Wave is one form wherever it opens.
+- `swift/LoopflowMac` passes no padding, spacing or corner radius as a number,
+  and the check that says so is a test.
+- DESIGN.md's Desktop pointers this change fixes are gone, and "Tokens today"
+  describes what ships.
+
+## Acceptance check at gate
+
+```
+scripts/test_desktop.sh --filter DesignDisciplineTests
+```
+
+passes, and this prints nothing:
+
+```
+grep -rnE '\.padding\(([^)]*, *)?-?[0-9]|spacing: *[1-9]|[cC]ornerRadius: *[0-9]|(fixedS|s)ize: *[0-9]' swift/LoopflowMac --include='*.swift'
+```
+
+The view suites that inspect the changed screens pass:
+`BacklogViewTests`, `DashboardWorkspaceTests`, `RoadmapViewTests`,
+`CreateWaveSheetTests`, `ThemeWorkflowTests`, `TaskRowTests`,
+`WorkflowLineTests`, `WorkPaletteTests`.
+
+Looked at in Loopflow Dev (`uv run python scripts/loopflow-dev.py run`, after
+checking the Dev app is not in use and the installed `lf` is at the branch's
+store frontier): the backlog, a Portfolio Wave page, a dashboard and Choose
+Theme, in Loopflow Light, Loopflow Dark and one imported Ghostty theme. That
+look needs a display, so it belongs to qa and review, not to build.
+
+## What the code is today
+
+Counts are from `swift/LoopflowMac` at the base commit.
+
+- Font sizes are already on the ramp: `TypographyDisciplineTests` holds it.
+  One literal remains, the AppKit field at `WorkPalette.swift:452`
+  (`NSFont(name:size: 13)`).
+- 177 lines pass a literal padding and 132 pass a literal non-zero `spacing:`.
+  Off-scale values in use: 1, 3, 5, 6, 7, 9, 10, 14, 15, 17, 18, 22, 28, 30,
+  36, 72, 96. Heaviest files: `TaskChangesView` 22, `WorkNavigator` 18,
+  `ReviewStreamView` 18, `TaskFilesView` 17, `NewTaskSheet` 14.
+- One literal radius: the selection edge in `Design/WorkStyle.swift:171`.
+- 29 uses of system button styles (`.borderedProminent`, `.bordered`,
+  `.controlSize`) and 11 of `.secondary` or a system color in place of a role.
+- 69 uses of `Typography.mono`; each needs reading against "could a person
+  paste this into a terminal".
+- `WorkSectionHeading` and `WorkDisclosureHeading` are already sentence case
+  since #2016; only their doc comments still say "caps". The live uppercase is
+  the two hand-made variants: `WaveMetricTableHeader.cell`
+  (`WaveDetailPane.swift:405`) and the kind label in
+  `WorkActivityView.swift:109`.
+- `WaveStandupBoard.swift` no longer exists. The Portfolio window
+  (`WavesView`) mounts `WaveDetailPane` and `RoadmapView`; those are the Wave
+  page and the standup's successor.
+- DESIGN.md's "✓/✗ before key results (`BacklogView.swift`)" pointer is
+  already fixed in code (`Label` with SF Symbols); the pointer is stale. "⚠"
+  remains at `TaskFilesView.swift:368`.
+- Task rows exist four ways: `TaskRow`, `RoadmapTaskRow` and `NowRowView`
+  (`RoadmapView.swift`), `RoadmapTaskView` (`WaveDetailPane.swift`), plus
+  `TaskHeading` (`TaskWorkView.swift:212`) heading a dashboard tile.
+- New Wave exists twice: `CreateWaveSheet` (`WavesView.swift:582`, with a
+  repository picker) and `NewWaveRow`'s popover form
+  (`WorkNavigator.swift:466`, repository implied). Both end in
+  `WaveAddedLeftovers`.
+
+## Design
+
+### The scale becomes a test
+
+`TypographyDisciplineTests` becomes `DesignDisciplineTests` and gains rules
+for a literal padding, a literal non-zero `spacing:` and a literal radius in
+`Loopflow` and `LoopflowMac`, outside `Design/` for radius only. DESIGN.md
+rule 8 names the test. Without it the count drifts back, as it did from 166
+in the audit to 177 now.
+
+Off-scale values snap to the nearest step, and a tie goes down, because the
+app is dense by rule:
+
+| Was | Becomes |
+|-----|---------|
+| 1, 3 | `xxs` 2 |
+| 5, 6 | `xs` 4 |
+| 7, 9, 10 | `sm` 8 |
+| 14 | `md` 12 |
+| 15, 17, 18 | `lg` 16 |
+| 22 | `xl` 20 |
+| 28 | `xxl` 24 |
+| 30, 36 | `xxxl` 32 |
+| −3, −4 | `-Spacing.xs` |
+
+72 and 96 are indents that line a block up with a column above it (the
+backlog brief under its title). They become layout: the brief sits in the
+same column structure as its row, so no number says where the title starts.
+
+No step is added. `frame(width:height:)` numbers are sizes of things (column
+widths, icon boxes), not spacing; they stay, except hit targets, which use
+`HitTarget`. Choice made for review: frames are left out of the test.
+
+### Backlog (`BacklogView.swift`), per the prototype's notes 3 to 9
+
+- **Name.** `wave-title` is `.serif(.display)` in `emphasisInk`, for a Wave
+  and for the repository board. `WaveViewHeader` (backlog hidden) uses the
+  same step. It is the one serif thing on the screen.
+- **Filter.** `BacklogFilterPicker` stays one control: three segments at
+  radius `control`, the chosen one in the theme's selection fill with
+  `textStrong`, counts in tabular digits. The accent capsule goes; accent is
+  for the action. The prototype's "Unstarted" menu was a guess at a control
+  the app no longer has, so nothing is added for it.
+- **Action bar.** Begins with "N selected" ("Nothing selected" at zero), then
+  Start, Claim, Edit, Move, Abandon…, all `LoopflowButtonStyle`; Start is the
+  surface's one `.accent`. "8 of 46" and the two arrows close the bar.
+  `BacklogQuietButtonStyle` and the capsule in `BacklogStartButton` are
+  deleted; the split Start keeps its menu as a second button of the same
+  style. `startLabel` reads "Start with feature", not "Start · feature". The
+  folding order under `ViewThatFits` stays.
+- **Row.** Checkbox, then a chevron that shows or hides the brief, then the
+  ID in mono, the title, the standing, ownership, and the "more" menu last.
+  The chevron reflects `list.opened`; it adds no state.
+- **Ownership.** `BacklogOwnerMark` is deleted. A claimed row says "claimed
+  by you" or "claimed by Ana" in `meta`, after the Wave's name when the row
+  shows one ("Growth, claimed by Ana"). An unclaimed row says nothing; the
+  Available count already does. `BacklogOwner.mark` in the plain-text listing
+  follows the same words.
+- **Brief.** `text` at 13 with `lineSpacing(Spacing.xs)`, held to its
+  readable width, aligned under the title by layout.
+- **Sentences.** "Project unavailable · reason", the notice and the footer
+  join with a full stop or a comma, not a middle dot. A Task ID is the only
+  mono in them.
+
+### Portfolio: Wave page and roadmap (`WaveDetailPane.swift`, `RoadmapView.swift`)
+
+- The Wave's name on its page is `.serif(.display)`. On the roadmap, where
+  several Waves share a screen, names are `lede`.
+- A Wave on the roadmap is a section divided from the next by a hairline, not
+  a bordered card holding filled rows. `RoadmapWaveCard` loses its border and
+  fill.
+- `RoadmapTaskRow`, `NowRowView` and `RoadmapTaskView` are deleted for
+  `TaskRow`, fed from the window's `WorkModel` the way
+  `WorkNavigator.taskRow` feeds it. `WorkChannelChips` goes with them: the
+  Task row's status word carries what three capsules did. `TaskActionCluster`
+  keeps its verbs as `LoopflowButtonStyle` buttons beside the row.
+- `WaveWorkInspector` loses its fill: it is text under a heading, with "Open
+  Task workspace" as the one button.
+- The metric table header is sentence case in `meta`, untracked. The table
+  keeps `workPanel()` as the one framed surface on the page.
+- Contract issues: the tinted, striped block becomes a notice with a hairline
+  border at radius `row`, the count as its title in the warning role with an
+  SF Symbol, each issue's summary in `text`. `MetricContractIssue` carries a
+  summary and no recovery, so the next step offered is "Copy" for the
+  summaries. Choice made for review; a real next step needs the wire to carry
+  one.
+- "Project history" in `WaveDetailPane` joins the header as a
+  `LoopflowButtonStyle` button.
+- `WorkSectionHeading` and `WorkDisclosureHeading` stay, with their comments
+  corrected. Choice made for review: the brief says they go, but since #2016
+  they are sentence-case headings, and DESIGN.md names a section "by a heading
+  in sentence case". Passed over: deleting both and inlining the same five
+  lines at nine call sites.
+
+### Dashboard (`DashboardView.swift`, `DashboardSlotGrid.swift`)
+
+- The header is the dashboard's name at `.serif(.title)` ("Working Tasks" on
+  that board), the query field in mono beside it, then "Edit Slots" or
+  "Default Slots" and "Edit Dashboard" as the one button.
+- A tile's header is `TaskRow` (title in full, ID, status word, the ask),
+  with "open in full", "more" and "hide" as icon buttons at its end.
+  `TaskHeading` is deleted; `TitleBar` reads the lifecycle label directly.
+- Under the row, the workflow is its sentence: `WorkflowLine` gains a
+  sentence-only setting the tile uses, since a tile's width is known to be
+  too narrow for the steps. A row with an ask shows the ask instead.
+- The pager is `Typography.text` with tabular digits and icon buttons.
+- `DashboardEditor`'s title is `.serif(.title)`; its example is `meta` in a
+  palette role, its buttons the one button with Save as accent.
+
+### Choose Theme (`ThemeChooser.swift`, `ThemeEditor.swift`)
+
+- "Choose Theme" at `.serif(.title)`. The "Mode" caption is deleted; the
+  segmented control says what it is.
+- The row of five colored words becomes a sample in the previewed theme: a
+  title bar strip with the repository's name, a selected Work row reading
+  "Blocked since 12:07", Working, Available, Blocked, Failed and Passed as
+  status words on the sidebar surface, and one terminal line,
+  `$ lf task status LOO-515`, in the theme's terminal colors.
+- Apply is the surface's accent button.
+- Choice made for review: the tile grid and the two per-side pickers stay.
+  The prototype draws a plain list of names and one mode, but a tile shows a
+  theme's own terminal colors before a click, and System mode assigns a light
+  and a dark theme separately. Passed over: the prototype's name list.
+
+### One New Wave form
+
+`CreateWaveSheet`'s form becomes the only one. It shows the repository picker
+when it is given more than one repository. `WavesView` presents it as a sheet
+with the Portfolio's repositories; `NewWaveRow` presents it in its popover
+with the window's one. `NewWaveRow`'s own fields, error line and Create
+button are deleted. Field captions that repeat the placeholder ("Wave name"
+over "Wave name") go; Cancel is the one button, neutral.
+
+### Everything else in `swift/LoopflowMac`
+
+Settings (`ConfigurationSettingsView`, `MobileSettings`,
+`KeyboardShortcutsView`), `SessionsView`, `WorkActivityView`,
+`TaskHistoryView`, `TaskCommentsView`, `TrackerSyncView`,
+`ProjectHistoryView`, `OpenSourceLicenses`, the sheets
+(`RenameWaveSheet`, `RemoveWaveSheet`, `SessionActionSheet`),
+`TelemetryDashboardView`, `GraphDiagramView`, `WorkPalette`, and the Task
+workspace files that still hold literals (`TaskChangesView`,
+`ReviewStreamView`, `TaskFilesView`, `TaskWorkView`, `NewTaskSheet`,
+`WorkNavigator`, `WorkspacePanesView`):
+
+- Named steps for every padding, spacing and radius, by the table above.
+- System button styles become `LoopflowButtonStyle`; `.secondary` and system
+  colors become palette roles.
+- Mono only where the text could be pasted into a terminal. Known prose in
+  mono: "Page 1 of N", "builtin Graph" (`WorkPalette.swift:380`), the
+  activity time (`WorkActivityView.swift:116`, `meta` with tabular digits).
+  The other 66 uses are read one by one.
+- Typed glyphs become SF Symbols or words: "⚠" before a changed previous
+  version, the "•" unsaved-draft mark in `TaskFilesView` (three places).
+- `WorkActivityView`'s `KIND · subject` loses `uppercased()` and its
+  tracking: "Wave, Product".
+- `WorkChip`'s `tracking(0.2)` and off-scale padding go.
+
+### DESIGN.md
+
+Removed under "We do these now": the Desktop pointers for uppercase labels,
+mono as decoration, values outside the scale, the two Create Wave forms, and
+glyphs as icons. "Tokens today" gains the discipline test's new name and
+scope, and the components list stays as it is.
+
+Kept, with its reason already written there: `WorkflowSteps`
+(`NewTaskSheet.swift`) beside `WorkflowLine`. A Graph definition has no
+top-level steps on the wire, so one renderer needs a Rust and DTO change.
+Choice made for review: that is its own Task, so one Desktop pointer
+survives this change. See `scratch/questions.md`.
+
+`design/prototypes/` stays: `desktop.html` and `desktop-more.html` also hold
+New Task and the empty and failed states, which have not shipped.
+
+## Absent and error states
+
+- Backlog empty: unchanged words and step, the title in `textStrong`, the
+  step as the accent button.
+- A tile whose Task has no Graph yet shows the row alone; a tile with no Task
+  ("Work unavailable") keeps its placeholder.
+- A theme missing a role fails to decode before the sample draws, as today.
+- New Wave with one repository shows no picker; with none, Create is off.
+
+## Exclusions
+
+- The shared empty or failed state. DESIGN.md describes one component and
+  none exists; the 14 `ContentUnavailableView` sites and `PaneEmptyState`
+  stay until a Task builds it. This change adds no component.
+- New Task's `WorkflowSteps`, as above.
+- Middle dots in strings built outside views (`PullRequestStore`,
+  `SessionProgramStatus`, `ReviewDiff`): one voice per event means changing
+  them with their tests and their CLI twins, not in a styling pass.
+- iPhone and the website.
+- No Rust, wire or DTO change.
+
+## What goes
+
+`BacklogOwnerMark`, `BacklogQuietButtonStyle`, the capsule Start control,
+`RoadmapTaskRow`, `NowRowView`, `RoadmapTaskView`, `WorkChannelChips`,
+`TaskHeading`, `NewWaveRow`'s inline form, the striped contract-issue block,
+`WaveMetricTableHeader`'s uppercase cell, `TypographyDisciplineTests` under
+that name. Tests that name these (`BacklogViewTests`, `RoadmapViewTests`,
+`DashboardWorkspaceTests`, `CreateWaveSheetTests`, `ThemeWorkflowTests`)
+move to the surviving view and identifier.
+
+What survives: every backlog action and shortcut, drag reorder, the folding
+toolbar, undo registration, tile drag and drop and hide, dashboard slot
+editing, theme import, customize, delete and the per-side assignment, the
+New Wave leftovers receipt, and every accessibility identifier that a test
+or `lf desktop` reads unless its view is deleted.
+
+## Slices
+
+1. **The test and the backlog.** Rename the discipline test, add the padding,
+   spacing and radius rules, and bring `BacklogView.swift` and
+   `Design/WorkStyle.swift` to pass them while rebuilding the backlog to the
+   prototype. It shows whether the snap table holds on a dense, real screen
+   (the 9 pt row padding, the 96 pt brief indent, the 5 pt search field) and
+   whether one button style carries a five-action bar that still folds. If
+   rows read cramped at 8, the table is wrong and changes here, before 300
+   more lines use it. The test fails on the other files until slice 4; that
+   is the remaining-work list.
+2. **Dashboard.** Tile header as `TaskRow`, the sentence, the pager, the
+   header. `TaskHeading` goes.
+3. **Portfolio and New Wave.** `TaskRow` in the roadmap and Wave page, cards
+   flattened, the contract-issue notice, the one form.
+4. **Choose Theme, then the sweep.** The sample, then every remaining file
+   to named steps, one button, roles, mono and glyphs, until the test and the
+   grep are clean. DESIGN.md's pointers and "Tokens today" change last, from
+   what the code then is.
+
+## Checks
+
+| Command | Result | Who runs it |
+|---------|--------|-------------|
+| `scripts/test_desktop.sh --filter DesignDisciplineTests` | not run; the suite does not exist yet | build |
+| the grep above | 314 lines at base | build |
+| Dev app in light, dark and an imported theme | not run; needs a display | qa, review |

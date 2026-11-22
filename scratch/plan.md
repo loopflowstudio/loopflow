@@ -59,7 +59,7 @@ All five steps are built. What each one settled:
 4. **Words and prototype.** `desktop-themes.js` restates the catalogue again and carries `titlebar`; `.titlebar` and the Choose Theme sample bar paint `var(--titlebar)`. The `swift/README.md` example had comments after values, which `ThemeFile` rejects; they are on their own lines now.
 5. **Page rebuilt.** The 24 sections read the files as they are; "Before" under the two defaults is the base commit.
 
-Nothing remains to build. Left for ship-review: the editor's Title bar row and the bar in a key window (needs an unlocked display).
+Nothing remains to build. Post-build concept review (`scratch/concept-review.html`): the model holds, nothing to change. Optional for compress: "white or black on this color" is spelled three times (`PaletteDefinition.titlebarText`, `LoopflowPalette.titlebarColorScheme`, inside `GhosttyThemeMapping.titlebar`); one `ThemeRGB` property would serve all three. Left for ship-review: the editor's Title bar row and the bar in a key window (needs an unlocked display).
 
 ## Docs
 

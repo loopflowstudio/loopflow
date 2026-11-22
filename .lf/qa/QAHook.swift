@@ -44,6 +44,18 @@ enum QAHook {
                 } catch { lines.append("\(index) \(window.title) failed \(error)") }
             }
             return lines.joined(separator: "\n")
+        case "frame":
+            // The whole frame view, title bar and toolbar included, which `snap` leaves out.
+            var lines: [String] = []
+            for (index, window) in windows.enumerated() {
+                guard let frame = window.contentView?.superview,
+                      let rep = frame.bitmapImageRepForCachingDisplay(in: frame.bounds) else { continue }
+                frame.cacheDisplay(in: frame.bounds, to: rep)
+                let file = "\(arg)-\(index).png"
+                try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: file))
+                lines.append("\(index) \(window.title) \(file)")
+            }
+            return lines.joined(separator: "\n")
         case "tree":
             var lines: [String] = []
             for (index, window) in windows.enumerated() {

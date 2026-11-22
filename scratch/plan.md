@@ -59,7 +59,7 @@ All five steps are built. What each one settled:
 4. **Words and prototype.** `desktop-themes.js` restates the catalogue again and carries `titlebar`; `.titlebar` and the Choose Theme sample bar paint `var(--titlebar)`. The `swift/README.md` example had comments after values, which `ThemeFile` rejects; they are on their own lines now.
 5. **Page rebuilt.** The 24 sections read the files as they are; "Before" under the two defaults is the base commit.
 
-Nothing remains to build. Left for ship-review: the Dev app looked at in both defaults (needs a display).
+Nothing remains to build. Left for ship-review: the editor's Title bar row and the bar in a key window (needs an unlocked display).
 
 ## Docs
 
@@ -88,7 +88,7 @@ A personal theme file without `loopflow-titlebar` gets its bar from its own acce
 - `swift test --package-path swift --filter 'WorkPaletteTests|TerminalColorTests|ThemeTests'` (needs `cargo build -p loopflow --bin lf` first): 27 tests in 3 suites passed, 2026-11-22. Gate reruns.
 - `python3 -I scratch/theme-audit/audit.py`: no fail in Loopflow Light or Loopflow Dark, no title bar finding in any theme.
 - `cargo test -p loopflow --test integration documented_commands::` (README edits): not run; gate.
-- Dev app in both defaults, looked at: not run; needs a display, ship-review.
+- Dev app in both defaults and two files without `loopflow-titlebar`, looked at on a private Machine with the screen locked: passed, 2026-11-22 (`scratch/qa.html`). Packaging failed first on a stale `ThirdPartyNotices/inventory.json`; refreshed. Open for ship-review: the editor's Title bar row and a key window's bar on an unlocked display.
 
 ## Left outside this change (for ship-review)
 

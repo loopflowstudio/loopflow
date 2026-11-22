@@ -212,8 +212,21 @@ them. Nothing here needs WindowServer focus.
   in `trackMouse` and the app hangs. Don't `activate` or `makeKey` in the
   hook: every later click goes dead. The first click after a launch is often
   swallowed; send it twice and look.
+- `frame <prefix>` writes each window's frame view, title bar and toolbar
+  included; `snap` and a locked-screen `screencapture -l` ("could not create
+  image from window") both miss the title bar. The hook's windows are never
+  key, so the bar draws lighter than its stated color (`#722f37` reads back
+  `#7e4448`); compare bars against each other, not against the file.
 - `menu Settings…` performs a main-menu item, which is how Choose Theme
-  opens. `close <window>` closes one.
+  opens. `close <window>` closes one. Customize answers `click` a few
+  seconds after the first; the editor's disclosure groups never open, and
+  after the editor opens Apply answers no click either.
+- Imported themes: most Ghostty files (GitHub Light Default, Catppuccin
+  Latte) are refused for cursor or selection text. A catalogue file from
+  `git show main:…` loads and stands in for a theme saved before a change.
+- Packaging refuses ("Third-party inputs changed") after any edit to a
+  catalogue theme or its README until `uv run python scripts/third_party.py
+  refresh` rewrites `ThirdPartyNotices/inventory.json`; commit that.
 - Theme: `lf set --global theme "<name>"` on the private Machine, then
   relaunch. An imported theme is a file in `$LF_HOME/themes/`; Ghostty.app's
   `Contents/Resources/ghostty/themes/` has many.
@@ -243,7 +256,7 @@ them. Nothing here needs WindowServer focus.
   `loopflow://<repo>`. Never send a finished Task's link to a relaunched app.
 - A theme set from the CLI reaches the running app, but relaunch before
   judging Choose Theme: its tiles were blank once after a live change.
-- Not reachable: the title bar, hover, drag, the jump menu (its shortcut needs
+- Not reachable: hover, drag, the jump menu (its shortcut needs
   a key window, and setting `navigation.palette = .search` draws nothing),
   popovers and sheets opened from a "+" (New Wave never appeared), file panels
   and Ghostty faces. The in-process accessibility tree is empty, so there is no

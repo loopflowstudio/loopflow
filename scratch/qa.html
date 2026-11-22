@@ -1,0 +1,69 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>QA: bundled themes and the title bar role</title>
+<style>
+body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:980px;margin:2rem auto;padding:0 1rem;color:#222}
+h1{font-size:1.6rem}h2{font-size:1.15rem;margin-top:2.2rem}
+img{width:100%;border:1px solid #ccc;border-radius:6px}
+code{background:#f3f1ee;padding:0 .25em;border-radius:3px}
+table{border-collapse:collapse}td,th{border:1px solid #ddd;padding:.3rem .6rem;text-align:left}
+.ok{color:#256b2a}.bad{color:#9a2a2a}
+</style>
+<h1>QA: the two defaults and the title bar role</h1>
+<p>Branch Dev app as an isolated bundle (<code>com.loopflow.mac.qath.dev</code>) on a private Machine (<code>/tmp/lf-qa-th</code>, branch <code>lf server run</code>, a git-planned repository with two Tasks), production mode, driven by <code>.lf/qa/QAHook.swift</code>. The screen was locked, so captures are the app's own frame views. Run 2026-11-22.</p>
+
+<h2>1. Packaging the app — broken, fixed</h2>
+<p>The first build stopped at <code>third_party.py package</code>: "Third-party inputs changed". The inventory hashes every catalogue theme file and the Themes README; all 25 had changed. No CI check runs this, so it would have surfaced first in a Dev build or a release. <span class="ok">Fixed</span>: refreshed <code>swift/LoopflowMac/ThirdPartyNotices/inventory.json</code> (commit "Refresh the third-party inventory for the changed theme files").</p>
+
+<h2>2. Fresh settings, system in light mode: Loopflow Light</h2>
+<p>Burgundy bar, white breadcrumb, burgundy headings on the warm ground.</p>
+<img src="qa/light-frame-0.png" alt="Loopflow Light window">
+
+<h2>3. Loopflow Dark, switched live with <code>lf set --global theme "Loopflow Dark"</code></h2>
+<p>The running window repainted without a relaunch: the same burgundy bar over the blue-grey window, rose headings. Bar pixels read back identical in both defaults (<code>#7e4448</code> each; the hook's window is never key, which lightens the toolbar from the stated <code>#722f37</code>).</p>
+<img src="qa/dark-live-0.png" alt="Loopflow Dark window">
+
+<h2>4. Choose Theme</h2>
+<p>Settings → Appearance. The sample's bar paints the role (burgundy for Loopflow Dark). Customize opened the editor and its groups; "Actions and focus" did not expand under synthesized clicks, so the <b>Title bar</b> row and a saved file were not seen.</p>
+<img src="qa/settings-1.png" alt="Choose Theme">
+
+<h2>5. A theme saved before this change, dark: main's Loopflow Dark as <code>Old Dark</code></h2>
+<p>No <code>loopflow-titlebar</code>, accent <code>#722f37</code>, ground <code>#2b3036</code>. The bar comes from that file's accent: the muted plum-grey it painted before (rule gives <code>#443036</code>), not ANSI 4 and not the new burgundy.</p>
+<img src="qa/olddark-0.png" alt="Old Dark">
+
+<h2>6. A light theme without the role whose bar failed: main's Catppuccin Latte as <code>Old Latte</code></h2>
+<p>Accent <code>#7d705c</code>. The rule darkens it to <code>#635849</code> so the second text level reads; the bar is visibly darker than main painted it, white breadcrumb.</p>
+<img src="qa/oldlatte-0.png" alt="Old Latte">
+
+<h2>7. Imported Ghostty themes</h2>
+<p>GitHub Light Default and Catppuccin Latte straight from Ghostty.app are refused for terminal cursor and selection text, and the app falls back to Loopflow Light with the notice. This is the existing import check, not this change; the title bar adds no refusal of its own here.</p>
+<img src="qa/lattes-0.png" alt="Import refusal">
+
+<h2>What works now</h2>
+<ul>
+<li>Both defaults load and share one burgundy bar; Dark is blue-grey with rose headings.</li>
+<li>Live theme switch from the CLI reaches the running app.</li>
+<li>Choose Theme's sample paints the role.</li>
+<li>Files without <code>loopflow-titlebar</code> get the bar from their own accent, darkened where the second text level would fail.</li>
+<li>The app packages again.</li>
+</ul>
+
+<h2>Not reached</h2>
+<ul>
+<li>System dark mode with fresh settings: the Mac is in light mode and is someone's live machine; Dark was checked by setting it.</li>
+<li>The editor's <b>Title bar</b> row and the file Apply writes: disclosure groups and Apply did not answer synthesized clicks after the editor opened.</li>
+<li>The bar as a key window draws it: needs an unlocked display.</li>
+</ul>
+
+<h2>Still wrong, worst first</h2>
+<ol>
+<li>Nothing checks the third-party inventory in CI, so the next theme edit can break packaging the same way.</li>
+<li>Most Ghostty imports are refused outright over terminal cursor/selection contrast (pre-existing).</li>
+</ol>
+
+<h2>Checks</h2>
+<table>
+<tr><th>Command</th><th>Result</th><th>Who runs it</th></tr>
+<tr><td>Branch Dev bundle, both defaults and two role-less files, looked at</td><td>passed, locked screen</td><td>this step</td></tr>
+<tr><td><code>swift test … 'WorkPaletteTests|TerminalColorTests|ThemeTests'</code></td><td>not rerun here</td><td>gate</td></tr>
+</table>

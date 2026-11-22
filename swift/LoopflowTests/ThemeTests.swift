@@ -381,6 +381,27 @@ struct ThemeTests {
         #expect(manager.theme.name == "Loopflow Dark")
     }
 
+    @Test(arguments: [nil, false, true] as [Bool?])
+    func terminalStrokeWeightFollowsGhosttyConfig(personalSetting: Bool?) throws {
+        try #require(GhosttyManager.libraryReady)
+        let baseline = try #require(ghostty_config_new())
+        defer { ghostty_config_free(baseline) }
+        try GhosttyThemeConfiguration.load(GhosttyManager.loopflowConfig, into: baseline)
+        if let personalSetting {
+            try GhosttyThemeConfiguration.load("font-thicken = \(personalSetting)\n", into: baseline)
+        }
+        try GhosttyThemeConfiguration.load(GhosttyManager.embeddedConfig + "\ntheme =\n", into: baseline)
+        ghostty_config_finalize(baseline)
+
+        for theme in [ThemeDefinition.light, .dark, .light] {
+            let candidate = try GhosttyThemeConfiguration.candidate(theme, baseline: baseline)
+            defer { ghostty_config_free(candidate) }
+            var thickened = false
+            try #require(ghostty_config_get(candidate, &thickened, "font-thicken", 12))
+            #expect(thickened == (personalSetting ?? false))
+        }
+    }
+
     @Test func compiledOverlayOverridesPersonalColors() throws {
         try #require(GhosttyManager.libraryReady)
         let baseline = try #require(ghostty_config_new())

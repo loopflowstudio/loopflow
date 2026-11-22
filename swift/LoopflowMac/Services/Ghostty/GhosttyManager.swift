@@ -132,7 +132,6 @@ final class GhosttyManager: ObservableObject {
     adjust-cell-height = 10%
     font-feature = -calt
     font-feature = -liga
-    font-thicken = true
     minimum-contrast = 3
 
     """

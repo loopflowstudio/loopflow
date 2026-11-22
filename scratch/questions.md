@@ -188,3 +188,22 @@ Checks (qa):
 - Not reached: landscape and iPad (AXe rotates only the Duo and physical
   devices), the QR scanner (no camera), a lost network mid-Session (the
   carrier is the person's one endpoint), a physical phone.
+
+Made in concept review after the build with nobody present; each is
+reversible. The page is `scratch/concept-review.html`.
+
+- **The phone's Task screen opens a conversation that begins while it is
+  showing**, by reading the Task's row when the Task reading lists a Session.
+  Passed over: leaving it to "go back and tap again", and adding the primary
+  Session to the Task reading on the wire (not needed: `task:<id>` already
+  answers it).
+- **Both surfaces offer Task actions by one rule, the Mac's** (`TaskActions`).
+  The phone now offers Auto-Ship on every Task not completed and Start on any
+  Task with no Graph, and shows Rust's refusal under a disabled action.
+  Passed over: the phone's narrower rule from the list's states.
+- **Both Notices say "Auto-Ship requested" and "Stop Auto-Ship requested".**
+  This changes words on the Mac. Passed over: the phone saying "Auto on
+  requested" for a button named Auto-Ship. This closes the open wording
+  question above.
+- Still open, a product choice: the filter "Working now" lists rows that
+  read "Busy", and "Ready for you" lists rows that read "Available".

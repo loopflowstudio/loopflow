@@ -20,8 +20,9 @@ says the Task waits, the screen offers the Run that moves it.
 
 ## What the code is today
 
-After slices 1 to 4, everything in this plan is built. On top of slices 1
-to 3: no line in `swift/LoopflowiOS` or `Loopflow/Services/Notice.swift`
+Slices 1 to 4 are built; slice 5 (one live Task on the phone's Task screen,
+one set of Task actions for both surfaces, one name in the Notice) is not.
+On top of slices 1 to 3: no line in `swift/LoopflowiOS` or `Loopflow/Services/Notice.swift`
 passes a literal padding, spacing or radius, and `TypographyDisciplineTests`
 fails on one in `LoopflowiOS` (`spacing: 0` passes); the phone terminal has
 `adjust-cell-height = 10%`; the New Task field is typed in `lede`; the
@@ -36,9 +37,17 @@ iPhone SE Simulator in light and dark (`scratch/look/`). Still to do:
   Changes, short diffs centred in their sheet, the 34 pt address field, the
   picker's header under its empty state, the list rows 4 pt off their headers.
 - Not looked at: landscape and iPad, the QR scanner, a physical phone (demo).
-- Open choice, not blocking: the Mac's Notice
-  (`LoopflowMac/WorkModel.swift:2698`) says "Auto on requested" while the
-  phone's says "Auto-Ship requested" (`scratch/questions.md`).
+- The phone's Task screen holds its Task twice: `MobileTask`, copied at the
+  tap (with the conversation it had then), and `Reading`, which follows the
+  Machine. A Task started from its screen keeps showing "No changes yet"
+  while the sentence says a step is running; the conversation opens only
+  after going back to the list (qa's worst open item).
+- Which actions a Task offers is decided twice from the same reading:
+  `TaskWorkspaceView.actions` on the phone, `TaskWorkflowBar.next` and
+  `TaskAutoControl` on the Mac, with different rules (see slice 5).
+- The Mac's Notice (`LoopflowMac/WorkModel.swift:2698`) says "Auto on
+  requested" for the button named Auto-Ship; the phone's says "Auto-Ship
+  requested".
 
 ## Design
 
@@ -129,11 +138,26 @@ same thing").
   `TaskWorkflowBar` is 34 pt high and applies `.lineLimit(1)` and its
   `.help` from outside, so the Mac looks as it does today. Landscape and
   iPad get the full line.
-- **The step that moves a Task** is one function of the Graph.
-  `TaskWorkflowBar.runAction` becomes `TaskGraph.runAction(issue:)` in the
-  shared library beside `WorkflowLine` (label "Start" or "Run", the
-  `lf task run` help line, nil while a run carries the Task or at `end`).
-  The Mac's bar and the phone's Task screen both call it.
+- **What a Task offers** is one value, `TaskActions`, in the shared library
+  beside `WorkflowLine`, built from what the Task's reading carries (its
+  Graph, its `RoadmapTask` row and its `TaskExecution`):
+  - `run`: `TaskGraph.runAction(issue:)` when there is a Graph (label
+    "Start" or "Run", the `lf task run` help line, nil while a run carries
+    the Task or at `end`); "Start" when a reading arrived with no Graph;
+  - `auto`: on (offer "Stop Auto-Ship"), off (offer "Auto-Ship"), or not
+    offered (a completed Task with auto off). On is
+    `execution.auto.state == .on`, else the row's `auto` state;
+  - `runRefusal`: Rust's `row.runControl.unavailable`. It disables `run` and
+    "Auto-Ship" and is shown as the reason; it never disables "Stop
+    Auto-Ship".
+  The Mac's bar and the phone's menu both draw this value and decide nothing
+  themselves. The Mac draws exactly what it draws today (the rule is its
+  rule, moved). The phone changes to match: Start is offered after any
+  reading with no Graph, Auto-Ship on every Task that is not completed, and
+  an action Rust refuses is disabled with the reason as its second line in
+  the menu instead of failing after the tap. `WorkflowLine`'s `auto:` on
+  both is `TaskActions`' on. Passed over: keeping the phone's rule from
+  `states` (two owners for one action, and a refusal only after the tap).
 - **LoopflowButtonStyle** takes its height from the platform's control
   height. On the phone the `.accent` button fills the width it is offered.
   Hover and the focus ring stay Mac behavior.
@@ -164,13 +188,29 @@ same thing").
   the Notice to say why; it never blocks the terminal, and the subscription
   resumes with the link.
   The toolbar's one Task item is a menu, "Task actions", as on the Mac. It
-  lists the step that moves the Task when there is one ("Start" or "Run",
-  from `TaskGraph.runAction`; a Task with no Graph whose row is `unstarted`
-  offers "Start") and "Auto-Ship" or "Stop Auto-Ship" (the row's `auto`
-  state, as today). Each sends the write it sends today (`taskRun`,
-  `taskAutoOn`, `taskAutoOff`) and the Notice names it the same way
-  ("LOO-5 Auto-Ship requested"). "Auto on" and "Auto off" are deleted from
-  the phone. `WorkflowLine`'s `auto:` is the row's `auto` state.
+  lists what `TaskActions` offers: the step that moves the Task ("Start" or
+  "Run") and "Auto-Ship" or "Stop Auto-Ship". Each sends the write it sends
+  today (`taskRun`, `taskAutoOn`, `taskAutoOff`) and the Notice names it by
+  the button's words on both surfaces: "LOO-5 Auto-Ship requested", "LOO-5
+  Stop Auto-Ship requested". "Auto on" and "Auto off" are deleted as action
+  names from the phone and from the Mac's Notice and its Undo help; the row's
+  mark stays "Auto" (the setting), and `lf task auto on` stays the command
+  the help line names.
+  **The screen is one Task, read live.** `MobileTask` hands over which Task
+  was tapped (ID, identifier, title) and the conversation it had then.
+  Everything else the screen shows follows the Machine: the Graph, the row
+  and the execution from the Task reading (`Reading` holds the `RoadmapTask`
+  row, not a copy of two of its fields), and the conversation. When a frame
+  of the Task reading lists a Session and the screen has no conversation, it
+  reads the Task's row once (`viewPlan` with `task:<id>`, the read
+  `RemoteMobileClient.createdTask` already makes; both go through one
+  `task(id:directory:)`) and opens the primary Session that row names. So
+  Start on an unstarted Task ends in its conversation on the same screen.
+  If the row names none yet, the next frame asks again; a failed read leaves
+  the Changes view and the Notice says why. Passed over: taking the
+  conversation from the list's row (the list's filter hides a Task that
+  just left Backlog, the case qa hit), and guessing the primary from
+  `overview.sessions` (a second definition of primary).
   Session states (elsewhere, ended, not running, disconnected) are the state
   view over the terminal with their one accent button. Changes, diff and file:
   empty and failed states are the state view (a failure keeps "Try again");
@@ -204,15 +244,20 @@ Choices made here for review: the iPhone ramp values; removing the pairing
 icon row; `.display` (not the Mac sheet's `.title`) for "What do you want?";
 the phone's status words become the Mac's (Busy, Available, the lifecycle
 word) and "Running", "Ready", "Open" go; the phone says "Auto-Ship" and
-"Stop Auto-Ship"; the phone gains "Run" where the Graph offers it, in a
-"Task actions" menu; state titles keep today's one-line messages instead of
-new title-and-sentence copy.
+"Stop Auto-Ship", and so does the Mac's Notice; the phone gains "Run" where
+the Graph offers it, in a "Task actions" menu; both surfaces offer actions
+by the Mac's rule, with Rust's refusal shown before the tap; the phone's
+Task screen opens a conversation that begins while it is showing; state
+titles keep today's one-line messages instead of new title-and-sentence
+copy.
 
 ## Source of truth
 
 `DESIGN.md` for the system; `swift/Loopflow/Design/DesignSystem.swift` for
 values; Rust's `TaskGraph.sentence` for the workflow sentence and
-`TaskGraph.position` for the step that moves a Task;
+`TaskGraph.position` for the step that moves a Task and
+`TaskRunControl.unavailable` for why it cannot, both read through
+`TaskActions`;
 `ProgramStatusState.label` and `TaskState.label` for the status word on
 every row.
 
@@ -220,8 +265,10 @@ every row.
 
 - `swift/Loopflow/Design/` (tokens, four moved components, the new state view).
 - `swift/LoopflowMac`: imports of the moved components, the `TaskRow`
-  adapter, `TaskWorkflowBar` calling the shared `runAction` and limiting
-  the line itself. No visible change on the Mac; its tests are the check.
+  adapter, `TaskWorkflowBar` and `TaskAutoControl` drawing `TaskActions` and
+  the bar limiting the line itself. The one visible change on the Mac is the
+  Notice's wording ("Auto-Ship requested", "Stop Auto-Ship requested");
+  `DesktopHeadlessTests` and `swift/README.md` carry the old words.
 - `swift/Loopflow/Services/Notice.swift` already uses `Typography.text`; on
   the phone it grows from 13 to 17 with the ramp. Its four literal paddings
   are on `Spacing`, which moved the Mac's Notice by 2 pt on three sides.
@@ -259,6 +306,15 @@ gives the word `ProgramStatusState` gives the Mac row, and a reading with
 none of them gives its lifecycle word. It fails if a surface gets its own
 word again. `runAction`'s existing cases move with it.
 
+`TaskActions` is tested once, headless, in `swift/LoopflowTests`: waiting at
+a step offers Run and Auto-Ship; a run carrying the Task offers no Run; a
+reading with no Graph offers Start; Rust's refusal disables Run and
+Auto-Ship and not Stop Auto-Ship; a completed Task with auto off offers no
+Auto-Ship. `TaskActionsTests` in `LoopflowiOSTests` keeps only what is the
+phone's: a reading the Machine could not make shows no Graph, and a Task
+with no conversation opens the one its row names after a frame lists a
+Session.
+
 ## Looking at it
 
 The brief asks to look at the Task list, a Task, New Task and Machine pairing
@@ -282,8 +338,11 @@ tests' stand-in client only, and the live look moves to demo.
 | Task list | no Tasks under the filter | state view, "New Task" |
 | Task list | search matches nothing | state view, "Clear search" |
 | Task list | read failed | keeps the last list; the Notice says why (unchanged) |
-| Task | no Graph taken up | no workflow line; "Start" if the row is unstarted |
-| Task | Graph reading failed or the link dropped | no workflow line and no Start or Run; Auto-Ship stays (it needs only the row); terminal unaffected; the line returns when the link does |
+| Task | no Graph taken up | no workflow line; "Start" |
+| Task | Rust refuses a run | "Start", "Run" and "Auto-Ship" disabled, the reason under each; "Stop Auto-Ship" stays |
+| Task | started from its screen | the sentence, then its conversation in place of "No changes yet" |
+| Task | started, but its row names no conversation yet | "No changes yet" or Changes, until a later frame's read names one |
+| Task | Task reading failed or the link dropped | no workflow line and no Task actions; terminal unaffected; both return when the link does |
 | Task | a run carries it | the sentence; no Start or Run |
 | Task | stopped or waiting at a step | the sentence; "Run" |
 | Task list | a row's reading carries no state, only reasons | the word "Unavailable" |
@@ -317,9 +376,12 @@ tests' stand-in client only, and the live look moves to demo.
 - `SessionView.card`.
 - Nine `.borderedProminent` buttons with their tint and frame modifiers.
 - The phone's status words "Running", "Ready", "Open" and "No conversation
-  yet"; the toolbar's "Auto on" and "Auto off" and its states-only choice of
-  action; `TaskWorkflowBar.runAction` (moved, not copied); the line limit
-  inside `WorkflowLine`.
+  yet"; the toolbar's "Auto on" and "Auto off"; `TaskWorkflowBar.runAction`
+  (moved, not copied); the line limit inside `WorkflowLine`.
+- `TaskWorkspaceView.actions(reading:states:issue:)` and its `states` and
+  `directory` fallbacks to the list's row, `Reading.states` and
+  `Reading.checkout`; `TaskWorkflowBar.next`; `TaskAutoControl.on`; the
+  Mac's "Auto on" and "Auto off" as Notice and Undo words.
 - The four component files under `swift/LoopflowMac/Design/` (moved, not
   copied).
 - The pairing screen's icon row.
@@ -377,6 +439,23 @@ and New Task screens other than the New Task question.
    What it taught: the docs written ahead already matched, so only the
    phone README gained a line (the unavailable state's Changes).
 
+5. **One live Task, one set of actions, one name.** Not built. In this
+   order, each showing on its own:
+   1. The phone's Task screen follows the Machine for its conversation.
+      Check first, on the Simulator as `.lf/qa/iphone-simulator.md`
+      describes: open an unstarted Task from Backlog, Start, and the
+      conversation replaces "No changes yet" without leaving the screen. If
+      no frame arrives after the primary Session is recorded, note what
+      does arrive and reread on that.
+   2. `TaskActions` in `swift/Loopflow/Design/`, drawn by
+      `TaskWorkflowBar`, `TaskAutoControl` and the phone's menu. The Mac's
+      `task-workflow-run`, `task-workflow-start` and `task-auto`
+      identifiers and its existing tests are the check that it looks the
+      same.
+   3. The Mac's Notice and Undo help say "Auto-Ship" and "Stop Auto-Ship";
+      `DesktopHeadlessTests`, `PendingChangesTests` and `swift/README.md`
+      follow.
+
 ## Done when
 
 - The phone's Task list, Task, New Task and pairing screens show the shared
@@ -385,6 +464,9 @@ and New Task screens other than the New Task question.
   dark on an iPhone SE.
 - A Task shows the same status word on the phone's row as on the Mac's, and
   a Task waiting at a step can be run from the phone.
+- A Task started from the phone's Task screen shows its conversation there.
+- Both surfaces offer the same Task actions from one `TaskActions`, and both
+  Notices say "Auto-Ship requested".
 - `TypographyDisciplineTests` reads `LoopflowiOS` and finds nothing.
 - The existing iOS tests and the Mac component tests pass.
 - DESIGN.md has the iPhone ramp, no iPhone pointer under "We do these now",
@@ -405,7 +487,8 @@ Read these before building; they describe the finished behavior.
 Names the docs settled: the state view is `StateView`; the platform's control
 height is `HitTarget.control`.
 
-Open: the Mac's Notice for the same write reads "LOO-5 Auto on requested ·
-Undo" (`swift/README.md`), and the phone's docs say "LOO-5 Auto-Ship
-requested". Should the Mac's Notice say "Auto-Ship requested" too, or should
-the phone keep "Auto on requested"?
+Slice 5 changes two sentences in `swift/LoopflowiOS/README.md`: "if the
+Machine refuses, the same line says why" (a refusal Rust already knows is
+shown under the disabled action; the line covers the rest), and the Changes
+paragraph gains that a Task started from its screen opens its conversation
+there. `swift/README.md` still reads "LOO-5 Auto on requested · Undo".

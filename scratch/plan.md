@@ -442,37 +442,21 @@ in DESIGN.md "Desktop semantics"; palette contrast.
    `cargo test -p loopflow --test integration documented_commands::`.
    QA in three themes at the narrowest width stays for qa.
 
+9. **Built** (e38ebddbba), from the concept review after the build
+   (`scratch/concept-review.html`). `TaskBrief.state(runtime:graph:reason:)`
+   names `TaskGraph.steps[currentStep]`, the step the bar makes strong
+   ("Moving, at build." while `implement` runs), and the word alone with no
+   `currentStep`; the graph reaches the Brief through `TaskFilesView.graph`
+   from `model.taskWork`. `GraphProcessLog(showsPosition: false)` on the Task
+   page, where `TaskWorkflowHeader` already prints the sentence; the
+   standalone Graph-log pane keeps it. Tests: `stateNamesTheTopLevelStepTheBarMakesStrong`,
+   and `DesktopHeadlessTests` checks the log without its position line (the
+   view, not the mounted page). Passed: `scripts/test_desktop.sh --filter
+   'TaskBriefTests|DesktopHeadlessTests'` (20).
+
 ## Remaining
 
-**Slice 9, from the concept review after the build (2026-11-22,
-`scratch/concept-review.html`).** The Brief names a different place from
-the bar right above it. `TaskBrief.state` reads `task.execution?.step`, which
-is `TaskExecutionSnapshot.step`: the latest concrete step's label
-(`implement`, `concept-review`), not the top-level step. So the Brief reads
-"Moving, at implement." under a bar that makes `build` strong, while the
-prototype reads "Moving, at build.". `stateAndReasonAreOneSentence` passes
-only because it hands in `"build"`.
-
-- `TaskBrief.state` takes the Task's `TaskGraph` (`model.taskWork[id]`'s
-  `graph`) and names `steps[currentStep].name`; with `currentStep` null
-  (start, end, no Graph read yet) the lead is the word alone ("Moving.").
-  Nothing in the Brief reads `TaskExecutionSnapshot.step` for display.
-- The test builds a `TaskGraph` standing in `build` (index 1) while running
-  `implement` and expects "Moving, at build."; one with `currentStep` null
-  expects "Unstarted.".
-- On the Task page (`WorkspacePanesView` `.task`), `TaskWorkflowHeader`
-  already prints the sentence, so `GraphProcessLog` there shows no
-  `task-run-position` line; the standalone Graph-log pane (the other
-  `GraphProcessLog` call) keeps it. A parameter on `GraphProcessLog`
-  (`showsPosition`) is the smallest way; a test of the Task page asserts the
-  sentence appears once.
-- `swift/README.md:389`'s example already reads "Moving, at build."; it
-  stays true.
-- Check: `scripts/test_desktop.sh --filter 'TaskBriefTests|DesktopHeadlessTests'`.
-- Built 2026-11-22: `TaskBrief.state(runtime:graph:reason:)`; the graph reaches
-  the Brief through `TaskFilesView.graph` from `model.taskWork`. The Task page
-  test checks `GraphProcessLog(showsPosition: false)` beside the default log,
-  not the mounted page. Check above passed (20 tests). Left: gate and QA.
+No slice left; gate and the unreached QA checks remain.
 
 Outside this Task: `TaskExecutionSnapshot.reason` can carry a raw step UUID
 ("Step c9b373a4-… is running help graph."), shared with `lf task status`.

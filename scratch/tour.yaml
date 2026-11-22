@@ -1,4 +1,4 @@
-at: 5d880e4bd6db851d203caf5f77c0eb7a687c028a
+at: 6dc555446140f36cb00664a32f5c7e66a6356962
 first:
   - path: DESIGN.md
     why: the rules, and the Desktop pointers this change removes
@@ -15,8 +15,8 @@ first:
     why: the Mac adds a program's report; the sidebar row may have no Task yet
   - path: swift/LoopflowTests/DesignDisciplineTests.swift
     why: the scale as a test; explains the mechanical edits
-  - path: swift/LoopflowTests/TaskStandingFixtures.swift
-    why: the Task and program report the standing tests share
+  - path: swift/LoopflowTests/TaskRowStatusFixtures.swift
+    why: the Task and program report the status tests share
   - path: swift/LoopflowMac/Views/BacklogView.swift
     why: the backlog rebuilt to the prototype
   - path: swift/LoopflowMac/Views/RoadmapView.swift

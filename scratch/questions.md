@@ -208,3 +208,12 @@ Each was decided so the work could continue; `scratch/plan.md` has the detail.
     offers no Run and the backlog's Start still splits on `awaitsStart`
     (question 53). Left for the wire Task "Graph position on a list row".
     Offer Run on a row whenever a run is allowed instead?
+57. **The standing suite is `TaskRowStatusTests`** (ship review). The file and
+    its fixtures kept `TaskStanding`, a type the merge with main removed;
+    renamed, decides the third review's question 4 the other way.
+58. **The two wire findings went into Task d5be39's notes**, not a new Task
+    (ship review): the server's `waiting`/"ready" condition and the Graph
+    position on a list row. d5be39 is the wire change #2017 left out, unstarted
+    and unowned. File them apart instead?
+59. **"One page for a Wave" and the small design leftovers have no Task**
+    (ship review). `scratch/ship-review.html` questions 4 and 5.

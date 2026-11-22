@@ -66,7 +66,7 @@ grep -rnE '\.padding\(([^)]*, *)?-?[0-9]|spacing: *[1-9]|[cC]ornerRadius: *[0-9]
 The view suites that inspect the changed screens pass:
 `BacklogViewTests`, `DashboardWorkspaceTests`, `RoadmapViewTests`,
 `CreateWaveSheetTests`, `ThemeWorkflowTests`, `TaskRowTests`,
-`TaskStandingTests`, `WorkflowLineTests`, `WorkPaletteTests`.
+`TaskRowStatusTests`, `WorkflowLineTests`, `WorkPaletteTests`.
 
 Looked at in Loopflow Dev (`uv run python scripts/loopflow-dev.py run`, after
 checking the Dev app is not in use and the installed `lf` is at the branch's
@@ -96,8 +96,9 @@ The branch then merged main at c4de2038fd (#2017, 02be411be1). `TaskRow`,
 Task's planning to it; the iPhone's rows pass none and say the program's
 word or the lifecycle (DESIGN.md "Tokens today"). The slice 6 suites and
 `DesignDisciplineTests` passed on the merge and the acceptance grep prints
-nothing. `TaskStandingTests` and `TaskStandingFixtures.swift` keep the old
-name; the acceptance command names the suite.
+nothing. Ship review renamed the suite and its fixtures to
+`TaskRowStatusTests` and `TaskRowStatusFixtures.swift`; rows in the Checks
+table name the suite as it was when they ran.
 
 - At the base, 177 lines passed a literal padding and 132 a literal non-zero
   `spacing:`, with off-scale values 1, 3, 5, 6, 7, 9, 10, 14, 15, 17, 18, 22,
@@ -702,6 +703,10 @@ or `lf desktop` reads unless its view is deleted.
 
 ## Outside this change
 
+The second and third entries are in the notes of Task d5be39, "A Task
+row's status is written once in Rust and printed by Desktop and iPhone".
+The first has no Task; `scratch/ship-review.html` asks (question 4).
+
 - **One page for a Wave.** A Wave has two: its view in a repository window
   (backlog, conversation, tiles) and `WaveDetailPane` in the Portfolio
   (objective, key results, every Task with history, metrics). They share no
@@ -760,3 +765,5 @@ or `lf desktop` reads unless its view is deleted.
 | `scripts/test_desktop.sh --filter 'TaskStandingTests\|TaskRowTests\|BacklogViewTests\|TaskBriefTests\|WorkNavigationTests\|WorkModelTests\|NowProjectionTests\|DesignDisciplineTests'` | passed after compress made `TaskRowStatus(task:program:)` take a Task and dropped `Source.none` (138 tests) | compress; CI runs the rest |
 | Dev app after slice 6 and the merge | looked at with the screen locked on the second run's private Machine (`scratch/qa.html`, "Third run"): an opened, never-run Task reads "Idle" and is off the Now list, a parked Task's Portfolio row says "Run", Start from a Roadmap row runs the Graph, the Brief leads "Waiting, at demo.", and a blocked Task's page and Brief say "Blocked". One fix: an idle Task's Brief read "Idle. ready." and reads "Idle." Light throughout; Task and Wave page in Loopflow Dark, backlog and Choose Theme in Dracula. The activity pane, the jump menu, New Wave and the title bar need an unlocked display | qa; review for the rest |
 | `scripts/test_desktop.sh --filter 'TaskBriefTests\|TaskStandingTests\|TaskConceptTests'` | passed after the third qa run's fix (19 tests) | qa; CI runs the rest |
+| `scripts/test_desktop.sh --filter 'TaskRowStatusTests\|TaskBriefTests\|NowProjectionTests\|DashboardWorkspaceTests\|TaskRowTests'` | passed after ship review renamed the suite and its fixtures (43 tests) | ship-review; CI runs the rest |
+| CI on PR #2018 | every test job skipped while `scratch/` holds added files; `scratch-clear` and `macos-inputs` passed | CI, once gate clears scratch |

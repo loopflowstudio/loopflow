@@ -42,7 +42,9 @@ use snapshot::{
     file_snapshot, git_output, git_output_bytes, read_task_snapshot, resolve_file_base,
     validate_task_relative_path,
 };
-pub use snapshot::{task_changes, task_diff, task_file, task_snapshot, MAX_FILE_BYTES};
+pub use snapshot::{
+    task_changes, task_diff, task_file, task_snapshot, MAX_BINARY_DATA_BYTES, MAX_FILE_BYTES,
+};
 pub mod auto;
 mod file_save;
 pub mod run_recovery;
@@ -306,6 +308,8 @@ pub struct TaskFileSnapshot {
     pub task_id: String,
     pub path: String,
     pub content: Option<String>,
+    /// A `binary` file's bytes, base64, up to `MAX_BINARY_DATA_BYTES`.
+    pub data: Option<String>,
     pub state: TaskFileState,
     pub revision: Option<String>,
     pub read_only_reason: Option<String>,

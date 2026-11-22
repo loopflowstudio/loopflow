@@ -155,20 +155,23 @@ public struct TaskFileSnapshot: Decodable, Sendable, Hashable {
     public let taskId: String
     public let path: String
     public let content: String?
+    /// A `binary` file's bytes (base64 on the wire), up to 16 MiB; nil over that and for other states.
+    public let data: Data?
     public let state: TaskFileState
     public let revision: String?
     public let readOnlyReason: String?
     public let sizeBytes: UInt64
 
     public init(recoveries: [TaskFileRecovery], issueIdentifier: String, taskId: String, path: String,
-                content: String?, state: TaskFileState, revision: String?, readOnlyReason: String?, sizeBytes: UInt64) {
+                content: String?, data: Data?, state: TaskFileState, revision: String?, readOnlyReason: String?,
+                sizeBytes: UInt64) {
         self.recoveries = recoveries; self.issueIdentifier = issueIdentifier; self.taskId = taskId
-        self.path = path; self.content = content; self.state = state; self.revision = revision
+        self.path = path; self.content = content; self.data = data; self.state = state; self.revision = revision
         self.readOnlyReason = readOnlyReason; self.sizeBytes = sizeBytes
     }
 
     enum CodingKeys: String, CodingKey {
-        case path, content, state, revision, recoveries
+        case path, content, data, state, revision, recoveries
         case issueIdentifier = "issue_identifier"
         case taskId = "task_id"
         case sizeBytes = "size_bytes"

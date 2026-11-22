@@ -7,20 +7,9 @@ import Loopflow
 struct ReviewDiff: Equatable, Sendable {
     var files: [ReviewFile]
 
-    /// Every change and moved block in reading order, across files.
+    /// Every change and moved block in the patch, in reading order, across files.
     var stops: [ReviewStop] {
         files.flatMap { file in file.stops.map { ReviewStop(id: $0, path: file.path) } }
-    }
-
-    /// The stop `offset` away from `current`; from nothing, the first or last.
-    func stop(after current: String?, offset: Int) -> ReviewStop? {
-        let stops = self.stops
-        guard !stops.isEmpty else { return nil }
-        guard let current, let index = stops.firstIndex(where: { $0.id == current }) else {
-            return offset >= 0 ? stops.first : stops.last
-        }
-        let next = index + offset
-        return stops.indices.contains(next) ? stops[next] : nil
     }
 
     func file(_ path: String) -> ReviewFile? { files.first { $0.path == path } }
@@ -156,6 +145,21 @@ struct ReviewDiff: Equatable, Sendable {
 struct ReviewStop: Equatable, Sendable {
     let id: String
     let path: String
+
+    /// A rendered file reads as one change, landing on its top.
+    static func rendered(_ path: String) -> ReviewStop { ReviewStop(id: "\(path)#rendered", path: path) }
+}
+
+extension [ReviewStop] {
+    /// The stop `offset` away from `current`; from nothing, the first or last.
+    func stop(after current: String?, offset: Int) -> ReviewStop? {
+        guard !isEmpty else { return nil }
+        guard let current, let index = firstIndex(where: { $0.id == current }) else {
+            return offset >= 0 ? first : last
+        }
+        let next = index + offset
+        return indices.contains(next) ? self[next] : nil
+    }
 }
 
 /// One Graph step's commits: a run of commits whose subjects start
@@ -480,31 +484,20 @@ struct ReviewSegment: Equatable, Sendable {
     /// lines that share less than half their tokens read better as a removal
     /// and an addition.
     static func edit(_ old: String, _ new: String) -> ([ReviewSegment], [ReviewSegment])? {
-        let a = tokens(old), b = tokens(new)
-        // Bound the quadratic table; very long lines keep line-level color.
-        guard a.count * b.count <= 160_000, let table = LongestCommon.table(a, b) else { return nil }
-        var left: [ReviewSegment] = [], right: [ReviewSegment] = []
-        var i = 0, j = 0, shared = 0
-        func push(_ segments: inout [ReviewSegment], _ text: String, _ changed: Bool) {
-            if let last = segments.last, last.changed == changed {
-                segments[segments.count - 1] = ReviewSegment(text: last.text + text, changed: changed)
-            } else {
-                segments.append(ReviewSegment(text: text, changed: changed))
+        guard let words = ReviewWords.edit(old, new) else { return nil }
+        func side(_ dropped: ReviewWords.Kind) -> [ReviewSegment] {
+            var segments: [ReviewSegment] = []
+            for word in words where word.kind != dropped {
+                let changed = word.kind != .same
+                if let last = segments.last, last.changed == changed {
+                    segments[segments.count - 1] = ReviewSegment(text: last.text + word.text, changed: changed)
+                } else {
+                    segments.append(ReviewSegment(text: word.text, changed: changed))
+                }
             }
+            return segments
         }
-        while i < a.count || j < b.count {
-            if i < a.count, j < b.count, a[i] == b[j] {
-                if !a[i].allSatisfy(\.isWhitespace) { shared += 1 }
-                push(&left, a[i], false); push(&right, b[j], false); i += 1; j += 1
-            } else if j < b.count, i == a.count || table[i][j + 1] >= table[i + 1][j] {
-                push(&right, b[j], true); j += 1
-            } else {
-                push(&left, a[i], true); i += 1
-            }
-        }
-        let meaningful = { (tokens: [String]) in tokens.filter { !$0.allSatisfy(\.isWhitespace) }.count }
-        guard shared > 0, shared * 2 >= max(meaningful(a), meaningful(b)) else { return nil }
-        return (left, right)
+        return (side(.added), side(.removed))
     }
 
     /// Words, whitespace runs and single punctuation marks.
@@ -528,6 +521,51 @@ struct ReviewSegment: Equatable, Sendable {
         if !word.isEmpty { tokens.append(word) }
         if !space.isEmpty { tokens.append(space) }
         return tokens
+    }
+}
+
+/// One edit read in order: the words both sides share, the words removed
+/// and the words added in their place, as a redline shows them.
+struct ReviewWords: Equatable, Sendable {
+    enum Kind: Equatable, Sendable { case same, removed, added }
+    let text: String
+    let kind: Kind
+
+    /// Nil when the two texts are not one edit: they share less than half
+    /// their tokens, or are too long to compare word by word.
+    static func edit(_ old: String, _ new: String) -> [ReviewWords]? {
+        let a = ReviewSegment.tokens(old), b = ReviewSegment.tokens(new)
+        // Bound the quadratic table; very long lines keep line-level color.
+        guard a.count * b.count <= 160_000, let table = LongestCommon.table(a, b) else { return nil }
+        var words: [ReviewWords] = []
+        // Between shared words, what was removed reads before what replaced it.
+        var removed = "", added = ""
+        func flush() {
+            if !removed.isEmpty { words.append(ReviewWords(text: removed, kind: .removed)) }
+            if !added.isEmpty { words.append(ReviewWords(text: added, kind: .added)) }
+            removed = ""; added = ""
+        }
+        var i = 0, j = 0, shared = 0
+        while i < a.count || j < b.count {
+            if i < a.count, j < b.count, a[i] == b[j] {
+                if !a[i].allSatisfy(\.isWhitespace) { shared += 1 }
+                flush()
+                if let last = words.last, last.kind == .same {
+                    words[words.count - 1] = ReviewWords(text: last.text + a[i], kind: .same)
+                } else {
+                    words.append(ReviewWords(text: a[i], kind: .same))
+                }
+                i += 1; j += 1
+            } else if j < b.count, i == a.count || table[i][j + 1] >= table[i + 1][j] {
+                added += b[j]; j += 1
+            } else {
+                removed += a[i]; i += 1
+            }
+        }
+        flush()
+        let meaningful = { (tokens: [String]) in tokens.filter { !$0.allSatisfy(\.isWhitespace) }.count }
+        guard shared > 0, shared * 2 >= max(meaningful(a), meaningful(b)) else { return nil }
+        return words
     }
 }
 
@@ -600,7 +638,7 @@ struct ReviewMove: Equatable, Sendable {
 }
 
 /// Longest common subsequence lengths: `table[i][j]` covers `a[i...]` and `b[j...]`.
-private enum LongestCommon {
+enum LongestCommon {
     static func table<T: Equatable>(_ a: [T], _ b: [T]) -> [[Int]]? {
         guard !a.isEmpty, !b.isEmpty else { return nil }
         var table = Array(repeating: Array(repeating: 0, count: b.count + 1), count: a.count + 1)

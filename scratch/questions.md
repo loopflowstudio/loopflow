@@ -55,3 +55,10 @@
   says "Copied" on click; its icon returns after 1.6s.
 
 - Kept this Task’s plan and review pages through the design branch’s scratch cleanup. The shipped stylesheet takes its dark keyboard focus ring for solid buttons.
+
+# Ship review (2026-11-21, headless)
+
+- No one was present; no reactions recorded. Questions 1–4 on
+  `scratch/ship-review.html` are open.
+- Filed Task d5e6d7 (drop unpinned Pico and its resets). The favicon route
+  stays with gate, as the plan says.

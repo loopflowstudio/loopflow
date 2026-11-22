@@ -247,5 +247,18 @@ them. Nothing here needs WindowServer focus.
   popovers and sheets opened from a "+" (New Wave never appeared), file panels
   and Ghostty faces. The in-process accessibility tree is empty, so there is no
   finding a control by name.
+- A private Machine can be kept for the next run: `rm` its `lf` copy, copy
+  the new build in and start `lf server run` again. A Task whose held step
+  was running when the old server stopped comes back blocked ("process left
+  no exit record"), and opening it does not unblock it: that is the route to
+  a blocked Task's page and Brief.
+- Window indices move whenever a window opens or the app restores one. Read
+  the index by title from `snap` before each `click` or `close`
+  (`awk '$2=="Portfolio" {print $1}'`). `lf desktop working-tasks` answers in
+  whichever repository window is first; in a restored one it drew "Dashboard
+  unavailable". Close Appearance and the Portfolio before quitting.
+- Portfolio buttons answer hook clicks: Start on a Roadmap row runs the Graph.
+  With the `LF_BIN` wrapper holding `help graph`, the row reads "Moving" until
+  `touch <dir>/go`, then "Waiting".
 - Stand-in providers exit at once here, so a Session pane shows "Process
   exited" under its opening overlay. That is the stand-in, not the pane.

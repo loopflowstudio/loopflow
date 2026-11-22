@@ -424,7 +424,8 @@ them. Hidden tools keep their clients and drafts.
 **Brief** opens on the Task's title, then one sentence with the word its row
 says when no program reports, its step and why
 ("Moving, at build. The loop chose another pass on the concept review.",
-"Waiting, at demo. ready."), a line for what it
+"Waiting, at demo. ready."; a Task that needs nobody gives no why when it
+would only repeat its condition: "Idle."), a line for what it
 needs when that sentence has not already said it ("Blocked: checkout has uncommitted changes"), then its PR, the Tasks the brief names
 (click one to open it) and an outline when the brief has headings or an
 `Acceptance:` lead, as a two-column table that wraps in a narrow pane. Its

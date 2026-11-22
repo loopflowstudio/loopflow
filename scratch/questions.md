@@ -197,3 +197,8 @@ Each was decided so the work could continue; `scratch/plan.md` has the detail.
     offered in the bar's Start. Left as it is; move the backlog to
     `graphHasRun` too?
 54. Sync with main uses the shared Task row on Mac and iPhone. The Mac supplies its planning condition. Notice uses main’s padding steps.
+55. **The Brief gives no reason for a Task that needs nobody** when its next
+    move only repeats the condition's reason (third qa run): "Idle." where it
+    read "Idle. ready." A moving Task keeps its next move's reason. A blocked
+    Task's Portfolio row still offers only "Worktree" while its page offers
+    "Run"; at the base too. Should the row offer Run?

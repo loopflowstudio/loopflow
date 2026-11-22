@@ -23,6 +23,105 @@ second person's claims and a held Graph. The screen was locked, so the app was d
 file-command hook (snapshot, click, menu item) that is not in the commit. Every picture below is the
 real window drawn by the real app from the real server.</p>
 
+<h2>Third run, after slice 6 and the merge with main (at 144804b79b)</h2>
+
+<p>Same method, on the second run's private Machine, kept as a returning person's data: the branch
+<code>lf</code> swapped in under its store, the server restarted. "atlas" held two Tasks parked at
+<code>demo</code>, one whose held step lost its server (blocked, "process left no exit record"), one opened
+by its link and never run, and three untouched. Screen locked throughout. This run was for slice 6: a Task
+awaits Start until a Graph has run, a Portfolio row says Run once one has, and the Brief leads with the
+row's word.</p>
+
+<h3>A Task opened and never run reads Idle, and is off the Now list</h3>
+<div class="pair">
+  <figure><img src="qa/60-backlog.png"><figcaption>Sidebar on arrival: f247c3 was opened in the last run and never started. It reads "Idle" with no line. The second run showed it as "Waiting" over "ready".</figcaption></figure>
+  <figure><img src="qa/61-now.png"><figcaption>Now: Blocked 1, Waiting 2. The idle Task is not listed. The parked rows offer "Run".</figcaption></figure>
+</div>
+<div class="pair">
+  <figure><img src="qa/62-roadmap.png"><figcaption>Roadmap: "Run" on the parked Task, "Start" on the idle Task and on the unstarted ones.</figcaption></figure>
+  <figure><img src="qa/71-task-page-idle.png"><figcaption>Another unstarted Task opened by its link (3837f0). Its page: "Idle", "No Graph has run.", Start in the bar.</figcaption></figure>
+</div>
+
+<h3>Start from a Roadmap row, to the end</h3>
+<p>Clicked Start on the idle Task's Roadmap row, then released the held step.</p>
+<div class="pair">
+  <figure><img src="qa/63-roadmap-after-start.png"><figcaption>A few seconds after the click: the row reads "Moving" and its Start is gone. The repository window's sidebar changed with it, no reload. <code>lf task status</code>: "make is running help graph. You are next needed at demo."</figcaption></figure>
+  <figure><img src="qa/64-now-after-park.png"><figcaption>After the step finished: the Task joined Now under Waiting 3, with "Run".</figcaption></figure>
+</div>
+
+<h3>A Task's page and Brief say the row's word</h3>
+<div class="pair">
+  <figure><img src="qa/66-task-page-parked.png"><figcaption>Parked: row "Waiting", page "Waiting · Waiting for you at demo.", "Run" in the bar.</figcaption></figure>
+  <figure><img src="qa/70-brief-parked.png"><figcaption>Its Brief leads "Waiting, at demo." where the second run read "Active, at demo."</figcaption></figure>
+</div>
+<div class="pair">
+  <figure><img src="qa/67-task-page-blocked.png"><figcaption>A blocked Task's own page, not reached before: row "Blocked", page "Blocked · Stopped at make. `lf task run` starts it again."</figcaption></figure>
+  <figure><img src="qa/68-brief-blocked.png"><figcaption>Its Brief: "Blocked, at make." then the reason once.</figcaption></figure>
+</div>
+<div class="pair">
+  <figure><img src="qa/69-brief-idle-before.png"><figcaption>First look at the idle Task's Brief: "Idle. ready." The row says it needs nobody and the Brief still printed the server's reason.</figcaption></figure>
+  <figure><img src="qa/69-brief-idle-after.png"><figcaption>After: "Idle."</figcaption></figure>
+</div>
+<p><b>Fixed.</b> <code>TaskBrief.state</code> printed the next move's reason for every Task. For a Task that
+needs nobody it now gives none when that reason only repeats the condition's
+(<code>TaskBriefView.swift</code>; <code>TaskBriefTests</code> gains the opened, never-run case). A moving
+Task keeps its reason, and a parked one still reads "Waiting, at demo. ready." (question 42).</p>
+
+<h3>The four screens again, after the merge</h3>
+<div class="pair">
+  <figure><img src="qa/75-dashboard-light.png"><figcaption>Dashboard, Loopflow Light, from main's shared <code>TaskRow</code>: row, then "Waiting for you at demo." on the visited tile. "Page 1 of 2" in sans.</figcaption></figure>
+  <figure><img src="qa/72-wave-page-light.png"><figcaption>Wave page: "Run" and "Start" by row, the idle Task with both Start and Worktree, Completed on the heading's line.</figcaption></figure>
+</div>
+<div class="pair">
+  <figure><img src="qa/74-backlog-light.png"><figcaption>Backlog. "All 2": the Task opened by its link left the backlog, as question 53 says.</figcaption></figure>
+  <figure><img src="qa/73-choose-theme-light.png"><figcaption>Choose Theme, Loopflow Light.</figcaption></figure>
+</div>
+<div class="pair">
+  <figure><img src="qa/77-task-page-dark.png"><figcaption>Task page, Loopflow Dark.</figcaption></figure>
+  <figure><img src="qa/78-wave-page-dark.png"><figcaption>Wave page, Loopflow Dark.</figcaption></figure>
+</div>
+<div class="pair">
+  <figure><img src="qa/79-backlog-dracula.png"><figcaption>Backlog, Dracula.</figcaption></figure>
+  <figure><img src="qa/80-choose-theme-dracula.png"><figcaption>Choose Theme previewing Dracula. "Yours" is at the fold again.</figcaption></figure>
+</div>
+
+<h3>Checks run</h3>
+<table><tr><th>Command</th><th>Result</th></tr>
+<tr><td><code>scripts/test_desktop.sh --filter 'TaskBriefTests|TaskStandingTests|TaskConceptTests'</code></td><td>19 tests in 3 suites passed, after the Brief fix.</td></tr>
+</table>
+
+<h3>What works now</h3>
+<ul>
+<li>An opened, never-run Task reads "Idle" in the sidebar, the Roadmap, a Wave's page and its own page, has no line, and is off the Now list.</li>
+<li>A Portfolio row says "Start" before a Graph has run and "Run" after. Start from the row started the Graph, and both windows followed it to "Moving" and then "Waiting" without a reload.</li>
+<li>Row, page and Brief agree for a parked Task ("Waiting"), a blocked one ("Blocked") and an idle one ("Idle").</li>
+<li>Dashboard, Wave page, backlog and Choose Theme draw as before on main's shared row, in Loopflow Light; Task page and Wave page in Loopflow Dark; backlog and Choose Theme in Dracula.</li>
+</ul>
+
+<h3>Not reached, and why</h3>
+<ul>
+<li>The dashboard in Loopflow Dark and Dracula this run: <code>lf desktop working-tasks</code> went to a restored window both times. The second run's pictures of both stand; the tile's code changed by three lines since.</li>
+<li>The activity pane and the Task detail's line without "ready" (slice 6, question 52): no hook route to either. <code>NowProjectionTests</code> holds the spoken label.</li>
+<li>The jump menu, New Wave, the title bar, menus, hover, drag, terminal faces, and the Dev app on the live Machine: the screen was locked, as before.</li>
+<li>A first install. The Machine was a returning person's; an empty repository was not opened.</li>
+</ul>
+
+<h3>Still wrong, worst first</h3>
+<ul>
+<li>A parked Task still reads "Waiting" over "ready" on every row, and "Waiting, at demo. ready." in its Brief. The word is the server's (question 42, and the Rust Task under "Outside this change").</li>
+<li>An opened, never-run Task is in no list that starts it: it left the backlog ("All 2") and is off Now. Its own page, the Roadmap and its Wave's page offer Start. Question 53.</li>
+<li>A blocked Task's Portfolio row offers only "Worktree" while its page offers "Run" and says "`lf task run` starts it again". At the base too.</li>
+<li>Seen once: <code>lf desktop working-tasks</code> in a window the app restored at launch drew "Dashboard unavailable. This Dashboard is no longer available."; a window opened by link drew the dashboard. Restored windows read no Work while the screen is locked, so this may be the harness.
+<figure><img src="qa/76-dashboard-unavailable-restored.png"></figure></li>
+<li>A narrow tile cuts a blocked Task's reason to "help graph: process left no e…".</li>
+<li>From the earlier runs and unchanged: the link to a Wave shows the repository's backlog under "atlas"; a narrow tile clips "Open conversation"; the sample says "Working" where rows say "Busy" or "Moving".</li>
+</ul>
+
+<h3>What it left behind</h3>
+<p>Nothing running: the app and the private server were stopped by PID, the bundle unregistered and
+deleted, its defaults removed, the hook and the two local action edits taken out of the tree. The private
+Machine's files are in <code>/tmp/lf-qa-8b92c6</code>.</p>
+
 <h2>Second run, after slice 5 (at d1355bac0d)</h2>
 
 <p>Same method on a new private Machine: "atlas" with Growth and Infrastructure, ten Tasks. One parked at

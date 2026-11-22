@@ -46,6 +46,10 @@ struct TaskBriefTests {
                                     nextMove: "", graphHasRun: false)
         #expect(TaskBrief.state(fresh, graph: unstarted).lead == "Unstarted.")
         #expect(TaskBrief.state(fresh, graph: nil) == ("Unstarted.", ""))
+        // Opened and never run: the server's "ready" is no reason to give.
+        let opened = try roadmapTask(condition: "waiting", reason: "ready", lifecycle: "idle", recommended: "run",
+                                     nextMove: "ready", graphHasRun: false)
+        #expect(TaskBrief.state(opened, graph: nil) == ("Idle.", ""))
     }
 
     @Test("The Brief says what the Task needs once: not again when the state line ends with it")

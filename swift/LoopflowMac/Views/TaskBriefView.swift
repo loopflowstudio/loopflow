@@ -37,12 +37,14 @@ enum TaskBrief {
 
     /// "Waiting, at demo." then why: the word the Task's row says with no
     /// program reporting, the top-level step the workflow bar makes strong, the
-    /// next move's reason in one sentence.
+    /// next move's reason in one sentence. A Task that needs nobody gives no
+    /// reason when the next move only repeats its condition's ("ready").
     static func state(_ task: RoadmapTask, graph: TaskGraph?) -> (lead: String, reason: String) {
         let word = TaskRowStatus(task: task).word ?? ""
         let step = graph.flatMap { graph in graph.currentStep.map { graph.steps[$0].name } }
         let lead = step.map { "\(word), at \($0)." } ?? "\(word)."
         let why = task.nextMove.reason.trimmingCharacters(in: .whitespacesAndNewlines)
+        if task.need == nil, why == task.condition.reason { return (lead, "") }
         return (lead, why.isEmpty || why.hasSuffix(".") ? why : why + ".")
     }
 

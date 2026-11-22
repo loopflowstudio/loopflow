@@ -104,3 +104,6 @@
   help text still says "continue after <step>".
 - A completed Task with no Graph still shows a disabled **Start** carrying
   Rust's refusal ("Reopen the Task"), as the header did.
+
+- Sync with LOO-515 kept the 3d4350 concept review in this checkout. Each
+  Task uses the same scratch filename for its own review.

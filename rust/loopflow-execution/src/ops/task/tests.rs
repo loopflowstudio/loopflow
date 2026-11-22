@@ -1140,6 +1140,35 @@ fn task_changes_count_each_files_stops_before_any_patch_is_read() {
             ("with space.txt", 1),
         ])
     );
+    // The Diff's patch holds the same stops; Swift parses the checked-in copy.
+    let diff = super::snapshot::diff_snapshot(
+        super::TaskComparison {
+            checkout: super::TaskWorkspace {
+                issue_identifier: "TEST-1",
+                task_id: &id,
+                worktree: repo.path(),
+            },
+            base_commit: &base,
+            head_commit: None,
+        },
+        None,
+    )
+    .unwrap();
+    let nonzero = counts
+        .iter()
+        .filter(|(_, count)| **count > 0)
+        .map(|(path, count)| (path.to_string(), *count))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    assert_eq!(
+        super::snapshot::count_changes(diff.patch.as_bytes()),
+        nonzero
+    );
+    let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/fixtures/review/change_counts.patch");
+    assert_eq!(
+        super::snapshot::count_changes(&std::fs::read(fixture).unwrap()),
+        nonzero
+    );
     let adjacent =
         b"diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1,2 +1,2 @@\n+new\n-old\n+again\n-more\n";
     // A removal right after additions starts a new stop, as the Diff reads it.

@@ -101,7 +101,8 @@ file and a builtin skill.
     stream and page at 360, 480 and 640 pt.
   - **Count up front**: `TaskChangedFile.changes` is each file's runs of
     changed lines, counted in Rust (`count_changes`) from the same
-    default-context patch the stream parses (`-U0` aligns some blank lines
+    default-context patch the stream parses: both reads take
+    `comparison_diff_args`, renames found and prefixes pinned (`-U0` aligns some blank lines
     differently: `config/files.rs` read 11 against 12). Title and stepper sum
     it (`TaskFilesStore.changeCount`); a file's own lines count only where no
     count came (Files' Diff, drafts).
@@ -400,7 +401,10 @@ total. Direction: one function builds the comparison's diff arguments and both
 reads use it; a test parses the per-file patch of the count fixture in Swift
 and finds the stops `lf task changes` counted. The stop rule itself agrees:
 both start a change after an unchanged line or a hunk header and on a removal
-after additions, and a move is two stops on each side.
+after additions, and a move is two stops on each side. Repaired: both reads
+take `comparison_diff_args`; `tests/fixtures/review/change_counts.patch` is
+counted in Rust and stepped in Swift, which found Swift kept Git's trailing tab
+on `+++ b/with space.txt` (fixed in `ReviewDiff.strip`).
 
 Left as built: the title counts every shown file, Viewed ones included, while
 the stepper's total leaves Viewed files out ("2 of 4" under "6 changes"); a
@@ -408,6 +412,13 @@ file read from a later live update keeps the count from the file list until
 the list is reread. The window's "N files above · Show" button where Jack's
 pasted order said jumps "between windows" is the chosen form; whether
 scrolling up to it reads as a wall is for the screen.
+
+Thirteenth pass, November 21, over the repair at `969f707c90`: nothing to
+change. `change_counts` and `diff_snapshot` both build their arguments with
+`comparison_diff_args`, and the untracked files' `--no-index` patch takes the
+same `PINNED_PATCH_FLAGS`; an untracked file's count is `untracked_changes`,
+one addition. A step's read replaces the counts with its own comparison's,
+since `showStep` clears `changes` and `refreshChanges` reads the step.
 
 ## Remaining
 
@@ -519,6 +530,8 @@ files:
 Measured (November 21 evening, `DiffScrollMeasurement`, this Task's Diff with nothing hidden, 76 files, 600 × 900 pt): before, scroll frames of 40 pt median 4.6 ms, p95 12.1, 5/300 over 16.7 ms, sidebar jumps median 245 ms, max 1,102 ms. Separating anchor from current alone: about the same. Lazy line rows: p95 9.7, 2/300, jumps median 109, max 1,524 (the farthest). With the window: jumps median 92, max 119 ms; "files above" 350 ms; first frame 92 → 51 ms. A per-line syntax span cache was tried and dropped: jumps draw unseen lines, so it never hit. Jumps keep ~90 ms of drawing a new screen of rows; whether that reads as instant is for the screen.
 
 Check (November 21 evening): `cargo test -p loopflow-execution --lib task_changes_` 2, `dto_fixtures::` 49, `server::schema::tests::` 8, `documented_commands::` 4 passed; `scripts/test_desktop.sh --skip-build --filter 'TaskFilesTests|ReviewDiffTests|DTOFixtureTests|RegistryQueryTests'` 135 passed. Gate/CI: clippy, the full Swift suite (the FSEvents tests `commitInLinkedWorktreeRereadsTheComparison` and `ignoredWritesFromReadsNeverScheduleAnotherRead` failed earlier under a busy `fseventsd`), `global_commands`. Demo: scrolling and jumps on screen.
+
+Check (November 21 night, shared `PINNED_PATCH_FLAGS` for counts, the Diff and untracked files): `cargo test -p loopflow-execution --lib ops::task::` 65 passed, `cargo clippy -p loopflow-execution --all-targets` clean; `scripts/test_desktop.sh --filter ReviewDiffTests` 15 passed, `stopsMatchTheCountsTheServerSends` among them.
 
 ## Diff polish, November 21 — built
 

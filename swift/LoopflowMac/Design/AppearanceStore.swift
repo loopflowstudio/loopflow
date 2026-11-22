@@ -27,7 +27,6 @@ private struct AppearanceDraft {
     var selection: AppearanceSelection
     var library: ThemeLibrary
     var changed: Set<String> = []
-    var refusal: String?
 }
 
 /// All windows share one theme choice from `theme:` in `~/.lf/config.yaml`, your theme files and
@@ -93,14 +92,13 @@ final class AppearanceStore {
     }
     var canDelete: Bool { selectedSource == .yours }
     var deleteRevertsToBuiltin: Bool { canDelete && currentLibrary.isBuiltin(selectedName) }
-    var refusal: String? { draft?.refusal }
     var draftErrors: [String] {
         guard let draft else { return [] }
         return draft.changed.sorted().flatMap { name in
             (draft.library.yours[name]?.readabilityErrors ?? []).map { "\(name): \($0)" }
         }
     }
-    var canApply: Bool { !saving && refusal == nil && draftErrors.isEmpty }
+    var canApply: Bool { !saving && draftErrors.isEmpty }
     func themeName(for picker: AppearanceMode) -> String { current.name(dark: picker == .dark) }
 
     private func theme(_ name: String, dark: Bool, in library: ThemeLibrary) -> ThemeDefinition {
@@ -145,7 +143,7 @@ final class AppearanceStore {
             if let theme = library.resolve(name) { return (name, theme.isDark) }
             guard let dark = ThemeDefinition.retired[name] else { throw unknown(name) }
             let replacement: ThemeDefinition = dark ? .dark : .light
-            notes.append("“\(name)” is no longer built in, so \(replacement.name) is showing; to keep it, import its Ghostty theme file under Yours in Choose Theme.")
+            notes.append("“\(name)” is no longer built in, so \(replacement.name) is showing.")
             return (replacement.name, dark)
         }
         var choice = selection
@@ -202,13 +200,11 @@ final class AppearanceStore {
         guard appearance != .system else { return }
         beginPreview()
         picker = appearance
-        draft?.refusal = nil
         update(selectedTheme)
     }
     func previewMode(_ mode: AppearanceMode) {
         beginPreview()
         draft?.selection.mode = mode
-        draft?.refusal = nil
         picker = current.isDark(systemDark: systemDark) ? .dark : .light
         update(selectedTheme)
     }
@@ -216,7 +212,6 @@ final class AppearanceStore {
         guard let theme = currentLibrary.resolve(name) else { notice = "No theme named “\(name)”."; return }
         beginPreview()
         if picker == .dark { draft?.selection.dark = name } else { draft?.selection.light = name }
-        draft?.refusal = nil
         diagnostics = []
         update(theme)
     }
@@ -248,20 +243,16 @@ final class AppearanceStore {
         update(selectedTheme)
     }
 
-    /// Import a theme file into the active picker. Only that picker's appearance is accepted.
+    /// Import a theme file onto the side its own colors say. In Light or Dark mode the preview switches to that side.
     func importTheme(_ url: URL) {
         beginPreview()
         do {
             let file = try ThemeFile.read(url)
-            let dark = picker == .dark
-            guard file.theme.isDark == dark else {
-                let other = file.theme.isDark ? "Dark" : "Light"
-                draft?.refusal = "“\(file.theme.name)” is a \(other.lowercased()) theme. Import it from the \(other) picker."
-                return
-            }
-            draft?.refusal = nil
+            let side: AppearanceMode = file.theme.isDark ? .dark : .light
+            if current.mode != .system { draft?.selection.mode = side }
+            picker = side
             stage(file.theme, for: file.theme.name)
-            if dark { draft?.selection.dark = file.theme.name } else { draft?.selection.light = file.theme.name }
+            if side == .dark { draft?.selection.dark = file.theme.name } else { draft?.selection.light = file.theme.name }
             diagnostics = file.diagnostics
             update(file.theme)
         } catch { notice = error.localizedDescription }

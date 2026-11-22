@@ -291,21 +291,17 @@ struct ThemeTests {
         }
     }
 
-    @Test func importAcceptsOnlyThePickersAppearance() async throws {
+    @Test func importFilesAThemeOnItsOwnSide() async throws {
         try await withThemeServer { location in
             let paths = ThemePaths.temporary()
             let store = await AppearanceStore.loaded(paths: paths, systemDark: false, location: location)
             store.beginPreview(); store.showPicker(.light)
             store.importTheme(try file("background=171924\nforeground=CAD2EF"))
-            #expect(store.refusal == "“Personal” is a dark theme. Import it from the Dark picker.")
-            #expect(!store.canApply)
-            #expect(store.effectiveTheme.name == "Loopflow Light")
-            #expect(store.entries(for: store.picker).yours.isEmpty)
-            store.showPicker(.dark)
             #expect(store.canApply)
-            store.importTheme(try file("background=171924\nforeground=CAD2EF"))
-            #expect(store.refusal == nil)
-            #expect(store.entries(for: store.picker).yours.map(\.name) == ["Personal"])
+            #expect(store.current.mode == .system)
+            #expect(store.picker == .dark)
+            #expect(store.entries(for: .dark).yours.map(\.name) == ["Personal"])
+            #expect(store.entries(for: .light).yours.isEmpty)
             #expect(store.effectiveTheme.name == "Personal")
             await store.apply()
             let savedTheme7 = try await ThemeConfig.read(paths.config, location: location)

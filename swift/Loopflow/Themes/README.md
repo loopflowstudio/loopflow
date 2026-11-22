@@ -38,4 +38,4 @@ from the matching Loopflow preset; 16–255 default to xterm's.
 
 Both SwiftPM and Xcode ship the catalogue offline. A `theme:` setting that
 names a built-in from before the families (Gruvbox Dark, Linen…) shows Loopflow
-Light or Dark for that side and says how to import the old one.
+Light or Dark for that side and says so.

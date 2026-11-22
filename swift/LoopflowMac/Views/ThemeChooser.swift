@@ -9,39 +9,17 @@ struct ThemeChooser: View {
     @Environment(\.palette) private var palette
 
     var body: some View {
-        // System shows both pickers; Light or Dark shows only its own.
+        // System shows both sides; Light or Dark shows only its own.
         let sides: [AppearanceMode] = appearance.current.mode == .system ? [.light, .dark] : [appearance.current.mode]
         VStack(alignment: .leading, spacing: Spacing.lg) {
             Text("Choose Theme").serif(.title).foregroundStyle(palette.emphasisInk)
-            HStack(alignment: .bottom, spacing: Spacing.lg) {
-                Picker("Mode", selection: Binding(get: { appearance.current.mode }, set: { appearance.previewMode($0) })) {
-                    ForEach(AppearanceMode.allCases, id: \.self) { mode in Text(mode.menuTitle).tag(mode) }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .frame(width: 180)
-                .accessibilityIdentifier("appearance-mode")
-                ForEach([AppearanceMode.light, .dark], id: \.self) { side in
-                    let enabled = appearance.current.mode == .system || appearance.current.mode == side
-                    VStack(alignment: .leading, spacing: Spacing.xs) {
-                        Text("\(side.menuTitle) theme").font(Typography.meta).foregroundStyle(palette.textSecondary)
-                        Button { editing = false; appearance.showPicker(side) } label: {
-                            Text(appearance.themeName(for: side))
-                                .lineLimit(1).truncationMode(.tail)
-                                .frame(maxWidth: .infinity, minHeight: 28, alignment: .leading)
-                        }
-                        .buttonStyle(LoopflowButtonStyle())
-                        .workSelection(enabled && appearance.picker == side)
-                        .disabled(!enabled)
-                        .accessibilityLabel("\(side.menuTitle) theme")
-                        .accessibilityValue(appearance.themeName(for: side))
-                        .accessibilityIdentifier("appearance-picker-\(side.rawValue)")
-                        .help(enabled ? "Choose your \(side.menuTitle.lowercased()) theme" : "Used in \(side.menuTitle) or System mode")
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .opacity(enabled ? 1 : 0.45)
-                }
+            Picker("Mode", selection: Binding(get: { appearance.current.mode }, set: { appearance.previewMode($0) })) {
+                ForEach(AppearanceMode.allCases, id: \.self) { mode in Text(mode.menuTitle).tag(mode) }
             }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(width: 180)
+            .accessibilityIdentifier("appearance-mode")
             Text("Previewing \(appearance.selectedTheme.name)")
                 .font(Typography.meta).foregroundStyle(palette.textSecondary)
             ScrollView {
@@ -51,7 +29,9 @@ struct ThemeChooser: View {
                     VStack(alignment: .leading, spacing: Spacing.sm) {
                         ForEach(sides, id: \.self) { side in
                             let entries = appearance.entries(for: side)
-                            if sides.count > 1 { Text("\(side.menuTitle) themes").font(Typography.textStrong) }
+                            Text("\(side.menuTitle) themes · \(appearance.themeName(for: side))")
+                                .font(Typography.textStrong)
+                                .accessibilityIdentifier("appearance-heading-\(side.rawValue)")
                             Text("Built-in").font(Typography.meta).foregroundStyle(palette.textSecondary)
                             grid(entries.builtins, side: side)
                             Text("Yours").font(Typography.meta).foregroundStyle(palette.textSecondary)
@@ -63,9 +43,6 @@ struct ThemeChooser: View {
                     ForEach(appearance.diagnostics, id: \.self) { Text($0) }
                     ForEach(appearance.draftErrors, id: \.self) { Text($0).foregroundStyle(palette.failure) }
                 }.font(Typography.meta).frame(maxWidth: .infinity, alignment: .leading)
-            }
-            if let refusal = appearance.refusal {
-                Text(refusal).foregroundStyle(palette.failure).accessibilityIdentifier("appearance-import-refusal")
             }
             if let notice = appearance.notice { Text(notice).foregroundStyle(palette.failure).textSelection(.enabled) }
             HStack {
@@ -93,13 +70,13 @@ struct ThemeChooser: View {
     private func grid(_ entries: [ThemeEntry], side: AppearanceMode, importTile: Bool = false) -> some View {
         LazyVGrid(columns: [GridItem(.adaptive(minimum: 180), alignment: .top)], alignment: .leading, spacing: Spacing.md) {
             ForEach(entries) { entry in card(entry, side: side) }
-            if importTile { importPlaceholder(side: side) }
+            if importTile { importPlaceholder }
         }
     }
 
-    /// A dashed tile the same shape as a theme card.
-    private func importPlaceholder(side: AppearanceMode) -> some View {
-        Button { importTheme(side: side) } label: {
+    /// A dashed tile the same shape as a theme card. The file joins the side its own colors say.
+    private var importPlaceholder: some View {
+        Button { importTheme() } label: {
             VStack(alignment: .leading, spacing: Spacing.sm) {
                 Text("Import file…").foregroundStyle(palette.textSecondary)
                 Color.clear.frame(height: 8)
@@ -112,8 +89,8 @@ struct ThemeChooser: View {
                 .strokeBorder(palette.borderStrong, style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
         }
         .buttonStyle(.plain)
-        .help("Add a Ghostty theme file to your \(side.menuTitle.lowercased()) themes")
-        .accessibilityIdentifier(side == .dark ? "appearance-import-theme-dark" : "appearance-import-theme")
+        .help("Add a Ghostty theme file to your themes")
+        .accessibilityIdentifier("appearance-import-theme")
     }
 
     /// The theme drawn in its own roles; the chosen card is ringed in the window's focus color.
@@ -157,8 +134,7 @@ struct ThemeChooser: View {
         }
     }
 
-    private func importTheme(side: AppearanceMode) {
-        appearance.showPicker(side)
+    private func importTheme() {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false

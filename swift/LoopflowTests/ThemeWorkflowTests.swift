@@ -55,9 +55,10 @@ struct ThemeWorkflowTests {
             let mode = try view.inspect().find(viewWithAccessibilityIdentifier: "appearance-mode").picker()
             for choice in [AppearanceMode.light, .dark, .system] {
                 try mode.select(value: choice)
-                for slot in [AppearanceMode.light, .dark] {
-                    let button = try view.inspect().find(viewWithAccessibilityIdentifier: "appearance-picker-\(slot.rawValue)").button()
-                    #expect(button.isDisabled() == (choice != .system && choice != slot))
+                for side in [AppearanceMode.light, .dark] {
+                    let heading = try? view.inspect().find(viewWithAccessibilityIdentifier: "appearance-heading-\(side.rawValue)").text().string()
+                    let shown = choice == .system || choice == side
+                    #expect(heading == (shown ? "\(side.menuTitle) themes · Loopflow \(side.menuTitle)" : nil))
                 }
                 #expect(appearance.picker == (choice == .dark ? .dark : .light))
                 let showsDark = (try? view.inspect().find(viewWithAccessibilityIdentifier: "appearance-theme-Harbor")) != nil
@@ -69,9 +70,18 @@ struct ThemeWorkflowTests {
             #expect(appearance.entries(for: .light).builtins.allSatisfy { !$0.theme.isDark })
             #expect(appearance.entries(for: .dark).builtins.count == 13)
             #expect(appearance.entries(for: .dark).builtins.allSatisfy { $0.theme.isDark })
-            // System lists both sides at once; each tile assigns its own side.
+            // System lists both sides at once; each card assigns its own side and takes the Customize row.
+            func customizeShown(under name: String) -> Bool {
+                (try? view.inspect().find(viewWithAccessibilityIdentifier: "appearance-theme-\(name)").parent()
+                    .find(viewWithAccessibilityIdentifier: "appearance-customize-theme")) != nil
+            }
             try view.inspect().find(viewWithAccessibilityIdentifier: "appearance-theme-Fjord Light").button().tap()
+            #expect(customizeShown(under: "Fjord Light"))
             try view.inspect().find(viewWithAccessibilityIdentifier: "appearance-theme-Harbor").button().tap()
+            #expect(customizeShown(under: "Harbor"))
+            #expect(!customizeShown(under: "Fjord Light"))
+            #expect(try view.inspect().find(viewWithAccessibilityIdentifier: "appearance-heading-light").text().string() == "Light themes · Fjord Light")
+            #expect(try view.inspect().find(viewWithAccessibilityIdentifier: "appearance-heading-dark").text().string() == "Dark themes · Harbor")
             #expect(appearance.themeName(for: .light) == "Fjord Light")
             #expect(appearance.current.mode == .system)
             try view.inspect().find(button: "Apply").tap()
@@ -94,27 +104,27 @@ struct ThemeWorkflowTests {
         }
     }
 
-    @Test func chooserExplainsAMismatchedImportAndKeepsApplyDisabled() throws {
+    @Test func aDarkFileImportedFromTheLightSectionPreviewsInDarkWithApplyEnabled() throws {
         let appearance = AppearanceStore(paths: .temporary(), systemDark: false)
         appearance.beginPreview()
+        appearance.previewMode(.light)
         let view = ThemeChooser(appearance: appearance)
-        #expect(try !view.inspect().find(button: "Apply").isDisabled())
-        try view.inspect().find(button: "Cancel").tap()
-        #expect(!appearance.chooserOpen)
+        #expect((try? view.inspect().find(viewWithAccessibilityIdentifier: "appearance-heading-dark")) == nil)
         let source = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
             .appendingPathComponent("Midnight")
         defer { try? FileManager.default.removeItem(at: source.deletingLastPathComponent()) }
         try FileManager.default.createDirectory(at: source.deletingLastPathComponent(), withIntermediateDirectories: true)
         try Data("background=101010\nforeground=EEEEEE".utf8).write(to: source)
-        appearance.beginPreview(); appearance.importTheme(source)
-        #expect(try view.inspect().find(button: "Apply").isDisabled())
-        let refusal = try view.inspect().find(viewWithAccessibilityIdentifier: "appearance-import-refusal").text().string()
-        #expect(refusal == "“Midnight” is a dark theme. Import it from the Dark picker.")
-        #expect(appearance.effectiveTheme.name == "Loopflow Light")
-        try view.inspect().find(viewWithAccessibilityIdentifier: "appearance-picker-dark").button().tap()
-        #expect(try !view.inspect().find(button: "Apply").isDisabled())
         appearance.importTheme(source)
+        #expect(appearance.current.mode == .dark)
+        #expect(appearance.current.light == "Loopflow Light")
         #expect(appearance.effectiveTheme.name == "Midnight")
+        #expect(try view.inspect().find(viewWithAccessibilityIdentifier: "appearance-mode").picker().selectedValue(AppearanceMode.self) == .dark)
+        #expect(try view.inspect().find(viewWithAccessibilityIdentifier: "appearance-heading-dark").text().string() == "Dark themes · Midnight")
+        #expect(try !view.inspect().find(button: "Apply").isDisabled())
+        appearance.cancel()
+        #expect(appearance.current.mode == .system)
+        #expect(appearance.effectiveTheme.name == "Loopflow Light")
     }
 }
 /// The accepted appearances, exercised through the same preview transaction as the chooser.

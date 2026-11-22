@@ -287,6 +287,12 @@ What the build taught:
 Left for gate: `cargo test -p loopflow --test integration documented_commands::`
 (DESIGN.md's one-token edit), and a look in real Chrome.
 
+Post-build concept review (2026-11-21): concepts line up; no model change.
+Also for gate: `@rt("/favicon.ico")` in `main.py` never runs (fast_app's
+static route wins); register it with the front-inserted `Route`s so
+`/favicon.ico` answers, as the font route does. Page:
+`scratch/concept-review.html`.
+
 ## Docs written first (write-docs, 2026-11-21)
 
 `DESIGN.md` already describes the shipped website: prototypes paragraph,

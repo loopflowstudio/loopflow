@@ -2,8 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>dd8997 concept review: one site</title>
+<title>dd8997 concept review: one site, as built</title>
 <style>
 :root { color-scheme: light dark; --bg:#fff; --fg:#1a1a1a; --muted:#5d6066; --rule:#e2e2df; --yes:#2f7a3d; --no:#a3263d; --prop:#2a5db0; --tint:#f6f6f4; }
 @media (prefers-color-scheme: dark) { :root { --bg:#141414; --fg:#ececea; --muted:#a2a5aa; --rule:#333; --yes:#6fc27f; --no:#f08497; --prop:#8db4f2; --tint:#1e1e1e; } }
@@ -22,67 +21,54 @@ code { font:13.5px ui-monospace, monospace; }
 .cols { display:grid; grid-template-columns:1fr 1fr; gap:20px; }
 @media (max-width:700px){ .cols { grid-template-columns:1fr; } }
 .frame { border:1px solid var(--rule); border-radius:8px; padding:12px; background:var(--tint); font-size:13.5px; }
-.frame div { border:1px dashed var(--rule); border-radius:4px; padding:6px 8px; margin:6px 0; background:var(--bg); }
-.frame .bad { border-color:var(--no); } .frame .good { border-color:var(--prop); }
-ol li { margin:8px 0; }
+ol li { margin-bottom:8px; }
 </style>
 </head>
 <body>
-<h1>Do the website's concepts and the code's line up?</h1>
-<p class="lead">Area taken: every page a visitor reaches on loopflow.studio (<code>/</code>, studio pages, <code>/docs/*</code>, <code>/architecture/*</code>, <code>/download</code>) and what wraps them: faces, bar, footer, palette, type steps, the install action and the workflow card. The plan named a bar; the thing a visitor meets is the whole page frame, so the review takes the frame. Nothing is built yet; this reviews the plan against <code>main.py</code>, <code>content.yaml</code> and <code>style.css</code> at 07e2fcd6c5.</p>
+<h1>dd8997 concept review: one site, as built</h1>
+<p class="lead">Do the website's concepts and the code's line up, now that the change is in?</p>
+
+<p>Area taken: every page a visitor reaches (<code>/</code>, studio pages, <code>/docs/*</code>, <code>/architecture/*</code>, <code>/download</code>, the 404) and what frames them: faces, bar, footer, palette, ramp, install, the workflow card. Reviewed at <code>d37ecdb54d</code> against the checkout base <code>ef799cd012</code>. The pre-build review of this page (at <code>07e2fcd6c5</code>) proposed the one frame; this pass checks it shipped and looks for what the build left.</p>
 
 <h2>The interaction</h2>
-<p>A visitor lands on <code>/</code>, reads, clicks Docs, reads a page, clicks Install. Today: the bar changes shape on the click to Docs (<code>Navbar</code>, sticky, blurred, a "Graphs" link, different type), the footer changes text, and Install from the homepage bar goes to <code>/#start</code>, which nothing carries, so it does nothing. From the docs bar the same word goes to <code>/download</code>. On <code>/studio</code> there is no footer at all. Recovery today is the browser's back button.</p>
-<p class="prop"><span class="tag p">proposed</span> The same bar and the same footer frame every page; Install goes to <code>/download</code> from everywhere; only what sits between them changes.</p>
+<p>A visitor lands on <code>/</code>, clicks Docs, reads, clicks Install, copies the command, mistypes a URL. Built: the bar and footer are the same element on every page (<code>SitePage</code> → <code>SiteHeader</code> · <code>Main</code> · <code>SiteFooter</code>); Install goes to <code>/download</code> from everywhere; the command there comes from the one <code>install</code> block and the copy button says "Copied"; a bad URL lands on a 404 inside the same frame with Home · Docs, which is the recovery path. <code>test_faces.py</code> fails if any page's header or footer differs.</p>
 
 <h2>Pairings</h2>
 <table>
-<tr><th>What a visitor knows</th><th>Code behind it</th><th>Line up?</th><th>After the plan</th></tr>
-<tr><td>A page of the site (bar, body, footer)</td><td><code>_studio_page</code> (no footer), <code>_product_page</code> (homepage footer), <code>_docs_page</code> and <code>/download</code> (<code>Navbar</code> + <code>SiteFooter</code>)</td><td class="no">no: one idea, four builders, three footer states</td><td><span class="tag p">proposed</span> one <code>SitePage</code></td></tr>
-<tr><td>The bar</td><td><code>_topbar()</code> and <code>Navbar()</code>, two link sets, two CSS blocks</td><td class="no">no: one name for two things</td><td class="yes">yes: <code>SiteHeader</code></td></tr>
-<tr><td>The footer</td><td><code>SiteFooter()</code> and the inline homepage <code>Footer</code></td><td class="no">no: two footers, different copy</td><td><span class="tag p">proposed</span> one <code>SiteFooter</code>, the homepage's</td></tr>
-<tr><td>Install (the action)</td><td><code>install</code> (bar, href <code>/#start</code>), <code>homepage.install</code> (command, dmg), <code>/download</code> hardcoding the command twice</td><td class="no">no: one action in three places, one link dead</td><td><span class="tag p">proposed</span> one <code>install</code> block</td></tr>
-<tr><td>The site's faces</td><td>Google Fonts link, Instrument/Inter/JetBrains stacks, patches for the new faces</td><td class="no">no: faces DESIGN.md names aren't shipped</td><td class="yes">yes: self-hosted woff2, one stack per role</td></tr>
-<tr><td>Colors</td><td><code>:root</code> roles plus <code>--d-*</code> and raw hex below it</td><td class="no">no: docs palette under its own names</td><td class="yes">yes: <code>:root</code> only</td></tr>
-<tr><td>Type sizes</td><td><code>--t-*</code> plus <code>--fs-*</code></td><td class="no">no: two ramps</td><td class="yes">yes: <code>--t-*</code></td></tr>
-<tr><td>Commands look like commands</td><td><code>.md-link</code> in mono with a <code>{ }</code> glyph</td><td class="no">no: mono as decoration</td><td class="yes">yes: sans</td></tr>
-<tr><td>The three workflows and where you come in</td><td>hand-written <code>.wfs</code> in <code>home.html</code>; builtin <code>task/graph/*.yaml</code></td><td class="no">no: card names steps the Graphs don't run (<code>task-design</code>, <code>pursue</code>, <code>demo</code>, <code>ship</code>)</td><td class="yes">yes for the lines, tested against the YAML</td></tr>
-<tr><td>The card's captions</td><td><code>&lt;small&gt;</code> copy, kept word for word</td><td class="no">no: <code>code</code> says "One stop." beside two stops; <code>feature</code> says "The default." while <code>code</code> is the fallback</td><td class="no">still no; question 3</td></tr>
+<tr><th>What a visitor knows</th><th>Code behind it</th><th>Line up?</th></tr>
+<tr><td>A page of the site</td><td><code>SitePage(title, current, *main, cls)</code>; every route, the 404 included</td><td class="yes">yes</td></tr>
+<tr><td>The bar</td><td><code>SiteHeader(current)</code>, <code>.site-header</code>; <code>Navbar</code> deleted</td><td class="yes">yes</td></tr>
+<tr><td>The footer</td><td><code>SiteFooter()</code> from top-level <code>footer</code>; docs footer deleted</td><td class="yes">yes</td></tr>
+<tr><td>Install</td><td>top-level <code>install</code> (label, href, command, download_url); <code>/download</code> reads it</td><td class="yes">yes</td></tr>
+<tr><td>The faces</td><td>five self-hosted woff2, <code>/static/fonts/{name}</code> with CORS for the portable export</td><td class="yes">yes</td></tr>
+<tr><td>Colors and sizes</td><td><code>:root</code> only: 0 <code>!important</code>, 0 raw colors below it, no <code>--d-*</code>/<code>--fs-*</code></td><td class="yes">yes</td></tr>
+<tr><td>The workflow card's lines</td><td><code>home.html</code> <code>.wfs</code>, tested against <code>task/graph/*.yaml</code></td><td class="yes">yes</td></tr>
+<tr><td>The card's captions</td><td><code>&lt;small&gt;</code> copy, kept word for word</td><td class="no">no: <code>code</code> "One stop." beside two stops; "The default." under <code>feature</code> while <code>code</code> is the fallback. Copy is excluded from this Task.</td></tr>
+<tr><td>(nothing: browsers use <code>&lt;link rel="icon"&gt;</code>)</td><td><code>@rt("/favicon.ico")</code> in <code>main.py</code>, shadowed by fast_app's static route, never runs</td><td class="no">no: code the visitor never reaches</td></tr>
+<tr><td>(nothing)</td><td><code>cls="home-page"</code> scopes the homepage, studio pages and the 404</td><td class="no">no, minor: one name for "pages in the homepage's layout"; 95 scoped selectors</td></tr>
 </table>
 
-<h2>The biggest mismatch: the page frame</h2>
-<p>The plan unifies the bar and leaves the footer as "its own decision". But the visitor's concept is the page frame, and the code's mismatch is the four builders, not the bar. Fixing only the bar leaves the four builders in place, each choosing a footer, and the next page added picks a fifth arrangement.</p>
+<h2>The biggest mismatch</h2>
+<p>None at the concept level. The frame, install, palette and ramp each have one owner, and the old second system is gone rather than wrapped. What is left is small:</p>
 <div class="cols">
-<div class="frame"><b>Before <span class="tag e">existing</span></b>
-<div class="bad"><code>/</code>: <code>_topbar</code> · main · homepage <code>Footer</code></div>
-<div class="bad"><code>/studio</code>, <code>/etude</code>…: <code>_topbar</code> · main · <em>nothing</em></div>
-<div class="bad"><code>/docs/*</code>: <code>Navbar</code> · rail + article · <code>SiteFooter</code></div>
-<div class="bad"><code>/download</code>: <code>Navbar</code> · inline-styled card · <code>SiteFooter</code></div>
+<div class="frame"><span class="tag e">existing</span><br><code>@rt("/favicon.ico") async def favicon()</code> declared after fast_app's <code>/{fname}.{ext:static}</code> route, so <code>/favicon.ico</code> answers 404.</div>
+<div class="frame prop"><span class="tag p">proposed</span><br>Register it with the other front-inserted routes (<code>app.routes.insert(0, Route("/favicon.ico", …))</code>) so it works, or delete it. Working is the smaller-system answer: one place where routes that must win are registered.</div>
 </div>
-<div class="frame"><b>After <span class="tag p">proposed</span></b>
-<div class="good"><code>SitePage(title, current, *main, cls)</code></div>
-<div class="good">→ <code>SkipLink</code> · <code>SiteHeader(current)</code> · <code>Main</code> · <code>SiteFooter()</code></div>
-<div class="good">home / studio: <code>cls="home-page"</code> (scoped rules stay)</div>
-<div class="good">docs: <code>cls="docs-page"</code> · download: <code>cls="download-page"</code></div>
-</div>
-</div>
-<p>Choice made for review: the homepage footer wins ("Loopflow · An open-source software instrument." with Loopflow Studio, Get started ↗, Source ↗). It is already the shared copy in <code>content.yaml</code>, so nothing new is written; the docs footer's "Built by Loopflow Studio" line goes. Studio pages gain a footer. The identical-frame e2e test covers header and footer on four pages, so a page that skips <code>SitePage</code> fails it.</p>
-<p>Also folded in: one <code>install</code> block in <code>content.yaml</code> (the dead <code>/#start</code> goes, <code>/download</code> reads the command instead of hardcoding it), and the <code>footer</code> block moves to top level since every page reads it. Both ride in slice 2.</p>
-<p>Kept as the plan has it: slice 1 (faces) first, since Old Standard at 390px is the riskiest visual unknown; the workflow card tested against the YAML rather than rendered from it, because the Docker image copies only <code>website/</code> and cannot read <code>rust/</code>.</p>
+<p>Recorded in <code>scratch/plan.md</code> under "Left for gate"; it does not change the model.</p>
 
 <h2>Counterexamples tried</h2>
 <ul>
-<li>Docs run 1440 wide, the homepage 1240: the frame's bar and footer sit in their own 1240 wrapper, so the box matches while the docs body stays wide.</li>
-<li>Docs need <code>docs.js</code> and a robots <code>Meta</code> on architecture pages: they pass through <code>SitePage</code>'s content; nothing about the frame changes.</li>
-<li>Two <code>nav</code> landmarks on docs pages: they keep distinct labels ("Main navigation", "Documentation"), which the accessibility test checks.</li>
+<li>A future page that builds its own <code>Title</code>/<code>Header</code>: the identical-frame test covers four pages, not all routes, so it would pass. Acceptable: the only builder is <code>SitePage</code>, and there is nothing else to call.</li>
+<li><code>/static/fonts/../main.py</code>: Starlette's <code>{name}</code> does not match <code>/</code>, so the font route cannot leave the directory.</li>
+<li>OS dark mode: <code>data-theme="light"</code> keeps Pico from recoloring; a test fails without it.</li>
 </ul>
 
 <h2>Questions</h2>
 <ol>
-<li>Footer: (a) the homepage's on every page, as planned; (b) the docs footer's "Built by Loopflow Studio" line joins it; (c) keep two footers.</li>
-<li>Studio pages (<code>/studio</code>, <code>/etude</code>, <code>/fantasia</code>, <code>/about</code>) gaining a footer: (a) yes; (b) they stay bare on purpose.</li>
-<li>Workflow card captions once the lines are true: (a) keep word for word, contradiction and all; (b) rewrite <code>code</code>'s "One stop." and <code>feature</code>'s "The default." to match; (c) make <code>feature</code> the actual fallback Graph so "The default." is true.</li>
-<li>The docs bar's "Graphs" link: (a) gone, as planned; (b) a Graphs entry joins the shared bar.</li>
+<li>Workflow card captions: (a) keep word for word, contradiction and all; (b) a separate copy Task rewrites "One stop." and "The default."; (c) make <code>feature</code> the fallback Graph so "The default." is true.</li>
+<li><code>/favicon.ico</code>: (a) register it ahead of the static route so it works; (b) delete the handler.</li>
+<li><code>home-page</code> scope: (a) leave it; (b) rename to a layout name (e.g. <code>wide-page</code>) in a later cleanup.</li>
+<li>Pico, loaded unpinned from jsDelivr and the cause of most resets: (a) pin a version; (b) <code>pico=False</code> and delete the resets, as its own Task; (c) leave it.</li>
 </ol>
 </body>
 </html>

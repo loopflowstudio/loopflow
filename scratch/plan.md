@@ -7,12 +7,11 @@ once their screens shipped; `git show fd90d7e6ad:design/prototypes/desktop-more.
 has them, and `docs/surfaces.md` holds the wording now.
 
 Slices 1 to 6 are built and were looked at in the Dev app
-(`scratch/qa.html`, three runs). Of slice 6's lines, two were seen on a real
-failure ("Workspace did not open.", "Latest read failed."); the rest have
-view tests or nothing (the page lists which). Next: the gate checks and one
-look at "Not started." on an unlocked display (questions 48). A Task started
-from New Task opens beside "Files did not open" (Task ea8659, outside this
-change); a demo meets it on the first Start.
+(`scratch/qa.html`, three runs). **Next: slice 7**, five failures still
+drawn outside `FailureLine` (the list is under "Slices"). After it: the gate
+checks and one look at "Not started." on an unlocked display (questions 48).
+A Task started from New Task opens beside "Files did not open" (Task ea8659,
+outside this change); a demo meets it on the first Start.
 
 ## Outcome
 
@@ -541,6 +540,48 @@ demo: not headless; qa or demo runs it.
      message in the 380 pt bind sheet is the one to look at first.
    - Checks: `scripts/test_desktop.sh --filter 'EmptyStateTests|TypographyDisciplineTests|RemoveWaveSheetTests|RenameWaveSheetTests|WorkNavigationTests|ProjectActivationTests|emptyListStates'`
      passed at 3c4b0d4025, after the last edit (70 tests in 7 suites).
+
+7. **The last five failures drawn another way. To build.** Swift only; no
+   new type beyond the backlog's notice saying which it is. The third
+   as-built concept review read every `Text(error)`, `palette.warning`,
+   `palette.failure` and `exclamationmark` under `swift/LoopflowMac`; this
+   list is closed, and nothing is added to it while building.
+   - `Views/RoadmapView.swift:273`: a Wave card whose Tasks did not load is
+     a warning triangle and the bare reason. It becomes
+     `FailureLine("Tasks did not load.", machine: reason)`, the line
+     `WaveDetailPane.swift:248` draws for the same `roadmap.tasks`.
+   - `Views/RoadmapView.swift:283`: "LOO-1: reason · recovery" becomes
+     `FailureLine("<identifier> is unavailable.", machine: task.reason)`
+     with `task.recovery` as text in its trailing slot.
+   - `Views/BacklogView.swift:465`, `:530`, `:551`: "Order not saved · …",
+     "Brief not saved · …", "Brief not restored · …" share
+     `BacklogState.notice: String?` with "Filed fc6ad0". The notice becomes
+     one value that is either what was done or what failed with the
+     Machine's message, and `notices` (`:737`) draws the second as
+     `FailureLine("Brief not saved.", machine:)` under the same
+     `backlog-notice` identifier. "Order not saved." keeps the Task's
+     identifier in its `what`. Every other `backlogNotice` caller passes
+     what was done, unchanged.
+   - `Views/DashboardView.swift:99`:
+     `FailureLine("Some Work did not load.", machine: first or "first (+n more)")`,
+     one line, `dashboard-unavailable` and the help listing every reason kept.
+   - `Views/TaskChangesView.swift:194`, `:754`: `hiddenNotice` holds the
+     error alone and draws as
+     `FailureLine("Diff settings did not load.", machine:)`.
+   - Stay as they are, because nothing failed: "Partial: searching the N
+     loaded", "Older Tasks are truncated.", "Brief changed since; not
+     undone", "The brief changed since you last read it.", the sidebar's
+     triangle beside a Wave's name (`WorkNavigator.swift:214`), and the
+     sites slice 6 lists as still bare.
+   - A `FailureLine` that is a narrow container's whole content sets its
+     smallest size (questions 56). These five sit beside rows that set the
+     width; the line gets no floor of its own.
+   - Checks: one view test for the backlog (a failed brief save shows "Brief
+     not saved." and the message; a filed Task's notice still reads as
+     text), then
+     `scripts/test_desktop.sh --filter 'BacklogViewTests|EmptyStateTests|TypographyDisciplineTests|WorkNavigationTests'`.
+     Dev app: none of the five is reachable without breaking the Machine;
+     qa looks at whichever it can.
 
 Outside this change, on the page for whoever wants it: a stopped Graph's
 reason is one string on the wire, so the Machine's part of "kickoff:

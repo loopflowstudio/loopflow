@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <meta charset="utf-8">
-<title>Concept review, second pass as built: empty and failed states (923677)</title>
+<title>Concept review, third pass as built: empty and failed states (923677)</title>
 <style>
   :root { --bg:#f8f6f1; --ink:#1f1b18; --soft:#6a625b; --line:#d9d2c7; --card:#fffdf9; --accent:#6d2b35;
           --yes:#2f6b3f; --no:#a23a2a; --new:#8a5a00; --newbg:#fbf1d8; --mono: ui-monospace, Menlo, monospace; }
@@ -13,7 +13,6 @@
          max-width:1040px; margin:0 auto; padding:40px 28px 80px; }
   h1 { font:400 34px/1.15 Georgia, serif; margin:0 0 6px; }
   h2 { font:400 25px/1.2 Georgia, serif; margin:44px 0 10px; }
-  h3 { font:600 16px/1.3 inherit; margin:22px 0 6px; }
   p { margin:8px 0; max-width:74ch; }
   .soft { color:var(--soft); }
   code { font:13px var(--mono); }
@@ -24,58 +23,52 @@
   .new { background:var(--newbg); color:var(--new); padding:0 5px; border-radius:3px; font-weight:600; }
   .pair { display:grid; grid-template-columns:1fr 1fr; gap:18px; margin:14px 0; }
   @media (max-width:760px) { .pair { grid-template-columns:1fr; } }
-  .win { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:0; overflow:hidden; }
+  .win { background:var(--card); border:1px solid var(--line); border-radius:8px; overflow:hidden; }
   .win.proposed { border:2px dashed var(--new); }
   .cap { padding:8px 12px; border-bottom:1px solid var(--line); font-weight:600; }
-  .row { display:flex; min-height:210px; }
-  .pane { padding:16px; border-right:1px solid var(--line); display:flex; flex-direction:column; justify-content:center; }
-  .pane:last-child { border-right:none; }
-  .serif { font:400 22px/1.15 Georgia, serif; color:var(--accent); margin-bottom:6px; }
-  .btn { display:inline-block; border:1px solid var(--line); border-radius:5px; padding:2px 9px; font-size:14px; margin:8px 6px 0 0; }
-  .btn.a { background:var(--accent); color:var(--bg); border-color:var(--accent); font-weight:600; }
-  .bar { padding:6px 12px; border-bottom:1px solid var(--line); font:13px var(--mono); display:flex; gap:10px; align-items:center; }
+  .pane { padding:16px; }
+  .warn { color:var(--new); }
   ol.q > li { margin:14px 0; } ol.q ol { list-style:lower-alpha; margin-top:4px; }
   .taken { color:var(--yes); font-weight:600; }
 </style>
 <h1>Nothing there, or something failed: do the product's concepts and the code's line up?</h1>
-<p class="soft">Task 923677, second review of the built change. The branch at <code>4ffc9a1e43</code> against its base
-<code>fd90d7e6ad</code>, read with both Dev app runs in <code>scratch/qa.html</code>. The first as-built page is in git at
-<code>26d6ae279b</code>.</p>
+<p class="soft">Task 923677, third review of the built change. The branch at <code>6d0e161730</code> against its base
+<code>fd90d7e6ad</code>, read with the three Dev app runs in <code>scratch/qa.html</code>. The second as-built page is in
+git at <code>80284bb62c</code>.</p>
 
 <p><b>The area taken.</b> What Loopflow for Mac shows before work is running and when a read or write fails: the New
-Task sheet, a filed Task that has not started, a pane with nothing in it, and a failure, whether it fills a pane or
-sits beside content that stays. Reviewed with all five slices in it, as someone opening the app for the first time.</p>
+Task sheet, a filed Task that has not started, a pane with nothing in it, a list with nothing in it, and a failure,
+whether it fills a pane or sits beside content that stays. All six slices in it.</p>
 
-<p><b>Since the last pass.</b> It planned one thing, the empty repository's single state, and settled six wordings.
-Slice 5 built all of it; the second Dev app run saw the state in both themes, both of its buttons working, "Not
-filed." and "Not started." with the Machine away, and a Wave's default read the same in the sheet and the pane. The
-four mismatches that page marked <span class="no">no</span> are <span class="yes">yes</span> now.</p>
+<p><b>Since the last pass.</b> It planned one thing: every failure beside content drawn as a
+<code>FailureLine</code>. Slice 6 built it at thirteen sites; 70 view tests passed at <code>3c4b0d4025</code>; the
+third Dev app run saw two of the lines on a real failure, found the Open Work window grown to 1,989 pt by one of them
+and fixed it, and joined the workspace's "Layout not saved" to the tile's. <code>FailureLine</code> is at 27 sites.
+This pass read every remaining error text and warning icon in <code>swift/LoopflowMac</code>. The three forms hold.
+Five sites still draw a failure another way, and one of them is a failure that already has its line on the next
+screen.</p>
 
 <p><span class="yes">yes</span> lines up &nbsp; <span class="no">no</span> does not &nbsp;
 <span class="new">proposed</span> not in the code yet; dashed boxes are proposed too</p>
 
 <h2>One interaction, walked in the built app</h2>
-<p>Someone opens a fresh repository, files a Task with ⌘N, starts it; then the Machine goes away and a save fails.</p>
+<p>Someone files a Task, the Machine loses a Wave's plan, and they look for the Wave's Tasks in two places.</p>
 <table>
   <tr><th>What they see</th><th>Where it comes from</th><th></th></tr>
-  <tr><td>Dev app: “No planned Work in this repository”, one sentence, <i>New Task ⌘N</i>, <i>Open the repository
-      conversation</i>. Released app: the repository's page with its conversation already open.</td>
-      <td><code>WorkModel.repositoryIsEmpty</code>, <code>NoPlannedWork</code>; the conversation opens on its own
-      through <code>SessionsWorkspace.opensConversationAutomatically</code>.</td>
-      <td class="yes">yes (question 1)</td></tr>
-  <tr><td>⌘N: the question, the sentence with two menus, the step line, “You take part at …”, <i>Start ⌘↩</i>.</td>
-      <td><code>NewTaskWorkflow</code> over <code>GraphCatalogEntry.workflow</code>.</td><td class="yes">yes</td></tr>
-  <tr><td>The filed Task: “Not started”, “It will run code, the default. You take part at ship-review and verify.”,
-      <i>Start</i>, <i>Start with…</i>.</td>
-      <td><code>TaskStartOffer</code> as an <code>EmptyState</code>, the same outline.</td><td class="yes">yes</td></tr>
-  <tr><td>File with the Machine away: the sheet stays, “<b>Not filed.</b>” and the message in mono.</td>
-      <td><code>FailureLine</code>.</td><td class="yes">yes</td></tr>
-  <tr><td>⌘↩ with the Machine away: the request, “<b>Not started.</b>”, the message in mono, <i>Try again</i>,
-      <i>Discard</i>. Try again starts it once the Machine is back.</td>
-      <td><code>StartingTaskView</code> with a <code>FailureLine</code>.</td><td class="yes">yes</td></tr>
-  <tr><td>A directive that does not save, a dashboard layout that does not save, a Project that is not prepared: the
-      message alone, in the warning ink or the body ink, with no word for what failed.</td>
-      <td>Bare <code>Text(error)</code> at about a dozen sites.</td><td class="no">no</td></tr>
+  <tr><td>⌘N, the sentence with two menus, the step line, <i>Start ⌘↩</i>; with the Machine away, “<b>Not filed.</b>”
+      and the message in mono.</td>
+      <td><code>NewTaskWorkflow</code> over <code>GraphCatalogEntry.workflow</code>; <code>FailureLine</code>.</td>
+      <td class="yes">yes</td></tr>
+  <tr><td>The Wave's page: “<b>Tasks did not load.</b>” and the reason in mono.</td>
+      <td><code>WaveDetailPane.swift:248</code>, <code>FailureLine</code>.</td><td class="yes">yes</td></tr>
+  <tr><td>The roadmap's card for the same Wave: a warning triangle and the bare reason in the warning ink.</td>
+      <td><code>RoadmapView.swift:273</code>, <code>Label(reason, systemImage:)</code> over the same
+      <code>roadmap.tasks</code>.</td><td class="no">no</td></tr>
+  <tr><td>In the backlog they edit a brief and the save fails: “Brief not saved · store is locked” in the secondary
+      ink, the face that says “Filed fc6ad0”.</td>
+      <td><code>BacklogState.notice</code>, one string for a success and a failure.</td><td class="no">no</td></tr>
+  <tr><td>Recovery: the plan reads again and both lines go; the next save replaces the notice.</td>
+      <td>Each site's own state, unchanged.</td><td class="yes">yes</td></tr>
 </table>
 
 <h2>Product concepts and code concepts</h2>
@@ -87,82 +80,90 @@ four mismatches that page marked <span class="no">no</span> are <span class="yes
   <tr><td>Whose default the workflow is</td>
       <td><code>workflowChoice</code>, <code>workflowSelection</code></td><td class="yes">yes</td><td></td></tr>
   <tr><td>A pane with nothing in it, or one that did not open</td>
-      <td><code>EmptyState</code>; no <code>ContentUnavailableView</code> left, and a test fails on a new one</td>
+      <td><code>EmptyState</code> at 22 sites; no <code>ContentUnavailableView</code>, and a test fails on a new
+      one</td><td class="yes">yes</td><td></td></tr>
+  <tr><td>A list with nothing in it</td><td><code>.emptyLine()</code> at 17 sites</td><td class="yes">yes</td><td></td></tr>
+  <tr><td>An empty repository</td><td><code>repositoryIsEmpty</code>, <code>NoPlannedWork</code></td>
       <td class="yes">yes</td><td></td></tr>
-  <tr><td>A list with nothing in it</td>
-      <td><code>.emptyLine()</code></td><td class="yes">yes</td>
-      <td>Two sidebar lines lack the full stop the rest have (question 3).</td></tr>
-  <tr><td>An empty repository</td>
-      <td><code>repositoryIsEmpty</code>, one state in place of the page</td><td class="yes">yes</td>
-      <td>It holds only while no conversation is open, which is what its second button says.</td></tr>
   <tr><td>Something failed beside what I am looking at</td>
-      <td><code>FailureLine</code> at 13 sites; bare <code>Text(error)</code> at about 12 more</td>
-      <td class="no">no</td><td>One idea in two forms. The bare ones carry no word for what failed, differ in ink
-      (warning, failure, secondary, body) and half cannot be selected.</td></tr>
-  <tr><td>A Graph that stopped, and why</td>
-      <td>Rust's position line, one string</td><td class="no">no</td>
-      <td>The Machine's message cannot be set apart: the wire carries one sentence. Outside this change
-      (question 4).</td></tr>
+      <td><code>FailureLine</code> at 27 sites; five others</td><td class="no">no</td>
+      <td>One failure under two forms (the roadmap card and the Wave page). One name for two ideas: the backlog's
+      notice is both “Filed fc6ad0” and “Brief not saved”. Three more draw the message alone in the warning ink.</td></tr>
+  <tr><td>What I typed is not valid yet (a range, a Wave's name, a theme file)</td>
+      <td>Text in the warning or failure ink under the field</td><td class="yes">yes</td>
+      <td>Not a failure: nothing was asked of the Machine. These stay, with the Create Wave forms, settings and
+      telemetry the plan excludes.</td></tr>
+  <tr><td>A Graph that stopped, and why</td><td>Rust's position line, one string</td><td class="no">no</td>
+      <td>Outside this change: the wire carries one sentence.</td></tr>
 </table>
 
-<h2>The biggest mismatch: a failure beside content has two forms</h2>
-<p>The brief says “Failures say what failed, show the machine's message in mono, and keep Retry.” The slices
-converted the failures their list named and the ones qa reached. The second run counted what the list missed. To a
-person these are the same event as “Not filed.”: something they asked for did not happen, and the Machine said why.</p>
+<h2>The biggest mismatch: five failures still drawn another way</h2>
 <div class="pair">
-  <div class="win"><div class="cap">Built: a directive that did not save</div>
-    <div class="pane"><span style="color:var(--new)">store is locked by another writer (SQLITE_BUSY)</span></div></div>
-  <div class="win proposed"><div class="cap">Proposed: the same, as New Task says it</div>
-    <div class="pane"><span><b style="color:var(--no)">Not saved.</b>
-      <code>store is locked by another writer (SQLITE_BUSY)</code></span></div></div>
+  <div class="win"><div class="cap">Built: the roadmap's card, a Wave whose Tasks did not load</div>
+    <div class="pane"><span class="warn">⚠ linear: request timed out after 5s</span></div></div>
+  <div class="win proposed"><div class="cap">Proposed: as the Wave's page says it</div>
+    <div class="pane"><b style="color:var(--no)">Tasks did not load.</b> <code>linear: request timed out after 5s</code></div></div>
 </div>
 <div class="pair">
-  <div class="win"><div class="cap">Built: a Project that was not prepared</div>
-    <div class="pane"><span style="color:var(--new)">linear: team not found</span>
-      <span><span class="btn">Retry Project preparation</span></span></div></div>
+  <div class="win"><div class="cap">Built: a brief that did not save, in the backlog</div>
+    <div class="pane"><span class="soft">Brief not saved · store is locked by another writer</span></div></div>
   <div class="win proposed"><div class="cap">Proposed</div>
-    <div class="pane"><span><b style="color:var(--no)">Project not prepared.</b> <code>linear: team not found</code>
-      <span class="btn">Retry Project preparation</span></span></div></div>
+    <div class="pane"><b style="color:var(--no)">Brief not saved.</b> <code>store is locked by another writer</code></div></div>
 </div>
-<p><span class="new">proposed</span> Slice 6 in <code>scratch/plan.md</code>: twelve sites become
-<code>FailureLine("<i>what failed</i>.", machine:)</code>, each keeping its button and its accessibility identifier.
-The plan lists them with a phrase each. It adds no type and no action.</p>
+<p><span class="new">proposed</span> Slice 7 in <code>scratch/plan.md</code>, a closed list:</p>
+<table>
+  <tr><th>Site</th><th>Today</th><th>After</th></tr>
+  <tr><td><code>RoadmapView.swift:273</code></td><td>warning triangle, bare reason</td>
+      <td><code>FailureLine("Tasks did not load.", machine: reason)</code></td></tr>
+  <tr><td><code>RoadmapView.swift:283</code></td><td>“LOO-1: reason · recovery” in the warning ink</td>
+      <td><code>FailureLine("LOO-1 is unavailable.", machine: reason)</code> with the recovery sentence after it</td></tr>
+  <tr><td><code>BacklogView.swift:465, :530, :551</code></td><td>“Order not saved · …”, “Brief not saved · …”,
+      “Brief not restored · …” in the notice's face</td>
+      <td>the backlog's notice says which it is, and a failed one draws a <code>FailureLine</code></td></tr>
+  <tr><td><code>DashboardView.swift:99</code></td><td>the first reason alone, warning ink</td>
+      <td><code>FailureLine("Some Work did not load.", machine: …)</code>, one line, the rest in its help</td></tr>
+  <tr><td><code>TaskChangesView.swift:194, :754</code></td><td>“Diff settings unavailable: …” in the warning ink</td>
+      <td><code>FailureLine("Diff settings did not load.", machine: …)</code></td></tr>
+</table>
 <table>
   <tr><th>Tested on</th><th>What happens</th></tr>
-  <tr><td>Normal path</td><td>No failure, nothing drawn; unchanged.</td></tr>
-  <tr><td>Failure</td><td>What failed in the failure ink, the message in mono and selectable, the existing button.</td></tr>
-  <tr><td>Recovery</td><td>The line goes when the site's own error clears, as today; Retry stays where there is one.</td></tr>
-  <tr><td>Counterexample kept</td><td>A typed range that does not parse (<code>TaskHistoryFilter</code>), a file's
-      read-only reason and its save message are not failures: nothing was attempted and refused by the Machine. They
-      stay as they are. So do the Create Wave forms, settings and telemetry, the plan's exclusions.</td></tr>
-  <tr><td>Risk</td><td>None of the twelve was reached on screen. A site whose text turns out to be advice stays and
-      is noted.</td></tr>
+  <tr><td>Normal path</td><td>“Filed fc6ad0”, “Moved 3 Tasks” read as they do now.</td></tr>
+  <tr><td>Failure</td><td>What failed in the failure ink, the message in mono and selectable.</td></tr>
+  <tr><td>Recovery</td><td>The next notice replaces a failed one; each other line goes when its own read succeeds.</td></tr>
+  <tr><td>Counterexample kept</td><td>“Partial: searching the 400 loaded”, “Older Tasks are truncated.”, “Brief
+      changed since; not undone” and “The brief changed since you last read it.” say where things stand; nothing
+      failed. They stay. So does the sidebar's triangle beside a Wave's name, where a line has no room.</td></tr>
+  <tr><td>Counterexample kept</td><td>A <code>FailureLine</code> as a narrow container's whole content sets its
+      smallest size (the 1,989 pt window). All five sites sit beside rows that set the width.</td></tr>
 </table>
+<p>After slice 7 no failure the Machine reported is drawn outside <code>FailureLine</code> or <code>EmptyState</code>
+except in the plan's exclusions. The sweep that found these five read every <code>Text(error)</code>,
+<code>palette.warning</code>, <code>palette.failure</code> and <code>exclamationmark</code> in the target, so the list
+is closed.</p>
 
 <h2>Outside this change</h2>
 <ul>
-  <li>A new Task's Files pane pointing at the repository after Start (<code>SessionsWorkspace.files(for:)</code>,
-      untouched here). Its own Task: find why the pane's recorded location is not the Task's checkout.</li>
-  <li>A Start the Machine refused going to creation recovery's notice and not to “Not started.” with Try again. Its
-      own Task in creation recovery.</li>
+  <li>A new Task's Files pane pointing at the repository after Start: Task ea8659.</li>
+  <li>A Start the Machine refused going to creation recovery's notice, not to “Not started.”: its own Task in
+      creation recovery.</li>
   <li>A stopped Graph's reason in mono: Rust would send what stopped and the Machine's message as two fields.</li>
 </ul>
 
 <h2>Questions</h2>
 <p class="soft">Each was decided with nobody present; the choice taken is marked. “2b” is a complete answer.</p>
 <ol class="q">
-  <li>When should “No planned Work in this repository” show?
-    <ol><li><span class="taken">Taken:</span> while no conversation is open, in every build. The released app keeps
-        opening a repository's conversation on its own, so it shows there after the conversation is closed.</li>
-      <li>Hold the conversation back in an empty repository until its button is pressed. Changes when a repository's
-        agent starts.</li></ol></li>
-  <li>The dozen failures beside content that are still bare text:
-    <ol><li><span class="taken">Taken:</span> convert them in this change (slice 6).</li>
-      <li>Leave them to a later sweep; this change ships with two forms.</li></ol></li>
-  <li>The sidebar's “No working Tasks in this Wave” and “… in this list”, and “Show working tasks”:
-    <ol><li><span class="taken">Taken:</span> full stops, and “Show working Tasks”.</li>
-      <li>Leave the sidebar's wording alone.</li></ol></li>
-  <li>A stopped Graph's reason:
-    <ol><li><span class="taken">Taken:</span> stays one sentence; outside this change.</li>
-      <li>Rust sends the two parts and the pane draws a <code>FailureLine</code>, in this change.</li></ol></li>
+  <li>The five failures still drawn another way:
+    <ol><li><span class="taken">Taken:</span> convert them in this change (slice 7), then stop sweeping.</li>
+      <li>Ship as built; the roadmap card and the Wave page differ for the same failure.</li></ol></li>
+  <li>The backlog's notice, one string for “Filed fc6ad0” and “Brief not saved”:
+    <ol><li><span class="taken">Taken:</span> the notice says whether it is a failure, and a failed one is a
+        <code>FailureLine</code>.</li>
+      <li>Keep one string and only replace the middle dot with a colon.</li></ol></li>
+  <li><code>FailureLine</code> as a window's whole content (questions 56):
+    <ol><li><span class="taken">Taken:</span> the site sets its width, as Open Work does now; the line has no floor
+        of its own.</li>
+      <li>A minimum width inside <code>FailureLine</code>, which could squeeze it in a narrow tile.</li></ol></li>
+  <li><code>ProjectReadinessView</code>'s readiness sentences with no Machine message (questions 53):
+    <ol><li><span class="taken">Taken:</span> they stay text; they say where the Project stands.</li>
+      <li>Draw “Project activation failed.” as a failure with no message.</li></ol></li>
 </ol>

@@ -229,3 +229,16 @@ Made at the third qa with nobody present; `scratch/qa.html` has the captures.
     not saved · …" share the one-string notice that says "Filed fc6ad0".
     Left: a `FailureLine` there needs the notice to carry a failure apart
     from its message. Convert them in this change?
+
+Made at the concept review of the built change, third pass, with nobody
+present; the page is `scratch/concept-review.html`.
+
+60. Settles 59 and adds four: the backlog's three failed notices, the
+    roadmap card's unavailable Tasks (a warning triangle where the Wave page
+    says "Tasks did not load."), its per-Task unavailable line, the
+    Dashboard's membership reason and the Changes pane's "Diff settings
+    unavailable" become `FailureLine`s (slice 7). The sweep read every error
+    text and warning icon in the target, so this list is the last.
+61. Settles 56: `FailureLine` gets no minimum width of its own; a site where
+    it is the whole content sets the width, as Open Work does.
+62. Settles 53: readiness sentences with no Machine message stay text.

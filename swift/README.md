@@ -156,6 +156,20 @@ its checkout. Repository and Wave primary conversations keep their own scope,
 even in a Task checkout. The Task's conversation list and breadcrumb Session
 picker use the same membership.
 
+A sidebar row is the Task's whole title, wrapped rather than cut, then its ID
+and lifecycle word. A Task that is blocked or waiting adds one line with what
+its program last reported:
+
+```text
+Loopflow for Mac's Task workspace matches
+the design prototype
+3d4350 · Active
+Waiting for you: approve the plan
+```
+
+The selected row is filled; rows carry no stripe or border. A Wave's count
+beside its name is in the same face as its name.
+
 Drag a Task in the sidebar to change its shared order. Ordinary repository and
 Wave lists, boards and Task pickers keep that relative order after refresh.
 Filtering or opening a Task leaves the order intact. Saved Dashboard arrangements,
@@ -318,14 +332,31 @@ Unreadable app/default/selection/cursor text prevents Apply; ANSI colors keep
 their source values. Personal non-color Ghostty settings still load; its `theme =` is ignored and its file never written.
 Source and license notices ship offline with the catalogue.
 
-The **Auto** toggle turns a Task's auto setting on and runs it, as `lf task auto on`
-does: its run stands in at each interactive step and lands the PR. It sits at
-the right end of the Workflow bar under the jump bar, beside the Task's stages
-as dots (click them for each stage) and what is running now. Turning it on
-raises the Notice "LOO-5 Auto on requested · Undo"; Undo is auto off, the same
-as switching the toggle off (`lf task auto off`). While auto is on, the Task's
-board card and sidebar row carry an Auto badge.
-Open a Dashboard with `state:auto` to watch those Tasks.
+Under the jump bar, the workflow bar reads where the Task stands:
+
+```text
+code  plan  build  👤ship-review  deliver  👤verify   build is running implement. You are next needed at ship-review.   [Auto-Ship]  …
+```
+
+The Graph's name, then its top-level steps in order, a person before each step
+that waits for you. Steps already passed are quieter; the step the Task stands
+in is strong, in the working colour while it runs and in the waiting colour
+when it has stopped or is waiting for you. A step that appears in more than one
+part of the Graph (`concept-review` runs in both `plan` and `build`) marks the
+part it is running in. The sentence is the one `lf task status` prints. In a
+narrow window the steps go and the sentence stays.
+
+When the Task can move, one button says how: **Start** before it has run,
+**Run** once its Graph has stopped. **Auto-Ship** turns the Task's auto setting
+on and runs it, as `lf task auto on` does: its run stands in at each
+interactive step and lands the PR. Turning it on raises the Notice "LOO-5 Auto
+on requested · Undo"; Undo is auto off (`lf task auto off`). While auto is on,
+the sentence names auto instead of you, and the Task's board card and sidebar
+row carry an Auto badge. Open a Dashboard with `state:auto` to watch those Tasks.
+
+Everything else is in **…**, the same list as the sidebar row's context menu:
+**Start from…**, Complete or Reopen, Claim or Unassign, Move, Copy ID and
+link, and **Abandon…**.
 
 ```text
 ⌘T          new shell tab in the Task’s Shell tool
@@ -354,13 +385,16 @@ Shell holds retained shell tabs. The Task's pane has one row of tabs: **Brief**,
 **Diff** and **Files** (Option-Command-1/2/3), then anything else open beside
 them. Hidden tools keep their clients and drafts.
 
-**Brief** shows the Task's state, next move and PR state above its text, the
-Tasks the brief names (click one to open it), and an outline when the brief has
-headings or an `Acceptance:` lead. Its scroll position survives page and Task
-switches in this window; a brief that changed since you last read it says so.
+**Brief** opens on the Task's title, then one sentence with its state and why
+("Active. build is running implement."), then its PR, the Tasks the brief names
+(click one to open it) and an outline when the brief has headings or an
+`Acceptance:` lead, as a two-column table that wraps in a narrow pane. Its
+scroll position survives page and Task switches in this window; a brief that
+changed since you last read it says so above its text.
 
-**Diff** opens on what is compared and how much changed ("7 changes in 4
-files", then the base branch and commit), with the changed files beside the
+**Diff** opens on how much changed ("4 changed files", with the **Whole Task**
+step menu beside it), then what is compared: the base branch and its commit,
+wrapping rather than cut. The changed files sit beside the
 whole comparison as one stream. Each shown file's lines are read on their own,
 those near the top of the pane first, so a large file never cuts another short
 and a hidden file is never read. A new file reads as its contents. Size
@@ -369,12 +403,13 @@ characters · Show**, a file past 1 MB shows its first 1 MB and says it was cut,
 and a file that could not be read offers **Retry**. Code is in syntax colors,
 here and in Files. The page fits a pane 360 pt wide: the toolbar keeps the
 sidebar toggle, the stepper and the **…** menu, which holds what has no room,
-layout first, then order and tour, then Focus, and **Wrap long lines**. Under
-the title, **Whole Task** opens a menu of the Graph steps in the branch's
+layout first, named in words (**New code**, **Unified**, **Side by side**), then order and
+tour, then Focus, and **Wrap long lines**. **Whole Task** opens a menu of the
+Graph steps in the branch's
 commits since its base: a run of commits whose subjects start `lf implement:`
 is one step, any other commit stands alone, and picking one compares that
-step's commits. A pill in the title says where the work is
-delivered and opens the delivery card. Loopflow's record decides whether there
+step's commits. A button by the title says where the work is
+delivered and opens the delivery card, whose link reads **Open on GitHub**. Loopflow's record decides whether there
 is a PR: none, publishing, open, merged or abandoned. GitHub's reading adds
 checks, review and description with its age; a failed, stale (over two minutes)
 or behind-the-checkout reading stays readable but loses its colors, and merged
@@ -438,15 +473,15 @@ file to bring it to the top. Under them, **Always hidden** is the `diff_hidden`
 setting, patterns matched the same way. Every layer adds to it (`scratch/` by
 default; `[]` clears the layers below), and each pattern is named by the layer
 that added it. Only yours can be removed or added there; they are saved in the
-repository's `.lf/config.local.yaml`. Hidden files stay in the count: "7
-changes in 4 of 9 files". Below 620 pt the sidebar opens over the stream from
+repository's `.lf/config.local.yaml`. Hidden files stay in the count: "4 of
+9 changed files". Below 620 pt the sidebar opens over the stream from
 its button and closes when you choose a file.
 
 The stream follows the comparison live without moving what you are reading. A
 bar above it names the file you are in, with its counts, **Open** and
 **Viewed**, and under it the function, type or Markdown heading the top line
 sits in. **Viewed** folds a file to its header until its lines change; the
-sidebar counts "12 / 60 viewed" and stepping passes over it. Marks beside the
+sidebar counts "12 of 60 viewed", marks each folded file **Viewed**, and stepping passes over it. Marks beside the
 scrollbar place every change, green added, red removed, accent for both; click
 one to land there. Press `]`
 and `[` (or the arrows around the position) to step through changes across
@@ -471,8 +506,10 @@ the + and −. **Reference in conversation** types
 `path:L4-6 (after, working tree on <sha>)` alone. Files' Diff has the
 same comments, skipped lines and Send.
 
-**Files** holds open documents and their Read, Edit and Diff controls, with the
-Machine, checkout and directory of the selection under them. Files starts with
+**Files** holds open documents and their Read, Edit and Diff controls. One menu
+names the open file and where it sits among them ("TaskRow.swift · 1 of 3")
+and switches between them; under it, the Machine and checkout, then the path
+in mono. Files starts with
 its chooser closed. Click the file-browser toggle or press Command-P for
 **scratch** and the Task's checkout tree, read from the Task's Machine as you
 open folders, 500 entries at a time (**Load more** for the rest). `M`, `R` and
@@ -613,8 +650,7 @@ Opening a Task enters its retained panes and opens its conversation.
 Navigation never starts its Graph. Returning preserves panes, drafts and focus, including historical
 conversations. Explicit bare CLI Task links still support inspection without
 conversation acquisition.
-The compact header shows the current Workflow position and available actions;
-**Overview** expands its graph and description above the multiplexer. Opening
+The workflow bar shows where the Task stands and what it can do next. Opening
 feedback stays inside the terminal area. Resolving a conversation installs its
 record and pane before ending preparation, including explicit Session links.
 Cached switches reuse their panes and drafts without preparing again.
@@ -622,14 +658,8 @@ When the selected Task's lifecycle becomes completed or abandoned, it stays
 visible with a green **Completed** or red **Canceled** header. Navigating away restores the ordinary
 sidebar filters. **Back** (⌘[) returns to the retained workspace and its sidebar
 row, preserving conversations, files and drafts without starting execution.
-The expanded graph scales to the window:
-`start` and `end` as circles, each node a box saying what you do there, one
-labelled arrow per edge, a loop back as an arc over its node. The current node
-or running edge is marked. The labels of the edges leaving the current node
-are buttons; each runs `lf -b task run` as a child of the app. No edge is offered while one runs. An edge whose Graph stopped holds the
-Task, is drawn stopped, and is offered again with the others leaving its
-node. **Move to** changes Workflow position; `end` requests completion.
-**Complete** changes Task status independently: the row leaves the list in the
+**Start from…** in **…** lists `start` and the Task's interactive steps; picking
+one runs `lf task run ISSUE --from STEP` as a child of the app. **Complete** changes Task status independently: the row leaves the list in the
 click and the next Task opens. A refused completion brings the row back with a
 Notice saying why; completing again never replays the Graph.
 Linear completion leaves the displayed Workflow and live Processes intact.
@@ -671,7 +701,11 @@ beside the name. Task navigation keeps that provenance in inspection. On the rig
 the Task's read-only worktree location and the Activity glyph.
 
 Each nonempty pane has a compact program header with its known provider,
-conversation or terminal title, directory and current reported status. Hovering
+conversation or terminal title, directory and current reported status: one
+dot in the status's colour and a short phrase.
+When a Task's conversation starts fresh rather than resuming, "New
+conversation; earlier one left behind" sits on its own line between the header
+and the terminal, never over the terminal's text. Hovering
 the focused header reveals Close; its context menu offers zoom. Shell tabs share
 one tool pane. A lone terminal omits the redundant pane header. A neutral edge and subtle shadow
 distinguish the selected pane without recoloring its reported activity.
@@ -687,8 +721,16 @@ current match for 160 ms; hiding a pane cancels the cue. Reduce Motion uses
 Find's persistent match styling. Programs that own selection may show their own
 copy confirmation; terminal feedback describes only a terminal-owned copy.
 
+Terminals draw in Spline Sans Mono 13 with its real bold and italic faces and
+ligatures off; Ghostty draws box drawing, blocks and braille itself, so Claude's
+frames stay continuous. Your Ghostty configuration still wins: a
+`font-family` you set comes first and Spline Sans Mono fills the glyphs it
+lacks, and your `font-size`, `adjust-cell-height` or `font-feature` replace
+Loopflow's.
+
 ```ini
 # In your Ghostty configuration; reopen Loopflow after editing.
+font-family = Berkeley Mono
 minimum-contrast = 1
 ```
 

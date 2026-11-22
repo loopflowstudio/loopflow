@@ -262,6 +262,17 @@ which exists only on cfadc6's unpublished branch. That edit is the last
 slice and needs cfadc6 on main (then `lf sync` picks it up through
 LOO-515). Until then the slice is blocked, not skipped; the PR body says so.
 
+### Docs (written first, 2026-11-21)
+
+`swift/README.md` (sidebar row, workflow bar and its "…" menu, Start from…,
+pane header and notice line, terminal face and how a person's `font-family`
+stacks, Brief, Diff title/counts/layout words/Open on GitHub, Files menu),
+`docs/work.md` (`lf task status` sentence and `graph.steps`/`current_step`/
+`sentence`), `swift/LoopflowiOS/README.md` (terminal face). Implement makes
+the code match these words or changes both. `swift/DESIGN.md` is left alone:
+cfadc6 deletes it for the root `DESIGN.md`, so its Typography and Corner
+Radius snippets stay stale until that lands.
+
 ## Exclusions
 
 New Task (`NewTaskSheet`) beyond the call-site migration, empty and failure

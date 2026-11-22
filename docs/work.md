@@ -86,6 +86,20 @@ lf task list --closed --wave infra --since 7d  # closed in the last week
 lf task list --subscribe --json                # stream a JSON line on every change
 ```
 
+`lf task status` says where the Task stands on its Graph in one sentence, the
+same words Desktop's workflow bar shows:
+
+```text
+LOO-12  moving
+  Graph code: build is running implement. You are next needed at ship-review.
+```
+
+With auto on, the second clause names auto: "Auto stands in next at
+ship-review." A stopped Graph reads "Stopped at build. `lf task run` starts it
+again." `--json` carries the parts: `graph.steps` (each top-level step's
+`name` and `interactive`), `graph.current_step` (its index, null before the
+start and at the end) and `graph.sentence`.
+
 Every read queries this machine's local store, so it answers instantly and
 works offline.
 

@@ -73,6 +73,31 @@ Nothing in the product. After completion, this worktree and branch are
 disposable; `~/.lf/reports/LOO-912-stuck-sessions/` holds the only record of
 the live observations and stays.
 
+## Concept review (2026-11-21, against origin/main `891d9a9b92`)
+
+The paste model holds with the whole change in it: one `Paste` type counted at
+each hop that can lose its upstream (relay, server queue, server-to-holder
+Source, holder), closed exactly, never by a blanket `ESC[201~`. Counterexamples
+tried and their outcomes are in `scratch/concept-review.html`. Nothing here
+changes steps 1 and 2 below.
+
+Separate outcomes found around it, each its own change on main, none filed:
+
+- A. `Paste::finish` logs at debug with no terminal or cause, so a recurrence
+  cannot tell "lf closed a paste" from "lf saw nothing". Move the line to the
+  four callers at info with terminal and cause.
+- B. `transport/README.md` says the entrance is "revision 3"; `registry.rs`
+  says 4. Delete the number from the README.
+- C. `closes_pastes = revision >= 2` (`held.rs`), its `[1, 2]` test loop and
+  the README's "older holders" paragraph serve revision 1 holders. All thirteen
+  holders alive here on 2026-11-21 started on or after 2026-11-17. Delete once
+  each answers revision 2.
+- D. `input::keys` strips report-shaped sequences from a non-sizing view even
+  inside a paste, editing pasted content. Apply it only outside a paste.
+
+Choice made for review: the merged Task is not reopened for these, and no Task
+was filed for them; the page's question 1 decides.
+
 ## Remaining steps
 
 1. Verify: run the acceptance check on main's code, and check the live holders.

@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOO-912 concept review: pasting into a Session</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #fbfaf7; --fg: #1d1c1a; --muted: #6a665f; --line: #dcd8cf; --card: #ffffff;
+    --yes: #1f7a45; --yes-bg: #e4f3ea; --no: #a8321f; --no-bg: #f9e4df;
+    --part: #8a6100; --part-bg: #f8edcf; --new: #2b55b8; --new-bg: #e5ecfb; --code: #f1eee7;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #17171a; --fg: #e8e6e1; --muted: #a09c94; --line: #34343a; --card: #1f1f24;
+      --yes: #6fcf97; --yes-bg: #17301f; --no: #f08a76; --no-bg: #3a1c17;
+      --part: #e5be5a; --part-bg: #33290f; --new: #8fb0ff; --new-bg: #1a2442; --code: #26262c;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+    font: 16px/1.55 ui-sans-serif, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 1020px; margin: 0 auto; padding: 40px 24px 80px; }
+  h1 { font-size: 28px; line-height: 1.2; margin: 0 0 8px; }
+  h2 { font-size: 20px; margin: 44px 0 12px; }
+  h3 { font-size: 16px; margin: 0 0 6px; }
+  p { margin: 0 0 12px; }
+  .lede { color: var(--muted); max-width: 70ch; }
+  code, pre { font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+  code { background: var(--code); padding: 1px 5px; border-radius: 4px; }
+  pre { background: var(--code); padding: 12px 14px; border-radius: 8px; overflow-x: auto; margin: 0 0 12px; }
+  table { width: 100%; border-collapse: collapse; background: var(--card);
+    border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  th, td { text-align: left; vertical-align: top; padding: 10px 12px; border-top: 1px solid var(--line); }
+  thead th { border-top: 0; font-size: 14px; color: var(--muted); font-weight: 600; }
+  .tag { display: inline-block; padding: 1px 9px; border-radius: 999px; font-size: 13px; font-weight: 600; white-space: nowrap; }
+  .yes { color: var(--yes); background: var(--yes-bg); }
+  .no { color: var(--no); background: var(--no-bg); }
+  .part { color: var(--part); background: var(--part-bg); }
+  .new { color: var(--new); background: var(--new-bg); }
+  .pipe { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin: 14px 0; }
+  .hop { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; font-size: 14px; }
+  .hop b { display: block; font-size: 15px; }
+  .hop small { color: var(--muted); display: block; margin-top: 4px; }
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; }
+  .card.proposed { border: 2px dashed var(--new); }
+  .big { border-left: 4px solid var(--no); padding: 14px 18px; background: var(--card); border-radius: 0 8px 8px 0; }
+  ol.q > li { margin-bottom: 16px; }
+  ol.q ol { list-style: lower-alpha; margin-top: 4px; }
+  .muted { color: var(--muted); }
+  @media (max-width: 760px) { .pipe, .cols { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<main>
+
+<h1>Pasting into a Session whose view can go away</h1>
+<p class="lede">Area taken: everything between a person's keyboard and a held provider's prompt — typing, pasting,
+leaving with Ctrl+], a second view, and what happens to a half-sent paste. LOO-912 (PR #1944, merged
+2026-11-15) lives here; this reads the area as it stands on <code>origin/main</code> at <code>891d9a9b92</code>,
+after #1954 moved it into <code>loopflow-execution</code> and a later change let every view type.</p>
+
+<p><span class="tag yes">result</span> The paste model holds. Nothing in it needs rebuilding. Four smaller things
+around it do not line up, and none belongs in the merged PR; they are listed as separate outcomes below.</p>
+
+<h2>One interaction, walked</h2>
+<p>Someone pastes forty lines into a Session in Rex. Partway through, Rex closes. Later they open the Session in
+Desktop and type.</p>
+
+<div class="pipe">
+  <div class="hop"><b>Terminal</b>Rex, Desktop, any tty<small>wraps the paste in <code>ESC[200~</code> … <code>ESC[201~</code></small></div>
+  <div class="hop"><b>View</b><code>lf resume</code> relay<small><code>RelayInput.paste</code>: is Ctrl+] a key or pasted content?</small></div>
+  <div class="hop"><b>Server</b><code>hosted.rs</code><small><code>PendingInput.paste</code> + <code>writer</code>: whose paste is in the queue?</small></div>
+  <div class="hop"><b>Server → holder</b><code>held.rs Source</code><small><code>input_paste</code>: what framing did the holder already get?</small></div>
+  <div class="hop"><b>Holder</b><code>terminal_holder.rs</code><small><code>input_paste</code>: what did the PTY already get?</small></div>
+</div>
+
+<table>
+<thead><tr><th style="width:22%">Moment</th><th>What the person sees</th><th>What the code does</th></tr></thead>
+<tbody>
+<tr><td>Normal paste</td><td>The text lands in the draft, unsubmitted.</td><td>Bytes pass through every hop unchanged. Each hop only counts delimiters.</td></tr>
+<tr><td>Rex closes mid-paste</td><td>Nothing; the Session keeps running.</td><td>Server sees its writer view gone (<code>finish_departed_paste</code>) and queues the missing part of <code>ESC[201~</code>. No Return, no replayed content.</td></tr>
+<tr><td>Back in Desktop, typing</td><td>Keys land at the prompt after the half paste.</td><td>The provider's parser is outside the paste again. Before #1944 every later key vanished into it.</td></tr>
+<tr><td>Server dies mid-paste instead</td><td>Same as above after reopening.</td><td>The holder closes the paste when its writer connection drops. A returning server sends <code>ESC[200~</code> before any unsent tail, so pasted newlines never arrive as Returns.</td></tr>
+<tr><td>A second view types mid-paste</td><td>Their keys are keys, not paste content.</td><td>Server closes the first view's paste before forwarding the other view's bytes.</td></tr>
+<tr><td>Pasted text contains Ctrl+]</td><td>It is pasted; the view stays.</td><td><code>Paste::detaches</code> ignores <code>0x1d</code> inside a paste.</td></tr>
+</tbody>
+</table>
+
+<p style="margin-top:14px">Counterexamples tried against it, and what happened:</p>
+<table>
+<thead><tr><th style="width:40%">Counterexample</th><th>Outcome</th></tr></thead>
+<tbody>
+<tr><td>Drop the tracking: always write <code>ESC[201~</code> when a view leaves.</td><td>Fails. A shell in cooked mode, or a provider outside a paste, receives a stray sequence on every detach. The tracker is what makes the close exact. It stays.</td></tr>
+<tr><td>One tracker at the holder only, since it is the last hop.</td><td>Fails. The holder cannot see which view wrote, and after it closes a paste the server's unsent tail would arrive as typed keys, with newlines submitting. Each hop that can lose its upstream needs its own count.</td></tr>
+<tr><td>Queue cleared on a write error while the tracker keeps counting.</td><td>Holds. For a held terminal the writer only reports "would block"; the holder closes on loss and the Source restores framing.</td></tr>
+<tr><td>Old and new writer connections overlap at the holder (state is per terminal, not per connection).</td><td>Holds. The server drops the old socket before it connects the new one, so the close precedes the restored start.</td></tr>
+<tr><td>The provider's own parser sticks while lf's count says "closed".</td><td>Not covered, and cannot be from here. See the biggest mismatch.</td></tr>
+</tbody>
+</table>
+
+<h2>Do the product's concepts and the code's concepts line up?</h2>
+<table>
+<thead><tr><th style="width:27%">What a person knows</th><th style="width:30%">What the code has</th><th style="width:9%">Match</th><th>What is wrong where it is not</th></tr></thead>
+<tbody>
+<tr><td>A Session keeps running with no view open.</td><td>Holder process, held terminal, PTY ring.</td><td><span class="tag yes">yes</span></td><td></td></tr>
+<tr><td>A view: type, paste, Ctrl+] to leave.</td><td>Viewer relay, <code>Tag::Input</code> frames, <code>Request::Leave</code>.</td><td><span class="tag yes">yes</span></td><td></td></tr>
+<tr><td>A paste is one thing. It ends when the view that started it goes, or when someone else types.</td><td><code>Paste</code>, one type, four instances along the pipe; <code>writer: Option<ViewerId></code> names the owner.</td><td><span class="tag yes">yes</span></td><td>Four instances of one type is the honest shape: each counts bytes at the point they are forwarded, so no instance has to trust another.</td></tr>
+<tr><td>Ctrl+] inside pasted text is text.</td><td><code>Paste::detaches</code>.</td><td><span class="tag yes">yes</span></td><td></td></tr>
+<tr><td>Pasted text arrives as pasted, from any view.</td><td><code>input::keys</code> strips terminal answers from a view that does not size the terminal, and does not know about pastes.</td><td><span class="tag part">partly</span></td><td>One name, <code>Input</code>, for three ideas: keys, pasted content and a terminal's answers. From a second view, pasted text that contains a report-shaped sequence (<code>ESC ] … BEL</code>, <code>ESC[0n</code>) is silently edited. Libghostty passes ESC through in bracketed pastes, so Rex and Desktop can send it. Rare: copied terminal text is normally rendered, not raw.</td></tr>
+<tr><td>"The typist" (nobody says this; the code needs it).</td><td><code>writer</code> in <code>hosted.rs</code> is a view. <code>Mode::Writer</code> in the holder is the server's connection.</td><td><span class="tag part">partly</span></td><td>One name for two ideas, a hop apart. Readable in context; noted, not worth a change alone.</td></tr>
+<tr><td>Nothing. People never see protocol revisions.</td><td>Holder wire revision (2) and held-terminal entrance revision (4). The README says the entrance is "revision 3" and tells the reader to update two test files when advancing it.</td><td><span class="tag no">no</span></td><td>One fact in three places, and one of them is wrong today: <code>transport/README.md</code> says 3, <code>registry.rs</code> says 4.</td></tr>
+<tr><td>Nothing. Old holders are not a thing people choose.</td><td><code>closes_pastes = revision >= 2</code> in <code>held.rs</code>, a test loop over <code>[1, 2]</code>, a README paragraph about "older holders".</td><td><span class="tag no">no</span></td><td>A branch for holders that predate the fix. The thirteen holders alive on this Machine on 2026-11-21 all started on or after 2026-11-17. Once none of revision 1 is alive, the branch describes nothing.</td></tr>
+<tr><td>"My keys stopped landing." The original report.</td><td>No record. <code>Paste::finish</code> logs at debug; <code>~/.lf/logs/lf.log</code> has zero such lines. The recovery that worked on LOO-904 is a paragraph in a report.</td><td><span class="tag no">no</span></td><td>The one moment a person would ask about has nothing to read afterwards.</td></tr>
+</tbody>
+</table>
+
+<h2>The biggest mismatch</h2>
+<div class="big">
+<p><strong>The product concept is "my keys stopped landing"; the code has no trace of ever having dealt with it.</strong></p>
+<p>The repair closed every path lf could lose a paste end on. It never learned which one lost LOO-904's. If the
+symptom returns, the first question is whether lf believed a paste was open and closed it, or believed nothing was
+wrong. Today that cannot be answered: the close is a debug line with no terminal named, written by whichever of
+two processes happened to do it, and the installed build's log holds none.</p>
+</div>
+
+<div class="cols" style="margin-top:14px">
+  <div class="card">
+    <h3>Existing</h3>
+    <pre>// transport/input.rs
+tracing::debug!("closing an interrupted terminal paste");</pre>
+    <p class="muted">No terminal, no cause, below the level <code>lf.log</code> keeps. A recurrence starts again from process samples and a hand-sent <code>ESC[201~</code>.</p>
+  </div>
+  <div class="card proposed">
+    <h3>Proposed <span class="tag new">not built</span></h3>
+    <pre>// at each of the four call sites, which know the cause
+info: closed an unfinished paste
+  terminal=b30e03b7… cause=view-left
+  // or another-view-typed, detached, writer-lost</pre>
+    <p class="muted"><code>Paste::finish</code> returns the bytes and stops logging; the caller, which knows the terminal and why, writes the line. It fires only when a paste was cut, so the log stays quiet.</p>
+  </div>
+</div>
+<p style="margin-top:12px">With that line, a stuck Session whose log shows a close is a provider parser problem, and one whose log
+shows none is a path lf still does not see. Either reading is a new Task with a place to start. Passed over: a
+"paste open" field on the holder's terminal listing, and a command that sends a paste end by hand. Both are new
+behavior for a symptom not seen since the merge.</p>
+
+<h2>Separate outcomes, none filed</h2>
+<p>LOO-912's PR is merged and its model stands, so none of these reopen it. Each is small and would be its own change
+on <code>origin/main</code>.</p>
+<table>
+<thead><tr><th style="width:4%"></th><th style="width:34%">Outcome</th><th>What it would take</th></tr></thead>
+<tbody>
+<tr><td>A</td><td>A cut paste leaves a line someone can read.</td><td>Move the log from <code>Paste::finish</code> to its four callers at info, with terminal and cause. Confirm the holder process writes to <code>logs/lf.log</code>; if it does not, the server logs what it observes on reconnect.</td></tr>
+<tr><td>B</td><td>The README stops naming a revision number.</td><td>Delete "revision 3" and the "update both" sentence from <code>transport/README.md</code>; <code>registry.rs</code> and the handshake tests already say it. Prose only.</td></tr>
+<tr><td>C</td><td>The revision 1 holder branch goes.</td><td>Ask each live holder its revision. When none answers 1: delete <code>closes_pastes</code>, the <code>[1, 2]</code> test loop and the "older holders" README paragraph. A holder older than the client then gets the same answer any other skew gets.</td></tr>
+<tr><td>D</td><td>Pasted content from a second view arrives unedited.</td><td><code>hosted.rs</code> applies <code>input::keys</code> only outside a paste, using the count it already keeps. One test: a non-sizing view pastes text containing <code>ESC]0;x BEL</code>.</td></tr>
+</tbody>
+</table>
+
+<h2>Choice made for review</h2>
+<p>Chosen: report the model as sound and leave the merged work alone; write A–D down without filing them. Passed
+over: reopening LOO-912 to build A, because a Task is one PR and this one's is merged, and filing four Tasks
+unasked, because backlog nobody reviewed is noise.</p>
+
+<h2>Questions</h2>
+<ol class="q">
+<li>The separate outcomes A–D:
+  <ol><li>File all four as one Task ("paste input: readable close, one revision fact, no revision 1 branch, unedited second-view pastes").</li>
+  <li>File A alone; B–D get done by whoever next touches the files.</li>
+  <li>File none.</li></ol></li>
+<li>Has input stopped landing in any Session since 2026-11-17?
+  <ol><li>No. Then LOO-904's cause is treated as closed by the repair.</li>
+  <li>Yes. Then which Session; A becomes the first step of a new debug Task.</li></ol></li>
+<li>For C, is this Machine the only place a revision 1 holder could still be alive?
+  <ol><li>Yes; delete the branch once the live holders answer 2.</li>
+  <li>No, another host runs long-lived holders; check it first.</li></ol></li>
+</ol>
+
+</main>
+</body>
+</html>

@@ -322,6 +322,16 @@ final class WorkModel {
         return task.opensConversationAutomatically && taskWorkspaceIdentity(task) != nil
     }
 
+    /// A repository whose plan was read and holds nothing, with no conversation
+    /// attached, opening or failed: `NoPlannedWork` stands in for its page until
+    /// a conversation opens or a Task exists.
+    func repositoryIsEmpty(_ workspace: SessionsWorkspace) -> Bool {
+        workspace.key.kind == .repository && roadmap.value != nil && !showsSavedWork
+            && visibleWaves.isEmpty && visibleTasks.isEmpty
+            && workspace.conversationError == nil && !conversationIsOpening(workspace)
+            && !workspace.multiplexer.layout.allPanes.contains { $0.sessionId != nil }
+    }
+
     private func taskWorkspaceIdentity(_ task: RoadmapTask) -> WorkspaceIdentity? {
         navigation.preparedTaskWorktrees[task.id] ?? task.reference.workspace?.identity
     }
@@ -1277,10 +1287,6 @@ final class WorkModel {
     private var graphCatalogKey: String { repoPath ?? "" }
     var graphCatalog: Reading<[GraphCatalogEntry]> {
         graphCatalogReadings[graphCatalogKey] ?? .loading
-    }
-    /// The same read, each graph seen as a Workflow.
-    var workflowCatalog: Reading<[WorkflowCatalogEntry]> {
-        graphCatalog.map { $0.map(WorkflowCatalogEntry.init) }
     }
     /// Comment threads, read on demand for the shown Task.
     private(set) var comments = TaskReadings<TaskComments>()
@@ -2259,6 +2265,11 @@ final class WorkModel {
         return (sessions.value ?? []).filter { $0.names(task: id) }
     }
 
+    /// What a Task's programs report, for its row and the title bar.
+    func programStatus(task id: String) -> SessionProgramStatus {
+        SessionProgramStatus(sessions: taskSessions(id), unavailable: sessions.failure)
+    }
+
     /// ⌘N: the Nth Task row on screen.
     func selectSidebarTask(slot: Int) {
         let ids = sidebarTaskIDs
@@ -2645,7 +2656,7 @@ final class WorkModel {
         state.query = ""
         state.selection = []
         state.select(created.receipt.task.id)
-        state.notice = "Filed \(created.receipt.task.identifier)"
+        state.notice = .did("Filed \(created.receipt.task.identifier)")
         navigation.backlogs[view] = state
         // Its backlog row is the Task's presentation; nothing opens.
         await CreationRecovery.shared.presented([requestID])
@@ -2691,18 +2702,18 @@ final class WorkModel {
         }
     }
 
-    /// Turn auto on and run the Task, as `lf task auto on` does: the Notice says auto on
+    /// Turn auto on and run the Task, as `lf task auto on` does: the Notice says Auto-Ship
     /// was requested and its Undo turns auto off. The Task moves when the
     /// Machine's reading says so.
     func turnAutoOn(_ task: RoadmapTask) {
-        request(task, "Auto on", .taskAutoOn(directory: directory(task), issue: task.task.identifier),
-                      undo: Notice.Action("Undo", help: "Auto off") { [weak self] in
+        request(task, TaskActions.Auto.off.offer, .taskAutoOn(directory: directory(task), issue: task.task.identifier),
+                      undo: Notice.Action("Undo", help: TaskActions.Auto.on.offer) { [weak self] in
                           self?.turnAutoOff(task)
                       })
     }
 
     func turnAutoOff(_ task: RoadmapTask) {
-        request(task, "Auto off", .taskAutoOff(directory: directory(task), issue: task.task.identifier))
+        request(task, TaskActions.Auto.on.offer, .taskAutoOff(directory: directory(task), issue: task.task.identifier))
     }
 
     /// The Work the Machine control describes: the current started Task, else the
@@ -2821,6 +2832,23 @@ final class WorkModel {
         change(task, .reopen(task: issue), .taskReopen(directory: directory(task), issue: issue), "reopened")
     }
 
+    /// Why no change to Work can be requested now; nil when one can.
+    var changeRefusal: String? {
+        if !pendingChanges.acceptsChanges { return PendingChanges.awayText }
+        if showsSavedPlanning { return WorkCache.savedReason }
+        return nil
+    }
+
+    /// Why no run of `task` can be started now; nil when one can.
+    func runRefusal(_ task: RoadmapTask) -> String? {
+        changeRefusal ?? task.runControl.unavailable
+    }
+
+    /// Abandon… asks first: the window confirms before `abandonTask`.
+    func beginAbandon(_ task: RoadmapTask) {
+        navigation.abandoning = task.id
+    }
+
     /// The row leaves every list and the selection moves on in the click; PR,
     /// branch and checkout cleanup finish after. A refusal puts the row back.
     func abandonTask(_ task: RoadmapTask) {
@@ -2925,7 +2953,7 @@ final class WorkModel {
         }
     }
 
-    /// Start, Auto on and Auto off say "requested" in the click.
+    /// Start, Auto-Ship and Stop Auto-Ship say "requested" in the click.
     private func request(_ task: RoadmapTask, _ name: String, _ write: ServedWrite, undo: Notice.Action? = nil,
                          refused: @escaping @MainActor () -> Void = {}) {
         pendingChanges.request(name, subject: task.task.identifier, write: write, notices: navigation.notices,
@@ -3645,5 +3673,34 @@ enum TaskOrderDrag {
     static func token(_ workID: String) -> String { "task-order:" + workID }
     static func taskID(_ token: String) -> String? {
         token.hasPrefix("task-order:") ? String(token.dropFirst("task-order:".count)) : nil
+    }
+}
+
+extension WorkModel {
+    /// The Wave a Task is filed in, else the repository.
+    func scopeName(_ wave: WaveSnapshot?) -> String { wave?.displayName ?? repositoryName }
+
+    /// Whose choice a workflow is, from the layer Rust says chose it: "your
+    /// default", "loopflow's default" for the scope it follows, "the default"
+    /// for the builtin, and "for this Task only" when the Task has its own.
+    func workflowChoice(source: String?, wave: WaveSnapshot?) -> String {
+        switch source {
+        case nil: "for this Task only"
+        case "personal": "your default"
+        case "repository": "\(scopeName(wave))'s default"
+        default: "the default"
+        }
+    }
+
+    /// The named workflow as the catalog outlines it; nil until the catalog is
+    /// read, or for a Graph that does not load.
+    func workflowOutline(_ name: String?) -> WorkflowOutline? {
+        name.flatMap { name in graphCatalog.value?.first { $0.name == name }?.workflow }
+    }
+
+    /// The workflow a Task's first run takes up and whose choice it is:
+    /// "feature, loopflow's default".
+    func workflowSelection(_ task: RoadmapTask) -> String? {
+        task.graphName.map { "\($0), \(workflowChoice(source: task.graphSource, wave: self.task(id: task.id)?.wave?.wave))" }
     }
 }

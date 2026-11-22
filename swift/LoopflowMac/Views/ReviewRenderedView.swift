@@ -41,13 +41,13 @@ struct ReviewRendered: View {
             switch rendering {
             case .markdown:
                 ReviewMarkdown(old: sides.old?.content, new: sides.new?.content, split: split).equatable()
-                    .padding(.horizontal, 12).padding(.vertical, 10)
+                    .padding(.horizontal, Spacing.md).padding(.vertical, Spacing.sm)
             case .image, .svg, .html:
                 ViewThatFits(in: .horizontal) {
-                    HStack(alignment: .top, spacing: 12) { both(sides) }.frame(minWidth: TaskFilesStore.splitWidth)
-                    VStack(alignment: .leading, spacing: 12) { both(sides) }
+                    HStack(alignment: .top, spacing: Spacing.md) { both(sides) }.frame(minWidth: TaskFilesStore.splitWidth)
+                    VStack(alignment: .leading, spacing: Spacing.md) { both(sides) }
                 }
-                .padding(.horizontal, 12).padding(.vertical, 10)
+                .padding(.horizontal, Spacing.md).padding(.vertical, Spacing.sm)
             }
         } else {
             ReviewNotice(text: "Reading…")
@@ -74,10 +74,10 @@ struct ReviewRendered: View {
             TaskHTMLView(html: html, baseURL: baseURL, interacted: store.noteInteraction)
                 .containerRelativeFrame(.vertical)
                 .frame(maxWidth: .infinity)
-                .overlay { RoundedRectangle(cornerRadius: CornerRadius.sm).stroke(palette.border) }
+                .overlay { RoundedRectangle(cornerRadius: CornerRadius.control).stroke(palette.border) }
                 .accessibilityIdentifier("changes-rendered-html")
         } else {
-            Text(absent).font(Typography.caption(11)).foregroundStyle(palette.textSecondary)
+            Text(absent).font(Typography.meta).foregroundStyle(palette.textSecondary)
                 .frame(maxWidth: .infinity)
         }
     }
@@ -93,7 +93,7 @@ struct ReviewSidesFailed: View {
         HStack(spacing: 0) {
             ReviewNotice(text: "Can't render this file: \(error)")
             Button("Retry") { Task { await store.retrySides(file) } }
-                .buttonStyle(WorkPlainButtonStyle()).font(Typography.caption(11))
+                .buttonStyle(WorkPlainButtonStyle()).font(Typography.meta)
         }
     }
 }
@@ -115,7 +115,7 @@ struct ReviewMarkdown: View, Equatable {
         VStack(alignment: .leading, spacing: Spacing.sm) {
             ForEach(Array(redline.entries.enumerated()), id: \.offset) { _, entry in
                 if split {
-                    HStack(alignment: .top, spacing: 12) {
+                    HStack(alignment: .top, spacing: Spacing.md) {
                         side(entry, showing: .removed).frame(maxWidth: .infinity, alignment: .leading)
                         Divider()
                         side(entry, showing: .added).frame(maxWidth: .infinity, alignment: .leading)
@@ -157,7 +157,7 @@ struct ReviewMarkdown: View, Equatable {
     /// A block that stands alone, removed or added: filled in its tone with a bar beside it.
     private func marked(_ block: MarkdownBlocks.Block, tone: ThemeTone) -> some View {
         MarkdownBlocks.Row(block: block)
-            .padding(.horizontal, Spacing.xs).padding(.vertical, 2)
+            .padding(.horizontal, Spacing.xs).padding(.vertical, Spacing.xxs)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(tone.fill)
             .overlay(alignment: .leading) { Rectangle().fill(tone.ink).frame(width: 2) }
@@ -208,7 +208,7 @@ struct TaskImage: View {
     @Environment(\.palette) private var palette
 
     var body: some View {
-        VStack(spacing: 6) {
+        VStack(spacing: Spacing.xs) {
             if let file, file.state != .missing {
                 if let data = Self.bytes(of: file), let image = NSImage(data: data) {
                     Image(nsImage: image).resizable().interpolation(.high).aspectRatio(contentMode: .fit)
@@ -236,7 +236,7 @@ struct TaskImage: View {
     }
 
     private func caption(_ text: String) -> some View {
-        Text(text).font(Typography.caption(11)).foregroundStyle(palette.textSecondary)
+        Text(text).font(Typography.meta).foregroundStyle(palette.textSecondary)
     }
 
     /// The image's pixel size, or its point size for a picture without pixels.

@@ -82,7 +82,7 @@ struct PullRequestTests {
         let merged = describe(try record("merged", merge: "abcdef0123456789"))
         let abandoned = describe(try record("abandoned"))
 
-        #expect(none.headline == "No pull request yet · changes below are local")
+        #expect(none.headline == "No pull request yet. Changes below are local.")
         #expect(working == none)
         #expect(publishing.headline == "Publishing… · requested 2026-11-14T10:00:00Z")
         #expect(open.headline == "Open #12 · 1 passed · read 20 s ago")

@@ -64,7 +64,7 @@ struct HideablePart<Content: View>: View {
         content
             .overlay(alignment: .topTrailing) {
                 HoverRevealed(flag: hover) {
-                    HStack(spacing: 2) {
+                    HStack(spacing: Spacing.xxs) {
                         button(zoomed ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right",
                                label: zoomed ? "Zoom out" : "Zoom \(part.title)", id: "wave-zoom-\(part.rawValue)",
                                help: zoomed ? "Return to the view (Esc)" : "Fill the view with the \(part.title.lowercased())") {
@@ -89,7 +89,7 @@ struct HideablePart<Content: View>: View {
                         action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: systemImage)
-                .font(.system(size: 11))
+                .font(Typography.meta)
                 .foregroundStyle(palette.textSecondary)
                 .frame(width: 22, height: 20)
                 .contentShape(Rectangle())
@@ -205,10 +205,11 @@ struct WaveViewLayout<Session: View, Backlog: View, Tiles: View>: View {
 struct ZoomCrumb: View {
     let title: String
     let zoomOut: () -> Void
+    @Environment(\.palette) private var palette
 
     var body: some View {
-        HStack(spacing: 6) {
-            Text("›").foregroundStyle(.secondary)
+        HStack(spacing: Spacing.xs) {
+            Image(systemName: "chevron.right").font(Typography.meta).foregroundStyle(palette.titlebarSecondaryText)
             Text(title).lineLimit(1).fixedSize()
             Button(action: zoomOut) { Image(systemName: "arrow.down.right.and.arrow.up.left") }
                 .frame(width: 24, height: 28).contentShape(Rectangle())

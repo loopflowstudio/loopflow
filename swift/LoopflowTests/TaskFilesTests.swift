@@ -851,13 +851,13 @@ struct TaskFilesTests {
         // An edited line pairs its before and after and emphasizes the typed words.
         #expect(change.pairs.first?.added?.text == "typed saved")
         #expect(change.pairs.first?.addedSegments?.filter(\.changed).map(\.text).joined().contains("typed") == true)
-        #expect(store.comparisonDescription?.hasSuffix("· includes uncommitted changes") == true)
+        #expect(store.comparisonDescription?.hasSuffix(". Includes uncommitted changes.") == true)
         #expect(store.comparisonDescription?.hasPrefix("Compared with the Task's base at aaaaaaaaaa") == true)
     }
 
     /// A store over two changed files, each with two separate changes.
     /// `word` is the first hunk's new line, read on every file read.
-    private func twoFileStore(failingOnce: String? = nil,
+    private func twoFileStore(failingOnce: String? = nil, calledOff: Bool = false,
                               word: OSAllocatedUnfairLock<String> = .init(initialState: "uno"),
                               before: @escaping @Sendable (String) async -> Void = { _ in }) throws -> TaskFilesStore {
         let failed = OSAllocatedUnfairLock(initialState: false)
@@ -866,14 +866,19 @@ struct TaskFilesTests {
             .appendingPathComponent("tests/fixtures/dto/task_files.json"))
         let reply: @Sendable ([String]) throws -> String = { args in
             let root = try JSONSerialization.jsonObject(with: fixture) as! [String: Any]
-            var value = root[args[1] == "changes" ? "changes" : "diff"] as! [String: Any]
-            if args[1] == "changes" {
+            var value = root[args[1]] as! [String: Any]
+            switch args[1] {
+            case "changes":
                 let file = (value["files"] as! [[String: Any]])[0]
                 value["files"] = ["a.swift", "b.swift"].map { path in
                     file.merging(["path": path, "old_path": NSNull(), "changes": 2]) { $1 }
                 }
-            } else {
+            case "file":
+                // No tour. Any other file is the fixture's one line, shorter than a second hunk expects.
+                if args[3] == DiffTour.path { throw RegistryQueryError("no such file") }
+            default:
                 if args[3] == failingOnce, !failed.withLock({ let was = $0; $0 = true; return was }) {
+                    if calledOff { throw CancellationError() }
                     throw RegistryQueryError("the server restarted")
                 }
                 // No path argument is the whole comparison.
@@ -1040,6 +1045,14 @@ struct TaskFilesTests {
         #expect(store.review?.file("b.swift")?.stops.count == 2)
     }
 
+    /// A read that was called off is not a failure: the file stays unread and is read again.
+    @Test func aFileReadCalledOffIsNotAFailure() async throws {
+        let store = try twoFileStore(failingOnce: "b.swift", calledOff: true)
+        await store.loadReview()
+        #expect(store.fileNotes.isEmpty && store.unread.isEmpty)
+        #expect(store.review?.file("b.swift")?.stops.count == 2)
+    }
+
     /// The Diff draws a window of files, so a jump lands at once however far
     /// down it goes. A jump far down starts the window at its file, scrolling
     /// down draws the next files, and showing earlier files keeps the top line.
@@ -1185,7 +1198,7 @@ struct TaskFilesTests {
             return nil
         }.first)
         await store.openGap(header, gap: try #require(file.gaps[index]), file: file, reader: .changes)
-        #expect(store.gapError == nil)
+        #expect(store.openedGaps[file.path]?.failure == nil)
         let opened = store.opened(file)
         #expect(opened.lines.first { $0.new == 5 }?.text == "let five = 5")
         #expect(reads.withLock { $0 }.contains { $0.suffix(2) == ["--at", head] })
@@ -1226,6 +1239,21 @@ struct TaskFilesTests {
             ReviewStream(store: store, reader: .changes, files: (store.shownReview?.files ?? []) + [long],
                          split: false, addToConversation: nil)
         }) <= width)
+    }
+
+    /// A narrow pane moves a file's counts and Viewed under its name rather
+    /// than clipping either; a wide one keeps the header on one line.
+    @Test func aFileHeaderWrapsInsteadOfClipping() async throws {
+        let store = try twoFileStore()
+        await store.loadReview()
+        let path = "swift/LoopflowMac/Design/TaskChangesViewWithALongName.swift"
+        let file = ReviewFile(path: path, oldPath: nil, status: .added, blocks: [])
+        func height(at width: CGFloat) -> CGFloat {
+            let host = NSHostingController(rootView: ReviewFileTitle(store: store, file: file, note: nil, viewable: true))
+            return host.sizeThatFits(in: CGSize(width: width, height: 600)).height
+        }
+        let wide = height(at: 1_200), narrow = height(at: 360)
+        #expect(narrow > wide * 1.5)
     }
 
     /// The checkout's `scratch/tour.yaml` orders the Diff and hides what
@@ -1275,7 +1303,7 @@ struct TaskFilesTests {
             return nil
         }.first)
         await store.openGap(header, gap: try #require(file.gaps[index]), file: file, reader: .changes)
-        #expect(store.gapError == nil)
+        #expect(store.openedGaps[file.path]?.failure == nil)
         #expect(store.opened(file).lines.compactMap(\.new).contains(5))
         store.reviewSelection = ReviewSelection(path: "a.swift", side: .new, first: 5, last: 5)
         store.commentDraft = "what is five?"
@@ -1284,6 +1312,25 @@ struct TaskFilesTests {
         #expect(store.comments.map(\.anchor) == [["five"]])
         await store.loadReview()
         #expect(store.comments.map(\.detached) == [false])
+    }
+
+    /// Skipped lines that do not load say so under their own file, and the
+    /// words go when that file's opened rows go.
+    @Test func aFailedSkippedLinesOpenBelongsToItsFile() async throws {
+        let store = try twoFileStore()
+        await store.loadReview()
+        let file = try #require(store.review?.file("a.swift"))
+        let (index, header) = try #require(file.blocks.enumerated().compactMap { index, block -> (Int, String)? in
+            if case .hunk(let header) = block, index > 0 { return (index, header) }
+            return nil
+        }.first)
+        await store.openGap(header, gap: try #require(file.gaps[index]), file: file, reader: .changes)
+        #expect(store.openedGaps["a.swift"]?.failure?.contains("the file changed since this comparison was read") == true)
+        #expect(store.openedGaps["b.swift"] == nil)
+        #expect(store.opened(file) == file)
+
+        store.showStep(ReviewStep(name: "implement", base: "a", commits: [], head: "b"))
+        #expect(store.openedGaps["a.swift"] == nil)
     }
 
     /// A store over `a.swift` and `z.swift` whose checkout holds `tour`.
@@ -1697,6 +1744,66 @@ struct TaskFilesTests {
         #expect(document.text == "external\n")
         editor.undoManager?.redo()
         #expect(document.text == "external\ndraft")
+    }
+
+    /// The Diff counts files in words, names its refs as code, and the
+    /// sidebar counts and marks what you have viewed.
+    @Test func theDiffSaysWhatChangedAndWhatYouViewed() async throws {
+        let store = try twoFileStore()
+        await store.loadReview()
+        #expect(store.changesTitle == "2 changed files")
+        let line = try #require(store.comparisonLine)
+        #expect(String(line.characters).hasSuffix(". Includes uncommitted changes."))
+        let named = TaskChangesView.names(line)
+        let mono = named.runs.filter { $0.font == Typography.mono }.map { String(named[$0.range].characters) }
+        #expect(mono == [String(try #require(store.changes).baseCommit.prefix(10))])
+        #expect(!named.runs.contains { $0.inlinePresentationIntent != nil })
+
+        store.hide("b.swift")
+        #expect(store.changesTitle == "1 of 2 changed files")
+        store.unhide("b.swift")
+
+        let sidebar = ChangedFilesSidebar(store: store, current: nil, notice: nil, jump: { _ in })
+        #expect(store.viewedSummary == nil)
+        #expect((try? sidebar.inspect().find(text: "Viewed")) == nil)
+        store.setViewed(try #require(store.shownReview?.files.first), true)
+        #expect(store.viewedSummary == "1 of 2 viewed")
+        _ = try sidebar.inspect().find(text: "1 of 2 viewed")
+        _ = try sidebar.inspect().find(text: "Viewed")
+        #expect(ChangedFilesSidebar.place("swift/LoopflowMac/Views/TaskBriefView.swift", under: nil)
+            == ("TaskBriefView.swift", "swift/LoopflowMac/Views/"))
+        #expect(ChangedFilesSidebar.place("swift/LoopflowMac/Views/TaskBriefView.swift", under: "swift/".count)
+            == ("TaskBriefView.swift", "LoopflowMac/Views/"))
+        #expect(ChangedFilesSidebar.place("README.md", under: nil) == ("README.md", nil))
+    }
+
+    /// Layouts are named in words, and the delivery card's link has no typed arrow.
+    @Test func theDiffNamesItsChoicesInWords() throws {
+        let store = try twoFileStore()
+        let picker = ReviewLayoutPicker(store: store, width: 800)
+        for layout in ["New code", "Unified", "Side by side"] { _ = try picker.inspect().find(text: layout) }
+        let url = try #require(URL(string: "https://github.com/loopflow/loopflow/pull/1949"))
+        let card = DeliveryCard(store: store.pullRequest, record: nil, taskOpen: true, url: url, localHead: nil)
+        #expect(try card.inspect().find(viewWithAccessibilityIdentifier: "changes-open-github").button().labelView().text().string()
+            == "Open on GitHub")
+        _ = try card.inspect().find(button: "Read again")
+    }
+
+    /// Files names the open file with its place among the open ones.
+    @Test func filesNamesTheOpenFileAndItsPlace() throws {
+        let store = TaskFilesStore(issue: "TEST-1", cwd: "/src/loopflow", query: RegistryQuery { _, _ in "{}" })
+        store.page = .files
+        store.selection = "scratch/plan.md"
+        #expect(store.tabPlace == nil)
+        store.selection = "scratch/questions.md"
+        store.selection = "swift/TaskRow.swift"
+        store.selection = "scratch/plan.md"
+        #expect(store.tabPlace == "1 of 3")
+        let view = TaskFilesView(store: store, checkoutBase: nil)
+        _ = try view.inspect().find(text: "1 of 3")
+        _ = try view.inspect().find(text: "plan.md")
+        _ = try view.inspect().find(text: "This Mac")
+        _ = try view.inspect().find(text: "loopflow/scratch")
     }
 }
 private func fileJSON(_ url: URL) throws -> [String: Any] {

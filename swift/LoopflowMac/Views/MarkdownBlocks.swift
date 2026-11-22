@@ -27,8 +27,12 @@ struct MarkdownBlocks: View, Equatable {
     /// Each block's scroll id, for an outline to jump to.
     static func anchor(_ block: Int) -> String { "markdown-block-\(block)" }
 
-    /// Reading copy at 1.55 line height: Lato 13 sets ~15.6 pt natively.
+    /// Reading copy at about 1.55 line height over the `text` step (13 pt).
     static let lineSpacing: CGFloat = 4.5
+
+    private static func indent(_ block: Block) -> CGFloat {
+        Spacing.lg * CGFloat(max(block.depth - 1, 0))
+    }
 
     var body: some View {
         let blocks = Perf.measure(Perf.markdownParse, "bytes=\(source.utf8.count)") { Self.blocks(source) }
@@ -56,9 +60,9 @@ struct MarkdownBlocks: View, Equatable {
                 }
                 content
             }
-            .font(Typography.body(13))
+            .font(Typography.text)
             .lineSpacing(block.kind == .code ? 0 : MarkdownBlocks.lineSpacing)
-            .padding(.leading, CGFloat(max(block.depth - 1, 0)) * 16)
+            .padding(.leading, MarkdownBlocks.indent(block))
         }
 
         @ViewBuilder
@@ -66,7 +70,7 @@ struct MarkdownBlocks: View, Equatable {
             switch block.kind {
             case .heading(let level):
                 Text(block.text)
-                    .font(Typography.strong(level <= 1 ? 17 : level == 2 ? 15 : 13))
+                    .font(level <= 2 ? Typography.lede : Typography.textStrong)
                     .padding(.top, Spacing.xs)
             case .paragraph:
                 Text(block.text)
@@ -77,11 +81,11 @@ struct MarkdownBlocks: View, Equatable {
                     .overlay(alignment: .leading) { Rectangle().fill(palette.border).frame(width: 2) }
             case .code:
                 Text(block.text)
-                    .font(Typography.code(12))
+                    .font(Typography.mono)
                     .padding(Spacing.sm)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(palette.surfaceMuted)
-                    .clipShape(RoundedRectangle(cornerRadius: CornerRadius.sm))
+                    .clipShape(RoundedRectangle(cornerRadius: CornerRadius.control))
             case .rule:
                 Divider()
             case .row(let header):

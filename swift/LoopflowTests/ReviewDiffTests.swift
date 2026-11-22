@@ -203,8 +203,8 @@ struct ReviewDiffTests {
         #expect(detached.detached && detached.selection.range == "L8")
         // A file that left the comparison detaches its comments; none is dropped.
         #expect(kept.anchored(in: nil).detached)
-        let message = ReviewComment.message([moved, detached], revision: "Compared with main at abc1234")
-        #expect(message == "2 comments on the diff, Compared with main at abc1234: "
+        let message = ReviewComment.message([moved, detached], revision: "Compared with main at abc1234. Includes uncommitted changes")
+        #expect(message == "2 comments on the diff (Compared with main at abc1234. Includes uncommitted changes): "
             + "(1) `a.swift:L11-12` (after): why Spanish? say so "
             + "(2) `a.swift:L8` (before, lines since changed): keep this ")
         #expect(!message.unicodeScalars.contains { $0.value < 0x20 })

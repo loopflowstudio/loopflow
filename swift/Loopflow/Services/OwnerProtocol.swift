@@ -3,6 +3,8 @@ import Foundation
 /// A frame's first byte on an owner connection, as `rust/loopflow-execution/src/transport/wire.rs` names it.
 public enum OwnerTag: UInt8, Sendable {
     case reply = 0x01, snapshot = 0x02, out = 0x03, err = 0x04
+    /// The PTY byte the stream stands at, lf's own events and reports, and the reason an orderly stream ends.
+    case position = 0x05, aside = 0x06, close = 0x07
     case request = 0x11, input = 0x12
 }
 
@@ -64,7 +66,7 @@ public struct OwnerStream: Sendable {
         var events: [TerminalEvent] = []
         while frames.count - consumed >= 5 {
             let start = frames.startIndex + consumed
-            guard let tag = OwnerTag(rawValue: frames[start]), tag.rawValue <= OwnerTag.err.rawValue else {
+            guard let tag = OwnerTag(rawValue: frames[start]), tag.rawValue <= OwnerTag.close.rawValue else {
                 throw RegistryQueryError("Unsupported Session frame")
             }
             let length = frames[(start + 1)..<(start + 5)].reduce(0) { ($0 << 8) | Int($1) }
@@ -79,6 +81,17 @@ public struct OwnerStream: Sendable {
                     throw RegistryQueryError("Unexpected Session snapshot")
                 }
                 try appendScreen(body)
+            case .position:
+                // A reconnecting phone asks for a fresh screen, so it keeps no position.
+                break
+            case .close:
+                ended = true
+                sizing = false
+                switch try JSONDecoder().decode(OwnerClose.self, from: body).reason {
+                case "finished": events.append(.ended)
+                case "retired": events.append(.disconnected("This Session’s terminal was put away."))
+                default: events.append(.disconnected("This Session’s terminal was replaced."))
+                }
             default:
                 guard scanner != nil else { throw RegistryQueryError("Session output arrived before attachment") }
                 for piece in scanner!.scan(body) {
@@ -187,6 +200,10 @@ public struct OwnerStream: Sendable {
     }
 
     public static func input(_ bytes: Data) throws -> Data { try frame(.input, body: bytes) }
+}
+
+private struct OwnerClose: Decodable {
+    let reason: String
 }
 
 private struct AttachRequest: Encodable {

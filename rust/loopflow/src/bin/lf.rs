@@ -694,7 +694,7 @@ fn print_task_snapshot(
             tracker_writeback,
         );
         if let Some(graph) = &snapshot.work.graph {
-            println!("  {}", graph.summary());
+            println!("  Graph {}: {}", graph.name, graph.sentence);
         }
         if let Some(conflict) = &snapshot.completion_pending {
             println!("  error: {conflict}");
@@ -3331,7 +3331,7 @@ fn execute_command(
         Some(Commands::Context { json, wave, task }) => {
             loopflow::lf::commands::context::run(*json, wave.as_deref(), task.as_deref())
         }
-        Some(Commands::List { .. } | Commands::Help { .. }) => {
+        Some(Commands::List { .. } | Commands::Help { .. } | Commands::Docs { .. }) => {
             unreachable!("inspection returned before execution")
         }
         Some(Commands::Discord {

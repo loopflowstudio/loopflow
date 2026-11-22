@@ -200,5 +200,35 @@
         ]
       }
     ]
+  },
+  "workflow": {
+    "steps": [
+      {
+        "name": "review",
+        "interactive": false
+      },
+      {
+        "name": "xor-route",
+        "interactive": false
+      },
+      {
+        "name": "implement",
+        "interactive": false
+      },
+      {
+        "name": "loop-or-next",
+        "interactive": false
+      },
+      {
+        "name": "demo",
+        "interactive": false
+      },
+      {
+        "name": "loop-or-next",
+        "interactive": false
+      }
+    ],
+    "interactive_steps": [],
+    "sentence": "Runs on its own."
   }
 }

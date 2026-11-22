@@ -168,25 +168,25 @@ private struct RecoveredCreationInspector: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(resource.task == nil ? "Recovered Session" : "Recovered Task").font(.headline)
+        VStack(alignment: .leading, spacing: Spacing.md) {
+            Text(resource.task == nil ? "Recovered Session" : "Recovered Task").font(Typography.textStrong)
             ScrollView {
                 Group {
                     switch detail {
                     case .success(let text): Text(text).task { await presented() }
-                    case .failure(let error): Text(error.localizedDescription)
+                    case .failure(let error): FailureLine("Current work not read.", machine: error.localizedDescription)
                     case nil: Text("Reading current work…")
                     }
                 }
-                .font(.system(.body, design: .monospaced)).textSelection(.enabled)
+                .font(Typography.mono).textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             DisclosureGroup("Receipt") {
-                ScrollView { Text(resource.receipt).font(.system(.caption, design: .monospaced)).textSelection(.enabled) }
+                ScrollView { Text(resource.receipt).font(Typography.mono).textSelection(.enabled) }
             }
-            Button("Done") { dismiss() }
+            Button("Done") { dismiss() }.buttonStyle(LoopflowButtonStyle())
         }
-        .padding(20).frame(minWidth: 600, minHeight: 400)
+        .padding(Spacing.xl).frame(minWidth: 600, minHeight: 400)
         .task {
             do {
                 guard try await CreationSubmissions.localMachine() == resource.destination else {

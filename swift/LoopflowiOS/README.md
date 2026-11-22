@@ -28,24 +28,70 @@ to show — **Started** (Desktop's sidebar: Working Tasks), **Ready for
 you**, **Working now**, **Backlog** or **Done** — in the Machine's order, within one Wave when you pick it there. Tasks
 with a conversation come first; started Tasks nobody has opened a conversation
 for fold under "N without a conversation". Search covers title and checkout
-path. Pull to refresh. **+** opens New Task: describe the work, pick a
+path. Pull to refresh.
+
+A row is the Mac sidebar's row: the Task's whole title, wrapped rather than
+cut, then its ID and status word.
+
+```text
+Loopflow for iPhone uses the shared design
+tokens and components
+LOO-5  Busy  Auto
+```
+
+The word is the one the Mac shows for that Task: what its conversation reports
+(**Blocked**, **Busy**, **Available**), or its lifecycle word (**Unstarted**,
+**Idle**, **Active**, **Moving**, **Done**) while nothing reports. **Auto**
+follows while Auto-Ship is on. A Task whose reading carries
+neither says **Unavailable**. The row carries no stripe: colour is on the word.
+
+**+** opens New Task. Under "What do you want?", describe the work, pick a
 repository, **Create & start**. The Task's conversation opens as soon as the
 Machine answers and prints its setup (checkout, then Graph) before the agent's
 prompt.
 
-Swipe a Task left and tap **Complete**: the row leaves the list at once. In a
-Task, the toolbar offers **Start** (not started), otherwise **Auto on** or
-**Auto off**; each shows a line like "LOO-5 Auto on requested" at the
-bottom of the screen. If the Machine refuses, the row comes back and the same
-line says why. A list that fails to load keeps what it last showed and says so
-there too. The list opens on the last reading this phone saved for that
-Machine and filter, then updates.
+Swipe a Task left and tap **Complete**: the row leaves the list at once. If the
+Machine refuses, the row comes back and a line at the bottom of the screen says
+why. A list that fails to load keeps what it last showed and says so there too.
+The list opens on the last reading this phone saved for that Machine and
+filter, then updates.
+
+A list with nothing in it says so and offers the next step: **New Task** when
+the filter is empty, **Clear search** when the search matches nothing.
 
 ## Task
 
-Opening a Task opens its conversation and fits the terminal to the phone.
+Opening a Task opens its conversation and fits the terminal to the phone. Above
+it, one sentence says where the Task stands:
+
+```text
+build is running implement. You are next needed at ship-review.
+```
+
+It is the sentence `lf task status` prints and the Mac's workflow bar shows,
+in full: it wraps rather than cuts, and it changes as the Task moves. Turned
+sideways, or on an iPad, the Graph's steps stand before it as they do on the
+Mac. A Task that has not taken up a Graph shows no sentence.
+
+**Task actions** in the toolbar holds what the Mac's workflow bar offers:
+
+- **Start** before the Task has run, **Run** once its Graph has stopped or is
+  waiting at a step. While a run carries the Task, neither is there.
+- **Auto-Ship** turns the Task's auto setting on and runs it, as
+  `lf task auto on` does; **Stop Auto-Ship** turns it off. Every Task that is
+  not completed has one of them.
+
+Each shows a line like "LOO-5 Auto-Ship requested" at the bottom of the
+screen. An action the Machine already knows it would refuse is greyed, and
+the reason stands in full under the workflow sentence; any other refusal shows
+in that line.
+
 **Changes** lists the files the Task changed; each opens its diff, and the diff
-opens the whole file. A Task with no conversation opens on its Changes.
+opens the whole file. A Task with no conversation opens on its Changes; one
+that has not started says "No changes yet" and offers **Start**. Once it
+starts, its conversation opens in place, without going back to the list. Task
+actions follow the Task itself, so they stay when the list's filter no longer
+shows it.
 
 The device touched last has the terminal. When another device takes it, the
 phone stops drawing and offers **Continue here**.
@@ -61,10 +107,18 @@ end. Leaving the app drops the connection and the Session keeps running;
 returning reconnects. A stopped Session offers **Start it**. Nothing typed is
 ever sent twice: after an uncertain send the app says so and waits.
 
+When there is no terminal to draw (the Session ended, is saved but not
+running, is open on another device, or the connection dropped), the screen
+says which in a line of serif and offers the one button that fits. A Task
+whose Session cannot be reached from here offers **Changes**. Changes,
+a diff and a file do the same when they are empty or fail to load; a failure
+keeps **Try again**.
+
 ## Terminal
 
 Ghostty draws the Session, the same renderer as Desktop, in the theme's terminal
-colours and JetBrains Mono 12 scaled by Dynamic Type. No process runs on the
+colours and Spline Sans Mono 12 scaled by Dynamic Type, with ligatures off and
+10% more cell height, as on the Mac. No process runs on the
 phone: the bytes the Machine sends are fed to the surface, and what Ghostty
 would write back (keys, and its answers to a program's queries such as
 `OSC 7501;?`) goes to the Machine. Ghostty encodes the key row and hardware keys
@@ -74,6 +128,24 @@ The framework is GhosttyKit with the iOS slices from
 [`0006-ios-external-io.patch`](../GhosttyKitPatches/README.md), the archive
 `Package.swift` pins for Desktop too; `scripts/test_ios.py` resolves it before
 generating the project. The Simulator slice is arm64.
+
+## Look
+
+The phone draws with the Mac's parts. The Task row, status word, workflow
+sentence, button and empty or failed state are the shared components in
+[`swift/Loopflow/Design/`](../Loopflow/Design/), in the same three faces, on
+the iPhone column of the type ramp in [DESIGN.md](../../DESIGN.md#type). Text
+scales with Dynamic Type, nothing meant to be read is under 12 pt, and every
+control is 44 pt tall. Each screen has one accent button.
+
+A view names a step (`Typography.text`, `Spacing.md`, `CornerRadius.pane`) and
+never passes a number; `DesignDisciplineTests` reads this directory and
+fails on a literal size, padding or radius, a `.borderedProminent` button or a
+`ContentUnavailableView`.
+
+```sh
+cd swift && swift test --filter DesignDisciplineTests
+```
 
 ## Files
 

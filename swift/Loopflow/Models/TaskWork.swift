@@ -183,22 +183,51 @@ public struct TaskGraph: Codable, Sendable, Equatable {
         }
     }
 
+    /// One top-level step of the Graph, as the workflow line shows it.
+    public struct Step: Codable, Sendable, Hashable {
+        public let name: String
+        /// A person takes part somewhere inside it, XOR paths included.
+        public let interactive: Bool
+    }
+
     public static let start = "start"
     public static let end = "end"
 
     public let name: String
     public let interactiveSteps: [InteractiveStep]
     public let position: Position
+    /// The Graph's top-level steps in order.
+    public let steps: [Step]
+    /// The index in `steps` of the step the Task stands in; `nil` at `start` and `end`.
+    public let currentStep: Int?
+    /// Where the Task stands, in Rust's words: "build is running implement.
+    /// You are next needed at ship-review."
+    public let sentence: String
 
     enum CodingKeys: String, CodingKey {
-        case name, position
+        case name, position, steps, sentence
         case interactiveSteps = "interactive_steps"
+        case currentStep = "current_step"
     }
 
     /// The interactive step a person takes part at now.
     public var waitingStep: InteractiveStep? {
         guard case .at(let step) = position else { return nil }
         return interactiveSteps.first { $0.name == step }
+    }
+}
+
+extension TaskGraph {
+    // In an extension so the memberwise initializer stays.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            name: try container.decode(String.self, forKey: .name),
+            interactiveSteps: try container.decode([InteractiveStep].self, forKey: .interactiveSteps),
+            position: try container.decode(Position.self, forKey: .position),
+            steps: try container.decode([Step].self, forKey: .steps),
+            currentStep: try container.decode(Int?.self, forKey: .currentStep),
+            sentence: try container.decode(String.self, forKey: .sentence))
     }
 }
 

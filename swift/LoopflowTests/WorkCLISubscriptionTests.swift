@@ -203,7 +203,7 @@ struct WorkCLISubscriptionTests {
         let terminalTask = try #require(model.task(id: id)?.task)
         let header = TaskWorkflowHeader(model: model, task: terminalTask, work: model.taskWork[id])
         let label = try header.inspect().find(viewWithAccessibilityIdentifier: "task-lifecycle-status").text().string()
-        #expect(label == (action == "complete" ? "Completed" : "Canceled"))
+        #expect(label == (action == "complete" ? "Done" : "Abandoned"))
         #expect(FileManager.default.fileExists(atPath: checkout.worktree))
         #expect(workspace.multiplexer.layout == layout)
         #expect(workspace.multiplexer.focusedPaneId == focus)

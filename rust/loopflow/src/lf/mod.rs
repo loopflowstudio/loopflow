@@ -641,6 +641,13 @@ pub enum Commands {
         #[arg(long)]
         json: bool,
     },
+    /// Read embedded Loopflow user documentation offline
+    Docs {
+        /// Topic slug (omit to list all topics)
+        topic: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
     /// Show Wave memory size targets, their sources, and current usage
     Context {
         #[arg(long)]
@@ -1168,7 +1175,9 @@ impl Commands {
             Self::Repo { cmd, .. } => cmd.as_ref().is_some_and(|cmd| cmd.changes_work()),
             Self::Config { cmd } => cmd.changes_work(),
             Self::Self_ { cmd } => cmd.changes_work(),
-            Self::List { .. } | Self::Help { .. } | Self::Context { .. } => false,
+            Self::List { .. } | Self::Help { .. } | Self::Docs { .. } | Self::Context { .. } => {
+                false
+            }
             Self::Open(_)
             | Self::Inline { .. }
             | Self::Scratch { .. }

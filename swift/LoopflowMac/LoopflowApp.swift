@@ -204,7 +204,7 @@ struct LoopflowApp: App {
             TabView {
                 ThemeChooser(appearance: appearance).tabItem { Label("Appearance", systemImage: "paintpalette") }
                 Form { Toggle("Autosave Task Files", isOn: $taskFilesAutosave) }
-                    .padding(24).tabItem { Label("Editing", systemImage: "pencil") }
+                    .padding(Spacing.xxl).tabItem { Label("Editing", systemImage: "pencil") }
                 ConfigurationSettingsView().tabItem { Label("Configuration", systemImage: "slider.horizontal.3") }
                 KeyboardShortcutsView().tabItem { Label("Keyboard Shortcuts", systemImage: "keyboard") }
                 MobileSettings().tabItem { Label("Mobile", systemImage: "iphone") }
@@ -341,13 +341,13 @@ struct AppAppearance: ViewModifier {
             .safeAreaInset(edge: .top) {
                 if let notice = appearance.notice, !appearance.chooserOpen {
                     HStack {
-                        Text(notice).font(.caption)
+                        Text(notice).font(Typography.meta)
                         Button("Choose Theme…") {
                             appearance.beginPreview()
                             openSettings()
                         }
                     }
-                    .padding(8).foregroundStyle(theme.palette.text)
+                    .padding(Spacing.sm).foregroundStyle(theme.palette.text)
                     .background(theme.palette.surface)
                 }
             }

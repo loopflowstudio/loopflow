@@ -11,7 +11,7 @@ import ViewInspector
 struct WorkspacePanesTests {
     private let location = WorkspaceIdentity(machineId: "fixture", worktree: "/fixture/task-a")
 
-    private func session(_ id: String) throws -> SessionRecord {
+    private func session(_ id: String, _ fields: [String: Any] = [:]) throws -> SessionRecord {
         let path = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent()
             .appendingPathComponent("tests/fixtures/dto/session.json")
@@ -21,6 +21,7 @@ struct WorkspacePanesTests {
         wire["state"] = "unknown"
         wire["workspace"] = ["machine_id": location.machineId, "worktree": location.worktree,
                              "task_id": "task-a", "unavailable": NSNull()]
+        wire.merge(fields) { $1 }
         return try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: wire))
     }
 
@@ -292,6 +293,32 @@ struct WorkspacePanesTests {
         #expect(throws: (any Error).self) { try view.inspect().find(WorkspacePanesView.self) }
         #expect(throws: (any Error).self) { try view.inspect().find(TaskStartOffer.self) }
         #expect(throws: (any Error).self) { try view.inspect().find(viewWithAccessibilityIdentifier: "open-conversation") }
+    }
+
+    @Test("The Session strip names its agent in words and the conversation notice sits above the terminal")
+    func sessionStripAndNotice() throws {
+        let query = RegistryQuery { _, _ in throw RegistryQueryError("Rendering cannot open work") }
+        let model = WorkModel(query: query, repoPath: location.worktree)
+        let workspace = SessionsWorkspace(key: .init(repository: "repo", kind: .task, id: "task-a"),
+            title: "Task A", location: location, localMachineId: location.machineId)
+        let sessions = workspace.sessionStore(repoPath: location.worktree, query: query)
+        let record = try session("primary", ["provider": "claude", "transition": ["kind": "started", "from_provider_session": "earlier", "to_provider_session": "next",
+                              "from_agent_process": NSNull(), "to_agent_process": "55555555-5555-4555-8555-555555555555",
+                              "original_running": NSNull(), "seed": NSNull(), "observed_at": 1794100000]])
+        sessions.reconcile([record])
+        workspace.multiplexer.load(sessionId: record.id, location: location)
+        let pane = workspace.multiplexer.focusedPane
+        let view = SessionPaneView(pane: pane, isFocused: true, sessions: sessions, workspace: workspace,
+                                   model: model, onFocus: { _, _ in })
+        // The label is the word alone: Text, not a Label with the provider's symbol.
+        let program = try view.inspect().find(viewWithAccessibilityIdentifier: "pane-program-\(pane.id)")
+            .find(ViewType.Menu.self).labelView()
+        #expect(try program.text().string() == "Claude")
+        let notice = try view.inspect().find(ProviderTransitionRow.self)
+        _ = try notice.find(text: "New conversation; earlier one left behind")
+        #expect(throws: (any Error).self) {
+            try view.inspect().find(viewWithAccessibilityIdentifier: "pane-strip-\(pane.id)").find(ProviderTransitionRow.self)
+        }
     }
 
     @Test("Every Task pane hides on hover and the header's Show… restores it")

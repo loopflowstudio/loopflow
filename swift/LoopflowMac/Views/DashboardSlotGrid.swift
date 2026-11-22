@@ -131,17 +131,17 @@ struct DashboardSlotGrid<Tile: View>: View {
     var body: some View {
         let pages = layout.pages(members)
         let current = min(page, pages.count - 1)
-        VStack(spacing: 8) {
+        VStack(spacing: Spacing.sm) {
             pageView(pages[current])
                 .id(current)
                 .transition(.push(from: forward ? .trailing : .leading))
                 .clipped()
             if pages.count > 1 {
-                HStack(spacing: 12) {
+                HStack(spacing: Spacing.md) {
                     Button { turn(to: current - 1) } label: { Image(systemName: "chevron.left") }
                         .disabled(current == 0).help("Previous page")
                         .keyboardShortcut(pagerKeys ? KeyboardShortcut(.leftArrow, modifiers: [.command, .option]) : nil)
-                    Text("Page \(current + 1) of \(pages.count)").font(Typography.code(11))
+                    Text("Page \(current + 1) of \(pages.count)").font(Typography.text).monospacedDigit()
                         .foregroundStyle(palette.textSecondary)
                         .accessibilityIdentifier("dashboard-page")
                     Button { turn(to: current + 1) } label: { Image(systemName: "chevron.right") }
@@ -192,9 +192,9 @@ struct DashboardSlotGrid<Tile: View>: View {
 
     /// Drag a slot onto another to exchange their places; split or remove in place.
     private func slotControls(_ index: Int, _ editing: DashboardSlotEditing) -> some View {
-        VStack(spacing: 8) {
-            Text("Slot \(index + 1)").font(Typography.strong(13))
-            HStack(spacing: 12) {
+        VStack(spacing: Spacing.sm) {
+            Text("Slot \(index + 1)").font(Typography.textStrong)
+            HStack(spacing: Spacing.md) {
                 Button { editing.write(layout.adding(beside: index, axis: .vertical)) } label: {
                     Image(systemName: "rectangle.split.2x1")
                 }.help("Add a slot beside")

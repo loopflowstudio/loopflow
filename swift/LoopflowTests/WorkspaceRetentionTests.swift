@@ -370,10 +370,10 @@ struct WorkspaceRetentionTests {
                 #expect(resolved.path == scene.path)
                 return repo
             }
-        #expect(throws: Never.self) { try failed.inspect().find(RepoView.self) }
-        let banner = try failed.body.inspect().vStack().hStack(1)
-        #expect(try banner.text(0).string() == reason)
-        try banner.button(1).tap()
+        let view = try failed.inspect()
+        _ = try view.find(RepoView.self)
+        _ = try view.find(text: reason)
+        try view.find(button: "Retry").tap()
         #expect(retries == 1)
         #expect(registry.inspect() == before)
         #expect(registry.openWork == layout)

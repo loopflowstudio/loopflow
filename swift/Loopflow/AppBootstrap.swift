@@ -32,12 +32,15 @@ extension Bundle {
 /// else is synthesized by CoreText and renders heavier than the design.
 enum AppFontRegistration {
     private static let fontFiles = [
-        "CormorantGaramond-Regular.otf",
-        "CormorantGaramond-Medium.otf",
-        "CormorantGaramond-SemiBold.otf",
-        "Lato-Regular.ttf",
-        "Lato-Bold.ttf",
-        "JetBrainsMono-Regular.ttf",
+        "OldStandard-Regular.ttf",
+        "AtkinsonHyperlegibleNext-Regular.ttf",
+        "AtkinsonHyperlegibleNext-Italic.ttf",
+        "AtkinsonHyperlegibleNext-SemiBold.ttf",
+        "AtkinsonHyperlegibleNext-SemiBoldItalic.ttf",
+        "SplineSansMono-Regular.ttf",
+        "SplineSansMono-Bold.ttf",
+        "SplineSansMono-Italic.ttf",
+        "SplineSansMono-BoldItalic.ttf",
     ]
 
     static func registerBundledFonts() {

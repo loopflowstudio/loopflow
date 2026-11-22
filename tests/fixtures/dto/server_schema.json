@@ -2825,6 +2825,17 @@
             "string",
             "null"
           ]
+        },
+        "workflow": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WorkflowOutline"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The Graph as a Task's workflow line draws it; null exactly when\n`compiled` is."
         }
       },
       "required": [
@@ -2833,6 +2844,7 @@
         "source",
         "compiled",
         "composition",
+        "workflow",
         "unavailable",
         "included_by",
         "runs"
@@ -13304,6 +13316,15 @@
     "TaskGraph": {
       "description": "One Task's Graph as `lf task status --json` carries it.",
       "properties": {
+        "current_step": {
+          "description": "The index in `steps` of the step the Task stands in; null at `start`\nand at `end`.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "interactive_steps": {
           "items": {
             "$ref": "#/$defs/InteractiveStep"
@@ -13315,12 +13336,26 @@
         },
         "position": {
           "$ref": "#/$defs/TaskGraphPosition"
+        },
+        "sentence": {
+          "description": "Where the Task stands, in one sentence: \"build is running implement.\nYou are next needed at ship-review.\"",
+          "type": "string"
+        },
+        "steps": {
+          "description": "The Graph's top-level steps in order, as the workflow line shows them.",
+          "items": {
+            "$ref": "#/$defs/WorkflowStep"
+          },
+          "type": "array"
         }
       },
       "required": [
         "name",
         "interactive_steps",
-        "position"
+        "position",
+        "steps",
+        "current_step",
+        "sentence"
       ],
       "type": "object"
     },
@@ -15894,6 +15929,52 @@
         "task"
       ],
       "type": "string"
+    },
+    "WorkflowOutline": {
+      "description": "A Graph as the workflow line shows it before any Task stands on it.",
+      "properties": {
+        "interactive_steps": {
+          "description": "Every step where a person takes part, as `TaskGraph` carries them.",
+          "items": {
+            "$ref": "#/$defs/InteractiveStep"
+          },
+          "type": "array"
+        },
+        "sentence": {
+          "description": "\"You take part at explore, ship-review and verify.\" or \"Runs on its own.\"",
+          "type": "string"
+        },
+        "steps": {
+          "description": "The Graph's top-level steps in order, as `TaskGraph.steps` carries them.",
+          "items": {
+            "$ref": "#/$defs/WorkflowStep"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "steps",
+        "interactive_steps",
+        "sentence"
+      ],
+      "type": "object"
+    },
+    "WorkflowStep": {
+      "description": "One top-level step of a Task's Graph.",
+      "properties": {
+        "interactive": {
+          "description": "A person takes part somewhere inside it, XOR paths included.",
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "interactive"
+      ],
+      "type": "object"
     },
     "Write": {
       "description": "A typed mutation with the same defaults and effects as its CLI spelling.\nOn the wire each write is a resource-named `kind` (`task.complete`);\n`desktop.*` writes are Desktop's own arrangement state.",

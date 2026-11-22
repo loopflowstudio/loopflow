@@ -372,3 +372,16 @@ present; the page is `scratch/concept-review.html`.
 92. `runtime.completionPending` (`TaskWorkView.swift:49`) is a sentence in
     the failure ink, not a `FailureLine`: Rust sends one string, as it does
     for a stopped Graph's reason. Left with that one, outside this change.
+
+Made at ship-review, with nobody present; the page is
+`scratch/ship-review.html`, and its questions 1 to 7 are still a person's.
+
+93. Filed: Task aa85f7 (one empty or failed state on Mac and iPhone; 78,
+    85) and Task 6d98bd (a refused Start, a stopped Graph's reason and a
+    pending completion in two parts, "starting" after Try again; 38, 52,
+    89, 92).
+94. Not filed: narrow Dashboard tiles (70), the 92 middle dots left under
+    `swift/LoopflowMac`, the slow comparison reload, the unsaved hidden
+    path that stays listed, the one capture in 88.
+95. No code changed at ship-review. Nothing promised is missing or broken;
+    the change goes to delivery.

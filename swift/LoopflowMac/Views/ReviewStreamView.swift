@@ -48,7 +48,7 @@ struct ReviewStream: View {
             if reader == .changes, store.isViewed(file) {
                 // Viewed: folded to its header until you clear it or its lines change.
             } else if reader == .changes, store.isReading(file) {
-                ReviewNotice(text: "Reading…").id(file.topID)
+                ReviewNotice(text: "Reading…").id(store.topID(of: file, in: reader))
                     .onAppear { store.setNear(file.path, true) }
                     .onDisappear { store.setNear(file.path, false) }
             } else {
@@ -85,16 +85,7 @@ struct ReviewStream: View {
         }
         let gaps = file.gaps
         ForEach(Array(file.blocks.enumerated()), id: \.offset) { index, block in
-            if file.status == .added, case .change(let change) = block {
-                // A new file is its contents: one lazy row per line, however long it is.
-                ForEach(Array(change.added.enumerated()), id: \.offset) { offset, line in
-                    lineRow(line, segments: nil, file: file)
-                        .overlay { if offset == 0 { currentMark(change.id) } }
-                        .id(change.rowID(offset))
-                }
-            } else {
-                blockView(block, gap: gaps[index], file: file).id(block.id(in: file.path))
-            }
+            blockView(block, gap: gaps[index], file: file)
         }
     }
 
@@ -129,40 +120,58 @@ struct ReviewStream: View {
             }
     }
 
+    /// A block's rows, each with its id. A change gives one lazy row per
+    /// line, so a long change is drawn only as it scrolls into view.
     @ViewBuilder
     private func blockView(_ block: ReviewBlock, gap: ReviewGap?, file: ReviewFile) -> some View {
         switch block {
         case .hunk(let header):
-            gapRow(header, gap: gap, file: file)
+            gapRow(header, gap: gap, file: file).id(block.id(in: file.path))
         case .context(let line):
             pairRow(ReviewPair(removed: line, added: line, removedSegments: nil, addedSegments: nil),
                     file: file, context: true)
+                .id(block.id(in: file.path))
         case .change(let change):
-            VStack(spacing: 0) {
-                if split, file.status != .added {
-                    ForEach(Array(change.pairs.enumerated()), id: \.offset) { _, pair in
-                        pairRow(pair, file: file, context: false)
-                    }
-                } else {
-                    // Unified: every removed line, then every added line. New
-                    // code folds the removed lines to a mark that opens them.
-                    let pairs = Array(change.pairs.enumerated())
-                    if store.reviewLayout == .new, !store.openedRemovals.contains(change.id) {
-                        if !change.removed.isEmpty { removalMark(change.removed.count, change: change.id) }
-                    } else {
-                        ForEach(pairs, id: \.offset) { _, pair in
-                            if let line = pair.removed { lineRow(line, segments: pair.removedSegments, file: file) }
-                        }
-                    }
-                    ForEach(pairs, id: \.offset) { _, pair in
-                        if let line = pair.added { lineRow(line, segments: pair.addedSegments, file: file) }
-                    }
-                }
+            ForEach(Array(rows(of: change, in: file).enumerated()), id: \.offset) { offset, row in
+                changeRow(row, change: change, file: file)
+                    .overlay { currentMark(change.id) }
+                    .id(change.rowID(offset))
             }
-            .overlay { currentMark(change.id) }
         case .moved(let move):
             movedView(move, file: file)
                 .overlay { currentMark(move.id) }
+                .id(block.id(in: file.path))
+        }
+    }
+
+    private enum ChangeRow {
+        /// New code's fold of the removed lines, with how many there are.
+        case removals(Int)
+        case line(ReviewLine, [ReviewSegment]?)
+        case pair(ReviewPair)
+    }
+
+    /// Side by side, one row per pair. Unified, every removed line, then every
+    /// added line; new code folds the removed lines to a mark that opens them.
+    /// A new file is its contents.
+    private func rows(of change: ReviewChange, in file: ReviewFile) -> [ChangeRow] {
+        if file.status == .added { return change.added.map { .line($0, nil) } }
+        if split { return change.pairs.map(ChangeRow.pair) }
+        var rows: [ChangeRow] = []
+        if store.reviewLayout == .new, !store.openedRemovals.contains(change.id) {
+            if !change.removed.isEmpty { rows.append(.removals(change.removed.count)) }
+        } else {
+            rows += change.pairs.compactMap { pair in pair.removed.map { .line($0, pair.removedSegments) } }
+        }
+        rows += change.pairs.compactMap { pair in pair.added.map { .line($0, pair.addedSegments) } }
+        return rows
+    }
+
+    @ViewBuilder private func changeRow(_ row: ChangeRow, change: ReviewChange, file: ReviewFile) -> some View {
+        switch row {
+        case .removals(let count): removalMark(count, change: change.id)
+        case .line(let line, let segments): lineRow(line, segments: segments, file: file)
+        case .pair(let pair): pairRow(pair, file: file, context: false)
         }
     }
 
@@ -196,14 +205,8 @@ struct ReviewStream: View {
         }
     }
 
-    @ViewBuilder private func currentMark(_ id: String) -> some View {
-        if store[place: reader].current == id {
-            ZStack(alignment: .leading) {
-                LandingFlash(stepped: store.steppedAt, color: palette.accent)
-                Rectangle().fill(palette.accent).frame(width: 3).accessibilityLabel("Current change")
-            }
-            .allowsHitTesting(false)
-        }
+    private func currentMark(_ id: String) -> some View {
+        ReviewCurrentMark(store: store, reader: reader, id: id)
     }
 
     // MARK: Moved code
@@ -505,6 +508,25 @@ private struct ReviewGutter: View {
 }
 
 /// One outline pulse on the change next/previous just landed on.
+/// The accent bar on the change next/previous landed on. Its own view, so
+/// stepping redraws the two marks that change, not the stream around them.
+private struct ReviewCurrentMark: View {
+    let store: TaskFilesStore
+    let reader: TaskFilesStore.ReviewReader
+    let id: String
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        if store.current(reader) == id {
+            ZStack(alignment: .leading) {
+                LandingFlash(stepped: store.steppedAt, color: palette.accent)
+                Rectangle().fill(palette.accent).frame(width: 3).accessibilityLabel("Current change")
+            }
+            .allowsHitTesting(false)
+        }
+    }
+}
+
 private struct LandingFlash: View {
     let stepped: Date
     let color: Color
@@ -740,7 +762,7 @@ struct ReviewStepper: View {
 extension TaskFilesStore {
     /// The reader's scroll anchor, for `scrollPosition(id:)`.
     func anchor(_ reader: ReviewReader) -> Binding<String?> {
-        Binding(get: { self[place: reader].anchor }, set: { self[place: reader].anchor = $0 })
+        Binding(get: { self[place: reader].anchor }, set: { self.scrolled(to: $0, in: reader) })
     }
 }
 

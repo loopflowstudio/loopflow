@@ -14,6 +14,12 @@ struct ReviewDiff: Equatable, Sendable {
 
     func file(_ path: String) -> ReviewFile? { files.first { $0.path == path } }
 
+    /// The index of the file a row belongs to: its header (`file:` and its
+    /// path) or one of its blocks (its path, `#`, the block).
+    func fileIndex(holding id: String) -> Int? {
+        files.firstIndex { id == "file:\($0.path)" || id.hasPrefix($0.path + "#") }
+    }
+
     // MARK: Parsing
 
     static func parse(_ patch: String) -> ReviewDiff {
@@ -65,8 +71,9 @@ struct ReviewDiff: Equatable, Sendable {
         return ReviewDiff(files: files)
     }
 
+    /// Drops the `a/` or `b/` prefix and the tab Git writes after a name with a space.
     private static func strip(_ path: Substring) -> String {
-        let path = String(path)
+        let path = String(path.hasSuffix("\t") ? path.dropLast() : path)
         if path.hasPrefix("a/") || path.hasPrefix("b/") { return String(path.dropFirst(2)) }
         return path
     }
@@ -207,6 +214,8 @@ struct ReviewFile: Equatable, Sendable, Identifiable {
     /// The file's lines as this patch reads them; a file marked viewed stays
     /// viewed until this changes. Equal only within one run of the app.
     let fingerprint: Int
+    /// The rows the stream draws for it at most: one per line and hunk.
+    let rows: Int
     var id: String { path }
 
     init(path: String, oldPath: String?, status: Status, blocks: [ReviewBlock]) {
@@ -214,16 +223,19 @@ struct ReviewFile: Equatable, Sendable, Identifiable {
         self.oldPath = oldPath
         self.status = status
         self.blocks = blocks
-        var additions = 0, deletions = 0
+        var additions = 0, deletions = 0, rows = 1
         var hasher = Hasher()
         hasher.combine(status)
+        for block in blocks { if case .hunk = block { rows += 1 } }
         for line in Self.lines(blocks) {
             if line.kind == .added { additions += 1 } else if line.kind == .removed { deletions += 1 }
+            rows += 1
             hasher.combine(line.kind)
             hasher.combine(line.text)
         }
         self.additions = additions
         self.deletions = deletions
+        self.rows = rows
         fingerprint = hasher.finalize()
     }
 
@@ -257,7 +269,8 @@ struct ReviewFile: Equatable, Sendable, Identifiable {
                 let named = ReviewGap(header, after: 0).declaration
                 if !named.isEmpty { found = named }
             }
-            // A new file's lines are rows of their own; any other block is one row.
+            // Every line of a change is a row. A new file's rows are its lines
+            // in order; another change's top row reads the declaration above it.
             if status == .added, case .change(let change) = block {
                 for (offset, line) in change.added.enumerated() {
                     if change.rowID(offset) == id { return found }
@@ -265,6 +278,7 @@ struct ReviewFile: Equatable, Sendable, Identifiable {
                 }
                 continue
             }
+            if case .change(let change) = block, change.hasRow(id) { return found }
             if block.id(in: path) == id { return found }
             let lines: [ReviewLine] = switch block {
             case .context(let line): [line]
@@ -422,14 +436,24 @@ struct ReviewChange: Equatable, Sendable {
     let id: String
     let removed: [ReviewLine]
     let added: [ReviewLine]
-
     /// Removed and added lines side by side; a modified line pairs with its
     /// replacement and carries word-level emphasis, a pure addition or removal
-    /// stands alone.
-    var pairs: [ReviewPair] { ReviewPair.align(removed, added) }
+    /// stands alone. Found once, where the patch is parsed, since the stream
+    /// lists every change's rows each time it is drawn.
+    let pairs: [ReviewPair]
 
-    /// A new file draws each added line as its own row; the first carries the change's id.
+    init(id: String, removed: [ReviewLine], added: [ReviewLine]) {
+        self.id = id
+        self.removed = removed
+        self.added = added
+        pairs = ReviewPair.align(removed, added)
+    }
+
+    /// Each of a change's lines is a row of its own; the first carries the change's id.
     func rowID(_ offset: Int) -> String { offset == 0 ? id : "\(id)+\(offset)" }
+
+    /// Whether `id` names one of this change's rows.
+    func hasRow(_ id: String) -> Bool { id == self.id || id.hasPrefix(self.id + "+") }
 }
 
 struct ReviewPair: Equatable, Sendable {

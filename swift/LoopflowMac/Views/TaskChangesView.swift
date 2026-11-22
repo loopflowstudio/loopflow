@@ -58,7 +58,7 @@ struct TaskChangesView: View {
                     .onScrollPhaseChange { _, phase in if phase == .interacting { store.noteInteraction() } }
                     .onGeometryChange(for: CGFloat.self, of: \.size.width) { width = $0 }
                     // Over the stream, so showing or hiding it moves no line.
-                    .overlay(alignment: .top) { enclosingBar }
+                    .overlay(alignment: .top) { EnclosingDeclarationBar(store: store) }
                 }
             }
             .overlay(alignment: .leading) {
@@ -212,7 +212,7 @@ struct TaskChangesView: View {
         guard let review = store.review, let shown = store.shownReview else {
             return all == 1 ? "1 file changed" : "\(all) files changed"
         }
-        let stops = store.stops(of: shown.files, in: .changes).count
+        let stops = shown.files.reduce(0) { $0 + store.changeCount($1) }
         let files = shown.files.count == review.files.count
             ? (all == 1 ? "1 file" : "\(all) files") : "\(shown.files.count) of \(review.files.count) files"
         return "\(stops == 1 ? "1 change" : "\(stops) changes") in \(files)"
@@ -393,27 +393,10 @@ struct TaskChangesView: View {
         }
     }
 
-    /// The file whose lines are at the top of the stream: the focused one,
-    /// else the one the reading anchor or the current change is in. While a
-    /// file's own header is the top row, the file above it is still the one
-    /// you are in, so the bar never names the header under it.
-    private var currentPath: String? {
-        if let focused = store.focusedPath { return focused }
-        let files = store.shownReview?.files ?? []
-        let place = store[place: .changes]
-        guard let id = place.anchor ?? place.current else { return files.first?.path }
-        if id.hasPrefix("file:") {
-            let index = files.firstIndex { $0.path == id.dropFirst("file:".count) } ?? 0
-            return files.isEmpty ? nil : files[max(0, index - 1)].path
-        }
-        if id == "footer" { return files.last?.path }
-        return files.first { id.hasPrefix($0.path + "#") }?.path ?? files.first?.path
-    }
-
     /// The header of the file you are in, fixed above the stream while its
     /// lines scroll under it. It is the first file's only header.
     @ViewBuilder private var currentFileBar: some View {
-        if let currentPath, let file = store.shownReview?.file(currentPath) {
+        if let path = store.topPath, let file = store.shownReview?.file(path) {
             let group = store.shownGroups.first { group in group.isTour && group.files.contains { $0.path == file.path } }
             ReviewFileTitle(store: store, file: file, note: group?.title ?? file.oldPath.map { "from \($0)" }, viewable: true)
                 .fillsPane()
@@ -429,24 +412,6 @@ struct TaskChangesView: View {
         }
     }
 
-    /// The function, type or heading the top line sits in, under the file's
-    /// name, while the file's own lines are at the top.
-    @ViewBuilder private var enclosingBar: some View {
-        if let path = currentPath, let file = store.shownReview?.file(path),
-           let id = store[place: .changes].anchor, id.hasPrefix(path + "#"),
-           let declaration = store.opened(file).enclosing(id) {
-            Text(declaration).font(Typography.code(11)).foregroundStyle(palette.textSecondary)
-                .lineLimit(1).truncationMode(.tail)
-                .padding(.leading, ReviewStream.gutterWidth + 18).padding(.trailing, 12).padding(.vertical, 3)
-                .fillsPane()
-                .background(palette.background.opacity(0.94))
-                .overlay(alignment: .bottom) { Divider() }
-                .help(declaration)
-                .allowsHitTesting(false)
-                .accessibilityIdentifier("changes-enclosing")
-        }
-    }
-
     /// Every shown file's changes, viewed ones included.
     private var shownStops: [ReviewStop] { store.shownReview.map { store.stops(of: $0.files, in: .changes) } ?? [] }
 
@@ -454,8 +419,8 @@ struct TaskChangesView: View {
         if store.focusedPath != nil {
             store.focusedPath = nil
         } else {
-            let current = store[place: .changes].current.flatMap { id in shownStops.first { $0.id == id }?.path }
-            store.focusedPath = current ?? currentPath
+            let current = store.current(.changes).flatMap { id in shownStops.first { $0.id == id }?.path }
+            store.focusedPath = current ?? store.topPath
         }
         store.noteInteraction()
     }
@@ -479,7 +444,7 @@ struct TaskChangesView: View {
     }
 
     private var sidebar: some View {
-        ChangedFilesSidebar(store: store, current: currentPath, notice: hiddenNotice, jump: jump)
+        ChangedFilesSidebar(store: store, current: store.topPath, notice: hiddenNotice, jump: jump)
             .frame(width: ChangedFilesSidebar.width)
     }
 
@@ -495,17 +460,36 @@ struct TaskChangesView: View {
 
     // MARK: Stream
 
+    /// The files in the window, or the focused one. Above the window, the way
+    /// to the files before it; at its end, a row that draws the next ones
+    /// once it scrolls into view.
     @ViewBuilder private var stream: some View {
         if let review = store.shownReview {
-            let files = store.focusedPath.map { path in review.files.filter { $0.path == path } } ?? review.files
+            let window = store.focusedPath == nil ? store.window : review.files.indices
+            let files = store.focusedPath.map { path in review.files.filter { $0.path == path } }
+                ?? Array(review.files[window])
             if let tour = store.tourStatus {
                 ReviewNotice(text: tour)
             }
             if review.files.isEmpty, store.review?.files.isEmpty == false {
                 ReviewNotice(text: "Every changed file is hidden or filtered out · the changed files list what is hidden")
             }
+            if window.lowerBound > 0 {
+                Button(window.lowerBound == 1 ? "1 file above · Show" : "\(window.lowerBound) files above · Show") {
+                    store.showEarlierFiles()
+                }
+                .buttonStyle(WorkPlainButtonStyle()).font(Typography.caption(11))
+                .padding(.horizontal, 12).padding(.vertical, 8)
+                .accessibilityIdentifier("changes-files-above")
+            }
             ReviewStream(store: store, reader: .changes, files: files, split: store.layout(width: width) == .split,
                          headings: headings, headsFirstFile: false, addToConversation: addToConversation)
+            if window.upperBound < review.files.count {
+                let more = review.files.count - window.upperBound
+                ReviewNotice(text: more == 1 ? "1 more file" : "\(more) more files")
+                    .id("window-end-\(window.upperBound)")
+                    .onAppear { store.extendWindow() }
+            }
         } else if store.changesError == nil {
             ProgressView().frame(maxWidth: .infinity).padding(24)
         }
@@ -525,7 +509,8 @@ struct TaskChangesView: View {
     /// The stream says where it ends, and offers the way back.
     @ViewBuilder private var footer: some View {
         VStack(spacing: 6) {
-            if let first = shownStops.first, store.focusedPath == nil {
+            if let first = shownStops.first, store.focusedPath == nil,
+               store.window.upperBound == store.shownReview?.files.count {
                 Text("End of changes").font(Typography.caption(11)).foregroundStyle(palette.textSecondary)
                 Button("Back to the first change") {
                     store[place: .changes] = .init(anchor: store.shownReview?.file(first.path).map { store.topID(of: $0, in: .changes) },
@@ -541,6 +526,30 @@ struct TaskChangesView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 24)
+    }
+}
+
+/// The function, type or heading the top line sits in, under the file's
+/// name, while the file's own lines are at the top. Its own view, so the row
+/// each scroll lands on redraws this line and nothing else.
+private struct EnclosingDeclarationBar: View {
+    let store: TaskFilesStore
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        if let path = store.topPath, let file = store.shownReview?.file(path),
+           let id = store[place: .changes].anchor, id.hasPrefix(path + "#"),
+           let declaration = store.opened(file).enclosing(id) {
+            Text(declaration).font(Typography.code(11)).foregroundStyle(palette.textSecondary)
+                .lineLimit(1).truncationMode(.tail)
+                .padding(.leading, ReviewStream.gutterWidth + 18).padding(.trailing, 12).padding(.vertical, 3)
+                .fillsPane()
+                .background(palette.background.opacity(0.94))
+                .overlay(alignment: .bottom) { Divider() }
+                .help(declaration)
+                .allowsHitTesting(false)
+                .accessibilityIdentifier("changes-enclosing")
+        }
     }
 }
 

@@ -623,7 +623,18 @@ final class TaskFilesStore {
         }.sorted { $0.path < $1.path }
     }
     var mode = Mode.read
-    private(set) var changes: TaskChangesSnapshot?
+    private(set) var changes: TaskChangesSnapshot? {
+        didSet { changeCounts = Dictionary((changes?.files ?? []).map { ($0.path, $0.changes) }) { first, _ in first } }
+    }
+    /// Each changed file's stops as `lf task changes` counted them, so the
+    /// Diff's totals are whole before any file's lines arrive.
+    private var changeCounts: [String: Int] = [:]
+
+    /// A file's changes: the count read with the file list, else its own lines'.
+    func changeCount(_ file: ReviewFile, in reader: ReviewReader = .changes) -> Int {
+        if rendering(of: file, in: reader) != nil { return 1 }
+        return reader == .changes ? changeCounts[file.path] ?? file.stops.count : file.stops.count
+    }
     private(set) var isRefreshingChanges = false
     private(set) var changesError: String?
     private(set) var documents: [String: TaskFileDocument] = [:]
@@ -909,8 +920,31 @@ final class TaskFilesStore {
     @ObservationIgnored private var readCommits: [String] = []
     @ObservationIgnored private var nearPaths: Set<String> = []
     private var reviewGeneration = 0
-    /// Each reader's place, so switching paths or pages and back lands where you were.
-    private var places: [ReviewReader: ReviewPlace] = [:]
+    /// Each reader's place, so switching paths or pages and back lands where
+    /// you were. The row at the top moves on every scrolled row, the current
+    /// change only when you step, so they are observed apart: scrolling
+    /// redraws what names the top file, never the rows that mark the change.
+    private var anchors: [ReviewReader: String] = [:] { didSet { refreshTopPath() } }
+    private var currents: [ReviewReader: String] = [:] { didSet { refreshTopPath() } }
+
+    /// The file whose lines are at the top of the Diff: the focused one, else
+    /// the one the anchor or the current change is in. While a file's own
+    /// header is the top row, the file above it is still the one you are in.
+    /// Set only when it changes, so the file bar and the sidebar redraw when
+    /// you cross into another file, not on every scrolled row.
+    private(set) var topPath: String?
+
+    private func refreshTopPath() {
+        let path: String? = {
+            if let focusedPath { return focusedPath }
+            let files = shownReview?.files ?? []
+            guard let id = anchors[.changes] ?? currents[.changes] else { return files.first?.path }
+            if id == "footer" { return files.last?.path }
+            guard let index = shownReview?.fileIndex(holding: id) else { return files.first?.path }
+            return files[id.hasPrefix("file:") ? max(0, index - 1) : index].path
+        }()
+        if path != topPath { topPath = path }
+    }
     /// The file next/previous crossed into, and from which end its first stop is taken.
     @ObservationIgnored private var entering: (path: String, offset: Int)?
     /// When next/previous last moved, so the change it landed on can pulse once.
@@ -925,7 +959,7 @@ final class TaskFilesStore {
     /// Rendered files you switched to their line Diff, by path.
     var sourceFiles: Set<String> = []
     /// One file at a time; next/previous still crosses into the next file.
-    var focusedPath: String?
+    var focusedPath: String? { didSet { refreshTopPath() } }
     var expandedMoves: Set<String> = []
     var reviewSelection: ReviewSelection? { didSet { if reviewSelection != oldValue { commentDraft = "" } } }
     /// Where the Brief was scrolled, and the brief it was showing.
@@ -963,7 +997,9 @@ final class TaskFilesStore {
         review = nil
         openedGaps = [:]
         dropSides()
-        places[.changes] = nil
+        self[place: .changes] = ReviewPlace()
+        windowStart = nil
+        windowRows = Self.windowBudget
         noteInteraction()
     }
 
@@ -972,7 +1008,7 @@ final class TaskFilesStore {
     /// read from disk would not show.
     func rendering(of file: ReviewFile, in reader: ReviewReader) -> ReviewRendering? {
         if showsDraft(reader) { return nil }
-        return ReviewRendering.of(file).flatMap { $0.hasSource && sourceFiles.contains(file.path) ? nil : $0 }
+        return ReviewRendering.of(file, awaitingPatch: reader == .changes && isReading(file) && changeCounts[file.path] == 0).flatMap { $0.hasSource && sourceFiles.contains(file.path) ? nil : $0 }
     }
 
     /// Files' Diff of an unsaved draft, whose lines are not the file on disk.
@@ -1228,6 +1264,7 @@ final class TaskFilesStore {
         guard let review else {
             shownGroups = []
             shownReview = nil
+            refreshTopPath()
             return
         }
         let filter = reviewFilter.trimmingCharacters(in: .whitespaces)
@@ -1237,6 +1274,7 @@ final class TaskFilesStore {
         }
         shownGroups = ReviewGroup.arrange(files, ordering: ordering, tour: diffTour, groups: diffGroups)
         shownReview = ReviewDiff(files: shownGroups.flatMap(\.files))
+        refreshTopPath()
     }
 
     private func readTour() async -> DiffTour? {
@@ -1510,10 +1548,82 @@ final class TaskFilesStore {
         var current: String?
     }
 
+    /// Setting a place moves to it: in the Diff, the window moves to a row it
+    /// does not hold or holds far down.
     subscript(place reader: ReviewReader) -> ReviewPlace {
-        get { places[reader] ?? ReviewPlace() }
-        set { places[reader] = newValue }
+        get { ReviewPlace(anchor: anchors[reader], current: currents[reader]) }
+        set {
+            if anchors[reader] != newValue.anchor { anchors[reader] = newValue.anchor }
+            if currents[reader] != newValue.current { currents[reader] = newValue.current }
+            if reader == .changes { reveal(newValue.anchor) }
+        }
     }
+
+    /// The row the scroll view reports at its top as you scroll. Scrolling
+    /// stays inside the window, so it never moves it.
+    func scrolled(to id: String?, in reader: ReviewReader) {
+        if anchors[reader] != id { anchors[reader] = id }
+    }
+
+    // MARK: The Diff's window
+
+    /// How many rows the Diff draws from where it starts. A scroll view finds
+    /// a row by passing every row above it, so a jump past thousands of rows
+    /// takes seconds; the window keeps every jump short.
+    static let windowBudget = 1_500
+
+    /// The first file the Diff draws; nil for the first of all.
+    private(set) var windowStart: String?
+    /// How many rows the window holds from its start: the budget, plus what
+    /// scrolling down and showing earlier files added.
+    private(set) var windowRows = windowBudget
+
+    /// The shown files the Diff draws, as indices into `shownReview`.
+    var window: Range<Int> {
+        let files = shownReview?.files ?? []
+        let start = windowStart.flatMap { path in files.firstIndex { $0.path == path } } ?? 0
+        var end = start, rows = 0
+        while end < files.count, end == start || rows < windowRows {
+            rows += files[end].rows
+            end += 1
+        }
+        return start..<end
+    }
+
+    /// Scrolling reached the window's last row: draw the files after it.
+    func extendWindow() { windowRows += Self.windowBudget }
+
+    /// Draw the files above the window, about a budget's worth, keeping the
+    /// line at the top where it is.
+    func showEarlierFiles() {
+        let files = shownReview?.files ?? []
+        var start = window.lowerBound, added = 0
+        guard start > 0 else { return }
+        let top = anchors[.changes] ?? topID(of: files[start], in: .changes)
+        while start > 0, added < Self.windowBudget {
+            start -= 1
+            added += files[start].rows
+        }
+        windowStart = start == 0 ? nil : files[start].path
+        windowRows += added
+        anchors[.changes] = top
+        noteInteraction()
+    }
+
+    /// Start the window at the file holding `id` when the window lacks it or
+    /// holds it more than a budget's rows down.
+    private func reveal(_ id: String?) {
+        guard let id, let files = shownReview?.files, let index = shownReview?.fileIndex(holding: id) else { return }
+        let window = self.window
+        if window.contains(index), files[window.lowerBound..<index].reduce(0, { $0 + $1.rows }) <= Self.windowBudget {
+            return
+        }
+        windowStart = index == 0 ? nil : files[index].path
+        windowRows = Self.windowBudget
+    }
+
+    /// The change next/previous moves from, read without the scroll anchor.
+    func current(_ reader: ReviewReader) -> String? { currents[reader] }
 
     /// The diff a reader shows, once it has been read.
     func diff(_ reader: ReviewReader) -> ReviewDiff? {
@@ -1540,21 +1650,17 @@ final class TaskFilesStore {
         rendering(of: file, in: reader) != nil ? ReviewStop.rendered(file.path).id : file.topID
     }
 
-    /// "2 of 5" once a change is current; the count before. While the
-    /// comparison's files are still being read the count would climb, so it
-    /// shows how many files are read instead, and "2 of …".
+    /// Source totals come with the file list, before the patch reads finish.
     func position(_ reader: ReviewReader) -> String {
-        guard diff(reader) != nil else { return "" }
-        let stops = stops(reader)
-        let unread = reader == .changes ? unreadShown : 0
-        let current = self[place: reader].current.flatMap { current in stops.firstIndex { $0.id == current } }
-        if unread > 0 {
-            let shown = shownReview?.files.count ?? 0
-            return current.map { "\($0 + 1) of …" } ?? "\(shown - unread)/\(shown) files"
+        guard let diff = diff(reader) else { return "" }
+        let total = diff.files.reduce(0) { $0 + changeCount($1, in: reader) }
+        guard total > 0 else { return "No changes" }
+        guard let current = current(reader), let file = diff.fileIndex(holding: current),
+              let index = stops(of: [diff.files[file]], in: reader).firstIndex(where: { $0.id == current }) else {
+            return total == 1 ? "1 change" : "\(total) changes"
         }
-        guard !stops.isEmpty else { return "No changes" }
-        guard let current else { return stops.count == 1 ? "1 change" : "\(stops.count) changes" }
-        return "\(current + 1) of \(stops.count)"
+        let before = diff.files[..<file].reduce(0) { $0 + changeCount($1, in: reader) }
+        return "\(before + index + 1) of \(total)"
     }
 
     /// Move to the next or previous change in a reader. Changes crosses files
@@ -1565,8 +1671,8 @@ final class TaskFilesStore {
     func step(_ offset: Int, in reader: ReviewReader) -> ReviewStop? {
         noteInteraction()
         steppedAt = .now
-        if let stop = stops(reader).stop(after: self[place: reader].current, offset: offset) {
-            self[place: reader].current = stop.id
+        if let stop = stops(reader).stop(after: current(reader), offset: offset) {
+            currents[reader] = stop.id
             if reader == .changes, focusedPath != nil { focusedPath = stop.path }
             return stop
         }
@@ -1641,7 +1747,7 @@ final class TaskFilesStore {
             if let entry = entering, entry.path == path {
                 entering = nil
                 let stop = stops(.file(path)).stop(after: nil, offset: entry.offset)
-                places[.file(path)] = ReviewPlace(anchor: stop?.id, current: stop?.id)
+                self[place: .file(path)] = ReviewPlace(anchor: stop?.id, current: stop?.id)
             }
             changesError = nil
         } catch {

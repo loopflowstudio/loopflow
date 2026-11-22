@@ -1036,7 +1036,7 @@ struct DesktopPerformanceTests {
             case "task" where args.dropFirst().first == "show":
                 return #"{"overview":\#(workJSON),"graph_processes":[],"comments":\#(commentsJSON),"execution":null,"row":null}"#
             case "task" where args.dropFirst().first == "changes":
-                return #"{"issue_identifier":"PERF-0","task_id":"perf-task-0","base_commit":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","head_commit":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","commits":[],"files":[{"path":"notes.txt","old_path":null,"committed":true,"staged":false,"unstaged":false,"untracked":false}],"scratch":[],"scratch_truncated":false,"recovery_directory":null}"#
+                return #"{"issue_identifier":"PERF-0","task_id":"perf-task-0","base_commit":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","head_commit":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","commits":[],"files":[{"path":"notes.txt","old_path":null,"committed":true,"staged":false,"unstaged":false,"untracked":false,"changes":1}],"scratch":[],"scratch_truncated":false,"recovery_directory":null}"#
             case "task" where args.dropFirst().first == "files":
                 return #"{"path":"","entries":[{"path":"notes.txt","kind":"file"}],"next_cursor":null}"#
             case "task" where args.dropFirst().first == "file":

@@ -239,6 +239,9 @@ pub struct TaskChangedFile {
     pub staged: bool,
     pub unstaged: bool,
     pub untracked: bool,
+    /// Runs of changed lines in the file's patch, each the Diff's stop: a run
+    /// ends at an unchanged line, a hunk's end, or a removal after additions.
+    pub changes: u64,
 }
 
 /// One commit in a Task's comparison. A Graph step's commits share the subject

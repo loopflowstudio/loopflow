@@ -9,9 +9,10 @@ import SwiftUI
 enum ReviewRendering: Equatable {
     case markdown, svg, html, image
 
-    static func of(_ file: ReviewFile) -> ReviewRendering? {
+    static func of(_ file: ReviewFile, awaitingPatch: Bool = false) -> ReviewRendering? {
         let ext = (file.path as NSString).pathExtension.lowercased()
-        if file.status == .binary { return ["png", "jpg", "jpeg", "gif", "webp"].contains(ext) ? .image : nil }
+        if (file.status == .binary || awaitingPatch), ["png", "jpg", "jpeg", "gif", "webp"].contains(ext) { return .image }
+        if file.status == .binary { return nil }
         switch ext {
         case "md", "markdown": return .markdown
         case "svg": return .svg

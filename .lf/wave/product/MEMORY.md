@@ -697,24 +697,24 @@ establish every scenario, merge or Task completion.
 
 ## Task Brief, Diff and Files pages (LOO-515, 2026-11-21; PR #1949 unmerged)
 
-- Brief, Diff and Files are tabs of the one Files tool (Jack, November 18:
-  "why does files show up three times"); Jack named Diff. One renderer reads
-  the PR-equivalent comparison.
+- Brief, Diff and Files: tabs of one Files tool (Jack: "why does files show
+  up three times"); Jack named Diff. One renderer, the PR's comparison.
 - One `lf task diff` capped at 1 MB hid the Swift. Jack: "that we felt we
   couldnt afford to see a full diff". Read by file; say what is cut.
 - Size collapses nothing. Jack: "often the largest diffs are the ones that
   matter the most".
-- November 21 demo, 600 pt: clipped, "jumps when i hover". Fit 360 pt.
+- At 600 pt it clipped and "jumps when i hover"; fit 360 pt.
 - Jack reads new code: "i just read the right side"; New code is default.
+- Jack: the change count "should know up front"; jumps beat no pagination.
 - Jack: "The diff is really about the underlying worker not the highest-level
   session."
-- Jack chose comments sent to the session, a sidebar and a reading order:
-  the `tour` skill writes `scratch/tour.yaml`; it ends at publish.
+- Jack chose comments to the session, a sidebar and a reading order: the
+  `tour` skill writes `scratch/tour.yaml`, gone at publish.
 - `diff_hidden` adds per layer; `diff_groups` replaces whole (an agent's
   choice, unreviewed). Desktop reads final values from the config parser.
   Private settings: `.lf/config.local.yaml` (Jack).
-- Top-level `diff` is `context.diff`'s shorthand. A key the released `lf`
-  doesn't know in `.lf/config.yaml` warns on every command.
+- Top-level `diff` means `context.diff`; released `lf` warns per command on
+  an unknown `.lf/config.yaml` key.
 
 ## Accepted calmer workspace (2026-09-25)
 

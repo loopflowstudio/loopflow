@@ -369,10 +369,9 @@ commands, keybindings, includes and theme references are never followed.
 
 The title bar is its own role. A file that leaves it out gets a bar from its
 accent, darkened where needed (lightened under black text) so the bar's text
-stays readable; a theme you made
-before the role existed may show a slightly darker bar. **Customize** lists
-**Title bar** under Actions and focus, and saving states it: after that,
-changing **Button** leaves the bar alone.
+stays readable; a theme you made before the role existed may show a slightly
+darker bar. **Customize** lists **Title bar** under Actions and focus, and saving
+states it: after that, changing **Button** leaves the bar alone.
 
 Unreadable app/default/selection/cursor text prevents Apply; ANSI colors keep
 their source values. Personal non-color Ghostty settings still load; its `theme =` is ignored and its file never written.

@@ -3677,6 +3677,12 @@ extension WorkModel {
         }
     }
 
+    /// The named workflow as the catalog outlines it; nil until the catalog is
+    /// read, or for a Graph that does not load.
+    func workflowOutline(_ name: String?) -> WorkflowOutline? {
+        name.flatMap { name in graphCatalog.value?.first { $0.name == name }?.workflow }
+    }
+
     /// The workflow a Task's first run takes up and whose choice it is:
     /// "feature, loopflow's default".
     func workflowSelection(_ task: RoadmapTask) -> String? {

@@ -298,10 +298,6 @@ impl CapturedGraph {
             seen.join(", ")
         }
     }
-
-    pub fn interactive_summary(&self) -> Vec<InteractiveStep> {
-        interactive_summary(&self.steps)
-    }
 }
 
 /// The interactive steps of `steps` in order, each XOR path's in name order.
@@ -528,7 +524,7 @@ impl TaskGraph {
         };
         Self {
             name: graph.name.clone(),
-            interactive_steps: graph.interactive_summary(),
+            interactive_steps: interactive_summary(&graph.steps),
             position,
             steps,
             current_step,
@@ -584,7 +580,7 @@ pub(crate) fn validate_graph_name(name: &str) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{CapturedGraph, TaskGraph, TaskGraphRun};
+    use super::{interactive_summary, CapturedGraph, TaskGraph, TaskGraphRun};
     use loopflow_storage::sqlite::{Auto, AutoState};
 
     fn write(repo: &std::path::Path, path: &str, content: &str) {
@@ -599,8 +595,7 @@ mod tests {
         let feature = CapturedGraph::load("feature", repo.path())
             .unwrap()
             .unwrap();
-        let steps: Vec<_> = feature
-            .interactive_summary()
+        let steps: Vec<_> = interactive_summary(&feature.steps)
             .into_iter()
             .map(|step| step.name)
             .collect();

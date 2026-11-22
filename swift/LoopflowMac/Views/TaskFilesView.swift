@@ -292,7 +292,7 @@ struct TaskFilesView: View {
                 .buttonStyle(.link).font(Typography.meta).padding(.leading, indent + 16)
                 .accessibilityIdentifier("files-load-more")
         case .failed(let directory, let reason, _):
-            FailureLine(what: "Not read.", machine: reason) {
+            FailureLine("Not read.", machine: reason) {
                 Button("Retry") { Task { await store.retryDirectory(directory) } }
                     .buttonStyle(.link).font(Typography.text)
             }.lineLimit(2).padding(.leading, indent + 16)

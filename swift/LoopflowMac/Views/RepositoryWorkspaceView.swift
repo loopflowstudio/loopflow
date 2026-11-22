@@ -121,7 +121,7 @@ struct RepositoryWorkspaceContent<Content: View>: View {
             }
             // A retained workspace stays mounted; its failure reads beside it.
             if let error, workspace != nil {
-                FailureLine(what: "The latest read of this repository failed.", machine: error) {
+                FailureLine("The latest read of this repository failed.", machine: error) {
                     Button("Retry", action: retry).buttonStyle(LoopflowButtonStyle())
                 }.padding(Spacing.lg)
             }

@@ -106,6 +106,12 @@ struct FailureLine<Actions: View>: View {
     @ViewBuilder let actions: Actions
     @Environment(\.palette) private var palette
 
+    init(_ what: String, machine: String, @ViewBuilder actions: () -> Actions) {
+        self.what = what
+        self.machine = machine
+        self.actions = actions()
+    }
+
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
             Text(what).font(Typography.text).foregroundStyle(palette.failure)
@@ -118,6 +124,6 @@ struct FailureLine<Actions: View>: View {
 
 extension FailureLine where Actions == EmptyView {
     init(_ what: String, machine: String) {
-        self.init(what: what, machine: machine) { EmptyView() }
+        self.init(what, machine: machine) { EmptyView() }
     }
 }

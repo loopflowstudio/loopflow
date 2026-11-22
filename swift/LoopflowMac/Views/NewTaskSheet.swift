@@ -114,9 +114,6 @@ struct NewTaskWorkflow: View {
         model.graphDefaults[model.graphDefaultKey(wave: wave)]?.value?.default
     }
     private var chosen: String? { graph ?? reported?.name }
-    private var outline: WorkflowOutline? {
-        chosen.flatMap { name in model.graphCatalog.value?.first { $0.name == name }?.workflow }
-    }
     /// Whose choice the workflow is; nil until the scope's default is read.
     private var whose: String? {
         if graph == nil, reported == nil { return nil }
@@ -151,11 +148,12 @@ struct NewTaskWorkflow: View {
             }
             .font(Typography.text)
             .foregroundStyle(palette.text)
-            if let outline {
+            if let outline = model.workflowOutline(chosen) {
                 WorkflowLine(outline: outline).accessibilityIdentifier("new-task-steps")
             }
         }
-    }}
+    }
+}
 
 /// A New Task between the click and its installed conversation: the words you
 /// typed, and the failure if the request could not be filed.

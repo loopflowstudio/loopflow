@@ -36,11 +36,12 @@ struct WorkflowLine: View {
         self.auto = auto
     }
 
-    /// The workflow an unstarted Task takes up, in its bar: the name and the steps.
-    init(name: String, outline: WorkflowOutline) {
+    /// The workflow an unstarted Task takes up, in its bar: the name, and the
+    /// steps once the catalog has them.
+    init(name: String, outline: WorkflowOutline?) {
         self.name = name
-        steps = outline.steps
-        tones = Array(repeating: .ahead, count: outline.steps.count)
+        steps = outline?.steps ?? []
+        tones = Array(repeating: .ahead, count: steps.count)
         sentence = nil
         auto = false
     }

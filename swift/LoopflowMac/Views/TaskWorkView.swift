@@ -139,13 +139,7 @@ struct TaskWorkflowBar: View {
                     .accessibilityIdentifier("task-workflow-bar-live")
             } else if let name = task.graphName {
                 // Not started: the workflow its first run takes up, as the catalog outlines it.
-                if let outline = model.graphCatalog.value?.first(where: { $0.name == name })?.workflow {
-                    WorkflowLine(name: name, outline: outline)
-                } else {
-                    Text(name).font(Typography.mono).fixedSize()
-                        .foregroundStyle(palette.text)
-                        .accessibilityIdentifier("task-workflow-bar-name")
-                }
+                WorkflowLine(name: name, outline: model.workflowOutline(name))
             }
             Spacer(minLength: 0)
             if let next {
@@ -239,9 +233,9 @@ struct TaskStartOffer: View {
     @Environment(\.compactPanes) private var compact
 
     private var sentence: String {
-        let outline = task.graphName.flatMap { name in model.graphCatalog.value?.first { $0.name == name }?.workflow }
-        return (["Not started."] + [model.workflowSelection(task).map { "It will run \($0)." }, outline?.sentence].compactMap { $0 })
-            .joined(separator: " ")
+        ["Not started.", model.workflowSelection(task).map { "It will run \($0)." },
+         model.workflowOutline(task.graphName)?.sentence]
+            .compactMap { $0 }.joined(separator: " ")
     }
 
     var body: some View {

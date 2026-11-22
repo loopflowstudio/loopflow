@@ -5,7 +5,7 @@ import Testing
 @testable import LoopflowMac
 
 @Suite("Where a Task stands")
-struct TaskStandingTests {
+struct TaskRowStatusTests {
     @Test("With no program reporting, a blocked or waiting Task says so and gives the reason", arguments: [
         ("blocked", "Blocked"), ("waiting", "Waiting"),
     ])

@@ -6,8 +6,8 @@ button and title bar. Stacked on LOO-515 (#1949): its Brief, Diff and Files
 views are the base, restyled, never restored to what it deleted.
 
 Reference: `DESIGN.md` and `design/prototypes/` on cfadc6's branch
-`jack-heart/de-slop-fable` (read at `/Users/jack/src/loopflow.de-slop-fable/`;
-not on main and not in this checkout). Screens: `desktop.html` notes 1–12,
+`jack-heart/de-slop-fable`, merged to main as #2011 (read at `/Users/jack/src/loopflow.de-slop-fable/`
+until `lf sync` brings it here). Screens: `desktop.html` notes 1–12,
 `desktop-more.html` "The Task pane: Brief and Changes" notes 1–11.
 
 ## Demo

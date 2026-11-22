@@ -35,11 +35,5 @@ final class MachineTheme {
         }
     }
 
-    nonisolated static func declared(in answer: RawJSON) throws -> String? {
-        struct Declaration: Decodable { let value: JSONValue }
-        guard case .string(let value) = try answer.decode(Declaration.self).value else { return nil }
-        return value
-    }
-
     private static func key(_ machineID: String) -> String { "theme-\(machineID)" }
 }

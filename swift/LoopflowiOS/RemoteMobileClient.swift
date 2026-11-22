@@ -74,7 +74,7 @@ final class RemoteMobileClient: MobileTaskCreationClient {
 
     /// The Machine's `theme:` text; nil when it names none.
     func themeChoice() async throws -> String? {
-        try MachineTheme.declared(in: await request(.config(.configTheme(value: nil))))
+        try await request(.config(.configTheme(value: nil))).decode(ConfigurationFileValue.self).text
     }
 
     private struct Ticket: Decodable { let ticket: String }

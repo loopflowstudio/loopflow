@@ -394,57 +394,46 @@ def theme_file(t):
     return "\n".join(lines) + "\n"
 
 
-def read_roles(path):
-    """A theme file's appearance and `loopflow-` roles."""
-    roles, dark = {}, False
+def read_theme(path):
+    """A handwritten theme file in the shape the specs build: name, appearance, terminal, ANSI and roles."""
+    t = {"name": path.name, "dark": False, "term": {}, "roles": {}}
+    ansi = {}
     for raw in path.read_text().splitlines():
         line = raw.strip()
-        if not line or line.startswith("#") or "=" not in line:
+        if line.startswith("#") or "=" not in line:
             continue
         key, value = [p.strip() for p in line.split("=", 1)]
-        if key == "loopflow-appearance":
-            dark = value == "dark"
-        elif key.startswith("loopflow-"):
-            roles[key[len("loopflow-"):]] = value.lower()
-    return dark, roles
-
-
-def prototype(themes):
-    """`desktop-themes.js`: the roles the prototypes paint, in the app's order: Loopflow, then by name."""
-    entries = [(name, *read_roles(CATALOGUE / name)) for name in HANDWRITTEN]
-    entries += [(t["name"], t["dark"], t["roles"]) for t in sorted(themes, key=lambda t: t["name"])]
-    blocks = []
-    for name, dark, roles in entries:
-        rows = [f'"_mode": "{"dark" if dark else "light"}"']
-        rows += [f'"{key}": "{roles[role]}"' for key, role in PROTOTYPE_ROLES.items()]
-        blocks.append(f'"{name}": {{\n' + ",\n".join(rows) + "\n}")
-    header = "// Written by scripts/theme_catalogue.py from swift/Loopflow/Themes/Catalogue; do not edit.\n"
-    return header + "var THEMES = {\n" + ",\n".join(blocks) + "\n};\n"
-
-
-def read_terminal(path):
-    """A theme file's terminal colors and its 16 ANSI colors."""
-    term, ansi = {}, {}
-    for raw in path.read_text().splitlines():
-        if "=" not in raw or raw.lstrip().startswith("#"):
-            continue
-        key, value = [p.strip() for p in raw.split("=", 1)]
         if key == "palette":
             index, color = value.split("=", 1)
             ansi[int(index)] = color.strip().lower()
         elif key in TERMINAL_KEYS:
-            term[key] = value.lower()
-    return term, [ansi[i] for i in range(16)]
+            t["term"][key] = value.lower()
+        elif key == "loopflow-appearance":
+            t["dark"] = value == "dark"
+        elif key.startswith("loopflow-"):
+            t["roles"][key[len("loopflow-"):]] = value.lower()
+    t["ansi"] = [ansi[i] for i in range(16)]
+    return t
+
+
+def prototype(themes):
+    """`desktop-themes.js`: the roles the prototypes paint, in the app's order: Loopflow, then by name."""
+    entries = [read_theme(CATALOGUE / name) for name in HANDWRITTEN] + sorted(themes, key=lambda t: t["name"])
+    blocks = []
+    for t in entries:
+        rows = [f'"_mode": "{"dark" if t["dark"] else "light"}"']
+        rows += [f'"{key}": "{t["roles"][role]}"' for key, role in PROTOTYPE_ROLES.items()]
+        blocks.append(f'"{t["name"]}": {{\n' + ",\n".join(rows) + "\n}")
+    header = "// Written by scripts/theme_catalogue.py from swift/Loopflow/Themes/Catalogue; do not edit.\n"
+    return header + "var THEMES = {\n" + ",\n".join(blocks) + "\n};\n"
 
 
 def website():
     """`theme.css`: Loopflow Light's roles and light terminal, the only colors the site has."""
-    path = CATALOGUE / "Loopflow Light"
-    _, roles = read_roles(path)
-    term, ansi = read_terminal(path)
-    rows = [f"    --{role}: {roles[role]};" for role in WEBSITE_ROLES]
-    rows += [f"    --terminal-background: {term['background']};", f"    --terminal-foreground: {term['foreground']};"]
-    rows += [f"    --terminal-{i}: {c};" for i, c in enumerate(ansi)]
+    t = read_theme(CATALOGUE / "Loopflow Light")
+    rows = [f"    --{role}: {t['roles'][role]};" for role in WEBSITE_ROLES]
+    rows += [f"    --terminal-{key}: {t['term'][key]};" for key in ("background", "foreground")]
+    rows += [f"    --terminal-{i}: {c};" for i, c in enumerate(t["ansi"])]
     header = "/* Written by scripts/theme_catalogue.py from Loopflow Light; do not edit. */\n"
     return header + ":root {\n" + "\n".join(rows) + "\n}\n"
 

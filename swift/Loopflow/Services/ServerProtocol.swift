@@ -321,6 +321,20 @@ public enum ConfigOperation: Encodable, Sendable {
     }
 }
 
+/// One key's declaration in one config file, as `config.get`, `config.set` and `config.theme` answer.
+public struct ConfigurationFileValue: Decodable, Sendable {
+    public let path: String
+    public let key: String
+    public let value: JSONValue
+    public let lifecycle: String
+
+    /// `value` when it is a string, as `theme:` is; nil when the file doesn't declare the key.
+    public var text: String? {
+        guard case .string(let text) = value else { return nil }
+        return text
+    }
+}
+
 /// An occurrence beside a complete reading. Unknown kinds stay subscription-local.
 public enum SubscriptionEvent: Decodable, Sendable {
     case taskShipped(taskID: String, prID: String, number: UInt32, url: String, mergeCommit: String)

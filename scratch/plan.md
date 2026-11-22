@@ -36,6 +36,8 @@ Built, in PR #2020: the two defaults and the `loopflow-titlebar` role (round 1),
 
 - 2026-11-22, implement round 5: `cargo test -p loopflow --lib -- lf::commands::write::tests:: server::schema::tests::` 11 passed (after regenerating `server_schema.json`); `served_reads configuration_edits_use_the_server_without_work_processes` passed; `swift test … 'WorkPaletteTests|TerminalColorTests|ThemeTests|ThemeWorkflowTests|AppAppearanceTests|ServerProtocolTests|ServerClientTests'` 79 passed; `scripts/test_ios.py` `MachineThemeTests` 3 passed and `MobileTaskCreationTests` 21 passed; website `dev.py test` 99 passed; `test_theme_catalogue.py` passed; `documented_commands::` 4 passed. Not run: clippy (gate).
 
+- 2026-11-22, compress round 5: `swift test … 'ThemeTests|ThemeWorkflowTests|AppAppearanceTests|ServerProtocolTests'` 53 passed; `test_ios.py` `MachineThemeTests` 3 passed; `theme_catalogue.py --check` and `test_theme_catalogue.py` passed.
+
 ## Demo
 
 Dev app → Settings → Choose Theme: 13 cards per side in their own colors, both sides in System mode. Click Fig and the window turns plum with lime; Fig Leaf is the light half. Import a dark file from the light section in Light mode: the mode switches to Dark and the file previews there.

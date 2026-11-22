@@ -185,8 +185,7 @@ final class AppearanceStore {
     private func declared(_ answer: Data) throws -> String? {
         let declaration = try JSONDecoder().decode(ConfigurationFileValue.self, from: answer)
         configPath = declaration.path
-        guard case .string(let value) = declaration.value else { return nil }
-        return value
+        return declaration.text
     }
 
     // MARK: Preview

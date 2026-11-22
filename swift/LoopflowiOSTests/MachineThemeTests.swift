@@ -21,7 +21,7 @@ final class MachineThemeTests: XCTestCase {
         let theme = MachineTheme()
         theme.show(machineID: machineID)
         XCTAssertEqual(theme.theme(dark: true).name, "Loopflow Dark")
-        theme.remember(try MachineTheme.declared(in: answer), machineID: machineID)
+        theme.remember(try answer.decode(ConfigurationFileValue.self).text, machineID: machineID)
         XCTAssertEqual(theme.theme(dark: true).name, "Fig")
         XCTAssertEqual(theme.theme(dark: false).name, "Fig Leaf")
 

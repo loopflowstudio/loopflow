@@ -165,8 +165,6 @@ Made in qa with nobody present; each is reversible.
 
 Open after qa:
 
-- A Task started from its screen keeps showing Changes; its conversation
-  opens after going back to the list.
 - The Notice sits over the Reply field for its few seconds.
 - In dark, "Available" is close to the secondary ink; the tone is the shared
   palette's.
@@ -207,3 +205,37 @@ reversible. The page is `scratch/concept-review.html`.
   question above.
 - Still open, a product choice: the filter "Working now" lists rows that
   read "Busy", and "Ready for you" lists rows that read "Available".
+
+Made in implement (slice 5) with nobody present; each is reversible.
+
+- **The phone sends a Task's writes from its row's `task.repo`**, as the Mac
+  does (through `WaveOrigin`), in place of the list's repository path or the
+  Task's checkout. Checked for Start on an unstarted Task; Run and Auto-Ship
+  from a started Task's repository were not driven again after the change.
+- **Before the Task's reading arrives the phone shows no "Task actions"**;
+  the list row's states no longer stand in. A Task whose reading carries no
+  row shows none either.
+- **The Mac's workflow line reads auto from the row until the Task reading
+  arrives**, as its Auto-Ship button always did; before, the line alone read
+  off until then.
+- **A refused action in the phone's menu is a disabled item with Rust's
+  reason as its second line** (`Label` then `Text` in the button's label).
+- **A row read that fails posts "The conversation couldn’t be opened: …"**
+  and the next frame asks again.
+- `TaskGraph.runAction` moved beside `TaskActions`; only `TaskActions` and
+  `WorkflowLineTests` call it now.
+
+Checks (slice 5):
+
+- `swift test --filter 'TaskActionsTests|WorkflowLineTests|DesktopHeadlessTests|PendingChangesTests|TaskHistoryFilterTests|TypographyDisciplineTests'`: 56 tests passed, 2026-11-22. Gate reruns.
+- `uv run python scripts/test_ios.py`: TEST SUCCEEDED, 44 tests, 2026-11-22. CI reruns.
+- `uv run python scripts/check_swift_multiplatform_boundaries.py`: passed.
+- iPhone SE (3rd generation) Simulator, iOS 26.2, installed Machine, AXe:
+  Backlog, an unstarted Task ("No changes yet"; menu: Start, Auto-Ship),
+  Start; four seconds later the same screen showed "qa: Waiting for you at
+  pause#1." over the Session terminal, and the menu read Run, Auto-Ship.
+  `scratch/look/task-start-menu.png`, `task-started-conversation.png`.
+- The disposable repository's Task 4afa23 is abandoned in the Machine's
+  store; its repository, checkout and Simulator are deleted.
+- Not driven: Run, Auto-Ship and Stop Auto-Ship after the directory change;
+  a disabled action with its reason; the Mac's Notice in Loopflow Dev. qa.

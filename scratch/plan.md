@@ -20,8 +20,9 @@ says the Task waits, the screen offers the Run that moves it.
 
 ## What the code is today
 
-Slices 1 to 4 are built; slice 5 (one live Task on the phone's Task screen,
-one set of Task actions for both surfaces, one name in the Notice) is not.
+Slices 1 to 5 are built: the phone's Task screen opens a conversation that
+begins while it shows, `TaskActions` is the one rule both surfaces draw, and
+both Notices say "Auto-Ship requested".
 On top of slices 1 to 3: no line in `swift/LoopflowiOS` or `Loopflow/Services/Notice.swift`
 passes a literal padding, spacing or radius, and `TypographyDisciplineTests`
 fails on one in `LoopflowiOS` (`spacing: 0` passes); the phone terminal has
@@ -37,17 +38,6 @@ iPhone SE Simulator in light and dark (`scratch/look/`). Still to do:
   Changes, short diffs centred in their sheet, the 34 pt address field, the
   picker's header under its empty state, the list rows 4 pt off their headers.
 - Not looked at: landscape and iPad, the QR scanner, a physical phone (demo).
-- The phone's Task screen holds its Task twice: `MobileTask`, copied at the
-  tap (with the conversation it had then), and `Reading`, which follows the
-  Machine. A Task started from its screen keeps showing "No changes yet"
-  while the sentence says a step is running; the conversation opens only
-  after going back to the list (qa's worst open item).
-- Which actions a Task offers is decided twice from the same reading:
-  `TaskWorkspaceView.actions` on the phone, `TaskWorkflowBar.next` and
-  `TaskAutoControl` on the Mac, with different rules (see slice 5).
-- The Mac's Notice (`LoopflowMac/WorkModel.swift:2698`) says "Auto on
-  requested" for the button named Auto-Ship; the phone's says "Auto-Ship
-  requested".
 
 ## Design
 
@@ -439,22 +429,20 @@ and New Task screens other than the New Task question.
    What it taught: the docs written ahead already matched, so only the
    phone README gained a line (the unavailable state's Changes).
 
-5. **One live Task, one set of actions, one name.** Not built. In this
-   order, each showing on its own:
-   1. The phone's Task screen follows the Machine for its conversation.
-      Check first, on the Simulator as `.lf/qa/iphone-simulator.md`
-      describes: open an unstarted Task from Backlog, Start, and the
-      conversation replaces "No changes yet" without leaving the screen. If
-      no frame arrives after the primary Session is recorded, note what
-      does arrive and reread on that.
-   2. `TaskActions` in `swift/Loopflow/Design/`, drawn by
-      `TaskWorkflowBar`, `TaskAutoControl` and the phone's menu. The Mac's
-      `task-workflow-run`, `task-workflow-start` and `task-auto`
-      identifiers and its existing tests are the check that it looks the
-      same.
-   3. The Mac's Notice and Undo help say "Auto-Ship" and "Stop Auto-Ship";
-      `DesktopHeadlessTests`, `PendingChangesTests` and `swift/README.md`
-      follow.
+5. **One live Task, one set of actions, one name.** Built.
+   `TaskActions` is in `swift/Loopflow/Design/TaskActions.swift` with
+   `TaskGraph.runAction`; `TaskWorkflowBar` and `TaskAutoControl` draw it
+   (the bar keeps only which identifier, `task-workflow-start` or
+   `-run`, its button carries) and so does the phone's menu.
+   `TaskWorkspaceView.Reading` holds the reading's work, row and execution;
+   writes and the row read go from the row's `task.repo`.
+   What it taught: on the Simulator, the first Task frame after Start
+   already lists the Session and the row read (`task:<id>` in `task.repo`)
+   already names the primary, so the conversation replaced "No changes yet"
+   within four seconds with no second ask. `task.repo` is accepted as the
+   directory for `taskRun` on an unstarted Task. Not seen on the Simulator:
+   an action disabled over Rust's reason (no Task here had a refusal), and a
+   row read that fails.
 
 ## Done when
 
@@ -487,8 +475,6 @@ Read these before building; they describe the finished behavior.
 Names the docs settled: the state view is `StateView`; the platform's control
 height is `HitTarget.control`.
 
-Slice 5 changes two sentences in `swift/LoopflowiOS/README.md`: "if the
-Machine refuses, the same line says why" (a refusal Rust already knows is
-shown under the disabled action; the line covers the rest), and the Changes
-paragraph gains that a Task started from its screen opens its conversation
-there. `swift/README.md` still reads "LOO-5 Auto on requested · Undo".
+Slice 5 changed both READMEs to match: the phone's says a refused action is
+greyed with its reason and that a started Task opens its conversation in
+place; `swift/README.md` reads "LOO-5 Auto-Ship requested · Undo".

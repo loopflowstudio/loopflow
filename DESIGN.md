@@ -261,8 +261,11 @@ Components, in `swift/Loopflow/Design/`, for both apps: `TaskRow`,
 - `WorkflowLine`'s steps, running step and sentence come from Rust
   (`TaskGraph.steps`, `current_step`, `sentence`), so `lf task status` prints
   the same sentence. Where the steps do not fit, the sentence stands alone and
-  wraps. `TaskGraph.runAction` says which step moves the Task (Start, Run or
-  none) for every surface.
+  wraps.
+- `TaskActions` (beside `WorkflowLine`) is what a Task offers: Start or Run,
+  Auto-Ship or Stop Auto-Ship, and Rust's reason when a run cannot start. The
+  Mac's Workflow bar and the phone's "Task actions" menu draw it; neither
+  decides what to offer, and the Notice names an action by its button's words.
 - `LoopflowButtonStyle` is as tall as the platform's control height. On the
   phone the accent button fills the width it is offered; a screen has one.
 - `StateView` is every empty and failed state: left-aligned, a serif title,

@@ -19,3 +19,7 @@
 - Concept review round 3: a card click takes its side from the theme's own colors, as import does, rather than from a side argument. Passed over: `previewTheme(name, side:)`, which keeps a parameter that can disagree with the theme.
 
 - QA round 4: steer f4ce64ed ("make sure to make ipgone app respecy themes and the website he in loopflow light") arrived during QA. QA wrote it into the plan's Remaining rather than building two new surfaces in a QA step.
+
+- Concept review round 4: `config.theme` drops `path` so the phone and Desktop ask the Machine the same question. Passed over: an optional `path` (two ways to ask).
+- Concept review round 4: on the phone a single-name `theme:` is that theme whatever the phone's appearance, as on the Mac. Passed over: phone appearance picks, Loopflow default on the unnamed side (the steer summary's reading; Jack's words don't say it).
+- Concept review round 4: the website terminal block becomes Loopflow Light's light terminal. Passed over: a dark block from Loopflow Dark.

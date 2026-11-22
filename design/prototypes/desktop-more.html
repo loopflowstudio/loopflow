@@ -13,7 +13,7 @@
 
 <main class="page">
 <h1>Loopflow for Mac, more screens</h1>
-<p class="lede">New Task, the empty and failure states, the Task pane's Brief and Changes tabs, a dashboard of Tasks side by side, and the theme chooser. Same rules, fonts and tokens as <a href="desktop.html">the first two screens</a>.</p>
+<p class="lede">The Task pane's Brief and Changes tabs, a dashboard of Tasks side by side, and the theme chooser. Same rules, fonts and tokens as <a href="desktop.html">the first two screens</a>.</p>
 <p class="soft">There is no screenshot of these screens as they are today, so each note says what the app does now, read from its source. Everything is live: type, choose, and switch themes. All 24 bundled themes are in the Theme menu.</p>
 <form class="switches" onsubmit="return false">
   <fieldset><legend>Fonts</legend>
@@ -30,42 +30,6 @@
     <label><input type="radio" name="pins" value="on" checked><span>Shown</span></label>
     <label><input type="radio" name="pins" value="off"><span>Hidden</span></label></fieldset>
 </form>
-
-<h2>New Task</h2>
-<div class="pair one"><div class="stage plain" style="max-width:640px">
-  <form class="app sheet" onsubmit="return false" id="nt">
-    <label class="ask" for="nt-q" data-pin="1">What do you want?</label>
-    <textarea id="nt-q" rows="3" data-pin="2">Sidebar rows stop clipping the Task ID and status</textarea>
-    <p class="say" data-pin="3">In <select id="nt-scope" aria-label="Repository or Wave"><option>loopflow</option><option>Product</option><option>Growth</option><option>Infrastructure</option></select>, running <select id="nt-wf" aria-label="Workflow"><option>feature</option><option>code</option></select><span class="second" id="nt-why"></span></p>
-    <ol class="steps" id="nt-steps" data-pin="4"></ol>
-    <p class="when" id="nt-when"></p>
-    <p class="foot2" data-pin="5"><button class="btn" type="button">Cancel</button><button class="btn primary" type="submit">Start <kbd>⌘↩</kbd></button></p>
-  </form>
-</div></div>
-<ol class="notes">
-  <li><i>1</i><div><b>The question is the serif line, at a ramp size.</b> Today it is 28 pt, a size the ramp does not have. It is the 34 pt display step. This is the screen where the serif has the most room. <small>Today: <code>NewTaskSheet.swift:43</code>.</small></div></li>
-  <li><i>2</i><div><b>What you type is set at the lede step.</b> Today the request is 15 pt, another off-ramp size. It is 17, the one place in the app where the text you are writing is larger than the text around it.</div></li>
-  <li><i>3</i><div><b>The sentence stays; its sizes and dots go.</b> "In loopflow, running feature · loopflow's default" is 13.5 pt with a 9 pt chevron. It is 13 pt, the choices are ordinary menus, and the middle dot is a comma.</div></li>
-  <li><i>4</i><div><b>The workflow preview is the same line the Task shows later.</b> Today it is a row of circles with "you" under some of them in 15 pt serif, a third way of drawing a workflow and a serif far below 24 pt. It is the one steps component, with the sentence the app already speaks to VoiceOver ("You take part at…") shown to everyone. Change the workflow to see it update. <small>Rules: one component per job; state is never shape alone.</small></div></li>
-  <li><i>5</i><div><b>Start is the one accent button.</b> It is what the sheet is for. Its shortcut sits inside it at the same size, where today two spaces separate them.</div></li>
-</ol>
-
-<h2>When nothing is there, and when something fails</h2>
-<p class="soft">Today these are the system's stock empty view: a grey icon over a centred title. Here each is left-aligned, says what happened in the serif title step, and ends in what to do next.</p>
-<div class="states">
-  <section><h3>An empty repository</h3><div class="app state"><h4>No planned Work in this repository</h4><p>Say what you want built, or talk it through first.</p><p class="do"><button class="btn primary">New Task <kbd>⌘N</kbd></button><button class="btn">Open the repository conversation</button></p></div>
-    <p class="today">Today: a map icon, the same title, and "Open the repository conversation to decide what to work on." with nothing to press. <code>WorkSurfaceView.swift:43</code></p></section>
-  <section><h3>Nothing selected</h3><div class="app state"><h4>Choose Work</h4><p>Pick a Task or a Wave in the sidebar, or press ⌘K to find one in any repository.</p></div>
-    <p class="today">Today: a list icon and "Choose Work", with no second line. <code>WorkSurfaceView.swift:52</code></p></section>
-  <section><h3>A Task that has not started</h3><div class="app state"><h4>Stream metrics from rented machines</h4><p>Not started. It will run <span class="mono">feature</span>, the Wave's default, and you take part at explore, human-review and verify.</p><p class="do"><button class="btn primary">Start</button><button class="btn">Choose workflow <svg><use href="#i-down"/></svg></button></p></div>
-    <p class="today">Today: "feature · wave" in grey, a "Choose workflow" menu and an outlined Start, in the workflow bar. The Task title here is a stand-in. <code>TaskWorkView.swift:62</code></p></section>
-  <section><h3>A repository that would not open</h3><div class="app state"><h4>This repository did not open</h4><p class="mono">Workspace Machine is unavailable; retry opening it.</p><p class="do"><button class="btn primary">Retry</button><button class="btn">Open another repository…</button></p></div>
-    <p class="today">Today: the error text alone with a Retry button under it, no title. The error shown is one the app can produce. <code>RepositoryWorkspaceView.swift:13</code></p></section>
-  <section><h3>A selection the plan no longer has</h3><div class="app state"><h4>Selected Work is unavailable</h4><p>The latest plan does not include it. Its workspace and conversations are kept.</p><p class="do"><button class="btn primary">Read the plan again</button><button class="btn">Open its conversations</button></p></div>
-    <p class="today">Today: a question-mark icon and "This planning read cannot resolve the selection. Its workspace and conversations remain retained." with nothing to press. Both buttons are my proposal. <code>WorkSurfaceView.swift:215</code></p></section>
-  <section><h3>A New Task that failed to start</h3><div class="app state"><p class="req" style="font-size:var(--lede)">Sidebar rows stop clipping the Task ID and status</p><p><span class="bad">Not started.</span> <span class="mono">Linear did not answer in time.</span></p><p class="do"><button class="btn primary">Try again</button><button class="btn">Discard</button></p></div>
-    <p class="today">Today: the request, then the error in 12 pt warning-colored text, then "Try again" and "Discard". The error text here is a stand-in. <code>NewTaskSheet.swift:314</code></p></section>
-</div>
 
 <h2>The Task pane: Brief and Changes</h2>
 <p class="soft">Drawn from the LOO-515 branch as it stands, which already replaced the old pull request view. The tabs are Brief, Diff and Files.</p>
@@ -216,14 +180,6 @@
 <script src="desktop-themes.js"></script>
 <script src="desktop.js"></script>
 <script>
-  var WF = { feature: [["explore",1],["plan",0],["build",0],["human-review",1],["deliver",0],["verify",1]], code: [["plan",0],["build",0],["human-review",1],["deliver",0],["verify",1]] };
-  function steps() {
-    var wf = document.getElementById("nt-wf").value, scope = document.getElementById("nt-scope").value, you = [];
-    document.getElementById("nt-steps").innerHTML = WF[wf].map(function (s) { if (s[1]) you.push(s[0]); return '<li' + (s[1] ? ' class="you" title="Stops for you"><svg><use href="#i-person"/></svg>' : '>') + s[0] + (s[1] ? '<small>you</small>' : '') + '</li>'; }).join("");
-    document.getElementById("nt-when").textContent = "You take part at " + you.slice(0, -1).join(", ") + " and " + you[you.length - 1] + ".";
-    document.getElementById("nt-why").textContent = wf === "feature" ? ", " + scope + "'s default" : ", for this Task only";
-  }
-  document.getElementById("nt").addEventListener("change", steps); steps();
   var names = document.getElementById("names");
   [["Light", "light"], ["Dark", "dark"]].forEach(function (g) {
     var p = document.createElement("p"); p.textContent = g[0] + " themes"; names.appendChild(p);

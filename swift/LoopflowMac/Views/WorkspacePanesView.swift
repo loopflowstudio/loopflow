@@ -95,10 +95,9 @@ struct ConversationPlaceholder: View {
         }
     }
 
-    private var note: String {
+    private var note: String? {
         if workspace.conversationClosed { return "Closed here. Select it again to reopen the conversation." }
-        if model.showsSavedWork { return WorkCache.savedReason }
-        return "Open the conversation here."
+        return model.showsSavedWork ? WorkCache.savedReason : nil
     }
 }
 

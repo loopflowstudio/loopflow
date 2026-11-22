@@ -131,3 +131,18 @@ is `scratch/concept-review.html`, and its questions 1 to 6 are these.
     "Not started." with Try again. Left outside this change; should a
     refusal keep the words and Try again, with only a lost answer going to
     recovery?
+
+Made while building slice 5 with nobody present.
+
+39. The plan's test for an empty repository ("no conversation attached,
+    opening or failed") is built as written, and it means the released app
+    rarely shows the state: a repository's conversation opens on its own
+    there, so a fresh `git init` directory goes to its page. The Dev app
+    opens nothing until a visit and does show it. Should an empty repository
+    hold its conversation back until the button is pressed, in every build?
+40. `WorkSurfaceView` lost its `NoPlannedWork` branch; `RoadmapView` keeps
+    the title-only form, with or without a repository.
+41. All four backlog empties end in a full stop, the search and claimed ones
+    included, and `lf desktop capture -p backlog` prints the same line.
+42. The prototype's CSS for the deleted sections stays in `desktop.css`,
+    which `desktop.html` shares.

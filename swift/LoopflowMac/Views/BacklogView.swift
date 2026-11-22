@@ -429,12 +429,12 @@ struct BacklogList {
 
     var empty: (title: String, step: EmptyStep) {
         if !state.query.trimmingCharacters(in: .whitespaces).isEmpty {
-            return ("Nothing in \(state.filter.rawValue) matches “\(state.query)”", .clearSearch)
+            return ("Nothing in \(state.filter.rawValue) matches “\(state.query)”.", .clearSearch)
         }
         switch state.filter {
         case .mine: return ("You haven't claimed anything. \(count(.available)) are available.", .showAvailable)
-        case .available where !all.isEmpty: return ("Everything here is claimed by someone else", .showAll)
-        default: return ("Nothing is waiting in this \(wave == nil ? "repository" : "Wave")", .new)
+        case .available where !all.isEmpty: return ("Everything here is claimed by someone else.", .showAll)
+        default: return ("Nothing is waiting in this \(wave == nil ? "repository" : "Wave").", .new)
         }
     }
 }
@@ -860,8 +860,8 @@ struct BacklogView: View {
     @ViewBuilder
     private func emptyState(_ list: BacklogList) -> some View {
         let empty = list.empty
-        VStack(alignment: .leading, spacing: Spacing.md) {
-            Text(empty.title).font(Typography.textStrong)
+        HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
+            Text(empty.title).emptyLine()
             switch empty.step {
             case .clearSearch: Button("Clear search") { state.wrappedValue.query = "" }
             case .showAvailable: Button("Show available") { state.wrappedValue.filter = .available }
@@ -869,7 +869,7 @@ struct BacklogView: View {
             case .new: Button("New") { model.navigation.palette = .newTask }
             }
         }
-        .buttonStyle(LoopflowButtonStyle(.accent))
+        .buttonStyle(LoopflowButtonStyle())
         .padding(Spacing.xl).frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityIdentifier("backlog-empty")
     }

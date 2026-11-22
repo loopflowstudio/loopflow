@@ -5,23 +5,26 @@ import AppKit
 import Loopflow
 import SwiftUI
 
-/// A plan with no Waves and no Tasks. A repository's says what to do next.
+/// A plan with no Waves and no Tasks. A repository's stands in for its page
+/// (`WorkModel.repositoryIsEmpty`) and says what to do next.
 struct NoPlannedWork: View {
     let model: WorkModel
+    /// Opens the repository's conversation in its workspace; nil outside a repository.
+    var openConversation: (() -> Void)?
 
     var body: some View {
         Group {
-            if model.repoPath == nil {
-                EmptyState(title: "No planned Work yet")
-            } else {
+            if let openConversation {
                 EmptyState(title: "No planned Work in this repository",
                            sentence: "Say what you want built, or talk it through first.") {
                     Button("New Task ⌘N") { model.navigation.palette = .newTask }
                         .buttonStyle(LoopflowButtonStyle(.accent))
                         .accessibilityIdentifier("loopflow-work-empty-new-task")
-                    Button("Open the repository conversation") { model.jump(to: .repository, source: "empty") }
+                    Button("Open the repository conversation", action: openConversation)
                         .accessibilityIdentifier("loopflow-work-empty-conversation")
                 }
+            } else {
+                EmptyState(title: "No planned Work yet")
             }
         }
         .accessibilityIdentifier("loopflow-work-empty")
@@ -70,8 +73,6 @@ struct WorkSurfaceView: View {
                 .accessibilityIdentifier("loopflow-work-loading")
         } else if snapshot == nil {
             Color.clear
-        } else if visibleWaves.isEmpty, model.visibleWaves.isEmpty, model.visibleTasks.isEmpty {
-            NoPlannedWork(model: model)
         } else {
             switch model.selection?.kind {
             case nil:

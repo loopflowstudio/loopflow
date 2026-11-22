@@ -15,22 +15,47 @@ struct EmptyStateTests {
         return try Data(contentsOf: root.appendingPathComponent("tests/fixtures/dto/\(name)"))
     }
 
-    @Test("A repository with no Work says so and offers New Task")
+    @Test("A repository with no Work and no conversation says so, offers New Task and opens its conversation")
     func emptyRepositoryOffersNewTask() throws {
-        var wire = try #require(JSONSerialization.jsonObject(with: fixture("roadmap_snapshot.json")) as? [String: Any])
+        let full = try fixture("roadmap_snapshot.json")
+        var wire = try #require(JSONSerialization.jsonObject(with: full) as? [String: Any])
         wire["waves"] = []
         wire["tasks"] = ["state": "ok", "items": [], "truncated": false]
         let empty = try JSONDecoder().decode(RoadmapSnapshot.self, from: JSONSerialization.data(withJSONObject: wire))
         let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("An empty plan reads nothing") },
                               repoPath: "/src/loopflow")
+        // As in the Dev app, a conversation waits for a person to open it.
+        let registry = SessionsWorkspaceRegistry(localMachineId: "fixture", opensUnvisitedWork: false)
+        defer { registry.prepareForQuit() }
+        model.bindWorkspaces(registry, repository: "repo")
+        let workspace = registry.workspace(for: .init(repository: "repo", kind: .repository, id: "repo"),
+                                           title: "repo", location: nil)
+        // Nothing is empty before the plan is read.
+        #expect(!model.repositoryIsEmpty(workspace))
         model.applyFixture(roadmap: .available(empty), waves: .available([]), workActivity: .loading, repos: [])
-        let view = try WorkSurfaceView(model: model).inspect()
+        #expect(model.repositoryIsEmpty(workspace))
+
+        var opened = 0
+        let view = try NoPlannedWork(model: model) { opened += 1 }.inspect()
         _ = try view.find(text: "No planned Work in this repository")
         _ = try view.find(text: "Say what you want built, or talk it through first.")
-        _ = try view.find(button: "Open the repository conversation")
         #expect(model.navigation.palette == nil)
         try view.find(button: "New Task ⌘N").tap()
         #expect(model.navigation.palette == .newTask)
+        try view.find(button: "Open the repository conversation").tap()
+        #expect(opened == 1)
+
+        // A conversation that failed, is opening or is attached brings the page back, and so does a Task.
+        workspace.conversationError = "Machine unavailable"
+        #expect(!model.repositoryIsEmpty(workspace))
+        workspace.conversationError = nil
+        workspace.visit()
+        #expect(model.conversationIsOpening(workspace) && !model.repositoryIsEmpty(workspace))
+        workspace.conversationClosed = true
+        #expect(model.repositoryIsEmpty(workspace))
+        let planned = try JSONDecoder().decode(RoadmapSnapshot.self, from: full)
+        model.applyFixture(roadmap: .available(planned), waves: .available([]), workActivity: .loading, repos: [])
+        #expect(!model.repositoryIsEmpty(workspace))
     }
 
     @Test("A repository that did not open shows the Machine's message and retries")
@@ -64,12 +89,12 @@ struct EmptyStateTests {
 
         // Before the catalog arrives the pane still says which workflow and whose choice.
         let waiting = try TaskStartOffer(model: model, task: task).inspect()
-        _ = try waiting.find(text: task.task.name)
-        _ = try waiting.find(text: "Not started. It will run feature, loopflow's default.")
+        _ = try waiting.find(text: "Not started")
+        _ = try waiting.find(text: "It will run feature, loopflow's default.")
 
         await model.loadGraphCatalog()
         let offer = try TaskStartOffer(model: model, task: task).inspect()
-        _ = try offer.find(text: "Not started. It will run feature, loopflow's default. You take part at demo.")
+        _ = try offer.find(text: "It will run feature, loopflow's default. You take part at demo.")
         _ = try offer.find(viewWithAccessibilityIdentifier: "task-start-with-issue-review")
         let start = try offer.find(viewWithAccessibilityIdentifier: "task-start-issue-review").button()
         #expect(!start.isDisabled())

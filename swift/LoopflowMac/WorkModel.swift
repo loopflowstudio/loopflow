@@ -322,6 +322,16 @@ final class WorkModel {
         return task.opensConversationAutomatically && taskWorkspaceIdentity(task) != nil
     }
 
+    /// A repository whose plan was read and holds nothing, with no conversation
+    /// attached, opening or failed: `NoPlannedWork` stands in for its page until
+    /// a conversation opens or a Task exists.
+    func repositoryIsEmpty(_ workspace: SessionsWorkspace) -> Bool {
+        workspace.key.kind == .repository && roadmap.value != nil && !showsSavedWork
+            && visibleWaves.isEmpty && visibleTasks.isEmpty
+            && workspace.conversationError == nil && !conversationIsOpening(workspace)
+            && !workspace.multiplexer.layout.allPanes.contains { $0.sessionId != nil }
+    }
+
     private func taskWorkspaceIdentity(_ task: RoadmapTask) -> WorkspaceIdentity? {
         navigation.preparedTaskWorktrees[task.id] ?? task.reference.workspace?.identity
     }

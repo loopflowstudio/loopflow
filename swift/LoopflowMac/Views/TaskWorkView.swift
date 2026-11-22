@@ -232,16 +232,16 @@ struct TaskStartOffer: View {
     let task: RoadmapTask
     @Environment(\.compactPanes) private var compact
 
-    private var sentence: String {
-        ["Not started.", model.workflowSelection(task).map { "It will run \($0)." },
-         model.workflowOutline(task.graphName)?.sentence]
-            .compactMap { $0 }.joined(separator: " ")
+    private var sentence: String? {
+        let parts = [model.workflowSelection(task).map { "It will run \($0)." },
+                     model.workflowOutline(task.graphName)?.sentence].compactMap { $0 }
+        return parts.isEmpty ? nil : parts.joined(separator: " ")
     }
 
     var body: some View {
         let refusal = model.runRefusal(task)
-        // A Dashboard tile already names its Task above this line.
-        EmptyState(title: compact ? "Not started" : task.task.name, sentence: sentence) {
+        // The brief beside the pane and a Dashboard tile's header already name the Task.
+        EmptyState(title: "Not started", sentence: sentence) {
             Button("Start") { model.startTaskFromInput(nil, task: task) }
                 .buttonStyle(LoopflowButtonStyle(.accent))
                 .disabled(refusal != nil)
@@ -453,17 +453,9 @@ struct GraphProcessLog: View {
                         .accessibilityIdentifier("task-earlier-runs")
                     }
                     if graphs.isEmpty {
-                        HStack(spacing: Spacing.sm) {
-                            Text("No Graph has run.").emptyLine()
-                                .accessibilityIdentifier("task-graph-processes-empty")
-                            if let task, task.awaitsStart {
-                                let refusal = model.runRefusal(task)
-                                Button("Start") { model.startTaskFromInput(nil, task: task) }
-                                    .buttonStyle(LoopflowButtonStyle())
-                                    .disabled(refusal != nil)
-                                    .help(refusal ?? "lf task run \(task.task.identifier)")
-                            }
-                        }.padding(.vertical, 6)
+                        Text("No Graph has run.").emptyLine()
+                            .accessibilityIdentifier("task-graph-processes-empty")
+                            .padding(.vertical, 6)
                     }
                 } else if readError == nil {
                     Text(task == nil ? "Task unavailable." : "Reading Graph processes…").emptyLine().padding(.vertical, 6)

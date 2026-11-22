@@ -1747,6 +1747,8 @@ struct SessionsContentView: View {
                         if navigation.showsActivity { WorkActivityView(model: model).frame(minWidth: 230, maxWidth: 360) }
                     }
                 }
+            } else if active, navigation.waveView == .repository, model.repositoryIsEmpty(entry) {
+                NoPlannedWork(model: model) { Task { await model.openConversation(in: entry, store: store) } }
             } else if key.kind != .task, active, let view = navigation.waveView {
                 // A Wave view, the repository page included: the conversation and the
                 // backlog share the top band; the Tasks run along the bottom.

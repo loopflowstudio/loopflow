@@ -229,7 +229,7 @@ struct BacklogViewTests {
         let mine = list(unclaimed) { $0.filter = .mine }
         #expect(mine.rows.isEmpty && mine.empty.step == .showAvailable)
         #expect(list(tasks) { $0.query = "nothing like this" }.empty.step == .clearSearch)
-        #expect(list([]).empty.step == .new && list([]).empty.title == "Nothing is waiting in this Wave")
+        #expect(list([]).empty.step == .new && list([]).empty.title == "Nothing is waiting in this Wave.")
     }
 
     @Test func startFlowsReadStopsMergesAndPiecesFromTheCatalog() throws {

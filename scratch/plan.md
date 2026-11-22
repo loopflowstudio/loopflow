@@ -448,63 +448,39 @@ demo: not headless; qa or demo runs it.
      `documented_commands::` (a `docs/surfaces.md` row) were not run; gate
      runs them.
 
-5. **The empty repository, and what the Dev app showed. To build.** Found at
-   qa (`scratch/qa.html`, items 1, 3, 4) and at the concept review of the
-   built change (`scratch/concept-review.html`). No Rust or wire change.
-   Each is a choice made for review.
-   - **An empty repository opens on `NoPlannedWork` alone.** Today a
-     repository opens on its page (`SessionsView.swift`, the
-     `navigation.waveView` branch near `:1750`: conversation, `BacklogView`,
-     `WaveTiles`), so the person reads "Conversation not open" beside the
-     backlog's bold "Nothing is waiting in this repository" and never the
-     prototype's state. That branch shows `NoPlannedWork` in place of
-     `WaveViewLayout` while all of these hold: the view is the repository's,
-     the plan has been read (`model.roadmap.value != nil`, not saved work),
-     `model.visibleWaves` and `model.visibleTasks` are empty, and the
-     repository's workspace has no conversation attached, opening or failed
-     (`DashboardView.swift:243-245` is the existing test for "a conversation
-     is attached"; `model.conversationIsOpening`; `conversationError`).
-     Anything else shows the page as today. Passed over: the state inside
-     the narrow conversation pane with the backlog beside it (the title
-     wraps to three lines and two empties still share the screen).
-   - **"Open the repository conversation" opens it.** It calls
-     `jump(to: .repository)` today, which is `select(nil)`: on the
-     repository's page it does nothing. It runs what `ConversationOpenButton`
-     runs (`model.openConversation(in:store:)`). If `WorkSurfaceView:74`
-     cannot be reached for a repository once this is in, its
-     `NoPlannedWork` call goes; `RoadmapView:144` (no repository, title
-     only) stays.
-   - **The backlog's empty is the list form.** `BacklogView.emptyState`
-     (`:861`) draws `Typography.textStrong` and an accent button, a fourth
-     form beside `EmptyState`, `.emptyLine()` and `FailureLine`. It becomes
-     the sentence with `.emptyLine()` and a full stop, and its step as a
-     neutral `LoopflowButtonStyle` button beside it. The four steps and
-     `backlog-empty` stay; `BacklogViewTests.swift:232` follows the wording.
-   - **`TaskStartOffer`'s title is "Not started"** at both sizes; the
-     `compact ?` branch goes, and "Not started." leaves the sentence, which
-     reads "It will run feature, demo's default. You take part at …".
-   - **The Start beside "No Graph has run." goes** (`TaskWorkView.swift:457`);
-     the sentence stays.
-   - **"Open the conversation here." goes** (`ConversationPlaceholder.note`,
-     `WorkspacePanesView.swift:101`): the title and the button say it. The
-     closed and saved-work sentences stay.
-   - **The typed request stays `Typography.lede`**, semibold as `DESIGN.md`
-     lists it, where the prototype's textarea is regular.
-   - **The two prototype sections go**, "New Task" and "When nothing is
-     there, and when something fails" in
-     `design/prototypes/desktop-more.html`, with any `DESIGN.md` pointer to
-     them: each difference from them is a choice recorded here.
-   - `docs/surfaces.md` ("A Task that has not started", "When nothing is
-     there, or something failed", "When the list is empty") and
-     `.lf/qa/desktop.md` say the new wording.
-   - Tests: `EmptyStateTests` gains the empty repository (title, New Task
-     sets the palette, the second button calls the open) and loses what it
-     asserted about the Task's name as title; `unstartedTaskOffersStart`
-     and `DesktopHeadlessTests.swift:575-585` follow.
-   - Should show: `uv run python scripts/loopflow-dev.py run` on a fresh
-     `git init` directory reads the prototype's state; "Open the repository
-     conversation" brings the page with a terminal and "Nothing is waiting
-     in this repository." beside New. qa looks, in both themes.
+5. **The empty repository, and what the Dev app showed. Built.** Swift and
+   docs only. `WorkModel.repositoryIsEmpty(_:)` is the one test for "a
+   repository with nothing in it"; `SessionsView`'s workspace panel shows
+   `NoPlannedWork` in place of `WaveViewLayout` while it holds, and the
+   second button runs `model.openConversation(in:store:)`. The backlog's
+   empty is `.emptyLine()` with a full stop beside a neutral button;
+   `TaskStartOffer` is titled "Not started" at both sizes; the Start beside
+   "No Graph has run." and "Open the conversation here." are gone, and so
+   are the prototype's two sections with their script. What it taught:
+   - **The state shows only where a conversation waits for a person.** A
+     repository's conversation opens on its own in the released app
+     (`SessionsWorkspace.opensConversationAutomatically` is true for every
+     non-Task workspace, and `conversationIsOpening` answers true as soon as
+     the Machine is known). There a fresh `git init` directory goes straight
+     to its page with a terminal and "Nothing is waiting in this
+     repository." beside New, and reads "No planned Work in this repository"
+     only after its conversation is closed. The Dev app
+     (`opensUnvisitedWork` false for a `.dev` bundle) opens nothing until a
+     visit, which is why qa saw "Conversation not open" and why the demo
+     step reads the state there. Questions 39.
+   - `WorkSurfaceView` no longer draws `NoPlannedWork`: with no selection the
+     repository's page takes that place, and a stale selection in an empty
+     plan reads as its own unavailable state. `NoPlannedWork` draws the
+     repository's form when handed the open action and the title alone
+     otherwise (`RoadmapView`).
+   - `BacklogList.empty.title` also feeds `lf desktop capture -p backlog`,
+     so the capture's empty line gained the full stop.
+   - Not seen in the Dev app: the state in a repository's window, the
+     conversation opening from its button, the backlog's one-line empty,
+     either theme. qa looks.
+   - Checks: `scripts/test_desktop.sh --filter 'EmptyStateTests|unstartedTaskOffersStart|workStates|BacklogViewTests|TypographyDisciplineTests'`
+     passed (21 tests in 5 suites). `documented_commands::` after the
+     `docs/surfaces.md` and prototype edits was not run; gate runs it.
 
 Outside this change, on the page for whoever wants it: a Start the Machine
 refused goes to `CreationRecovery`'s notice (a request UUID, cut off at the

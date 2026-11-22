@@ -184,9 +184,9 @@ Open a filed Task and it says what Start will do, in the sheet's words:
 ```text
 feature   ☺ explore   plan   build   ☺ ship-review   deliver   ☺ verify   Start
 
-Customize terminal chords
+Not started
 
-Not started. It will run feature, Product's default.
+It will run feature, Product's default.
 You take part at explore, ship-review and verify.
 
 [Start]   Start with… ▾
@@ -194,8 +194,8 @@ You take part at explore, ship-review and verify.
 
 **Start** runs that workflow. **Start with…** lists the others; picking one
 starts the Task on it. When the Machine would refuse the run, Start is off and
-its tooltip says why. In a Dashboard tile, which already names the Task, it is
-one line: "Not started" and **Start**.
+its tooltip says why. The brief beside it names the Task. In a Dashboard tile
+it is one line: "Not started" and **Start**.
 
 #### Start picks a workflow
 
@@ -243,9 +243,10 @@ backlog and appear in the sidebar.
 
 #### When the list is empty
 
-Every empty list says why and offers one step: **Mine** with nothing claimed
-offers **Show available**, a search with no match offers **Clear search**, and
-an empty Wave offers **New**. When a read fails, the last rows you saw stay and
+Every empty list says why in one line and offers one step beside it: **Mine**
+with nothing claimed offers **Show available**, a search with no match offers
+**Clear search**, and an empty Wave or repository reads "Nothing is waiting in
+this repository." beside **New**. When a read fails, the last rows you saw stay and
 a Notice says so. A list too large to load at once says
 `Partial: searching the 200 loaded`.
 
@@ -257,11 +258,16 @@ and puts the next step on a button:
 | You see | Next step |
 |---|---|
 | **No planned Work in this repository.** Say what you want built, or talk it through first. | **New Task ⌘N**, **Open the repository conversation** |
+| **Conversation not open.** | **Open conversation** |
 | **Choose Work.** Pick a Task or a Wave in the sidebar, or press ⌘K to find one in any repository. | |
 | **Selected Work is unavailable.** The latest plan does not include it. Its workspace and conversations are kept. | **Read the plan again** |
 | **Nothing needs action.** No live or stopped work across these Waves. | **Show roadmap** |
 | **This dashboard is no longer available.** | **Show working Tasks** |
 | **No activity in this window.** Work creation, runs, PRs and steers appear here. | |
+
+A repository with no Waves, no Tasks and no conversation opens on the first
+row alone. **Open the repository conversation** starts the conversation and
+brings the repository's page: the terminal, the backlog and its Tasks.
 
 A failure names what failed, shows the Machine's message as it came, and keeps
 **Retry**:

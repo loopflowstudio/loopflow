@@ -557,7 +557,7 @@ struct DesktopHeadlessTests {
         #expect(try session("run").statusLabel == "Session")
     }
 
-    @Test("Loading, unread, empty and selected Work have distinct content")
+    @Test("Loading, unread and selected Work have distinct content")
     func workStates() async throws {
         let query = RegistryQuery { _, _ in throw RegistryQueryError("Unexpected external read") }
         let model = WorkModel(query: query)
@@ -571,19 +571,8 @@ struct DesktopHeadlessTests {
         #expect(throws: (any Error).self) {
             try view.inspect().find(viewWithAccessibilityIdentifier: "loopflow-work-loading")
         }
-        #expect(throws: (any Error).self) {
-            try view.inspect().find(viewWithAccessibilityIdentifier: "loopflow-work-empty")
-        }
 
         let data = try Data(contentsOf: fixtures.appendingPathComponent("roadmap_snapshot.json"))
-        var wire = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
-        wire["waves"] = []
-        wire["tasks"] = ["state": "ok", "items": [], "truncated": false]
-        let empty = try JSONDecoder().decode(RoadmapSnapshot.self, from: JSONSerialization.data(withJSONObject: wire))
-        model.applyFixture(roadmap: .available(empty), waves: .available([]),
-                           workActivity: .loading, repos: [])
-        _ = try view.inspect().find(viewWithAccessibilityIdentifier: "loopflow-work-empty")
-
         var saved = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
         var tasks = try #require(saved["tasks"] as? [String: Any])
         var items = try #require(tasks["items"] as? [[String: Any]])

@@ -20,9 +20,9 @@ For Desktop in a headless run, follow `swift/README.md`'s Testing section:
 `scripts/test_desktop.sh --filter '<affected suites>'` builds the app and CLI,
 then runs model and production-view checks with WindowServer access denied.
 Unset inherited `LF_*` and close stdin as described in `scripts/testing.md`.
-`DesktopHeadlessTests/workStates` checks loading, unavailable, empty and selected
-Work and taps the production navigation button. Report these as automated
-checks. With a display, `uv run python scripts/loopflow-dev.py
+`DesktopHeadlessTests/workStates` checks loading, unavailable and selected Work
+and taps the production navigation button; `EmptyStateTests` checks the empty
+repository. Report these as automated checks. With a display, `uv run python scripts/loopflow-dev.py
 run-debug` builds and launches the development app; use `lf desktop state --json`
 and the commands in `docs/surfaces.md` to inspect and drive it.
 
@@ -218,6 +218,10 @@ for each `<name>.req` write `SnapshotService().snapshotWindow(window, …)` to
   the way to an unstarted Task's pane: a `loopflow://<repo>/task/<id>` link
   opens its conversation, which claims and places it, and so does
   `lf open --task <id> --link`.
+- A fresh `git init` directory with no conversation opens on "No planned Work
+  in this repository"; **Open the repository conversation** starts the
+  conversation and brings the page, whose backlog reads "Nothing is waiting
+  in this repository." beside **New**. Filing a Task brings the page too.
 - A failed Start is hard to produce: an unwritable `.git` and a repository
   default naming a missing Graph both end in creation recovery (a notice,
   and the Task is filed), not in "Not started." on the request.

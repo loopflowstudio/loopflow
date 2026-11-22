@@ -147,7 +147,6 @@ h1, h2, h3 {
     text-align: center;
 }
 .hero-centered {
-    text-align: center;
     max-width: 700px;
     margin: 0 auto;
 }
@@ -163,7 +162,6 @@ h1, h2, h3 {
     font-weight: 400;
     line-height: 1.1;
     margin-bottom: var(--space-16);
-    color: var(--burgundy);
 }
 .hero .tagline {
     font-size: var(--t-lede);
@@ -212,10 +210,6 @@ a:focus-visible,
     border-color: var(--rule-strong);
     background: var(--bg-subtle);
 }
-.copy-btn:focus-visible {
-    outline: 2px solid var(--burgundy);
-    outline-offset: 2px;
-}
 .copy-btn svg {
     width: 18px;
     height: 18px;
@@ -223,7 +217,6 @@ a:focus-visible,
 }
 @media (max-width: 480px) {
     .install-code-wrapper {
-        max-width: 100%;
         flex-wrap: wrap;
         justify-content: center;
     }
@@ -231,7 +224,6 @@ a:focus-visible,
         font-size: var(--t-small);
         padding: var(--space-12) var(--space-16);
         max-width: 100%;
-        overflow-x: auto;
     }
 }
 
@@ -443,8 +435,6 @@ a:focus-visible,
     position: static;
     padding: 0;
     background: transparent;
-    -webkit-backdrop-filter: none;
-    backdrop-filter: none;
     border: 0;
 }
 .docs-breadcrumb {
@@ -1050,21 +1040,18 @@ h3:hover .anchor-link,
 /* Homepage — prototype 05. Scoped to leave docs and download layouts independent. */
 body:has(.home-page), html:has(.home-page) { overflow-x: visible; }
 .home-page { line-height: normal; }
-.home-page h1, .home-page h2, .home-page h3 { margin-top: 0; }
-.home-page section, .home-page article { margin: 0; }
-.home-page article { background: none; border-radius: 0; box-shadow: none; }
-.home-page code { padding: 0; background: none; color: inherit; font-size: inherit; border-radius: 0; }
+.home-page section { margin: 0; scroll-margin-top: var(--space-24); }
+.home-page article { margin: 0; background: none; border-radius: 0; box-shadow: none; }
+.home-page code { padding: 0; background: none; color: inherit; font-family: var(--font-mono); font-size: inherit; border-radius: 0; }
 .home-page a { color: inherit; text-decoration: none; }
 .home-page a:focus-visible, .home-page pre:focus-visible { outline: 3px solid var(--wine); outline-offset: 5px; }
 .home-page p { color: inherit; margin: 0 0 1em; line-height: 1.65; }
-.home-page h1, .home-page h2 { font-family: var(--font-serif); font-weight: 400; }
+.home-page h1, .home-page h2 { margin-top: 0; font-family: var(--font-serif); font-weight: 400; }
 .home-page h1 { font-size: var(--t-display); line-height: 1.08; text-wrap: balance; }
 .home-page h2 { font-size: var(--t-title); line-height: 1.14; text-wrap: balance; }
 .home-page h3 { font-size: var(--t-lede); margin: 0 0 1em; }
-.home-page code { font-family: var(--font-mono); }
 .home-page .eyebrow { font-size: var(--t-meta); line-height: 1.6; }
 .home-page main { padding-bottom: var(--space-20); }
-.home-page section { scroll-margin-top: var(--space-24); }
 
 /* Hero: kicker, headline, one paragraph, the install command. */
 .home-hero { padding: var(--space-96) 0 var(--space-20); }
@@ -1093,7 +1080,7 @@ body:has(.home-page), html:has(.home-page) { overflow-x: visible; }
     .home-hero h1:has(.rotating) { white-space: normal; font-size: var(--t-name); }
 }
 .home-page .install-row { display: flex; align-items: stretch; max-width: 680px; background: var(--term-bg); border-radius: var(--radius-md); overflow: hidden; }
-.home-page .install-row .term { flex: 1; min-width: 0; border-radius: 0; padding: var(--space-12) var(--space-16); }
+.home-page .install-row .term { flex: 1; min-width: 0; border-radius: 0; padding: var(--space-12) var(--space-16); line-height: var(--space-20); }
 .home-page .copy { flex: none; width: auto; min-width: 84px; min-height: 44px; margin: 0; padding: 0 var(--space-16); border: 0; border-left: 1px solid var(--term-rule); border-radius: 0; background: none; color: var(--term-fg); font: 500 var(--t-meta) var(--font-sans); cursor: pointer; box-shadow: none; }
 .home-page .copy:hover { background: var(--term-hover); }
 .home-page .copy:focus-visible { outline: 3px solid var(--term-accent); outline-offset: -4px; }
@@ -1160,7 +1147,7 @@ body:has(.home-page), html:has(.home-page) { overflow-x: visible; }
 .home-page .belief{padding:var(--space-96) 0 var(--space-96)}
 .home-page .belief p{font:400 var(--t-display)/1.14 var(--font-serif);color:var(--burgundy);margin:0;max-width:900px}
 .home-page .belief .get{margin-top:var(--space-24)}
-.home-page .pair article>p.cap{font-size: var(--t-small);line-height:1.5;color:var(--text-secondary);margin:var(--space-12) var(--space-4) 0}
+.home-page .pair article>p.cap{font-size: var(--t-small);line-height:1.5;color:var(--text-secondary);margin:var(--space-12) 0 0}
 .home-page .home-hero .either{font-size: var(--t-lede);line-height:1.5;color:var(--text);margin:var(--space-16) 0 0;max-width:760px}
 .home-page .home-hero .get{margin-top:var(--space-20)}
 .home-page .system h2{max-width:980px}
@@ -1193,7 +1180,7 @@ body:has(.home-page), html:has(.home-page) { overflow-x: visible; }
 .works{padding-top:var(--space-48)}
 .home-page .works .eyebrow{color:var(--burgundy);margin-bottom:var(--space-12)}
 .works ul{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:0;border-top:1px solid var(--border);border-bottom:1px solid var(--border)}
-.works li{list-style:none;margin:0;padding:var(--space-16) var(--space-16) var(--space-16) 0;display:grid;gap:var(--space-4)}
+.works li{list-style:none;margin:0;padding:var(--space-16) var(--space-16) var(--space-16) 0;display:grid;gap:var(--space-4);align-content:start}
 .works b{font:500 var(--t-text) var(--font-sans)}
 .works b a{color:var(--text);text-decoration:underline;text-decoration-color:var(--rule-strong);text-underline-offset:4px}
 .works b a::after{content:" ↗";font-size:.8em;color:var(--text-secondary)}
@@ -1221,7 +1208,7 @@ body:has(.home-page), html:has(.home-page) { overflow-x: visible; }
 .appmock .runs .t{margin:0 0 var(--space-8);font-size: var(--t-small);font-weight:600;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .appmock .runs .done .t{font-weight:400;color:var(--text-secondary)}
 .appmock .runs .m{margin:0;display:flex;justify-content:space-between;gap:var(--space-8);font:var(--t-meta) var(--font-mono);color:var(--text-secondary)}
-.appmock .runs .st{color:var(--wine);white-space:nowrap}
+.appmock .runs .st{color:var(--wine);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .appmock .runs .st.run{color:var(--text-secondary)}
 .appmock .runs .st.run::before{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--ok);margin-right:6px;vertical-align:1px}
 .appmock .runs .st.ok{color:var(--ok)}
@@ -1251,7 +1238,6 @@ body:has(.home-page), html:has(.home-page) { overflow-x: visible; }
 @media (max-width:560px){.appmock .runs{grid-template-columns:1fr}.appmock .waves{grid-template-columns:1fr}}
 .appmock.duo header>*{margin-block:0}
 .appmock .runs .ag{white-space:nowrap}
-.appmock .runs .st{overflow:hidden;text-overflow:ellipsis}
 .appmock .dash header b:first-child{margin-left:0}
 .appmock.duo .win::after{content:"";position:absolute;inset:0;pointer-events:none;background:repeating-linear-gradient(-45deg,var(--stripe-wash) 0 12px,transparent 12px 24px)}
 .appmock .sketch{position:absolute;z-index:1;top:50%;left:50%;margin:0;padding:var(--space-12) var(--space-20);border:2px dashed var(--wine);border-radius:var(--radius-md);background:var(--stamp-bg);box-shadow:var(--shadow-stamp);font:600 var(--t-text)/1.4 var(--font-sans);color:var(--wine);transform:translate(-50%,-50%) rotate(-4deg);white-space:nowrap}
@@ -1263,15 +1249,10 @@ body:has(.home-page), html:has(.home-page) { overflow-x: visible; }
 .home-page .split .hand{margin:var(--space-32) 0 var(--space-32);padding-top:var(--space-24);border-top:1px solid var(--border);font-size: var(--t-lede);line-height:1.6;max-width:900px;color:var(--text)}
 
 /* Alignment. Things that sit side by side share an edge, a height or a baseline. */
-.home-page .install-row .term { line-height: var(--space-20); }
-.home-page .get .button { display: inline-flex; align-items: center; }
-.home-page .pair article>p.cap { margin-inline: 0; }
 .appmock.duo .win>header { min-height: var(--space-64); align-items: center; }
 .home-page .split .halves:first-of-type { align-items: stretch; }
 .home-page .split .halves:first-of-type article { display: flex; flex-direction: column; }
 .home-page .split .halves:first-of-type .term { margin-top: auto; }
-.works li { align-content: start; }
-.home-page .works { padding-bottom: 0; }
 .home-page .work-row p.tag { font-size: var(--t-small); color: var(--burgundy); }
 
 /* Serif text, 24px and up only. Old Standard's fl ligature collides in "Loopflow" and "workflow". */

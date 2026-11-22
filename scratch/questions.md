@@ -37,3 +37,9 @@
 - The shared header takes the open Company menu fix. The consolidated font
   prototype goes because its faces already ship. This Task keeps its type
   step names; the upstream suggestion to rename the ramp remains open.
+
+# Compress (2026-11-21)
+
+- `/favicon.ico` answers 404: fast_app's `/{fname}.{ext:static}` route
+  catches it first and looks for `./favicon.ico`, so main.py's favicon
+  handler never runs. Browsers use the `<link rel="icon">`; left alone.

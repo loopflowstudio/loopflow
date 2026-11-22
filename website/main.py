@@ -1159,10 +1159,5 @@ async def favicon():
     return FileResponse("static/logo.svg", media_type="image/svg+xml")
 
 
-@rt("/static/{fname:path}")
-async def static(fname: str):
-    return FileResponse(f"static/{fname}")
-
-
 if __name__ == "__main__":
     serve(host="0.0.0.0", port=int(os.environ.get("PORT", 5001)))

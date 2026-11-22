@@ -252,3 +252,11 @@ Then look at `/`, `/docs`, `/docs/orchestration`, `/download` at 1440 and
    every page at both widths.
 4. **Workflow card and DESIGN.md.** Card lines from the YAML plus its test;
    DESIGN.md pointers and "Tokens today" to what shipped.
+
+## Docs written first (write-docs, 2026-11-21)
+
+`DESIGN.md` already describes the shipped website: prototypes paragraph,
+"What we avoid" website pointers, "Tokens today" type, ramp and color.
+Slice 4's DESIGN.md work is done; check it against what lands and correct
+the values (ramp clamps, token names) if the build moves them. No
+user-facing docs change: the site's copy is excluded.

@@ -89,8 +89,8 @@ One component for each of these, on every surface that shows it:
 
 `design/prototypes/` holds the reference for layout and wording until the
 code matches: `desktop.html` and `desktop-more.html` (Loopflow for Mac, live,
-in all 24 themes), `elements.html` (the Task row, workflow line and New Task
-three ways each) and `website-fonts.*.patch` (the website in these faces).
+in all 24 themes) and `elements.html` (the Task row, workflow line and New
+Task three ways each).
 Delete a prototype when its screens ship.
 
 ## What we avoid
@@ -114,8 +114,7 @@ terminal: commands, paths, IDs, SHAs, diffs, and numbers in a column. It is
 not for prose, section titles, links, captions or buttons.
 - Desktop: the sidebar Task summary is prose set in mono; sidebar section
   titles and counts, "Page 1 of N", "builtin Graph".
-- Website: the "Markdown source" and "Public user docs" links in the docs;
-  agent names and statuses in the homepage's app drawings.
+- Website: agent names and statuses in the homepage's app drawings.
 
 **A stripe down the side of a rounded row.** A colored leading edge means
 status and nothing else. A row with no status has no stripe.
@@ -134,19 +133,12 @@ thing, or show nothing. "Coming soon" over a drawing is two problems.
   is not in the scale; 166 literal paddings.
 - iPhone: `Spacing` and `CornerRadius` are never used; 49 of 50 type calls
   pass their own size.
-- Website docs and download pages: their own sizes, radii and a second
-  palette (`--d-*`). The homepage and studio pages use `:root` steps for
-  size, space and radius; 18 raw colors remain there (tints, shadows and the
-  avatar colors in the drawings), and several rules still override each other
-  with `!important`.
 
 **Two of the same thing.** One component per job, on every surface.
-- The website has two navigation bars (homepage and docs) with different
-  wordmark casing, links and button shape, and the docs still set Inter.
 - Desktop has three workflow renderers, two Create Wave forms and two status
   dots (flat circles and a glass "lens" with a glow).
 - iPhone repeats one primary button by hand eight times in two shapes.
-- The site sets Instrument Serif and Inter; the apps bundle Cormorant
+- The website sets the faces above; the apps still bundle Cormorant
   Garamond and Lato.
 
 **Tiny text.** Nothing a person is meant to read is under 11 pt on Desktop,
@@ -232,9 +224,12 @@ not resolved.
 
 | Role | Mac and iPhone | Website |
 |------|----------------|---------|
-| Serif | Cormorant Garamond 400/500/600 | Instrument Serif 400 |
-| Sans | Lato 400/700 | Inter 400–700 |
-| Mono | JetBrains Mono 400 | JetBrains Mono 400/500 |
+| Serif | Cormorant Garamond 400/500/600 | Old Standard TT 400 |
+| Sans | Lato 400/700 | Atkinson Hyperlegible Next 400–600 |
+| Mono | JetBrains Mono 400 | Spline Sans Mono 400–700 with italics |
+
+The website serves its faces from `website/static/fonts/` (latin subsets,
+OFL) and requests nothing from a font CDN.
 
 Request only bundled weights in the apps; semibold or medium on Lato is
 synthesized and renders heavy.
@@ -253,22 +248,19 @@ Desktop ramp (`Typography` in `swift/Loopflow/Design/DesignSystem.swift`):
 
 iPhone has no ramp of its own yet; it uses 12, 13, 14, 15, 16, 17, 24 and 34.
 
-Website ramp for the homepage and studio pages (`:root` in
-`website/static/style.css`):
+Website ramp, for every page (`:root` in `website/static/style.css`):
 
 | Step | Size | Use |
 |------|------|-----|
-| `--t-display` | 34 to 60 | Page headline, closing line (serif) |
-| `--t-title` | 30 to 42 | Section heading (serif) |
-| `--t-name` | 34 | A product's name on the studio page (serif) |
-| `--t-head` | 24 | Subheading (serif) |
-| `--t-intro` | 21 | Studio page introduction |
+| `--t-display` | 32 to 54 | Page headline, closing line (serif) |
+| `--t-title` | 28 to 38 | Section heading (serif) |
+| `--t-name` | 30 | A product's name on the studio page (serif) |
+| `--t-head` | 24 | Subheading (serif on the homepage, sans 600 in the docs) |
+| `--t-intro` | 21 | Studio page introduction, a doc's deck |
 | `--t-lede` | 18 | The sentence under a heading |
 | `--t-text` | 16 | Prose |
 | `--t-small` | 13 | Captions, navigation, terminals |
 | `--t-meta` | 12 | Labels, text inside the drawings |
-
-The docs keep their own `--fs-*` ramp.
 
 ### Color
 
@@ -280,8 +272,11 @@ surface, including selection fills, in every theme.
 Website (`:root`): `--burgundy #722f37` for headings; `--wine #9B1A4A` for the
 primary button; `--text #1a1a1a`, `--text-secondary #555555`, `--bg #ffffff`,
 `--border #e5e5e5`; `--paper-warm`, `--border-warm`, `--rule-strong`,
-`--track` and `--ok` for the warm cards; `--term-*` for the terminal block.
-The logo's cyan `#0ab3cc` is `--info`.
+`--track` and `--ok` for the warm cards; `--term-*` for the terminal block
+and docs code. The logo's cyan `#0ab3cc` is `--info`. Tints, shadows and the
+drawings' avatar colors are named there too; no rule below `:root` writes a
+color or `!important`. The docs use these roles; they have no palette of
+their own.
 
 ### Space, shape, motion
 

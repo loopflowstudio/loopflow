@@ -129,6 +129,8 @@ thing, or show nothing. "Coming soon" over a drawing is two problems.
 
 **Two of the same thing.** One component per job, on every surface.
 - Desktop has two Create Wave forms (`WavesView.swift`, `WorkNavigator.swift`).
+- An empty or failed state is drawn twice: `EmptyState` on the Mac and
+  `StateView` on iPhone, in different inks and spacing.
 
 **Tiny text.** Nothing a person is meant to read is under 11 pt on Desktop,
 12 pt on iPhone or 12 px on the web.

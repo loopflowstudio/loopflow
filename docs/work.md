@@ -311,7 +311,7 @@ tracker:
 |---|---|
 | Create, edit, steer, complete, reorder, or delete | The same change |
 | Start work on the Task | Issue moves to In Progress |
-| Open, land, or abandon its PR | Linked PR and its state |
+| Open, land, or abandon its PR | One linked PR on the issue, updated as its state changes |
 
 In Linear, a Wave maps to an Initiative and its current Project maps to a
 Linear Project. In Asana, it maps to a team project.
@@ -339,6 +339,20 @@ Answer a lost line: lf repo tracker answer <id> --keep-theirs, or --use-mine.
   so the tracker's value won. Both values stay visible until you run
   `lf repo tracker answer 9f2c41d0 --keep-theirs` or `--use-mine` (or click
   **Keep** / **Use mine** in Desktop, or run `lf task sync LOO-377 --keep-theirs`).
+- **Rate limited:** when Linear refuses a request with a 429, Loopflow holds
+  back only what Linear limited. A limit on one mutation (Linear limits
+  linking PRs more tightly than other writes) holds that mutation until
+  Linear says it refills; new Tasks, comments and state changes keep going
+  out. Only an exhausted hourly allowance holds every
+  write until its reset. Turn on `logs: { linear_requests: true }` in
+  `~/.lf/config.yaml` to see which operation was held:
+
+  ```text
+  $ lf history linear --since 1h
+  COMMAND                   OPERATION                         SENT      HELD  COMPLEXITY
+  lf                        LinkAttachment                       2         3          4
+  lf task create            DeliverTaskCreation                  1         0         30
+  ```
 
 A Wave not yet linked to a Linear Initiative keeps its Tasks local until you
 run `lf wave plan connect <wave>`.

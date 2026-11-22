@@ -8,6 +8,9 @@ pub type OpsResult<T> = Result<T, OpsError>;
 pub enum OpsError {
     #[error(transparent)]
     Planning(#[from] crate::linear::LinearBindingError),
+    /// A tracker request that failed in the tracker's terms (a rate limit).
+    #[error(transparent)]
+    Tracker(#[from] crate::ops::tracker::TrackerError),
     #[error(transparent)]
     TaskData(#[from] loopflow_storage::work::task::TaskDataError),
     #[error("git error: {0}")]

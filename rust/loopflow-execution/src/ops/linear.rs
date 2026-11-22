@@ -1899,7 +1899,10 @@ fn block_on_linear<T>(future: impl Future<Output = OpsResult<T>>) -> OpsResult<T
 }
 
 fn linear_error(err: LinearError) -> OpsError {
-    OpsError::Message(err.to_string())
+    match err {
+        LinearError::RateLimited { .. } => OpsError::Tracker(err.into()),
+        LinearError::Message(text) => OpsError::Message(text),
+    }
 }
 
 #[cfg(test)]

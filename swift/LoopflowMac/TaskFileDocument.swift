@@ -922,6 +922,8 @@ final class TaskFilesStore {
     private var viewed: [String: Int] = [:]
     /// Changes whose removed lines you opened while reading new code.
     var openedRemovals: Set<String> = []
+    /// Rendered files you switched to their line Diff, by path.
+    var sourceFiles: Set<String> = []
     /// One file at a time; next/previous still crosses into the next file.
     var focusedPath: String?
     var expandedMoves: Set<String> = []
@@ -963,6 +965,14 @@ final class TaskFilesStore {
         dropSides()
         places[.changes] = nil
         noteInteraction()
+    }
+
+    /// How the file reads in the Diff instead of its lines; nil once you chose
+    /// its Source, and for Files' Diff of an unsaved draft, which the sides
+    /// read from disk would not show.
+    func rendering(of file: ReviewFile, in reader: ReviewReader) -> ReviewRendering? {
+        if reader != .changes, fileReview?.draft == true { return nil }
+        return ReviewRendering.of(file).flatMap { $0.hasSource && sourceFiles.contains(file.path) ? nil : $0 }
     }
 
     /// A file you marked viewed and whose lines have not changed since.

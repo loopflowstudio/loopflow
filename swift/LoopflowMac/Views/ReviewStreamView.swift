@@ -52,26 +52,19 @@ struct ReviewStream: View {
                     .onAppear { store.setNear(file.path, true) }
                     .onDisappear { store.setNear(file.path, false) }
             } else {
-                if ReviewImages.shows(file) {
-                    ReviewImages(store: store, file: file).id(file.topID)
-                } else if file.status == .binary {
-                    ReviewNotice(text: "Binary file · no text to compare").id(file.topID)
-                } else if file.blocks.isEmpty, note == nil {
-                    ReviewNotice(text: file.status == .renamed ? "Renamed without changes" : "No textual changes")
-                        .id(file.topID)
-                }
-                let gaps = file.gaps
-                ForEach(Array(file.blocks.enumerated()), id: \.offset) { index, block in
-                    if file.status == .added, case .change(let change) = block {
-                        // A new file is its contents: one lazy row per line, however long it is.
-                        ForEach(Array(change.added.enumerated()), id: \.offset) { offset, line in
-                            lineRow(line, segments: nil, file: file)
-                                .overlay { if offset == 0 { currentMark(change.id) } }
-                                .id(change.rowID(offset))
+                let rendering = store.rendering(of: file, in: reader)
+                if let rendering, !(rendering.hasSource && store.sideErrors[file.path] != nil) {
+                    ReviewRendered(store: store, file: file, rendering: rendering, split: split).id(file.topID)
+                } else {
+                    if rendering != nil, let error = store.sideErrors[file.path] {
+                        // The rendered view needs both sides; the line Diff does not.
+                        HStack(spacing: 0) {
+                            ReviewNotice(text: "Can't render this file: \(error)")
+                            Button("Retry") { Task { await store.retrySides(file) } }
+                                .buttonStyle(WorkPlainButtonStyle()).font(Typography.caption(11))
                         }
-                    } else {
-                        blockView(block, gap: gaps[index], file: file).id(block.id(in: file.path))
                     }
+                    lines(file, note: note)
                 }
             }
             if let note {
@@ -82,6 +75,29 @@ struct ReviewStream: View {
                             .buttonStyle(WorkPlainButtonStyle()).font(Typography.caption(11))
                     }
                 }
+            }
+        }
+    }
+
+    /// The file's line Diff: its hunks, or what stands in when it has none.
+    @ViewBuilder private func lines(_ file: ReviewFile, note: TaskFilesStore.FileNote?) -> some View {
+        if file.status == .binary {
+            ReviewNotice(text: "Binary file · no text to compare").id(file.topID)
+        } else if file.blocks.isEmpty, note == nil {
+            ReviewNotice(text: file.status == .renamed ? "Renamed without changes" : "No textual changes")
+                .id(file.topID)
+        }
+        let gaps = file.gaps
+        ForEach(Array(file.blocks.enumerated()), id: \.offset) { index, block in
+            if file.status == .added, case .change(let change) = block {
+                // A new file is its contents: one lazy row per line, however long it is.
+                ForEach(Array(change.added.enumerated()), id: \.offset) { offset, line in
+                    lineRow(line, segments: nil, file: file)
+                        .overlay { if offset == 0 { currentMark(change.id) } }
+                        .id(change.rowID(offset))
+                }
+            } else {
+                blockView(block, gap: gaps[index], file: file).id(block.id(in: file.path))
             }
         }
     }
@@ -442,6 +458,16 @@ struct ReviewFileTitle: View {
             if !store.isReading(file) {
                 Text("+\(file.additions)").foregroundStyle(palette.successTone.ink).font(Typography.code(11)).fixedSize()
                 Text("−\(file.deletions)").foregroundStyle(palette.failureTone.ink).font(Typography.code(11)).fixedSize()
+            }
+            if ReviewRendering.of(file)?.hasSource == true {
+                let source = store.sourceFiles.contains(file.path)
+                Button(source ? "Rendered" : "Source") {
+                    if source { store.sourceFiles.remove(file.path) } else { store.sourceFiles.insert(file.path) }
+                    store.noteInteraction()
+                }
+                .buttonStyle(.plain).font(Typography.caption(11)).foregroundStyle(palette.textSecondary).fixedSize()
+                .help(source ? "Read \(file.path) rendered" : "Show the lines that changed in \(file.path)")
+                .accessibilityIdentifier("changes-source")
             }
             Button("Open") { store.selectFile(file.path, mode: .read) }
                 .buttonStyle(.plain).font(Typography.caption(11)).foregroundStyle(palette.textSecondary).fixedSize()

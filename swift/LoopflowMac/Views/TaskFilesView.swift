@@ -445,7 +445,7 @@ struct TaskFileReadingView: View {
 
 /// Pages run their scripts but never reach the network; links open in the browser.
 /// A rewrite reloads in place at the same scroll position.
-private struct TaskHTMLView: View {
+struct TaskHTMLView: View {
     let html: String
     let baseURL: URL?
     let interacted: () -> Void

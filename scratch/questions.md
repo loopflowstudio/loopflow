@@ -10,3 +10,6 @@
 - Round 2: `ThemeDefinition.retired` has no removal date; it is the sentence a person with an old setting sees, not a file-shape fallback. No removal Task filed.
 
 - QA round 2: the third-party inventory went stale a second time (a README edit after the refresh) and only the bundle build noticed. Not added: a `test_third_party.py` case calling `third_party.check()`, which would catch it in CI but also fail every PR that bumps `Cargo.lock` without a refresh.
+
+- Concept review round 2: importing a dark file while in Light mode switches the preview to Dark mode rather than refusing. Passed over: switching to System (changes two sides), or filing it under dark Yours without previewing (the person sees nothing happen).
+- Concept review round 2: the side buttons go; the chosen name moves into each section heading. Lost: in Light mode, seeing the dark side's name without switching to System.

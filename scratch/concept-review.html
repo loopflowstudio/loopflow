@@ -1,85 +1,121 @@
 <!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<title>Concept review: the theme, as built</title>
+<html lang="en"><head><meta charset="utf-8"><title>Concept review: themes, round 2 as built</title>
 <style>
-:root { color-scheme: light dark; --bg:#faf8f5; --fg:#2a2624; --muted:#6b625c; --line:#e2dcd5; --card:#fff; --yes:#2f6b3a; --no:#a3392f; --prop:#2d5a8a; }
-@media (prefers-color-scheme: dark) { :root { --bg:#2b2d30; --fg:#e6e2dc; --muted:#a8a29b; --line:#45474b; --card:#323437; --yes:#8fcf9a; --no:#f0a39a; --prop:#9cc2ee; } }
-body { background:var(--bg); color:var(--fg); font:15px/1.55 -apple-system, system-ui, sans-serif; max-width:960px; margin:2rem auto; padding:0 1.25rem; }
+:root { color-scheme: light dark; --bg:#faf8f5; --fg:#2a2624; --muted:#6b625c; --line:#e2dcd5; --card:#fff; --yes:#2f6b3a; --no:#a3392f; --prop:#2d5a8a; --ring:#2d5a8a; }
+@media (prefers-color-scheme: dark) { :root { --bg:#2b2d30; --fg:#e6e2dc; --muted:#a8a29b; --line:#45474b; --card:#323437; --yes:#8fcf9a; --no:#f0a39a; --prop:#9cc2ee; --ring:#9cc2ee; } }
+body { background:var(--bg); color:var(--fg); font:15px/1.55 -apple-system, system-ui, sans-serif; max-width:980px; margin:2rem auto; padding:0 1.25rem; }
 h1 { font-size:1.6rem; margin-bottom:.25rem } h2 { margin-top:2.2rem; font-size:1.2rem }
 code { font:13px ui-monospace, Menlo, monospace } .muted { color:var(--muted) }
 table { border-collapse:collapse; width:100%; margin:1rem 0 } td, th { border-bottom:1px solid var(--line); padding:.45rem .5rem; text-align:left; vertical-align:top }
 .yes { color:var(--yes); font-weight:600 } .no { color:var(--no); font-weight:600 }
 .tag { font-size:12px; border:1px solid var(--prop); color:var(--prop); border-radius:4px; padding:0 .35rem }
-.bars { display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:1rem; margin:1rem 0 }
-.win { border:1px solid var(--line); border-radius:8px; overflow:hidden }
-.win .bar { padding:.5rem .75rem; font-weight:600 } .win .bar span { font-weight:400 }
-.win .body { padding:.75rem } .win figcaption { padding:.5rem .75rem; font-size:13px; border-top:1px solid var(--line); background:var(--card) }
-pre { background:var(--card); border:1px solid var(--line); border-radius:6px; padding:.75rem; overflow:auto }
-ol.q li { margin:.5rem 0 }
-</style>
-</head>
-<body>
-<h1>The theme, as built: do the concepts line up?</h1>
-<p><strong>Area taken:</strong> the theme as a whole with this branch's change in it: the theme file and its roles, how missing roles are filled, what the window paints, the editor, and Loopflow Light and Dark as a pair. Reviewed against the base commit, not against the earlier pass. An earlier version of this page reviewed the plan before anything was built; its three changes (fallback after stated roles, one readable rule, the bar's text chosen against the bar) are all in the code now.</p>
+.cmp { display:grid; grid-template-columns:1fr 1fr; gap:1rem; margin:1rem 0 }
+.win { border:1px solid var(--line); border-radius:8px; padding:.9rem; background:var(--card) }
+.win h3 { margin:.1rem 0 .6rem; font-size:1rem }
+.row { display:flex; gap:.5rem; align-items:center; flex-wrap:wrap; margin:.4rem 0 }
+.seg { border:1px solid var(--line); border-radius:6px; padding:.1rem .5rem; font-size:13px }
+.btn { border:1px solid var(--line); border-radius:6px; padding:.15rem .6rem; font-size:13px; min-width:110px }
+.btn.on { outline:2px solid var(--ring) } .gone { text-decoration:line-through; opacity:.5 }
+.cards { display:grid; grid-template-columns:repeat(4,1fr); gap:.4rem; margin:.3rem 0 .6rem }
+.c { border-radius:5px; overflow:hidden; font-size:11px; border:1px solid var(--line) }
+.c b { display:block; height:6px } .c span { display:block; padding:.25rem .35rem }
+.c.on { outline:2px solid var(--ring) }
+.imp { border:1px dashed var(--muted); border-radius:5px; font-size:11px; padding:.4rem .35rem; color:var(--muted) }
+.lbl { font-size:12px; color:var(--muted) } .hd { font-weight:600; font-size:13px; margin-top:.3rem }
+.err { color:var(--no); font-size:12px }
+pre { background:var(--card); border:1px solid var(--line); border-radius:6px; padding:.75rem; overflow:auto; font-size:13px }
+ol.q li { margin:.6rem 0 }
+</style></head><body>
+
+<h1>Themes, round 2 as built: do the concepts line up?</h1>
+<p class="muted">Area taken: Choose Theme and the catalogue behind it, with the whole branch in it against base <code>621fb0926d</code>: 13 families, the card grid, retired names, import, and the title bar role from round 1. The earlier version of this page reviewed round 1 only (title bar role, found nothing to change); that finding still holds and is summarised in the table.</p>
 
 <h2>One interaction, walked</h2>
-<p>Mac in dark mode, fresh settings. The first thing seen is the title bar.</p>
-<div class="bars">
-  <figure class="win" style="margin:0">
-    <div class="bar" style="background:#722f37;color:#fff">loopflow <span style="color:rgba(255,255,255,.72)">› review-the-bundled</span></div>
-    <div class="body" style="background:#faf8f5;color:#2a2624"><b style="color:#722f37">Review the bundled themes</b><br>Loopflow Light</div>
-    <figcaption>Light: bar <code>#722f37</code>, stated in the file.</figcaption>
-  </figure>
-  <figure class="win" style="margin:0">
-    <div class="bar" style="background:#4c3237;color:#fff">loopflow <span style="color:rgba(255,255,255,.72)">› review-the-bundled</span></div>
-    <div class="body" style="background:#2b2d30;color:#e6e2dc"><b style="color:#eba8ac">Review the bundled themes</b><br>Dark without the role: what the rule would give</div>
-    <figcaption>What the fallback rule gives Dark's accent and ground: <code>#4c3237</code>. Not shipped.</figcaption>
-  </figure>
-  <figure class="win" style="margin:0">
-    <div class="bar" style="background:#722f37;color:#fff">loopflow <span style="color:rgba(255,255,255,.72)">› review-the-bundled</span></div>
-    <div class="body" style="background:#2b2d30;color:#e6e2dc"><b style="color:#eba8ac">Review the bundled themes</b><br>Loopflow Dark</div>
-    <figcaption>Dark as built: the same bar, stated. <code>ThemeTests</code> fails if the two drift.</figcaption>
-  </figure>
+<p>System mode, Mac dark. A person opens Choose Theme to try Fig.</p>
+<ol>
+<li>They see a mode control, then two buttons, <b>Light theme: Loopflow Light</b> and <b>Dark theme: Loopflow Dark</b>, then a <i>Light themes</i> section of 13 cards and a <i>Dark themes</i> section of 13. The ringed card in each section already says what each side uses. The buttons say it again.</li>
+<li>They click Fig. The window turns plum; Fig is ringed; Customize appears under it. Clicking the Dark button would have done nothing visible except move Customize to whichever dark card is ringed.</li>
+<li><b>Failure.</b> They have a dark Ghostty file and click <i>Import file…</i> under the light section, the one nearest the top. The chooser answers in red: <span class="err">“Midnight” is a dark theme. Import it from the Dark picker.</span> Apply goes grey. There is no thing called the Dark picker on screen; there is a button labelled “Dark theme” and a second Import tile further down. The app read the file, knew it was dark, and refused to put it there.</li>
+<li><b>Recovery.</b> They scroll, find the second tile, import again. Two tries for one file.</li>
+<li><b>Old setting.</b> Their <code>theme:</code> said <code>Linen</code>. The window opens in Loopflow Light with: <span class="err">“Linen” is no longer built in, so Loopflow Light is showing; to keep it, import its Ghostty theme file under Yours in Choose Theme.</span> Linen was Loopflow's own design; no Ghostty file named Linen exists. Clay's upstream was <i>Desert Morning</i>. Even for Gruvbox Dark, the upstream file has none of the app roles the built-in carried, so “keep it” is not what import gives.</li>
+</ol>
+
+<h2>Before and after</h2>
+<div class="cmp">
+<div class="win"><h3>Built (System mode)</h3>
+<div class="row"><span class="seg">System · Light · Dark</span></div>
+<div class="row"><span class="lbl">Light theme</span><span class="btn">Loopflow Light</span><span class="lbl">Dark theme</span><span class="btn on">Fig</span></div>
+<div class="hd">Light themes</div><span class="lbl">Built-in</span>
+<div class="cards">
+<div class="c on" style="background:#fbf7f0;color:#3a2a2a"><b style="background:#722f37"></b><span>Loopflow Light</span></div>
+<div class="c" style="background:#f7f0f7;color:#3a2a4a"><b style="background:#a2447a"></b><span>Arcade Day</span></div>
+<div class="c" style="background:#fff;color:#000"><b style="background:#2550a8"></b><span>Contrast Light</span></div>
+<div class="c" style="background:#f3f6ea;color:#4a2a3a"><b style="background:#7a3a5a"></b><span>Fig Leaf</span></div>
 </div>
-<p><strong>Failure.</strong> A person drops in a light Ghostty theme whose accent leaves 72% white text at 3.4:1. Before: nothing checked it. Now: the file has no <code>loopflow-titlebar</code>, so <code>GhosttyThemeMapping.titlebar</code> darkens the accent until the second text level reads, and <code>readabilityErrors</code> holds both text levels on the bar at 4.5:1.</p>
-<p><strong>Recovery.</strong> They want a different bar. The editor has a <b>Title bar</b> row under "Actions and focus". Saving writes <code>loopflow-titlebar</code>; from then on "Button" no longer moves the bar, like hover and pressed.</p>
-<p><strong>Old saved theme.</strong> A custom theme saved before this change states its accent and no bar. <code>ThemeFile.parse</code> runs the rule after the stated roles and <code>loopflow-appearance</code>, so the bar comes from that accent: today's color where it reads, a darker one where it does not.</p>
+<span class="lbl">Yours</span><div class="cards"><div class="imp">Import file…</div></div>
+<div class="hd">Dark themes</div><span class="lbl">Built-in</span>
+<div class="cards">
+<div class="c" style="background:#2b2d30;color:#e6dada"><b style="background:#722f37"></b><span>Loopflow Dark</span></div>
+<div class="c" style="background:#1e1530;color:#eadcf5"><b style="background:#6a2a6a"></b><span>Arcade</span></div>
+<div class="c" style="background:#000;color:#fff"><b style="background:#5a4a00"></b><span>Contrast</span></div>
+<div class="c on" style="background:#3a2230;color:#f3e3ea"><b style="background:#4a5a1a"></b><span>Fig</span></div>
+</div>
+<span class="lbl">Yours</span><div class="cards"><div class="imp">Import file…</div></div>
+<div class="err">“Midnight” is a dark theme. Import it from the Dark picker.</div>
+</div>
+
+<div class="win"><h3><span class="tag">proposed</span> Same screen</h3>
+<div class="row"><span class="seg">System · Light · Dark</span></div>
+<div class="row"><span class="btn gone">Loopflow Light</span><span class="btn gone">Fig</span></div>
+<div class="hd">Light themes · Loopflow Light</div><span class="lbl">Built-in</span>
+<div class="cards">
+<div class="c on" style="background:#fbf7f0;color:#3a2a2a"><b style="background:#722f37"></b><span>Loopflow Light</span></div>
+<div class="c" style="background:#f7f0f7;color:#3a2a4a"><b style="background:#a2447a"></b><span>Arcade Day</span></div>
+<div class="c" style="background:#fff;color:#000"><b style="background:#2550a8"></b><span>Contrast Light</span></div>
+<div class="c" style="background:#f3f6ea;color:#4a2a3a"><b style="background:#7a3a5a"></b><span>Fig Leaf</span></div>
+</div>
+<span class="lbl">Yours</span><div class="cards"><div class="imp">Import file…</div></div>
+<div class="hd">Dark themes · Midnight</div><span class="lbl">Built-in</span>
+<div class="cards">
+<div class="c" style="background:#2b2d30;color:#e6dada"><b style="background:#722f37"></b><span>Loopflow Dark</span></div>
+<div class="c" style="background:#1e1530;color:#eadcf5"><b style="background:#6a2a6a"></b><span>Arcade</span></div>
+<div class="c" style="background:#000;color:#fff"><b style="background:#5a4a00"></b><span>Contrast</span></div>
+<div class="c" style="background:#3a2230;color:#f3e3ea"><b style="background:#4a5a1a"></b><span>Fig</span></div>
+</div>
+<span class="lbl">Yours</span><div class="cards"><div class="c on" style="background:#101010;color:#eee"><b style="background:#333"></b><span>Midnight</span></div><div class="imp">Import file…</div></div>
+<p class="lbl">Either Import tile took the dark file; it landed under Dark → Yours, ringed and previewed. In Light mode the mode control would flip to Dark; Cancel undoes it.</p>
+</div>
+</div>
 
 <h2>Product concepts and code concepts</h2>
 <table>
 <tr><th>What a person knows</th><th>What the code has</th><th>Match</th><th>Note</th></tr>
-<tr><td>A theme: a name, light or dark, one file</td><td><code>ThemeFile</code>, <code>PaletteDefinition</code></td><td class="yes">yes</td><td></td></tr>
-<tr><td>The title bar</td><td><code>PaletteDefinition.titlebar</code>, key <code>loopflow-titlebar</code>, editor row "Title bar"</td><td class="yes">yes</td><td>Was <span class="no">no</span> at base: computed at paint time with an <code>isDark</code> branch, unchecked, no row.</td></tr>
-<tr><td>Title bar text, two levels</td><td><code>PaletteDefinition.titlebarText</code>, <code>titlebarSecondaryText</code>, <code>titlebarSecondaryOpacity</code> (0.72, named once)</td><td class="yes">yes</td><td>Chosen against the bar, not the accent. "White or black on the bar" is spelled three times: <code>titlebarText</code>, <code>LoopflowPalette.titlebarColorScheme</code> and inside the rule. One idea, three spellings; small, no behavior at stake.</td></tr>
-<tr><td>A theme I drop in fills in what it leaves out</td><td><code>GhosttyThemeMapping</code>: <code>palette(_:)</code> and <code>titlebar(accent:background:dark:)</code></td><td class="yes">yes</td><td>Still the one place colors are worked out from colors. The bar is the only role re-derived after stated roles; it is also the only one that was never stored before, which is why.</td></tr>
-<tr><td>Loopflow Light and Dark are one brand in two modes</td><td>two files; one test: <code>dark.titlebar == light.titlebar</code></td><td class="yes">yes, by test</td><td>Was <span class="no">no</span>: nothing held them together. Now the shared bar is pinned; the rest of the pairing (rose ink from Light's burgundy) lives in <code>scratch/theme-audit/proposals.py</code>, which does not ship. Fine for a frozen file.</td></tr>
-<tr><td>Button, hover, pressed</td><td><code>accent</code>, <code>accentHover</code>, <code>accentPressed</code></td><td class="yes">yes</td><td>Dark's button <code>#8a3a44</code> is lighter than its bar; the bar is brand, the button is action.</td></tr>
-<tr><td>Added and removed lines in a Diff</td><td>the success and failure chip fills</td><td class="no">no</td><td>One name for two ideas, in all 24. This branch makes the defaults' values serve both; the role split is a separate outcome (plan, "Left outside").</td></tr>
-<tr><td>A selected file</td><td><code>selectionFill</code></td><td class="no">no, by value</td><td>22 files state it as <code>surface</code>. Separate outcome, listed in the plan.</td></tr>
+<tr><td>A theme: a name, light or dark, one file</td><td><code>ThemeFile</code>, <code>ThemeDefinition</code></td><td class="yes">yes</td><td></td></tr>
+<tr><td>The title bar</td><td><code>loopflow-titlebar</code>, <code>GhosttyThemeMapping.titlebar</code>, editor row</td><td class="yes">yes</td><td>Round 1's finding stands: a stated role, one fallback rule after stated roles, one check. “White or black on this color” is now one property, <code>ThemeRGB.contrastingText</code> (4c9120dff4).</td></tr>
+<tr><td>Which theme each side uses</td><td><code>AppearanceSelection.light</code>/<code>.dark</code>, shown as the ring on a card</td><td class="no">no, two owners</td><td>Shown twice: the ring and the side buttons. The buttons are the list-per-side chooser's control left behind by the grid.</td></tr>
+<tr><td>“The theme I just clicked” (where Customize shows, what the window paints)</td><td><code>AppearanceStore.picker</code>, set by the side buttons and by every card</td><td class="no">no, a concept the person never sees</td><td>Once the buttons go, <code>picker</code> is just the side of the last card clicked, which is what people already think it is.</td></tr>
+<tr><td>Import a theme file</td><td><code>importTheme(_:)</code> + <code>AppearanceDraft.refusal</code></td><td class="no">no, refuses a context it can resolve</td><td>The file says its side; the store requires the person to have pre-chosen the same one, and the refusal names “the Dark picker”, which is not on screen.</td></tr>
+<tr><td>My old built-in is gone</td><td><code>ThemeDefinition.retired</code> → notice</td><td class="no">no, the sentence</td><td>The mapping is right (side kept, Loopflow's theme shown, setting untouched until Apply). The advice to import “its Ghostty theme file” is false for Linen and Hearth and misleading for the rest.</td></tr>
+<tr><td>A family (Fig and Fig Leaf)</td><td>a name prefix; specs in <code>scripts/theme_catalogue.py</code>; sort order in <code>ThemeDefinition.builtins</code></td><td class="no">no, by design for now</td><td>The app never knows Fig and Fig Leaf belong together; it lines them up because names sort. Enough while the person picks each side separately. Picking a family once needs a family the app can read (a key in the file, or the generator emitting a pairing). Left outside this Task, as the plan says.</td></tr>
+<tr><td>Added and removed lines in a Diff; a selected file</td><td>chip fills; <code>selectionFill</code></td><td class="no">no, for imports</td><td>Generated themes follow the rules; imports don't. Outside this Task (plan, “Left outside”).</td></tr>
 </table>
 
-<h2>Biggest mismatch, before and after</h2>
-<p>Before: the most visible color in the window had no name in the theme. After: it is a role like every other, with one fallback rule, one check, one editor row, and the two defaults share it by test. That was the mismatch this Task set out to fix, and the code matches it.</p>
-<p>What remains on this page as <span class="no">no</span> (diff lines sharing chip fills, selection fill as surface) is catalogue-wide, one rule repeated in 22 files, and already listed in the plan as its own outcome. Taking it here would grow the Task.</p>
-<p><span class="tag">proposed</span> The small one: name "white or black on this color" once and have <code>titlebarColorScheme</code> and the rule read it:</p>
+<h2>Biggest mismatch</h2>
+<p>The grid replaced the per-side list, and the per-side list's machinery stayed: the side buttons, the <code>picker</code> they drive, and an import that only works from the side you pre-picked. Each was right for a chooser that showed one side's list at a time. With both sides on screen as rings, they are a second way to say the same thing, and the import refusal is the place where the second way breaks.</p>
+<p><b>Recommendation</b> (in <code>scratch/plan.md</code>, Remaining 1–3): delete the side buttons and put each side's chosen name in its section heading; import files a theme on the side its colors say and previews it there; the retired-name sentence drops the import advice. The store gets smaller (no <code>refusal</code>, no refusal branch in <code>canApply</code>), the view loses a row, nothing a person relies on goes away except seeing the other side's name in Light-only mode.</p>
 <pre>// today
-titlebarColorScheme { definition.titlebar.prefersLightText ? .dark : .light }
-titlebarText        { ThemeRGB(titlebar.prefersLightText ? 0xFFFFFF : 0) }
-titlebar(accent:…)  { let text = ThemeRGB(lightText ? 0xFFFFFF : 0) … }
+guard file.theme.isDark == dark else { draft?.refusal = "… Import it from the \(other) picker."; return }
 // proposed
-extension ThemeRGB { var readableText: ThemeRGB }   // white or black
-titlebarText        { titlebar.readableText }
-titlebarColorScheme { definition.titlebarText == .white ? .dark : .light }</pre>
-<p class="muted">Cleanup, not a model change; left to compress or gate.</p>
+let dark = file.theme.isDark
+if current.mode != .system { draft?.selection.mode = dark ? .dark : .light }
+picker = dark ? .dark : .light
+stage(file.theme, for: file.theme.name)   // then assign that side, as today</pre>
 
 <h2>Questions</h2>
 <ol class="q">
-<li>Loopflow Dark's bar <code>#722f37</code> is 1.4:1 against its <code>#2b2d30</code> window; it separates by hue. (a) keep; (b) use the rule's <code>#4c3237</code>; (c) use the button's <code>#8a3a44</code>.</li>
-<li>Saved custom themes stop moving the bar with "Button" once saved. (a) keep; (b) have the editor leave unstated roles out of the file so the bar keeps following.</li>
-<li>Solarized Dark's app text moves to <code>#b6b9b9</code>, lighter than its terminal text. (a) keep; (b) lower the changed-word fill for every theme instead.</li>
-<li>Diff lines and status chips share fills in all 24. (a) separate Task for <code>diff-added</code>/<code>diff-removed</code>; (b) leave.</li>
+<li>The side buttons. (a) delete, names move into section headings <span class="tag">chosen for review</span>; (b) keep them as read-only labels; (c) keep as built.</li>
+<li>A dark file imported in Light mode. (a) preview switches to Dark mode, Cancel undoes <span class="tag">chosen for review</span>; (b) switch to System; (c) file it under dark Yours without previewing.</li>
+<li>The retired-name sentence. (a) ““Linen” is no longer built in, so Loopflow Light is showing.” <span class="tag">chosen for review</span>; (b) also name the closest new family (“try Tannin Light”), which needs a 22-entry mapping kept by hand.</li>
+<li>Families. (a) stay a naming convention; pick each side <span class="tag">as built</span>; (b) a separate Task makes a family a thing the app reads, so System mode picks once.</li>
 </ol>
-</body>
-</html>
+</body></html>

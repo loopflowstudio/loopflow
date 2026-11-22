@@ -1,6 +1,6 @@
 # 50f7f9: review the bundled themes
 
-Built, in PR #2020: the two defaults and the `loopflow-titlebar` role (round 1), then the 13 families and a Choose Theme grid of cards (round 2). What remains is ship-review's look at the Dev app on an unlocked display.
+Built, in PR #2020: the two defaults and the `loopflow-titlebar` role (round 1), then the 13 families and a Choose Theme grid of cards (round 2). What remains is three chooser corrections from the concept review, then ship-review's look at the Dev app on an unlocked display.
 
 ## What people said
 
@@ -32,11 +32,19 @@ Dev app → Settings → Choose Theme: 13 cards per side in their own colors, bo
 
 ## Remaining
 
-- Ship-review: the Dev app look above, on an unlocked display.
+From the concept review of round 2 (`scratch/concept-review.html`). The chooser is now sections of cards, one per side; three pieces of the list-per-side chooser it replaced still stand.
+
+1. **Delete the "Light theme" / "Dark theme" buttons** in `ThemeChooser.body` (`appearance-picker-<side>`). In System mode both sections are on screen and the chosen card in each is ringed, so the buttons only repeat the ring and switch `picker`, which a card click already does. Each section heading carries the chosen name instead: "Light themes · Fjord Light" (in Light or Dark mode, the one section's heading). `picker` stays in `AppearanceStore` as the side of the last card clicked; `showPicker` stays as the store call a card makes. `ThemeWorkflowTests` stops finding the buttons and checks the headings and that a card click moves the Customize row.
+2. **Import files a theme on its own side; no refusal.** `AppearanceStore.importTheme` reads the file and uses `file.theme.isDark` for the side: it stages the file, assigns it to that side, sets `picker` to it, and in Light or Dark mode switches the preview's mode to the file's side (the segmented control shows it; Cancel undoes it). Delete `AppearanceDraft.refusal`, `AppearanceStore.refusal`, the `refusal == nil` in `canApply`, the `appearance-import-refusal` text, and `importPlaceholder`'s `side` and `showPicker` call. The Import tile stays in each Yours grid. Tests: the two refusal tests (`ThemeTests` "Personal", `ThemeWorkflowTests.chooserExplainsAMismatchedImportAndKeepsApplyDisabled`) become "a dark file imported from the light section previews in Dark and Apply is enabled".
+3. **The retired-name sentence says only what is true.** Today it says "to keep it, import its Ghostty theme file under Yours"; Linen and Hearth never had one, Clay's was named Desert Morning, and no upstream file carries the app roles the built-in had. New sentence: "“Gruvbox Dark” is no longer built in, so Loopflow Dark is showing." Update `ThemeTests` line ~258 if its prefix changes (it does not), and the last sentence of `swift/Loopflow/Themes/README.md` ("and says how to import the old one" → "and says so").
+
+Checks for these: the Swift filter under Checks; no theme file changes, so the catalogue check is untouched.
+
+- Ship-review: the Dev app look above, on an unlocked display, including a dark file imported from the light section.
 
 ## Left outside this Task
 
-Import mapping rules (diff tints, file selection fill, focus on the selected row), separate `diff-added`/`diff-removed` roles, picking a family once in System mode, and Rex's accent-colored cursor for imports. The generated themes already follow these rules; imported themes don't yet.
+Import mapping rules (diff tints, file selection fill, focus on the selected row), separate `diff-added`/`diff-removed` roles, picking a family once in System mode (it needs a family the app can read; today a family is a name prefix only the generator knows), and Rex's accent-colored cursor for imports. The generated themes already follow these rules; imported themes don't yet.
 
 ## The page
 

@@ -8,7 +8,7 @@
 - Round 2: `ThemeSample` is deleted rather than kept beside the cards. What it showed that no card does: a terminal line and the secondary text on the selected row.
 - Round 2: the chosen card is a 2 pt ring in the window's focus color instead of the old selection fill and edge. Passed over: both.
 
-- QA round 2: the third-party inventory went stale a second time (a README edit after the refresh) and only the bundle build noticed. Not added: a `test_third_party.py` case calling `third_party.check()`, which would catch it in CI but also fail every PR that bumps `Cargo.lock` without a refresh.
+- QA round 4: the inventory went stale a third time. Themes left the third-party inputs instead (the catalogue holds no third-party files now); a CI check for the rest is still not added, for the `Cargo.lock` reason.
 
 - Concept review round 2: importing a dark file while in Light mode switches the preview to Dark mode rather than refusing. Passed over: switching to System (changes two sides), or filing it under dark Yours without previewing (the person sees nothing happen).
 - Concept review round 2: the side buttons go; the chosen name moves into each section heading. Lost: in Light mode, seeing the dark side's name without switching to System.
@@ -17,3 +17,5 @@
 - Round 3: the Import tile's accessibility identifier is `appearance-import-theme` in both sections (the `-dark` variant went with the side).
 
 - Concept review round 3: a card click takes its side from the theme's own colors, as import does, rather than from a side argument. Passed over: `previewTheme(name, side:)`, which keeps a parameter that can disagree with the theme.
+
+- QA round 4: steer f4ce64ed ("make sure to make ipgone app respecy themes and the website he in loopflow light") arrived during QA. QA wrote it into the plan's Remaining rather than building two new surfaces in a QA step.

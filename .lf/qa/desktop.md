@@ -223,14 +223,19 @@ them. Nothing here needs WindowServer focus.
   after the editor opens Apply answers no click either.
 - `import <path>` stands in for the Import tile's file panel (unreachable
   locked): it cancels any open panel and imports the file as the panel's OK
-  does. `size <window> <w> <h>` shows the "Yours" row; keep the window on
-  screen (900x1250 fits) or later clicks land off it.
+  does. `size <window> <w> <h>` shows the "Yours" row. Keep the whole window
+  on the display: `tree` prints its frame, and a part below y = 0 answers no
+  click. On a 982 pt display 900x1250 sits at y = −384; 1500x900 puts the
+  dark section of System mode within reach.
 - Imported themes: most Ghostty files (GitHub Light Default, Catppuccin
   Latte) are refused for cursor or selection text. A catalogue file from
   `git show main:…` loads and stands in for a theme saved before a change.
-- Packaging refuses ("Third-party inputs changed") after any edit to a
-  catalogue theme or its README until `uv run python scripts/third_party.py
-  refresh` rewrites `ThirdPartyNotices/inventory.json`; commit that.
+- Packaging refuses ("Third-party inputs changed") after an edit to a
+  third-party input (`Cargo.lock`, fonts, Ghostty resources) until `uv run
+  python scripts/third_party.py refresh` rewrites
+  `ThirdPartyNotices/inventory.json`; commit that. Theme files are not inputs.
+- `set -- $pair` does not split words in zsh; copy captures out of the
+  private Machine one by one before deleting it.
 - Theme: `lf set --global theme "<name>"` on the private Machine, then
   relaunch. An imported theme is a file in `$LF_HOME/themes/`; Ghostty.app's
   `Contents/Resources/ghostty/themes/` has many.

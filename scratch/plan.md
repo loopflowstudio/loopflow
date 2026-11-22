@@ -1,12 +1,13 @@
 # 50f7f9: review the bundled themes
 
-Built, in PR #2020: the two defaults and the `loopflow-titlebar` role (round 1), then the 13 families and a Choose Theme grid of cards (round 2). Round 3 made the concept review's three chooser corrections, swapped Verdigris for Moss and dropped the removed-name fallback. Round 3's concept review found two leftovers of the per-side picker; round 4 removed them: `previewTheme` and `importTheme` share one assignment that takes the side from the theme's own colors, `showPicker` is gone and `picker` is `previewSide`. Left: ship-review's look at the Dev app on an unlocked display.
+Built, in PR #2020: the two defaults and the `loopflow-titlebar` role (round 1), then the 13 families and a Choose Theme grid of cards (round 2). Round 3 made the concept review's three chooser corrections, swapped Verdigris for Moss and dropped the removed-name fallback. Round 3's concept review found two leftovers of the per-side picker; round 4 removed them: `previewTheme` and `importTheme` share one assignment that takes the side from the theme's own colors, `showPicker` is gone and `picker` is `previewSide`. Round 4 QA passed. Left: the steer's iPhone and website pieces, then ship-review's look at the Dev app on an unlocked display.
 
 ## What people said
 
 - Round 1: "i def prefer the new loopflow darks red, but i kinda wanna go back at least somewhat towards rhe bluer grey", then "you can pick for now lets stay higher level."
 - Round 2, at ship-review after `scratch/theme-audit/explore.html`: "i like the 13 damilies"; of the page's cards, "our theme chooser should be more like this so you cab preview and scan"; then "jusr put all this stifg in this one task".
 - Steers on round 3: "can we swap verdigris for somethig more moss like"; on removed names, "not worried about any existing users".
+- Steer f4ce64ed, during round 4 QA: "make sure to make ipgone app respecy themes and the website he in loopflow light".
 - Rex steer (54d66633): "Inspiration only: take ideas, never copy theme files, color values or code." Answered in the "What Rex does" section of `scratch/theme-audit/index.html`.
 
 ## What exists
@@ -30,6 +31,7 @@ Built, in PR #2020: the two defaults and the `loopflow-titlebar` role (round 1),
 - `test_third_party.py`: 9 passed.
 - `swift test … 'WorkPaletteTests|TerminalColorTests|ThemeTests|ThemeWorkflowTests'`: 33 passed, 2026-11-22 (round 4, with `previewingADarkThemeFromTheLightSideLandsOnTheDarkSide`).
 - `swift test … 'WorkPaletteTests|TerminalColorTests|ThemeTests|ThemeWorkflowTests'`: 33 passed and `test_theme_catalogue.py` passed, 2026-11-22 (compress: one title bar rule, `show(_:)`).
+- Round 4 Dev app QA, screen locked: a light card in Light mode, a dark card in System mode, a dark import in Light mode: passed after dropping themes from the third-party inputs (`scratch/qa.html`). `test_third_party.py`: 9 passed.
 - Not run here: the real Import file panel, Apply and Cancel clicked in the chooser, the editor's Title bar row, a key window's bar, the selected Appearance toolbar tab in dark mode (ship-review, unlocked display).
 
 ## Demo
@@ -38,7 +40,9 @@ Dev app → Settings → Choose Theme: 13 cards per side in their own colors, bo
 
 ## Remaining
 
-1. Ship-review: the Dev app look above, on an unlocked display, including a dark file imported from the light section.
+1. iPhone draws in the chosen theme (steer f4ce64ed, full text in `.lf/prompts/20261122-122656-eRiNCm-steer.md`). Three places pick Loopflow Light/Dark by color scheme: `LoopflowiOSApp.swift:61`, `MachineConnectionView.swift:81`, `TaskListView.swift:209`; the terminal follows them. One resolved theme for palette and terminal, light or dark by the phone's appearance. Preferred source: the Mac's choice for that Machine; if the Machine can't tell the phone today, the phone gets its own Choose Theme with the same cards, and the PR says why. All 26 built-ins decode on iOS; `swift/LoopflowiOSTests` covers one non-default theme end to end.
+2. loopflow.studio is Loopflow Light: every `:root` color in `website/static/style.css` takes a Loopflow Light role (accent `#722f37` with hover and pressed replaces `--wine`; status inks; terminal block from its terminal colors), generated from the catalogue file (e.g. by `scripts/theme_catalogue.py`, covered by `--check`). DESIGN.md's "Tokens today" website colors match. Check `website/tests/`, the homepage and a docs page.
+3. Ship-review: the Dev app look above, on an unlocked display, including a dark file imported from the light section.
 
 ## Left outside this Task
 

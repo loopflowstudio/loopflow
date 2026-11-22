@@ -9,6 +9,25 @@ code{background:#f3f1ee;padding:0 .25em;border-radius:3px}
 table{border-collapse:collapse}td,th{border:1px solid #ddd;padding:.3rem .6rem;text-align:left}
 .ok{color:#256b2a}.bad{color:#9a2a2a}
 </style>
+<h1>Round 4: a card's side comes from the theme</h1>
+<p>Isolated bundle <code>com.loopflow.mac.qath4.dev</code>, private Machine <code>/tmp/lfq4</code> on the branch <code>lf server run</code>, a git-planned repository with one Task, production mode, <code>.lf/qa/QAHook.swift</code>. Screen locked (CGSSessionScreenIsLocked true, idle 2.8 h). Run 2026-11-22 at 5e03228191. The captures were lost in cleanup; what each showed is written here.</p>
+<h2>R4.1 Packaging — broken a third time, fixed by removing the cause</h2>
+<p class="bad">The bundle build stopped at <code>third_party.py package</code>: "Third-party inputs changed". Compress had moved Fjord, Signal and Tannin Light's bars.</p>
+<p><b>Fix:</b> the catalogue holds only Loopflow's own files now (no companions, <code>Sources.md</code> or <code>Licenses/</code>), so <code>scripts/third_party.py</code> no longer hashes <code>swift/Loopflow/Themes</code> or scans it for notices. The inventory loses 27 entries; <code>test_third_party.py</code> 9 passed; the bundle packaged. A theme edit can no longer break a Dev build or a release.</p>
+<h2>R4.2 Light mode, click a light card</h2>
+<p>Settings → Appearance opened in Light mode on Loopflow Light, 13 light cards, Import tile. Clicking Fjord Light previewed it across the chooser and main window, ringed it, headed the section "Light themes · Fjord Light"; the mode stayed Light. Light mode shows no dark cards, so a card click cannot cross sides there.</p>
+<h2>R4.3 System mode, click a dark card while macOS is light</h2>
+<p>Clicking Fig in the dark section: mode stayed System, "Previewing Fig", heading "Dark themes · Fig", Fig ringed with Customize, the light side kept "Harbor Light". The main window turned plum with lime headings. Same as before the change.</p>
+<h2>R4.4 Import a dark file in Light mode (shared path)</h2>
+<p>A copy of Fig as <code>Plum</code>: the control switched to Dark, Plum previewed, filed under dark Yours with Customize and Delete, "Supplied: …; 16 indexed colors; 34 app roles." and no Derived line. Closing the window wrote nothing: <code>config.yaml</code> still read <code>theme: Loopflow Light</code>, no <code>themes/</code>.</p>
+<h2>R4.5 Customize over "Yours", briefly</h2>
+<p>A capture two seconds after switching System → Light drew the chosen card's Customize button on top of the "Yours" label (chosen card in the last light row). Five seconds after the same switch the grid had re-measured and the label sat below the button. Not fixed: it looks like the non-key window's lazy re-layout, and may never show on a key window.</p>
+<h2>Round 4: what works</h2>
+<p>A card click previews on the card's own side in Light and System mode; import still switches Light/Dark mode and leaves System alone; closing discards the draft; the bundle packages after theme edits.</p>
+<h2>Round 4: not reached</h2>
+<p>Apply and Cancel clicks, the real file panel, a key window's bar, the editor's Title bar row, the three moved light bars on a real title bar: unlocked display (ship-review).</p>
+<h2>Round 4: still wrong, worst first</h2>
+<p>The Customize-over-Yours frame (R4.5), if it shows on screen. Moss's quiet bar (round 3) still waits for a look.</p>
 <h1>Round 3: Moss, removed names, the chooser without side buttons</h1>
 <p>Same method as round 2: isolated bundle <code>com.loopflow.mac.qath3.dev</code>, private Machine <code>/tmp/lfq3</code> on the branch <code>lf server run</code>, a git-planned repository with one Task, production mode, <code>.lf/qa/QAHook.swift</code>. Screen locked (CGSSessionScreenIsLocked Yes, idle 2.5 h). Run 2026-11-22 at d62943431e. The hook gained <code>import &lt;path&gt;</code>, which stands in for the Import tile's file panel and then calls what the panel's OK calls.</p>
 

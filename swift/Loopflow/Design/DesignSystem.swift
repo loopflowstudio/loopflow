@@ -27,11 +27,14 @@ public enum ZIndex {
 }
 
 public enum CornerRadius {
-    public static let sm: CGFloat = 4
-    public static let md: CGFloat = 8
-    public static let lg: CGFloat = 12
-    public static let xl: CGFloat = 16
-    public static let full: CGFloat = 9999
+    /// Buttons, fields, chips.
+    public static let control: CGFloat = 4
+    /// Rows and their selection.
+    public static let row: CGFloat = 8
+    /// Panes and cards.
+    public static let pane: CGFloat = 12
+    /// Popovers, palettes, sheets.
+    public static let floating: CGFloat = 16
 }
 
 /// Bundled faces (see `AppFontRegistration`): Old Standard TT Regular, Atkinson
@@ -58,10 +61,11 @@ public enum Typography {
 
     // Select bundled faces by PostScript name; family/weight matching can choose
     // an account-installed face that is unavailable inside the app sandbox.
-    static let serifFace = "OldStandardTT-Regular"
-    static let sansFace = "AtkinsonHyperlegibleNext-Regular"
-    static let sansStrongFace = "AtkinsonHyperlegibleNext-SemiBold"
-    static let monoFace = "SplineSansMono-Regular"
+    // iPhone and AppKit fields name them too.
+    public static let serifFace = "OldStandardTT-Regular"
+    public static let sansFace = "AtkinsonHyperlegibleNext-Regular"
+    public static let sansStrongFace = "AtkinsonHyperlegibleNext-SemiBold"
+    public static let monoFace = "SplineSansMono-Regular"
 
     /// A document's first heading; the text typed in New Task.
     public static let lede = Font.custom(sansStrongFace, fixedSize: 17)
@@ -75,31 +79,6 @@ public enum Typography {
     public static let mono = Font.custom(monoFace, fixedSize: 12)
     /// Ghostty's `font-size` default; the person's configuration replaces it.
     public static let terminalSize: CGFloat = 13
-
-    // Sized helpers on the new faces until every call site moves onto the ramp.
-    public static func heroTitle(_ size: CGFloat = 32) -> Font {
-        .custom(serifFace, size: size)
-    }
-
-    public static func sectionTitle(_ size: CGFloat = 20) -> Font {
-        .custom(serifFace, size: size)
-    }
-
-    public static func body(_ size: CGFloat = 14) -> Font {
-        .custom(sansFace, size: size)
-    }
-
-    public static func strong(_ size: CGFloat = 14) -> Font {
-        .custom(sansStrongFace, size: size)
-    }
-
-    public static func caption(_ size: CGFloat = 12) -> Font {
-        .custom(sansFace, size: size)
-    }
-
-    public static func code(_ size: CGFloat = 13) -> Font {
-        .custom(monoFace, size: size)
-    }
 }
 
 /// The two serif steps. They are not `Font` values: serif is set only through
@@ -177,7 +156,7 @@ public extension View {
         frame(minWidth: HitTarget.minimum, minHeight: HitTarget.minimum)
     }
 
-    func keyboardFocusRing(_ isFocused: Bool, cornerRadius: CGFloat = CornerRadius.md) -> some View {
+    func keyboardFocusRing(_ isFocused: Bool, cornerRadius: CGFloat = CornerRadius.row) -> some View {
         modifier(KeyboardFocusRing(isFocused: isFocused, cornerRadius: cornerRadius))
     }
 }
@@ -208,12 +187,12 @@ public struct DarkButtonStyle: ButtonStyle {
 
     public func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(Typography.body())
+            .font(Typography.text)
             .foregroundStyle(palette.accentText)
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
             .background(
-                RoundedRectangle(cornerRadius: CornerRadius.md)
+                RoundedRectangle(cornerRadius: CornerRadius.row)
                     .fill(configuration.isPressed ? palette.accentPressed : (hovering ? palette.accentHover : palette.accent))
             )
             .onHover { hovering = $0 }
@@ -229,12 +208,12 @@ public struct GhostButtonStyle: ButtonStyle {
 
     public func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(Typography.body())
+            .font(Typography.text)
             .foregroundStyle(palette.actionInk)
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
             .background(
-                RoundedRectangle(cornerRadius: CornerRadius.md)
+                RoundedRectangle(cornerRadius: CornerRadius.row)
                     .fill(configuration.isPressed ? palette.surfaceMuted : Color.clear)
             )
             .keyboardFocusRing(focused)
@@ -248,12 +227,12 @@ public struct DestructiveButtonStyle: ButtonStyle {
 
     public func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(Typography.body())
+            .font(Typography.text)
             .foregroundStyle(palette.failure)
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
             .background(
-                RoundedRectangle(cornerRadius: CornerRadius.md)
+                RoundedRectangle(cornerRadius: CornerRadius.row)
                     .strokeBorder(palette.failure.opacity(configuration.isPressed ? 0.8 : 0.5), lineWidth: 1)
             )
             .keyboardFocusRing(focused)

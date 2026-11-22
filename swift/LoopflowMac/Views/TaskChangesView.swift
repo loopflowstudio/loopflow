@@ -111,7 +111,7 @@ struct TaskChangesView: View {
             if showsDelivery {
                 DeliveryCard(store: store.pullRequest, record: task?.pr, taskOpen: task?.isCompleted == false,
                              url: prURL, localHead: store.changes?.headCommit)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .clipShape(RoundedRectangle(cornerRadius: CornerRadius.row))
             }
         }
         .padding(.horizontal, 12).padding(.vertical, 8)
@@ -119,12 +119,12 @@ struct TaskChangesView: View {
 
     private var titles: some View {
         VStack(alignment: .leading, spacing: 1) {
-            Text(title).font(Typography.strong(13))
+            Text(title).font(Typography.textStrong)
                 .foregroundStyle(store.changesError == nil ? palette.text : palette.warning)
                 .lineLimit(2).multilineTextAlignment(.leading)
                 .accessibilityIdentifier("changes-title")
             if let compared = store.comparisonDescription {
-                Text(compared).font(Typography.caption(11)).foregroundStyle(palette.textSecondary)
+                Text(compared).font(Typography.meta).foregroundStyle(palette.textSecondary)
                     .lineLimit(1).truncationMode(.middle).help(compared)
                     .accessibilityIdentifier("changes-comparison")
             }
@@ -147,7 +147,7 @@ struct TaskChangesView: View {
                     .lineLimit(1).truncationMode(.tail)
             }
             .menuStyle(.borderlessButton).fixedSize(horizontal: false, vertical: true)
-            .font(Typography.caption(11))
+            .font(Typography.meta)
             .help("Compare one Graph step's commits, or the whole Task")
             .accessibilityIdentifier("changes-step")
         }
@@ -237,9 +237,9 @@ struct TaskChangesView: View {
                     Text(delivery.headline.components(separatedBy: " · ").first ?? delivery.headline)
                         .lineLimit(1).truncationMode(.tail)
                     Image(systemName: showsDelivery ? "chevron.up" : "chevron.down")
-                        .font(.system(size: 8, weight: .semibold)).foregroundStyle(palette.textSecondary)
+                        .font(Typography.meta).fontWeight(.semibold).foregroundStyle(palette.textSecondary)
                 }
-                .font(Typography.caption(11))
+                .font(Typography.meta)
                 .padding(.horizontal, 9).padding(.vertical, 3)
                 .frame(maxWidth: 200)
                 .background(palette.surface, in: Capsule())
@@ -264,7 +264,7 @@ struct TaskChangesView: View {
     var toolbar: some View {
         HStack(spacing: 8) {
             Button { store.showsSidebar = !showsSidebar } label: {
-                Image(systemName: "sidebar.left").font(.system(size: 12))
+                Image(systemName: "sidebar.left").font(Typography.text)
                     .foregroundStyle(showsSidebar ? palette.text : palette.textSecondary)
                     .frame(width: 24, height: 20).contentShape(Rectangle())
             }
@@ -290,7 +290,7 @@ struct TaskChangesView: View {
                 .accessibilityLabel(reading)
         }
         .buttonStyle(.plain)
-        .font(Typography.caption(11))
+        .font(Typography.meta)
         .padding(.horizontal, 10)
         .frame(height: TaskFileChrome.headerHeight + 4)
         .background(palette.surfaceMuted.opacity(0.5))
@@ -314,12 +314,12 @@ struct TaskChangesView: View {
             Button { toggleFocus() } label: {
                 let on = store.focusedPath != nil
                 Group {
-                    if compact { Image(systemName: "scope").font(.system(size: 11)) } else { Text("Focus") }
+                    if compact { Image(systemName: "scope").font(Typography.meta) } else { Text("Focus") }
                 }
                 .foregroundStyle(on ? palette.background : palette.text)
                 .padding(.horizontal, compact ? 6 : 9).frame(height: 20)
-                .background(on ? palette.text : palette.surface, in: RoundedRectangle(cornerRadius: 6))
-                .overlay { RoundedRectangle(cornerRadius: 6).strokeBorder(palette.border) }
+                .background(on ? palette.text : palette.surface, in: RoundedRectangle(cornerRadius: CornerRadius.control))
+                .overlay { RoundedRectangle(cornerRadius: CornerRadius.control).strokeBorder(palette.border) }
                 .contentShape(Rectangle())
             }
             .help("Show one file at a time; next and previous still cross files")
@@ -365,7 +365,7 @@ struct TaskChangesView: View {
             }
             Toggle("Wrap long lines", isOn: $store.wrapsLines)
         } label: {
-            Image(systemName: "ellipsis.circle").font(.system(size: 12)).frame(width: 24, height: 20)
+            Image(systemName: "ellipsis.circle").font(Typography.text).frame(width: 24, height: 20)
         }
         .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
         .help("Order, tour, focus, layout and wrapping")
@@ -435,7 +435,7 @@ struct TaskChangesView: View {
         if let path = currentPath, let file = store.shownReview?.file(path),
            let id = store[place: .changes].anchor, id.hasPrefix(path + "#"),
            let declaration = store.opened(file).enclosing(id) {
-            Text(declaration).font(Typography.code(11)).foregroundStyle(palette.textSecondary)
+            Text(declaration).font(Typography.mono).foregroundStyle(palette.textSecondary)
                 .lineLimit(1).truncationMode(.tail)
                 .padding(.leading, ReviewStream.gutterWidth + 18).padding(.trailing, 12).padding(.vertical, 3)
                 .fillsPane()
@@ -460,11 +460,11 @@ struct TaskChangesView: View {
     @ViewBuilder private var focusStrip: some View {
         if let focused = store.focusedPath, let review = store.shownReview {
             HStack(spacing: 6) {
-                Text("Only \((focused as NSString).lastPathComponent)").font(Typography.strong(11))
+                Text("Only \((focused as NSString).lastPathComponent)").font(Typography.textStrong)
                 Text(review.files.count == 2 ? "· 1 more file" : "· \(review.files.count - 1) more files")
-                    .font(Typography.caption(11)).foregroundStyle(palette.textSecondary)
+                    .font(Typography.meta).foregroundStyle(palette.textSecondary)
                 Spacer(minLength: 4)
-                Button { toggleFocus() } label: { Image(systemName: "xmark").font(.system(size: 9, weight: .semibold)) }
+                Button { toggleFocus() } label: { Image(systemName: "xmark").font(Typography.meta).fontWeight(.semibold) }
                     .buttonStyle(.plain).help("Show all files").accessibilityLabel("Show all files")
             }
             .lineLimit(1)
@@ -523,16 +523,16 @@ struct TaskChangesView: View {
     @ViewBuilder private var footer: some View {
         VStack(spacing: 6) {
             if let first = store.shownReview?.stops.first, store.focusedPath == nil {
-                Text("End of changes").font(Typography.caption(11)).foregroundStyle(palette.textSecondary)
+                Text("End of changes").font(Typography.meta).foregroundStyle(palette.textSecondary)
                 Button("Back to the first change") {
                     store[place: .changes] = .init(anchor: store.shownReview?.file(first.path)?.topID, current: first.id)
                     store.noteInteraction()
                 }
-                .buttonStyle(WorkPlainButtonStyle()).font(.caption)
+                .buttonStyle(WorkPlainButtonStyle()).font(Typography.meta)
             }
             if store.query.remoteMachine == nil, let directory = store.changes?.recoveryDirectory {
                 Button("Open saved versions ↗") { NSWorkspace.shared.open(URL(fileURLWithPath: directory)) }
-                    .buttonStyle(WorkPlainButtonStyle()).font(.caption)
+                    .buttonStyle(WorkPlainButtonStyle()).font(Typography.meta)
             }
         }
         .frame(maxWidth: .infinity)
@@ -569,7 +569,7 @@ private struct ChangedFilesSidebar: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             TextField("Filter files", text: $store.reviewFilter)
-                .textFieldStyle(.roundedBorder).font(Typography.caption(12))
+                .textFieldStyle(.roundedBorder).font(Typography.text)
                 .padding(8)
                 .accessibilityIdentifier("changes-filter")
             Divider()
@@ -593,14 +593,14 @@ private struct ChangedFilesSidebar: View {
                 .padding(.bottom, 12)
             }
         }
-        .font(Typography.caption(11))
+        .font(Typography.meta)
         .frame(maxHeight: .infinity, alignment: .top)
         .background(palette.surfaceMuted.opacity(0.35))
         .accessibilityIdentifier("changes-files")
     }
 
     private func heading(_ text: String) -> some View {
-        Text(text).font(Typography.strong(11)).foregroundStyle(palette.textSecondary)
+        Text(text).font(Typography.textStrong).foregroundStyle(palette.textSecondary)
             .padding(.horizontal, 8).padding(.top, 12).padding(.bottom, 3)
     }
 
@@ -608,7 +608,7 @@ private struct ChangedFilesSidebar: View {
         if !group.title.isEmpty {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 // A tour's reason reads quieter than the files under it.
-                Text(group.title).font(group.isTour ? Typography.caption(11) : Typography.strong(11))
+                Text(group.title).font(group.isTour ? Typography.meta : Typography.textStrong)
                     .foregroundStyle(palette.textSecondary)
                     .lineLimit(group.isTour ? 2 : 1).truncationMode(.tail)
                     .help(group.title)
@@ -629,10 +629,10 @@ private struct ChangedFilesSidebar: View {
         return Button { jump(file.path) } label: {
             HStack(spacing: 6) {
                 Text(folder.map { String(file.path.dropFirst($0)) } ?? (file.path as NSString).lastPathComponent)
-                    .font(Typography.code(11)).lineLimit(1).truncationMode(.head)
+                    .font(Typography.mono).lineLimit(1).truncationMode(.head)
                     .foregroundStyle(viewed ? palette.textTertiary : palette.text)
                 if viewed {
-                    Image(systemName: "checkmark").font(.system(size: 8, weight: .bold))
+                    Image(systemName: "checkmark").font(Typography.meta).fontWeight(.bold)
                         .foregroundStyle(palette.textTertiary).accessibilityLabel("Viewed")
                 }
                 Spacer(minLength: 4)
@@ -656,7 +656,7 @@ private struct ChangedFilesSidebar: View {
             Text("+\(added)").foregroundStyle(palette.successTone.ink)
             Text("−\(removed)").foregroundStyle(palette.failureTone.ink)
         }
-        .font(Typography.code(10))
+        .font(Typography.mono)
     }
 
     private func fileCount(_ count: Int) -> String { count == 1 ? "1 file" : "\(count) files" }
@@ -672,7 +672,7 @@ private struct ChangedFilesSidebar: View {
                 let shown = store.shownTourHides.contains(entry.path)
                 VStack(alignment: .leading, spacing: 1) {
                     HStack(spacing: 6) {
-                        Text(entry.path).font(Typography.code(11)).lineLimit(1).truncationMode(.head)
+                        Text(entry.path).font(Typography.mono).lineLimit(1).truncationMode(.head)
                         Text(fileCount(files.count { entry.matches($0.path) })).foregroundStyle(palette.textSecondary)
                         Spacer(minLength: 4)
                         Button(shown ? "Hide" : "Show") {
@@ -697,7 +697,7 @@ private struct ChangedFilesSidebar: View {
         heading("Always hidden")
         ForEach(store.hidden, id: \.pattern) { entry in
             HStack(spacing: 6) {
-                Text(entry.pattern).font(Typography.code(11)).lineLimit(1).truncationMode(.head)
+                Text(entry.pattern).font(Typography.mono).lineLimit(1).truncationMode(.head)
                 Text(fileCount(files.count { DiffPattern.matches(entry.pattern, $0.path) }))
                     .foregroundStyle(palette.textSecondary)
                 Spacer(minLength: 4)
@@ -706,7 +706,7 @@ private struct ChangedFilesSidebar: View {
                         .help("From \(source == "Default" ? "Loopflow's default" : "the \(source.lowercased()) settings"); diff_hidden there changes it")
                 } else {
                     Button { store.unhide(entry.pattern) } label: {
-                        Image(systemName: "xmark").font(.system(size: 8, weight: .bold)).frame(width: 16, height: 16)
+                        Image(systemName: "xmark").font(Typography.meta).fontWeight(.bold).frame(width: 16, height: 16)
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain).help("Stop hiding paths matching \(entry.pattern)")
@@ -716,7 +716,7 @@ private struct ChangedFilesSidebar: View {
             .padding(.horizontal, 8).padding(.vertical, 2)
         }
         TextField("tests/, *.lock…", text: $hiding)
-            .textFieldStyle(.roundedBorder).font(Typography.code(11))
+            .textFieldStyle(.roundedBorder).font(Typography.mono)
             .onSubmit { store.hide(hiding); hiding = "" }
             .help("Hide every changed file whose path contains this text, or ends with it after *")
             .padding(.horizontal, 8).padding(.vertical, 4)
@@ -752,7 +752,7 @@ private struct DeliveryCard: View {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Image(systemName: record?.publication?.github == nil ? "arrow.triangle.branch" : "arrow.triangle.pull")
                         .foregroundStyle(palette.textSecondary)
-                    Text(delivery.headline).font(Typography.strong(12))
+                    Text(delivery.headline).font(Typography.textStrong)
                         .foregroundStyle(delivery.warning ? palette.warning : palette.text)
                         .fixedSize(horizontal: false, vertical: true)
                         .accessibilityIdentifier("changes-delivery")
@@ -761,11 +761,11 @@ private struct DeliveryCard: View {
                         Button { Task { await store.refresh(url) } } label: { Image(systemName: "arrow.clockwise") }
                             .buttonStyle(.plain).disabled(store.refreshing)
                             .help("Read GitHub again").accessibilityLabel("Refresh pull request")
-                        Link("Open on GitHub ↗", destination: url).font(.caption)
+                        Link("Open on GitHub ↗", destination: url).font(Typography.meta)
                     }
                 }
                 if let detail = delivery.detail {
-                    Text(detail).font(.caption).foregroundStyle(palette.textSecondary)
+                    Text(detail).font(Typography.meta).foregroundStyle(palette.textSecondary)
                 }
                 if let pr = store.pullRequest {
                     reading(pr, current: delivery.readingIsCurrent)
@@ -781,7 +781,7 @@ private struct DeliveryCard: View {
     /// A reading that is not current stays readable but loses its colors.
     private func reading(_ pr: GitHubPullRequest, current: Bool) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(pr.title).font(Typography.body(12)).lineLimit(2)
+            Text(pr.title).font(Typography.text).lineLimit(2)
             if let checks = pr.statusCheckRollup, !checks.isEmpty {
                 DisclosureGroup(isExpanded: $showsChecks) {
                     ForEach(Array(checks.enumerated()), id: \.offset) { _, check in
@@ -794,18 +794,18 @@ private struct DeliveryCard: View {
                             Spacer(minLength: 0)
                             Text(check.result.replacingOccurrences(of: "_", with: " ").capitalized)
                                 .foregroundStyle(palette.textSecondary)
-                        }.font(.caption)
+                        }.font(Typography.meta)
                     }
-                } label: { Text(pr.checksSummary).font(.caption) }
+                } label: { Text(pr.checksSummary).font(Typography.meta) }
             }
             if !pr.reviewRequests.isEmpty {
                 Text("Waiting on \(pr.reviewRequests.map(\.label).joined(separator: ", "))")
-                    .font(.caption).foregroundStyle(palette.textSecondary)
+                    .font(Typography.meta).foregroundStyle(palette.textSecondary)
             }
             if !pr.body.isEmpty {
                 DisclosureGroup("Description", isExpanded: $showsDescription) {
                     MarkdownBlocks(source: pr.body).equatable()
-                }.font(.caption)
+                }.font(Typography.meta)
             }
         }
         .opacity(current ? 1 : 0.6)

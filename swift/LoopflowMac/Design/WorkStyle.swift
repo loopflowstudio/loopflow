@@ -57,16 +57,16 @@ struct WorkChip: View {
 
     var body: some View {
         Text(text)
-            .font(Typography.strong(10.5))
+            .font(Typography.textStrong)
             .tracking(0.2)
             .foregroundStyle(tone == .neutral ? tone.ink(in: palette) : tone.text(in: palette))
             .lineLimit(1)
             .padding(.horizontal, 7)
             .padding(.vertical, 1)
-            .background(tone.fill(in: palette), in: RoundedRectangle(cornerRadius: 4))
+            .background(tone.fill(in: palette), in: RoundedRectangle(cornerRadius: CornerRadius.control))
             .overlay {
                 if tone == .neutral {
-                    RoundedRectangle(cornerRadius: 4).strokeBorder(tone.stroke(in: palette), lineWidth: 1)
+                    RoundedRectangle(cornerRadius: CornerRadius.control).strokeBorder(tone.stroke(in: palette), lineWidth: 1)
                 }
             }
     }
@@ -87,8 +87,8 @@ private struct WorkPanel: ViewModifier {
     func body(content: Content) -> some View {
         content
             .padding(padding)
-            .background(palette.surface, in: RoundedRectangle(cornerRadius: CornerRadius.lg))
-            .overlay(RoundedRectangle(cornerRadius: CornerRadius.lg).strokeBorder(palette.border))
+            .background(palette.surface, in: RoundedRectangle(cornerRadius: CornerRadius.pane))
+            .overlay(RoundedRectangle(cornerRadius: CornerRadius.pane).strokeBorder(palette.border))
     }
 }
 
@@ -106,19 +106,19 @@ struct WorkOutlineButtonStyle: ButtonStyle {
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(Typography.body(12.5))
+            .font(Typography.text)
             .foregroundStyle(isEnabled ? ink : palette.textTertiary)
             .padding(.horizontal, 11)
             .padding(.vertical, 4)
             .background(
-                RoundedRectangle(cornerRadius: 6)
+                RoundedRectangle(cornerRadius: CornerRadius.control)
                     .fill(configuration.isPressed ? palette.surfaceElement : (hovering ? palette.surfaceMuted : palette.surface))
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 6)
+                RoundedRectangle(cornerRadius: CornerRadius.control)
                     .strokeBorder(isEnabled && (emphasized || destructive) ? ink : palette.borderStrong, lineWidth: 1)
             )
-            .contentShape(RoundedRectangle(cornerRadius: 6))
+            .contentShape(RoundedRectangle(cornerRadius: CornerRadius.control))
             .onHover { hovering = $0 }
             .workFocusRing()
     }
@@ -151,7 +151,7 @@ struct WorkDisclosureHeading: View {
             Button(action: toggle) {
                 HStack(alignment: .firstTextBaseline, spacing: Spacing.xs) {
                     Image(systemName: "chevron.right")
-                        .font(.system(size: 9, weight: .bold))
+                        .font(Typography.meta).fontWeight(.bold)
                         .rotationEffect(.degrees(expanded ? 90 : 0))
                     Text(title)
                         .font(Typography.textStrong)
@@ -179,7 +179,7 @@ struct WorkDisclosureHeading: View {
 private struct WorkFocusRing: ViewModifier {
     @Environment(\.isFocused) private var focused
     func body(content: Content) -> some View {
-        content.keyboardFocusRing(focused, cornerRadius: 4)
+        content.keyboardFocusRing(focused, cornerRadius: CornerRadius.control)
     }
 }
 
@@ -197,7 +197,7 @@ private struct WorkSelection: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .background(selected ? palette.selectionFill : .clear, in: RoundedRectangle(cornerRadius: 6))
+            .background(selected ? palette.selectionFill : .clear, in: RoundedRectangle(cornerRadius: CornerRadius.row))
             .overlay(alignment: .leading) {
                 if selected {
                     RoundedRectangle(cornerRadius: 1).fill(palette.selectionEdge)
@@ -253,8 +253,8 @@ private struct WorkDestinationSelection: ViewModifier {
     func body(content: Content) -> some View {
         content
             .background(selected ? palette.workSelectedFill : (hovering ? palette.actionHover : .clear),
-                        in: RoundedRectangle(cornerRadius: 6))
-            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(selected ? palette.selectionEdge : .clear))
+                        in: RoundedRectangle(cornerRadius: CornerRadius.row))
+            .overlay(RoundedRectangle(cornerRadius: CornerRadius.row).strokeBorder(selected ? palette.selectionEdge : .clear))
             .onHover { hovering = $0 }
             .accessibilityAddTraits(selected ? [.isSelected] : [])
     }

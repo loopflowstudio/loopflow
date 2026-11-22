@@ -26,10 +26,10 @@ struct WorkActivityView: View {
             HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
                 VStack(alignment: .leading, spacing: Spacing.xxs) {
                     Text("Activity")
-                        .font(Typography.sectionTitle(20))
+                        .font(Typography.lede)
                         .foregroundStyle(palette.text)
                     Text(scopeTitle)
-                        .font(Typography.caption(10))
+                        .font(Typography.meta)
                         .foregroundStyle(palette.textSecondary)
                         .lineLimit(1)
                         .accessibilityIdentifier("loopflow-activity-scope")
@@ -49,7 +49,7 @@ struct WorkActivityView: View {
 
             if let selectedSummary {
                 Text(selectedSummary)
-                    .font(Typography.body(11))
+                    .font(Typography.meta)
                     .foregroundStyle(palette.text)
                     .lineLimit(2)
                     .textSelection(.enabled)
@@ -75,7 +75,7 @@ struct WorkActivityView: View {
                     }
                     if model.workActivity.value?.truncated == true {
                         Text("Older Activity exists outside this window.")
-                            .font(Typography.caption(9))
+                            .font(Typography.meta)
                             .foregroundStyle(palette.textSecondary)
                             .padding(Spacing.lg)
                     }
@@ -100,25 +100,25 @@ struct WorkActivityView: View {
                     .fill(appearance.color.opacity(0.12))
                     .frame(width: 30, height: 30)
                 Image(systemName: appearance.icon)
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(Typography.meta).fontWeight(.semibold)
                     .foregroundStyle(appearance.color)
             }
 
             VStack(alignment: .leading, spacing: Spacing.xs) {
                 HStack(alignment: .firstTextBaseline, spacing: Spacing.xs) {
                     Text("\(entry.work.kind.rawValue.uppercased()) · \(entry.subject)")
-                        .font(Typography.strong(8))
+                        .font(Typography.textStrong)
                         .tracking(0.6)
                         .foregroundStyle(palette.textSecondary)
                         .lineLimit(1)
                     Spacer(minLength: 0)
                     Text(activityTime(entry.recordedAt))
-                        .font(Typography.code(8))
+                        .font(Typography.mono)
                         .foregroundStyle(palette.textSecondary)
                         .help(exactTime(entry.recordedAt))
                 }
                 Text(entry.summary)
-                    .font(Typography.body(11).weight(.semibold))
+                    .font(Typography.meta.weight(.semibold))
                     .foregroundStyle(palette.text)
                     .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)

@@ -169,7 +169,7 @@ private struct RecoveredCreationInspector: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(resource.task == nil ? "Recovered Session" : "Recovered Task").font(.headline)
+            Text(resource.task == nil ? "Recovered Session" : "Recovered Task").font(Typography.textStrong)
             ScrollView {
                 Group {
                     switch detail {
@@ -178,11 +178,11 @@ private struct RecoveredCreationInspector: View {
                     case nil: Text("Reading current work…")
                     }
                 }
-                .font(.system(.body, design: .monospaced)).textSelection(.enabled)
+                .font(Typography.mono).textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             DisclosureGroup("Receipt") {
-                ScrollView { Text(resource.receipt).font(.system(.caption, design: .monospaced)).textSelection(.enabled) }
+                ScrollView { Text(resource.receipt).font(Typography.mono).textSelection(.enabled) }
             }
             Button("Done") { dismiss() }
         }

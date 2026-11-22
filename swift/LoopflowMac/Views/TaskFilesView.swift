@@ -78,7 +78,7 @@ struct TaskFilesView: View {
                                 .accessibilityLabel("Close \(tab.path)")
                         }
                     }
-                }.buttonStyle(.plain).font(.caption).padding(8)
+                }.buttonStyle(.plain).font(Typography.meta).padding(8)
             }
             navigationBar
         }
@@ -90,7 +90,7 @@ struct TaskFilesView: View {
         let checkout = URL(fileURLWithPath: store.cwd).lastPathComponent
         let directory = store.selection.map { ($0 as NSString).deletingLastPathComponent } ?? ""
         return Text([machine, checkout + (directory.isEmpty ? "" : "/" + directory)].joined(separator: " · "))
-            .font(Typography.code(10)).foregroundStyle(palette.textSecondary)
+            .font(Typography.mono).foregroundStyle(palette.textSecondary)
             .lineLimit(1).truncationMode(.head)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 10).padding(.vertical, 3)
@@ -117,8 +117,8 @@ struct TaskFilesView: View {
                             navigator
                                 .frame(width: min(360, geometry.size.width),
                                        height: max(0, geometry.size.height - 8))
-                                .clipShape(RoundedRectangle(cornerRadius: 10))
-                                .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(palette.border))
+                                .clipShape(RoundedRectangle(cornerRadius: CornerRadius.pane))
+                                .overlay(RoundedRectangle(cornerRadius: CornerRadius.pane).strokeBorder(palette.border))
                                 .shadow(color: .black.opacity(0.2), radius: 12, x: 3, y: 6)
                                 .accessibilityIdentifier("files-navigation-dropdown")
                         }
@@ -180,19 +180,19 @@ struct TaskFilesView: View {
                                 scratchRow(path)
                             }
                             if store.changes?.scratchTruncated == true {
-                                Text("Scratch list truncated").font(.caption).foregroundStyle(palette.textSecondary)
+                                Text("Scratch list truncated").font(Typography.meta).foregroundStyle(palette.textSecondary)
                             }
                         }
                         Text(URL(fileURLWithPath: store.cwd).lastPathComponent)
-                            .font(Typography.caption(11)).foregroundStyle(palette.textSecondary)
+                            .font(Typography.meta).foregroundStyle(palette.textSecondary)
                             .padding(.top, 12).padding(.bottom, 2)
                             .help(store.cwd)
                         let badges = store.changeBadges
                         ForEach(store.treeRows) { row in treeRow(row, badges: badges) }
                         if let reason = store.changesError {
-                            Text(reason).font(.caption).foregroundStyle(palette.warning)
+                            Text(reason).font(Typography.meta).foregroundStyle(palette.warning)
                         } else if !store.search.isEmpty, store.scratchPaths.isEmpty, store.treeRows.isEmpty {
-                            Text("No matching files").font(.caption).foregroundStyle(palette.textSecondary)
+                            Text("No matching files").font(Typography.meta).foregroundStyle(palette.textSecondary)
                         }
                     }.padding(10)
                 }
@@ -244,14 +244,14 @@ struct TaskFilesView: View {
                     Image(systemName: entry.kind == .directory
                           ? (store.tree.isExpanded(entry.path) ? "chevron.down" : "chevron.right")
                           : entry.kind == .symlink ? "arrow.turn.up.right" : "doc")
-                        .font(.system(size: 9, weight: .semibold)).frame(width: 10)
+                        .font(Typography.meta).fontWeight(.semibold).frame(width: 10)
                         .foregroundStyle(palette.textSecondary)
                     Text(label)
-                        .font(.system(size: 11, design: .monospaced)).lineLimit(1).truncationMode(.middle)
+                        .font(Typography.mono).lineLimit(1).truncationMode(.middle)
                     if store.documents[entry.path]?.dirty == true { Text("•").help("Unsaved draft") }
                     Spacer(minLength: 4)
                     if let badge = badges[entry.path] {
-                        Text(badge.rawValue).font(Typography.code(10))
+                        Text(badge.rawValue).font(Typography.mono)
                             .foregroundStyle(badge == .untracked ? palette.successTone.ink : palette.actionInk)
                             .help(badge.help)
                     }
@@ -268,13 +268,13 @@ struct TaskFilesView: View {
             ProgressView().controlSize(.mini).padding(.leading, indent + 16)
         case .more(let directory, _):
             Button("Load more") { Task { await store.readDirectory(directory, more: true) } }
-                .buttonStyle(.link).font(.caption).padding(.leading, indent + 16)
+                .buttonStyle(.link).font(Typography.meta).padding(.leading, indent + 16)
                 .accessibilityIdentifier("files-load-more")
         case .failed(let directory, let reason, _):
             HStack(spacing: 6) {
-                Text(reason).font(.caption).foregroundStyle(palette.warning).lineLimit(2)
+                Text(reason).font(Typography.meta).foregroundStyle(palette.warning).lineLimit(2)
                 Button("Retry") { Task { await store.retryDirectory(directory) } }
-                    .buttonStyle(.link).font(.caption)
+                    .buttonStyle(.link).font(Typography.meta)
             }.padding(.leading, indent + 16)
         }
     }
@@ -313,7 +313,7 @@ struct TaskFilesView: View {
             }.pickerStyle(.menu).labelsHidden()
                 .accessibilityLabel("View").frame(width: 70).fixedSize()
         }
-        .font(Typography.caption(11)).padding(.horizontal, 10)
+        .font(Typography.meta).padding(.horizontal, 10)
         .frame(height: TaskFileChrome.headerHeight)
         .fixedSize(horizontal: true, vertical: false)
     }
@@ -321,22 +321,22 @@ struct TaskFilesView: View {
     private var documentPane: some View {
         VStack(spacing: 0) {
             if let error = store.error {
-                Text(error).font(.caption).foregroundStyle(palette.warning).padding(8)
+                Text(error).font(Typography.meta).foregroundStyle(palette.warning).padding(8)
             }
             if let reason = store.selectedDocument?.readOnlyReason {
-                Text(reason).font(.caption).padding(8)
+                Text(reason).font(Typography.meta).padding(8)
             }
             if let document = store.selectedDocument, let external = document.external {
                 Text("\(external.state.title) · local draft retained; saving unavailable")
-                    .font(.caption).padding(8)
+                    .font(Typography.meta).padding(8)
             }
             content
             if let document = store.selectedDocument {
                 if let message = document.saveMessage {
-                    Text(message).font(.system(size: 10)).foregroundStyle(palette.textSecondary).padding(6)
+                    Text(message).font(Typography.meta).foregroundStyle(palette.textSecondary).padding(6)
                 } else if document.dirty {
                     Text(store.autosave && document.canSave ? "Autosave pending · draft retained" : "Unsaved draft · retained in this window")
-                        .font(.system(size: 10)).foregroundStyle(palette.textSecondary).padding(6)
+                        .font(Typography.meta).foregroundStyle(palette.textSecondary).padding(6)
                 }
                 if !document.recoveries.isEmpty {
                     HStack {
@@ -349,7 +349,7 @@ struct TaskFilesView: View {
                                 }.help(recovery.message)
                             }
                         }.fixedSize()
-                    }.font(.caption).padding(6)
+                    }.font(Typography.meta).padding(6)
                 }
             }
         }
@@ -361,8 +361,8 @@ struct TaskFilesView: View {
         Button { expanded.wrappedValue.toggle() } label: {
             HStack(spacing: 6) {
                 Image(systemName: expanded.wrappedValue ? "chevron.down" : "chevron.right")
-                    .font(.system(size: 9, weight: .semibold)).frame(width: 10)
-                Text(title).font(Typography.caption(11))
+                    .font(Typography.meta).fontWeight(.semibold).frame(width: 10)
+                Text(title).font(Typography.meta)
                 Spacer(minLength: 0)
             }.padding(.vertical, 2).contentShape(Rectangle())
         }
@@ -383,7 +383,7 @@ struct TaskFilesView: View {
         } label: {
             HStack {
                 Text(path.dropFirst("scratch/".count))
-                    .font(.system(size: 11, design: .monospaced)).lineLimit(1).truncationMode(.middle)
+                    .font(Typography.mono).lineLimit(1).truncationMode(.middle)
                 if store.documents[path]?.dirty == true { Text("•") }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -568,7 +568,7 @@ private struct TaskFileDiffView: View {
             HStack(spacing: 8) {
                 ReviewStepper(store: store, reader: reader, isFocused: isFocused)
                 Text(store.revision + (review.draft ? " · unsaved draft" : ""))
-                    .font(Typography.caption(11)).foregroundStyle(palette.textSecondary)
+                    .font(Typography.meta).foregroundStyle(palette.textSecondary)
                     .lineLimit(1).truncationMode(.middle)
                     .accessibilityIdentifier("files-diff-comparison")
                 Spacer(minLength: 4)

@@ -315,12 +315,21 @@ in DESIGN.md "Desktop semantics"; palette contrast.
    process-registered Spline Sans Mono faces. Not yet seen on screen: the
    Dev app with Claude's TUI (fallback glyph width, box drawing) and
    Atkinson at the narrowest window; that look belongs to QA.
-2. **One ramp, one radius set (next).** Mechanical migration of every call
-   site, iPhone to `MobileType`, delete the sized helpers and old radius
-   names, add `TypographyDisciplineTests`. Counted after slice 1: 356 sized
-   `Typography.*(` calls, 86 `.system(size:)`/`.font(.caption|.body` in
-   `Loopflow/` and `LoopflowMac/`, 25 `CornerRadius.sm/md/lg/xl/full`.
-3. **Workflow line end to end.** Rust `steps` + `sentence`, fixtures, CLI
+2. **Built.** Every Mac and shared call site is on the ramp (scripted by the
+   table; small bold ≤ 11.5 went to `textStrong` so emphasis survives, SF
+   Symbol sizes became the step plus `.fontWeight`, `.system(.body,
+   design: .monospaced)` became `mono`, `.title2`/`.callout` became
+   `lede`/`text`). The sized helpers are deleted; the face PostScript names
+   are public so iPhone's `MobileType` (`LoopflowiOS/MobileType.swift`:
+   `text(_:)`, `strong(_:)`, the old sizes) and AppKit fields name them.
+   `CornerRadius` is `control/row/pane/floating`; literal radii in Mac
+   views became names (4–5 control; 6–9 row, buttons and fields control;
+   10–12 pane), except 1–2 pt stripe ends, which go with the stripe;
+   `PaneGeometry.cornerRadius` is `pane`. `TypographyDisciplineTests`
+   passes with `WorkPaletteTests`. Not run here: the iPhone build (gate's
+   `scripts/test_ios.py`), and no look at the Dev app; sizes moved by up to
+   ±3 pt everywhere outside the Task pane, which QA sees.
+3. **Workflow line end to end (next).** Rust `steps` + `sentence`, fixtures, CLI
    text, `WorkflowLine`, delete the three position renderers.
 4. Then: Task row + status mark + button + title bar; Session strip and
    notice line; Brief/Diff/Files; DESIGN.md once cfadc6 is on main; QA in

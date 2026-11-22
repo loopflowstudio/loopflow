@@ -57,12 +57,12 @@ struct TaskBriefView: View {
                     let outline = TaskBrief.outline(description)
                     if !outline.isEmpty { outlineView(outline, proxy: proxy) }
                     if updated {
-                        Text("Brief updated since you last read it").font(.caption).foregroundStyle(palette.warning)
+                        Text("Brief updated since you last read it").font(Typography.meta).foregroundStyle(palette.warning)
                     }
                     Divider()
                     if description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         Text("No brief recorded · edit with `lf task edit \(task.task.identifier)`")
-                            .font(.caption).foregroundStyle(palette.textSecondary)
+                            .font(Typography.meta).foregroundStyle(palette.textSecondary)
                     } else {
                         MarkdownBlocks(source: description).equatable()
                             .frame(maxWidth: 680, alignment: .leading)
@@ -89,13 +89,13 @@ struct TaskBriefView: View {
         let delivery = TaskDelivery.describe(record: task.pr, taskOpen: !task.isCompleted, reading: store.pullRequest.pullRequest,
             error: store.pullRequest.error, readAt: store.pullRequest.readAt, localHead: store.changes?.headCommit)
         return VStack(alignment: .leading, spacing: 4) {
-            Text("\(runtime.capitalized)\(step)").font(Typography.strong(13))
+            Text("\(runtime.capitalized)\(step)").font(Typography.textStrong)
                 .accessibilityIdentifier("brief-state")
-            Text(task.nextMove.reason).font(Typography.body(12)).foregroundStyle(palette.textSecondary)
+            Text(task.nextMove.reason).font(Typography.text).foregroundStyle(palette.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
             if task.condition.state != .clear {
                 Text("\(task.condition.state.rawValue.capitalized) · \(task.condition.reason)")
-                    .font(.caption).foregroundStyle(palette.warning)
+                    .font(Typography.meta).foregroundStyle(palette.warning)
             }
             HStack(spacing: 10) {
                 Button { store.page = .changes; store.noteInteraction() } label: {
@@ -104,17 +104,17 @@ struct TaskBriefView: View {
                 .buttonStyle(WorkPlainButtonStyle()).help("Show Diff")
                 if let due = task.task.dueDate { Text("Due \(due)") }
             }
-            .font(.caption).foregroundStyle(palette.textSecondary)
+            .font(Typography.meta).foregroundStyle(palette.textSecondary)
         }
     }
 
     private func relatedTasks(_ identifiers: [String]) -> some View {
         HStack(spacing: 6) {
-            Text("Related").font(.caption).foregroundStyle(palette.textSecondary)
+            Text("Related").font(Typography.meta).foregroundStyle(palette.textSecondary)
             ForEach(identifiers, id: \.self) { identifier in
                 Button(identifier) { open(identifier) }
                     .buttonStyle(.plain)
-                    .font(Typography.code(10))
+                    .font(Typography.mono)
                     .padding(.horizontal, 6).padding(.vertical, 2)
                     .background(palette.surfaceMuted, in: Capsule())
                     .help("Open \(identifier)")
@@ -135,7 +135,7 @@ struct TaskBriefView: View {
                 Button(heading.title) {
                     withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo(MarkdownBlocks.anchor(heading.block), anchor: .top) }
                 }
-                .buttonStyle(WorkPlainButtonStyle()).font(.caption).lineLimit(1)
+                .buttonStyle(WorkPlainButtonStyle()).font(Typography.meta).lineLimit(1)
             }
         }
     }

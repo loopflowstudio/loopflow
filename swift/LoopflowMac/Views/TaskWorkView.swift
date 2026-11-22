@@ -140,7 +140,7 @@ struct TaskWorkflowHeader: View {
         } message: {
             Text("Cancels the Task, closes its PRs and deletes its branches. Unassign it instead to keep its work for later.")
         }
-        .font(Typography.body(12))
+        .font(Typography.text)
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -278,7 +278,7 @@ struct TaskAutoControl: View {
             if turnOn { model.turnAutoOn(task) } else { model.turnAutoOff(task) }
         }))
         .toggleStyle(.switch).controlSize(.small)
-        .font(Typography.body(12.5))
+        .font(Typography.text)
         .disabled(refusal != nil)
         .help(refusal ?? (on
             ? "lf task auto off \(issue): the run waits at its next interactive step for you, and auto-merge is disarmed"
@@ -334,7 +334,7 @@ struct TaskWorkflowBar: View {
                 cells(stages)
             }
         }
-        .font(Typography.body(12))
+        .font(Typography.text)
         .background(palette.background)
         .overlay(alignment: .bottom) { Rectangle().fill(palette.border).frame(height: 1) }
         .accessibilityElement(children: .contain)
@@ -352,7 +352,7 @@ struct TaskWorkflowBar: View {
                         .help(stage.who.map { "\(stage.name) (\($0))" } ?? stage.name)
                 }
                 Image(systemName: expanded ? "chevron.down" : "chevron.right")
-                    .font(.system(size: 9, weight: .semibold))
+                    .font(Typography.meta).fontWeight(.semibold)
                     .foregroundStyle(palette.textTertiary)
             }
             .contentShape(Rectangle())
@@ -368,13 +368,13 @@ struct TaskWorkflowBar: View {
         HStack(alignment: .top, spacing: Spacing.sm) {
             ForEach(stages, id: \.name) { stage in
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(stage.who ?? " ").font(Typography.caption(10)).foregroundStyle(palette.textTertiary)
+                    Text(stage.who ?? " ").font(Typography.meta).foregroundStyle(palette.textTertiary)
                     Text(stage.name).fontWeight(.semibold)
                     Text(stage.note).foregroundStyle(palette.textSecondary).lineLimit(2)
                 }
                 .padding(.horizontal, 8).padding(.vertical, 6)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(RoundedRectangle(cornerRadius: 6).fill(
+                .background(RoundedRectangle(cornerRadius: CornerRadius.row).fill(
                     stage.current ? palette.surfaceElement : palette.surface))
                 .accessibilityIdentifier("task-workflow-bar-stage-\(stage.name)")
             }
@@ -466,7 +466,7 @@ struct TaskHeading: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            Text(task.task.identifier).font(.system(.body, design: .monospaced)).fixedSize()
+            Text(task.task.identifier).font(Typography.mono).fixedSize()
             // The title truncates first; identifier and state keep their width.
             Text(task.task.name).lineLimit(1).truncationMode(.tail)
                 .frame(minWidth: 0, alignment: .leading).help(task.task.name)
@@ -576,7 +576,7 @@ struct TaskPlanningFactsView: View {
         VStack(alignment: .leading, spacing: Spacing.xxs) {
             if let due = task.task.dueDate {
                 Text("Due \(due)")
-                    .font(Typography.body(12.5))
+                    .font(Typography.text)
                     .foregroundStyle(palette.textSecondary)
             }
         }
@@ -652,7 +652,7 @@ struct GraphProcessLog: View {
             .padding(.vertical, 8)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .font(Typography.body(12))
+        .font(Typography.text)
         .foregroundStyle(palette.textSecondary)
         .textSelection(.enabled)
         .background(palette.background)
@@ -739,7 +739,7 @@ struct TaskWorkView: View {
                 }
             }
         }
-        .font(Typography.body(12))
+        .font(Typography.text)
         .foregroundStyle(palette.textSecondary)
         .textSelection(.enabled)
         .accessibilityIdentifier("task-work")
@@ -751,7 +751,7 @@ struct TaskWorkView: View {
             Text(name).lineLimit(2)
             Spacer()
             Text(state)
-            Text(id).font(Typography.code(10)).help(id)
+            Text(id).font(Typography.mono).help(id)
         }
         .accessibilityIdentifier("task-work-\(id)")
     }
@@ -786,10 +786,10 @@ struct GraphProcessView: View {
             } label: {
                 HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
                     Image(systemName: expanded ? "chevron.down" : "chevron.right")
-                        .font(.system(size: 9, weight: .semibold))
+                        .font(Typography.meta).fontWeight(.semibold)
                         .frame(width: 10)
                         .accessibilityHidden(true)
-                    Text(graph.name).font(Typography.code(12)).foregroundStyle(palette.text)
+                    Text(graph.name).font(Typography.mono).foregroundStyle(palette.text)
                     Text(graph.state == .current ? "running" : graph.state.rawValue)
                         .foregroundStyle(tone?.ink(in: palette) ?? palette.textSecondary)
                     Spacer()
@@ -826,7 +826,7 @@ struct GraphProcessView: View {
 
     @ViewBuilder
     private var detail: some View {
-        Text(graph.id).font(Typography.code(10)).foregroundStyle(palette.textTertiary)
+        Text(graph.id).font(Typography.mono).foregroundStyle(palette.textTertiary)
             .accessibilityIdentifier("graph-process-id-\(graph.id)")
         if let run {
             Text([run.presentation.reason, graphIterationLabel(run.iterations)]
@@ -863,7 +863,7 @@ struct GraphRunStep: View {
     var body: some View {
         DisclosureGroup {
             VStack(alignment: .leading, spacing: Spacing.sm) {
-                Text(step.lfProcessId).font(Typography.code(10))
+                Text(step.lfProcessId).font(Typography.mono)
                 Text("Started " + Date(timeIntervalSince1970: TimeInterval(step.startedAt))
                     .formatted(date: .abbreviated, time: .standard))
                 if let ended = step.completedAt {
@@ -875,7 +875,7 @@ struct GraphRunStep: View {
             .textSelection(.enabled)
         } label: {
             HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
-                Text(step.label).font(Typography.code(11))
+                Text(step.label).font(Typography.mono)
                 Spacer()
                 Text(step.outcome ?? (step.completedAt == nil ? "running" : "no recorded exit"))
                 if let completed = step.completedAt {

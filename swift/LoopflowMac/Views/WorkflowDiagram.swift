@@ -206,14 +206,14 @@ struct WorkflowDiagram: View {
 
     private func node(_ box: WorkflowDiagramLayout.Box) -> some View {
         let marked = position == .at(step: box.name)
-        let shape = box.terminal ? AnyShape(Circle()) : AnyShape(RoundedRectangle(cornerRadius: 7))
+        let shape = box.terminal ? AnyShape(Circle()) : AnyShape(RoundedRectangle(cornerRadius: CornerRadius.row))
         return VStack(spacing: 1) {
             Text(box.name)
-                .font(Typography.code(box.terminal ? 11 : 12))
+                .font(Typography.mono)
                 .foregroundStyle(palette.text)
             if let description = box.description {
                 Text(description)
-                    .font(Typography.caption(10.5))
+                    .font(Typography.meta)
                     .foregroundStyle(palette.textSecondary)
             }
         }
@@ -241,7 +241,7 @@ struct WorkflowDiagram: View {
                     .accessibilityIdentifier("task-workflow-process-\(arrow.index)")
             } else {
                 Text(arrow.text)
-                    .font(Typography.code(11))
+                    .font(Typography.mono)
                     .foregroundStyle(tone(arrow.index)?.ink(in: palette) ?? palette.textTertiary)
                     .accessibilityValue(state)
                     .accessibilityIdentifier("task-workflow-edge-\(arrow.index)")

@@ -110,14 +110,14 @@ struct WorkSurfaceView: View {
                     }
                     HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
                         Text(task.condition.reason)
-                            .font(Typography.body(13))
+                            .font(Typography.text)
                             .foregroundStyle(palette.textSecondary)
                             .accessibilityLabel(taskConditionAccessibilityLabel(task))
                         Spacer()
                         if let workspace = task.reference.workspace {
                             Button("Worktree") { model.openWorktree(workspace) }
                                 .buttonStyle(WorkPlainButtonStyle())
-                                .font(Typography.body(12.5))
+                                .font(Typography.text)
                         }
                         if let parent = model.taskExecution[task.id].value?.stackParent {
                             TaskStackParentLabel(parent: parent)
@@ -125,7 +125,7 @@ struct WorkSurfaceView: View {
                         if let github = task.pr?.publication?.github {
                             Link("PR #\(github.number)", destination: github.url)
                                 .buttonStyle(WorkLinkStyle())
-                                .font(Typography.body(12.5))
+                                .font(Typography.text)
                         }
                     }
                     .tint(palette.actionInk)
@@ -133,7 +133,7 @@ struct WorkSurfaceView: View {
                     TaskPlanningFactsView(task: task)
                     if task.task.trackerState.state != .available {
                         Text("Tracker state: \(task.task.trackerState.state.rawValue)")
-                            .font(Typography.caption())
+                            .font(Typography.meta)
                             .foregroundStyle(palette.textSecondary)
                     }
                     TrackerSyncView(sync: task.task.sync, repo: task.task.repo)
@@ -148,7 +148,7 @@ struct WorkSurfaceView: View {
                 // Raw records, for when the Workflow and the Graph process log disagree with them.
                 TaskDiagnosticsView(model: model, task: task)
                     .id(task.id)
-                    .font(Typography.body(12))
+                    .font(Typography.text)
                     .foregroundStyle(palette.textSecondary)
                     .accessibilityIdentifier("task-debug")
                 // A Task conversation that is not running, or that the server started again, prints the
@@ -157,7 +157,7 @@ struct WorkSurfaceView: View {
                    conversation.outlook != nil || conversation.start != nil,
                    let line = conversation.statusLine {
                     Label("Conversation: \(line)", systemImage: "arrow.clockwise")
-                        .font(Typography.body(12.5))
+                        .font(Typography.text)
                         .foregroundStyle(palette.textSecondary)
                         .accessibilityIdentifier("task-conversation-line")
                 }
@@ -180,7 +180,7 @@ struct WorkSurfaceView: View {
                             editingTask = task
                         }
                         .buttonStyle(WorkPlainButtonStyle())
-                        .font(Typography.body(12.5))
+                        .font(Typography.text)
                         .foregroundStyle(palette.textTertiary)
                         .accessibilityIdentifier("work-edit-directive")
                     }
@@ -225,10 +225,10 @@ struct WorkSurfaceView: View {
                 .foregroundStyle(palette.warning)
             VStack(alignment: .leading, spacing: Spacing.xxs) {
                 Text(title)
-                    .font(Typography.strong(11))
+                    .font(Typography.textStrong)
                     .foregroundStyle(palette.text)
                 Text(detail)
-                    .font(Typography.caption(10))
+                    .font(Typography.meta)
                     .foregroundStyle(palette.textSecondary)
                     .textSelection(.enabled)
             }
@@ -259,9 +259,9 @@ struct TaskDirectiveEditor: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.md) {
             Text("Edit description · \(task.task.identifier)")
-                .font(Typography.strong(14))
+                .font(Typography.textStrong)
             TextEditor(text: $draft)
-                .font(Typography.body(13))
+                .font(Typography.text)
                 .scrollContentBackground(.hidden)
                 .padding(Spacing.sm)
                 .background(palette.surfaceMuted)
@@ -269,7 +269,7 @@ struct TaskDirectiveEditor: View {
                 .disabled(isSaving)
             if let saveError {
                 Text(saveError)
-                    .font(Typography.body(12))
+                    .font(Typography.text)
                     .foregroundStyle(palette.warning)
                     .textSelection(.enabled)
                     .accessibilityIdentifier("task-directive-error")
@@ -317,7 +317,7 @@ struct TaskStackParentLabel: View {
 
     var body: some View {
         Text("Stacked on \(parent.identifier)")
-            .font(Typography.body(12.5))
+            .font(Typography.text)
             .foregroundStyle(palette.textSecondary)
             .help(help)
             .accessibilityIdentifier("task-stack-parent")

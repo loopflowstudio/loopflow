@@ -63,7 +63,7 @@ struct TaskRowMetadata: View {
             Text("⌘9").hidden().frame(width: 28, alignment: .trailing)
                 .overlay(alignment: .trailing) { trailing }
         }
-        .font(Typography.code(10))
+        .font(Typography.mono)
         .foregroundStyle(selected ? palette.workSelectedSecondaryText : palette.textSecondary)
         .lineLimit(1)
     }

@@ -80,7 +80,7 @@ struct WorkNavigator: View {
                                 .matchedGeometryEffect(id: scope, in: scopeTitle)
                             Spacer()
                             Text("\(taskIDs.count)")
-                        }.font(Typography.code(10)).foregroundStyle(palette.textSecondary).padding(10)
+                        }.font(Typography.mono).foregroundStyle(palette.textSecondary).padding(10)
                     }
                     // ⌘N counts the rows on screen; sidebar Task IDs are already unique.
                     ForEach(Array(taskIDs.enumerated()), id: \.element) { index, id in
@@ -88,7 +88,7 @@ struct WorkNavigator: View {
                     }
                     if taskIDs.isEmpty, let emptyListText {
                         Text(emptyListText)
-                            .font(Typography.body(12))
+                            .font(Typography.text)
                             .foregroundStyle(palette.textSecondary).padding(10)
                     }
                     if let selection = model.selection, selection.kind == .task,
@@ -102,7 +102,7 @@ struct WorkNavigator: View {
                                     model.navigation.sidebarWaveID = nil
                                 }
                             }
-                        }.font(Typography.body(11)).padding(10)
+                        }.font(Typography.meta).padding(10)
                     }
                 }.padding(8).coordinateSpace(.named(TaskOrderDrag.space))
             }
@@ -213,14 +213,14 @@ struct WorkNavigator: View {
                 if let unavailableReason {
                     Image(systemName: "exclamationmark.triangle").help(unavailableReason)
                 } else {
-                    Text("\(count)").font(Typography.code(10)).help("\(count) working Tasks")
+                    Text("\(count)").font(Typography.mono).help("\(count) working Tasks")
                 }
-            }.font(Typography.body(13)).padding(10)
+            }.font(Typography.text).padding(10)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .foregroundStyle(state == .shown ? palette.workSelectedText : palette.text)
                 .background(SidebarSelectionShape(state: state))
                 // The whole row clicks, as a Task row does, not only its text.
-                .contentShape(RoundedRectangle(cornerRadius: 6))
+                .contentShape(RoundedRectangle(cornerRadius: CornerRadius.row))
         }.buttonStyle(.plain)
             .modifier(FocusedWork(focus: $focusedWork, reference: reference))
             .accessibilityLabel("\(name), \(count) working Tasks")
@@ -303,7 +303,7 @@ struct WorkNavigator: View {
         return VStack(alignment: .leading, spacing: 6) {
             if let detail {
                 Text(detail.text)
-                    .font(Typography.code(11)).lineLimit(status.session?.availability == .available ? 2 : 1)
+                    .font(Typography.mono).lineLimit(status.session?.availability == .available ? 2 : 1)
                     .foregroundStyle(selected ? palette.workSelectedSecondaryText : palette.textSecondary)
                     .help(detail.help).allowsHitTesting(false)
             }
@@ -346,7 +346,7 @@ struct WorkBreadcrumbs: View {
             }
         }
         .buttonStyle(.plain)
-        .font(Typography.strong(13))
+        .font(Typography.textStrong)
         .foregroundStyle(palette.titlebarText, palette.titlebarSecondaryText)
         .accessibilityIdentifier("work-breadcrumbs")
         .waveLifecycleSheets(model: model, removing: $removingWave, renaming: $renamingWave)
@@ -399,7 +399,7 @@ struct WorkBreadcrumbs: View {
                         .accessibilityIdentifier("task-heading-state")
                 }
                 if let workspace = model.shownWorkspace, workspace.key.kind == .task, workspace.key.id == task.task.id {
-                    ShowHiddenMenu(workspace: workspace).font(Typography.caption())
+                    ShowHiddenMenu(workspace: workspace).font(Typography.meta)
                     let store = workspace.multiplexer
                     if let zoomed = store.zoomedPaneId, let pane = store.layout.pane(for: zoomed) {
                         ZoomCrumb(title: pane.kind.rawValue.capitalized) { store.setZoom(zoomed, enabled: false) }
@@ -453,7 +453,7 @@ struct WorkMachineControl: View {
                 Image(systemName: "desktopcomputer")
                 Text(current.id.map(name) ?? current.label ?? "Machine unknown").lineLimit(1)
             }
-            .font(Typography.caption())
+            .font(Typography.meta)
         }
         .menuStyle(.borderlessButton)
         .fixedSize()
@@ -495,7 +495,7 @@ struct WorkJumpSeparator: View {
     var body: some View {
         Button { open.toggle() } label: {
             Image(systemName: "chevron.right")
-                .font(.system(size: 10, weight: .semibold))
+                .font(Typography.meta).fontWeight(.semibold)
                 .rotationEffect(.degrees(open ? 90 : 0))
                 .frame(width: 18, height: 28).contentShape(Rectangle())
         }
@@ -518,7 +518,7 @@ struct WorkJumpMenu: View {
     var body: some View {
         let rows = model.jumpRows(scope, filter: filter)
         VStack(alignment: .leading, spacing: 6) {
-            Text(title.uppercased()).font(Typography.code(10)).foregroundStyle(palette.textSecondary)
+            Text(title.uppercased()).font(Typography.mono).foregroundStyle(palette.textSecondary)
             TextField("Search \(title.lowercased())", text: $filter)
                 .textFieldStyle(.roundedBorder)
                 .onSubmit { if let first = rows.first { choose(first.id) } }
@@ -530,11 +530,11 @@ struct WorkJumpMenu: View {
                             HStack {
                                 Text(row.title).lineLimit(1)
                                 Spacer()
-                                Text(row.detail).font(Typography.caption()).foregroundStyle(palette.textSecondary).lineLimit(1)
+                                Text(row.detail).font(Typography.meta).foregroundStyle(palette.textSecondary).lineLimit(1)
                             }.padding(6).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
                         }.buttonStyle(.plain)
                     }
-                    if rows.isEmpty { Text("No matches").font(Typography.caption()).foregroundStyle(palette.textSecondary).padding(6) }
+                    if rows.isEmpty { Text("No matches").font(Typography.meta).foregroundStyle(palette.textSecondary).padding(6) }
                 }
             }.frame(maxHeight: 320)
         }
@@ -570,10 +570,10 @@ private struct NewTaskRow: View {
                 Image(systemName: "plus")
                 Text("New Task").lineLimit(1)
                 Spacer()
-                Text("⌘N").font(Typography.code(10))
-            }.font(Typography.body(13)).foregroundStyle(palette.textSecondary).padding(10)
+                Text("⌘N").font(Typography.mono)
+            }.font(Typography.text).foregroundStyle(palette.textSecondary).padding(10)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(RoundedRectangle(cornerRadius: 6))
+                .contentShape(RoundedRectangle(cornerRadius: CornerRadius.row))
         }.buttonStyle(.plain)
             .disabled(model.repoPath == nil)
             .accessibilityIdentifier("work-new-task")
@@ -598,9 +598,9 @@ private struct NewWaveRow: View {
                 Image(systemName: "plus")
                 Text("New Wave").lineLimit(1)
                 Spacer()
-            }.font(Typography.body(13)).foregroundStyle(palette.textSecondary).padding(10)
+            }.font(Typography.text).foregroundStyle(palette.textSecondary).padding(10)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(RoundedRectangle(cornerRadius: 6))
+                .contentShape(RoundedRectangle(cornerRadius: CornerRadius.row))
         }.buttonStyle(.plain)
             .accessibilityIdentifier("work-new-wave")
             .popover(isPresented: $naming, arrowEdge: .trailing) { form }
@@ -617,7 +617,7 @@ private struct NewWaveRow: View {
             VStack(alignment: .leading, spacing: 8) {
                 TextField("Wave name", text: $name).onSubmit(create).frame(width: 200)
                 TextField("Objective (optional)", text: $objective).onSubmit(create).frame(width: 200)
-                if let error { Text(error).font(Typography.body(11)).foregroundStyle(palette.warning) }
+                if let error { Text(error).font(Typography.meta).foregroundStyle(palette.warning) }
                 HStack { Spacer(); Button("Create", action: create).keyboardShortcut(.defaultAction) }
             }.padding(12)
         }
@@ -649,10 +649,10 @@ struct WaveAddedLeftovers: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
             Text(added.created ? "Added \(added.name)" : "\(added.name) already exists")
-                .font(Typography.body(13)).foregroundStyle(palette.text)
+                .font(Typography.text).foregroundStyle(palette.text)
             VStack(alignment: .leading, spacing: Spacing.xs) {
                 ForEach(Array(added.summary.enumerated()), id: \.offset) { _, line in
-                    Text(line).font(Typography.body(11)).foregroundStyle(palette.textSecondary)
+                    Text(line).font(Typography.meta).foregroundStyle(palette.textSecondary)
                 }
             }.accessibilityIdentifier("new-wave-summary")
             HStack {
@@ -687,7 +687,7 @@ struct SidebarSelectionShape: View {
     @Environment(\.palette) private var palette
 
     var body: some View {
-        let shape = RoundedRectangle(cornerRadius: 6)
+        let shape = RoundedRectangle(cornerRadius: CornerRadius.row)
         switch state {
         case .none: shape.fill(Color.clear)
         case .containing: shape.fill(palette.surface)
@@ -876,11 +876,11 @@ struct WorkTaskIdentity: View {
     var body: some View {
         HStack(spacing: 6) {
             if showsIdentifier, let identifier = presentation.identifier {
-                Text(identifier).font(Typography.code(10)).fixedSize()
+                Text(identifier).font(Typography.mono).fixedSize()
             }
-            Text(presentation.title).font(Typography.strong(13)).lineLimit(2).help(presentation.title)
+            Text(presentation.title).font(Typography.textStrong).lineLimit(2).help(presentation.title)
             if let context = presentation.context {
-                Text(context).font(Typography.code(10)).foregroundStyle(.secondary)
+                Text(context).font(Typography.mono).foregroundStyle(.secondary)
             }
         }
     }
@@ -889,6 +889,6 @@ struct WorkTaskIdentity: View {
 struct WorkReadStatus: View {
     let status: String
     var body: some View {
-        Text(status).font(Typography.body(11)).padding(10).accessibilityIdentifier("work-status")
+        Text(status).font(Typography.meta).padding(10).accessibilityIdentifier("work-status")
     }
 }

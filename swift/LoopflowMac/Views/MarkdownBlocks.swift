@@ -42,7 +42,7 @@ struct MarkdownBlocks: View, Equatable {
                     }
                     content(block)
                 }
-                .font(Typography.body(13))
+                .font(Typography.text)
                 .lineSpacing(block.kind == .code ? 0 : Self.lineSpacing)
                 .padding(.leading, CGFloat(max(block.depth - 1, 0)) * 16)
                 .id(Self.anchor(index))
@@ -58,7 +58,7 @@ struct MarkdownBlocks: View, Equatable {
         switch block.kind {
         case .heading(let level):
             Text(block.text)
-                .font(Typography.strong(level <= 1 ? 17 : level == 2 ? 15 : 13))
+                .font(level <= 2 ? Typography.lede : Typography.textStrong)
                 .padding(.top, Spacing.xs)
         case .paragraph:
             Text(block.text)
@@ -69,11 +69,11 @@ struct MarkdownBlocks: View, Equatable {
                 .overlay(alignment: .leading) { Rectangle().fill(palette.border).frame(width: 2) }
         case .code:
             Text(String(block.text.characters))
-                .font(Typography.code(12))
+                .font(Typography.mono)
                 .padding(Spacing.sm)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(palette.surfaceMuted)
-                .clipShape(RoundedRectangle(cornerRadius: CornerRadius.sm))
+                .clipShape(RoundedRectangle(cornerRadius: CornerRadius.control))
         case .rule:
             Divider()
         case .row(let header):

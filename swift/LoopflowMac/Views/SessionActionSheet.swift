@@ -10,7 +10,7 @@ struct SessionActionSheet: View {
             bindingForm
         } else if let draft = model.navigation.renaming {
             VStack(alignment: .leading, spacing: 12) {
-                Text("Rename Session").font(.headline)
+                Text("Rename Session").font(Typography.textStrong)
                 TextField("Session name", text: Binding(
                     get: { model.navigation.renaming?.text ?? draft.text },
                     set: { model.navigation.renaming?.text = $0 }))
@@ -96,7 +96,7 @@ struct ProgramStatusLabel: View {
         if let report = status.summary {
             Text(verbatim: report.displayText)
                 .foregroundStyle(report.state.workTone.ink(in: palette))
-                .font(Typography.code(11))
+                .font(Typography.mono)
                 .lineLimit(1)
                 .truncationMode(.tail)
                 .frame(maxWidth: 340, alignment: .leading)

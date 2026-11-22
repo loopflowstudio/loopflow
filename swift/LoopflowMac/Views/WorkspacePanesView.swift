@@ -115,7 +115,7 @@ struct SessionOpeningView: View {
             Color.clear
             if let screen {
                 ScrollView {
-                    Text(screen).font(.system(.body, design: .monospaced))
+                    Text(screen).font(Typography.mono)
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
@@ -170,7 +170,7 @@ struct SessionSlotOffer<Description: View>: View {
                     .accessibilityIdentifier(actionIdentifier)
                 if !compact, let note = unavailable ?? note {
                     Text(note)
-                        .font(Typography.caption(9))
+                        .font(Typography.meta)
                         .foregroundStyle(theme.palette.textSecondary)
                 }
             }
@@ -203,7 +203,7 @@ struct PaneEmptyState<Description: View, Actions: View>: View {
                 compactRow(Label(title, systemImage: systemImage).fixedSize())
                 compactRow(Label(title, systemImage: systemImage).labelStyle(.iconOnly))
             }
-            .font(Typography.body(12))
+            .font(Typography.text)
             .padding(Spacing.sm)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
@@ -242,7 +242,7 @@ enum PaneGeometry {
     // Keep pane outlines inside the native window's larger lower corners.
     static let windowInset: CGFloat = 10
     static let spacing: CGFloat = 6
-    static let cornerRadius = CornerRadius.md
+    static let cornerRadius = CornerRadius.pane
     /// Pane chrome and content keep clear of the corner arc on every edge.
     static let inset = cornerRadius
     // Nested curves share a center at the workspace's lower corners.
@@ -494,7 +494,7 @@ struct SessionPaneView: View {
                 paneContentChoices
             } label: {
                 Label(programHeading.name, systemImage: programHeading.symbol)
-                    .font(Typography.body(11)).fontWeight(.semibold)
+                    .font(Typography.meta).fontWeight(.semibold)
                     .foregroundStyle(theme.palette.text)
             }
             .menuStyle(.borderlessButton).fixedSize()
@@ -528,7 +528,7 @@ struct SessionPaneView: View {
             if case .browser = pane.content { browserTabs }
             if workspace.key.kind != .task || pane.content.location != workspace.location {
                 Text(programHeading.context)
-                    .font(Typography.code(11)).foregroundStyle(theme.palette.textSecondary)
+                    .font(Typography.mono).foregroundStyle(theme.palette.textSecondary)
                     .lineLimit(1).truncationMode(.middle)
                     .help(programHeading.detail)
                     .accessibilityIdentifier("pane-context-\(pane.id)")
@@ -543,7 +543,7 @@ struct SessionPaneView: View {
             Spacer(minLength: 8)
             if let copyConfirmation {
                 Text(copyConfirmation)
-                    .font(Typography.body(11))
+                    .font(Typography.meta)
                     .foregroundStyle(theme.palette.text)
                     .lineLimit(1)
                     .allowsHitTesting(false)
@@ -551,7 +551,7 @@ struct SessionPaneView: View {
             }
             if bellRinging {
                 Image(systemName: "bell.fill")
-                    .font(.system(size: 10))
+                    .font(Typography.meta)
                     .foregroundStyle(theme.palette.available)
                     .accessibilityLabel("Session ready")
             }
@@ -705,7 +705,7 @@ struct SessionPaneView: View {
     ) -> some View {
         Button(action: action) {
             Image(systemName: systemImage)
-                .font(.system(size: 11))
+                .font(Typography.meta)
                 .foregroundStyle(theme.palette.textSecondary)
                 .frame(width: 22, height: 20)
                 .contentShape(Rectangle())
@@ -766,12 +766,12 @@ struct SessionPaneView: View {
                             .accessibilityLabel("Shell \(index + 1)")
                             .padding(.horizontal, 6).padding(.vertical, 3)
                             .background(tab.id == selected ? theme.palette.surfaceElement : .clear,
-                                        in: RoundedRectangle(cornerRadius: 4))
+                                        in: RoundedRectangle(cornerRadius: CornerRadius.control))
                     }
                     Button { do { try workspace.newShell() } catch { paneFailed(error) } }
                         label: { Image(systemName: "plus") }
                         .accessibilityLabel("New shell tab")
-                }.buttonStyle(.plain).font(Typography.code(11))
+                }.buttonStyle(.plain).font(Typography.mono)
             }.fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -800,7 +800,7 @@ struct SessionPaneView: View {
                             workspace.showBrowser(tab, from: pane)
                         }
                     }
-                }.buttonStyle(.plain).font(Typography.body(11))
+                }.buttonStyle(.plain).font(Typography.meta)
             }.fixedSize(horizontal: false, vertical: true)
             .help("Brief ⌥⌘1 · Diff ⌥⌘2 · Files ⌥⌘3")
         }
@@ -812,7 +812,7 @@ struct SessionPaneView: View {
             .fontWeight(selected ? .semibold : .regular)
             .foregroundStyle(selected ? theme.palette.text : theme.palette.textSecondary)
             .padding(.horizontal, 7).padding(.vertical, 3)
-            .background(selected ? theme.palette.surfaceElement : .clear, in: RoundedRectangle(cornerRadius: 4))
+            .background(selected ? theme.palette.surfaceElement : .clear, in: RoundedRectangle(cornerRadius: CornerRadius.control))
             .accessibilityIdentifier("browser-tab-\(id)")
             .accessibilityAddTraits(selected ? .isSelected : [])
     }
@@ -845,7 +845,7 @@ struct SessionPaneView: View {
                     if workspace.disconnectedShells.contains(tab.id) {
                         VStack {
                             if let screen = workspace.shellScreens[tab.id] {
-                                ScrollView { Text(screen).font(.system(.body, design: .monospaced)).textSelection(.enabled) }
+                                ScrollView { Text(screen).font(Typography.mono).textSelection(.enabled) }
                             }
                             Text("Shell attachment ended. Reconnect checks the same execution; New Shell starts fresh.")
                             Button("Reconnect") { workspace.reconnectShell(tab) }
@@ -906,7 +906,7 @@ struct SessionPaneView: View {
                     if let task = model.task(id: taskId)?.task {
                         ScrollView {
                             VStack(alignment: .leading, spacing: 12) {
-                                Text(task.task.name).font(.headline)
+                                Text(task.task.name).font(Typography.textStrong)
                                 TaskPlanningFactsView(task: task)
                                 TaskWorkflowHeader(model: model, task: task, work: model.taskWork[taskId])
                                 MarkdownBlocks(source: task.task.description).equatable()
@@ -941,7 +941,7 @@ struct SessionPaneView: View {
             VStack(alignment: .leading, spacing: Spacing.md) {
                 Text("No longer open here").foregroundStyle(theme.palette.text)
                 ScrollView {
-                    Text(output).font(.system(.body, design: .monospaced))
+                    Text(output).font(Typography.mono)
                         .foregroundStyle(theme.palette.text).textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }

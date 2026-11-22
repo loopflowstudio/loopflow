@@ -12,10 +12,10 @@ struct ThemeChooser: View {
         // System shows both pickers; Light or Dark shows only its own.
         let sides: [AppearanceMode] = appearance.current.mode == .system ? [.light, .dark] : [appearance.current.mode]
         VStack(alignment: .leading, spacing: 16) {
-            Text("Choose Theme").font(Typography.sectionTitle())
+            Text("Choose Theme").font(Typography.lede)
             HStack(alignment: .top, spacing: 16) {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Mode").font(.caption).foregroundStyle(palette.textSecondary)
+                    Text("Mode").font(Typography.meta).foregroundStyle(palette.textSecondary)
                     Picker("Mode", selection: Binding(get: { appearance.current.mode }, set: { appearance.previewMode($0) })) {
                         ForEach(AppearanceMode.allCases, id: \.self) { mode in Text(mode.menuTitle).tag(mode) }
                     }
@@ -28,7 +28,7 @@ struct ThemeChooser: View {
                 ForEach([AppearanceMode.light, .dark], id: \.self) { side in
                     let enabled = appearance.current.mode == .system || appearance.current.mode == side
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("\(side.menuTitle) theme").font(.caption).foregroundStyle(palette.textSecondary)
+                        Text("\(side.menuTitle) theme").font(Typography.meta).foregroundStyle(palette.textSecondary)
                         Button { editing = false; appearance.showPicker(side) } label: {
                             Text(appearance.themeName(for: side))
                                 .lineLimit(1).truncationMode(.tail)
@@ -47,7 +47,7 @@ struct ThemeChooser: View {
                 }
             }
             Text("Previewing \(appearance.selectedTheme.name)")
-                .font(.caption).foregroundStyle(palette.textSecondary)
+                .font(Typography.meta).foregroundStyle(palette.textSecondary)
             ScrollView {
                 if editing, appearance.selectedSource == .yours {
                     ThemeEditor(appearance: appearance)
@@ -55,10 +55,10 @@ struct ThemeChooser: View {
                     VStack(alignment: .leading, spacing: 10) {
                         ForEach(sides, id: \.self) { side in
                             let entries = appearance.entries(for: side)
-                            if sides.count > 1 { Text("\(side.menuTitle) themes").font(Typography.strong(13)) }
-                            Text("Built-in").font(.caption).foregroundStyle(palette.textSecondary)
+                            if sides.count > 1 { Text("\(side.menuTitle) themes").font(Typography.textStrong) }
+                            Text("Built-in").font(Typography.meta).foregroundStyle(palette.textSecondary)
                             grid(entries.builtins, side: side)
-                            Text("Yours").font(.caption).foregroundStyle(palette.textSecondary)
+                            Text("Yours").font(Typography.meta).foregroundStyle(palette.textSecondary)
                             grid(entries.yours, side: side, importTile: true)
                         }
                     }
@@ -74,7 +74,7 @@ struct ThemeChooser: View {
                 VStack(alignment: .leading, spacing: 6) {
                     ForEach(appearance.diagnostics, id: \.self) { Text($0) }
                     ForEach(appearance.draftErrors, id: \.self) { Text($0).foregroundStyle(palette.failure) }
-                }.font(.caption).frame(maxWidth: .infinity, alignment: .leading)
+                }.font(Typography.meta).frame(maxWidth: .infinity, alignment: .leading)
             }
             if let refusal = appearance.refusal {
                 Text(refusal).foregroundStyle(palette.failure).accessibilityIdentifier("appearance-import-refusal")
@@ -85,7 +85,7 @@ struct ThemeChooser: View {
                     Button("Done Editing") { editing = false }
                 }
                 DisclosureGroup("Advanced") {
-                    Text(appearance.paths.config.path).font(.caption).textSelection(.enabled)
+                    Text(appearance.paths.config.path).font(Typography.meta).textSelection(.enabled)
                 }
                 Spacer()
                 Button("Cancel") { appearance.cancel() }.disabled(appearance.saving).keyboardShortcut(.cancelAction)
@@ -153,7 +153,7 @@ struct ThemeChooser: View {
                     HStack(spacing: 6) { themeActions(entry) }
                     VStack(alignment: .leading, spacing: 6) { themeActions(entry) }
                 }
-                .font(.caption).buttonStyle(WorkOutlineButtonStyle())
+                .font(Typography.meta).buttonStyle(WorkOutlineButtonStyle())
                 .padding([.horizontal, .bottom], 10)
             }
         }

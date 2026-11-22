@@ -20,7 +20,7 @@ struct MobileRepositoryPicker: View {
         List {
             if let error = model.error {
                 Section {
-                    Text(error).font(Typography.body(14)).foregroundStyle(theme.palette.warning)
+                    Text(error).font(MobileType.text(14)).foregroundStyle(theme.palette.warning)
                         .listRowBackground(theme.palette.surface)
                 }
             }
@@ -32,13 +32,13 @@ struct MobileRepositoryPicker: View {
                     } label: {
                         HStack(alignment: .top, spacing: 12) {
                             VStack(alignment: .leading, spacing: 6) {
-                                Text(repository.displayName).font(Typography.strong(17))
+                                Text(repository.displayName).font(MobileType.strong(17))
                                     .foregroundStyle(theme.palette.text)
-                                Text(repository.path).font(Typography.caption(13))
+                                Text(repository.path).font(MobileType.text(13))
                                     .foregroundStyle(theme.palette.textSecondary)
                                 if let error = repository.error {
                                     Label(error, systemImage: "exclamationmark.circle")
-                                        .font(Typography.body(14)).foregroundStyle(theme.palette.warning)
+                                        .font(MobileType.text(14)).foregroundStyle(theme.palette.warning)
                                 }
                             }
                             .fixedSize(horizontal: false, vertical: true)
@@ -58,7 +58,7 @@ struct MobileRepositoryPicker: View {
                 }
             } header: {
                 Text(model.context?.name ?? "Paired Machine")
-                    .font(Typography.caption(12)).foregroundStyle(theme.palette.textSecondary).textCase(nil)
+                    .font(MobileType.text(12)).foregroundStyle(theme.palette.textSecondary).textCase(nil)
             }
         }
         .listStyle(.plain)

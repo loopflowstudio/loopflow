@@ -2110,7 +2110,7 @@ struct ProviderTransitionRow: View {
     let transition: ProviderTransition
     var body: some View {
         Text(transition.explanation)
-            .font(.caption)
+            .font(Typography.meta)
             .foregroundStyle(.secondary)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 12)

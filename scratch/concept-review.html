@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Concept review after build: Wave pages, backlog and dashboards (Task 8b92c6)</title>
+<title>Concept review, third pass after build: where a Task stands and what it offers (Task 8b92c6)</title>
 <style>
 :root {
   color-scheme: light dark;
@@ -52,117 +52,76 @@ ol.q ol { list-style: lower-alpha; margin-top: 4px; }
 ul { max-width: 76ch; }
 </style>
 </head>
-<body>
-<main>
+<body><main>
 <h1>Do the product's concepts and the code's concepts line up?</h1>
-<p class="second">Task 8b92c6, reviewed a second time after it was built, at 7df8f8fcaa against its base fd90d7e6ad. Earlier pages are in git: before the build at d8fc78a0cc, after slices 1 to 4 at 0fbaadb10f.</p>
-
-<p><strong>The area taken:</strong> every Mac screen that says where a Task stands and whether it needs someone: the sidebar, the title bar, the Task's page, its Brief and its detail, a dashboard tile, the backlog, the Portfolio's Now list, roadmap and Wave page, the jump menu and the activity pane. The change restyles far more than that, but its one new value, <code>TaskStanding</code>, and its one new predicate, <code>RoadmapTask.need</code>, are claims about this area.</p>
-
-<p><strong>Outcome: the plan changed.</strong> Slice 5 did what it set out to: the second qa run saw one word per Task on the Now list, the roadmap, a Wave's page, a Task's page and a tile. What is left is smaller and of one kind. The predicate asks the wrong fact, so looking at a Task changes what it says; and three readers still print their own answer. The plan gains slice 6, Swift only.</p>
+<p class="second">Task 8b92c6, reviewed a third time after it was built, at 0a08439e8d against its base c4de2038fd (main with #2017 merged in). Earlier pages are in git: before the build at d8fc78a0cc, after slices 1 to 4 at 0fbaadb10f, after slice 5 at dd78ba9923.</p>
+<p><strong>The area taken:</strong> every Mac screen that says where a Task stands, whether it needs someone, and what it offers to do next: the sidebar, the title bar, the Task's page, Brief and detail, a dashboard tile, the backlog, the Portfolio's Now list, roadmap and Wave page, the jump menu and the activity pane. The restyling is wider, but this is the one place the change added a concept, and the merge with main brought a second one beside it, <code>TaskActions</code>.</p>
+<p><strong>Outcome: nothing to change in the build.</strong> Slice 6 did what it set out to do, and the third qa run saw it: an opened, never-run Task reads "Idle" with no line and is off the Now list; a Portfolio row says "Start" before a Graph has run and "Run" after; row, page and Brief agree for a parked, a blocked and an idle Task. What still disagrees is one thing, the action a row offers, and Swift cannot settle it: the row does not hold the fact the page decides from. The plan's "Outside this change" now says so in one entry where it had the half of it.</p>
 
 <h2>One interaction, walked as built</h2>
-<p>LOO-520 has not been started. Someone clicks its link to read the brief, reads it, and goes back to the Now list.</p>
-
+<p>LOO-515 runs to demo and parks. Its worktree is then moved away, and put back.</p>
 <div class="grid">
-<div class="shot">
-<h4>Before the click</h4>
-<div class="row"><span class="t">Now list: not listed</span></div>
-<div class="row"><span class="t">Read Loopflow docs offline</span><span class="m"><span class="mono">LOO-520</span><span>Unstarted</span></span></div>
+<div class="shot"><h4>Parked at demo: every screen</h4>
+<div class="row"><span class="t">Review a Task's brief <span class="btn">Run</span></span><span class="m"><span class="mono">LOO-515</span><span class="waiting">Waiting</span></span><span class="a">ready</span></div>
+<div class="row"><span class="a">Page header: Waiting. Brief: Waiting, at demo. ready. Tile: Waiting for you at demo.</span></div></div>
+<div class="shot"><h4>Worktree moved away</h4>
+<div class="row"><span class="t">Review a Task's brief <span class="btn">Worktree</span></span><span class="m"><span class="mono">LOO-515</span><span class="blocked">Blocked</span></span><span class="a">The Task's worktree is missing.</span></div>
+<div class="row"><span class="a">Page header: Blocked, with a <span class="btn">Run</span> button and "lf task run starts it again".</span></div></div>
 </div>
-<div class="shot">
-<h4>After the click, as built</h4>
-<div class="row"><span class="t"><strong>Waiting</strong> <span class="chip">1</span></span></div>
-<div class="row"><span class="t">Read Loopflow docs offline <span class="btn">Start</span></span><span class="m"><span class="mono">LOO-520</span><span class="waiting">Waiting</span></span><span class="a">ready</span></div>
-</div>
-</div>
-
-<p><strong>Normal path.</strong> Opening the Task placed a checkout. The server now calls it <code>idle</code>, and <code>need</code> exempts only <code>unstarted</code>. The row says "Waiting" beside a button that says "Start".</p>
-<p><strong>Failure.</strong> LOO-515 is parked at demo. Row and page say "Waiting"; its Brief opens "Active, at demo. ready." Its Portfolio row offers "Start"; its page offers "Run". Same <code>lf task run</code>.</p>
-<p><strong>Recovery.</strong> None for LOO-520 short of starting it: the Now list keeps it. An unstarted Task selected in the sidebar shows "ready" under its title in the detail and the activity pane, though its row says it needs nobody.</p>
+<p><strong>Normal path.</strong> One word, one line, one verb, on all of them. This is what the change was for and it holds.</p>
+<p><strong>Failure.</strong> The word still agrees ("Blocked" everywhere). The verb does not: the row offers no Run, the page does. It was so at the base.</p>
+<p><strong>Recovery.</strong> Open the Task and press Run on its page. One extra click; nothing is lost and nothing is wrong on the way.</p>
 
 <h2>Product concepts against code concepts</h2>
 <table>
 <tr><th>A person knows</th><th>The code has</th><th>Line up?</th><th>What is wrong</th></tr>
-<tr><td>A Task's row and its word</td><td><code>TaskRow</code> drawing <code>TaskStanding</code>; the title bar, <code>TaskWorkflowHeader</code> and the jump menu print the same word</td><td class="yes">Yes</td><td>Slice 5 closed the page and the menu.</td></tr>
-<tr><td>The Now list</td><td><code>nowSections</code> reading <code>RoadmapTask.need</code></td><td class="yes">Yes</td><td>Headings and rows agree; one decider.</td></tr>
-<tr><td>A Task that only awaits Start</td><td><code>need</code>'s <code>awaitsStart</code>, which is <code>lifecycle == .unstarted</code>, which means "has no checkout"</td><td class="no">No</td><td>One name for two ideas. Having no checkout and never having run are different facts; a click separates them. The biggest mismatch; below.</td></tr>
-<tr><td>Start a Task, or run it on</td><td><code>TaskWorkflowHeader.runAction</code> ("Start", "Run"); <code>RoadmapTaskAction.label</code> ("Start" always)</td><td class="no">No</td><td>One action, two names, decided in two places. The row can tell the two apart from the same fact as above.</td></tr>
-<tr><td>The word in the Brief</td><td><code>TaskBrief.state</code>, from the runtime status</td><td class="no">No</td><td>The page's header says "Waiting", the Brief under it "Active".</td></tr>
-<tr><td>Why a Task needs me</td><td><code>TaskStanding.line</code>; raw <code>condition.reason</code> in <code>WorkSurfaceView</code>, <code>WorkActivityView</code> and the spoken label</td><td class="no">No</td><td>Three readers print a reason for a Task that needs nobody.</td></tr>
-<tr><td>A tile's workflow sentence</td><td><code>DashboardTile.workflow</code></td><td class="yes">Yes, with a gap</td><td>Yields only to an ask now. Still only for a Task opened in this window (question 39).</td></tr>
-<tr><td>Backlog actions, New Wave, key results, the scale</td><td><code>BacklogView.Action</code>, <code>CreateWaveSheet</code>, <code>WaveProjectView</code>, <code>DesignDisciplineTests</code></td><td class="yes">Yes</td><td>As at the last review.</td></tr>
+<tr><td>A Task's row and its word</td><td><code>TaskRow</code> drawing <code>TaskRowStatus</code>, on the Mac and the iPhone; the title bar, the page header, the Brief's lead and the jump menu print its word</td><td class="yes">Yes</td><td>One type since the merge; <code>TaskStanding</code> is gone but for two test file names.</td></tr>
+<tr><td>Whether a Task needs someone</td><td><code>RoadmapTask.need</code>, read by the status, the Now list and the spoken label</td><td class="yes">Yes</td><td>One predicate. It corrects the server's condition in Swift; the wire Task deletes it.</td></tr>
+<tr><td>Why it needs me</td><td><code>TaskRowStatus.line</code> on every row, the detail, the activity pane and the Brief</td><td class="yes">Yes</td><td>No screen prints a reason for a Task that needs nobody. "ready" under "Waiting" is the server's word.</td></tr>
+<tr><td>A Task that has not been started</td><td><code>graphHasRun</code> (no Graph has run) for the word, the Now list and the Portfolio verb; <code>awaitsStart</code> (no checkout) for the Session slot and the backlog's Start</td><td class="yes">Yes, with a seam</td><td>Two facts, and each reader uses the right one for what it draws but one: the backlog's Start. See below.</td></tr>
+<tr><td>Start a Task, or run it on</td><td><code>TaskActions.run</code> from the Graph's position (page, iPhone); <code>roadmapTaskAction</code> from the server's recommended action (Portfolio rows); <code>BacklogList.startLabel</code> from <code>awaitsStart</code> (backlog)</td><td class="no">No</td><td>One action, three deciders. The biggest mismatch.</td></tr>
+<tr><td>The backlog, New Wave, key results, tiles, Choose Theme, the scale</td><td><code>BacklogView.Action</code>, <code>CreateWaveSheet</code>, <code>WaveProjectView</code>, <code>DashboardTile</code>, <code>ThemeSample</code>, <code>DesignDisciplineTests</code></td><td class="yes">Yes</td><td>As at the last two reviews.</td></tr>
 <tr><td>A Wave's page</td><td>The repository window's Wave view and <code>WaveDetailPane</code></td><td class="no">No</td><td>One name, two pages. Outside this change, as before.</td></tr>
 </table>
 
-<h2>The biggest mismatch: awaiting Start</h2>
+<h2>The biggest mismatch: what a Task offers</h2>
 <div class="grid">
-<div class="was">
-<p><strong>Existing</strong></p>
-<p><code>need</code> is nil for a <code>waiting</code> Task when it is <code>unstarted</code> and its recommended action is Start.</p>
-<p><code>unstarted</code> ends when a checkout is placed. A link click places one.</p>
+<div class="was"><p><strong>Existing</strong></p>
+<p>The page and the iPhone ask <code>TaskActions</code>, which reads the Task's Graph position from its own reading (<code>TaskOverview</code>): Start at the beginning, Run at a step or after a stopped run, nothing while a run carries it.</p>
+<p>A Portfolio row holds a <code>RoadmapTask</code>, which has no position. It asks the server's <code>actions.recommended</code> whether to offer the verb and <code>graphHasRun</code> which word to use.</p>
+<p>The backlog asks <code>awaitsStart</code>: Start runs Tasks with no checkout and says "Open" for the rest.</p></div>
+<div class="new"><p><span class="tag">Proposed, on the wire, not in this change.</span></p>
+<p>The planning row carries the Task's Graph position. <code>TaskActions</code> is built from the row alone; <code>roadmapTaskAction</code>, <code>RoadmapTaskAction.label</code>, <code>graphHasRun</code> and the backlog's own split are deleted, and the workflow sentence reaches every tile and list row by the same field.</p>
+<p>That is the "Workflow position on a list row" entry the plan already had; it now names the action too.</p></div>
 </div>
-<div class="new">
-<p><span class="tag">Proposed.</span> No Graph has run.</p>
-<p><code>latestGraphProcess == nil &amp;&amp; actions.recommended == .run</code>. FIX-2 in <code>task_concepts.json</code>, an active Task that never ran, carries a null process and "No Task Graph has run".</p>
-<p>The row's verb reads the same fact: "Start" before a run, "Run" after.</p>
-</div>
-</div>
-
-<div class="grid">
-<div class="shot">
-<h4>After the click, proposed</h4>
-<div class="row"><span class="t">Now list: not listed</span></div>
-<div class="row"><span class="t">Read Loopflow docs offline <span class="btn">Start</span></span><span class="m"><span class="mono">LOO-520</span><span>Idle</span></span></div>
-</div>
-<div class="shot">
-<h4>LOO-515, parked at demo, proposed</h4>
-<div class="row"><span class="t">Review a Task's brief <span class="btn">Run</span></span><span class="m"><span class="mono">LOO-515</span><span class="waiting">Waiting</span></span><span class="a">ready</span></div>
-<div class="row"><span class="t">Brief: <strong>Waiting, at demo.</strong> ready.</span></div>
-</div>
-</div>
-
-<h3>Tested on three paths</h3>
+<h3>Why not in Swift, now</h3>
 <ul>
-<li><strong>Normal.</strong> Unstarted, opened or not: off the Now list, Start on its row.</li>
-<li><strong>Failure.</strong> A Graph stops: <code>blocked</code> is a need whatever has run. A parked Task has a Graph process, so it stays "Waiting".</li>
-<li><strong>Recovery.</strong> The moved worktree: "Blocked" with the server's sentence, unchanged.</li>
+<li><strong>The row lacks the fact.</strong> <code>TaskActions</code> needs a reading only an opened Task has. A row-level copy of its rule would be a fourth decider.</li>
+<li><strong>The blocked Task.</strong> Offering Run whenever <code>runControl</code> allows it would contradict the comment the code stands on: the server recommends, the app "never re-derives it from status". The disagreement is between two Rust answers, the recommended action and the position.</li>
+<li><strong>The backlog's Start</strong> (question 53). Moving it to <code>graphHasRun</code> changes one case: a Task with a checkout, no run and no owner. Opening a Task claims it, so it leaves the backlog for Working, which is what the third qa run saw and what the server's sections decide. The case Swift could change needs a release after an open; there the bar says "Open" where a Portfolio row says "Start", and the page it opens offers Start. One click, and it goes with the wire change.</li>
 </ul>
-
 <h3>Counterexamples kept</h3>
 <ul>
-<li><strong>A claimed Task with a conversation and no run.</strong> It reads "Idle" or "Active", not "Waiting". Someone may be working in it by hand; nothing waits on anyone but its owner pressing Start. Question 1.</li>
-<li><strong>The fact is unverified for a parked Task.</strong> If a parked Task's row also carries a null process, the rule would hide it. Slice 6 tests that first and names the fallback, <code>execution?.step == nil</code>.</li>
-<li><strong>The Brief ignores the program.</strong> A Busy Task reads "Busy" in its header and the Task's own word in its Brief. The Brief describes the Task, as its second line already does. Question 2.</li>
-<li><strong>"Waiting" over "ready" stays.</strong> The reason is the server's; the wire Task replaces it with the Graph's sentence.</li>
-<li><strong>Swift still corrects Rust.</strong> <code>need</code> is one predicate in Swift where the repository wants one in Rust. The wire Task deletes it.</li>
+<li><strong>Opening a Task still changes it.</strong> It reads "Unstarted" before and "Idle" after, and moves from the backlog to Working. Nothing it says about needing someone changes, which is what slice 6 promised. Whether a link should place a checkout at all is the CLI's <code>open</code>, not these screens.</li>
+<li><strong>"Waiting" over "ready"</strong> on a parked Task, every row. The server's reason; the standing-on-the-wire Task replaces it.</li>
+<li><strong>Not looked at:</strong> the activity pane, the jump menu, New Wave, the title bar, menus, hover and drag. The screen was locked on all three qa runs; tests hold their words. These belong to review on a display.</li>
 </ul>
 
 <h2>What changed in the plan</h2>
 <ul>
-<li>Two lines added to "Done when": looking at a Task changes nothing it says, and the Brief's lead and every printed reason follow the row.</li>
-<li>Two subsections under "Where a Task stands, said once": awaiting Start as a fact about the Graph, and the last three readers.</li>
-<li>Slice 6, in order: <code>need</code> on <code>latestGraphProcess</code>; the row's "Run"; the Brief's lead; the detail, the activity pane and the spoken label; the README. One test command.</li>
-<li>The wire Task under "Outside this change" names the placed Task and the finished Task.</li>
-</ul>
-
-<h2>Outside this change</h2>
-<ul>
-<li><strong>The standing on the wire</strong>: <code>task_condition</code> in Rust returns <code>clear</code> for a Task that only awaits Start, a parked Task's reason is its Graph's sentence, and <code>RoadmapTask.need</code> is deleted.</li>
-<li><strong>One page for a Wave</strong> and <strong>the workflow sentence on a list row</strong>, as written before the build.</li>
+<li>"Outside this change": the workflow-position entry names the action as well as the sentence, and what it deletes. No new entry.</li>
+<li>"What the code is today" says the third review found nothing to build.</li>
 </ul>
 
 <h2>Questions</h2>
 <ol class="q">
-<li>A Task with a checkout and no Graph run. Chosen: (a).
-<ol><li>It awaits Start: lifecycle word, off the Now list.</li><li>It waits on its owner: "Waiting", listed.</li><li>Only an unclaimed one awaits Start.</li></ol></li>
-<li>The Brief's lead. Chosen: (a).
-<ol><li>The Task's word with no program: "Waiting, at demo."</li><li>The header's word, program included: "Busy, at demo."</li><li>Leave "Active, at demo."</li></ol></li>
-<li>The Portfolio row's verb for a Task that has run. Chosen: (a).
-<ol><li>"Run", as its page says.</li><li>"Start" on rows and on the page.</li><li>"Continue".</li></ol></li>
-<li>"Waiting" over "ready" on a parked Task. Chosen: (a).
-<ol><li>Leave it until the wire carries the sentence.</li><li>Drop a line that is only the status word, in Swift.</li><li>Do the Rust change in this Task.</li></ol></li>
+<li>The action a list row offers. <em>Chosen: (a).</em>
+<ol><li>Leave rows on the server's recommended action until the row carries the Graph position.</li><li>Offer Run on a Portfolio row whenever a run is allowed, in Swift.</li><li>Do the wire change in this Task.</li></ol></li>
+<li>The backlog's Start for a Task with a checkout and no run. <em>Chosen: (a).</em>
+<ol><li>"Open", as now; it goes with the wire change.</li><li>Start it from the bar, by <code>graphHasRun</code>.</li></ol></li>
+<li>Opening an unstarted Task by its link. <em>Chosen: (a).</em>
+<ol><li>It claims the Task and places a checkout, so it reads "Idle" and moves to Working.</li><li>It shows the brief and the Start offer and places nothing; a separate Task in Rust.</li></ol></li>
+<li><code>TaskStandingTests.swift</code> and <code>TaskStandingFixtures.swift</code> keep the old type's name. <em>Chosen: (a).</em>
+<ol><li>Leave them; the plan's acceptance command names the suite.</li><li>Rename to <code>TaskRowStatus</code> at gate.</li></ol></li>
 </ol>
-</main>
-</body>
-</html>
+</main></body></html>

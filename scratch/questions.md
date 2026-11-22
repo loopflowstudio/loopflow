@@ -202,3 +202,9 @@ Each was decided so the work could continue; `scratch/plan.md` has the detail.
     read "Idle. ready." A moving Task keeps its next move's reason. A blocked
     Task's Portfolio row still offers only "Worktree" while its page offers
     "Run"; at the base too. Should the row offer Run?
+56. **A list row's action stays on the server's recommended action** (third
+    review of the built screens). The page decides Start or Run from the
+    Graph's position, which a row does not carry, so a blocked Task's row
+    offers no Run and the backlog's Start still splits on `awaitsStart`
+    (question 53). Left for the wire Task "Graph position on a list row".
+    Offer Run on a row whenever a run is allowed instead?

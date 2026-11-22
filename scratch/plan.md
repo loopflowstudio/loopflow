@@ -84,7 +84,8 @@ onto `RoadmapTask.need` and `TaskRowStatus`, and the second qa run saw one
 word per Task on the Now list, the roadmap, a Wave's page, a Task's page and
 a tile. The review after it (`scratch/concept-review.html`, at 7df8f8fcaa)
 found the predicate keyed on the wrong fact and three readers still outside
-it; slice 6 moved them. What remains is the look on an unlocked display and
+it; slice 6 moved them. The review after slice 6 (at 0a08439e8d)
+found nothing to build. What remains is the look on an unlocked display and
 the three Tasks under "Outside this change".
 
 The branch then merged main at c4de2038fd (#2017, 02be411be1). `TaskRow`,
@@ -709,11 +710,21 @@ or `lf desktop` reads unless its view is deleted.
   Task, and that view gaining completed Tasks and the metric table; then
   `WaveDetailPane` goes. That changes what the Portfolio window is for, so it
   is its own Task.
-- **Workflow position on a list row.** `RoadmapTask` carries
-  `execution.step` and not `TaskGraph.sentence`, so the backlog says "at
-  build" where the Task's own page says "build is running. You are next
-  needed at human-review." One sentence on both needs the planning wire to
-  carry it.
+- **Graph position on a list row.** `RoadmapTask` carries `execution.step`
+  and not the Task's Graph position, so two things are decided twice. The
+  backlog says "at build" where the Task's own page says "build is running.
+  You are next needed at human-review." And the action a row offers has
+  three deciders: `TaskActions.run` from the position (the page, the
+  iPhone), `roadmapTaskAction` from the server's recommended action
+  (Portfolio rows, so a blocked Task's row offers no Run where its page
+  does), and the backlog's Start from `awaitsStart` (so a released Task with
+  a checkout and no run says "Open" there and "Start" on a Portfolio row;
+  question 53). With the position on the planning wire, `TaskActions` and
+  `TaskGraph.sentence` are built from the row; `roadmapTaskAction`,
+  `RoadmapTaskAction.label`, `graphHasRun` and the backlog's split go. The
+  third review of the built screens (`scratch/concept-review.html`, at
+  0a08439e8d) found this and nothing to build in Swift: a row-level copy of
+  the rule would be a fourth decider.
 - **The standing belongs on the wire.** Rust's `task_condition`
   (`rust/loopflow/src/lf/commands/waves.rs`) calls a Task `waiting` whenever
   its next move is not its own, an unstarted Task included, and gives the

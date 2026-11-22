@@ -342,9 +342,9 @@ Edit it by hand and every window follows; a misspelled name keeps the last theme
 and names the fix. Absent means Loopflow Light/Dark. A repository's
 `.lf/config.yaml` never sets the theme.
 
-Built-ins are 13 families, each a light and a dark theme. **Loopflow Light** keeps
+Built-ins are 12 families, each a light and a dark theme. **Loopflow Light** keeps
 the original cream/burgundy; **Loopflow Dark** is blue-grey with rose headings and
-links, under the same burgundy title bar. The other twelve are generated from
+links, under the same burgundy title bar. The other eleven are generated from
 specs in `scripts/theme_catalogue.py`: **Fig** is plum with a lime accent, its
 light half **Fig Leaf** a leaf-green ground with plum ink.
 

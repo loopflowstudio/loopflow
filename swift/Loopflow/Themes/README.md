@@ -1,14 +1,14 @@
 # Bundled themes
 
-`Catalogue/` holds 26 fixed built-ins: 13 families, each a light and a dark
+`Catalogue/` holds 24 fixed built-ins: 12 families, each a light and a dark
 theme. **Loopflow Light** is the original cream/burgundy; **Loopflow Dark** puts
 the same burgundy title bar over blue-grey, with rose headings and links. The
-other twelve families (Arcade, Contrast, Fig, Fjord, Folio, Graphite, Harbor,
-Moss, Signal, Sorbet, Tannin, Terracotta) are Loopflow's own, written by
+other eleven families (Arcade, Contrast, Fig, Fjord, Folio, Graphite, Moss,
+Signal, Sorbet, Tannin, Terracotta) are Loopflow's own, written by
 `scripts/theme_catalogue.py` from a short spec each:
 
 ```bash
-uv run python scripts/theme_catalogue.py           # rewrite the 24 generated files and the prototype's table
+uv run python scripts/theme_catalogue.py           # rewrite the 22 generated files and the prototype's table
 uv run python scripts/theme_catalogue.py --check   # what a fresh run would change
 ```
 

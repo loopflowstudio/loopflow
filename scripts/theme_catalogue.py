@@ -1,6 +1,6 @@
 """Write the generated built-in themes, the prototype's theme table and the website's colors.
 
-Twelve families, a light and a dark theme each, come from the specs below; Loopflow
+Eleven families, a light and a dark theme each, come from the specs below; Loopflow
 Light and Loopflow Dark are written by hand and only read here. loopflow.studio is
 drawn in Loopflow Light. Change a theme by editing its spec and rerunning; never
 edit a generated file.
@@ -167,16 +167,6 @@ FAMILIES = [
                       hues=dict(yellow=80, green=145), titlebar="accent"),
     },
     {
-        "family": "Harbor",
-        "idea": "Deep navy with an amber lamp: the blue-black editor ground, warmed by one color.",
-        "dark": dict(name="Harbor", ground=(0.205, 0.05, 248), text=(0.90, 0.03, 230), accent=(0.78, 0.14, 75),
-                     on_accent="dark", ink=(0.80, 0.13, 75), status_c=0.12, ansi_c=0.13,
-                     hues=dict(cyan=210, blue=245), titlebar=(0.29, 0.07, 248)),
-        "light": dict(name="Harbor Light", ground=(0.968, 0.014, 230), text=(0.27, 0.07, 250), accent=(0.45, 0.13, 250),
-                      on_accent="light", ink=(0.48, 0.13, 250), status_c=0.13, ansi_c=0.14,
-                      hues=dict(cyan=210, blue=245), titlebar="accent"),
-    },
-    {
         "family": "Tannin",
         "idea": "Roast and parchment with muted earth colors: warm, low glare, made for long sessions.",
         "dark": dict(name="Tannin", ground=(0.255, 0.016, 70), text=(0.89, 0.035, 85), accent=(0.70, 0.13, 58),
@@ -212,7 +202,7 @@ FAMILIES = [
         "dark": dict(name="Arcade", ground=(0.19, 0.06, 295), text=(0.93, 0.03, 300), accent=(0.72, 0.24, 345),
                      on_accent="dark", ink=(0.86, 0.12, 200), status_c=0.17, ansi_c=0.20,
                      hues=dict(magenta=345, cyan=200, blue=275, yellow=100), titlebar=(0.27, 0.12, 320)),
-        "light": dict(name="Arcade Day", ground=(0.962, 0.02, 350), text=(0.26, 0.09, 290), accent=(0.55, 0.24, 350),
+        "light": dict(name="Arcade Day", ground=(0.975, 0.006, 300), text=(0.26, 0.09, 290), accent=(0.55, 0.24, 350),
                       on_accent="light", ink=(0.46, 0.17, 250), status_c=0.17, ansi_c=0.19,
                       hues=dict(magenta=350, cyan=210, blue=265), titlebar=(0.40, 0.16, 290)),
     },
@@ -372,7 +362,7 @@ def generate(spec, dark):
 
 
 def catalogue():
-    """The 24 generated themes, each family's light theme before its dark one."""
+    """The 22 generated themes, each family's light theme before its dark one."""
     themes = []
     for family in FAMILIES:
         for mode in ("light", "dark"):

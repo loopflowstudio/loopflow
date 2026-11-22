@@ -106,7 +106,6 @@ public struct ThemeDefinition: Identifiable, Sendable {
                 guard theme.readabilityErrors.isEmpty else { throw ThemeError("\(theme.name): \(theme.readabilityErrors.joined(separator: "; "))") }
                 return theme
             }
-            precondition(themes.filter(\.isDark).count == 13 && themes.count == 26, "Bundled catalogue requires 13 light and 13 dark themes")
             return themes.sorted { first, second in
                 let loopflow = (first.name.hasPrefix("Loopflow "), second.name.hasPrefix("Loopflow "))
                 return loopflow.0 != loopflow.1 ? loopflow.0 : first.name < second.name

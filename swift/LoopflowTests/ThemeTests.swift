@@ -106,13 +106,13 @@ struct ThemeTests {
         #expect(dark != GhosttyThemeMapping.palette(ThemeDefinition.dark.terminal))
     }
 
-    @Test func catalogueIsThirteenFamiliesWithALightAndADarkTheme() throws {
+    @Test func catalogueIsTwelveFamiliesWithALightAndADarkTheme() throws {
         let light = ThemeDefinition.builtins.filter { !$0.isDark }.map(\.name)
         let dark = ThemeDefinition.builtins.filter(\.isDark).map(\.name)
         #expect(light == ["Loopflow Light", "Arcade Day", "Contrast Light", "Fig Leaf", "Fjord Light", "Folio", "Graphite Light",
-                          "Harbor Light", "Moss Light", "Signal Light", "Sorbet Day", "Tannin Light", "Terracotta Light"])
+                          "Moss Light", "Signal Light", "Sorbet Day", "Tannin Light", "Terracotta Light"])
         #expect(dark == ["Loopflow Dark", "Arcade", "Contrast", "Fig", "Fjord", "Folio Night", "Graphite",
-                         "Harbor", "Moss", "Signal", "Sorbet", "Tannin", "Terracotta"])
+                         "Moss", "Signal", "Sorbet", "Tannin", "Terracotta"])
         for theme in ThemeDefinition.builtins {
             let palette = theme.palette.definition
             // Headings are the text or the accent ink, never a third color.
@@ -234,9 +234,9 @@ struct ThemeTests {
 
     @Test func outsideEditsReloadAndUnknownNamesKeepTheLastGoodTheme() async throws {
         try await withThemeServer { location, paths in
-            try paths.writeConfig("theme: light:Folio,dark:Harbor\n")
+            try paths.writeConfig("theme: light:Folio,dark:Signal\n")
             let store = await AppearanceStore.loaded(paths: paths, systemDark: true, location: location)
-            #expect(store.effectiveTheme.name == "Harbor")
+            #expect(store.effectiveTheme.name == "Signal")
             try paths.writeConfig("theme: 'light:Folio,dark:Contrast' # by hand\n")
             await store.reload()
             #expect(store.effectiveTheme.name == "Contrast")
@@ -305,11 +305,11 @@ struct ThemeTests {
         let store = AppearanceStore(paths: .temporary(), systemDark: false)
         store.beginPreview(); store.previewMode(.system)
         #expect(store.previewSide == .light)
-        store.previewTheme("Harbor")
-        #expect(store.current.dark == "Harbor")
+        store.previewTheme("Signal")
+        #expect(store.current.dark == "Signal")
         #expect(store.current.light == "Loopflow Light")
         #expect(store.previewSide == .dark)
-        #expect(store.effectiveTheme.name == "Harbor")
+        #expect(store.effectiveTheme.name == "Signal")
     }
 
     @Test func ghosttyThemesResolveAfterYoursAndBuiltinsAndStayReadOnly() async throws {

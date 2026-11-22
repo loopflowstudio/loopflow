@@ -60,14 +60,14 @@ struct ThemeWorkflowTests {
                     #expect(heading == (shown ? "\(side.menuTitle) themes · Loopflow \(side.menuTitle)" : nil))
                 }
                 #expect(appearance.previewSide == (choice == .dark ? .dark : .light))
-                let showsDark = (try? view.inspect().find(viewWithAccessibilityIdentifier: "appearance-theme-Harbor")) != nil
+                let showsDark = (try? view.inspect().find(viewWithAccessibilityIdentifier: "appearance-theme-Signal")) != nil
                 let showsLight = (try? view.inspect().find(viewWithAccessibilityIdentifier: "appearance-theme-Fjord Light")) != nil
                 #expect(showsDark == (choice != .light))
                 #expect(showsLight == (choice != .dark))
             }
-            #expect(appearance.entries(for: .light).builtins.count == 13)
+            #expect(appearance.entries(for: .light).builtins.count == 12)
             #expect(appearance.entries(for: .light).builtins.allSatisfy { !$0.theme.isDark })
-            #expect(appearance.entries(for: .dark).builtins.count == 13)
+            #expect(appearance.entries(for: .dark).builtins.count == 12)
             #expect(appearance.entries(for: .dark).builtins.allSatisfy { $0.theme.isDark })
             // System lists both sides at once; each card assigns its own side and takes the Customize row.
             func customizeShown(under name: String) -> Bool {
@@ -76,11 +76,11 @@ struct ThemeWorkflowTests {
             }
             try view.inspect().find(viewWithAccessibilityIdentifier: "appearance-theme-Fjord Light").button().tap()
             #expect(customizeShown(under: "Fjord Light"))
-            try view.inspect().find(viewWithAccessibilityIdentifier: "appearance-theme-Harbor").button().tap()
-            #expect(customizeShown(under: "Harbor"))
+            try view.inspect().find(viewWithAccessibilityIdentifier: "appearance-theme-Signal").button().tap()
+            #expect(customizeShown(under: "Signal"))
             #expect(!customizeShown(under: "Fjord Light"))
             #expect(try view.inspect().find(viewWithAccessibilityIdentifier: "appearance-heading-light").text().string() == "Light themes · Fjord Light")
-            #expect(try view.inspect().find(viewWithAccessibilityIdentifier: "appearance-heading-dark").text().string() == "Dark themes · Harbor")
+            #expect(try view.inspect().find(viewWithAccessibilityIdentifier: "appearance-heading-dark").text().string() == "Dark themes · Signal")
             #expect(appearance.themeName(for: .light) == "Fjord Light")
             #expect(appearance.current.mode == .system)
             try view.inspect().find(button: "Apply").tap()
@@ -93,10 +93,10 @@ struct ThemeWorkflowTests {
             #expect(!appearance.chooserOpen)
             #expect(!appearance.saving)
             let savedTheme1 = try await savedTheme(location)
-            #expect(savedTheme1 == "light:Fjord Light,dark:Harbor")
+            #expect(savedTheme1 == "light:Fjord Light,dark:Signal")
             #expect(appearance.effectiveTheme.name == "Fjord Light")
             appearance.setSystemDark(true)
-            #expect(appearance.effectiveTheme.name == "Harbor")
+            #expect(appearance.effectiveTheme.name == "Signal")
             let restored = await AppearanceStore.loaded(paths: paths, systemDark: false, location: location)
             #expect(restored.selection == appearance.selection)
             #expect(restored.effectiveTheme.name == "Fjord Light")
@@ -137,7 +137,7 @@ enum ThemeFixture: String, CaseIterable {
         case .light, .dark: appearance.previewMode(AppearanceMode(rawValue: rawValue)!)
         case .bundled:
             appearance.previewMode(.dark)
-            appearance.previewTheme("Harbor")
+            appearance.previewTheme("Signal")
         case .lightImport, .darkImport:
             appearance.previewMode(self == .lightImport ? .light : .dark)
             let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)

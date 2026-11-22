@@ -191,7 +191,7 @@ covered.
 
 1. **One scale per property, and only named steps.** Type, spacing, radius,
    line width, opacity and duration each have a short list. A view names a
-   step (`Typography.meta`, `Spacing.md`, `--fs-small`); it never passes a
+   step (`Typography.meta`, `Spacing.md`, `--t-small`); it never passes a
    number. Helpers that accept any size are how the scale leaked, so they go.
 2. **A new value is a change to the system.** If no step fits, add or move a
    step here and in the token source, in the same change, with the reason.

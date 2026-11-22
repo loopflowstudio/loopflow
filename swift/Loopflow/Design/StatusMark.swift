@@ -1,10 +1,9 @@
-import Loopflow
 import SwiftUI
 
 /// The one status mark: a flat dot and a sans phrase in the tone's ink, with
 /// the next step beside it as a button where one exists. Without a phrase the
 /// dot stands beside a name that already says what it marks.
-struct StatusMark<Action: View>: View {
+public struct StatusMark<Action: View>: View {
     let phrase: String?
     let tone: WorkTone
     /// The tooltip, and what VoiceOver reads when there is no phrase.
@@ -12,7 +11,14 @@ struct StatusMark<Action: View>: View {
     @ViewBuilder var action: Action
     @Environment(\.palette) private var palette
 
-    var body: some View {
+    public init(phrase: String?, tone: WorkTone, detail: String? = nil, @ViewBuilder action: () -> Action) {
+        self.phrase = phrase
+        self.tone = tone
+        self.detail = detail
+        self.action = action()
+    }
+
+    public var body: some View {
         let ink = tone.ink(in: palette)
         HStack(spacing: Spacing.sm) {
             HStack(spacing: Spacing.sm) {
@@ -34,7 +40,7 @@ struct StatusMark<Action: View>: View {
     }
 }
 
-extension StatusMark where Action == EmptyView {
+public extension StatusMark where Action == EmptyView {
     init(_ phrase: String?, tone: WorkTone, detail: String? = nil) {
         self.init(phrase: phrase, tone: tone, detail: detail) { EmptyView() }
     }

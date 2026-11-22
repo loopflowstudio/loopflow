@@ -126,6 +126,23 @@ struct OwnerStreamTests {
         ]))
     }
 
+    @Test func positionsAndAsidesFromAHeldTerminalDrawAndItsCloseEndsTheStream() throws {
+        var stream = try observed()
+        #expect(try stream.receive(OwnerStream.frame(.position, body: Data(count: 8))).isEmpty)
+        let drawn = try stream.receive(OwnerStream.frame(.aside, body: Data("Checkout ready\r\n".utf8)))
+        guard case .output(let bytes) = drawn.first, drawn.count == 1 else {
+            Issue.record("An aside is bytes for the viewer's terminal"); return
+        }
+        #expect(bytes == Data("Checkout ready\r\n".utf8))
+        let closed = try stream.receive(OwnerStream.frame(.close, body: Data(#"{"reason":"finished"}"#.utf8)))
+        guard case .ended = closed.first else { Issue.record("A finished terminal ends the Session view"); return }
+        #expect(stream.ended)
+
+        var replaced = try observed()
+        let moved = try replaced.receive(OwnerStream.frame(.close, body: Data(#"{"reason":"replaced"}"#.utf8)))
+        guard case .disconnected = moved.first else { Issue.record("A replaced terminal offers Reconnect"); return }
+    }
+
     private func observed() throws -> OwnerStream {
         var stream = OwnerStream()
         stream.expectAttachment(1)

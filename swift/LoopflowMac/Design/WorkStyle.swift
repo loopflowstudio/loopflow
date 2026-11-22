@@ -181,33 +181,6 @@ struct WorkPlainButtonStyle: ButtonStyle {
     }
 }
 
-struct WorkLinkStyle: ButtonStyle {
-    @Environment(\.palette) private var palette
-    @Environment(\.isFocused) private var focused
-    @State private var hovering = false
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .foregroundStyle(hovering || focused ? palette.linkHover : palette.linkInk)
-            .underline(hovering || focused)
-            .workFocusRing()
-            .onHover { hovering = $0 }
-    }
-}
-
-extension ProgramStatusState {
-    var workTone: WorkTone {
-        switch self {
-        case .working: .running
-        case .blocked: .warning
-        case .error: .failure
-        case .done: .done
-        case .idle: .available
-        case .clear: .neutral
-        }
-    }
-}
-
 extension View {
     func workDestinationSelection(_ selected: Bool) -> some View {
         modifier(WorkDestinationSelection(selected: selected))

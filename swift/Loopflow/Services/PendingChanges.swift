@@ -104,8 +104,8 @@ public final class PendingChanges {
         return requestID
     }
 
-    /// Start, Auto on and Auto off change nothing on screen: the Notice
-    /// says "LOO-5 Auto on requested" in the click and the Machine's readings
+    /// Start, Run and the two Auto-Ship requests change nothing on screen: the
+    /// Notice says "LOO-5 Auto-Ship requested" in the click and the Machine's readings
     /// show the rest. A refusal posts over it.
     public func request(_ name: String, subject: String, write: ServedWrite, notices: NoticeCenter,
                         undo: Notice.Action? = nil, answered: @escaping @MainActor () async -> Void = {},

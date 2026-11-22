@@ -84,16 +84,8 @@ struct MachineAddressView: View {
         NavigationStack {
             ScrollViewReader { proxy in
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 24) {
+                    VStack(alignment: .leading, spacing: Spacing.xxl) {
                         if replacing == nil && !enteringAddress {
-                            HStack(spacing: 12) {
-                                Image(systemName: "desktopcomputer")
-                                Image(systemName: "arrow.left.arrow.right").font(.system(size: 16))
-                                Image(systemName: "iphone")
-                            }
-                            .font(.system(size: 34, weight: .light))
-                            .foregroundStyle(theme.palette.accentInk)
-                            .accessibilityHidden(true)
                             Text("Your work,\nwithin reach.")
                                 .serif(.display)
                         }
@@ -102,26 +94,26 @@ struct MachineAddressView: View {
                             : replacing == nil
                             ? "Connect to your Loopflow Machine to open Tasks and continue their Sessions."
                             : "Scan the new code in Desktop’s Mobile settings. Your saved connection stays until the new address is verified.")
-                            .font(MobileType.text(17))
+                            .font(Typography.text)
                             .foregroundStyle(theme.palette.textSecondary)
                         if let replacing {
                             Text(replacing.endpoint.absoluteString)
-                                .font(MobileType.text(13))
+                                .font(Typography.meta)
                                 .foregroundStyle(theme.palette.textSecondary)
                                 .textSelection(.enabled)
                         } else if !enteringAddress {
-                            VStack(alignment: .leading, spacing: 14) {
+                            VStack(alignment: .leading, spacing: Spacing.md) {
                                 Label("Sign in to the same Tailscale account on both devices.", systemImage: "1.circle")
                                 Label("On your Mac, open Loopflow → Settings → Mobile.", systemImage: "2.circle")
                                 Label("Enable mobile access, then scan its code here.", systemImage: "3.circle")
                             }
-                            .font(MobileType.text(15))
+                            .font(Typography.text)
                         }
                         if let endpoint, !enteringAddress {
                             Label(endpoint.host ?? "Machine", systemImage: "desktopcomputer")
-                                .font(MobileType.strong(16))
+                                .font(Typography.textStrong)
                             Text(endpoint.absoluteString)
-                                .font(MobileType.text(13))
+                                .font(Typography.meta)
                                 .foregroundStyle(theme.palette.textSecondary)
                                 .textSelection(.enabled)
                             Button {
@@ -130,21 +122,16 @@ struct MachineAddressView: View {
                                 HStack {
                                     if connecting { ProgressView() }
                                     Text(connecting ? "Connecting…" : (replacing == nil ? "Connect Machine" : "Update address"))
-                                }.frame(maxWidth: .infinity, minHeight: 44)
+                                }
                             }
-                            .buttonStyle(.borderedProminent)
-                            .tint(theme.palette.accent)
-                            .foregroundStyle(theme.palette.accentText)
+                            .buttonStyle(LoopflowButtonStyle(.accent))
                             .disabled(connecting)
-                            Button("Scan another code") { scanning = true }.disabled(connecting)
+                            Button("Scan another code") { scanning = true }.buttonStyle(LoopflowButtonStyle()).disabled(connecting)
                         } else if !enteringAddress {
                             Button { scanning = true } label: {
                                 Label("Scan QR code", systemImage: "qrcode.viewfinder")
-                                    .frame(maxWidth: .infinity, minHeight: 44)
                             }
-                            .buttonStyle(.borderedProminent)
-                            .tint(theme.palette.accent)
-                            .foregroundStyle(theme.palette.accentText)
+                            .buttonStyle(LoopflowButtonStyle(.accent))
                         }
                         if enteringAddress {
                             TextField("machine.tailnet.ts.net", text: $address)
@@ -152,7 +139,11 @@ struct MachineAddressView: View {
                                 .keyboardType(.URL)
                                 .textInputAutocapitalization(.never)
                                 .autocorrectionDisabled()
-                                .textFieldStyle(.roundedBorder)
+                                .font(Typography.text)
+                                .padding(.horizontal, Spacing.md)
+                                .frame(minHeight: HitTarget.touch)
+                                .background(theme.palette.surface, in: RoundedRectangle(cornerRadius: CornerRadius.pane))
+                                .overlay(RoundedRectangle(cornerRadius: CornerRadius.pane).stroke(theme.palette.border))
                                 .focused($addressFocused)
                                 .submitLabel(.continue)
                                 .onSubmit { accept(address) }
@@ -163,39 +154,35 @@ struct MachineAddressView: View {
                                 enteringAddress = true
                                 addressFocused = true
                             }
-                                .frame(minHeight: 44)
-                                .disabled(connecting)
+                            .buttonStyle(LoopflowButtonStyle())
+                            .disabled(connecting)
                         }
                         if let error {
                             Text(error)
-                                .font(MobileType.text(14))
+                                .font(Typography.text)
                                 .foregroundStyle(theme.palette.textSecondary)
                                 .accessibilityLabel("Connection issue: \(error)")
                                 .id("machine-connection-error")
                         }
                         Text("Your Sessions run on your Machine. This phone connects through your private Tailscale network.")
-                            .font(MobileType.text(13))
+                            .font(Typography.meta)
                             .foregroundStyle(theme.palette.textSecondary)
                     }
-                    .padding(28)
+                    .padding(Spacing.xxl)
                 }
                 .background(theme.palette.background)
                 .safeAreaInset(edge: .bottom) {
                     if enteringAddress {
-                        VStack(spacing: 8) {
-                            Button { accept(address) } label: {
-                                Text("Continue").frame(maxWidth: .infinity, minHeight: 44)
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .tint(theme.palette.accent)
-                            .foregroundStyle(theme.palette.accentText)
+                        VStack(spacing: Spacing.sm) {
+                            Button("Continue") { accept(address) }
+                            .buttonStyle(LoopflowButtonStyle(.accent))
                             .disabled(connecting || address.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                             .accessibilityIdentifier("machine-address-continue")
                             Button("Scan QR code instead") { scanning = true }
-                                .frame(minHeight: 44)
+                                .buttonStyle(LoopflowButtonStyle())
                                 .disabled(connecting)
                         }
-                        .padding(16)
+                        .padding(Spacing.lg)
                         .background(theme.palette.background)
                     }
                 }

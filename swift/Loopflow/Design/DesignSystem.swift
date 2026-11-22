@@ -16,6 +16,12 @@ public enum HitTarget {
     public static let minimum: CGFloat = 24
     public static let comfortable: CGFloat = 32
     public static let touch: CGFloat = 44
+    /// A button's or a row's height on this platform.
+    #if os(iOS)
+    public static let control: CGFloat = touch
+    #else
+    public static let control: CGFloat = minimum
+    #endif
 }
 
 public enum ZIndex {
@@ -42,18 +48,19 @@ public enum CornerRadius {
 /// Mono Regular / Bold / Italic / Bold Italic. Request only those; any other
 /// weight is synthesized by CoreText and renders heavier than the design.
 ///
-/// The ramp (DESIGN.md), serif on two steps and applied only with `.serif(_:)`:
+/// The ramp (DESIGN.md), serif on two steps and applied only with `.serif(_:)`.
+/// The step names are the same on each platform; iPhone steps follow Dynamic Type.
 ///
-/// | step        | face                | size |
-/// |-------------|---------------------|------|
-/// | display     | Old Standard        | 34   |
-/// | title       | Old Standard        | 26   |
-/// | lede        | Atkinson 600        | 17   |
-/// | text        | Atkinson 400        | 13   |
-/// | textStrong  | Atkinson 600        | 13   |
-/// | meta        | Atkinson 400        | 11   |
-/// | mono        | Spline Sans Mono    | 12   |
-/// | terminal    | Spline Sans Mono    | 13   |
+/// | step        | face                | Mac | iPhone |
+/// |-------------|---------------------|-----|--------|
+/// | display     | Old Standard        | 34  | 34     |
+/// | title       | Old Standard        | 26  | 26     |
+/// | lede        | Atkinson 600        | 17  | 20     |
+/// | text        | Atkinson 400        | 13  | 17     |
+/// | textStrong  | Atkinson 600        | 13  | 17     |
+/// | meta        | Atkinson 400        | 11  | 13     |
+/// | mono        | Spline Sans Mono    | 12  | 14     |
+/// | terminal    | Spline Sans Mono    | 13  | 12     |
 public enum Typography {
     public static let serifFamily = "Old Standard TT"
     public static let sansFamily = "Atkinson Hyperlegible Next"
@@ -61,24 +68,37 @@ public enum Typography {
 
     // Select bundled faces by PostScript name; family/weight matching can choose
     // an account-installed face that is unavailable inside the app sandbox.
-    // iPhone and AppKit fields name them too.
+    // AppKit and UIKit fields name them too.
     public static let serifFace = "OldStandardTT-Regular"
     public static let sansFace = "AtkinsonHyperlegibleNext-Regular"
     public static let sansStrongFace = "AtkinsonHyperlegibleNext-SemiBold"
     public static let monoFace = "SplineSansMono-Regular"
 
     /// A document's first heading; the text typed in New Task.
-    public static let lede = Font.custom(sansStrongFace, fixedSize: 17)
+    public static let lede = step(sansStrongFace, mac: 17, iPhone: 20, .title3)
     /// Everything else.
-    public static let text = Font.custom(sansFace, fixedSize: 13)
+    public static let text = step(sansFace, mac: 13, iPhone: 17, .body)
     /// The selected row's title, a pane's name.
-    public static let textStrong = Font.custom(sansStrongFace, fixedSize: 13)
+    public static let textStrong = step(sansStrongFace, mac: 13, iPhone: 17, .body)
     /// Counts, times, secondary facts.
-    public static let meta = Font.custom(sansFace, fixedSize: 11)
+    public static let meta = step(sansFace, mac: 11, iPhone: 13, .footnote)
     /// Inline IDs, paths, commands.
-    public static let mono = Font.custom(monoFace, fixedSize: 12)
-    /// Ghostty's `font-size` default; the person's configuration replaces it.
+    public static let mono = step(monoFace, mac: 12, iPhone: 14, .subheadline)
+    /// Ghostty's `font-size` default; the person's configuration replaces it on the Mac.
+    #if os(iOS)
+    public static let terminalSize: CGFloat = 12
+    #else
     public static let terminalSize: CGFloat = 13
+    #endif
+
+    /// A sans or mono step: fixed on the Mac, following Dynamic Type's `style` on iPhone.
+    private static func step(_ face: String, mac: CGFloat, iPhone: CGFloat, _ style: Font.TextStyle) -> Font {
+        #if os(iOS)
+        .custom(face, size: iPhone, relativeTo: style)
+        #else
+        .custom(face, fixedSize: mac)
+        #endif
+    }
 }
 
 /// The two serif steps. They are not `Font` values: serif is set only through
@@ -97,20 +117,39 @@ public enum SerifStep: Sendable {
         }
     }
 
-    var font: Font {
-        let descriptor = CTFontDescriptorCreateCopyWithFeature(
-            CTFontDescriptorCreateWithNameAndSize(Typography.serifFace as CFString, size),
-            NSNumber(value: kLigaturesType),
-            NSNumber(value: kCommonLigaturesOffSelector)
-        )
-        return Font(CTFontCreateWithFontDescriptor(descriptor, size, nil))
+    var textStyle: Font.TextStyle {
+        switch self {
+        case .display: .largeTitle
+        case .title: .title
+        }
     }
 }
 
 public extension View {
     /// The serif face at a ramp step, ligatures off and tracked −3%.
     func serif(_ step: SerifStep) -> some View {
-        font(step.font).tracking(-0.03 * step.size)
+        modifier(Serif(step))
+    }
+}
+
+private struct Serif: ViewModifier {
+    let step: SerifStep
+    /// Dynamic Type's factor for the step; 1 on the Mac, which has none.
+    @ScaledMetric private var scale: CGFloat
+
+    init(_ step: SerifStep) {
+        self.step = step
+        _scale = ScaledMetric(wrappedValue: 1, relativeTo: step.textStyle)
+    }
+
+    func body(content: Content) -> some View {
+        let size = step.size * scale
+        let descriptor = CTFontDescriptorCreateCopyWithFeature(
+            CTFontDescriptorCreateWithNameAndSize(Typography.serifFace as CFString, size),
+            NSNumber(value: kLigaturesType),
+            NSNumber(value: kCommonLigaturesOffSelector)
+        )
+        content.font(Font(CTFontCreateWithFontDescriptor(descriptor, size, nil))).tracking(-0.03 * size)
     }
 }
 

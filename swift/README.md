@@ -348,9 +348,9 @@ narrow window the steps go and the sentence stays.
 When the Task can move, one button says how: **Start** before it has run,
 **Run** once its Graph has stopped. **Auto-Ship** turns the Task's auto setting
 on and runs it, as `lf task auto on` does: its run stands in at each
-interactive step and lands the PR. Turning it on raises the Notice "LOO-5 Auto
-on requested · Undo"; Undo is auto off (`lf task auto off`), and so is the
-button, which reads **Stop Auto-Ship** while auto is on. While auto is on,
+interactive step and lands the PR. Turning it on raises the Notice "LOO-5
+Auto-Ship requested · Undo"; Undo is Stop Auto-Ship (`lf task auto off`), and
+so is the button, which reads **Stop Auto-Ship** while auto is on. While auto is on,
 the sentence names auto instead of you, and the Task's board card and sidebar
 row carry an Auto badge. Open a Dashboard with `state:auto` to watch those Tasks.
 
@@ -1559,8 +1559,8 @@ xcodegen generate --spec swift/ios.yml
 open swift/LoopflowMobile.xcodeproj
 ```
 
-The **LoopflowiOS** scheme opens an explicitly offline Task → Session fixture.
-Disable its `--fixture` argument to connect a Machine over host Tailscale.
-[Native client and focused input tests](LoopflowiOS/README.md) describe its build,
-renderer choice and remaining device/live-integration proof. Desktop's project
-and package remain unchanged.
+Run the **LoopflowiOS** scheme and connect a Machine over host Tailscale.
+[Loopflow for iOS](LoopflowiOS/README.md) covers its build, screens, terminal
+and tests. It draws with the shared tokens and components in
+`Loopflow/Design/`, on the iPhone sizes of the ramp in
+[DESIGN.md](../DESIGN.md#type).

@@ -285,9 +285,13 @@ struct TaskListView: View {
                     ProgressView()
                 } else if sections.isEmpty && feed.loaded {
                     if search.isEmpty {
-                        ContentUnavailableView("No \(feed.filter.title.lowercased()) Tasks", systemImage: "checkmark.circle")
+                        StateView("No \(feed.filter.title.lowercased()) Tasks") {
+                            Button("New Task", action: newTask).buttonStyle(LoopflowButtonStyle(.accent))
+                        }
                     } else {
-                        ContentUnavailableView.search(text: search)
+                        StateView("No results for “\(search)”") {
+                            Button("Clear search") { search = "" }.buttonStyle(LoopflowButtonStyle(.accent))
+                        }
                     }
                 }
             }
@@ -338,10 +342,7 @@ struct TaskListView: View {
                     .accessibilityValue(feed.filter.title)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        created = nil
-                        creation = MobileTaskCreation(client: client)
-                    } label: { Image(systemName: "plus") }
+                    Button(action: newTask) { Image(systemName: "plus") }
                         .accessibilityLabel("New Task")
                 }
                 ToolbarItem(placement: .topBarTrailing) {
@@ -369,11 +370,15 @@ struct TaskListView: View {
             Button("OK") { captureError = nil }
         } message: { Text(captureError ?? "") }
         .tint(theme.palette.accentInk)
-        .environment(\.palette, theme.palette)
         .onChange(of: repository) { feed.wave = nil }
         .task(id: [feed.filter.rawValue, feed.wave ?? "", String(scenePhase == .active)]) {
             if scenePhase == .active { await feed.start() } else { feed.stop() }
         }
+    }
+
+    private func newTask() {
+        created = nil
+        creation = MobileTaskCreation(client: client)
     }
 
     /// A repository's folder name; one the Machine cannot place keeps its short ID,

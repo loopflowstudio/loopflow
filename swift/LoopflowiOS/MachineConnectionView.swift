@@ -122,21 +122,16 @@ struct MachineAddressView: View {
                                 HStack {
                                     if connecting { ProgressView() }
                                     Text(connecting ? "Connecting…" : (replacing == nil ? "Connect Machine" : "Update address"))
-                                }.frame(maxWidth: .infinity, minHeight: 44)
+                                }
                             }
-                            .buttonStyle(.borderedProminent)
-                            .tint(theme.palette.accent)
-                            .foregroundStyle(theme.palette.accentText)
+                            .buttonStyle(LoopflowButtonStyle(.accent))
                             .disabled(connecting)
-                            Button("Scan another code") { scanning = true }.disabled(connecting)
+                            Button("Scan another code") { scanning = true }.buttonStyle(LoopflowButtonStyle()).disabled(connecting)
                         } else if !enteringAddress {
                             Button { scanning = true } label: {
                                 Label("Scan QR code", systemImage: "qrcode.viewfinder")
-                                    .frame(maxWidth: .infinity, minHeight: 44)
                             }
-                            .buttonStyle(.borderedProminent)
-                            .tint(theme.palette.accent)
-                            .foregroundStyle(theme.palette.accentText)
+                            .buttonStyle(LoopflowButtonStyle(.accent))
                         }
                         if enteringAddress {
                             TextField("machine.tailnet.ts.net", text: $address)
@@ -175,16 +170,12 @@ struct MachineAddressView: View {
                 .safeAreaInset(edge: .bottom) {
                     if enteringAddress {
                         VStack(spacing: 8) {
-                            Button { accept(address) } label: {
-                                Text("Continue").frame(maxWidth: .infinity, minHeight: 44)
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .tint(theme.palette.accent)
-                            .foregroundStyle(theme.palette.accentText)
+                            Button("Continue") { accept(address) }
+                            .buttonStyle(LoopflowButtonStyle(.accent))
                             .disabled(connecting || address.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                             .accessibilityIdentifier("machine-address-continue")
                             Button("Scan QR code instead") { scanning = true }
-                                .frame(minHeight: 44)
+                                .buttonStyle(LoopflowButtonStyle())
                                 .disabled(connecting)
                         }
                         .padding(16)

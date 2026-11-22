@@ -67,10 +67,14 @@ struct MobileRepositoryPicker: View {
         .overlay {
             if repositories.isEmpty && model.error == nil {
                 if model.context?.repositories.isEmpty == true {
-                    ContentUnavailableView("No repositories", systemImage: "folder",
-                        description: Text("Add a repository in Loopflow on this Machine, then refresh this list."))
+                    StateView("No repositories",
+                              sentence: "Add a repository in Loopflow on this Machine, then refresh this list.") {
+                        Button("Refresh") { Task { await model.prepare() } }.buttonStyle(LoopflowButtonStyle(.accent))
+                    }
                 } else {
-                    ContentUnavailableView.search(text: search)
+                    StateView("No results for “\(search)”") {
+                        Button("Clear search") { search = "" }.buttonStyle(LoopflowButtonStyle(.accent))
+                    }
                 }
             }
         }

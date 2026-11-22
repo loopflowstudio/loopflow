@@ -25,15 +25,11 @@ struct MachineCodeScanner: View {
                                 .background(.regularMaterial)
                         }
                 } else {
-                    ContentUnavailableView {
-                        Label("Scan a QR code", systemImage: "qrcode.viewfinder")
-                    } description: {
-                        Text(message ?? "Preparing the camera…")
-                    } actions: {
+                    StateView("Scan a QR code", sentence: message ?? "Preparing the camera…") {
+                        Button("Enter an address instead", action: enterAddress).buttonStyle(LoopflowButtonStyle(.accent))
                         if denied, let settings = URL(string: UIApplication.openSettingsURLString) {
-                            Button("Open Settings") { openURL(settings) }
+                            Button("Open Settings") { openURL(settings) }.buttonStyle(LoopflowButtonStyle())
                         }
-                        Button("Enter an address instead", action: enterAddress)
                     }
                 }
             }

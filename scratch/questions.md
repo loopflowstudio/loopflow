@@ -70,3 +70,23 @@ Made in implement (slice 1) with nobody present; each is reversible.
   where it was 32; its 44 pt frame is unchanged.
 - **A phone row with neither a conversation state nor a lifecycle state in
   its reading shows no status word.** The old row said "Open".
+
+Made in implement (slice 2) with nobody present; each is reversible.
+
+- **A search with no match says "No results for “term”"** with "Clear
+  search", on the Task list and the repository picker. The stock view's
+  second line ("Check the spelling or try a new search.") is gone.
+- **The button's side padding is a third of its height** (8 pt on the Mac as
+  before, about 15 pt on the phone), so the style asks the platform one thing.
+- **Secondary buttons on the phone are the neutral style** (bordered, 44 pt),
+  where they were plain tinted text: "Scan another code", "Scan QR code
+  instead", "Retry connection", "Save for later", "Open Settings".
+- **The scanner's state leads with "Enter an address instead"** as its accent
+  button; "Open Settings" is neutral beside it when the camera is denied.
+
+Checks (slices 1 and 2):
+
+- `swift test --filter 'TaskRowTests|TaskStatusTests|TypographyDisciplineTests|ProgramStatusTests|TaskConceptTests|WorkPaletteTests|WorkflowLineTests'`: passed, 2026-11-22. Gate reruns.
+- `uv run python scripts/test_ios.py`: TEST SUCCEEDED, 2026-11-22. CI reruns.
+- `uv run python scripts/check_swift_multiplatform_boundaries.py`: passed.
+- Simulator look on an iPhone SE, light and dark: not done; slice 4.

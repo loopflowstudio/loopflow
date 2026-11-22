@@ -20,7 +20,7 @@ struct SessionView: View {
     var body: some View {
         VStack(spacing: 0) {
             if case .unavailable(let reason) = link.state {
-                ContentUnavailableView("No Session here", systemImage: "terminal", description: Text(reason))
+                StateView("No Session here", sentence: reason)
             } else {
                 SessionTerminal(link: link, actions: actions, theme: theme)
                     .overlay { notice }
@@ -49,34 +49,22 @@ struct SessionView: View {
         case .live, .unavailable: EmptyView()
         case .opening: ProgressView().controlSize(.large)
         case .elsewhere:
-            card("This Session is open on another device.", action: "Continue here") { link.continueHere() }
+            state("This Session is open on another device.", action: "Continue here") { link.continueHere() }
         case .ended:
-            card("The Session ended.", action: "Start it again") { Task { await link.start() } }
+            state("The Session ended.", action: "Start it again") { Task { await link.start() } }
         case .notRunning:
-            card("The Session is saved, but not running.", action: "Start it") { Task { await link.start() } }
+            state("The Session is saved, but not running.", action: "Start it") { Task { await link.start() } }
         case .disconnected(let reason):
-            card(reason, action: "Reconnect") { Task { await link.open() } }
+            state("Disconnected", sentence: reason, action: "Reconnect") { Task { await link.open() } }
         }
     }
 
-    private func card(_ message: String, action: String, perform: @escaping () -> Void) -> some View {
-        VStack(spacing: 16) {
-            Text(message)
-                .font(Typography.text)
-                .multilineTextAlignment(.center)
-            Button(action: perform) {
-                Text(action).font(Typography.textStrong).frame(minWidth: 160, minHeight: 44)
-            }
-            .buttonStyle(.borderedProminent)
-            .tint(theme.palette.accent)
-            .foregroundStyle(theme.palette.accentText)
+    private func state(_ title: String, sentence: String? = nil, action: String,
+                       perform: @escaping () -> Void) -> some View {
+        StateView(title, sentence: sentence) {
+            Button(action, action: perform).buttonStyle(LoopflowButtonStyle(.accent))
         }
-        .padding(24)
-        .background(theme.palette.surface, in: RoundedRectangle(cornerRadius: 16))
-        .overlay(RoundedRectangle(cornerRadius: 16).stroke(theme.palette.border))
-        .padding(24)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(theme.palette.background.opacity(0.85))
+        .background(theme.palette.background)
     }
 
     private var keys: some View {

@@ -375,10 +375,16 @@ and New Task screens other than the New Task question.
    generic, so the status type cannot nest in it (`TaskRow<A>.Status` and
    `TaskRow<B>.Status` are different types); it is `TaskRowStatus` beside the
    row. Not yet looked at on an SE: 17/13 on the row (slice 4's look).
-2. **Button and state view.** Next. Move `LoopflowButtonStyle`; add the state
-   view; replace the nine buttons, the ten stock empty views, `LoadFailure`
-   and `SessionView.card`. Extend `TypographyDisciplineTests` to the phone.
-3. **Workflow sentence and the step that moves the Task.** Move
+2. **Button and state view.** Built. `LoopflowButtonStyle` and `StateView`
+   are in `swift/Loopflow/Design/`; the phone's nine hand-made buttons, ten
+   stock empty views, `LoadFailure` and `SessionView.card` are gone, and
+   `TypographyDisciplineTests` fails on `.borderedProminent` or
+   `ContentUnavailableView` in `LoopflowiOS`. The palette reaches every phone
+   screen from `MobileRoot`, since shared components read it from the
+   environment. Left for slice 4: the spacing rule in the scan (the literals
+   are still there), and "unavailable offers Changes" as a button in the
+   state (the toolbar's Changes is the only way in today).
+3. **Workflow sentence and the step that moves the Task.** Next. Move
    `WorkflowLine` (and `StatusMark`) and `runAction`; the sentence wraps;
    subscribe to the Task in the Task screen; show the line; the "Task
    actions" menu with Start or Run and Auto-Ship.

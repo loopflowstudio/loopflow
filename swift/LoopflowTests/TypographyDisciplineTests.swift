@@ -41,4 +41,24 @@ struct TypographyDisciplineTests {
         }
         #expect(violations.isEmpty, "\(violations.joined(separator: "\n"))")
     }
+
+    @Test("LoopflowiOS draws buttons and states with the shared components")
+    func thePhoneUsesTheSharedButtonAndStateView() throws {
+        let rules = [
+            (#"\.borderedProminent"#, "a hand-made primary button; use LoopflowButtonStyle(.accent)"),
+            (#"ContentUnavailableView"#, "a stock empty view; use StateView"),
+        ]
+        var violations: [String] = []
+        let root = Self.swiftRoot.appendingPathComponent("LoopflowiOS")
+        for name in try FileManager.default.contentsOfDirectory(atPath: root.path) where name.hasSuffix(".swift") {
+            let lines = try String(contentsOf: root.appendingPathComponent(name), encoding: .utf8).components(separatedBy: "\n")
+            for (index, line) in lines.enumerated() {
+                let code = line.components(separatedBy: "//").first ?? line
+                for (pattern, reason) in rules where code.range(of: pattern, options: .regularExpression) != nil {
+                    violations.append("LoopflowiOS/\(name):\(index + 1): \(reason)")
+                }
+            }
+        }
+        #expect(violations.isEmpty, "\(violations.joined(separator: "\n"))")
+    }
 }

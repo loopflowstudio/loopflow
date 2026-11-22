@@ -142,24 +142,22 @@ struct MobileNewTaskView: View {
                     .frame(minHeight: 44)
             } else if model.settled {
                 Button("Open Task") { action = Task { if let task = await model.openTask() { onOpen(task) } } }
-                    .buttonStyle(.borderedProminent).controlSize(.large)
-                    .tint(theme.palette.accent).foregroundStyle(theme.palette.accentText)
+                    .buttonStyle(LoopflowButtonStyle(.accent))
             } else if model.draft.submission != nil {
                 Button("Check status") { editing = false; action = Task { await submit() } }
-                    .buttonStyle(.borderedProminent).controlSize(.large)
-                    .tint(theme.palette.accent).foregroundStyle(theme.palette.accentText)
+                    .buttonStyle(LoopflowButtonStyle(.accent))
             } else {
                 Button("Create & start") { editing = false; action = Task { await submit() } }
-                    .buttonStyle(.borderedProminent).controlSize(.large)
-                    .tint(theme.palette.accent).foregroundStyle(theme.palette.accentText)
+                    .buttonStyle(LoopflowButtonStyle(.accent))
                     .disabled(!model.canCreate)
                 if model.context == nil && !model.storageUnavailable {
                     Button("Retry connection") { action = Task { await model.prepare() } }
+                        .buttonStyle(LoopflowButtonStyle())
                 }
             }
             if !model.busy && model.draft.submission != nil {
                 Button("Save for later") { editing = false; model.saveForLater() }
-                    .font(Typography.textStrong).frame(minHeight: 44)
+                    .buttonStyle(LoopflowButtonStyle())
             }
         }
         .frame(maxWidth: .infinity).padding(16)
@@ -280,7 +278,7 @@ struct MobileSavedTaskRequestView: View {
                 } else if let request = model.savedRequest(id) {
                     if let outcome = request.outcome, outcome.state != .inProgress {
                         Button("Open Task") { action = Task { await open() } }
-                            .buttonStyle(.borderedProminent).controlSize(.large)
+                            .buttonStyle(LoopflowButtonStyle(.accent))
                     } else {
                         Button("Check status") {
                             action = Task {
@@ -288,11 +286,10 @@ struct MobileSavedTaskRequestView: View {
                                 if model.savedRequest(id)?.outcome?.state == .started { await open() }
                             }
                         }
-                        .buttonStyle(.borderedProminent).controlSize(.large)
+                        .buttonStyle(LoopflowButtonStyle(.accent))
                     }
                 }
             }
-            .tint(theme.palette.accent).foregroundStyle(theme.palette.accentText)
             .frame(maxWidth: .infinity).padding(16).background(theme.palette.background)
         }
         .onAppear { model.clearError() }

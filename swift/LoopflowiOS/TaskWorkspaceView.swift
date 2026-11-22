@@ -79,21 +79,6 @@ private enum Loaded<Value> {
     case loading, failed(String), value(Value)
 }
 
-private struct LoadFailure: View {
-    let message: String
-    let retry: () -> Void
-
-    var body: some View {
-        ContentUnavailableView {
-            Label("Couldn’t load", systemImage: "wifi.exclamationmark")
-        } description: {
-            Text(message)
-        } actions: {
-            Button("Try again", action: retry)
-        }
-    }
-}
-
 /// Files the Task changed from its base, each opening its diff.
 struct TaskChangesView: View {
     let client: RemoteMobileClient
@@ -105,9 +90,12 @@ struct TaskChangesView: View {
         Group {
             switch changes {
             case .loading: ProgressView()
-            case .failed(let message): LoadFailure(message: message) { Task { await load() } }
+            case .failed(let message):
+                StateView("Couldn’t load", sentence: message) {
+                    Button("Try again") { Task { await load() } }.buttonStyle(LoopflowButtonStyle(.accent))
+                }
             case .value(let changes) where changes.files.isEmpty:
-                ContentUnavailableView("No changes yet", systemImage: "plusminus")
+                StateView("No changes yet")
             case .value(let changes):
                 List(changes.files) { file in
                     NavigationLink {
@@ -159,7 +147,10 @@ struct TaskFileView: View {
         Group {
             switch file {
             case .loading: ProgressView()
-            case .failed(let message): LoadFailure(message: message) { Task { await load() } }
+            case .failed(let message):
+                StateView("Couldn’t load", sentence: message) {
+                    Button("Try again") { Task { await load() } }.buttonStyle(LoopflowButtonStyle(.accent))
+                }
             case .value(let file):
                 if let content = file.content {
                     ScrollView([.vertical, .horizontal]) {
@@ -170,7 +161,7 @@ struct TaskFileView: View {
                             .padding(12)
                     }
                 } else {
-                    ContentUnavailableView(file.state.title, systemImage: "doc")
+                    StateView(file.state.title)
                 }
             }
         }
@@ -199,9 +190,12 @@ struct TaskDiffView: View {
         Group {
             switch diff {
             case .loading: ProgressView()
-            case .failed(let message): LoadFailure(message: message) { Task { await load() } }
+            case .failed(let message):
+                StateView("Couldn’t load", sentence: message) {
+                    Button("Try again") { Task { await load() } }.buttonStyle(LoopflowButtonStyle(.accent))
+                }
             case .value(let diff) where diff.binary:
-                ContentUnavailableView("Binary file", systemImage: "doc")
+                StateView("Binary file")
             case .value(let diff):
                 ScrollView([.vertical, .horizontal]) {
                     LazyVStack(alignment: .leading, spacing: 0) {

@@ -11,6 +11,7 @@ struct ThemeChooser: View {
     var body: some View {
         // System shows both sides; Light or Dark shows only its own.
         let sides: [AppearanceMode] = appearance.current.mode == .system ? [.light, .dark] : [appearance.current.mode]
+        let editingYours = editing && appearance.selectedSource == .yours
         VStack(alignment: .leading, spacing: Spacing.lg) {
             Text("Choose Theme").serif(.title).foregroundStyle(palette.emphasisInk)
             Picker("Mode", selection: Binding(get: { appearance.current.mode }, set: { appearance.previewMode($0) })) {
@@ -23,7 +24,7 @@ struct ThemeChooser: View {
             Text("Previewing \(appearance.selectedTheme.name)")
                 .font(Typography.meta).foregroundStyle(palette.textSecondary)
             ScrollView {
-                if editing, appearance.selectedSource == .yours {
+                if editingYours {
                     ThemeEditor(appearance: appearance)
                 } else {
                     VStack(alignment: .leading, spacing: Spacing.sm) {
@@ -48,7 +49,7 @@ struct ThemeChooser: View {
                 Text($0).foregroundStyle(palette.failure).textSelection(.enabled)
             }
             HStack {
-                if editing, appearance.selectedSource == .yours {
+                if editingYours {
                     Button("Done Editing") { editing = false }
                 } else {
                     // Here rather than under the chosen card, so choosing a card never moves the grid.

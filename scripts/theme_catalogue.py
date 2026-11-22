@@ -1,8 +1,7 @@
 """Write the generated built-in themes, the prototype's theme table and the website's colors.
 
-Eleven families, a light and a dark theme each, come from the specs below; Loopflow
-Light and Loopflow Dark are written by hand and only read here. loopflow.studio is
-drawn in Loopflow Light. Change a theme by editing its spec and rerunning; never
+Each family below is a light and a dark theme; Loopflow Light and Loopflow Dark are
+written by hand and only read here. loopflow.studio is drawn in Loopflow Light. Change a theme by editing its spec and rerunning; never
 edit a generated file.
 
     uv run python scripts/theme_catalogue.py           # rewrite Catalogue/, desktop-themes.js and theme.css
@@ -362,7 +361,7 @@ def generate(spec, dark):
 
 
 def catalogue():
-    """The 22 generated themes, each family's light theme before its dark one."""
+    """The generated themes, each family's light theme before its dark one."""
     themes = []
     for family in FAMILIES:
         for mode in ("light", "dark"):

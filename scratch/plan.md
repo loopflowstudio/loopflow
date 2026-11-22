@@ -51,6 +51,8 @@ Built, in PR #2020: the two defaults and the `loopflow-titlebar` role (round 1),
 
 - 2026-11-22, implement round 7: `swift test … 'ThemeTests|ThemeWorkflowTests'` 27 passed (before the bottom-bar move), then `ThemeWorkflowTests` 4 passed after it; `theme_catalogue.py --check` and `test_theme_catalogue.py` passed. The runtime 13/13 count precondition in `ThemeDefinition.builtins` is deleted; `catalogueIsTwelveFamiliesWithALightAndADarkTheme` names the list. Not run: `documented_commands::` for the `swift/README.md` edit (gate), the chooser on a display (ship-review: does any row move when a card is chosen?).
 
+- 2026-11-22, compress round 7: one `editingYours` in `ThemeChooser`, catalogue docstrings without counts. `ThemeWorkflowTests` 4 passed; `theme_catalogue.py --check` passed.
+
 ## Demo
 
 Dev app → Settings → Choose Theme: 12 cards per side in their own colors, both sides in System mode. Click Fig and the window turns plum with lime; Fig Leaf is the light half. Import a dark file from the light section in Light mode: the mode switches to Dark and the file previews there.

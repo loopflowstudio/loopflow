@@ -127,4 +127,4 @@ Remaining:
 
 ## Docs
 
-Written ahead of the build: `swift/README.md` (Diff: grammar colors, skipped lines in step comparisons, rendered Markdown, image and HTML diffs and **Source**; Files Read shows images) and `docs/workspaces.md` (`lf task file ENG-123 README.md --at parent`). The `documented_commands` check fails on that `--at` example until slice 3 adds the flag to Clap.
+Written ahead of the build: `swift/README.md` (Diff: grammar colors, skipped lines in step comparisons, rendered Markdown, image and HTML diffs and **Source**; Files Read shows images) and `docs/workspaces.md` (`lf task file ENG-123 README.md --at parent`). Slice 3's flag makes that example pass `documented_commands`; the README's rendered-Markdown, HTML and **Source** lines describe slice 4.

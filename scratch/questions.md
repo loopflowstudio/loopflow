@@ -114,3 +114,28 @@ Checks (slice 3):
 - `uv run python scripts/test_ios.py`: TEST SUCCEEDED, 45 tests, 2026-11-22. CI reruns.
 - `uv run python scripts/check_swift_multiplatform_boundaries.py`: passed.
 - The Task screen on a phone against a real Machine (sentence, Run, Auto-Ship): not done; demo.
+
+Made in implement (slice 4) with nobody present; each is reversible.
+
+- **`spacing: 0` is allowed by the source scan.** It says "no gap"; there is
+  no step for it and `Spacing.none` would be a name for nothing.
+- **Literal → step**: 6 → `xs` inside a row and `sm` between stacked lines;
+  10 and 14 → `md`; 28 → `xxl`; 18 and 20 → `xl`. The Notice's paddings
+  (14, 10, 8, bottom 18) became `lg`, `md`, `sm`, `xl`, which moves the Mac's
+  Notice by 2 pt on three sides.
+- **The reply field's radius is `pane` (12, was 20)** and it holds a 44 pt
+  minimum height.
+- **44 pt frames name `HitTarget.touch`**, including the terminal's "latest"
+  button; the scan does not check frames.
+- **"Enter address" on pairing is the neutral button.** It was an unstyled
+  button that drew as body text in the theme's ink.
+- **The unavailable Session's "Changes" is its accent button** and opens the
+  same sheet as the toolbar's.
+
+Checks (slice 4):
+
+- `swift test --filter TypographyDisciplineTests`: 2 tests passed, 2026-11-22. Gate reruns.
+- `uv run python scripts/test_ios.py`: TEST SUCCEEDED, 45 tests, 2026-11-22, before "Enter address" took the neutral style; `xcodebuild build` succeeded after. CI reruns.
+- `uv run python scripts/check_swift_multiplatform_boundaries.py`: passed.
+- Pairing on an iPhone SE (3rd generation) Simulator, iOS 26.2, light and dark: looked at, `scratch/look/pairing-{light,dark}.png`.
+- Task list, a Task, New Task against a real Machine: not done; demo. `lf server mobile --status` reported ready and `~/.lf/mobile-same-device` exists, but no tool here taps in a Simulator.

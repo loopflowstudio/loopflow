@@ -19,29 +19,21 @@ says the Task waits, the screen offers the Run that moves it.
 
 ## What the code is today
 
-After slices 1 to 3. Built: the per-platform ramp, `HitTarget.control`,
-`TaskRow` and `TaskRowStatus`, `LoopflowButtonStyle`, `StateView`,
-`StatusMark`, `WorkflowLine` and `TaskGraph.runAction(issue:)`, all in
-`swift/Loopflow/Design/`; the phone's list, buttons and states draw them; the
-Task screen watches `ServedRead.taskGet`, shows the sentence in full and has
-"Task actions" (Start or Run, Auto-Ship, Stop Auto-Ship); one status
-vocabulary, held by `TaskStatusTests`. Still to change:
+After slices 1 to 4, everything in this plan is built. On top of slices 1
+to 3: no line in `swift/LoopflowiOS` or `Loopflow/Services/Notice.swift`
+passes a literal padding, spacing or radius, and `TypographyDisciplineTests`
+fails on one in `LoopflowiOS` (`spacing: 0` passes); the phone terminal has
+`adjust-cell-height = 10%`; the New Task field is typed in `lede`; the
+unavailable Session state has a "Changes" button; pairing was looked at on an
+iPhone SE Simulator in light and dark (`scratch/look/`). Still to do:
 
-- 43 lines in `swift/LoopflowiOS` pass a literal padding, spacing or radius
-  (`MobileNewTaskView` 18, `SessionView` 10, `MachineConnectionView` 5,
-  `TaskWorkspaceView` 6, `MobileRepositoryPicker` 3, `MachineCodeScanner`
-  1; four of them are `spacing: 0`), and 4 in `swift/Loopflow/Services/Notice.swift`.
-  `TypographyDisciplineTests` does not scan for them yet, though
-  `swift/LoopflowiOS/README.md` says it does.
-- The terminal reads `Typography.terminalSize` but lacks the Mac's
-  `adjust-cell-height = 10%` (`GhosttyManager.swift:132`).
-- The Session state "unavailable" has no "Changes" button of its own.
-- The shared comment at `Loopflow/Services/PendingChanges.swift:107` still
-  says "Auto on and Auto off", the Mac's Notice wording
-  (`LoopflowMac/WorkModel.swift:2698`). Open choice, not blocking: the Mac's
-  Notice becomes "Auto-Ship requested", or the two surfaces keep different
-  words for one request (`scratch/questions.md`).
-- Nothing has been looked at in the Simulator.
+- Look at the Task list, a Task and New Task on a phone or Simulator against
+  a real Machine (demo). Mobile access and `~/.lf/mobile-same-device` are on
+  here, but nothing on this Mac can tap in a Simulator (no `idb`), so pairing
+  could not be driven past its first screen.
+- Open choice, not blocking: the Mac's Notice
+  (`LoopflowMac/WorkModel.swift:2698`) says "Auto on requested" while the
+  phone's says "Auto-Ship requested" (`scratch/questions.md`).
 
 ## Design
 
@@ -372,10 +364,12 @@ and New Task screens other than the New Task question.
    hides the sentence from `PendingChanges.acceptsChanges` (the Machine is
    away), not from the watch. Not yet seen on a device or Simulator: the
    wrapped sentence above the terminal (slice 4's look).
-4. **New Task, pairing, terminal, spacing sweep.** Next. The New Task field in
-   `lede`, the pairing screen's buttons and field, terminal cell height
-   (its size already reads `Typography.terminalSize`), the remaining literals;
-   DESIGN.md and the two READMEs; the Simulator look, light and dark.
+4. **New Task, pairing, terminal, spacing sweep.** Built. The literals map
+   to steps as the Design section says; the reply field keeps a 44 pt
+   minimum height now that its padding is `sm`. Pairing's "Enter address"
+   became the neutral button after the look showed it reading as body text.
+   What it taught: the docs written ahead already matched, so only the
+   phone README gained a line (the unavailable state's Changes).
 
 ## Done when
 

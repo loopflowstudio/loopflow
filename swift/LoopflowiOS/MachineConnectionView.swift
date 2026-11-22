@@ -150,8 +150,8 @@ struct MachineAddressView: View {
                                 enteringAddress = true
                                 addressFocused = true
                             }
-                                .frame(minHeight: HitTarget.touch)
-                                .disabled(connecting)
+                            .buttonStyle(LoopflowButtonStyle())
+                            .disabled(connecting)
                         }
                         if let error {
                             Text(error)

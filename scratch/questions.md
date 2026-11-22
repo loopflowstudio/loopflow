@@ -43,3 +43,13 @@
 - `/favicon.ico` answers 404: fast_app's `/{fname}.{ext:static}` route
   catches it first and looks for `./favicon.ico`, so main.py's favicon
   handler never runs. Browsers use the `<link rel="icon">`; left alone.
+
+# QA (2026-11-21)
+
+- Pico loads from `cdn.jsdelivr.net/npm/@picocss/pico@latest`, unpinned, on
+  every page. Pinning a version or dropping Pico (`pico=False`) is a separate
+  change; most of the site's resets exist to undo Pico.
+- The 404 page's words ("Page not found", Home · Docs) are new copy, kept to
+  the minimum a site page needs.
+- The /download copy button now shares the homepage's `data-copy` script, so it
+  says "Copied" on click; its icon returns after 1.6s.

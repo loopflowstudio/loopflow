@@ -160,17 +160,21 @@ h1, h2, h3 {
     margin: 0 auto var(--space-20);
     line-height: 1.5;
 }
-a:focus-visible,
-.copy-btn:focus-visible {
-    outline: 2px solid var(--burgundy);
+/* One focus ring; it also clears Pico's blue box-shadow ring. */
+:is(a, button, summary, pre, [tabindex]):focus-visible {
+    outline: 2px solid var(--wine);
     outline-offset: 2px;
+    box-shadow: none;
 }
 
 .install-code-wrapper {
-    display: inline-flex;
+    display: flex;
     align-items: center;
     gap: var(--space-8);
-    max-width: 100%;
+}
+.install-code-wrapper .install-code {
+    flex: 1;
+    min-width: 0;
 }
 .install-code {
     background: var(--bg);
@@ -181,6 +185,7 @@ a:focus-visible,
     font-size: var(--t-text);
     margin: 0;
     overflow-x: auto;
+    text-align: left;
 }
 .install-code code {
     color: var(--text);
@@ -191,7 +196,7 @@ a:focus-visible,
     border-radius: var(--radius-md);
     padding: var(--space-16) var(--space-16);
     cursor: pointer;
-    transition: all 0.15s;
+    transition: background-color 0.15s, border-color 0.15s;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -234,7 +239,7 @@ a:focus-visible,
     margin-bottom: var(--space-8);
 }
 .install-option {
-    max-width: 420px;
+    max-width: 640px;
     margin: 0 auto;
     padding: var(--space-24) var(--space-24);
     border-radius: var(--radius-lg);
@@ -393,10 +398,6 @@ a:focus-visible,
     height: 100%;
     top: 0;
     transform: none;
-}
-.docs-nav a:focus-visible {
-    outline: 2px solid var(--wine);
-    outline-offset: 2px;
 }
 .docs-nav-child a {
     padding-left: var(--space-24);
@@ -690,10 +691,6 @@ h3:hover .anchor-link,
 .docs-content a:hover {
     text-decoration-color: var(--wine);
 }
-.docs-content a:focus-visible {
-    outline: 2px solid var(--wine);
-    outline-offset: 2px;
-}
 .docs-content hr {
     border: none;
     border-top: 1px solid var(--border);
@@ -900,24 +897,35 @@ h3:hover .anchor-link,
         min-height: 52px;
         padding: 0 var(--space-4) var(--space-16);
         border-bottom: 1px solid var(--border-warm);
-        color: var(--text);
         cursor: pointer;
         font-family: var(--font-sans);
         font-size: var(--t-lede);
         font-weight: 600;
         list-style: none;
     }
+    /* Outranks Pico's accordion colors: closed, focused and open. */
+    .docs-nav .docs-nav-disclosure > summary:not([role]),
+    .docs-nav .docs-nav-disclosure[open] > summary:not([role]):not(:focus) {
+        color: var(--text);
+    }
     .docs-nav-disclosure > summary::-webkit-details-marker {
         display: none;
     }
     .docs-nav-disclosure > summary::after {
         content: "+";
+        float: none;
+        width: auto;
+        height: auto;
+        margin: 0;
+        background: none;
+        transform: none;
         color: var(--text-secondary);
         font-size: var(--t-lede);
         font-weight: 400;
     }
     .docs-nav-disclosure[open] > summary::after {
         content: "−";
+        transform: none;
     }
     .docs-nav-disclosure > summary span:last-child {
         color: var(--text-secondary);

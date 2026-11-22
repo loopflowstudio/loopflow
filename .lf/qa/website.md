@@ -6,3 +6,7 @@ Read when the change touches the website (`website/`), its stylesheet or `docs/d
 - `docs/dev/index.html` is generated from the site: after any `style.css` edit, run `website/.venv/bin/python scripts/render_architecture_html.py` (the repo `uv run` lacks fasthtml); `tests/test_portable_architecture.py` fails until you do.
 - `/design`, `/colors` and `/fonts` are standalone internal pages with inline styles; `style.css` doesn't reach them.
 - Ghostty config strings: `/Applications/Ghostty.app/Contents/MacOS/ghostty +validate-config --config-file=<file>` rejects unknown keys.
+- Find Pico leaks by sweeping computed `color`/`background`/`border`/`outline`/`box-shadow` on every crawled page for blue (`rgb(1,88,135)`, `rgba(2,154,232,.5)`); open `details` and Tab through pages first, since Pico's accordion colors and focus ring only show then.
+- Read focus outlines after keyboard `Tab`, not `.focus()`; an element with `transition: all` reports a 0px outline mid-animation.
+- Clipboard checks: `context.grant_permissions(["clipboard-read","clipboard-write"])`, then `navigator.clipboard.readText()`; wait for the "Copied" label with `expect(...).to_have_text`, it lands after the clipboard promise.
+- Screenshots beyond the first viewport need `full_page=True` with `clip`; run scripts with absolute output paths, `uv run` from `website/` changes the cwd.

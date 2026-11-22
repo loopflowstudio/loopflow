@@ -126,13 +126,9 @@ thing, or show nothing. "Coming soon" over a drawing is two problems.
 
 **Values outside the scale.** See [How the system works](#how-the-system-works).
 - Desktop: 172 literal paddings.
-- iPhone: `Spacing` and `CornerRadius` are never used; `MobileType`
-  (`swift/LoopflowiOS/MobileType.swift`) passes its own sizes, 12 to 24.
 
 **Two of the same thing.** One component per job, on every surface.
-- Desktop has two Create Wave forms (`WavesView.swift`,
-  `WorkNavigator.swift`).
-- iPhone repeats one primary button by hand eight times in two shapes.
+- Desktop has two Create Wave forms (`WavesView.swift`, `WorkNavigator.swift`).
 
 **Tiny text.** Nothing a person is meant to read is under 11 pt on Desktop,
 12 pt on iPhone or 12 px on the web.
@@ -228,34 +224,52 @@ OFL) and requests nothing from a font CDN.
 The apps bundle static files (`swift/Loopflow/Fonts/`) and request each face
 by PostScript name (`Typography.*Face`), so nothing is synthesized.
 
-Desktop ramp (`Typography` in `swift/Loopflow/Design/DesignSystem.swift`):
+App ramp (`Typography` in `swift/Loopflow/Design/DesignSystem.swift`). A step
+has one name and a size on each platform, so a shared component that names
+`Typography.text` is 13 pt on the Mac and 17 pt on the phone:
 
-| Step | Face | Size | Use |
-|------|------|------|-----|
-| `display` | Old Standard 400 | 34 | Wave page title, "What do you want?" in New Task (`.serif(.display)`) |
-| `title` | Old Standard 400 | 26 | Task title in the Brief, the title of an empty or failed pane (`.serif(.title)`) |
-| `lede` | Atkinson 600 | 17 | Wave objective, a document's first heading, the request you type in New Task |
-| `text` | Atkinson 400 | 13 | Everything else |
-| `textStrong` | Atkinson 600 | 13 | Selected row titles, Session names |
-| `meta` | Atkinson 400 | 11 | Meta, ranks |
-| `mono` | Spline Sans Mono 400 | 12 | Commands, IDs, paths |
-| `terminalSize` | Spline Sans Mono 400 | 13 | Ghostty's `font-size` default; Ghostty draws the cells |
+| Step | Face | Mac | iPhone | Use |
+|------|------|-----|--------|-----|
+| `display` | Old Standard 400 | 34 | 34 | Wave page title, "What do you want?" in New Task (`.serif(.display)`) |
+| `title` | Old Standard 400 | 26 | 26 | Task title in the Brief, a state's title (`.serif(.title)`) |
+| `lede` | Atkinson 600 | 17 | 20 | Wave objective, a document's first heading, the request you type in New Task |
+| `text` | Atkinson 400 | 13 | 17 | Everything else |
+| `textStrong` | Atkinson 600 | 13 | 17 | Selected row titles, Session names |
+| `meta` | Atkinson 400 | 11 | 13 | Meta, ranks, a row's second line |
+| `mono` | Spline Sans Mono 400 | 12 | 14 | Commands, IDs, paths, diffs |
+| `terminalSize` | Spline Sans Mono 400 | 13 | 12 | Ghostty's `font-size` default; Ghostty draws the cells |
 
 Serif is set only through `.serif(_:)`, which applies the −3% tracking and
-turns off common ligatures with it. No step takes a size.
+turns off common ligatures with it. No step takes a size. Mac sizes are fixed;
+iPhone sizes are the size at the default Dynamic Type setting and scale with
+it. The phone's body is 17 because that is the platform's reading size, its
+`meta` is one above the 12 pt floor, and its terminal is 12 because 13 costs
+columns on a 375 pt screen.
 
-iPhone has no ramp of its own yet; `MobileType` keeps 12 to 24 in these faces.
+Components, in `swift/Loopflow/Design/`, for both apps: `TaskRow`,
+`StatusMark`, `WorkflowLine`, `LoopflowButtonStyle` (`.neutral`, `.accent`,
+`.destructive`) and `StateView`. The Mac also has `TitleBar` and `EmptyState` in
+`swift/LoopflowMac/Design/`.
 
-Components, in `swift/LoopflowMac/Design/`: `TaskRow`, `StatusMark`,
-`WorkflowLine`, `LoopflowButtonStyle` (`.neutral`, `.accent`, `.destructive`),
-`TitleBar` and `EmptyState`. `EmptyState` is every pane with nothing to show
-or a failed read; a list with nothing in it is one sentence (`.emptyLine()`),
-and a failure beside content that stays is a `FailureLine`. A source scan in
-`TypographyDisciplineTests` fails on `ContentUnavailableView` in the Mac app. The workflow line's steps, running step and sentence come from
-Rust (`TaskGraph.steps`, `current_step`, `sentence`), so `lf task status`
-prints the same sentence. Before a Task stands on a Graph, the line draws the
-catalog's `workflow` (`lf graph list --json`): the same steps, and where you
-take part as its sentence.
+- `TaskRow` takes its status as a `TaskRowStatus`, never a string, so a
+  surface cannot bring its own word. The word is what the Task's conversation
+  reports (Blocked, Busy, Available, Done, Error), else its lifecycle word.
+- `WorkflowLine`'s steps, running step and sentence come from Rust
+  (`TaskGraph.steps`, `current_step`, `sentence`), so `lf task status` prints
+  the same sentence. Where the steps do not fit, the sentence stands alone and
+  wraps. Before a Task starts, the line draws the catalog’s workflow steps
+  (`lf graph list --json`). New Task shows where you take part beneath them.
+- `TaskActions` (beside `WorkflowLine`) is what a Task offers: Start or Run,
+  Auto-Ship or Stop Auto-Ship, and Rust's reason when a run cannot start. The
+  Mac's Workflow bar and the phone's "Task actions" menu draw it; neither
+  decides what to offer, and the Notice names an action by its button's words.
+- `LoopflowButtonStyle` is as tall as the platform's control height. On the
+  phone the accent button fills the width it is offered; a screen has one.
+- On iPhone, `StateView` shows a left-aligned serif title, a sentence and
+  any actions. On Mac, `EmptyState` also shows the Machine’s error in mono
+  and fits dashboard slots. An empty list uses `.emptyLine()`, and a failure
+  beside retained content uses `FailureLine`. `TypographyDisciplineTests`
+  checks both apps for `ContentUnavailableView`.
 
 Website ramp, for every page (`:root` in `website/static/style.css`):
 
@@ -293,7 +307,7 @@ their own.
 |----------|-------|
 | Spacing | 2, 4, 8, 12, 16, 20, 24, 32 (`Spacing.xxs` … `xxxl`) |
 | Radius | 4, 8, 12, 16 (`CornerRadius.control`, `row`, `pane`, `floating`) |
-| Hit target | 24 Desktop, 32 comfortable, 44 touch |
+| Hit target | 24 Desktop, 32 comfortable, 44 touch; `HitTarget.control` is the platform's control height (24 Mac, 44 iPhone) |
 | Duration | 100 ms hover and chevrons, 160 ms selection and panels, 240 ms sidebar and splits |
 
 The website names its steps by value: `--space-4` through `--space-96`

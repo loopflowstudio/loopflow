@@ -20,20 +20,16 @@ struct MachineCodeScanner: View {
                     CameraScanner(accept: accept, issue: { message = $0 })
                         .overlay(alignment: .bottom) {
                             Text(message ?? "Point your camera at the code in Loopflow’s Mobile settings.")
-                                .font(MobileType.text(16))
-                                .padding(20).frame(maxWidth: .infinity)
+                                .font(Typography.text)
+                                .padding(Spacing.xl).frame(maxWidth: .infinity)
                                 .background(.regularMaterial)
                         }
                 } else {
-                    ContentUnavailableView {
-                        Label("Scan a QR code", systemImage: "qrcode.viewfinder")
-                    } description: {
-                        Text(message ?? "Preparing the camera…")
-                    } actions: {
+                    StateView("Scan a QR code", sentence: message ?? "Preparing the camera…") {
+                        Button("Enter an address instead", action: enterAddress).buttonStyle(LoopflowButtonStyle(.accent))
                         if denied, let settings = URL(string: UIApplication.openSettingsURLString) {
-                            Button("Open Settings") { openURL(settings) }
+                            Button("Open Settings") { openURL(settings) }.buttonStyle(LoopflowButtonStyle())
                         }
-                        Button("Enter an address instead", action: enterAddress)
                     }
                 }
             }

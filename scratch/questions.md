@@ -298,3 +298,7 @@ Made while building slice 8, with nobody present.
     reach the note any other way.
 76. Neither diff-stream failure was looked at in the Dev app: both need a
     file read to fail on a live Machine.
+
+77. During the sync with main, the Mac keeps its compact dashboard and
+    machine-error layouts in `EmptyState`; the phone keeps `StateView`.
+    The shared workflow line wraps its sentence wherever its container allows.

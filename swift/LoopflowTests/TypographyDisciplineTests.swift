@@ -1,7 +1,7 @@
 import Foundation
 import Testing
 
-/// Mac text is set on the ramp in `Design/DesignSystem.swift`. A size picked at a
+/// Mac and iPhone text is set on the ramp in `Design/DesignSystem.swift`. A size picked at a
 /// call site, a system text style or a sized helper puts a face on screen the
 /// design does not have.
 @Suite("Typography discipline")
@@ -10,16 +10,10 @@ struct TypographyDisciplineTests {
         .deletingLastPathComponent()
         .deletingLastPathComponent()
 
-    private static let rules: [(pattern: String, reason: String, outsideDesignOnly: Bool)] = [
-        (#"(Font)?\.custom\("#, "a face chosen outside Design/", true),
-        (#"\.system\("#, "a system font", false),
-        (#"\.font\(\.(largeTitle|title|title2|title3|headline|subheadline|body|callout|footnote|caption|caption2)\b"#, "a system text style", false),
-        (#"Typography\.\w+\("#, "a sized Typography call", false),
-    ]
+    private typealias Rule = (pattern: String, reason: String, outsideDesignOnly: Bool)
 
-    /// Every line of code under `directories` that matches a rule, comments left out.
-    private static func violations(in directories: [String],
-                                   rules: [(pattern: String, reason: String, outsideDesignOnly: Bool)]) throws -> [String] {
+    /// Every line of Swift under `directories` that matches a rule, comments aside.
+    private static func violations(in directories: [String], _ rules: [Rule]) throws -> [String] {
         var violations: [String] = []
         for directory in directories {
             let root = swiftRoot.appendingPathComponent(directory)
@@ -43,16 +37,34 @@ struct TypographyDisciplineTests {
         return violations
     }
 
-    @Test("Loopflow and LoopflowMac set every font from the ramp")
+    @Test("Loopflow, LoopflowMac and LoopflowiOS set every font from the ramp")
     func everyFontComesFromTheRamp() throws {
-        let violations = try Self.violations(in: ["Loopflow", "LoopflowMac"], rules: Self.rules)
+        let violations = try Self.violations(in: ["Loopflow", "LoopflowMac", "LoopflowiOS"], [
+            (#"(Font)?\.custom\("#, "a face chosen outside Design/", true),
+            (#"\.system\("#, "a system font", false),
+            (#"\.font\(\.(largeTitle|title|title2|title3|headline|subheadline|body|callout|footnote|caption|caption2)\b"#, "a system text style", false),
+            (#"Typography\.\w+\("#, "a sized Typography call", false),
+        ])
         #expect(violations.isEmpty, "\(violations.joined(separator: "\n"))")
     }
 
     @Test("LoopflowMac draws every empty or failed pane as EmptyState")
     func noGreyIconOverACentredTitle() throws {
-        let violations = try Self.violations(in: ["LoopflowMac"], rules: [
+        let violations = try Self.violations(in: ["LoopflowMac"], [
             (#"ContentUnavailableView"#, "a centred icon and title; use EmptyState", false),
+        ])
+        #expect(violations.isEmpty, "\(violations.joined(separator: "\n"))")
+    }
+
+    /// `spacing: 0` passes: it says "no gap", which is not a step on the scale.
+    @Test("LoopflowiOS draws buttons, states and spacing from the shared design")
+    func thePhoneUsesTheSharedButtonStateViewAndSteps() throws {
+        let violations = try Self.violations(in: ["LoopflowiOS"], [
+            (#"\.borderedProminent"#, "a hand-made primary button; use LoopflowButtonStyle(.accent)", false),
+            (#"ContentUnavailableView"#, "a stock empty view; use StateView", false),
+            (#"padding\((\.\w+, *)?\d|EdgeInsets\([^)]*\d"#, "a literal padding; use a Spacing step", false),
+            (#"spacing: *[1-9]"#, "a literal spacing; use a Spacing step", false),
+            (#"ornerRadius: *\d"#, "a literal radius; use a CornerRadius step", false),
         ])
         #expect(violations.isEmpty, "\(violations.joined(separator: "\n"))")
     }

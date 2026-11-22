@@ -145,10 +145,10 @@ open failures (offline, signed out) keep writing, as now.
 
 ### Request log
 
-`LinearRequestRecord` gains `endpoint: Option<Allowance>` plus
-`endpoint_name: Option<String>`, and `retry_after_ms`, so the next 429 says
-which limit it was. Old lines without the fields still parse: serde reads a
-missing `Option` field as `None`.
+`Allowances` gains `endpoint: Option<Allowance>`, `endpoint_name` and
+`retry_after_ms`, and `LinearRequestRecord` flattens `Allowances` instead of
+copying its fields, so the next 429 says which limit it was. The JSON keys
+are unchanged; old lines without the new fields still parse as `None`.
 
 ## Docs
 

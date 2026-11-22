@@ -9,7 +9,9 @@ first:
   - path: rust/loopflow-execution/src/linear/cooldown.rs
     why: Home-wide versus per-operation pauses
   - path: rust/loopflow-execution/src/linear/mod.rs
+    why: send checks the operation's own pause
   - path: rust/loopflow-execution/src/linear/request_log.rs
+    why: the record flattens Allowances, endpoint limit included
   - path: rust/loopflow-storage/src/planning/rules.rs
     why: idempotent resends wait the pass window
   - path: rust/loopflow-execution/src/ops/tracker/drain.rs

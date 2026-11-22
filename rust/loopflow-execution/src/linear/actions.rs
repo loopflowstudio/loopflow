@@ -444,15 +444,8 @@ impl LinearClient {
                     .filter(|earlier| earlier.phase == ActionPhase::Confirmed)
                     .filter_map(|earlier| earlier.remote_id.clone())
                     .next_back();
-                let link = PrLink {
-                    task,
-                    issue: &issue,
-                    url: &url,
-                    action,
-                    posted,
-                    attachment: attachment.as_deref(),
-                };
-                Ok(super::urgent(self.pr_link(link)).await)
+                let link = self.pr_link(task, &issue, &url, action, posted, attachment.as_deref());
+                Ok(super::urgent(link).await)
             }
             None => Err(message("link action names nothing to link")),
         }
@@ -460,15 +453,17 @@ impl LinearClient {
 
     /// The PR as one attachment, whose subtitle is its state, and one managed
     /// comment. Both keep their ids, so a state change updates them in place.
-    async fn pr_link(&self, link: PrLink<'_>) -> Sent {
-        let PrLink {
-            task,
-            issue,
-            url,
-            action,
-            posted,
-            attachment,
-        } = link;
+    /// `posted`: an earlier send posted the comment; `attachment`: the one an
+    /// earlier send confirmed.
+    async fn pr_link(
+        &self,
+        task: &TaskId,
+        issue: &str,
+        url: &str,
+        action: &TrackerAction,
+        posted: bool,
+        attachment: Option<&str>,
+    ) -> Sent {
         let (number, state) = (&action.value["number"], &action.value["state"]);
         let state = state.as_str().unwrap_or("Open");
         let title = format!("GitHub PR #{number}");
@@ -748,18 +743,6 @@ impl LinearClient {
 /// already has: `This URL has already been linked with LOO-966.`
 const ALREADY_LINKED: &str = "This URL has already been linked with";
 
-/// One PR link send: the action and what earlier sends recorded.
-struct PrLink<'a> {
-    task: &'a TaskId,
-    issue: &'a str,
-    url: &'a str,
-    action: &'a TrackerAction,
-    /// An earlier send posted the managed comment.
-    posted: bool,
-    /// The attachment an earlier send confirmed.
-    attachment: Option<&'a str>,
-}
-
 /// The id of a PR's managed comment: one per Task and PR URL.
 fn pr_comment_id(task: &TaskId, url: &str) -> OpsResult<String> {
     let id = uuid::Uuid::new_v5(
@@ -926,7 +909,7 @@ mod tests {
 
     use super::pr_comment_id;
     use crate::linear::test_server::{self, json_response};
-    use crate::linear::LinearClient;
+    use crate::linear::{request_log, LinearClient};
     use crate::ops::tracker::Sent;
     use crate::store::Store;
     use loopflow_model::durable::TaskId;
@@ -1038,19 +1021,12 @@ mod tests {
             .iter()
             .map(|body| {
                 let body: Value = serde_json::from_str(body).unwrap();
-                let query = body["query"].as_str().unwrap();
-                let name = query
-                    .split_whitespace()
-                    .nth(1)
-                    .unwrap()
-                    .split('(')
-                    .next()
-                    .unwrap();
+                let (_, name) = request_log::operation(body["query"].as_str().unwrap());
                 match body["variables"]["id"].as_str() {
                     Some(id) if name.contains("Attachment") && id.starts_with("att") => {
                         format!("{name} {id}")
                     }
-                    _ => name.to_owned(),
+                    _ => name,
                 }
             })
             .collect()

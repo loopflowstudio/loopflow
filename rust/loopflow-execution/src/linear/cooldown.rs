@@ -1,7 +1,7 @@
 //! One Linear cooldown and budget per Home, shared by repositories and
 //! refreshed logins. A 429 pauses what Linear limited: every request when an
-//! hourly allowance ran out, else only the operation it refused. The locks cover only these small files, never network I/O
-//! or local saves.
+//! hourly allowance ran out, else only the operation it refused. The locks
+//! cover only these small files, never network I/O or local saves.
 //!
 //! Every response's `x-ratelimit-*` headers update the budget. As the hourly
 //! allowance falls, non-urgent requests are paced and then held, leaving the
@@ -539,9 +539,9 @@ mod tests {
         assert_eq!(record.operation, "ListInitiatives");
         assert_eq!(record.outcome, RequestOutcome::Sent);
         assert_eq!(record.status, Some(200));
-        assert_eq!(record.cost, Some(3));
+        assert_eq!(record.allowances.cost, Some(3));
         assert_eq!(
-            record.requests,
+            record.allowances.requests,
             Some(Allowance {
                 limit: Some(1000),
                 remaining: 900,
@@ -741,11 +741,11 @@ mod tests {
         );
         // The log says which limit Linear applied.
         assert_eq!(
-            records[0].endpoint_name.as_deref(),
+            records[0].allowances.endpoint_name.as_deref(),
             Some("attachmentLinkURL")
         );
         assert_eq!(
-            records[0].endpoint,
+            records[0].allowances.endpoint,
             Some(Allowance {
                 limit: Some(20),
                 remaining: 0,

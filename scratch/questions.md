@@ -1,0 +1,2 @@
+- `Sent::failed` files a GraphQL error answered on a 200 as `Unknown` ("no reply"), so a definite refusal is handled as a lost reply. Not changed in b28a8a (§2 and §3 remove the storm); a separate answered-refusal outcome would be its own Task.
+- `enqueue_pr_link` re-queues identical `Open` links that are later retired "superseded by a later save" (e.g. manabot#566: seqs 662–721). Unexamined.

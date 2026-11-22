@@ -95,24 +95,53 @@ window looks already use. A genuinely lost reply resends at the next pass
 after ten minutes; `lf task sync <id>` resends now. This turns "13 links per
 `lf` command" into "13 links per ten minutes".
 
-### 3. An already-linked PR reuses its attachment
+### 3. A PR keeps its attachment
 
-When `link_attachment` fails with `This URL has already been linked with`,
-`pr_link` reads the issue's attachments and takes the one whose `url` is
-this PR, then goes on to `UpdateAttachment` and the comment as usual.
-`item_attachment_urls` (`IssueAttachments`, `linear/mod.rs`) already pages
-an issue's attachments; it starts returning `{id, url}` and its one caller
-reads `url`. If no attachment on the issue has the URL (linked to another
-issue), the action retires with Linear's message (`Sent::Unsupported`):
-moving a PR between issues is not this Task's call.
+A PR shows on its Linear issue as one attachment, refreshed when its state
+changes. The store already holds that attachment's id: a confirmed link
+action's `remote_id`. On 2026-11-22, 14 of the 15 `sent` link actions had an
+earlier confirmed link for the same subject with a `remote_id`; nothing reads
+it, so every state change sends `LinkAttachment` again and Linear refuses it.
 
-Choice made for review: reuse `IssueAttachments`, which is known to work
-against the live API, over `attachmentsForURL(url:)`, which is one request
-but unprobed here. The match is on Linear's message prefix because the
-error has no distinguishing code in what we saw; the stand-in test pins
-that text.
+`task_link` already scans the owner's earlier actions for `posted`; the same
+scan returns the latest confirmed link's `remote_id` for this subject. Then
+`pr_link`:
 
-Fix the comment on `LINK_ATTACHMENT_MUTATION` to say what Linear does.
+- with a recorded attachment, sends `UpdateAttachment` on it, then the
+  comment. No `LinkAttachment`. If that update fails with Linear's
+  not-found answer (someone removed the attachment), it links as below.
+- without one, sends `LinkAttachment`. When Linear answers `This URL has
+  already been linked with` (a first link whose reply was lost, like seq 722,
+  or another Machine linked it), it reads the issue's attachments
+  (`IssueAttachments`, `item_attachment_urls` in `linear/mod.rs`, which starts
+  returning `{id, url}`; its one caller reads `url`) and takes the one whose
+  `url` is this PR. No match (linked to another issue): the action retires
+  with Linear's message (`Sent::Unsupported`); moving a PR between issues is
+  not this Task's call.
+
+So `LinkAttachment`, the endpoint-limited mutation, goes out once per PR, not
+once per state change, and a link 429 can only ever hold first links.
+
+Choice made for review: the recorded `remote_id` is the attachment's
+identity, as `comment_id` is the comment's; passed over: recovering from
+Linear's "already linked" error on every state change (the earlier version
+of this plan), which keeps a doomed request on the limited endpoint for each
+change. The match on Linear's message prefix stays for the recovery path
+because the error has no distinguishing code in what we saw; the stand-in
+test pins that text.
+
+Fix the comment on `LINK_ATTACHMENT_MUTATION` to say what Linear does: it
+refuses a URL already attached (`This URL has already been linked with
+<issue>.`), it does not return the existing attachment. Fix `pr_link`'s doc
+comment ("sending again refreshes both") the same way.
+
+### 4. A pause is not an action's error
+
+When `Tracker::for_repository`/`for_items` fails with `RateLimited`,
+`drain_repository` stops writing that error onto every queued action: the
+pause belongs to the Home (the cooldown file, `lf history linear`), and
+copying it onto each action erased the error that explained this bug. Other
+open failures (offline, signed out) keep writing, as now.
 
 ### Request log
 
@@ -132,10 +161,14 @@ missing `Option` field as `None`.
 
 - `reset_at`'s "limited takes every scope's reset" branch.
 - The unconditional idempotent `Resend` in `rules::lost_reply`.
-- The wrong "dedupes" comment on `LINK_ATTACHMENT_MUTATION`.
+- The wrong "dedupes" comment on `LINK_ATTACHMENT_MUTATION` and `pr_link`'s
+  "sending again refreshes both".
+- `LinkAttachment` on a PR link whose attachment the store already holds.
+- `drain_repository` writing a pause onto every queued action.
 
-Survives: the 13 stuck link actions in `tracker_actions` confirm on the
-first pass after install through (3); nothing needs hand repair.
+Survives: the stuck link actions in `tracker_actions` confirm on the first
+pass after install through (3): 14 by updating their recorded attachment, seq
+722 through the already-linked recovery; nothing needs hand repair.
 
 ## Slices
 
@@ -150,21 +183,26 @@ first pass after install through (3); nothing needs hand repair.
 2. **Resend window.** `rules::lost_reply` + a drain test: a `sent` idempotent
    link whose send failed is not resent by a second pass inside the window,
    and is by `Bound::NOW`.
-3. **Already-linked PR.** `pr_link` + a stand-in test in `linear/actions.rs`:
-   `attachmentLinkURL` answers `This URL has already been linked with
-   LOO-1.`, `IssueAttachments` lists the URL, and the action confirms with
-   that attachment's id after one `UpdateAttachment`. The second case
-   (URL not on the issue) retires.
+3. **A PR keeps its attachment.** `task_link` + `pr_link` + stand-in tests
+   in `linear/actions.rs`: (a) a state change after a confirmed link sends
+   `UpdateAttachment` on the recorded id and no `LinkAttachment`; (b) a first
+   link answered `This URL has already been linked with LOO-1.` reads
+   `IssueAttachments`, finds the URL and confirms with that id after one
+   `UpdateAttachment`; (c) the URL not on the issue retires. Plus (4) in
+   `drain_repository`, tested in `ops::tracker::drain::`: a paused open
+   leaves an action's saved error as it was.
 
-Order: slice 3 is the smallest and stops the burst that trips the 429
-today, so it may go first; slice 1 is what the outcome needs (a creation
-never waits on a link 429), and slice 2 keeps the next persistent error
-from becoming a storm.
+Order: 3, then 1, then 2. Slice 3 is the smallest, removes the burst that
+trips the 429 today, and shows on the live store within one pass whether the
+recorded attachment holds; slice 1 is what the outcome needs (a creation
+never waits on a link 429); slice 2 keeps the next persistent error from
+becoming a storm.
 
 ## Acceptance at gate
 
 `cargo test -p loopflow-execution --lib linear::cooldown::` and
-`ops::tracker::drain::` pass, including the two new scenarios. On the live
-Machine after install: `lf task create` during a link backlog reaches Linear
-in under a minute; `lf history linear` shows `LinkAttachment` sends at most
-once per ten minutes per link.
+`ops::tracker::drain::` and `linear::actions::` pass, including the new
+scenarios. On the live Machine after install: `lf task create` during a link
+backlog reaches Linear in under a minute; the stuck link actions confirm on
+the first pass; `lf history linear` shows no `LinkAttachment` for a PR whose
+attachment is recorded.

@@ -52,3 +52,14 @@ Each was decided so the work could continue; `scratch/plan.md` has the detail.
 16. **The Wave page's rows no longer name the owner or who moves next.** The
     old row read "idle · Ana · next: user". The shared row shows neither,
     as in the sidebar. Put the owner back on Portfolio rows?
+17. **`DesignDisciplineTests` fails until slice 4.** It lists every literal
+    left in other files (301 lines after slice 2). The branch is not green on
+    that suite between slices.
+18. **The backlog's checkbox always shows.** It used to appear on hover or
+    once something was selected; the prototype draws it on every row. Hide it
+    again until hover?
+19. **The plain-text backlog listing keeps " · " between columns.** Only the
+    words inside a column changed ("Idle, at demo, PR #12", "claimed by
+    you"). Use another separator there?
+20. **Abandon… is a neutral button**, as the prototype draws it, not
+    `.destructive`; a dialog still confirms.

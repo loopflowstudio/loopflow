@@ -170,7 +170,7 @@ private struct KeyboardFocusRing: ViewModifier {
         content.overlay {
             RoundedRectangle(cornerRadius: cornerRadius)
                 .strokeBorder(palette.keyboardFocus, lineWidth: 2)
-                .padding(-3)
+                .padding(-Spacing.xs)
                 .opacity(isFocused ? 1 : 0)
                 .allowsHitTesting(false)
         }

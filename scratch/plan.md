@@ -95,8 +95,8 @@ only the rows.
 - Task rows and the seven ways of saying where a Task stands are gone since
   slice 1: one `TaskRow` drawing one `TaskStanding`, and a click opens the
   Task on every Portfolio list. The backlog row still builds its own standing
-  (`BacklogList.standing`: `execution.step`, else `nextMove.reason`) and its
-  click selects for the action bar; slice 2 changes the first.
+  word from `TaskStanding` since slice 2, and its click selects for the
+  action bar.
 - A Project's key results are drawn twice: circles in `WaveProjectView`,
   `Label`s with a check or a cross in the backlog's objective
   (`BacklogView.swift:723`).
@@ -423,15 +423,36 @@ or `lf desktop` reads unless its view is deleted.
      seven listed above: `TaskWorkflowHeader` ("Completed", "Canceled" where
      the row says "Done", "Abandoned") and the jump palette's detail ("Not
      started", else the lifecycle word). Left; see `scratch/questions.md`.
-2. **The test and the backlog.** Rename the discipline test, add the padding,
-   spacing and radius rules, and bring `BacklogView.swift` and
-   `Design/WorkStyle.swift` to pass them while rebuilding the backlog to the
-   prototype. It shows whether the snap table holds on a dense, real screen
-   (the 9 pt row padding, the 96 pt brief indent, the 5 pt search field) and
-   whether one button style carries a five-action bar that still folds. If
-   rows read cramped at 8, the table changes here, before 300 more lines use
-   it. The test fails on the other files until slice 4; that is the
-   remaining-work list.
+2. **The test and the backlog.** Built. `DesignDisciplineTests` holds the
+   ramp, padding, spacing and radius; `BacklogView.swift`,
+   `Design/WorkStyle.swift` and the focus ring in `DesignSystem.swift` pass
+   it. The backlog is rebuilt to the prototype: serif name, one segmented
+   filter, an action bar of the one button that begins with "N selected",
+   checkbox and chevron before each ID, ownership as words, the standing from
+   `TaskStanding`, key results through `WaveProjectView`. Deleted:
+   `BacklogOwnerMark`, `BacklogOwner.mark`, `BacklogQuietButtonStyle`, the
+   capsule Start, the key-result `Label`s.
+
+   What it taught:
+   - The snap table held without a change. The 9 pt row padding became a
+     32 pt minimum row height (`HitTarget.comfortable`) with `xs` padding,
+     and the 5 pt search field a 24 pt minimum height, so neither needed a
+     new step. Whether rows read cramped is for the Dev app look.
+   - The 96 pt indent became `BacklogUnderTitle`: the row's own columns,
+     empty, before the brief and the reason line. The brief stays a sibling
+     of the row, so drag, drop and click reach the row alone.
+   - A blocked or waiting Task that has not started shows its word too;
+     otherwise the reason line would have no word above it.
+   - Toolbar menus (Move, Start's ▾, the folded "more") use
+     `.menuStyle(.button)` under `LoopflowButtonStyle`. Not seen on a
+     display: whether AppKit draws the custom style on a `Menu` is for qa.
+   - "Claim 3" and "Abandon 3…" lost their counts; the bar's first words say
+     the count. The position reads only for one selected Task.
+   - `lf desktop capture -p backlog` keeps " · " between a row's columns and
+     in its heading; the words inside each column follow the screen.
+   - The test's failures are the list for slices 3 and 4: 301 lines, all
+     outside these three files, `swift/Loopflow/Services/Notice.swift`
+     among them.
 3. **The rest of the dashboard and the Portfolio, and New Wave.** The tile's
    sentence, the pager and the dashboard header; cards flattened, the
    contract-issue notice, the one form.
@@ -461,6 +482,6 @@ or `lf desktop` reads unless its view is deleted.
 | Command | Result | Who runs it |
 |---------|--------|-------------|
 | `scripts/test_desktop.sh --skip-build --filter 'TaskStandingTests\|TaskRowTests\|RoadmapViewTests\|TaskConceptTests\|WorkNavigationTests\|TaskBriefTests\|ProjectActivationTests\|NowProjectionTests\|DashboardWorkspaceTests\|WorkModelTests\|DesktopHeadlessTests'` | passed after slice 1 | build; CI runs the rest |
-| `scripts/test_desktop.sh --filter DesignDisciplineTests` | not run; the suite does not exist yet | build |
-| the grep above | 314 lines at base, 309 after slice 1 | build |
+| `scripts/test_desktop.sh --filter 'BacklogViewTests\|DesignDisciplineTests'` | after slice 2: `BacklogViewTests` passed (12 tests); `DesignDisciplineTests` fails on 301 lines in other files, as planned until slice 4 | build |
+| the grep above | 314 lines at base, 309 after slice 1, 296 after slice 2 | build |
 | Dev app in light, dark and an imported theme | not run; needs a display | qa, review |

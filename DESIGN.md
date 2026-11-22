@@ -207,7 +207,7 @@ covered.
    shown as unknown, not as idle.
 8. **Measured, not asserted.** A claim in this file that can be checked has a
    check: palette contrast in `WorkPaletteTests`, site accessibility in
-   `website/tests/`, sizes and faces in `TypographyDisciplineTests`.
+   `website/tests/`, sizes, faces, padding, spacing and radius in `DesignDisciplineTests`.
 9. **Real content.** Design against the longest Task title, the slowest
    Machine and an empty repository, not placeholder text.
 

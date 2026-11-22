@@ -4,7 +4,7 @@
 import Loopflow
 import SwiftUI
 
-/// Every workspace section heading: small tracked caps, one system.
+/// Every workspace section heading: sentence case in the strong step.
 struct WorkSectionHeading<Trailing: View>: View {
     let title: String
     var count: Int?
@@ -58,11 +58,10 @@ struct WorkChip: View {
     var body: some View {
         Text(text)
             .font(Typography.textStrong)
-            .tracking(0.2)
             .foregroundStyle(tone == .neutral ? tone.ink(in: palette) : tone.text(in: palette))
             .lineLimit(1)
-            .padding(.horizontal, 7)
-            .padding(.vertical, 1)
+            .padding(.horizontal, Spacing.sm)
+            .padding(.vertical, Spacing.xxs)
             .background(tone.fill(in: palette), in: RoundedRectangle(cornerRadius: CornerRadius.control))
             .overlay {
                 if tone == .neutral {
@@ -102,7 +101,7 @@ struct AutoBadge: View {
 }
 
 /// Collapsed heading for a demand-read Task section (Comments, Session history):
-/// chevron, caps title, optional count, and the read's progress.
+/// chevron, title, optional count, and the read's progress.
 struct WorkDisclosureHeading: View {
     let title: String
     let count: Int?
@@ -168,8 +167,8 @@ private struct WorkSelection: ViewModifier {
             .background(selected ? palette.selectionFill : .clear, in: RoundedRectangle(cornerRadius: CornerRadius.row))
             .overlay(alignment: .leading) {
                 if selected {
-                    RoundedRectangle(cornerRadius: 1).fill(palette.selectionEdge)
-                        .frame(width: 2).padding(.vertical, 4)
+                    Capsule().fill(palette.selectionEdge)
+                        .frame(width: Spacing.xxs).padding(.vertical, Spacing.xs)
                 }
             }
     }

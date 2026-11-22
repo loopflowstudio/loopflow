@@ -179,31 +179,43 @@ pass after install through (3): 14 by updating their recorded attachment, seq
 
 ## Slices
 
-1. **Scoped cooldown** (teaches the most: proves a link 429 no longer stops
-   a creation). `cooldown.rs`: global vs operation deadline; `send` checks
-   both; request log records endpoint headers. Test with `test_server`: a
-   429 on `LinkAttachment` carrying healthy global headers and an exhausted
-   endpoint scope pauses the next `LinkAttachment` and sends the next
-   `DeliverTaskCreation`; a 429 with `requests-remaining: 0` still pauses
-   both. Rewrite `cooldown_uses_reset_milliseconds_retry_after_and_safe_missing_reset`
-   for the new reset rules.
-2. **Resend window.** `rules::lost_reply` + a drain test: a `sent` idempotent
-   link whose send failed is not resent by a second pass inside the window,
-   and is by `Bound::NOW`.
-3. **A PR keeps its attachment.** `task_link` + `pr_link` + stand-in tests
-   in `linear/actions.rs`: (a) a state change after a confirmed link sends
-   `UpdateAttachment` on the recorded id and no `LinkAttachment`; (b) a first
-   link answered `This URL has already been linked with LOO-1.` reads
-   `IssueAttachments`, finds the URL and confirms with that id after one
-   `UpdateAttachment`; (c) the URL not on the issue retires. Plus (4) in
-   `drain_repository`, tested in `ops::tracker::drain::`: a paused open
-   leaves an action's saved error as it was.
+All three built (2026-11-22), each with its tests:
 
-Order: 3, then 1, then 2. Slice 3 is the smallest, removes the burst that
-trips the 429 today, and shows on the live store within one pass whether the
-recorded attachment holds; slice 1 is what the outcome needs (a creation
-never waits on a link 429); slice 2 keeps the next persistent error from
-becoming a storm.
+1. **Scoped cooldown** — done. `Cooldown` keeps `<key>` (Home-wide) and
+   `<key>.op/<Operation>`; `deadlines()` replaces `reset_at`. Tests:
+   `linear::cooldown::a_limited_operation_pauses_itself_and_lets_other_writes_through`
+   (LinkAttachment 429 with 9952 left: next LinkAttachment paused, next
+   DeliverTaskCreation sent, log carries endpoint name/allowance),
+   `…_with_the_hourly_allowance_spent_pauses_every_write`,
+   `deadlines_follow_the_limit_linear_reported`. The old
+   `rate_limit_pauses_independent_clients…` fixture sent a 400 with only
+   `requests-reset`; it now also says `requests-remaining: 0`, since a bare
+   limit holds only its operation for a minute.
+2. **Resend window** — done. `rules::an_idempotent_send_repeats_once_per_window`,
+   `ops::tracker::drain::a_failing_idempotent_send_waits_its_window_unless_synced_now`.
+   `task_comments_tests::task_comments_read_and_publish_without_starting_work`
+   expected a failed comment to resend on the next pass; it ages `sent_at`
+   past the window first.
+3. **A PR keeps its attachment** — done. Four stand-in tests in
+   `linear::actions::tests` (merge updates `att-1` with no LinkAttachment;
+   already-linked recovery; another issue retires; removed attachment links
+   again). §4: `OpsError::Tracker` carries `TrackerError::RateLimited` out of
+   `linear_error`, and `drain_repository` skips writing it. No fixture covers
+   §4: the open fails on a rate limit only inside `validate_team_claim`,
+   which the process-wide `VALIDATED_TEAM_CLAIMS` cache skips after the
+   first fixture.
+
+What building taught:
+
+- A removed attachment is detected by reading the issue's attachments after
+  a failed `UpdateAttachment`, not by matching Linear's not-found text, which
+  no log shows. Costs one read per failed update.
+- Each held send still saves the pause text on its own action
+  (`attempt_tracker_action` clears the error, `reject_tracker_action` writes
+  the pause). With (1) that only reaches actions of the paused operation, and
+  with (3) those are first links.
+
+Left: the live acceptance below, after install.
 
 ## Acceptance at gate
 

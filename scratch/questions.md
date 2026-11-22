@@ -1,2 +1,4 @@
 - `Sent::failed` files a GraphQL error answered on a 200 as `Unknown` ("no reply"), so a definite refusal is handled as a lost reply. Not changed in b28a8a (§2 and §3 remove the storm); a separate answered-refusal outcome would be its own Task.
 - `enqueue_pr_link` re-queues identical `Open` links that are later retired "superseded by a later save" (e.g. manabot#566: seqs 662–721). Unexamined.
+- `oauth_tests::pm_read_linear_oauth_sqlite_contention_has_bounded_failure_and_recovers` failed twice here ("Linear credential resolution deadline elapsed") with other checkouts compiling; this branch does not touch OAuth. Not rerun to green; gate/CI decide.
+- A failed comment send now waits ten minutes before resending (slice 2 covers every idempotent kind, not only links). Simpler than a per-kind window; revisit if steers feel slow after a lost reply.

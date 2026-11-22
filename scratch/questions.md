@@ -344,3 +344,17 @@ present; the page is `scratch/concept-review.html`.
 85. 78 stays open and outside this change: `desktop.css`'s `.app.state`
     uses the Mac's inks, and the phone's were not compared with a phone
     prototype here.
+
+Made at the sixth qa, with nobody present; the page is `scratch/qa.html`.
+
+86. Settles 48: "Not started." with no Task selected was seen on an
+    unlocked display, on the app's own background. The white page in
+    earlier captures was `cacheDisplay`.
+87. Slice 9 seen in both themes. Not reached: the line going after choosing
+    a step's commits (no step had commits), and long.txt's own failure in
+    the Files tab's Diff.
+88. Seen once, not settled: one capture drew README.md's header over
+    long.txt's failure line and lines; the captures around it were right.
+    A real fault in the stream, or the capture's pinned header?
+89. Seen, left: after Try again the page holds only the request for eight
+    seconds or more, with nothing saying it is starting. Should it?

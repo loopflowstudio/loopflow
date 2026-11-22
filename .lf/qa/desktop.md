@@ -304,6 +304,23 @@ for each `<name>.req` write `SnapshotService().snapshotWindow(window, …)` to
   "N unchanged lines" row. The stream moves down when "Comparison
   unavailable." arrives, so capture first and take the row's position from
   that capture.
+  A press within a second of the `chmod` can win the race and open the
+  lines; press the file's other row. Open rows are gone after a relaunch.
+- On an unlocked display that someone is using, launch with `open -n -g`:
+  in `live` mode the window mounts behind the others and the capture loop
+  and `lf desktop` work as they do locked. Starting a Task brings the app to
+  the front once.
+- A real screen capture of that window, title bar included, needs no focus:
+  take the window number from `CGWindowListCopyWindowInfo` (owner name is
+  the bundle's name, `kCGWindowIsOnscreen` 1) and run `screencapture -x -o
+  -l <number> out.png`. This is the way to see a `ScrollView` that meets the
+  title bar ("Not started." with no Task selected).
+- `lf desktop do files path=<file>` follows a file: with another file being
+  read it opens a tab and leaves the selection. The Read/Diff control is a
+  menu, so a file's own Diff in Files needs a local-only line setting
+  `store.mode = .diff` after `presentFile`.
+- After a `chmod` back, "Comparison unavailable." goes on its own in 12 to 40
+  seconds; wait for it before reading the stream.
 - A capture right after a change in the checkout can take 15 seconds or more
   to arrive; wait for its `.out` before reading the image.
 - The run's quit script stops the QA app by the PID `pgrep -f` finds for the

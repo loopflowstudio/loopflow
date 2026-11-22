@@ -7,16 +7,16 @@ once their screens shipped; `git show fd90d7e6ad:design/prototypes/desktop-more.
 has them, and `docs/surfaces.md` holds the wording now.
 
 Slices 1 to 8 are built and were looked at in the Dev app
-(`scratch/qa.html`, five runs). The fifth saw slice 8's two diff-stream
+(`scratch/qa.html`, six runs). The fifth saw slice 8's two diff-stream
 failures and fixed one thing: a file read called off by a newer reload was
 recorded as "File not read." (questions 80).
-Slice 9 is built: a file's skipped-lines failure is held with that file's
-opened rows and drawn above its lines (settles questions 81). Its store
-test passed; nobody has looked at it in the Dev app yet.
-**Next:** nothing left to build. qa looks at slice 9 (a `chmod 000` file
-with a skipped-lines row: the line sits under that file's header, not
-first in the stream, and goes after choosing a step), then the gate checks
-and one look at "Not started." on an unlocked display (questions 48).
+Slice 9 is built and was looked at in the Dev app (sixth run, no fix): a
+file's skipped-lines failure sits under that file's header in both themes,
+folds with the file, and does not show in another file's Files Diff
+(settles questions 81). The sixth run also saw "Not started." with no
+Task selected on an unlocked display (settles questions 48).
+**Next:** nothing left to build; the gate checks. Not reached at qa: the
+line going after choosing a step's commits (a store test covers it).
 
 The sync with main (6197582ea4) moved `LoopflowButtonStyle`, `StatusMark`,
 `TaskRow` and `WorkflowLine` to `swift/Loopflow/Design/` and brought the
@@ -682,8 +682,9 @@ demo: not headless; qa or demo runs it.
    - Ran: `scripts/test_desktop.sh --filter 'TaskFilesTests|EmptyStateTests|TypographyDisciplineTests'`
      passed (62 tests in 3 suites), `aFailedSkippedLinesOpenBelongsToItsFile`
      among them.
-   - Not yet looked at in the Dev app: a `chmod 000` file with a
-     skipped-lines row, as the fifth run did; qa looks.
+   - Looked at in the Dev app (sixth run): under the file's header, folded
+     with Viewed, absent from another file's Files Diff, gone once the row
+     opens. Choosing a step's commits was not reached.
 
 Outside this change, on the page for whoever wants it: a stopped Graph's
 reason is one string on the wire, so the Machine's part of "kickoff:

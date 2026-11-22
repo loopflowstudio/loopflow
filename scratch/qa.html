@@ -13,17 +13,89 @@
 </style>
 
 <h1>QA: New Task and the empty and failed states</h1>
-<p>Task 923677. Five runs are on this page, newest first. The fifth, on 2026-11-22 at a28344bb4c plus its one
-fix, reached slice 8's two diff-stream failures with a real unreadable file, and went through the main path again
-after the sync with main on the fourth run's store (a returning user). The fourth, at 406697d19c plus its four
+<p>Task 923677. Six runs are on this page, newest first. The sixth, on 2026-11-22 at 788c667875 with no fix,
+looked at slice 9 (a file's skipped-lines failure under that file's header) with a real unreadable file in both
+themes, and saw "Not started." with no Task selected on an unlocked display for the first time. The fifth, at
+a28344bb4c plus its one fix, reached slice 8's two diff-stream failures and went through the main path again after
+the sync with main on the fourth run's store (a returning user). The fourth, at 406697d19c plus its four
 fixes, looked at slice 7's failure lines on a real Machine, went through the main path again from a fresh repository
 and a Wave, and stopped the Machine under an open window to see what each pane says.</p>
 <p>Every run used the branch's Loopflow for Mac in an isolated bundle with its own bundle ID, a private Machine
 (the branch's <code>lf server run</code>, a stand-in <code>claude</code>; <code>LF_HOME=/tmp/lfq923d/lf</code> in the
-fourth and fifth) and <code>git init</code> directories made for the run. The screen was locked throughout: windows were
+fourth to sixth) and <code>git init</code> directories made for the run. The screen was locked in the first five runs: windows were
 captured from the app's own rendering (<code>cacheDisplay</code>) and driven through <code>lf desktop</code> and a
 capture loop added to the app for the run only (type into a field, ⌘↩, a click at a point). That loop is removed and
-not committed. Nothing touched the installed app, the shared Loopflow Dev bundle, its server or <code>~/.lf</code>.</p>
+not committed. In the sixth the display was unlocked and in use, so the app was opened behind the other windows
+(<code>open -n -g</code>) and driven the same way; captures with a title bar are real screen captures of that window
+(<code>screencapture -l</code>). Nothing touched the installed app, the shared Loopflow Dev bundle, its server or <code>~/.lf</code>.</p>
+
+<h2>The sixth run: what works now</h2>
+<table>
+<tr><th>Scenario</th><th>Result</th></tr>
+<tr><td>The fifth run's store and repository opened by this build (a returning user)</td><td>The page, its backlog rows, the Wave and the three started Tasks as they were left.</td></tr>
+<tr><td>A started Task with two changed files (README.md, long.txt). long.txt made unreadable (<code>chmod 000</code>), then one of its "N unchanged lines" rows pressed</td><td><b>"Skipped lines did not load."</b> strong in the failure ink with "cannot read Task file "long.txt": Permission denied (os error 13)" in mono, <b>under long.txt's header</b> and above its lines. README.md, first in the stream, has nothing over it. No path in the sentence, no button. Slice 9, both themes.</td></tr>
+<tr><td>Rows of that file opened before the failure</td><td>Stay open under the line (133 lines opened, then the 6-line row failed).</td></tr>
+<tr><td><b>Viewed</b> ticked on long.txt, then cleared</td><td>The line folds away with the file's lines and comes back with them.</td></tr>
+<tr><td>The Files tab's own Diff of README.md while long.txt holds the failure</td><td>README.md's two lines and nothing else. Back on the Diff tab the line is still under long.txt. This is the first of the two faults slice 9 was for.</td></tr>
+<tr><td>long.txt readable again (<code>chmod 644</code>)</td><td>"Comparison unavailable." goes on its own; the skipped-lines line stays under long.txt, as designed, until a row there is pressed.</td></tr>
+<tr><td>The row pressed again</td><td>The lines open and the line goes.</td></tr>
+<tr><td>Machine stopped, ⌘N, a request, ⌘↩, no Task selected, <b>on a real screen</b></td><td>The sheet reads "In fresh, running …" with no step line. After ⌘↩ the page holds the request, <b>"Not started."</b> with "Loopflow server unavailable or owned by another account" in mono, <b>Try again</b> in the accent and <b>Discard</b>, on the app's own background. Questions 48: the white page in earlier captures was the capture.</td></tr>
+<tr><td>Machine started again, <b>Try again</b></td><td>The Task starts: "plan is running kickoff. You are next needed at ship-review.", "Checkout ready 0.5 s", beside the known "Files did not open" (Task ea8659).</td></tr>
+</table>
+<div class="pair">
+  <div><img src="qa/s9-under-file-dark.jpg"><p class="cap">The line under long.txt's header, Loopflow Dark.</p></div>
+  <div><img src="qa/s9-under-file-light.jpg"><p class="cap">Loopflow Light, with the 133 lines opened before it.</p></div>
+  <div><img src="qa/s9-folded-light.jpg"><p class="cap">Viewed: the line folds with the file.</p></div>
+  <div><img src="qa/s9-files-diff-other-light.jpg"><p class="cap">Files' Diff of README.md while long.txt holds the failure.</p></div>
+  <div><img src="qa/s9-held-light.jpg"><p class="cap">Back on the Diff tab: still under long.txt.</p></div>
+  <div><img src="qa/s9-restored-dark.jpg"><p class="cap">The file readable again: the comparison is back, the line stays.</p></div>
+  <div><img src="qa/s9-opened-dark.jpg"><p class="cap">The row pressed: the lines open and the line goes.</p></div>
+  <div><img src="qa/s9-sheet-down-dark.jpg"><p class="cap">The sheet with the Machine stopped.</p></div>
+  <div><img src="qa/s9-not-started-dark.jpg"><p class="cap">"Not started." with no Task selected, a real screen capture.</p></div>
+  <div><img src="qa/s9-started-dark.jpg"><p class="cap">After Try again.</p></div>
+</div>
+
+<h2>The sixth run: fixed</h2>
+<p>Nothing. No code changed in this run.</p>
+
+<h2>The sixth run: still wrong or open, worst first</h2>
+<h3>1. One capture showed README.md's header over long.txt's failure and lines</h3>
+<p>About fifteen seconds after the first press, in Loopflow Dark, one capture had README.md's header directly above
+"Skipped lines did not load." and long.txt's lines; README.md's own two lines and long.txt's header were not drawn.
+The capture before it and the seven after it, of the same state, were right, and the same steps in Loopflow Light
+did not show it in six captures. It came from the app's own rendering (<code>cacheDisplay</code>), not the screen,
+and the offset is exactly long.txt's header meeting the pinned header's place, so a stream scrolled for a moment
+with a stale pinned header in the capture fits. Not settled either way.</p>
+<img src="qa/s9-transient-dark.jpg"><p class="cap">The one capture.</p>
+<h3>2. After Try again the page holds only the request</h3>
+<p>For at least eight seconds after <b>Try again</b> the page was the request in the lede step and nothing else, with
+"The Machine is away; showing what was last read" still at the bottom. Nothing says it is starting. The Task then
+opened. <code>StartingTaskView</code> draws only the request while a start is in flight; whether it should say so is
+a product choice.</p>
+<h3>3. A comparison takes up to half a minute to come back</h3>
+<p>After <code>chmod 644</code> the Diff tab still read "Comparison unavailable." at 12 seconds and was back by 30.
+The Files tab's Diff still read it at 28 seconds and was back about ten seconds later. <b>Retry</b> is there in
+Files' Diff; the Diff tab's line has none.</p>
+<h3>4. Two failure lines for one unreadable file</h3>
+<p>As in the fifth run: "Comparison unavailable." with git's whole command line above the stream, and the
+skipped-lines line under the file. Each is true.</p>
+
+<h2>The sixth run: not reached, and why</h2>
+<ul>
+<li>The line going after choosing a step's commits, the second fault slice 9 was for. A step has commits only when
+a Graph step committed; the stand-in agent commits nothing, and the step control is a menu the run cannot open.
+<code>aFailedSkippedLinesOpenBelongsToItsFile</code> calls <code>showStep</code> and covers it in the store.</li>
+<li>long.txt's own failure in the Files tab's Diff. <code>lf desktop do files path=…</code> follows a file without
+leaving the one being read, and the Read/Diff control is a menu. It is the same view, keyed by the file's path.</li>
+<li>"Reload saved intent" and "Retry Project preparation" (questions 79, 82): neither failure was reached again.</li>
+<li>Menus, real keys, VoiceOver, imported themes: as before.</li>
+</ul>
+
+<h2>The sixth run: left behind</h2>
+<p>The private server, its holder, the new Task's <code>lf task run</code> tree and the stand-in providers are stopped
+by PID; no launchd job was registered. The QA bundle is deleted, unregistered from LaunchServices and its defaults
+removed. The capture loop is reverted. Starting the Task brought the QA app to the front of the display once.
+<code>/tmp/lfq923d</code> is still on disk, with one more started Task (2aecbb).</p>
 
 <h2>The fifth run: what works now</h2>
 <table>

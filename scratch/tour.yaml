@@ -1,4 +1,4 @@
-at: 5558f2480cfb5dcddb4cb99d856529158200d611
+at: 02be411be1f8b02c3eadabfcc24514a7b609411c
 first:
   - path: DESIGN.md
     why: the rules, and the Desktop pointers this change removes
@@ -7,12 +7,12 @@ first:
   - path: docs/surfaces.md
   - path: swift/Loopflow/Models/WaveWorkMap.swift
     why: RoadmapTask.need and graphHasRun, whether a Task needs someone
-  - path: swift/LoopflowMac/Design/TaskStanding.swift
-    why: the one answer to where a Task stands
+  - path: swift/Loopflow/Design/TaskRow.swift
+    why: TaskRowStatus, the one answer to where a Task stands, and the row every list draws it with
   - path: swift/Loopflow/Models/NowProjection.swift
     why: the Now list reads the same predicate
-  - path: swift/LoopflowMac/Design/TaskRow.swift
-    why: the row every list draws it with
+  - path: swift/LoopflowMac/SessionProgramStatus.swift
+    why: where the Mac hands the row a Task's planning and its program's report
   - path: swift/LoopflowTests/DesignDisciplineTests.swift
     why: the scale as a test; explains the mechanical edits
   - path: swift/LoopflowTests/TaskStandingFixtures.swift

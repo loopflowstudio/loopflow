@@ -1,9 +1,11 @@
 # Wave pages, backlog, dashboards, theme chooser and the remaining Mac views follow DESIGN.md
 
-Task 8b92c6. Builds on main at 0fa6a4e202 (#2016), which shipped the fonts, the
-ramp, `TaskRow`, `StatusMark`, `WorkflowLine`, `LoopflowButtonStyle` and
-`TitleBar`. This change uses them and adds no component. It adds one value,
-`TaskStanding`, which is what `TaskRow` already works out inline.
+Task 8b92c6. Builds on main at c4de2038fd (#2017), which moved `TaskRow`,
+`StatusMark`, `WorkflowLine` and `LoopflowButtonStyle` into
+`swift/Loopflow/Design/` for both apps and gave the row's status a type,
+`TaskRowStatus`. This change uses them and adds no component or type: it
+gives `TaskRowStatus` one initializer, from a Task's planning and its
+program's report.
 
 Reference: `DESIGN.md` ("The language", "What we avoid") and the live
 prototypes `design/prototypes/desktop.html` ("A Wave's backlog") and
@@ -27,7 +29,7 @@ a card or a stripe without a status.
 - The Now list's headings and its rows agree: a Task is listed there when
   its row says it needs someone, and under that word.
 - A Task's own page says the word its row says: the workflow header and the
-  jump palette print `TaskStanding`'s word.
+  jump palette print `TaskRowStatus`'s word.
 - Looking at a Task changes nothing it says: an unstarted Task opened by its
   link still reads as one that awaits Start, and stays off the Now list.
 - The Brief's lead says the row's word, and no screen prints a condition's
@@ -78,12 +80,23 @@ Slices 1 to 6 are built. The acceptance grep prints nothing (seen again
 after slice 4's commit, 6fe53188bb) and the Checks table has
 `DesignDisciplineTests` passing. Slice 5 moved the four readers the review
 of the built screens found (`scratch/concept-review.html`, at 021b28484a)
-onto `RoadmapTask.need` and `TaskStanding`, and the second qa run saw one
+onto `RoadmapTask.need` and `TaskRowStatus`, and the second qa run saw one
 word per Task on the Now list, the roadmap, a Wave's page, a Task's page and
 a tile. The review after it (`scratch/concept-review.html`, at 7df8f8fcaa)
 found the predicate keyed on the wrong fact and three readers still outside
 it; slice 6 moved them. What remains is the look on an unlocked display and
 the three Tasks under "Outside this change".
+
+The branch then merged main at c4de2038fd (#2017, 02be411be1). `TaskRow`,
+`StatusMark`, `WorkflowLine` and `LoopflowButtonStyle` are main's now, in
+`swift/Loopflow/Design/` for the Mac and iPhone, and this branch's
+`TaskStanding` is main's `TaskRowStatus` with one more initializer,
+`init(task:program:)`, which reads `RoadmapTask.need`. The Mac passes a
+Task's planning to it; the iPhone's rows pass none and say the program's
+word or the lifecycle (DESIGN.md "Tokens today"). The slice 6 suites and
+`DesignDisciplineTests` passed on the merge and the acceptance grep prints
+nothing. `TaskStandingTests` and `TaskStandingFixtures.swift` keep the old
+name; the acceptance command names the suite.
 
 - At the base, 177 lines passed a literal padding and 132 a literal non-zero
   `spacing:`, with off-scale values 1, 3, 5, 6, 7, 9, 10, 14, 15, 17, 18, 22,
@@ -107,9 +120,9 @@ the three Tasks under "Outside this change".
   (`WavesView`) mounts `WaveDetailPane` and `RoadmapView`; those are the Wave
   page and the standup's successor.
 - Task rows and the seven ways of saying where a Task stands are gone since
-  slice 1: one `TaskRow` drawing one `TaskStanding`, and a click opens the
+  slice 1: one `TaskRow` drawing one `TaskRowStatus`, and a click opens the
   Task on every Portfolio list. The backlog row is its own view; since
-  slice 2 its word comes from `TaskStanding`, and its click selects for the
+  slice 2 its word comes from `TaskRowStatus`, and its click selects for the
   action bar.
 - A Project's key results are drawn once, by `WaveProjectView`, since
   slice 2.
@@ -121,7 +134,7 @@ the three Tasks under "Outside this change".
 ### Where a Task stands, said once
 
 A person asks one thing of a Task's row: where does it stand, and does it
-need me. `TaskStanding` (in `Design/`, beside `TaskRow`) is that answer: a
+need me. `TaskRowStatus` (`swift/Loopflow/Design/TaskRow.swift`) is that answer: a
 word, its tone, its tooltip, and an optional line. It is built in one place
 from a `RoadmapTask?` and a `SessionProgramStatus`, in this order:
 
@@ -139,16 +152,16 @@ the condition is not clear, which is the rule the Brief already applies
 (`TaskBriefView.swift:128`). A screen with no Session readings passes
 `.unknown` and gets rules 3 and 4.
 
-`TaskRow` draws a `TaskStanding` and stops choosing. It gains an initializer
+`TaskRow` draws a `TaskRowStatus` and stops choosing. It gains an initializer
 from a `RoadmapTask`, for hosts that hold one; the sidebar keeps
 `presentation` for a row named before planning answers. `TitleBar` prints
-the same word, and the Brief's "Blocked: reason" line reads `TaskStanding`
+the same word, and the Brief's "Blocked: reason" line reads `TaskRowStatus`
 too.
 
 #### Whether a Task needs someone is one predicate (slice 5)
 
 Qa found the server marks an unstarted Task whose next move is Start as
-`waiting`, reason "ready", and `TaskStanding` grew a private rule that does
+`waiting`, reason "ready", and `TaskRowStatus` grew a private rule that does
 not count that as a need. The Now list never learned the rule: it groups by
 the wire's `condition.state` (`nowGroup`, `swift/Loopflow/Models/
 NowProjection.swift`), so "Waiting 9" heads nine rows that read "Unstarted".
@@ -159,7 +172,7 @@ Two deciders on one screen.
   nil for `clear`, nil for `waiting` on a finished Task or on one that only
   awaits Start, the state otherwise. Slice 5 built "awaits Start" as the
   `unstarted` lifecycle; slice 6 below corrects it to "no Graph has run".
-- `TaskStanding` and `nowSections` read `need`, so the Now list
+- `TaskRowStatus` and `nowSections` read `need`, so the Now list
   omits Tasks that wait only to be started; the backlog is where those are
   listed and started. `NowProjectionTests` gains that case.
 - Choice made for review: the Now list gets shorter. Passed over: keeping
@@ -169,7 +182,7 @@ Two deciders on one screen.
 #### The Task's own page says the row's word (slice 5)
 
 - `TaskWorkflowHeader` (`TaskWorkView.swift`) prints
-  `TaskStanding(task:status:)`'s word and tone, with the program status the
+  `TaskRowStatus(task:status:)`'s word and tone, with the program status the
   title bar passes (`model.programStatus(task:)`). Its private
   `lifecycleLabel` ("Completed", "Canceled") is deleted, so the page says
   "Done" and "Abandoned" as every row does. The identifier
@@ -223,7 +236,7 @@ person looked at it.
 - The Brief's lead (`TaskBrief.state`, `TaskBriefView.swift:40`) prints the
   runtime status word, so a Task parked at demo reads "Waiting" on its row
   and page and "Active, at demo. ready." in its Brief. The lead takes
-  `TaskStanding(task:status: .unknown).word`, the word `TaskBrief.need`
+  `TaskRowStatus(task:status: .unknown).word`, the word `TaskBrief.need`
   already uses: "Waiting, at demo. ready." `state` loses its `runtime`
   parameter. Choice made for review: the Brief ignores the program's report,
   as its second line does, so it describes the Task and not a Session.
@@ -233,10 +246,10 @@ person looked at it.
   the activity pane's summary for a selected Task
   (`WorkActivityView.swift:161`) print `condition.reason` whatever the
   condition, so an unstarted Task shows "ready" there and nowhere else. Both
-  print `TaskStanding(task:status: .unknown).line` and draw nothing when it
+  print `TaskRowStatus(task:status: .unknown).line` and draw nothing when it
   is nil. `taskConditionAccessibilityLabel` (`NowProjection.swift`) speaks
   `need`'s word and that line, and only the ID and name when there is no
-  need; it moves beside its one caller if `TaskStanding` cannot be reached
+  need; it moves beside its one caller if `TaskRowStatus` cannot be reached
   from `Loopflow`.
 
 Choice made for review: the condition's reason shows on the sidebar row as
@@ -302,10 +315,10 @@ widths, icon boxes), not spacing; they stay, except hit targets, which use
   The chevron reflects `list.opened`; it adds no state. This row is not
   `TaskRow`: it is a line in a ranked list of work mostly not started, with
   the ID first and the title on one line, as the prototype draws it.
-- **Standing.** A started Task in the backlog leads with `TaskStanding`'s
+- **Standing.** A started Task in the backlog leads with `TaskRowStatus`'s
   word, then its step and PR, joined by commas: "Idle, at build, PR #12".
   `BacklogList.standing` keeps the step and the PR and stops falling back to
-  `nextMove.reason`; the word and the reason come from `TaskStanding`.
+  `nextMove.reason`; the word and the reason come from `TaskRowStatus`.
 - **Key results.** The objective's disclosure shows the Project through
   `WaveProjectView`, the one drawing of key results. The backlog's own
   check-and-cross `Label`s go.
@@ -329,7 +342,7 @@ widths, icon boxes), not spacing; they stay, except hit targets, which use
   fill.
 - `RoadmapTaskRow`, `NowRowView` and `RoadmapTaskView` are deleted for
   `TaskRow`, built from the `RoadmapTask` each already holds and a
-  `TaskStanding`. The Now row's Wave name goes in the row's context slot.
+  `TaskRowStatus`. The Now row's Wave name goes in the row's context slot.
   `WorkChannelChips` goes with them: the standing's word and line carry the
   condition and the lifecycle, and the tracker's own state ("PM") was a
   third copy of done or not done. `TaskSection.label`, its color and
@@ -365,7 +378,7 @@ widths, icon boxes), not spacing; they stay, except hit targets, which use
   "Default Slots" and "Edit Dashboard" as the one button.
 - A tile's header is `TaskRow` (title in full, ID, status word, the ask),
   with "open in full", "more" and "hide" as icon buttons at its end.
-  `TaskHeading` is deleted; `TitleBar` prints `TaskStanding`'s word, so the
+  `TaskHeading` is deleted; `TitleBar` prints `TaskRowStatus`'s word, so the
   bar and the sidebar row agree about the open Task.
 - Under the row, the workflow is its sentence: `WorkflowLine` gains a
   sentence-only setting the tile uses, since a tile's width is known to be
@@ -500,8 +513,8 @@ or `lf desktop` reads unless its view is deleted.
 
 ## Slices
 
-1. **One standing, one row, every host.** Built. `TaskStanding`
-   (`Design/TaskStanding.swift`) decides the word and the line; `TaskRow`
+1. **One standing, one row, every host.** Built. `TaskRowStatus`
+   (`swift/Loopflow/Design/TaskRow.swift`) decides the word and the line; `TaskRow`
    draws it; the sidebar, the title bar, a dashboard tile, the roadmap, the
    Now list and the Wave page all show it. `PortfolioTaskRow`
    (`RoadmapView.swift`) is the row plus `TaskActionCluster`, used by the
@@ -534,7 +547,7 @@ or `lf desktop` reads unless its view is deleted.
    it. The backlog is rebuilt to the prototype: serif name, one segmented
    filter, an action bar of the one button that begins with "N selected",
    checkbox and chevron before each ID, ownership as words, the standing from
-   `TaskStanding`, key results through `WaveProjectView`. Deleted:
+   `TaskRowStatus`, key results through `WaveProjectView`. Deleted:
    `BacklogOwnerMark`, `BacklogOwner.mark`, `BacklogQuietButtonStyle`, the
    capsule Start, the key-result `Label`s.
 
@@ -620,9 +633,9 @@ or `lf desktop` reads unless its view is deleted.
      with `meta`, and every snapped padding.
 5. **One answer, on the remaining four readers.** Built.
    `RoadmapTask.need` (`WaveWorkMap.swift`) says whether a Task needs
-   someone; `TaskStanding` and `nowSections` read it, so the Now list omits
+   someone; `TaskRowStatus` and `nowSections` read it, so the Now list omits
    Tasks that wait only to be started. `TaskWorkflowHeader` and the jump
-   menu print `TaskStanding`'s word. A tile's workflow sentence yields only
+   menu print `TaskRowStatus`'s word. A tile's workflow sentence yields only
    to a program's ask (`DashboardTile.workflow`), and the Brief prints what
    the Task needs only when its state line has not said it
    (`TaskBrief.need`). Deleted: `lifecycleLabel`, the palette's "Not
@@ -662,7 +675,7 @@ or `lf desktop` reads unless its view is deleted.
      the Portfolio row's verb.
    - `taskConditionAccessibilityLabel` stays in `Loopflow`: with no Session
      readings the standing's line is `condition.reason` whenever `need` is
-     set, so it reads `need` and never `TaskStanding`.
+     set, so it reads `need` and never `TaskRowStatus`.
    - The backlog still splits rows by `awaitsStart` (no checkout), so a Task
      opened and never run counts there as started. Not changed here.
 
@@ -731,4 +744,5 @@ or `lf desktop` reads unless its view is deleted.
 | `scripts/test_desktop.sh --filter 'RoadmapViewTests\|WaveDetailReadingTests\|WorkNavigationTests\|DesktopHeadlessTests\|DesignDisciplineTests'` | passed after the second qa run's fix (77 tests) | qa; CI runs the rest |
 | `scripts/test_desktop.sh --filter 'NowProjectionTests\|TaskStandingTests\|TaskBriefTests\|RoadmapViewTests\|TaskConceptTests\|TaskRowTests\|WorkNavigationTests'` | passed after slice 6 (89 tests) | build; CI runs the rest |
 | `scripts/test_desktop.sh --filter 'BacklogViewTests\|WorkCacheTests\|DashboardWorkspaceTests\|WorkPaletteTests\|DesignDisciplineTests\|WorkCLISubscriptionTests'` | passed after slice 6 (65 tests) | build; CI runs the rest |
+| `scripts/test_desktop.sh --filter 'NowProjectionTests\|TaskStandingTests\|TaskBriefTests\|RoadmapViewTests\|TaskConceptTests\|TaskRowTests\|WorkNavigationTests\|DesignDisciplineTests\|TaskActionsTests\|TaskStatusTests'` | passed on the merge with main, 02be411be1 (101 tests); the grep above prints nothing there | realign; CI runs the rest |
 | Dev app after slice 6 | not run: an opened, never-run Task reading "Idle" off the Now list, "Run" on a parked Task's Portfolio row, and the Brief's "Waiting, at demo." | qa |

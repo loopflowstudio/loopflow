@@ -91,7 +91,7 @@ struct ThemeChooser: View {
     }
 
     private func grid(_ entries: [ThemeEntry], side: AppearanceMode, importTile: Bool = false) -> some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 180))], alignment: .leading, spacing: Spacing.md) {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 180), alignment: .top)], alignment: .leading, spacing: Spacing.md) {
             ForEach(entries) { entry in card(entry, side: side) }
             if importTile { importPlaceholder(side: side) }
         }

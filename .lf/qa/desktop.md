@@ -221,6 +221,10 @@ them. Nothing here needs WindowServer focus.
   opens. `close <window>` closes one. Customize answers `click` a few
   seconds after the first; the editor's disclosure groups never open, and
   after the editor opens Apply answers no click either.
+- `import <path>` stands in for the Import tile's file panel (unreachable
+  locked): it cancels any open panel and imports the file as the panel's OK
+  does. `size <window> <w> <h>` shows the "Yours" row; keep the window on
+  screen (900x1250 fits) or later clicks land off it.
 - Imported themes: most Ghostty files (GitHub Light Default, Catppuccin
   Latte) are refused for cursor or selection text. A catalogue file from
   `git show main:…` loads and stands in for a theme saved before a change.
@@ -241,8 +245,8 @@ them. Nothing here needs WindowServer focus.
   `lf --task <id> desktop do details page=brief` switches the Task pane. A tile
   shows its workflow sentence only after its Task was visited in that window.
   `lf desktop do new-task` opens the New Task sheet, and `snap` lists a sheet
-  as its own untitled window. Apply in Choose Theme answered a doubled click
-  once and no click at all in a later run (no `config.theme` write in the
+  as its own untitled window. Apply and Cancel in Choose Theme answered a doubled click
+  once and no click at all in later runs (no `config.theme` write in the
   server log); set the theme with `lf set --global theme` to see it applied.
   Card clicks in the chooser preview reliably.
 - Opening a Task changes it: a link to an unstarted Task places its checkout

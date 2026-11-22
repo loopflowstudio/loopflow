@@ -25,8 +25,10 @@ Built, in PR #2020: the two defaults and the `loopflow-titlebar` role (round 1),
 - All 26 cards rendered offscreen with `ImageRenderer`: `scratch/qa/cards.png`.
 - Round 1 Dev app QA, both defaults plus two files without a bar, with the screen locked: passed (`scratch/qa.html`).
 - Round 2 Dev app QA, screen locked: both sides' cards, Fig preview and Fig applied (via `lf set`): passed after top-aligning the grid rows and refreshing the third-party inventory (`scratch/qa.html`).
+- Round 3 Dev app QA, screen locked: Verdigris as an unknown name, headings without side buttons, a dark file imported in Light mode (switches to Dark) and System mode (stays), Moss applied via `lf set`: passed after dropping the empty "Derived: ." import line (`scratch/qa.html`).
+- `swift test … 'ThemeTests|ThemeWorkflowTests|WorkPaletteTests|TerminalColorTests'`: 32 passed, 2026-11-22 (after the Derived fix).
 - `test_third_party.py`: 9 passed.
-- Not run here: Apply clicked in the chooser, the editor's Title bar row, a key window's bar, the selected Appearance toolbar tab in dark mode (ship-review, unlocked display).
+- Not run here: the real Import file panel, Apply and Cancel clicked in the chooser, the editor's Title bar row, a key window's bar, the selected Appearance toolbar tab in dark mode (ship-review, unlocked display).
 
 ## Demo
 

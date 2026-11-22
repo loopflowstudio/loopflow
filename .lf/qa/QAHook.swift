@@ -107,6 +107,12 @@ enum QAHook {
             guard let item = search(menu), let action = item.action else { return "no item" }
             item.menu?.update()
             return NSApp.sendAction(action, to: item.target, from: item) ? "performed" : "refused"
+        case "import":
+            // Stands in for the file panel the Import tile opens: reports and cancels it, then imports `arg` as the panel's OK does.
+            let panels = NSApp.windows.compactMap { $0 as? NSOpenPanel }.filter(\.isVisible)
+            panels.forEach { $0.cancel(nil) }
+            AppearanceStore.shared.importTheme(URL(fileURLWithPath: arg))
+            return "imported (open panels cancelled: \(panels.count))"
         case "close":
             guard let index = Int(arg), windows.indices.contains(index) else { return "usage: close window" }
             windows[index].performClose(nil)

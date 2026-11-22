@@ -336,6 +336,13 @@ struct ThemeTests {
         #expect(try ThemeFile.read(ghostty).diagnostics.contains("Line 3: loopflow-waiting-ink is now loopflow-warning-ink; not applied."))
     }
 
+    @Test func importDiagnosticsNameOnlyWhatWasDerived() throws {
+        #expect(try imported().diagnostics.contains { $0.hasPrefix("Derived: cursor-color") && $0.hasSuffix("remaining app roles.") })
+        let complete = try imported(ThemeFile.text(.dark))
+        #expect(complete.diagnostics.contains { $0.hasPrefix("Supplied: ") })
+        #expect(!complete.diagnostics.contains { $0.hasPrefix("Derived") })
+    }
+
     @Test func invalidFilesAreReportedAndDoNotHideOtherThemes() async throws {
         try await withThemeServer { location in
             let paths = ThemePaths.temporary()

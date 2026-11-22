@@ -9,6 +9,39 @@ code{background:#f3f1ee;padding:0 .25em;border-radius:3px}
 table{border-collapse:collapse}td,th{border:1px solid #ddd;padding:.3rem .6rem;text-align:left}
 .ok{color:#256b2a}.bad{color:#9a2a2a}
 </style>
+<h1>Round 3: Moss, removed names, the chooser without side buttons</h1>
+<p>Same method as round 2: isolated bundle <code>com.loopflow.mac.qath3.dev</code>, private Machine <code>/tmp/lfq3</code> on the branch <code>lf server run</code>, a git-planned repository with one Task, production mode, <code>.lf/qa/QAHook.swift</code>. Screen locked (CGSSessionScreenIsLocked Yes, idle 2.5 h). Run 2026-11-22 at d62943431e. The hook gained <code>import &lt;path&gt;</code>, which stands in for the Import tile's file panel and then calls what the panel's OK calls.</p>
+
+<h2>R3.1 A removed family name: <code>theme: Verdigris</code></h2>
+<p class="ok">"No theme named “Verdigris”: keeping Loopflow Light. Fix theme: in …/config.yaml with a built-in name or a file in …/themes." with Choose Theme… — the unknown-name sentence, no special case.</p>
+<img src="qa/r3-removed-name.png">
+
+<h2>R3.2 Choose Theme, System mode</h2>
+<p class="ok">No Light/Dark theme buttons. The heading reads "Light themes · Loopflow Light". Moss Light sits where Verdigris was. The sentence repeats under the grid until a preview starts.</p>
+<img src="qa/r3-system.png">
+
+<h2>R3.3 Import a dark file while in Light mode</h2>
+<p>Light mode showed only the light section. Importing <code>Bog</code> (a copy of the Moss file) switched the segmented control to Dark, previewed Bog across the chooser, headed the section "Dark themes · Bog" and filed the card under dark Yours, ringed, with Customize and Delete.</p>
+<p class="bad">Under it the diagnostics read "Supplied: …; 16 indexed colors; 34 app roles." then <b>"Derived: ."</b> — an empty list, shown for every complete file (every catalogue file now is). Present since #1560.</p>
+<p><b>Fix:</b> <code>ThemeFile.parse</code> writes the Derived line only when something was derived; <code>ThemeTests.importDiagnosticsNameOnlyWhatWasDerived</code> covers a partial and a complete file.</p>
+<img src="qa/r3-import-light-mode.png">
+
+<h2>R3.4 Import the same file in System mode</h2>
+<p class="ok">Mode stays System; Bog previews on the dark side (macOS is in light) as a card click does, both headings name their side's choice. The light side's chosen card takes Bog's focus color for its ring while Bog previews.</p>
+<img src="qa/r3-import-system-mode.png">
+<p>Cancel answered no synthesized click (two tries); nothing reached <code>config.yaml</code> or <code>themes/</code>. Closing the window left the setting unchanged.</p>
+
+<h2>R3.5 Moss applied</h2>
+<p class="ok"><code>lf set --global theme Moss</code>, reopened: deep moss window and bar, lichen-yellow headings, no notice.</p>
+<img src="qa/r3-moss-applied.png">
+
+<h2>Round 3: what works</h2>
+<ul><li>A removed name reads as any unknown name.</li><li>Section headings carry each side's choice; no side buttons.</li><li>Import files a theme by its own side, switching Light/Dark mode and leaving System alone.</li><li>Moss and Moss Light load and paint the window.</li><li>The bundle packaged without an inventory refresh.</li></ul>
+<h2>Round 3: not reached</h2>
+<ul><li>The real file panel, Apply and Cancel clicks, hover, a key window's bar, the editor's Title bar row: unlocked display.</li></ul>
+<h2>Round 3: still wrong, worst first</h2>
+<ul><li>Moss's bar (<code>#2e3a1e</code> on <code>#202916</code>) is a quiet band like Graphite's, not an accent bar; the family spec chose it. A look on screen decides whether it stays.</li><li>The third-party inventory still has no CI check (round 2).</li></ul>
+
 <h1>Round 2: 13 families and the card chooser</h1>
 <p>Branch Dev app as an isolated bundle (<code>com.loopflow.mac.qath2.dev</code>) on a private Machine (<code>/tmp/lfq2</code>, branch <code>lf server run</code>, a git-planned repository with one Task), production mode, driven by <code>.lf/qa/QAHook.swift</code>. The screen was locked (CGSSessionScreenIsLocked 1, idle 2 h+). Run 2026-11-22 at 4c9120dff4.</p>
 

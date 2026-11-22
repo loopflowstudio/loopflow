@@ -165,9 +165,9 @@ public struct ThemeFile: Sendable {
             palette.titlebar = GhosttyThemeMapping.titlebar(accent: palette.accent, background: palette.background, dark: dark)
         }
         if !complete {
-            let derived = terminalKeys.map(\.key).filter { colors[$0] == nil }
+            let derived = terminalKeys.map(\.key).filter { colors[$0] == nil } + (roles.count < appRoles.count ? ["remaining app roles"] : [])
             diagnostics.append("Supplied: \(colors.keys.sorted().joined(separator: ", ")); \(indexed.count) indexed colors; \(roles.count) app roles.")
-            diagnostics.append("Derived: \((derived + (roles.count < appRoles.count ? ["remaining app roles"] : [])).joined(separator: ", ")).")
+            if !derived.isEmpty { diagnostics.append("Derived: \(derived.joined(separator: ", ")).") }
         }
         return Self(theme: ThemeDefinition(name: name, palette: LoopflowPalette(palette), terminal: terminal), diagnostics: diagnostics)
     }

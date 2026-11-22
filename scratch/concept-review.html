@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Mac terminal appearance · LOO-1061</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --paper: #f8f5ee;
+      --panel: #fffcf6;
+      --ink: #262923;
+      --muted: #52584d;
+      --line: #c8cdc0;
+      --yes: #24563e;
+      --yes-bg: #e5efe5;
+      --no: #813f29;
+      --no-bg: #f6e6db;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --paper: #181e1b;
+        --panel: #222923;
+        --ink: #efeee7;
+        --muted: #bbc6b9;
+        --line: #505d51;
+        --yes: #b6e5c6;
+        --yes-bg: #263c2e;
+        --no: #f4b8a3;
+        --no-bg: #412d26;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--paper);
+      color: var(--ink);
+      font: 1rem/1.55 system-ui, sans-serif;
+    }
+    main { max-width: 68rem; margin: auto; padding: clamp(1rem, 5vw, 4rem); }
+    header { border-bottom: 1px solid var(--line); padding-bottom: 1.75rem; }
+    h1, h2 { font-family: Georgia, serif; font-weight: 500; line-height: 1.12; }
+    h1 { font-size: clamp(2.4rem, 6vw, 4.6rem); margin: .2rem 0 .7rem; letter-spacing: -.055em; }
+    h2 { font-size: clamp(1.65rem, 4vw, 2.55rem); margin: 0 0 .8rem; letter-spacing: -.035em; }
+    h3 { font-size: 1.05rem; margin: 0 0 .6rem; }
+    p { margin: .55rem 0; max-width: 76ch; }
+    section { margin-top: 2.6rem; }
+    a { color: var(--yes); text-decoration-thickness: 1px; text-underline-offset: .2em; }
+    a:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; }
+    code { font: .92em ui-monospace, monospace; overflow-wrap: anywhere; }
+    .meta, .refs, figcaption { color: var(--muted); font-size: .9rem; }
+    .comparison { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .8rem; margin: 1rem 0 .5rem; }
+    .card { border: 1px solid var(--line); border-radius: .65rem; padding: 1rem; background: var(--panel); }
+    .existing { border-top: 3px solid var(--no); }
+    .proposed { border-top: 3px solid var(--yes); }
+    .path { display: grid; gap: .25rem; margin: 0; }
+    .path div { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .75rem; align-items: baseline; }
+    .path dd { margin: 0; font-weight: 650; }
+    .path div + div { border-top: 1px solid var(--line); padding-top: .25rem; }
+    .on { color: var(--no); }
+    .off { color: var(--yes); }
+    figure { margin: 0; }
+    table { width: 100%; border-collapse: collapse; background: var(--panel); }
+    caption { text-align: left; margin-bottom: .55rem; color: var(--muted); }
+    th, td { border-bottom: 1px solid var(--line); padding: .75rem; vertical-align: top; text-align: left; }
+    thead th { background: var(--yes-bg); }
+    tbody th { width: 26%; }
+    td:last-child { width: 27%; }
+    .answer { border-radius: .3rem; padding: .04em .3em; font-weight: 700; white-space: nowrap; }
+    .yes { color: var(--yes); background: var(--yes-bg); }
+    .no { color: var(--no); background: var(--no-bg); }
+    .walk { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .8rem; padding: 0; list-style: none; }
+    .walk p:last-child { margin-bottom: 0; }
+    .questions { padding-left: 1.5rem; }
+    .questions > li { margin-bottom: .8rem; }
+    .questions ol { margin-top: .25rem; padding-left: 1.35rem; }
+    @media (max-width: 44rem) {
+      .comparison, .walk { grid-template-columns: 1fr; }
+      th, td { padding: .45rem; overflow-wrap: anywhere; }
+    }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <p class="meta">LOO-1061 · Concept review</p>
+    <h1>Mac terminal appearance</h1>
+    <p>Do the product’s concepts and the code’s concepts line up? This review covers the text people read in a Task shell or Session and the places they can change how it looks.</p>
+  </header>
+
+  <section aria-labelledby="weight">
+    <h2 id="weight">Regular text starts out thickened</h2>
+    <p>The app bundles a regular face and separate bold and italic faces. The default Mac configuration also tells Ghostty to thicken all strokes. A person reading ordinary output sees that rendering choice even when the program chose regular text.</p>
+    <figure>
+      <div class="comparison">
+        <div class="card existing">
+          <h3>Existing · Loopflow enables thickening</h3>
+          <dl class="path">
+            <div><dt>Ghostty default</dt><dd>Off</dd></div>
+            <div><dt>Loopflow adds <code>font-thicken = true</code></dt><dd>On</dd></div>
+            <div><dt>No personal weight setting</dt><dd>On</dd></div>
+            <div><dt>Regular strokes in both panes</dt><dd class="on">Thickened</dd></div>
+          </dl>
+        </div>
+        <div class="card proposed">
+          <h3>Proposed · Ghostty owns the default</h3>
+          <dl class="path">
+            <div><dt>Ghostty default</dt><dd>Off</dd></div>
+            <div><dt>Loopflow inherits Ghostty’s default</dt><dd>Off</dd></div>
+            <div><dt>No personal weight setting</dt><dd>Off</dd></div>
+            <div><dt>Regular strokes in both panes</dt><dd class="off">Native</dd></div>
+          </dl>
+        </div>
+      </div>
+      <figcaption>The pinned library probe read the effective settings in both paths. Compare the rendered strokes in a mounted pane before shipping.</figcaption>
+    </figure>
+    <p>Remove the override. Spline Sans Mono keeps its glyph metrics and bold and italic faces. Lowering the strength still enables thickening, even at zero. A lighter face changes glyph shapes and fallback. The existing Ghostty option gives people who prefer thicker strokes a reversible choice.</p>
+    <p class="refs"><a href="../swift/LoopflowMac/Services/Ghostty/GhosttyManager.swift#L125">Mac defaults</a> · <a href="https://github.com/ghostty-org/ghostty/blob/a60e9e2a57f73e1eef2bd1cf2995a467f69e7fb0/src/config/Config.zig#L343-L355">Pinned defaults</a> · <a href="https://github.com/ghostty-org/ghostty/blob/a60e9e2a57f73e1eef2bd1cf2995a467f69e7fb0/src/font/face/coretext.zig#L477-L483">CoreText rendering</a></p>
+  </section>
+
+  <section aria-labelledby="model">
+    <h2 id="model">What each action changes</h2>
+    <table>
+      <caption>Existing product and code pairings, with the effect of this proposal</caption>
+      <thead><tr><th scope="col">What a person does</th><th scope="col">What the code does today</th><th scope="col">With the proposal</th></tr></thead>
+      <tbody>
+        <tr>
+          <th scope="row">Open a shell or Session and read ordinary output</th>
+          <td><span class="answer no">No</span> The Mac default enables extra stroke weight for the regular face as well as styled text. The program’s choice of regular text and the renderer’s extra stroke weight look like one choice.</td>
+          <td><span class="answer yes">Yes</span> Ghostty’s native strokes are the baseline for both panes.</td>
+        </tr>
+        <tr>
+          <th scope="row">Read a program’s bold or italic emphasis</th>
+          <td><span class="answer yes">Yes</span> Terminal cell attributes select from Ghostty’s faces. Loopflow bundles regular, bold, italic and bold italic Spline Sans Mono.</td>
+          <td><span class="answer yes">Yes</span> ANSI attributes still select the styled faces.</td>
+        </tr>
+        <tr>
+          <th scope="row">Preview colors, then Apply or Cancel</th>
+          <td><span class="answer yes">Yes</span> An <code>AppearanceStore</code> draft previews a <code>ThemeDefinition</code>. Apply saves the choice in <code>~/.lf/config.yaml</code> and writes staged theme edits. Cancel restores the applied palette. Ghostty candidates clone the startup baseline.</td>
+          <td><span class="answer yes">Yes</span> The palette changes live. Both actions keep the startup font settings.</td>
+        </tr>
+        <tr>
+          <th scope="row">Check terminal typography from the chooser</th>
+          <td><span class="answer no">No</span> The chooser shows a terminal line in SwiftUI with <code>Typography.mono</code>. It can show foreground and background together. It has no access to the native glyph rendering or a person’s selected Ghostty face.</td>
+          <td><span class="answer yes">Yes</span> The guide calls it a color sample and locates the typography check in the actual pane.</td>
+        </tr>
+        <tr>
+          <th scope="row">Choose a personal font or thicker strokes</th>
+          <td><span class="answer yes">Yes</span> Ghostty reads its personal files at startup. Loopflow appends Spline Sans Mono for fallback. Imported theme files also use Ghostty syntax, so a font line can look valid there even though the importer reports it as omitted.</td>
+          <td><span class="answer yes">Yes</span> The guide gives the Ghostty setting and the reopen step. One setting serves both panes across themes.</td>
+        </tr>
+        <tr>
+          <th scope="row">Keep the terminal appearance across Task and Session changes</th>
+          <td><span class="answer yes">Yes</span> Each pane has a native surface. One <code>GhosttyManager</code> supplies both through <code>ghostty_app_new</code> and <code>ghostty_app_update_config</code>.</td>
+          <td><span class="answer yes">Yes</span> Effective weight is derived from app configuration. Task and Session state needs no migration.</td>
+        </tr>
+      </tbody>
+    </table>
+    <p class="refs"><a href="../swift/LoopflowMac/Design/AppearanceStore.swift">Appearance state</a> · <a href="../swift/LoopflowMac/Views/ThemeChooser.swift#L185-L225">Color sample</a> · <a href="../swift/LoopflowMac/Design/GhosttyThemeConfiguration.swift">Ghostty candidate</a> · <a href="../swift/Loopflow/Design/GhosttyThemeOverlay.swift">Palette overlay</a> · <a href="../swift/Loopflow/AppBootstrap.swift#L40-L43">Bundled faces</a></p>
+  </section>
+
+  <section aria-labelledby="walk">
+    <h2 id="walk">Try it in a pane</h2>
+    <p>Start with the proposed default and a test configuration with no weight setting. This is the walkthrough for the built change.</p>
+    <ol class="walk" aria-label="Normal path, failure and recovery">
+      <li class="card">
+        <h3>Read the output</h3>
+        <p>Compare regular, bold and italic text in a Task shell and Session. Preview Dark, then Cancel. The palette changes and returns while the three text styles keep their weight and shape.</p>
+      </li>
+      <li class="card">
+        <h3>Put the option in a theme file</h3>
+        <p>Import a valid color theme with <code>font-thicken = true</code>. The import lists the omission. Its colors preview in the pane while ordinary text keeps native strokes.</p>
+      </li>
+      <li class="card">
+        <h3>Move it to Ghostty config</h3>
+        <p>Set <code>font-thicken = true</code> in the test Ghostty config and reopen Loopflow. Both panes use thicker strokes. Remove the line and reopen to recover native strokes with the chosen palette.</p>
+      </li>
+    </ol>
+    <p>A color change that flips an explicit weight would falsify the shared baseline. If the baseline reads <code>false</code> and the same ordinary text still looks heavy, compare the real pane with the base build at the same size, display scale and palette. Inspect the selected face or renderer before claiming the default is fixed.</p>
+    <p class="refs"><a href="../swift/Loopflow/Design/ThemeFile.swift#L133-L136">Import omission</a> · <a href="../swift/LoopflowTests/ThemeTests.swift#L375-L438">Existing configuration readback</a> · <a href="./plan.md">Build and demo plan</a></p>
+  </section>
+
+  <section aria-labelledby="choices">
+    <h2 id="choices">Questions for review</h2>
+    <ol class="questions">
+      <li>Which stroke weight should a fresh Mac install use?
+        <ol type="a">
+          <li>Native strokes with a Ghostty opt-in. <strong>Proposed.</strong></li>
+          <li>Thicker strokes with a Ghostty opt-out.</li>
+        </ol>
+      </li>
+      <li>Where should typography be evaluated?
+        <ol type="a">
+          <li>Use the live pane and describe the chooser sample as a color sample. <strong>Proposed.</strong></li>
+          <li>Make the chooser show the person’s terminal typography too. This would require a preview rendered from the effective Ghostty font configuration.</li>
+        </ol>
+      </li>
+    </ol>
+  </section>
+</main>
+</body>
+</html>

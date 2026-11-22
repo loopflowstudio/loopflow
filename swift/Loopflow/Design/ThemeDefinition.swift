@@ -91,7 +91,8 @@ public struct ThemeDefinition: Identifiable, Sendable {
     public var colorScheme: ColorScheme { isDark ? .dark : .light }
     public static let light = builtin("Loopflow Light")
     public static let dark = builtin("Loopflow Dark")
-    /// The fixed catalogue: Loopflow's own pair first, then each appearance's companions by name.
+    /// The fixed catalogue: Loopflow's own pair first, then the families by name. Every family's
+    /// themes start with its name, so both appearances list the families in one order.
     public static let builtins: [Self] = {
         guard let directory = Bundle.loopflowResources.url(forResource: "Themes", withExtension: nil)?
             .appendingPathComponent("Catalogue", isDirectory: true) else {
@@ -103,14 +104,23 @@ public struct ThemeDefinition: Identifiable, Sendable {
                 guard theme.readabilityErrors.isEmpty else { throw ThemeError("\(theme.name): \(theme.readabilityErrors.joined(separator: "; "))") }
                 return theme
             }
-            precondition(themes.filter(\.isDark).count == 12 && themes.count == 24, "Bundled catalogue requires 12 light and 12 dark themes")
-            let order = ["Loopflow Light": 0, "Loopflow Dark": 0, "Linen": 1, "Hearth": 1]
+            precondition(themes.filter(\.isDark).count == 13 && themes.count == 26, "Bundled catalogue requires 13 light and 13 dark themes")
             return themes.sorted { first, second in
-                if order[first.name] != order[second.name] { return (order[first.name] ?? 2) < (order[second.name] ?? 2) }
-                return first.name < second.name
+                let loopflow = (first.name.hasPrefix("Loopflow "), second.name.hasPrefix("Loopflow "))
+                return loopflow.0 != loopflow.1 ? loopflow.0 : first.name < second.name
             }
         } catch { preconditionFailure("Invalid bundled theme: \(error)") }
     }()
+
+    /// Built-ins the 13 families replaced, and whether each was dark. A setting that names one
+    /// shows Loopflow's theme for that side instead.
+    public static let retired: [String: Bool] = [
+        "Linen": false, "Catppuccin Latte": false, "Celadon": false, "Clay": false, "Flexoki Light": false,
+        "Frost": false, "Gruvbox Light": false, "Noctis Lilac": false, "Pewter": false, "Sea Glass": false,
+        "Vellum": false, "Hearth": true, "Aubergine": true, "Catppuccin Mocha": true, "Flexoki Dark": true,
+        "Gruvbox Dark": true, "Moss": true, "Night Owl": true, "Onyx": true, "Phosphor": true, "Rosewood": true,
+        "Solarized Dark": true,
+    ]
 
     private static func builtin(_ name: String) -> Self {
         guard let theme = builtins.first(where: { $0.name == name }) else { preconditionFailure("Missing bundled theme \(name)") }

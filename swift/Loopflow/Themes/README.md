@@ -1,10 +1,19 @@
 # Bundled themes
 
-`Catalogue/` holds the 24 fixed built-ins, 12 light and 12 dark. **Loopflow
-Light** is the original cream/burgundy; **Loopflow Dark** puts the same burgundy
-title bar over blue-grey, with rose headings and links; **Linen** and **Hearth**
-are quiet light and charcoal alternatives.
-Companions span amber, rose, violet, green, teal and blue actions with quiet text.
+`Catalogue/` holds 26 fixed built-ins: 13 families, each a light and a dark
+theme. **Loopflow Light** is the original cream/burgundy; **Loopflow Dark** puts
+the same burgundy title bar over blue-grey, with rose headings and links. The
+other twelve families (Arcade, Contrast, Fig, Fjord, Folio, Graphite, Harbor,
+Signal, Sorbet, Tannin, Terracotta, Verdigris) are Loopflow's own, written by
+`scripts/theme_catalogue.py` from a short spec each:
+
+```bash
+uv run python scripts/theme_catalogue.py           # rewrite the 24 generated files and the prototype's table
+uv run python scripts/theme_catalogue.py --check   # what a fresh run would change
+```
+
+Change a generated theme by editing its spec and rerunning; never edit its file.
+A family's themes start with its name, which is how Choose Theme orders them.
 
 Every file is Ghostty theme syntax plus `loopflow-` app roles:
 
@@ -27,6 +36,6 @@ secondary text reads at 4.5:1.
 Colors are seeds, never activity. Missing ANSI colors come
 from the matching Loopflow preset; 16–255 default to xterm's.
 
-`Sources.md` records upstream terminal colors and marked adaptations;
-`Licenses/` keeps each author's notice. Both SwiftPM and Xcode ship the
-catalogue offline.
+Both SwiftPM and Xcode ship the catalogue offline. A `theme:` setting that
+names a built-in from before the families (Gruvbox Dark, Linen…) shows Loopflow
+Light or Dark for that side and says how to import the old one.

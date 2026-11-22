@@ -331,19 +331,22 @@ before **Apply**.
 
 ```yaml
 # ~/.lf/config.yaml
-theme: "light:Linen,dark:Hearth"   # System
-theme: "Hearth"                    # Dark (or Light) mode: one name
+theme: "light:Folio,dark:Fig"   # System
+theme: "Fig"                    # Dark (or Light) mode: one name
 ```
 
 **Apply** rewrites only that line; **Cancel**, Escape or closing writes nothing.
 Edit it by hand and every window follows; a misspelled name keeps the last theme
-and names the fix. Absent means Loopflow Light/Dark. A repository's
-`.lf/config.yaml` never sets the theme.
+and names the fix. Absent means Loopflow Light/Dark. A name from the old
+catalogue (Gruvbox Dark, Linen…) shows Loopflow's theme for that side, with a
+sentence on importing the old one. A repository's `.lf/config.yaml` never sets
+the theme.
 
-Built-ins are 12 light and 12 dark. **Loopflow Light** keeps the original
-cream/burgundy; **Loopflow Dark** is blue-grey with rose headings and links, under
-the same burgundy title bar; **Linen** and **Hearth** are quieter light and
-charcoal alternatives.
+Built-ins are 13 families, each a light and a dark theme. **Loopflow Light** keeps
+the original cream/burgundy; **Loopflow Dark** is blue-grey with rose headings and
+links, under the same burgundy title bar. The other twelve are generated from
+specs in `scripts/theme_catalogue.py`: **Fig** is plum with a lime accent, its
+light half **Fig Leaf** a leaf-green ground with plum ink.
 
 Your themes are Ghostty theme files in `~/.lf/themes/`; `~/.config/ghostty/themes/`
 is read too, never written. Names resolve to yours, then built-ins, then Ghostty's.

@@ -14,19 +14,19 @@ struct ThemeWorkflowTests {
         let appearance = AppearanceStore(paths: .temporary(), systemDark: false)
         appearance.beginPreview()
         let chooser = ThemeChooser(appearance: appearance).modifier(AppAppearance(appearance: appearance))
-        try chooser.inspect().find(viewWithAccessibilityIdentifier: "appearance-theme-Linen").button().tap()
-        #expect(appearance.selectedName == "Linen")
+        try chooser.inspect().find(viewWithAccessibilityIdentifier: "appearance-theme-Folio").button().tap()
+        #expect(appearance.selectedName == "Folio")
         #expect(throws: (any Error).self) { try chooser.inspect().find(viewWithAccessibilityIdentifier: "appearance-delete-theme") }
         try chooser.inspect().find(viewWithAccessibilityIdentifier: "appearance-customize-theme").button().tap()
         #expect(appearance.selectedSource == .yours)
         let editor = ThemeEditor(appearance: appearance).modifier(AppAppearance(appearance: appearance))
-        #expect(try editor.inspect().find(viewWithAccessibilityIdentifier: "appearance-theme-name").text().string() == "Linen")
+        #expect(try editor.inspect().find(viewWithAccessibilityIdentifier: "appearance-theme-name").text().string() == "Folio")
         appearance.editTheme { palette, _ in palette.accent = ThemeRGB(0x224466) }
         let revert = try chooser.inspect().find(viewWithAccessibilityIdentifier: "appearance-delete-theme").button()
         #expect(try revert.labelView().text().string() == "Revert to built-in")
         try revert.tap()
         #expect(appearance.selectedSource == .builtin)
-        #expect(appearance.selectedTheme.palette.definition == ThemeDefinition.builtins.first { $0.name == "Linen" }?.palette.definition)
+        #expect(appearance.selectedTheme.palette.definition == ThemeDefinition.builtins.first { $0.name == "Folio" }?.palette.definition)
     }
 
     @Test func theSampleShowsThePreviewedThemeWhereItsColorsLand() throws {
@@ -42,8 +42,8 @@ struct ThemeWorkflowTests {
             "Working", "Available", "Blocked", "Failed", "Passed", "$ lf task status LOO-515",
         ])
         #expect(try chooser.inspect().find(ThemeSample.self).actualView().theme.name == "Loopflow Light")
-        try chooser.inspect().find(viewWithAccessibilityIdentifier: "appearance-theme-Linen").button().tap()
-        #expect(try chooser.inspect().find(ThemeSample.self).actualView().theme.name == "Linen")
+        try chooser.inspect().find(viewWithAccessibilityIdentifier: "appearance-theme-Folio").button().tap()
+        #expect(try chooser.inspect().find(ThemeSample.self).actualView().theme.name == "Folio")
     }
 
     @Test func chooserFiltersEachPickerToItsAppearanceAndWritesTheChoice() async throws {
@@ -60,19 +60,19 @@ struct ThemeWorkflowTests {
                     #expect(button.isDisabled() == (choice != .system && choice != slot))
                 }
                 #expect(appearance.picker == (choice == .dark ? .dark : .light))
-                let showsDark = (try? view.inspect().find(viewWithAccessibilityIdentifier: "appearance-theme-Night Owl")) != nil
-                let showsLight = (try? view.inspect().find(viewWithAccessibilityIdentifier: "appearance-theme-Celadon")) != nil
+                let showsDark = (try? view.inspect().find(viewWithAccessibilityIdentifier: "appearance-theme-Harbor")) != nil
+                let showsLight = (try? view.inspect().find(viewWithAccessibilityIdentifier: "appearance-theme-Fjord Light")) != nil
                 #expect(showsDark == (choice != .light))
                 #expect(showsLight == (choice != .dark))
             }
-            #expect(appearance.entries(for: .light).builtins.count == 12)
+            #expect(appearance.entries(for: .light).builtins.count == 13)
             #expect(appearance.entries(for: .light).builtins.allSatisfy { !$0.theme.isDark })
-            #expect(appearance.entries(for: .dark).builtins.count == 12)
+            #expect(appearance.entries(for: .dark).builtins.count == 13)
             #expect(appearance.entries(for: .dark).builtins.allSatisfy { $0.theme.isDark })
             // System lists both sides at once; each tile assigns its own side.
-            try view.inspect().find(viewWithAccessibilityIdentifier: "appearance-theme-Celadon").button().tap()
-            try view.inspect().find(viewWithAccessibilityIdentifier: "appearance-theme-Night Owl").button().tap()
-            #expect(appearance.themeName(for: .light) == "Celadon")
+            try view.inspect().find(viewWithAccessibilityIdentifier: "appearance-theme-Fjord Light").button().tap()
+            try view.inspect().find(viewWithAccessibilityIdentifier: "appearance-theme-Harbor").button().tap()
+            #expect(appearance.themeName(for: .light) == "Fjord Light")
             #expect(appearance.current.mode == .system)
             try view.inspect().find(button: "Apply").tap()
             let deadline = ContinuousClock.now + .seconds(10)
@@ -84,13 +84,13 @@ struct ThemeWorkflowTests {
             #expect(!appearance.chooserOpen)
             #expect(!appearance.saving)
             let savedTheme1 = try await ThemeConfig.read(paths.config, location: location)
-            #expect(savedTheme1 == "light:Celadon,dark:Night Owl")
-            #expect(appearance.effectiveTheme.name == "Celadon")
+            #expect(savedTheme1 == "light:Fjord Light,dark:Harbor")
+            #expect(appearance.effectiveTheme.name == "Fjord Light")
             appearance.setSystemDark(true)
-            #expect(appearance.effectiveTheme.name == "Night Owl")
+            #expect(appearance.effectiveTheme.name == "Harbor")
             let restored = await AppearanceStore.loaded(paths: paths, systemDark: false, location: location)
             #expect(restored.selection == appearance.selection)
-            #expect(restored.effectiveTheme.name == "Celadon")
+            #expect(restored.effectiveTheme.name == "Fjord Light")
         }
     }
 
@@ -128,7 +128,7 @@ enum ThemeFixture: String, CaseIterable {
         case .light, .dark: appearance.previewMode(AppearanceMode(rawValue: rawValue)!)
         case .bundled:
             appearance.previewMode(.dark)
-            appearance.previewTheme("Night Owl")
+            appearance.previewTheme("Harbor")
         case .lightImport, .darkImport:
             appearance.previewMode(self == .lightImport ? .light : .dark)
             let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)

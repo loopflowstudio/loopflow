@@ -2,8 +2,12 @@
 
 Task 923677. Reference: `DESIGN.md` ("The language", "What we avoid") and the
 "New Task" and "When nothing is there, and when something fails" sections of
-`design/prototypes/desktop-more.html` (open it; it is live). Both are on main
-since #2016; this builds on main.
+`design/prototypes/desktop-more.html`. This change deleted those two sections
+once their screens shipped; `git show fd90d7e6ad:design/prototypes/desktop-more.html`
+has them, and `docs/surfaces.md` holds the wording now.
+
+Every slice is built. What remains is looking at slice 5 in the Dev app, the
+gate checks, and the open choice under "Open choice" below.
 
 ## Outcome
 
@@ -25,7 +29,10 @@ it.)
 A repository with no Waves, no Tasks and no conversation open shows one
 thing: "No planned Work in this repository", "Say what you want built, or
 talk it through first.", "New Task ⌘N" and "Open the repository
-conversation". Either button leads to the ordinary repository page.
+conversation". Either button leads to the ordinary repository page. The
+state stands only while no conversation is open, so it is what the Dev app
+shows on a fresh repository and what the released app shows once the
+conversation is closed (see "Open choice").
 
 Anywhere the app has nothing to show or something failed, the pane is
 left-aligned: a 26 pt serif title saying what happened, one sentence, then
@@ -39,8 +46,9 @@ in mono, and keeps Retry.
 
 1. ⌘N. Type a request, switch the workflow menu from the default to another:
    the step line and the "You take part at …" sentence change with it.
-2. Open an empty repository: "No planned Work in this repository", with
-   "New Task ⌘N" and "Open the repository conversation" to press.
+2. Open an empty repository (a fresh `git init` directory): "No planned Work
+   in this repository", with "New Task ⌘N" and "Open the repository
+   conversation" to press. The second brings the page with its terminal.
 3. Open a path that is not a repository: "This repository did not open", the
    error in mono, Retry.
 
@@ -218,10 +226,10 @@ appear, and a failure should not move those words to the pane's middle.
 
 ### The states
 
-The prototype's drawn states are built, except that `NoPlannedWork` is not
-where an empty repository opens (slice 5): `NoPlannedWork` and `ChooseWork`
-(`WorkSurfaceView.swift:9`, `:32`), the missing selection (`:240`),
-`RepositoryDidNotOpen` (`RepositoryWorkspaceView.swift:98`),
+The prototype's drawn states are built: `NoPlannedWork` and `ChooseWork`
+(`WorkSurfaceView.swift`; the first stands in for an empty repository's page
+in `SessionsView`'s workspace panel and is the title alone in `RoadmapView`),
+the missing selection, `RepositoryDidNotOpen` (`RepositoryWorkspaceView.swift:98`),
 `TaskStartOffer` (`TaskWorkView.swift:236`) and the pane sites in
 `WorkspacePanesView.swift`. `docs/surfaces.md` holds their wording.
 
@@ -233,7 +241,7 @@ where an empty repository opens (slice 5): `NoPlannedWork` and `ChooseWork`
 - An unstarted Task's full screen has Start twice, neutral in the bar and
   accent in the pane. The bar's stays because it is the one left when the
   conversation pane is collapsed or another pane is zoomed. There is no
-  third: the Graph log's "No Graph has run." has no button (slice 5).
+  third: the Graph log's "No Graph has run." has no button.
 - The unstarted pane's title is "Not started" in a pane and in a tile, not
   the Task's name as the prototype draws it alone: the brief beside the pane
   sets the name in serif already. Passed over: the name twice.
@@ -265,7 +273,7 @@ beside the sentence where the app has the action.
 
 - Gains a button: "No planned or started Tasks." (New Task); "No recorded
   work." (its Refresh, set beside it). The backlog's empty keeps its four
-  steps and takes this form (slice 5). "No Tasks in this
+  steps and takes this form, neutral button beside the line. "No Tasks in this
   Project.", "No current Tasks." and "No Projects in this Wave." have no
   `WorkModel` to open New Task from: wording only (questions 20).
 - Wording only: "No pull request yet · changes below are local"
@@ -316,10 +324,12 @@ Gone: `WorkflowSteps`, `WorkflowChooser`, `WorkflowDefinition`,
 count, "Takes up … when it starts", the "· loopflow's default" assertion,
 the `new-task-workflow-<name>` identifiers, `PaneEmptyState`,
 `SessionSlotOffer`, `NewTaskWorkflow.defaultPhrase`, "feature · repository",
-"No workflow selected" and every `ContentUnavailableView` in
-`swift/LoopflowMac`. Remaining (slice 5): the backlog's own empty form,
-`TaskStartOffer`'s title branch, the Graph log's Start, "Open the
-conversation here." and the two prototype sections.
+"No workflow selected", every `ContentUnavailableView` in
+`swift/LoopflowMac`, the backlog's own bold empty form, `TaskStartOffer`'s
+title branch, the Graph log's Start, "Open the conversation here.",
+`WorkSurfaceView`'s `NoPlannedWork` branch and the two prototype sections
+with their script (their CSS stays in `desktop.css`, which `desktop.html`
+shares).
 
 Must survive: File without starting, ⌘↩ and Esc, the sheet opening on the
 sidebar's Wave, the default following the scope, the request kept when
@@ -327,8 +337,18 @@ filing is refused, every accessibility identifier tests and `lf` Desktop
 actions use other than the two named above, compact dashboard slots staying
 one line.
 
-The Dev app check ran at qa; slice 5 deletes the prototype sections
-(`DESIGN.md`: "Delete a prototype when its screens ship").
+## Open choice
+
+Should an empty repository hold its conversation back until "Open the
+repository conversation" is pressed, in every build? As built, the state
+shows while no conversation is attached, opening or failed. The released app
+opens a repository's conversation on its own
+(`SessionsWorkspace.opensConversationAutomatically`), so a fresh `git init`
+directory goes straight to its page there, with a terminal and "Nothing is
+waiting in this repository." beside New, and reads "No planned Work in this
+repository" only after the conversation is closed. Holding the conversation
+back changes when a repository's agent starts, which this Task's brief does
+not ask for; nobody has said which is wanted (questions 39).
 
 ## Acceptance check at gate
 

@@ -76,11 +76,11 @@ struct WorkNavigator: View {
                     NewTaskRow(model: model)
                     if case .dashboard = scope {
                         HStack {
-                            Text(listTitle.uppercased()).lineLimit(1)
+                            Text(listTitle).font(Typography.textStrong).lineLimit(1)
                                 .matchedGeometryEffect(id: scope, in: scopeTitle)
                             Spacer()
-                            Text("\(taskIDs.count)")
-                        }.font(Typography.mono).foregroundStyle(palette.textSecondary).padding(10)
+                            Text("\(taskIDs.count)").font(Typography.meta).monospacedDigit()
+                        }.foregroundStyle(palette.textTertiary).padding(10)
                     }
                     // ⌘N counts the rows on screen; sidebar Task IDs are already unique.
                     ForEach(Array(taskIDs.enumerated()), id: \.element) { index, id in
@@ -373,7 +373,7 @@ struct WorkJumpMenu: View {
     var body: some View {
         let rows = model.jumpRows(scope, filter: filter)
         VStack(alignment: .leading, spacing: 6) {
-            Text(title.uppercased()).font(Typography.mono).foregroundStyle(palette.textSecondary)
+            Text(title).font(Typography.textStrong).foregroundStyle(palette.textTertiary)
             TextField("Search \(title.lowercased())", text: $filter)
                 .textFieldStyle(.roundedBorder)
                 .onSubmit { if let first = rows.first { choose(first.id) } }

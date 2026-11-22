@@ -105,22 +105,18 @@ map. Remove a pointer when its code is fixed.
 **Small tracked uppercase labels.** No eyebrow above a heading, no caps
 section label, no caps kicker, no caps "or". A section is named by a heading
 in sentence case or not at all. The one allowed use of capitals is an acronym.
-- Desktop builds it into the system: `WorkSectionHeading` and
-  `WorkDisclosureHeading` (`swift/LoopflowMac/Design/WorkStyle.swift`), plus
-  four hand-made variants (`WaveDetailPane.swift`, `WorkActivityView.swift`,
-  `WorkNavigator.swift`).
+- Desktop: two hand-made variants (`WaveDetailPane.swift`,
+  `WorkActivityView.swift`).
 
 **Monospace as decoration.** Mono is for things a person could paste into a
 terminal: commands, paths, IDs, SHAs, diffs, and numbers in a column. It is
 not for prose, section titles, links, captions or buttons.
-- Desktop: the sidebar Task summary is prose set in mono; sidebar section
-  titles and counts, "Page 1 of N", "builtin Graph".
+- Desktop: "Page 1 of N" (`DashboardSlotGrid.swift`), "builtin Graph"
+  (`WorkPalette.swift`).
 - Website: agent names and statuses in the homepage's app drawings.
 
 **A stripe down the side of a rounded row.** A colored leading edge means
 status and nothing else. A row with no status has no stripe.
-- Desktop: every sidebar Task row draws one, falling back to a border color
-  when there is no status (`WorkNavigator.swift`).
 
 **Drawings of the product.** No hand-built HTML or SVG picture of an app
 window, a dashboard or a team. Show a screenshot or a recording of the real
@@ -129,25 +125,22 @@ thing, or show nothing. "Coming soon" over a drawing is two problems.
   initials circles, a diagonal stripe wash and a rotated dashed stamp.
 
 **Values outside the scale.** See [How the system works](#how-the-system-works).
-- Desktop: 20 font sizes against a ramp of 6, half-point sizes 24 times, 62
-  calls under 11 pt with a floor of 8 pt; radius 6 is the most used radius and
-  is not in the scale; 166 literal paddings.
-- iPhone: `Spacing` and `CornerRadius` are never used; 49 of 50 type calls
-  pass their own size.
+- Desktop: 172 literal paddings.
+- iPhone: `Spacing` and `CornerRadius` are never used; `MobileType`
+  (`swift/LoopflowiOS/MobileType.swift`) passes its own sizes, 12 to 24.
 
 **Two of the same thing.** One component per job, on every surface.
-- Desktop has three workflow renderers, two Create Wave forms and two status
-  dots (flat circles and a glass "lens" with a glow).
+- Desktop has two workflow renderers: `WorkflowLine` for a Task and New
+  Task's `WorkflowSteps` (`NewTaskSheet.swift`) for a Graph definition, which
+  has no top-level steps on the wire. It has two Create Wave forms
+  (`WavesView.swift`, `WorkNavigator.swift`).
 - iPhone repeats one primary button by hand eight times in two shapes.
-- The website sets the faces above; the apps still bundle Cormorant
-  Garamond and Lato.
 
 **Tiny text.** Nothing a person is meant to read is under 11 pt on Desktop,
 12 pt on iPhone or 12 px on the web.
 
 **Truncated meaning.** If a row's ID, status or owner ends in "…", the row is
 carrying too much. Drop a field; don't clip three.
-- Desktop sidebar rows: "LOO-515 Block… #1949 Jack…".
 
 **Motion on a loop.** Nothing moves unless it changed. No rotating headline
 word, no pulsing dot beside a static label.
@@ -164,6 +157,8 @@ page at most.
 
 **Glyphs as icons.** "⚠", "✓", "✗" and "↗" typed into strings sit beside SF
 Symbols. Use the icon set, or a word.
+- Desktop: "✓"/"✗" before key results (`BacklogView.swift`), "⚠" before a
+  changed previous version (`TaskFilesView.swift`).
 
 ### We don't do these; keep it that way
 
@@ -212,7 +207,7 @@ covered.
    shown as unknown, not as idle.
 8. **Measured, not asserted.** A claim in this file that can be checked has a
    check: palette contrast in `WorkPaletteTests`, site accessibility in
-   `website/tests/`. Token discipline should get the same.
+   `website/tests/`, sizes and faces in `TypographyDisciplineTests`.
 9. **Real content.** Design against the longest Task title, the slowest
    Machine and an empty repository, not placeholder text.
 
@@ -225,29 +220,39 @@ not resolved.
 
 | Role | Mac and iPhone | Website |
 |------|----------------|---------|
-| Serif | Cormorant Garamond 400/500/600 | Old Standard TT 400 |
-| Sans | Lato 400/700 | Atkinson Hyperlegible Next 400–600 |
-| Mono | JetBrains Mono 400 | Spline Sans Mono 400–700 with italics |
+| Serif | Old Standard TT 400 | Old Standard TT 400 |
+| Sans | Atkinson Hyperlegible Next 400/600 with italics | Atkinson Hyperlegible Next 400–600 |
+| Mono | Spline Sans Mono 400/700 with italics | Spline Sans Mono 400–700 with italics |
 
 The website serves its faces from `website/static/fonts/` (latin subsets,
 OFL) and requests nothing from a font CDN.
 
-Request only bundled weights in the apps; semibold or medium on Lato is
-synthesized and renders heavy.
+The apps bundle static files (`swift/Loopflow/Fonts/`) and request each face
+by PostScript name (`Typography.*Face`), so nothing is synthesized.
 
 Desktop ramp (`Typography` in `swift/Loopflow/Design/DesignSystem.swift`):
 
 | Step | Face | Size | Use |
 |------|------|------|-----|
-| `display` | Cormorant 500 | 34 | Wave page title |
-| `title` | Cormorant 500 | 26 | Task page title |
-| `lede` | Cormorant 500 | 17 | Wave objective |
-| `text` | Lato 400 | 13 | Everything else |
-| `textStrong` | Lato 700 | 13 | Selected row titles, Session names |
-| `meta` | Lato 400 | 11 | Meta, ranks |
-| `mono` | JetBrains Mono | 12 | Commands, IDs, paths |
+| `display` | Old Standard 400 | 34 | Wave page title (`.serif(.display)`) |
+| `title` | Old Standard 400 | 26 | Task title in the Brief (`.serif(.title)`) |
+| `lede` | Atkinson 600 | 17 | Wave objective, a document's first heading |
+| `text` | Atkinson 400 | 13 | Everything else |
+| `textStrong` | Atkinson 600 | 13 | Selected row titles, Session names |
+| `meta` | Atkinson 400 | 11 | Meta, ranks |
+| `mono` | Spline Sans Mono 400 | 12 | Commands, IDs, paths |
+| `terminalSize` | Spline Sans Mono 400 | 13 | Ghostty's `font-size` default; Ghostty draws the cells |
 
-iPhone has no ramp of its own yet; it uses 12, 13, 14, 15, 16, 17, 24 and 34.
+Serif is set only through `.serif(_:)`, which applies the −3% tracking and
+turns off common ligatures with it. No step takes a size.
+
+iPhone has no ramp of its own yet; `MobileType` keeps 12 to 24 in these faces.
+
+Components, in `swift/LoopflowMac/Design/`: `TaskRow`, `StatusMark`,
+`WorkflowLine`, `LoopflowButtonStyle` (`.neutral`, `.accent`, `.destructive`)
+and `TitleBar`. The workflow line's steps, running step and sentence come from
+Rust (`TaskGraph.steps`, `current_step`, `sentence`), so `lf task status`
+prints the same sentence.
 
 Website ramp, for every page (`:root` in `website/static/style.css`):
 
@@ -284,7 +289,7 @@ their own.
 | Property | Steps |
 |----------|-------|
 | Spacing | 2, 4, 8, 12, 16, 20, 24, 32 (`Spacing.xxs` … `xxxl`) |
-| Radius | 4, 8, 12, 16 (`CornerRadius.sm` … `xl`) |
+| Radius | 4, 8, 12, 16 (`CornerRadius.control`, `row`, `pane`, `floating`) |
 | Hit target | 24 Desktop, 32 comfortable, 44 touch |
 | Duration | 100 ms hover and chevrons, 160 ms selection and panels, 240 ms sidebar and splits |
 

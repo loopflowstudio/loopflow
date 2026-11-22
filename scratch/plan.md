@@ -434,21 +434,19 @@ in DESIGN.md "Desktop semantics"; palette contrast.
    (questions.md). Not seen in the Dev app. Realign checked: no `↗` left in
    `LoopflowMac/`; tests assert each word above; `swift/README.md:388-512`
    already describes Brief, Diff and Files this way.
-8. **Waiting on LOO-515's sync: DESIGN.md.** cfadc6 merged as #2011 (`4cee2ed182`, origin/main's
-   tip on 2026-11-21); LOO-515 (#1949) is still open, so this branch has
-   neither root `DESIGN.md` nor `design/`. Tried 2026-11-21: `lf sync --plan`
-   is `noop` (base is LOO-515's branch at `31fc852dca`, which lacks #2011),
-   and `lf sync origin/main` would detach this Task from LOO-515, putting its
-   commits in this PR. LOO-515 is active with its own agent, so its checkout
-   was left alone. The edit is prepared in `scratch/design-md-slice8.md`
-   (pointer by pointer, with today's file:line); apply it once LOO-515 brings
-   main in or lands. Bring main in (`lf sync`, through
-   LOO-515; never `git merge`), resolve the `GhosttyManager` constant (#2011
-   adds `font-thicken = true` and the scalar lines: keep both sets, family
-   line stays after the default files) and the `swift/DESIGN.md` deletion,
-   then edit root `DESIGN.md`'s pointers and "Tokens today" to the ramp,
-   `CornerRadius`, components and `WorkflowLine` as built. Expected: the
-   pointers name files that exist (`git grep` each path), and
-   `scripts/test_desktop.sh --filter 'TypographyDisciplineTests|WorkPaletteTests|WorkflowLineTests'`
-   passes after the sync. QA in three themes at the narrowest width stays
-   for qa.
+8. **Built.** LOO-515 landed (#1949) and merge `586aa4b7d4` brought main in
+   with #2011; `GhosttyManager` keeps both sets (`font-thicken = true` and
+   the scalar lines in `loopflowConfig`, the family line after the default
+   files). Root `DESIGN.md`'s pointers and "Tokens today" describe the ramp,
+   faces, `CornerRadius`, components and the Rust-written workflow sentence;
+   principle 8 names `TypographyDisciplineTests`. The merge had left two
+   mono caps labels in `WorkNavigator.swift` (the Dashboard list title and
+   `WorkJumpMenu`'s title); both are `textStrong` tertiary as written, the
+   count `meta` digits. Pointers left: caps in `WaveDetailPane`/
+   `WorkActivityView`, mono "Page 1 of N"/"builtin Graph", 172 literal
+   paddings, `WorkflowSteps` beside `WorkflowLine`, two Create Wave forms,
+   typed ✓/✗/⚠. Passed: `scripts/test_desktop.sh --filter
+   'TypographyDisciplineTests|WorkPaletteTests|WorkflowLineTests|WorkNavigationTests|TaskRowTests'`
+   (WorkNavigation's ⌘⌥1 failure is gone after the merge) and
+   `cargo test -p loopflow --test integration documented_commands::`.
+   QA in three themes at the narrowest width stays for qa.

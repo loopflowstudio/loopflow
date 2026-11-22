@@ -339,6 +339,7 @@ pub fn inspect(cli: &Cli) -> Option<Result<()>> {
     if !matches!(
         command,
         Commands::Help { .. }
+            | Commands::Docs { .. }
             | Commands::List { .. }
             | Commands::Graph {
                 cmd: GraphCommand::List { .. }
@@ -365,6 +366,9 @@ pub fn inspect(cli: &Cli) -> Option<Result<()>> {
                 } else {
                     print!("{}", render_help(path, &repo, *all)?);
                 }
+            }
+            Commands::Docs { topic, json } => {
+                crate::lf::commands::docs::show(topic.as_deref(), *json || cli.json)?
             }
             Commands::List { path, json } => crate::lf::commands::list::show(path, &repo, *json)?,
             Commands::Graph {
@@ -562,7 +566,7 @@ pub fn render_help(path: &[String], repo: &Path, all: bool) -> Result<String> {
             .filter(|cmd| !cmd.is_hide_set())
             .map(Command::get_name)
             .collect::<Vec<_>>();
-        let mut output = String::from("Usage: lf <name> [message] | <command>\n\nRun\n  lf pursue [message]        build a change through to a published PR\n  lf graph <name> [message]   select a graph explicitly\n  lf skill <name> [message]  select a skill explicitly\n\nDiscover\n  lf list                   commands, skills, and graphs\n  lf help <path>             explain a command or definition\n  lf help --all              show the complete command tree\n\nCommands\n");
+        let mut output = String::from("Usage: lf <name> [message] | <command>\n\nRun\n  lf pursue [message]        build a change through to a published PR\n  lf graph <name> [message]   select a graph explicitly\n  lf skill <name> [message]  select a skill explicitly\n\nDiscover\n  lf list                   commands, skills, and graphs\n  lf help <path>             explain a command or definition\n  lf help --all              show the complete command tree\n  lf docs [topic]            read embedded user docs\n\nCommands\n");
         for row in names.chunks(5) {
             output.push_str(&format!(
                 "  {}\n",

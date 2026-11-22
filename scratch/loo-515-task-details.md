@@ -400,7 +400,10 @@ total. Direction: one function builds the comparison's diff arguments and both
 reads use it; a test parses the per-file patch of the count fixture in Swift
 and finds the stops `lf task changes` counted. The stop rule itself agrees:
 both start a change after an unchanged line or a hunk header and on a removal
-after additions, and a move is two stops on each side.
+after additions, and a move is two stops on each side. Repaired: both reads
+take `comparison_diff_args`; `tests/fixtures/review/change_counts.patch` is
+counted in Rust and stepped in Swift, which found Swift kept Git's trailing tab
+on `+++ b/with space.txt` (fixed in `ReviewDiff.strip`).
 
 Left as built: the title counts every shown file, Viewed ones included, while
 the stepper's total leaves Viewed files out ("2 of 4" under "6 changes"); a

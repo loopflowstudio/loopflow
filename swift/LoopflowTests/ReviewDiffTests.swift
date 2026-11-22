@@ -65,6 +65,16 @@ struct ReviewDiffTests {
         #expect(review.stop(after: nil, offset: -1)?.path == "b.swift")
     }
 
+    /// The patch `task_changes_count_each_files_stops_before_any_patch_is_read`
+    /// counts in Rust: the title's total and the stepper walk the same stops.
+    @Test func stopsMatchTheCountsTheServerSends() throws {
+        let fixture = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().appendingPathComponent("tests/fixtures/review/change_counts.patch")
+        let review = ReviewDiff.parse(try String(contentsOf: fixture, encoding: .utf8))
+        let counts = Dictionary(grouping: review.stops, by: \.path).mapValues(\.count)
+        #expect(counts == ["edited.txt": 2, "removed.txt": 1, "with space.txt": 1, "new.txt": 1])
+    }
+
     @Test func modifiedLineEmphasizesOnlyTheChangedWords() throws {
         let (old, new) = try #require(ReviewSegment.edit(#"let label = "files""#, #"let label = "changed files""#))
         #expect(old.filter(\.changed).map(\.text).joined().isEmpty)

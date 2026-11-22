@@ -82,8 +82,9 @@ struct ReviewDiff: Equatable, Sendable {
         return ReviewDiff(files: files)
     }
 
+    /// Drops the `a/` or `b/` prefix and the tab Git writes after a name with a space.
     private static func strip(_ path: Substring) -> String {
-        let path = String(path)
+        let path = String(path.hasSuffix("\t") ? path.dropLast() : path)
         if path.hasPrefix("a/") || path.hasPrefix("b/") { return String(path.dropFirst(2)) }
         return path
     }

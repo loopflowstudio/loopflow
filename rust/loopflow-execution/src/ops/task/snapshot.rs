@@ -301,6 +301,16 @@ pub(super) fn changes_snapshot(workspace: TaskComparison<'_>) -> OpsResult<TaskC
 /// with its usual context, since Git aligns some changes differently without.
 /// A file with no hunks (binary, a pure rename) is absent.
 fn change_counts(workspace: TaskComparison<'_>) -> OpsResult<BTreeMap<String, u64>> {
+    Ok(count_changes(&git_output_bytes(
+        workspace.checkout.worktree,
+        &comparison_diff_args(workspace),
+    )?))
+}
+
+/// `git diff` over the comparison, pinned against Machine configuration
+/// (`diff.renames`, `diff.noprefix`, `diff.mnemonicPrefix`, external drivers)
+/// so the counts and the Diff read the same patch. Pathspecs follow.
+fn comparison_diff_args<'a>(workspace: TaskComparison<'a>) -> Vec<&'a str> {
     let mut args = vec![
         "diff",
         "--no-color",
@@ -312,10 +322,7 @@ fn change_counts(workspace: TaskComparison<'_>) -> OpsResult<BTreeMap<String, u6
     ];
     args.extend(workspace.head_commit);
     args.push("--");
-    Ok(count_changes(&git_output_bytes(
-        workspace.checkout.worktree,
-        &args,
-    )?))
+    args
 }
 
 pub(super) fn count_changes(patch: &[u8]) -> BTreeMap<String, u64> {
@@ -462,9 +469,7 @@ pub(super) fn diff_snapshot(
         Some(path) => net_changed_paths(workspace)?.remove(path).flatten(),
         None => None,
     };
-    let mut args = vec!["diff", "--no-ext-diff", "--no-color", workspace.base_commit];
-    args.extend(workspace.head_commit);
-    args.push("--");
+    let mut args = comparison_diff_args(workspace);
     // Both sides of a rename are needed for Git to preserve its identity.
     if let Some(old) = &old_path {
         args.push(old);
@@ -484,7 +489,17 @@ pub(super) fn diff_snapshot(
     for path in include_untracked {
         let output = crate::observe::git(
             workspace.checkout.worktree,
-            &["diff", "--no-index", "--no-color", "--", "/dev/null", &path],
+            &[
+                "diff",
+                "--no-index",
+                "--no-color",
+                "--no-ext-diff",
+                "--src-prefix=a/",
+                "--dst-prefix=b/",
+                "--",
+                "/dev/null",
+                &path,
+            ],
         )
         .map_err(|error| task_error(format!("failed to diff untracked file {path}: {error}")))?;
         if !output.status.success() && output.status.code() != Some(1) {
